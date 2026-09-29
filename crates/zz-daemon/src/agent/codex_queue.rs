@@ -105,7 +105,7 @@ pub(crate) fn group_runs_codex(group: u32) -> bool {
             .to_str()
             .and_then(|name| name.parse::<u32>().ok())
             .is_some_and(|pid| {
-                claude_peers::process_group(pid) == Some(group)
+                crate::process_info::process_group(pid) == Some(group)
                     && std::fs::read_link(format!("/proc/{pid}/exe")).is_ok_and(|path| {
                         path.file_name()
                             .and_then(std::ffi::OsStr::to_str)

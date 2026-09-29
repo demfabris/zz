@@ -44,6 +44,14 @@ pub fn working_directory(pid: u32) -> Option<PathBuf> {
     platform::working_directory(pid)
 }
 
+pub fn parent(pid: u32) -> Option<u32> {
+    platform::parent(pid)
+}
+
+pub fn process_group(pid: u32) -> Option<u32> {
+    platform::process_group(pid)
+}
+
 pub fn terminate(pid: u32) -> bool {
     platform::terminate(pid)
 }
@@ -339,6 +347,16 @@ mod platform {
         Some(PathBuf::from(OsStr::from_bytes(path.to_bytes())))
     }
 
+    pub(super) fn parent(pid: u32) -> Option<u32> {
+        bsd_info(raw_pid(pid)?)
+            .map(|info| info.pbi_ppid)
+            .filter(|parent| *parent != 0)
+    }
+
+    pub(super) fn process_group(pid: u32) -> Option<u32> {
+        bsd_info(raw_pid(pid)?).map(|info| info.pbi_pgid)
+    }
+
     pub(super) fn terminate(pid: u32) -> bool {
         super::unix_terminate(pid)
     }
@@ -471,6 +489,7 @@ mod platform {
     use super::{ProcessRecord, ProcessSample};
 
     const PARENT: usize = 1;
+    const PROCESS_GROUP: usize = 2;
     const USER_TICKS: usize = 11;
     const SYSTEM_TICKS: usize = 12;
     const THREADS: usize = 17;
@@ -637,6 +656,16 @@ mod platform {
         fs::read_link(format!("/proc/{pid}/cwd")).ok()
     }
 
+    pub(super) fn parent(pid: u32) -> Option<u32> {
+        u32::try_from(Stat::read(pid)?.number(PARENT)?)
+            .ok()
+            .filter(|parent| *parent != 0)
+    }
+
+    pub(super) fn process_group(pid: u32) -> Option<u32> {
+        u32::try_from(Stat::read(pid)?.number(PROCESS_GROUP)?).ok()
+    }
+
     pub(super) fn terminate(pid: u32) -> bool {
         super::unix_terminate(pid)
     }
@@ -758,6 +787,18 @@ mod platform {
         .map(PathBuf::from)
     }
 
+    pub(super) fn parent(pid: u32) -> Option<u32> {
+        let key = Pid::from_u32(pid);
+        refreshed(&[key], ProcessRefreshKind::nothing())
+            .process(key)?
+            .parent()
+            .map(Pid::as_u32)
+    }
+
+    pub(super) fn process_group(_pid: u32) -> Option<u32> {
+        None
+    }
+
     pub(super) fn terminate(pid: u32) -> bool {
         let key = Pid::from_u32(pid);
         refreshed(&[key], ProcessRefreshKind::nothing())
@@ -852,6 +893,23 @@ mod platform {
     }
 
     pub(super) fn working_directory(_pid: u32) -> Option<PathBuf> {
+        None
+    }
+
+    pub(super) fn parent(_pid: u32) -> Option<u32> {
+        None
+    }
+
+    #[cfg(unix)]
+    #[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
+    pub(super) fn process_group(pid: u32) -> Option<u32> {
+        let process_id = libc::pid_t::try_from(pid).ok().filter(|pid| *pid > 0)?;
+        let group = unsafe { libc::getpgid(process_id) };
+        u32::try_from(group).ok().filter(|group| *group > 0)
+    }
+
+    #[cfg(not(unix))]
+    pub(super) fn process_group(_pid: u32) -> Option<u32> {
         None
     }
 
@@ -956,6 +1014,8 @@ mod tests {
         let sample = sample(pid).expect("sample");
         assert_eq!(sample.parent, Some(std::process::id()));
         assert_eq!(sample.start_time, expected.start_time());
+        assert_eq!(parent(pid), Some(std::process::id()));
+        assert_eq!(process_group(pid), process_group(std::process::id()));
         assert!(descendants(std::process::id()).contains(&pid));
     }
 
@@ -967,6 +1027,11 @@ mod tests {
         assert_eq!(start_time(pid), Some(expected.start_time()));
         assert_eq!(command_name(pid).as_deref(), expected.name().to_str());
         assert_eq!(host_name(), System::host_name());
+        assert_eq!(parent(pid), expected.parent().map(Pid::as_u32));
+        assert_eq!(
+            process_group(pid),
+            u32::try_from(rustix::process::getpgrp().as_raw_nonzero().get()).ok()
+        );
         let sample = sample(pid).expect("sample");
         assert!(sample.resident_bytes > 0);
         assert!(sample.threads >= 1);
@@ -1069,6 +1134,8 @@ mod tests {
         assert_eq!(command_name(0), None);
         assert_eq!(record(u32::MAX), None);
         assert_eq!(working_directory(u32::MAX), None);
+        assert_eq!(parent(u32::MAX), None);
+        assert_eq!(process_group(u32::MAX), None);
         assert!(!terminate(0));
     }
 }

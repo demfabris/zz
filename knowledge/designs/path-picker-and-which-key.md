@@ -124,8 +124,8 @@ the wrong machine's.
 **Insert style**, computed off the `inner` lock from the foreground process group `fg` (`tcgetpgrp`):
 
 - Claude: a claude peer record for the pane with `zz.is_none()` (zz's own terminal peer records must not
-  match) whose process group equals `fg`. Add `process_group(pid)` next to `parent_pid` in
-  `agent/claude_peers.rs` (macOS `pbi_pgid`, Linux `/proc/<pid>/stat`).
+  match) whose process group equals `fg`, read by `process_group(pid)` in `process_info.rs`
+  (macOS `pbi_pgid`, Linux `/proc/<pid>/stat`).
 - Codex: a member of the `fg` group whose basename is `codex` (one `ps -axo pid=,pgid=,comm=` on macOS,
   `/proc` on Linux). This also catches the npm `node` leader with a native `codex` child, and rejects a
   suspended or background codex.

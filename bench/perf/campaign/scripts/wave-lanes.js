@@ -22,14 +22,14 @@ const QUICK_BASE_JSON = `bench/perf/results/baseline-quick-${HOST}-17e17115.json
 const SCRATCH = '/tmp/zz-perf-campaign'
 const BASH_ENV = ''
 const CLONE = 'cp -R --reflink=always'
-const PROFILER = '`perf record -F 999 -g -p <daemon pid> -- sleep 5` then `perf report --stdio --no-children` (needs kernel.perf_event_paranoid <= 2)'
+const PROFILER = '`perf record -F 999 -g -p <daemon pid> -- sleep 5` then `perf report --stdio --no-children` (needs kernel.perf_event_paranoid <= 1 for kernel stacks)'
 const OS_NOTE = 'This host is Linux. macOS-only paths (the posix_spawn pane launcher, clonefile tmux wrapper pin, kqueue, the macOS PTY spin bridge, ri_instructions, `just ios-gpui`) cannot be run here: say so in the report instead of claiming them.'
 const SLOTS = 2
 const LANES = [
   {
     id: 'W1-ATTACH', slug: 'attach', n: 6, groups: 'attach,echo,throughput,chatty', start: 'fix',
     reports: 'bench/perf/campaign/attach-review.json',
-    note: 'RESUME: the lane is built and reviewed, and a fix pass was cut off mid-verification. Its commits 46510b07, 6e475f57, 08186223 and the WIP commit 73eafb94 are on perf/attach, which already contains the perf/wave1 head. findings_status in the reports file says which findings those commits look to address; verify each one, finish the rest, re-run every lane check, and replace the WIP commit message with a real one only by adding a follow-up commit (never rewrite pushed history).',
+    note: 'RESUME: the lane is built and reviewed, and a fix pass was cut off mid-verification. Its commits 46510b07, 6e475f57, 08186223 and the WIP commit 73eafb94 are on perf/attach, which holds perf/wave1 only up to 9eb5888b. First run `git merge perf/wave1` in the worktree so the lane has the Linux instruction probe and the Linux W0 JSONs; without them the quick gates have no instr twins and no W0, and the vs-W0 rules and drift check do not run. findings_status in the reports file says which findings those commits look to address; verify each one, finish the rest, re-run every lane check, and replace the WIP commit message with a real one only by adding a follow-up commit (never rewrite pushed history).',
   },
 ]
 
@@ -129,7 +129,7 @@ ${reportText(report)}
 Steps:
 1. \`cd ${laneWT(l)} && git merge ${INT_BRANCH}\` (merge, not rebase: lane branches may already be shared); resolve conflicts by understanding both sides and never drop another lane's behaviour; rebuild and re-run the lane's own tests after a non-trivial merge.
 2. \`cd ${INT} && git merge --no-ff perf/${l.slug} -m "Merge ${l.id}: <one line>"\`.
-3. In ${INT}: \`cargo fmt --all -- --check\`; \`cargo clippy --workspace --all-targets --all-features -- -D warnings\`; \`timeout 3600 cargo test --workspace --all-features --no-fail-fast\` (re-run zz-daemon failures alone; watch for hung tests); \`just compat-check\`; \`cargo build -p zz-cli\` then the full corpus \`${BASH_ENV}ZZ_COMPAT_ZZ=${INT}/target/debug/zz_cli compat/run.sh\` compared against the accepted summary, with any unclean row checked against the pre-merge binary before blaming this lane; \`compat/attached-client.sh\`; then the full gate \`just perf-gate ${STAGE} --baseline <${newestBase}> --json bench/perf/results/w${WAVE}-${l.n}-${l.slug}-${HOST}-<sha8 of the merge commit>.json\`, with \`--strict\` only when nothing else builds on the host. Judge the lane on metrics it owns and on the gate's regressed/drifted checks; stage targets owned by unmerged lanes are expected to fail.
+3. In ${INT}: \`cargo fmt --all -- --check\`; \`cargo clippy --workspace --all-targets --all-features -- -D warnings\`; \`timeout 3600 cargo test --workspace --all-features --no-fail-fast\` (re-run zz-daemon failures alone; watch for hung tests); \`just compat-check\`; \`cargo build -p zz-cli\` then the full corpus \`${BASH_ENV}ZZ_COMPAT_ZZ=${INT}/target/debug/zz_cli compat/run.sh\` compared against the accepted summary, with any unclean row checked against the pre-merge binary before blaming this lane; \`compat/attached-client.sh\`; then the full gate \`just perf-gate ${STAGE} --baseline <${newestBase}> --json bench/perf/results/w${WAVE}-${l.n}-${l.slug}-${HOST}-<sha8 of the merge commit>.json\`, with \`--strict\`: first wait until nothing else builds and the 1-minute load per CPU is under 0.5 (\`uptime\`, \`nproc\`), up to 30 minutes; if the host never gets there, run without \`--strict\` and say so in the report so the owner can rerun it. Judge the lane on metrics it owns and on the gate's regressed/drifted checks; stage targets owned by unmerged lanes are expected to fail.
 4. Anything red this merge caused: fix it in ${INT} with a follow-up commit, or if unsalvageable, \`git -C ${INT} reset --hard <pre-merge sha>\` (the integration branch belongs to this workflow alone while it runs) and return status failed.
 5. Commit the results JSON in ${INT}. Then remove the lane worktree and branch: \`git -C ${INT} worktree remove --force ${laneWT(l)} && git -C ${INT} branch -D perf/${l.slug}\`.
 Return the structured merge report.`

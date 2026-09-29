@@ -2,7 +2,8 @@
 
 Entry point for a fresh session continuing the zz daemon performance rebuild on a Linux host
 (Arch or Ubuntu, x86_64 or aarch64) with no access to the owner's Mac or to the earlier
-session's memory. Written 2026-09-29 at perf/wave1 `9eb5888b`.
+session's memory. Written 2026-09-29. The code on perf/wave1 is as of `9eb5888b`; the handoff files
+were committed on top of it in `fd6f36a8` and corrected after that, and steps 3-4 move the head again.
 
 Read next, in this order: `knowledge/designs/daemon-perf-rebuild.md` (the plan: targets, lanes,
 write zones, as-built notes per merged lane), `bench/perf/README.md` (the gate),
@@ -14,8 +15,8 @@ Paths under `/Users/...` and `/private/tmp/...` in any report are on the Mac and
 | Branch | Head | Contents | State |
 |---|---|---|---|
 | `main` (origin) | `1f474295` | has `17e17115` (W0 code point) | the gate and plan (`157ac6a3`) are not on origin yet |
-| `perf/wave1` | `9eb5888b` | W0 gate + plan, W1-FOOTPRINT, W1-FORMAT, W1-PUBLISH, W1-PANE, W1-EXEC, 3 side branches | all checks green on the Mac (see below); 79 commits ahead of local main |
-| `perf/attach` | `00831246` | W1-ATTACH (16 commits) + `perf/wave1` merged in | fix pass cut off mid-verification; `73eafb94` is a WIP commit |
+| `perf/wave1` | `9eb5888b` + handoff commits (`fd6f36a8`, ...) | W0 gate + plan, W1-FOOTPRINT, W1-FORMAT, W1-PUBLISH, W1-PANE, W1-EXEC, 3 side branches | all checks green on the Mac (see below); 83 commits ahead of `origin/main` at `fd6f36a8` |
+| `perf/attach` | `00831246` | W1-ATTACH (16 commits) + `perf/wave1` merged in up to `9eb5888b` (not the handoff commits) | fix pass cut off mid-verification; `73eafb94` is a WIP commit |
 
 Wave 1 merge log on `perf/wave1` (gate JSON per merge in `bench/perf/results/`):
 
@@ -23,7 +24,7 @@ Wave 1 merge log on `perf/wave1` (gate JSON per merge in `bench/perf/results/`):
 |---|---|---|---|
 | W0 | gate + plan | `157ac6a3` (local main) | `baseline-macbook-17e17115.json`, `baseline-quick-macbook-17e17115.json` |
 | 1 | FOOTPRINT | `613630ce` | `w1-1-footprint-macbook-613630ce.json` |
-| 2 | FORMAT | `a5c5cab7` | `w1-2-format-macbook-a5c5cab7.json` |
+| 2 | FORMAT (before PUBLISH, see below) | `a5c5cab7` | `w1-2-format-macbook-a5c5cab7.json` |
 | 3 | PUBLISH | `d5542787` | `w1-3-publish-macbook-d5542787.json` |
 | 4 | PANE | `ad9c0c9b` | `w1-4-pane-macbook-ad9c0c9b.json` |
 | 5 | EXEC | `a26b6368` | `w1-5-exec-macbook-a26b6368.json` (last full gate, load 4-5 on 16 CPUs, not noisy, not `--strict`) |
@@ -31,6 +32,11 @@ Wave 1 merge log on `perf/wave1` (gate JSON per merge in `bench/perf/results/`):
 | fold | `fix/pty-bridge-adaptive-spin` | `c7c93042` | quick throughput only: 261.0 MB/s vs tmux 47.4 (5.51x), W0 quick 233.9; not committed (`results/local/`) |
 | fold | `perf/footprint` (title fix) | `cd1ce6eb` | none; `select-pane -T` titles survive shell-integration prompt retitles |
 | extra | registry | `9eb5888b` | closes `terminal.shell-integration-prompt-title` in `compat/tmux-gaps.json`; owner may drop it |
+
+FORMAT merged before PUBLISH, against the plan's order: a usage-limit cut left PUBLISH's fix pass
+unfinished while FORMAT was ready, and the resume run (`scripts/wave1-resume.js`) merged it first.
+PUBLISH's as-built notes are written against FOOTPRINT and FORMAT. None of merges 1-5 ran the gate
+with `--strict` (other lanes were compiling); see the open decisions.
 
 Fold checks on the Mac: fmt and clippy `-D warnings` clean; zz-terminal 309, zz-mux 584 pass;
 `cargo test --workspace --all-features --no-fail-fast` green on rerun (first run: 3 zz-daemon
@@ -109,8 +115,9 @@ scrollback footprint (0.63x at 180 cols), throughput (4.8x ASCII, 10.6x unicode)
 
 ## Decisions still open (ask the owner)
 
-- **Echo rows at wave 1.** They fail 1.5x tmux and no wave-1 lane owns the remaining hops. Either move their rule to `wave3` in `thresholds.json` (and regenerate the Targets table with `run.py --targets`) or add a lane. Do not relax them quietly.
+- **Echo rows at wave 1.** They fail 1.5x tmux and no wave-1 lane owns the remaining hops. Either move their rule to `wave3` in `thresholds.json` (and regenerate the Targets table with `python3 bench/perf/run.py --targets --w0 bench/perf/results/baseline-macbook-17e17115.json`, so the table keeps the Mac tmux and W0 columns; without `--w0` it picks the Linux W0) or add a lane. Do not relax them quietly. Note for the decision: at the EXEC merge `echo.p50.busy30` went from 0.50 to 0.846 ms (1.69x the w1-4 PANE JSON) and `idle.wakeups_per_s.p20` from 0.2 to 0.3 (1.5x). Neither is flagged because wall and CPU rules are soft, and tmux's busy30 moved by the same 1.69x in that run (load 4-5), so the ratio stayed at 4.19x; a quiet `--strict` run should settle whether EXEC moved it.
 - **Merges of record on Linux.** The plan and README say merge runs happen on the macOS reference host. This handoff moves lane merges to Linux with a Linux W0, and keeps one strict Mac run per wave exit. Confirm.
+- **Non-strict merge gates.** The plan and `bench/perf/README.md` require `--strict` for every merge of record. Wave-1 merges 1-5 and the Mac W1-ATTACH quick gate ran without it. This handoff runs the remaining wave-1 gates (steps 4, 6, 7) with `--strict` on a quiet host; the owner decides whether merges 1-5 need strict reruns or the rule is relaxed while lanes build in parallel.
 - **`9eb5888b`** (gap registry close) was not requested; keep or drop.
 
 ## Next steps, in order
@@ -140,15 +147,19 @@ Work in worktrees, never in the main checkout if other sessions use it.
 | Rust 1.97.0 + clippy, rustfmt | `rust-toolchain.toml` (rustup picks it up) | MSRV |
 | Zig 0.16.0 | `mise install` (reads `mise.toml`) or a tarball on PATH | every build: `libghostty-vt-sys/build.rs` runs `zig build`, not only release builds |
 | System packages | Ubuntu: the `apt-get install` list in `.github/workflows/ci.yml` (autoconf automake bison cmake libevent-dev libncurses-dev libfontconfig-dev libwayland-dev libxkbcommon-dev pkg-config ninja-build ...); Arch: the equivalents plus `base-devel`; see `knowledge/playbooks/prerequisites.md` | GUI crates in `--workspace`, the pinned tmux build |
-| CEF | `export CEF_PATH=$HOME/.cache/zz-cef` (CI does the same); `cef-dll-sys` downloads 154.0.23 there once instead of into every target dir | `cargo clippy/test --workspace` builds `zz-browser` |
+| CEF | `export CEF_PATH=$HOME/.cache/cef` (as in `knowledge/playbooks/running-zz.md`; CI points it at a shared `.cef-cache` directory); `cef-dll-sys` downloads 154.0.23 there once instead of into every target dir | `cargo clippy/test --workspace` builds `zz-browser` |
 | Release tmux for the gate | distro package (`pacman -S tmux` / `apt install tmux`) at `/usr/bin/tmux` | the gate refuses ASan builds, scripts and zz's own tmux wrapper; record `tmux -V` (the Mac used 3.7c, distros ship older; ratios are per run) |
 | Pinned tmux oracle | `compat/fetch-tmux.sh` in each worktree (builds next-3.8 `d77c9dc6` into `compat/.cache`) | `compat/run.sh`, `just compat-check`; not for the gate |
 | bash >= 4 | default on Linux | `compat/run.sh` uses `declare -A`, `diff-scenario.sh` uses `mapfile` |
-| perf counters | `sudo sysctl kernel.perf_event_paranoid=1` (Ubuntu defaults to 4, Arch to 2) | step 3 and `perf record`; VMs may expose no PMU at all |
+| `just` | distro package or `cargo install just` | every recipe (`perf-gate`, `compat-check`, `web-build`) |
+| Linux `perf` | Arch `perf`; Ubuntu `linux-tools-$(uname -r)` | the profiler in the lane prompts (`PROFILER` in `scripts/wave-lanes.js`) |
+| perf counters | `sudo sysctl kernel.perf_event_paranoid=1` (Ubuntu defaults to 4, Arch to 2) | 2 is enough for step 3's user-only counters on your own processes; `perf record -g` with kernel stacks needs 1. VMs may expose no PMU at all |
+| Web toolchain | `just web-setup` (nightly with `wasm32-unknown-unknown`, wasm-bindgen-cli 0.2.128) | `just web-build` in steps 5 and 9 |
 | Disk | >= 20 GB free before any build; each worktree target grows to 40-50 GB | |
 
 First build in `~/dev/zz-perf-int`: `cargo build -p zz-cli && cargo build --release -p zz-cli`, then
-run the Linux-only tests nobody has run yet: `cargo test -p zz-daemon process_info process_facts`,
+`cargo test --workspace --all-features --no-run` (the cold GUI and CEF compile, untimed), then run
+the Linux-only tests nobody has run yet: `cargo test -p zz-daemon -- process_info process_facts`,
 `cargo test -p zz-mux localtime`, `timeout 3600 cargo test --workspace --all-features --no-fail-fast`,
 `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `just compat-check`.
 Code written on the Mac for Linux and never run: `process_info.rs` `/proc` paths, zz-mux
@@ -162,7 +173,7 @@ rule has something to hold (CPU time moved up to 61% between runs of one binary 
 
 - The Linux branch sets `HAS_INSTRUCTIONS = False` and `instructions=0`, and `run.py` `add_instr` then drops every `instr` metric.
 - Use `perf_event_open` through `ctypes.CDLL(None).syscall` (nr 298 on x86_64, 241 on aarch64), `PERF_TYPE_HARDWARE`/`PERF_COUNT_HW_INSTRUCTIONS`, `inherit=1`, `exclude_kernel=1`, `exclude_hv=1`.
-- A counter attaches to one thread: open one per tid in `/proc/<pid>/task`, cache the fds per pid, and open counters for unseen tids on each `sample()`. `inherit` folds threads created later by a counted thread into its counter; a counter of an exited thread stays readable.
+- A counter attaches to one thread. When `sample()` first sees a pid, open one counter per tid in `/proc/<pid>/task` and cache the fds; never open counters for tids that appear later. `inherit=1` folds every thread created after that by a counted thread (so every later thread of the process) into its parent's counter, and a counter of an exited thread stays readable. Opening counters for new tids as well would count those threads twice.
 - Linux counts user space only, so Linux and Mac instruction numbers are not comparable; ratios to tmux are.
 - Fall back to no instructions (and say so in `meta`) when the syscall fails (paranoid level, no PMU).
 - Run `python3 bench/perf/test_gate.py` and update the README Probes table.
@@ -180,15 +191,21 @@ cd ~/dev/zz-w0 && cargo build --release -p zz-cli
 python3 bench/perf/run.py --zz target/release/zz_cli --stage baseline --w0 none --json /tmp/baseline-$H-17e17115.json
 python3 bench/perf/run.py --zz target/release/zz_cli --stage baseline --w0 none --quick --json /tmp/baseline-quick-$H-17e17115.json
 cp /tmp/baseline-*$H-17e17115.json ~/dev/zz-perf-int/bench/perf/results/
-cd ~/dev/zz-perf-int && just perf-gate wave1 --json bench/perf/results/w1-5-fold-$H-$(git rev-parse --short=8 HEAD).json
+cd ~/dev/zz-perf-int && just perf-gate wave1 --strict --json bench/perf/results/w1-5-fold-$H-$(git rev-parse --short=8 HEAD).json
 ```
 
-Run on a quiet host (1-minute load / CPUs under 0.5). The last line is the `--baseline` for the
-attach merge. Commit the three JSONs on `perf/wave1`, then remove `~/dev/zz-w0`.
-Footprint on Linux is `smaps_rollup` `Pss_Anon`, not `phys_footprint`: the `abs` MiB rules were set
-on the Mac and may read differently here.
+Run on a quiet host (1-minute load / CPUs under 0.5), nothing else building. The last line is the
+`--baseline` for the attach merge. Commit the three JSONs on `perf/wave1`, then remove `~/dev/zz-w0`.
+Footprint on Linux is `smaps_rollup` `Pss_Anon + Pss_Shmem + SwapPss` (falling back to `/proc/<pid>/status`
+`RssAnon + VmSwap`), not `phys_footprint`: the `abs` MiB rules were set on the Mac and may read
+differently here.
 
 ### 5. Finish W1-ATTACH (`~/dev/zz-attach`, branch `perf/attach`)
+
+First bring the lane up to the integration head so its quick gates use the Linux probe (step 3)
+and find the Linux W0 (step 4): `git -C ~/dev/zz-attach merge perf/wave1`. Without it the lane has
+the old probe (no `instr` twins) and no `baseline-quick-<host>` W0, so the `--w0` default finds
+nothing and the vs-W0 rules and the drift check do not run.
 
 `attach-review.json` holds the implementer report, both reviews and `findings_status`. Status is
 judged from the fix-pass diffs (`46510b07`, `6e475f57`, `08186223`, `73eafb94`); none was verified.
@@ -210,20 +227,29 @@ judged from the fix-pass diffs (`46510b07`, `6e475f57`, `08186223`, `73eafb94`);
 
 Also: `ZZ_PERF_ATTACH_BATCH` is missing from the Rollback switches table; the lane adds ~73 new
 comment lines in `.rs` files (house rule: no comments); web build never run (`just web-build`);
-iOS build is Mac-only.
+iOS build is Mac-only; the full `--strict` gate was never run for this lane (only a quick gate
+against the full w1-4 JSON, which warns that sample counts differ).
 
 Then: lane tests (`cargo test -p zz-daemon attach_tests`, `-p zz-tui -p zz-client -p zz-cli`),
-`python3 compat/tui/tracker.py check`, every `compat/tui-*.sh` fixture (`tui-choosers.sh` can only
-pass on Linux), `compat/attached-client.sh`, the scenarios the parity reviewer listed, and
-`just perf-gate wave1 --quick --only attach,echo,throughput,chatty --baseline <w1-5-fold JSON>`.
+`python3 compat/tui/tracker.py check`, every `compat/tui-*.sh` fixture, `compat/attached-client.sh`,
+the scenarios the parity reviewer listed, and `just perf-gate wave1 --quick --only
+attach,echo,throughput,chatty --baseline bench/perf/results/baseline-quick-<host>-17e17115.json`
+(quick against quick; a quick run against the full w1-5-fold JSON warns that sample counts differ).
+`tui-output-backpressure.sh` reads `/proc` and runs only on Linux. These failed on the base build
+on the Mac too, so compare each against the pre-merge binary before blaming the lane: fixtures
+`status-row`, `tui-choosers` (stops at the same checkpoint on `157ac6a3`), `tui-client-commands`,
+`tui-stock-keys`, `tui-output-backpressure`, `tui-command-streams`; corpus `census-hooks`,
+`plugin-runtime-continuum`, `plugin-runtime-vim-tmux-navigator`, `source-file-byte-name`,
+`resurrect-save`, `status-background-jobs`.
 `scripts/wave-lanes.js` is preset for exactly this (fix from the reports, then merge).
 
 ### 6. Merge attach as w1-6
 
-`perf/attach` already contains `perf/wave1`; merge `--no-ff` into `perf/wave1`, full checks
-(fmt, clippy, workspace tests under `timeout`, `just compat-check`, full `compat/run.sh`,
-`compat/attached-client.sh`), gate JSON `bench/perf/results/w1-6-attach-<host>-<sha8>.json`
-against the `w1-5-fold` JSON. Remove `~/dev/zz-attach` and the branch right after.
+Merge `perf/wave1` into `perf/attach` again if it moved since step 5, then merge `perf/attach`
+`--no-ff` into `perf/wave1`, full checks (fmt, clippy, workspace tests under `timeout`,
+`just compat-check`, full `compat/run.sh`, `compat/attached-client.sh`), gate JSON
+`just perf-gate wave1 --strict --baseline <w1-5-fold JSON> --json
+bench/perf/results/w1-6-attach-<host>-<sha8>.json` on a quiet host. Remove `~/dev/zz-attach` and the branch right after.
 
 ### 7. Wave-1 exit
 
@@ -240,11 +266,14 @@ the Mac for `wave1-macbook-<sha8>.json`.
 
 ### 9. Wave 2, in the plan's order
 
-Create `perf/wave2` from the new main. Lanes: W2-TERM, W2-CTRL (after TERM, or one lane with
+Create the integration worktree again from the new main (the script hardcodes
+`INT = ${ROOT}/zz-perf-int`): `git -C ~/dev/zz worktree add -b perf/wave2 ~/dev/zz-perf-int main`.
+Lanes: W2-TERM, W2-CTRL (after TERM, or one lane with
 TERM), W2-HOOKS, W2-FMT, W2-COPY. `LANES` for `scripts/wave-lanes.js`:
 
 ```js
 const INT_BRANCH = 'perf/wave2', WAVE = 2, STAGE = 'wave2'
+const BASE_JSON = `bench/perf/results/wave1-${HOST}-<sha8>.json`
 const LANES = [
   { id: 'W2-TERM', slug: 'term', n: 1, groups: 'attach,echo,throughput,chatty' },
   { id: 'W2-CTRL', slug: 'ctrl', n: 2, groups: 'attach,control,cli,chatty,echo', after: 'term' },
@@ -279,7 +308,7 @@ Rule: every wave exit gets one `--strict` gate run on the Mac, committed as
 
 - One integration worktree (`~/dev/zz-perf-int`, branch `perf/waveN`), one worktree per lane (`~/dev/zz-<slug>`, branch `perf/<slug>`) from the integration head.
 - Per lane: implementer at `xhigh` effort, then a parity reviewer and a perf reviewer in parallel at `high`, then a fix agent at `high`. All return structured JSON (schemas in the script); keep those reports outside the repo, they are the resume point.
-- Merges strictly serial in the plan's order: merge the integration head into the lane, `--no-ff` into integration, fmt, clippy, workspace tests, `just compat-check`, full `compat/run.sh`, `compat/attached-client.sh`, then a full gate JSON `w<wave>-<n>-<slug>-<host>-<sha8>.json` whose `--baseline` is the previous merge's JSON.
+- Merges strictly serial in the plan's order (wave 1 swapped FORMAT and PUBLISH, see above): merge the integration head into the lane, `--no-ff` into integration, fmt, clippy, workspace tests, `just compat-check`, full `compat/run.sh`, `compat/attached-client.sh`, then a full `--strict` gate JSON `w<wave>-<n>-<slug>-<host>-<sha8>.json` on a quiet host whose `--baseline` is the previous merge's JSON.
 - 2 lane slots at a time spread token use (the first wave-1 run used 3 and hit the usage limit); remove a lane worktree and branch right after its merge.
 - Template: `bench/perf/campaign/scripts/wave-lanes.js`. Edit only the constants block at the top (`ROOT`, `MAIN`, `INT`, `INT_BRANCH`, `HOST`, `WAVE`, `STAGE`, `BASE_JSON`, `QUICK_BASE_JSON`, `CLONE`, `PROFILER`, `SLOTS`, `LANES`). Lanes take `start: 'impl' | 'review' | 'fix' | 'merge'`, `reports` (a file in the integration tree) and `after` (a lane slug whose merge must land first). Run it with the Workflow tool (load the `workflow-authoring` skill first).
 - `scripts/wave1-resume.js` is the run that resumed wave 1 after the usage-limit cut, kept as the example of RESUME notes per lane (paths moved into constants, logic unchanged; its `execDone` line uses `&&` on a promise, so EXEC did not actually wait for PANE).

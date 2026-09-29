@@ -205,8 +205,11 @@ fn resource_root() -> Option<PathBuf> {
         let mut prepared_roots = PREPARED_ROOTS
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if !prepared_roots.contains(&root) {
+        let known = prepared_roots.contains(&root);
+        if !known || !resources_present(&root) {
             materialize_resources(&root)?;
+        }
+        if !known {
             prepared_roots.push(root.clone());
         }
         Ok(root)
@@ -261,6 +264,17 @@ fn nonempty_home() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .filter(|home| !home.is_empty())
         .map(PathBuf::from)
+}
+
+#[cfg(unix)]
+fn resources_present(root: &Path) -> bool {
+    [
+        "bash/zz-integration.bash",
+        "zsh/.zshenv",
+        "zsh/zz-integration.zsh",
+    ]
+    .iter()
+    .all(|resource| root.join(resource).is_file())
 }
 
 #[cfg(unix)]
@@ -435,6 +449,11 @@ fn resource_cache_root() -> io::Result<PathBuf> {
 }
 
 #[cfg(windows)]
+fn resources_present(root: &Path) -> bool {
+    root.join("powershell/zz-integration.ps1").is_file()
+}
+
+#[cfg(windows)]
 fn materialize_resources(root: &Path) -> io::Result<()> {
     fs::create_dir_all(root)?;
     write_resource(
@@ -576,9 +595,15 @@ mod tests {
         let temporary = tempfile::tempdir().expect("temporary resource directory");
         let root = temporary.path().join("shell-integration/v1");
         materialize_resources(&root).expect("materialize shell integration");
+        assert!(resources_present(&root));
         fs::remove_dir_all(&root).expect("purge shell integration cache");
+        assert!(
+            !resources_present(&root),
+            "a purged tree is noticed before the next spawn"
+        );
 
         materialize_resources(&root).expect("rematerialize shell integration");
+        assert!(resources_present(&root));
         for relative in [
             "bash/zz-integration.bash",
             "zsh/.zshenv",

@@ -208,8 +208,6 @@ pub(crate) struct TerminalOptions {
 }
 
 impl TerminalOptions {
-    /// The two server options the daemon put in a raw-terminal client's
-    /// hello, or `None` from a daemon that did not.
     pub fn from_hello(hello: &ServerHello) -> Option<Self> {
         let mut extended_keys = None;
         let mut focus_events = None;

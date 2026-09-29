@@ -37,9 +37,6 @@ use crate::browser::BrowserFrameProvider;
 
 const MANUAL_RESTART_HINT: &str = "run 'zz kill-server' to restart it (sessions will be lost)";
 
-/// `ZZ_PERF_TUI_COALESCE=0` paints after every event, repaints everything on
-/// every snapshot, draws a card in a pane that has no frame yet, and reads the
-/// terminal options over two connections of their own.
 pub(crate) static COALESCE: LazyLock<bool> =
     LazyLock::new(|| std::env::var_os("ZZ_PERF_TUI_COALESCE").is_none_or(|value| value != "0"));
 

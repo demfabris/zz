@@ -2061,12 +2061,6 @@ fn newer_terminal_delivered(
             .is_some_and(|delivered| current.precedes(*delivered))
 }
 
-/// An update that leaves the client where a frame already queued or written
-/// leaves it: an older Full, or any frame whose generation is the one the
-/// client holds or is about to hold. A viewport's generations move on every
-/// publish, so equal generations are an equal frame, except that a queued
-/// patch never stands in for a Full: the Full is wanted because the client
-/// may not hold the patch's base.
 fn terminal_update_redundant(
     state: &OutboundState,
     pane: PaneId,
@@ -2340,9 +2334,6 @@ impl OutboundMailbox {
         self.enqueue_encoded_reliable_with(encoded, |_| {})
     }
 
-    /// Queues `Attached`. Every client wipes its viewports when it reads one,
-    /// so what was delivered before it no longer stands for anything the
-    /// client holds.
     #[must_use]
     fn enqueue_attached(&self, message: &ProtocolMessage) -> bool {
         let encoded = match self.encode_message(message) {
@@ -2363,10 +2354,6 @@ impl OutboundMailbox {
         })
     }
 
-    /// Keeps terminal frames queued until `Attached` is: a frame written
-    /// before it is one the client throws away when it reads it. Nothing is
-    /// written until the attach releases the hold, so the client reads the
-    /// attach, its status and its first frames as one batch.
     fn hold_terminals(&self) {
         if *attach::ATTACH_DEDUP {
             let mut state = self.state.lock();
@@ -2415,9 +2402,6 @@ impl OutboundMailbox {
         true
     }
 
-    /// The client dropped this pane's viewport (a patch it could not apply),
-    /// so the next Full is wanted even at the generation last delivered, and
-    /// no patch queued against the dropped base may follow it.
     fn forget_delivered_terminal(&self, pane: PaneId) {
         forget_delivered_terminal_state(&mut self.state.lock(), pane);
     }
@@ -3038,9 +3022,6 @@ impl OutboundMailbox {
         }
     }
 
-    /// Takes the frames ready now, in the order [`Self::recv`] hands them out,
-    /// until about `max_bytes` are taken; waits while none is ready. False
-    /// once the mailbox is closed and drained.
     fn recv_batch(&self, frames: &mut Vec<Vec<u8>>, max_bytes: usize) -> bool {
         let mut state = self.state.lock();
         loop {
@@ -23395,10 +23376,6 @@ impl Shared {
         );
     }
 
-    /// Everything a client needs to draw its attachment. A fresh attach sends
-    /// only what `Attached` does not carry: the client resets every overlay
-    /// and viewport on `Attached`, so an overlay that does not exist and the
-    /// Snapshot `Attached` already holds are not sent again.
     fn send_resync_as(
         &self,
         client: ClientId,

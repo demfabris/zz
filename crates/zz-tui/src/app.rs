@@ -403,7 +403,6 @@ enum ProtocolOutcome {
     Exit(TuiExit),
 }
 
-/// The one paint a drained run of protocol events owes the terminal.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum PendingPaint {
     None,
@@ -412,7 +411,6 @@ enum PendingPaint {
     RepaintAll,
 }
 
-/// How many queued protocol events one paint may cover.
 const MAX_COALESCED_EVENTS: usize = 256;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1659,8 +1657,6 @@ fn handle_core_event(
     browser: &mut BrowserState,
 ) -> Result<ProtocolOutcome, String> {
     match event {
-        // Adopting the snapshot here keeps the new session and the painted
-        // layout from ever disagreeing; the attach repaints everything once.
         CoreEvent::Attached { session } => {
             *attempt = AttachAttempt::Idle;
             model.attached_session = Some(session);

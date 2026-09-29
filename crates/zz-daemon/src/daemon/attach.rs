@@ -42,9 +42,6 @@ impl ResyncScope {
     }
 }
 
-/// `tty_start_tty` arms focus reporting and extended keys from these two
-/// server options once, when the client starts; a raw-terminal client reads
-/// them from its hello instead of dialing twice more to ask.
 pub(super) fn terminal_option_capabilities(engine: &MuxEngine) -> [String; 2] {
     [
         format!(
@@ -68,10 +65,6 @@ pub(super) fn client_cell_fact(capabilities: &[String]) -> Option<(u32, u32)> {
     })
 }
 
-/// The geometry a terminal client that named its size in the hello will
-/// report for each pane it shows, seeded before the first frame is built so
-/// the first frame already has the final size. A pane the client has already
-/// reported keeps its report.
 pub(super) fn presize_client_terminals(
     inner: &mut ServerState,
     client: ClientId,
@@ -135,9 +128,6 @@ pub(super) fn presize_client_terminals(
     seeded
 }
 
-/// A frame read for a fresh attach whose grid differs from the size the pane
-/// is being laid out at is already superseded: the resize this attach queued
-/// publishes the pane again, and the watcher delivers that frame instead.
 pub(super) fn attach_frame_superseded(
     inner: &ServerState,
     pane: PaneId,
@@ -151,8 +141,6 @@ pub(super) fn attach_frame_superseded(
     })
 }
 
-/// Writes every frame of one batch with as few `writev` calls as the socket
-/// takes.
 pub(super) fn write_frames(stream: &mut impl Write, frames: &[Vec<u8>]) -> io::Result<()> {
     let mut slices = frames
         .iter()
@@ -176,9 +164,6 @@ pub(super) fn write_frames(stream: &mut impl Write, frames: &[Vec<u8>]) -> io::R
 }
 
 impl Shared {
-    /// Holds the client's outbound frames for the attach about to run, until
-    /// the returned hold is dropped: after the attach and the publish that
-    /// follows it, or when the attach fails.
     pub(super) fn hold_attach_terminals(&self, client: ClientId) -> AttachHold {
         let subscriber = self.inner.lock().subscribers.get(&client).cloned();
         if let Some(subscriber) = &subscriber {
@@ -187,7 +172,6 @@ impl Shared {
         AttachHold(subscriber)
     }
 
-    /// The client dropped the pane's viewport and asked for it whole.
     pub(super) fn request_full(&self, client: ClientId, pane: PaneId, outbound: &OutboundMailbox) {
         outbound.forget_delivered_terminal(pane);
         self.send_full(client, pane, outbound);

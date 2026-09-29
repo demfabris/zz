@@ -26,10 +26,6 @@ use crate::{
     tty::TerminalSize,
 };
 
-/// What a snapshot can change that only a full repaint redraws: pane
-/// geometry, dividers and their highlight, pane kinds and border colours, and
-/// the frame around the panes. A snapshot that leaves it alone is painted by
-/// the diffing repaint.
 #[derive(Debug, PartialEq)]
 pub(crate) struct PaintStructure {
     layout: ResolvedLayout,

@@ -207,8 +207,6 @@ struct PaintedSidebarRow {
 
 const PAINT_BEGIN: &[u8] = b"\x1b[?2026h\x1b[?25l";
 const PAINT_END: &[u8] = b"\x1b[?2026l";
-/// How much of the last paint is kept to recognize a paint that only puts the
-/// cursor back where that paint left it.
 const PAINT_TAIL_BYTES: usize = 64;
 
 pub(crate) struct Renderer {
@@ -2955,8 +2953,6 @@ fn fill_cells(fill: char, width: usize) -> String {
     )
 }
 
-/// Nothing but cursor placement and visibility, which a terminal already
-/// showing the same placement is not changed by.
 fn cursor_only(bytes: &[u8]) -> bool {
     let mut rest = bytes;
     while !rest.is_empty() {
@@ -3138,10 +3134,6 @@ fn write_colored_sgr(output: &mut Vec<u8>, foreground: Color, background: Color)
     .expect("writing to Vec cannot fail");
 }
 
-/// Border cells in screen order, as runs: the cursor is placed only where the
-/// next cell does not follow the last one, and the rendition is written only
-/// where it changes. Every rendition starts from a reset, so a run needs no
-/// reset between its cells.
 fn write_border_runs(output: &mut Vec<u8>, cells: &BTreeMap<(u16, u16), (Rc<Vec<u8>>, String)>) {
     if cells.is_empty() {
         return;

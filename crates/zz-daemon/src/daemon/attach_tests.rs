@@ -32,8 +32,6 @@ fn interactive(shared: &Arc<Shared>, client: ClientId, args: &[&str]) {
         .unwrap_or_else(|error| panic!("{args:?}: {error:?}"));
 }
 
-/// A raw-terminal client: it has a terminal and named its size and cell in
-/// the hello, the facts `handle_connection` records from the capabilities.
 fn terminal_client(shared: &Arc<Shared>, size: (u16, u16)) -> (ClientId, Arc<OutboundMailbox>) {
     let mailbox = OutboundMailbox::new();
     let (client, _) =
@@ -60,8 +58,6 @@ fn terminal_client(shared: &Arc<Shared>, size: (u16, u16)) -> (ClientId, Arc<Out
     (client, mailbox)
 }
 
-/// Pops ready frames the way the writer does, without blocking, until
-/// `done` holds for what was taken and then `quiet` passes with nothing new.
 fn drain_until(
     mailbox: &OutboundMailbox,
     quiet: Duration,
@@ -430,7 +426,6 @@ fn a_held_attach_lets_a_long_reliable_queue_drain_but_keeps_its_frames() {
     ));
 }
 
-/// Writes at most `limit` bytes per call, as a full socket buffer does.
 struct Trickle {
     written: Vec<u8>,
     limit: usize,

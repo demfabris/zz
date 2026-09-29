@@ -1886,8 +1886,6 @@ enum CallerTtyScope {
 pub const DEFAULT_CELL_WIDTH_PX: u32 = 8;
 pub const DEFAULT_CELL_HEIGHT_PX: u32 = 16;
 
-/// One cell's extent in pixels from a terminal's window size: the pixel
-/// extent over the cell count, or `fallback` when the terminal reports none.
 #[must_use]
 pub fn cell_pixel_extent(pixels: u16, cells: u16, fallback: u32) -> u32 {
     if pixels == 0 || cells == 0 {

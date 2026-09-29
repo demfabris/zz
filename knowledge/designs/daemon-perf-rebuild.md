@@ -2035,12 +2035,17 @@ zz-client, zz-tui, zz-cli, zz-client-ffi, zz-web, zz, zz-mux and zz-config (all 
 features); tests of zz-terminal, zz-protocol, zz-client (with the daemon-backed simulator), zz-tui,
 zz-client-ffi, zz-web, zz-cli and zz pass; zz-daemon passes except the known
 `endpoint::tests::remote_scripts_fall_back_to_the_mac_app_bundle_cli` and one russh port test
-that passes alone. `compat/tui-screen-diff.sh` 147/147 three times on the release build;
+that passes alone. `compat/tui-screen-diff.sh` 147/147 three times on the first release build
+and three times on the final one;
 `attached-client.sh`, `tui-choosers.sh` (previews ride the new postcard body),
 `tui-output-backpressure.sh`, overlays, pane-geometry, caps, launch-diff, indicators, superset,
 command-streams and stock-keys pass; copy-mode (the six fresh-entry search prompt cases),
 status-row, mouse and client-commands (`switch-mode-duplicate-windows`, `sh` against `bash`, the
-same on the base binary) fail as on the base. `compat/wire-version.py`: 107 unreleased.
+same on the base binary) fail as on the base. `compat/run.sh` over the whole corpus
+(`LC_ALL=en_US.UTF-8`, debug build): only `lane2-store`, `show-options-hooks` (the pin's `vlock`
+`lock-command`) and `smoke/plugin-runtime-resurrect-restore` fail twice, the three host rows the
+wave-1 merge recorded, and the `known/` rows keep their documented divergences.
+`compat/tui/tracker.py check` passes. `compat/wire-version.py`: 107 unreleased.
 `just web-build` builds. Not run here: `just ios-gpui iPad build` (needs the Mac; gpui-shared
 decodes through zz-client core and did not change), and `bench/run.sh` (it drives the packaged GUI
 app in a window, not the daemon; the gate's throughput rows and the headless client cover the

@@ -17,8 +17,10 @@ This zz-maintained snapshot builds `demfabris/ghostty` commit `6fce227c55d288e35
   another Zig CPU expression to optimize for known deployment hardware.
 - Set `LIBGHOSTTY_VT_SYS_OPTIMIZE` to `Debug`, `ReleaseSafe`, `ReleaseFast`, or
   `ReleaseSmall` to override the Zig optimize mode used by vendored builds.
-  Without it, Cargo's dev profile builds `ReleaseSafe` and optimized profiles
-  build `ReleaseFast`.
+  Without it, profiles Cargo reports as `PROFILE=debug` (dev, test) build
+  `ReleaseSafe`; release-family profiles build `ReleaseSmall` at `opt-level`
+  `s` or `z` and `ReleaseFast` otherwise, including release profiles that add
+  debug info.
 - iOS targets (`aarch64-apple-ios`, `aarch64-apple-ios-sim`) build through
   ghostty's xcframework emit instead of a flat cross build. This requires a
   macOS host with Xcode and the iOS SDK installed, and supports static linking

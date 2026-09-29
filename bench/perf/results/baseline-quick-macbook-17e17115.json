@@ -1,0 +1,3680 @@
+{
+ "schema": 2,
+ "meta": {
+  "stage": "baseline",
+  "quick": true,
+  "strict": false,
+  "groups": [
+   "cli",
+   "spawn",
+   "cold",
+   "config",
+   "chatty",
+   "idle",
+   "mem",
+   "attach",
+   "echo",
+   "throughput",
+   "control",
+   "statusjob"
+  ],
+  "started_at": "2026-09-28T15:53:37+00:00",
+  "host": "macbook",
+  "os": "Darwin 27.0.0",
+  "arch": "arm64",
+  "ncpu": 16,
+  "python": "3.9.6",
+  "git_sha": "17e17115adf0f3ce1a087a300854c346e9e23f4e",
+  "git_dirty": false,
+  "zz_bin": "/Users/demfabris/dev/zz-perf-gate/target/release/zz_cli",
+  "zz_version": "tmux 3.8-zz",
+  "zz_sha256": "f9f53a46ff8c9709fb148e8733698abeab9a02df4d8bc4defc7dabb7d970209a",
+  "zz_mtime": "2026-09-28T14:42:33+00:00",
+  "zz_profile": "release",
+  "tmux_bin": "/opt/homebrew/Cellar/tmux/3.7c/bin/tmux",
+  "tmux_version": "tmux 3.7c",
+  "tmux_libs": [
+   "/opt/homebrew/opt/utf8proc/lib/libutf8proc.3.dylib",
+   "/opt/homebrew/opt/ncurses/lib/libncursesw.6.dylib",
+   "/opt/homebrew/opt/libevent/lib/libevent_core-2.1.7.dylib",
+   "/usr/lib/libSystem.B.dylib",
+   "/usr/lib/libresolv.9.dylib",
+   "/opt/homebrew/opt/jemalloc/lib/libjemalloc.2.dylib"
+  ],
+  "baseline": null,
+  "w0": null,
+  "history_limit": 10000,
+  "cpu_source": "proc_pid_rusage",
+  "instructions": true,
+  "warnings": [],
+  "loadavg_start": [
+   4.48,
+   4.15,
+   4.49
+  ],
+  "root": "/tmp/zzpf-85174-qj9ppoet",
+  "loadavg_end": [
+   3.8,
+   3.97,
+   4.36
+  ],
+  "duration_s": 145.7,
+  "group_seconds": {
+   "cli": 11.2,
+   "spawn": 14.0,
+   "cold": 24.7,
+   "config": 2.6,
+   "chatty": 17.3,
+   "idle": 9.2,
+   "mem": 6.2,
+   "attach": 13.1,
+   "echo": 29.3,
+   "throughput": 6.1,
+   "control": 3.1,
+   "statusjob": 8.4
+  },
+  "stray_processes_after": [],
+  "orphans_killed": 0,
+  "group_history_limit": {
+   "cli": {
+    "zz": "10000",
+    "tmux": "10000"
+   },
+   "spawn": {
+    "zz": "10000",
+    "tmux": "10000"
+   },
+   "config": {
+    "zz": "10000",
+    "tmux": "10000"
+   },
+   "chatty": {
+    "zz": "10000",
+    "tmux": "10000"
+   },
+   "idle": {
+    "zz": "10000",
+    "tmux": "10000"
+   },
+   "mem": {
+    "zz": "10000",
+    "tmux": "10000"
+   },
+   "attach": {
+    "zz": "10000",
+    "tmux": "10000"
+   },
+   "echo": {
+    "zz": "10000",
+    "tmux": "10000"
+   },
+   "throughput": {
+    "zz": "10000",
+    "tmux": "10000"
+   },
+   "control": {
+    "zz": "10000",
+    "tmux": "10000"
+   },
+   "statusjob": {
+    "zz": "10000",
+    "tmux": "10000"
+   }
+  },
+  "noisy": false
+ },
+ "metrics": [
+  {
+   "id": "cli.wall.version.p1",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 3.8851,
+    "p10": 3.6188,
+    "p90": 4.699,
+    "p99": 5.052,
+    "min": 3.4542,
+    "max": 5.1082,
+    "n": 20
+   },
+   "tmux": {
+    "median": 3.2347,
+    "p10": 2.9677,
+    "p90": 3.7473,
+    "p99": 8.284,
+    "min": 2.8247,
+    "max": 9.3305,
+    "n": 20
+   },
+   "better": "lower",
+   "ratio": 1.201,
+   "report_only": true,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.wall.display.p1",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 4.9222,
+    "p10": 4.7459,
+    "p90": 5.4644,
+    "p99": 5.9682,
+    "min": 4.6783,
+    "max": 6.0837,
+    "n": 20
+   },
+   "tmux": {
+    "median": 3.3762,
+    "p10": 3.254,
+    "p90": 3.6542,
+    "p99": 3.9573,
+    "min": 3.2019,
+    "max": 4.0048,
+    "n": 20
+   },
+   "better": "lower",
+   "ratio": 1.458,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.cpu.display.p1",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "cpu",
+   "zz": {
+    "median": 1.0799,
+    "p10": 1.0799,
+    "p90": 1.0799,
+    "p99": 1.0799,
+    "min": 1.0799,
+    "max": 1.0799,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.0828,
+    "p10": 0.0828,
+    "p90": 0.0828,
+    "p99": 0.0828,
+    "min": 0.0828,
+    "max": 0.0828,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 13.042,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.instr.display.p1",
+   "group": "cli",
+   "unit": "Minstr",
+   "kind": "instr",
+   "zz": {
+    "median": 10.7882,
+    "p10": 10.7882,
+    "p90": 10.7882,
+    "p99": 10.7882,
+    "min": 10.7882,
+    "max": 10.7882,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.485,
+    "p10": 0.485,
+    "p90": 0.485,
+    "p99": 0.485,
+    "min": 0.485,
+    "max": 0.485,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 22.244,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.wall.list_panes.p1",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 4.9134,
+    "p10": 4.6851,
+    "p90": 5.1362,
+    "p99": 5.3332,
+    "min": 4.6113,
+    "max": 5.3619,
+    "n": 20
+   },
+   "tmux": {
+    "median": 3.3807,
+    "p10": 3.2012,
+    "p90": 3.5525,
+    "p99": 3.8698,
+    "min": 3.1117,
+    "max": 3.9146,
+    "n": 20
+   },
+   "better": "lower",
+   "ratio": 1.453,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.cpu.list_panes.p1",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "cpu",
+   "zz": {
+    "median": 1.0853,
+    "p10": 1.0853,
+    "p90": 1.0853,
+    "p99": 1.0853,
+    "min": 1.0853,
+    "max": 1.0853,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.0869,
+    "p10": 0.0869,
+    "p90": 0.0869,
+    "p99": 0.0869,
+    "min": 0.0869,
+    "max": 0.0869,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 12.489,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.instr.list_panes.p1",
+   "group": "cli",
+   "unit": "Minstr",
+   "kind": "instr",
+   "zz": {
+    "median": 10.8924,
+    "p10": 10.8924,
+    "p90": 10.8924,
+    "p99": 10.8924,
+    "min": 10.8924,
+    "max": 10.8924,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.6116,
+    "p10": 0.6116,
+    "p90": 0.6116,
+    "p99": 0.6116,
+    "min": 0.6116,
+    "max": 0.6116,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 17.81,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.wall.show_options.p1",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 4.8682,
+    "p10": 4.7793,
+    "p90": 4.9749,
+    "p99": 5.0241,
+    "min": 4.6463,
+    "max": 5.0303,
+    "n": 20
+   },
+   "tmux": {
+    "median": 3.3311,
+    "p10": 3.1782,
+    "p90": 3.4226,
+    "p99": 3.4462,
+    "min": 3.1575,
+    "max": 3.4515,
+    "n": 20
+   },
+   "better": "lower",
+   "ratio": 1.461,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.cpu.show_options.p1",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "cpu",
+   "zz": {
+    "median": 1.0338,
+    "p10": 1.0338,
+    "p90": 1.0338,
+    "p99": 1.0338,
+    "min": 1.0338,
+    "max": 1.0338,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.0717,
+    "p10": 0.0717,
+    "p90": 0.0717,
+    "p99": 0.0717,
+    "min": 0.0717,
+    "max": 0.0717,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 14.418,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.instr.show_options.p1",
+   "group": "cli",
+   "unit": "Minstr",
+   "kind": "instr",
+   "zz": {
+    "median": 10.8328,
+    "p10": 10.8328,
+    "p90": 10.8328,
+    "p99": 10.8328,
+    "min": 10.8328,
+    "max": 10.8328,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.4984,
+    "p10": 0.4984,
+    "p90": 0.4984,
+    "p99": 0.4984,
+    "min": 0.4984,
+    "max": 0.4984,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 21.735,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.wall.has_session.p1",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 4.9359,
+    "p10": 4.7817,
+    "p90": 5.2088,
+    "p99": 5.5038,
+    "min": 4.6222,
+    "max": 5.5528,
+    "n": 20
+   },
+   "tmux": {
+    "median": 3.2782,
+    "p10": 3.1874,
+    "p90": 3.5734,
+    "p99": 3.5796,
+    "min": 3.1193,
+    "max": 3.5808,
+    "n": 20
+   },
+   "better": "lower",
+   "ratio": 1.506,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.cpu.has_session.p1",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "cpu",
+   "zz": {
+    "median": 1.013,
+    "p10": 1.013,
+    "p90": 1.013,
+    "p99": 1.013,
+    "min": 1.013,
+    "max": 1.013,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.0632,
+    "p10": 0.0632,
+    "p90": 0.0632,
+    "p99": 0.0632,
+    "min": 0.0632,
+    "max": 0.0632,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 16.028,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.instr.has_session.p1",
+   "group": "cli",
+   "unit": "Minstr",
+   "kind": "instr",
+   "zz": {
+    "median": 10.165,
+    "p10": 10.165,
+    "p90": 10.165,
+    "p99": 10.165,
+    "min": 10.165,
+    "max": 10.165,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.3694,
+    "p10": 0.3694,
+    "p90": 0.3694,
+    "p99": 0.3694,
+    "min": 0.3694,
+    "max": 0.3694,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 27.518,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.wall.send_keys.p1",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 4.9097,
+    "p10": 4.726,
+    "p90": 5.2362,
+    "p99": 5.4647,
+    "min": 4.5363,
+    "max": 5.5118,
+    "n": 20
+   },
+   "tmux": {
+    "median": 3.3602,
+    "p10": 3.1826,
+    "p90": 3.7218,
+    "p99": 4.0703,
+    "min": 3.1196,
+    "max": 4.082,
+    "n": 20
+   },
+   "better": "lower",
+   "ratio": 1.461,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.cpu.send_keys.p1",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "cpu",
+   "zz": {
+    "median": 1.0349,
+    "p10": 1.0349,
+    "p90": 1.0349,
+    "p99": 1.0349,
+    "min": 1.0349,
+    "max": 1.0349,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.0677,
+    "p10": 0.0677,
+    "p90": 0.0677,
+    "p99": 0.0677,
+    "min": 0.0677,
+    "max": 0.0677,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 15.287,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.instr.send_keys.p1",
+   "group": "cli",
+   "unit": "Minstr",
+   "kind": "instr",
+   "zz": {
+    "median": 10.2178,
+    "p10": 10.2178,
+    "p90": 10.2178,
+    "p99": 10.2178,
+    "min": 10.2178,
+    "max": 10.2178,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.4242,
+    "p10": 0.4242,
+    "p90": 0.4242,
+    "p99": 0.4242,
+    "min": 0.4242,
+    "max": 0.4242,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 24.087,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.wall.select_pane.p1",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 5.3454,
+    "p10": 4.8741,
+    "p90": 6.0516,
+    "p99": 6.8263,
+    "min": 4.7433,
+    "max": 6.9848,
+    "n": 20
+   },
+   "tmux": {
+    "median": 3.5713,
+    "p10": 3.342,
+    "p90": 4.0892,
+    "p99": 4.2846,
+    "min": 3.2463,
+    "max": 4.3204,
+    "n": 20
+   },
+   "better": "lower",
+   "ratio": 1.497,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.cpu.select_pane.p1",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "cpu",
+   "zz": {
+    "median": 1.1253,
+    "p10": 1.1253,
+    "p90": 1.1253,
+    "p99": 1.1253,
+    "min": 1.1253,
+    "max": 1.1253,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.066,
+    "p10": 0.066,
+    "p90": 0.066,
+    "p99": 0.066,
+    "min": 0.066,
+    "max": 0.066,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 17.05,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.instr.select_pane.p1",
+   "group": "cli",
+   "unit": "Minstr",
+   "kind": "instr",
+   "zz": {
+    "median": 10.1883,
+    "p10": 10.1883,
+    "p90": 10.1883,
+    "p99": 10.1883,
+    "min": 10.1883,
+    "max": 10.1883,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.3756,
+    "p10": 0.3756,
+    "p90": 0.3756,
+    "p99": 0.3756,
+    "min": 0.3756,
+    "max": 0.3756,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 27.125,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.wall.list_keys.p1",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 19.2059,
+    "p10": 18.972,
+    "p90": 20.1338,
+    "p99": 25.692,
+    "min": 18.9524,
+    "max": 26.777,
+    "n": 20
+   },
+   "tmux": {
+    "median": 6.3483,
+    "p10": 6.0033,
+    "p90": 6.7366,
+    "p99": 7.1998,
+    "min": 5.9151,
+    "max": 7.2728,
+    "n": 20
+   },
+   "better": "lower",
+   "ratio": 3.025,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.cpu.list_keys.p1",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "cpu",
+   "zz": {
+    "median": 15.1374,
+    "p10": 15.1374,
+    "p90": 15.1374,
+    "p99": 15.1374,
+    "min": 15.1374,
+    "max": 15.1374,
+    "n": 1
+   },
+   "tmux": {
+    "median": 2.7863,
+    "p10": 2.7863,
+    "p90": 2.7863,
+    "p99": 2.7863,
+    "min": 2.7863,
+    "max": 2.7863,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 5.433,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.instr.list_keys.p1",
+   "group": "cli",
+   "unit": "Minstr",
+   "kind": "instr",
+   "zz": {
+    "median": 249.1924,
+    "p10": 249.1924,
+    "p90": 249.1924,
+    "p99": 249.1924,
+    "min": 249.1924,
+    "max": 249.1924,
+    "n": 1
+   },
+   "tmux": {
+    "median": 53.375,
+    "p10": 53.375,
+    "p90": 53.375,
+    "p99": 53.375,
+    "min": 53.375,
+    "max": 53.375,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 4.669,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.wall.chain5.p1",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 5.7025,
+    "p10": 5.6068,
+    "p90": 6.2119,
+    "p99": 7.0148,
+    "min": 5.4973,
+    "max": 7.1195,
+    "n": 20
+   },
+   "tmux": {
+    "median": 3.4233,
+    "p10": 3.2828,
+    "p90": 3.6588,
+    "p99": 3.9637,
+    "min": 3.2152,
+    "max": 3.9757,
+    "n": 20
+   },
+   "better": "lower",
+   "ratio": 1.666,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.cpu.chain5.p1",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "cpu",
+   "zz": {
+    "median": 1.7698,
+    "p10": 1.7698,
+    "p90": 1.7698,
+    "p99": 1.7698,
+    "min": 1.7698,
+    "max": 1.7698,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.1097,
+    "p10": 0.1097,
+    "p90": 0.1097,
+    "p99": 0.1097,
+    "min": 0.1097,
+    "max": 0.1097,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 16.133,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.instr.chain5.p1",
+   "group": "cli",
+   "unit": "Minstr",
+   "kind": "instr",
+   "zz": {
+    "median": 20.3729,
+    "p10": 20.3729,
+    "p90": 20.3729,
+    "p99": 20.3729,
+    "min": 20.3729,
+    "max": 20.3729,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.9315,
+    "p10": 0.9315,
+    "p90": 0.9315,
+    "p99": 0.9315,
+    "min": 0.9315,
+    "max": 0.9315,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 21.871,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.wall.display.p20",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 6.0497,
+    "p10": 5.8526,
+    "p90": 6.3436,
+    "p99": 6.5653,
+    "min": 5.7443,
+    "max": 6.5797,
+    "n": 20
+   },
+   "tmux": {
+    "median": 3.4729,
+    "p10": 3.2449,
+    "p90": 3.7788,
+    "p99": 3.8995,
+    "min": 3.1226,
+    "max": 3.9155,
+    "n": 20
+   },
+   "better": "lower",
+   "ratio": 1.742,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.cpu.display.p20",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "cpu",
+   "zz": {
+    "median": 3.0694,
+    "p10": 3.0694,
+    "p90": 3.0694,
+    "p99": 3.0694,
+    "min": 3.0694,
+    "max": 3.0694,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.1124,
+    "p10": 0.1124,
+    "p90": 0.1124,
+    "p99": 0.1124,
+    "min": 0.1124,
+    "max": 0.1124,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 27.308,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.instr.display.p20",
+   "group": "cli",
+   "unit": "Minstr",
+   "kind": "instr",
+   "zz": {
+    "median": 29.1272,
+    "p10": 29.1272,
+    "p90": 29.1272,
+    "p99": 29.1272,
+    "min": 29.1272,
+    "max": 29.1272,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.8792,
+    "p10": 0.8792,
+    "p90": 0.8792,
+    "p99": 0.8792,
+    "min": 0.8792,
+    "max": 0.8792,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 33.129,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.wall.list_panes.p20",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 6.1166,
+    "p10": 5.9051,
+    "p90": 6.3931,
+    "p99": 6.5661,
+    "min": 5.8813,
+    "max": 6.5739,
+    "n": 20
+   },
+   "tmux": {
+    "median": 3.4341,
+    "p10": 3.2913,
+    "p90": 3.6183,
+    "p99": 3.7436,
+    "min": 3.2255,
+    "max": 3.7453,
+    "n": 20
+   },
+   "better": "lower",
+   "ratio": 1.781,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.cpu.list_panes.p20",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "cpu",
+   "zz": {
+    "median": 3.0802,
+    "p10": 3.0802,
+    "p90": 3.0802,
+    "p99": 3.0802,
+    "min": 3.0802,
+    "max": 3.0802,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.1273,
+    "p10": 0.1273,
+    "p90": 0.1273,
+    "p99": 0.1273,
+    "min": 0.1273,
+    "max": 0.1273,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 24.196,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.instr.list_panes.p20",
+   "group": "cli",
+   "unit": "Minstr",
+   "kind": "instr",
+   "zz": {
+    "median": 29.1952,
+    "p10": 29.1952,
+    "p90": 29.1952,
+    "p99": 29.1952,
+    "min": 29.1952,
+    "max": 29.1952,
+    "n": 1
+   },
+   "tmux": {
+    "median": 1.0121,
+    "p10": 1.0121,
+    "p90": 1.0121,
+    "p99": 1.0121,
+    "min": 1.0121,
+    "max": 1.0121,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 28.846,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.wall.show_options.p20",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 6.1746,
+    "p10": 5.9773,
+    "p90": 6.7684,
+    "p99": 7.4608,
+    "min": 5.934,
+    "max": 7.6137,
+    "n": 20
+   },
+   "tmux": {
+    "median": 3.4932,
+    "p10": 3.312,
+    "p90": 3.8344,
+    "p99": 3.9865,
+    "min": 3.299,
+    "max": 4.0135,
+    "n": 20
+   },
+   "better": "lower",
+   "ratio": 1.768,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.cpu.show_options.p20",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "cpu",
+   "zz": {
+    "median": 3.119,
+    "p10": 3.119,
+    "p90": 3.119,
+    "p99": 3.119,
+    "min": 3.119,
+    "max": 3.119,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.1231,
+    "p10": 0.1231,
+    "p90": 0.1231,
+    "p99": 0.1231,
+    "min": 0.1231,
+    "max": 0.1231,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 25.337,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.instr.show_options.p20",
+   "group": "cli",
+   "unit": "Minstr",
+   "kind": "instr",
+   "zz": {
+    "median": 29.1286,
+    "p10": 29.1286,
+    "p90": 29.1286,
+    "p99": 29.1286,
+    "min": 29.1286,
+    "max": 29.1286,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.8936,
+    "p10": 0.8936,
+    "p90": 0.8936,
+    "p99": 0.8936,
+    "min": 0.8936,
+    "max": 0.8936,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 32.597,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.wall.has_session.p20",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 6.4502,
+    "p10": 5.9936,
+    "p90": 7.1051,
+    "p99": 7.2619,
+    "min": 5.8596,
+    "max": 7.2689,
+    "n": 20
+   },
+   "tmux": {
+    "median": 3.7804,
+    "p10": 3.3898,
+    "p90": 3.9319,
+    "p99": 4.0002,
+    "min": 3.3555,
+    "max": 4.0077,
+    "n": 20
+   },
+   "better": "lower",
+   "ratio": 1.706,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.cpu.has_session.p20",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "cpu",
+   "zz": {
+    "median": 2.9838,
+    "p10": 2.9838,
+    "p90": 2.9838,
+    "p99": 2.9838,
+    "min": 2.9838,
+    "max": 2.9838,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.0997,
+    "p10": 0.0997,
+    "p90": 0.0997,
+    "p99": 0.0997,
+    "min": 0.0997,
+    "max": 0.0997,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 29.928,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.instr.has_session.p20",
+   "group": "cli",
+   "unit": "Minstr",
+   "kind": "instr",
+   "zz": {
+    "median": 26.0772,
+    "p10": 26.0772,
+    "p90": 26.0772,
+    "p99": 26.0772,
+    "min": 26.0772,
+    "max": 26.0772,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.6683,
+    "p10": 0.6683,
+    "p90": 0.6683,
+    "p99": 0.6683,
+    "min": 0.6683,
+    "max": 0.6683,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 39.02,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.wall.send_keys.p20",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 5.8725,
+    "p10": 5.755,
+    "p90": 6.1015,
+    "p99": 6.1432,
+    "min": 5.6729,
+    "max": 6.1432,
+    "n": 20
+   },
+   "tmux": {
+    "median": 3.3816,
+    "p10": 3.2086,
+    "p90": 3.5997,
+    "p99": 3.6617,
+    "min": 3.171,
+    "max": 3.6625,
+    "n": 20
+   },
+   "better": "lower",
+   "ratio": 1.737,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.cpu.send_keys.p20",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "cpu",
+   "zz": {
+    "median": 2.9098,
+    "p10": 2.9098,
+    "p90": 2.9098,
+    "p99": 2.9098,
+    "min": 2.9098,
+    "max": 2.9098,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.0911,
+    "p10": 0.0911,
+    "p90": 0.0911,
+    "p99": 0.0911,
+    "min": 0.0911,
+    "max": 0.0911,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 31.941,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.instr.send_keys.p20",
+   "group": "cli",
+   "unit": "Minstr",
+   "kind": "instr",
+   "zz": {
+    "median": 26.1251,
+    "p10": 26.1251,
+    "p90": 26.1251,
+    "p99": 26.1251,
+    "min": 26.1251,
+    "max": 26.1251,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.7255,
+    "p10": 0.7255,
+    "p90": 0.7255,
+    "p99": 0.7255,
+    "min": 0.7255,
+    "max": 0.7255,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 36.01,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.wall.select_pane.p20",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 5.8778,
+    "p10": 5.674,
+    "p90": 5.9725,
+    "p99": 6.0784,
+    "min": 5.6292,
+    "max": 6.0946,
+    "n": 20
+   },
+   "tmux": {
+    "median": 3.372,
+    "p10": 3.2433,
+    "p90": 3.4573,
+    "p99": 3.6054,
+    "min": 3.2138,
+    "max": 3.6194,
+    "n": 20
+   },
+   "better": "lower",
+   "ratio": 1.743,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.cpu.select_pane.p20",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "cpu",
+   "zz": {
+    "median": 2.8302,
+    "p10": 2.8302,
+    "p90": 2.8302,
+    "p99": 2.8302,
+    "min": 2.8302,
+    "max": 2.8302,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.0868,
+    "p10": 0.0868,
+    "p90": 0.0868,
+    "p99": 0.0868,
+    "min": 0.0868,
+    "max": 0.0868,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 32.606,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.instr.select_pane.p20",
+   "group": "cli",
+   "unit": "Minstr",
+   "kind": "instr",
+   "zz": {
+    "median": 26.0721,
+    "p10": 26.0721,
+    "p90": 26.0721,
+    "p99": 26.0721,
+    "min": 26.0721,
+    "max": 26.0721,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.6751,
+    "p10": 0.6751,
+    "p90": 0.6751,
+    "p99": 0.6751,
+    "min": 0.6751,
+    "max": 0.6751,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 38.62,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.wall.list_keys.p20",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 68.2738,
+    "p10": 67.3769,
+    "p90": 70.6957,
+    "p99": 72.2095,
+    "min": 67.291,
+    "max": 72.4809,
+    "n": 20
+   },
+   "tmux": {
+    "median": 6.4525,
+    "p10": 5.906,
+    "p90": 6.9874,
+    "p99": 7.1535,
+    "min": 5.8924,
+    "max": 7.1712,
+    "n": 20
+   },
+   "better": "lower",
+   "ratio": 10.581,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.cpu.list_keys.p20",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "cpu",
+   "zz": {
+    "median": 64.8971,
+    "p10": 64.8971,
+    "p90": 64.8971,
+    "p99": 64.8971,
+    "min": 64.8971,
+    "max": 64.8971,
+    "n": 1
+   },
+   "tmux": {
+    "median": 2.825,
+    "p10": 2.825,
+    "p90": 2.825,
+    "p99": 2.825,
+    "min": 2.825,
+    "max": 2.825,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 22.972,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.instr.list_keys.p20",
+   "group": "cli",
+   "unit": "Minstr",
+   "kind": "instr",
+   "zz": {
+    "median": 1125.8069,
+    "p10": 1125.8069,
+    "p90": 1125.8069,
+    "p99": 1125.8069,
+    "min": 1125.8069,
+    "max": 1125.8069,
+    "n": 1
+   },
+   "tmux": {
+    "median": 53.8437,
+    "p10": 53.8437,
+    "p90": 53.8437,
+    "p99": 53.8437,
+    "min": 53.8437,
+    "max": 53.8437,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 20.909,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.wall.chain5.p20",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 7.5516,
+    "p10": 7.1936,
+    "p90": 8.406,
+    "p99": 8.8167,
+    "min": 7.0575,
+    "max": 8.8669,
+    "n": 20
+   },
+   "tmux": {
+    "median": 3.7064,
+    "p10": 3.4395,
+    "p90": 4.1138,
+    "p99": 4.7315,
+    "min": 3.3002,
+    "max": 4.8311,
+    "n": 20
+   },
+   "better": "lower",
+   "ratio": 2.037,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.cpu.chain5.p20",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "cpu",
+   "zz": {
+    "median": 4.2721,
+    "p10": 4.2721,
+    "p90": 4.2721,
+    "p99": 4.2721,
+    "min": 4.2721,
+    "max": 4.2721,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.1524,
+    "p10": 0.1524,
+    "p90": 0.1524,
+    "p99": 0.1524,
+    "min": 0.1524,
+    "max": 0.1524,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 28.032,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.instr.chain5.p20",
+   "group": "cli",
+   "unit": "Minstr",
+   "kind": "instr",
+   "zz": {
+    "median": 43.8177,
+    "p10": 43.8177,
+    "p90": 43.8177,
+    "p99": 43.8177,
+    "min": 43.8177,
+    "max": 43.8177,
+    "n": 1
+   },
+   "tmux": {
+    "median": 1.295,
+    "p10": 1.295,
+    "p90": 1.295,
+    "p99": 1.295,
+    "min": 1.295,
+    "max": 1.295,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 33.836,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.wall.list_panes_a.s20",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 11.7607,
+    "p10": 11.4871,
+    "p90": 12.1006,
+    "p99": 12.7684,
+    "min": 11.2969,
+    "max": 12.7945,
+    "n": 20
+   },
+   "tmux": {
+    "median": 3.7938,
+    "p10": 3.5143,
+    "p90": 3.9351,
+    "p99": 4.2204,
+    "min": 3.4675,
+    "max": 4.2687,
+    "n": 20
+   },
+   "better": "lower",
+   "ratio": 3.1,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.cpu.list_panes_a.s20",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "cpu",
+   "zz": {
+    "median": 8.3991,
+    "p10": 8.3991,
+    "p90": 8.3991,
+    "p99": 8.3991,
+    "min": 8.3991,
+    "max": 8.3991,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.3368,
+    "p10": 0.3368,
+    "p90": 0.3368,
+    "p99": 0.3368,
+    "min": 0.3368,
+    "max": 0.3368,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 24.938,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.instr.list_panes_a.s20",
+   "group": "cli",
+   "unit": "Minstr",
+   "kind": "instr",
+   "zz": {
+    "median": 123.6144,
+    "p10": 123.6144,
+    "p90": 123.6144,
+    "p99": 123.6144,
+    "min": 123.6144,
+    "max": 123.6144,
+    "n": 1
+   },
+   "tmux": {
+    "median": 4.508,
+    "p10": 4.508,
+    "p90": 4.508,
+    "p99": 4.508,
+    "min": 4.508,
+    "max": 4.508,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 27.421,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.wall.list_windows_a.s20",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 11.6603,
+    "p10": 11.4607,
+    "p90": 12.3365,
+    "p99": 13.338,
+    "min": 11.318,
+    "max": 13.3559,
+    "n": 20
+   },
+   "tmux": {
+    "median": 3.6404,
+    "p10": 3.4128,
+    "p90": 3.9324,
+    "p99": 4.0776,
+    "min": 3.3742,
+    "max": 4.0862,
+    "n": 20
+   },
+   "better": "lower",
+   "ratio": 3.203,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.cpu.list_windows_a.s20",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "cpu",
+   "zz": {
+    "median": 8.35,
+    "p10": 8.35,
+    "p90": 8.35,
+    "p99": 8.35,
+    "min": 8.35,
+    "max": 8.35,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.2439,
+    "p10": 0.2439,
+    "p90": 0.2439,
+    "p99": 0.2439,
+    "min": 0.2439,
+    "max": 0.2439,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 34.235,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.instr.list_windows_a.s20",
+   "group": "cli",
+   "unit": "Minstr",
+   "kind": "instr",
+   "zz": {
+    "median": 123.0736,
+    "p10": 123.0736,
+    "p90": 123.0736,
+    "p99": 123.0736,
+    "min": 123.0736,
+    "max": 123.0736,
+    "n": 1
+   },
+   "tmux": {
+    "median": 2.9311,
+    "p10": 2.9311,
+    "p90": 2.9311,
+    "p99": 2.9311,
+    "min": 2.9311,
+    "max": 2.9311,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 41.989,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.wall.list_sessions.s20",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 11.5674,
+    "p10": 11.481,
+    "p90": 11.8126,
+    "p99": 11.8899,
+    "min": 11.456,
+    "max": 11.9031,
+    "n": 20
+   },
+   "tmux": {
+    "median": 5.09,
+    "p10": 4.9274,
+    "p90": 5.2034,
+    "p99": 5.2364,
+    "min": 4.8833,
+    "max": 5.2418,
+    "n": 20
+   },
+   "better": "lower",
+   "ratio": 2.273,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.cpu.list_sessions.s20",
+   "group": "cli",
+   "unit": "ms",
+   "kind": "cpu",
+   "zz": {
+    "median": 7.9928,
+    "p10": 7.9928,
+    "p90": 7.9928,
+    "p99": 7.9928,
+    "min": 7.9928,
+    "max": 7.9928,
+    "n": 1
+   },
+   "tmux": {
+    "median": 1.7556,
+    "p10": 1.7556,
+    "p90": 1.7556,
+    "p99": 1.7556,
+    "min": 1.7556,
+    "max": 1.7556,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 4.553,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cli.instr.list_sessions.s20",
+   "group": "cli",
+   "unit": "Minstr",
+   "kind": "instr",
+   "zz": {
+    "median": 123.2195,
+    "p10": 123.2195,
+    "p90": 123.2195,
+    "p99": 123.2195,
+    "min": 123.2195,
+    "max": 123.2195,
+    "n": 1
+   },
+   "tmux": {
+    "median": 30.6057,
+    "p10": 30.6057,
+    "p90": 30.6057,
+    "p99": 30.6057,
+    "min": 30.6057,
+    "max": 30.6057,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 4.026,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "spawn.wall.split_shell",
+   "group": "spawn",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 10.2119,
+    "p10": 8.9532,
+    "p90": 10.5744,
+    "p99": 10.6047,
+    "min": 8.5354,
+    "max": 10.6081,
+    "n": 4
+   },
+   "tmux": {
+    "median": 5.208,
+    "p10": 5.0002,
+    "p90": 5.411,
+    "p99": 5.4173,
+    "min": 4.9912,
+    "max": 5.418,
+    "n": 4
+   },
+   "better": "lower",
+   "ratio": 1.961,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "spawn.cpu.split_shell",
+   "group": "spawn",
+   "unit": "ms",
+   "kind": "cpu",
+   "zz": {
+    "median": 4.6711,
+    "p10": 4.1787,
+    "p90": 4.9535,
+    "p99": 4.9577,
+    "min": 4.0841,
+    "max": 4.9582,
+    "n": 4
+   },
+   "tmux": {
+    "median": 0.9363,
+    "p10": 0.8434,
+    "p90": 1.0038,
+    "p99": 1.0174,
+    "min": 0.8174,
+    "max": 1.0189,
+    "n": 4
+   },
+   "better": "lower",
+   "ratio": 4.989,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "spawn.instr.split_shell",
+   "group": "spawn",
+   "unit": "Minstr",
+   "kind": "instr",
+   "zz": {
+    "median": 36.6117,
+    "p10": 36.1603,
+    "p90": 38.6584,
+    "p99": 39.4469,
+    "min": 35.968,
+    "max": 39.5345,
+    "n": 4
+   },
+   "tmux": {
+    "median": 5.4001,
+    "p10": 5.243,
+    "p90": 5.5577,
+    "p99": 5.5765,
+    "min": 5.2223,
+    "max": 5.5786,
+    "n": 4
+   },
+   "better": "lower",
+   "ratio": 6.78,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "spawn.wall.split_empty_P",
+   "group": "spawn",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 2007.9852,
+    "p10": 2007.7489,
+    "p90": 2008.1508,
+    "p99": 2008.1608,
+    "min": 2007.7076,
+    "max": 2008.1619,
+    "n": 4
+   },
+   "tmux": {
+    "median": 4.2909,
+    "p10": 4.116,
+    "p90": 4.4289,
+    "p99": 4.4497,
+    "min": 4.077,
+    "max": 4.452,
+    "n": 4
+   },
+   "better": "lower",
+   "ratio": 467.964,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "spawn.cpu.split_empty_P",
+   "group": "spawn",
+   "unit": "ms",
+   "kind": "cpu",
+   "zz": {
+    "median": 7.7327,
+    "p10": 7.6328,
+    "p90": 7.753,
+    "p99": 7.7582,
+    "min": 7.5929,
+    "max": 7.7588,
+    "n": 4
+   },
+   "tmux": {
+    "median": 0.2161,
+    "p10": 0.2085,
+    "p90": 0.2314,
+    "p99": 0.2364,
+    "min": 0.2062,
+    "max": 0.2369,
+    "n": 4
+   },
+   "better": "lower",
+   "ratio": 35.783,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "spawn.instr.split_empty_P",
+   "group": "spawn",
+   "unit": "Minstr",
+   "kind": "instr",
+   "zz": {
+    "median": 40.3701,
+    "p10": 40.2558,
+    "p90": 40.4649,
+    "p99": 40.4983,
+    "min": 40.2103,
+    "max": 40.502,
+    "n": 4
+   },
+   "tmux": {
+    "median": 1.1729,
+    "p10": 1.1333,
+    "p90": 1.1812,
+    "p99": 1.1815,
+    "min": 1.1195,
+    "max": 1.1815,
+    "n": 4
+   },
+   "better": "lower",
+   "ratio": 34.419,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "spawn.wall.new_window",
+   "group": "spawn",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 9.157,
+    "p10": 8.8476,
+    "p90": 9.9223,
+    "p99": 10.1166,
+    "min": 8.8271,
+    "max": 10.1382,
+    "n": 4
+   },
+   "tmux": {
+    "median": 4.7075,
+    "p10": 4.2718,
+    "p90": 5.2985,
+    "p99": 5.4696,
+    "min": 4.1481,
+    "max": 5.4887,
+    "n": 4
+   },
+   "better": "lower",
+   "ratio": 1.945,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "spawn.cpu.new_window",
+   "group": "spawn",
+   "unit": "ms",
+   "kind": "cpu",
+   "zz": {
+    "median": 4.5476,
+    "p10": 4.3448,
+    "p90": 4.8056,
+    "p99": 4.8805,
+    "min": 4.2852,
+    "max": 4.8889,
+    "n": 4
+   },
+   "tmux": {
+    "median": 0.7502,
+    "p10": 0.704,
+    "p90": 0.8662,
+    "p99": 0.8967,
+    "min": 0.7,
+    "max": 0.9,
+    "n": 4
+   },
+   "better": "lower",
+   "ratio": 6.062,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "spawn.instr.new_window",
+   "group": "spawn",
+   "unit": "Minstr",
+   "kind": "instr",
+   "zz": {
+    "median": 41.7803,
+    "p10": 41.5754,
+    "p90": 42.5518,
+    "p99": 42.8372,
+    "min": 41.5011,
+    "max": 42.8689,
+    "n": 4
+   },
+   "tmux": {
+    "median": 5.1462,
+    "p10": 5.0697,
+    "p90": 5.5889,
+    "p99": 5.7315,
+    "min": 5.0683,
+    "max": 5.7473,
+    "n": 4
+   },
+   "better": "lower",
+   "ratio": 8.119,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "spawn.wall.kill_pane",
+   "group": "spawn",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 5.4508,
+    "p10": 5.3252,
+    "p90": 6.2325,
+    "p99": 6.5063,
+    "min": 5.2213,
+    "max": 6.5367,
+    "n": 8
+   },
+   "tmux": {
+    "median": 3.4581,
+    "p10": 3.3749,
+    "p90": 3.632,
+    "p99": 3.6859,
+    "min": 3.3452,
+    "max": 3.6919,
+    "n": 8
+   },
+   "better": "lower",
+   "ratio": 1.576,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "spawn.cpu.kill_pane",
+   "group": "spawn",
+   "unit": "ms",
+   "kind": "cpu",
+   "zz": {
+    "median": 1.6234,
+    "p10": 1.4286,
+    "p90": 1.8461,
+    "p99": 2.0836,
+    "min": 1.3774,
+    "max": 2.11,
+    "n": 8
+   },
+   "tmux": {
+    "median": 0.1144,
+    "p10": 0.0765,
+    "p90": 0.1386,
+    "p99": 0.1435,
+    "min": 0.0755,
+    "max": 0.144,
+    "n": 8
+   },
+   "better": "lower",
+   "ratio": 14.191,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "spawn.instr.kill_pane",
+   "group": "spawn",
+   "unit": "Minstr",
+   "kind": "instr",
+   "zz": {
+    "median": 14.3623,
+    "p10": 14.0869,
+    "p90": 14.6384,
+    "p99": 14.6441,
+    "min": 14.0776,
+    "max": 14.6448,
+    "n": 8
+   },
+   "tmux": {
+    "median": 0.6058,
+    "p10": 0.5109,
+    "p90": 0.6632,
+    "p99": 0.675,
+    "min": 0.5095,
+    "max": 0.6763,
+    "n": 8
+   },
+   "better": "lower",
+   "ratio": 23.708,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cold.wall.new_session",
+   "group": "cold",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 42.0985,
+    "p10": 37.489,
+    "p90": 43.4129,
+    "p99": 43.4672,
+    "min": 36.0163,
+    "max": 43.4733,
+    "n": 4
+   },
+   "tmux": {
+    "median": 11.7834,
+    "p10": 11.4364,
+    "p90": 11.9742,
+    "p99": 12.025,
+    "min": 11.3131,
+    "max": 12.0306,
+    "n": 4
+   },
+   "better": "lower",
+   "ratio": 3.573,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cold.wall.new_session_noterm",
+   "group": "cold",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 40.9575,
+    "p10": 36.9155,
+    "p90": 41.672,
+    "p99": 41.8272,
+    "min": 35.3169,
+    "max": 41.8445,
+    "n": 4
+   },
+   "tmux": {
+    "median": 11.7187,
+    "p10": 11.5782,
+    "p90": 12.6126,
+    "p99": 12.949,
+    "min": 11.5275,
+    "max": 12.9864,
+    "n": 4
+   },
+   "better": "lower",
+   "ratio": 3.495,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "cold.infocmp_forks",
+   "group": "cold",
+   "unit": "count",
+   "kind": "count",
+   "zz": {
+    "median": 1,
+    "p10": 1,
+    "p90": 1,
+    "p99": 1,
+    "min": 1,
+    "max": 1,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0,
+    "p10": 0,
+    "p90": 0,
+    "p99": 0,
+    "min": 0,
+    "max": 0,
+    "n": 1
+   },
+   "notes": [
+    "infocmp runs during a cold new-session -d with TERM set; each one is a fork+exec on the first client's path"
+   ],
+   "better": "lower",
+   "report_only": true,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "config.wall.source_1000",
+   "group": "config",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 232.3767,
+    "p10": 230.6471,
+    "p90": 238.1847,
+    "p99": 239.4915,
+    "min": 230.2147,
+    "max": 239.6367,
+    "n": 3
+   },
+   "tmux": {
+    "median": 13.3676,
+    "p10": 13.1889,
+    "p90": 13.5503,
+    "p99": 13.5914,
+    "min": 13.1443,
+    "max": 13.596,
+    "n": 3
+   },
+   "better": "lower",
+   "ratio": 17.384,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "config.cpu.source_1000",
+   "group": "config",
+   "unit": "ms",
+   "kind": "cpu",
+   "zz": {
+    "median": 227.6094,
+    "p10": 226.4697,
+    "p90": 233.1561,
+    "p99": 234.4041,
+    "min": 226.1848,
+    "max": 234.5428,
+    "n": 3
+   },
+   "tmux": {
+    "median": 9.1993,
+    "p10": 9.0261,
+    "p90": 9.2009,
+    "p99": 9.2013,
+    "min": 8.9828,
+    "max": 9.2013,
+    "n": 3
+   },
+   "better": "lower",
+   "ratio": 24.742,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "config.instr.source_1000",
+   "group": "config",
+   "unit": "Minstr",
+   "kind": "instr",
+   "zz": {
+    "median": 3640.3985,
+    "p10": 3635.1283,
+    "p90": 3650.2428,
+    "p99": 3652.4578,
+    "min": 3633.8108,
+    "max": 3652.7039,
+    "n": 3
+   },
+   "tmux": {
+    "median": 198.4573,
+    "p10": 198.4152,
+    "p90": 198.6444,
+    "p99": 198.6865,
+    "min": 198.4046,
+    "max": 198.6912,
+    "n": 3
+   },
+   "better": "lower",
+   "ratio": 18.343,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "chatty.cpu_pct.flip",
+   "group": "chatty",
+   "unit": "%",
+   "kind": "cpu",
+   "zz": {
+    "median": 24.664,
+    "p10": 24.664,
+    "p90": 24.664,
+    "p99": 24.664,
+    "min": 24.664,
+    "max": 24.664,
+    "n": 1
+   },
+   "tmux": {
+    "median": 1.7922,
+    "p10": 1.7922,
+    "p90": 1.7922,
+    "p99": 1.7922,
+    "min": 1.7922,
+    "max": 1.7922,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 13.762,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "chatty.instr_per_s.flip",
+   "group": "chatty",
+   "unit": "Minstr/s",
+   "kind": "instr",
+   "zz": {
+    "median": 3206.3373,
+    "p10": 3206.3373,
+    "p90": 3206.3373,
+    "p99": 3206.3373,
+    "min": 3206.3373,
+    "max": 3206.3373,
+    "n": 1
+   },
+   "tmux": {
+    "median": 76.7638,
+    "p10": 76.7638,
+    "p90": 76.7638,
+    "p99": 76.7638,
+    "min": 76.7638,
+    "max": 76.7638,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 41.769,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "chatty.cpu_pct.hidden",
+   "group": "chatty",
+   "unit": "%",
+   "kind": "cpu",
+   "zz": {
+    "median": 54.7304,
+    "p10": 54.7304,
+    "p90": 54.7304,
+    "p99": 54.7304,
+    "min": 54.7304,
+    "max": 54.7304,
+    "n": 1
+   },
+   "tmux": {
+    "median": 2.0848,
+    "p10": 2.0848,
+    "p90": 2.0848,
+    "p99": 2.0848,
+    "min": 2.0848,
+    "max": 2.0848,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 26.252,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "chatty.instr_per_s.hidden",
+   "group": "chatty",
+   "unit": "Minstr/s",
+   "kind": "instr",
+   "zz": {
+    "median": 7294.9113,
+    "p10": 7294.9113,
+    "p90": 7294.9113,
+    "p99": 7294.9113,
+    "min": 7294.9113,
+    "max": 7294.9113,
+    "n": 1
+   },
+   "tmux": {
+    "median": 99.6509,
+    "p10": 99.6509,
+    "p90": 99.6509,
+    "p99": 99.6509,
+    "min": 99.6509,
+    "max": 99.6509,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 73.205,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "chatty.tty_kibps.hidden",
+   "group": "chatty",
+   "unit": "KiB/s",
+   "kind": "bytes",
+   "zz": {
+    "median": 235.114,
+    "p10": 235.114,
+    "p90": 235.114,
+    "p99": 235.114,
+    "min": 235.114,
+    "max": 235.114,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.5344,
+    "p10": 0.5344,
+    "p90": 0.5344,
+    "p99": 0.5344,
+    "min": 0.5344,
+    "max": 0.5344,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 439.959,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "chatty.client_cpu_pct.hidden",
+   "group": "chatty",
+   "unit": "%",
+   "kind": "cpu",
+   "zz": {
+    "median": 1.9852,
+    "p10": 1.9852,
+    "p90": 1.9852,
+    "p99": 1.9852,
+    "min": 1.9852,
+    "max": 1.9852,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.0,
+    "p10": 0.0,
+    "p90": 0.0,
+    "p99": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 1
+   },
+   "better": "lower",
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "idle.cpu_pct.p20",
+   "group": "idle",
+   "unit": "%",
+   "kind": "cpu",
+   "zz": {
+    "median": 0.0037,
+    "p10": 0.0037,
+    "p90": 0.0037,
+    "p99": 0.0037,
+    "min": 0.0037,
+    "max": 0.0037,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.0,
+    "p10": 0.0,
+    "p90": 0.0,
+    "p99": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 1
+   },
+   "better": "lower",
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "idle.instr_per_s.p20",
+   "group": "idle",
+   "unit": "Minstr/s",
+   "kind": "instr",
+   "zz": {
+    "median": 0.0334,
+    "p10": 0.0334,
+    "p90": 0.0334,
+    "p99": 0.0334,
+    "min": 0.0334,
+    "max": 0.0334,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.0,
+    "p10": 0.0,
+    "p90": 0.0,
+    "p99": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 1
+   },
+   "better": "lower",
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "idle.wakeups_per_s.p20",
+   "group": "idle",
+   "unit": "1/s",
+   "kind": "count",
+   "zz": {
+    "median": 1.1991,
+    "p10": 1.1991,
+    "p90": 1.1991,
+    "p99": 1.1991,
+    "min": 1.1991,
+    "max": 1.1991,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.0,
+    "p10": 0.0,
+    "p90": 0.0,
+    "p99": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 1
+   },
+   "better": "lower",
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "mem.footprint.p1",
+   "group": "mem",
+   "unit": "MiB",
+   "kind": "mem",
+   "zz": {
+    "median": 7.9849,
+    "p10": 7.9849,
+    "p90": 7.9849,
+    "p99": 7.9849,
+    "min": 7.9849,
+    "max": 7.9849,
+    "n": 1
+   },
+   "tmux": {
+    "median": 2.7034,
+    "p10": 2.7034,
+    "p90": 2.7034,
+    "p99": 2.7034,
+    "min": 2.7034,
+    "max": 2.7034,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 2.954,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "mem.rss.p1",
+   "group": "mem",
+   "unit": "MiB",
+   "kind": "rss",
+   "zz": {
+    "median": 18.9531,
+    "p10": 18.9531,
+    "p90": 18.9531,
+    "p99": 18.9531,
+    "min": 18.9531,
+    "max": 18.9531,
+    "n": 1
+   },
+   "tmux": {
+    "median": 4.1094,
+    "p10": 4.1094,
+    "p90": 4.1094,
+    "p99": 4.1094,
+    "min": 4.1094,
+    "max": 4.1094,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 4.612,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "mem.threads.p1",
+   "group": "mem",
+   "unit": "count",
+   "kind": "threads",
+   "zz": {
+    "median": 13,
+    "p10": 13,
+    "p90": 13,
+    "p99": 13,
+    "min": 13,
+    "max": 13,
+    "n": 1
+   },
+   "tmux": {
+    "median": 1,
+    "p10": 1,
+    "p90": 1,
+    "p99": 1,
+    "min": 1,
+    "max": 1,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 13.0,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "mem.footprint.p20",
+   "group": "mem",
+   "unit": "MiB",
+   "kind": "mem",
+   "zz": {
+    "median": 53.8914,
+    "p10": 53.8914,
+    "p90": 53.8914,
+    "p99": 53.8914,
+    "min": 53.8914,
+    "max": 53.8914,
+    "n": 1
+   },
+   "tmux": {
+    "median": 2.8909,
+    "p10": 2.8909,
+    "p90": 2.8909,
+    "p99": 2.8909,
+    "min": 2.8909,
+    "max": 2.8909,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 18.642,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "mem.rss.p20",
+   "group": "mem",
+   "unit": "MiB",
+   "kind": "rss",
+   "zz": {
+    "median": 65.4062,
+    "p10": 65.4062,
+    "p90": 65.4062,
+    "p99": 65.4062,
+    "min": 65.4062,
+    "max": 65.4062,
+    "n": 1
+   },
+   "tmux": {
+    "median": 4.2812,
+    "p10": 4.2812,
+    "p90": 4.2812,
+    "p99": 4.2812,
+    "min": 4.2812,
+    "max": 4.2812,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 15.278,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "mem.threads.p20",
+   "group": "mem",
+   "unit": "count",
+   "kind": "threads",
+   "zz": {
+    "median": 89,
+    "p10": 89,
+    "p90": 89,
+    "p99": 89,
+    "min": 89,
+    "max": 89,
+    "n": 1
+   },
+   "tmux": {
+    "median": 1,
+    "p10": 1,
+    "p90": 1,
+    "p99": 1,
+    "min": 1,
+    "max": 1,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 89.0,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "attach.ttfc.p1",
+   "group": "attach",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 19.6869,
+    "p10": 18.3693,
+    "p90": 20.6001,
+    "p99": 20.8789,
+    "min": 17.8862,
+    "max": 20.9099,
+    "n": 4
+   },
+   "tmux": {
+    "median": 8.3866,
+    "p10": 8.0122,
+    "p90": 8.5703,
+    "p99": 8.5796,
+    "min": 7.9201,
+    "max": 8.5806,
+    "n": 4
+   },
+   "better": "lower",
+   "ratio": 2.347,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "attach.tty_total.p1",
+   "group": "attach",
+   "unit": "B",
+   "kind": "bytes",
+   "zz": {
+    "median": 162014.0,
+    "p10": 162014.0,
+    "p90": 163943.2,
+    "p99": 164687.32,
+    "min": 162014,
+    "max": 164770,
+    "n": 4
+   },
+   "tmux": {
+    "median": 973.5,
+    "p10": 972.0,
+    "p90": 975.0,
+    "p99": 975.0,
+    "min": 972,
+    "max": 975,
+    "n": 4
+   },
+   "notes": [
+    "tty bytes from attach until 200 ms of quiet"
+   ],
+   "better": "lower",
+   "ratio": 166.424,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "attach.tty_bytes.p1",
+   "group": "attach",
+   "unit": "B",
+   "kind": "bytes_info",
+   "zz": {
+    "median": 157249.0,
+    "p10": 157249.0,
+    "p90": 157249.0,
+    "p99": 157249.0,
+    "min": 157249,
+    "max": 157249,
+    "n": 4
+   },
+   "tmux": {
+    "median": 220.0,
+    "p10": 220.0,
+    "p90": 220.0,
+    "p99": 220.0,
+    "min": 220,
+    "max": 220,
+    "n": 4
+   },
+   "notes": [
+    "tty bytes up to the last content marker; depends on draw order"
+   ],
+   "better": "lower",
+   "ratio": 714.768,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "attach.cpu.p1",
+   "group": "attach",
+   "unit": "ms",
+   "kind": "cpu",
+   "zz": {
+    "median": 12.3373,
+    "p10": 11.9608,
+    "p90": 12.5233,
+    "p99": 12.5815,
+    "min": 11.8145,
+    "max": 12.5879,
+    "n": 4
+   },
+   "tmux": {
+    "median": 1.5885,
+    "p10": 1.5338,
+    "p90": 1.6626,
+    "p99": 1.6822,
+    "min": 1.5204,
+    "max": 1.6844,
+    "n": 4
+   },
+   "better": "lower",
+   "ratio": 7.767,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "attach.instr.p1",
+   "group": "attach",
+   "unit": "Minstr",
+   "kind": "instr",
+   "zz": {
+    "median": 122.8546,
+    "p10": 111.1817,
+    "p90": 131.304,
+    "p99": 134.4601,
+    "min": 106.2935,
+    "max": 134.8107,
+    "n": 4
+   },
+   "tmux": {
+    "median": 17.4843,
+    "p10": 17.4077,
+    "p90": 17.8131,
+    "p99": 17.9227,
+    "min": 17.3941,
+    "max": 17.9349,
+    "n": 4
+   },
+   "better": "lower",
+   "ratio": 7.027,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "attach.ttfc.p4",
+   "group": "attach",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 28.812,
+    "p10": 27.6819,
+    "p90": 29.8353,
+    "p99": 30.0433,
+    "min": 27.405,
+    "max": 30.0664,
+    "n": 4
+   },
+   "tmux": {
+    "median": 9.1738,
+    "p10": 8.4133,
+    "p90": 9.2588,
+    "p99": 9.2862,
+    "min": 8.0933,
+    "max": 9.2892,
+    "n": 4
+   },
+   "better": "lower",
+   "ratio": 3.141,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "attach.tty_total.p4",
+   "group": "attach",
+   "unit": "B",
+   "kind": "bytes",
+   "zz": {
+    "median": 337433.0,
+    "p10": 335908.4,
+    "p90": 338562.1,
+    "p99": 338997.61,
+    "min": 335255,
+    "max": 339046,
+    "n": 4
+   },
+   "tmux": {
+    "median": 3653.0,
+    "p10": 3653.0,
+    "p90": 3653.0,
+    "p99": 3653.0,
+    "min": 3653,
+    "max": 3653,
+    "n": 4
+   },
+   "notes": [
+    "tty bytes from attach until 200 ms of quiet"
+   ],
+   "better": "lower",
+   "ratio": 92.371,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "attach.tty_bytes.p4",
+   "group": "attach",
+   "unit": "B",
+   "kind": "bytes_info",
+   "zz": {
+    "median": 297020.0,
+    "p10": 297020.0,
+    "p90": 297020.0,
+    "p99": 297020.0,
+    "min": 297020,
+    "max": 297020,
+    "n": 4
+   },
+   "tmux": {
+    "median": 1696.0,
+    "p10": 1696.0,
+    "p90": 1696.0,
+    "p99": 1696.0,
+    "min": 1696,
+    "max": 1696,
+    "n": 4
+   },
+   "notes": [
+    "tty bytes up to the last content marker; depends on draw order"
+   ],
+   "better": "lower",
+   "ratio": 175.13,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "attach.cpu.p4",
+   "group": "attach",
+   "unit": "ms",
+   "kind": "cpu",
+   "zz": {
+    "median": 13.2765,
+    "p10": 12.5672,
+    "p90": 14.4865,
+    "p99": 14.8261,
+    "min": 12.4046,
+    "max": 14.8638,
+    "n": 4
+   },
+   "tmux": {
+    "median": 2.0025,
+    "p10": 1.8119,
+    "p90": 2.1317,
+    "p99": 2.1622,
+    "min": 1.7517,
+    "max": 2.1656,
+    "n": 4
+   },
+   "better": "lower",
+   "ratio": 6.63,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "attach.instr.p4",
+   "group": "attach",
+   "unit": "Minstr",
+   "kind": "instr",
+   "zz": {
+    "median": 112.2735,
+    "p10": 112.2021,
+    "p90": 120.9836,
+    "p99": 124.3165,
+    "min": 112.2013,
+    "max": 124.6868,
+    "n": 4
+   },
+   "tmux": {
+    "median": 21.8424,
+    "p10": 21.7889,
+    "p90": 22.2305,
+    "p99": 22.3657,
+    "min": 21.782,
+    "max": 22.3807,
+    "n": 4
+   },
+   "better": "lower",
+   "ratio": 5.14,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "attach.conns.p1",
+   "group": "attach",
+   "unit": "count",
+   "kind": "count",
+   "zz": {
+    "median": 4,
+    "p10": 4,
+    "p90": 4,
+    "p99": 4,
+    "min": 4,
+    "max": 4,
+    "n": 1
+   },
+   "tmux": null,
+   "notes": [
+    "zz only: daemon connections opened by one attach"
+   ],
+   "better": "lower",
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "attach.wire_s2c.p1",
+   "group": "attach",
+   "unit": "B",
+   "kind": "bytes",
+   "zz": {
+    "median": 257150,
+    "p10": 257150,
+    "p90": 257150,
+    "p99": 257150,
+    "min": 257150,
+    "max": 257150,
+    "n": 1
+   },
+   "tmux": null,
+   "notes": [
+    "zz only: daemon to client socket bytes from spawn to 1 s after content"
+   ],
+   "better": "lower",
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "attach.wire_frames.p1",
+   "group": "attach",
+   "unit": "count",
+   "kind": "count",
+   "zz": {
+    "median": 23,
+    "p10": 23,
+    "p90": 23,
+    "p99": 23,
+    "min": 23,
+    "max": 23,
+    "n": 1
+   },
+   "tmux": null,
+   "notes": [
+    "zz only"
+   ],
+   "better": "lower",
+   "report_only": true,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "attach.wire_c2s.p1",
+   "group": "attach",
+   "unit": "B",
+   "kind": "bytes",
+   "zz": {
+    "median": 8812,
+    "p10": 8812,
+    "p90": 8812,
+    "p99": 8812,
+    "min": 8812,
+    "max": 8812,
+    "n": 1
+   },
+   "tmux": null,
+   "notes": [
+    "zz only"
+   ],
+   "better": "lower",
+   "report_only": true,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "attach.conns.p4",
+   "group": "attach",
+   "unit": "count",
+   "kind": "count",
+   "zz": {
+    "median": 4,
+    "p10": 4,
+    "p90": 4,
+    "p99": 4,
+    "min": 4,
+    "max": 4,
+    "n": 1
+   },
+   "tmux": null,
+   "notes": [
+    "zz only: daemon connections opened by one attach"
+   ],
+   "better": "lower",
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "attach.wire_s2c.p4",
+   "group": "attach",
+   "unit": "B",
+   "kind": "bytes",
+   "zz": {
+    "median": 257421,
+    "p10": 257421,
+    "p90": 257421,
+    "p99": 257421,
+    "min": 257421,
+    "max": 257421,
+    "n": 1
+   },
+   "tmux": null,
+   "notes": [
+    "zz only: daemon to client socket bytes from spawn to 1 s after content"
+   ],
+   "better": "lower",
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "attach.wire_frames.p4",
+   "group": "attach",
+   "unit": "count",
+   "kind": "count",
+   "zz": {
+    "median": 29,
+    "p10": 29,
+    "p90": 29,
+    "p99": 29,
+    "min": 29,
+    "max": 29,
+    "n": 1
+   },
+   "tmux": null,
+   "notes": [
+    "zz only"
+   ],
+   "better": "lower",
+   "report_only": true,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "attach.wire_c2s.p4",
+   "group": "attach",
+   "unit": "B",
+   "kind": "bytes",
+   "zz": {
+    "median": 8852,
+    "p10": 8852,
+    "p90": 8852,
+    "p99": 8852,
+    "min": 8852,
+    "max": 8852,
+    "n": 1
+   },
+   "tmux": null,
+   "notes": [
+    "zz only"
+   ],
+   "better": "lower",
+   "report_only": true,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "echo.p50.idle",
+   "group": "echo",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 0.4365,
+    "p10": 0.2965,
+    "p90": 0.5162,
+    "p99": 0.649,
+    "min": 0.2011,
+    "max": 0.7739,
+    "n": 100
+   },
+   "tmux": {
+    "median": 0.1043,
+    "p10": 0.0851,
+    "p90": 0.1439,
+    "p99": 0.2013,
+    "min": 0.0591,
+    "max": 0.2028,
+    "n": 100
+   },
+   "notes": [
+    "the pane echoes key N as U+00A7 and N, matched in the tty text with escape sequences removed"
+   ],
+   "better": "lower",
+   "ratio": 4.185,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "echo.p99.idle",
+   "group": "echo",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 0.649,
+    "p10": 0.649,
+    "p90": 0.649,
+    "p99": 0.649,
+    "min": 0.649,
+    "max": 0.649,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.2013,
+    "p10": 0.2013,
+    "p90": 0.2013,
+    "p99": 0.2013,
+    "min": 0.2013,
+    "max": 0.2013,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 3.224,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "echo.p50.busy30",
+   "group": "echo",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 7.1041,
+    "p10": 0.5352,
+    "p90": 17.7204,
+    "p99": 18.6055,
+    "min": 0.2646,
+    "max": 18.7092,
+    "n": 100
+   },
+   "tmux": {
+    "median": 0.0881,
+    "p10": 0.0615,
+    "p90": 0.1211,
+    "p99": 0.2259,
+    "min": 0.0533,
+    "max": 0.3353,
+    "n": 100
+   },
+   "notes": [
+    "the pane echoes key N as U+00A7 and N, matched in the tty text with escape sequences removed"
+   ],
+   "better": "lower",
+   "ratio": 80.637,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "echo.p99.busy30",
+   "group": "echo",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 18.6055,
+    "p10": 18.6055,
+    "p90": 18.6055,
+    "p99": 18.6055,
+    "min": 18.6055,
+    "max": 18.6055,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.2259,
+    "p10": 0.2259,
+    "p90": 0.2259,
+    "p99": 0.2259,
+    "min": 0.2259,
+    "max": 0.2259,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 82.362,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "echo.wire_bytes.idle",
+   "group": "echo",
+   "unit": "B",
+   "kind": "bytes",
+   "zz": {
+    "median": 1133.0,
+    "p10": 1133.0,
+    "p90": 1133.0,
+    "p99": 1133.0,
+    "min": 1133,
+    "max": 1133,
+    "n": 20
+   },
+   "tmux": null,
+   "notes": [
+    "zz only: daemon to client bytes per keystroke, echo plus 60 ms"
+   ],
+   "better": "lower",
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "echo.wire_bytes.busy30",
+   "group": "echo",
+   "unit": "B",
+   "kind": "bytes",
+   "zz": {
+    "median": 3399.0,
+    "p10": 3399.0,
+    "p90": 3399.0,
+    "p99": 3399.0,
+    "min": 3399,
+    "max": 3399,
+    "n": 20
+   },
+   "tmux": null,
+   "notes": [
+    "zz only: daemon to client bytes per keystroke, echo plus 60 ms; includes the 30 Hz ticker output in the same window"
+   ],
+   "better": "lower",
+   "report_only": true,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "throughput.detached.ascii",
+   "group": "throughput",
+   "unit": "MB/s",
+   "kind": "throughput",
+   "zz": {
+    "median": 233.864,
+    "p10": 233.864,
+    "p90": 233.864,
+    "p99": 233.864,
+    "min": 233.864,
+    "max": 233.864,
+    "n": 1
+   },
+   "tmux": {
+    "median": 52.095,
+    "p10": 52.095,
+    "p90": 52.095,
+    "p99": 52.095,
+    "min": 52.095,
+    "max": 52.095,
+    "n": 1
+   },
+   "better": "higher",
+   "notes": [
+    "grid zz 180x50",
+    "grid tmux 180x50"
+   ],
+   "ratio": 4.489,
+   "threshold": {
+    "ratio": 4.0,
+    "vs_w0": 0.85
+   },
+   "checks": [
+    {
+     "kind": "ratio",
+     "bound": 208.38,
+     "ok": true
+    }
+   ],
+   "verdict": "pass"
+  },
+  {
+   "id": "control.latency",
+   "group": "control",
+   "unit": "ms",
+   "kind": "wall",
+   "zz": {
+    "median": 0.5635,
+    "p10": 0.5504,
+    "p90": 0.6296,
+    "p99": 0.6928,
+    "min": 0.5385,
+    "max": 0.7137,
+    "n": 50
+   },
+   "tmux": {
+    "median": 0.0188,
+    "p10": 0.0155,
+    "p90": 0.0253,
+    "p99": 0.0422,
+    "min": 0.0145,
+    "max": 0.0487,
+    "n": 50
+   },
+   "better": "lower",
+   "ratio": 29.973,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "control.cpu_per_cmd",
+   "group": "control",
+   "unit": "ms",
+   "kind": "cpu",
+   "zz": {
+    "median": 0.5477,
+    "p10": 0.5477,
+    "p90": 0.5477,
+    "p99": 0.5477,
+    "min": 0.5477,
+    "max": 0.5477,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.0136,
+    "p10": 0.0136,
+    "p90": 0.0136,
+    "p99": 0.0136,
+    "min": 0.0136,
+    "max": 0.0136,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 40.272,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "control.instr_per_cmd",
+   "group": "control",
+   "unit": "Minstr",
+   "kind": "instr",
+   "zz": {
+    "median": 7.6603,
+    "p10": 7.6603,
+    "p90": 7.6603,
+    "p99": 7.6603,
+    "min": 7.6603,
+    "max": 7.6603,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.1621,
+    "p10": 0.1621,
+    "p90": 0.1621,
+    "p99": 0.1621,
+    "min": 0.1621,
+    "max": 0.1621,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 47.257,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "control.burst_cmds_per_s",
+   "group": "control",
+   "unit": "cmd/s",
+   "kind": "wall",
+   "zz": {
+    "median": 1640.3034,
+    "p10": 1640.3034,
+    "p90": 1640.3034,
+    "p99": 1640.3034,
+    "min": 1640.3034,
+    "max": 1640.3034,
+    "n": 1
+   },
+   "tmux": {
+    "median": 132042.1373,
+    "p10": 132042.1373,
+    "p90": 132042.1373,
+    "p99": 132042.1373,
+    "min": 132042.1373,
+    "max": 132042.1373,
+    "n": 1
+   },
+   "better": "higher",
+   "ratio": 0.012,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "control.output_mbps",
+   "group": "control",
+   "unit": "MB/s",
+   "kind": "wall",
+   "zz": {
+    "median": 103.0883,
+    "p10": 103.0883,
+    "p90": 103.0883,
+    "p99": 103.0883,
+    "min": 103.0883,
+    "max": 103.0883,
+    "n": 1
+   },
+   "tmux": {
+    "median": 39.9997,
+    "p10": 39.9997,
+    "p90": 39.9997,
+    "p99": 39.9997,
+    "min": 39.9997,
+    "max": 39.9997,
+    "n": 1
+   },
+   "better": "higher",
+   "notes": [
+    "16 MiB cat seen as %output, first %output line to the done marker"
+   ],
+   "ratio": 2.577,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "control.output_bytes_per_byte",
+   "group": "control",
+   "unit": "x",
+   "kind": "bytes_info",
+   "zz": {
+    "median": 1.1242,
+    "p10": 1.1242,
+    "p90": 1.1242,
+    "p99": 1.1242,
+    "min": 1.1242,
+    "max": 1.1242,
+    "n": 1
+   },
+   "tmux": {
+    "median": 1.1232,
+    "p10": 1.1232,
+    "p90": 1.1232,
+    "p99": 1.1232,
+    "min": 1.1232,
+    "max": 1.1232,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 1.001,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "statusjob.cpu_pct",
+   "group": "statusjob",
+   "unit": "%",
+   "kind": "cpu",
+   "zz": {
+    "median": 0.5359,
+    "p10": 0.5359,
+    "p90": 0.5359,
+    "p99": 0.5359,
+    "min": 0.5359,
+    "max": 0.5359,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.2538,
+    "p10": 0.2538,
+    "p90": 0.2538,
+    "p99": 0.2538,
+    "min": 0.2538,
+    "max": 0.2538,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 2.112,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "statusjob.instr_per_s",
+   "group": "statusjob",
+   "unit": "Minstr/s",
+   "kind": "instr",
+   "zz": {
+    "median": 59.6007,
+    "p10": 59.6007,
+    "p90": 59.6007,
+    "p99": 59.6007,
+    "min": 59.6007,
+    "max": 59.6007,
+    "n": 1
+   },
+   "tmux": {
+    "median": 22.1922,
+    "p10": 22.1922,
+    "p90": 22.1922,
+    "p99": 22.1922,
+    "min": 22.1922,
+    "max": 22.1922,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 2.686,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "statusjob.threads_per_s",
+   "group": "statusjob",
+   "unit": "1/s",
+   "kind": "threads",
+   "zz": {
+    "median": 2.9998,
+    "p10": 2.9998,
+    "p90": 2.9998,
+    "p99": 2.9998,
+    "min": 2.9998,
+    "max": 2.9998,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.0,
+    "p10": 0.0,
+    "p90": 0.0,
+    "p99": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 1
+   },
+   "notes": [
+    "sampled every ~2 ms; a thread that lives shorter than that is missed"
+   ],
+   "better": "lower",
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "statusjob.child_cpu_pct",
+   "group": "statusjob",
+   "unit": "%",
+   "kind": "cpu_info",
+   "zz": {
+    "median": 0.9217,
+    "p10": 0.9217,
+    "p90": 0.9217,
+    "p99": 0.9217,
+    "min": 0.9217,
+    "max": 0.9217,
+    "n": 1
+   },
+   "tmux": {
+    "median": 1.2306,
+    "p10": 1.2306,
+    "p90": 1.2306,
+    "p99": 1.2306,
+    "min": 1.2306,
+    "max": 1.2306,
+    "n": 1
+   },
+   "notes": [
+    "reaped job children"
+   ],
+   "better": "lower",
+   "ratio": 0.749,
+   "threshold": null,
+   "verdict": "info"
+  },
+  {
+   "id": "statusjob.tty_kibps",
+   "group": "statusjob",
+   "unit": "KiB/s",
+   "kind": "bytes",
+   "zz": {
+    "median": 0.6015,
+    "p10": 0.6015,
+    "p90": 0.6015,
+    "p99": 0.6015,
+    "min": 0.6015,
+    "max": 0.6015,
+    "n": 1
+   },
+   "tmux": {
+    "median": 0.2392,
+    "p10": 0.2392,
+    "p90": 0.2392,
+    "p99": 0.2392,
+    "min": 0.2392,
+    "max": 0.2392,
+    "n": 1
+   },
+   "better": "lower",
+   "ratio": 2.515,
+   "report_only": true,
+   "threshold": null,
+   "verdict": "info"
+  }
+ ],
+ "summary": {
+  "pass": 1,
+  "fail": 0,
+  "warn": 0,
+  "info": 126,
+  "error": 0,
+  "regressed": 0,
+  "drifted": 0
+ },
+ "errors": []
+}

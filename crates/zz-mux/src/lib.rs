@@ -6,11 +6,14 @@ mod command;
 #[cfg(test)]
 mod compat_manifest_tests;
 mod copy_actions;
+#[cfg(test)]
+mod format_universe_tests;
 mod formats;
 mod honest_knobs;
 mod layout;
 #[cfg(test)]
 mod layout_pin_tests;
+mod localtime;
 mod model;
 mod parser;
 mod sort;
@@ -45,12 +48,15 @@ pub use copy_actions::{
     missing_copy_mode_actions, pinned_copy_action,
 };
 pub use formats::{
-    FormatClient, FormatClientRow, FormatContextSnapshot, FormatEnvironRow, TmuxColour,
-    delegated_format_variable_names, display_width, format_true, fuzzy_match_columns,
-    indexed_colour_rgb, parse_tmux_colour, sanitize_client_output, utf8_sanitize,
+    FormatClient, FormatClientRow, FormatContextSnapshot, FormatEnvironRow, FormatNeeds,
+    FormatUniverseRef, PaneFormatGeometry, StatusValues, TmuxColour,
+    delegated_format_variable_names, display_width, eager_universe_knob,
+    format_needs_without_engine, format_true, fuzzy_match_columns, indexed_colour_rgb,
+    parse_tmux_colour, sanitize_client_output, utf8_sanitize, with_eager_universe,
 };
 pub use honest_knobs::{BellAction, PresetOptions, VisualBell, WindowSize};
 pub use layout::{CellLayout, SplitSize};
+pub use localtime::local_time;
 pub use model::{
     LayoutPreset, MuxState, Pane, PaneDirection, PaneKind, Session, SplitPlacement, Window,
     joined_layout, swapped_layout,

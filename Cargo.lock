@@ -11606,7 +11606,6 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
- "sysinfo 0.39.6",
  "tempfile",
  "windows 0.62.2",
  "zz-config",
@@ -11743,7 +11742,9 @@ name = "zz-mux"
 version = "0.14.0"
 dependencies = [
  "chrono",
+ "foldhash",
  "glob",
+ "libc",
  "nix 0.31.3",
  "parking_lot",
  "regex",
@@ -11778,8 +11779,10 @@ dependencies = [
  "filedescriptor",
  "foldhash",
  "image",
+ "libc",
  "libghostty-vt",
  "log",
+ "memchr",
  "parking_lot",
  "portable-pty",
  "regex",

@@ -231,6 +231,7 @@ pub(crate) struct BrowserState {
     transport: FrameTransport,
     max_frame_bytes: usize,
     inline_budget_bytes_per_second: f64,
+    wanted: bool,
 }
 
 impl BrowserState {
@@ -248,7 +249,12 @@ impl BrowserState {
             transport: FrameTransport::Inline,
             max_frame_bytes: INLINE_MAX_FRAME_BYTES,
             inline_budget_bytes_per_second: configured_inline_budget_bytes_per_second(),
+            wanted: false,
         }
+    }
+
+    pub const fn wants_graphics(&self) -> bool {
+        self.wanted
     }
 
     pub fn set_transport(&mut self, transport: FrameTransport, now: Instant) -> bool {
@@ -342,6 +348,7 @@ impl BrowserState {
         surfaces: Vec<BrowserSurface>,
         now: Instant,
     ) -> SurfaceChanges {
+        self.wanted = !self.enabled && self.provider.is_some() && !surfaces.is_empty();
         if !self.enabled || self.provider.is_none() {
             return SurfaceChanges::default();
         }

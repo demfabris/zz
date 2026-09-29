@@ -108,6 +108,11 @@ profile-terminal-diagnostics platform duration="20s":
 profile-terminal-summary run:
     @python3 scripts/summarize-terminal-render.py "{{ run }}"
 
+# Build zz_cli, then gate the daemon against a release tmux (bench/perf/README.md); extra args go to run.py.
+perf-gate stage="baseline" *args:
+    @cargo build --release -p zz-cli --quiet
+    @python3 bench/perf/run.py --zz target/release/zz_cli --stage {{ stage }} {{ args }}
+
 # Build and validate the macOS release bundle, then emit dist/zz-macos.dmg.
 dmg:
     @if [[ "$(uname -s)" != "Darwin" ]]; then echo "just dmg requires macOS" >&2; exit 2; fi

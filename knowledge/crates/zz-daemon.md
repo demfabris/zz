@@ -276,11 +276,10 @@ The daemon is thread-per-connection with dedicated writer and per-pane watcher t
 | `zz-client-writer-{id}` | `handle_connection` | Drain that client's `OutboundMailbox` via `write_outbound`, write framed bytes to the stream |
 | `zz-pane-{n}` | `watch_terminal` | Consume one `TerminalSession`'s events, revalidate actor identity, persist changed OSC titles, diff viewports, fan out |
 | `zz-output-{id}` | `watch_command_output` | Stream one client's command-output-view terminal events |
-| `zz-display-panes` | `start_display_panes_deadline_dispatcher` | One deadline per client: time out `display-panes` overlays, token-validated against `ServerState.display_panes` |
-| `zz-monitor-silence` | `start_silence_deadline_dispatcher` | One deadline per window: fire `monitor-silence` alerts and re-arm, whole-struct-validated against `ServerState.silence_deadlines` |
-| `zz-client-message` | `start_client_message_deadline_dispatcher` | One deadline per client: retire that client's ordinary or alert-produced status message, token-validated against `ServerState.client_messages` |
+| `zz-daemon-timers` | `start_timers` (`daemon/timers.rs`) | One thread for every deadline: `display-panes` overlays, key-table timeouts, `monitor-silence` alerts, client status messages, deferred automatic renames, and the trailing 16 ms publish flush. Each deadline is validated against its `ServerState` entry (token or whole struct) before it fires, and an expiry that panics is logged without stopping the thread |
+| `zz-daemon-hooks` | `run_event_hooks_on_worker` | Spawned on demand, FIFO: runs silence and rename hooks that have commands so a slow `run-shell` cannot hold up the timer thread; exits when its queue is empty |
 | `zz-daemon-diagnostics` | `start_diagnostic_sampler` | Periodic state snapshot logging (only when trace logging is on) |
-| `zz-daemon-status` | `start_status_sampler` | Re-render the [status line](/tmux/status-line.md) every `status-interval`, re-running its `#()` commands |
+| `zz-daemon-status` | `start_status_sampler` | Re-render the [status line](/tmux/status-line.md) every `status-interval`, re-running its `#()` commands. A 1 s tick runs only while a control client has subscriptions, a `set-hook -B` monitor exists, or a pane holds a Claude peer state; pane output asks for at most one peer probe a second. With none of that and no `status-interval` to keep, it parks until a subscribe, the end of a command, or pane output wakes it |
 | `zz-daemon-signals` (Unix) | `DaemonSignalGuard` | Listen for `SIGTERM`/`SIGINT` until ordinary shutdown cancellation; the first signal requests the same graceful stop as `kill-server`, a repeated one forces it |
 | `zz-daemon-shutdown-grace` (Unix) | `Shared::request_signal_shutdown` | Wait up to `SIGNAL_SHUTDOWN_GRACE` for `stopping`, then `force_shutdown` |
 | `zz-copy-pipe` | `spawn_copy_pipe` | Run a `copy-pipe` child, feed selection on stdin (bounded pool) |
@@ -532,7 +531,7 @@ composer input the client owns, and its prompts arrive as `AgentPrompt`, not as 
 claim in-flight sequence keys from focus contexts that never reach the daemon. `sync_key_table`
 also publishes `KeyTableActive { table, repeat }` from `KeyEngine::shown_table`: the prefix or a
 `switch-client -T` table, never copy-mode and never the session's own `key-table`, re-sent after
-every key decided inside a table. A `zz-key-table` deadline thread re-runs the sync at
+every key decided inside a table. The `zz-daemon-timers` thread re-runs the sync at
 `KeyEngine::next_deadline`, so both events clear when the repeat window or prefix-timeout ends
 without another key; the engine itself still expires lazily.
 

@@ -668,7 +668,7 @@ fn agent_insert_style(pane: PaneId, pane_pid: Option<u32>, foreground: u32) -> O
         pane,
         pane_pid,
         foreground,
-        crate::agent::claude_peers::process_group,
+        crate::process_info::process_group,
     ) {
         return Some(InsertStyle::Claude);
     }
@@ -1818,7 +1818,7 @@ mod tests {
         assert_eq!(shell_style, InsertStyle::Shell(ShellKind::Posix));
         assert_eq!(prompt_style, InsertStyle::Shell(ShellKind::Posix));
         assert_eq!(
-            crate::agent::claude_peers::process_group(std::process::id()),
+            crate::process_info::process_group(std::process::id()),
             u32::try_from(rustix::process::getpgrp().as_raw_nonzero().get()).ok()
         );
     }

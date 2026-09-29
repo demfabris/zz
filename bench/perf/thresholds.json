@@ -1,0 +1,89 @@
+{
+ "schema": 2,
+ "stages": ["baseline", "wave1", "wave2", "wave3", "final"],
+ "reference": {"host": "macbook", "w0": "results/baseline-macbook-17e17115.json", "scale": {"cpu": "ratio", "wall": "ratio", "mem": "plus"}},
+ "tolerance": {
+  "instr": {"factor": 1.05, "floor": 0.05, "hard": true},
+  "bytes": {"factor": 1.05, "floor": 256, "hard": true},
+  "count": {"factor": 1.05, "floor": 1, "hard": true},
+  "mem": {"factor": 1.10, "floor": 0.5, "hard": true},
+  "threads": {"factor": 1.10, "floor": 1, "hard": true},
+  "throughput": {"factor": 1.15, "hard": false},
+  "cpu": {"factor": 1.25, "floor": 0.05, "hard": false},
+  "wall": {"factor": 1.25, "floor": 0.5, "hard": false}
+ },
+ "report_only": [
+  "cli.wall.version.p1",
+  "cold.infocmp_forks",
+  "attach.wire_frames.*",
+  "attach.wire_c2s.*",
+  "echo.wire_bytes.busy30",
+  "statusjob.tty_kibps"
+ ],
+ "metrics": {
+  "cli.wall.*": {"wave1": {"ratio": 1.10}, "final": {"ratio": 1.05}},
+  "cli.wall.list_keys.*": {"wave1": {"ratio": 1.0}},
+  "cli.wall.list_panes_a.s20": {"wave1": {"ratio": 1.0}},
+  "cli.cpu.*": {"final": {"ratio": 1.2, "plus": 0.03, "combine": "any"}},
+  "cli.cpu.display.p1": {"wave1": {"abs": 0.25}, "wave3": {"ratio": 1.2, "plus": 0.03, "combine": "any"}},
+  "cli.cpu.display.p20": {"wave1": {"abs": 0.40}, "wave3": {"ratio": 1.2, "plus": 0.03, "combine": "any"}},
+  "cli.cpu.list_keys.p1": {"wave1": {"abs": 3.0}, "final": {"ratio": 1.2, "plus": 0.1, "combine": "any"}},
+  "cli.cpu.list_keys.p20": {"wave1": {"abs": 5.0}, "final": {"ratio": 1.2, "plus": 0.1, "combine": "any"}},
+  "cli.cpu.*.s20": {"wave1": {"ratio": 1.2}, "final": {"ratio": 1.2, "plus": 0.05, "combine": "any"}},
+
+  "spawn.wall.*": {"wave1": {"ratio": 1.1}, "final": {"ratio": 1.05}},
+  "spawn.wall.split_empty_P": {"wave1": {"plus": 1.5}, "final": {"ratio": 1.05}},
+  "spawn.cpu.split_shell": {"wave1": {"abs": 1.5}, "wave3": {"ratio": 1.2}},
+  "spawn.cpu.new_window": {"wave1": {"ratio": 1.6}, "final": {"ratio": 1.2}},
+  "spawn.cpu.split_empty_P": {"wave1": {"ratio": 1.6}, "final": {"ratio": 1.2}},
+  "spawn.cpu.kill_pane": {"wave1": {"abs": 0.8}, "wave2": {"abs": 0.4}, "wave3": {"plus": 0.1}},
+
+  "cold.wall.*": {"wave1": {"abs": 22}, "final": {"ratio": 1.15}},
+
+  "config.wall.source_1000": {"wave1": {"abs": 25}, "wave2": {"ratio": 1.1}},
+  "config.cpu.source_1000": {"wave1": {"abs": 25}, "wave2": {"ratio": 1.1, "slack": 1.0}},
+
+  "chatty.cpu_pct.*": {"wave1": {"ratio": 1.5, "slack": 1.0}, "final": {"ratio": 1.2, "slack": 0.5}},
+  "chatty.tty_kibps.hidden": {"wave1": {"abs": 2.0}, "tolerance": {"factor": 1.35, "floor": 2}},
+  "chatty.tty_kibps.visible": {"wave2": {"ratio": 1.5}, "tolerance": {"factor": 1.35, "floor": 2}},
+  "chatty.client_cpu_pct.*": {"wave2": {"ratio": 3.0, "slack": 1.0}},
+  "chatty.instr_per_s.*": {"tolerance": {"factor": 1.25, "floor": 5}},
+
+  "idle.cpu_pct.p20": {"wave1": {"abs": 0.1}, "wave3": {"abs": 0.05}},
+  "idle.wakeups_per_s.p20": {"wave1": {"abs": 1.0}, "wave3": {"abs": 0.2}},
+  "idle.instr_per_s.p20": {"tolerance": {"factor": 1.25, "floor": 1}},
+
+  "mem.footprint.p1": {"wave1": {"abs": 6.5}, "final": {"abs": 5.0}},
+  "mem.footprint.p20": {"wave1": {"abs": 38.0}, "final": {"abs": 12.0}},
+  "mem.footprint.tui20": {"wave1": {"vs_w0": 1.02}, "final": {"abs": 15.0}},
+  "mem.footprint.scroll180": {"wave1": {"ratio": 1.0}, "final": {"ratio": 0.65}},
+  "mem.footprint.scroll80": {"wave1": {"ratio": 1.15}, "final": {"ratio": 0.8}},
+  "mem.threads.p20": {"wave1": {"abs": 51}, "final": {"abs": 12}},
+  "mem.threads.*": {"final": {"abs": 12}},
+
+  "attach.ttfc.*": {"wave1": {"abs": 14.0}, "wave2": {"ratio": 1.1}},
+  "attach.tty_total.p1": {"wave1": {"abs": 8192}, "wave2": {"abs": 2048}},
+  "attach.tty_total.p4": {"wave1": {"abs": 16384}, "wave2": {"ratio": 1.5}},
+  "attach.conns.*": {"wave1": {"abs": 2}, "wave2": {"abs": 1}},
+  "attach.wire_s2c.*": {"wave1": {"abs": 133120}, "wave2": {"abs": 8192}},
+  "attach.cpu.*": {"wave1": {"ratio": 3.0}, "wave2": {"ratio": 1.25}},
+
+  "echo.p50.*": {"wave3": {"ratio": 1.5}},
+  "echo.p99.*": {"wave3": {"ratio": 1.5}},
+  "echo.wire_bytes.idle": {"wave1": {"abs": 1700}, "wave2": {"abs": 64}},
+  "echo.wire_bytes.busy30": {"tolerance": {"factor": 1.5, "floor": 512}},
+
+  "throughput.detached.*": {"better": "higher", "baseline": {"ratio": 4.0, "vs_w0": 0.85, "ceiling": 0.85}},
+  "throughput.attached.ascii_ms": {"baseline": {"ratio": 0.25, "vs_w0": 1.18, "ceiling": 0.85}},
+
+  "control.latency": {"wave2": {"ratio": 1.2}, "final": {"ratio": 1.1}},
+  "control.cpu_per_cmd": {"wave2": {"ratio": 1.5, "plus": 0.1, "combine": "any"}, "final": {"ratio": 1.2, "plus": 0.03, "combine": "any"}},
+  "control.burst_cmds_per_s": {"better": "higher", "wave2": {"ratio": 0.8}, "final": {"ratio": 0.9}},
+  "control.output_mbps": {"better": "higher", "wave1": {"vs_w0": 0.85}, "final": {"ratio": 1.0}},
+
+  "statusjob.cpu_pct": {"wave3": {"ratio": 1.5, "slack": 0.1}},
+  "statusjob.threads_per_s": {"wave3": {"abs": 0.5}},
+  "statusjob.instr_per_s": {"tolerance": {"factor": 1.25, "floor": 1}},
+  "statusjob.tty_kibps": {"tolerance": {"factor": 1.35, "floor": 0.5}}
+ }
+}

@@ -15,13 +15,14 @@ use std::{
     path::{Path, PathBuf},
     str::FromStr as _,
     sync::{Arc, LazyLock},
+    time::{Duration, Instant},
 };
 
 use parking_lot::Mutex;
 use zz_protocol::{
     AgentAutoApprove, AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, ChooseTreeKind,
-    ClientId, CommandInvocation, CommandPromptMode, CommandPromptType, CommandResolution,
-    CommandSpec, DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND,
+    ClientEnvironmentBlob, ClientId, CommandInvocation, CommandPromptMode, CommandPromptType,
+    CommandResolution, CommandSpec, DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND,
     DEFAULT_AGENT_COMMAND, DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken,
     MAX_AGENT_COMMAND_BYTES, MAX_GUI_TEXT_BYTES, MuxOptionKey, NATIVE_COMMAND_NAMES,
     PaneBorderIndicators, PaneBorderLines, PaneBorderStatus, PaneId, PaneKindSnapshot,
@@ -44,22 +45,22 @@ use crate::{
     copy_actions::pinned_copy_action,
     formats::{
         CommandHooks, FormatClient, FormatClientRow, FormatContext, FormatEnvironRow, FormatJobTag,
-        FormatOptionRow, FormatType, StatusHooks, expand_format_time_traced,
-        expand_format_time_with_hooks, expand_format_with_hooks, format_listing, format_true,
-        parse_tmux_colour,
+        FormatOptionRow, FormatType, LayoutDumps, PreparedFormat, StatusHooks,
+        expand_format_time_traced, expand_format_time_with_hooks, expand_format_with_hooks,
+        format_listing, format_true, parse_tmux_colour,
     },
     honest_knobs::{
         AllowPassthrough, PaneOption, PaneOptions, ServerOption, ServerOptions, SessionOption,
         SessionOptions, WindowOption, WindowOptions,
     },
     layout::{CellLayout, PANE_MAXIMUM},
-    model::{DEFAULT_WINDOW_EXTENT, NO_MARKED_TARGET, fnmatch, is_marked_target},
+    model::{DEFAULT_WINDOW_EXTENT, GlobPattern, NO_MARKED_TARGET, is_marked_target},
     terminfo::TtyTerm,
     tmux_options::{
         HOOK_NAMES, TmuxArrayValue, TmuxOption, TmuxOptionScope, TmuxStoredScalarKind,
-        exact_tmux_option, match_tmux_option, parse_tmux_option, tmux_option_format_is_flag,
-        tmux_option_is_hook, tmux_option_table_order, tmux_options, tmux_stored_array,
-        tmux_stored_scalar,
+        exact_tmux_option, match_tmux_option, parse_tmux_option, tmux_consumer_options,
+        tmux_option_format_is_flag, tmux_option_is_hook, tmux_option_table_order,
+        tmux_option_with_consumer, tmux_options, tmux_stored_array, tmux_stored_scalar,
     },
     valid_style,
 };
@@ -608,7 +609,7 @@ impl<H: StatusHooks> StatusHooks for RowFormatHooks<'_, H> {
         self.inner.client_environment_rows()
     }
 
-    fn client_tty_term(&mut self) -> Option<TtyTerm> {
+    fn client_tty_term(&mut self) -> Option<Arc<TtyTerm>> {
         self.inner.client_tty_term()
     }
 
@@ -625,7 +626,7 @@ pub struct ExecutionContext {
     client_terminal: ClientTerminal,
     client_size: Option<(u16, u16)>,
     client_working_directory: Option<PathBuf>,
-    client_environment: Option<Arc<BTreeMap<RawText, RawText>>>,
+    client_environment: Option<Arc<ClientEnvironmentBlob>>,
     client_attached: bool,
     client_attached_context: Option<(SessionId, WindowId, PaneId)>,
     target_format_client_override: Option<FormatClient>,
@@ -726,7 +727,7 @@ impl fmt::Debug for ExecutionContext {
                 &self
                     .client_environment
                     .as_ref()
-                    .map(|environment| environment.len()),
+                    .map(|environment| environment.entries().count()),
             )
             .field("client_attached", &self.client_attached)
             .field("client_attached_context", &self.client_attached_context)
@@ -763,7 +764,7 @@ impl Default for ExecutionContext {
             client_terminal: ClientTerminal::Present,
             client_size: None,
             client_working_directory: None,
-            client_environment: Some(Arc::new(BTreeMap::new())),
+            client_environment: Some(Arc::default()),
             client_attached: true,
             client_attached_context: None,
             target_format_client_override: None,
@@ -905,10 +906,12 @@ impl ExecutionContext {
 
     #[must_use]
     pub fn client_environment(&self) -> Option<&BTreeMap<RawText, RawText>> {
-        self.client_environment.as_deref()
+        self.client_environment
+            .as_deref()
+            .map(ClientEnvironmentBlob::map)
     }
 
-    pub fn set_client_environment(&mut self, environment: Option<Arc<BTreeMap<RawText, RawText>>>) {
+    pub fn set_client_environment(&mut self, environment: Option<Arc<ClientEnvironmentBlob>>) {
         self.client_environment = environment;
     }
 
@@ -1452,7 +1455,7 @@ impl<H: StatusHooks> StatusHooks for CommandItemHooks<'_, H> {
         self.inner.client_environment_rows()
     }
 
-    fn client_tty_term(&mut self) -> Option<TtyTerm> {
+    fn client_tty_term(&mut self) -> Option<Arc<TtyTerm>> {
         self.inner.client_tty_term()
     }
 
@@ -1519,7 +1522,7 @@ impl<H: StatusHooks> StatusHooks for ListCommandHooks<'_, H> {
         self.inner.client_environment_rows()
     }
 
-    fn client_tty_term(&mut self) -> Option<TtyTerm> {
+    fn client_tty_term(&mut self) -> Option<Arc<TtyTerm>> {
         self.inner.client_tty_term()
     }
 
@@ -1576,7 +1579,7 @@ impl<H: StatusHooks> StatusHooks for ListKeyHooks<'_, H> {
         self.inner.client_environment_rows()
     }
 
-    fn client_tty_term(&mut self) -> Option<TtyTerm> {
+    fn client_tty_term(&mut self) -> Option<Arc<TtyTerm>> {
         self.inner.client_tty_term()
     }
 
@@ -1775,6 +1778,8 @@ enum ShowOptionArgument {
 
 type UserOptions = BTreeMap<String, String>;
 
+type SharedUserOptions = Arc<UserOptions>;
+
 /// What format expansion reads without holding the engine: `#{pane_kind}` and
 /// `#{@name}` readback, keyed by the ids a `StatusContext` already carries.
 #[derive(Clone, Debug, Default)]
@@ -1782,12 +1787,12 @@ pub struct FormatFacts {
     pane_kinds: BTreeMap<String, &'static str>,
     browser_urls: BTreeMap<String, String>,
     pane_windows: BTreeMap<String, String>,
-    server: UserOptions,
-    global_session: UserOptions,
-    sessions: BTreeMap<String, UserOptions>,
-    global_window: UserOptions,
-    windows: BTreeMap<String, UserOptions>,
-    panes: BTreeMap<String, UserOptions>,
+    server: SharedUserOptions,
+    global_session: SharedUserOptions,
+    sessions: BTreeMap<String, SharedUserOptions>,
+    global_window: SharedUserOptions,
+    windows: BTreeMap<String, SharedUserOptions>,
+    panes: BTreeMap<String, SharedUserOptions>,
 }
 
 impl FormatFacts {
@@ -1879,8 +1884,8 @@ fn parse_format_option(input: &str) -> Option<(TmuxOption, FormatOptionIndex)> {
     } else {
         (input, FormatOptionIndex::Whole)
     };
-    let option = exact_tmux_option(name)?;
-    if !TMUX_OPTION_CONSUMERS.contains(&option.name) {
+    let (option, consumer) = tmux_option_with_consumer(name)?;
+    if !consumer {
         return None;
     }
     if matches!(
@@ -2099,12 +2104,12 @@ pub struct MuxEngine {
     session_initial_repeat_time_ms: BTreeMap<SessionId, u32>,
     global_repeat_time_ms: u32,
     session_repeat_time_ms: BTreeMap<SessionId, u32>,
-    server_user_options: UserOptions,
-    global_session_user_options: UserOptions,
-    session_user_options: BTreeMap<SessionId, UserOptions>,
-    global_window_user_options: UserOptions,
-    window_user_options: BTreeMap<WindowId, UserOptions>,
-    pane_user_options: BTreeMap<PaneId, UserOptions>,
+    server_user_options: SharedUserOptions,
+    global_session_user_options: SharedUserOptions,
+    session_user_options: BTreeMap<SessionId, SharedUserOptions>,
+    global_window_user_options: SharedUserOptions,
+    window_user_options: BTreeMap<WindowId, SharedUserOptions>,
+    pane_user_options: BTreeMap<PaneId, SharedUserOptions>,
     stored_arrays: StoredArrays,
     stored_scalars: StoredScalars,
     global_hooks: HookTable,
@@ -2143,7 +2148,38 @@ pub struct MuxEngine {
     agent: AgentOptions,
     format_monitors: Vec<FormatMonitorEntry>,
     next_format_monitor_id: u64,
+    automatic_rename_throttle: bool,
+    window_name_times: BTreeMap<WindowId, Instant>,
+    pending_window_renames: BTreeSet<WindowId>,
 }
+
+const NAME_INTERVAL: Duration = Duration::from_millis(500);
+
+const RUNTIME_FACT_MARKERS: [&str; 11] = [
+    "pane_current_command",
+    "pane_current_path",
+    "pane_path",
+    "pane_pid",
+    "pane_tty",
+    "pane_start_path",
+    "pane_dead_signal",
+    "@",
+    "E:",
+    "T:",
+    "O:",
+];
+
+const CLOCK_MARKERS: [&str; 5] = ["#(", "t:", "t/", "E:", "T:"];
+
+fn template_reads_runtime_facts(template: &str) -> bool {
+    template.contains('#')
+        && RUNTIME_FACT_MARKERS
+            .iter()
+            .any(|marker| template.contains(marker))
+}
+
+#[cfg(test)]
+mod runtime_facts_tests;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PaneRuntimeFacts {
@@ -2376,10 +2412,10 @@ impl Default for MuxEngine {
             session_initial_repeat_time_ms: BTreeMap::new(),
             global_repeat_time_ms: DEFAULT_REPEAT_TIME_MS,
             session_repeat_time_ms: BTreeMap::new(),
-            server_user_options: UserOptions::new(),
-            global_session_user_options: UserOptions::new(),
+            server_user_options: SharedUserOptions::default(),
+            global_session_user_options: SharedUserOptions::default(),
             session_user_options: BTreeMap::new(),
-            global_window_user_options: UserOptions::new(),
+            global_window_user_options: SharedUserOptions::default(),
             window_user_options: BTreeMap::new(),
             pane_user_options: BTreeMap::new(),
             stored_arrays: StoredArrays::default(),
@@ -2420,6 +2456,9 @@ impl Default for MuxEngine {
             agent: AgentOptions::default(),
             format_monitors: Vec::new(),
             next_format_monitor_id: 0,
+            automatic_rename_throttle: false,
+            window_name_times: BTreeMap::new(),
+            pending_window_renames: BTreeSet::new(),
         }
     }
 }
@@ -2644,11 +2683,7 @@ impl MuxEngine {
         scope: TmuxOptionScope,
         target: TmuxOptionTarget,
     ) {
-        for name in TMUX_OPTION_CONSUMERS {
-            let option = exact_tmux_option(name).expect("consumer option is catalogued");
-            if option.scope != scope {
-                continue;
-            }
+        for &option in tmux_consumer_options(scope) {
             if let Some(array) = self.format_option_array(target, option.name) {
                 values.insert(
                     option.name.to_owned(),
@@ -2713,6 +2748,124 @@ impl MuxEngine {
             };
         }
         self.format_scalar_option(target, option)
+    }
+
+    pub(crate) fn format_option_always_answers(&self, name: &str) -> bool {
+        let Some((option, index)) = parse_format_option(name) else {
+            return false;
+        };
+        let global = match option.scope {
+            TmuxOptionScope::Server => TmuxOptionTarget::Server,
+            TmuxOptionScope::Session => TmuxOptionTarget::GlobalSession,
+            TmuxOptionScope::Window | TmuxOptionScope::WindowPane => TmuxOptionTarget::GlobalWindow,
+        };
+        matches!(index, FormatOptionIndex::Invalid)
+            || self.format_option_array(global, option.name).is_some()
+            || self.format_scalar_option(global, option).is_some()
+    }
+
+    pub(crate) fn format_option_texts(&self, name: &str, visit: &mut dyn FnMut(&str)) -> bool {
+        if name.starts_with('@') {
+            let mut global = false;
+            for options in [
+                &self.server_user_options,
+                &self.global_session_user_options,
+                &self.global_window_user_options,
+            ] {
+                if let Some(value) = options.get(name) {
+                    visit(value);
+                    global = true;
+                }
+            }
+            for options in self
+                .session_user_options
+                .values()
+                .chain(self.window_user_options.values())
+                .chain(self.pane_user_options.values())
+            {
+                if let Some(value) = options.get(name) {
+                    visit(value);
+                }
+            }
+            return global;
+        }
+        let Some((option, _)) = parse_format_option(name) else {
+            return false;
+        };
+        let global = match option.scope {
+            TmuxOptionScope::Server => TmuxOptionTarget::Server,
+            TmuxOptionScope::Session => TmuxOptionTarget::GlobalSession,
+            TmuxOptionScope::Window | TmuxOptionScope::WindowPane => TmuxOptionTarget::GlobalWindow,
+        };
+        let complete = self.visit_format_option_at(global, option, true, visit);
+        match option.scope {
+            TmuxOptionScope::Server => {}
+            TmuxOptionScope::Session => {
+                for session in self.state.sessions.keys() {
+                    self.visit_format_option_at(
+                        TmuxOptionTarget::Session(*session),
+                        option,
+                        false,
+                        visit,
+                    );
+                }
+            }
+            TmuxOptionScope::Window => {
+                for window in self.state.windows.keys() {
+                    self.visit_format_option_at(
+                        TmuxOptionTarget::Window(*window),
+                        option,
+                        false,
+                        visit,
+                    );
+                }
+            }
+            TmuxOptionScope::WindowPane => {
+                for window in self.state.windows.values() {
+                    self.visit_format_option_at(
+                        TmuxOptionTarget::Window(window.id),
+                        option,
+                        false,
+                        visit,
+                    );
+                    for pane in window.panes.keys() {
+                        self.visit_format_option_at(
+                            TmuxOptionTarget::Pane(*pane),
+                            option,
+                            false,
+                            visit,
+                        );
+                    }
+                }
+            }
+        }
+        complete
+    }
+
+    fn visit_format_option_at(
+        &self,
+        target: TmuxOptionTarget,
+        option: TmuxOption,
+        inherited: bool,
+        visit: &mut dyn FnMut(&str),
+    ) -> bool {
+        if let Some((array, _)) = matches!(
+            option.name,
+            "command-alias" | "pane-colours" | "status-format" | "update-environment"
+        )
+        .then(|| self.array_option_readback(target, option.name, inherited))
+        .flatten()
+        {
+            for value in array.values() {
+                visit(value);
+            }
+            return true;
+        }
+        let Ok(Some((value, _))) = self.tmux_option_readback(option, target, inherited) else {
+            return false;
+        };
+        visit(&value);
+        true
     }
 
     fn format_option_target(
@@ -2940,6 +3093,11 @@ impl MuxEngine {
     #[must_use]
     pub const fn focus_events(&self) -> bool {
         self.server_options.focus_events
+    }
+
+    #[must_use]
+    pub const fn extended_keys(&self) -> &str {
+        self.server_options.extended_keys.as_str()
     }
 
     #[must_use]
@@ -3203,7 +3361,20 @@ impl MuxEngine {
 
     #[must_use]
     pub fn window_size(&self, window: WindowId) -> WindowSize {
-        self.window_knobs(window).window_size
+        self.window_options
+            .get(&window)
+            .and_then(|overrides| overrides.get(&WindowOption::WindowSize))
+            .and_then(|value| {
+                [
+                    WindowSize::Largest,
+                    WindowSize::Smallest,
+                    WindowSize::Manual,
+                    WindowSize::Latest,
+                ]
+                .into_iter()
+                .find(|size| size.as_str() == value)
+            })
+            .unwrap_or(self.global_window_options.window_size)
     }
 
     /// `window_get_pane_status`: the window's `pane-border-status`, with
@@ -3848,8 +4019,18 @@ impl MuxEngine {
     pub fn set_pane_runtime_facts_with_hooks(
         &mut self,
         pane: PaneId,
+        facts: PaneRuntimeFacts,
+        hooks: &mut impl StatusHooks,
+    ) -> bool {
+        self.set_pane_runtime_facts_at(pane, facts, hooks, Instant::now())
+    }
+
+    pub fn set_pane_runtime_facts_at(
+        &mut self,
+        pane: PaneId,
         mut facts: PaneRuntimeFacts,
         hooks: &mut impl StatusHooks,
+        now: Instant,
     ) -> bool {
         if self.state.pane(pane).is_none() {
             return false;
@@ -3865,11 +4046,234 @@ impl MuxEngine {
             return false;
         }
         self.pane_runtime_facts.insert(pane, facts);
-        self.state.bump_generation();
         if command_changed {
-            self.refresh_automatic_window_name_for_pane(pane, hooks);
+            self.refresh_automatic_window_name_throttled(pane, hooks, now);
         }
         true
+    }
+
+    pub fn set_automatic_rename_throttle(&mut self, enabled: bool) {
+        self.automatic_rename_throttle = enabled;
+        if !enabled {
+            self.pending_window_renames.clear();
+        }
+    }
+
+    fn refresh_automatic_window_name_throttled(
+        &mut self,
+        pane: PaneId,
+        hooks: &mut impl StatusHooks,
+        now: Instant,
+    ) -> bool {
+        if !self.automatic_rename_throttle {
+            return self.refresh_automatic_window_name_for_pane(pane, hooks);
+        }
+        let Some(window) = self.automatic_rename_window(pane) else {
+            return false;
+        };
+        if self.window_name_waits(window, now) {
+            self.pending_window_renames.insert(window);
+            return false;
+        }
+        self.window_name_times.insert(window, now);
+        self.pending_window_renames.remove(&window);
+        self.refresh_automatic_window_name_for_pane(pane, hooks)
+    }
+
+    fn automatic_rename_window(&self, pane: PaneId) -> Option<WindowId> {
+        let window = self.state.window_for_pane(pane)?;
+        (self.state.windows[&window].active_pane == pane
+            && self
+                .state
+                .window_automatic_rename(window)
+                .unwrap_or_default())
+        .then_some(window)
+    }
+
+    fn window_name_waits(&self, window: WindowId, now: Instant) -> bool {
+        self.window_name_times
+            .get(&window)
+            .is_some_and(|last| now.saturating_duration_since(*last) < NAME_INTERVAL)
+    }
+
+    #[must_use]
+    pub fn automatic_rename_due(&self, pane: PaneId, now: Instant) -> bool {
+        self.automatic_rename_window(pane).is_some_and(|window| {
+            !self.automatic_rename_throttle || !self.window_name_waits(window, now)
+        })
+    }
+
+    #[must_use]
+    pub fn next_window_rename_deadline(&self) -> Option<Instant> {
+        self.pending_window_renames
+            .iter()
+            .filter_map(|window| self.window_name_times.get(window))
+            .map(|last| *last + NAME_INTERVAL)
+            .min()
+    }
+
+    pub fn note_automatic_rename_output(&mut self, pane: PaneId, now: Instant) {
+        if !self.automatic_rename_throttle {
+            return;
+        }
+        let Some(window) = self.automatic_rename_window(pane) else {
+            return;
+        };
+        match self.window_name_times.get(&window) {
+            Some(last) if *last == now => {}
+            Some(last) if now.saturating_duration_since(*last) < NAME_INTERVAL => {
+                self.pending_window_renames.insert(window);
+            }
+            _ => {
+                self.window_name_times.insert(window, now);
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn due_window_rename_panes(&self, now: Instant) -> Vec<PaneId> {
+        self.pending_window_renames
+            .iter()
+            .filter(|window| !self.window_name_waits(**window, now))
+            .filter_map(|window| self.state.windows.get(window))
+            .map(|window| window.active_pane)
+            .collect()
+    }
+
+    pub fn apply_due_window_renames(&mut self, now: Instant, hooks: &mut impl StatusHooks) -> bool {
+        self.window_name_times
+            .retain(|window, _| self.state.windows.contains_key(window));
+        let due = self
+            .pending_window_renames
+            .iter()
+            .copied()
+            .filter(|window| {
+                self.window_name_times
+                    .get(window)
+                    .is_none_or(|last| now.saturating_duration_since(*last) >= NAME_INTERVAL)
+            })
+            .collect::<Vec<_>>();
+        let mut renamed = false;
+        for window in due {
+            self.pending_window_renames.remove(&window);
+            let Some(pane) = self
+                .state
+                .windows
+                .get(&window)
+                .map(|state| state.active_pane)
+            else {
+                continue;
+            };
+            self.window_name_times.insert(window, now);
+            renamed |= self.refresh_automatic_window_name_for_pane(pane, hooks);
+        }
+        renamed
+    }
+
+    #[must_use]
+    pub fn has_format_monitors(&self) -> bool {
+        !self.format_monitors.is_empty()
+    }
+
+    #[must_use]
+    pub fn runtime_facts_reach_presentation(&self) -> bool {
+        self.presentation_templates(true)
+            .into_iter()
+            .any(template_reads_runtime_facts)
+    }
+
+    #[must_use]
+    pub fn window_labels_follow_the_clock(&self) -> bool {
+        self.presentation_templates(false)
+            .into_iter()
+            .any(|template| {
+                template.contains('#')
+                    && CLOCK_MARKERS.iter().any(|marker| template.contains(marker))
+                    || template.contains('%')
+            })
+    }
+
+    fn presentation_templates(&self, status: bool) -> Vec<&str> {
+        const LABEL_SCALARS: [&str; 5] = [
+            "pane-border-format",
+            "pane-border-style",
+            "pane-active-border-style",
+            "window-pane-status-format",
+            "window-pane-current-status-format",
+        ];
+        const STATUS_SCALARS: [&str; 3] =
+            ["window-style", "window-active-style", "set-titles-string"];
+        let names = || {
+            LABEL_SCALARS
+                .iter()
+                .chain(status.then_some(&STATUS_SCALARS).into_iter().flatten())
+        };
+        let window_status = &self.window_status;
+        let mut templates = vec![
+            window_status.format.as_str(),
+            window_status.current_format.as_str(),
+            window_status.separator.as_str(),
+            window_status.style.as_str(),
+            window_status.current_style.as_str(),
+            window_status.last_style.as_str(),
+            window_status.bell_style.as_str(),
+            window_status.activity_style.as_str(),
+        ];
+        templates.extend(
+            self.window_status_options
+                .values()
+                .flat_map(BTreeMap::values)
+                .map(String::as_str),
+        );
+        templates.extend(
+            names().filter_map(|name| tmux_stored_scalar(name).map(|metadata| metadata.default)),
+        );
+        let scalar_tables = std::iter::once(&self.stored_scalars.global_session)
+            .chain(self.stored_scalars.sessions.values())
+            .chain(std::iter::once(&self.stored_scalars.global_window))
+            .chain(self.stored_scalars.windows.values())
+            .chain(self.stored_scalars.panes.values());
+        for table in scalar_tables {
+            templates.extend(
+                names()
+                    .filter_map(|name| table.get(name))
+                    .map(String::as_str),
+            );
+        }
+        if !status {
+            return templates;
+        }
+        let formats = &self.status;
+        templates.extend([
+            formats.left.as_str(),
+            formats.right.as_str(),
+            formats.style.as_str(),
+            formats.background.as_str(),
+            formats.foreground.as_str(),
+            formats.left_style.as_str(),
+            formats.right_style.as_str(),
+        ]);
+        templates.extend(
+            self.session_status_options
+                .values()
+                .flat_map(BTreeMap::values)
+                .map(String::as_str),
+        );
+        if !self.explicit_status_options.is_empty()
+            || !self.session_explicit_status_options.is_empty()
+        {
+            let default = default_array("status-format");
+            for table in std::iter::once(&self.stored_arrays.global_session)
+                .chain(self.stored_arrays.sessions.values())
+            {
+                if let Some(array) = table.get("status-format")
+                    && *array != default
+                {
+                    templates.extend(array.values().map(String::as_str));
+                }
+            }
+        }
+        templates
     }
 
     pub fn mark_pane_dead(
@@ -5110,6 +5514,8 @@ impl MuxEngine {
             ordering.then_with(|| left.name.cmp(&right.name))
         });
         let mut output = Vec::new();
+        let universe = self.format_universe(FormatClient::NoClient);
+        let mut dumps = LayoutDumps::default();
         for (line, session) in sessions.into_iter().enumerate() {
             let format_context = FormatContext {
                 session: Some(session),
@@ -5119,30 +5525,24 @@ impl MuxEngine {
                 format_client: FormatClient::NoClient,
                 format_type: FormatType::Session,
             };
+            let prepared =
+                PreparedFormat::with_universe(self, format_context, universe.clone(), &mut dumps);
             if let Some(filter) = options.value("-f") {
                 let mut row_hooks = RowFormatHooks { inner: hooks, line };
-                let expanded =
-                    expand_format_with_hooks(filter, self, format_context, &mut row_hooks);
-                if !format_true(&expanded) {
+                if !format_true(&prepared.expand(filter, &mut row_hooks)) {
                     continue;
                 }
             }
             let mut row_hooks = RowFormatHooks { inner: hooks, line };
             output.push(if options.has("--json") {
-                let values = self.format_status_context_with_format_client(
-                    format_context.session,
-                    format_context.window,
-                    format_context.pane,
-                    format_context.active_session,
-                    format_context.format_client,
-                );
                 RawText::from(
-                    values
+                    prepared
+                        .values()
                         .scoped_format_values("session", &mut row_hooks)
                         .to_string(),
                 )
             } else {
-                expand_format_with_hooks(format, self, format_context, &mut row_hooks)
+                prepared.expand(format, &mut row_hooks)
             });
         }
         Ok(Execution::output(RawText::join(&output, b"\n")))
@@ -5604,6 +6004,8 @@ impl MuxEngine {
         });
         let line = windows.len();
         let mut output = Vec::new();
+        let universe = self.format_universe(FormatClient::NoClient);
+        let mut dumps = LayoutDumps::default();
         for (session, window) in windows {
             let format_context = FormatContext {
                 session: Some(session),
@@ -5613,30 +6015,24 @@ impl MuxEngine {
                 format_client: FormatClient::NoClient,
                 format_type: FormatType::Window,
             };
+            let prepared =
+                PreparedFormat::with_universe(self, format_context, universe.clone(), &mut dumps);
             if let Some(filter) = options.value("-f") {
                 let mut row_hooks = RowFormatHooks { inner: hooks, line };
-                let expanded =
-                    expand_format_with_hooks(filter, self, format_context, &mut row_hooks);
-                if !format_true(&expanded) {
+                if !format_true(&prepared.expand(filter, &mut row_hooks)) {
                     continue;
                 }
             }
             let mut row_hooks = RowFormatHooks { inner: hooks, line };
             output.push(if options.has("--json") {
-                let values = self.format_status_context_with_format_client(
-                    format_context.session,
-                    format_context.window,
-                    format_context.pane,
-                    format_context.active_session,
-                    format_context.format_client,
-                );
                 RawText::from(
-                    values
+                    prepared
+                        .values()
                         .scoped_format_values("window", &mut row_hooks)
                         .to_string(),
                 )
             } else {
-                expand_format_with_hooks(format, self, format_context, &mut row_hooks)
+                prepared.expand(format, &mut row_hooks)
             });
         }
         Ok(Execution::output(RawText::join(&output, b"\n")))
@@ -6817,7 +7213,7 @@ impl MuxEngine {
                 hooks,
             );
             if let Some(title) = tmux_clean_title(&title) {
-                self.state.update_pane_title(pane, title)?;
+                self.state.pin_pane_title(pane, title)?;
             }
         }
         let session = self.state.windows[&window].session;
@@ -7021,7 +7417,7 @@ impl MuxEngine {
                 hooks,
             );
             if let Some(title) = tmux_clean_title(&title) {
-                self.state.update_pane_title(pane, title)?;
+                self.state.pin_pane_title(pane, title)?;
             }
             return Ok(execution);
         }
@@ -7182,6 +7578,8 @@ impl MuxEngine {
             DEFAULT_LIST_PANES_FORMAT
         });
         let mut output = Vec::new();
+        let universe = self.format_universe(FormatClient::NoClient);
+        let mut dumps = LayoutDumps::default();
         for window_id in window_ids {
             let window = self
                 .state
@@ -7237,30 +7635,28 @@ impl MuxEngine {
                     format_client: FormatClient::NoClient,
                     format_type: FormatType::Pane,
                 };
+                let prepared = PreparedFormat::with_universe(
+                    self,
+                    format_context,
+                    universe.clone(),
+                    &mut dumps,
+                );
                 if let Some(filter) = options.value("-f") {
                     let mut row_hooks = RowFormatHooks { inner: hooks, line };
-                    let expanded =
-                        expand_format_with_hooks(filter, self, format_context, &mut row_hooks);
-                    if !format_true(&expanded) {
+                    if !format_true(&prepared.expand(filter, &mut row_hooks)) {
                         continue;
                     }
                 }
                 let mut row_hooks = RowFormatHooks { inner: hooks, line };
                 output.push(if options.has("--json") {
-                    let values = self.format_status_context_with_format_client(
-                        format_context.session,
-                        format_context.window,
-                        format_context.pane,
-                        format_context.active_session,
-                        format_context.format_client,
-                    );
                     RawText::from(
-                        values
+                        prepared
+                            .values()
                             .scoped_format_values("pane", &mut row_hooks)
                             .to_string(),
                     )
                 } else {
-                    expand_format_with_hooks(format, self, format_context, &mut row_hooks)
+                    prepared.expand(format, &mut row_hooks)
                 });
             }
         }
@@ -9175,6 +9571,17 @@ impl MuxEngine {
         );
         let had_binding = !bindings.is_empty();
         let mut output = Vec::new();
+        let prepared = PreparedFormat::new(
+            self,
+            FormatContext {
+                session: context.session,
+                window: context.window,
+                pane: context.pane,
+                active_session: context.session,
+                format_client: context.target_format_client(),
+                format_type: FormatType::None,
+            },
+        );
         for listed in bindings {
             let mut item_hooks = ListKeyHooks {
                 inner: &mut *hooks,
@@ -9187,19 +9594,7 @@ impl MuxEngine {
                 key_width,
                 table_width,
             };
-            let line = expand_format_with_hooks(
-                format,
-                self,
-                FormatContext {
-                    session: context.session,
-                    window: context.window,
-                    pane: context.pane,
-                    active_session: context.session,
-                    format_client: context.target_format_client(),
-                    format_type: FormatType::None,
-                },
-                &mut item_hooks,
-            );
+            let line = prepared.expand(format, &mut item_hooks);
             if !line.is_empty() {
                 output.push(line);
             }
@@ -9262,24 +9657,23 @@ impl MuxEngine {
         specs.sort_by_key(|spec| spec.name);
         let format = options.value("-F").unwrap_or(DEFAULT_LIST_COMMANDS_FORMAT);
         let mut output = Vec::with_capacity(specs.len());
+        let prepared = PreparedFormat::new(
+            self,
+            FormatContext {
+                session: context.session,
+                window: context.window,
+                pane: context.pane,
+                active_session: context.session,
+                format_client: FormatClient::NoClient,
+                format_type: FormatType::None,
+            },
+        );
         for spec in specs {
             let mut item_hooks = ListCommandHooks {
                 inner: &mut *hooks,
                 spec,
             };
-            output.push(expand_format_with_hooks(
-                format,
-                self,
-                FormatContext {
-                    session: context.session,
-                    window: context.window,
-                    pane: context.pane,
-                    active_session: context.session,
-                    format_client: FormatClient::NoClient,
-                    format_type: FormatType::None,
-                },
-                &mut item_hooks,
-            ));
+            output.push(prepared.expand(format, &mut item_hooks));
         }
         Ok(Execution::output(RawText::join(&output, b"\n")))
     }
@@ -10670,7 +11064,7 @@ impl MuxEngine {
                     .unwrap_or_default();
                 for pane in panes {
                     if let Some(values) = self.pane_user_options.get_mut(&pane) {
-                        values.remove(option);
+                        Arc::make_mut(values).remove(option);
                     }
                 }
             }
@@ -11128,10 +11522,11 @@ impl MuxEngine {
             TmuxOptionTarget::Window(window) => self.window_user_options.get(&window),
             TmuxOptionTarget::Pane(pane) => self.pane_user_options.get(&pane),
         }
+        .map(Arc::as_ref)
     }
 
     fn user_options_at_target_mut(&mut self, target: TmuxOptionTarget) -> &mut UserOptions {
-        match target {
+        Arc::make_mut(match target {
             TmuxOptionTarget::Server => &mut self.server_user_options,
             TmuxOptionTarget::GlobalSession => &mut self.global_session_user_options,
             TmuxOptionTarget::Session(session) => {
@@ -11140,7 +11535,7 @@ impl MuxEngine {
             TmuxOptionTarget::GlobalWindow => &mut self.global_window_user_options,
             TmuxOptionTarget::Window(window) => self.window_user_options.entry(window).or_default(),
             TmuxOptionTarget::Pane(pane) => self.pane_user_options.entry(pane).or_default(),
-        }
+        })
     }
 
     fn user_option_readback<'a>(
@@ -15696,17 +16091,57 @@ fn session_creation_environment(options: &Options) -> Vec<(String, String)> {
         .collect()
 }
 
+enum EnvironmentPattern {
+    Name(String),
+    Glob(GlobPattern),
+}
+
+type CompiledPatterns = Arc<[(String, EnvironmentPattern)]>;
+
+fn compiled_update_environment(patterns: &[String]) -> CompiledPatterns {
+    static COMPILED: std::sync::LazyLock<
+        parking_lot::Mutex<Option<(Vec<String>, CompiledPatterns)>>,
+    > = std::sync::LazyLock::new(parking_lot::Mutex::default);
+    let mut cached = COMPILED.lock();
+    if let Some((key, compiled)) = cached.as_ref()
+        && key.as_slice() == patterns
+    {
+        return Arc::clone(compiled);
+    }
+    let compiled: CompiledPatterns = patterns
+        .iter()
+        .map(|pattern| {
+            let glob = GlobPattern::new(pattern);
+            let compiled = glob
+                .literal()
+                .map_or(EnvironmentPattern::Glob(glob), EnvironmentPattern::Name);
+            (pattern.clone(), compiled)
+        })
+        .collect();
+    *cached = Some((patterns.to_vec(), Arc::clone(&compiled)));
+    compiled
+}
+
 fn apply_client_environment_update(
     environment: &mut Environment,
     patterns: &[String],
     client_environment: &BTreeMap<RawText, RawText>,
 ) {
-    for pattern in patterns {
-        let matches = client_environment
-            .iter()
-            .filter(|(name, _)| fnmatch(pattern, name))
-            .map(|(name, value)| (name.clone(), value.clone()))
-            .collect::<Vec<_>>();
+    for (pattern, compiled) in compiled_update_environment(patterns).iter() {
+        let matches = match compiled {
+            EnvironmentPattern::Name(name) => client_environment
+                .range::<str, _>((
+                    std::ops::Bound::Included(name.as_str()),
+                    std::ops::Bound::Included(name.as_str()),
+                ))
+                .map(|(name, value)| (name.clone(), value.clone()))
+                .collect::<Vec<_>>(),
+            EnvironmentPattern::Glob(glob) => client_environment
+                .iter()
+                .filter(|(name, _)| glob.matches(name))
+                .map(|(name, value)| (name.clone(), value.clone()))
+                .collect::<Vec<_>>(),
+        };
         if matches.is_empty() {
             environment
                 .entry(pattern.clone().into())
@@ -16106,22 +16541,22 @@ impl MuxEngine {
             }
         }
         fn keyed<K: std::fmt::Display>(
-            options: &BTreeMap<K, UserOptions>,
-        ) -> BTreeMap<String, UserOptions> {
+            options: &BTreeMap<K, SharedUserOptions>,
+        ) -> BTreeMap<String, SharedUserOptions> {
             options
                 .iter()
                 .filter(|(_, values)| !values.is_empty())
-                .map(|(id, values)| (id.to_string(), values.clone()))
+                .map(|(id, values)| (id.to_string(), Arc::clone(values)))
                 .collect()
         }
         FormatFacts {
             pane_kinds,
             browser_urls,
             pane_windows,
-            server: self.server_user_options.clone(),
-            global_session: self.global_session_user_options.clone(),
+            server: Arc::clone(&self.server_user_options),
+            global_session: Arc::clone(&self.global_session_user_options),
             sessions: keyed(&self.session_user_options),
-            global_window: self.global_window_user_options.clone(),
+            global_window: Arc::clone(&self.global_window_user_options),
             windows: keyed(&self.window_user_options),
             panes: keyed(&self.pane_user_options),
         }
@@ -20251,10 +20686,9 @@ mod tests {
         let mut engine = MuxEngine::default();
         engine.seed_global_environment([("DISPLAY", "daemon")]);
         let mut context = ExecutionContext::default();
-        context.set_client_environment(Some(Arc::new(BTreeMap::from([(
-            "DISPLAY".into(),
-            "client".into(),
-        )]))));
+        context.set_client_environment(Some(Arc::new(ClientEnvironmentBlob::from_map(
+            BTreeMap::from([("DISPLAY".into(), "client".into())]),
+        ))));
 
         engine
             .execute(
@@ -20416,11 +20850,11 @@ mod tests {
                 &command("set-option", &["-g", "update-environment", "EXACT APP_*"]),
             )
             .expect("global update patterns");
-        let snapshot = Arc::new(BTreeMap::from([
+        let snapshot = Arc::new(ClientEnvironmentBlob::from_map(BTreeMap::from([
             ("APP_ONE".into(), "one".into()),
             ("APP_TWO".into(), RawText::default()),
             ("UNSELECTED".into(), "client".into()),
-        ]));
+        ])));
         context.set_client_environment(Some(Arc::clone(&snapshot)));
         let cloned = context.clone();
         assert!(Arc::ptr_eq(
@@ -37561,10 +37995,12 @@ mod tests {
             ("PHASE4D_EXTRA", "global"),
         ]);
         let mut context = ExecutionContext::default();
-        context.set_client_environment(Some(Arc::new(BTreeMap::from([
-            ("DISPLAY".into(), ":7".into()),
-            ("SSH_AUTH_SOCK".into(), "/tmp/agent.sock".into()),
-        ]))));
+        context.set_client_environment(Some(Arc::new(ClientEnvironmentBlob::from_map(
+            BTreeMap::from([
+                ("DISPLAY".into(), ":7".into()),
+                ("SSH_AUTH_SOCK".into(), "/tmp/agent.sock".into()),
+            ]),
+        ))));
         engine
             .execute(&mut context, &command("new-session", &["-s", "work"]))
             .unwrap();
@@ -39607,10 +40043,9 @@ mod tests {
         let mut engine = MuxEngine::default();
         engine.seed_global_environment([("DISPLAY", ":7"), ("PHASE_C7", "seeded")]);
         let mut context = ExecutionContext::default();
-        context.set_client_environment(Some(Arc::new(BTreeMap::from([(
-            "PHASE_C7".into(),
-            "seeded".into(),
-        )]))));
+        context.set_client_environment(Some(Arc::new(ClientEnvironmentBlob::from_map(
+            BTreeMap::from([("PHASE_C7".into(), "seeded".into())]),
+        ))));
         engine
             .execute(
                 &mut context,
@@ -39635,6 +40070,53 @@ mod tests {
                 .global_tmux_option_value("update-environment")
                 .as_deref(),
             Some("PHASE_C7 ABSENT_C7")
+        );
+    }
+
+    #[test]
+    fn update_environment_names_take_only_their_own_entry_and_globs_every_match() {
+        let client = BTreeMap::from([
+            (RawText::from("DISPLAY"), RawText::from(":0")),
+            (RawText::from("DISPLAY_EXTRA"), RawText::from("extra")),
+            (RawText::from("SSH_AGENT_PID"), RawText::from("7")),
+            (RawText::from("SSH_AUTH_SOCK"), RawText::from("/sock")),
+            (RawText::from("STAR*"), RawText::from("star")),
+            (
+                RawText::from_bytes(b"BYTE\xff".to_vec()),
+                RawText::from("raw"),
+            ),
+        ]);
+        let mut environment = Environment::default();
+        apply_client_environment_update(
+            &mut environment,
+            &[
+                "DISPLAY".to_owned(),
+                "SSH_*".to_owned(),
+                "STAR\\*".to_owned(),
+                "BYTE\u{fffd}".to_owned(),
+                "ABSENT".to_owned(),
+            ],
+            &client,
+        );
+        let values = environment
+            .iter()
+            .map(|(name, entry)| {
+                (
+                    name.as_bytes().to_vec(),
+                    entry.value.as_ref().map(ToString::to_string),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            values,
+            [
+                (b"ABSENT".to_vec(), None),
+                (b"BYTE\xff".to_vec(), Some("raw".to_owned())),
+                (b"DISPLAY".to_vec(), Some(":0".to_owned())),
+                (b"SSH_AGENT_PID".to_vec(), Some("7".to_owned())),
+                (b"SSH_AUTH_SOCK".to_vec(), Some("/sock".to_owned())),
+                (b"STAR*".to_vec(), Some("star".to_owned())),
+            ]
         );
     }
 

@@ -286,10 +286,10 @@ just profile-build mac
 This writes `dist/zz-profile/zz.app` plus matching `zz.dSYM` and `zz_helper.dSYM` bundles under
 `dist/zz-profile/symbols/`. The build inherits release optimization, fat LTO, and one codegen unit,
 but retains full DWARF so Instruments can resolve source lines and inlined Rust frames. `xtask`
-compares each Mach-O UUID with its copied dSYM before accepting the bundle. It also forces
-`libghostty-vt` to Zig `ReleaseFast`: Cargo exposes `DEBUG=true` to build scripts when this profile
-emits DWARF, and the native dependency would otherwise select Zig `Debug`, retain expensive terminal
-integrity assertions, and make profiling results unlike the normal release bundle.
+compares each Mach-O UUID with its copied dSYM before accepting the bundle. `libghostty-vt` picks its
+Zig mode from Cargo's `PROFILE` (`debug` for dev and test builds, `release` for this profile), so it
+builds the same `ReleaseFast` engine as the release bundle even though Cargo exposes `DEBUG=true` to
+build scripts when a profile emits DWARF.
 
 Capture one question at a time:
 

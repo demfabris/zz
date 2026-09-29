@@ -556,6 +556,7 @@ skipped=0
 retry_pass=0
 retry_list=()
 retried=()
+failed_twice=()
 declare -A summary_rows
 for scenario in "${scenarios[@]}"; do
   scenario_identity
@@ -592,6 +593,7 @@ for scenario in "${retry_list[@]}"; do
   if [ "$scenario_failed" -eq 0 ]; then
     retried+=("$scenario_name")
   else
+    failed_twice+=("$scenario_name")
     failed=1
   fi
 done
@@ -618,6 +620,7 @@ if [ "$ATTACHED_CLIENT" -eq 1 ]; then
       fixture_rc=$?
       attached_client_status="FAIL (exit $fixture_rc)"
       warn "attached-client failed again with exit $fixture_rc"
+      failed_twice+=("attached-client")
       failed=1
     fi
   fi
@@ -634,10 +637,14 @@ fi
     printf 'Recorded at: `%s`\n' "$attached_client_commit"
   fi
   printf '\n## Retries\n\n'
-  if [ "${#retried[@]}" -eq 0 ]; then
+  if [ "${#retried[@]}" -eq 0 ] && [ "${#failed_twice[@]}" -eq 0 ]; then
     printf 'Nothing failed on the first pass.\n'
-  else
+  fi
+  if [ "${#retried[@]}" -ne 0 ]; then
     printf 'Failed on the first pass and passed when re-run alone: %s\n' "$(IFS=', '; printf '%s' "${retried[*]}")"
+  fi
+  if [ "${#failed_twice[@]}" -ne 0 ]; then
+    printf 'Failed on the first pass and again when re-run alone: %s\n' "$(IFS=', '; printf '%s' "${failed_twice[*]}")"
   fi
 } >>"$SUMMARY_TMP"
 

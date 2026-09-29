@@ -1,9 +1,10 @@
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::ffi::{OsStr, OsString};
 use std::fmt::Write as _;
 use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
 use std::net::Shutdown;
-use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -15,7 +16,7 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", default)]
 pub(crate) struct PeerRecord {
     pub(crate) pid: u32,
@@ -85,27 +86,152 @@ fn read_records_in(directory: &Path) -> io::Result<Vec<PeerRecord>> {
     for entry in entries {
         let entry = entry?;
         let filename = entry.file_name();
-        let Some(pid) = filename
-            .to_str()
-            .and_then(|name| name.strip_suffix(".json"))
-            .and_then(|name| name.parse::<u32>().ok())
-        else {
+        let Some(pid) = record_file_pid(&filename) else {
             continue;
         };
         if !entry.file_type()?.is_file() {
             continue;
         }
-        let Some(record) = fs::read(entry.path())
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<PeerRecord>(&bytes).ok())
-        else {
-            continue;
-        };
-        if record.pid == pid && filename.to_str() == Some(format!("{pid}.json").as_str()) {
+        if let Some(record) = read_record_file(&entry.path(), pid) {
             records.push(record);
         }
     }
     Ok(records)
+}
+
+fn record_file_pid(filename: &OsStr) -> Option<u32> {
+    let name = filename.to_str()?;
+    let pid = name.strip_suffix(".json")?.parse::<u32>().ok()?;
+    (name == format!("{pid}.json")).then_some(pid)
+}
+
+fn read_record_file(path: &Path, pid: u32) -> Option<PeerRecord> {
+    fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<PeerRecord>(&bytes).ok())
+        .filter(|record| record.pid == pid)
+}
+
+const RACY_WINDOW: Duration = Duration::from_secs(2);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct FileStamp {
+    modified: Option<SystemTime>,
+    len: u64,
+    inode: u64,
+}
+
+impl FileStamp {
+    fn of(metadata: &fs::Metadata) -> Self {
+        Self {
+            modified: metadata.modified().ok(),
+            len: metadata.len(),
+            inode: metadata.ino(),
+        }
+    }
+
+    fn racy(self, read_at: SystemTime) -> bool {
+        self.modified.is_none_or(|modified| {
+            read_at
+                .duration_since(modified)
+                .map_or(true, |age| age < RACY_WINDOW)
+        })
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Seen {
+    stamp: FileStamp,
+    racy: bool,
+}
+
+impl Seen {
+    fn fresh(previous: Option<Self>, stamp: Option<FileStamp>) -> bool {
+        previous.is_some_and(|seen| !seen.racy && Some(seen.stamp) == stamp)
+    }
+
+    fn at(stamp: Option<FileStamp>, read_at: SystemTime) -> Option<Self> {
+        stamp.map(|stamp| Self {
+            stamp,
+            racy: stamp.racy(read_at),
+        })
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct RegistryCache {
+    directory: Option<PathBuf>,
+    listing: Option<Seen>,
+    files: BTreeMap<OsString, (Option<Seen>, Option<PeerRecord>)>,
+}
+
+impl RegistryCache {
+    pub(crate) fn refresh(&mut self) -> io::Result<bool> {
+        let directory = registry_dir()?;
+        self.refresh_in(&directory)
+    }
+
+    fn refresh_in(&mut self, directory: &Path) -> io::Result<bool> {
+        let mut changed = false;
+        if self.directory.as_deref() != Some(directory) {
+            changed = !self.files.is_empty();
+            *self = Self {
+                directory: Some(directory.to_path_buf()),
+                ..Self::default()
+            };
+        }
+        let listing = match fs::metadata(directory) {
+            Ok(metadata) => FileStamp::of(&metadata),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                changed |= !self.files.is_empty();
+                self.files.clear();
+                self.listing = None;
+                return Ok(changed);
+            }
+            Err(error) => return Err(error),
+        };
+        if !Seen::fresh(self.listing, Some(listing)) {
+            let read_at = SystemTime::now();
+            let mut names = BTreeSet::new();
+            for entry in fs::read_dir(directory)? {
+                let entry = entry?;
+                let filename = entry.file_name();
+                if record_file_pid(&filename).is_some() && entry.file_type()?.is_file() {
+                    names.insert(filename);
+                }
+            }
+            self.listing = Seen::at(Some(listing), read_at);
+            let before = self.files.len();
+            self.files.retain(|name, _| names.contains(name));
+            changed |= self.files.len() != before;
+            for name in names {
+                self.files.entry(name).or_insert((None, None));
+            }
+        }
+        for (name, (seen, record)) in &mut self.files {
+            let path = directory.join(name);
+            let read_at = SystemTime::now();
+            let current = fs::metadata(&path)
+                .ok()
+                .map(|metadata| FileStamp::of(&metadata));
+            if Seen::fresh(*seen, current) {
+                continue;
+            }
+            *seen = Seen::at(current, read_at);
+            let next = record_file_pid(name).and_then(|pid| read_record_file(&path, pid));
+            if next != *record {
+                *record = next;
+                changed = true;
+            }
+        }
+        Ok(changed)
+    }
+
+    pub(crate) fn records(&self) -> impl Iterator<Item = &PeerRecord> {
+        self.files
+            .values()
+            .filter_map(|(_, record)| record.as_ref())
+    }
 }
 
 fn socket_dir(records: &[PeerRecord]) -> io::Result<PathBuf> {
@@ -153,7 +279,7 @@ pub(crate) fn record_for_pane<'a>(
     pane: &str,
     pane_pid: Option<u32>,
 ) -> Option<&'a PeerRecord> {
-    record_for_pane_with_parents(records, pane, pane_pid, parent_pid)
+    record_for_pane_with_parents(records, pane, pane_pid, crate::process_info::parent)
 }
 
 pub(crate) fn record_for_pane_with_parents<'a>(
@@ -184,80 +310,6 @@ fn descends_from(mut pid: u32, root: u32, parent_of: impl Fn(u32) -> Option<u32>
         }
     }
     false
-}
-
-#[cfg(target_os = "macos")]
-#[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
-fn parent_pid(pid: u32) -> Option<u32> {
-    let process_id = libc::pid_t::try_from(pid).ok().filter(|pid| *pid > 0)?;
-    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
-    let size = i32::try_from(std::mem::size_of::<libc::proc_bsdinfo>()).ok()?;
-    let result = unsafe {
-        libc::proc_pidinfo(
-            process_id,
-            libc::PROC_PIDTBSDINFO,
-            0,
-            info.as_mut_ptr().cast(),
-            size,
-        )
-    };
-    (result == size).then(|| unsafe { info.assume_init() }.pbi_ppid)
-}
-
-#[cfg(target_os = "linux")]
-fn parent_pid(pid: u32) -> Option<u32> {
-    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    stat.rsplit_once(')')?
-        .1
-        .split_whitespace()
-        .nth(1)?
-        .parse()
-        .ok()
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn parent_pid(pid: u32) -> Option<u32> {
-    process_parents()
-        .ok()?
-        .into_iter()
-        .find_map(|(child, parent)| (child == pid).then_some(parent))
-}
-
-#[cfg(target_os = "macos")]
-#[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
-pub(crate) fn process_group(pid: u32) -> Option<u32> {
-    let process_id = libc::pid_t::try_from(pid).ok().filter(|pid| *pid > 0)?;
-    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
-    let size = i32::try_from(std::mem::size_of::<libc::proc_bsdinfo>()).ok()?;
-    let result = unsafe {
-        libc::proc_pidinfo(
-            process_id,
-            libc::PROC_PIDTBSDINFO,
-            0,
-            info.as_mut_ptr().cast(),
-            size,
-        )
-    };
-    (result == size).then(|| unsafe { info.assume_init() }.pbi_pgid)
-}
-
-#[cfg(target_os = "linux")]
-pub(crate) fn process_group(pid: u32) -> Option<u32> {
-    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    stat.rsplit_once(')')?
-        .1
-        .split_whitespace()
-        .nth(2)?
-        .parse()
-        .ok()
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-#[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
-pub(crate) fn process_group(pid: u32) -> Option<u32> {
-    let process_id = libc::pid_t::try_from(pid).ok().filter(|pid| *pid > 0)?;
-    let group = unsafe { libc::getpgid(process_id) };
-    u32::try_from(group).ok().filter(|group| *group > 0)
 }
 
 pub(crate) fn pane_process_ids(parents: &[(u32, u32)], pane_pid: u32) -> Vec<u32> {
@@ -845,6 +897,61 @@ mod tests {
     use super::*;
 
     #[test]
+    fn registry_cache_reads_only_changed_records() {
+        let directory = tempfile::tempdir().expect("registry");
+        let record = |status: &str| {
+            serde_json::to_vec(&json!({"pid": 4242, "status": status, "tmux": "s:@0.%1"}))
+                .expect("record JSON")
+        };
+        let path = directory.path().join("4242.json");
+        let settled = SystemTime::now() - Duration::from_hours(1);
+        let rewrite = |status: &str, modified: SystemTime| {
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(&path)
+                .expect("open record in place");
+            file.write_all(&record(status))
+                .expect("rewrite record in place");
+            file.set_modified(modified).expect("pin mtime");
+        };
+        rewrite("busy", settled);
+        fs::write(directory.path().join("notes.txt"), "ignored").expect("write stray file");
+        let mut cache = RegistryCache::default();
+        assert!(cache.refresh_in(directory.path()).expect("first scan"));
+        let statuses = |cache: &RegistryCache| {
+            cache
+                .records()
+                .map(|record| record.status.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(statuses(&cache), ["busy"]);
+        assert!(!cache.refresh_in(directory.path()).expect("quiet scan"));
+        rewrite("idle", settled);
+        assert!(!cache.refresh_in(directory.path()).expect("settled stamp"));
+        assert_eq!(statuses(&cache), ["busy"]);
+        let recent = SystemTime::now();
+        rewrite("idle", recent);
+        assert!(cache.refresh_in(directory.path()).expect("in-place scan"));
+        assert_eq!(statuses(&cache), ["idle"]);
+        rewrite("busy", recent);
+        assert!(cache.refresh_in(directory.path()).expect("same-stamp scan"));
+        assert_eq!(statuses(&cache), ["busy"]);
+        assert!(!cache.refresh_in(directory.path()).expect("racy quiet scan"));
+        fs::remove_file(&path).expect("remove record");
+        assert!(cache.refresh_in(directory.path()).expect("removal scan"));
+        assert!(statuses(&cache).is_empty());
+        assert!(!cache.refresh_in(directory.path()).expect("empty scan"));
+        fs::remove_dir_all(directory.path()).expect("remove registry");
+        assert!(
+            !cache
+                .refresh_in(directory.path())
+                .expect("missing registry")
+        );
+    }
+
+    #[test]
     fn replies_strip_only_the_outer_wrapper() {
         assert_eq!(
             reply_content(
@@ -1011,7 +1118,7 @@ mod tests {
         let lookups = std::cell::Cell::new(0);
         let parent_of = |pid| {
             lookups.set(lookups.get() + 1);
-            parent_pid(pid)
+            crate::process_info::parent(pid)
         };
         let me = std::process::id();
         let records = [PeerRecord {

@@ -46,7 +46,8 @@ just ios-gpui iPad testflight
 TestFlight mode builds a release binary with the production identity (`zz` on the host), packages
 it as `dev.zz.ios` ("zz", the bundle the native client shipped under) with the zz icon, workspace
 marketing version, and a UTC timestamp build number, and wraps it in an `.xcarchive` under
-`target/ios-testflight`. `xcodebuild -exportArchive` then signs it for App Store distribution and
+`target/ios-testflight`. The `testflight` Cargo profile keeps line tables, so the archive carries a
+dSYM for crash symbolication and the shipped binary is stripped afterwards. `xcodebuild -exportArchive` then signs it for App Store distribution and
 uploads it for internal TestFlight testing. Signing uses the Apple account signed into Xcode; set
 `APPLE_API_ISSUER_ID` to use the App Store Connect key in `../.zz-signing` instead.
 `ZZ_IOS_UPLOAD=0` exports the signed `.ipa` without uploading, and `ZZ_IOS_BUILD_NUMBER` overrides

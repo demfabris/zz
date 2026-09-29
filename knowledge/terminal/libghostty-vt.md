@@ -21,7 +21,7 @@ in `third_party/rust/libghostty-vt-sys/UPSTREAM.md`. It statically builds Ghostt
 upstream `6301810a48aaa3426887a4316668f18833a40138` (2026-09-25). The carried one-line
 `signal_stack_size = null` option removes the unused Zig signal-stack TLS allocation in C hosts; since
 upstream's TinyIo change, release builds no longer carry it, but the ReleaseSafe dev and test builds
-still do. Rust retains ownership of thread startup and signal handling. See the [macOS measurements](/research/2026-09-23-macos-performance.md). The repository pins **Zig 0.16.0** in `.zigversion`,
+(any profile cargo reports as `PROFILE=debug`) still do. Rust retains ownership of thread startup and signal handling. See the [macOS measurements](/research/2026-09-23-macos-performance.md). The repository pins **Zig 0.16.0** in `.zigversion`,
 `mise.toml`, and CI so every native rebuild uses the required compiler. `zz-terminal` enables the
 wrapper's `kitty-graphics` feature and leaves the other defaults off. `session.rs` uses
 `Terminal::kitty_graphics`, `Terminal::set_kitty_image_storage_limit`, `PlacementIterator`, and the

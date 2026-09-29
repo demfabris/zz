@@ -21,40 +21,45 @@ use std::{
 use parking_lot::{Condvar, Mutex};
 
 mod chooser_presentation;
+mod exec;
+#[cfg(test)]
+mod exec_tests;
+pub use exec::exec_resume_kind;
 pub(crate) mod path_listing;
-use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use zz_mux::{
     CUSTOMIZE_MENU_ITEMS, CUSTOMIZE_OUTSIDE_MENU_ITEMS, CellLayout, CommandAliasResolution,
     CommandPromptStep, CommandPromptTemplate, ConfigDiagnostic, CopyModeStyleValues, CustomizeMenu,
     CustomizeMenuItem, CustomizeMode, CustomizeResult, DEFAULT_BUFFER_LIMIT, DetachScope,
     Execution, ExecutionContext, FormatClient, FormatMonitorScope, FormatMonitorTarget,
-    KeyDecision, KeyEngine, KeyTables, MouseEventTarget, MuxEffect, MuxEngine, PaneKind,
-    PaneModeRequest, PaneRuntimeFacts, ParsedConfig, ParsedConfigBytes, RetainedJobEnvironment,
-    SourceStream, StatusHooks, SwitchAction, TmuxColour, TmuxSort, TmuxSortOrder, WindowSize,
-    canonical_command, command_block_body, copy_mode_action_is_read_only_safe, customize_menu_feed,
-    expand_format_bytes, expand_format_values, expand_status, format_command, format_true,
-    hook_format_variables, if_shell_truthy, parse_tmux_colour, sanitize_client_output,
-    send_keys_is_read_only_safe, send_keys_target_client, validate_static_command_chain,
+    FormatNeeds, KeyDecision, KeyEngine, KeyTables, MouseEventTarget, MuxEffect, MuxEngine,
+    PaneKind, PaneModeRequest, PaneRuntimeFacts, ParsedConfig, ParsedConfigBytes,
+    RetainedJobEnvironment, SourceStream, StatusHooks, SwitchAction, TmuxColour, TmuxSort,
+    TmuxSortOrder, WindowSize, canonical_command, command_block_body,
+    copy_mode_action_is_read_only_safe, customize_menu_feed, expand_format_bytes,
+    expand_format_values, expand_status, format_command, format_true, hook_format_variables,
+    if_shell_truthy, parse_tmux_colour, sanitize_client_output, send_keys_is_read_only_safe,
+    send_keys_target_client, validate_static_command_chain,
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, COMMAND_ARGS_PARSE_BEHAVES, ChooseBufferAction, ChooseBufferItem,
     ChooseBufferSearchState, ChooseBufferState, ChooseTreeAction, ChooseTreeItem, ChooseTreeKind,
     ChooseTreePaneKind, ChooseTreeSearchState, ChooseTreeState, ChooseTreeTarget,
-    ChooserPreviewSize, ChooserRow, ClientExitAction, ClientFileOperation, ClientFileRequest,
-    ClientFileResponse, ClientHello, ClientId, ClientInstanceId, ClientKind, ClientMessageKind,
-    ClientPath, ClipboardProducer, CommandInvocation, CommandPromptAction, CommandPromptKind,
-    CommandPromptMode, CommandPromptState, CommandPromptType, CommandRequest, CommandResolution,
-    CommandResponse, ConfigOverrideEntry, ConfirmAction, ConfirmState, ControlSourceFileEvent,
-    DisplayPanesAction, DisplayPanesState, Event, EventPayload, GuiResponse, InputMessage,
-    MAX_AGENT_SEND_BYTES, MAX_BROWSER_KEY_REPEAT, MAX_CHOOSE_BUFFER_QUERY_BYTES,
-    MAX_CHOOSE_ITEM_KEY_BYTES, MAX_CHOOSE_ITEM_TEXT_BYTES, MAX_CHOOSE_TREE_QUERY_BYTES,
-    MAX_ENCODED_FRAME_BYTES, MAX_KITTY_IMAGE_REMOVALS, MAX_PANE_INDICATOR_LABEL_BYTES,
-    MAX_STARTUP_CONFIG_CAUSE_BYTES, MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES,
-    MAX_WINDOW_STATUS_LABEL_BYTES, MENU_ROW_MARGIN, MenuAction, MenuItem, MenuState, MuxOptionKey,
-    MuxOptionSource, MuxOptions, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION,
-    PaneId, PaneIndicator, PaneKindSnapshot, PaneMode, PasteUploadPurpose, PastedImageFormat,
-    PopupAction, PopupBorderLines, PopupPointer, PopupPointerButton, PopupState, PreparedCommand,
-    PreparedCommandResult, ProtocolError, ProtocolMessage, RawText, SPLIT_RATIO_BASIS, ServerError,
+    ChooserPreviewSize, ChooserRow, ClientEnvironmentBlob, ClientExitAction, ClientFileOperation,
+    ClientFileRequest, ClientFileResponse, ClientHello, ClientId, ClientInstanceId, ClientKind,
+    ClientMessageKind, ClientPath, ClipboardProducer, CommandInvocation, CommandPromptAction,
+    CommandPromptKind, CommandPromptMode, CommandPromptState, CommandPromptType, CommandRequest,
+    CommandResolution, CommandResponse, ConfigOverrideEntry, ConfirmAction, ConfirmState,
+    ControlSourceFileEvent, DisplayPanesAction, DisplayPanesState, Event, EventPayload,
+    GuiResponse, InputMessage, MAX_AGENT_SEND_BYTES, MAX_BROWSER_KEY_REPEAT,
+    MAX_CHOOSE_BUFFER_QUERY_BYTES, MAX_CHOOSE_ITEM_KEY_BYTES, MAX_CHOOSE_ITEM_TEXT_BYTES,
+    MAX_CHOOSE_TREE_QUERY_BYTES, MAX_ENCODED_FRAME_BYTES, MAX_KITTY_IMAGE_REMOVALS,
+    MAX_PANE_INDICATOR_LABEL_BYTES, MAX_STARTUP_CONFIG_CAUSE_BYTES, MAX_STARTUP_CONFIG_CAUSES,
+    MAX_STARTUP_CONFIG_CAUSES_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES, MENU_ROW_MARGIN, MenuAction,
+    MenuItem, MenuState, MuxOptionKey, MuxOptionSource, MuxOptions, MuxSnapshot,
+    NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId, PaneIndicator, PaneKindSnapshot,
+    PaneMode, PasteUploadPurpose, PastedImageFormat, PopupAction, PopupBorderLines, PopupPointer,
+    PopupPointerButton, PopupState, PreparedCommand, PreparedCommandResult, ProtocolError,
+    ProtocolMessage, RawText, SERVER_OPTION_CAPABILITY_PREFIX, SPLIT_RATIO_BASIS, ServerError,
     ServerHello, SessionId, SessionViewer, SourceSpan, SplitId, StatusLine, StdoutClaim, WindowId,
     canonical_key, encode_protocol_message_into, encode_terminal_viewport_event_into, is_key_name,
     layout_menu_row, menu_row_cells, menu_row_width, read_protocol_message_into, resolve_command,
@@ -66,8 +71,8 @@ use zz_terminal::{
     CursorStyle, EngineKnobs, LastCommandCapture, PasteBufferAction, ProgressBarState,
     RawOutputTapError, TerminalAppearance, TerminalCaptureError, TerminalColorScheme,
     TerminalDiffScratch, TerminalEvent, TerminalEvents, TerminalMode, TerminalPalette,
-    TerminalSession, TerminalSize, TerminalSpawn, TerminalViewId, TerminalViewport, WordSeparators,
-    apply_appearance_overrides, parse_x11_color, prepare_paste_buffer,
+    TerminalSession, TerminalSize, TerminalSpawn, TerminalViewId, TerminalViewport, ViewStream,
+    WordSeparators, apply_appearance_overrides, parse_x11_color, prepare_paste_buffer,
 };
 
 #[cfg(feature = "agent")]
@@ -97,9 +102,8 @@ use crate::{
     shell_process,
     status::{
         BufferFormatFacts, ClientFormatFacts, ClientViewportFacts, DaemonFormatHooks,
-        FormatHookFacts, MessageFormatFacts, StatusRenderer, StatusRequest,
-        client_environment_rows, client_terminal_facts, host_names, status_context,
-        warm_terminfo_entries,
+        FormatHookFacts, MessageFormatFacts, StatusRenderer, StatusRequest, client_terminal_facts,
+        host_names, status_context, warm_terminfo_entries,
     },
     terminal_features::{terminal_colour_count, terminal_feature_mask, terminal_features_list},
     transport::{AcceptWake, LocalTransport, Transport, TransportListener, TransportStream},
@@ -400,62 +404,21 @@ fn tmux_environment(socket_path: &Path, session: Option<SessionId>) -> String {
     format!("{},{},{session}", socket_path.display(), std::process::id())
 }
 
-#[cfg(target_os = "macos")]
-#[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn terminal_working_directory(terminal: &TerminalSession) -> Option<PathBuf> {
-    use std::{ffi::CStr, mem::MaybeUninit, os::unix::ffi::OsStrExt as _};
-
-    let process_id = libc::pid_t::try_from(terminal.foreground_process_id()?)
-        .ok()
-        .filter(|pid| *pid > 0)?;
-    let mut info = MaybeUninit::<libc::proc_vnodepathinfo>::zeroed();
-    let size = i32::try_from(std::mem::size_of::<libc::proc_vnodepathinfo>()).ok()?;
-    let result = unsafe {
-        libc::proc_pidinfo(
-            process_id,
-            libc::PROC_PIDVNODEPATHINFO,
-            0,
-            info.as_mut_ptr().cast(),
-            size,
-        )
-    };
-    if result != size {
-        return None;
-    }
-    let cwd = unsafe { info.assume_init() }.pvi_cdir;
-    if cwd.vip_vi.vi_stat.vst_dev == 0 {
-        return None;
-    }
-    let path = unsafe {
-        std::slice::from_raw_parts(
-            cwd.vip_path.as_ptr().cast::<u8>(),
-            std::mem::size_of_val(&cwd.vip_path),
-        )
-    };
-    let path = CStr::from_bytes_until_nul(path).ok()?;
-    Some(PathBuf::from(OsStr::from_bytes(path.to_bytes())))
+    terminal
+        .foreground_process_id()
+        .filter(|pid| *pid != 0)
+        .and_then(crate::process_info::working_directory)
 }
 
-#[cfg(target_os = "linux")]
-fn terminal_working_directory(terminal: &TerminalSession) -> Option<PathBuf> {
-    let process_id = terminal.foreground_process_id().filter(|pid| *pid != 0)?;
-    let process_id = Pid::from_u32(process_id);
-    let mut system = System::new();
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::Some(&[process_id]),
-        true,
-        ProcessRefreshKind::nothing().with_cwd(sysinfo::UpdateKind::Always),
-    );
-    system
-        .process(process_id)
-        .and_then(|process| process.cwd())
-        .map(Path::to_path_buf)
-}
-
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn terminal_working_directory(_terminal: &TerminalSession) -> Option<PathBuf> {
     None
 }
+
+#[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
+mod process_facts_tests;
 
 fn home_directory_for(engine: &MuxEngine, user: &str) -> Option<String> {
     if user.is_empty() {
@@ -469,22 +432,10 @@ fn home_directory_for(engine: &MuxEngine, user: &str) -> Option<String> {
 }
 
 fn terminal_current_command(terminal: &TerminalSession) -> String {
-    let Some(process_id) = terminal
+    terminal
         .foreground_process_id()
         .filter(|pid| *pid != 0)
-        .map(Pid::from_u32)
-    else {
-        return String::new();
-    };
-    let mut system = System::new();
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::Some(&[process_id]),
-        true,
-        ProcessRefreshKind::nothing(),
-    );
-    system
-        .process(process_id)
-        .map(|process| process.name().to_string_lossy().into_owned())
+        .and_then(crate::process_info::command_name)
         .unwrap_or_default()
 }
 
@@ -989,13 +940,13 @@ impl StatusHooks for InertFormatHooks<'_> {
     }
 }
 
-fn server_format_context(
-    engine: &MuxEngine,
+fn server_format_context<'e>(
+    engine: &'e MuxEngine,
     config_files: &str,
     session: Option<SessionId>,
     window: Option<WindowId>,
     pane: Option<PaneId>,
-) -> zz_mux::StatusContext {
+) -> zz_mux::StatusContext<'e> {
     server_format_context_with_format_client(
         engine,
         config_files,
@@ -1007,15 +958,15 @@ fn server_format_context(
     )
 }
 
-fn server_format_context_with_format_client(
-    engine: &MuxEngine,
+fn server_format_context_with_format_client<'e>(
+    engine: &'e MuxEngine,
     config_files: &str,
     session: Option<SessionId>,
     window: Option<WindowId>,
     pane: Option<PaneId>,
     active_session: Option<SessionId>,
     format_client: FormatClient,
-) -> zz_mux::StatusContext {
+) -> zz_mux::StatusContext<'e> {
     let mut context = engine.format_status_context_with_format_client(
         session,
         window,
@@ -1159,7 +1110,7 @@ fn terminal_appearance_updates(
     inner: &ServerState,
 ) -> Vec<(Arc<TerminalSession>, Arc<TerminalAppearance>)> {
     let mut updates = Vec::with_capacity(inner.terminals.len() + inner.command_outputs.len());
-    for (pane, terminal) in &inner.terminals {
+    for (pane, terminal) in inner.terminals.iter() {
         let appearance =
             terminal_worker_options(&inner.engine, &inner.appearance, &inner.config_files, *pane)
                 .map_or_else(
@@ -1466,6 +1417,7 @@ pub struct Daemon {
     zz_mux_config_path: Option<PathBuf>,
     server_id: Option<u64>,
     initial_client_working_directory: Option<PathBuf>,
+    bootstrap_ready_fd: Option<i32>,
 }
 
 impl Daemon {
@@ -1478,7 +1430,14 @@ impl Daemon {
             zz_mux_config_path: None,
             server_id: None,
             initial_client_working_directory: None,
+            bootstrap_ready_fd: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_bootstrap_ready_fd(mut self, fd: i32) -> Self {
+        self.bootstrap_ready_fd = Some(fd);
+        self
     }
 
     #[must_use]
@@ -1524,7 +1483,8 @@ impl Daemon {
         &self,
         ready: impl FnOnce(u64) -> R,
     ) -> Result<(), DaemonError> {
-        prepare_socket(&self.socket_path)?;
+        let mut bootstrap_ready = BootstrapReady::adopt(self.bootstrap_ready_fd);
+        let start_lock = prepare_socket(&self.socket_path, &mut bootstrap_ready)?;
         let listener = LocalTransport::bind(&self.socket_path).map_err(|error| {
             if error.kind() == ErrorKind::AddrInUse {
                 DaemonError::AlreadyRunning(self.socket_path.clone())
@@ -1532,6 +1492,8 @@ impl Daemon {
                 DaemonError::Io(error)
             }
         })?;
+        drop(start_lock);
+        bootstrap_ready.signal();
         restrict_socket_permissions(&self.socket_path)?;
         listener.set_nonblocking(true)?;
         let socket_guard = SocketGuard::new(self.socket_path.clone());
@@ -1556,10 +1518,7 @@ impl Daemon {
         T::Listener: Send + 'static,
     {
         let (mut socket_guard, identity_guard) = socket_guards;
-        #[cfg(all(feature = "agent", unix))]
-        if let Err(error) = crate::agent::claude_peers::sweep_stale_records() {
-            log::warn!(target: "zz::agent", "could not sweep Claude peers: {error}");
-        }
+        exec::ConnectionThreads::log_knob();
         let color_scheme = daemon_color_scheme();
         let load = AppearanceLoad::defaults_for(color_scheme);
         log_appearance_load("startup", &load);
@@ -1607,12 +1566,21 @@ impl Daemon {
             shared.start_diagnostic_sampler()?;
             shared.start_status_sampler()?;
             shared.log_diagnostic_snapshot("startup");
+            if zz_mux::eager_universe_knob() {
+                log::info!("ZZ_PERF_EAGER_UNIVERSE=1: format universes are built eagerly");
+            }
             log::info!("zz daemon listening at {endpoint}");
+            log_pane_perf_knobs();
             Ok::<(), DaemonError>(())
         })();
         let _ready_guard = if startup_result.is_ok() {
             shared.finish_startup();
-            Some(ready(shared.server_id))
+            let ready_guard = ready(shared.server_id);
+            #[cfg(all(feature = "agent", unix))]
+            if let Err(error) = crate::agent::claude_peers::sweep_stale_records() {
+                log::warn!(target: "zz::agent", "could not sweep Claude peers: {error}");
+            }
+            Some(ready_guard)
         } else {
             shared.request_shutdown();
             None
@@ -1704,16 +1672,12 @@ fn accept_connections<T: Transport>(
     while !shared.stopping.load(Ordering::Acquire) {
         match listener.accept() {
             Ok(stream) => {
-                let shared = Arc::clone(shared);
-                if let Err(error) =
-                    thread::Builder::new()
-                        .name("zz-client".to_owned())
-                        .spawn(move || {
-                            if let Err(error) = handle_connection(stream, &shared) {
-                                log::debug!("client disconnected: {error}");
-                            }
-                        })
-                {
+                let connection_shared = Arc::clone(shared);
+                if let Err(error) = shared.connection_threads.run(Box::new(move || {
+                    if let Err(error) = handle_connection(stream, &connection_shared) {
+                        log::debug!("client disconnected: {error}");
+                    }
+                })) {
                     log::warn!("could not start client connection thread: {error}");
                 }
             }
@@ -1781,8 +1745,61 @@ struct TmuxShimGuard {
 }
 
 #[cfg(unix)]
+fn pinned_executable(directory: &Path, executable: &Path) -> PathBuf {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = directory;
+        let own = PathBuf::from(format!("/proc/{}/exe", std::process::id()));
+        if own.exists() {
+            return own;
+        }
+        executable.to_path_buf()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let Some(name) = executable.file_name() else {
+            return executable.to_path_buf();
+        };
+        let clone = directory.join(name);
+        if clone_file(executable, &clone).is_ok() || fs::hard_link(executable, &clone).is_ok() {
+            return clone;
+        }
+        executable.to_path_buf()
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = directory;
+        executable.to_path_buf()
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[allow(
+    unsafe_code,
+    reason = "clonefile copies one file the daemon can read into its own directory"
+)]
+fn clone_file(source: &Path, target: &Path) -> std::io::Result<()> {
+    use std::os::unix::ffi::OsStrExt as _;
+
+    unsafe extern "C" {
+        fn clonefile(
+            src: *const std::ffi::c_char,
+            dst: *const std::ffi::c_char,
+            flags: u32,
+        ) -> std::ffi::c_int;
+    }
+    let source = std::ffi::CString::new(source.as_os_str().as_bytes())?;
+    let target = std::ffi::CString::new(target.as_os_str().as_bytes())?;
+    if unsafe { clonefile(source.as_ptr(), target.as_ptr(), 0) } == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(unix)]
 impl TmuxShimGuard {
-    fn install(executable: PathBuf) -> std::io::Result<Self> {
+    fn install(executable: PathBuf, pin: bool) -> std::io::Result<Self> {
         use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
 
         let directory = loop {
@@ -1810,6 +1827,11 @@ impl TmuxShimGuard {
             let _ = fs::remove_dir(&directory);
             return Err(error);
         }
+        let executable = if pin {
+            pinned_executable(&directory, &executable)
+        } else {
+            executable
+        };
         Ok(Self {
             directory,
             executable,
@@ -1820,9 +1842,64 @@ impl TmuxShimGuard {
 #[cfg(unix)]
 impl Drop for TmuxShimGuard {
     fn drop(&mut self) {
+        if self.executable.parent() == Some(self.directory.as_path()) {
+            let _ = fs::remove_file(&self.executable);
+        }
         let _ = fs::remove_file(self.directory.join("tmux"));
         let _ = fs::remove_dir(&self.directory);
     }
+}
+
+struct BootstrapReady(Option<i32>);
+
+impl BootstrapReady {
+    #[cfg(unix)]
+    #[allow(
+        unsafe_code,
+        reason = "the spawning client handed this descriptor to the daemon alone"
+    )]
+    fn adopt(fd: Option<i32>) -> Self {
+        let fd = fd.filter(|fd| unsafe { libc::fcntl(*fd, libc::F_SETFD, libc::FD_CLOEXEC) } == 0);
+        Self(fd)
+    }
+
+    #[cfg(not(unix))]
+    fn adopt(fd: Option<i32>) -> Self {
+        let _ = fd;
+        Self(None)
+    }
+
+    #[cfg(unix)]
+    #[allow(
+        unsafe_code,
+        reason = "one byte to a pipe the daemon owns, then close it"
+    )]
+    fn signal(&mut self) {
+        if let Some(fd) = self.0.take() {
+            unsafe {
+                let _ = libc::write(fd, [1_u8].as_ptr().cast(), 1);
+                libc::close(fd);
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn signal(&mut self) {}
+}
+
+impl Drop for BootstrapReady {
+    #[cfg(unix)]
+    #[allow(unsafe_code, reason = "close a descriptor the daemon owns")]
+    fn drop(&mut self) {
+        if let Some(fd) = self.0.take() {
+            unsafe {
+                libc::close(fd);
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn drop(&mut self) {}
 }
 
 fn paste_upload_directory(socket_path: &Path) -> PathBuf {
@@ -1922,6 +1999,9 @@ struct OutboundState {
     discarded_bytes: u64,
     closed: bool,
     writer_finished: bool,
+    terminals_held: bool,
+    attach_batch: bool,
+    buffered: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1961,6 +2041,11 @@ impl TerminalGeneration {
     }
 }
 
+mod attach;
+
+#[cfg(test)]
+mod attach_tests;
+
 fn newer_terminal_delivered(
     state: &OutboundState,
     pane: PaneId,
@@ -1976,10 +2061,50 @@ fn newer_terminal_delivered(
             .is_some_and(|delivered| current.precedes(*delivered))
 }
 
+fn terminal_update_redundant(
+    state: &OutboundState,
+    pane: PaneId,
+    transition: TerminalTransition,
+    preview: bool,
+) -> bool {
+    let current = transition.current;
+    transition.base.is_none() && newer_terminal_delivered(state, pane, current)
+        || *attach::ATTACH_DEDUP
+            && (state.terminals.get(&pane).is_some_and(|pending| {
+                pending.current == current
+                    && (preview || !pending.preview)
+                    && (pending.full || transition.base.is_some())
+            }) || state.delivered_terminals.get(&pane) == Some(&current))
+}
+
+fn forget_delivered_terminal_state(state: &mut OutboundState, pane: PaneId) {
+    state.delivered_terminals.remove(&pane);
+    if state
+        .terminals
+        .get(&pane)
+        .is_some_and(|pending| !pending.full)
+    {
+        remove_pending_terminal(state, pane);
+    }
+}
+
+fn forget_delivered_terminals_state(state: &mut OutboundState) {
+    state.delivered_terminals.clear();
+    let patches = state
+        .terminals
+        .iter()
+        .filter_map(|(pane, pending)| (!pending.full).then_some(*pane))
+        .collect::<Vec<_>>();
+    for pane in patches {
+        remove_pending_terminal(state, pane);
+    }
+}
+
 struct PendingTerminal {
     encoded: Vec<u8>,
     current: TerminalGeneration,
     preview: bool,
+    full: bool,
 }
 
 struct PendingCommandOutput {
@@ -2106,11 +2231,6 @@ impl OutboundMailbox {
         recycle_outbound_frame(&mut state, frame);
     }
 
-    fn note_written(&self, bytes: usize) {
-        let mut state = self.state.lock();
-        state.written_bytes = state.written_bytes.saturating_add(bytes as u64);
-    }
-
     fn stats(&self) -> (u64, u64) {
         let state = self.state.lock();
         (state.written_bytes, state.discarded_bytes)
@@ -2189,10 +2309,13 @@ impl OutboundMailbox {
             state.queued_bytes = state.queued_bytes.saturating_sub(pending.encoded.len());
             discard_outbound_frame(&mut state, pending.encoded);
         }
+        if state.attach_batch && state.reliable.len() >= MAX_RELIABLE_MESSAGES / 2 {
+            state.attach_batch = false;
+        }
         if !reserve_outbound_bytes(&mut state, encoded.len(), 0) {
             shed_preview_terminals(&mut state);
         }
-        if state.reliable.len() >= MAX_RELIABLE_MESSAGES
+        if (!state.buffered && state.reliable.len() >= MAX_RELIABLE_MESSAGES)
             || !reserve_outbound_bytes(&mut state, encoded.len(), 0)
         {
             close_outbound_too_far_behind(&mut state);
@@ -2208,25 +2331,83 @@ impl OutboundMailbox {
 
     #[must_use]
     fn enqueue_encoded_reliable(&self, encoded: Vec<u8>) -> bool {
+        self.enqueue_encoded_reliable_with(encoded, |_| {})
+    }
+
+    #[must_use]
+    fn enqueue_attached(&self, message: &ProtocolMessage) -> bool {
+        let encoded = match self.encode_message(message) {
+            Ok(encoded) => encoded,
+            Err(error) => {
+                log::error!(
+                    target: "zz_daemon::diagnostics::outbound",
+                    "failed to encode outbound attach message: {error}"
+                );
+                return false;
+            }
+        };
+        self.enqueue_encoded_reliable_with(encoded, |state| {
+            if *attach::ATTACH_DEDUP {
+                forget_delivered_terminals_state(state);
+            }
+            state.terminals_held = false;
+        })
+    }
+
+    fn hold_terminals(&self) {
+        if *attach::ATTACH_DEDUP {
+            let mut state = self.state.lock();
+            state.terminals_held = true;
+            state.attach_batch = *attach::ATTACH_BATCH;
+        }
+    }
+
+    fn release_terminals(&self) {
+        let mut state = self.state.lock();
+        let held = std::mem::take(&mut state.terminals_held);
+        if !std::mem::take(&mut state.attach_batch) && !held {
+            return;
+        }
+        drop(state);
+        self.ready.notify_one();
+    }
+
+    fn enqueue_encoded_reliable_with(
+        &self,
+        encoded: Vec<u8>,
+        before_push: impl FnOnce(&mut OutboundState),
+    ) -> bool {
         let mut state = self.state.lock();
         if state.closed {
             return false;
         }
+        if state.attach_batch && state.reliable.len() >= MAX_RELIABLE_MESSAGES / 2 {
+            state.attach_batch = false;
+        }
         if !reserve_outbound_bytes(&mut state, encoded.len(), 0) {
             shed_preview_terminals(&mut state);
         }
-        if state.reliable.len() >= MAX_RELIABLE_MESSAGES
+        if (!state.buffered && state.reliable.len() >= MAX_RELIABLE_MESSAGES)
             || !reserve_outbound_bytes(&mut state, encoded.len(), 0)
         {
             close_outbound_too_far_behind(&mut state);
             self.ready.notify_all();
             return false;
         }
+        before_push(&mut state);
         state.queued_bytes += encoded.len();
         state.reliable.push_back(encoded);
         drop(state);
         self.ready.notify_one();
         true
+    }
+
+    fn forget_delivered_terminal(&self, pane: PaneId) {
+        forget_delivered_terminal_state(&mut self.state.lock(), pane);
+    }
+
+    fn forget_delivered_terminals(&self) {
+        forget_delivered_terminals_state(&mut self.state.lock());
     }
 
     fn enqueue_kitty_image(
@@ -2553,6 +2734,10 @@ impl OutboundMailbox {
             if matches!(delivery, TerminalDelivery::Foreground) {
                 clear_preview_refresh(&mut state, pane);
             }
+            let preview = matches!(delivery, TerminalDelivery::Preview { .. });
+            if terminal_update_redundant(&state, pane, transition, preview) {
+                return TerminalEnqueue::Dropped;
+            }
             if state.terminals.contains_key(&pane) {
                 return match delivery {
                     TerminalDelivery::Foreground => TerminalEnqueue::NeedsFull,
@@ -2566,11 +2751,6 @@ impl OutboundMailbox {
                 && transition.base != state.delivered_terminals.get(&pane).copied()
             {
                 return TerminalEnqueue::NeedsFull;
-            }
-            if transition.base.is_none()
-                && newer_terminal_delivered(&state, pane, transition.current)
-            {
-                return TerminalEnqueue::Dropped;
             }
             if let TerminalDelivery::Preview { foreground_panes } = delivery
                 && (state.terminals.len() >= MAX_PENDING_TERMINALS.saturating_sub(foreground_panes)
@@ -2600,6 +2780,11 @@ impl OutboundMailbox {
         if matches!(delivery, TerminalDelivery::Foreground) {
             clear_preview_refresh(&mut state, pane);
         }
+        let preview = matches!(delivery, TerminalDelivery::Preview { .. });
+        if terminal_update_redundant(&state, pane, transition, preview) {
+            recycle_outbound_frame(&mut state, encoded);
+            return TerminalEnqueue::Dropped;
+        }
         if state.terminals.contains_key(&pane) {
             recycle_outbound_frame(&mut state, encoded);
             return match delivery {
@@ -2615,10 +2800,6 @@ impl OutboundMailbox {
         {
             recycle_outbound_frame(&mut state, encoded);
             return TerminalEnqueue::NeedsFull;
-        }
-        if transition.base.is_none() && newer_terminal_delivered(&state, pane, transition.current) {
-            recycle_outbound_frame(&mut state, encoded);
-            return TerminalEnqueue::Dropped;
         }
         match delivery {
             TerminalDelivery::Foreground => {
@@ -2662,6 +2843,7 @@ impl OutboundMailbox {
                 encoded,
                 current: transition.current,
                 preview: matches!(delivery, TerminalDelivery::Preview { .. }),
+                full: transition.base.is_none(),
             },
         );
         state.terminal_order.push_back(pane);
@@ -2702,6 +2884,15 @@ impl OutboundMailbox {
         transition: TerminalTransition,
         encode: impl FnOnce(&mut Vec<u8>) -> Result<(), ProtocolError>,
     ) -> bool {
+        {
+            let state = self.state.lock();
+            if state.closed {
+                return false;
+            }
+            if terminal_update_redundant(&state, pane, transition, false) {
+                return false;
+            }
+        }
         let Ok(encoded) = self.encode_with(encode) else {
             log::error!("failed to encode coalesced terminal update for {pane}");
             return false;
@@ -2710,7 +2901,7 @@ impl OutboundMailbox {
         if state.closed {
             return false;
         }
-        if newer_terminal_delivered(&state, pane, transition.current) {
+        if terminal_update_redundant(&state, pane, transition, false) {
             recycle_outbound_frame(&mut state, encoded);
             return false;
         }
@@ -2745,6 +2936,7 @@ impl OutboundMailbox {
                 encoded,
                 current: transition.current,
                 preview: false,
+                full: transition.base.is_none(),
             },
         );
         if let Some(replaced) = replaced {
@@ -2820,44 +3012,42 @@ impl OutboundMailbox {
     fn recv(&self) -> Option<Vec<u8>> {
         let mut state = self.state.lock();
         loop {
-            if let Some(frame) = state.reliable.pop_front() {
-                state.queued_bytes = state.queued_bytes.saturating_sub(frame.len());
+            if let Some(frame) = pop_ready_frame(&mut state) {
                 return Some(frame);
-            }
-            if let Some(pending) = state.command_output.take() {
-                state.queued_bytes = state.queued_bytes.saturating_sub(pending.encoded.len());
-                return Some(pending.encoded);
-            }
-            // One frame per pane per turn: a chatty agent never starves the
-            // pane beside it, and terminals still drain behind both.
-            while let Some(pane) = state.agent_order.pop_front() {
-                let Some(queued) = state.agent.get_mut(&pane) else {
-                    continue;
-                };
-                let Some((_, frame)) = queued.frames.pop_front() else {
-                    state.agent.remove(&pane);
-                    continue;
-                };
-                queued.bytes = queued.bytes.saturating_sub(frame.len());
-                if queued.frames.is_empty() {
-                    state.agent.remove(&pane);
-                } else {
-                    state.agent_order.push_back(pane);
-                }
-                state.queued_bytes = state.queued_bytes.saturating_sub(frame.len());
-                return Some(frame);
-            }
-            while let Some(pane) = state.terminal_order.pop_front() {
-                if let Some(pending) = state.terminals.remove(&pane) {
-                    state.queued_bytes = state.queued_bytes.saturating_sub(pending.encoded.len());
-                    state.delivered_terminals.insert(pane, pending.current);
-                    return Some(pending.encoded);
-                }
             }
             if state.closed {
                 return None;
             }
             self.ready.wait(&mut state);
+        }
+    }
+
+    fn recv_batch(&self, frames: &mut Vec<Vec<u8>>, max_bytes: usize) -> bool {
+        let mut state = self.state.lock();
+        loop {
+            let mut bytes = 0_usize;
+            while bytes < max_bytes {
+                let Some(frame) = pop_ready_frame(&mut state) else {
+                    break;
+                };
+                bytes = bytes.saturating_add(frame.len());
+                frames.push(frame);
+            }
+            if !frames.is_empty() {
+                return true;
+            }
+            if state.closed {
+                return false;
+            }
+            self.ready.wait(&mut state);
+        }
+    }
+
+    fn finish_batch(&self, frames: &mut Vec<Vec<u8>>) {
+        let mut state = self.state.lock();
+        for frame in frames.drain(..) {
+            state.written_bytes = state.written_bytes.saturating_add(frame.len() as u64);
+            recycle_outbound_frame(&mut state, frame);
         }
     }
 
@@ -2873,6 +3063,29 @@ impl OutboundMailbox {
         state.closed = true;
         drop(state);
         self.ready.notify_all();
+    }
+
+    fn buffered() -> Arc<Self> {
+        Arc::new(Self {
+            state: Mutex::new(OutboundState {
+                buffered: true,
+                ..OutboundState::default()
+            }),
+            ready: Condvar::new(),
+        })
+    }
+
+    fn stop_buffering(&self) {
+        self.state.lock().buffered = false;
+    }
+
+    fn drain_reliable_into(&self, output: &mut Vec<u8>) {
+        let mut state = self.state.lock();
+        while let Some(frame) = state.reliable.pop_front() {
+            state.queued_bytes = state.queued_bytes.saturating_sub(frame.len());
+            output.extend_from_slice(&frame);
+            recycle_outbound_frame(&mut state, frame);
+        }
     }
 
     fn mark_writer_finished(&self) {
@@ -2974,6 +3187,50 @@ impl OutboundMailbox {
             state.recycled_frames.iter().map(Vec::capacity).collect::<Vec<_>>(),
         );
     }
+}
+
+fn pop_ready_frame(state: &mut OutboundState) -> Option<Vec<u8>> {
+    if state.attach_batch {
+        return None;
+    }
+    if let Some(frame) = state.reliable.pop_front() {
+        state.queued_bytes = state.queued_bytes.saturating_sub(frame.len());
+        return Some(frame);
+    }
+    if let Some(pending) = state.command_output.take() {
+        state.queued_bytes = state.queued_bytes.saturating_sub(pending.encoded.len());
+        return Some(pending.encoded);
+    }
+    // One frame per pane per turn: a chatty agent never starves the
+    // pane beside it, and terminals still drain behind both.
+    while let Some(pane) = state.agent_order.pop_front() {
+        let Some(queued) = state.agent.get_mut(&pane) else {
+            continue;
+        };
+        let Some((_, frame)) = queued.frames.pop_front() else {
+            state.agent.remove(&pane);
+            continue;
+        };
+        queued.bytes = queued.bytes.saturating_sub(frame.len());
+        if queued.frames.is_empty() {
+            state.agent.remove(&pane);
+        } else {
+            state.agent_order.push_back(pane);
+        }
+        state.queued_bytes = state.queued_bytes.saturating_sub(frame.len());
+        return Some(frame);
+    }
+    if state.terminals_held {
+        return None;
+    }
+    while let Some(pane) = state.terminal_order.pop_front() {
+        if let Some(pending) = state.terminals.remove(&pane) {
+            state.queued_bytes = state.queued_bytes.saturating_sub(pending.encoded.len());
+            state.delivered_terminals.insert(pane, pending.current);
+            return Some(pending.encoded);
+        }
+    }
+    None
 }
 
 fn take_recycled_frame(state: &mut OutboundState) -> Vec<u8> {
@@ -3384,6 +3641,23 @@ struct Shared {
     destroy_unattached_hook: Mutex<Option<ResponseAdmissionHook>>,
     #[cfg(unix)]
     tmux_shim: Mutex<Option<TmuxShimGuard>>,
+    status_job_needs: crate::status::StatusJobNeeds,
+    timer_tx: crossbeam_channel::Sender<timers::TimerCommand>,
+    timer_rx: Mutex<Option<crossbeam_channel::Receiver<timers::TimerCommand>>>,
+    publish_flush: Mutex<timers::PublishFlush>,
+    hook_worker: Mutex<timers::HookWorker>,
+    status_sampler: Mutex<Option<thread::Thread>>,
+    status_sampler_idle: AtomicBool,
+    snapshot_order: Mutex<()>,
+    #[cfg(all(feature = "agent", unix))]
+    peer_probe: AtomicBool,
+    #[cfg(all(feature = "agent", unix))]
+    peer_registry: Mutex<crate::agent::claude_peers::RegistryCache>,
+    pending_execs: Mutex<Vec<Box<dyn FnOnce() + Send>>>,
+    exec_links: Mutex<BTreeMap<ClientId, Arc<exec::ExecLink>>>,
+    prompt_history_source: Mutex<Option<(PathBuf, usize)>>,
+    prompt_history_settled: AtomicBool,
+    connection_threads: Arc<exec::ConnectionThreads>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -4289,10 +4563,10 @@ fn prepare_config_command(
 impl Shared {
     #[cfg(unix)]
     fn install_tmux_shim(&self) -> Result<(), DaemonError> {
-        let executable = std::env::var_os(crate::TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE)
-            .map(PathBuf::from)
-            .map_or_else(std::env::current_exe, Ok)?;
-        let shim = TmuxShimGuard::install(executable)?;
+        let shim = match std::env::var_os(crate::TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE) {
+            Some(executable) => TmuxShimGuard::install(PathBuf::from(executable), false)?,
+            None => TmuxShimGuard::install(std::env::current_exe()?, true)?,
+        };
         self.status
             .lock()
             .set_tmux_shim(shim.directory.clone(), shim.executable.clone());
@@ -4385,6 +4659,9 @@ impl Shared {
                 .set_default_status_keys(keys)
                 .expect("daemon status-keys default is valid");
         }
+        state
+            .engine
+            .set_automatic_rename_throttle(*timers::RENAME_THROTTLE);
         state.engine.initialize_default_editor(default_editor);
         state.engine.initialize_default_shell(default_shell);
         state.engine.seed_global_environment(environment);
@@ -4412,6 +4689,9 @@ impl Shared {
         let (silence_deadline_tx, silence_deadline_rx) = crossbeam_channel::unbounded();
         let (client_message_deadline_tx, client_message_deadline_rx) =
             crossbeam_channel::unbounded();
+        let status = StatusRenderer::default();
+        let status_job_needs = status.job_needs();
+        let (timer_tx, timer_rx) = crossbeam_channel::unbounded();
         Self {
             accept_wake: AcceptWake::new(),
             inner: Mutex::new(state),
@@ -4442,7 +4722,7 @@ impl Shared {
             peer_waits: Arc::new(Mutex::new(crate::agent::claude_peers::PeerWaits::default())),
             kitty_image_frames: Mutex::new(BTreeMap::new()),
             pasted_images: Mutex::new(BTreeMap::new()),
-            status: Mutex::new(StatusRenderer::default()),
+            status: Mutex::new(status),
             display_panes_deadline_tx,
             display_panes_deadline_rx: Mutex::new(Some(display_panes_deadline_rx)),
             key_table_deadline_tx,
@@ -4478,6 +4758,23 @@ impl Shared {
             destroy_unattached_hook: Mutex::new(None),
             #[cfg(unix)]
             tmux_shim: Mutex::new(None),
+            status_job_needs,
+            timer_tx,
+            timer_rx: Mutex::new(Some(timer_rx)),
+            publish_flush: Mutex::new(timers::PublishFlush::default()),
+            hook_worker: Mutex::new(timers::HookWorker::default()),
+            status_sampler: Mutex::new(None),
+            status_sampler_idle: AtomicBool::new(false),
+            snapshot_order: Mutex::new(()),
+            #[cfg(all(feature = "agent", unix))]
+            peer_probe: AtomicBool::new(false),
+            #[cfg(all(feature = "agent", unix))]
+            peer_registry: Mutex::new(crate::agent::claude_peers::RegistryCache::default()),
+            pending_execs: Mutex::new(Vec::new()),
+            exec_links: Mutex::new(BTreeMap::new()),
+            prompt_history_source: Mutex::new(None),
+            prompt_history_settled: AtomicBool::new(true),
+            connection_threads: Arc::default(),
         }
     }
 
@@ -4488,6 +4785,7 @@ impl Shared {
     fn finish_startup(&self) {
         *self.startup_ready.lock() = true;
         self.startup_changed.notify_all();
+        self.resume_pending_execs();
     }
 
     fn wait_for_startup(&self) -> bool {
@@ -4514,10 +4812,15 @@ impl Shared {
         mux_config_files: Option<&[PathBuf]>,
         initial_client_working_directory: Option<&Path>,
     ) -> Result<(), DaemonError> {
-        self.start_display_panes_deadline_dispatcher()?;
-        self.start_key_table_deadline_dispatcher()?;
-        self.start_silence_deadline_dispatcher()?;
-        self.start_client_message_deadline_dispatcher()?;
+        log::info!(
+            target: "zz_daemon::perf",
+            "publication knobs: ZZ_PERF_EAGER_PUBLISH={} ZZ_PERF_RENAME_THROTTLE={} ZZ_PERF_PEER_SCAN={}",
+            u8::from(*timers::EAGER_PUBLISH),
+            u8::from(*timers::RENAME_THROTTLE),
+            if *timers::PEER_SCAN_ALWAYS { "always" } else { "changes" },
+        );
+        attach::log_knobs();
+        self.start_timers()?;
         let mut context = ExecutionContext::default();
         *self.mux_config_selection.lock() =
             (load_user_config, mux_config_files.map(<[PathBuf]>::to_vec));
@@ -4542,317 +4845,25 @@ impl Shared {
             prompt_history_path(inner.engine.history_file())
                 .map(|path| (path, inner.engine.prompt_history_limit()))
         };
-        if let Some((path, limit)) = history_settings {
+        if let Some(source) = history_settings {
+            *self.prompt_history_source.lock() = Some(source);
+            self.prompt_history_settled.store(false, Ordering::Release);
+        }
+        Ok(())
+    }
+
+    fn ensure_prompt_history(&self) {
+        if self.prompt_history_settled.load(Ordering::Acquire) {
+            return;
+        }
+        let mut source = self.prompt_history_source.lock();
+        if let Some((path, limit)) = source.take() {
             let (command, search) = load_command_prompt_history(&path, limit);
             let mut inner = self.inner.lock();
             inner.command_history = command;
             inner.search_history = search;
         }
-        Ok(())
-    }
-
-    fn start_display_panes_deadline_dispatcher(self: &Arc<Self>) -> Result<(), DaemonError> {
-        let Some(receiver) = self.display_panes_deadline_rx.lock().take() else {
-            return Ok(());
-        };
-        let shared = Arc::downgrade(self);
-        let (ready_tx, ready_rx) = crossbeam_channel::bounded(1);
-        thread::Builder::new()
-            .name("zz-display-panes".to_owned())
-            .spawn(move || {
-                if ready_tx.send(()).is_err() {
-                    return;
-                }
-                let mut deadlines = BTreeMap::<ClientId, DisplayPanesDeadline>::new();
-                loop {
-                    let next = deadlines
-                        .values()
-                        .min_by_key(|deadline| deadline.deadline)
-                        .copied();
-                    let command = if let Some(next) = next {
-                        let now = Instant::now();
-                        if next.deadline <= now {
-                            deadlines.remove(&next.client);
-                            let Some(shared) = shared.upgrade() else {
-                                return;
-                            };
-                            shared.expire_display_panes(next, now);
-                            continue;
-                        }
-                        match receiver.recv_deadline(next.deadline) {
-                            Ok(command) => command,
-                            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                                deadlines.remove(&next.client);
-                                let Some(shared) = shared.upgrade() else {
-                                    return;
-                                };
-                                shared.expire_display_panes(next, Instant::now());
-                                continue;
-                            }
-                            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
-                        }
-                    } else {
-                        let Ok(command) = receiver.recv() else {
-                            return;
-                        };
-                        command
-                    };
-                    match command {
-                        DisplayPanesDeadlineCommand::Schedule(deadline) => {
-                            let Some(shared) = shared.upgrade() else {
-                                return;
-                            };
-                            if shared
-                                .inner
-                                .lock()
-                                .display_panes
-                                .get(&deadline.client)
-                                .is_some_and(|overlay| {
-                                    overlay.token == deadline.token
-                                        && overlay.deadline == Some(deadline.deadline)
-                                })
-                            {
-                                deadlines.insert(deadline.client, deadline);
-                            }
-                        }
-                        DisplayPanesDeadlineCommand::Cancel { client, token } => {
-                            if deadlines
-                                .get(&client)
-                                .is_some_and(|deadline| deadline.token == token)
-                            {
-                                deadlines.remove(&client);
-                            }
-                        }
-                    }
-                }
-            })
-            .map_err(|error| DaemonError::Thread(error.to_string()))?;
-        ready_rx
-            .recv()
-            .map_err(|error| DaemonError::Thread(error.to_string()))
-    }
-
-    fn start_key_table_deadline_dispatcher(self: &Arc<Self>) -> Result<(), DaemonError> {
-        let Some(receiver) = self.key_table_deadline_rx.lock().take() else {
-            return Ok(());
-        };
-        let shared = Arc::downgrade(self);
-        let (ready_tx, ready_rx) = crossbeam_channel::bounded(1);
-        thread::Builder::new()
-            .name("zz-key-table".to_owned())
-            .spawn(move || {
-                if ready_tx.send(()).is_err() {
-                    return;
-                }
-                let mut deadlines = BTreeMap::<ClientId, Instant>::new();
-                loop {
-                    let next = deadlines
-                        .iter()
-                        .min_by_key(|(_, deadline)| **deadline)
-                        .map(|(client, deadline)| (*client, *deadline));
-                    let command = if let Some((client, deadline)) = next {
-                        if deadline <= Instant::now() {
-                            deadlines.remove(&client);
-                            let Some(shared) = shared.upgrade() else {
-                                return;
-                            };
-                            shared.sync_key_table(client, false);
-                            continue;
-                        }
-                        match receiver.recv_deadline(deadline) {
-                            Ok(command) => command,
-                            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                                deadlines.remove(&client);
-                                let Some(shared) = shared.upgrade() else {
-                                    return;
-                                };
-                                shared.sync_key_table(client, false);
-                                continue;
-                            }
-                            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
-                        }
-                    } else {
-                        let Ok(command) = receiver.recv() else {
-                            return;
-                        };
-                        command
-                    };
-                    match command {
-                        KeyTableDeadlineCommand::Schedule(client, Some(deadline)) => {
-                            deadlines.insert(client, deadline);
-                        }
-                        KeyTableDeadlineCommand::Schedule(client, None) => {
-                            deadlines.remove(&client);
-                        }
-                    }
-                }
-            })
-            .map_err(|error| DaemonError::Thread(error.to_string()))?;
-        ready_rx
-            .recv()
-            .map_err(|error| DaemonError::Thread(error.to_string()))
-    }
-
-    fn start_silence_deadline_dispatcher(self: &Arc<Self>) -> Result<(), DaemonError> {
-        let Some(receiver) = self.silence_deadline_rx.lock().take() else {
-            return Ok(());
-        };
-        let shared = Arc::downgrade(self);
-        let (ready_tx, ready_rx) = crossbeam_channel::bounded(1);
-        thread::Builder::new()
-            .name("zz-monitor-silence".to_owned())
-            .spawn(move || {
-                if ready_tx.send(()).is_err() {
-                    return;
-                }
-                let mut deadlines = BTreeMap::<WindowId, SilenceDeadline>::new();
-                loop {
-                    let next = deadlines
-                        .values()
-                        .min_by_key(|deadline| deadline.deadline)
-                        .copied();
-                    let command = if let Some(next) = next {
-                        let now = Instant::now();
-                        if next.deadline <= now {
-                            deadlines.remove(&next.window);
-                            let Some(shared) = shared.upgrade() else {
-                                return;
-                            };
-                            shared.expire_window_silence(next, now);
-                            continue;
-                        }
-                        match receiver.recv_deadline(next.deadline) {
-                            Ok(command) => command,
-                            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                                deadlines.remove(&next.window);
-                                let Some(shared) = shared.upgrade() else {
-                                    return;
-                                };
-                                shared.expire_window_silence(next, Instant::now());
-                                continue;
-                            }
-                            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
-                        }
-                    } else {
-                        let Ok(command) = receiver.recv() else {
-                            return;
-                        };
-                        command
-                    };
-                    match command {
-                        SilenceDeadlineCommand::Schedule(deadline) => {
-                            let Some(shared) = shared.upgrade() else {
-                                return;
-                            };
-                            if shared
-                                .inner
-                                .lock()
-                                .silence_deadlines
-                                .get(&deadline.window)
-                                .is_some_and(|current| *current == deadline)
-                            {
-                                deadlines.insert(deadline.window, deadline);
-                            }
-                        }
-                        SilenceDeadlineCommand::Cancel { window, token } => {
-                            if deadlines
-                                .get(&window)
-                                .is_some_and(|deadline| deadline.token == token)
-                            {
-                                deadlines.remove(&window);
-                            }
-                        }
-                    }
-                }
-            })
-            .map_err(|error| DaemonError::Thread(error.to_string()))?;
-        ready_rx
-            .recv()
-            .map_err(|error| DaemonError::Thread(error.to_string()))
-    }
-
-    /// Owns the pin's per-client `message_timer`. Keyed per client and
-    /// token-validated on both schedule and expiry so a retired message's
-    /// deadline can never retire the message that replaced it.
-    fn start_client_message_deadline_dispatcher(self: &Arc<Self>) -> Result<(), DaemonError> {
-        let Some(receiver) = self.client_message_deadline_rx.lock().take() else {
-            return Ok(());
-        };
-        let shared = Arc::downgrade(self);
-        let (ready_tx, ready_rx) = crossbeam_channel::bounded(1);
-        thread::Builder::new()
-            .name("zz-client-message".to_owned())
-            .spawn(move || {
-                if ready_tx.send(()).is_err() {
-                    return;
-                }
-                let mut deadlines = BTreeMap::<ClientId, ClientMessageDeadline>::new();
-                loop {
-                    let next = deadlines
-                        .values()
-                        .min_by_key(|deadline| deadline.deadline)
-                        .copied();
-                    let command = if let Some(next) = next {
-                        let now = Instant::now();
-                        if next.deadline <= now {
-                            deadlines.remove(&next.client);
-                            let Some(shared) = shared.upgrade() else {
-                                return;
-                            };
-                            shared.expire_client_message(next, now);
-                            continue;
-                        }
-                        match receiver.recv_deadline(next.deadline) {
-                            Ok(command) => command,
-                            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                                deadlines.remove(&next.client);
-                                let Some(shared) = shared.upgrade() else {
-                                    return;
-                                };
-                                shared.expire_client_message(next, Instant::now());
-                                continue;
-                            }
-                            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
-                        }
-                    } else {
-                        let Ok(command) = receiver.recv() else {
-                            return;
-                        };
-                        command
-                    };
-                    match command {
-                        ClientMessageDeadlineCommand::Schedule(deadline) => {
-                            let Some(shared) = shared.upgrade() else {
-                                return;
-                            };
-                            if shared
-                                .inner
-                                .lock()
-                                .client_messages
-                                .get(&deadline.client)
-                                .is_some_and(|current| {
-                                    current.token == deadline.token
-                                        && current.deadline == Some(deadline.deadline)
-                                })
-                            {
-                                deadlines.insert(deadline.client, deadline);
-                            }
-                        }
-                        ClientMessageDeadlineCommand::Cancel { client, token } => {
-                            if deadlines
-                                .get(&client)
-                                .is_some_and(|deadline| deadline.token == token)
-                            {
-                                deadlines.remove(&client);
-                            }
-                        }
-                    }
-                }
-            })
-            .map_err(|error| DaemonError::Thread(error.to_string()))?;
-        ready_rx
-            .recv()
-            .map_err(|error| DaemonError::Thread(error.to_string()))
+        self.prompt_history_settled.store(true, Ordering::Release);
     }
 
     fn freeze_response_admissions_and_wait(&self, timeout: Duration) -> bool {
@@ -4920,6 +4931,7 @@ impl Shared {
         self.stopping.store(true, Ordering::Release);
         self.accept_wake.wake();
         self.startup_changed.notify_all();
+        self.drop_pending_execs();
         let events = self.stop_shutdown_resources(true, run_hooks);
         if run_hooks && !self.shutdown_drops_event_hooks.load(Ordering::Acquire) {
             self.run_shutdown_event_hooks(events);
@@ -4995,7 +5007,9 @@ impl Shared {
         ) = {
             let mut inner = self.inner.lock();
             let mut terminals = std::mem::take(&mut inner.terminals)
-                .into_values()
+                .values()
+                .cloned()
+                .inspect(|terminal| terminal.retire())
                 .collect::<Vec<_>>();
             terminals.extend(
                 inner
@@ -5184,6 +5198,14 @@ impl Shared {
         self.refresh_status_for_sessions(None);
     }
 
+    fn status_job_needs(&self, client: ClientId) -> FormatNeeds {
+        self.status_job_needs
+            .lock()
+            .get(&client)
+            .copied()
+            .unwrap_or_default()
+    }
+
     fn refresh_status_for_sessions(&self, sessions: Option<&BTreeSet<SessionId>>) {
         self.refresh_status_filtered(sessions, None);
     }
@@ -5196,37 +5218,33 @@ impl Shared {
         let startup_ready = *self.startup_ready.lock();
         let requests = {
             let mut inner = self.inner.lock();
+            let targets = status_targets(&inner, sessions, clients);
+            if targets.is_empty() && !*timers::EAGER_PUBLISH {
+                return;
+            }
             inner.engine.set_format_now(unix_timestamp());
             let snapshot = inner.engine.state.snapshot();
             let facts = format_hook_facts(&inner);
-            let option_snapshot = Arc::new(inner.engine.format_option_snapshot());
-            inner
-                .subscribers
-                .keys()
-                .copied()
-                .filter(|client| {
-                    clients.is_none_or(|clients| clients.contains(client))
-                        && sessions.is_none_or(|sessions| {
-                            client_attached_session(&inner, *client)
-                                .is_some_and(|session| sessions.contains(&session))
-                        })
-                })
-                .map(|client| {
-                    status_request(
-                        &inner,
-                        client,
-                        &snapshot,
-                        option_snapshot.clone(),
-                        facts.clone(),
-                        startup_ready,
-                    )
-                })
-                .collect::<Vec<_>>()
+            status_requests(
+                &inner,
+                targets,
+                &snapshot,
+                &facts,
+                startup_ready,
+                &self.status_job_needs,
+            )
         };
+        self.publish_status_requests(&requests);
+    }
+
+    fn publish_status_requests(&self, requests: &[StatusRequest]) {
         if requests.is_empty() {
             return;
         }
-        let changed = self.status.lock().render_changed(&requests);
+        let changed = {
+            let _round_trips = zz_terminal::forbid_actor_round_trips();
+            self.status.lock().render_changed(requests)
+        };
         if !changed.is_empty() {
             let mut inner = self.inner.lock();
             for (client, status) in &changed {
@@ -5253,7 +5271,7 @@ impl Shared {
                         client: Some(client_format_facts(&inner, *client, session)),
                         ..FormatHookFacts::default()
                     };
-                    let requests = mode_requests(&inner, *client, session);
+                    let requests = mode_requests(&inner, *client, session, FormatNeeds::NONE);
                     Some((
                         *client,
                         crate::status::expand_modes(&requests, &facts, &inner.engine),
@@ -5287,27 +5305,28 @@ impl Shared {
             let base_facts = format_hook_facts(&inner);
             let mut events = Vec::new();
             for (client, session) in clients {
-                let client_facts = client_format_facts(&inner, client, session);
+                let facts = FormatHookFacts {
+                    client: Some(client_format_facts(&inner, client, session)),
+                    ..base_facts.clone()
+                };
                 let mut subscriptions = inner
                     .control_outputs
                     .get_mut(&client)
                     .map(|output| std::mem::take(&mut output.subscriptions))
                     .unwrap_or_default();
+                let contexts = inner
+                    .engine
+                    .format_context_snapshot(FormatClient::Attached(session));
                 for (name, subscription) in &mut subscriptions {
                     let mut current = BTreeMap::new();
                     for target in control_subscription_targets(&inner, session, subscription.scope)
                     {
-                        let mut context = inner.engine.format_status_context_for_client(
+                        let mut context = contexts.status_context(
                             Some(target.session),
                             target.window,
                             target.pane,
-                            session,
                         );
                         context.config_files.clone_from(&inner.config_files);
-                        let facts = FormatHookFacts {
-                            client: Some(client_facts.clone()),
-                            ..base_facts.clone()
-                        };
                         let mut hooks =
                             DaemonFormatHooks::command(&facts).with_option_engine(&inner.engine);
                         let value =
@@ -5354,6 +5373,8 @@ impl Shared {
             inner.engine.set_format_now(unix_timestamp());
             let base_facts = format_hook_facts(&inner);
             let mut fires = Vec::new();
+            let mut samples_by_monitor = Vec::new();
+            let contexts = inner.engine.format_context_snapshot(FormatClient::NoClient);
             for monitor in monitors {
                 let Some(session) = monitor
                     .session
@@ -5372,11 +5393,8 @@ impl Shared {
                 let mut seen = BTreeSet::new();
                 let mut samples = Vec::new();
                 for target in control_subscription_targets(&inner, session, scope) {
-                    let mut context = inner.engine.format_status_context(
-                        Some(target.session),
-                        target.window,
-                        target.pane,
-                    );
+                    let mut context =
+                        contexts.status_context(Some(target.session), target.window, target.pane);
                     context.config_files.clone_from(&inner.config_files);
                     let mut hooks =
                         DaemonFormatHooks::command(&base_facts).with_option_engine(&inner.engine);
@@ -5389,6 +5407,9 @@ impl Shared {
                     seen.insert(key);
                     samples.push((key, value));
                 }
+                samples_by_monitor.push((monitor, seen, samples));
+            }
+            for (monitor, seen, samples) in samples_by_monitor {
                 for (key, value) in samples {
                     if let Some(last) = inner
                         .engine
@@ -5457,16 +5478,28 @@ impl Shared {
             .name("zz-daemon-status".to_owned())
             .spawn(move || {
                 let mut due: BTreeMap<SessionId, (Instant, Duration)> = BTreeMap::new();
-                let mut next_tick = Instant::now() + CONTROL_SUBSCRIPTION_INTERVAL;
+                let mut next_tick = Some(Instant::now() + CONTROL_SUBSCRIPTION_INTERVAL);
+                let mut probe = timers::PeerProbe::default();
+                let mut probe_at = None;
                 loop {
                     let next_wake = due
                         .values()
                         .map(|(deadline, _)| *deadline)
-                        .fold(next_tick, Instant::min);
-                    thread::park_timeout(next_wake.saturating_duration_since(Instant::now()));
+                        .chain(next_tick)
+                        .chain(probe_at)
+                        .min();
+                    if let Some(next_wake) = next_wake {
+                        thread::park_timeout(next_wake.saturating_duration_since(Instant::now()));
+                    } else if shared.upgrade().is_some_and(|shared| {
+                        shared.status_sampler_idle.store(true, Ordering::SeqCst);
+                        !Self::status_sampler_has_work(&shared.inner.lock())
+                    }) {
+                        thread::park();
+                    }
                     let Some(shared) = shared.upgrade() else {
                         break;
                     };
+                    shared.status_sampler_idle.store(false, Ordering::SeqCst);
                     if shared.stopping.load(Ordering::Acquire) {
                         break;
                     }
@@ -5478,16 +5511,11 @@ impl Shared {
                     if !jobs_changed.is_empty() {
                         shared.refresh_status_filtered(None, Some(&jobs_changed));
                     }
-                    if Instant::now() >= next_tick {
-                        next_tick = Instant::now() + CONTROL_SUBSCRIPTION_INTERVAL;
-                        shared.refresh_control_subscriptions();
-                        shared.run_format_monitors();
-                        #[cfg(all(feature = "agent", unix))]
-                        shared.sync_claude_peer_states();
-                    }
-                    let intervals = {
+                    let (tick_needed, peer_scan, intervals) = {
                         let inner = shared.inner.lock();
-                        inner
+                        let tick_needed = Self::status_tick_needed(&inner);
+                        let peer_scan = Self::peer_scan_armed(&inner);
+                        let intervals = inner
                             .subscribers
                             .keys()
                             .filter_map(|client| client_attached_session(&inner, *client))
@@ -5500,8 +5528,21 @@ impl Shared {
                                         .interval,
                                 )
                             })
-                            .collect::<BTreeMap<_, _>>()
+                            .collect::<BTreeMap<_, _>>();
+                        (tick_needed, peer_scan, intervals)
                     };
+                    if !tick_needed {
+                        next_tick = None;
+                    } else if next_tick.is_none_or(|tick| Instant::now() >= tick) {
+                        next_tick = Some(Instant::now() + CONTROL_SUBSCRIPTION_INTERVAL);
+                        shared.refresh_control_subscriptions();
+                        shared.run_format_monitors();
+                        #[cfg(all(feature = "agent", unix))]
+                        if peer_scan {
+                            shared.sync_claude_peer_states();
+                        }
+                    }
+                    probe_at = shared.run_peer_probe(peer_scan, &mut probe);
                     due.retain(|session, _| intervals.contains_key(session));
                     let now = Instant::now();
                     let sessions = intervals
@@ -5526,11 +5567,15 @@ impl Shared {
                         .collect::<BTreeSet<_>>();
                     if !sessions.is_empty() {
                         shared.refresh_status_for_sessions(Some(&sessions));
+                        if shared.inner.lock().engine.window_labels_follow_the_clock() {
+                            shared.publish_mux_labels();
+                        }
                     }
                 }
             })
             .map_err(|error| DaemonError::Thread(error.to_string()))?;
         self.status.lock().set_job_waker(sampler.thread().clone());
+        *self.status_sampler.lock() = Some(sampler.thread().clone());
         Ok(())
     }
 
@@ -5685,7 +5730,7 @@ impl Shared {
             inner.client_color_schemes.insert(client, color_scheme);
             inner.active_color_scheme = color_scheme;
         }
-        let capabilities = vec![
+        let mut capabilities = vec![
             "mux-v1".to_owned(),
             "terminal-viewport-v3".to_owned(),
             "terminal-row-patches".to_owned(),
@@ -5714,7 +5759,11 @@ impl Shared {
             "browser-panes".to_owned(),
             "tmux-config-subset".to_owned(),
             NEW_SESSION_ATTACH_CAPABILITY.to_owned(),
+            zz_protocol::EXEC_CAPABILITY.to_owned(),
         ];
+        if kind == ClientKind::Interactive && client_has_terminal {
+            capabilities.extend(attach::terminal_option_capabilities(&inner.engine));
+        }
         let hello_mux_options = inner.mux_options.clone();
         inner
             .published_mux_options
@@ -5729,8 +5778,15 @@ impl Shared {
             appearance_provenance: inner.appearance_provenance.clone(),
             mux_options: hello_mux_options,
             status: StatusLine::default(),
-            key_tables: inner.engine.keys.snapshot(),
+            key_tables: if inner.key_tables_generation == inner.engine.keys.generation() {
+                inner.key_tables.clone()
+            } else {
+                inner.engine.keys.snapshot()
+            },
         };
+        if kind == ClientKind::Interactive && client_has_terminal && *attach::ATTACH_BATCH {
+            return Some((client, hello));
+        }
         let option_snapshot = Arc::new(inner.engine.format_option_snapshot());
         let request = status_request(
             &inner,
@@ -5739,6 +5795,7 @@ impl Shared {
             option_snapshot,
             format_hook_facts(&inner),
             startup_ready,
+            self.status_job_needs(client),
         );
         drop(inner);
         let mut hello = hello;
@@ -5751,11 +5808,14 @@ impl Shared {
     }
 
     fn subscribe(&self, client: ClientId, outbound: Arc<OutboundMailbox>) {
-        let mut inner = self.inner.lock();
-        inner.subscribers.insert(client, outbound);
-        if inner.client_kinds.get(&client) == Some(&ClientKind::Control) {
-            inner.control_outputs.entry(client).or_default();
+        {
+            let mut inner = self.inner.lock();
+            inner.subscribers.insert(client, outbound);
+            if inner.client_kinds.get(&client) == Some(&ClientKind::Control) {
+                inner.control_outputs.entry(client).or_default();
+            }
         }
+        self.nudge_status_sampler();
     }
 
     fn try_deliver_startup_config_causes(
@@ -5856,15 +5916,21 @@ impl Shared {
         }
         outbound.reset_kitty_images();
         outbound.reset_pasted_images();
-        if !outbound.enqueue_reliable(&ProtocolMessage::Attached {
-            session,
-            snapshot,
-            read_only,
-            client_flags,
-        }) {
-            return false;
+        let sent = (snapshot.content_digest(), snapshot.generation);
+        {
+            let _order = self.snapshot_order.lock();
+            if !outbound.enqueue_attached(&ProtocolMessage::Attached {
+                session,
+                snapshot,
+                read_only,
+                client_flags,
+            }) {
+                return false;
+            }
+            let mut inner = self.inner.lock();
+            inner.published_key_tables.remove(&client);
+            inner.published_snapshots.insert(client, sent);
         }
-        self.inner.lock().published_key_tables.remove(&client);
         self.sync_key_table(client, false);
         let startup_delivery = match (target, pending.as_ref().and_then(|causes| causes.as_ref())) {
             (Some((kind, pane)), Some(causes)) => {
@@ -5876,7 +5942,12 @@ impl Shared {
         if startup_delivery == StartupConfigDelivery::AdmissionFailed {
             return false;
         }
-        self.send_resync_inner(client, outbound, startup_delivery.command_output());
+        self.send_resync_as(
+            client,
+            outbound,
+            startup_delivery.command_output(),
+            attach::ResyncScope::Attach,
+        );
         if !outbound.is_open() {
             if let Some(output_id) = startup_delivery.command_output() {
                 self.retire_command_output_if_exact(client, output_id);
@@ -5928,7 +5999,7 @@ impl Shared {
     fn unregister(self: &Arc<Self>, client: ClientId) {
         let (detached, _) = self.detach_client_state(client, false);
         if detached {
-            self.publish_snapshot();
+            self.publish_snapshot_after_detach(client);
         }
         self.enforce_destroy_unattached();
         self.fail_gui_requests_for(client);
@@ -5942,7 +6013,7 @@ impl Shared {
             inner.client_color_schemes.remove(&client);
             inner.client_names.remove(&client);
             inner.client_instances.remove(&client);
-            inner.client_kinds.remove(&client);
+            let control = inner.client_kinds.remove(&client) == Some(ClientKind::Control);
             inner.client_terminals.remove(&client);
             inner.native_terminal_search_clients.remove(&client);
             inner.native_chooser_clients.remove(&client);
@@ -5954,6 +6025,7 @@ impl Shared {
             inner.nested_clients.remove(&client);
             inner.client_ttys.remove(&client);
             inner.client_sizes.remove(&client);
+            inner.client_cell_pixels.remove(&client);
             inner.client_working_directories.remove(&client);
             inner.client_environments.remove(&client);
             inner.published_mux_options.remove(&client);
@@ -5971,6 +6043,7 @@ impl Shared {
             inner.key_engines.remove(&client);
             inner.copy_sessions.remove(&client);
             inner.published_key_tables.remove(&client);
+            inner.published_snapshots.remove(&client);
             inner.scheduled_key_table_deadlines.remove(&client);
             inner.swallowed_keys.remove(&client);
             inner.suppressed_text.remove(&client);
@@ -6035,9 +6108,10 @@ impl Shared {
                 popup_waiters,
                 menu_waiters,
                 confirm_waiters,
-                shutdown,
+                (shutdown, control),
             )
         };
+        let (shutdown, control) = shutdown;
         let view = TerminalViewId(client.0);
         if let Some(command_output) = command_output {
             command_output.terminal.view_action(
@@ -6057,7 +6131,9 @@ impl Shared {
         for waiter in confirm_waiters {
             let _ = waiter.try_send(false);
         }
-        self.refresh_control_output_taps();
+        if detached && control {
+            self.refresh_control_output_taps();
+        }
         if shutdown {
             self.request_shutdown_without_hooks();
         }
@@ -6086,26 +6162,44 @@ impl Shared {
         command: &CommandInvocation,
         prepared: bool,
     ) -> CommandResponse {
+        self.execute_command_request_with_streams(
+            client, kind, context, request_id, command, prepared,
+        )
+        .0
+    }
+
+    fn execute_command_request_with_streams(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        request_id: u64,
+        command: &CommandInvocation,
+        prepared: bool,
+    ) -> (CommandResponse, bool) {
         let stdin_available = kind == ClientKind::Command && command.stdin_available();
-        let (command, blocked) = match self.prepare_command_request(client, command, prepared) {
-            Ok(prepared) => prepared,
-            Err(error) => {
-                return CommandResponse::Error {
-                    request_id,
-                    error,
-                    output: RawText::default(),
-                };
-            }
-        };
-        if blocked {
-            return CommandResponse::Error {
-                request_id,
-                error: ServerError::InvalidCommand("client is read-only".to_owned()),
-                output: RawText::default(),
-            };
-        }
-        let client_name = {
+        let (command, client_name) = {
             let mut inner = self.inner.lock();
+            let refusal = match prepare_command_request(&mut inner, client, command, prepared) {
+                Ok((command, false)) => Ok(command),
+                Ok((_, true)) => Err(ServerError::InvalidCommand(
+                    "client is read-only".to_owned(),
+                )),
+                Err(error) => Err(error),
+            };
+            let command = match refusal {
+                Ok(command) => command,
+                Err(error) => {
+                    return (
+                        CommandResponse::Error {
+                            request_id,
+                            error,
+                            output: RawText::default(),
+                        },
+                        false,
+                    );
+                }
+            };
             let client_name = server_log_client_name(&inner, client);
             let command_line = command_log_line(&command);
             push_server_message(&mut inner, format!("{client_name} command: {command_line}"));
@@ -6123,7 +6217,7 @@ impl Shared {
                     },
                 );
             }
-            client_name
+            (command, client_name)
         };
         let previous_control_target = context.control_command_target();
         if kind == ClientKind::Control {
@@ -6191,15 +6285,20 @@ impl Shared {
                 }
             }
         };
-        let streams = self.inner.lock().command_streams.remove(&client);
+        let (streams, sanitizes) = {
+            let mut inner = self.inner.lock();
+            (
+                inner.command_streams.remove(&client),
+                sanitizes_output_for(&inner, client, kind, &command.name),
+            )
+        };
+        let client_exit = streams.as_ref().is_some_and(|streams| streams.client_exit);
         let recorded_claim = streams.as_ref().and_then(|streams| streams.stdout_claim);
         let mut response = match streams {
             Some(streams) if !streams.is_empty() => merge_command_streams(response, &streams),
             _ => response,
         };
-        if recorded_claim != Some(StdoutClaim::Raw)
-            && self.sanitizes_output_for(client, kind, &command.name)
-        {
+        if recorded_claim != Some(StdoutClaim::Raw) && sanitizes {
             let output = match &mut response {
                 CommandResponse::Success { output, .. } | CommandResponse::Error { output, .. } => {
                     output
@@ -6238,35 +6337,12 @@ impl Shared {
                 },
             );
         }
-        response
+        (response, client_exit)
     }
 
-    /// `server_client_print` runs `utf8_sanitize` over a message bound for a
-    /// client with no session of its own or for a control client, which is
-    /// every shape but an attached one: an attached client is shown the message
-    /// in a pane instead. The gate is tmux's `CLIENT_UTF8`, which the client
-    /// raised for itself out of `$TMUX` and the locale before it dialled.
-    ///
-    /// Three commands answer their client without passing through
-    /// `server_client_print` at all, so the pin leaves their bytes alone for
-    /// every client shape and every encoding. `capture-pane -p` writes
-    /// `control_write` for a control client and `file_print_buffer` for
-    /// everyone else. `save-buffer` always writes `file_write`, a real path and
-    /// `-` alike. `show-buffer` reaches `cmdq_print_data` only when the client
-    /// has a session of its own or is a control client, so it is sanitized for
-    /// a control client but falls through to the same raw `file_write` for a
-    /// session-less command client, which is the only shape zz's `Command`
-    /// kind has.
+    #[cfg(test)]
     fn sanitizes_output_for(&self, client: ClientId, kind: ClientKind, command: &str) -> bool {
-        if !matches!(kind, ClientKind::Command | ClientKind::Control) {
-            return false;
-        }
-        match canonical_command(command) {
-            "capture-pane" | "save-buffer" => return false,
-            "show-buffer" if kind == ClientKind::Command => return false,
-            _ => {}
-        }
-        !self.inner.lock().utf8_clients.contains(&client)
+        sanitizes_output_for(&self.inner.lock(), client, kind, command)
     }
 
     fn execute_command_request_with_prepared_into(
@@ -6308,6 +6384,7 @@ impl Shared {
     /// to block on something that answers later, so tell the client once that
     /// nothing else it queued runs until this request resumes.
     fn report_command_queue_park(&self) {
+        self.go_live_current_exec();
         let Some((client, request_id)) = take_unreported_command_queue_park() else {
             return;
         };
@@ -6419,28 +6496,6 @@ impl Shared {
             .lock()
             .get(&client)
             .is_some_and(|cancel| cancel.load(Ordering::Acquire))
-    }
-
-    fn prepare_command_request(
-        &self,
-        client: ClientId,
-        command: &CommandInvocation,
-        prepared: bool,
-    ) -> Result<(CommandInvocation, bool), ServerError> {
-        let mut inner = self.inner.lock();
-        inner.cold_bootstrap.command(client);
-        let command = if prepared {
-            command.clone()
-        } else {
-            resolve_and_prepare_command(&inner.engine, command)?.0
-        };
-        if !prepared && canonical_command(&command.name) == "load-buffer" {
-            parse_buffer_command_args("load-buffer", &command.args, &['b', 't'], &['w'])?;
-        }
-        let guarded = read_only_guard_client(&inner, client, &command);
-        let blocked = guarded.is_some_and(|guarded| inner.client_flags.contains(guarded))
-            && !command_is_read_only_safe(&command);
-        Ok((command, blocked))
     }
 
     #[cfg(test)]
@@ -6703,6 +6758,7 @@ impl Shared {
         client_terminal: ClientTerminal,
         queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
+        let _round_trips = zz_terminal::forbid_actor_round_trips();
         let split_input = canonical_command(&command.name) == "split-window"
             && command_stdin_sink("split-window", &command.args)
                 == Some(CommandStdinSink::PaneInput);
@@ -7882,6 +7938,9 @@ impl Shared {
         let mut format_variables = context.format_variables.clone();
         let event_hooks_enabled = !context.no_hooks;
         let command_name = canonical_command(&command.name);
+        if command_name == "command-prompt" {
+            self.ensure_prompt_history();
+        }
         let split_caller_stream = command_name == "split-window"
             && command_stdin_sink(command_name, &command.args) == Some(CommandStdinSink::PaneInput);
         let mut terminals_to_watch = Vec::new();
@@ -7921,6 +7980,7 @@ impl Shared {
         let mut import_tmux_config = None;
         let mut reload_config = false;
         let mut snapshot_changed = false;
+        let mut respawned_terminals = false;
         let mut mux_options_changed = false;
         let mut mux_option_refresh_sessions = BTreeSet::new();
         #[cfg(feature = "agent")]
@@ -8280,6 +8340,9 @@ impl Shared {
                                 .map(|(columns, rows)| TerminalSize::cells(columns, rows)),
                             non_login_shell: false,
                             env,
+                            word_separators: Some(word_separators.clone()),
+                            allow_passthrough: Some(terminal_options.allow_passthrough),
+                            wrap_search: Some(terminal_options.wrap_search),
                         };
                         let session = Arc::new(if empty {
                             let session = TerminalSession::spawn_empty_with_appearance(
@@ -8299,23 +8362,15 @@ impl Shared {
                                 |path| path.to_string_lossy().into_owned(),
                             )
                         };
-                        deferred_terminal_commands.push(
-                            DeferredTerminalCommand::SetWordSeparators {
-                                terminal: Arc::clone(&session),
-                                separators: word_separators,
-                            },
-                        );
-                        deferred_terminal_commands.push(
-                            DeferredTerminalCommand::SetAllowPassthrough {
-                                terminal: Arc::clone(&session),
-                                enabled: terminal_options.allow_passthrough,
-                            },
-                        );
-                        deferred_terminal_commands.push(DeferredTerminalCommand::SetWrapSearch {
-                            terminal: Arc::clone(&session),
-                            enabled: terminal_options.wrap_search,
-                        });
-                        inner.terminals.insert(*pane, Arc::clone(&session));
+                        if empty {
+                            session.set_word_separators(word_separators);
+                            session.set_wrap_search(terminal_options.wrap_search);
+                        }
+                        if let Some(previous) =
+                            inner.terminals_mut().insert(*pane, Arc::clone(&session))
+                        {
+                            previous.retire();
+                        }
                         inner.terminal_spawns.insert(*pane, spawn);
                         inner.engine.set_pane_runtime_facts_with_hooks(
                             *pane,
@@ -8454,6 +8509,9 @@ impl Shared {
                                 .map(|(columns, rows)| TerminalSize::cells(columns, rows)),
                             non_login_shell: false,
                             env,
+                            word_separators: Some(word_separators.clone()),
+                            allow_passthrough: Some(terminal_options.allow_passthrough),
+                            wrap_search: Some(terminal_options.wrap_search),
                         };
                         let session = Arc::new(if *empty {
                             let session = TerminalSession::spawn_empty_with_appearance(
@@ -8473,30 +8531,27 @@ impl Shared {
                                 |path| path.to_string_lossy().into_owned(),
                             )
                         };
-                        deferred_terminal_commands.push(
-                            DeferredTerminalCommand::SetWordSeparators {
-                                terminal: Arc::clone(&session),
-                                separators: word_separators,
-                            },
-                        );
-                        deferred_terminal_commands.push(
-                            DeferredTerminalCommand::SetAllowPassthrough {
-                                terminal: Arc::clone(&session),
-                                enabled: terminal_options.allow_passthrough,
-                            },
-                        );
-                        deferred_terminal_commands.push(DeferredTerminalCommand::SetWrapSearch {
-                            terminal: Arc::clone(&session),
-                            enabled: terminal_options.wrap_search,
-                        });
+                        if *empty {
+                            session.set_word_separators(word_separators);
+                            session.set_wrap_search(terminal_options.wrap_search);
+                        }
                         Self::wake_pane_exit_wait(&mut inner, *pane, 0);
                         if let Some(entry) = inner.pane_exit_waits.get_mut(pane) {
                             let command_wait = entry.command_wait.take();
                             *entry = PaneExitWait::new();
                             entry.command_wait = command_wait;
                         }
-                        inner.terminals.insert(*pane, Arc::clone(&session));
+                        if let Some(previous) =
+                            inner.terminals_mut().insert(*pane, Arc::clone(&session))
+                        {
+                            previous.retire();
+                        }
                         inner.terminal_spawns.insert(*pane, spawn);
+                        for streamed in inner.streamed_terminals.values_mut() {
+                            streamed.remove(pane);
+                        }
+                        inner.preview_watched.remove(pane);
+                        respawned_terminals = true;
                         inner.engine.set_pane_runtime_facts_with_hooks(
                             *pane,
                             PaneRuntimeFacts {
@@ -8596,7 +8651,7 @@ impl Shared {
                             if let Some((columns, rows)) = inner.engine.pane_geometry(*pane) {
                                 session.resize(columns, rows, 0, 0);
                             }
-                            inner.terminals.insert(*pane, Arc::clone(&session));
+                            inner.terminals_mut().insert(*pane, Arc::clone(&session));
                             terminals_to_watch.push((*pane, session));
                         }
                         agent_panes_opened.push(*pane);
@@ -8648,7 +8703,9 @@ impl Shared {
                                 pipes_to_close.push(pipe);
                             }
                             Self::wake_pane_exit_wait(&mut inner, *pane, 0);
-                            inner.terminals.remove(pane);
+                            if let Some(terminal) = inner.terminals_mut().remove(pane) {
+                                terminal.retire();
+                            }
                             inner.last_output.remove(pane);
                             #[cfg(all(feature = "agent", unix))]
                             inner.claude_peer_states.remove(pane);
@@ -9537,7 +9594,7 @@ impl Shared {
                         inner.automatic_paste_buffer_limit = AutomaticPasteBufferLimit(*limit);
                     }
                     MuxEffect::WordSeparatorsChanged { session } => {
-                        for (pane, terminal) in &inner.terminals {
+                        for (pane, terminal) in inner.terminals.iter() {
                             let Some(window) = inner.engine.state.window_for_pane(*pane) else {
                                 continue;
                             };
@@ -9574,7 +9631,7 @@ impl Shared {
                         }
                     }
                     MuxEffect::TerminalKnobsChanged { window, pane } => {
-                        for (candidate, terminal) in &inner.terminals {
+                        for (candidate, terminal) in inner.terminals.iter() {
                             if pane.is_some_and(|pane| pane != *candidate)
                                 || window.is_some_and(|window| {
                                     inner.engine.state.window_for_pane(*candidate) != Some(window)
@@ -10057,14 +10114,31 @@ impl Shared {
         }
         self.refresh_control_output_taps();
 
+        let mut copy_mode_terminals: Vec<Arc<TerminalSession>> = Vec::new();
         for command in deferred_terminal_commands {
             #[cfg(test)]
             let wrap_search = command.wrap_search();
+            if let Some(terminal) = command.copy_mode_terminal()
+                && !copy_mode_terminals
+                    .iter()
+                    .any(|settled| Arc::ptr_eq(settled, terminal))
+            {
+                copy_mode_terminals.push(Arc::clone(terminal));
+            }
             command.run();
             #[cfg(test)]
             if let Some(enabled) = wrap_search {
                 self.delivered_wrap_search_commands.lock().push(enabled);
             }
+        }
+        if !copy_mode_terminals.is_empty() {
+            let _round_trips = zz_terminal::allow_actor_round_trips();
+            for terminal in copy_mode_terminals {
+                terminal.settle();
+            }
+        }
+        if respawned_terminals && !snapshot_changed {
+            self.refresh_terminal_visibility();
         }
         for (selected, pane, keys, repeat) in pane_mode_keys {
             self.inject_pane_mode_keys(selected, context, pane, &keys, repeat)?;
@@ -10155,10 +10229,11 @@ impl Shared {
                 if let Some(environment) = inner.client_environments.get(&client).cloned() {
                     inner
                         .engine
-                        .update_session_environment_from_client(session, &environment)?;
+                        .update_session_environment_from_client(session, environment.map())?;
                 }
             }
             if invoking_client_terminal == ClientTerminal::Present {
+                let _held = self.hold_attach_terminals(client);
                 let (mut snapshot, attach_hook_events) =
                     self.attach_collect_event_hooks(client, session, event_hooks_enabled)?;
                 self.refresh_control_output_taps();
@@ -10836,6 +10911,7 @@ impl Shared {
             source_file_error = Some(error);
         }
         self.publish_key_tables_if_changed();
+        self.nudge_status_sampler();
         pending_hook_events.extend(std::mem::take(&mut self.inner.lock().deferred_event_hooks));
         if std::mem::take(&mut self.inner.lock().deferred_control_refresh) {
             self.refresh_control_output_taps();
@@ -10891,31 +10967,25 @@ impl Shared {
     }
 
     fn publish_key_tables_if_changed(&self) {
-        let (tables, tables_changed, reset_clients) = {
+        let (tables, reset_clients) = {
             let mut inner = self.inner.lock();
-            let existing = inner
-                .engine
-                .keys
-                .table_names()
-                .map(str::to_owned)
-                .collect::<BTreeSet<_>>();
-            let reset_clients = inner
-                .key_engines
-                .iter()
-                .filter_map(|(client, engine)| {
-                    engine
+            let ServerState {
+                engine,
+                key_engines,
+                ..
+            } = &mut *inner;
+            let reset_clients = key_engines
+                .iter_mut()
+                .filter_map(|(client, key_engine)| {
+                    key_engine
                         .active_table()
-                        .is_some_and(|table| !existing.contains(table))
-                        .then_some(*client)
+                        .is_some_and(|table| !engine.keys.has_table(table))
+                        .then(|| {
+                            key_engine.switch_table(None);
+                            *client
+                        })
                 })
                 .collect::<Vec<_>>();
-            for client in &reset_clients {
-                inner
-                    .key_engines
-                    .get_mut(client)
-                    .expect("reset client has a key engine")
-                    .switch_table(None);
-            }
             let mut defaults = inner
                 .attached
                 .iter()
@@ -10928,17 +10998,25 @@ impl Shared {
             for table in defaults {
                 inner.engine.keys.ensure_table(&table);
             }
-            let tables = inner.engine.keys.snapshot();
-            let tables_changed = tables != inner.key_tables;
-            if tables_changed {
-                inner.key_tables.clone_from(&tables);
-            }
-            (tables, tables_changed, reset_clients)
+            let generation = inner.engine.keys.generation();
+            let tables = if generation == inner.key_tables_generation
+                || timers::KeyTablePublishHold::active()
+            {
+                None
+            } else {
+                inner.key_tables_generation = generation;
+                let tables = inner.engine.keys.snapshot();
+                (tables != inner.key_tables).then(|| {
+                    inner.key_tables.clone_from(&tables);
+                    tables
+                })
+            };
+            (tables, reset_clients)
         };
         for client in reset_clients {
             self.sync_key_table(client, false);
         }
-        if tables_changed {
+        if let Some(tables) = tables {
             self.publish(EventPayload::KeyTablesChanged { tables });
         }
     }
@@ -11003,6 +11081,7 @@ impl Shared {
         let capture = if dead {
             terminal.capture_frozen_frame(parsed.options)
         } else {
+            let _round_trips = zz_terminal::allow_actor_round_trips();
             match terminal.capture(parsed.options) {
                 Err(TerminalCaptureError::ActorStopped) => {
                     let retained = {
@@ -11225,6 +11304,7 @@ impl Shared {
             let old_pipe = inner.pane_pipes.remove(&pane);
             (pane, terminal, old_pipe)
         };
+        let _round_trips = zz_terminal::allow_actor_round_trips();
         let had_pipe = old_pipe.is_some();
         if let Some(pipe) = old_pipe {
             stop_pane_pipe(pipe);
@@ -11412,6 +11492,7 @@ impl Shared {
         if !valid || multiplexed {
             return;
         }
+        let _round_trips = zz_terminal::allow_actor_round_trips();
         let Err(error) = terminal.arm_raw_output_tap(token, output) else {
             return;
         };
@@ -11454,6 +11535,14 @@ impl Shared {
         let serial = self.pipe_effects.lock();
         let (stale, desired) = {
             let mut inner = self.inner.lock();
+            if inner.control_output_taps.is_empty()
+                && !inner
+                    .client_kinds
+                    .values()
+                    .any(|kind| *kind == ClientKind::Control)
+            {
+                return;
+            }
             let desired = inner
                 .terminals
                 .iter()
@@ -11518,6 +11607,7 @@ impl Shared {
     }
 
     fn start_control_output_tap(self: &Arc<Self>, pane: PaneId, terminal: &Arc<TerminalSession>) {
+        let _round_trips = zz_terminal::allow_actor_round_trips();
         let next_token = |daemon: &Self| {
             let mut inner = daemon.inner.lock();
             inner.next_pipe_token = inner.next_pipe_token.wrapping_add(1).max(1);
@@ -15000,6 +15090,7 @@ impl Shared {
                 .ok_or(ServerError::PaneExited(pane))?;
             (pane, terminal, is_agent)
         };
+        let _round_trips = zz_terminal::allow_actor_round_trips();
         let capture = match terminal.capture_last_command() {
             Ok(capture) => capture,
             Err(TerminalCaptureError::NoSemanticMarks) if is_agent => {
@@ -15420,9 +15511,10 @@ impl Shared {
             if let Some(environment) = inner.client_environments.get(&target_client).cloned() {
                 inner
                     .engine
-                    .update_session_environment_from_client(target_session, &environment)?;
+                    .update_session_environment_from_client(target_session, environment.map())?;
             }
         }
+        let mut held = self.hold_attach_terminals(target_client);
         let (snapshot, mut attach_events) =
             self.attach_collect_event_hooks(target_client, target_session, !context.no_hooks)?;
         if same_session && !context.no_hooks {
@@ -15459,6 +15551,7 @@ impl Shared {
                 self.send_attached(target_client, outbound, target_session, snapshot.clone());
             }
             self.publish_mux_snapshots();
+            held.release();
             attach_events.sort_by_key(|event| event.name != "client-session-changed");
         }
         self.run_event_hooks(attach_events);
@@ -15529,6 +15622,7 @@ impl Shared {
         name: &str,
         args: &[RawText],
     ) -> Result<Execution, DaemonError> {
+        self.ensure_prompt_history();
         let parsed = parse_buffer_command_args(name, args, &['T'], &[])?;
         require_no_positionals(name, &parsed)?;
         let prompt_type = parsed
@@ -15836,6 +15930,7 @@ impl Shared {
                 Arc::new(inner.engine.format_option_snapshot()),
                 format_hook_facts(&inner),
                 startup_ready,
+                self.status_job_needs(target),
             )
         };
         let status = {
@@ -16162,6 +16257,9 @@ impl Shared {
                 }),
                 non_login_shell: true,
                 env,
+                word_separators: None,
+                allow_passthrough: None,
+                wrap_search: None,
             };
             (
                 geometry,
@@ -16176,6 +16274,7 @@ impl Shared {
         let terminal = Arc::new(TerminalSession::spawn(history_limit, appearance, spawn));
         terminal.set_word_separators(word_separators);
         terminal.attach_view(TerminalViewId(target_client.0));
+        terminal.set_view_stream(TerminalViewId(target_client.0), ViewStream::Foreground);
         let (wake, wait) = crossbeam_channel::bounded(1);
         {
             let mut inner = self.inner.lock();
@@ -16258,6 +16357,7 @@ impl Shared {
         if self.inner.lock().client_kinds.get(&client) != Some(&ClientKind::Command) {
             return None;
         }
+        self.go_live_exec(client);
         let writer = self.client_writers.lock().get(&client).cloned()?;
         let (request_id, wait) = {
             let mut inner = self.inner.lock();
@@ -17499,9 +17599,17 @@ impl Shared {
             .copied()
             .collect::<Vec<_>>();
         affected_panes.extend(visible.iter().copied());
+        let previous_kinds = inner
+            .streamed_terminals
+            .get(&client)
+            .cloned()
+            .unwrap_or_default();
         inner.visible_terminals.insert(client, visible);
         inner.streamed_terminals.insert(client, streamed);
         mark_client_terminal_latest(&mut inner, client);
+        affected_panes.extend(attach::presize_client_terminals(
+            &mut inner, client, session,
+        ));
         affected_panes.extend(control_client_sized_panes(&inner, client));
         #[cfg(feature = "agent")]
         {
@@ -17512,7 +17620,10 @@ impl Shared {
         let subscriber = inner.subscribers.get(&client).cloned();
         let unfocused_copy_mode_exits = unfocused_copy_sessions(&mut inner);
         write_back_terminal_geometries(&mut inner, &affected_panes);
-        let resizes = terminal_resizes_for_panes(&inner, &affected_panes);
+        apply_terminal_resizes(terminal_resizes_for_panes(&inner, &affected_panes));
+        if let Some(streamed) = inner.streamed_terminals.get(&client) {
+            apply_view_streams(&inner, TerminalViewId(client.0), &previous_kinds, streamed);
+        }
         let mut snapshot = inner.engine.state.snapshot();
         let presence = snapshot_presence(&inner);
         stamp_snapshot_for_client(&inner, client, &mut snapshot, &presence);
@@ -17586,7 +17697,6 @@ impl Shared {
         for terminal in terminals {
             terminal.attach_view(view);
         }
-        apply_terminal_resizes(resizes);
         Ok((snapshot, hook_events))
     }
 
@@ -17693,7 +17803,7 @@ impl Shared {
             if let Some(environment) = inner.client_environments.get(&client).cloned() {
                 inner
                     .engine
-                    .update_session_environment_from_client(session, &environment)?;
+                    .update_session_environment_from_client(session, environment.map())?;
             }
         }
         let snapshot = self.attach(client, session)?;
@@ -17707,10 +17817,12 @@ impl Shared {
     fn detach_with_event_hooks(self: &Arc<Self>, client: ClientId, event_hooks_enabled: bool) {
         let (detached, events) = self.detach_client_state(client, event_hooks_enabled);
         if detached {
-            self.publish_snapshot();
+            self.publish_snapshot_after_detach(client);
         }
         self.enforce_destroy_unattached();
-        self.refresh_control_output_taps();
+        if detached && self.inner.lock().client_kinds.get(&client) == Some(&ClientKind::Control) {
+            self.refresh_control_output_taps();
+        }
         self.run_event_hooks(events);
     }
 
@@ -17825,6 +17937,7 @@ impl Shared {
             .filter_map(|(session, clients)| clients.contains(&client).then_some(*session))
             .collect::<Vec<_>>();
         let was_attached = !sessions.is_empty();
+        let event_hooks_enabled = event_hooks_enabled && !detach_is_inert(&inner, client);
         let hook_state_before = event_hooks_enabled.then(|| {
             (
                 MuxHookSnapshot::capture(&inner.engine),
@@ -17861,6 +17974,11 @@ impl Shared {
             .remove(&client)
             .map(|streamed| streamed.into_keys().collect::<Vec<_>>())
             .unwrap_or_default();
+        for pane in &streamed {
+            if let Some(terminal) = inner.terminals.get(pane) {
+                terminal.set_view_stream(TerminalViewId(client.0), ViewStream::Off);
+            }
+        }
         inner.terminal_preview_clients.remove(&client);
         let subscriber = inner.subscribers.get(&client).cloned();
         inner.visible_agents.remove(&client);
@@ -18268,6 +18386,9 @@ impl Shared {
                                 cell_height_px,
                             },
                         );
+                        if let Some(cell) = inner.client_cell_pixels.get_mut(&client) {
+                            *cell = (cell_width_px, cell_height_px);
+                        }
                         if let Some(reported) =
                             pane_geometry_from(&inner, pane, GeometrySource::ClientReport)
                         {
@@ -18479,8 +18600,11 @@ impl Shared {
             Ok(())
         })();
         let publish_snapshot = {
-            let inner = self.inner.lock();
+            let mut inner = self.inner.lock();
             let current = inner.engine.state.generation();
+            if resize_split && result.is_ok() {
+                inner.published_snapshots.remove(&client);
+            }
             resize_split && result.is_ok()
                 || current != generation && inner.last_published_mux_generation != current
         };
@@ -18975,7 +19099,9 @@ impl Shared {
                 return;
             };
             let terminal = Arc::clone(&popup.terminal);
-            inner.terminals.insert(pane, Arc::clone(&terminal));
+            if let Some(previous) = inner.terminals_mut().insert(pane, Arc::clone(&terminal)) {
+                previous.retire();
+            }
             let current_path = terminal_working_directory(&terminal)
                 .map(|path| path.to_string_lossy().into_owned())
                 .unwrap_or_default();
@@ -21930,6 +22056,7 @@ impl Shared {
         context: &mut ExecutionContext,
         text: &str,
     ) -> bool {
+        self.ensure_prompt_history();
         let result = {
             let mut inner = self.inner.lock();
             let Some(prompt) = inner.command_prompts.get(&client) else {
@@ -21986,6 +22113,7 @@ impl Shared {
         input: &zz_terminal::KeyInput,
         text_follows: bool,
     ) -> bool {
+        self.ensure_prompt_history();
         let outcome = {
             let mut inner = self.inner.lock();
             let Some(mut prompt) = inner.command_prompts.remove(&client) else {
@@ -22123,6 +22251,7 @@ impl Shared {
             )
             .into());
         }
+        self.ensure_prompt_history();
         let (read_only, read_only_pane) = {
             let inner = self.inner.lock();
             let read_only = inner.client_flags.contains(client);
@@ -22241,6 +22370,7 @@ impl Shared {
         if input.is_empty() {
             return;
         }
+        self.ensure_prompt_history();
         let changed = {
             let mut inner = self.inner.lock();
             let limit = inner.engine.prompt_history_limit();
@@ -22888,7 +23018,7 @@ impl Shared {
         };
         if armed_changed {
             let armed = is_prefix(&shown.0);
-            log::info!(
+            log::debug!(
                 target: "zz_daemon::diagnostics::input",
                 "prefix_armed_published client={client} armed={armed}"
             );
@@ -22970,7 +23100,7 @@ impl Shared {
         }
         drop(inner);
         if decision != KeyDecision::Pass {
-            log::info!(
+            log::debug!(
                 target: "zz_daemon::diagnostics::input",
                 "key_decision client={client} key={key} table={} decision={decision:?}",
                 table.as_deref().unwrap_or(&root_table)
@@ -23100,6 +23230,7 @@ impl Shared {
         if let Some(frames) = self.kitty_image_frames.lock().get(&key).cloned() {
             return Some(frames);
         }
+        let _round_trips = zz_terminal::allow_actor_round_trips();
         let image = match terminal.kitty_image(image_id) {
             Ok(Some(image)) if image.generation == generation => image,
             Ok(Some(image)) => {
@@ -23194,6 +23325,7 @@ impl Shared {
             .collect::<Vec<_>>();
         let mut removed = BTreeSet::new();
         let mut stale = Vec::new();
+        let _round_trips = zz_terminal::allow_actor_round_trips();
         for key in candidates {
             match terminal.kitty_image_generation(key.image_id) {
                 Ok(generation) if generation == Some(key.generation) => {}
@@ -23229,6 +23361,7 @@ impl Shared {
     }
 
     fn send_resync(&self, client: ClientId, outbound: &OutboundMailbox) {
+        outbound.forget_delivered_terminals();
         self.send_resync_inner(client, outbound, None);
     }
 
@@ -23238,6 +23371,23 @@ impl Shared {
         outbound: &OutboundMailbox,
         skip_command_output: Option<u64>,
     ) {
+        self.send_resync_as(
+            client,
+            outbound,
+            skip_command_output,
+            attach::ResyncScope::Full,
+        );
+    }
+
+    fn send_resync_as(
+        &self,
+        client: ClientId,
+        outbound: &OutboundMailbox,
+        skip_command_output: Option<u64>,
+        scope: attach::ResyncScope,
+    ) {
+        let everything = scope.sends_everything();
+        let order = everything.then(|| self.snapshot_order.lock());
         let (
             snapshot,
             viewports,
@@ -23251,10 +23401,14 @@ impl Shared {
             menu,
             confirm,
         ) = {
-            let inner = self.inner.lock();
-            let mut snapshot = inner.engine.state.snapshot();
-            let presence = snapshot_presence(&inner);
-            stamp_snapshot_for_client(&inner, client, &mut snapshot, &presence);
+            let mut inner = self.inner.lock();
+            let snapshot = everything.then(|| {
+                let mut snapshot = inner.engine.state.snapshot();
+                let presence = snapshot_presence(&inner);
+                stamp_snapshot_for_client(&inner, client, &mut snapshot, &presence);
+                note_snapshot_sent(&mut inner, client, &snapshot);
+                snapshot
+            });
             let command_prompt = command_prompt_state(&inner, client);
             let choose_tree = inner
                 .choose_trees
@@ -23294,11 +23448,16 @@ impl Shared {
                         streamed
                             .iter()
                             .filter_map(|(pane, kind)| {
-                                terminal_viewport_for_pane(&inner, *pane, view).map(
-                                    |(terminal, viewport)| {
+                                terminal_viewport_for_pane(&inner, *pane, view)
+                                    .filter(|(_, viewport)| {
+                                        everything
+                                            || !attach::attach_frame_superseded(
+                                                &inner, *pane, viewport,
+                                            )
+                                    })
+                                    .map(|(terminal, viewport)| {
                                         (*pane, *kind, terminal, (*viewport).clone())
-                                    },
-                                )
+                                    })
                             })
                             .collect()
                     })
@@ -23321,40 +23480,59 @@ impl Shared {
                 confirm,
             )
         };
-        Self::send_event(outbound, EventPayload::Snapshot(snapshot));
-        Self::send_event(
-            outbound,
-            EventPayload::CommandPrompt {
-                state: command_prompt,
-            },
-        );
-        Self::send_event(
-            outbound,
-            EventPayload::Popup {
-                state: popup.as_ref().map(|(state, _, _)| state.clone()),
-            },
-        );
-        Self::send_event(outbound, EventPayload::Menu { state: menu });
-        Self::send_event(outbound, EventPayload::Confirm { state: confirm });
-        Self::send_event(outbound, EventPayload::ChooseTree { state: choose_tree });
-        Self::send_event(
-            outbound,
-            EventPayload::ChooseBuffer {
-                state: choose_buffer,
-            },
-        );
-        Self::send_event(
-            outbound,
-            EventPayload::ChooserPresentation {
-                presentation: chooser_presentation,
-            },
-        );
-        Self::send_event(
-            outbound,
-            EventPayload::DisplayPanes {
-                state: display_panes,
-            },
-        );
+        if let Some(snapshot) = snapshot {
+            Self::send_event(outbound, EventPayload::Snapshot(snapshot));
+        }
+        drop(order);
+        if everything || command_prompt.is_some() {
+            Self::send_event(
+                outbound,
+                EventPayload::CommandPrompt {
+                    state: command_prompt,
+                },
+            );
+        }
+        if everything || popup.is_some() {
+            Self::send_event(
+                outbound,
+                EventPayload::Popup {
+                    state: popup.as_ref().map(|(state, _, _)| state.clone()),
+                },
+            );
+        }
+        if everything || menu.is_some() {
+            Self::send_event(outbound, EventPayload::Menu { state: menu });
+        }
+        if everything || confirm.is_some() {
+            Self::send_event(outbound, EventPayload::Confirm { state: confirm });
+        }
+        if everything || choose_tree.is_some() {
+            Self::send_event(outbound, EventPayload::ChooseTree { state: choose_tree });
+        }
+        if everything || choose_buffer.is_some() {
+            Self::send_event(
+                outbound,
+                EventPayload::ChooseBuffer {
+                    state: choose_buffer,
+                },
+            );
+        }
+        if everything || chooser_presentation.is_some() {
+            Self::send_event(
+                outbound,
+                EventPayload::ChooserPresentation {
+                    presentation: chooser_presentation,
+                },
+            );
+        }
+        if everything || display_panes.is_some() {
+            Self::send_event(
+                outbound,
+                EventPayload::DisplayPanes {
+                    state: display_panes,
+                },
+            );
+        }
         for (pane, kind, terminal, viewport) in viewports {
             if kind == TerminalStreamKind::Foreground {
                 self.enqueue_kitty_images_for_viewport(outbound, pane, &terminal, &viewport);
@@ -23398,7 +23576,7 @@ impl Shared {
                 });
                 let _ = outbound.replace_command_output(&message);
             }
-        } else {
+        } else if everything {
             Self::send_event(
                 outbound,
                 EventPayload::CommandOutput {
@@ -23738,6 +23916,7 @@ impl Shared {
 
         terminal.set_word_separators(word_separators);
         terminal.attach_view(view);
+        terminal.set_view_stream(view, ViewStream::Foreground);
         if choose_tree_closed {
             self.publish_to_client(client, EventPayload::ChooseTree { state: None });
         }
@@ -24316,8 +24495,9 @@ impl Shared {
         thread::Builder::new()
             .name(format!("zz-pane-{}", pane.0))
             .spawn(move || {
-                let mut previous = BTreeMap::<TerminalViewId, Arc<TerminalViewport>>::new();
+                let mut previous = BTreeMap::<TerminalViewId, (u64, Arc<TerminalViewport>)>::new();
                 let mut previous_title = None::<String>;
+                let mut previous_title_writes = 0;
                 let projects_agent = shared
                     .inner
                     .lock()
@@ -24337,36 +24517,11 @@ impl Shared {
                     }
                     match event {
                         TerminalEvent::ViewportReady { output_activity } => {
-                            let mut current =
-                                terminal.latest_viewports().into_iter().collect::<Vec<_>>();
-                            current.sort_by_key(|(view, _)| view.0);
-                            let runtime_viewport = current.first().map_or_else(
-                                || terminal.latest_viewport(),
-                                |(_, viewport)| Arc::clone(viewport),
-                            );
-                            if !terminal_status_should_close(&runtime_viewport.status) {
-                                let current_command = terminal_current_command(&terminal);
-                                shared.synchronize_pane_runtime(
-                                    pane,
-                                    &terminal,
-                                    &runtime_viewport,
-                                    &current_command,
-                                    output_activity,
-                                );
-                                let bar_state = terminal.progress_bar().state;
-                                if !projects_agent && previous_bar_state != bar_state {
-                                    previous_bar_state = bar_state;
-                                    shared.synchronize_pane_progress(
-                                        pane,
-                                        &terminal,
-                                        &current_command,
-                                        bar_state,
-                                    );
-                                }
-                            }
+                            let current = terminal.latest_view_frames();
+                            let runtime_viewport = terminal.latest_viewport();
                             let referenced_images = current
                                 .iter()
-                                .flat_map(|(_, viewport)| {
+                                .flat_map(|(_, viewport, _)| {
                                     viewport.kitty_placements.iter().map(|placement| {
                                         (placement.image_id, placement.image_generation)
                                     })
@@ -24383,42 +24538,20 @@ impl Shared {
                             }
                             let active = current
                                 .iter()
-                                .map(|(view, _)| *view)
+                                .map(|(view, _, _)| *view)
                                 .collect::<BTreeSet<_>>();
-                            let mut finished = false;
+                            let mut finished =
+                                terminal_status_should_close(&runtime_viewport.status);
                             let mut mode_clients = BTreeSet::new();
-                            if active.is_empty() {
-                                let viewport = terminal.latest_viewport();
-                                if !projects_agent
-                                    && previous_title
-                                        .as_deref()
-                                        .is_none_or(|previous| previous != viewport.title())
-                                {
-                                    shared.synchronize_pane_title(
-                                        pane,
-                                        &terminal,
-                                        viewport.title(),
-                                    );
-                                    previous_title = Some(viewport.title().to_owned());
-                                }
-                                finished = terminal_status_should_close(&viewport.status);
-                            }
-                            for (view, viewport) in current {
-                                if !projects_agent
-                                    && previous_title
-                                        .as_deref()
-                                        .is_none_or(|previous| previous != viewport.title())
-                                {
-                                    shared.synchronize_pane_title(
-                                        pane,
-                                        &terminal,
-                                        viewport.title(),
-                                    );
-                                    previous_title = Some(viewport.title().to_owned());
-                                }
+                            for (view, viewport, epoch) in current {
                                 finished |= terminal_status_should_close(&viewport.status);
-                                let payload = previous
-                                    .get(&view)
+                                let payload = epoch
+                                    .and_then(|epoch| {
+                                        previous
+                                            .get(&view)
+                                            .filter(|(seen, _)| *seen == epoch)
+                                            .map(|(_, previous)| previous)
+                                    })
                                     .and_then(|previous| {
                                         TerminalViewport::diff_with_scratch(
                                             previous,
@@ -24445,13 +24578,59 @@ impl Shared {
                                 {
                                     mode_clients.insert(ClientId(view.0));
                                 }
-                                previous.insert(view, viewport);
+                                match epoch {
+                                    Some(epoch) => {
+                                        previous.insert(view, (epoch, viewport));
+                                    }
+                                    None => {
+                                        previous.remove(&view);
+                                    }
+                                }
                             }
                             mode_memo.retain(|view, _| active.contains(view));
+                            previous.retain(|view, _| active.contains(view));
+                            if !terminal_status_should_close(&runtime_viewport.status) {
+                                let current_command = terminal_current_command(&terminal);
+                                shared.synchronize_pane_runtime(
+                                    pane,
+                                    &terminal,
+                                    &runtime_viewport,
+                                    &current_command,
+                                    output_activity,
+                                );
+                                let bar_state = terminal.progress_bar().state;
+                                if !projects_agent && previous_bar_state != bar_state {
+                                    previous_bar_state = bar_state;
+                                    shared.synchronize_pane_progress(
+                                        pane,
+                                        &terminal,
+                                        &current_command,
+                                        bar_state,
+                                    );
+                                }
+                            }
+                            let title_writes = terminal.facts().program_title_writes;
+                            if !projects_agent
+                                && (previous_title_writes != title_writes
+                                    || previous_title.as_deref().is_none_or(|previous| {
+                                        previous != runtime_viewport.title()
+                                    }))
+                            {
+                                shared.synchronize_pane_title(
+                                    pane,
+                                    &terminal,
+                                    runtime_viewport.title(),
+                                    previous_title_writes != title_writes,
+                                );
+                                previous_title = Some(runtime_viewport.title().to_owned());
+                                previous_title_writes = title_writes;
+                            }
+                            if terminal.take_preview_ready() {
+                                shared.refresh_chooser_previews();
+                            }
                             if !mode_clients.is_empty() {
                                 shared.status.lock().request_mode_refresh(mode_clients);
                             }
-                            previous.retain(|view, _| active.contains(view));
                             if finished {
                                 shared.close_exited_terminal(pane, &terminal);
                                 return;
@@ -24687,11 +24866,16 @@ impl Shared {
     }
 
     fn is_current_terminal(&self, pane: PaneId, terminal: &Arc<TerminalSession>) -> bool {
-        self.inner
-            .lock()
-            .terminals
-            .get(&pane)
-            .is_some_and(|current| Arc::ptr_eq(current, terminal))
+        let current = !terminal.is_retired();
+        debug_assert!(
+            !current
+                || self.inner.try_lock().is_none_or(|inner| inner
+                    .terminals
+                    .get(&pane)
+                    .is_none_or(|mapped| Arc::ptr_eq(mapped, terminal))),
+            "a live terminal is mapped to another pane's session"
+        );
+        current
     }
 
     fn synchronize_pane_progress(
@@ -24784,6 +24968,7 @@ impl Shared {
         pane: PaneId,
         terminal: &Arc<TerminalSession>,
         title: &str,
+        program_wrote_title: bool,
     ) {
         let event = {
             let mut inner = self.inner.lock();
@@ -24803,7 +24988,7 @@ impl Shared {
             let changed = inner
                 .engine
                 .state
-                .update_pane_title(pane, title)
+                .update_pane_title_from_terminal(pane, title, program_wrote_title)
                 .unwrap_or(false);
             changed.then(|| {
                 let snapshot = MuxHookSnapshot::capture(&inner.engine);
@@ -24816,7 +25001,7 @@ impl Shared {
             })
         };
         if let Some(event) = event {
-            self.publish_snapshot();
+            self.request_publish(timers::PublishReason::Tree);
             self.run_event_hooks(vec![event]);
         }
     }
@@ -24894,7 +25079,7 @@ impl Shared {
             .borrow_mut()
             .drain(..)
             .collect::<Vec<_>>();
-        self.publish_snapshot();
+        self.request_publish(timers::PublishReason::Tree);
         self.run_event_hooks(events);
         for launch in jobs {
             launch(self);
@@ -24955,8 +25140,13 @@ impl Shared {
                 .cloned()
                 .unwrap_or_default();
             let current_path = live_path.unwrap_or_else(|| previous.start_path.clone());
+            let current_command = if current_command.is_empty() {
+                previous.current_command.clone()
+            } else {
+                current_command.to_owned()
+            };
             let runtime = PaneRuntimeFacts {
-                current_command: current_command.to_owned(),
+                current_command,
                 current_path,
                 dead_signal: previous.dead_signal,
                 reported_path,
@@ -24964,31 +25154,57 @@ impl Shared {
                 pid,
                 tty,
             };
-            if inner.engine.pane_runtime_facts(pane) == Some(&runtime) {
+            let now = Instant::now();
+            let result = if inner.engine.pane_runtime_facts(pane) == Some(&runtime) {
                 (
-                    false,
+                    None,
                     Vec::new(),
                     refresh_activity_choosers,
                     alert_window,
                     silence_schedule,
                 )
             } else {
-                let facts = format_hook_facts(&inner);
+                let rename_due = previous.current_command != runtime.current_command
+                    && inner.engine.automatic_rename_due(pane, now);
+                let facts = if rename_due {
+                    format_hook_facts(&inner)
+                } else {
+                    FormatHookFacts::default()
+                };
                 let mut hooks = DaemonFormatHooks::command(&facts);
-                let before = MuxHookSnapshot::capture(&inner.engine);
+                let before = rename_due.then(|| MuxHookSnapshot::capture(&inner.engine));
+                let generation = inner.engine.state.generation();
                 let changed = inner
                     .engine
-                    .set_pane_runtime_facts_with_hooks(pane, runtime, &mut hooks);
-                let after = MuxHookSnapshot::capture(&inner.engine);
+                    .set_pane_runtime_facts_at(pane, runtime, &mut hooks, now);
+                let renamed = inner.engine.state.generation() != generation;
+                let events = match before {
+                    Some(before) if renamed => {
+                        mux_hook_events(&before, &MuxHookSnapshot::capture(&inner.engine), "")
+                    }
+                    _ => Vec::new(),
+                };
                 (
-                    changed,
-                    mux_hook_events(&before, &after, ""),
+                    changed.then_some(if renamed {
+                        timers::PublishReason::Tree
+                    } else {
+                        timers::PublishReason::RuntimeFacts
+                    }),
+                    events,
                     refresh_activity_choosers,
                     alert_window,
                     silence_schedule,
                 )
+            };
+            if output_activity {
+                inner.engine.note_automatic_rename_output(pane, now);
             }
+            self.schedule_window_renames(&mut inner);
+            result
         };
+        if output_activity || changed.is_some() {
+            self.request_peer_probe();
+        }
         if let Some(deadline) = silence_schedule {
             let _ = self
                 .silence_deadline_tx
@@ -24997,8 +25213,8 @@ impl Shared {
         if let Some(window) = alert_window {
             self.raise_window_activity(window, pane);
         }
-        if changed {
-            self.publish_snapshot();
+        if let Some(reason) = changed {
+            self.request_publish(reason);
         } else if refresh_activity_choosers {
             self.refresh_choose_trees();
         }
@@ -25058,6 +25274,7 @@ impl Shared {
         for (session, clients) in destroyed {
             for (client, survivor) in clients {
                 if let Some(survivor) = survivor {
+                    let _held = self.hold_attach_terminals(client);
                     match self.attach_collect_event_hooks(client, survivor, true) {
                         Ok((snapshot, events)) => {
                             let mut inner = self.inner.lock();
@@ -25071,10 +25288,12 @@ impl Shared {
                             }
                             continue;
                         }
-                        Err(error) => log::warn!(
-                            target: "zz_daemon::detach_on_destroy",
-                            "client {client} could not move to survivor {survivor} after session {session} died: {error}"
-                        ),
+                        Err(error) => {
+                            log::warn!(
+                                target: "zz_daemon::detach_on_destroy",
+                                "client {client} could not move to survivor {survivor} after session {session} died: {error}"
+                            );
+                        }
                     }
                 }
                 self.publish_to_client(client, EventPayload::detached_session_destroyed(session));
@@ -25089,8 +25308,22 @@ impl Shared {
     }
 
     fn publish_snapshot_state(&self) {
-        self.publish_mux_snapshots();
-        self.refresh_status();
+        self.publish_snapshot_state_except(None);
+    }
+
+    fn publish_snapshot_after_detach(self: &Arc<Self>, client: ClientId) {
+        self.detach_removed_sessions();
+        if !*attach::ATTACH_DEDUP {
+            self.publish_snapshot_state();
+            return;
+        }
+        self.status.lock().forget(client);
+        self.publish_snapshot_state_except(Some(client));
+    }
+
+    fn publish_snapshot_state_except(&self, detached: Option<ClientId>) {
+        self.note_published();
+        self.publish_mux_snapshots_except(true, true, detached);
         self.refresh_terminal_visibility();
         #[cfg(feature = "agent")]
         self.refresh_agent_visibility();
@@ -25100,7 +25333,26 @@ impl Shared {
     }
 
     fn publish_mux_snapshots(&self) {
-        let (snapshots, appearance_updates) = {
+        self.publish_mux_snapshots_as(true, false);
+    }
+
+    fn publish_mux_labels(&self) {
+        self.publish_mux_snapshots_as(false, false);
+    }
+
+    fn publish_mux_snapshots_as(&self, owns_generation: bool, with_status: bool) {
+        self.publish_mux_snapshots_except(owns_generation, with_status, None);
+    }
+
+    fn publish_mux_snapshots_except(
+        &self,
+        owns_generation: bool,
+        with_status: bool,
+        detached: Option<ClientId>,
+    ) {
+        let startup_ready = with_status.then(|| *self.startup_ready.lock());
+        let order = self.snapshot_order.lock();
+        let (snapshots, appearance_updates, requests) = {
             let mut inner = self.inner.lock();
             let ServerState {
                 engine,
@@ -25109,31 +25361,48 @@ impl Shared {
             } = &mut *inner;
             window_latest_clients.retain(|window, _| engine.state.windows.contains_key(window));
             release_chooser_zooms(&mut inner);
-            let snapshot = inner.engine.state.snapshot();
-            inner.last_published_mux_generation = snapshot.generation;
-            let presence = snapshot_presence(&inner);
-            let snapshots = inner
-                .subscribers
-                .iter()
-                .map(|(client, subscriber)| {
-                    let mut client_snapshot = snapshot.clone();
-                    stamp_snapshot_for_client(&inner, *client, &mut client_snapshot, &presence);
-                    (*client, Arc::clone(subscriber), client_snapshot)
-                })
-                .collect::<Vec<_>>();
+            let generation = inner.engine.state.generation();
+            let tracked = owns_generation || inner.last_published_mux_generation == generation;
+            if tracked {
+                inner.last_published_mux_generation = generation;
+            }
             let appearance_updates = if inner.engine.has_window_style_settings() {
                 terminal_appearance_updates(&inner)
             } else {
                 Vec::new()
             };
-            (snapshots, appearance_updates)
+            let mut targets = startup_ready
+                .map(|_| status_targets(&inner, None, None))
+                .unwrap_or_default();
+            targets.retain(|client| Some(*client) != detached);
+            if inner.subscribers.is_empty() && !*timers::EAGER_PUBLISH {
+                (Vec::new(), appearance_updates, Vec::new())
+            } else {
+                if !targets.is_empty() {
+                    inner.engine.set_format_now(unix_timestamp());
+                }
+                let snapshot = inner.engine.state.snapshot();
+                let facts = format_hook_facts(&inner);
+                let snapshots = stamped_snapshot_sends(&mut inner, tracked, &snapshot, &facts);
+                let requests = status_requests(
+                    &inner,
+                    targets,
+                    &snapshot,
+                    &facts,
+                    startup_ready.unwrap_or_default(),
+                    &self.status_job_needs,
+                );
+                (snapshots, appearance_updates, requests)
+            }
         };
         for (terminal, appearance) in appearance_updates {
             terminal.set_appearance(appearance);
         }
-        for (_, subscriber, snapshot) in snapshots {
+        for (subscriber, snapshot) in snapshots {
             Self::send_event(&subscriber, EventPayload::Snapshot(snapshot));
         }
+        drop(order);
+        self.publish_status_requests(&requests);
     }
 
     fn refresh_choose_trees(&self) {
@@ -25390,6 +25659,7 @@ impl Shared {
                     .copied()
                     .collect::<Vec<_>>();
                 let view = TerminalViewId(client.0);
+                apply_view_streams(&inner, view, &previous_streamed, &next_streamed);
                 let viewport_for = |pane: &PaneId| {
                     terminal_viewport_for_pane(&inner, *pane, view)
                         .map(|(terminal, viewport)| (*pane, terminal, (*viewport).clone()))
@@ -25422,6 +25692,7 @@ impl Shared {
                 inner.visible_terminals.insert(client, next_visible);
                 inner.streamed_terminals.insert(client, next_streamed);
             }
+            refresh_preview_watches(&mut inner);
             let layout_changed = write_back_terminal_geometries(&mut inner, &affected_panes);
             let resizes = terminal_resizes_for_panes(&inner, &affected_panes);
             (changes, resizes, layout_changed)
@@ -25460,6 +25731,19 @@ impl Shared {
         apply_terminal_resizes(resizes);
         if layout_changed {
             self.publish_mux_snapshots();
+        }
+    }
+
+    fn refresh_chooser_previews(&self) {
+        let clients = self
+            .inner
+            .lock()
+            .choose_trees
+            .keys()
+            .copied()
+            .collect::<Vec<_>>();
+        for client in clients {
+            self.publish_chooser_presentation(client);
         }
     }
 
@@ -25514,7 +25798,8 @@ impl Shared {
 
     fn publish_chooser_presentation(&self, client: ClientId) {
         let presentation = {
-            let inner = self.inner.lock();
+            let mut inner = self.inner.lock();
+            refresh_preview_watches(&mut inner);
             chooser_presentation::chooser_presentation(&inner, client).map(Box::new)
         };
         self.publish_to_client(client, EventPayload::ChooserPresentation { presentation });
@@ -26991,7 +27276,7 @@ impl Shared {
         }
         self.publish_window_alert_notifications(notifications);
         if let Some(hook) = hook {
-            self.run_event_hooks(vec![hook]);
+            self.run_event_hooks_on_worker(vec![hook]);
         }
     }
 
@@ -28060,6 +28345,7 @@ impl Shared {
         deferred_control_config_warnings: &mut Vec<DeferredControlConfigWarning>,
         queue_execution: &CommandQueueExecution,
     ) -> Result<(), DaemonError> {
+        let _key_table_hold = timers::KeyTablePublishHold::enter();
         // cfg.c adds `current_file` to the state every command parsed out of this
         // file inherits. A nested source replays through its own cloned context,
         // so a child overrides its parent for its own commands only.
@@ -28998,7 +29284,19 @@ impl Shared {
         if self.agent_stopped.load(Ordering::Acquire) {
             return;
         }
-        let mut records = match claude_peers::read_records() {
+        let records = if *timers::PEER_SCAN_ALWAYS {
+            claude_peers::read_records()
+        } else {
+            let mut registry = self.peer_registry.lock();
+            registry.refresh().map(|_| {
+                registry
+                    .records()
+                    .filter(|record| record.zz.is_none())
+                    .cloned()
+                    .collect()
+            })
+        };
+        let mut records = match records {
             Ok(records) => records,
             Err(error) => {
                 log::warn!(target: "zz::agent", "could not read Claude peers: {error}");
@@ -31025,7 +31323,7 @@ struct ServerState {
     client_ttys: BTreeMap<ClientId, String>,
     client_sizes: BTreeMap<ClientId, (u16, u16)>,
     client_working_directories: BTreeMap<ClientId, PathBuf>,
-    client_environments: BTreeMap<ClientId, Arc<BTreeMap<RawText, RawText>>>,
+    client_environments: BTreeMap<ClientId, Arc<ClientEnvironmentBlob>>,
     client_origins: BTreeMap<ClientId, PaneId>,
     last_sessions: BTreeMap<ClientId, SessionId>,
     client_flags: ClientFlags,
@@ -31042,7 +31340,7 @@ struct ServerState {
     activity_sequence: u64,
     deferred_event_hooks: Vec<PendingHookEvent>,
     deferred_control_refresh: bool,
-    terminals: BTreeMap<PaneId, Arc<TerminalSession>>,
+    terminals: Arc<BTreeMap<PaneId, Arc<TerminalSession>>>,
     last_output: BTreeMap<PaneId, Instant>,
     #[cfg(all(feature = "agent", unix))]
     claude_peer_states: BTreeMap<PaneId, String>,
@@ -31124,6 +31422,11 @@ struct ServerState {
     control_output_taps: BTreeMap<PaneId, ControlOutputTap>,
     control_outputs: BTreeMap<ClientId, ControlClientOutput>,
     next_pipe_token: u64,
+    key_tables_generation: u64,
+    published_snapshots: BTreeMap<ClientId, (u64, u64)>,
+    scheduled_window_rename: Option<Instant>,
+    preview_watched: BTreeSet<PaneId>,
+    client_cell_pixels: BTreeMap<ClientId, (u32, u32)>,
 }
 
 struct WaitItem {
@@ -31303,6 +31606,12 @@ impl DiagnosticSample {
 struct PendingGuiRequest {
     client: ClientId,
     reply: crossbeam_channel::Sender<Result<String, String>>,
+}
+
+impl ServerState {
+    fn terminals_mut(&mut self) -> &mut BTreeMap<PaneId, Arc<TerminalSession>> {
+        Arc::make_mut(&mut self.terminals)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -35219,13 +35528,13 @@ fn client_working_directory_fact(working_directory: Option<&ClientPath>) -> Opti
         .filter(|working_directory| working_directory.is_absolute())
 }
 
-fn client_environment_fact(entries: &[RawText]) -> Arc<BTreeMap<RawText, RawText>> {
-    Arc::new(
+fn client_environment_fact(entries: &[RawText]) -> Arc<ClientEnvironmentBlob> {
+    Arc::new(ClientEnvironmentBlob::from_map(
         entries
             .iter()
             .filter_map(|entry| entry.split_once_byte(b'='))
             .collect(),
-    )
+    ))
 }
 
 fn effective_mux_options(inner: &ServerState, client: ClientId) -> MuxOptions {
@@ -35560,6 +35869,7 @@ fn client_environment_value<'a>(
     inner
         .client_environments
         .get(&client)?
+        .map()
         .get(name)
         .map(RawText::as_str)
 }
@@ -35857,7 +36167,9 @@ fn client_format_facts(
     client: ClientId,
     session: SessionId,
 ) -> ClientFormatFacts {
-    let session_state = &inner.engine.state.sessions[&session];
+    let Some(session_state) = inner.engine.state.sessions.get(&session) else {
+        return ClientFormatFacts::default();
+    };
     let window = client_focused_window(inner, client, session_state);
     let kind = inner.client_kinds.get(&client).copied();
     let has_terminal =
@@ -35949,7 +36261,7 @@ fn client_format_facts(
         width: width.to_string(),
         written: written.to_string(),
         line: 0,
-        environment: client_environment_rows(inner.client_environments.get(&client)),
+        environment: inner.client_environments.get(&client).cloned(),
         terminal: has_terminal
             .then(|| {
                 client_terminal_facts(
@@ -36003,10 +36315,9 @@ fn mouse_format_variables(
     let Some(window) = inner.engine.state.window_for_pane(pane) else {
         return (variables, None);
     };
-    let session = inner.engine.state.windows[&window].session;
     let geometry = inner
         .engine
-        .format_status_context(Some(session), Some(window), Some(pane));
+        .pane_format_geometry(None, Some(window), Some(pane));
     let mut probe = None;
     if let (Some(left), Some(top)) = (geometry.pane_left, geometry.pane_top)
         && let (Some(x), Some(y)) = (mouse.column.checked_sub(left), mouse.row.checked_sub(top))
@@ -36041,6 +36352,7 @@ fn mouse_format_variables(
 /// tree never carries expands the same empty a NULL does, so a read that finds
 /// nothing publishes nothing.
 fn pointer_format_variables(probe: &PointerProbe) -> BTreeMap<String, String> {
+    let _round_trips = zz_terminal::allow_actor_round_trips();
     let mut variables = BTreeMap::new();
     let Ok(context) = probe
         .terminal
@@ -36073,7 +36385,7 @@ fn client_viewport_facts(
     let pane = inner.engine.state.windows.get(&window)?.active_pane;
     let geometry = inner
         .engine
-        .format_status_context(Some(session), Some(window), Some(pane));
+        .pane_format_geometry(Some(session), Some(window), Some(pane));
     let cursor = inner.terminals.get(&pane).and_then(|terminal| {
         let cursor = terminal
             .latest_viewport()
@@ -36525,6 +36837,72 @@ fn set_current_window_latest_client(
     set_window_latest_client(inner, client, window, event_hooks_enabled)
 }
 
+fn prepare_command_request(
+    inner: &mut ServerState,
+    client: ClientId,
+    command: &CommandInvocation,
+    prepared: bool,
+) -> Result<(CommandInvocation, bool), ServerError> {
+    inner.cold_bootstrap.command(client);
+    let command = if prepared {
+        command.clone()
+    } else {
+        resolve_and_prepare_command(&inner.engine, command)?.0
+    };
+    if !prepared && canonical_command(&command.name) == "load-buffer" {
+        parse_buffer_command_args("load-buffer", &command.args, &['b', 't'], &['w'])?;
+    }
+    let guarded = read_only_guard_client(inner, client, &command);
+    let blocked = guarded.is_some_and(|guarded| inner.client_flags.contains(guarded))
+        && !command_is_read_only_safe(&command);
+    Ok((command, blocked))
+}
+
+/// `server_client_print` runs `utf8_sanitize` over a message bound for a
+/// client with no session of its own or for a control client, which is
+/// every shape but an attached one: an attached client is shown the message
+/// in a pane instead. The gate is tmux's `CLIENT_UTF8`, which the client
+/// raised for itself out of `$TMUX` and the locale before it dialled.
+///
+/// Three commands answer their client without passing through
+/// `server_client_print` at all, so the pin leaves their bytes alone for
+/// every client shape and every encoding. `capture-pane -p` writes
+/// `control_write` for a control client and `file_print_buffer` for
+/// everyone else. `save-buffer` always writes `file_write`, a real path and
+/// `-` alike. `show-buffer` reaches `cmdq_print_data` only when the client
+/// has a session of its own or is a control client, so it is sanitized for
+/// a control client but falls through to the same raw `file_write` for a
+/// session-less command client, which is the only shape zz's `Command`
+/// kind has.
+fn sanitizes_output_for(
+    inner: &ServerState,
+    client: ClientId,
+    kind: ClientKind,
+    command: &str,
+) -> bool {
+    if !matches!(kind, ClientKind::Command | ClientKind::Control) {
+        return false;
+    }
+    match canonical_command(command) {
+        "capture-pane" | "save-buffer" => return false,
+        "show-buffer" if kind == ClientKind::Command => return false,
+        _ => {}
+    }
+    !inner.utf8_clients.contains(&client)
+}
+
+fn detach_is_inert(inner: &ServerState, client: ClientId) -> bool {
+    client_attached_session(inner, client).is_none()
+        && !inner.copy_sessions.contains_key(&client)
+        && !inner.focused_windows.contains_key(&client)
+        && !inner.visible_terminals.contains_key(&client)
+        && inner.client_kinds.get(&client) != Some(&ClientKind::Control)
+        && !inner
+            .window_latest_clients
+            .values()
+            .any(|latest| *latest == client)
+}
+
 fn promote_window_latest_clients(
     inner: &mut ServerState,
     detached: ClientId,
@@ -36586,6 +36964,59 @@ fn client_input_pane(
         })
 }
 
+#[cfg(test)]
+mod format_universe_tests;
+
+fn status_targets(
+    inner: &ServerState,
+    sessions: Option<&BTreeSet<SessionId>>,
+    clients: Option<&BTreeSet<ClientId>>,
+) -> Vec<ClientId> {
+    inner
+        .subscribers
+        .keys()
+        .copied()
+        .filter(|client| {
+            clients.is_none_or(|clients| clients.contains(client))
+                && sessions.is_none_or(|sessions| {
+                    client_attached_session(inner, *client)
+                        .is_some_and(|session| sessions.contains(&session))
+                })
+        })
+        .collect()
+}
+
+fn status_requests(
+    inner: &ServerState,
+    targets: Vec<ClientId>,
+    snapshot: &MuxSnapshot,
+    facts: &FormatHookFacts,
+    startup_ready: bool,
+    job_needs: &crate::status::StatusJobNeeds,
+) -> Vec<StatusRequest> {
+    if targets.is_empty() {
+        return Vec::new();
+    }
+    let option_snapshot = Arc::new(inner.engine.format_option_snapshot());
+    let job_needs = job_needs.lock();
+    let mut line_needs = BTreeMap::new();
+    targets
+        .into_iter()
+        .map(|client| {
+            status_request_with(
+                inner,
+                client,
+                snapshot,
+                option_snapshot.clone(),
+                facts.clone(),
+                startup_ready,
+                job_needs.get(&client).copied().unwrap_or_default(),
+                &mut line_needs,
+            )
+        })
+        .collect()
+}
+
 fn status_request(
     inner: &ServerState,
     client: ClientId,
@@ -36593,12 +37024,33 @@ fn status_request(
     option_snapshot: Arc<zz_mux::StatusRowVariables>,
     facts: FormatHookFacts,
     startup_ready: bool,
+    job_needs: FormatNeeds,
+) -> StatusRequest {
+    status_request_with(
+        inner,
+        client,
+        snapshot,
+        option_snapshot,
+        facts,
+        startup_ready,
+        job_needs,
+        &mut BTreeMap::new(),
+    )
+}
+
+fn status_request_with(
+    inner: &ServerState,
+    client: ClientId,
+    snapshot: &MuxSnapshot,
+    option_snapshot: Arc<zz_mux::StatusRowVariables>,
+    facts: FormatHookFacts,
+    startup_ready: bool,
+    job_needs: FormatNeeds,
+    line_needs: &mut BTreeMap<Option<SessionId>, FormatNeeds>,
 ) -> StatusRequest {
     let attached = client_attached_session(inner, client);
     let mut facts = facts;
-    facts.client_environment = Arc::new(client_environment_rows(
-        inner.client_environments.get(&client),
-    ));
+    facts.client_environment = inner.client_environments.get(&client).cloned();
     if let Some(session) = attached {
         facts.client = Some(client_format_facts(inner, client, session));
     }
@@ -36612,23 +37064,38 @@ fn status_request(
     let pane_borders = attached.map_or_else(Vec::new, |session| {
         border_presentations(inner, client, session, &facts)
     });
+    let formats = inner.engine.status_formats_for_session(attached);
+    let row_formats = inner.engine.status_format_array_for_session(attached);
+    let title_format = (attached.is_some() && inner.engine.set_titles_for_session(attached))
+        .then(|| inner.engine.set_titles_string_for_session(attached));
+    let message_styles = inner.engine.message_styles_for_session(attached);
+    let needs = *line_needs.entry(attached).or_insert_with(|| {
+        crate::status::status_line_needs(
+            &inner.engine,
+            &formats,
+            &row_formats,
+            title_format.as_deref(),
+            &message_styles,
+        )
+    }) | job_needs;
     StatusRequest {
         client,
-        formats: inner.engine.status_formats_for_session(attached),
-        row_formats: inner.engine.status_format_array_for_session(attached),
+        formats,
+        row_formats,
         option_snapshot,
         message_line: inner.engine.message_line_for_session(attached),
         customized: inner.engine.status_customized_for_session(attached),
-        title_format: (attached.is_some() && inner.engine.set_titles_for_session(attached))
-            .then(|| inner.engine.set_titles_string_for_session(attached)),
+        title_format,
         environment: inner.engine.job_environment(None),
         default_terminal: inner.engine.default_terminal_for_spawn().to_owned(),
         startup: !startup_ready,
-        context,
+        context: context.detach(needs),
         facts,
         client_scheme: inner.client_color_schemes.get(&client).copied(),
-        message_styles: inner.engine.message_styles_for_session(attached),
-        modes: attached.map_or_else(Vec::new, |session| mode_requests(inner, client, session)),
+        message_styles,
+        modes: attached.map_or_else(Vec::new, |session| {
+            mode_requests(inner, client, session, job_needs)
+        }),
         pane_borders,
     }
 }
@@ -36647,17 +37114,15 @@ fn border_presentations(
         return Vec::new();
     };
     let mut hooks = DaemonFormatHooks::command(facts).with_option_engine(&inner.engine);
+    let contexts = inner
+        .engine
+        .format_context_snapshot(FormatClient::Attached(session));
     window_state
         .panes
         .keys()
         .take(zz_protocol::MAX_PANE_BORDER_PRESENTATIONS)
         .map(|pane| {
-            let context = inner.engine.format_status_context_for_client(
-                Some(session),
-                Some(window),
-                Some(*pane),
-                session,
-            );
+            let context = contexts.status_context(Some(session), Some(window), Some(*pane));
             let format = if *pane == window_state.active_pane {
                 "#{E:pane-active-border-style}"
             } else {
@@ -36675,19 +37140,61 @@ fn mode_requests(
     inner: &ServerState,
     client: ClientId,
     session: SessionId,
+    job_needs: FormatNeeds,
 ) -> Vec<crate::status::ModeRequest> {
     let copy = inner
         .copy_sessions
         .get(&client)
         .filter(|copy| !copy.exiting)
-        .and_then(|copy| {
-            let terminal = inner.terminals.get(&copy.pane)?;
-            mode_request(inner, client, session, copy.pane, terminal, false)
-        });
-    let view = inner.command_outputs.get(&client).and_then(|output| {
-        mode_request(inner, client, session, output.pane, &output.terminal, true)
-    });
-    copy.into_iter().chain(view).collect()
+        .and_then(|copy| Some((copy.pane, inner.terminals.get(&copy.pane)?, false)));
+    let view = inner
+        .command_outputs
+        .get(&client)
+        .map(|output| (output.pane, &output.terminal, true));
+    let mut shown = copy
+        .into_iter()
+        .chain(view)
+        .filter_map(|(pane, terminal, view)| {
+            mode_request_position(client, terminal, view).map(|position| (pane, view, position))
+        })
+        .peekable();
+    if shown.peek().is_none() {
+        return Vec::new();
+    }
+    let needs = inner.engine.format_needs(crate::status::MODE_FORMATS) | job_needs;
+    let contexts = inner
+        .engine
+        .format_context_snapshot(FormatClient::Attached(session));
+    shown
+        .filter_map(|(pane, view, position)| {
+            mode_request(inner, &contexts, needs, session, pane, view, position)
+        })
+        .collect()
+}
+
+fn mode_request(
+    inner: &ServerState,
+    contexts: &zz_mux::FormatContextSnapshot<'_>,
+    needs: FormatNeeds,
+    session: SessionId,
+    pane: PaneId,
+    view: bool,
+    (position, limit): (u32, u32),
+) -> Option<crate::status::ModeRequest> {
+    let window = inner.engine.state.window_for_pane(pane)?;
+    Some(crate::status::ModeRequest {
+        pane,
+        view,
+        context: contexts
+            .status_context(Some(session), Some(window), Some(pane))
+            .detach(needs),
+        position,
+        limit,
+        vi_keys: inner
+            .engine
+            .copy_mode_table_for_pane(pane)
+            .is_ok_and(|table| table == "copy-mode-vi"),
+    })
 }
 
 const fn mode_kind(mode: TerminalMode) -> u8 {
@@ -36705,14 +37212,11 @@ const fn mode_kind(mode: TerminalMode) -> u8 {
     }
 }
 
-fn mode_request(
-    inner: &ServerState,
+fn mode_request_position(
     client: ClientId,
-    session: SessionId,
-    pane: PaneId,
     terminal: &TerminalSession,
     view: bool,
-) -> Option<crate::status::ModeRequest> {
+) -> Option<(u32, u32)> {
     let viewport = terminal.latest_viewport_for(TerminalViewId(client.0))?;
     let shown = match viewport.mode {
         TerminalMode::Copy { hide_position, .. } => !view && !hide_position,
@@ -36726,24 +37230,7 @@ fn mode_request(
         .scrollbar
         .total
         .saturating_sub(viewport.scrollbar.len);
-    let window = inner.engine.state.window_for_pane(pane)?;
-    let context = inner.engine.format_status_context_for_client(
-        Some(session),
-        Some(window),
-        Some(pane),
-        session,
-    );
-    Some(crate::status::ModeRequest {
-        pane,
-        view,
-        context,
-        position: limit.saturating_sub(viewport.scrollbar.offset),
-        limit,
-        vi_keys: inner
-            .engine
-            .copy_mode_table_for_pane(pane)
-            .is_ok_and(|table| table == "copy-mode-vi"),
-    })
+    Some((limit.saturating_sub(viewport.scrollbar.offset), limit))
 }
 
 fn resolve_popup_client(
@@ -36906,7 +37393,7 @@ fn popup_position_variables(
     width: u16,
     height: u16,
 ) -> BTreeMap<String, String> {
-    let status = engine.format_status_context(target.session, target.window, target.pane);
+    let status = engine.pane_format_geometry(target.session, target.window, target.pane);
     let status_row = engine.status_formats_for_session(target.session);
     let status_lines = if status_row.enabled {
         u16::from(status_row.lines)
@@ -37125,11 +37612,84 @@ fn snapshot_presence(inner: &ServerState) -> SnapshotPresence {
         .collect()
 }
 
+mod timers;
+
+#[cfg(test)]
+mod publish_tests;
+
+fn note_snapshot_sent(inner: &mut ServerState, client: ClientId, snapshot: &MuxSnapshot) {
+    inner
+        .published_snapshots
+        .insert(client, (snapshot.content_digest(), snapshot.generation));
+}
+
+fn stamped_snapshot_sends(
+    inner: &mut ServerState,
+    tracked: bool,
+    snapshot: &MuxSnapshot,
+    facts: &FormatHookFacts,
+) -> Vec<(Arc<OutboundMailbox>, MuxSnapshot)> {
+    let presence = snapshot_presence(inner);
+    let mut sends = Vec::with_capacity(inner.subscribers.len());
+    let mut unchanged = Vec::new();
+    let mut restamp = false;
+    for (client, subscriber) in &inner.subscribers {
+        let mut client_snapshot = snapshot.clone();
+        stamp_snapshot_for_client_with(inner, *client, &mut client_snapshot, &presence, facts);
+        let digest = client_snapshot.content_digest();
+        let sent = inner.published_snapshots.get(client).copied();
+        if !*timers::EAGER_PUBLISH && sent == Some((digest, snapshot.generation)) {
+            unchanged.push(*client);
+            continue;
+        }
+        restamp |= sent.is_some_and(|(sent_digest, sent_generation)| {
+            sent_digest != digest && sent_generation == snapshot.generation
+        });
+        sends.push((*client, Arc::clone(subscriber), client_snapshot, digest));
+    }
+    let generation = if restamp {
+        inner.engine.state.bump_generation();
+        let generation = inner.engine.state.generation();
+        if tracked {
+            inner.last_published_mux_generation = generation;
+        }
+        for client in unchanged {
+            if let Some((_, sent_generation)) = inner.published_snapshots.get_mut(&client) {
+                *sent_generation = generation;
+            }
+        }
+        generation
+    } else {
+        snapshot.generation
+    };
+    sends
+        .into_iter()
+        .map(|(client, subscriber, mut client_snapshot, digest)| {
+            client_snapshot.generation = generation;
+            inner
+                .published_snapshots
+                .insert(client, (digest, generation));
+            (subscriber, client_snapshot)
+        })
+        .collect()
+}
+
 fn stamp_snapshot_for_client(
     inner: &ServerState,
     client: ClientId,
     snapshot: &mut MuxSnapshot,
     presence: &SnapshotPresence,
+) {
+    let facts = format_hook_facts(inner);
+    stamp_snapshot_for_client_with(inner, client, snapshot, presence, &facts);
+}
+
+fn stamp_snapshot_for_client_with(
+    inner: &ServerState,
+    client: ClientId,
+    snapshot: &mut MuxSnapshot,
+    presence: &SnapshotPresence,
+    facts: &FormatHookFacts,
 ) {
     snapshot.focused_window = client_focused_window_for_attachment(inner, client);
     for session in &mut snapshot.sessions {
@@ -37143,33 +37703,32 @@ fn stamp_snapshot_for_client(
             })
             .collect();
     }
-    let facts = format_hook_facts(inner);
     let format_client = client_attached_session(inner, client)
         .map_or(FormatClient::Unattached, FormatClient::Attached);
     let contexts = inner.engine.format_context_snapshot(format_client);
     expand_window_status_labels(
         &inner.engine,
         &inner.config_files,
-        &facts,
+        facts,
         &contexts,
         snapshot,
     );
     stamp_pane_border_colours(
         &inner.engine,
         &inner.config_files,
-        &facts,
+        facts,
         &contexts,
         snapshot,
     );
     stamp_pane_border_chrome(
         &inner.engine,
         &inner.config_files,
-        &facts,
+        facts,
         &contexts,
         snapshot,
     );
     drop(contexts);
-    stamp_pane_modes(inner, &facts, snapshot);
+    stamp_pane_modes(inner, facts, snapshot);
 }
 
 fn stamp_pane_modes(inner: &ServerState, facts: &FormatHookFacts, snapshot: &mut MuxSnapshot) {
@@ -38554,6 +39113,7 @@ fn stop_pane_pipe(mut pipe: PanePipe) {
         log::error!("pipe-pane worker panicked for pane process {}", pipe.pid);
     }
     let terminal = Arc::clone(&pipe.terminal.lock());
+    let _round_trips = zz_terminal::allow_actor_round_trips();
     let _ = terminal.disarm_raw_output_tap(pipe.token);
 }
 
@@ -38627,6 +39187,7 @@ fn drain_control_pane_output(
 }
 
 fn stop_control_output_tap(mut tap: ControlOutputTap) {
+    let _round_trips = zz_terminal::allow_actor_round_trips();
     tap.stop.store(true, Ordering::Release);
     let _ = tap.terminal.disarm_raw_output_tap(tap.token);
     if let Some(worker) = tap.thread.take()
@@ -38806,6 +39367,23 @@ enum DeferredTerminalCommand {
 }
 
 impl DeferredTerminalCommand {
+    fn copy_mode_terminal(&self) -> Option<&Arc<TerminalSession>> {
+        match self {
+            Self::ViewAction {
+                terminal, action, ..
+            } if terminal_view_action_enters_copy_mode(action)
+                || matches!(
+                    action,
+                    zz_terminal::TerminalViewAction::CopyMode(_)
+                        | zz_terminal::TerminalViewAction::CopyModeCounted { .. }
+                ) =>
+            {
+                Some(terminal)
+            }
+            _ => None,
+        }
+    }
+
     #[cfg(test)]
     const fn wrap_search(&self) -> Option<bool> {
         match self {
@@ -38825,13 +39403,16 @@ impl DeferredTerminalCommand {
             }
             Self::SetWrapSearch { terminal, enabled } => terminal.set_wrap_search(enabled),
             Self::SetEngineKnobs { terminal, knobs } => terminal.set_engine_knobs(knobs),
-            Self::ArmCopySource { terminal, source } => match source.capture_copy_source() {
-                Ok(captured) => terminal.set_pending_copy_source(Some(Box::new(captured))),
-                Err(error) => log::warn!(
-                    target: "zz_daemon::diagnostics::terminal",
-                    "could not clone the copy-mode source screen: {error}"
-                ),
-            },
+            Self::ArmCopySource { terminal, source } => {
+                let _round_trips = zz_terminal::allow_actor_round_trips();
+                match source.capture_copy_source() {
+                    Ok(captured) => terminal.set_pending_copy_source(Some(Box::new(captured))),
+                    Err(error) => log::warn!(
+                        target: "zz_daemon::diagnostics::terminal",
+                        "could not clone the copy-mode source screen: {error}"
+                    ),
+                }
+            }
             Self::SetAppearance {
                 terminal,
                 appearance,
@@ -38991,6 +39572,100 @@ fn streamed_terminal_panes(
         }
     }
     streamed
+}
+
+#[cfg(test)]
+mod pane_tests;
+
+fn log_pane_perf_knobs() {
+    for (knob, active) in zz_terminal::perf_knobs() {
+        log::info!(target: "zz_daemon::perf_knobs", "{knob} {}", if active { "on" } else { "off" });
+    }
+}
+
+fn apply_view_streams(
+    inner: &ServerState,
+    view: TerminalViewId,
+    previous: &BTreeMap<PaneId, TerminalStreamKind>,
+    next: &BTreeMap<PaneId, TerminalStreamKind>,
+) {
+    for pane in previous.keys().filter(|pane| !next.contains_key(pane)) {
+        if let Some(terminal) = inner.terminals.get(pane) {
+            terminal.set_view_stream(view, ViewStream::Off);
+        }
+    }
+    for (pane, kind) in next {
+        if previous.contains_key(pane) {
+            continue;
+        }
+        if let Some(terminal) = inner.terminals.get(pane) {
+            terminal.set_view_stream(
+                view,
+                match kind {
+                    TerminalStreamKind::Foreground => ViewStream::Foreground,
+                    TerminalStreamKind::Preview => ViewStream::Preview,
+                },
+            );
+        }
+    }
+}
+
+fn chooser_preview_panes(inner: &ServerState) -> BTreeSet<PaneId> {
+    let state = &inner.engine.state;
+    let mut panes = BTreeSet::new();
+    for chooser in inner.choose_trees.values() {
+        let Some(item) = usize::try_from(chooser.rendered.selected)
+            .ok()
+            .and_then(|selected| chooser.rendered.items.get(selected))
+        else {
+            continue;
+        };
+        match item.target {
+            ChooseTreeTarget::Session(session) => panes.extend(
+                state
+                    .sessions
+                    .get(&session)
+                    .into_iter()
+                    .flat_map(|session| session.windows.iter())
+                    .filter_map(|window| state.windows.get(window))
+                    .map(|window| window.active_pane),
+            ),
+            ChooseTreeTarget::Window(window) => panes.extend(
+                state
+                    .windows
+                    .get(&window)
+                    .into_iter()
+                    .flat_map(|window| window.panes.keys().copied()),
+            ),
+            ChooseTreeTarget::Pane(pane) => {
+                panes.insert(pane);
+            }
+            ChooseTreeTarget::Client(client) if !chooser.info_preview => panes.extend(
+                chooser
+                    .clients
+                    .iter()
+                    .filter(|row| row.client == client)
+                    .filter_map(|row| row.pane)
+                    .filter(|pane| !(chooser.hide_source && *pane == chooser.source_pane)),
+            ),
+            ChooseTreeTarget::Client(_) => {}
+        }
+    }
+    panes.retain(|pane| inner.terminals.contains_key(pane));
+    panes
+}
+
+fn refresh_preview_watches(inner: &mut ServerState) {
+    let next = chooser_preview_panes(inner);
+    if next == inner.preview_watched {
+        return;
+    }
+    for pane in inner.preview_watched.symmetric_difference(&next) {
+        if let Some(terminal) = inner.terminals.get(pane) {
+            terminal.set_preview_watch(next.contains(pane));
+        }
+    }
+    inner.preview_watched = next;
 }
 
 /// The agent panes a client can actually see, derived exactly like the
@@ -39779,11 +40454,7 @@ fn mouse_pane_cell(
     pane: PaneId,
     mouse: &MouseEventTarget,
 ) -> Option<(usize, usize)> {
-    let window = inner.engine.state.window_for_pane(pane)?;
-    let session = inner.engine.state.windows[&window].session;
-    let geometry = inner
-        .engine
-        .format_status_context(Some(session), Some(window), Some(pane));
+    let geometry = inner.engine.pane_format_geometry(None, None, Some(pane));
     let (left, top) = (geometry.pane_left?, geometry.pane_top?);
     let (x, y) = (mouse.column.checked_sub(left)?, mouse.row.checked_sub(top)?);
     if geometry.pane_right.is_none_or(|right| mouse.column > right)
@@ -39795,13 +40466,7 @@ fn mouse_pane_cell(
 }
 
 fn wait_for_terminal_identity(terminal: &TerminalSession) {
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while terminal.process_id().is_none() || cfg!(unix) && terminal.tty().is_none() {
-        if terminal.completion().is_some() || Instant::now() >= deadline {
-            return;
-        }
-        thread::sleep(Duration::from_millis(1));
-    }
+    terminal.wait_for_identity(Duration::from_secs(2));
 }
 
 fn terminal_resizes_for_panes(
@@ -40037,7 +40702,7 @@ fn format_hook_facts(inner: &ServerState) -> FormatHookFacts {
         copy_modes: Arc::new(copy_mode_format_facts(inner)),
         pane_modes: Arc::new(pane_mode_format_facts(inner)),
         unseen_changes: Arc::new(unseen_change_panes(inner)),
-        terminals: Arc::new(inner.terminals.clone()),
+        terminals: Arc::clone(&inner.terminals),
         pane_pipes: Arc::new(
             inner
                 .pane_pipes
@@ -40120,9 +40785,7 @@ fn format_hook_facts_for_client(
     // reads that client's environment even when the format's own client is the
     // command's target.
     if let Some(invoking) = format_provenance_client(context, client) {
-        facts.client_environment = Arc::new(client_environment_rows(
-            inner.client_environments.get(&invoking),
-        ));
+        facts.client_environment = inner.client_environments.get(&invoking).cloned();
     }
     let format_client = if context.has_no_client() {
         hook_body_format_client(inner)
@@ -42563,6 +43226,7 @@ fn capture_screen(
     pane: PaneId,
     options: &CaptureOptions,
 ) -> Result<String, DaemonError> {
+    let _round_trips = zz_terminal::allow_actor_round_trips();
     match terminal.capture(*options) {
         Ok(screen) => Ok(screen),
         Err(TerminalCaptureError::ActorStopped) => Err(ServerError::PaneExited(pane).into()),
@@ -43804,11 +44468,15 @@ fn handle_connection<S: TransportStream>(
         }
         Err(error) => return Err(error.into()),
     };
-    let ProtocolMessage::ClientHello(hello) = first_message else {
-        return Err(ServerError::InvalidCommand(
-            "first protocol message must be ClientHello".to_owned(),
-        )
-        .into());
+    let hello = match first_message {
+        ProtocolMessage::ClientHello(hello) => hello,
+        ProtocolMessage::Exec(request) => return exec::serve_exec(stream, shared, request),
+        _ => {
+            return Err(ServerError::InvalidCommand(
+                "first protocol message must be ClientHello".to_owned(),
+            )
+            .into());
+        }
     };
     if let Err(error) = validate_hello(&hello) {
         best_effort_protocol_mismatch_reply(&mut stream, hello.protocol_version);
@@ -43890,6 +44558,9 @@ fn handle_connection<S: TransportStream>(
         if let Some(size) = client_size_fact(&hello.capabilities) {
             inner.client_sizes.insert(client, size);
         }
+        if let Some(cell) = attach::client_cell_fact(&hello.capabilities) {
+            inner.client_cell_pixels.insert(client, cell);
+        }
         inner.client_pids.insert(client, hello.process_id);
         if let Some(working_directory) =
             client_working_directory_fact(hello.working_directory.as_ref())
@@ -43910,12 +44581,15 @@ fn handle_connection<S: TransportStream>(
         hello.kind,
     );
     let mut writer = stream.try_clone()?;
+    if *attach::BATCHED_WRITES {
+        let _ = writer.set_send_buffer_size(attach::MAX_BATCHED_WRITE_BYTES);
+    }
     let writer_mailbox = Arc::clone(&outbound);
     let writer_shared = Arc::downgrade(shared);
-    let writer_thread = thread::Builder::new()
-        .name(format!("zz-client-writer-{}", client.0))
-        .spawn(move || write_outbound(&mut writer, &writer_mailbox, &writer_shared, client))
-        .map_err(|error| DaemonError::Thread(error.to_string()))?;
+    let writer_thread = attach::spawn_writer(&shared.connection_threads, client, move || {
+        write_outbound(&mut writer, &writer_mailbox, &writer_shared, client);
+    })
+    .map_err(|error| DaemonError::Thread(error.to_string()))?;
     let mut writer_registration =
         ClientWriterRegistrationGuard::new(shared, client, Arc::clone(&outbound));
     let _ = outbound.enqueue_reliable(&ProtocolMessage::ServerHello(server_hello));
@@ -44009,6 +44683,7 @@ fn handle_connection<S: TransportStream>(
 
     let mut path_list: Option<(u64, Arc<AtomicBool>)> = None;
     let path_list_turn = Arc::new(Mutex::new(()));
+    let mut stream = attach::inbound_reader(stream);
     let result = loop {
         let message = match read_protocol_message_into(&mut stream, &mut inbound_frame) {
             Ok(message) => message,
@@ -44142,13 +44817,16 @@ fn handle_connection<S: TransportStream>(
                     ));
                     continue;
                 };
+                outbound.hold_terminals();
                 match shared.attach_target(client, hello.kind, context, &session) {
                     Ok((session, snapshot)) => {
                         shared.clear_pending_committed_text(client);
                         shared.send_attached(client, &outbound, session, snapshot);
                         shared.publish_snapshot();
+                        outbound.release_terminals();
                     }
                     Err(error) => {
+                        outbound.release_terminals();
                         let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(
                             CommandResponse::Error {
                                 request_id: 0,
@@ -44238,7 +44916,7 @@ fn handle_connection<S: TransportStream>(
             }
             ProtocolMessage::Resync => shared.send_resync(client, &outbound),
             ProtocolMessage::RequestFull { pane } => {
-                shared.send_full(client, pane, &outbound);
+                shared.request_full(client, pane, &outbound);
             }
             ProtocolMessage::HistoryRequest { pane, start, count } => {
                 shared.send_history(client, pane, start, count, &outbound);
@@ -44399,34 +45077,38 @@ fn write_outbound(
     shared: &Weak<Shared>,
     client: ClientId,
 ) {
-    while let Some(frame) = outbound.recv() {
+    let mut batch = Vec::new();
+    loop {
+        let ready = if *attach::BATCHED_WRITES {
+            outbound.recv_batch(&mut batch, attach::MAX_BATCHED_WRITE_BYTES)
+        } else {
+            outbound.recv().map(|frame| batch.push(frame)).is_some()
+        };
+        if !ready {
+            break;
+        }
         let started = diagnostic_timer();
-        let bytes = frame.len();
-        let capacity = frame.capacity();
-        let write_started = diagnostic_timer();
-        let write_result = stream.write_all(&frame);
-        let write_us = diagnostic_elapsed_us(write_started);
-        let flush_started = diagnostic_timer();
-        let result = write_result.and_then(|()| stream.flush());
-        let flush_us = diagnostic_elapsed_us(flush_started);
+        let frames = batch.len();
+        let bytes = batch.iter().map(Vec::len).sum::<usize>();
+        let result = attach::write_frames(stream, &batch);
         log::trace!(
             target: "zz_daemon::diagnostics::outbound",
-            "write bytes={bytes} frame_capacity={capacity} success={} write_us={} flush_us={} elapsed_us={}",
+            "write bytes={bytes} frames={frames} success={} elapsed_us={}",
             result.is_ok(),
-            write_us,
-            flush_us,
             diagnostic_elapsed_us(started),
         );
         if result.is_err() {
             outbound.close();
             break;
         }
-        outbound.note_written(bytes);
-        outbound.recycle_frame(frame);
-        if let Some(pane) = outbound.take_preview_refresh()
-            && let Some(shared) = shared.upgrade()
-        {
-            shared.send_full(client, pane, outbound);
+        outbound.finish_batch(&mut batch);
+        for _ in 0..frames {
+            let Some(pane) = outbound.take_preview_refresh() else {
+                break;
+            };
+            if let Some(shared) = shared.upgrade() {
+                shared.send_full(client, pane, outbound);
+            }
         }
     }
     let _ = stream.shutdown();
@@ -44475,22 +45157,40 @@ fn post_admission_callback_error(error: DaemonError) -> DaemonError {
 }
 
 #[cfg(unix)]
-fn prepare_socket(path: &Path) -> Result<(), DaemonError> {
+fn prepare_socket(path: &Path, ready: &mut BootstrapReady) -> Result<fs::File, DaemonError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
+    let mut lock_path = path.as_os_str().to_owned();
+    lock_path.push(".lock");
+    let lock = {
+        use std::os::unix::fs::OpenOptionsExt as _;
+
+        fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .mode(0o600)
+            .open(PathBuf::from(lock_path))?
+    };
+    rustix::fs::flock(&lock, rustix::fs::FlockOperation::LockExclusive)
+        .map_err(std::io::Error::from)?;
     // A stopping daemon releases its endpoint within one accept tick; wait
     // that out so a spawn racing a kill-server binds instead of dying to a
     // socket that only looks alive. The deadline is generous because loaded
     // schedulers stretch the tick.
     let deadline = Instant::now() + Duration::from_secs(3);
     while path.exists() {
-        match LocalTransport::connect(path) {
-            Ok(_) if Instant::now() >= deadline => {
+        match daemon_answers_at(path) {
+            Some(true) => {
+                ready.signal();
                 return Err(DaemonError::AlreadyRunning(path.to_owned()));
             }
-            Ok(_) => thread::sleep(Duration::from_millis(20)),
-            Err(_) => {
+            Some(false) if Instant::now() >= deadline => {
+                return Err(DaemonError::AlreadyRunning(path.to_owned()));
+            }
+            Some(false) => thread::sleep(Duration::from_millis(20)),
+            None => {
                 match fs::remove_file(path) {
                     Ok(()) => {}
                     Err(error) if error.kind() == ErrorKind::NotFound => {}
@@ -44500,11 +45200,51 @@ fn prepare_socket(path: &Path) -> Result<(), DaemonError> {
             }
         }
     }
-    Ok(())
+    Ok(lock)
+}
+
+#[cfg(unix)]
+fn daemon_answers_at(path: &Path) -> Option<bool> {
+    let mut stream = LocalTransport::connect(path).ok()?;
+    let (answered, answer) = crossbeam_channel::bounded(1);
+    let probe = thread::Builder::new()
+        .name("zz-socket-probe".to_owned())
+        .spawn(move || {
+            let request = ProtocolMessage::Exec(zz_protocol::ExecRequest {
+                protocol_version: PROTOCOL_VERSION,
+                flags: zz_protocol::ExecFlags::default(),
+                client_instance_id: ClientInstanceId::default(),
+                origin: None,
+                working_directory: None,
+                tty: None,
+                size: None,
+                features: 0,
+                startup_reentry: None,
+                spawned_server_id: None,
+                expect_server_id: None,
+                process_id: std::process::id(),
+                environment: ClientEnvironmentBlob::default(),
+                commands: Vec::new(),
+            });
+            let live = zz_protocol::write_protocol_message(&mut stream, &request).is_ok()
+                && matches!(
+                    zz_protocol::read_protocol_message(&mut stream),
+                    Ok(ProtocolMessage::ExecExit(_))
+                );
+            let _ = answered.send(live);
+        });
+    if probe.is_err() {
+        return Some(false);
+    }
+    Some(
+        answer
+            .recv_timeout(Duration::from_millis(250))
+            .unwrap_or(false),
+    )
 }
 
 #[cfg(windows)]
-fn prepare_socket(_: &Path) -> Result<(), DaemonError> {
+fn prepare_socket(_: &Path, _: &mut BootstrapReady) -> Result<(), DaemonError> {
     Ok(())
 }
 
@@ -45423,7 +46163,7 @@ mod tests {
         take_reliable_messages(&mailbox);
         assert!(shared.send_attached(client, &mailbox, session, snapshot));
         let state = mailbox.state.lock();
-        assert!(state.reliable.len() >= 3);
+        assert!(state.reliable.len() >= 2);
         assert!(matches!(
             decode_protocol_frame(&state.reliable[0]),
             Ok(ProtocolMessage::Attached { .. })
@@ -45442,15 +46182,7 @@ mod tests {
             })) => kind == ClientKind::Interactive,
             _ => false,
         });
-        assert!(matches!(
-            decode_protocol_frame(&state.reliable[2]),
-            Ok(ProtocolMessage::Event(Event {
-                payload: EventPayload::Snapshot(_),
-                ..
-            }))
-        ));
-        let prefix = state.reliable[0].len() + state.reliable[1].len();
-        (prefix, state.reliable[2].len())
+        (state.reliable[0].len(), state.reliable[1].len())
     }
 
     #[test]
@@ -46271,6 +47003,7 @@ mod tests {
                 option_snapshot,
                 FormatHookFacts::default(),
                 true,
+                FormatNeeds::NONE,
             );
             assert_eq!(request.context.config_files, expected);
         }
@@ -50146,7 +50879,7 @@ mod tests {
                 "client-focus sibling fixture".to_owned(),
                 "sibling".to_owned(),
             ));
-            inner.terminals.insert(sibling, Arc::clone(&terminal));
+            inner.terminals_mut().insert(sibling, Arc::clone(&terminal));
             (window, sibling, terminal)
         };
         shared
@@ -52618,7 +53351,7 @@ mod tests {
         shared
             .inner
             .lock()
-            .terminals
+            .terminals_mut()
             .insert(pane, Arc::clone(&terminal));
         shared
             .watch_terminal(pane, &terminal)
@@ -52635,7 +53368,7 @@ mod tests {
             "only the test and terminal map should own the session"
         );
 
-        shared.inner.lock().terminals.remove(&pane);
+        shared.inner.lock().terminals_mut().remove(&pane);
         drop(terminal);
         let deadline = Instant::now() + Duration::from_secs(2);
         while terminal_weak.upgrade().is_some() {
@@ -52665,7 +53398,7 @@ mod tests {
         shared
             .inner
             .lock()
-            .terminals
+            .terminals_mut()
             .insert(pane, Arc::clone(&terminal));
         shared
             .watch_terminal(pane, &terminal)
@@ -52703,16 +53436,16 @@ mod tests {
         shared
             .inner
             .lock()
-            .terminals
+            .terminals_mut()
             .insert(pane, Arc::clone(&replacement));
-        shared.synchronize_pane_title(pane, &terminal, "stale watcher title");
+        shared.synchronize_pane_title(pane, &terminal, "stale watcher title", true);
         assert_eq!(
             shared.inner.lock().engine.state.pane(pane).unwrap().title,
             "dynamic terminal title",
             "a retired watcher must not rename its replacement"
         );
 
-        shared.inner.lock().terminals.remove(&pane);
+        shared.inner.lock().terminals_mut().remove(&pane);
     }
 
     #[test]
@@ -53858,13 +54591,13 @@ mod tests {
         assert!(text.contains("root.conf:1: first"));
         assert!(text.contains("nested.conf:2: second"));
         assert!(text.contains("continued"));
-        assert!(matches!(
-            messages.get(2),
-            Some(ProtocolMessage::Event(Event {
+        assert!(!messages.iter().any(|message| matches!(
+            message,
+            ProtocolMessage::Event(Event {
                 payload: EventPayload::Snapshot(_),
                 ..
-            }))
-        ));
+            })
+        )));
         assert!(mailbox.state.lock().command_output.is_none());
         assert!(shared.startup_config_causes.lock().is_none());
 
@@ -53961,7 +54694,7 @@ mod tests {
     }
 
     #[test]
-    fn control_startup_transaction_retains_causes_when_resync_overflows() {
+    fn control_startup_transaction_retains_causes_when_the_attach_overflows() {
         let shared = Arc::new(Shared::new(1));
         *shared.startup_config_causes.lock() = Some(vec!["retry me".to_owned()]);
         let full = OutboundMailbox::new();
@@ -53970,7 +54703,7 @@ mod tests {
         let (session, _, _) = switch_test_session(&shared, "startup-retry");
         let first_snapshot = shared.attach(first, session).expect("attach first control");
         take_reliable_messages(&full);
-        for _ in 0..MAX_RELIABLE_MESSAGES.saturating_sub(2) {
+        for _ in 0..MAX_RELIABLE_MESSAGES.saturating_sub(1) {
             assert!(full.enqueue_reliable(&Shared::event(EventPayload::ServerStopping)));
         }
 
@@ -53992,7 +54725,7 @@ mod tests {
     }
 
     #[test]
-    fn interactive_startup_transaction_retires_and_retries_when_resync_overflows() {
+    fn interactive_startup_transaction_retires_and_retries_when_the_attach_overflows() {
         let shared = Arc::new(Shared::new(1));
         *shared.startup_config_causes.lock() = Some(vec!["retry interactive".to_owned()]);
         let full = OutboundMailbox::new();
@@ -54003,7 +54736,7 @@ mod tests {
             .attach(first, session)
             .expect("attach first interactive");
         take_reliable_messages(&full);
-        for _ in 0..MAX_RELIABLE_MESSAGES.saturating_sub(2) {
+        for _ in 0..MAX_RELIABLE_MESSAGES.saturating_sub(1) {
             assert!(full.enqueue_reliable(&Shared::event(EventPayload::ServerStopping)));
         }
 
@@ -54043,7 +54776,7 @@ mod tests {
     #[test]
     fn startup_transactions_retain_causes_under_control_and_interactive_byte_pressure() {
         for kind in [ClientKind::Control, ClientKind::Interactive] {
-            let (prefix_bytes, first_resync_bytes) = startup_attach_prefix_bytes(kind);
+            let (attached_bytes, causes_bytes) = startup_attach_prefix_bytes(kind);
             let shared = Arc::new(Shared::new(1));
             *shared.startup_config_causes.lock() = Some(vec!["byte pressure".to_owned()]);
             let mailbox = OutboundMailbox::new();
@@ -54053,8 +54786,7 @@ mod tests {
                 .attach(client, session)
                 .expect("attach byte-pressure client");
             take_reliable_messages(&mailbox);
-            assert!(first_resync_bytes > 64);
-            let available = prefix_bytes + 64;
+            let available = attached_bytes + causes_bytes - 1;
             mailbox.state.lock().queued_bytes = MAX_OUTBOUND_BYTES - available;
 
             assert!(!shared.send_attached(client, &mailbox, session, snapshot));
@@ -54158,7 +54890,7 @@ mod tests {
             .expect("attach healthy waiter");
         take_reliable_messages(&failed_mailbox);
         take_reliable_messages(&healthy_mailbox);
-        for _ in 0..MAX_RELIABLE_MESSAGES.saturating_sub(2) {
+        for _ in 0..MAX_RELIABLE_MESSAGES.saturating_sub(1) {
             assert!(failed_mailbox.enqueue_reliable(&Shared::event(EventPayload::ServerStopping)));
         }
         *shared.startup_config_causes.lock() = Some(vec!["serialized retry".to_owned()]);
@@ -54269,8 +55001,7 @@ mod tests {
             )
         });
         assert!(attached_index.is_some());
-        assert!(snapshot_index.is_some());
-        assert!(attached_index < snapshot_index);
+        assert!(snapshot_index.is_none_or(|snapshot_index| attached_index < Some(snapshot_index)));
     }
 
     #[test]
@@ -56289,7 +57020,8 @@ mod tests {
                 .inner
                 .lock()
                 .engine
-                .format_status_context(None, None, None);
+                .format_status_context(None, None, None)
+                .detach(FormatNeeds::NONE);
             let now = u64::try_from(context.format_now.unwrap()).unwrap();
             assert!((before..=after).contains(&now));
         }
@@ -65930,7 +66662,7 @@ set-option -g @alias-mixed-next yes
     }
 
     #[cfg(unix)]
-    fn key_table_fixture(
+    pub(super) fn key_table_fixture(
         name: &str,
     ) -> (
         Arc<Shared>,
@@ -65959,7 +66691,7 @@ set-option -g @alias-mixed-next yes
         (shared, client, context, pane, mailbox)
     }
 
-    fn key_table_events(mailbox: &OutboundMailbox) -> Vec<EventPayload> {
+    pub(super) fn key_table_events(mailbox: &OutboundMailbox) -> Vec<EventPayload> {
         take_reliable_messages(mailbox)
             .into_iter()
             .filter_map(|message| match message {
@@ -65974,7 +66706,7 @@ set-option -g @alias-mixed-next yes
             .collect()
     }
 
-    fn table_active(table: Option<&str>, repeat: bool) -> EventPayload {
+    pub(super) fn table_active(table: Option<&str>, repeat: bool) -> EventPayload {
         EventPayload::KeyTableActive {
             table: table.map(str::to_owned),
             repeat,
@@ -65982,7 +66714,7 @@ set-option -g @alias-mixed-next yes
     }
 
     #[cfg(unix)]
-    fn run_test_command(
+    pub(super) fn run_test_command(
         shared: &Arc<Shared>,
         client: ClientId,
         context: &mut ExecutionContext,
@@ -66181,9 +66913,7 @@ set-option -g @alias-mixed-next yes
     #[test]
     fn key_table_deadlines_clear_the_published_state_without_another_key() {
         let (shared, client, mut context, pane, mailbox) = key_table_fixture("key-table-timer");
-        shared
-            .start_key_table_deadline_dispatcher()
-            .expect("start key table deadlines");
+        shared.start_timers().expect("start key table deadlines");
         run_test_command(
             &shared,
             client,
@@ -70501,7 +71231,7 @@ set-option -g @alias-mixed-next yes
         shared
             .inner
             .lock()
-            .terminals
+            .terminals_mut()
             .insert(pane, Arc::clone(&terminal));
         shared
             .attach(client, session)
@@ -70738,9 +71468,21 @@ set-option -g @alias-mixed-next yes
         let deadline = Instant::now() + Duration::from_secs(30);
         for client in clients {
             loop {
-                let ready = shared.inner.lock().terminals[&pane]
-                    .latest_viewport_for(TerminalViewId(client.0))
-                    .is_some();
+                let ready = {
+                    let inner = shared.inner.lock();
+                    let streamed = inner
+                        .streamed_terminals
+                        .get(client)
+                        .is_some_and(|streamed| streamed.contains_key(&pane));
+                    let terminal = &inner.terminals[&pane];
+                    if streamed {
+                        terminal
+                            .latest_viewport_for(TerminalViewId(client.0))
+                            .is_some()
+                    } else {
+                        matches!(terminal.latest_viewport().status, SessionStatus::Running)
+                    }
+                };
                 if ready {
                     break;
                 }
@@ -70828,7 +71570,6 @@ set-option -g @alias-mixed-next yes
 
         shared.synchronize_pane_runtime(pane, &terminal, &viewport, "zz-changed", false);
         let inner = shared.inner.lock();
-        assert!(inner.engine.state.generation() > generation);
         assert_ne!(inner.engine.pane_runtime_facts(pane), Some(&facts));
     }
 
@@ -71280,10 +72021,16 @@ set-option -g @alias-mixed-next yes
             "EXACT=last".into(),
             "VALUE=contains=equals".into(),
         ]);
-        assert_eq!(environment.get("EMPTY").map(RawText::as_str), Some(""));
-        assert_eq!(environment.get("EXACT").map(RawText::as_str), Some("last"));
         assert_eq!(
-            environment.get("VALUE").map(RawText::as_str),
+            environment.map().get("EMPTY").map(RawText::as_str),
+            Some("")
+        );
+        assert_eq!(
+            environment.map().get("EXACT").map(RawText::as_str),
+            Some("last")
+        );
+        assert_eq!(
+            environment.map().get("VALUE").map(RawText::as_str),
             Some("contains=equals")
         );
     }
@@ -75443,7 +76190,7 @@ set-option -g @alias-mixed-next yes
             .lock()
             .engine
             .seed_global_environment([("PATH", "/modeled/bin:/modeled/sbin")]);
-        let shim = TmuxShimGuard::install(executable).expect("install tmux executable path");
+        let shim = TmuxShimGuard::install(executable, false).expect("install tmux executable path");
         let expected_directory = shim.directory.clone();
         let expected_path = std::env::join_paths([
             shim.directory.clone(),
@@ -75509,8 +76256,8 @@ set-option -g @alias-mixed-next yes
     #[cfg(unix)]
     #[test]
     fn tmux_shim_refuses_bare_nested_invocation_before_running_zz() {
-        let shim =
-            TmuxShimGuard::install(PathBuf::from("/bin/echo")).expect("install tmux wrapper");
+        let shim = TmuxShimGuard::install(PathBuf::from("/bin/echo"), false)
+            .expect("install tmux wrapper");
         let output = std::process::Command::new(shim.directory.join("tmux"))
             .env("TMUX", "/tmp/zzprobe-nested.sock,1,0")
             .env(
@@ -78206,7 +78953,7 @@ set-option -g @alias-mixed-next yes
                 .state
                 .create_session("exit-status")
                 .expect("session");
-            inner.terminals.insert(ids.2, Arc::clone(&terminal));
+            inner.terminals_mut().insert(ids.2, Arc::clone(&terminal));
             ids
         };
         let context = ExecutionContext::new(Some(session), Some(window), Some(pane));
@@ -82711,10 +83458,10 @@ bind - split-window -v -c "#{pane_current_path}"
                 .collect::<Vec<_>>()
         };
 
-        shared.send_full(client, first, &mailbox);
+        shared.request_full(client, first, &mailbox);
         assert_eq!(queued_fulls(), [first]);
 
-        shared.send_full(client, PaneId(u64::MAX), &mailbox);
+        shared.request_full(client, PaneId(u64::MAX), &mailbox);
         assert_eq!(queued_fulls(), [first]);
     }
 
@@ -82751,7 +83498,7 @@ bind - split-window -v -c "#{pane_current_path}"
         shared
             .inner
             .lock()
-            .terminals
+            .terminals_mut()
             .insert(second, Arc::clone(&second_terminal));
         shared
             .watch_terminal(second, &second_terminal)
@@ -83143,7 +83890,7 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[cfg(unix)]
-    fn copy_mode_fixture(
+    pub(super) fn copy_mode_fixture(
         name: &str,
         producer: &str,
     ) -> (
@@ -83264,7 +84011,7 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("set test mode-keys");
     }
 
-    fn input_test_key(
+    pub(super) fn input_test_key(
         shared: &Arc<Shared>,
         client: ClientId,
         context: &mut ExecutionContext,
@@ -89187,7 +89934,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 "second window".to_owned(),
                 String::new(),
             ));
-            inner.terminals.insert(second_pane, terminal);
+            inner.terminals_mut().insert(second_pane, terminal);
             (first_window, second_window, second_pane)
         };
         shared
@@ -89500,7 +90247,7 @@ bind - split-window -v -c "#{pane_current_path}"
                     _ => None,
                 })
                 .collect::<Vec<_>>();
-            assert!(snapshots.len() >= 2);
+            assert!(!snapshots.is_empty());
             for snapshot in snapshots {
                 assert_eq!(snapshot.focused_window, Some(target_window));
                 let window = snapshot
@@ -93517,7 +94264,10 @@ bind - split-window -v -c "#{pane_current_path}"
             inner.client_terminals.insert(client);
             inner.client_environments.insert(
                 client,
-                Arc::new(BTreeMap::from([("TERM".into(), "xterm".into())])),
+                Arc::new(ClientEnvironmentBlob::from_map(BTreeMap::from([(
+                    "TERM".into(),
+                    "xterm".into(),
+                )]))),
             );
             inner.client_features.insert(
                 client,
@@ -93568,7 +94318,10 @@ bind - split-window -v -c "#{pane_current_path}"
             inner.client_terminals.insert(client);
             inner.client_environments.insert(
                 client,
-                Arc::new(BTreeMap::from([("TERM".into(), "xterm".into())])),
+                Arc::new(ClientEnvironmentBlob::from_map(BTreeMap::from([(
+                    "TERM".into(),
+                    "xterm".into(),
+                )]))),
             );
         }
         let facts = || {
@@ -93626,11 +94379,11 @@ bind - split-window -v -c "#{pane_current_path}"
             inner.client_sizes.insert(client, (132, 43));
             inner.client_environments.insert(
                 client,
-                Arc::new(BTreeMap::from([
+                Arc::new(ClientEnvironmentBlob::from_map(BTreeMap::from([
                     ("COLORTERM".into(), "truecolor".into()),
                     ("LANG".into(), "en_US.UTF-8".into()),
                     ("TERM".into(), "xterm-256color".into()),
-                ])),
+                ]))),
             );
             inner.client_activity_times.insert(client, 222);
             inner.client_created_times.insert(client, 111);
@@ -93690,12 +94443,12 @@ bind - split-window -v -c "#{pane_current_path}"
                 "/dev/pts/42",
             ]
         );
-        let expected_identity =
-            shared
-                .inner
-                .lock()
-                .engine
-                .format_status_context(Some(session), Some(window), None);
+        let expected_identity = shared
+            .inner
+            .lock()
+            .engine
+            .format_status_context(Some(session), Some(window), None)
+            .detach(FormatNeeds::NONE);
         assert_eq!(fields[21], expected_identity.uid);
         assert_eq!(fields[22], expected_identity.user);
         assert_eq!(&fields[23..27], ["1", "132", "1234", "333"]);
@@ -93768,6 +94521,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 option_snapshot,
                 format_hook_facts(&inner),
                 true,
+                FormatNeeds::NONE,
             )
         };
         status_request.formats.enabled = true;
@@ -93821,10 +94575,10 @@ bind - split-window -v -c "#{pane_current_path}"
             inner.client_ttys.insert(control, "/dev/pts/43".to_owned());
             inner.client_environments.insert(
                 control,
-                Arc::new(BTreeMap::from([
+                Arc::new(ClientEnvironmentBlob::from_map(BTreeMap::from([
                     ("LANG".into(), "C.UTF-8".into()),
                     ("TERM".into(), "xterm-256color".into()),
-                ])),
+                ]))),
             );
             client_format_facts(&inner, control, session)
         };
@@ -93845,7 +94599,10 @@ bind - split-window -v -c "#{pane_current_path}"
         assert_eq!(control_facts.width, "91");
     }
 
-    fn switch_test_session(shared: &Shared, name: &str) -> (SessionId, WindowId, PaneId) {
+    pub(super) fn switch_test_session(
+        shared: &Shared,
+        name: &str,
+    ) -> (SessionId, WindowId, PaneId) {
         shared
             .inner
             .lock()
@@ -100943,7 +101700,7 @@ bind - split-window -v -c "#{pane_current_path}"
                     false,
                 )
                 .expect("second window");
-            inner.terminals.insert(
+            inner.terminals_mut().insert(
                 second_pane,
                 Arc::new(TerminalSession::spawn_output_view(
                     "second fixture".to_owned(),
@@ -101279,7 +102036,7 @@ bind - split-window -v -c "#{pane_current_path}"
                     false,
                 )
                 .expect("second window");
-            inner.terminals.insert(
+            inner.terminals_mut().insert(
                 pane,
                 Arc::new(TerminalSession::spawn_output_view(
                     "second fixture".to_owned(),
@@ -101574,7 +102331,7 @@ bind - split-window -v -c "#{pane_current_path}"
                     false,
                 )
                 .expect("second window");
-            inner.terminals.insert(
+            inner.terminals_mut().insert(
                 second_pane,
                 Arc::new(TerminalSession::spawn_output_view(
                     "second fixture".to_owned(),
@@ -101810,7 +102567,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 &CommandInvocation::new("rename-window", ["-t", &window.to_string(), "manual"]),
             )
             .expect("explicit rename");
-        shared.synchronize_pane_title(pane, &terminal, "osc-title");
+        shared.synchronize_pane_title(pane, &terminal, "osc-title", true);
         shared.raise_pane_bell(pane);
         shared.raise_pane_bell(pane);
 
@@ -103169,7 +103926,7 @@ bind - split-window -v -c "#{pane_current_path}"
             );
         }
 
-        let terminal = shared.inner.lock().terminals.remove(&pane);
+        let terminal = shared.inner.lock().terminals_mut().remove(&pane);
         assert_eq!(
             choose_path_error(choose_path(ClientKind::Interactive, &mut context, &[])),
             "choose-path needs a terminal pane"
@@ -105088,7 +105845,7 @@ bind - split-window -v -c "#{pane_current_path}"
         );
     }
 
-    const QUIET_PANE_COMMAND: &str = "while read -r line; do eval \"$line\"; done";
+    pub(super) const QUIET_PANE_COMMAND: &str = "while read -r line; do eval \"$line\"; done";
 
     fn belled_session(
         shared: &Arc<Shared>,
@@ -106063,7 +106820,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 ),
             )
             .expect("disable terminal titles");
-        shared.synchronize_pane_title(pane, &terminal, "blocked title");
+        shared.synchronize_pane_title(pane, &terminal, "blocked title", true);
         assert_ne!(
             shared.inner.lock().engine.state.pane(pane).unwrap().title,
             "blocked title"
@@ -106079,11 +106836,45 @@ bind - split-window -v -c "#{pane_current_path}"
                 ),
             )
             .expect("enable terminal titles");
-        shared.synchronize_pane_title(pane, &terminal, "allowed title");
+        shared.synchronize_pane_title(pane, &terminal, "allowed title", true);
         assert_eq!(
             shared.inner.lock().engine.state.pane(pane).unwrap().title,
             "allowed title"
         );
+    }
+
+    #[test]
+    fn select_pane_title_survives_shell_integration_titles_until_a_program_retitles() {
+        let shared = Arc::new(Shared::new(1));
+        let (_, pane, terminal) = output_view_session_fixture(&shared, "title-pin", "first");
+        let title = |shared: &Arc<Shared>| {
+            shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .pane(pane)
+                .unwrap()
+                .title
+                .clone()
+        };
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("title context");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("select-pane", ["-t", &pane.to_string(), "-T", "mytitle"]),
+            )
+            .expect("set the pane title");
+        shared.synchronize_pane_title(pane, &terminal, "bash", false);
+        shared.synchronize_pane_title(pane, &terminal, "ls -la", false);
+        assert_eq!(title(&shared), "mytitle");
+        shared.synchronize_pane_title(pane, &terminal, "vim", true);
+        assert_eq!(title(&shared), "vim");
+        shared.synchronize_pane_title(pane, &terminal, "bash", false);
+        assert_eq!(title(&shared), "bash");
     }
 
     #[test]
@@ -106858,8 +107649,8 @@ bind - split-window -v -c "#{pane_current_path}"
         let server_id = started
             .recv_timeout(Duration::from_secs(10))
             .expect("ready callback");
-        let passive = connect_command_retry(&socket);
-        assert_eq!(passive.server_hello().server_id, server_id);
+        let mut passive = connect_command_retry(&socket);
+        assert_eq!(passive.server_id().expect("probe"), server_id);
         let mut commands = connect_command_retry(&socket);
         commands
             .execute(CommandInvocation::new("new-session", ["-d"]))
@@ -107735,7 +108526,7 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("connection handler failed");
     }
 
-    fn connect_command_retry(path: &Path) -> CommandClient {
+    pub(super) fn connect_command_retry(path: &Path) -> CommandClient {
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             match CommandClient::connect(path) {
@@ -107746,7 +108537,7 @@ bind - split-window -v -c "#{pane_current_path}"
         }
     }
 
-    fn daemon_test_endpoint(name: &str) -> PathBuf {
+    pub(super) fn daemon_test_endpoint(name: &str) -> PathBuf {
         #[cfg(windows)]
         {
             PathBuf::from(format!(
@@ -107794,7 +108585,7 @@ bind - split-window -v -c "#{pane_current_path}"
         shared
             .inner
             .lock()
-            .terminals
+            .terminals_mut()
             .insert(pane, Arc::clone(&terminal));
         shared
             .watch_terminal(pane, &terminal)
@@ -107802,7 +108593,11 @@ bind - split-window -v -c "#{pane_current_path}"
         (session, pane, terminal)
     }
 
-    fn terminal_test_message(pane: PaneId, sequence: u64, generation: u64) -> ProtocolMessage {
+    pub(super) fn terminal_test_message(
+        pane: PaneId,
+        sequence: u64,
+        generation: u64,
+    ) -> ProtocolMessage {
         let mut viewport = zz_terminal::TerminalViewport::blank(2, 2, SessionStatus::Running);
         viewport.generation = generation;
         viewport.view_generation = generation;
@@ -107812,7 +108607,7 @@ bind - split-window -v -c "#{pane_current_path}"
         })
     }
 
-    fn terminal_patch_test_message(
+    pub(super) fn terminal_patch_test_message(
         pane: PaneId,
         sequence: u64,
         base_generation: u64,
@@ -108126,7 +108921,7 @@ bind - split-window -v -c "#{pane_current_path}"
         }
     }
 
-    fn take_reliable_messages(mailbox: &OutboundMailbox) -> Vec<ProtocolMessage> {
+    pub(super) fn take_reliable_messages(mailbox: &OutboundMailbox) -> Vec<ProtocolMessage> {
         let frames = {
             let mut state = mailbox.state.lock();
             let frames = state.reliable.drain(..).collect::<Vec<_>>();
@@ -108317,7 +109112,7 @@ bind - split-window -v -c "#{pane_current_path}"
             .collect()
     }
 
-    fn test_key(key: KeyCode, modifiers: Modifiers, text: Option<&str>) -> KeyInput {
+    pub(super) fn test_key(key: KeyCode, modifiers: Modifiers, text: Option<&str>) -> KeyInput {
         KeyInput {
             action: KeyAction::Press,
             key,

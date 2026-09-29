@@ -1,0 +1,298 @@
+{
+ "lane": "W1-ATTACH",
+ "branch": "perf/attach",
+ "head": "00831246",
+ "contains": "perf/wave1 9eb5888b (merged in 00831246, no conflicts; cargo check -p zz-daemon -p zz-tui --all-targets passed)",
+ "fix_pass": {
+  "state": "Cut off by a usage limit during its compat run. Its edits are committed; lane tests, clippy, compat and the gate were not re-run after 08186223 and 73eafb94.",
+  "commits": [
+   "46510b07 Never let a queued patch stand in for a Full the client asked for",
+   "6e475f57 Clear the TUI screen to the default colour and never erase a blank pane row twice",
+   "08186223 Write an attach as one batch and trim the daemon work around it",
+   "73eafb94 WIP: W1-ATTACH review fixes, interrupted mid-verification (adds ZZ_PERF_ATTACH_BATCH)"
+  ],
+  "also_check": [
+   "The lane adds about 73 new // and /// comment lines in .rs files; the house rule is no comments in code.",
+   "ZZ_PERF_ATTACH_BATCH is missing from the Rollback switches table and the as-built knob list.",
+   "The web and iOS client builds were never run; the lane adds hello capability constants to zz-protocol (client-cell-v1, server-option-v1). Run just web-build on Linux; the iOS build needs the Mac.",
+   "The full gate with --strict was never run for this lane."
+  ]
+ },
+ "findings_status": [
+  {
+   "review": "parity",
+   "severity": "major",
+   "finding": "Equal-generation dedup lets a queued patch stand in for a Full after the client wiped its viewport (Attached, RequestFull, Resync); pane stays blank or stale",
+   "status": "fixed",
+   "by": "46510b07",
+   "note": "Queued patches dropped at every wipe point, only a queued Full covers a Full; the three probe cases added as a_requested_full_replaces_a_patch_queued_at_its_generation, a_patch_queued_before_attached_never_follows_it, a_resync_drops_queued_patches_and_keeps_queued_fulls, a_request_full_on_a_live_pane_with_a_patch_queued_is_answered_with_a_full. Re-run them plus the reviewer's scenario with ZZ_PERF_ATTACH_DEDUP on and off.",
+   "linux_fix_pass": "Verified on Linux: the four probe tests pass on the defaults. With ZZ_PERF_ATTACH_DEDUP=0, a_requested_full_replaces..., a_resync_drops... and a_request_full_on_a_live_pane... pass; a_patch_queued_before_attached_never_follows_it fails on its dedup-only mailbox assertion, by design (the knob restores the pre-lane round trip)."
+  },
+  {
+   "review": "parity",
+   "severity": "minor",
+   "finding": "Same-size SIGWINCH no longer repaints (tmux redraws on every MSG_RESIZE)",
+   "status": "fixed",
+   "by": "6e475f57",
+   "note": "Commit message says a same-size SIGWINCH redraws the whole client again. Check both the InputOutcome::Resize arm and the SIGWINCH path in zz-tui app.rs.",
+   "linux_fix_pass": "MainEvent::Resize (SIGWINCH) always sends ClientTerminalSize and redraws the whole client; pane resizes only when the size changed. InputOutcome::Resize is the reply to CSI 16 t, not a SIGWINCH: it now sends nothing when the grid is unchanged (it used to fire client-resized on every attach in a terminal that answers). attached-client.sh passes."
+  },
+  {
+   "review": "parity",
+   "severity": "minor",
+   "finding": "As-built notes overstate client behaviour: only zz-client core (TUI, web, iOS) wipes viewports on Attached, the GPUI client keeps them; 'no epoch needed' ignored queued patches",
+   "status": "fixed",
+   "by": null,
+   "note": "The W1-ATTACH as-built block on perf/attach still says every client resets overlays and viewports on Attached and that no epoch is needed. Fix the two sentences.",
+   "linux_fix_pass": "As-built items 1 and 2 now say only zz-client core clients wipe viewports on Attached, the GPUI client keeps them, and queued patches are dropped at every wipe point, which is why no epoch is needed."
+  },
+  {
+   "review": "perf",
+   "severity": "major",
+   "finding": "Half the p1 attach tty bytes are themed clear plus ECH on every blank row",
+   "status": "fixed",
+   "by": "6e475f57",
+   "note": "Forced paint clears with the default rendition and fills the theme background only where no painter writes; a pane waiting for its first frame is remembered as blank. Measure attach.tty_total.p1 (target under tmux 972 B) and .p4 (wave2 rule 1.5x tmux).",
+   "linux_fix_pass": "Linux gate: attach.tty_total.p1 504 B (tmux 977), .p4 1449 B (tmux 3655)."
+  },
+  {
+   "review": "perf",
+   "severity": "major",
+   "finding": "First attach paint draws a placeholder status row and borders that StatusChanged redraws 0.2 ms later",
+   "status": "fixed",
+   "by": "08186223, 73eafb94",
+   "note": "The mailbox is held until the publish after Attached so Attached, status and first frames go out as one batch; 73eafb94 (WIP) adds the rollback knob ZZ_PERF_ATTACH_BATCH=0, not yet in the doc's Rollback switches table. The test an_attach_is_written_as_one_batch_once_its_hold_is_released covers the daemon side; capture the TUI tty bytes to confirm one paint.",
+   "linux_fix_pass": "TUI tty captures: Attached and the status arrive in one batch; the first paint is the chrome with the real status, the second the frames; no byte is painted twice. The hello of a terminal client no longer carries a status rendered before it attached (one status render and one option snapshot less per attach)."
+  },
+  {
+   "review": "perf",
+   "severity": "minor",
+   "finding": "macOS AF_UNIX send buffer is 8 KiB, so writev batching cannot reach ~2 writes per attach",
+   "status": "fixed on Linux; macOS effect unmeasured",
+   "by": "08186223",
+   "note": "Accepted daemon sockets get SO_SNDBUF = MAX_BATCHED_WRITE_BYTES (transport.rs set_send_buffer_size). The client-side SO_RCVBUF was not set. Writes per attach not re-measured. Linux defaults differ (net.core.wmem_default), so measure on both.",
+   "linux_fix_pass": "Counted with an LD_PRELOAD shim per four-pane attach and detach: daemon socket writes 28 send -> 6-7 writev + 1 send (same 101 KB), daemon reads 27 -> 10, TUI reads 63 -> 9-10. SO_RCVBUF does nothing for AF_UNIX streams on Linux (the queue is charged to the sender's SO_SNDBUF, 212992 B default); buffered protocol reads on both ends cut the reads instead. The 8 KiB macOS sendspace case needs the Mac."
+  },
+  {
+   "review": "perf",
+   "severity": "minor",
+   "finding": "Every terminal command wakes the pane thread (7 wakes per pane per attach+detach); a repeated same-geometry resize costs another loop",
+   "status": "fixed",
+   "by": "08186223",
+   "note": "TerminalSession::resize skips a geometry equal to the last requested one (ControlSlot.requested_geometry) and with_slot wakes only once per drained slot (wake_queued). Check requested_geometry cannot go stale when the geometry changes by another path, and re-count wakes.",
+   "linux_fix_pass": "Verified by reading: the actor's geometry changes only through Command::Resize, which comes only from ControlSlot.pending.resize, set together with requested_geometry, so the skip cannot go stale."
+  },
+  {
+   "review": "perf",
+   "severity": "minor",
+   "finding": "A writer thread is created and torn down per TUI connection",
+   "status": "fixed",
+   "by": "08186223",
+   "note": "attach::spawn_writer runs write_outbound on the pooled connection threads.",
+   "linux_fix_pass": "attach::spawn_writer runs write_outbound on the pooled connection threads. Distinct daemon threads seen over a 6 s four-pane attach loop: perf/wave1 41 (10 zz-client-writer and 10 zz-client), lane 23 (2 zz-client, no writer threads)."
+  },
+  {
+   "review": "perf",
+   "severity": "minor",
+   "finding": "Every attach glob-matches the whole client environment against update-environment",
+   "status": "fixed",
+   "by": "08186223",
+   "note": "GlobPattern::matches rejects on the literal prefix without allocating. Compiling patterns per option change or skipping an unchanged environment digest was not done.",
+   "linux_fix_pass": "Patterns were already compiled once per array (16e97c3a). A pattern with no glob characters now reads its own entry by name (GlobPattern::literal plus a range over the client environment) instead of scanning every variable; test update_environment_names_take_only_their_own_entry_and_globs_every_match; update-environment scenarios clean."
+  },
+  {
+   "review": "perf",
+   "severity": "minor",
+   "finding": "Remaining attach-cycle daemon work owned by other lanes: status render for the detaching TUI, option snapshot per publish, foreground lookup per wake, full viewport builds",
+   "status": "fixed (lane part); rest handed on",
+   "by": null,
+   "note": "Skipping the status render for a detaching client can land in this lane (it counts in attach.cpu). Record the rest in the plan's hand-on list (W1-FORMAT/W2-CTRL, W1-PUBLISH/W4-DELIVER, W2-TERM/W4-ROWS).",
+   "linux_fix_pass": "publish_snapshot_after_detach leaves the detached client out of the status render and forgets its status record (tests a_detaching_client_gets_no_status_render_and_its_next_attach_gets_one, a_terminal_client_hello_skips_the_status_its_attach_sends). Other lanes' attach-cycle work (option snapshot, hello key tables, Full frame builds, hook captures, foreground lookup) is in the plan's hand-on list with its Linux profile share."
+  },
+  {
+   "review": "perf",
+   "severity": "minor",
+   "finding": "Every attach writes a kitty graphics probe with a temp file plus a terminal query burst (282 B, 15% of p1 tty_total)",
+   "status": "fixed",
+   "by": null,
+   "note": "Not touched by the fix pass. Probe only for terminals that can answer, or cache per TERM and terminal program.",
+   "linux_fix_pass": "The kitty graphics probe and temp file go out at start only for kitty, ghostty, wezterm, konsole and zz, and for any other terminal once an image or a browser pane needs it, fenced by its own DA1. The rest of the burst (DA1, DA2, XTVERSION, theme subscription) is tmux's own; CSI 16 t stays for the cell size."
+  },
+  {
+   "review": "perf",
+   "severity": "minor",
+   "finding": "Headline numbers misattributed: wire_s2c 256 -> 100 KB came from W1-PANE and W1-EXEC; chatty.tty_kibps.hidden 0.375 did not reproduce (0.6-1.05); ttfc passes 14 ms only at low load",
+   "status": "fixed",
+   "by": null,
+   "note": "The as-built block still carries the 0.375 KiB/s figure. Restate lane-only deltas against w1-5-exec (a26b6368) or the Linux fold baseline.",
+   "linux_fix_pass": "The as-built block restates lane-only deltas against a same-session perf/wave1 build on Linux and drops the 0.375 KiB/s figure (lane 0.53 KiB/s, base 2.08)."
+  }
+ ],
+ "implementer": {
+  "branch": "perf/attach",
+  "worktree": "/Users/demfabris/dev/zz-attach",
+  "head": "22455b48",
+  "summary": "W1-ATTACH is built on perf/attach. The branch contains the current perf/wave1 head (a26b6368, W1-EXEC), so merging it back has no conflicts.\n\nDaemon (crates/zz-daemon/src/daemon/attach.rs plus daemon.rs):\n- A fresh attach sends no second Snapshot and no overlay events for overlays that do not exist (ResyncScope::Attach). A requested Resync still sends everything.\n- An update whose generation is already queued or already written is dropped (terminal_update_redundant). The written record is cleared exactly where the client wipes its viewports: when Attached is queued, on RequestFull, and on a full resync.\n- Terminal frames are held until Attached is queued.\n- A raw-terminal client that reports its size and cell size (new hello fact client-cell-v1) gets its panes resized before view streams start, so each pane's first Full is at the final size. Resync frames whose size is already out of date are skipped.\n- Ready frames go out with writev in batches of up to 256 KiB. LocalStream now forwards write_vectored. The reliable lane stays FIFO, so kitty image chunks still go out before the frame that places them.\n\nTUI (zz-tui):\n- It drains up to 256 queued events and paints once. A snapshot repaints everything only when the frame structure changes.\n- Nothing is painted before attach or into a pane that has no frame yet. Borders are written as runs. A paint that only puts the cursor back is skipped. Pane cards are cached.\n- extended-keys and focus-events now arrive in the hello (server-option-v1:) instead of through two extra command connections.\n\nThis session:\n- Removed the partial status-row repaint. The compat corpus reads raw pty bytes, and smoke/display-menu-action-queue broke on it. Changed status rows are written whole again, and the two zz-cli test patterns are back to their original form.\n- Merged W1-EXEC. Two small conflicts in daemon.rs (the import list and a struct field), plus a type fix: ExecRequest.size keeps (cols, rows).\n- Reran clippy, tests, all TUI fixtures, the full 254-scenario corpus and the gate, and updated the as-built notes in knowledge/designs/daemon-perf-rebuild.md.\n\nResults:\n- attach.tty_total.p1: 161554 -> 1915 B (tmux 972).\n- attach.wire_s2c: 256 KB -> 100 KB.\n- attach.conns: 4 -> 2.\n- chatty.tty_kibps.hidden: 5.81 -> 0.375 KiB/s (tmux 0.667).\n- attach.ttfc.p1 in interleaved runs with the lane's knobs off vs on: 26-27 ms -> 8-17 ms, against tmux 10-16 ms in the same runs.",
+  "rollback_knobs": [
+   "ZZ_PERF_ATTACH_DEDUP=0 (daemon: resync sends the Snapshot and every overlay again, frames are not held until Attached, no update is dropped because its generation was already queued or written)",
+   "ZZ_PERF_ATTACH_PRESIZE=0 (daemon: an attaching raw-terminal client's panes keep their size until its first ResizeTerminal)",
+   "ZZ_PERF_WRITEV=0 (daemon: one write per outbound frame)",
+   "ZZ_PERF_TUI_COALESCE=0 (CLI/TUI: paints after every event, repaints everything on each snapshot and on a resize to the same size, paints before attach and a card in panes with no frame, writes cursor-only paints, reads the two terminal options over their own connections)"
+  ],
+  "tests_added": [
+   "zz-daemon attach_tests.rs: a_fresh_attach_repeats_neither_the_snapshot_nor_an_absent_overlay",
+   "zz-daemon attach_tests.rs: a_fresh_attach_still_sends_the_overlays_that_exist",
+   "zz-daemon attach_tests.rs: equal_generations_are_dropped_against_the_queued_and_the_written_frame",
+   "zz-daemon attach_tests.rs: the_client_wiping_its_viewports_lets_the_same_generation_through_again",
+   "zz-daemon attach_tests.rs: held_frames_follow_the_attached_that_releases_them",
+   "zz-daemon attach_tests.rs: kitty_image_chunks_precede_the_frame_that_places_them_in_one_batched_write",
+   "zz-daemon attach_tests.rs: a_terminal_client_hello_names_the_options_its_terminal_is_armed_from",
+   "zz-daemon attach_tests.rs: a_cell_fact_needs_two_positive_pixel_extents",
+   "zz-daemon attach_tests.rs: a_client_that_named_its_size_gets_its_first_frame_at_that_size",
+   "zz-daemon attach_tests.rs: switching_away_and_back_and_reattaching_repaint_every_visible_pane",
+   "zz-daemon attach_tests.rs: a_full_the_client_asks_for_is_sent_at_the_generation_it_already_had",
+   "zz-tui app.rs: only_a_snapshot_that_moves_the_frame_asks_for_a_full_repaint",
+   "zz-tui app.rs: a_drained_run_of_events_owes_the_strongest_paint_once",
+   "zz-tui render.rs: a_terminal_pane_waiting_for_its_first_frame_paints_nothing",
+   "zz-tui render.rs: a_paint_that_only_puts_the_cursor_back_writes_nothing",
+   "zz-tui render.rs: only_cursor_placement_counts_as_cursor_only",
+   "zz-tui render.rs: border_runs_place_the_cursor_once_per_run_and_the_rendition_once_per_change",
+   "zz-tui tty.rs: the_hello_arms_the_terminal_only_when_it_names_both_options",
+   "Updated only where they asserted the old duplicates: 7 daemon attach-sequence tests (resync Snapshot, mailbox overflow via the Snapshot) and request_full_enqueues_only_the_requested_visible_pane"
+  ],
+  "checks_run": [
+   "cargo fmt --all --check: clean",
+   "cargo clippy --workspace --all-targets --all-features -- -D warnings: clean after the W1-EXEC merge (covers the GUI crate)",
+   "cargo test -p zz-daemon: lib 1118/1119, the failing one is russh_socks ssh_inventory_prepares_page_and_api_ports... (port race under load), which passed 3/3 alone; all integration targets pass",
+   "cargo test -p zz-cli -p zz-tui -p zz-protocol -p zz-client -p zz-mux --no-fail-fast: 1611 passed, 0 failed",
+   "python3 compat/tui/tracker.py check: valid",
+   "compat/tui fixtures on the merged debug build with LANG=en_US.UTF-8 and the pinned tmux: superset, overlays, indicators, launch-diff, screen-diff, caps, mouse, pane-geometry, copy-mode, attached-client all pass; status-row (defaults), choosers (pin side /dev/pts), client-commands (same 5 DIFFs as the base build), stock-keys (gcat vs cat), output-backpressure (tmux has no client rss) and command-streams (stdin-closed matrix on the pin) fail the same way as on the base build",
+   "Full compat/scenarios corpus (254 top-level, known and smoke scenarios) via diff-scenario.sh: clean except the registered known/ tuples (all match tmux-tracker known-tuple) and six that diverge the same way on the W1-PANE and W1-EXEC merge builds: census-hooks, plugin-runtime-continuum, plugin-runtime-vim-tmux-navigator, source-file-byte-name, resurrect-save, status-background-jobs",
+   "smoke/display-menu-action-queue: 0 divergences after the status-row fix (it had 1 OUT divergence with the partial repaint)",
+   "just perf-gate wave1 --quick --only attach,echo,throughput,chatty --baseline bench/perf/results/w1-4-pane-macbook-ad9c0c9b.json --json /tmp/zz-attach-after3.json, plus 2 reruns of attach,echo and 3 interleaved knob-off/knob-on attach runs"
+  ],
+  "gate": "Quick wave1 gate for attach, echo, throughput and chatty, against w1-4-pane-macbook-ad9c0c9b.json, at b56dec43 with load 3-4: 13 pass, 6 fail.\n\nPassing rows:\n- attach.tty_total: 1915 B at p1 and 5149 B at p4 (bounds 8192 and 16384).\n- attach.cpu: 3.8 and 5.85 ms, 1.56x and 1.7x tmux (bound 3x).\n- attach.conns: 2 at p1 and p4.\n- attach.wire_s2c: 100414 and 100586 B (bound 133120).\n- echo.wire_bytes.idle: 1133 B (bound 1700).\n- throughput.detached.ascii: 237 MB/s, 4.76x tmux.\n- chatty CPU for flip and hidden.\n- chatty.tty_kibps.hidden: 0.375 KiB/s (bound 2).\n\nFailing rows:\n- attach.ttfc.p1 and p4: 16.4 and 15.7 ms against the 14 ms bound. The machine was slower than in earlier runs: tmux read 10.5 and 15.2 ms in the same run, against 8.6 before. Across reruns zz read 8.2-17 ms against tmux 9.3-15.3 ms, so the row passes in some runs and fails in others. With every lane knob off, zz reads 26-36 ms.\n- echo.p50 and p99, idle and busy30: 2.2-4.6x tmux. The W1-PANE merge JSON already reads the same (echo.p50.idle 0.403 ms against tmux 0.184), and this lane does not touch the echo path.",
+  "deviations": [
+   "Item 2: updates are also dropped against the generation already written (delivered_terminals), not only against the pending slot. The pending-only check missed a second copy of the same Full that arrived 0.1 ms after the first was written. The written record is cleared wherever the client wipes its viewports: Attached (inside the enqueue lock), RequestFull (Shared::request_full) and a full resync.",
+   "New behaviour: terminal frames are held in the mailbox from the Attach request until Attached is queued. Frames written before Attached caused duplicate Fulls in 2 of 5 attaches.",
+   "Item 3 needs the cell size as well as the grid size, so there is a new hello fact client-cell-v1:WxH (zz-protocol CLIENT_CELL_CAPABILITY_PREFIX). The daemon keeps client_cell_pixels per client and updates it from ResizeTerminal.",
+   "Item 5: the TUI's option reads come from hello capabilities server-option-v1:extended-keys=... and focus-events=... (SERVER_OPTION_CAPABILITY_PREFIX), not from a CommandRequest on the InteractiveClient, because that opens a command-output view. The CommandClient reads remain as a fallback for older daemons and for new-session chains of more than one command. PROTOCOL_VERSION is not bumped (only capability strings were added).",
+   "Tried and removed: repainting a status row from its first changed column. It broke corpus fixtures that grep raw pty bytes, so changed status rows are written whole. The zz-cli pattern loosening in 3fff4b0b was reverted in 9eae40de.",
+   "Merged perf/wave1 into the lane twice, at W1-PANE (ab50ca24) and at W1-EXEC (b56dec43). The EXEC merge needed ExecRequest.size mapped to (cols, rows), because caller_terminal_size now also returns the cell size.",
+   "The web and iOS client builds (clients/web, clients/ios-gpui) were not run. The lane adds only constants to zz-protocol and does not change zz-client."
+  ],
+  "known_issues": [
+   "attach.ttfc against its 14 ms bound depends on machine load. With the machine slower than in earlier runs it fails in some runs, with zz at parity with tmux or up to 1.6x slower.",
+   "The echo rows fail the wave1 ratio on perf/wave1 already. This is not ATTACH's path.",
+   "Handed on to later lanes (recorded in the plan): one 28.3 KB ServerHello per TUI attach (W2-CTRL Welcome). The status line arrives after the first attach paint, so the status row and borders are painted twice. The themed clear plus ECH on blank rows costs about 18 B per row. The watcher still diffs every view a wake lists (W4-DELIVER). Detach renders the status for the exiting TUI.",
+   "tui-screen-diff.sh failed once at the 80x6 unzoom checkpoint in an earlier lane run and passed every rerun, including after the merge. Not reproduced.",
+   "Failures that are the same on the base build: status-row, tui-choosers, tui-client-commands, tui-stock-keys, tui-output-backpressure, tui-command-streams, and 6 corpus scenarios (census-hooks, plugin-runtime-continuum, plugin-runtime-vim-tmux-navigator, source-file-byte-name, resurrect-save, status-background-jobs). The zz-daemon russh_socks port test flaked once under load and passes alone.",
+   "The full perf gate with --strict was not run. Only the quick lane gate ran, against the w1-4 full-run JSON, and it warns that sample counts differ."
+  ]
+ },
+ "review_parity": {
+  "verdict": "Not ready to merge. There is one major regression, and it is a small fix. The lane's equal-generation dedup treats a queued PATCH as covering a Full at the same generation. So when a client has just dropped its viewport (after Attached, a failed patch, or a requested Resync), the Full it needs is thrown away and it gets a patch whose base it no longer has. After a RequestFull this leaves the pane blank or stale until the next Snapshot event, because zz-client core `full_pending` and the GUI's `full_requests_pending` hold back a second RequestFull. I proved this with three probe tests in an exported copy of 22455b48 (/tmp/zzprobe-attach, appended to the end of crates/zz-daemon/src/daemon/attach_tests.rs). All three fail on the lane defaults and pass with ZZ_PERF_ATTACH_DEDUP=0.\n\nEverything else I tried held up:\n- The lane's 11 attach_tests pass 30 times in a row, including under corpus load, with no hangs.\n- cargo test -p zz-tui -p zz-client passes.\n- 21 at-risk compat scenarios run against the pinned tmux were clean on the lane build and again with every lane knob off. They cover switch-client, alerts, aggressive-resize, resize-window, and these smoke scenarios: client-resized-context, copy-mode-refresh, display-popup-menu, display-popup-kitty, display-popup-to-pane, hooks-pane-focus-clients, pane-border-status, pane-border-lines, pane-border-indicators, refresh-status, display-menu-action-queue, display-menu-resize-lifecycle, control-notify, focus-follows-mouse, format-window-bigger, chooser-row-flags and client-exit-actions.\n- All four attach paths release the terminal hold on error. Lock order is consistent: startup_config_causes, then snapshot_order, then the mailbox, then inner.\n- Moving apply_terminal_resizes under the inner lock is safe, because TerminalSession::resize only writes a command slot.\n- The hello values for the terminal options are read after the startup config is loaded, since wait_for_startup runs before register.\n- Hook order at attach is now closer to tmux: window-layout-changed comes before client-session-changed and client-attached, as tmux's server_client_set_session calls recalculate_sizes first.\n- The writev path is correct: std caps writev at IOV_MAX, advance_slices handles a short write, and a transport without write_vectored falls back safely.\n\nOne thing I need to own: my first probe build shared the lane's target directory, and cargo reused the same artifact hashes, so it overwrote the lane's zz_daemon test binary. I deleted those fingerprints and rebuilt from the lane source. `--list` now shows the lane's 11 attach_tests and no probe tests. The lane's source, git state and HEAD (22455b48) are untouched.",
+  "issues": [
+   {
+    "severity": "major",
+    "where": "crates/zz-daemon/src/daemon.rs terminal_update_redundant (used by enqueue_terminal_with, replace_terminal_with including its new pre-encode check), with OutboundMailbox::enqueue_attached, forget_delivered_terminal(s) and Shared::request_full in daemon/attach.rs",
+    "issue": "The pending-slot equality rule (`pending.current == current && (preview || !pending.preview)`) treats a queued patch as covering a Full at the same generation. The wipe points (Attached, RequestFull, requested Resync) clear delivered_terminals but leave queued patches in place, and those patches were built against the base the client is about to drop. So the Full the client needs is dropped and the stale patch is written instead. Before the lane, replace_terminal_with swapped a pending patch for the Full, and enqueue returned NeedsFull. After a RequestFull the client gets a patch with no base. zz-client core (used by the TUI, web and iOS) and the GUI then hold back the next RequestFull (`full_pending` / `full_requests_pending`), and later patches still match delivered, so the daemon never answers NeedsFull. The pane stays blank or stale until some Snapshot event clears the pending flag. The Attached case costs a round trip and a blank pane at best, and turns into the stuck case whenever the RequestFull that follows meets another queued patch at the latest generation. That is more likely over ssh or with a slow client, where the pending slot stays full longer. As built, this also contradicts the note's claim that clearing inside the enqueue lock means no attach epoch is needed.",
+    "evidence": "Probe tests appended to /tmp/zzprobe-attach/crates/zz-daemon/src/daemon/attach_tests.rs (an export of 22455b48), run with an isolated CARGO_TARGET_DIR.\n\nLane defaults:\n- PROBE1 (Full 5 written, patch 5->6 queued, forget_delivered_terminal, replace_terminal Full 6): `replaced=false written=Patch %11`.\n- PROBE2 (Full 5 written, hold, patch 5->6 queued, enqueue_attached, resync Full 6): `enqueue=Dropped written=Patch %12` after Attached.\n- PROBE3 (live pane: attach-session, send-keys -l x, wait until a patch sits in the pending slot, then shared.request_full): `RequestFull answered with [\"Patch %0\"]`.\n\nAll three fail with the lane defaults and pass with ZZ_PERF_ATTACH_DEDUP=0.\n\nOn the client side:\n- crates/zz-client/src/core.rs apply_patch: no viewport leads to request_full, which is held back while full_pending holds the pane. full_pending is cleared only by a Full, a Snapshot, or Attached.\n- crates/zz/src/mux/client.rs request_full_viewport: held back by full_requests_pending, which is cleared only on SnapshotChanged or attach.",
+    "fix": "Record in PendingTerminal whether the queued frame is a Full (base is None). Only drop an incoming Full against the pending slot when the pending frame is a Full at that generation; against a pending patch, fall through to NeedsFull and replace it, as the code did before the lane. At the wipe points, also remove queued patches for the affected panes: remove_pending_terminal for patch entries in enqueue_attached's before_push, forget_delivered_terminals and forget_delivered_terminal. That way a patch built against the pre-wipe base can never follow the wipe. Add the three probe cases (pending patch plus RequestFull, pending patch across Attached, and the live-pane RequestFull) to daemon/attach_tests.rs."
+   },
+   {
+    "severity": "minor",
+    "where": "crates/zz-tui/src/app.rs, the InputOutcome::Resize arm (`unchanged` check near line 840) and the SIGWINCH path (`size == previous` near line 1002)",
+    "issue": "With ZZ_PERF_TUI_COALESCE on (the default), a resize to the same size sends ClientTerminalSize but repaints nothing. tmux redraws the whole client on every MSG_RESIZE, whether or not the size changed. So a same-size SIGWINCH, the usual way to recover a garbled outer terminal, no longer repaints under zz.",
+    "evidence": "compat/.cache/tmux-src/server-client.c:2455-2471: the MSG_RESIZE case calls recalculate_sizes, then server_client_clear_overlay or overlay_resize, then server_redraw_client(c), then notify_client(\"client-resized\"), with no check that the size changed. In zz-tui app.rs, `let unchanged = *crate::COALESCE && size == model.size; ... if unchanged { continue; }` and `if *crate::COALESCE && size == previous { continue; }`. Both skip send_resizes_and_sync_browser and the forced paint.",
+    "fix": "On an unchanged size, skip send_resizes_and_sync_browser (no pane geometry changed) but still do renderer.invalidate() and paint(model, true), so the client is redrawn as tmux redraws it. Otherwise, list this as an accepted gap in the as-built notes."
+   },
+   {
+    "severity": "minor",
+    "where": "knowledge/designs/daemon-perf-rebuild.md, W1-ATTACH as-built, item 1 and item 2",
+    "issue": "The as-built notes overstate what clients do. Item 1 says every client resets overlays and viewports on Attached, but the GPUI desktop client keeps its own retained viewports across Attached; only zz-client core (TUI, web, iOS) wipes them. Item 2 says clearing the written record inside the lock that queues Attached means no epoch is needed, but that ignores patches already queued against the old base (see the major issue).",
+    "evidence": "crates/zz/src/mux/client.rs: finish_attach and the CoreEvent::Attached arm never clear self.viewports. Only clear_cross_host_state and forget_pane drop them. crates/zz-client/src/core.rs clears viewports in its handling of ProtocolMessage::Attached. See PROBE2 above for the queued patch.",
+    "fix": "Correct the two sentences when the major issue is fixed. State which clients wipe viewports on Attached, and that queued patches are dropped at every wipe point."
+   }
+  ]
+ },
+ "review_perf": {
+  "verdict": "W1-ATTACH gains reproduce, and no regressions turned up in metrics the lane does not own. There are no blockers. Several pieces of avoidable work remain on the lane's own path, and two headline numbers in the report are misattributed or did not reproduce.\n\nMethod:\n- I built a clean base at perf/wave1 a26b6368 in a scratch worktree. The zz-perf-int binary was older than that commit, so I did not use it.\n- Interleaved gate runs of lane, base and lane with every knob off, at load 2.5-5 except where noted.\n- xctrace Time Profiler (CPU-only samples) and lldb call counts against isolated daemons, using profiling-profile builds of the lane and the base.\n\nVerified gains, lane vs base:\n- attach.tty_total: 1915 vs 167.7-175.7 KB at p1, 5053-6239 vs 344.8 KB at p4.\n- attach.conns: 4 -> 2. attach.wire_frames: 20 -> 6 at p1, 23 -> 9 at p4.\n- attach.ttfc in full runs: 7.8-9.9 vs 14.7-25.2 ms at p1 (tmux 8.0-10.8), 8.0-8.9 vs 28.8-38.8 ms at p4.\n- attach.cpu p1: 2.2-2.9 vs 3.0-4.5 ms. attach.instr p1: 16.0 vs 16.8 Minstr (-5%). Per-attach daemon CPU in the p4 loop: 2.84 vs 3.73 ms.\n- TUI client CPU per attach: 12.0-12.4 ms vs 14.6-16.1 ms (tmux 11.0).\n- The TUI's time from the Full arriving to the marker on the tty: 0.06-0.13 ms vs 3.2-5.5 ms.\n- One Full encode per pane per attach (lldb: 4.75 vs 8.25 encode_viewport_into per p4 cycle).\n\nNo regressions:\n- throughput.detached.ascii 247.5-252.3 vs 243.6-245.4 MB/s, which is 5.0-5.1x tmux.\n- throughput.attached.ascii_ms 639-668 vs 653-661 ms.\n- mem footprint and threads, idle, cli and chatty CPU are identical to base.\n- The echo rows fail the same way on base (2.1-4.5x tmux).\n- Rescored against the newest w1-5-exec-macbook-a26b6368.json: 0 regressed on every attach run. The full-gate run flagged chatty.steady and the echo p99 rows, but tmux moved the same way on a loaded host, so that is noise.\n\nFragile:\n- attach.ttfc.p1 passes 14 ms only on a quiet machine. It passed in both full runs and one of three quick runs; the other two quick runs read 16.2 and 16.6 ms with tmux at 14.7-14.9.\n- 60-65% of ttfc is CLI process start before the first daemon connect (5.7-9.9 ms). That belongs to W1-EXEC and W4-BINARY.\n\nMain evidence: /private/tmp/claude-501/-Users-demfabris-dev-zz/9e7e04c9-8d02-43fa-ad4b-24a1abc02bee/scratchpad/rev-w1attach\n- Gate runs: lane1/base1/att-*/tp-*/full-*/mem-*/q-lane-*.json and .txt\n- Profiles: x-lane-a, x-lane-b, x-base-b (.trace, .xml, .xml.pkl)\n- Call counts and TUI byte captures: count_calls.py and the m-lane-*.tty files",
+  "issues": [
+   {
+    "severity": "major",
+    "where": "crates/zz-tui/src/render.rs, blank terminal rows in paint_workspace (themed clear, then ECH on every blank row)",
+    "issue": "Half of the p1 attach tty bytes still go to resetting blank pane rows to the default background: `\\x1b[N;1H\\x1b[0m\\x1b[180X\\x1b[0m` on every blank row after a themed `\\x1b[2J`. The lane's own TUI paint path (item 5) writes this, but it was handed on. At p4 it also keeps the attach above the next stage's `attach.tty_total.p4 <= 1.5x tmux` rule (5480 B).",
+    "evidence": "Captures m-lane-a2.tty and m-lane-b2.tty. p1: 958 of 1862 B are ECH rows (46 rows), 51%. p4: 1744 of 4789 B. There is also a redundant trailing `\\x1b[0m` before each row's leading `\\x1b[0m`, 4 B a row. Lane p4 tty_total medians are 5053, 5664 and 6239 B against 5480 B at wave2 (tmux 3653 B), so it fails that rule in 2 of 3 runs. Removing the ECH rows puts p1 at about 900 B, under tmux's 972 B.",
+    "fix": "Clear with the default SGR and paint the theme background only where the layout needs it (sidebar, window gaps, cards). A single-pane layout with no sidebar then writes no blank rows. At minimum, drop the duplicated `\\x1b[0m` per row."
+   },
+   {
+    "severity": "major",
+    "where": "crates/zz-daemon/src/daemon.rs send_attached, and zz-tui app.rs handling of the Attached paint",
+    "issue": "The first attach paint draws a placeholder status row (`[]` plus 178 spaces) and theme-coloured borders. Both are redrawn about 0.2 ms later when StatusChanged arrives, because the status is published after send_attached. The lane handed this to W2-CTRL, but send_attached and the TUI's attach paint are both in this lane's write zone.",
+    "evidence": "p1: the first paint is 247 of 1862 B (13%) and is fully overwritten. p4: the first paint is 1386 B of about 4.8-5.4 KB (26-29%), and the borders are redrawn in status style in the last 2040 B paint. Wire trace: Attached at 297.06, then StatusChanged at 297.27, then the Full at 297.38.",
+    "fix": "Have send_attached render and queue the client's StatusChanged in the same snapshot_order section, before or right after Attached, so one drained batch covers both. Or have the TUI hold the attach RepaintAll until the first StatusChanged or frame, with a short cap."
+   },
+   {
+    "severity": "minor",
+    "where": "crates/zz-daemon/src/daemon/attach.rs write_frames, and the daemon/client local stream setup",
+    "issue": "writev batching cannot reach the brief's ~2 write syscalls per attach. The macOS AF_UNIX send buffer is 8 KiB (net.local.stream.sendspace=8192), so each writev takes at most 8 KiB. The writer blocks and wakes once per 8 KiB, and the TUI reader wakes once per 8 KiB too.",
+    "evidence": "lldb counts per p4 attach+detach cycle: lane 8.75 writev + 1.75 write + 2 send = 12.5 socket writes; base 50 send + 4.25 write = 54. With about 100 KB per attach, 100 KB / 8 KB is about 12.5, which matches. The brief expected 29 -> ~2.",
+    "fix": "Set SO_SNDBUF on accepted local streams to at least MAX_BATCHED_WRITE_BYTES, and SO_RCVBUF on the client side. Then re-measure writes per attach and attach.cpu. The gain is not measured yet."
+   },
+   {
+    "severity": "minor",
+    "where": "daemon.rs attach_collect_event_hooks (apply_terminal_resizes, apply_view_streams, attach_view), the ResizeTerminal input path, and detach_client_state/unregister; zz-terminal TerminalSession::resize/with_slot",
+    "issue": "Every terminal command wakes the pane thread with its own wake write: 7 per pane per attach+detach. After presize, the TUI's ResizeTerminal re-sends the same geometry to each pane. TerminalSession::resize does not compare it with the current geometry, so each report costs another wake and another terminal-thread loop.",
+    "evidence": "lldb, per p4 cycle: 28 `write` calls from CommandSender::try_send. Each of these sends 4 per attach (one per pane): resize via apply_terminal_resizes, set_view_stream, attach_view, resize via input closure#5 (the redundant one), set_view_stream on detach, detach_view, release_view. poll in run_terminal is 193 us per attach (7.8% of daemon CPU).",
+    "fix": "Skip TerminalSession::resize when the geometry equals the last one applied. Wake only when a slot goes from empty to pending, so attach and detach each cost one wake per pane."
+   },
+   {
+    "severity": "minor",
+    "where": "daemon.rs handle_connection (`zz-client-writer-{client}` thread spawn) and exec.rs:682",
+    "issue": "A new writer thread is created and torn down for every TUI connection. write_outbound is in this lane's write zone. W1-EXEC reuses the connection handler threads, but not the writer thread.",
+    "evidence": "Time Profiler: pthread_create, _pthread_exit, _pthread_tsd_cleanup and _mi_thread_done take 83 us per p4 attach (3.4% of daemon CPU) and 21 us at p1 (1.2%). 39 distinct zz-client-writer-N threads appeared in 12 s of attach loop.",
+    "fix": "Run the outbound writer on a pooled or reused thread, as W1-EXEC's ConnectionThreads does for the handlers."
+   },
+   {
+    "severity": "minor",
+    "where": "daemon.rs attach_target -> MuxEngine::update_session_environment_from_client (zz-mux apply_client_environment_update, GlobPattern::matches)",
+    "issue": "Every attach glob-matches the whole client environment against the update-environment patterns, even when nothing changed.",
+    "evidence": "52-68 us per attach, 2.7-3.1% of daemon attach CPU (x-lane-a and x-lane-b profiles). GlobPattern::matches alone takes 2.5% self.",
+    "fix": "Compile the patterns once per option change, or skip the update when the client environment digest is unchanged since the last attach to that session."
+   },
+   {
+    "severity": "minor",
+    "where": "Remaining daemon work in the attach cycle that other lanes own (for the handoff list)",
+    "issue": "Most of the daemon CPU left in an attach+detach cycle sits outside this lane's changes. It still counts toward attach.cpu, which is at 1.4-1.7x tmux even though instructions are below tmux (16.0 vs 17.4 Minstr at p1).",
+    "evidence": "CPU share per attach cycle, as p1 and p4:\n- publish_snapshot_state: 448/458 us (26.7/18.6%). Of that, the status render on detach for the exiting TUI is 245/229 us (14.6/9.3%) and format_option_snapshot is 214/193 us (12.7/7.8%).\n- run_terminal: 198/672 us, of which Frames::snapshot is 161/323 us.\n- watch_terminal: 83/292 us. It calls tcgetpgrp and proc_pidinfo 16 times each per p4 cycle, 31/115 us (1.9/4.6%).\n- write_outbound: 115/146 us.",
+    "fix": "Record these in the plan's handoff list:\n- Skip the status render for a detaching client (publish after detach_client_state excludes it). This could also land here, since it counts in attach.cpu.\n- The option snapshot per publish: W1-FORMAT and W2-CTRL.\n- The foreground lookup per wake: W1-PUBLISH and W4-DELIVER.\n- Full viewport builds: W2-TERM and W4-ROWS."
+   },
+   {
+    "severity": "minor",
+    "where": "crates/zz-tui/src/tty.rs TerminalGuard setup (kitty graphics probe, probe_file_path) and the attach query burst",
+    "issue": "Every attach writes a kitty graphics probe that creates and removes a temp file (zz-tui-PID-probe.rgba). The probe and the terminal queries take 282 B of setup, even for TERM=xterm-256color. This predates the lane but is on the attach setup path it owns.",
+    "evidence": "Setup is 282 of 1862 B (15%) of the p1 tty_total in m-lane-a2.tty. It includes `\\x1b_Gi=4294967294,...t=f,...` with a base64 temp path, plus `\\x1b[c\\x1b[>c\\x1b[>q\\x1b[?996n\\x1b[16t`.",
+    "fix": "Probe kitty graphics only for terminals that can answer (the same terminal_supports list as pixel mouse), or cache the answer per TERM and terminal program. Leave file-transfer probing until an image actually needs it."
+   },
+   {
+    "severity": "minor",
+    "where": "Implementer report 'Results' and the rebuild plan's W1-ATTACH as-built numbers",
+    "issue": "Two headline numbers do not reproduce as this lane's effect. First, attach.wire_s2c `256 KB -> 100 KB` comes from W1-PANE and W1-EXEC: the base the lane sits on already reads 101 KB. Second, chatty.tty_kibps.hidden 0.375 KiB/s did not reproduce.",
+    "evidence": "wire_s2c: base a26b6368 reads 101046/101218 B, matching w1-5-exec-macbook-a26b6368.json (101045). The lane reads 100414/100586, a delta of -632 B (0.6%).\n\nchatty.tty_kibps.hidden: lane 0.60, 0.75, 0.90 and 1.05 KiB/s (tmux 0.49-1.16), base 2.91-2.92. The traffic is whole status-row repaints from automatic-rename flapping (sleep/bash), which tmux sends too. The lane still passes the 2 KiB/s bound, at parity with tmux.\n\nattach.instr at the current base: 16.8 -> 16.0 Minstr at p1 and 19.0 -> 18.2 at p4, not 24.5 -> 19.7.\n\nattach.ttfc.p1 fails its 14 ms bound in 2 of 3 quick runs (16.2 and 16.6 ms, tmux 14.7-14.9).",
+    "fix": "State the lane-only deltas against the a26b6368 base or w1-5-exec in the plan and the merge summary, and list attach.ttfc as passing only at low load."
+   }
+  ]
+ },
+ "paths_note": "Paths under /Users and /private/tmp in these reports are on the owner's Mac and do not exist on other hosts.",
+ "linux_fix_pass": {
+  "state": "Verified and extended on Linux (alienware) on 2026-09-29; see the W1-ATTACH as-built notes in knowledge/designs/daemon-perf-rebuild.md and ~/.cache/zz-perf/attach/report.md.",
+  "also_check": {
+   "comments": "The 71 comment lines the lane added to Rust sources are removed; one moved pre-existing comment in pop_ready_frame stays.",
+   "rollback_table": "ZZ_PERF_ATTACH_BATCH is in the Rollback switches table and the as-built knob list.",
+   "web_build": "just web-build passes on Linux after just web-setup (nightly, wasm-bindgen-cli 0.2.128); zz-ui prints 8 warnings that predate the lane.",
+   "ios_build": "needs the Mac; not run",
+   "strict_gate": "Not run: it belongs to merge 6 on a quiet host. Quick gates on Linux are in the as-built notes."
+  }
+ }
+}

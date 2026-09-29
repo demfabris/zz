@@ -14,7 +14,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use rustix::termios::{OptionalActions, Termios};
 
 use zz_daemon::{CommandClient, Endpoint, terminal_default_features, terminal_feature_mask};
-use zz_protocol::CommandInvocation;
+use zz_protocol::{CommandInvocation, SERVER_OPTION_CAPABILITY_PREFIX, ServerHello};
 
 use crate::kitty::{FILE_PROBE_IMAGE_ID, PROBE_IMAGE_ID, cleanup_frame_slot_files};
 
@@ -30,8 +30,16 @@ impl TerminalSize {
     #[cfg(unix)]
     pub fn detect() -> io::Result<Self> {
         let size = rustix::termios::tcgetwinsize(io::stdout())?;
-        let cell_width_px = pixel_cell_extent(size.ws_xpixel, size.ws_col, 8);
-        let cell_height_px = pixel_cell_extent(size.ws_ypixel, size.ws_row, 16);
+        let cell_width_px = zz_daemon::cell_pixel_extent(
+            size.ws_xpixel,
+            size.ws_col,
+            zz_daemon::DEFAULT_CELL_WIDTH_PX,
+        );
+        let cell_height_px = zz_daemon::cell_pixel_extent(
+            size.ws_ypixel,
+            size.ws_row,
+            zz_daemon::DEFAULT_CELL_HEIGHT_PX,
+        );
         Ok(Self {
             columns: size.ws_col,
             rows: size.ws_row,
@@ -55,14 +63,6 @@ impl TerminalSize {
     }
 }
 
-fn pixel_cell_extent(pixels: u16, cells: u16, fallback: u32) -> u32 {
-    if pixels == 0 || cells == 0 {
-        fallback
-    } else {
-        (u32::from(pixels) / u32::from(cells)).max(1)
-    }
-}
-
 pub(crate) struct TerminalGuard {
     active: bool,
     pixel_mouse: bool,
@@ -79,6 +79,7 @@ const MOUSE_CLEAR_SEQUENCE: &[u8] = b"\x1b[?1016l\x1b[?1006l\x1b[?1000l\x1b[?100
 /// fences on, then the secondary and the extended ones, whose replies name the
 /// terminal and the features it carries.
 const TERMINAL_REQUESTS: &[u8] = b"\x1b[c\x1b[>c\x1b[>q";
+const DEVICE_ATTRIBUTES_REQUEST: &[u8] = b"\x1b[c";
 
 /// How many colours the terminal this client writes to takes. `tty.c` asks it
 /// of every cell it sends (`tty_check_fg` and `tty_check_bg`) and never lowers
@@ -201,6 +202,33 @@ const FOCUS_EVENTS_ENABLE: &[u8] = b"\x1b[?1004h";
 const EXTENDED_KEYS_ENABLE: &[u8] = b"\x1b[>4;2m";
 const EXTENDED_KEYS_DISABLE: &[u8] = b"\x1b[>4m";
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct TerminalOptions {
+    pub extended_keys: bool,
+    pub focus_events: bool,
+}
+
+impl TerminalOptions {
+    pub fn from_hello(hello: &ServerHello) -> Option<Self> {
+        let mut extended_keys = None;
+        let mut focus_events = None;
+        for capability in &hello.capabilities {
+            match capability
+                .strip_prefix(SERVER_OPTION_CAPABILITY_PREFIX)
+                .and_then(|option| option.split_once('='))
+            {
+                Some(("extended-keys", value)) => extended_keys = Some(extended_keys_armed(value)),
+                Some(("focus-events", value)) => focus_events = Some(value.trim() == "on"),
+                _ => {}
+            }
+        }
+        Some(Self {
+            extended_keys: extended_keys?,
+            focus_events: focus_events?,
+        })
+    }
+}
+
 pub(crate) fn extended_keys_option(endpoint: &Endpoint) -> bool {
     let Endpoint::Local(path) = endpoint else {
         return false;
@@ -266,15 +294,15 @@ impl TerminalGuard {
     #[cfg(unix)]
     pub fn enter(mouse: MouseArming, extended_keys: bool, focus_events: bool) -> io::Result<Self> {
         let original = rustix::termios::tcgetattr(io::stdin())?;
-        let file_probe = probe_file_path();
-        remove_file_if_present(&file_probe)?;
-        fs::write(&file_probe, [0_u8; 4])?;
+        let file_probe = (!*crate::COALESCE || supports_kitty_graphics())
+            .then(create_probe_file)
+            .transpose()?;
         let mut guard = Self {
             active: false,
             pixel_mouse: supports_pixel_mouse(),
             kitty_keyboard: supports_kitty_keyboard(),
             kitty_graphics: false,
-            file_probe: Some(file_probe),
+            file_probe,
             original,
         };
         guard.resume(mouse, extended_keys, focus_events)?;
@@ -309,11 +337,7 @@ impl TerminalGuard {
             output.write_all(b"\x1b[>3u")?;
         }
         if let Some(file_probe) = &self.file_probe {
-            let encoded_probe_path = STANDARD.encode(file_probe.as_os_str().as_encoded_bytes());
-            write!(
-                output,
-                "\x1b_Gi={PROBE_IMAGE_ID},s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b_Gi={FILE_PROBE_IMAGE_ID},s=1,v=1,a=q,t=f,f=32;{encoded_probe_path}\x1b\\"
-            )?;
+            write_kitty_probe(&mut output, file_probe)?;
         }
         output.write_all(TERMINAL_REQUESTS)?;
         output.write_all(THEME_SUBSCRIBE)?;
@@ -342,6 +366,23 @@ impl TerminalGuard {
 
     pub const fn kitty_keyboard(&self) -> bool {
         self.kitty_keyboard
+    }
+
+    pub const fn kitty_probe_sent(&self) -> bool {
+        self.file_probe.is_some()
+    }
+
+    pub fn probe_kitty_graphics(&mut self) -> io::Result<()> {
+        if self.file_probe.is_some() {
+            return Ok(());
+        }
+        let file_probe = create_probe_file()?;
+        let mut output = io::stdout().lock();
+        write_kitty_probe(&mut output, &file_probe)?;
+        output.write_all(DEVICE_ATTRIBUTES_REQUEST)?;
+        output.flush()?;
+        self.file_probe = Some(file_probe);
+        Ok(())
     }
 
     pub const fn activate_kitty_graphics(&mut self) {
@@ -391,6 +432,21 @@ impl Drop for TerminalGuard {
     }
 }
 
+fn create_probe_file() -> io::Result<PathBuf> {
+    let file_probe = probe_file_path();
+    remove_file_if_present(&file_probe)?;
+    fs::write(&file_probe, [0_u8; 4])?;
+    Ok(file_probe)
+}
+
+fn write_kitty_probe(output: &mut impl io::Write, file_probe: &std::path::Path) -> io::Result<()> {
+    let encoded_probe_path = STANDARD.encode(file_probe.as_os_str().as_encoded_bytes());
+    write!(
+        output,
+        "\x1b_Gi={PROBE_IMAGE_ID},s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b_Gi={FILE_PROBE_IMAGE_ID},s=1,v=1,a=q,t=f,f=32;{encoded_probe_path}\x1b\\"
+    )
+}
+
 fn probe_file_path() -> PathBuf {
     std::env::temp_dir().join(format!("zz-tui-{}-probe.rgba", std::process::id()))
 }
@@ -405,6 +461,10 @@ fn remove_file_if_present(path: &std::path::Path) -> io::Result<()> {
 
 fn supports_pixel_mouse() -> bool {
     terminal_supports(["ghostty", "kitty", "wezterm", "foot"])
+}
+
+fn supports_kitty_graphics() -> bool {
+    terminal_supports(["ghostty", "kitty", "wezterm", "konsole", "zz"])
 }
 
 fn supports_kitty_keyboard() -> bool {
@@ -428,10 +488,48 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_hello_arms_the_terminal_only_when_it_names_both_options() {
+        let hello = |capabilities: &[&str]| ServerHello {
+            protocol_version: zz_protocol::PROTOCOL_VERSION,
+            server_id: 1,
+            client_id: zz_protocol::ClientId(1),
+            client_instance_id: zz_protocol::ClientInstanceId::default(),
+            capabilities: capabilities.iter().map(|&value| value.to_owned()).collect(),
+            appearance: zz_terminal::TerminalAppearance::default(),
+            appearance_provenance: zz_terminal::AppearanceProvenance::default(),
+            mux_options: zz_protocol::MuxOptions::default(),
+            status: zz_protocol::StatusLine::default(),
+            key_tables: Vec::new(),
+        };
+        assert_eq!(
+            TerminalOptions::from_hello(&hello(&[
+                "mux-v1",
+                "server-option-v1:extended-keys=always",
+                "server-option-v1:focus-events=on",
+            ])),
+            Some(TerminalOptions {
+                extended_keys: true,
+                focus_events: true,
+            })
+        );
+        assert_eq!(
+            TerminalOptions::from_hello(&hello(&[
+                "server-option-v1:extended-keys=off",
+                "server-option-v1:focus-events=off",
+            ])),
+            Some(TerminalOptions::default())
+        );
+        assert_eq!(
+            TerminalOptions::from_hello(&hello(&["server-option-v1:focus-events=on"])),
+            None
+        );
+    }
+
+    #[test]
     fn pixel_geometry_uses_ioctl_values_or_documented_fallbacks() {
-        assert_eq!(pixel_cell_extent(1600, 200, 8), 8);
-        assert_eq!(pixel_cell_extent(0, 200, 8), 8);
-        assert_eq!(pixel_cell_extent(40, 80, 8), 1);
+        assert_eq!(zz_daemon::cell_pixel_extent(1600, 200, 8), 8);
+        assert_eq!(zz_daemon::cell_pixel_extent(0, 200, 8), 8);
+        assert_eq!(zz_daemon::cell_pixel_extent(40, 80, 8), 1);
     }
 
     #[test]

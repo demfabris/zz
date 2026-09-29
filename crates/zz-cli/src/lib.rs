@@ -7,9 +7,10 @@ pub mod diagnostics;
 mod events;
 mod fleet;
 
+#[cfg(all(test, not(target_os = "ios")))]
+use std::borrow::Cow;
 #[cfg(not(target_os = "ios"))]
 use std::{
-    borrow::Cow,
     cell::RefCell,
     io::{self, ErrorKind, IsTerminal as _, Write as _},
     path::PathBuf,
@@ -25,17 +26,17 @@ use std::{
 
 #[cfg(not(target_os = "ios"))]
 use zz_daemon::{
-    CommandClient, CommandOutcome, Daemon, Endpoint, classify_local_connect_error,
-    terminate_incompatible_daemon,
+    CommandClient, CommandOutcome, Daemon, Endpoint, ExecChain, ExecChainEnd, ExecClassifier,
+    classify_local_connect_error, terminate_incompatible_daemon,
 };
 use zz_daemon::{DaemonError, InteractiveClient};
 #[cfg(not(target_os = "ios"))]
 use zz_mux::MuxEngine;
 #[cfg(not(target_os = "ios"))]
 use zz_protocol::{
-    CommandInvocation, MAX_CLIENT_WORKING_DIRECTORY_BYTES, PROTOCOL_VERSION, PreparedCommand,
-    PreparedCommandResult, RawText, ServerError, ServerHello, StdoutClaim, canonical_command,
-    catalog_command_spec,
+    CommandInvocation, ExecResume, ExecResumeKind, MAX_CLIENT_WORKING_DIRECTORY_BYTES,
+    PROTOCOL_VERSION, PreparedCommand, RawText, ServerError, ServerHello, StdoutClaim,
+    canonical_command, catalog_command_spec,
 };
 use zz_terminal::TerminalColorScheme;
 
@@ -70,7 +71,11 @@ pub struct StartupOptions {
 
 const DAEMON_BOOTSTRAP_SERVER_ID_ARGUMENT: &str = "--bootstrap-server-id";
 #[cfg(not(target_os = "ios"))]
+const DAEMON_BOOTSTRAP_READY_FD_ARGUMENT: &str = "--bootstrap-ready-fd";
+#[cfg(not(target_os = "ios"))]
 const DAEMON_BOOTSTRAP_CLIENT_CWD_ARGUMENT: &str = "--bootstrap-client-cwd";
+#[cfg(not(target_os = "ios"))]
+const DAEMON_READY_DEADLINE: Duration = Duration::from_secs(6);
 #[cfg(not(target_os = "ios"))]
 static DAEMON_SPAWN_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
@@ -84,6 +89,7 @@ pub enum Startup {
 #[derive(Debug, Default, PartialEq, Eq)]
 struct DaemonBootstrapArguments {
     server_id: Option<u64>,
+    ready_fd: Option<i32>,
     client_working_directory: Option<PathBuf>,
 }
 
@@ -91,6 +97,7 @@ struct DaemonBootstrapArguments {
 #[derive(Debug, PartialEq, Eq)]
 enum DaemonBootstrapArgumentError {
     ServerId,
+    ReadyFd,
     ClientWorkingDirectory,
 }
 
@@ -99,6 +106,7 @@ impl DaemonBootstrapArgumentError {
     fn message(&self) -> &'static str {
         match self {
             Self::ServerId => "invalid bootstrap server id",
+            Self::ReadyFd => "invalid bootstrap ready fd",
             Self::ClientWorkingDirectory => "invalid bootstrap client cwd",
         }
     }
@@ -126,6 +134,21 @@ fn parse_daemon_bootstrap_arguments(
     let server_id = server_id
         .parse::<u64>()
         .map_err(|_| DaemonBootstrapArgumentError::ServerId)?;
+    let (ready_fd, remaining) = match remaining {
+        [flag, fd, remaining @ ..] if flag == DAEMON_BOOTSTRAP_READY_FD_ARGUMENT => (
+            Some(
+                fd.parse::<i32>()
+                    .ok()
+                    .filter(|fd| *fd > 2)
+                    .ok_or(DaemonBootstrapArgumentError::ReadyFd)?,
+            ),
+            remaining,
+        ),
+        [flag] if flag == DAEMON_BOOTSTRAP_READY_FD_ARGUMENT => {
+            return Err(DaemonBootstrapArgumentError::ReadyFd);
+        }
+        remaining => (None, remaining),
+    };
     let client_working_directory = match remaining {
         [] => None,
         [cwd_flag, cwd] if cwd_flag == DAEMON_BOOTSTRAP_CLIENT_CWD_ARGUMENT => Some(
@@ -136,6 +159,7 @@ fn parse_daemon_bootstrap_arguments(
     };
     Ok(DaemonBootstrapArguments {
         server_id: Some(server_id),
+        ready_fd,
         client_working_directory,
     })
 }
@@ -304,18 +328,36 @@ fn configure_application_working_directory() {
 }
 #[cfg(not(windows))]
 const MI_OPTION_PURGE_DELAY: std::ffi::c_int = 15;
+#[cfg(target_os = "macos")]
+const MI_OPTION_OS_TAG: std::ffi::c_int = 18;
+#[cfg(target_os = "macos")]
+const MI_DEFAULT_OS_TAG: std::ffi::c_long = 100;
+#[cfg(target_os = "macos")]
+const ALLOCATOR_OS_TAG: std::ffi::c_long = 241;
+#[cfg(not(windows))]
+const DAEMON_PURGE_DELAY_MS: std::ffi::c_long = 0;
 
 #[cfg(not(windows))]
 #[allow(unsafe_code)]
 unsafe extern "C" {
+    #[cfg(target_os = "macos")]
+    fn mi_option_get(option: std::ffi::c_int) -> std::ffi::c_long;
     fn mi_option_set(option: std::ffi::c_int, value: std::ffi::c_long);
+}
+
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
+pub extern "C" fn tag_allocator_memory() {
+    if unsafe { mi_option_get(MI_OPTION_OS_TAG) } == MI_DEFAULT_OS_TAG {
+        unsafe { mi_option_set(MI_OPTION_OS_TAG, ALLOCATOR_OS_TAG) };
+    }
 }
 
 #[cfg(not(windows))]
 #[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
 fn purge_freed_memory_promptly() {
     if std::env::var_os("MIMALLOC_PURGE_DELAY").is_none() {
-        unsafe { mi_option_set(MI_OPTION_PURGE_DELAY, 0) };
+        unsafe { mi_option_set(MI_OPTION_PURGE_DELAY, DAEMON_PURGE_DELAY_MS) };
     }
 }
 
@@ -812,6 +854,10 @@ fn run_command_mode(
         if let Some(client_working_directory) = bootstrap.client_working_directory {
             daemon = daemon.with_initial_client_working_directory(client_working_directory);
         }
+        #[cfg(unix)]
+        if let Some(fd) = bootstrap.ready_fd {
+            daemon = daemon.with_bootstrap_ready_fd(fd);
+        }
         return Some(match daemon.run_foreground() {
             Ok(()) | Err(DaemonError::AlreadyRunning(_)) => ExitCode::SUCCESS,
             Err(error) => {
@@ -870,27 +916,52 @@ fn run_command_mode(
     if command == "--kill-server" {
         return Some(match host {
             Some(host) => run_host_kill_server(host, invocation.args),
-            None => run_kill_server(socket_path, invocation.args, true),
+            None => run_kill_server(socket_path, invocation.args),
         });
     }
 
     let start_server = !no_start_server && tmux_command_starts_server(&command);
-    let native_attach_spelling = matches!(command.as_str(), "attach" | "attach-session");
-    let mut preparation_error = None;
-    let mut prepared = if host.is_none() {
-        match prepare_cli_command_chain(socket_path, &command_chain) {
-            Ok(prepared) => Some(prepared),
-            Err(error) => {
-                preparation_error = Some(classify_local_connect_error(socket_path, error));
-                None
+    let routing = ChainRouting {
+        socket_path,
+        host,
+        mux_config_files,
+        startup_options,
+        command: &command,
+        start_server,
+    };
+    if let Some(host) = host {
+        return Some(run_host_command_chain(
+            &routing,
+            host,
+            socket_source,
+            command_chain,
+        ));
+    }
+
+    let mut resume = None;
+    let failure = match CommandClient::connect(socket_path) {
+        Ok(client) => {
+            match run_local_command_chain(
+                &routing,
+                client,
+                &command_chain,
+                progress_target.as_deref(),
+                None,
+            ) {
+                LocalChain::Done(exit) => return Some(exit),
+                LocalChain::Resume(prepared) => {
+                    resume = Some(prepared);
+                    None
+                }
+                LocalChain::Unanswered(error) => Some(error),
             }
         }
-    } else {
-        None
+        Err(error) => Some(error),
     };
+    let failure = failure.map(|error| classify_local_connect_error(socket_path, error));
 
-    if prepared.is_none() && host.is_none() {
-        let static_commands = if native_attach_spelling {
+    if failure.is_some() {
+        let static_commands = if matches!(command.as_str(), "attach" | "attach-session") {
             if let Err(error) = parse_native_attach_arguments(command_chain[0].args.clone()) {
                 return Some(print_native_attach_argument_error(error));
             }
@@ -903,21 +974,19 @@ fn run_command_mode(
             return Some(exit_code_for(CliFailure::Server(&error)));
         }
     }
+    let failure = match failure {
+        Some(error)
+            if !start_server
+                && tmux_command_starts_server(&command)
+                && daemon_is_spawnable(&error) =>
+        {
+            eprintln!("{}", format_local_command_error(socket_path, error));
+            return Some(exit_code_for(CliFailure::Runtime));
+        }
+        failure => failure,
+    };
 
-    if prepared.is_none()
-        && !start_server
-        && tmux_command_starts_server(&command)
-        && preparation_error.as_ref().is_some_and(daemon_is_spawnable)
-    {
-        let error = preparation_error.expect("missing preparation error");
-        eprintln!("{}", format_local_command_error(socket_path, error));
-        return Some(exit_code_for(CliFailure::Runtime));
-    }
-
-    if prepared.is_none()
-        && start_server
-        && preparation_error.as_ref().is_some_and(daemon_is_spawnable)
-    {
+    let failure = if start_server && failure.as_ref().is_some_and(daemon_is_spawnable) {
         if let Some(error) = tmux_label_creation_error(socket_path, socket_source, start_server) {
             eprintln!("{}", error.message);
             let nested_label_new_session =
@@ -928,193 +997,55 @@ fn run_command_mode(
                 exit_code_for(CliFailure::Runtime)
             });
         }
-        let (mut client, spawned_server_id) =
-            match connect_command_client_with_spawn_provenance(socket_path, mux_config_files) {
-                Ok(connected) => connected,
-                Err(error) => {
-                    eprintln!("{}", format_local_command_error(socket_path, error));
-                    return Some(exit_code_for(CliFailure::Runtime));
-                }
-            };
-        let commands = match spawned_server_id {
-            Some(server_id) => {
-                client.prepare_commands_or_stop_empty(command_chain.clone(), server_id)
-            }
-            None => client.prepare_commands(command_chain.clone()),
-        };
-        let commands = match commands {
-            Ok(commands) => commands,
+        let client = match spawn_and_connect_command_client(socket_path, mux_config_files) {
+            Ok(connected) => connected,
             Err(error) => {
-                eprintln!("{}", command_error_message(&error));
-                return Some(exit_code_for(CliFailure::Daemon(&error)));
+                eprintln!("{}", format_local_command_error(socket_path, error));
+                return Some(exit_code_for(CliFailure::Runtime));
             }
         };
-        prepared = Some(PreparedCliCommandChain { client, commands });
-    }
-
-    if prepared.is_none()
-        && let Some(host) = host
-        && canonical_command(&command_chain[0].name) == "load-buffer"
-    {
-        let result = connect_host_command_client(host).and_then(|mut client| {
-            let commands = client
-                .prepare_commands(command_chain.clone())
-                .map_err(|error| command_error_message(&error))?;
-            Ok(PreparedCliCommandChain { client, commands })
-        });
-        match result {
-            Ok(commands) => prepared = Some(commands),
-            Err(error) => {
-                eprintln!("{error}");
+        let (client, spawned_server_id) = client;
+        match run_local_command_chain(
+            &routing,
+            client,
+            &command_chain,
+            progress_target.as_deref(),
+            Some(spawned_server_id),
+        ) {
+            LocalChain::Done(exit) => return Some(exit),
+            LocalChain::Resume(prepared) => {
+                resume = Some(prepared);
+                None
+            }
+            LocalChain::Unanswered(error) => {
+                eprintln!("{}", format_local_command_error(socket_path, error));
                 return Some(exit_code_for(CliFailure::Runtime));
             }
         }
+    } else {
+        failure
+    };
+
+    if command == "kill-server" && resume.is_none() {
+        return Some(run_kill_server(socket_path, invocation.args));
     }
 
-    if let Some(error) = prepared
-        .as_ref()
-        .and_then(|prepared| prepared_command_error(&prepared.commands))
-    {
-        eprintln!("{}", server_error_message(error));
-        return Some(exit_code_for(CliFailure::Server(error)));
+    let (new_session_tui, native_attach) = match &resume {
+        Some(resume) => (
+            resume.kind == ExecResumeKind::NewSession,
+            resume.kind == ExecResumeKind::NativeAttach,
+        ),
+        None => (
+            command_chain_uses_tui(&command_chain) || attach_prefix_uses_tui(&command),
+            matches!(command.as_str(), "attach" | "attach-session"),
+        ),
+    };
+    let prepared = resume.map(|resume| resume.commands);
+    if (prepared.is_some() || start_server) && new_session_tui {
+        return Some(run_tui_chain(&routing, prepared, command_chain));
     }
-
-    if command == "kill-server" && host.is_none() && prepared.is_none() {
-        return Some(run_kill_server(socket_path, invocation.args, false));
-    }
-
-    let new_session_tui = prepared.as_ref().map_or_else(
-        || command_chain_uses_tui(&command_chain),
-        |prepared| prepared_command_chain_uses_tui(&command_chain, &prepared.commands),
-    );
-    let attach_tui = prepared.as_ref().map_or_else(
-        || attach_prefix_uses_tui(&command),
-        |prepared| {
-            prepared
-                .commands
-                .first()
-                .is_some_and(|prepared| prepared_attach_uses_tui(&command, prepared))
-        },
-    );
-    let tui_connection_allowed = host.is_some() || prepared.is_some() || start_server;
-    if tui_connection_allowed && (new_session_tui || attach_tui) {
-        let options = zz_tui::RunOptions {
-            socket_path: socket_path.to_path_buf(),
-            host: host.map(str::to_owned),
-            session: None,
-            restart_daemon: false,
-            detach_others: false,
-            read_only: false,
-            client_flags: None,
-        };
-        let reconnect = |path: &Path, client_has_terminal| {
-            connect_terminal_surface_client_with_config(
-                path,
-                TerminalColorScheme::Dark,
-                mux_config_files,
-                client_has_terminal,
-            )
-        };
-        let request = match startup_options.browser_provider {
-            Some(provider) => options.with_browser_provider(provider),
-            None => zz_tui::RunRequest::from(&options),
-        }
-        .with_local_reconnect(&reconnect);
-        return Some(match prepared {
-            Some(PreparedCliCommandChain { client, commands }) => {
-                drop(client);
-                match zz_tui::run_prepared_new_session(request, commands) {
-                    Ok(()) => ExitCode::SUCCESS,
-                    Err(error) => {
-                        eprintln!("{error}");
-                        exit_code_for(CliFailure::Runtime)
-                    }
-                }
-            }
-            None => match zz_tui::run_new_session(request, command_chain) {
-                Ok(()) => ExitCode::SUCCESS,
-                Err(error) => {
-                    eprintln!("{error}");
-                    exit_code_for(CliFailure::Runtime)
-                }
-            },
-        });
-    }
-
-    let native_attach = prepared.as_ref().map_or_else(
-        || matches!(command.as_str(), "attach" | "attach-session"),
-        |prepared| {
-            prepared
-                .commands
-                .first()
-                .is_some_and(|prepared| prepared_native_attach(&command, prepared))
-        },
-    );
     if native_attach {
-        let options = match parse_native_attach_arguments(command_chain[0].args.clone()) {
-            Ok(options) => options,
-            Err(error) => {
-                return Some(print_native_attach_argument_error(error));
-            }
-        };
-        if options.restart_daemon && host.is_some() {
-            eprintln!("zz: --restart-daemon is only supported for the local daemon");
-            return Some(exit_code_for(CliFailure::Usage));
-        }
-        // -x has no RunOptions field: route it through the real attach command so
-        // the daemon sees the flag that picks the parent-hangup eviction.
-        let needs_command_attach = options.no_update_environment
-            || options.working_directory.is_some()
-            || options.detach_others_hangup;
-        let attach_command = native_attach_command(&options);
-        let options = zz_tui::RunOptions {
-            socket_path: socket_path.to_path_buf(),
-            host: host.map(str::to_owned),
-            session: options.session,
-            restart_daemon: options.restart_daemon,
-            detach_others: options.detach_others,
-            read_only: options.read_only,
-            client_flags: options.client_flags,
-        };
-        let reconnect = |path: &Path, client_has_terminal| {
-            connect_terminal_surface_client_with_config(
-                path,
-                TerminalColorScheme::Dark,
-                mux_config_files,
-                client_has_terminal,
-            )
-        };
-        let request = match startup_options.browser_provider {
-            Some(provider) => options.with_browser_provider(provider),
-            None => zz_tui::RunRequest::from(&options),
-        }
-        .with_local_reconnect(&reconnect);
-        let result = if command_chain.len() > 1 || needs_command_attach {
-            if let Some(PreparedCliCommandChain {
-                client,
-                mut commands,
-            }) = prepared.take()
-            {
-                drop(client);
-                commands[0].invocation = attach_command;
-                zz_tui::run_prepared_new_session(request, commands)
-            } else {
-                command_chain[0] = attach_command;
-                zz_tui::run_new_session(request, command_chain)
-            }
-        } else {
-            if let Some(PreparedCliCommandChain { client, .. }) = prepared.take() {
-                drop(client);
-            }
-            zz_tui::run(request)
-        };
-        return Some(match result {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => {
-                eprintln!("{error}");
-                exit_code_for(CliFailure::Runtime)
-            }
-        });
+        return Some(run_native_attach(&routing, prepared, command_chain));
     }
 
     if let Some(error) = tmux_label_creation_error(socket_path, socket_source, start_server) {
@@ -1127,92 +1058,268 @@ fn run_command_mode(
             exit_code_for(CliFailure::Runtime)
         });
     }
-    let connected = match prepared {
-        Some(PreparedCliCommandChain { client, commands }) => Ok((client, Some(commands))),
-        None => match host {
-            Some(host) => connect_host_command_client(host)
-                .map(|client| (client, None))
-                .map_err(|error| format!("zz: {error}")),
-            None => connect_command_client(socket_path, mux_config_files, start_server)
-                .map(|client| (client, None))
-                .map_err(|error| format_local_command_error(socket_path, error)),
-        },
-    };
-    let (mut client, prepared_commands) = match connected {
-        Ok(connected) => connected,
-        Err(error) => {
-            eprintln!("{error}");
-            return Some(exit_code_for(CliFailure::Runtime));
-        }
-    };
-    let _progress = if host.is_none()
-        && command_chain.len() == 1
+    let failure = failure.unwrap_or_else(|| {
+        DaemonError::Server(ServerError::Internal(
+            "daemon handed back a chain it cannot resume".to_owned(),
+        ))
+    });
+    eprintln!("{}", format_local_command_error(socket_path, failure));
+    Some(exit_code_for(CliFailure::Runtime))
+}
+
+#[cfg(not(target_os = "ios"))]
+struct ChainRouting<'a> {
+    socket_path: &'a Path,
+    host: Option<&'a str>,
+    mux_config_files: &'a [PathBuf],
+    startup_options: &'a StartupOptions,
+    command: &'a str,
+    start_server: bool,
+}
+
+#[cfg(not(target_os = "ios"))]
+enum LocalChain {
+    Done(ExitCode),
+    Resume(ExecResume),
+    Unanswered(DaemonError),
+}
+
+#[cfg(not(target_os = "ios"))]
+fn prepare_command_client(client: &mut CommandClient) {
+    client.enable_stdin();
+    client.set_stderr_handler(print_command_error);
+    client.set_stdout_handler(print_released_command_output);
+}
+
+#[cfg(not(target_os = "ios"))]
+fn emit_chain_outcome(outcome: &CommandOutcome) -> u8 {
+    let status = print_chain_output(&outcome.stdout, raw_command_output(outcome.stdout_claim));
+    print_command_error(&outcome.stderr);
+    status
+}
+
+#[cfg(not(target_os = "ios"))]
+fn run_local_command_chain(
+    routing: &ChainRouting<'_>,
+    mut client: CommandClient,
+    command_chain: &[CommandInvocation],
+    progress_target: Option<&str>,
+    spawned_server_id: Option<u64>,
+) -> LocalChain {
+    let _progress = if command_chain.len() == 1
         && let Some(pane) = progress_target
     {
-        match events::Progress::start(socket_path, pane) {
+        match events::Progress::start(routing.socket_path, pane.to_owned()) {
             Ok(progress) => Some(progress),
             Err(error) => {
                 eprintln!("agent-send: --progress: {error}");
-                return Some(exit_code_for(CliFailure::Runtime));
+                return LocalChain::Done(exit_code_for(CliFailure::Runtime));
             }
         }
     } else {
         None
     };
-    client.enable_stdin();
-    client.set_stderr_handler(print_command_error);
-    client.set_stdout_handler(print_released_command_output);
-    if let Some(prepared_commands) = prepared_commands {
-        let recover_kill = prepared_commands
-            .first()
-            .is_some_and(|prepared| prepared_kill_server_recovery(&command, prepared));
-        return match execute_command_chain(
-            prepared_commands.into_iter().enumerate(),
-            |(index, command)| {
-                execute_prepared_command(&mut client, command.clone())
-                    .map_err(|error| (*index, error))
-            },
-            |(_, _command), outcome| {
-                let raw = raw_command_output(outcome.stdout_claim);
-                let status = print_chain_output(&outcome.stdout, raw);
-                print_command_error(&outcome.stderr);
-                status
-            },
-        ) {
-            Ok(exit_code) => Some(ExitCode::from(exit_code)),
-            Err((0, error)) if recover_kill && daemon_transport_failure(&error) => {
-                Some(recover_kill_server_failure(socket_path, &error))
-            }
-            Err((_, DaemonError::CommandFailed { output, error })) => {
-                print_chain_output(&output, false);
-                eprintln!("{}", command_error_message(&error));
-                Some(exit_code_for(CliFailure::Runtime))
-            }
-            Err((_, error)) => {
-                eprintln!("{}", command_error_message(&error));
-                Some(exit_code_for(CliFailure::Daemon(&error)))
-            }
-        };
+    prepare_command_client(&mut client);
+    let classify: ExecClassifier<'_> = &zz_daemon::exec_resume_kind;
+    let chain = ExecChain {
+        commands: command_chain.to_vec(),
+        spawned_server_id,
+        expect_server_id: None,
+        resume: Some(classify),
+        prepared: false,
+        last: true,
+    };
+    match client.exec_chain(chain, emit_chain_outcome) {
+        Ok(ExecChainEnd::Ran { exit_code }) => LocalChain::Done(ExitCode::from(exit_code)),
+        Ok(ExecChainEnd::Resume(resume)) => LocalChain::Resume(resume),
+        Ok(ExecChainEnd::Rejected(error)) => {
+            eprintln!("{}", server_error_message(&error));
+            LocalChain::Done(exit_code_for(CliFailure::Server(&error)))
+        }
+        Ok(ExecChainEnd::Failed(error))
+            if routing.command == "kill-server" && daemon_transport_failure(&error) =>
+        {
+            LocalChain::Done(recover_kill_server_failure(routing.socket_path, &error))
+        }
+        Ok(ExecChainEnd::Failed(error)) => LocalChain::Done(print_chain_failure(error)),
+        Ok(ExecChainEnd::ServerMismatch) => LocalChain::Done(exit_code_for(CliFailure::Runtime)),
+        Err(error) => LocalChain::Unanswered(error),
     }
-    match execute_command_chain(
-        command_chain,
-        |command| client.execute_streams(command.clone()),
-        |_command, outcome| {
-            let status =
-                print_chain_output(&outcome.stdout, raw_command_output(outcome.stdout_claim));
-            print_command_error(&outcome.stderr);
-            status
-        },
-    ) {
-        Ok(exit_code) => Some(ExitCode::from(exit_code)),
-        Err(DaemonError::CommandFailed { output, error }) => {
+}
+
+#[cfg(not(target_os = "ios"))]
+fn print_chain_failure(error: DaemonError) -> ExitCode {
+    match error {
+        DaemonError::CommandFailed { output, error } => {
             print_chain_output(&output, false);
             eprintln!("{}", command_error_message(&error));
-            Some(exit_code_for(CliFailure::Runtime))
+            exit_code_for(CliFailure::Runtime)
+        }
+        error => {
+            eprintln!("{}", command_error_message(&error));
+            exit_code_for(CliFailure::Daemon(&error))
+        }
+    }
+}
+
+#[cfg(not(target_os = "ios"))]
+fn run_host_command_chain(
+    routing: &ChainRouting<'_>,
+    host: &str,
+    socket_source: SocketSelectionSource,
+    command_chain: Vec<CommandInvocation>,
+) -> ExitCode {
+    if command_chain_uses_tui(&command_chain) || attach_prefix_uses_tui(routing.command) {
+        return run_tui_chain(routing, None, command_chain);
+    }
+    if matches!(routing.command, "attach" | "attach-session") {
+        return run_native_attach(routing, None, command_chain);
+    }
+    if let Some(error) =
+        tmux_label_creation_error(routing.socket_path, socket_source, routing.start_server)
+    {
+        eprintln!("{}", error.message);
+        let nested_label_new_session = canonical_command(routing.command) == "new-session"
+            && error.kind == ErrorKind::NotFound;
+        return if nested_label_new_session {
+            ExitCode::SUCCESS
+        } else {
+            exit_code_for(CliFailure::Runtime)
+        };
+    }
+    let mut client = match connect_host_command_client(host) {
+        Ok(client) => client,
+        Err(error) => {
+            eprintln!("zz: {error}");
+            return exit_code_for(CliFailure::Runtime);
+        }
+    };
+    prepare_command_client(&mut client);
+    match client.exec_chain(ExecChain::new(command_chain), emit_chain_outcome) {
+        Ok(ExecChainEnd::Ran { exit_code }) => ExitCode::from(exit_code),
+        Ok(ExecChainEnd::Rejected(error)) => {
+            eprintln!("{}", server_error_message(&error));
+            exit_code_for(CliFailure::Server(&error))
+        }
+        Ok(ExecChainEnd::Failed(error)) => print_chain_failure(error),
+        Ok(ExecChainEnd::Resume(_) | ExecChainEnd::ServerMismatch) => {
+            exit_code_for(CliFailure::Runtime)
         }
         Err(error) => {
             eprintln!("{}", command_error_message(&error));
-            Some(exit_code_for(CliFailure::Daemon(&error)))
+            exit_code_for(CliFailure::Daemon(&error))
+        }
+    }
+}
+
+#[cfg(not(target_os = "ios"))]
+fn tui_request<'a>(
+    routing: &ChainRouting<'a>,
+    options: &'a zz_tui::RunOptions,
+    reconnect: &'a dyn Fn(&Path, bool) -> Result<InteractiveClient, DaemonError>,
+) -> zz_tui::RunRequest<'a> {
+    match routing.startup_options.browser_provider {
+        Some(provider) => options.with_browser_provider(provider),
+        None => zz_tui::RunRequest::from(options),
+    }
+    .with_local_reconnect(reconnect)
+}
+
+#[cfg(not(target_os = "ios"))]
+fn run_tui_chain(
+    routing: &ChainRouting<'_>,
+    prepared: Option<Vec<PreparedCommand>>,
+    command_chain: Vec<CommandInvocation>,
+) -> ExitCode {
+    let options = zz_tui::RunOptions {
+        socket_path: routing.socket_path.to_path_buf(),
+        host: routing.host.map(str::to_owned),
+        session: None,
+        restart_daemon: false,
+        detach_others: false,
+        read_only: false,
+        client_flags: None,
+    };
+    let mux_config_files = routing.mux_config_files;
+    let reconnect = |path: &Path, client_has_terminal| {
+        connect_terminal_surface_client_with_config(
+            path,
+            TerminalColorScheme::Dark,
+            mux_config_files,
+            client_has_terminal,
+        )
+    };
+    let request = tui_request(routing, &options, &reconnect);
+    let result = match prepared {
+        Some(commands) => zz_tui::run_prepared_new_session(request, commands),
+        None => zz_tui::run_new_session(request, command_chain),
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("{error}");
+            exit_code_for(CliFailure::Runtime)
+        }
+    }
+}
+
+#[cfg(not(target_os = "ios"))]
+fn run_native_attach(
+    routing: &ChainRouting<'_>,
+    prepared: Option<Vec<PreparedCommand>>,
+    mut command_chain: Vec<CommandInvocation>,
+) -> ExitCode {
+    let options = match parse_native_attach_arguments(command_chain[0].args.clone()) {
+        Ok(options) => options,
+        Err(error) => {
+            return print_native_attach_argument_error(error);
+        }
+    };
+    if options.restart_daemon && routing.host.is_some() {
+        eprintln!("zz: --restart-daemon is only supported for the local daemon");
+        return exit_code_for(CliFailure::Usage);
+    }
+    // -x has no RunOptions field: route it through the real attach command so
+    // the daemon sees the flag that picks the parent-hangup eviction.
+    let needs_command_attach = options.no_update_environment
+        || options.working_directory.is_some()
+        || options.detach_others_hangup;
+    let attach_command = native_attach_command(&options);
+    let options = zz_tui::RunOptions {
+        socket_path: routing.socket_path.to_path_buf(),
+        host: routing.host.map(str::to_owned),
+        session: options.session,
+        restart_daemon: options.restart_daemon,
+        detach_others: options.detach_others,
+        read_only: options.read_only,
+        client_flags: options.client_flags,
+    };
+    let mux_config_files = routing.mux_config_files;
+    let reconnect = |path: &Path, client_has_terminal| {
+        connect_terminal_surface_client_with_config(
+            path,
+            TerminalColorScheme::Dark,
+            mux_config_files,
+            client_has_terminal,
+        )
+    };
+    let request = tui_request(routing, &options, &reconnect);
+    let result = if command_chain.len() > 1 || needs_command_attach {
+        if let Some(mut commands) = prepared {
+            commands[0].invocation = attach_command;
+            zz_tui::run_prepared_new_session(request, commands)
+        } else {
+            command_chain[0] = attach_command;
+            zz_tui::run_new_session(request, command_chain)
+        }
+    } else {
+        zz_tui::run(request)
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("{error}");
+            exit_code_for(CliFailure::Runtime)
         }
     }
 }
@@ -1349,31 +1456,9 @@ fn usage_positional_names(usage: &str) -> Option<Vec<&str>> {
     (!names.is_empty()).then_some(names)
 }
 
-#[cfg(not(target_os = "ios"))]
-struct PreparedCliCommandChain {
-    client: CommandClient,
-    commands: Vec<PreparedCommand>,
-}
-
-#[cfg(not(target_os = "ios"))]
-fn prepare_cli_command_chain(
-    socket_path: &Path,
-    commands: &[CommandInvocation],
-) -> Result<PreparedCliCommandChain, DaemonError> {
-    let mut client = CommandClient::connect(socket_path)?;
-    let commands = client.prepare_commands(commands.to_vec())?;
-    Ok(PreparedCliCommandChain { client, commands })
-}
-
-#[cfg(not(target_os = "ios"))]
-fn prepared_command_is(command: &PreparedCommand, canonical_name: &str) -> bool {
-    command.result == PreparedCommandResult::Ready
-        && command.canonical_name.as_deref() == Some(canonical_name)
-}
-
-#[cfg(not(target_os = "ios"))]
+#[cfg(all(test, not(target_os = "ios")))]
 fn prepared_command_invocations(command: &PreparedCommand) -> Option<Cow<'_, [CommandInvocation]>> {
-    if command.result != PreparedCommandResult::Ready {
+    if command.result != zz_protocol::PreparedCommandResult::Ready {
         return None;
     }
     if command.canonical_name.is_some() {
@@ -1383,30 +1468,6 @@ fn prepared_command_invocations(command: &PreparedCommand) -> Option<Cow<'_, [Co
         .ok()
         .flatten()
         .map(Cow::Owned)
-}
-
-#[cfg(not(target_os = "ios"))]
-fn prepared_command_any(
-    command: &PreparedCommand,
-    mut matches: impl FnMut(&CommandInvocation, &str) -> bool,
-) -> bool {
-    prepared_command_invocations(command).is_some_and(|commands| {
-        commands.iter().any(|invocation| {
-            let canonical_name = command
-                .canonical_name
-                .as_deref()
-                .unwrap_or_else(|| canonical_command(&invocation.name));
-            matches(invocation, canonical_name)
-        })
-    })
-}
-
-#[cfg(not(target_os = "ios"))]
-fn prepared_command_error(commands: &[PreparedCommand]) -> Option<&ServerError> {
-    commands.iter().find_map(|command| match &command.result {
-        PreparedCommandResult::Ready => None,
-        PreparedCommandResult::Error(error) => Some(error),
-    })
 }
 
 #[cfg(all(test, not(target_os = "ios")))]
@@ -1432,53 +1493,6 @@ fn append_prepared_command_stdin_payload(
         return;
     }
     command.invocation.set_stdin(payload);
-}
-
-#[cfg(not(target_os = "ios"))]
-fn prepared_command_chain_uses_tui(
-    typed: &[CommandInvocation],
-    prepared: &[PreparedCommand],
-) -> bool {
-    typed.iter().zip(prepared).any(|(typed, prepared)| {
-        !matches!(typed.name.as_str(), "attach" | "attach-session")
-            && prepared_command_any(prepared, |command, canonical_name| {
-                canonical_name == "new-session"
-                    && MuxEngine::new_session_attaches(&command.args).unwrap_or(false)
-            })
-    })
-}
-
-#[cfg(not(target_os = "ios"))]
-fn prepared_attach_uses_tui(typed_name: &str, prepared: &PreparedCommand) -> bool {
-    !matches!(typed_name, "attach" | "attach-session")
-        && prepared_command_any(prepared, |_, canonical_name| {
-            canonical_name == "attach-session"
-        })
-}
-
-#[cfg(not(target_os = "ios"))]
-fn prepared_native_attach(typed_name: &str, prepared: &PreparedCommand) -> bool {
-    matches!(typed_name, "attach" | "attach-session")
-        && !prepared.alias_matched
-        && prepared_command_is(prepared, "attach-session")
-}
-
-#[cfg(not(target_os = "ios"))]
-fn prepared_kill_server_recovery(typed_name: &str, prepared: &PreparedCommand) -> bool {
-    typed_name == "kill-server"
-        && !prepared.alias_matched
-        && prepared_command_is(prepared, "kill-server")
-}
-
-#[cfg(not(target_os = "ios"))]
-fn execute_prepared_command(
-    client: &mut CommandClient,
-    command: PreparedCommand,
-) -> Result<CommandOutcome, DaemonError> {
-    match command.result {
-        PreparedCommandResult::Ready => client.execute_prepared_streams(command.invocation),
-        PreparedCommandResult::Error(error) => Err(DaemonError::Server(error)),
-    }
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -1529,34 +1543,6 @@ fn split_command_chain(arguments: &[RawText]) -> Vec<CommandInvocation> {
             Some(CommandInvocation::new(name, words))
         })
         .collect()
-}
-
-/// Run every member of a `\;` chain, emitting each one's streams as it lands.
-/// The pin stops a chain only when a command itself fails (`cmdq_next` drops
-/// the rest of the group on `CMD_RETURN_ERROR`) or when the server sets
-/// `CLIENT_EXIT` on the client, never merely because the client's exit status
-/// went nonzero, and the last nonzero status wins.
-#[cfg(not(target_os = "ios"))]
-fn execute_command_chain<T, E>(
-    commands: impl IntoIterator<Item = T>,
-    mut execute: impl FnMut(&T) -> Result<CommandOutcome, E>,
-    mut emit: impl FnMut(&T, &CommandOutcome) -> u8,
-) -> Result<u8, E> {
-    let mut exit_code = 0;
-    for command in commands {
-        let outcome = execute(&command)?;
-        let output_status = emit(&command, &outcome);
-        if outcome.exit_code != 0 {
-            exit_code = outcome.exit_code;
-        }
-        if output_status != 0 {
-            exit_code = output_status;
-        }
-        if outcome.client_exit {
-            break;
-        }
-    }
-    Ok(exit_code)
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -2015,35 +2001,17 @@ fn server_error_message(error: &ServerError) -> String {
 }
 
 #[cfg(not(target_os = "ios"))]
-fn run_kill_server(
-    path: &Path,
-    args: impl IntoIterator<Item = RawText>,
-    prepared: bool,
-) -> ExitCode {
+fn run_kill_server(path: &Path, args: impl IntoIterator<Item = RawText>) -> ExitCode {
     let invocation = CommandInvocation::new("kill-server", args);
     let failure = match CommandClient::connect(path) {
-        Ok(mut client) => {
-            if prepared {
-                match client.execute_prepared_streams(invocation) {
-                    Ok(outcome) => {
-                        print_command_output(&outcome.stdout);
-                        print_command_error(&outcome.stderr);
-                        return ExitCode::from(outcome.exit_code);
-                    }
-                    Err(error) => error,
-                }
-            } else {
-                match client.execute(invocation) {
-                    Ok(output) => {
-                        if !output.is_empty() {
-                            println!("{output}");
-                        }
-                        return ExitCode::SUCCESS;
-                    }
-                    Err(error) => error,
-                }
+        Ok(mut client) => match client.execute_prepared_streams(invocation) {
+            Ok(outcome) => {
+                print_command_output(&outcome.stdout);
+                print_command_error(&outcome.stderr);
+                return ExitCode::from(outcome.exit_code);
             }
-        }
+            Err(error) => error,
+        },
         Err(error) if daemon_is_missing(&error) => {
             eprintln!("{}", format_local_command_error(path, error));
             return exit_code_for(CliFailure::Runtime);
@@ -2160,7 +2128,7 @@ fn spawn_daemon(
     let executable = daemon_executable()?;
     let mut command = Command::new(&executable);
     command
-        .env("ZZ_TMUX_EXECUTABLE", &executable)
+        .env_remove("ZZ_TMUX_EXECUTABLE")
         .env_remove(APP_STARTUP_DIRECTORY_ENV);
     command.arg(diagnostics::SOCKET_ARGUMENT).arg(path);
     for config in mux_config_files {
@@ -2170,12 +2138,18 @@ fn spawn_daemon(
         .arg("daemon")
         .arg(DAEMON_BOOTSTRAP_SERVER_ID_ARGUMENT)
         .arg(server_id.to_string());
+    #[cfg(unix)]
+    let ready = readiness::Pipe::new()?;
+    #[cfg(unix)]
+    command
+        .arg(DAEMON_BOOTSTRAP_READY_FD_ARGUMENT)
+        .arg(ready.child_fd().to_string());
     if let Some(color_scheme) = color_scheme {
         command.env("ZZ_COLOR_SCHEME", color_scheme.as_str());
     }
     diagnostics::configure_spawned_process(&mut command);
     #[cfg(unix)]
-    detach_daemon_session(&mut command);
+    detach_daemon_session(&mut command, ready.child_fd());
     command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -2202,7 +2176,84 @@ fn spawn_daemon(
         path.display(),
         diagnostics::enabled(),
     );
+    #[cfg(unix)]
+    ready.wait(DAEMON_READY_DEADLINE);
     Ok(server_id)
+}
+
+#[cfg(all(unix, not(target_os = "ios")))]
+mod readiness {
+    use std::{
+        io,
+        os::fd::{AsRawFd as _, FromRawFd as _, OwnedFd, RawFd},
+        time::{Duration, Instant},
+    };
+
+    pub(super) struct Pipe {
+        reader: OwnedFd,
+        child: Option<OwnedFd>,
+    }
+
+    #[allow(
+        unsafe_code,
+        reason = "pipe, fcntl and poll on descriptors this function owns"
+    )]
+    impl Pipe {
+        pub(super) fn new() -> io::Result<Self> {
+            let mut fds = [0; 2];
+            if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            let (reader, child) =
+                unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) };
+            for fd in [&reader, &child] {
+                if unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) } != 0 {
+                    return Err(io::Error::last_os_error());
+                }
+            }
+            Ok(Self {
+                reader,
+                child: Some(child),
+            })
+        }
+
+        pub(super) fn child_fd(&self) -> RawFd {
+            self.child
+                .as_ref()
+                .map_or(-1, std::os::fd::AsRawFd::as_raw_fd)
+        }
+
+        pub(super) fn wait(mut self, limit: Duration) {
+            drop(self.child.take());
+            let deadline = Instant::now() + limit;
+            loop {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    return;
+                }
+                let mut poll = libc::pollfd {
+                    fd: self.reader.as_raw_fd(),
+                    events: libc::POLLIN,
+                    revents: 0,
+                };
+                let timeout = i32::try_from(remaining.as_millis())
+                    .unwrap_or(i32::MAX)
+                    .max(1);
+                match unsafe { libc::poll(&raw mut poll, 1, timeout) } {
+                    0 => return,
+                    count if count > 0 => {
+                        let mut byte = 0_u8;
+                        let _ = unsafe {
+                            libc::read(self.reader.as_raw_fd(), (&raw mut byte).cast(), 1)
+                        };
+                        return;
+                    }
+                    _ if io::Error::last_os_error().kind() == io::ErrorKind::Interrupted => {}
+                    _ => return,
+                }
+            }
+        }
+    }
 }
 
 /// A new process group alone is not enough: it stays in the launching
@@ -2214,13 +2265,16 @@ fn spawn_daemon(
     unsafe_code,
     reason = "Command::pre_exec is the only way to give the daemon its own session"
 )]
-fn detach_daemon_session(command: &mut Command) {
+fn detach_daemon_session(command: &mut Command, ready_fd: std::os::fd::RawFd) {
     use std::os::unix::process::CommandExt as _;
 
-    // SAFETY: the hook only calls setsid, which is async-signal-safe.
+    // SAFETY: the hook only calls setsid and fcntl, which are async-signal-safe.
     unsafe {
-        command.pre_exec(|| {
+        command.pre_exec(move || {
             let _ = rustix::process::setsid();
+            if ready_fd >= 0 {
+                libc::fcntl(ready_fd, libc::F_SETFD, 0);
+            }
             Ok(())
         });
     }
@@ -2263,28 +2317,32 @@ pub fn connect_or_spawn_daemon_with_provenance<T>(
             return Ok((client, None));
         }
         Err(error) => match classify_local_connect_error(path, error) {
-            DaemonError::Io(error)
-                if matches!(
-                    error.kind(),
-                    ErrorKind::NotFound | ErrorKind::ConnectionRefused | ErrorKind::ConnectionReset
-                ) => {}
+            error if daemon_is_spawnable(&error) => {}
             error => return Err(error),
         },
     }
 
     let spawned_server_id = spawn_daemon(path, color_scheme, mux_config_files)?;
-    let deadline = Instant::now() + Duration::from_secs(6);
+    let client = connect_spawned(path, || connect(true))?;
+    let provenance =
+        (server_hello(&client).server_id == spawned_server_id).then_some(spawned_server_id);
+    Ok((client, provenance))
+}
+
+#[cfg(not(target_os = "ios"))]
+fn connect_spawned<T>(
+    path: &Path,
+    connect: impl Fn() -> Result<T, DaemonError>,
+) -> Result<T, DaemonError> {
+    let deadline = Instant::now() + DAEMON_READY_DEADLINE;
+    let mut backoff = [500, 1_000, 2_000].into_iter();
     loop {
-        match connect(true) {
-            Ok(client) => {
-                let provenance = (server_hello(&client).server_id == spawned_server_id)
-                    .then_some(spawned_server_id);
-                return Ok((client, provenance));
-            }
-            Err(error) if Instant::now() >= deadline => {
+        match connect() {
+            Ok(client) => return Ok(client),
+            Err(error) if Instant::now() >= deadline || !daemon_is_spawnable(&error) => {
                 return Err(classify_local_connect_error(path, error));
             }
-            Err(_) => thread::sleep(Duration::from_millis(20)),
+            Err(_) => thread::sleep(Duration::from_micros(backoff.next().unwrap_or(5_000))),
         }
     }
 }
@@ -2295,16 +2353,24 @@ fn connect_command_client(
     mux_config_files: &[PathBuf],
     start_server: bool,
 ) -> Result<CommandClient, DaemonError> {
-    if !start_server {
-        return CommandClient::connect(path);
+    match CommandClient::connect(path) {
+        Ok(client) => Ok(client),
+        Err(error) if start_server && daemon_is_spawnable(&error) => {
+            spawn_and_connect_command_client(path, mux_config_files).map(|(client, _)| client)
+        }
+        Err(error) if start_server => Err(classify_local_connect_error(path, error)),
+        Err(error) => Err(error),
     }
-    connect_or_spawn_daemon(
-        path,
-        None,
-        mux_config_files,
-        |_| CommandClient::connect(path),
-        CommandClient::server_hello,
-    )
+}
+
+#[cfg(not(target_os = "ios"))]
+fn spawn_and_connect_command_client(
+    path: &Path,
+    mux_config_files: &[PathBuf],
+) -> Result<(CommandClient, u64), DaemonError> {
+    let spawned_server_id = spawn_daemon(path, None, mux_config_files)?;
+    let client = connect_spawned(path, || CommandClient::connect(path))?;
+    Ok((client, spawned_server_id))
 }
 
 /// The command list the pin's `server_client_default_command` runs for a client
@@ -2355,13 +2421,8 @@ fn stored_default_client_command(
     mux_config_files: &[PathBuf],
     no_start_server: bool,
 ) -> Option<String> {
-    let mut client = if no_start_server {
-        CommandClient::connect(socket_path).ok()?
-    } else {
-        connect_command_client_with_spawn_provenance(socket_path, mux_config_files)
-            .ok()?
-            .0
-    };
+    let mut client =
+        connect_command_client(socket_path, mux_config_files, !no_start_server).ok()?;
     let output = client
         .execute(CommandInvocation::new(
             "show-options",
@@ -2369,20 +2430,6 @@ fn stored_default_client_command(
         ))
         .ok()?;
     Some(output.trim_end_matches('\n').to_owned())
-}
-
-#[cfg(not(target_os = "ios"))]
-fn connect_command_client_with_spawn_provenance(
-    path: &Path,
-    mux_config_files: &[PathBuf],
-) -> Result<(CommandClient, Option<u64>), DaemonError> {
-    connect_or_spawn_daemon_with_provenance(
-        path,
-        None,
-        mux_config_files,
-        |_| CommandClient::connect(path),
-        CommandClient::server_hello,
-    )
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -2580,8 +2627,14 @@ pub fn launch_application(socket_path: &Path) -> ExitCode {
 }
 
 pub fn daemon_executable() -> io::Result<PathBuf> {
-    let executable = std::env::current_exe()?.canonicalize()?;
-    Ok(daemon_executable_from(&executable))
+    let executable = std::env::current_exe()?;
+    match executable.canonicalize() {
+        Ok(executable) => Ok(daemon_executable_from(&executable)),
+        #[cfg(target_os = "linux")]
+        Err(_) => Ok(PathBuf::from("/proc/self/exe")),
+        #[cfg(not(target_os = "linux"))]
+        Err(error) => Err(error),
+    }
 }
 
 #[must_use]
@@ -2606,24 +2659,45 @@ mod tests {
     use zz_protocol::RawText;
 
     use super::{
-        ApplicationArgumentError, CommandOutcome, CommandOutputWriter,
-        DaemonBootstrapArgumentError, DaemonBootstrapArguments, NativeAttachArgumentError,
-        TMUX_USAGE, TMUX_VERSION_OUTPUT, append_prepared_command_stdin_payload,
-        append_stdin_payload, application_arguments, application_working_directory,
-        attach_prefix_uses_tui, command_chain_uses_tui, command_error_message, command_reads_stdin,
-        daemon_is_missing, daemon_transport_failure, execute_command_chain,
+        ApplicationArgumentError, CommandOutputWriter, DaemonBootstrapArgumentError,
+        DaemonBootstrapArguments, NativeAttachArgumentError, TMUX_USAGE, TMUX_VERSION_OUTPUT,
+        append_prepared_command_stdin_payload, append_stdin_payload, application_arguments,
+        application_working_directory, attach_prefix_uses_tui, command_chain_uses_tui,
+        command_error_message, command_reads_stdin, daemon_is_missing, daemon_transport_failure,
         implicit_tmux_endpoint_conflict, native_attach_command, new_session_uses_tui,
-        parse_daemon_bootstrap_arguments, parse_native_attach_arguments, prepared_attach_uses_tui,
-        prepared_command_chain_uses_tui, prepared_command_reads_stdin,
-        prepared_kill_server_recovery, prepared_native_attach, protocol_version_output,
-        run_command_mode, split_command_chain, tmux_command_starts_server,
+        parse_daemon_bootstrap_arguments, parse_native_attach_arguments,
+        prepared_command_reads_stdin, protocol_version_output, run_command_mode,
+        split_command_chain, tmux_command_starts_server,
         validated_bootstrap_client_working_directory,
     };
     #[cfg(unix)]
     use super::{tmux_label_socket_path, tmux_socket_root};
     use zz_daemon::DaemonError;
     use zz_mux::{CommandAliasResolution, ExecutionContext, MuxEngine};
-    use zz_protocol::{CommandInvocation, PreparedCommand, PreparedCommandResult, ServerError};
+    use zz_protocol::{
+        CommandInvocation, ExecResumeKind, PreparedCommand, PreparedCommandResult, ServerError,
+    };
+
+    fn prepared_attach_uses_tui(typed: &str, prepared: &PreparedCommand) -> bool {
+        zz_daemon::exec_resume_kind(
+            &[CommandInvocation::new(typed, [] as [&str; 0])],
+            std::slice::from_ref(prepared),
+        ) == Some(ExecResumeKind::NewSession)
+    }
+
+    fn prepared_command_chain_uses_tui(
+        typed: &[CommandInvocation],
+        prepared: &[PreparedCommand],
+    ) -> bool {
+        zz_daemon::exec_resume_kind(typed, prepared) == Some(ExecResumeKind::NewSession)
+    }
+
+    fn prepared_native_attach(typed: &str, prepared: &PreparedCommand) -> bool {
+        zz_daemon::exec_resume_kind(
+            &[CommandInvocation::new(typed, [] as [&str; 0])],
+            std::slice::from_ref(prepared),
+        ) == Some(ExecResumeKind::NativeAttach)
+    }
 
     #[test]
     fn cli_exit_contract_preserves_explicit_status_and_classifies_errors() {
@@ -2704,9 +2778,37 @@ mod tests {
                 .unwrap(),
             DaemonBootstrapArguments {
                 server_id: Some(42),
+                ready_fd: None,
                 client_working_directory: None,
             }
         );
+        assert_eq!(
+            parse_daemon_bootstrap_arguments(&[
+                "--bootstrap-server-id".into(),
+                "42".into(),
+                "--bootstrap-ready-fd".into(),
+                "9".into(),
+                "--bootstrap-client-cwd".into(),
+                path_string.clone().into(),
+            ])
+            .unwrap(),
+            DaemonBootstrapArguments {
+                server_id: Some(42),
+                ready_fd: Some(9),
+                client_working_directory: Some(path.clone()),
+            }
+        );
+        for ready_fd in [
+            vec!["--bootstrap-ready-fd"],
+            vec!["--bootstrap-ready-fd", "1"],
+        ] {
+            let mut arguments = vec![RawText::from("--bootstrap-server-id"), "42".into()];
+            arguments.extend(ready_fd.into_iter().map(RawText::from));
+            assert_eq!(
+                parse_daemon_bootstrap_arguments(&arguments),
+                Err(DaemonBootstrapArgumentError::ReadyFd)
+            );
+        }
         assert_eq!(
             parse_daemon_bootstrap_arguments(&[
                 "--bootstrap-server-id".into(),
@@ -2717,6 +2819,7 @@ mod tests {
             .unwrap(),
             DaemonBootstrapArguments {
                 server_id: Some(42),
+                ready_fd: None,
                 client_working_directory: Some(path),
             }
         );
@@ -3064,10 +3167,9 @@ mod tests {
         let shadowed_send = prepared("agent-send", "display-message", true, &["-p", "shadow"]);
         assert!(prepared_command_reads_stdin(&shadowed_send).is_none());
 
-        let plain_kill = prepared("kill-server", "kill-server", false, &[]);
-        let aliased_kill = prepared("kill-server", "kill-server", true, &[]);
-        assert!(prepared_kill_server_recovery("kill-server", &plain_kill));
-        assert!(!prepared_kill_server_recovery("kill-server", &aliased_kill));
+        let plain_attach = prepared("attach", "attach-session", false, &[]);
+        assert!(prepared_native_attach("attach", &plain_attach));
+        assert!(!prepared_attach_uses_tui("attach", &plain_attach));
     }
 
     #[test]
@@ -3479,81 +3581,6 @@ mod tests {
     }
 
     #[test]
-    fn command_chains_preserve_output_and_abort_on_the_first_error() {
-        let commands =
-            split_command_chain(&["first", ";", "fail", ";", "never"].map(RawText::from));
-        let mut seen = Vec::new();
-        let mut output = Vec::new();
-        let result = execute_command_chain(
-            commands,
-            |command| {
-                seen.push(command.name.clone());
-                match command.name.as_str() {
-                    "first" => Ok(CommandOutcome {
-                        stdout: "first output\n".into(),
-                        ..CommandOutcome::default()
-                    }),
-                    "fail" => Err(17_u8),
-                    _ => panic!("command after the failure executed"),
-                }
-            },
-            |_, outcome| {
-                output.push(outcome.stdout.clone());
-                0
-            },
-        );
-        assert_eq!(result, Err(17));
-        assert_eq!(seen, ["first", "fail"]);
-        assert_eq!(output, ["first output\n"]);
-    }
-
-    /// The pin keeps running a chain after a nonzero exit and reports the last
-    /// nonzero status: `cmdq_next` drops the rest of the group only on
-    /// `CMD_RETURN_ERROR`, while `c->retval` is simply overwritten.
-    #[test]
-    fn command_chains_continue_past_a_nonzero_exit_and_keep_the_last_status() {
-        let commands = split_command_chain(&["three", ";", "zero", ";", "five"].map(RawText::from));
-        let mut seen = Vec::new();
-        let mut streams = Vec::new();
-        let result: Result<u8, u8> = execute_command_chain(
-            commands,
-            |command| {
-                seen.push(command.name.clone());
-                Ok(match command.name.as_str() {
-                    "three" => CommandOutcome {
-                        stdout: "three out\n".into(),
-                        stderr: "three err\n".to_owned(),
-                        exit_code: 3,
-                        ..CommandOutcome::default()
-                    },
-                    "zero" => CommandOutcome {
-                        stdout: "zero out\n".into(),
-                        ..CommandOutcome::default()
-                    },
-                    _ => CommandOutcome {
-                        exit_code: 5,
-                        ..CommandOutcome::default()
-                    },
-                })
-            },
-            |_, outcome| {
-                streams.push((outcome.stdout.clone(), outcome.stderr.clone()));
-                0
-            },
-        );
-        assert_eq!(result, Ok(5));
-        assert_eq!(seen, ["three", "zero", "five"]);
-        assert_eq!(
-            streams,
-            [
-                (RawText::from("three out\n"), "three err\n".to_owned()),
-                ("zero out\n".into(), String::new()),
-                (RawText::default(), String::new()),
-            ]
-        );
-    }
-
-    #[test]
     fn command_output_file_stream_owns_stdout_after_its_first_write() {
         let mut writer = CommandOutputWriter::default();
         let mut stdout = Vec::new();
@@ -3596,24 +3623,6 @@ mod tests {
             writer.write(&"hello".into(), true, &mut stdout).unwrap();
             assert_eq!(stdout, b"hello");
         }
-    }
-
-    #[test]
-    fn command_chains_continue_after_output_stream_errors() {
-        let mut writer = CommandOutputWriter::default();
-        let mut stdout = Vec::new();
-        let result: Result<u8, ()> = execute_command_chain(
-            [(false, "\n"), (true, "hello"), (false, "AFTER\n")],
-            |(_, text)| {
-                Ok(CommandOutcome {
-                    stdout: (*text).into(),
-                    ..CommandOutcome::default()
-                })
-            },
-            |(raw, _), outcome| u8::from(writer.write(&outcome.stdout, *raw, &mut stdout).is_err()),
-        );
-        assert_eq!(result, Ok(1));
-        assert_eq!(stdout, b"\nAFTER\n");
     }
 
     #[test]

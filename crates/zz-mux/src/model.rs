@@ -225,6 +225,7 @@ pub struct Pane {
     /// so it keeps the screen it was created with until the next layout fix
     /// (spawn.c `spawn_pane`, layout.c `layout_assign_pane`).
     pub(crate) screen_extent: Option<(u16, u16)>,
+    title_pinned: bool,
     input_options: InputOptions,
 }
 
@@ -516,6 +517,7 @@ impl MuxState {
             input_off: false,
             screen_extent: None,
             empty: false,
+            title_pinned: false,
             input_options: InputOptions::default(),
         };
         let window = Window {
@@ -642,6 +644,7 @@ impl MuxState {
             input_off: false,
             screen_extent: None,
             empty: false,
+            title_pinned: false,
             input_options: InputOptions::default(),
         };
         let window = Window {
@@ -1196,6 +1199,7 @@ impl MuxState {
                 input_off: false,
                 screen_extent: None,
                 empty: false,
+                title_pinned: false,
                 input_options: InputOptions::default(),
             },
         );
@@ -1746,6 +1750,34 @@ impl MuxState {
         Ok(true)
     }
 
+    pub(crate) fn pin_pane_title(
+        &mut self,
+        pane: PaneId,
+        title: impl Into<String>,
+    ) -> Result<bool, ServerError> {
+        let changed = self.update_pane_title(pane, title)?;
+        if let Some(pane_state) = self.pane_mut(pane) {
+            pane_state.title_pinned = true;
+        }
+        Ok(changed)
+    }
+
+    pub fn update_pane_title_from_terminal(
+        &mut self,
+        pane: PaneId,
+        title: impl Into<String>,
+        program_wrote_title: bool,
+    ) -> Result<bool, ServerError> {
+        let pane_state = self
+            .pane_mut(pane)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        if !program_wrote_title && pane_state.title_pinned {
+            return Ok(false);
+        }
+        pane_state.title_pinned = false;
+        self.update_pane_title(pane, title)
+    }
+
     /// Set or clear a pane's pending bell, reporting whether it moved. A pane
     /// that already left is not an error: nothing changed either way.
     pub fn set_pane_bell(&mut self, pane: PaneId, bell: bool) -> bool {
@@ -1793,6 +1825,7 @@ impl MuxState {
             .pane_mut(pane)
             .expect("the validated picker pane still exists");
         pane_state.title = title;
+        pane_state.title_pinned = false;
         pane_state.kind = kind;
         self.bump_generation();
         Ok(inherit_cwd_from)
@@ -2172,6 +2205,14 @@ impl MuxState {
         let window_id = self
             .window_for_pane(pane)
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        self.pane_synchronize_panes_in(window_id, pane)
+    }
+
+    pub(crate) fn pane_synchronize_panes_in(
+        &self,
+        window_id: WindowId,
+        pane: PaneId,
+    ) -> Result<bool, ServerError> {
         let window = &self.windows[&window_id];
         let pane = &window.panes[&pane];
         Ok(pane
@@ -3959,7 +4000,7 @@ impl MuxState {
         point
     }
 
-    pub(crate) fn bump_generation(&mut self) {
+    pub fn bump_generation(&mut self) {
         self.generation = self.generation.saturating_add(1);
     }
 }
@@ -4158,9 +4199,46 @@ struct GlobClassCharacter {
 }
 
 pub(crate) fn fnmatch(pattern: &str, value: &str) -> bool {
-    let Some(tokens) = glob_tokens(pattern) else {
-        return false;
-    };
+    GlobPattern::new(pattern).matches(value)
+}
+
+#[derive(Clone)]
+pub(crate) struct GlobPattern(Option<Vec<GlobToken>>);
+
+impl GlobPattern {
+    pub(crate) fn new(pattern: &str) -> Self {
+        Self(glob_tokens(pattern))
+    }
+
+    pub(crate) fn literal(&self) -> Option<String> {
+        self.0
+            .as_ref()?
+            .iter()
+            .map(|token| match token {
+                GlobToken::Literal(character) => Some(*character),
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub(crate) fn matches(&self, value: &str) -> bool {
+        let Some(tokens) = &self.0 else {
+            return false;
+        };
+        let mut rest = value.chars();
+        for (index, token) in tokens.iter().enumerate() {
+            let GlobToken::Literal(expected) = token else {
+                return glob_matches(&tokens[index..], rest.as_str());
+            };
+            if rest.next() != Some(*expected) {
+                return false;
+            }
+        }
+        rest.next().is_none()
+    }
+}
+
+fn glob_matches(tokens: &[GlobToken], value: &str) -> bool {
     let value = value.chars().collect::<Vec<_>>();
     let mut matched = vec![false; value.len() + 1];
     matched[0] = true;
@@ -4178,7 +4256,7 @@ pub(crate) fn fnmatch(pattern: &str, value: &str) -> bool {
             }
             GlobToken::Literal(expected) => {
                 for (index, character) in value.iter().copied().enumerate() {
-                    next[index + 1] = matched[index] && character == expected;
+                    next[index + 1] = matched[index] && character == *expected;
                 }
             }
             GlobToken::Class { negated, ranges } => {
@@ -4186,7 +4264,7 @@ pub(crate) fn fnmatch(pattern: &str, value: &str) -> bool {
                     let contains = ranges
                         .iter()
                         .any(|(start, end)| *start <= character && character <= *end);
-                    next[index + 1] = matched[index] && contains != negated;
+                    next[index + 1] = matched[index] && contains != *negated;
                 }
             }
         }

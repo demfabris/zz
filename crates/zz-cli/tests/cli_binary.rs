@@ -421,6 +421,93 @@ mod daemon_autostart {
     }
 
     #[test]
+    fn daemon_panes_own_their_tty_and_report_the_program_they_exec() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) || !Path::new("/bin/zsh").exists() {
+            eprintln!("SKIPPED: needs Unix socket binding and /bin/zsh");
+            return;
+        }
+        std::fs::write(&fixture.config, b"set -g default-shell /bin/zsh\n")
+            .expect("zsh default shell");
+        let created = fixture.run(&[
+            "new-session",
+            "-d",
+            "-s",
+            "tty",
+            "-x",
+            "80",
+            "-y",
+            "10",
+            "exec /bin/zsh -fi",
+        ]);
+        assert_eq!(created.status.code(), Some(0), "{created:?}");
+        let screen = || {
+            String::from_utf8_lossy(&fixture.run(&["capture-pane", "-p", "-t", "tty"]).stdout)
+                .into_owned()
+        };
+        let wait = |what: &str, ready: &dyn Fn() -> bool| {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while !ready() {
+                assert!(
+                    Instant::now() < deadline,
+                    "timed out waiting for {what}: {}",
+                    screen()
+                );
+                thread::sleep(Duration::from_millis(20));
+            }
+        };
+        let keys = |arguments: &[&str]| {
+            let mut command = vec!["send-keys", "-t", "tty"];
+            command.extend_from_slice(arguments);
+            assert_eq!(fixture.run(&command).status.code(), Some(0));
+        };
+        keys(&["[[ -o monitor ]] && print ZZ_MONITOR_ON", "Enter"]);
+        wait("job control", &|| screen().contains("\nZZ_MONITOR_ON"));
+        keys(&["sleep 30", "Enter"]);
+        wait("sleep in the foreground", &|| {
+            String::from_utf8_lossy(
+                &fixture
+                    .run(&[
+                        "display-message",
+                        "-p",
+                        "-t",
+                        "tty",
+                        "#{pane_current_command}",
+                    ])
+                    .stdout,
+            )
+            .trim()
+                == "sleep"
+        });
+        let interrupted = Instant::now();
+        keys(&["C-c"]);
+        keys(&["print ZZ_BACK", "Enter"]);
+        wait("the prompt after C-c", &|| screen().contains("\nZZ_BACK"));
+        assert!(interrupted.elapsed() < Duration::from_secs(15));
+
+        for window in 1..=5 {
+            let created = fixture.run(&["new-window", "-d", "-t", "tty:", "sleep", "30"]);
+            assert_eq!(created.status.code(), Some(0), "{created:?}");
+            let target = format!("tty:{window}");
+            wait("a silent pane to report its program", &|| {
+                String::from_utf8_lossy(
+                    &fixture
+                        .run(&[
+                            "display-message",
+                            "-p",
+                            "-t",
+                            &target,
+                            "#{pane_current_command}",
+                        ])
+                        .stdout,
+                )
+                .trim()
+                    == "sleep"
+            });
+        }
+    }
+
+    #[test]
     fn events_stream_ready_then_window_hook() {
         use std::io::BufRead as _;
 
@@ -2882,6 +2969,110 @@ mod daemon_autostart {
         assert_eq!(values.status.code(), Some(0));
         assert_eq!(values.stdout, b"ready\nloaded\n");
         assert!(values.stderr.is_empty());
+    }
+
+    fn wait_with_deadline(mut child: Child, limit: Duration) -> Output {
+        let deadline = Instant::now() + limit;
+        while child.try_wait().expect("poll child").is_none() {
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                panic!("command did not finish within {limit:?}");
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        child.wait_with_output().expect("collect child output")
+    }
+
+    #[test]
+    fn concurrent_cold_commands_finish_while_startup_and_hook_children_call_back() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let plugin = fixture.home.join("plugin.tmux");
+        std::fs::write(
+            &plugin,
+            b"#!/bin/sh
+tmux set-option -g @plugin loaded
+",
+        )
+        .expect("write plugin");
+        std::fs::set_permissions(&plugin, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .expect("plugin is executable");
+        let sourced = fixture.home.join("tpm.conf");
+        std::fs::write(
+            &sourced,
+            format!(
+                "run-shell '{}'\nrun-shell \"tmux set-option -g @tpm sourced\"\n",
+                plugin.display()
+            ),
+        )
+        .expect("write sourced config");
+        std::fs::write(
+            &fixture.config,
+            format!(
+                "run-shell \"tmux set-option -g @boot ready\"\nsource-file '{}'\nset-hook -g after-select-pane 'run-shell \"tmux set-option -g @hooked yes\"'\n",
+                sourced.display()
+            ),
+        )
+        .expect("write startup config");
+
+        let children = (0..2)
+            .map(|index| {
+                fixture
+                    .command()
+                    .args(["new-session", "-d", "-s", &format!("cold{index}")])
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .expect("spawn cold command")
+            })
+            .collect::<Vec<_>>();
+        for child in children {
+            let output = wait_with_deadline(child, Duration::from_secs(20));
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "stderr: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let selected = wait_with_deadline(
+            fixture
+                .command()
+                .args(["select-pane", "-t", "cold0"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("spawn select-pane"),
+            Duration::from_secs(20),
+        );
+        assert_eq!(selected.status.code(), Some(0));
+        let resourced = fixture.run(&["source-file", sourced.to_str().expect("UTF-8 path")]);
+        assert_eq!(resourced.status.code(), Some(0));
+        let values = fixture.run(&[
+            "show-options",
+            "-gqv",
+            "@boot",
+            ";",
+            "show-options",
+            "-gqv",
+            "@plugin",
+            ";",
+            "show-options",
+            "-gqv",
+            "@tpm",
+            ";",
+            "show-options",
+            "-gqv",
+            "@hooked",
+        ]);
+        assert_eq!(
+            String::from_utf8_lossy(&values.stdout),
+            "ready\nloaded\nsourced\nyes\n"
+        );
+        let sessions = fixture.run(&["list-sessions", "-F", "#{session_name}"]);
+        assert_eq!(String::from_utf8_lossy(&sessions.stdout), "cold0\ncold1\n");
     }
 
     #[test]

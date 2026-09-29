@@ -298,16 +298,26 @@ CORPUS=(
   "status-position|bottom"
 )
 
+# The pane border's TEXT, with the line glyphs taken out: the pin draws them in
+# the terminal's ACS charset (SO q SI) and the raw TUI as UTF-8 box drawing,
+# which is the border renderer's business (tui-screen-diff.sh), not whether a
+# runtime fact reached the border format.
+border_text() {
+  tmux_outer_command capture-pane -p -e -t "=$OUTER_SESSION:$1" | head -n 1 |
+    LC_ALL=C sed -e $'s/\033\\[[0-9;]*m//g' -e $'s/\016[^\017]*\017*//g' -e 's/\xe2\x94\x80//g'
+}
+
 # The default status-right carries a clock, and the two sides are captured one
 # after the other, so a minute boundary between the captures is a difference
 # that says nothing. Retry a bounded number of times before reporting one.
 compare_step() {
   local step="$1"
+  local row="${2:-last_row_bytes}"
   local zz_row tmux_row attempt
   for ((attempt = 0; attempt < 8; attempt++)); do
     sleep 0.3
-    zz_row="$(last_row_bytes zz)"
-    tmux_row="$(last_row_bytes tmux)"
+    zz_row="$("$row" zz)"
+    tmux_row="$("$row" tmux)"
     if [ "$zz_row" = "$tmux_row" ]; then
       printf 'ok    %s\n' "$step"
       return 0
@@ -339,7 +349,58 @@ for entry in "${CORPUS[@]}"; do
   compare_step "$option = $value"
 done
 
-TOTAL_CHECKS=$((${#CORPUS[@]} + ${#SERVER_CORPUS[@]} + 1 + BAND_CHECKS))
+# Runtime facts: the command and working directory of a pane come from the
+# process table, not from a command, so they reach the row only through the
+# daemon's runtime-fact publication. Every template kind that can read them is
+# checked: the window list and status-right, a whole status-format row, a pane
+# border line, and a row a client first sees when it attaches after the facts
+# changed while no client was there.
+send_on_both() {
+  side_command zz send-keys -t "=$INNER_SESSION:0.0" "$@" || die "zz refused send-keys"
+  side_command tmux send-keys -t "=$INNER_SESSION:0.0" "$@" || die "tmux refused send-keys"
+}
+no_clients() {
+  [ -z "$(side_command zz list-clients 2>/dev/null)" ] &&
+    [ -z "$(side_command tmux list-clients 2>/dev/null)" ]
+}
+inner_path_is() {
+  local expected="$1"
+  [ "$(side_command zz display-message -p -t "=$INNER_SESSION:0.0" '#{b:pane_current_path}')" = "$expected" ] &&
+    [ "$(side_command tmux display-message -p -t "=$INNER_SESSION:0.0" '#{b:pane_current_path}')" = "$expected" ]
+}
+set_on_both status-interval 1
+set_on_both window-status-current-format '#I:#{b:pane_current_path}'
+set_on_both status-right '#{pane_current_command}:#{b:pane_current_path}'
+compare_step "runtime facts in the row"
+send_on_both 'cd /usr' Enter
+compare_step "runtime facts after cd"
+set_on_both 'status-format[0]' '#{pane_current_command}|#{b:pane_current_path}'
+compare_step "status-format with runtime facts"
+send_on_both 'cd /bin' Enter
+compare_step "status-format after cd"
+unset_on_both 'status-format[0]'
+set_on_both pane-border-format '#{pane_current_command}:#{b:pane_current_path}'
+set_on_both pane-border-status top
+compare_step "pane-border-format with runtime facts" border_text
+send_on_both 'cd /usr' Enter
+compare_step "pane-border-format after cd" border_text
+set_on_both pane-border-status off
+tmux_outer_command set-option -g remain-on-exit on
+side_command zz detach-client -s "=$INNER_SESSION" || die "zz refused detach-client"
+side_command tmux detach-client -s "=$INNER_SESSION" || die "tmux refused detach-client"
+wait_for "both clients detached" no_clients
+send_on_both 'cd /sbin' Enter
+wait_for "the detached panes moved" inner_path_is sbin
+tmux_outer_command respawn-pane -t "=$OUTER_SESSION:zz" || die "could not reattach zz"
+tmux_outer_command respawn-pane -t "=$OUTER_SESSION:tmux" || die "could not reattach tmux"
+wait_for "zz client reattached" client_attached zz
+wait_for "tmux client reattached" client_attached tmux
+compare_step "runtime facts changed while detached"
+send_on_both 'exec cat' Enter
+compare_step "runtime facts after exec"
+RUNTIME_STEPS=8
+
+TOTAL_CHECKS=$((${#CORPUS[@]} + ${#SERVER_CORPUS[@]} + 1 + BAND_CHECKS + RUNTIME_STEPS))
 if [ "$FAILURES" -ne 0 ]; then
   printf '%s of %s comparisons differ\n' "$FAILURES" "$TOTAL_CHECKS"
   exit 1

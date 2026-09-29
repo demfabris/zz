@@ -41,12 +41,16 @@ pub use model::{
     UnderlineStyle,
 };
 pub use paste::{PastePreparationError, prepare_paste_buffer};
+#[cfg(all(feature = "session", target_os = "linux"))]
+pub use session::disable_transparent_huge_pages;
 #[cfg(feature = "session")]
 pub use session::{
     CaptureBoundary, CaptureOptions, CopyModeFacts, CopyModeSelectionFacts, EngineKnobs,
     KittyImage, KittyImageRequestError, LastCommandCapture, MAX_LAST_COMMAND_BYTES,
     MAX_LAST_COMMAND_LINES, PointerContext, ProgressBar, ProgressBarState, RawOutputTapError,
-    TerminalCaptureError, TerminalCopyReady, TerminalEvent, TerminalEvents, TerminalFacts,
-    TerminalProcessExit, TerminalSession, TerminalSessionDiagnostics, TerminalSize, TerminalSpawn,
+    RoundTripGuard, TerminalCaptureError, TerminalCopyReady, TerminalEvent, TerminalEvents,
+    TerminalFacts, TerminalProcessExit, TerminalSession, TerminalSessionDiagnostics, TerminalSize,
+    TerminalSpawn, ViewStream, allow_actor_round_trips, forbid_actor_round_trips, perf_knobs,
+    run_pty_exec_mode,
 };
 pub use word::{DEFAULT_WORD_SEPARATORS, WordSeparators};

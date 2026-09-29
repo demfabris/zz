@@ -1895,7 +1895,7 @@ impl TerminalSession {
     pub fn set_word_separators(&self, separators: WordSeparators) {
         *self.word_separators.write() = separators.clone();
         self.commands.with_slot(|slot| {
-            slot.word_separators = Some(Box::new(separators));
+            slot.pending.word_separators = Some(Box::new(separators));
             true
         });
     }
@@ -1909,7 +1909,7 @@ impl TerminalSession {
             return;
         }
         self.commands.with_slot(|slot| {
-            slot.appearance = Some(appearance);
+            slot.pending.appearance = Some(appearance);
             true
         });
     }
@@ -1917,7 +1917,7 @@ impl TerminalSession {
     pub fn set_allow_passthrough(&self, enabled: bool) {
         // The daemon folds tmux `on` into `all` because this worker has no pane-visibility signal.
         self.commands.with_slot(|slot| {
-            slot.allow_passthrough = Some(if enabled {
+            slot.pending.allow_passthrough = Some(if enabled {
                 AllowPassthrough::All
             } else {
                 AllowPassthrough::Off
@@ -1928,14 +1928,14 @@ impl TerminalSession {
 
     pub fn set_wrap_search(&self, enabled: bool) {
         self.commands.with_slot(|slot| {
-            slot.wrap_search = Some(enabled);
+            slot.pending.wrap_search = Some(enabled);
             true
         });
     }
 
     pub fn set_engine_knobs(&self, knobs: EngineKnobs) {
         self.commands.with_slot(|slot| {
-            slot.engine_knobs = Some(knobs);
+            slot.pending.engine_knobs = Some(knobs);
             true
         });
     }
@@ -2168,7 +2168,7 @@ impl TerminalSession {
             cell_height_px: cell_height_px.max(1),
         };
         self.commands.with_slot(|slot| {
-            slot.resize = Some(geometry);
+            slot.pending.resize = Some(geometry);
             true
         });
     }
@@ -2178,7 +2178,7 @@ impl TerminalSession {
     pub fn attach_view(&self, view: TerminalViewId) {
         self.commands.with_slot(|slot| {
             slot.known_views.insert(view);
-            slot.push_view(Command::AttachView(view));
+            slot.pending.push_view(Command::AttachView(view));
             true
         });
     }
@@ -2189,7 +2189,7 @@ impl TerminalSession {
             if !slot.known_views.contains(&view) {
                 return false;
             }
-            slot.push_view(Command::DetachView(view));
+            slot.pending.push_view(Command::DetachView(view));
             true
         });
     }
@@ -2200,7 +2200,7 @@ impl TerminalSession {
             if !slot.known_views.remove(&view) {
                 return false;
             }
-            slot.push_view(Command::ReleaseView(view));
+            slot.pending.push_view(Command::ReleaseView(view));
             true
         });
     }
@@ -2218,7 +2218,7 @@ impl TerminalSession {
             } else if !slot.known_views.contains(&view) {
                 return false;
             }
-            slot.push_view(Command::SetViewStream(view, stream));
+            slot.pending.push_view(Command::SetViewStream(view, stream));
             true
         });
     }
@@ -2226,7 +2226,7 @@ impl TerminalSession {
     pub fn set_preview_watch(&self, watch: bool) {
         self.preview_pending.store(watch, Ordering::Release);
         self.commands.with_slot(|slot| {
-            slot.preview = Some(watch);
+            slot.pending.preview = Some(watch);
             true
         });
     }
@@ -2645,6 +2645,27 @@ impl ViewStream {
 
 #[derive(Default)]
 struct ControlSlot {
+    pending: PendingControl,
+    deferred: Vec<(usize, Command)>,
+    in_flight: usize,
+    known_views: HashSet<TerminalViewId>,
+}
+
+impl ControlSlot {
+    fn release_deferred(&mut self, commands: &mut Vec<Command>) {
+        if !self.deferred.iter().any(|(remaining, _)| *remaining == 0) {
+            return;
+        }
+        let (ready, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.deferred)
+            .into_iter()
+            .partition(|(remaining, _)| *remaining == 0);
+        self.deferred = waiting;
+        commands.extend(ready.into_iter().map(|(_, command)| command));
+    }
+}
+
+#[derive(Default)]
+struct PendingControl {
     word_separators: Option<Box<WordSeparators>>,
     allow_passthrough: Option<AllowPassthrough>,
     wrap_search: Option<bool>,
@@ -2653,10 +2674,9 @@ struct ControlSlot {
     resize: Option<Geometry>,
     views: Vec<Command>,
     preview: Option<bool>,
-    known_views: HashSet<TerminalViewId>,
 }
 
-impl ControlSlot {
+impl PendingControl {
     fn push_view(&mut self, command: Command) {
         let view = match &command {
             Command::AttachView(view)
@@ -2717,9 +2737,26 @@ impl ControlSlot {
     }
 }
 
-fn take_control_slot(slot: &Mutex<ControlSlot>, woke_by: Option<Command>) -> Vec<Command> {
-    let mut commands = slot.lock().take();
-    commands.extend(woke_by);
+fn take_control_slot(
+    slot: &Mutex<ControlSlot>,
+    woke_by: Option<Command>,
+    from_control: bool,
+) -> Vec<Command> {
+    let mut slot = slot.lock();
+    let mut commands = slot.pending.take();
+    slot.release_deferred(&mut commands);
+    let Some(command) = woke_by else {
+        return commands;
+    };
+    let counted = from_control && !matches!(command, Command::Wake);
+    commands.push(command);
+    if counted {
+        slot.in_flight = slot.in_flight.saturating_sub(1);
+        for (remaining, _) in &mut slot.deferred {
+            *remaining = remaining.saturating_sub(1);
+        }
+        slot.release_deferred(&mut commands);
+    }
     commands
 }
 
@@ -2971,7 +3008,43 @@ struct CommandSender {
 
 impl CommandSender {
     fn with_slot(&self, update: impl FnOnce(&mut ControlSlot) -> bool) {
-        if update(&mut self.queues.slot.lock()) {
+        let mut slot = self.queues.slot.lock();
+        if slot.in_flight == 0 {
+            let wake = update(&mut slot);
+            drop(slot);
+            if wake {
+                let _ = self.try_send(Command::Wake);
+            }
+            return;
+        }
+        let earlier = std::mem::take(&mut slot.pending);
+        update(&mut slot);
+        let later = std::mem::replace(&mut slot.pending, earlier).take();
+        let in_flight = slot.in_flight;
+        slot.deferred
+            .extend(later.into_iter().map(|command| (in_flight, command)));
+    }
+
+    fn counts_in_flight(&self, command: &Command) -> bool {
+        let counted = !matches!(command, Command::Wake)
+            && (command.pty_input_bytes().is_none() || self.queues.input.is_none());
+        if counted {
+            self.queues.slot.lock().in_flight += 1;
+        }
+        counted
+    }
+
+    fn abandon_in_flight(&self) {
+        let mut slot = self.queues.slot.lock();
+        slot.in_flight = slot.in_flight.saturating_sub(1);
+        let limit = slot.in_flight;
+        let mut released = false;
+        for (remaining, _) in &mut slot.deferred {
+            *remaining = (*remaining).min(limit);
+            released |= *remaining == 0;
+        }
+        drop(slot);
+        if released {
             let _ = self.try_send(Command::Wake);
         }
     }
@@ -2982,10 +3055,16 @@ impl CommandSender {
         {
             input.try_send(command)
         } else {
-            self.queues
+            let counted = self.counts_in_flight(&command);
+            let result = self
+                .queues
                 .control
                 .send(command)
-                .map_err(|error| crossbeam_channel::TrySendError::Disconnected(error.0))
+                .map_err(|error| crossbeam_channel::TrySendError::Disconnected(error.0));
+            if counted && result.is_err() {
+                self.abandon_in_flight();
+            }
+            result
         };
         if result.is_ok() {
             self.wake.notify();
@@ -3010,7 +3089,12 @@ impl CommandSender {
                 }
             })
         } else {
-            self.queues.control.send_timeout(command, timeout)
+            let counted = self.counts_in_flight(&command);
+            let result = self.queues.control.send_timeout(command, timeout);
+            if counted && result.is_err() {
+                self.abandon_in_flight();
+            }
+            result
         };
         if result.is_ok() {
             self.wake.notify();
@@ -3048,7 +3132,12 @@ impl CommandSender {
         {
             input.try_send(command)
         } else {
-            self.queues.control.try_send(command)
+            let counted = self.counts_in_flight(&command);
+            let result = self.queues.control.try_send(command);
+            if counted && result.is_err() {
+                self.abandon_in_flight();
+            }
+            result
         };
         if result.is_ok() {
             self.wake.notify();
@@ -4882,7 +4971,7 @@ fn run_output_view(
                 let Ok(message) = message else {
                     return Ok(());
                 };
-                for command in take_control_slot(slot, Some(message)) {
+                for command in take_control_slot(slot, Some(message), true) {
                     match command {
                         Command::AttachView(view_id) => {
                             if frozen {
@@ -5996,17 +6085,14 @@ fn run_terminal(
         )?;
 
         let mut input_permit = None;
-        let wakeup = match wakeup {
+        let (commands, wakeup) = match wakeup {
             Wake::Input(QueuedInput { command, permit }) => {
                 input_permit = Some(permit);
                 echo.open();
-                Wake::Command(command)
+                (take_control_slot(slot, Some(command), false), None)
             }
-            wakeup => wakeup,
-        };
-        let (commands, wakeup) = match wakeup {
-            Wake::Command(command) => (take_control_slot(slot, Some(command)), None),
-            wakeup => (take_control_slot(slot, None), Some(wakeup)),
+            Wake::Command(command) => (take_control_slot(slot, Some(command), true), None),
+            wakeup => (take_control_slot(slot, None, false), Some(wakeup)),
         };
         for command in commands {
             match command {

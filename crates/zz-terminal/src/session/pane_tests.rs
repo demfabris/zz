@@ -444,3 +444,70 @@ fn an_unwatched_pane_publishes_a_few_times_a_second_under_steady_output() {
         published.len()
     );
 }
+
+#[test]
+fn slot_changes_made_after_a_queued_command_run_after_it() {
+    use super::{
+        ActorWake, Command, CommandQueues, CommandSender, CopyModeAction, TerminalViewAction,
+        command_channel, take_control_slot,
+    };
+
+    let (control, control_rx) = command_channel();
+    let slot = Arc::new(parking_lot::Mutex::new(super::ControlSlot::default()));
+    let commands = CommandSender {
+        queues: Box::new(CommandQueues {
+            control,
+            input: None,
+            liveness: crossbeam_channel::never(),
+            slot: Arc::clone(&slot),
+        }),
+        wake: ActorWake::none(),
+    };
+    let view = TerminalViewId(3);
+    commands.with_slot(|slot| {
+        slot.known_views.insert(view);
+        slot.pending.push_view(Command::AttachView(view));
+        false
+    });
+    commands
+        .send(Command::ViewAction {
+            view,
+            action: TerminalViewAction::CopyMode(CopyModeAction::Cancel),
+        })
+        .expect("queue the cancel");
+    commands.with_slot(|slot| {
+        slot.pending.push_view(Command::DetachView(view));
+        true
+    });
+    commands.with_slot(|slot| {
+        slot.pending.wrap_search = Some(false);
+        true
+    });
+    let woke_by = control_rx.recv().expect("the queued cancel");
+    let order = take_control_slot(&slot, Some(woke_by), true)
+        .iter()
+        .map(Command::name)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        order,
+        [
+            "attach-view",
+            "view-action",
+            "detach-view",
+            "set-wrap-search"
+        ]
+    );
+    assert_eq!(slot.lock().in_flight, 0);
+    commands.with_slot(|slot| {
+        slot.pending.wrap_search = Some(true);
+        true
+    });
+    assert!(matches!(control_rx.recv(), Ok(Command::Wake)));
+    assert_eq!(
+        take_control_slot(&slot, Some(Command::Wake), true)
+            .iter()
+            .map(Command::name)
+            .collect::<Vec<_>>(),
+        ["set-wrap-search", "wake"]
+    );
+}

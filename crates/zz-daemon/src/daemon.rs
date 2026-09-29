@@ -3745,6 +3745,10 @@ const PRODUCED_NON_AFTER_PINNED_HOOKS: &[&str] = &[
     "window-unlinked",
 ];
 
+mod hook_events;
+#[cfg(test)]
+mod hook_events_tests;
+
 #[derive(Clone)]
 struct HookSessionState {
     name: String,
@@ -4820,6 +4824,7 @@ impl Shared {
             if *timers::PEER_SCAN_ALWAYS { "always" } else { "changes" },
         );
         attach::log_knobs();
+        hook_events::log_knobs();
         self.start_timers()?;
         let mut context = ExecutionContext::default();
         *self.mux_config_selection.lock() =
@@ -7941,6 +7946,7 @@ impl Shared {
         if command_name == "command-prompt" {
             self.ensure_prompt_history();
         }
+        let read_only = hook_events::command_is_read_only(command_name, &command.args);
         let split_caller_stream = command_name == "split-window"
             && command_stdin_sink(command_name, &command.args) == Some(CommandStdinSink::PaneInput);
         let mut terminals_to_watch = Vec::new();
@@ -7995,35 +8001,51 @@ impl Shared {
         let (mut execution, mux_options_event, recheck_shutdown_requested) = {
             let mut inner = self.inner.lock();
             format_variables.insert("config_files".to_owned(), inner.config_files.clone());
+            let captures = !read_only || cfg!(debug_assertions);
+            let generation_before = inner.engine.state.generation();
             let hook_snapshot_before =
-                event_hooks_enabled.then(|| MuxHookSnapshot::capture(&inner.engine));
-            let pane_focus_before = event_hooks_enabled.then(|| capture_pane_focus_probe(&inner));
-            let copy_modes_before = event_hooks_enabled.then(|| active_copy_mode_panes(&inner));
-            let active_windows_before = inner
-                .engine
-                .state
-                .sessions
-                .iter()
-                .map(|(session, state)| (*session, state.active_window))
-                .collect::<BTreeMap<_, _>>();
-            let active_panes_before = inner
-                .engine
-                .state
-                .windows
-                .iter()
-                .map(|(window, state)| (*window, state.active_pane))
-                .collect::<BTreeMap<_, _>>();
-            let belled_panes_before = inner
-                .engine
-                .state
-                .windows
-                .values()
-                .flat_map(|window| window.panes.values())
-                .filter(|pane| pane.bell)
-                .map(|pane| pane.id)
-                .collect::<BTreeSet<_>>();
+                (event_hooks_enabled && captures).then(|| MuxHookSnapshot::capture(&inner.engine));
+            let pane_focus_before =
+                (event_hooks_enabled && captures).then(|| capture_pane_focus_probe(&inner));
+            let copy_modes_before =
+                (event_hooks_enabled && captures).then(|| active_copy_mode_panes(&inner));
+            let active_windows_before = if captures {
+                inner
+                    .engine
+                    .state
+                    .sessions
+                    .iter()
+                    .map(|(session, state)| (*session, state.active_window))
+                    .collect::<BTreeMap<_, _>>()
+            } else {
+                BTreeMap::new()
+            };
+            let active_panes_before = if captures {
+                inner
+                    .engine
+                    .state
+                    .windows
+                    .iter()
+                    .map(|(window, state)| (*window, state.active_pane))
+                    .collect::<BTreeMap<_, _>>()
+            } else {
+                BTreeMap::new()
+            };
+            let belled_panes_before = if captures {
+                inner
+                    .engine
+                    .state
+                    .windows
+                    .values()
+                    .flat_map(|window| window.panes.values())
+                    .filter(|pane| pane.bell)
+                    .map(|pane| pane.id)
+                    .collect::<BTreeSet<_>>()
+            } else {
+                BTreeSet::new()
+            };
             let mut focused_windows_before = BTreeMap::new();
-            for (session, clients) in &inner.attached {
+            for (session, clients) in inner.attached.iter().filter(|_| captures) {
                 let Some(state) = inner.engine.state.sessions.get(session) else {
                     continue;
                 };
@@ -8034,11 +8056,15 @@ impl Shared {
                     );
                 }
             }
-            let mut facts = format_hook_facts_for_client(&inner, client, context);
+            let facts_unread = hook_events::format_facts_unread(command_name, &command.args);
+            let mut built_facts =
+                (!facts_unread).then(|| format_hook_facts_for_client(&inner, client, context));
             // cmd-list-windows.c, cmd-list-sessions.c and cmd-list-panes.c all
             // call `format_defaults(ft, NULL, ...)`, so a row answers null for
             // every client-scoped name even while a client is attached.
-            if CLIENTLESS_ROW_COMMANDS.contains(&command_name) {
+            if CLIENTLESS_ROW_COMMANDS.contains(&command_name)
+                && let Some(facts) = built_facts.as_mut()
+            {
                 facts.client = None;
             }
             if command_name == "display-message" {
@@ -8058,17 +8084,23 @@ impl Shared {
                                 .map(|client_session| (client, client_session))
                         })
                 });
-                facts.client = format_client.map(|(client, client_session)| {
-                    client_format_facts(&inner, client, client_session)
-                });
+                if let Some(facts) = built_facts.as_mut() {
+                    facts.client = format_client.map(|(client, client_session)| {
+                        client_format_facts(&inner, client, client_session)
+                    });
+                }
                 context.set_format_client_session(
                     format_client.map(|(_, client_session)| client_session),
                 );
             }
+            let facts = built_facts
+                .as_ref()
+                .unwrap_or_else(|| hook_events::unread_format_facts());
             let mut hooks = DaemonFormatHooks::command_with_optional_variables(
-                &facts,
+                facts,
                 (!format_variables.is_empty()).then_some(&format_variables),
-            );
+            )
+            .withhold_facts(facts_unread);
             inner.engine.set_format_now(unix_timestamp());
             let mut prospective_context = context.clone();
             set_context_client_terminal(&mut prospective_context, invoking_client_terminal);
@@ -8142,6 +8174,10 @@ impl Shared {
                         .then_some(state.active_pane)
                 })
                 .collect::<Vec<_>>();
+            debug_assert!(
+                !read_only || selected_panes.is_empty(),
+                "read-only {command_name} selected a pane"
+            );
             for pane in selected_panes {
                 if inner.engine.state.set_pane_bell(pane, false) {
                     snapshot_changed = true;
@@ -8182,6 +8218,10 @@ impl Shared {
                     .then_some((*session, state.active_window))
                 })
                 .collect::<Vec<_>>();
+            debug_assert!(
+                !read_only || changed_windows.is_empty(),
+                "read-only {command_name} changed a window"
+            );
             for (_, window) in &changed_windows {
                 if let Some(deadline) = schedule_window_silence(&mut inner, *window) {
                     silence_schedules.push(deadline);
@@ -8223,6 +8263,10 @@ impl Shared {
                 })
                 .flatten()
                 .collect::<BTreeSet<_>>();
+            debug_assert!(
+                !read_only || resized_windows.is_empty(),
+                "read-only {command_name} moved a client's window"
+            );
             let resized_panes = panes_for_windows(&inner, &resized_windows);
             snapshot_changed |= write_back_terminal_geometries(&mut inner, &resized_panes);
             let mut pane_format_output = None;
@@ -9997,6 +10041,11 @@ impl Shared {
                     }
                 }
             }
+            debug_assert!(
+                !read_only || inner.engine.state.generation() == generation_before,
+                "read-only {command_name} moved the tree generation"
+            );
+            let hook_events_before = pending_hook_events.len();
             if let Some(before) = hook_snapshot_before.as_ref() {
                 let after = MuxHookSnapshot::capture(&inner.engine);
                 let anchor = pending_hook_events.len();
@@ -10032,6 +10081,10 @@ impl Shared {
                     ));
                 }
             }
+            debug_assert!(
+                !read_only || pending_hook_events.len() == hook_events_before,
+                "read-only {command_name} raised hook events"
+            );
             (execution, mux_options_changed, recheck_shutdown_requested)
         };
 
@@ -108566,7 +108619,7 @@ bind - split-window -v -c "#{pane_current_path}"
         "echo zz-terminal-ready & findstr .*"
     }
 
-    fn output_view_session_fixture(
+    pub(super) fn output_view_session_fixture(
         shared: &Arc<Shared>,
         name: &str,
         text: impl Into<String>,

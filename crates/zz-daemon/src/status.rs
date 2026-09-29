@@ -1451,6 +1451,7 @@ pub(crate) struct DaemonFormatHooks<'a> {
     tmux_shim: Option<&'a std::path::Path>,
     zz_executable: Option<&'a std::path::Path>,
     job_waker: Option<&'a thread::Thread>,
+    facts_withheld: bool,
 }
 
 impl<'a> DaemonFormatHooks<'a> {
@@ -1480,6 +1481,7 @@ impl<'a> DaemonFormatHooks<'a> {
             tmux_shim: None,
             zz_executable: None,
             job_waker: None,
+            facts_withheld: false,
         }
     }
 
@@ -1539,7 +1541,20 @@ impl<'a> DaemonFormatHooks<'a> {
             tmux_shim,
             zz_executable,
             job_waker,
+            facts_withheld: false,
         }
+    }
+
+    pub(crate) fn withhold_facts(mut self, withheld: bool) -> Self {
+        self.facts_withheld = withheld;
+        self
+    }
+
+    fn expect_facts(&self) {
+        debug_assert!(
+            !self.facts_withheld,
+            "a command whose facts were withheld expanded a format"
+        );
     }
 }
 
@@ -1734,18 +1749,22 @@ impl StatusHooks for DaemonFormatHooks<'_> {
     }
 
     fn client_loop_rows(&mut self) -> Vec<FormatClientRow> {
+        self.expect_facts();
         self.facts.clients.as_ref().clone()
     }
 
     fn client_environment_rows(&mut self) -> Vec<FormatEnvironRow> {
+        self.expect_facts();
         client_environment_rows(self.facts.client_environment.as_ref())
     }
 
     fn client_tty_term(&mut self) -> Option<Arc<TtyTerm>> {
+        self.expect_facts();
         self.facts.client.as_ref()?.terminal.clone()
     }
 
     fn client_terminal_environment(&mut self) -> Vec<FormatEnvironRow> {
+        self.expect_facts();
         client_environment_rows(
             self.facts
                 .client
@@ -1758,6 +1777,7 @@ impl StatusHooks for DaemonFormatHooks<'_> {
     /// before any command runs, which is `command` for every command and the
     /// hook variables on top of it inside a hook body.
     fn tree_entries(&mut self) -> Vec<(String, String)> {
+        self.expect_facts();
         let mut entries = self
             .variables
             .into_iter()
@@ -1771,6 +1791,7 @@ impl StatusHooks for DaemonFormatHooks<'_> {
     }
 
     fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+        self.expect_facts();
         if let Some(value) = self
             .option_engine
             .and_then(|engine| engine.format_option_value(context, name))
@@ -2097,6 +2118,7 @@ impl StatusHooks for DaemonFormatHooks<'_> {
         regex: bool,
         ignore_case: bool,
     ) -> usize {
+        self.expect_facts();
         let Some(viewport) = pane
             .and_then(|pane| self.facts.terminals.get(&pane))
             .map(|terminal| terminal.latest_viewport())

@@ -179,6 +179,23 @@ impl CommandSpec {
     }
 
     #[must_use]
+    pub fn mutates(&self, args: &[RawText]) -> bool {
+        let flagged = |flags: &[&str]| {
+            parse_tmux_options(self, args).ok().map(|parsed| {
+                parsed.options.iter().any(|option| {
+                    let (TmuxOption::Flag(name) | TmuxOption::Value(name, _)) = option;
+                    flags.contains(name)
+                })
+            })
+        };
+        match self.name {
+            "display-message" => flagged(&["-I", "-d"]).unwrap_or(true),
+            "capture-pane" => !flagged(&["-p"]).unwrap_or(false),
+            name => !READ_ONLY_COMMAND_NAMES.contains(&name),
+        }
+    }
+
+    #[must_use]
     pub fn positional_minimum(&self) -> usize {
         POSITIONAL_MINIMUMS
             .iter()
@@ -812,6 +829,25 @@ static UNIMPLEMENTED_TMUX_COMMAND_SPECS: &[CommandSpec] = &[
         positionals: &[],
         variadic: None,
     },
+];
+
+static READ_ONLY_COMMAND_NAMES: &[&str] = &[
+    "has-session",
+    "list-buffers",
+    "list-clients",
+    "list-commands",
+    "list-keys",
+    "list-panes",
+    "list-sessions",
+    "list-windows",
+    "show-buffer",
+    "show-environment",
+    "show-hooks",
+    "show-messages",
+    "show-options",
+    "show-prompt-history",
+    "show-window-options",
+    "start-server",
 ];
 
 pub static INTERNAL_COMMAND_NAMES: &[&str] = &[
@@ -2762,6 +2798,41 @@ mod tests {
     use serde::Deserialize;
 
     use super::*;
+
+    #[test]
+    fn mutates_is_a_predicate_over_arguments() {
+        let mutates = |name: &str, args: &[&str]| {
+            catalog_command_spec(name)
+                .expect("catalogued command")
+                .mutates(&CommandInvocation::new(name, args.iter().copied()).args)
+        };
+        for (name, args) in [
+            ("list-keys", &[][..]),
+            ("list-panes", &["-a", "-F", "#{pane_id}"][..]),
+            ("show-options", &["-gv", "status"][..]),
+            ("has-session", &["-t", "s"][..]),
+            ("display-message", &["-p", "#{pane_id}"][..]),
+            ("display-message", &["-c", "client", "hello"][..]),
+            ("capture-pane", &["-p", "-t", "%1"][..]),
+            ("capture-pane", &["-pb", "named"][..]),
+        ] {
+            assert!(!mutates(name, args), "{name} {args:?} is read-only");
+        }
+        for (name, args) in [
+            ("display-message", &["-I", "-t", "%1"][..]),
+            ("display-message", &["-d", "100", "hello"][..]),
+            ("display-message", &["-pd100", "hello"][..]),
+            ("display-message", &["-Z"][..]),
+            ("capture-pane", &[][..]),
+            ("capture-pane", &["-b", "named"][..]),
+            ("capture-pane", &["-Z"][..]),
+            ("set-option", &["-g", "@x", "1"][..]),
+            ("select-pane", &["-t", "%1"][..]),
+            ("bind-key", &["x", "display-message", "x"][..]),
+        ] {
+            assert!(mutates(name, args), "{name} {args:?} mutates");
+        }
+    }
 
     #[test]
     fn unimplemented_table_matches_the_flat_list() {

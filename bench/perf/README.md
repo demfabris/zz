@@ -110,7 +110,7 @@ the run.
 | probe | macOS | Linux |
 | --- | --- | --- |
 | CPU | `proc_pid_rusage(RUSAGE_INFO_V4)` user + system, mach timebase to ns | `clock_gettime` on `clock_getcpuclockid(pid)` (ns, includes exited threads); else the sum of `/proc/<pid>/task/*/schedstat`; else `stat` ticks |
-| instructions | `ri_instructions` | not read (no `instr` metrics) |
+| instructions | `ri_instructions` | `perf_event_open` `PERF_COUNT_HW_INSTRUCTIONS`, user space only, one counter per thread seen at the first sample with `inherit` + `inherit_thread`, so later threads fold into their creator's counter and forked children are not counted; none when the syscall fails (`meta.instructions_source` says why) |
 | footprint | `ri_phys_footprint` | `smaps_rollup` Pss_Anon + Pss_Shmem + SwapPss |
 | RSS | `ri_resident_size` | `VmRSS` |
 | threads | `PROC_PIDTASKINFO` `pti_threadnum` | `Threads` in status |
@@ -121,7 +121,7 @@ Per-command daemon CPU is the server's CPU delta over N commands divided by N.
 The server pid comes from `#{pid}`. zz runs all panes from one daemon process,
 so the daemon's own CPU is the whole cost; job children are reported
 separately. `meta.cpu_source` names the Linux CPU source used. Every CPU
-metric has an instruction twin on macOS (`cli.instr.*`, `spawn.instr.*`,
+metric has an instruction twin (`cli.instr.*`, `spawn.instr.*`,
 `config.instr.*`, `chatty.instr_per_s.*`, `idle.instr_per_s.*`,
 `attach.instr.*`, `control.instr_per_cmd`, `statusjob.instr_per_s`).
 
@@ -183,8 +183,11 @@ The 5% rule is held on instructions. A metric entry can carry its own
 `chatty.tty_kibps.*`, `statusjob.tty_kibps`, `echo.wire_bytes.busy30`) have
 wider ones. Report-only metrics never fail on a regression.
 
-On Linux there are no instruction counts, so the 5% rule has nothing to hold
-there; merge runs are made on the macOS reference host.
+Linux counts user-space instructions only (`perf_event_paranoid` 2 allows no
+more), so Linux and macOS instruction numbers are not comparable; ratios to
+tmux and runs on the same host are. A host whose `perf_event_open` fails
+(paranoid 3 or higher, a VM with no PMU) records no `instr` metrics, and the
+5% rule has nothing to hold there.
 
 ## Thresholds
 

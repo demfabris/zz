@@ -504,13 +504,6 @@ impl CommandClient {
         self.stdin_enabled = true;
     }
 
-    pub fn wait_for_disconnect(mut self) {
-        let reader = match &mut self.link {
-            CommandLink::Exec { reader, .. } | CommandLink::Legacy { reader, .. } => reader,
-        };
-        while reader.recv().is_ok() {}
-    }
-
     /// Run one command and keep only its stdout, folding a nonzero exit into
     /// `DaemonError::CommandExit`. Callers that need the command's stderr or
     /// that must treat a nonzero exit as a completed command use

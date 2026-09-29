@@ -282,10 +282,10 @@ Notes on the rules:
 # Architecture
 
 1. **Command clients are one-shot.** The CLI sends one `Exec` frame (facts, environment blob,
-   parsed chain) and gets `ExecOutput` frames and one `ExecExit`, written together. No
-   `ServerHello`, no `PrepareCommandList`, no per-command round trip. Wave 1: one thread per Exec
-   connection. Wave 3: the mux loop runs it. Cold start waits on a readiness pipe, not a 20 ms
-   sleep; the identity file is written without `F_FULLFSYNC`.
+   parsed chain) and gets one `CommandResponse` per command and one `ExecExit`, written together.
+   No `ServerHello`, no `PrepareCommandList`, no per-command round trip. Wave 1: one thread per
+   Exec connection, reused when idle. Wave 3: the mux loop runs it. Cold start waits on a
+   readiness pipe, not a 20 ms sleep; the identity file is written without `F_FULLFSYNC`.
 2. **Publication is driven by changes.** Key tables, mux tree, options and status inputs carry
    generations; pane runtime facts no longer bump the tree generation. Commands and pane events
    mark dirty; one flush at the end of a command, or at most every 16 ms for pane events, builds
@@ -348,12 +348,13 @@ per-caller reuse).
 - **No compromises** (owner, 2026-09-28). A lane may not stop at "meets the target" when the
   profile still shows avoidable work on its path; targets are floors. The three deferrals the
   architect rejected as good enough are reinstated as lanes W2-FMT, W4-ROWS and W4-BINARY.
-- **Pin the in-pane `tmux` wrapper to the daemon's own executable.** `install_tmux_shim` today
-  points the wrapper at `current_exe()` (or `ZZ_TMUX_EXECUTABLE`), a path an app swap replaces, so
-  panes of an old daemon run a newer CLI. At install (lazy, first pane spawn, W1-EXEC), clone
-  `current_exe()` into the daemon's runtime directory (`clonefile(2)` on macOS; hardlink, else
-  copy, on Linux) and point the wrapper at the clone; delete it on daemon exit. The
-  `ZZ_TMUX_EXECUTABLE` override still wins.
+- **Pin the in-pane `tmux` wrapper to the daemon's own executable.** `install_tmux_shim` pointed
+  the wrapper at `current_exe()` (or `ZZ_TMUX_EXECUTABLE`), a path an app swap replaces, so panes
+  of an old daemon ran a newer CLI. Built in W1-EXEC: the wrapper runs `/proc/<daemon pid>/exe`
+  on Linux (the running image, no copy) and a `clonefile(2)` clone beside the wrapper on macOS
+  (hard link if that fails, else the installed path); the clone goes with the wrapper on daemon
+  exit. `spawn_daemon` no longer exports `ZZ_TMUX_EXECUTABLE`, and an explicit one still wins
+  unpinned.
 - Every lane that touches the wire runs `just web-build` and `just ios-gpui iPad build` in its
   gate. `crates/zz-protocol/src/key.rs` is added to `NOT_WIRE` in `compat/wire-version.py`
   (KeyTables is not serialized), so W1-PUBLISH does not trip the guard after a future release.
@@ -1313,6 +1314,111 @@ provenance, daemon-upgrade mismatch tests, the concurrency tests in item 4, repe
 Expected: removes the hello build (47-51%), unregister wakeups (8%), thread churn (5-10%), 2 of 3
 round trips, 14.6 ms of retry slack and 3.8 ms of fsync on cold start.
 
+Built on `perf/exec` (2026-09-28). Where the build departs from the scope above:
+
+- Wire (appended to `ProtocolMessage`, new module `zz-protocol/src/exec.rs`): `Exec(ExecRequest)`
+  and `ExecExit(ExecExit)`. There is no `ExecOutput`: each command's result is today's
+  `CommandResponse` (request id = position in the chain, 1-based), and released `-P` lines,
+  streamed stderr lines, `CommandClientExit` and `ClientFileRequest` keep their existing frames,
+  so the CLI's stdout writer, its raw-claim collision rule and the last-nonzero exit fold are the
+  code they were. `ExecExit { server_id, outcome }`, outcome `Ran | Resume(ExecResume) |
+  Rejected(ServerError) | ServerMismatch`; `ExecResume { kind: NewSession | NativeAttach,
+  commands: Vec<PreparedCommand> }` (the whole chain: an attaching chain runs nothing on the
+  command connection, as before). A connection-level refusal (envelope or `protocol_version`
+  mismatch, server stopping) is today's `CommandResponse::Error { request_id: 0 }`. Flags: `UTF8`,
+  `STDIN_AVAILABLE`, `NESTED`, `RESUME` (the caller can take an attaching chain back; only the CLI
+  sets it), `PREPARED` (run the commands as given, no alias lookup: the raw `--kill-server` path
+  that `execute_prepared_streams` served). No `HAS_TTY`/`READ_ONLY` flag and no `TERM` field:
+  nothing reads the first two, and TERM rides the environment. Features travel as the folded
+  `u32` mask. The environment is one NUL-separated byte string (`ClientEnvironmentBlob`,
+  serialized with `serialize_bytes`, wire-identical to a byte `Vec`).
+- Daemon (`daemon/exec.rs`): `serve_exec` answers the first frame; `register_exec` inserts
+  instance id, kind, origin, nested, utf8, features, tty, size, pid, cwd, activity/created/focused
+  times and the environment blob, and computes the connection's `ExecutionContext` in the same
+  lock. The blob is parsed only when something reads it: `ExecutionContext` and
+  `client_environments` now hold `Arc<ClientEnvironmentBlob>` (zz-mux `set_client_environment`
+  changed type; interactive hellos build one pre-parsed with `from_map`). The chain is prepared
+  once (`prepare_command_list_with_engine`, `preflight_unaliased`), then each command runs through
+  `execute_command_request_with_streams` (the old body, now also returning `client_exit`) with
+  `prepared = true`; the chain stops at the first error or client exit, as the CLI loop did. That
+  wrapper takes the state lock twice per command (preparation with the message-log entry, stream
+  removal with the sanitize check) instead of four times; the engine's own locks are W3-LOOP's. A
+  zero-command Exec is answered on the spot, before the startup wait and without registering a
+  client, so it neither owns a cold daemon's bootstrap lease nor waits out a slow config.
+- One write: when nothing parked, the connection thread drains the per-Exec mailbox and writes
+  every frame plus the `ExecExit` in one `write_all`. The mailbox sits in `client_writers` only
+  while that Exec runs, so an idle connection never holds up the shutdown drain. The first
+  `report_command_queue_park` (via a thread-local exec client) or `client_file_operation` for the
+  client starts a writer thread and a reader thread on that connection (`ExecLink::go_live`), and
+  later Execs on it go through them; the reader's EOF cancels the queue and unregisters, as the
+  old reader did. One `ResponseAdmissionGuard` spans the whole Exec, so a `kill-server` answer and
+  the `ExecExit` are queued before shutdown freezes admissions and drains writers.
+- Startup: an Exec that is not a startup reentry waits in `Shared.pending_execs` as a boxed job;
+  `finish_startup` hands each to a connection thread and `begin_stopping` drops them (the client
+  sees EOF).
+- Connection threads: W1-FOOTPRINT handed over the per-connection thread cost (the heap purge at
+  thread exit). Each connection still gets a thread of its own and nothing waits for one, but a
+  finished connection thread parks for up to 1 s (at most two parked) and serves the next
+  connection. Knob `ZZ_PERF_CONNECTION_THREADS=0`.
+- Unregister: `detach_is_inert` (no session, copy mode, focus, visible views, control kind or
+  latest-client mark) skips the `MuxHookSnapshot`, copy-mode and focus captures in
+  `detach_client_state`, and an inert exec client skips `detach` entirely. Control output taps
+  refresh only when a control client leaves an attachment. `release_view` still goes to every pane
+  on unregister: W1-PANE's known-view set makes that a no-op for a client that never streamed.
+- CLI: one `CommandClient::exec_chain` per invocation; `ExecResume` drives the TUI and native
+  attach branches (the classification moved to the daemon as `exec_resume_kind`, which the legacy
+  path also uses). A daemon that never answers is the `Err` of `exec_chain` and takes the old
+  "prepare failed" branch (static validation, spawn, TUI for an incompatible daemon); an answered
+  chain ends in `ExecChainEnd`. Two edge semantics moved: kill-server recovery after a transport
+  failure applies to the typed `kill-server` (the daemon never answered, so alias status is
+  unknown), and a no-start-server command against an incompatible daemon prints the classified
+  mismatch message.
+- `CommandClient`: `connect` opens the socket only; `server_id()` is lazy; `server_hello()` is gone
+  (the one daemon test that read it probes instead); `execute_on_server` is the settings file
+  path (`expect_server_id`). `ZZ_PERF_LEGACY_COMMAND=1` and the once-only fallback (EOF, reset or an
+  undecodable frame before the daemon answered) run the hello path with the old prepare and
+  per-command loop, including the cold-start abort pseudo-command.
+- Cold start: `--bootstrap-ready-fd N` after the server id; the daemon writes one byte right after
+  `bind` and closes it; the CLI polls the pipe (6 s) and dials once. The backoff (0.5/1/2/5 ms) runs
+  only without the pipe (Windows) or when a racing daemon won the socket. `prepare_socket` now
+  holds `<socket>.lock` (flock) from the probe to `bind`, as tmux's `client_get_lock` does: two
+  concurrent cold commands (the new CLI test) otherwise let one daemon unlink the other's socket
+  between its `bind` and `listen`, leaving a daemon nobody could reach. The probe is a
+  zero-command Exec: a daemon that answers releases the loser's CLI through the readiness pipe and
+  the loser exits at once (before, it looped for 3 s and could bind after the winner was killed,
+  an orphan), and one that does not answer is still waited out as a stopping daemon. Identity
+  without `sync_all`; Claude peer sweep after the ready callback; `history-file` read on first use
+  (`ensure_prompt_history` at every prompt reader and writer).
+- The tmux wrapper is pinned (see Protocol and release policy) but still installed at startup, not
+  at the first pane: a cold `new-session` spawns a pane and needs it anyway, and install plus clone
+  measured 0.2 ms (clonefile 80 us, directory and script 110 us).
+
+Measured with the quick gate (`--only cli,cold,spawn,control,config`, stage wave1) on this
+macbook at load 10-37 with other lanes building, before (`613630ce`) -> after (`756498e1`), tmux
+in the same run. Instructions: `cli.instr.display.p1` 10.3 -> 2.78 Minstr (tmux 0.49),
+`.show_options.p1` 10.4 -> 2.80, `.has_session.p1` 9.7 -> 2.17, `.send_keys.p1` 9.77 -> 2.23,
+`.select_pane.p1` 9.72 -> 2.19, `.display.p20` 28.6 -> 6.0, `.has_session.p20` 25.6 -> 3.06,
+`.chain5.p1` 19.9 -> 12.0, `.chain5.p20` 43.3 -> 20.4, `spawn.instr.kill_pane` 13.8 -> 5.97,
+`spawn.instr.split_shell` 36.0 -> 28.1, `spawn.instr.split_empty_P` 45.6 -> 32.8. CPU (noisy at
+this load): `cli.cpu.display.p1` 1.17 -> 0.31-0.34 ms, `spawn.cpu.kill_pane` 1.9 -> 0.74-0.86 ms.
+Wall: `cli.wall.display.p1` 3.41 -> 2.52 ms (tmux 3.55), `cold.wall.new_session` 36.5 -> 11.7 ms
+(tmux 12.1), `cold.wall.new_session_noterm` 31.0 -> 11.7 ms. Control-mode rows are unchanged (that
+path is W2-CTRL's). Wire per `display-message -p x` through a counting proxy: 1 frame and 1 write
+up (1.1 KB with the gate's environment, 3.9 KB with a 3.2 KB shell environment), 1 read of 35 B
+down (the response and the exit); the hello path moved 3 frames up and 28.4 KB down in 6 reads.
+Daemon threads: 13 before and after 500 CLI commands; `mem.threads.p1` reads 14 because the gate's
+`#{pid}` lookup runs right before the sample and its connection thread is still parked (it retires
+after 1 s). Thread reuse alone is 2.95 -> 2.75 Minstr per `display-message` (A/B with the knob).
+
+Handed on: the `cli.cpu.display.*` floors (0.25 / 0.40 ms) and `spawn.cpu.split_*` wait on the
+other wave-1 lanes. A `sample` of 3000 `display-message -p x` on this branch puts 49% of the
+connection thread's CPU in `publish_key_tables_if_changed` (the 370-binding snapshot and its
+catalog lookups, W1-PUBLISH item 1) and 23% in the format universe built for a template with no
+`#` (W1-FORMAT items 2-3); p20 adds the per-pane universe rows and one `release_view` per pane on
+unregister (W1-PANE item 9). W2-CTRL: control lines can reuse `Exec` as built (results are
+`CommandResponse` frames, not `ExecOutput`; `ExecResumeKind` has no in-place attach upgrade yet),
+and the pinned wrapper path is `TmuxShimGuard.executable`.
+
 ## W1-ATTACH: attach path and TUI paint (effort M)
 
 Scope:
@@ -1403,8 +1509,9 @@ Scope:
   mouse bitset) is for TUI, CLI and control clients.
 - **Control mode**: `%layout-change` and window notifications stay hook-driven (W2-HOOKS owns the
   source; `DEFERRED_CONTROL_NOTIFICATIONS` ordering after `%end` preserved). New: control lines go
-  as one `ExecRequest` body over the interactive connection, answered by `ExecOutput`/`ExecExit`,
-  instead of `prepare_commands` + execute (1 round trip per line).
+  as one `ExecRequest` body over the interactive connection, answered by `CommandResponse` frames
+  and one `ExecExit` (W1-EXEC built no `ExecOutput`), instead of `prepare_commands` + execute (1
+  round trip per line).
 - Daemon: `Shared::register` / `register_subscribed` build only `Welcome`; `send_attached` +
   `send_resync_inner` produce one `Batch` (tree, ClientView, status, options, each visible pane's
   Full at final size); `publish`, `publish_to_control_clients`, `enqueue_reliable`,
@@ -1662,6 +1769,7 @@ deletes most wave-1 fallback paths anyway).
 | Knob | Lane | Set, restores |
 |---|---|---|
 | `ZZ_PERF_LEGACY_COMMAND=1` | EXEC | CLI uses ClientHello + PrepareCommandList + CommandRequest (daemon keeps that path through W2) |
+| `ZZ_PERF_CONNECTION_THREADS=0` | EXEC | a new thread per connection, none kept idle for reuse |
 | `ZZ_PERF_EAGER_FRAMES=1` | PANE | frames for every attached view plus the no-view fallback |
 | `ZZ_PERF_NO_COMPRESS=1` | PANE | no idle history compression |
 | `ZZ_PERF_ECHO_FASTPATH=0` | PANE | always wait `CONTENT_PUBLISH_STALENESS` |

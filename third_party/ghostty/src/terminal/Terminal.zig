@@ -4314,6 +4314,54 @@ test "Terminal setScrollbackMaxLines" {
     );
 }
 
+test "Terminal line-limited history stays exact while pages are reused" {
+    const alloc = testing.allocator;
+    var t = try init(testing.io, alloc, .{
+        .cols = 200,
+        .rows = 4,
+        .max_scrollback_bytes = null,
+        .max_scrollback_lines = null,
+    });
+    defer t.deinit(alloc);
+
+    const pages = &t.screens.get(.primary).?.pages;
+    const page_rows: usize = pages.pages.first.?.capacity().rows;
+    const max_lines = page_rows + page_rows / 3;
+    t.setScrollbackMaxLines(max_lines);
+
+    // Print numbered lines until several pages have been retired and
+    // reused, varying line lengths so a reused row that kept old cells
+    // would show up as trailing garbage.
+    const total = 5 * page_rows + 7;
+    var buf: [256]u8 = undefined;
+    for (0..total) |i| {
+        const line = try std.fmt.bufPrint(&buf, "{d}:", .{i});
+        try t.printString(line);
+        for (0..i % 150) |_| try t.print('x');
+        try t.printString("\n");
+    }
+
+    // History is whole-page pruned, so it sits just under the limit.
+    const history = pages.total_rows - pages.rows;
+    try testing.expect(history <= max_lines);
+    try testing.expect(history > max_lines - page_rows);
+
+    // Everything retained reads back as consecutive lines, and the rows
+    // after the last line are blank.
+    const text = try t.screens.active.dumpStringAlloc(alloc, .{ .screen = .{} });
+    defer alloc.free(text);
+    var it = std.mem.splitScalar(u8, text, '\n');
+    const first_line = total + 1 - pages.total_rows;
+    for (first_line..total) |i| {
+        const line = it.next().?;
+        const colon = std.mem.indexOfScalar(u8, line, ':').?;
+        try testing.expectEqual(i, try std.fmt.parseInt(usize, line[0..colon], 10));
+        try testing.expectEqual(i % 150, line.len - colon - 1);
+        for (line[colon + 1 ..]) |c| try testing.expectEqual('x', c);
+    }
+    while (it.next()) |line| try testing.expectEqual(0, line.len);
+}
+
 test "Terminal setScrollback only affects primary screen" {
     var t = try init(testing.io, testing.allocator, .{
         .cols = 80,

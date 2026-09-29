@@ -76,6 +76,11 @@ const Node = struct {
     /// is forced to make an explicit decision.
     owned: Owned,
 
+    /// Whether trimLastPage decommitted the cells behind this page's
+    /// unused rows. They must be recommitted (see untrim) before anything
+    /// writes past the page's current size.
+    trimmed: bool = false,
+
     /// The physical representation of the page contents.
     ///
     /// Both states retain the same `Page.memory` virtual mapping and the same
@@ -448,6 +453,24 @@ page_compression: IncrementalCompressionState = .{},
 /// pair per page is a significant part of reflow cost. Always null
 /// outside of an in-progress reflow.
 recycle_node: ?*List.Node = null,
+
+/// A page pruned by the scrollback limits, kept committed for the next
+/// createPage instead of going back to the pool.
+///
+/// Once scrollback is full, pruning retires one history page for
+/// every page grow appends, but the two rarely happen on the same
+/// row: the line limit usually prunes from grow's fast path and the
+/// replacement page is only needed when the last page fills. Returning
+/// the pruned buffer to the pool decommits it, and the next page then
+/// faults every byte of the same buffer back in. Keeping one page
+/// here turns that into a memset of resident memory.
+///
+/// Only pool-owned resident pages are kept, and only one. The spare is
+/// not in `page_size` and keeps its stale contents until createPage
+/// zeroes it. It goes back to the pool (decommitted) on compress, and
+/// is released on reset and deinit, so an idle PageList holds no extra
+/// resident memory once its embedder compresses it.
+spare_node: ?*List.Node = null,
 
 /// Limits for scrollback.
 limits: Limits,
@@ -970,8 +993,25 @@ pub fn deinit(self: *PageList) void {
     self.tracked_pins.deinit(self.pool.alloc);
 
     // Release every page and node back to the pools, then free the pools.
+    self.releaseSpare(.free);
     releasePages(&self.pool, self.pages);
     self.pool.deinit();
+}
+
+/// Give the spare node (see spare_node) back to the pools. Decommit mode
+/// returns its buffer to the page pool zeroed and decommitted, like
+/// destroyNode. Free mode is for teardown walks and releases the buffer
+/// straight to the page allocator without zeroing it, like releasePages.
+fn releaseSpare(self: *PageList, comptime mode: enum { decommit, free }) void {
+    const node = self.spare_node orelse return;
+    self.spare_node = null;
+    switch (mode) {
+        .decommit => destroyNodeExt(&self.pool, node, null),
+        .free => {
+            releasePoolPage(&self.pool, node.pageAssumeResident());
+            self.pool.nodes.destroy(node);
+        },
+    }
 }
 
 /// Reset the PageList back to an empty state. This is similar to
@@ -1009,6 +1049,7 @@ pub fn reset(self: *PageList) void {
     // Before resetting our pools we need to release our pages: heap-owned
     // pages go back to the page allocator and pool-owned pages back to
     // the page pool.
+    self.releaseSpare(.free);
     releasePages(&self.pool, self.pages);
 
     // Reset our pools to free as much memory as possible while retaining
@@ -3037,6 +3078,7 @@ fn resizeWithoutReflowGrowCols(
 
         // We only want scenarios where we have excess capacity.
         if (prev_page.size.rows >= prev_page.capacity.rows) break :prev;
+        untrim(prev_node);
 
         // We can copy as much as we can to fill the capacity or our
         // current page size.
@@ -3241,7 +3283,7 @@ fn trimTrailingBlankRows(
 
         row_pin.node.page().size.rows -= 1;
         if (row_pin.node.page().size.rows == 0) {
-            self.erasePage(row_pin.node);
+            self.erasePage(row_pin.node, .destroy);
         } else {
             row_pin.node.page().assertIntegrity();
         }
@@ -4009,6 +4051,7 @@ pub fn grow(self: *PageList) Allocator.Error!?*List.Node {
         // zeroed) or because whatever retired the row reset it (see
         // Page.resetRow).
         const page = last.page();
+        untrim(last);
         page.size.rows += 1;
         page.assertIntegrity();
 
@@ -4098,6 +4141,7 @@ pub fn grow(self: *PageList) Allocator.Error!?*List.Node {
 
         // Reset our memory
         const buf = first.restore(.discard).memory;
+        untrim(first);
         @memset(buf, 0);
         assert(buf.len <= std_size);
 
@@ -4517,39 +4561,25 @@ inline fn createPage(
     // If we have a node available for recycling (only during reflow,
     // see recycle_node), reuse it directly rather than going through
     // the memory pool.
-    if (self.recycle_node) |node| recycle: {
-        // Only a standard pool-owned resident node can be rebuilt
-        // in place for a standard-size layout.
-        if (opts.exact_size) break :recycle;
-        if (node.owned != .pool) break :recycle;
-        if (node.data != .resident) break :recycle;
-        const layout = Page.layout(opts.cap);
-        if (layout.total_size > std_size) break :recycle;
+    if (self.recycle_node) |node| {
+        if (self.rebuildNode(node, opts)) {
+            // Accounting: a pool-owned node always accounts for a full
+            // pool item in page_size, so destroying the node and
+            // creating a new pooled one is a net zero.
+            self.recycle_node = null;
+            return node;
+        }
+    }
 
-        self.recycle_node = null;
-
-        // The pool guarantees that buffers it hands out are zeroed.
-        // A pool-owned page dirties only its Page.memory prefix of
-        // the underlying standard-size item, so zeroing that prefix
-        // re-establishes the guarantee (this mirrors destroyNodeExt,
-        // minus the decommit).
-        const page = &node.data.resident;
-        const item: *align(std.heap.page_size_min) [std_size]u8 =
-            @ptrCast(@alignCast(page.memory.ptr));
-        @memset(page.memory, 0);
-
-        // Accounting: a pool-owned node always accounts for a full
-        // pool item in page_size, so destroying the node and
-        // creating a new pooled one is a net zero.
-
-        node.* = .{
-            .data = .{ .resident = .initBuf(.init(item), layout) },
-            .serial = self.page_serial,
-            .owned = .pool,
-        };
-        node.page().size.rows = 0;
-        self.page_serial += 1;
-        return node;
+    // Otherwise prefer the retired spare (see spare_node) over a pool
+    // buffer, which would have to be faulted back in. The spare left
+    // page_size when it was retired, so it counts again once reused.
+    if (self.spare_node) |node| {
+        if (self.rebuildNode(node, opts)) {
+            self.spare_node = null;
+            self.page_size += PagePool.item_size;
+            return node;
+        }
     }
 
     return try createPageExt(
@@ -4558,6 +4588,62 @@ inline fn createPage(
         &self.page_serial,
         &self.page_size,
     );
+}
+
+/// Rebuild a detached node in place as a new empty page for `opts`,
+/// as if createPageExt had taken its buffer from the pool. This returns
+/// false and leaves the node untouched if it cannot hold the layout.
+fn rebuildNode(
+    self: *PageList,
+    node: *List.Node,
+    opts: CreatePage,
+) bool {
+    // Only a standard pool-owned resident node can be rebuilt
+    // in place for a standard-size layout.
+    if (opts.exact_size) return false;
+    if (node.owned != .pool) return false;
+    if (node.data != .resident) return false;
+    const layout = Page.layout(opts.cap);
+    if (layout.total_size > std_size) return false;
+
+    // The pool guarantees that buffers it hands out are zeroed.
+    // A pool-owned page dirties only its Page.memory prefix of
+    // the underlying standard-size item, so zeroing that prefix
+    // re-establishes the guarantee (this mirrors destroyNodeExt,
+    // minus the decommit).
+    //
+    // The metadata block after the cells (styles, graphemes, strings,
+    // hyperlinks) is often never written, and then it may never have
+    // been faulted in either, so it is only cleared when something is
+    // there: zeroing it anyway would make it resident for nothing.
+    untrim(node);
+    const page = &node.data.resident;
+    const item: *align(std.heap.page_size_min) [std_size]u8 =
+        @ptrCast(@alignCast(page.memory.ptr));
+    const old = Page.layout(page.capacity);
+    @memset(page.memory[0..old.styles_start], 0);
+    const meta = page.memory[old.styles_start..];
+    if (!isZero(meta)) @memset(meta, 0);
+
+    node.* = .{
+        .data = .{ .resident = .initBuf(.init(item), layout) },
+        .serial = self.page_serial,
+        .owned = .pool,
+    };
+    node.page().size.rows = 0;
+    self.page_serial += 1;
+    return true;
+}
+
+/// Whether every byte is zero. This reads 32 bytes per step and has no
+/// early exit, since Zig does not vectorize the plain loop.
+fn isZero(bytes: []const u8) bool {
+    const V = @Vector(32, u8);
+    var acc: V = @splat(0);
+    var i: usize = 0;
+    while (i + 32 <= bytes.len) : (i += 32) acc |= @as(V, bytes[i..][0..32].*);
+    for (bytes[i..]) |b| acc[0] |= b;
+    return @reduce(.Or, acc) == 0;
 }
 
 inline fn createPageExt(
@@ -4839,10 +4925,16 @@ const compressPage_tw = tripwire.module(
 /// compression state. On supported targets, full compression returns
 /// `complete`, indicating that it has no continuation to schedule rather than
 /// that every page was compressed.
+///
+/// Every mode first returns the spare page (see spare_node) to the pool
+/// and decommits the unused rows of the last page (see trimLastPage), since
+/// a caller compressing is done writing for now.
 pub fn compress(
     self: *PageList,
     mode: enum { incremental, drain, full },
 ) IncrementalCompressionResult {
+    self.releaseSpare(.decommit);
+    self.trimLastPage();
     return switch (mode) {
         .incremental => self.compressIncremental(),
         .drain => while (true) switch (self.compressIncremental()) {
@@ -5051,6 +5143,64 @@ fn compressPage(self: *PageList, node: *List.Node) bool {
 /// updates `page_size` (byte accounting), not row accounting.
 fn destroyNode(self: *PageList, node: *List.Node) void {
     destroyNodeExt(&self.pool, node, &self.page_size);
+}
+
+/// Decommit the cells behind the last page's unused rows.
+///
+/// Rows past a page's size are zero by contract (see grow), so readers see
+/// no difference. A page rebuilt from the spare has all of them resident
+/// after its memset, where a fresh pool page only faults in the rows it
+/// uses, so an idle list gives them back here. The node is marked so the
+/// next write past its size recommits them first.
+fn trimLastPage(self: *PageList) void {
+    const node = self.pages.last.?;
+    if (node.trimmed) return;
+    const page = node.pageIfResident() orelse return;
+    const cap = page.capacity;
+    if (page.size.rows >= cap.rows) return;
+
+    const layout = Page.layout(cap);
+    const base = @intFromPtr(page.memory.ptr);
+    const unused = base + layout.cells_start +
+        @as(usize, page.size.rows) * cap.cols * @sizeOf(pagepkg.Cell);
+    const start = std.mem.alignForward(usize, unused, std.heap.page_size_min);
+    const end = std.mem.alignBackward(
+        usize,
+        base + layout.cells_start + layout.cells_size,
+        std.heap.page_size_min,
+    );
+    if (end <= start) return;
+
+    const range: [*]align(std.heap.page_size_min) u8 = @ptrFromInt(start);
+    _ = terminal_mem.decommit(.zero, range[0 .. end - start], 0);
+    node.trimmed = true;
+}
+
+/// Recommit a page trimmed by trimLastPage before writing past its size.
+inline fn untrim(node: *List.Node) void {
+    if (!node.trimmed) return;
+    node.trimmed = false;
+    terminal_mem.recommit(node.pageAssumeResident().memory);
+}
+
+/// Destroy a node like destroyNode, but keep it committed as the spare
+/// (see spare_node) when the slot is free and createPage could rebuild
+/// it. A compressed node is destroyed: its memory is already decommitted,
+/// so keeping it would save nothing.
+fn retireNode(self: *PageList, node: *List.Node) void {
+    if (self.spare_node != null or
+        node.owned != .pool or
+        node.data != .resident)
+    {
+        self.destroyNode(node);
+        return;
+    }
+
+    // Mirror destroyNode's accounting: the spare is not a list page.
+    self.page_size -= PagePool.item_size;
+    node.prev = null;
+    node.next = null;
+    self.spare_node = node;
 }
 
 fn destroyNodeExt(
@@ -5531,13 +5681,14 @@ fn eraseRows(
                 self.invalidateNodeLayout(chunk.node);
                 const page = chunk.node.page();
                 erased += page.size.rows;
+                untrim(chunk.node);
                 page.reinit();
                 page.size.rows = 0;
                 break;
             }
 
             erased += chunk.node.rows();
-            self.erasePage(chunk.node);
+            self.erasePage(chunk.node, .destroy);
             continue;
         }
 
@@ -5614,12 +5765,17 @@ fn eraseRows(
 /// Erase a single page, freeing all its resources. The page must be
 /// at the front or back of the linked list (not the middle) and must
 /// NOT be the final page in the entire list (i.e. must not make the
-/// list empty).
+/// list empty). Retire mode may keep the page committed as the spare
+/// (see spare_node) for the next page this list creates.
 ///
 /// IMPORTANT: This function does NOT update `total_rows`. The caller is
 /// responsible for accounting for the removed rows before or after calling
 /// this function.
-fn erasePage(self: *PageList, node: *List.Node) void {
+fn erasePage(
+    self: *PageList,
+    node: *List.Node,
+    comptime release: enum { destroy, retire },
+) void {
     // Must not be the final page.
     assert(node.next != null or node.prev != null);
 
@@ -5641,7 +5797,10 @@ fn erasePage(self: *PageList, node: *List.Node) void {
 
     // Remove the page from the linked list
     self.pages.remove(node);
-    self.destroyNode(node);
+    switch (release) {
+        .destroy => self.destroyNode(node),
+        .retire => self.retireNode(node),
+    }
 }
 
 /// Returns the pin for the given point. The pin is NOT tracked so it
@@ -6803,8 +6962,9 @@ pub fn totalPages(self: *const PageList) usize {
 /// Snapshot of the storage used by page nodes in this list.
 ///
 /// The raw byte counts describe page backing mappings only. They exclude
-/// nodes, allocator metadata, unused preheated pool items, and the small
-/// representation values stored in each node. A compressed page retains its
+/// nodes, allocator metadata, unused preheated pool items, the spare page
+/// (see spare_node), and the small representation values stored in each
+/// node. A compressed page retains its
 /// raw mapping as virtual address space, but its bytes are counted as
 /// decommitted because strict reclamation succeeded before the state was
 /// published.
@@ -7023,8 +7183,10 @@ const Limits = struct {
 
             // erasePage updates the list, pin targets, and byte accounting.
             // Row accounting belongs to the caller because erasePage is also used
-            // by paths that already adjusted total_rows.
-            pagelist.erasePage(first);
+            // by paths that already adjusted total_rows. The pruned page is
+            // retired rather than destroyed: history is full, so grow will want
+            // a new page soon (see spare_node).
+            pagelist.erasePage(first, .retire);
             pagelist.total_rows -= first_rows;
             removed += first_rows;
         }
@@ -11423,6 +11585,355 @@ test "PageList max lines applies to resize and clone" {
         cloned.total_rows - cloned.rows <= cloned.limits.max(.lines) or
             cloned.pages.first.? == cloned.getTopLeft(.active).node,
     );
+}
+
+test "PageList max lines reuses the retired page without the pool" {
+    const testing = std.testing;
+    const cols: size.CellCountInt = 80;
+    const page_rows: usize = initialCapacity(cols).rows;
+
+    // A limit that is not page aligned prunes from grow's fast path, well
+    // before the last page fills and grow needs a new one.
+    var s = try init(testing.allocator, .{
+        .cols = cols,
+        .rows = 24,
+        .max_lines = 2 * page_rows + page_rows / 2,
+    });
+    defer s.deinit();
+
+    while (s.total_rows - s.rows < s.limits.max(.lines)) _ = try s.grow();
+    try testing.expect(s.spare_node == null);
+    const pool_live = s.pool.pages.live;
+    const pool_free = s.pool.pages.free.items.len;
+
+    // One more row prunes the complete first page. It is kept as the
+    // spare instead of going back to the pool, and leaves page_size.
+    const first = s.pages.first.?;
+    try testing.expect(try s.grow() == null);
+    try testing.expectEqual(first, s.spare_node.?);
+    try testing.expect(s.pages.first.? != first);
+    try testing.expectEqual(pool_free, s.pool.pages.free.items.len);
+    try testing.expectEqual(
+        s.totalPages() * PagePool.item_size,
+        s.page_size,
+    );
+
+    // The next page grow needs is the spare, rebuilt as an empty page.
+    var reused: ?*List.Node = null;
+    while (reused == null) reused = try s.grow();
+    try testing.expectEqual(first, reused.?);
+    try testing.expectEqual(first, s.pages.last.?);
+    try testing.expect(s.spare_node == null);
+    try testing.expectEqual(@as(size.CellCountInt, 1), first.rows());
+    try testing.expectEqual(
+        s.totalPages() * PagePool.item_size,
+        s.page_size,
+    );
+
+    // From here on steady scrolling never goes through the pool: every
+    // retired page comes back as the next new one.
+    for (0..8 * page_rows) |_| {
+        _ = try s.grow();
+        try testing.expectEqual(pool_live, s.pool.pages.live);
+        try testing.expectEqual(pool_free, s.pool.pages.free.items.len);
+    }
+}
+
+test "PageList retired page reuse keeps history, pins, and viewport exact" {
+    const testing = std.testing;
+    const cols: size.CellCountInt = 200;
+    const page_rows: usize = initialCapacity(cols).rows;
+    const opts: Options = .{
+        .cols = cols,
+        .rows = 5,
+        .max_lines = page_rows + page_rows / 3,
+    };
+
+    // The reference list gives every retired page back to the pool at
+    // once, which is what pruning did before the spare existed. Both
+    // lists see the same operations and must stay indistinguishable.
+    var s = try init(testing.allocator, opts);
+    defer s.deinit();
+    var ref = try init(testing.allocator, opts);
+    defer ref.deinit();
+    const lists = [_]*PageList{ &s, &ref };
+
+    var pins: [2][2]*Pin = undefined;
+    var pin_count: usize = 0;
+    defer for (pins[0..pin_count]) |pair| {
+        for (lists, pair) |l, p| l.untrackPin(p);
+    };
+
+    var reused: usize = 0;
+    for (0..6 * page_rows) |i| {
+        for (lists) |l| {
+            const spare = l.spare_node;
+            if (try l.grow()) |node| {
+                if (spare == node) reused += 1;
+            }
+
+            // Mark each new row with one cell whose column moves, so
+            // stale cells left in a reused page could not hide.
+            const cell = l.getCell(.{ .active = .{
+                .x = @intCast(i % cols),
+                .y = l.rows - 1,
+            } }).?;
+            cell.cell.* = .{
+                .content_tag = .codepoint,
+                .content = .{ .codepoint = .{ .data = @intCast(0x100 + i) } },
+            };
+        }
+        ref.releaseSpare(.decommit);
+
+        // Pin history rows and scroll back into history at a few points,
+        // so pruning has pins and a viewport pin to remap.
+        if (i == page_rows / 2 or i == 2 * page_rows) {
+            for (lists, 0..) |l, j| {
+                pins[pin_count][j] = try l.trackPin(
+                    l.pin(.{ .screen = .{ .y = 3 } }).?,
+                );
+            }
+            pin_count += 1;
+        }
+        if (i == page_rows / 2 or i == 3 * page_rows) {
+            for (lists) |l| l.scroll(.{
+                .pin = l.pin(.{ .screen = .{ .y = 7 } }).?,
+            });
+        }
+
+        try testing.expectEqual(ref.total_rows, s.total_rows);
+        try testing.expectEqual(ref.totalPages(), s.totalPages());
+        try testing.expectEqual(ref.page_size, s.page_size);
+        try testing.expectEqual(
+            std.meta.activeTag(ref.viewport),
+            std.meta.activeTag(s.viewport),
+        );
+        try testing.expectEqual(ref.scrollbar(), s.scrollbar());
+        for (pins[0..pin_count]) |pair| {
+            try testing.expectEqual(pair[1].garbage, pair[0].garbage);
+            try testing.expectEqual(
+                ref.pointFromPin(.screen, pair[1].*),
+                s.pointFromPin(.screen, pair[0].*),
+            );
+        }
+    }
+
+    // The spare really was used, and the reference never used it.
+    try testing.expect(reused >= 4);
+    try testing.expect(ref.spare_node == null);
+
+    // Every retained row holds exactly what was written to it.
+    var it_s = s.rowIterator(.right_down, .{ .screen = .{} }, null);
+    var it_ref = ref.rowIterator(.right_down, .{ .screen = .{} }, null);
+    while (it_ref.next()) |p_ref| {
+        const p_s = it_s.next().?;
+        try testing.expectEqual(
+            p_ref.rowAndCell().row.*.wrap,
+            p_s.rowAndCell().row.*.wrap,
+        );
+        for (p_ref.cells(.all), p_s.cells(.all)) |a, b| {
+            try testing.expectEqual(a.codepoint(), b.codepoint());
+        }
+    }
+    try testing.expect(it_s.next() == null);
+}
+
+test "PageList retired page comes back blank" {
+    const testing = std.testing;
+    const cols: size.CellCountInt = 80;
+    const page_rows: usize = initialCapacity(cols).rows;
+
+    var s = try init(testing.allocator, .{
+        .cols = cols,
+        .rows = 24,
+        .max_lines = page_rows + page_rows / 2,
+    });
+    defer s.deinit();
+    while (s.pages.first == s.pages.last) _ = try s.grow();
+
+    // Dirty everything a page can carry: cells, row flags, a style, and
+    // a grapheme.
+    const first = s.pages.first.?;
+    {
+        const page = first.page();
+        const style_id = try page.styles.add(
+            page.memory,
+            .{ .flags = .{ .bold = true } },
+        );
+        for (0..page.size.rows) |y| {
+            const row = page.getRow(y);
+            row.wrap = true;
+            row.wrap_continuation = true;
+            row.styled = true;
+            row.semantic_prompt = .prompt;
+            for (page.getCells(row)) |*cell| {
+                cell.* = .{
+                    .content_tag = .codepoint,
+                    .content = .{ .codepoint = .{ .data = 'A' } },
+                    .style_id = style_id,
+                };
+                page.styles.use(page.memory, style_id);
+            }
+        }
+        page.styles.release(page.memory, style_id);
+
+        const rac = page.getRowAndCell(0, 0);
+        try page.appendGrapheme(rac.row, rac.cell, 0x0301);
+        try testing.expectEqual(1, page.styles.count());
+    }
+
+    var reused: ?*List.Node = null;
+    while (reused == null) reused = try s.grow();
+    try testing.expectEqual(first, reused.?);
+
+    // The rebuilt page is what a fresh pool buffer would give: row headers
+    // point at their cells, every other byte of the item is zero.
+    const page = first.page();
+    const layout = Page.layout(page.capacity);
+    const rows = page.rows.ptr(page.memory)[0..page.capacity.rows];
+    for (rows) |*row| {
+        try testing.expectEqual(Row{ .cells = row.cells }, row.*);
+    }
+    const item: *[std_size]u8 = @ptrCast(page.memory.ptr);
+    try testing.expect(std.mem.allEqual(u8, item[layout.cells_start..], 0));
+    try testing.expectEqual(0, page.styles.count());
+    page.assertIntegrity();
+}
+
+test "PageList compress, reset, and deinit give back the spare page" {
+    const testing = std.testing;
+    const cols: size.CellCountInt = 80;
+    const page_rows: usize = initialCapacity(cols).rows;
+
+    var s = try init(testing.allocator, .{
+        .cols = cols,
+        .rows = 24,
+        .max_lines = page_rows + page_rows / 2,
+    });
+    defer s.deinit();
+
+    // Prune once so the spare holds the retired first page.
+    const retire = struct {
+        fn run(l: *PageList) !void {
+            while (l.spare_node == null) _ = try l.grow();
+        }
+    }.run;
+    try retire(&s);
+
+    // Compression is what an idle embedder calls, so it returns the
+    // spare to the pool decommitted before compressing anything.
+    const free = s.pool.pages.free.items.len;
+    _ = s.compress(.incremental);
+    try testing.expect(s.spare_node == null);
+    try testing.expectEqual(free + 1, s.pool.pages.free.items.len);
+
+    // A page taken after that comes from the pool.
+    var node: ?*List.Node = null;
+    while (node == null) node = try s.grow();
+    try testing.expectEqual(free, s.pool.pages.free.items.len);
+
+    // Reset drops the spare along with every page.
+    try retire(&s);
+    s.reset();
+    try testing.expect(s.spare_node == null);
+
+    // Deinit releases a spare still held (testing.allocator checks leaks).
+    try retire(&s);
+    try testing.expect(s.spare_node != null);
+}
+
+test "PageList does not keep a compressed page as the spare" {
+    const testing = std.testing;
+    const cols: size.CellCountInt = 80;
+    const page_rows: usize = initialCapacity(cols).rows;
+
+    var s = try init(testing.allocator, .{
+        .cols = cols,
+        .rows = 24,
+        .max_lines = 2 * page_rows + page_rows / 2,
+    });
+    defer s.deinit();
+    while (s.total_rows - s.rows < s.limits.max(.lines)) _ = try s.grow();
+
+    // Idle compression leaves the cold history compressed and decommitted.
+    try testing.expectEqual(.complete, s.compress(.drain));
+    const first = s.pages.first.?;
+    try testing.expect(first.isCompressed());
+
+    // Pruning a compressed page frees it: its memory is already back with
+    // the OS, so there is nothing to keep warm.
+    const free = s.pool.pages.free.items.len;
+    _ = try s.grow();
+    try testing.expect(s.pages.first.? != first);
+    try testing.expect(s.spare_node == null);
+    try testing.expectEqual(free + 1, s.pool.pages.free.items.len);
+}
+
+test "PageList clear history does not keep a spare page" {
+    const testing = std.testing;
+    const cols: size.CellCountInt = 80;
+    const page_rows: usize = initialCapacity(cols).rows;
+
+    var s = try init(testing.allocator, .{ .cols = cols, .rows = 24 });
+    defer s.deinit();
+    try s.growRows(3 * page_rows);
+    const pages = s.totalPages();
+
+    // Only limit pruning keeps a page warm. Clearing history is not
+    // followed by steady growth, so every erased page goes to the pool.
+    const free = s.pool.pages.free.items.len;
+    s.eraseHistory(null);
+    try testing.expect(s.spare_node == null);
+    try testing.expectEqual(
+        free + pages - s.totalPages(),
+        s.pool.pages.free.items.len,
+    );
+}
+
+test "PageList isZero checks every byte" {
+    const testing = std.testing;
+    var buf: [100]u8 = @splat(0);
+    try testing.expect(isZero(&buf));
+    try testing.expect(isZero(buf[0..0]));
+    for (0..buf.len) |i| {
+        buf[i] = 0x80;
+        try testing.expect(!isZero(&buf));
+        buf[i] = 0;
+    }
+}
+
+test "PageList compress trims the last page until it grows" {
+    const testing = std.testing;
+
+    var s = try init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    defer s.deinit();
+    try s.growRows(10);
+
+    const last = s.pages.last.?;
+    try testing.expect(last.rows() < last.capacity().rows);
+    _ = s.compress(.incremental);
+    try testing.expect(last.trimmed);
+
+    // Only the cells past the page size are given back, and they still
+    // read as zero.
+    {
+        const page = last.page();
+        const layout = Page.layout(page.capacity);
+        const used = @as(usize, page.size.rows) * page.capacity.cols;
+        const cells = page.cells.ptr(page.memory)[0 .. layout.cells_size / @sizeOf(pagepkg.Cell)];
+        for (cells[used..]) |cell| try testing.expectEqual(0, @as(u64, @bitCast(cell)));
+    }
+
+    // Growing recommits them before it exposes the next row.
+    _ = try s.grow();
+    try testing.expect(!last.trimmed);
+
+    // A full last page has nothing to trim.
+    while (s.pages.last.?.rows() < s.pages.last.?.capacity().rows) {
+        _ = try s.grow();
+    }
+    _ = s.compress(.incremental);
+    try testing.expect(!s.pages.last.?.trimmed);
 }
 
 test "PageList grow prune scrollback" {

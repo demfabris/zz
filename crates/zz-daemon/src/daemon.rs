@@ -10828,6 +10828,7 @@ impl Shared {
             let generation = inner.engine.keys.generation();
             let tables = if generation == inner.key_tables_generation
                 || timers::KeyTablePublishHold::active()
+                || inner.subscribers.is_empty()
             {
                 None
             } else {

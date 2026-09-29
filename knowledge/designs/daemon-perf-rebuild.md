@@ -2122,6 +2122,21 @@ ceiling of 130.1 (tmux 55.0; it passes now because perf/wave2 brought the PageLi
 are `attach.conns` and `attach.wire_s2c` (W2-CTRL) and `attach.ttfc.p4` / `attach.cpu.p4`, wall
 and CPU rows that failed the same way on the wave-2 base.
 
+Fix-pass checks on Linux: `cargo fmt`; clippy `-D warnings` on every crate listed above; tests of
+zz-terminal (313), zz-protocol (252), zz-client (167 and the daemon-backed simulator), zz-tui (229),
+zz-mux (586), zz-client-ffi, zz-web, zz-cli and zz (583) pass; zz-daemon 1129 of 1133, the known
+`remote_scripts_fall_back_to_the_mac_app_bundle_cli` plus two `process_info` exec-name tests and
+the russh port test, which pass alone 3 of 3. The two-client daemon test passes three times plain
+and twice with `ZZ_PERF_ROW_PATCHES=1` (the knob reads 80.5 B on `echo.wire_bytes.idle`, as the
+rollback table says). Release build, with other trees' compiles paused: `tui-screen-diff.sh`
+147/147 three times, `attached-client.sh` PASS, choosers 78/78, overlays 48/48,
+output-backpressure 9/9, copy-mode 141/147 (the six fresh-entry search prompt cases of the base);
+`diff-scenario.sh` on capture-pane, the eight copy-mode scenarios, zoom, resize, resize-window,
+switch-client, alerts, panes, display-panes-format, pane-dead-time and windows: 18/18.
+`just web-build` builds. `compat/tui/tracker.py check`, `compat/wire-version.py` (107 unreleased),
+`bench/perf/test_gate.py` and the OKF validator pass. Not run: `just ios-gpui iPad build` and
+`bench/run.sh`, for the reasons above.
+
 Handed on:
 
 - W2-CTRL: the 28 KB `ServerHello` is now 95% of an attach's bytes. `Batch` can carry the

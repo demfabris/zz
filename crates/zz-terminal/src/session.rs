@@ -1105,7 +1105,7 @@ fn force_pty_erase(descriptor: std::os::fd::RawFd, erase: u8) {
 }
 
 fn find_escape(bytes: &[u8]) -> Option<usize> {
-    bytes.iter().position(|byte| *byte == 0x1b)
+    memchr::memchr(0x1b, bytes)
 }
 
 fn common_prefix(left: &[u8], right: &[u8]) -> usize {

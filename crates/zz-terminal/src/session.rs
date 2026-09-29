@@ -297,6 +297,7 @@ struct EngineFilter {
     osc: Option<Vec<u8>>,
     bar: ProgressBar,
     primary_history_size: usize,
+    metadata_hint: bool,
 }
 
 impl EngineFilter {
@@ -350,7 +351,8 @@ impl EngineFilter {
                         self.state = EngineState::Rename;
                         bytes = &bytes[1..];
                     }
-                    _ => {
+                    other => {
+                        self.metadata_hint |= other == b'c';
                         terminal.vt_write(b"\x1b");
                         self.state = EngineState::Ground;
                     }
@@ -366,6 +368,7 @@ impl EngineFilter {
                     }
                     bytes = &bytes[1..];
                     if byte >= 0x40 {
+                        self.metadata_hint |= csi_touches_metadata(&self.sequence, byte);
                         if csi_needs_rewrite(&self.sequence, byte, knobs) {
                             write_engine_csi(
                                 &self.sequence,
@@ -480,6 +483,7 @@ impl EngineFilter {
                     }
                     let final_byte = bytes[end];
                     let parameters = &bytes[escape + 2..end];
+                    self.metadata_hint |= csi_touches_metadata(parameters, final_byte);
                     if csi_needs_rewrite(parameters, final_byte, knobs) {
                         terminal.vt_write(&bytes[start..escape]);
                         write_engine_csi(
@@ -504,6 +508,10 @@ impl EngineFilter {
                     self.title.clear();
                     self.state = EngineState::Rename;
                     return &bytes[escape + 2..];
+                }
+                b'c' => {
+                    self.metadata_hint = true;
+                    cursor = escape + 2;
                 }
                 _ => {
                     cursor = escape + 1;
@@ -565,8 +573,10 @@ impl EngineFilter {
         last_command_status: &mut Option<CommandStatusUpdate>,
     ) {
         let Some(osc) = self.osc.take() else {
+            self.metadata_hint = true;
             return;
         };
+        self.metadata_hint |= osc_touches_metadata(&osc);
         if let Some(status) = parse_osc_command_status(&osc) {
             *last_command_status = Some(status);
             return;
@@ -605,6 +615,38 @@ impl CommandStatusUpdate {
             Self::Unknown => None,
             Self::Exit(code) => Some(code),
         }
+    }
+}
+
+fn osc_touches_metadata(payload: &[u8]) -> bool {
+    let digits = payload
+        .iter()
+        .position(|byte| !byte.is_ascii_digit())
+        .unwrap_or(payload.len());
+    matches!(&payload[..digits], b"0" | b"1" | b"2" | b"7")
+}
+
+fn csi_touches_metadata(parameters: &[u8], final_byte: u8) -> bool {
+    match final_byte {
+        b'h' | b'l' => parameters.strip_prefix(b"?").is_some_and(|modes| {
+            modes.split(|byte| *byte == b';').any(|mode| {
+                matches!(
+                    mode,
+                    b"9" | b"1000"
+                        | b"1001"
+                        | b"1002"
+                        | b"1003"
+                        | b"1005"
+                        | b"1006"
+                        | b"1015"
+                        | b"1016"
+                )
+            })
+        }),
+        b'u' => matches!(parameters.first(), Some(b'>' | b'<' | b'=')),
+        b'p' => parameters == b"!",
+        b't' => parameters.starts_with(b"22") || parameters.starts_with(b"23"),
+        _ => false,
     }
 }
 
@@ -1333,7 +1375,6 @@ struct PublishedViewports {
     last_command_status: Option<i32>,
     facts: TerminalFacts,
     search_string: String,
-    synchronized_output_deadline: Option<Instant>,
 }
 
 impl PublishedViewports {
@@ -1349,7 +1390,6 @@ impl PublishedViewports {
             last_command_status: None,
             facts: TerminalFacts::default(),
             search_string: String::new(),
-            synchronized_output_deadline: None,
         }
     }
 }
@@ -4184,33 +4224,6 @@ struct Publisher {
 }
 
 impl Publisher {
-    fn synchronized_output_deadline(&self) -> Option<Instant> {
-        self.latest.read().synchronized_output_deadline
-    }
-
-    fn defer_synchronized_output(
-        &self,
-        terminal: &mut Terminal<'_, '_>,
-        status: &SessionStatus,
-    ) -> Result<bool, WorkerError> {
-        let mut latest = self.latest.write();
-        if !terminal.mode(Mode::SYNC_OUTPUT)? {
-            latest.synchronized_output_deadline = None;
-            return Ok(false);
-        }
-        let now = Instant::now();
-        let deadline = latest
-            .synchronized_output_deadline
-            .get_or_insert(now + SYNCHRONIZED_OUTPUT_TIMEOUT);
-        if matches!(status, SessionStatus::Running) && now < *deadline {
-            return Ok(true);
-        }
-        latest.synchronized_output_deadline = None;
-        drop(latest);
-        terminal.set_mode(Mode::SYNC_OUTPUT, false)?;
-        Ok(false)
-    }
-
     fn set_foreground_source(&self, source: Option<Box<ForegroundSource>>) {
         *self.state.foreground.write() = source;
         self.state.resolve_identity();
@@ -4252,6 +4265,7 @@ impl Publisher {
         &self,
         fallback: FallbackFrame,
         viewports: Vec<(TerminalViewId, TerminalViewport, Option<u64>)>,
+        copy_facts: HashMap<TerminalViewId, Arc<CopyModeFacts>>,
         notify: bool,
     ) {
         let mut by_view = HashMap::with_capacity(viewports.len());
@@ -4280,6 +4294,7 @@ impl Publisher {
             latest.fallback_current = current;
             latest.by_view = by_view;
             latest.epochs = epochs;
+            latest.copy_facts = copy_facts;
         }
         if notify {
             self.notify_viewports(&fallback, view_count);
@@ -4341,10 +4356,6 @@ impl Publisher {
     fn notify_latest(&self) {
         let fallback = self.latest_fallback();
         self.notify_viewports(&fallback, 0);
-    }
-
-    fn publish_copy_facts(&self, facts: HashMap<TerminalViewId, Arc<CopyModeFacts>>) {
-        self.latest.write().copy_facts = facts;
     }
 
     fn publish_search_string(&self, search: Option<&CopyModeSearch>) {
@@ -4827,8 +4838,8 @@ fn run_output_view(
     }
 
     loop {
-        let synchronized_output_timeout = publisher
-            .synchronized_output_deadline()
+        let synchronized_output_timeout = frames
+            .synchronized_output_deadline
             .map_or_else(crossbeam_channel::never, |deadline| {
                 crossbeam_channel::after(deadline.saturating_duration_since(Instant::now()))
             });
@@ -5756,8 +5767,13 @@ fn run_terminal(
         SessionStatus::Running,
     )?;
 
+    let mut published_facts = None;
     loop {
-        publisher.set_facts(engine_filter.facts(&terminal)?);
+        let facts = engine_filter.facts(&terminal)?;
+        if published_facts != Some(facts) {
+            publisher.set_facts(facts);
+            published_facts = Some(facts);
+        }
         #[cfg(unix)]
         {
             writer.flush_pending()?;
@@ -5805,7 +5821,7 @@ fn run_terminal(
         if let Some(status) = engine_last_command_status.take() {
             publisher.set_last_command_status(status.code());
         }
-        let synchronized_output_deadline = publisher.synchronized_output_deadline();
+        let synchronized_output_deadline = frames.synchronized_output_deadline;
         let synchronized_output_due =
             synchronized_output_deadline.is_some_and(|deadline| now >= deadline);
         if synchronized_output_due || (reader_eof && synchronized_output_deadline.is_some()) {
@@ -5814,17 +5830,24 @@ fn run_terminal(
         if reader_eof {
             terminal.set_mode(Mode::SYNC_OUTPUT, false)?;
         }
+        let publish_interval = if frames.unwatched(&active_views) {
+            UNWATCHED_NOTIFY_INTERVAL
+        } else {
+            CONTENT_PUBLISH_STALENESS
+        };
         let echo_due = output_pending && echo.due();
         if output_pending
             && (reader_eof
                 || synchronized_output_due
                 || pending_window_due
                 || echo_due
-                || last_content_publish.elapsed() >= CONTENT_PUBLISH_STALENESS)
+                || engine_filter.metadata_hint
+                || last_content_publish.elapsed() >= publish_interval)
         {
             if echo_due {
                 echo.spend();
             }
+            engine_filter.metadata_hint = false;
             #[cfg(unix)]
             drain_effects_if_writer_ready(&effects, &mut writer)?;
             #[cfg(not(unix))]
@@ -5899,14 +5922,14 @@ fn run_terminal(
                 deadline = deadline.min(due);
             }
         }
-        if let Some(due) = publisher.synchronized_output_deadline() {
+        if let Some(due) = frames.synchronized_output_deadline {
             deadline = deadline.min(due);
         }
         if output_pending {
-            deadline = deadline.min(if echo.due() {
+            deadline = deadline.min(if echo.due() || engine_filter.metadata_hint {
                 Instant::now()
             } else {
-                last_content_publish + CONTENT_PUBLISH_STALENESS
+                last_content_publish + publish_interval
             });
         }
         if let Some(due) = search_refresh_due {
@@ -6556,6 +6579,12 @@ fn run_terminal(
                 }
                 Command::Shutdown => {
                     let _ = killer.kill();
+                    if exit_status.is_none() {
+                        #[cfg(all(unix, not(target_os = "linux")))]
+                        let _ = child_watch.wait_timeout(TERMINATION_KILL_WAIT);
+                        #[cfg(any(target_os = "linux", not(unix)))]
+                        let _ = exit_rx.recv_timeout(TERMINATION_KILL_WAIT);
+                    }
                     return Ok(());
                 }
                 Command::SetViewStream(view, stream) => {
@@ -6632,6 +6661,12 @@ fn run_terminal(
                     }
                 } else {
                     let _ = killer.kill();
+                    if exit_status.is_none() {
+                        #[cfg(all(unix, not(target_os = "linux")))]
+                        let _ = child_watch.wait_timeout(TERMINATION_KILL_WAIT);
+                        #[cfg(any(target_os = "linux", not(unix)))]
+                        let _ = exit_rx.recv_timeout(TERMINATION_KILL_WAIT);
+                    }
                 }
                 return Ok(());
             }
@@ -14203,6 +14238,8 @@ struct Frames<'alloc> {
     last_unbuilt: Option<Instant>,
     last_notify: Option<Instant>,
     notify_owed: bool,
+    synchronized_output_deadline: Option<Instant>,
+    retain_render_until: Option<Instant>,
 }
 
 impl<'alloc> Frames<'alloc> {
@@ -14223,7 +14260,36 @@ impl<'alloc> Frames<'alloc> {
             last_unbuilt: None,
             last_notify: None,
             notify_owed: false,
+            synchronized_output_deadline: None,
+            retain_render_until: None,
         })
+    }
+
+    fn defer_synchronized_output(
+        &mut self,
+        terminal: &mut Terminal<'_, '_>,
+        status: &SessionStatus,
+    ) -> Result<bool, WorkerError> {
+        if !terminal.mode(Mode::SYNC_OUTPUT)? {
+            self.synchronized_output_deadline = None;
+            return Ok(false);
+        }
+        let now = Instant::now();
+        let deadline = *self
+            .synchronized_output_deadline
+            .get_or_insert(now + SYNCHRONIZED_OUTPUT_TIMEOUT);
+        if matches!(status, SessionStatus::Running) && now < deadline {
+            return Ok(true);
+        }
+        self.synchronized_output_deadline = None;
+        terminal.set_mode(Mode::SYNC_OUTPUT, false)?;
+        Ok(false)
+    }
+
+    fn unwatched(&self, active: &ActiveTerminalViews) -> bool {
+        !self.needs_cells(active)
+            && self.mode_views.is_empty()
+            && active.values().all(|view| view.copy_mode.is_none())
     }
 
     fn streaming(&self, view: TerminalViewId) -> bool {
@@ -14326,8 +14392,16 @@ impl<'alloc> Frames<'alloc> {
 
     fn release_unused(&mut self, active: &ActiveTerminalViews) {
         if self.needs_cells(active) {
+            self.retain_render_until = None;
             return;
         }
+        if self
+            .retain_render_until
+            .is_some_and(|until| Instant::now() < until)
+        {
+            return;
+        }
+        self.retain_render_until = None;
         self.render = None;
         self.dictionary.release_pools();
     }
@@ -14348,10 +14422,14 @@ impl<'alloc> Frames<'alloc> {
     }
 
     fn settle_due(&self) -> Option<Instant> {
-        match (self.rebuild_due(), self.notify_due()) {
-            (Some(rebuild), Some(notify)) => Some(rebuild.min(notify)),
-            (rebuild, notify) => rebuild.or(notify),
-        }
+        [
+            self.rebuild_due(),
+            self.notify_due(),
+            self.retain_render_until,
+        ]
+        .into_iter()
+        .flatten()
+        .min()
     }
 
     fn admit_notify(&mut self, metadata_changed: bool) -> bool {
@@ -14406,7 +14484,7 @@ fn publish_views<'alloc: 'callbacks, 'callbacks>(
     status: SessionStatus,
     notify: bool,
 ) -> Result<(), WorkerError> {
-    if publisher.defer_synchronized_output(terminal, &status)? {
+    if frames.defer_synchronized_output(terminal, &status)? {
         return Ok(());
     }
     let force_fallback = std::mem::take(&mut frames.force_fallback);
@@ -14473,8 +14551,7 @@ fn publish_views<'alloc: 'callbacks, 'callbacks>(
     frames
         .published
         .extend(viewports.iter().map(|(view, _, _)| *view));
-    publisher.publish_copy_facts(copy_facts);
-    publisher.publish_frame(fallback, viewports, notify);
+    publisher.publish_frame(fallback, viewports, copy_facts, notify);
     frames.release_unused(active);
     Ok(())
 }
@@ -14494,8 +14571,12 @@ fn settle_unwatched<'alloc: 'callbacks, 'callbacks>(
         publisher.notify_latest();
     }
     if frames.rebuild_due().is_none_or(|due| now < due) {
+        if frames.retain_render_until.is_some_and(|until| now >= until) {
+            frames.release_unused(active);
+        }
         return Ok(());
     }
+    frames.retain_render_until = Some(now + UNWATCHED_SETTLE_MAX + UNWATCHED_SETTLE_QUIET);
     frames.force_fallback = true;
     publish_views(
         terminal,
@@ -14508,11 +14589,6 @@ fn settle_unwatched<'alloc: 'callbacks, 'callbacks>(
         false,
     )?;
     frames.force_fallback = false;
-    if frames.unbuilt_since.is_some() {
-        let now = Instant::now();
-        frames.unbuilt_since = Some(now);
-        frames.last_unbuilt = Some(now);
-    }
     Ok(())
 }
 

@@ -379,3 +379,68 @@ fn an_unwatched_pane_wakes_its_watcher_a_few_times_a_second_under_steady_output(
         "{ready} watcher wakes in {elapsed:.2} s for a pane nobody streams"
     );
 }
+
+#[test]
+fn only_sequences_that_change_published_metadata_hurry_an_unwatched_publish() {
+    let mut terminal = new_terminal(40, 5, 100).expect("terminal");
+    let mut filter = super::EngineFilter::default();
+    let mut hinted = |chunks: &[&[u8]]| {
+        filter.metadata_hint = false;
+        for chunk in chunks {
+            filter.write(
+                chunk,
+                super::EngineKnobs::default(),
+                &mut terminal,
+                &mut Vec::new(),
+                &mut None,
+                &mut None,
+            );
+        }
+        filter.metadata_hint
+    };
+    assert!(!hinted(&[
+        b"plain text\r\n\x1b[1;31mred\x1b[m\x1b[?25l\x1b[?25h"
+    ]));
+    assert!(!hinted(&[
+        b"\x1b]133;A\x07\x1b]8;;https://example.com\x07x\x1b]8;;\x07"
+    ]));
+    assert!(hinted(&[b"text \x1b]2;title\x07 more"]));
+    assert!(hinted(&[b"\x1b]0;ti", b"tle\x1b\\"]));
+    assert!(hinted(&[b"\x1b]7;file://host/tmp\x07"]));
+    assert!(hinted(&[b"\x1b[?1000;1006h"]));
+    assert!(hinted(&[b"\x1b[?10", b"02l"]));
+    assert!(hinted(&[b"\x1b[>1u"]));
+    assert!(!hinted(&[b"\x1b[?u"]));
+    assert!(hinted(&[b"\x1bc"]));
+}
+
+#[test]
+fn an_unwatched_pane_publishes_a_few_times_a_second_under_steady_output() {
+    let session = shell_session(
+        "read _; i=0; while [ $i -lt 400 ]; do printf 'row %d\\n' $i; i=$((i+1)); sleep 0.004; done; printf 'ZZ_DONE\\n'; read _",
+    );
+    wait_until("the shell to start", || {
+        matches!(session.latest_viewport().status, SessionStatus::Running)
+    });
+    session.send_text("go\n");
+    let started = Instant::now();
+    let mut published: Vec<Arc<TerminalViewport>> = Vec::new();
+    wait_until("the output to finish", || {
+        let viewport = session.latest_viewport();
+        let done = text(&viewport).contains("ZZ_DONE");
+        if published
+            .last()
+            .is_none_or(|last| !Arc::ptr_eq(last, &viewport))
+        {
+            published.push(viewport);
+        }
+        done
+    });
+    let elapsed = started.elapsed().as_secs_f64();
+    let per_second = published.len() as f64 / elapsed;
+    assert!(
+        per_second <= 20.0,
+        "{} fallback publishes in {elapsed:.2} s for a pane nobody streams",
+        published.len()
+    );
+}

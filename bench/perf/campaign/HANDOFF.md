@@ -1,14 +1,40 @@
-# Daemon perf campaign: handoff to Linux
+# Daemon perf campaign: handoff
 
-Entry point for a fresh session continuing the zz daemon performance rebuild on a Linux host
-(Arch or Ubuntu, x86_64 or aarch64) with no access to the owner's Mac or to the earlier
-session's memory. Written 2026-09-29. The code on perf/wave1 is as of `9eb5888b`; the handoff files
-were committed on top of it in `fd6f36a8` and corrected after that, and steps 3-4 move the head again.
+Entry point for a fresh session continuing the zz daemon performance rebuild. Written 2026-09-29 on
+the macbook, continued the same day on the Linux host alienware (see "Linux leg"). Wave 0 and wave 1
+are on `main` and pushed (`origin/main` `2166bd31` and later); wave 2 runs on `perf/wave2`.
 
 Read next, in this order: `knowledge/designs/daemon-perf-rebuild.md` (the plan: targets, lanes,
 write zones, as-built notes per merged lane), `bench/perf/README.md` (the gate),
-`bench/perf/thresholds.json`, `bench/perf/campaign/attach-review.json` (the unfinished lane).
-Paths under `/Users/...` and `/private/tmp/...` in any report are on the Mac and do not exist here.
+`bench/perf/thresholds.json`. Paths under `/Users/...` and `/private/tmp/...` in a report are on the
+Mac; paths under `/home/demfabris/...` and `~/.cache/zz-perf/...` are on alienware.
+
+## Next session on the Mac: the wave-1 macOS gate (owner asked for this, 2026-09-29)
+
+The Linux wave-1 exit is recorded (`wave1-alienware-aaaa8195.json`). The Mac run covers what Linux
+cannot (table "macOS-only checks") and the new Ghostty pin's Darwin path. Run on a quiet Mac, nothing
+else building:
+
+1. `git -C ~/dev/zz fetch origin && git -C ~/dev/zz worktree add --detach ~/dev/zz-macgate 2166bd31`
+   (`2166bd31` is wave 1 plus the Ghostty pin and the gate's per-host rules; if `main` has moved on
+   with wave-2 merges, still run this gate at `2166bd31`, and optionally a second one at `main`).
+   Remove any stale zz Dev daemon first (`zz kill-server` against dev sockets): the wire changed
+   inside protocol 107 during wave 1.
+2. `cd ~/dev/zz-macgate && cargo build --release -p zz-cli` (fetches `demfabris/ghostty@713374af`,
+   branch `zz-2026-09-29`), then
+   `just perf-gate wave1 --strict --baseline bench/perf/results/w1-5-exec-macbook-a26b6368.json --json bench/perf/results/wave1-macbook-2166bd31.json`.
+   The Mac is the `reference` host, so absolute rules apply unscaled there. Expect W1-ATTACH's rows
+   to pass (Linux: tty 504 B, 2 connections); echo rows are no longer wave-1 rules.
+3. Darwin path of the PageList fix (never run): in a ghostty checkout at `713374af`,
+   `zig build test-lib-vt -Demit-lib-vt=true -Dtest-filter=PageList`; then check the gate's
+   `mem.footprint.scroll180` / `scroll80` against `w1-5-exec-macbook-a26b6368.json` (the fix trims
+   idle pages with `MADV_FREE_REUSABLE` and recommits with `MADV_FREE_REUSE`; a missed `untrim`
+   would under-count footprint) and `throughput.*` (should not drop below W0).
+4. `just build mac` (bundle, CEF) and `otool -L` on the `dist/` binary (CoreFoundation-free link);
+   `just ios-gpui iPad build` (W1-ATTACH added hello capability constants; W2-TERM changes the
+   terminal wire if it has merged).
+5. Commit `wave1-macbook-2166bd31.json` (and notes on anything red) on `main` from a clean
+   checkout, run `python3 compat/evidence-secrets.py`, and push.
 
 ## Where things stand
 

@@ -15,6 +15,9 @@ static TAG_ALLOCATOR_MEMORY: extern "C" fn() = zz_cli::tag_allocator_memory;
 fn main() -> ExitCode {
     #[cfg(windows)]
     zz_cli::attach_parent_console();
+    if let Some(exit) = zz_terminal::run_pty_exec_mode() {
+        return exit;
+    }
     if let Some(exit) = zz_cli::run_askpass_mode() {
         return exit;
     }

@@ -8,7 +8,7 @@ use std::{
     path::PathBuf,
     rc::Rc,
     sync::{
-        Arc,
+        Arc, LazyLock,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     thread,
@@ -37,7 +37,9 @@ use libghostty_vt::{
     },
 };
 use parking_lot::{Mutex, RwLock};
-use portable_pty::{CommandBuilder, ExitStatus, PtySize, native_pty_system};
+#[cfg(not(unix))]
+use portable_pty::native_pty_system;
+use portable_pty::{CommandBuilder, ExitStatus, PtySize};
 use regex::RegexBuilder;
 use smallvec::SmallVec;
 use thiserror::Error;
@@ -58,6 +60,48 @@ use crate::{
 };
 
 mod mode_revision;
+#[cfg(test)]
+mod pane_tests;
+#[cfg(unix)]
+mod unix_pty;
+
+thread_local! {
+    static ROUND_TRIPS_FORBIDDEN: Cell<bool> = const { Cell::new(false) };
+}
+
+#[must_use]
+pub fn forbid_actor_round_trips() -> RoundTripGuard {
+    RoundTripGuard(ROUND_TRIPS_FORBIDDEN.with(|forbidden| forbidden.replace(true)))
+}
+
+/// Run as the pane launcher when the process was started as one: claim the
+/// terminal on stdin as the controlling terminal and exec the pane program.
+/// Returns `None` in every other process, which marks it as able to launch
+/// panes through itself.
+#[must_use]
+pub fn run_pty_exec_mode() -> Option<std::process::ExitCode> {
+    #[cfg(unix)]
+    {
+        unix_pty::run_pty_exec_mode()
+    }
+    #[cfg(not(unix))]
+    {
+        None
+    }
+}
+
+#[must_use]
+pub fn allow_actor_round_trips() -> RoundTripGuard {
+    RoundTripGuard(ROUND_TRIPS_FORBIDDEN.with(|forbidden| forbidden.replace(false)))
+}
+
+pub struct RoundTripGuard(bool);
+
+impl Drop for RoundTripGuard {
+    fn drop(&mut self) {
+        ROUND_TRIPS_FORBIDDEN.with(|forbidden| forbidden.set(self.0));
+    }
+}
 
 use mode_revision::{ModeRevision, ModeSelection};
 
@@ -84,6 +128,8 @@ const CAPTURE_TIMEOUT: Duration = Duration::from_secs(2);
 const SEARCH_REFRESH_DEBOUNCE: Duration = Duration::from_millis(80);
 const TERMINATION_GRACE: Duration = Duration::from_millis(500);
 const TERMINATION_KILL_WAIT: Duration = Duration::from_millis(500);
+#[cfg(unix)]
+const PANE_EXEC_WAIT: Duration = Duration::from_millis(500);
 const MAX_SEARCH_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_WHEEL_REPEAT: u32 = 32;
 const PTY_READ_BUFFER_BYTES: usize = 64 * 1024;
@@ -274,6 +320,7 @@ struct EngineFilter {
     osc: Option<Vec<u8>>,
     bar: ProgressBar,
     primary_history_size: usize,
+    metadata_hint: bool,
 }
 
 impl EngineFilter {
@@ -327,7 +374,8 @@ impl EngineFilter {
                         self.state = EngineState::Rename;
                         bytes = &bytes[1..];
                     }
-                    _ => {
+                    other => {
+                        self.metadata_hint |= other == b'c';
                         terminal.vt_write(b"\x1b");
                         self.state = EngineState::Ground;
                     }
@@ -343,6 +391,7 @@ impl EngineFilter {
                     }
                     bytes = &bytes[1..];
                     if byte >= 0x40 {
+                        self.metadata_hint |= csi_touches_metadata(&self.sequence, byte);
                         if csi_needs_rewrite(&self.sequence, byte, knobs) {
                             write_engine_csi(
                                 &self.sequence,
@@ -457,6 +506,7 @@ impl EngineFilter {
                     }
                     let final_byte = bytes[end];
                     let parameters = &bytes[escape + 2..end];
+                    self.metadata_hint |= csi_touches_metadata(parameters, final_byte);
                     if csi_needs_rewrite(parameters, final_byte, knobs) {
                         terminal.vt_write(&bytes[start..escape]);
                         write_engine_csi(
@@ -481,6 +531,10 @@ impl EngineFilter {
                     self.title.clear();
                     self.state = EngineState::Rename;
                     return &bytes[escape + 2..];
+                }
+                b'c' => {
+                    self.metadata_hint = true;
+                    cursor = escape + 2;
                 }
                 _ => {
                     cursor = escape + 1;
@@ -542,8 +596,10 @@ impl EngineFilter {
         last_command_status: &mut Option<CommandStatusUpdate>,
     ) {
         let Some(osc) = self.osc.take() else {
+            self.metadata_hint = true;
             return;
         };
+        self.metadata_hint |= osc_touches_metadata(&osc);
         if let Some(status) = parse_osc_command_status(&osc) {
             *last_command_status = Some(status);
             return;
@@ -582,6 +638,38 @@ impl CommandStatusUpdate {
             Self::Unknown => None,
             Self::Exit(code) => Some(code),
         }
+    }
+}
+
+fn osc_touches_metadata(payload: &[u8]) -> bool {
+    let digits = payload
+        .iter()
+        .position(|byte| !byte.is_ascii_digit())
+        .unwrap_or(payload.len());
+    matches!(&payload[..digits], b"0" | b"1" | b"2" | b"7")
+}
+
+fn csi_touches_metadata(parameters: &[u8], final_byte: u8) -> bool {
+    match final_byte {
+        b'h' | b'l' => parameters.strip_prefix(b"?").is_some_and(|modes| {
+            modes.split(|byte| *byte == b';').any(|mode| {
+                matches!(
+                    mode,
+                    b"9" | b"1000"
+                        | b"1001"
+                        | b"1002"
+                        | b"1003"
+                        | b"1005"
+                        | b"1006"
+                        | b"1015"
+                        | b"1016"
+                )
+            })
+        }),
+        b'u' => matches!(parameters.first(), Some(b'>' | b'<' | b'=')),
+        b'p' => parameters == b"!",
+        b't' => parameters.starts_with(b"22") || parameters.starts_with(b"23"),
+        _ => false,
     }
 }
 
@@ -1175,7 +1263,7 @@ pub struct TerminalEvents {
 
 struct ForegroundSource {
     #[cfg(unix)]
-    master: Arc<parking_lot::Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
+    master: Arc<unix_pty::UnixMaster>,
     shell: Option<u32>,
     tty: Option<PathBuf>,
 }
@@ -1185,7 +1273,6 @@ impl ForegroundSource {
         #[cfg(unix)]
         {
             self.master
-                .lock()
                 .process_group_leader()
                 .and_then(|group| u32::try_from(group).ok())
                 .filter(|process_id| *process_id != 0)
@@ -1208,8 +1295,10 @@ struct EventQueueState {
     pending_reliable_bytes: AtomicUsize,
     notification_pending: AtomicBool,
     output_activity_pending: AtomicBool,
+    identity: Mutex<bool>,
     foreground: RwLock<Option<Box<ForegroundSource>>>,
     completion: AtomicU64,
+    identity_ready: parking_lot::Condvar,
 }
 
 impl EventQueueState {
@@ -1219,8 +1308,18 @@ impl EventQueueState {
             pending_reliable_bytes: AtomicUsize::new(0),
             notification_pending: AtomicBool::new(false),
             output_activity_pending: AtomicBool::new(false),
+            identity: Mutex::new(false),
             foreground: RwLock::new(None),
             completion: AtomicU64::new(0),
+            identity_ready: parking_lot::Condvar::new(),
+        }
+    }
+
+    fn resolve_identity(&self) {
+        let mut resolved = self.identity.lock();
+        if !*resolved {
+            *resolved = true;
+            self.identity_ready.notify_all();
         }
     }
 }
@@ -1291,13 +1390,14 @@ pub struct TerminalFacts {
 struct PublishedViewports {
     fallback: Arc<TerminalViewport>,
     by_view: HashMap<TerminalViewId, Arc<TerminalViewport>>,
+    epochs: HashMap<TerminalViewId, u64>,
+    fallback_current: bool,
     copy_facts: HashMap<TerminalViewId, Arc<CopyModeFacts>>,
     frozen: Option<Arc<FrozenHistory>>,
     bar: ProgressBar,
     last_command_status: Option<i32>,
     facts: TerminalFacts,
     search_string: String,
-    synchronized_output_deadline: Option<Instant>,
 }
 
 impl PublishedViewports {
@@ -1305,13 +1405,14 @@ impl PublishedViewports {
         Self {
             fallback: Arc::new(viewport),
             by_view: HashMap::new(),
+            epochs: HashMap::new(),
+            fallback_current: false,
             copy_facts: HashMap::new(),
             frozen: None,
             bar: ProgressBar::default(),
             last_command_status: None,
             facts: TerminalFacts::default(),
             search_string: String::new(),
-            synchronized_output_deadline: None,
         }
     }
 }
@@ -1429,6 +1530,9 @@ pub struct TerminalSpawn {
     /// environment name and value are byte strings, so this carries `OsString`
     /// rather than text and a non-UTF-8 entry reaches the child verbatim.
     pub env: Vec<(std::ffi::OsString, Option<std::ffi::OsString>)>,
+    pub word_separators: Option<WordSeparators>,
+    pub allow_passthrough: Option<bool>,
+    pub wrap_search: Option<bool>,
 }
 
 pub struct TerminalSession {
@@ -1439,6 +1543,8 @@ pub struct TerminalSession {
     word_separators: RwLock<WordSeparators>,
     applied_appearance: AtomicU64,
     terminating: AtomicBool,
+    preview_pending: AtomicBool,
+    retired: AtomicBool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1557,11 +1663,13 @@ impl TerminalSession {
         let (input_tx, input_rx) = input_channel();
         let (wake, wake_rx) = actor_wake();
         let (alive, liveness) = crossbeam_channel::bounded(0);
+        let slot = Arc::new(Mutex::new(ControlSlot::default()));
         let commands = CommandSender {
             queues: Box::new(CommandQueues {
                 control: command_tx,
                 input: Some(input_tx),
                 liveness,
+                slot: Arc::clone(&slot),
             }),
             wake: wake.clone(),
         };
@@ -1585,12 +1693,14 @@ impl TerminalSession {
 
         let worker_publisher = publisher.clone();
         let appearance_hash = appearance.stable_hash();
+        let initial_separators = spawn.word_separators.clone().unwrap_or_default();
         if let Err(error) = thread::Builder::new()
             .name("zz-terminal".into())
             .spawn(move || {
                 terminal_worker(
                     command_rx,
                     input_rx,
+                    slot,
                     worker_publisher,
                     max_scrollback,
                     appearance,
@@ -1609,9 +1719,11 @@ impl TerminalSession {
             events,
             latest,
             max_scrollback,
-            word_separators: RwLock::new(WordSeparators::default()),
+            word_separators: RwLock::new(initial_separators),
             applied_appearance: AtomicU64::new(appearance_hash),
             terminating: AtomicBool::new(false),
+            preview_pending: AtomicBool::new(false),
+            retired: AtomicBool::new(false),
         }
     }
 
@@ -1681,15 +1793,18 @@ impl TerminalSession {
     ) -> Self {
         let (command_tx, command_rx) = command_channel();
         let (alive, liveness) = crossbeam_channel::bounded(0);
+        let slot = Arc::new(Mutex::new(ControlSlot::default()));
         let commands = CommandSender {
             queues: Box::new(CommandQueues {
                 control: command_tx,
                 input: None,
                 liveness,
+                slot: Arc::clone(&slot),
             }),
             wake: ActorWake::none(),
         };
         let event_state = Arc::new(EventQueueState::new());
+        event_state.resolve_identity();
         let (event_tx, events) = terminal_event_channel(&event_state);
         let latest = Arc::new(RwLock::new(PublishedViewports::new(
             TerminalViewport::blank_with_appearance(
@@ -1716,6 +1831,7 @@ impl TerminalSession {
             .spawn(move || {
                 output_view_worker(
                     command_rx,
+                    slot,
                     worker_publisher,
                     title,
                     text,
@@ -1737,6 +1853,8 @@ impl TerminalSession {
             word_separators: RwLock::new(WordSeparators::default()),
             applied_appearance: AtomicU64::new(appearance_hash),
             terminating: AtomicBool::new(false),
+            preview_pending: AtomicBool::new(false),
+            retired: AtomicBool::new(false),
         }
     }
 
@@ -1763,6 +1881,22 @@ impl TerminalSession {
             .shell_process_id()
     }
 
+    pub fn wait_for_identity(&self, timeout: Duration) -> bool {
+        let state = &self.events.state;
+        let deadline = Instant::now() + timeout;
+        let mut resolved = state.identity.lock();
+        while !*resolved {
+            if state
+                .identity_ready
+                .wait_until(&mut resolved, deadline)
+                .timed_out()
+            {
+                break;
+            }
+        }
+        *resolved
+    }
+
     #[must_use]
     pub fn completion(&self) -> Option<TerminalProcessExit> {
         TerminalProcessExit::decode(self.events.state.completion.load(Ordering::Acquire))
@@ -1783,7 +1917,10 @@ impl TerminalSession {
     /// Applied in command order, without touching the PTY.
     pub fn set_word_separators(&self, separators: WordSeparators) {
         *self.word_separators.write() = separators.clone();
-        self.send_command(Command::SetWordSeparators(Box::new(separators)));
+        self.commands.with_slot(|slot| {
+            slot.pending.word_separators = Some(Box::new(separators));
+            true
+        });
     }
 
     /// Apply new renderer defaults without replacing PTY or viewport state.
@@ -1794,24 +1931,36 @@ impl TerminalSession {
         if self.applied_appearance.swap(hash, Ordering::AcqRel) == hash {
             return;
         }
-        self.send_command(Command::SetAppearance(appearance));
+        self.commands.with_slot(|slot| {
+            slot.pending.appearance = Some(appearance);
+            true
+        });
     }
 
     pub fn set_allow_passthrough(&self, enabled: bool) {
         // The daemon folds tmux `on` into `all` because this worker has no pane-visibility signal.
-        self.send_command(Command::SetAllowPassthrough(if enabled {
-            AllowPassthrough::All
-        } else {
-            AllowPassthrough::Off
-        }));
+        self.commands.with_slot(|slot| {
+            slot.pending.allow_passthrough = Some(if enabled {
+                AllowPassthrough::All
+            } else {
+                AllowPassthrough::Off
+            });
+            true
+        });
     }
 
     pub fn set_wrap_search(&self, enabled: bool) {
-        self.send_command(Command::SetWrapSearch(enabled));
+        self.commands.with_slot(|slot| {
+            slot.pending.wrap_search = Some(enabled);
+            true
+        });
     }
 
     pub fn set_engine_knobs(&self, knobs: EngineKnobs) {
-        self.send_command(Command::SetEngineKnobs(knobs));
+        self.commands.with_slot(|slot| {
+            slot.pending.engine_knobs = Some(knobs);
+            true
+        });
     }
 
     /// `window_copy_clone_screen` runs on the source pane, so the revision a
@@ -1880,6 +2029,44 @@ impl TerminalSession {
     #[must_use]
     pub fn latest_viewports(&self) -> HashMap<TerminalViewId, Arc<TerminalViewport>> {
         self.latest.read().by_view.clone()
+    }
+
+    #[must_use]
+    pub fn latest_view_frames(&self) -> Vec<(TerminalViewId, Arc<TerminalViewport>, Option<u64>)> {
+        let latest = self.latest.read();
+        let mut frames = latest
+            .by_view
+            .iter()
+            .map(|(view, viewport)| {
+                (
+                    *view,
+                    Arc::clone(viewport),
+                    latest.epochs.get(view).copied(),
+                )
+            })
+            .collect::<Vec<_>>();
+        frames.sort_by_key(|(view, _, _)| view.0);
+        frames
+    }
+
+    #[must_use]
+    pub fn latest_viewport_is_current(&self) -> bool {
+        self.latest.read().fallback_current
+    }
+
+    pub fn retire(&self) {
+        self.retired.store(true, Ordering::Release);
+    }
+
+    #[must_use]
+    pub fn is_retired(&self) -> bool {
+        self.retired.load(Ordering::Acquire)
+    }
+
+    pub fn take_preview_ready(&self) -> bool {
+        self.preview_pending.load(Ordering::Acquire)
+            && self.latest_viewport_is_current()
+            && self.preview_pending.swap(false, Ordering::AcqRel)
     }
 
     /// The copy-mode facts published for one view, absent whenever that view
@@ -1997,27 +2184,80 @@ impl TerminalSession {
 
     /// Resize both the emulated terminal and the native PTY.
     pub fn resize(&self, columns: u16, rows: u16, cell_width_px: u32, cell_height_px: u32) {
-        self.send_command(Command::Resize(Geometry {
+        let geometry = Geometry {
             columns: columns.max(1),
             rows: rows.max(1),
             cell_width_px: cell_width_px.max(1),
             cell_height_px: cell_height_px.max(1),
-        }));
+        };
+        self.commands.with_slot(|slot| {
+            slot.pending.resize = Some(geometry);
+            true
+        });
     }
 
-    /// Activate one client's independent terminal snapshot stream.
+    /// Activate one client's view state. Frames for it flow only once
+    /// [`Self::set_view_stream`] turns its stream on.
     pub fn attach_view(&self, view: TerminalViewId) {
-        self.send_command(Command::AttachView(view));
+        self.commands.with_slot(|slot| {
+            slot.known_views.insert(view);
+            slot.pending.push_view(Command::AttachView(view));
+            true
+        });
     }
 
     /// Park one client's view state for a later reattach.
     pub fn detach_view(&self, view: TerminalViewId) {
-        self.send_command(Command::DetachView(view));
+        self.commands.with_slot(|slot| {
+            if !slot.known_views.contains(&view) {
+                return false;
+            }
+            slot.pending.push_view(Command::DetachView(view));
+            true
+        });
     }
 
     /// Permanently release a client view and all of its tracked terminal state.
     pub fn release_view(&self, view: TerminalViewId) {
-        self.send_command(Command::ReleaseView(view));
+        self.commands.with_slot(|slot| {
+            if !slot.known_views.remove(&view) {
+                return false;
+            }
+            slot.pending.push_view(Command::ReleaseView(view));
+            true
+        });
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn known_view_count(&self) -> usize {
+        self.commands.queues.slot.lock().known_views.len()
+    }
+
+    pub fn set_view_stream(&self, view: TerminalViewId, stream: ViewStream) {
+        self.commands.with_slot(|slot| {
+            if stream.is_on() {
+                slot.known_views.insert(view);
+            } else if !slot.known_views.contains(&view) {
+                return false;
+            }
+            slot.pending.push_view(Command::SetViewStream(view, stream));
+            true
+        });
+    }
+
+    pub fn set_preview_watch(&self, watch: bool) {
+        self.preview_pending.store(watch, Ordering::Release);
+        self.commands.with_slot(|slot| {
+            slot.pending.preview = Some(watch);
+            true
+        });
+    }
+
+    pub fn fresh_viewport(&self) -> Arc<TerminalViewport> {
+        self.commands
+            .request(Command::FreshViewport)
+            .unwrap_or_else(|_| self.latest_viewport())
     }
 
     /// Apply a native viewport, selection, copy, or paste action.
@@ -2402,6 +2642,141 @@ enum Command {
     },
     Terminate,
     Shutdown,
+    SetViewStream(TerminalViewId, ViewStream),
+    SetPreviewWatch(bool),
+    FreshViewport(Sender<Arc<TerminalViewport>>),
+    Wake,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ViewStream {
+    #[default]
+    Off,
+    Foreground,
+    Preview,
+}
+
+impl ViewStream {
+    const fn is_on(self) -> bool {
+        !matches!(self, Self::Off)
+    }
+}
+
+#[derive(Default)]
+struct ControlSlot {
+    pending: PendingControl,
+    deferred: Vec<(usize, Command)>,
+    in_flight: usize,
+    known_views: HashSet<TerminalViewId>,
+}
+
+impl ControlSlot {
+    fn release_deferred(&mut self, commands: &mut Vec<Command>) {
+        if !self.deferred.iter().any(|(remaining, _)| *remaining == 0) {
+            return;
+        }
+        let (ready, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.deferred)
+            .into_iter()
+            .partition(|(remaining, _)| *remaining == 0);
+        self.deferred = waiting;
+        commands.extend(ready.into_iter().map(|(_, command)| command));
+    }
+}
+
+#[derive(Default)]
+struct PendingControl {
+    word_separators: Option<Box<WordSeparators>>,
+    allow_passthrough: Option<AllowPassthrough>,
+    wrap_search: Option<bool>,
+    engine_knobs: Option<EngineKnobs>,
+    appearance: Option<Arc<TerminalAppearance>>,
+    resize: Option<Geometry>,
+    views: Vec<Command>,
+    preview: Option<bool>,
+}
+
+impl PendingControl {
+    fn push_view(&mut self, command: Command) {
+        let view = match &command {
+            Command::AttachView(view)
+            | Command::DetachView(view)
+            | Command::ReleaseView(view)
+            | Command::SetViewStream(view, _) => *view,
+            _ => unreachable!("only view commands coalesce per view"),
+        };
+        let replaces = |queued: &Command| {
+            matches!(
+                (&command, queued),
+                (Command::ReleaseView(_), _)
+                    | (
+                        Command::AttachView(_) | Command::DetachView(_),
+                        Command::AttachView(_) | Command::DetachView(_),
+                    )
+                    | (Command::SetViewStream(..), Command::SetViewStream(..))
+            )
+        };
+        self.views.retain(|queued| {
+            let same = match queued {
+                Command::AttachView(queued)
+                | Command::DetachView(queued)
+                | Command::ReleaseView(queued)
+                | Command::SetViewStream(queued, _) => *queued == view,
+                _ => false,
+            };
+            !(same && replaces(queued))
+        });
+        self.views.push(command);
+    }
+
+    fn take(&mut self) -> Vec<Command> {
+        let mut commands = Vec::new();
+        if let Some(separators) = self.word_separators.take() {
+            commands.push(Command::SetWordSeparators(separators));
+        }
+        if let Some(mode) = self.allow_passthrough.take() {
+            commands.push(Command::SetAllowPassthrough(mode));
+        }
+        if let Some(enabled) = self.wrap_search.take() {
+            commands.push(Command::SetWrapSearch(enabled));
+        }
+        if let Some(knobs) = self.engine_knobs.take() {
+            commands.push(Command::SetEngineKnobs(knobs));
+        }
+        if let Some(appearance) = self.appearance.take() {
+            commands.push(Command::SetAppearance(appearance));
+        }
+        if let Some(geometry) = self.resize.take() {
+            commands.push(Command::Resize(geometry));
+        }
+        commands.append(&mut self.views);
+        if let Some(watch) = self.preview.take() {
+            commands.push(Command::SetPreviewWatch(watch));
+        }
+        commands
+    }
+}
+
+fn take_control_slot(
+    slot: &Mutex<ControlSlot>,
+    woke_by: Option<Command>,
+    from_control: bool,
+) -> Vec<Command> {
+    let mut slot = slot.lock();
+    let mut commands = slot.pending.take();
+    slot.release_deferred(&mut commands);
+    let Some(command) = woke_by else {
+        return commands;
+    };
+    let counted = from_control && !matches!(command, Command::Wake);
+    commands.push(command);
+    if counted {
+        slot.in_flight = slot.in_flight.saturating_sub(1);
+        for (remaining, _) in &mut slot.deferred {
+            *remaining = remaining.saturating_sub(1);
+        }
+        slot.release_deferred(&mut commands);
+    }
+    commands
 }
 
 impl Command {
@@ -2439,6 +2814,10 @@ impl Command {
             Self::ResetScreen => "reset-screen",
             Self::Terminate => "terminate",
             Self::Shutdown => "shutdown",
+            Self::SetViewStream(..) => "set-view-stream",
+            Self::SetPreviewWatch(_) => "set-preview-watch",
+            Self::FreshViewport(_) => "fresh-viewport",
+            Self::Wake => "wake",
         }
     }
 
@@ -2579,10 +2958,11 @@ impl ActorWake {
 
     fn notify(&self) {
         #[cfg(unix)]
-        if let Some(pipe) = &self.pipe
-            && let Err(error) = write_actor_wake(|| rustix::io::write(&**pipe, &[1_u8]))
-        {
-            log::error!("failed to wake terminal actor: {error}");
+        if let Some(pipe) = &self.pipe {
+            match write_actor_wake(|| rustix::io::write(&**pipe, &[1_u8])) {
+                Ok(()) | Err(rustix::io::Errno::PIPE) => {}
+                Err(error) => log::error!("failed to wake terminal actor: {error}"),
+            }
         }
     }
 }
@@ -2637,6 +3017,7 @@ struct CommandQueues {
     control: Sender<Command>,
     input: Option<InputSender>,
     liveness: Receiver<Infallible>,
+    slot: Arc<Mutex<ControlSlot>>,
 }
 
 struct CommandSender {
@@ -2645,16 +3026,64 @@ struct CommandSender {
 }
 
 impl CommandSender {
+    fn with_slot(&self, update: impl FnOnce(&mut ControlSlot) -> bool) {
+        let mut slot = self.queues.slot.lock();
+        if slot.in_flight == 0 {
+            let wake = update(&mut slot);
+            drop(slot);
+            if wake {
+                let _ = self.try_send(Command::Wake);
+            }
+            return;
+        }
+        let earlier = std::mem::take(&mut slot.pending);
+        update(&mut slot);
+        let later = std::mem::replace(&mut slot.pending, earlier).take();
+        let in_flight = slot.in_flight;
+        slot.deferred
+            .extend(later.into_iter().map(|command| (in_flight, command)));
+    }
+
+    fn counts_in_flight(&self, command: &Command) -> bool {
+        let counted = !matches!(command, Command::Wake)
+            && (command.pty_input_bytes().is_none() || self.queues.input.is_none());
+        if counted {
+            self.queues.slot.lock().in_flight += 1;
+        }
+        counted
+    }
+
+    fn abandon_in_flight(&self) {
+        let mut slot = self.queues.slot.lock();
+        slot.in_flight = slot.in_flight.saturating_sub(1);
+        let limit = slot.in_flight;
+        let mut released = false;
+        for (remaining, _) in &mut slot.deferred {
+            *remaining = (*remaining).min(limit);
+            released |= *remaining == 0;
+        }
+        drop(slot);
+        if released {
+            let _ = self.try_send(Command::Wake);
+        }
+    }
+
     fn send(&self, command: Command) -> Result<(), crossbeam_channel::TrySendError<Command>> {
         let result = if command.pty_input_bytes().is_some()
             && let Some(input) = &self.queues.input
         {
             input.try_send(command)
         } else {
-            self.queues
+            let counted = self.counts_in_flight(&command);
+            let result = self
+                .queues
                 .control
                 .send(command)
-                .map_err(|error| crossbeam_channel::TrySendError::Disconnected(error.0))
+                .map_err(|error| crossbeam_channel::TrySendError::Disconnected(error.0));
+            if counted && result.is_err() {
+                self.abandon_in_flight();
+            }
+            result
         };
         if result.is_ok() {
             self.wake.notify();
@@ -2679,7 +3108,12 @@ impl CommandSender {
                 }
             })
         } else {
-            self.queues.control.send_timeout(command, timeout)
+            let counted = self.counts_in_flight(&command);
+            let result = self.queues.control.send_timeout(command, timeout);
+            if counted && result.is_err() {
+                self.abandon_in_flight();
+            }
+            result
         };
         if result.is_ok() {
             self.wake.notify();
@@ -2692,8 +3126,14 @@ impl CommandSender {
         command: impl FnOnce(Sender<T>) -> Command,
     ) -> Result<T, ActorRequestError> {
         let (reply, response) = crossbeam_channel::bounded(1);
+        let command = command(reply);
+        debug_assert!(
+            !ROUND_TRIPS_FORBIDDEN.with(Cell::get),
+            "{} waits on the pane actor while actor round trips are forbidden",
+            command.name()
+        );
         let started = Instant::now();
-        self.send_timeout(command(reply), CAPTURE_TIMEOUT)
+        self.send_timeout(command, CAPTURE_TIMEOUT)
             .map_err(|error| match error {
                 crossbeam_channel::SendTimeoutError::Timeout(_) => ActorRequestError::TimedOut,
                 crossbeam_channel::SendTimeoutError::Disconnected(_) => {
@@ -2717,7 +3157,12 @@ impl CommandSender {
         {
             input.try_send(command)
         } else {
-            self.queues.control.try_send(command)
+            let counted = self.counts_in_flight(&command);
+            let result = self.queues.control.try_send(command);
+            if counted && result.is_err() {
+                self.abandon_in_flight();
+            }
+            result
         };
         if result.is_ok() {
             self.wake.notify();
@@ -3220,6 +3665,13 @@ impl ViewportDictionary {
             self.cell_pool.swap_remove(discard);
         }
         self.cell_pool.push(plane);
+    }
+
+    fn release_pools(&mut self) {
+        self.cell_pool.clear();
+        self.overlay_pool.clear();
+        self.grapheme_scratch = String::new();
+        self.overlay_scratch = Vec::new();
     }
 
     fn commit_cell_plane(&mut self, plane: Arc<[PackedCell]>) {
@@ -3780,6 +4232,12 @@ fn decode_kitty_png<'alloc>(
     })
 }
 
+enum FallbackFrame {
+    FirstStreamed,
+    Built(TerminalViewport),
+    Metadata(TerminalViewport),
+}
+
 #[derive(Clone, Copy, Debug)]
 enum SnapshotChange {
     Content,
@@ -3880,35 +4338,9 @@ struct Publisher {
 }
 
 impl Publisher {
-    fn synchronized_output_deadline(&self) -> Option<Instant> {
-        self.latest.read().synchronized_output_deadline
-    }
-
-    fn defer_synchronized_output(
-        &self,
-        terminal: &mut Terminal<'_, '_>,
-        status: &SessionStatus,
-    ) -> Result<bool, WorkerError> {
-        let mut latest = self.latest.write();
-        if !terminal.mode(Mode::SYNC_OUTPUT)? {
-            latest.synchronized_output_deadline = None;
-            return Ok(false);
-        }
-        let now = Instant::now();
-        let deadline = latest
-            .synchronized_output_deadline
-            .get_or_insert(now + SYNCHRONIZED_OUTPUT_TIMEOUT);
-        if matches!(status, SessionStatus::Running) && now < *deadline {
-            return Ok(true);
-        }
-        latest.synchronized_output_deadline = None;
-        drop(latest);
-        terminal.set_mode(Mode::SYNC_OUTPUT, false)?;
-        Ok(false)
-    }
-
     fn set_foreground_source(&self, source: Option<Box<ForegroundSource>>) {
         *self.state.foreground.write() = source;
+        self.state.resolve_identity();
     }
 
     fn set_completion(&self, completion: TerminalProcessExit) {
@@ -3929,19 +4361,115 @@ impl Publisher {
         self.latest.write().last_command_status = status;
     }
 
+    #[cfg(test)]
     fn publish(&self, viewport: TerminalViewport) {
         let viewport = Arc::new(viewport);
         {
             let mut latest = self.latest.write();
             latest.fallback = Arc::clone(&viewport);
+            latest.fallback_current = true;
             latest.by_view.clear();
+            latest.epochs.clear();
             latest.copy_facts.clear();
         }
         self.notify_viewports(&viewport, 0);
     }
 
-    fn publish_copy_facts(&self, facts: HashMap<TerminalViewId, Arc<CopyModeFacts>>) {
-        self.latest.write().copy_facts = facts;
+    fn publish_frame(
+        &self,
+        fallback: FallbackFrame,
+        viewports: Vec<(TerminalViewId, TerminalViewport, Option<u64>)>,
+        copy_facts: HashMap<TerminalViewId, Arc<CopyModeFacts>>,
+        notify: bool,
+    ) {
+        let mut by_view = HashMap::with_capacity(viewports.len());
+        let mut epochs = HashMap::with_capacity(viewports.len());
+        let mut first_streamed = None;
+        for (view, viewport, epoch) in viewports {
+            let viewport = Arc::new(viewport);
+            if let Some(epoch) = epoch {
+                first_streamed.get_or_insert_with(|| Arc::clone(&viewport));
+                epochs.insert(view, epoch);
+            }
+            by_view.insert(view, viewport);
+        }
+        let view_count = by_view.len();
+        let (fallback, current) = match fallback {
+            FallbackFrame::FirstStreamed => (
+                first_streamed.expect("a streamed view published a frame"),
+                true,
+            ),
+            FallbackFrame::Built(viewport) => (Arc::new(viewport), true),
+            FallbackFrame::Metadata(viewport) => (Arc::new(viewport), false),
+        };
+        {
+            let mut latest = self.latest.write();
+            latest.fallback = Arc::clone(&fallback);
+            latest.fallback_current = current;
+            latest.by_view = by_view;
+            latest.epochs = epochs;
+            latest.copy_facts = copy_facts;
+        }
+        if notify {
+            self.notify_viewports(&fallback, view_count);
+        }
+    }
+
+    fn refresh_fallback(
+        &self,
+        terminal: &Terminal<'_, '_>,
+        dictionary: &mut ViewportDictionary,
+        status: &SessionStatus,
+    ) -> Result<Option<(TerminalViewport, bool)>, WorkerError> {
+        let previous = Arc::clone(&self.latest.read().fallback);
+        let scrollbar = terminal.scrollbar()?;
+        let scrollbar = ScrollbarState {
+            total: u32::try_from(scrollbar.total)
+                .map_err(|_| WorkerError::ViewportMetadataTooLarge)?,
+            offset: u32::try_from(scrollbar.offset)
+                .map_err(|_| WorkerError::ViewportMetadataTooLarge)?,
+            len: u32::try_from(scrollbar.len).map_err(|_| WorkerError::ViewportMetadataTooLarge)?,
+        };
+        let at_bottom = |state: ScrollbarState| {
+            u64::from(state.offset) + u64::from(state.len) >= u64::from(state.total)
+        };
+        if previous.columns != terminal.cols()?
+            || previous.rows != terminal.rows()?
+            || previous.mode != TerminalMode::Live
+            || !previous.overlays.is_empty()
+            || previous.search.is_some()
+            || !at_bottom(previous.scrollbar)
+            || !at_bottom(scrollbar)
+        {
+            return Ok(None);
+        }
+        let title = terminal.title().unwrap_or("zz");
+        let working_directory = terminal.pwd().ok().and_then(reported_working_directory);
+        let mut viewport = (*previous).clone();
+        viewport.presentation =
+            dictionary.shared_presentation(title, working_directory.as_deref(), None);
+        viewport.status = status.clone();
+        viewport.scrollbar = scrollbar;
+        viewport.mouse_tracking = terminal.is_mouse_tracking()?;
+        viewport.kitty_keyboard = terminal
+            .kitty_keyboard_flags()
+            .is_ok_and(|flags| !flags.is_empty());
+        viewport.unseen_output = 0;
+        let changed = viewport.presentation.title != previous.presentation.title
+            || viewport.presentation.working_directory != previous.presentation.working_directory
+            || viewport.status != previous.status
+            || viewport.mouse_tracking != previous.mouse_tracking
+            || viewport.kitty_keyboard != previous.kitty_keyboard;
+        Ok(Some((viewport, changed)))
+    }
+
+    fn latest_fallback(&self) -> Arc<TerminalViewport> {
+        Arc::clone(&self.latest.read().fallback)
+    }
+
+    fn notify_latest(&self) {
+        let fallback = self.latest_fallback();
+        self.notify_viewports(&fallback, 0);
     }
 
     fn publish_search_string(&self, search: Option<&CopyModeSearch>) {
@@ -3953,26 +4481,6 @@ impl Publisher {
 
     fn publish_frozen_history(&self, revision: Arc<ModeRevision>) {
         self.latest.write().frozen = Some(Arc::new(FrozenHistory { revision }));
-    }
-
-    fn publish_viewports(&self, viewports: Vec<(TerminalViewId, TerminalViewport)>) {
-        let mut by_view = HashMap::with_capacity(viewports.len());
-        let mut fallback = None;
-        for (view, viewport) in viewports {
-            let viewport = Arc::new(viewport);
-            fallback.get_or_insert_with(|| Arc::clone(&viewport));
-            by_view.insert(view, viewport);
-        }
-        let Some(fallback) = fallback else {
-            return;
-        };
-        let view_count = by_view.len();
-        {
-            let mut latest = self.latest.write();
-            latest.fallback = Arc::clone(&fallback);
-            latest.by_view = by_view;
-        }
-        self.notify_viewports(&fallback, view_count);
     }
 
     fn notify_viewports(&self, viewport: &TerminalViewport, view_count: usize) {
@@ -4013,27 +4521,25 @@ impl Publisher {
     }
 
     fn set_status(&self, status: &SessionStatus) {
-        let (fallback, by_view) = {
-            let latest = self.latest.read();
-            (Arc::clone(&latest.fallback), latest.by_view.clone())
-        };
         let update = |viewport: &TerminalViewport| {
             let mut viewport = viewport.clone();
             viewport.generation = viewport.generation.saturating_add(1);
             viewport.view_generation = viewport.view_generation.saturating_add(1);
             viewport.status = status.clone();
-            viewport
+            Arc::new(viewport)
         };
-        if by_view.is_empty() {
-            self.publish(update(&fallback));
-        } else {
-            self.publish_viewports(
-                by_view
-                    .into_iter()
-                    .map(|(view, viewport)| (view, update(&viewport)))
-                    .collect(),
-            );
-        }
+        let (fallback, view_count) = {
+            let mut latest = self.latest.write();
+            latest.fallback = update(&latest.fallback);
+            let by_view = std::mem::take(&mut latest.by_view)
+                .into_iter()
+                .map(|(view, viewport)| (view, update(&viewport)))
+                .collect::<HashMap<_, _>>();
+            let view_count = by_view.len();
+            latest.by_view = by_view;
+            (Arc::clone(&latest.fallback), view_count)
+        };
+        self.notify_viewports(&fallback, view_count);
     }
 
     fn mark_output_activity(&self) {
@@ -4044,6 +4550,7 @@ impl Publisher {
 
     fn fail(&self, error: &WorkerError) {
         self.set_status(&SessionStatus::failed(error.to_string()));
+        self.state.resolve_identity();
     }
 
     fn send_reliable(&self, event: TerminalEvent) -> Result<(), WorkerError> {
@@ -4183,6 +4690,7 @@ fn reliable_event_bytes(event: &TerminalEvent) -> usize {
 fn terminal_worker(
     control_rx: Receiver<Command>,
     input_rx: Receiver<QueuedInput>,
+    slot: Arc<Mutex<ControlSlot>>,
     publisher: Publisher,
     max_scrollback: usize,
     appearance: Arc<TerminalAppearance>,
@@ -4193,6 +4701,7 @@ fn terminal_worker(
     if let Err(error) = run_terminal(
         &control_rx,
         &input_rx,
+        &slot,
         &publisher,
         max_scrollback,
         &appearance,
@@ -4220,6 +4729,7 @@ fn terminal_worker(
 )]
 fn output_view_worker(
     command_rx: Receiver<Command>,
+    slot: Arc<Mutex<ControlSlot>>,
     publisher: Publisher,
     title: String,
     text: String,
@@ -4229,6 +4739,7 @@ fn output_view_worker(
 ) {
     if let Err(error) = run_output_view(
         &command_rx,
+        &slot,
         &publisher,
         &title,
         &text,
@@ -4307,11 +4818,23 @@ fn new_terminal<'alloc: 'cb, 'cb>(
     rows: u16,
     history_limit: usize,
 ) -> Result<Terminal<'alloc, 'cb>, libghostty_vt::Error> {
+    let history_limit = history_limit.min(MAX_HISTORY_LIMIT);
     let mut terminal = Terminal::new(cols, rows)?;
     terminal
-        .set_scrollback_max_bytes(None)?
-        .set_scrollback_max_lines(Some(history_limit.min(MAX_HISTORY_LIMIT)))?;
+        .set_scrollback_max_bytes(Some(scrollback_backstop_bytes(history_limit, cols)))?
+        .set_scrollback_max_lines(Some(history_limit))?;
     Ok(terminal)
+}
+
+const SCROLLBACK_BACKSTOP_BYTES_PER_CELL: usize = 128;
+const SCROLLBACK_BACKSTOP_FLOOR: usize = 64 * 1024 * 1024;
+const SCROLLBACK_BACKSTOP_CAP: usize = 1024 * 1024 * 1024;
+
+fn scrollback_backstop_bytes(history_limit: usize, columns: u16) -> usize {
+    history_limit
+        .saturating_mul(usize::from(columns.max(1)))
+        .saturating_mul(SCROLLBACK_BACKSTOP_BYTES_PER_CELL)
+        .clamp(SCROLLBACK_BACKSTOP_FLOOR, SCROLLBACK_BACKSTOP_CAP)
 }
 
 fn clipboard_write_request<'a>(
@@ -4379,6 +4902,7 @@ fn register_device_attributes(terminal: &mut Terminal<'_, '_>) -> Result<(), Wor
 
 fn run_output_view(
     command_rx: &Receiver<Command>,
+    slot: &Mutex<ControlSlot>,
     publisher: &Publisher,
     title: &str,
     text: &str,
@@ -4400,9 +4924,7 @@ fn run_output_view(
     let mut raw_output_tap: Option<(u64, Sender<Arc<[u8]>>)> = None;
     let mut engine_filter = EngineFilter::default();
 
-    let mut render_state = RenderState::new()?;
-    let mut row_iterator = RowIterator::new()?;
-    let mut cell_iterator = CellIterator::new()?;
+    let mut frames = Frames::new(appearance)?;
     let mut mouse_encoder = mouse::Encoder::new()?;
     let mut mouse_event = mouse::Event::new()?;
     let mut input_bytes = Vec::with_capacity(LINK_URI_SCRATCH_BYTES);
@@ -4413,16 +4935,36 @@ fn run_output_view(
     let mut active_views = ActiveTerminalViews::new();
     let mut inactive_views = InactiveTerminalViews::new();
     let bound_pasted_images = HashSet::new();
-    let mut generations = ViewportGenerations::new()?;
-    let mut dictionary = ViewportDictionary {
-        class_hints: ClassHints::new(appearance),
-        ..ViewportDictionary::default()
-    };
-    let (mut search_worker, search_results) = SearchWorker::spawn(ActorWake::none())?;
+    let (mut search_worker, search_results) = SearchWorker::spawn(ActorWake::none());
+    let mut compression = IdleCompression::default();
+    if frozen {
+        frames.force_fallback = true;
+        publish_views(
+            &mut terminal,
+            publisher,
+            &mut frames,
+            SnapshotChange::Content,
+            &mut active_views,
+            &word_separators,
+            SessionStatus::Running,
+            false,
+        )?;
+    }
 
     loop {
-        let synchronized_output_timeout = publisher
-            .synchronized_output_deadline()
+        let synchronized_output_timeout = frames
+            .synchronized_output_deadline
+            .map_or_else(crossbeam_channel::never, |deadline| {
+                crossbeam_channel::after(deadline.saturating_duration_since(Instant::now()))
+            });
+        let settle_timeout = frames
+            .settle_due()
+            .map_or_else(crossbeam_channel::never, |deadline| {
+                crossbeam_channel::after(deadline.saturating_duration_since(Instant::now()))
+            });
+        compression.observe(&terminal, Instant::now());
+        let compress_timeout = compression
+            .due()
             .map_or_else(crossbeam_channel::never, |deadline| {
                 crossbeam_channel::after(deadline.saturating_duration_since(Instant::now()))
             });
@@ -4431,383 +4973,412 @@ fn run_output_view(
                 publish_active_views(
                     &mut terminal,
                     publisher,
-                    &mut render_state,
-                    &mut row_iterator,
-                    &mut cell_iterator,
-                    &mut generations,
+                    &mut frames,
                     SnapshotChange::Content,
-                    &mut dictionary,
                     &mut active_views,
                     &word_separators,
                     SessionStatus::Running,
                 )?;
             }
+            recv(settle_timeout) -> _ => {
+                settle_unwatched(
+                    &mut terminal,
+                    publisher,
+                    &mut frames,
+                    &mut active_views,
+                    &word_separators,
+                    SessionStatus::Running,
+                )?;
+            }
+            recv(compress_timeout) -> _ => compression.run(&mut terminal),
 
-            recv(command_rx) -> message => match message {
-                Ok(Command::AttachView(view_id)) => {
-                    if frozen {
-                        if let Entry::Vacant(entry) = active_views.entry(view_id) {
-                            let state = inactive_views
-                                .remove(&view_id)
-                                .map_or_else(|| output_view_state(&mut terminal).map(Box::new), Ok)?;
-                            entry.insert(state);
-                        }
-                    } else {
-                        activate_view(
-                            &mut terminal,
-                            view_id,
-                            &mut active_views,
-                            &mut inactive_views,
-                            &word_separators,
-                        )?;
-                    }
-                    if let Some(state) = active_views.get_mut(&view_id) {
-                        let _ = refresh_view_search(
-                            &terminal,
-                            view_id,
-                            state,
-                            &mut search_worker,
-                        )?;
-                    }
-                    publish_active_views(
-                        &mut terminal,
-                        publisher,
-                        &mut render_state,
-                        &mut row_iterator,
-                        &mut cell_iterator,
-                        &mut generations,
-                        SnapshotChange::Content,
-                        &mut dictionary,
-                        &mut active_views,
-                        &word_separators,
-                        SessionStatus::Running,
-                    )?;
-                }
-                Ok(Command::DetachView(view_id)) => {
-                    if frozen {
-                        if let Some(state) = active_views.remove(&view_id) {
-                            inactive_views.insert(view_id, state);
-                        }
-                    } else {
-                        deactivate_view(
-                            &mut terminal,
-                            view_id,
-                            &mut active_views,
-                            &mut inactive_views,
-                            &word_separators,
-                        )?;
-                    }
-                    search_worker.cancel(view_id);
-                    publish_active_views(
-                        &mut terminal,
-                        publisher,
-                        &mut render_state,
-                        &mut row_iterator,
-                        &mut cell_iterator,
-                        &mut generations,
-                        SnapshotChange::View,
-                        &mut dictionary,
-                        &mut active_views,
-                        &word_separators,
-                        SessionStatus::Running,
-                    )?;
-                }
-                Ok(Command::ReleaseView(view_id)) => {
-                    let released = if frozen {
-                        inactive_views.remove(&view_id);
-                        active_views.remove(&view_id).is_some()
-                    } else {
-                        release_view(
-                            &mut terminal,
-                            view_id,
-                            &mut active_views,
-                            &mut inactive_views,
-                        )?
-                    };
-                    search_worker.forget(view_id);
-                    if released {
-                        publish_active_views(
-                            &mut terminal,
-                            publisher,
-                            &mut render_state,
-                            &mut row_iterator,
-                            &mut cell_iterator,
-                            &mut generations,
-                            SnapshotChange::View,
-                            &mut dictionary,
-                            &mut active_views,
-                            &word_separators,
-                            SessionStatus::Running,
-                        )?;
-                    }
-                }
-                Ok(Command::Resize(next)) => {
-                    if next != geometry {
-                        geometry = next;
-                        terminal.resize(
-                            geometry.columns.max(1),
-                            geometry.rows.max(1),
-                            geometry.cell_width_px,
-                            geometry.cell_height_px,
-                        )?;
-                        for view in inactive_views.values_mut() {
+            recv(command_rx) -> message => {
+                let Ok(message) = message else {
+                    return Ok(());
+                };
+                for command in take_control_slot(slot, Some(message), true) {
+                    match command {
+                        Command::AttachView(view_id) => {
                             if frozen {
-                                refresh_output_view(&mut terminal, view)?;
+                                if let Entry::Vacant(entry) = active_views.entry(view_id) {
+                                    let state = inactive_views
+                                        .remove(&view_id)
+                                        .map_or_else(|| output_view_state(&mut terminal).map(Box::new), Ok)?;
+                                    entry.insert(state);
+                                }
                             } else {
-                                view.invalidate_layout();
-                            }
-                        }
-                        for view in active_views.values_mut() {
-                            if frozen {
-                                refresh_output_view(&mut terminal, view)?;
-                            } else {
-                                view.invalidate_layout();
-                                reconcile_view_screen(
+                                activate_view(
                                     &mut terminal,
-                                    view,
+                                    view_id,
+                                    &mut active_views,
+                                    &mut inactive_views,
                                     &word_separators,
                                 )?;
                             }
-                        }
-                        publish_active_views(
-                            &mut terminal,
-                            publisher,
-                            &mut render_state,
-                            &mut row_iterator,
-                            &mut cell_iterator,
-                            &mut generations,
-                            SnapshotChange::Content,
-                            &mut dictionary,
-                            &mut active_views,
-                            &word_separators,
-                            SessionStatus::Running,
-                        )?;
-                    }
-                }
-                Ok(Command::SetWordSeparators(next)) => {
-                    word_separators = *next;
-                }
-                Ok(Command::SetWrapSearch(next)) => {
-                    wrap_search = next;
-                }
-                Ok(Command::SetAppearance(next)) => {
-                    reported_color_scheme.set(ghostty_color_scheme(next.color_scheme));
-                    apply_terminal_appearance(&mut terminal, &next)?;
-                    dictionary.class_hints = ClassHints::new(&next);
-                    render_state = RenderState::new()?;
-                    for view in active_views.values_mut().chain(inactive_views.values_mut()) {
-                        refresh_frozen_view_appearance(&mut terminal, view)?;
-                    }
-                    publish_active_views(
-                        &mut terminal,
-                        publisher,
-                        &mut render_state,
-                        &mut row_iterator,
-                        &mut cell_iterator,
-                        &mut generations,
-                        SnapshotChange::Content,
-                        &mut dictionary,
-                        &mut active_views,
-                        &word_separators,
-                        SessionStatus::Running,
-                    )?;
-                }
-                Ok(Command::ViewAction { view, action }) => {
-                    let Some(state) = active_views.get_mut(&view) else {
-                        continue;
-                    };
-                    let result = normalize_view_action_result(apply_view_action(
-                        &mut terminal,
-                        view,
-                        state,
-                        action,
-                        geometry,
-                        &mut writer,
-                        &mut mouse_encoder,
-                        &mut mouse_event,
-                        &mut input_bytes,
-                        &mut search_worker,
-                        wrap_search,
-                        mode_keys_vi,
-                        &word_separators,
-                        &bound_pasted_images,
-                        &mut None,
-                        &mut None,
-                    ))?;
-                    let closed = frozen && state.copy_mode.is_none();
-                    match result {
-                        ViewActionResult::Snapshot | ViewActionResult::ContentSnapshot if !closed => {
+                            if let Some(state) = active_views.get_mut(&view_id) {
+                                let _ = refresh_view_search(
+                                    &terminal,
+                                    view_id,
+                                    state,
+                                    &mut search_worker,
+                                )?;
+                            }
                             publish_active_views(
                                 &mut terminal,
                                 publisher,
-                                &mut render_state,
-                                &mut row_iterator,
-                                &mut cell_iterator,
-                                &mut generations,
+                                &mut frames,
+                                SnapshotChange::Content,
+                                &mut active_views,
+                                &word_separators,
+                                SessionStatus::Running,
+                            )?;
+                        }
+                        Command::DetachView(view_id) => {
+                            if frozen {
+                                if let Some(state) = active_views.remove(&view_id) {
+                                    inactive_views.insert(view_id, state);
+                                }
+                            } else {
+                                deactivate_view(
+                                    &mut terminal,
+                                    view_id,
+                                    &mut active_views,
+                                    &mut inactive_views,
+                                    &word_separators,
+                                )?;
+                            }
+                            search_worker.cancel(view_id);
+                            publish_active_views(
+                                &mut terminal,
+                                publisher,
+                                &mut frames,
                                 SnapshotChange::View,
-                                &mut dictionary,
                                 &mut active_views,
                                 &word_separators,
                                 SessionStatus::Running,
                             )?;
                         }
-                        ViewActionResult::OverlaySnapshot if !closed => {
+                        Command::ReleaseView(view_id) => {
+                            frames.forget_view(view_id);
+                            let released = if frozen {
+                                inactive_views.remove(&view_id);
+                                active_views.remove(&view_id).is_some()
+                            } else {
+                                release_view(
+                                    &mut terminal,
+                                    view_id,
+                                    &mut active_views,
+                                    &mut inactive_views,
+                                )?
+                            };
+                            search_worker.forget(view_id);
+                            if released {
+                                publish_active_views(
+                                    &mut terminal,
+                                    publisher,
+                                    &mut frames,
+                                    SnapshotChange::View,
+                                    &mut active_views,
+                                    &word_separators,
+                                    SessionStatus::Running,
+                                )?;
+                            }
+                        }
+                        Command::Resize(next) => {
+                            if next != geometry {
+                                geometry = next;
+                                terminal.resize(
+                                    geometry.columns.max(1),
+                                    geometry.rows.max(1),
+                                    geometry.cell_width_px,
+                                    geometry.cell_height_px,
+                                )?;
+                                terminal.set_scrollback_max_bytes(Some(scrollback_backstop_bytes(
+                                    max_scrollback.min(MAX_HISTORY_LIMIT),
+                                    geometry.columns.max(1),
+                                )))?;
+                                for view in inactive_views.values_mut() {
+                                    if frozen {
+                                        refresh_output_view(&mut terminal, view)?;
+                                    } else {
+                                        view.invalidate_layout();
+                                    }
+                                }
+                                for view in active_views.values_mut() {
+                                    if frozen {
+                                        refresh_output_view(&mut terminal, view)?;
+                                    } else {
+                                        view.invalidate_layout();
+                                        reconcile_view_screen(
+                                            &mut terminal,
+                                            view,
+                                            &word_separators,
+                                        )?;
+                                    }
+                                }
+                                publish_active_views(
+                                    &mut terminal,
+                                    publisher,
+                                    &mut frames,
+                                    SnapshotChange::Content,
+                                    &mut active_views,
+                                    &word_separators,
+                                    SessionStatus::Running,
+                                )?;
+                            }
+                        }
+                        Command::SetWordSeparators(next) => {
+                            word_separators = *next;
+                        }
+                        Command::SetWrapSearch(next) => {
+                            wrap_search = next;
+                        }
+                        Command::SetAppearance(next) => {
+                            reported_color_scheme.set(ghostty_color_scheme(next.color_scheme));
+                            apply_terminal_appearance(&mut terminal, &next)?;
+                            frames.dictionary.class_hints = ClassHints::new(&next);
+                            frames.reset_render();
+                            for view in active_views.values_mut().chain(inactive_views.values_mut()) {
+                                refresh_frozen_view_appearance(&mut terminal, view)?;
+                            }
                             publish_active_views(
                                 &mut terminal,
                                 publisher,
-                                &mut render_state,
-                                &mut row_iterator,
-                                &mut cell_iterator,
-                                &mut generations,
-                                SnapshotChange::Overlay,
-                                &mut dictionary,
+                                &mut frames,
+                                SnapshotChange::Content,
                                 &mut active_views,
                                 &word_separators,
                                 SessionStatus::Running,
                             )?;
                         }
-                        ViewActionResult::Copy(copy) => publisher.copy_ready(view, copy)?,
-                        ViewActionResult::OpenUri(uri) => publisher.open_uri(view, uri)?,
-                        ViewActionResult::None
-                        | ViewActionResult::Snapshot
-                        | ViewActionResult::OverlaySnapshot
-                        | ViewActionResult::ContentSnapshot => {}
-                    }
-                    if closed {
-                        search_worker.forget(view);
-                        active_views.remove(&view);
-                        inactive_views.remove(&view);
-                        publisher.view_closed(view)?;
-                        publish_active_views(
-                            &mut terminal,
-                            publisher,
-                            &mut render_state,
-                            &mut row_iterator,
-                            &mut cell_iterator,
-                            &mut generations,
-                            SnapshotChange::View,
-                            &mut dictionary,
-                            &mut active_views,
-                            &word_separators,
-                            SessionStatus::Running,
-                        )?;
-                    }
-                }
-                Ok(Command::Capture(request)) => {
-                    let CaptureRequest { options, reply } = *request;
-                    let mut copy_modes = active_views
-                        .values()
-                        .filter_map(|view| view.copy_mode.as_deref());
-                    let mode = match (copy_modes.next(), copy_modes.next()) {
-                        (Some(mode), None) => Some(mode),
-                        _ => None,
-                    };
-                    let _ = reply.send(capture_terminal(&terminal, mode, options));
-                }
-                Ok(Command::PointerContext(request)) => {
-                    let PointerContextRequest {
-                        view,
-                        column,
-                        row,
-                        reply,
-                    } = *request;
-                    let mode = active_views
-                        .get(&view)
-                        .and_then(|view| view.copy_mode.as_deref());
-                    let _ = reply.send(
-                        pointer_context(&terminal, mode, column, row, &word_separators)
-                            .unwrap_or_default(),
-                    );
-                }
-                Ok(Command::SemanticCapture(request)) => {
-                    let _ = request.reply.send(capture_last_command(&terminal));
-                }
-                Ok(Command::History(request)) => {
-                    let HistoryCommand { start, reply, .. } = *request;
-                    let _ = reply.send(empty_history_capture(&terminal, start));
-                }
-                Ok(Command::KittyImage(request)) => {
-                    let _ = request.reply.send(None);
-                }
-                Ok(Command::KittyImageGeneration(request)) => {
-                    let _ = request.reply.send(None);
-                }
-                Ok(Command::SetEngineKnobs(next)) => mode_keys_vi = next.mode_keys_vi,
-                Ok(
-                    Command::Text { .. }
-                    | Command::Key { .. }
+                        Command::ViewAction { view, action } => {
+                            compression.rearm();
+                            let Some(state) = active_views.get_mut(&view) else {
+                                continue;
+                            };
+                            let result = normalize_view_action_result(apply_view_action(
+                                &mut terminal,
+                                view,
+                                state,
+                                action,
+                                geometry,
+                                &mut writer,
+                                &mut mouse_encoder,
+                                &mut mouse_event,
+                                &mut input_bytes,
+                                &mut search_worker,
+                                wrap_search,
+                                mode_keys_vi,
+                                &word_separators,
+                                &bound_pasted_images,
+                                &mut None,
+                                &mut None,
+                            ))?;
+                            let closed = frozen && state.copy_mode.is_none();
+                            match result {
+                                ViewActionResult::Snapshot | ViewActionResult::ContentSnapshot if !closed => {
+                                    publish_active_views(
+                                        &mut terminal,
+                                        publisher,
+                                        &mut frames,
+                                        SnapshotChange::View,
+                                        &mut active_views,
+                                        &word_separators,
+                                        SessionStatus::Running,
+                                    )?;
+                                }
+                                ViewActionResult::OverlaySnapshot if !closed => {
+                                    publish_active_views(
+                                        &mut terminal,
+                                        publisher,
+                                        &mut frames,
+                                        SnapshotChange::Overlay,
+                                        &mut active_views,
+                                        &word_separators,
+                                        SessionStatus::Running,
+                                    )?;
+                                }
+                                ViewActionResult::Copy(copy) => publisher.copy_ready(view, copy)?,
+                                ViewActionResult::OpenUri(uri) => publisher.open_uri(view, uri)?,
+                                ViewActionResult::None
+                                | ViewActionResult::Snapshot
+                                | ViewActionResult::OverlaySnapshot
+                                | ViewActionResult::ContentSnapshot => {}
+                            }
+                            if closed {
+                                search_worker.forget(view);
+                                active_views.remove(&view);
+                                inactive_views.remove(&view);
+                                publisher.view_closed(view)?;
+                                publish_active_views(
+                                    &mut terminal,
+                                    publisher,
+                                    &mut frames,
+                                    SnapshotChange::View,
+                                    &mut active_views,
+                                    &word_separators,
+                                    SessionStatus::Running,
+                                )?;
+                            }
+                        }
+                        Command::Capture(request) => {
+                            let CaptureRequest { options, reply } = *request;
+                            let mut copy_modes = active_views
+                                .values()
+                                .filter_map(|view| view.copy_mode.as_deref());
+                            let mode = match (copy_modes.next(), copy_modes.next()) {
+                                (Some(mode), None) => Some(mode),
+                                _ => None,
+                            };
+                            let _ = reply.send(capture_terminal(&terminal, mode, options));
+                            compression.rearm();
+                        }
+                        Command::PointerContext(request) => {
+                            let PointerContextRequest {
+                                view,
+                                column,
+                                row,
+                                reply,
+                            } = *request;
+                            let mode = active_views
+                                .get(&view)
+                                .and_then(|view| view.copy_mode.as_deref());
+                            let _ = reply.send(
+                                pointer_context(&terminal, mode, column, row, &word_separators)
+                                    .unwrap_or_default(),
+                            );
+                        }
+                        Command::SemanticCapture(request) => {
+                            let _ = request.reply.send(capture_last_command(&terminal));
+                        }
+                        Command::History(request) => {
+                            let HistoryCommand { start, reply, .. } = *request;
+                            let _ = reply.send(empty_history_capture(&terminal, start));
+                        }
+                        Command::KittyImage(request) => {
+                            let _ = request.reply.send(None);
+                        }
+                        Command::KittyImageGeneration(request) => {
+                            let _ = request.reply.send(None);
+                        }
+                        Command::SetEngineKnobs(next) => mode_keys_vi = next.mode_keys_vi,
+                        Command::Text { .. }
+                        | Command::Key { .. }
                         | Command::PastePreparedBytes { .. }
                         | Command::RawInput(_)
                         | Command::SetAllowPassthrough(_)
                         | Command::SetPendingCopySource(_)
                         | Command::WriteDeadNotice(_)
                         | Command::PendingPasteOpened { .. }
-                    | Command::ResetScreen
-                    | Command::UnbindPastedImage { .. },
-                ) => {}
-                Ok(Command::CaptureCopySource { reply }) => {
-                    let _ = reply.send(
-                        capture_copy_source(&mut terminal)
-                            .map_err(|_| TerminalCaptureError::ActorStopped),
-                    );
-                }
-                Ok(Command::Output(bytes)) => {
-                    if let Some(token) = tap_raw_output_arc(&mut raw_output_tap, &bytes) {
-                        publisher.raw_output_tap_closed(token)?;
+                        | Command::ResetScreen
+                        | Command::UnbindPastedImage { .. }
+                        | Command::Wake => {}
+                        Command::CaptureCopySource { reply } => {
+                            let _ = reply.send(
+                                capture_copy_source(&mut terminal)
+                                    .map_err(|_| TerminalCaptureError::ActorStopped),
+                            );
+                        }
+                        Command::Output(bytes) => {
+                            if let Some(token) = tap_raw_output_arc(&mut raw_output_tap, &bytes) {
+                                publisher.raw_output_tap_closed(token)?;
+                            }
+                            let mut bar = None;
+                            let mut last_command_status = None;
+                            engine_filter.write(
+                                &bytes,
+                                EngineKnobs::default(),
+                                &mut terminal,
+                                &mut Vec::new(),
+                                &mut bar,
+                                &mut last_command_status,
+                            );
+                            if let Some(bar) = bar {
+                                publisher.set_progress_bar(bar);
+                            }
+                            if let Some(status) = last_command_status {
+                                publisher.set_last_command_status(status.code());
+                            }
+                            publisher.set_facts(engine_filter.facts(&terminal)?);
+                            publisher.mark_output_activity();
+                            publish_active_views(
+                                &mut terminal,
+                                publisher,
+                                &mut frames,
+                                SnapshotChange::Content,
+                                &mut active_views,
+                                &word_separators,
+                                SessionStatus::Running,
+                            )?;
+                        }
+                        Command::ArmRawOutputTap {
+                            token,
+                            output,
+                            reply,
+                        } => {
+                            raw_output_tap = Some((token, output));
+                            let _ = reply.send(true);
+                        }
+                        Command::Settle { reply } => {
+                            let _ = reply.send(());
+                        }
+                        Command::DisarmRawOutputTap { token, reply } => {
+                            if raw_output_tap
+                                .as_ref()
+                                .is_some_and(|(armed, _)| *armed == token)
+                            {
+                                raw_output_tap = None;
+                            }
+                            let _ = reply.send(());
+                        }
+                        Command::Terminate | Command::Shutdown => return Ok(()),
+                        Command::SetViewStream(view, stream) => {
+                            if frames.set_stream(view, stream) && active_views.contains_key(&view) {
+                                publish_active_views(
+                                    &mut terminal,
+                                    publisher,
+                                    &mut frames,
+                                    SnapshotChange::View,
+                                    &mut active_views,
+                                    &word_separators,
+                                    SessionStatus::Running,
+                                )?;
+                            }
+                        }
+                        Command::SetPreviewWatch(watch) => {
+                            let started = watch && !frames.preview;
+                            frames.preview = watch;
+                            if started {
+                                publish_active_views(
+                                    &mut terminal,
+                                    publisher,
+                                    &mut frames,
+                                    SnapshotChange::View,
+                                    &mut active_views,
+                                    &word_separators,
+                                    SessionStatus::Running,
+                                )?;
+                            } else {
+                                frames.release_unused(&active_views);
+                            }
+                        }
+                        Command::FreshViewport(reply) => {
+                            frames.force_fallback = true;
+                            publish_views(
+                                &mut terminal,
+                                publisher,
+                                &mut frames,
+                                SnapshotChange::View,
+                                &mut active_views,
+                                &word_separators,
+                                SessionStatus::Running,
+                                false,
+                            )?;
+                            frames.force_fallback = false;
+                            let _ = reply.send(publisher.latest_fallback());
+                        }
                     }
-                    let mut bar = None;
-                    let mut last_command_status = None;
-                    engine_filter.write(
-                        &bytes,
-                        EngineKnobs::default(),
-                        &mut terminal,
-                        &mut Vec::new(),
-                        &mut bar,
-                        &mut last_command_status,
-                    );
-                    if let Some(bar) = bar {
-                        publisher.set_progress_bar(bar);
-                    }
-                    if let Some(status) = last_command_status {
-                        publisher.set_last_command_status(status.code());
-                    }
-                    publisher.set_facts(engine_filter.facts(&terminal)?);
-                    publisher.mark_output_activity();
-                    publish_active_views(
-                        &mut terminal,
-                        publisher,
-                        &mut render_state,
-                        &mut row_iterator,
-                        &mut cell_iterator,
-                        &mut generations,
-                        SnapshotChange::Content,
-                        &mut dictionary,
-                        &mut active_views,
-                        &word_separators,
-                        SessionStatus::Running,
-                    )?;
                 }
-                Ok(Command::ArmRawOutputTap {
-                    token,
-                    output,
-                    reply,
-                }) => {
-                    raw_output_tap = Some((token, output));
-                    let _ = reply.send(true);
-                }
-                Ok(Command::DisarmRawOutputTap { token, reply }) => {
-                    if raw_output_tap
-                        .as_ref()
-                        .is_some_and(|(armed, _)| *armed == token)
-                    {
-                        raw_output_tap = None;
-                    }
-                    let _ = reply.send(());
-                }
-                Ok(Command::Settle { reply }) => {
-                    let _ = reply.send(());
-                }
-                Ok(Command::Terminate | Command::Shutdown) | Err(_) => return Ok(()),
             },
             recv(search_results) -> result => {
                 let result = result.map_err(|_| {
@@ -4823,12 +5394,8 @@ fn run_output_view(
                     publish_active_views(
                         &mut terminal,
                         publisher,
-                        &mut render_state,
-                        &mut row_iterator,
-                        &mut cell_iterator,
-                        &mut generations,
+                        &mut frames,
                         SnapshotChange::View,
-                        &mut dictionary,
                         &mut active_views,
                         &word_separators,
                         SessionStatus::Running,
@@ -5051,6 +5618,7 @@ fn terminal_command_preserves_tmux_argv_shapes() {
 fn run_terminal(
     control_rx: &Receiver<Command>,
     input_rx: &Receiver<QueuedInput>,
+    slot: &Mutex<ControlSlot>,
     publisher: &Publisher,
     max_scrollback: usize,
     appearance: &TerminalAppearance,
@@ -5065,19 +5633,20 @@ fn run_terminal(
         .initial_size
         .map(Geometry::from_size)
         .unwrap_or_default();
-    let pty_system = native_pty_system();
-    let pair = pty_system
+    #[cfg(not(unix))]
+    let pair = native_pty_system()
         .openpty(geometry.pty_size())
         .map_err(|error| WorkerError::Pty(error.to_string()))?;
     #[cfg(unix)]
-    let tty = pair.master.tty_name();
+    let pty =
+        unix_pty::open(geometry.pty_size()).map_err(|error| WorkerError::Pty(error.to_string()))?;
+    #[cfg(unix)]
+    let tty = Some(pty.tty.clone());
     #[cfg(not(unix))]
     let tty = None;
 
     #[cfg(unix)]
-    if let Some(descriptor) = pair.master.as_raw_fd() {
-        force_pty_erase(descriptor, spawn.knobs.verase_byte);
-    }
+    force_pty_erase(pty.master.as_raw_fd(), spawn.knobs.verase_byte);
 
     let mut command = terminal_command(spawn);
     command.env(
@@ -5101,30 +5670,65 @@ fn run_terminal(
         command.cwd(working_directory);
     }
 
-    let mut child = pair
+    #[cfg(not(unix))]
+    let child = pair
         .slave
         .spawn_command(command)
         .map_err(|error| WorkerError::Spawn(error.to_string()))?;
+    #[cfg(not(unix))]
     drop(pair.slave);
-
+    #[cfg(not(unix))]
     let shell_process_id = child.process_id();
+    #[cfg(not(unix))]
     let mut killer = child.clone_killer();
+    #[cfg(unix)]
+    let (shell_process_id, spawned) = {
+        let environment = unix_pty::command_environment(
+            &command,
+            spawn
+                .env
+                .iter()
+                .map(|(key, _)| key.as_os_str())
+                .chain(PANE_ENVIRONMENT_KEYS.iter().map(std::ffi::OsStr::new))
+                .chain(
+                    crate::shell_integration::ENVIRONMENT_KEYS
+                        .iter()
+                        .map(std::ffi::OsStr::new),
+                ),
+        );
+        let spawned = unix_pty::spawn(&command, environment, &pty.slave)
+            .map_err(|error| WorkerError::Spawn(error.to_string()))?;
+        (Some(spawned.pid), spawned)
+    };
+    #[cfg(unix)]
+    drop(pty.slave);
+    #[cfg(unix)]
+    let mut killer = UnixChildKiller(shell_process_id);
+    #[cfg(all(unix, not(target_os = "linux")))]
+    let mut child_watch = ChildExitWatch::new(shell_process_id)?;
+    #[cfg(any(target_os = "linux", not(unix)))]
     let (exit_tx, exit_rx) = crossbeam_channel::bounded(1);
+    #[cfg(target_os = "linux")]
+    let linux_child = watch_child_linux(shell_process_id, exit_tx)?;
     #[cfg(windows)]
     let (master_close_tx, master_close_rx) = crossbeam_channel::bounded(1);
-    let exit_wake = wake.clone();
-    thread::Builder::new()
-        .name("zz-child-wait".into())
-        .spawn(move || {
-            let status = child.wait();
-            let _ = exit_tx.send(status);
-            exit_wake.notify();
-            #[cfg(windows)]
-            if let Ok(master) = master_close_rx.recv() {
-                drop(master);
-            }
-        })
-        .map_err(WorkerError::Io)?;
+    #[cfg(not(unix))]
+    {
+        let mut child = child;
+        let exit_wake = wake.clone();
+        thread::Builder::new()
+            .name("zz-child-wait".into())
+            .spawn(move || {
+                let status = child.wait();
+                let _ = exit_tx.send(status);
+                exit_wake.notify();
+                #[cfg(windows)]
+                if let Ok(master) = master_close_rx.recv() {
+                    drop(master);
+                }
+            })
+            .map_err(WorkerError::Io)?;
+    }
 
     #[cfg(all(unix, not(target_os = "linux")))]
     let wake_rx = wake_rx.map_err(|error| {
@@ -5133,10 +5737,8 @@ fn run_terminal(
     #[cfg(unix)]
     let (drain_fd, mut writer) = {
         let dup = || {
-            pair.master
-                .as_raw_fd()
-                .and_then(|fd| filedescriptor::FileDescriptor::dup(&fd).ok())
-                .ok_or_else(|| WorkerError::Pty("failed to duplicate the PTY master".to_owned()))
+            filedescriptor::FileDescriptor::dup(&pty.master.as_raw_fd())
+                .map_err(|_| WorkerError::Pty("failed to duplicate the PTY master".to_owned()))
         };
         let drain_fd = dup()?;
         let writer_fd = dup()?;
@@ -5163,7 +5765,7 @@ fn run_terminal(
     #[cfg(not(unix))]
     let mut master = Some(pair.master);
     #[cfg(unix)]
-    let master = Arc::new(parking_lot::Mutex::new(pair.master));
+    let master = Arc::new(pty.master);
     publisher.set_foreground_source(Some(Box::new(ForegroundSource {
         #[cfg(unix)]
         master: Arc::clone(&master),
@@ -5183,7 +5785,7 @@ fn run_terminal(
         #[cfg(target_os = "linux")]
         thread::Builder::new()
             .name("zz-pty-gather".into())
-            .spawn(move || gather_pty_linux(drain_fd, output_tx, recycle_rx))
+            .spawn(move || gather_pty_linux(drain_fd, output_tx, recycle_rx, linux_child))
             .map_err(WorkerError::Io)?;
         #[cfg(not(unix))]
         {
@@ -5222,17 +5824,20 @@ fn run_terminal(
     register_bell(&mut terminal, publisher.clone())?;
     apply_terminal_appearance(&mut terminal, appearance)?;
 
-    let mut render_state = RenderState::new()?;
-    let mut row_iterator = RowIterator::new()?;
-    let mut cell_iterator = CellIterator::new()?;
+    let mut frames = Frames::new(appearance)?;
+    let mut compression = IdleCompression::default();
+    let mut echo = EchoWindow::default();
     let mut key_encoder = key::Encoder::new()?;
     let mut key_event = key::Event::new()?;
     let mut mouse_encoder = mouse::Encoder::new()?;
     let mut mouse_event = mouse::Event::new()?;
     let mut input_bytes = Vec::with_capacity(LINK_URI_SCRATCH_BYTES);
-    let mut word_separators = WordSeparators::default();
-    let mut wrap_search = true;
+    let mut word_separators = spawn.word_separators.clone().unwrap_or_default();
+    let mut wrap_search = spawn.wrap_search.unwrap_or(true);
     let mut passthrough = PassthroughFilter::default();
+    if spawn.allow_passthrough == Some(true) {
+        passthrough.set_mode(AllowPassthrough::All);
+    }
     let mut engine_knobs = spawn.knobs;
     let mut pending_copy_source: Option<Box<CapturedCopySource>> = None;
     let mut pane_search: Option<CopyModeSearch> = None;
@@ -5242,23 +5847,19 @@ fn run_terminal(
     let mut engine_last_command_status: Option<CommandStatusUpdate> = None;
     let mut active_views = ActiveTerminalViews::new();
     let mut inactive_views = InactiveTerminalViews::new();
-    let mut generations = ViewportGenerations::new()?;
-    let mut dictionary = ViewportDictionary {
-        class_hints: ClassHints::new(appearance),
-        ..ViewportDictionary::default()
-    };
     let mut pasted_image_bindings = PastedImageBindings::default();
     let mut reader_eof = false;
     let mut exit_status = None;
     let mut terminating = false;
     let mut termination_deadline = None::<Instant>;
     let mut termination_escalated = false;
+    #[cfg(any(target_os = "linux", not(unix)))]
     let no_exit = crossbeam_channel::never();
     #[cfg(any(target_os = "linux", not(unix)))]
     let no_output = crossbeam_channel::never();
     #[cfg(all(unix, not(target_os = "linux")))]
     let mut read_buffer = vec![0_u8; PTY_READ_BUFFER_BYTES];
-    let (mut search_worker, search_results) = SearchWorker::spawn(wake.clone())?;
+    let (mut search_worker, search_results) = SearchWorker::spawn(wake.clone());
     let mut search_refresh_due = None::<Instant>;
     let mut last_content_publish = Instant::now();
     let mut output_pending = false;
@@ -5270,20 +5871,25 @@ fn run_terminal(
     #[cfg(unix)]
     let mut active_input_permit = None::<InputPermit>;
 
-    publisher.publish(snapshot(
-        &terminal,
-        &mut render_state,
-        &mut row_iterator,
-        &mut cell_iterator,
-        &mut generations,
+    #[cfg(unix)]
+    spawned.wait_for_exec(PANE_EXEC_WAIT);
+    publish_active_views(
+        &mut terminal,
+        publisher,
+        &mut frames,
         SnapshotChange::Content,
-        &mut dictionary,
-        None,
+        &mut active_views,
+        &word_separators,
         SessionStatus::Running,
-    )?);
+    )?;
 
+    let mut published_facts = None;
     loop {
-        publisher.set_facts(engine_filter.facts(&terminal)?);
+        let facts = engine_filter.facts(&terminal)?;
+        if published_facts != Some(facts) {
+            publisher.set_facts(facts);
+            published_facts = Some(facts);
+        }
         #[cfg(unix)]
         {
             writer.flush_pending()?;
@@ -5310,6 +5916,7 @@ fn run_terminal(
         }
         if search_refresh_due.is_some_and(|due| now >= due) {
             search_refresh_due = None;
+            compression.rearm();
             let mut view_ids = active_views.keys().copied().collect::<Vec<_>>();
             view_ids.sort_by_key(|view| view.0);
             for view_id in view_ids {
@@ -5330,7 +5937,7 @@ fn run_terminal(
         if let Some(status) = engine_last_command_status.take() {
             publisher.set_last_command_status(status.code());
         }
-        let synchronized_output_deadline = publisher.synchronized_output_deadline();
+        let synchronized_output_deadline = frames.synchronized_output_deadline;
         let synchronized_output_due =
             synchronized_output_deadline.is_some_and(|deadline| now >= deadline);
         if synchronized_output_due || (reader_eof && synchronized_output_deadline.is_some()) {
@@ -5339,12 +5946,24 @@ fn run_terminal(
         if reader_eof {
             terminal.set_mode(Mode::SYNC_OUTPUT, false)?;
         }
+        let publish_interval = if frames.unwatched(&active_views) {
+            UNWATCHED_NOTIFY_INTERVAL
+        } else {
+            CONTENT_PUBLISH_STALENESS
+        };
+        let echo_due = output_pending && echo.due();
         if output_pending
             && (reader_eof
                 || synchronized_output_due
                 || pending_window_due
-                || last_content_publish.elapsed() >= CONTENT_PUBLISH_STALENESS)
+                || echo_due
+                || engine_filter.metadata_hint
+                || last_content_publish.elapsed() >= publish_interval)
         {
+            if echo_due {
+                echo.spend();
+            }
+            engine_filter.metadata_hint = false;
             #[cfg(unix)]
             drain_effects_if_writer_ready(&effects, &mut writer)?;
             #[cfg(not(unix))]
@@ -5379,12 +5998,8 @@ fn run_terminal(
             publish_active_views(
                 &mut terminal,
                 publisher,
-                &mut render_state,
-                &mut row_iterator,
-                &mut cell_iterator,
-                &mut generations,
+                &mut frames,
                 SnapshotChange::Content,
-                &mut dictionary,
                 &mut active_views,
                 &word_separators,
                 SessionStatus::Running,
@@ -5399,13 +6014,39 @@ fn run_terminal(
         for name in engine_renames.drain(..) {
             publisher.rename_window(name)?;
         }
+        if !output_pending {
+            settle_unwatched(
+                &mut terminal,
+                publisher,
+                &mut frames,
+                &mut active_views,
+                &word_separators,
+                SessionStatus::Running,
+            )?;
+        }
+        compression.observe(&terminal, now);
+        if !output_pending && raw_output_parse_backlog.is_empty() {
+            compression.run(&mut terminal);
+        }
 
         let mut deadline = Instant::now() + IDLE_SLEEP;
-        if let Some(due) = publisher.synchronized_output_deadline() {
+        if !output_pending {
+            if let Some(due) = frames.settle_due() {
+                deadline = deadline.min(due);
+            }
+            if let Some(due) = compression.due() {
+                deadline = deadline.min(due);
+            }
+        }
+        if let Some(due) = frames.synchronized_output_deadline {
             deadline = deadline.min(due);
         }
         if output_pending {
-            deadline = deadline.min(last_content_publish + CONTENT_PUBLISH_STALENESS);
+            deadline = deadline.min(if echo.due() || engine_filter.metadata_hint {
+                Instant::now()
+            } else {
+                last_content_publish + publish_interval
+            });
         }
         if let Some(due) = search_refresh_due {
             deadline = deadline.min(due);
@@ -5424,11 +6065,14 @@ fn run_terminal(
             deadline = deadline.min(Instant::now() + PTY_WRITE_RETRY);
         }
         let timeout = deadline.saturating_duration_since(Instant::now());
+        #[cfg(any(target_os = "linux", not(unix)))]
         let child_exit = if exit_status.is_some() {
             &no_exit
         } else {
             &exit_rx
         };
+        #[cfg(all(unix, not(target_os = "linux")))]
+        let child_exit = exit_status.is_none().then_some(&mut child_watch);
         #[cfg(unix)]
         let available_input = (!writer.has_pending()).then_some(input_rx);
         #[cfg(not(unix))]
@@ -5468,15 +6112,17 @@ fn run_terminal(
         )?;
 
         let mut input_permit = None;
-        let wakeup = match wakeup {
+        let (commands, wakeup) = match wakeup {
             Wake::Input(QueuedInput { command, permit }) => {
                 input_permit = Some(permit);
-                Wake::Command(command)
+                echo.open();
+                (take_control_slot(slot, Some(command), false), None)
             }
-            wakeup => wakeup,
+            Wake::Command(command) => (take_control_slot(slot, Some(command), true), None),
+            wakeup => (take_control_slot(slot, None, false), Some(wakeup)),
         };
-        match wakeup {
-            Wake::Command(command) => match command {
+        for command in commands {
+            match command {
                 Command::Text { view, text } => {
                     if exit_status.is_none() {
                         let viewport_changed = if let Some(view) = view
@@ -5496,12 +6142,8 @@ fn run_terminal(
                             publish_active_views(
                                 &mut terminal,
                                 publisher,
-                                &mut render_state,
-                                &mut row_iterator,
-                                &mut cell_iterator,
-                                &mut generations,
+                                &mut frames,
                                 SnapshotChange::View,
-                                &mut dictionary,
                                 &mut active_views,
                                 &word_separators,
                                 SessionStatus::Running,
@@ -5535,12 +6177,8 @@ fn run_terminal(
                             publish_active_views(
                                 &mut terminal,
                                 publisher,
-                                &mut render_state,
-                                &mut row_iterator,
-                                &mut cell_iterator,
-                                &mut generations,
+                                &mut frames,
                                 SnapshotChange::View,
-                                &mut dictionary,
                                 &mut active_views,
                                 &word_separators,
                                 SessionStatus::Running,
@@ -5570,12 +6208,8 @@ fn run_terminal(
                             publish_active_views(
                                 &mut terminal,
                                 publisher,
-                                &mut render_state,
-                                &mut row_iterator,
-                                &mut cell_iterator,
-                                &mut generations,
+                                &mut frames,
                                 SnapshotChange::View,
-                                &mut dictionary,
                                 &mut active_views,
                                 &word_separators,
                                 SessionStatus::Running,
@@ -5583,11 +6217,12 @@ fn run_terminal(
                         }
                     }
                 }
-                Command::Output(_) => {}
+                Command::Output(_) | Command::Wake => {}
                 Command::RawInput(bytes) => {
                     if exit_status.is_none() {
                         writer.write_all(&bytes)?;
                         writer.flush()?;
+                        echo.open();
                     }
                 }
                 Command::ArmRawOutputTap {
@@ -5598,6 +6233,9 @@ fn run_terminal(
                     raw_output_tap = Some((token, output));
                     let _ = reply.send(true);
                 }
+                Command::Settle { reply } => {
+                    let _ = reply.send(());
+                }
                 Command::DisarmRawOutputTap { token, reply } => {
                     if raw_output_tap
                         .as_ref()
@@ -5607,9 +6245,6 @@ fn run_terminal(
                     }
                     let _ = reply.send(());
                 }
-                Command::Settle { reply } => {
-                    let _ = reply.send(());
-                }
                 Command::Resize(next) => {
                     if next != geometry {
                         search_refresh_due = None;
@@ -5617,7 +6252,6 @@ fn run_terminal(
                         reported_size.set(geometry.size_report());
                         #[cfg(unix)]
                         master
-                            .lock()
                             .resize(geometry.pty_size())
                             .map_err(|error| WorkerError::Pty(error.to_string()))?;
                         #[cfg(not(unix))]
@@ -5632,6 +6266,10 @@ fn run_terminal(
                             geometry.cell_width_px,
                             geometry.cell_height_px,
                         )?;
+                        terminal.set_scrollback_max_bytes(Some(scrollback_backstop_bytes(
+                            max_scrollback.min(MAX_HISTORY_LIMIT),
+                            geometry.columns.max(1),
+                        )))?;
                         for view in inactive_views.values_mut() {
                             view.invalidate_layout();
                         }
@@ -5654,12 +6292,8 @@ fn run_terminal(
                         publish_active_views(
                             &mut terminal,
                             publisher,
-                            &mut render_state,
-                            &mut row_iterator,
-                            &mut cell_iterator,
-                            &mut generations,
+                            &mut frames,
                             SnapshotChange::Content,
-                            &mut dictionary,
                             &mut active_views,
                             &word_separators,
                             SessionStatus::Running,
@@ -5685,12 +6319,8 @@ fn run_terminal(
                         publish_active_views(
                             &mut terminal,
                             publisher,
-                            &mut render_state,
-                            &mut row_iterator,
-                            &mut cell_iterator,
-                            &mut generations,
+                            &mut frames,
                             SnapshotChange::View,
-                            &mut dictionary,
                             &mut active_views,
                             &word_separators,
                             SessionStatus::Running,
@@ -5711,6 +6341,7 @@ fn run_terminal(
                         capture_copy_source(&mut terminal)
                             .map_err(|_| TerminalCaptureError::ActorStopped),
                     );
+                    compression.rearm();
                 }
                 Command::SetPendingCopySource(source) => {
                     pending_copy_source = source;
@@ -5729,12 +6360,8 @@ fn run_terminal(
                     publish_active_views(
                         &mut terminal,
                         publisher,
-                        &mut render_state,
-                        &mut row_iterator,
-                        &mut cell_iterator,
-                        &mut generations,
+                        &mut frames,
                         SnapshotChange::Content,
-                        &mut dictionary,
                         &mut active_views,
                         &word_separators,
                         SessionStatus::Running,
@@ -5743,20 +6370,16 @@ fn run_terminal(
                 Command::SetAppearance(next) => {
                     reported_color_scheme.set(ghostty_color_scheme(next.color_scheme));
                     apply_terminal_appearance(&mut terminal, &next)?;
-                    dictionary.class_hints = ClassHints::new(&next);
-                    render_state = RenderState::new()?;
+                    frames.dictionary.class_hints = ClassHints::new(&next);
+                    frames.reset_render();
                     for view in active_views.values_mut().chain(inactive_views.values_mut()) {
                         refresh_frozen_view_appearance(&mut terminal, view)?;
                     }
                     publish_active_views(
                         &mut terminal,
                         publisher,
-                        &mut render_state,
-                        &mut row_iterator,
-                        &mut cell_iterator,
-                        &mut generations,
+                        &mut frames,
                         SnapshotChange::Content,
-                        &mut dictionary,
                         &mut active_views,
                         &word_separators,
                         SessionStatus::Running,
@@ -5775,22 +6398,21 @@ fn run_terminal(
                         let _ = refresh_view_search(&terminal, view, state, &mut search_worker)?;
                         sync_viewport_anchor(&terminal, state)?;
                     }
-                    publish_active_views(
-                        &mut terminal,
-                        publisher,
-                        &mut render_state,
-                        &mut row_iterator,
-                        &mut cell_iterator,
-                        &mut generations,
-                        SnapshotChange::View,
-                        &mut dictionary,
-                        &mut active_views,
-                        &word_separators,
-                        SessionStatus::Running,
-                    )?;
+                    if frames.shows(view, &active_views) {
+                        publish_active_views(
+                            &mut terminal,
+                            publisher,
+                            &mut frames,
+                            SnapshotChange::View,
+                            &mut active_views,
+                            &word_separators,
+                            SessionStatus::Running,
+                        )?;
+                    }
                 }
                 Command::DetachView(view) => {
                     search_worker.cancel(view);
+                    let shown = frames.shows(view, &active_views);
                     deactivate_view(
                         &mut terminal,
                         view,
@@ -5798,32 +6420,30 @@ fn run_terminal(
                         &mut inactive_views,
                         &word_separators,
                     )?;
-                    publish_active_views(
-                        &mut terminal,
-                        publisher,
-                        &mut render_state,
-                        &mut row_iterator,
-                        &mut cell_iterator,
-                        &mut generations,
-                        SnapshotChange::View,
-                        &mut dictionary,
-                        &mut active_views,
-                        &word_separators,
-                        SessionStatus::Running,
-                    )?;
-                }
-                Command::ReleaseView(view) => {
-                    search_worker.forget(view);
-                    if release_view(&mut terminal, view, &mut active_views, &mut inactive_views)? {
+                    if shown {
                         publish_active_views(
                             &mut terminal,
                             publisher,
-                            &mut render_state,
-                            &mut row_iterator,
-                            &mut cell_iterator,
-                            &mut generations,
+                            &mut frames,
                             SnapshotChange::View,
-                            &mut dictionary,
+                            &mut active_views,
+                            &word_separators,
+                            SessionStatus::Running,
+                        )?;
+                    }
+                }
+                Command::ReleaseView(view) => {
+                    search_worker.forget(view);
+                    let shown = frames.shows(view, &active_views);
+                    frames.forget_view(view);
+                    if release_view(&mut terminal, view, &mut active_views, &mut inactive_views)?
+                        && shown
+                    {
+                        publish_active_views(
+                            &mut terminal,
+                            publisher,
+                            &mut frames,
+                            SnapshotChange::View,
                             &mut active_views,
                             &word_separators,
                             SessionStatus::Running,
@@ -5831,6 +6451,7 @@ fn run_terminal(
                     }
                 }
                 Command::ViewAction { view, action } => {
+                    compression.rearm();
                     if active_views.contains_key(&view) {
                         let explicitly_enters_copy_mode = matches!(
                             &action,
@@ -5883,7 +6504,7 @@ fn run_terminal(
                         let leaves_copy_mode =
                             clears_history || (was_in_copy_mode && !is_in_copy_mode);
                         if explicitly_enters_copy_mode || entered_copy_mode || leaves_copy_mode {
-                            render_state.update(&terminal)?.set_dirty(Dirty::Full)?;
+                            frames.mark_full_dirty(&terminal)?;
                         }
                         if leaves_copy_mode {
                             let state = active_views
@@ -5907,12 +6528,8 @@ fn run_terminal(
                             ViewActionResult::Snapshot => publish_active_views(
                                 &mut terminal,
                                 publisher,
-                                &mut render_state,
-                                &mut row_iterator,
-                                &mut cell_iterator,
-                                &mut generations,
+                                &mut frames,
                                 SnapshotChange::View,
-                                &mut dictionary,
                                 &mut active_views,
                                 &word_separators,
                                 SessionStatus::Running,
@@ -5920,12 +6537,8 @@ fn run_terminal(
                             ViewActionResult::OverlaySnapshot => publish_active_views(
                                 &mut terminal,
                                 publisher,
-                                &mut render_state,
-                                &mut row_iterator,
-                                &mut cell_iterator,
-                                &mut generations,
+                                &mut frames,
                                 SnapshotChange::Overlay,
-                                &mut dictionary,
                                 &mut active_views,
                                 &word_separators,
                                 SessionStatus::Running,
@@ -5933,12 +6546,8 @@ fn run_terminal(
                             ViewActionResult::ContentSnapshot => publish_active_views(
                                 &mut terminal,
                                 publisher,
-                                &mut render_state,
-                                &mut row_iterator,
-                                &mut cell_iterator,
-                                &mut generations,
+                                &mut frames,
                                 SnapshotChange::Content,
-                                &mut dictionary,
                                 &mut active_views,
                                 &word_separators,
                                 SessionStatus::Running,
@@ -5950,12 +6559,8 @@ fn run_terminal(
                                     publish_active_views(
                                         &mut terminal,
                                         publisher,
-                                        &mut render_state,
-                                        &mut row_iterator,
-                                        &mut cell_iterator,
-                                        &mut generations,
+                                        &mut frames,
                                         SnapshotChange::View,
-                                        &mut dictionary,
                                         &mut active_views,
                                         &word_separators,
                                         SessionStatus::Running,
@@ -5977,6 +6582,7 @@ fn run_terminal(
                     };
                     let result = capture_terminal(&terminal, mode, options);
                     let _ = reply.send(result);
+                    compression.rearm();
                 }
                 Command::PointerContext(request) => {
                     let PointerContextRequest {
@@ -5994,6 +6600,7 @@ fn run_terminal(
                 }
                 Command::SemanticCapture(request) => {
                     let _ = request.reply.send(capture_last_command(&terminal));
+                    compression.rearm();
                 }
                 Command::History(request) => {
                     let HistoryCommand {
@@ -6005,11 +6612,13 @@ fn run_terminal(
                         &terminal,
                         start,
                         count,
-                        &dictionary.class_hints,
+                        &frames.dictionary.class_hints,
                     ));
+                    compression.rearm();
                 }
                 Command::KittyImage(request) => {
-                    let image = generations
+                    let image = frames
+                        .generations
                         .kitty
                         .as_mut()
                         .map_or(Ok(None), |kitty| kitty.image(&terminal, request.image_id))
@@ -6023,7 +6632,8 @@ fn run_terminal(
                     let _ = request.reply.send(image);
                 }
                 Command::KittyImageGeneration(request) => {
-                    let generation = generations
+                    let generation = frames
+                        .generations
                         .kitty
                         .as_ref()
                         .map_or(Ok(None), |_| {
@@ -6057,12 +6667,8 @@ fn run_terminal(
                             publish_active_views(
                                 &mut terminal,
                                 publisher,
-                                &mut render_state,
-                                &mut row_iterator,
-                                &mut cell_iterator,
-                                &mut generations,
+                                &mut frames,
                                 SnapshotChange::Overlay,
-                                &mut dictionary,
                                 &mut active_views,
                                 &word_separators,
                                 SessionStatus::Running,
@@ -6086,15 +6692,73 @@ fn run_terminal(
                 }
                 Command::Shutdown => {
                     let _ = killer.kill();
+                    if exit_status.is_none() {
+                        #[cfg(all(unix, not(target_os = "linux")))]
+                        let _ = child_watch.wait_timeout(TERMINATION_KILL_WAIT);
+                        #[cfg(any(target_os = "linux", not(unix)))]
+                        let _ = exit_rx.recv_timeout(TERMINATION_KILL_WAIT);
+                    }
                     return Ok(());
                 }
-            },
-            Wake::CommandsClosed => {
+                Command::SetViewStream(view, stream) => {
+                    if frames.set_stream(view, stream) && active_views.contains_key(&view) {
+                        publish_active_views(
+                            &mut terminal,
+                            publisher,
+                            &mut frames,
+                            SnapshotChange::View,
+                            &mut active_views,
+                            &word_separators,
+                            SessionStatus::Running,
+                        )?;
+                    }
+                }
+                Command::SetPreviewWatch(watch) => {
+                    let started = watch && !frames.preview;
+                    frames.preview = watch;
+                    if started {
+                        publish_active_views(
+                            &mut terminal,
+                            publisher,
+                            &mut frames,
+                            SnapshotChange::View,
+                            &mut active_views,
+                            &word_separators,
+                            SessionStatus::Running,
+                        )?;
+                    } else {
+                        frames.release_unused(&active_views);
+                    }
+                }
+                Command::FreshViewport(reply) => {
+                    frames.force_fallback = true;
+                    publish_views(
+                        &mut terminal,
+                        publisher,
+                        &mut frames,
+                        SnapshotChange::View,
+                        &mut active_views,
+                        &word_separators,
+                        SessionStatus::Running,
+                        false,
+                    )?;
+                    frames.force_fallback = false;
+                    let _ = reply.send(publisher.latest_fallback());
+                }
+            }
+        }
+        match wakeup {
+            None => {}
+            Some(Wake::CommandsClosed) => {
                 if terminating {
                     let remaining = termination_deadline
                         .map(|deadline| deadline.saturating_duration_since(Instant::now()))
                         .unwrap_or_default();
-                    if exit_rx.recv_timeout(remaining).is_err() && !termination_escalated {
+                    #[cfg(all(unix, not(target_os = "linux")))]
+                    let exited = child_watch.wait_timeout(remaining).is_some();
+                    #[cfg(any(target_os = "linux", not(unix)))]
+                    let exited = exit_rx.recv_timeout(remaining).is_ok();
+                    if !exited && !termination_escalated {
                         #[cfg(unix)]
                         signal_terminal_process_groups(
                             &master,
@@ -6103,15 +6767,26 @@ fn run_terminal(
                         );
                         #[cfg(not(unix))]
                         let _ = killer.kill();
+                        #[cfg(all(unix, not(target_os = "linux")))]
+                        let _ = child_watch.wait_timeout(TERMINATION_KILL_WAIT);
+                        #[cfg(any(target_os = "linux", not(unix)))]
                         let _ = exit_rx.recv_timeout(TERMINATION_KILL_WAIT);
                     }
                 } else {
                     let _ = killer.kill();
+                    if exit_status.is_none() {
+                        #[cfg(all(unix, not(target_os = "linux")))]
+                        let _ = child_watch.wait_timeout(TERMINATION_KILL_WAIT);
+                        #[cfg(any(target_os = "linux", not(unix)))]
+                        let _ = exit_rx.recv_timeout(TERMINATION_KILL_WAIT);
+                    }
                 }
                 return Ok(());
             }
-            Wake::Input(_) => unreachable!("PTY input is normalized before dispatch"),
-            Wake::Search(result) => {
+            Some(Wake::Command(_) | Wake::Input(_)) => {
+                unreachable!("commands and PTY input are dispatched above")
+            }
+            Some(Wake::Search(result)) => {
                 if apply_search_results(
                     &mut terminal,
                     &mut active_views,
@@ -6122,12 +6797,8 @@ fn run_terminal(
                     publish_active_views(
                         &mut terminal,
                         publisher,
-                        &mut render_state,
-                        &mut row_iterator,
-                        &mut cell_iterator,
-                        &mut generations,
+                        &mut frames,
                         SnapshotChange::View,
-                        &mut dictionary,
                         &mut active_views,
                         &word_separators,
                         SessionStatus::Running,
@@ -6135,7 +6806,7 @@ fn run_terminal(
                 }
             }
             #[cfg(all(unix, not(target_os = "linux")))]
-            Wake::PtyReadable => {
+            Some(Wake::PtyReadable) => {
                 let mut burst = 0_usize;
                 let mut spins = 0_u32;
                 let turn_started = Instant::now();
@@ -6203,7 +6874,7 @@ fn run_terminal(
                 }
             }
             #[cfg(any(target_os = "linux", not(unix)))]
-            Wake::PtyMessage(message) => match message {
+            Some(Wake::PtyMessage(message)) => match message {
                 ReaderMessage::Data { buffer, length } => {
                     let mut closed_tap = None;
                     let mut consumed_output = false;
@@ -6252,14 +6923,14 @@ fn run_terminal(
                 }
                 ReaderMessage::Eof => reader_eof = true,
             },
-            Wake::ChildExit(status) => {
+            Some(Wake::ChildExit(status)) => {
                 exit_status = Some(status?);
                 #[cfg(windows)]
                 if let Some(master) = master.take() {
                     let _ = master_close_tx.send(master);
                 }
             }
-            Wake::Deadline => {
+            Some(Wake::Deadline) => {
                 let started = diagnostic_timer();
                 let parsed = drain_raw_output_parse_backlog(
                     &mut terminal,
@@ -6359,15 +7030,12 @@ fn run_terminal(
             if had_output || output_pending {
                 publisher.mark_output_activity();
             }
+            frames.force_fallback = !terminating;
             publish_active_views(
                 &mut terminal,
                 publisher,
-                &mut render_state,
-                &mut row_iterator,
-                &mut cell_iterator,
-                &mut generations,
+                &mut frames,
                 SnapshotChange::Content,
-                &mut dictionary,
                 &mut active_views,
                 &word_separators,
                 SessionStatus::exited(status.exit_code(), status.signal().map(str::to_owned)),
@@ -6381,15 +7049,12 @@ fn run_terminal(
                             retained = true;
                             write_dead_notice(&mut terminal, &text)?;
                             publisher.set_facts(engine_filter.facts(&terminal)?);
+                            frames.force_fallback = true;
                             publish_active_views(
                                 &mut terminal,
                                 publisher,
-                                &mut render_state,
-                                &mut row_iterator,
-                                &mut cell_iterator,
-                                &mut generations,
+                                &mut frames,
                                 SnapshotChange::Content,
-                                &mut dictionary,
                                 &mut active_views,
                                 &word_separators,
                                 SessionStatus::exited(
@@ -6495,31 +7160,25 @@ fn signal_number(_description: &str) -> Option<u8> {
 
 #[cfg(unix)]
 fn signal_terminal_process_groups(
-    master: &parking_lot::Mutex<Box<dyn portable_pty::MasterPty + Send>>,
+    master: &unix_pty::UnixMaster,
     shell_process_id: Option<u32>,
     signal: rustix::process::Signal,
 ) {
-    let mut groups = SmallVec::<[rustix::process::Pid; 2]>::new();
-    if let Some(group) = master
-        .lock()
+    let shell = shell_process_id
+        .filter(|group| *group != 0)
+        .and_then(|group| i32::try_from(group).ok())
+        .and_then(rustix::process::Pid::from_raw);
+    let foreground = master
         .process_group_leader()
-        .and_then(|group| u32::try_from(group).ok())
-        .filter(|group| *group != 0)
-        .and_then(|group| i32::try_from(group).ok())
         .and_then(rustix::process::Pid::from_raw)
-    {
-        groups.push(group);
-    }
-    if let Some(group) = shell_process_id
-        .filter(|group| *group != 0)
-        .and_then(|group| i32::try_from(group).ok())
-        .and_then(rustix::process::Pid::from_raw)
-        && !groups.contains(&group)
-    {
-        groups.push(group);
-    }
-    for group in groups {
+        .filter(|group| Some(*group) != shell);
+    if let Some(group) = foreground {
         let _ = rustix::process::kill_process_group(group, signal);
+    }
+    if let Some(shell) = shell
+        && rustix::process::kill_process_group(shell, signal) == Err(rustix::io::Errno::SRCH)
+    {
+        let _ = rustix::process::kill_process(shell, signal);
     }
 }
 
@@ -11383,30 +12042,52 @@ struct SearchWorker {
     latest_requests: HashMap<TerminalViewId, Arc<AtomicU64>>,
     next_request: u64,
     match_scratch: Vec<SearchMatch>,
+    idle: Option<SearchThread>,
+}
+
+struct SearchThread {
+    jobs: Receiver<SearchJobs>,
+    results: Sender<SearchResults>,
+    discard_results: Receiver<SearchResults>,
+    wake: ActorWake,
 }
 
 impl SearchWorker {
-    fn spawn(wake: ActorWake) -> Result<(Self, Receiver<SearchResults>), WorkerError> {
+    fn spawn(wake: ActorWake) -> (Self, Receiver<SearchResults>) {
         let (jobs, job_rx) = crossbeam_channel::bounded::<SearchJobs>(1);
         let discard_jobs = job_rx.clone();
         let (result_tx, results) = crossbeam_channel::bounded::<SearchResults>(1);
         let discard_results = results.clone();
-        thread::Builder::new()
-            .name("zz-terminal-search".into())
-            .spawn(move || {
-                search_worker(&job_rx, &result_tx, &discard_results, &wake);
-            })
-            .map_err(WorkerError::Io)?;
-        Ok((
+        (
             Self {
                 jobs,
                 discard_jobs,
                 latest_requests: HashMap::new(),
                 next_request: 0,
                 match_scratch: Vec::new(),
+                idle: Some(SearchThread {
+                    jobs: job_rx,
+                    results: result_tx,
+                    discard_results,
+                    wake,
+                }),
             },
             results,
-        ))
+        )
+    }
+
+    fn start(&mut self) {
+        let Some(idle) = self.idle.take() else {
+            return;
+        };
+        if let Err(error) = thread::Builder::new()
+            .name("zz-terminal-search".into())
+            .spawn(move || {
+                search_worker(&idle.jobs, &idle.results, &idle.discard_results, &idle.wake);
+            })
+        {
+            log::error!("could not start the terminal search thread: {error}");
+        }
     }
 
     fn next_request(&mut self, view_id: TerminalViewId) -> (u64, Arc<AtomicU64>) {
@@ -11448,6 +12129,7 @@ impl SearchWorker {
     }
 
     fn submit(&mut self, job: SearchJob) {
+        self.start();
         let mut pending = SearchJobs::default();
         pending.by_view.insert(job.view_id, job);
         loop {
@@ -12669,7 +13351,7 @@ fn wait_for_wake(
     control_rx: &Receiver<Command>,
     input_rx: Option<&Receiver<QueuedInput>>,
     search_results: &Receiver<SearchResults>,
-    child_exit: &Receiver<std::io::Result<ExitStatus>>,
+    mut child: Option<&mut ChildExitWatch>,
     pty: Option<&filedescriptor::FileDescriptor>,
     wake_rx: &std::os::fd::OwnedFd,
     timeout: Duration,
@@ -12681,7 +13363,6 @@ fn wait_for_wake(
         control_rx: &Receiver<Command>,
         input_rx: Option<&Receiver<QueuedInput>>,
         search_results: &Receiver<SearchResults>,
-        child_exit: &Receiver<std::io::Result<ExitStatus>>,
     ) -> Result<Option<Wake>, WorkerError> {
         match control_rx.try_recv() {
             Ok(command) => return Ok(Some(Wake::Command(command))),
@@ -12695,59 +13376,291 @@ fn wait_for_wake(
             }
         }
         match search_results.try_recv() {
-            Ok(result) => return Ok(Some(Wake::Search(result))),
-            Err(TryRecvError::Disconnected) => {
-                return Err(WorkerError::Thread(
-                    "terminal search worker stopped".to_owned(),
-                ));
-            }
-            Err(TryRecvError::Empty) => {}
-        }
-        match child_exit.try_recv() {
-            Ok(status) => Ok(Some(Wake::ChildExit(status))),
+            Ok(result) => Ok(Some(Wake::Search(result))),
             Err(TryRecvError::Disconnected) => Err(WorkerError::Thread(
-                "terminal child waiter stopped".to_owned(),
+                "terminal search worker stopped".to_owned(),
             )),
             Err(TryRecvError::Empty) => Ok(None),
         }
     }
 
-    if let Some(wake) = check_channels(control_rx, input_rx, search_results, child_exit)? {
+    if let Some(wake) = check_channels(control_rx, input_rx, search_results)? {
         return Ok(wake);
+    }
+    if let Some(status) = child.as_deref_mut().and_then(ChildExitWatch::take_ready) {
+        return Ok(Wake::ChildExit(status));
     }
 
     let timespec = rustix::event::Timespec::try_from(timeout.min(Duration::from_hours(1)))
         .expect("a bounded timeout fits in a timespec");
     let readable = PollFlags::IN | PollFlags::HUP | PollFlags::ERR;
-    let wake_pollfd = PollFd::new(wake_rx, PollFlags::IN);
-    let (pty_ready, wake_ready) = if let Some(pty) = pty {
-        let mut fds = [PollFd::new(pty, PollFlags::IN), wake_pollfd];
+    let (pty_ready, wake_ready, child_ready) = {
+        let mut fds = SmallVec::<[PollFd<'_>; 3]>::new();
+        fds.push(PollFd::new(wake_rx, PollFlags::IN));
+        let pty_index = pty.map(|pty| {
+            fds.push(PollFd::new(pty, PollFlags::IN));
+            fds.len() - 1
+        });
+        let child_index = child
+            .as_deref()
+            .and_then(ChildExitWatch::poll_fd)
+            .map(|kqueue| {
+                fds.push(PollFd::new(kqueue, PollFlags::IN));
+                fds.len() - 1
+            });
         match rustix::event::poll(&mut fds, Some(&timespec)) {
-            Ok(_) => (
-                fds[0].revents().intersects(readable),
-                fds[1].revents().intersects(readable),
-            ),
-            Err(rustix::io::Errno::INTR) => (false, false),
-            Err(error) => return Err(WorkerError::Io(error.into())),
-        }
-    } else {
-        let mut fds = [wake_pollfd];
-        match rustix::event::poll(&mut fds, Some(&timespec)) {
-            Ok(_) => (false, fds[0].revents().intersects(readable)),
-            Err(rustix::io::Errno::INTR) => (false, false),
+            Ok(_) => {
+                let ready = |index: Option<usize>| {
+                    index.is_some_and(|index| fds[index].revents().intersects(readable))
+                };
+                (ready(pty_index), ready(Some(0)), ready(child_index))
+            }
+            Err(rustix::io::Errno::INTR) => (false, false, false),
             Err(error) => return Err(WorkerError::Io(error.into())),
         }
     };
     if wake_ready {
         drain_wake_pipe(wake_rx)?;
-        if let Some(wake) = check_channels(control_rx, input_rx, search_results, child_exit)? {
+        if let Some(wake) = check_channels(control_rx, input_rx, search_results)? {
             return Ok(wake);
         }
+    }
+    if child_ready && let Some(status) = child.and_then(ChildExitWatch::on_readable) {
+        return Ok(Wake::ChildExit(status));
     }
     if pty_ready {
         return Ok(Wake::PtyReadable);
     }
     Ok(Wake::Deadline)
+}
+
+const PANE_ENVIRONMENT_KEYS: [&str; 5] = [
+    "TERM",
+    "COLORTERM",
+    "TERM_PROGRAM",
+    "TERM_PROGRAM_VERSION",
+    "SHELL",
+];
+
+#[cfg(unix)]
+struct UnixChildKiller(Option<u32>);
+
+#[cfg(unix)]
+impl UnixChildKiller {
+    fn kill(&mut self) -> std::io::Result<()> {
+        let Some(pid) = self
+            .0
+            .and_then(|pid| i32::try_from(pid).ok())
+            .and_then(rustix::process::Pid::from_raw)
+        else {
+            return Ok(());
+        };
+        rustix::process::kill_process(pid, rustix::process::Signal::HUP).map_err(Into::into)
+    }
+}
+
+#[cfg(unix)]
+fn exit_status_from_wait(status: rustix::process::WaitStatus) -> ExitStatus {
+    use std::os::unix::process::ExitStatusExt;
+    ExitStatus::from(std::process::ExitStatus::from_raw(status.as_raw()))
+}
+
+#[cfg(unix)]
+fn reap_child(pid: rustix::process::Pid, block: bool) -> Option<std::io::Result<ExitStatus>> {
+    let options = if block {
+        rustix::process::WaitOptions::empty()
+    } else {
+        rustix::process::WaitOptions::NOHANG
+    };
+    loop {
+        match rustix::process::waitpid(Some(pid), options) {
+            Ok(Some((_, status))) => return Some(Ok(exit_status_from_wait(status))),
+            Ok(None) => return None,
+            Err(rustix::io::Errno::INTR) => {}
+            Err(error) => return Some(Err(error.into())),
+        }
+    }
+}
+
+#[cfg(unix)]
+fn child_pid(process_id: Option<u32>) -> Result<rustix::process::Pid, WorkerError> {
+    process_id
+        .and_then(|pid| i32::try_from(pid).ok())
+        .and_then(rustix::process::Pid::from_raw)
+        .ok_or_else(|| WorkerError::Spawn("the spawned child has no process id".to_owned()))
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+struct ChildExitWatch {
+    pid: rustix::process::Pid,
+    kqueue: Option<std::os::fd::OwnedFd>,
+    ready: Option<std::io::Result<ExitStatus>>,
+    reaped: bool,
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+impl ChildExitWatch {
+    fn new(process_id: Option<u32>) -> Result<Self, WorkerError> {
+        use rustix::event::kqueue::{Event, EventFilter, EventFlags, ProcessEvents};
+
+        let pid = child_pid(process_id)?;
+        let kqueue =
+            rustix::event::kqueue::kqueue().map_err(|error| WorkerError::Io(error.into()))?;
+        let change = [Event::new(
+            EventFilter::Proc {
+                pid,
+                flags: ProcessEvents::EXIT,
+            },
+            EventFlags::ADD | EventFlags::ONESHOT,
+            std::ptr::null_mut(),
+        )];
+        #[allow(
+            unsafe_code,
+            reason = "a process filter names no descriptor that could close under the kqueue"
+        )]
+        let registered = unsafe {
+            rustix::event::kqueue::kevent(&kqueue, &change, &mut [] as &mut [Event; 0], None)
+        };
+        match registered {
+            Ok(_) => {
+                let ready = reap_child(pid, false);
+                Ok(Self {
+                    pid,
+                    kqueue: ready.is_none().then_some(kqueue),
+                    reaped: ready.is_some(),
+                    ready,
+                })
+            }
+            Err(rustix::io::Errno::SRCH) => {
+                let ready = reap_child(pid, false).or_else(|| reap_child(pid, true));
+                Ok(Self {
+                    pid,
+                    kqueue: None,
+                    reaped: ready.is_some(),
+                    ready,
+                })
+            }
+            Err(error) => Err(WorkerError::Io(error.into())),
+        }
+    }
+
+    fn poll_fd(&self) -> Option<&std::os::fd::OwnedFd> {
+        self.kqueue.as_ref()
+    }
+
+    fn take_ready(&mut self) -> Option<std::io::Result<ExitStatus>> {
+        self.ready.take()
+    }
+
+    fn on_readable(&mut self) -> Option<std::io::Result<ExitStatus>> {
+        use rustix::event::kqueue::Event;
+
+        let exited = self.kqueue.as_ref().is_some_and(|kqueue| {
+            let mut events = Vec::<Event>::with_capacity(1);
+            #[allow(
+                unsafe_code,
+                reason = "reading events registers nothing, so no descriptor can dangle"
+            )]
+            let read = unsafe {
+                rustix::event::kqueue::kevent(kqueue, &[], &mut events, Some(Duration::ZERO))
+            };
+            read.is_ok_and(|count| count > 0)
+        });
+        let status = reap_child(self.pid, exited)?;
+        self.kqueue = None;
+        self.reaped = true;
+        Some(status)
+    }
+
+    fn wait_timeout(&mut self, timeout: Duration) -> Option<std::io::Result<ExitStatus>> {
+        use rustix::event::{PollFd, PollFlags};
+
+        if let Some(status) = self.ready.take() {
+            return Some(status);
+        }
+        self.kqueue.as_ref()?;
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(status) = reap_child(self.pid, false) {
+                self.kqueue = None;
+                self.reaped = true;
+                return Some(status);
+            }
+            let kqueue = self.kqueue.as_ref()?;
+            let remaining = deadline.checked_duration_since(Instant::now())?;
+            let timespec = rustix::event::Timespec::try_from(remaining)
+                .expect("a bounded timeout fits in a timespec");
+            let mut fds = [PollFd::new(kqueue, PollFlags::IN)];
+            match rustix::event::poll(&mut fds, Some(&timespec)) {
+                Ok(0) => return None,
+                Ok(_) | Err(rustix::io::Errno::INTR) => {}
+                Err(_) => return None,
+            }
+            if let Some(status) = self.on_readable() {
+                return Some(status);
+            }
+        }
+    }
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+impl Drop for ChildExitWatch {
+    fn drop(&mut self) {
+        if self.reaped || reap_child(self.pid, false).is_some() {
+            return;
+        }
+        let pid = self.pid;
+        if let Err(error) = thread::Builder::new()
+            .name("zz-child-reap".into())
+            .spawn(move || {
+                let _ = reap_child(pid, true);
+            })
+        {
+            log::warn!(
+                "could not wait for pane child {}: {error}",
+                pid.as_raw_nonzero()
+            );
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+struct LinuxChildWatch {
+    pid: rustix::process::Pid,
+    pidfd: std::os::fd::OwnedFd,
+    exit: Sender<std::io::Result<ExitStatus>>,
+}
+
+#[cfg(target_os = "linux")]
+impl LinuxChildWatch {
+    fn reap(&self) -> bool {
+        let Some(status) = reap_child(self.pid, false) else {
+            return false;
+        };
+        let _ = self.exit.send(status);
+        true
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn watch_child_linux(
+    process_id: Option<u32>,
+    exit: Sender<std::io::Result<ExitStatus>>,
+) -> Result<Option<LinuxChildWatch>, WorkerError> {
+    let pid = child_pid(process_id)?;
+    if let Ok(pidfd) = rustix::process::pidfd_open(pid, rustix::process::PidfdFlags::empty()) {
+        return Ok(Some(LinuxChildWatch { pid, pidfd, exit }));
+    }
+    thread::Builder::new()
+        .name("zz-child-wait".into())
+        .spawn(move || {
+            let status = reap_child(pid, true).unwrap_or_else(|| {
+                Err(std::io::Error::other("the pane child was reaped elsewhere"))
+            });
+            let _ = exit.send(status);
+        })
+        .map_err(WorkerError::Io)?;
+    Ok(None)
 }
 
 #[cfg(all(unix, not(target_os = "linux")))]
@@ -12810,6 +13723,7 @@ fn gather_pty_linux(
     drain_fd: impl std::os::fd::AsFd,
     output: Sender<ReaderMessage>,
     recycled: Receiver<Vec<u8>>,
+    mut child: Option<LinuxChildWatch>,
 ) {
     use rustix::event::{PollFd, PollFlags};
 
@@ -12824,16 +13738,31 @@ fn gather_pty_linux(
         let mut spins = 0_u32;
         while length < buffer.len() {
             if length == 0 {
-                let mut fds = [PollFd::new(&drain_fd, PollFlags::IN)];
                 loop {
-                    match rustix::event::poll(&mut fds, None) {
-                        Ok(_) => break,
-                        Err(rustix::io::Errno::INTR) => {}
-                        Err(error) => {
-                            log::debug!("Linux PTY gather poll stopped: {error}");
-                            eof = true;
-                            break;
+                    let (pty_ready, child_ready) = {
+                        let mut fds = SmallVec::<[PollFd<'_>; 2]>::new();
+                        fds.push(PollFd::new(&drain_fd, PollFlags::IN));
+                        if let Some(watch) = &child {
+                            fds.push(PollFd::new(&watch.pidfd, PollFlags::IN));
                         }
+                        match rustix::event::poll(&mut fds, None) {
+                            Ok(_) => (
+                                !fds[0].revents().is_empty(),
+                                fds.get(1).is_some_and(|fd| !fd.revents().is_empty()),
+                            ),
+                            Err(rustix::io::Errno::INTR) => (false, false),
+                            Err(error) => {
+                                log::debug!("Linux PTY gather poll stopped: {error}");
+                                eof = true;
+                                break;
+                            }
+                        }
+                    };
+                    if child_ready && child.as_ref().is_some_and(LinuxChildWatch::reap) {
+                        child = None;
+                    }
+                    if pty_ready {
+                        break;
                     }
                 }
                 if eof {
@@ -12874,6 +13803,26 @@ fn gather_pty_linux(
         }
     }
     let _ = output.send(ReaderMessage::Eof);
+    while let Some(watch) = &child {
+        let mut fds = [PollFd::new(&watch.pidfd, PollFlags::IN)];
+        match rustix::event::poll(&mut fds, None) {
+            Ok(_) => {
+                if watch.reap() {
+                    child = None;
+                }
+            }
+            Err(rustix::io::Errno::INTR) => {}
+            Err(error) => {
+                log::debug!("Linux child exit poll stopped: {error}");
+                let _ = watch
+                    .exit
+                    .send(reap_child(watch.pid, true).unwrap_or_else(|| {
+                        Err(std::io::Error::other("the pane child was reaped elsewhere"))
+                    }));
+                child = None;
+            }
+        }
+    }
 }
 
 #[cfg(any(not(unix), test))]
@@ -13231,61 +14180,435 @@ fn ghostty_key(key: KeyCode) -> key::Key {
     }
 }
 
+static EAGER_FRAMES: LazyLock<bool> = LazyLock::new(|| perf_flag("ZZ_PERF_EAGER_FRAMES", "1"));
+
+fn perf_flag(name: &str, value: &str) -> bool {
+    std::env::var_os(name).is_some_and(|set| set == value)
+}
+
+#[must_use]
+pub fn perf_knobs() -> [(&'static str, bool); 3] {
+    [
+        ("ZZ_PERF_EAGER_FRAMES=1", *EAGER_FRAMES),
+        ("ZZ_PERF_NO_COMPRESS=1", *NO_COMPRESS),
+        ("ZZ_PERF_ECHO_FASTPATH=0", *NO_ECHO_FASTPATH),
+    ]
+}
+
+static NO_COMPRESS: LazyLock<bool> = LazyLock::new(|| perf_flag("ZZ_PERF_NO_COMPRESS", "1"));
+static NO_ECHO_FASTPATH: LazyLock<bool> = LazyLock::new(|| perf_flag("ZZ_PERF_ECHO_FASTPATH", "0"));
+
+const ECHO_WINDOW: Duration = Duration::from_millis(50);
+const ECHO_PUBLISHES: u8 = 4;
+
+#[derive(Default)]
+struct EchoWindow {
+    opened: Option<Instant>,
+    publishes: u8,
+}
+
+impl EchoWindow {
+    fn open(&mut self) {
+        self.opened = Some(Instant::now());
+        self.publishes = ECHO_PUBLISHES;
+    }
+
+    fn due(&self) -> bool {
+        !*NO_ECHO_FASTPATH
+            && self.publishes > 0
+            && self
+                .opened
+                .is_some_and(|opened| opened.elapsed() < ECHO_WINDOW)
+    }
+
+    fn spend(&mut self) {
+        self.publishes = self.publishes.saturating_sub(1);
+    }
+}
+
+const COMPRESS_IDLE: Duration = Duration::from_secs(1);
+const COMPRESS_STEP_BUDGET: Duration = Duration::from_millis(2);
+
+#[derive(Default)]
+struct IdleCompression {
+    activity: Option<libghostty_vt::terminal::CompressionActivity>,
+    due: Option<Instant>,
+    unsupported: bool,
+}
+
+impl IdleCompression {
+    fn enabled(&self) -> bool {
+        !self.unsupported && !*NO_COMPRESS
+    }
+
+    fn observe(&mut self, terminal: &Terminal<'_, '_>, now: Instant) {
+        if !self.enabled() {
+            return;
+        }
+        let Ok(activity) = terminal.compression_activity() else {
+            return;
+        };
+        if self.activity != Some(activity) {
+            self.activity = Some(activity);
+            self.due = Some(now + COMPRESS_IDLE);
+        }
+    }
+
+    fn rearm(&mut self) {
+        if self.enabled() {
+            self.due = Some(Instant::now() + COMPRESS_IDLE);
+        }
+    }
+
+    const fn due(&self) -> Option<Instant> {
+        self.due
+    }
+
+    fn run(&mut self, terminal: &mut Terminal<'_, '_>) {
+        use libghostty_vt::terminal::{CompressionMode, CompressionResult};
+
+        if self.due.is_none_or(|due| Instant::now() < due) {
+            return;
+        }
+        let started = Instant::now();
+        loop {
+            match terminal.compress(CompressionMode::Incremental) {
+                Ok(CompressionResult::Pending) => {
+                    if started.elapsed() >= COMPRESS_STEP_BUDGET {
+                        self.due = Some(Instant::now());
+                        break;
+                    }
+                }
+                Ok(CompressionResult::Complete) => {
+                    self.due = None;
+                    break;
+                }
+                Ok(CompressionResult::Unsupported) => {
+                    self.unsupported = true;
+                    self.due = None;
+                    break;
+                }
+                Err(error) => {
+                    log::debug!("terminal history compression stopped: {error}");
+                    self.due = None;
+                    break;
+                }
+            }
+        }
+        log::trace!(
+            target: "zz_terminal::diagnostics::compression",
+            "compress step elapsed_us={} pending={}",
+            started.elapsed().as_micros(),
+            self.due.is_some(),
+        );
+        self.activity = terminal.compression_activity().ok();
+    }
+}
+
+const UNWATCHED_SETTLE_QUIET: Duration = Duration::from_millis(100);
+const UNWATCHED_SETTLE_MAX: Duration = Duration::from_secs(1);
+const UNWATCHED_NOTIFY_INTERVAL: Duration = Duration::from_millis(100);
+
+struct RenderResources<'alloc> {
+    state: RenderState<'alloc>,
+    rows: RowIterator<'alloc>,
+    cells: CellIterator<'alloc>,
+}
+
+impl<'alloc> RenderResources<'alloc> {
+    fn new(terminal: &Terminal<'alloc, '_>) -> Result<Self, WorkerError> {
+        let mut state = RenderState::new()?;
+        state.update(terminal)?.set_dirty(Dirty::Full)?;
+        Ok(Self {
+            state,
+            rows: RowIterator::new()?,
+            cells: CellIterator::new()?,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+struct StreamState {
+    stream: ViewStream,
+    epoch: u64,
+}
+
+struct Frames<'alloc> {
+    render: Option<RenderResources<'alloc>>,
+    generations: ViewportGenerations,
+    dictionary: ViewportDictionary,
+    streams: HashMap<TerminalViewId, StreamState>,
+    preview: bool,
+    force_fallback: bool,
+    mode_views: HashSet<TerminalViewId>,
+    published: HashSet<TerminalViewId>,
+    unbuilt_since: Option<Instant>,
+    last_unbuilt: Option<Instant>,
+    last_notify: Option<Instant>,
+    notify_owed: bool,
+    synchronized_output_deadline: Option<Instant>,
+    retain_render_until: Option<Instant>,
+    last_settle: Option<Instant>,
+}
+
+impl<'alloc> Frames<'alloc> {
+    fn new(appearance: &TerminalAppearance) -> Result<Self, WorkerError> {
+        Ok(Self {
+            render: None,
+            generations: ViewportGenerations::new()?,
+            dictionary: ViewportDictionary {
+                class_hints: ClassHints::new(appearance),
+                ..ViewportDictionary::default()
+            },
+            streams: HashMap::new(),
+            preview: false,
+            force_fallback: false,
+            mode_views: HashSet::new(),
+            published: HashSet::new(),
+            unbuilt_since: None,
+            last_unbuilt: None,
+            last_notify: None,
+            notify_owed: false,
+            synchronized_output_deadline: None,
+            retain_render_until: None,
+            last_settle: None,
+        })
+    }
+
+    fn defer_synchronized_output(
+        &mut self,
+        terminal: &mut Terminal<'_, '_>,
+        status: &SessionStatus,
+    ) -> Result<bool, WorkerError> {
+        if !terminal.mode(Mode::SYNC_OUTPUT)? {
+            self.synchronized_output_deadline = None;
+            return Ok(false);
+        }
+        let now = Instant::now();
+        let deadline = *self
+            .synchronized_output_deadline
+            .get_or_insert(now + SYNCHRONIZED_OUTPUT_TIMEOUT);
+        if matches!(status, SessionStatus::Running) && now < deadline {
+            return Ok(true);
+        }
+        self.synchronized_output_deadline = None;
+        terminal.set_mode(Mode::SYNC_OUTPUT, false)?;
+        Ok(false)
+    }
+
+    fn unwatched(&self, active: &ActiveTerminalViews) -> bool {
+        !self.needs_cells(active)
+            && self.mode_views.is_empty()
+            && active.values().all(|view| view.copy_mode.is_none())
+    }
+
+    fn streaming(&self, view: TerminalViewId) -> bool {
+        *EAGER_FRAMES
+            || self
+                .streams
+                .get(&view)
+                .is_some_and(|state| state.stream.is_on())
+    }
+
+    fn epoch(&self, view: TerminalViewId) -> u64 {
+        self.streams.get(&view).map_or(0, |state| state.epoch)
+    }
+
+    fn set_stream(&mut self, view: TerminalViewId, stream: ViewStream) -> bool {
+        let restart = stream.is_on() && !self.published.contains(&view);
+        let state = self.streams.entry(view).or_default();
+        state.stream = stream;
+        if restart {
+            state.epoch = state.epoch.wrapping_add(1);
+        }
+        restart
+    }
+
+    fn shows(&self, view: TerminalViewId, active: &ActiveTerminalViews) -> bool {
+        self.streaming(view)
+            || self.published.contains(&view)
+            || active
+                .get(&view)
+                .is_some_and(|state| state.copy_mode.is_some())
+    }
+
+    fn forget_view(&mut self, view: TerminalViewId) {
+        self.streams.remove(&view);
+        self.mode_views.remove(&view);
+        self.published.remove(&view);
+    }
+
+    fn resources(
+        &mut self,
+        terminal: &Terminal<'alloc, '_>,
+    ) -> Result<&mut RenderResources<'alloc>, WorkerError> {
+        if self.render.is_none() {
+            self.render = Some(RenderResources::new(terminal)?);
+        }
+        Ok(self
+            .render
+            .as_mut()
+            .expect("render resources were just created"))
+    }
+
+    fn reset_render(&mut self) {
+        self.render = None;
+    }
+
+    fn mark_full_dirty(&mut self, terminal: &Terminal<'alloc, '_>) -> Result<(), WorkerError> {
+        if let Some(render) = self.render.as_mut() {
+            render.state.update(terminal)?.set_dirty(Dirty::Full)?;
+        }
+        Ok(())
+    }
+
+    fn snapshot(
+        &mut self,
+        terminal: &Terminal<'alloc, '_>,
+        change: SnapshotChange,
+        view: Option<&TerminalViewState>,
+        status: SessionStatus,
+    ) -> Result<TerminalViewport, WorkerError> {
+        if let Some(view) = view
+            && let Some(copy_mode) = view.copy_mode.as_ref()
+        {
+            return Ok(copy_mode_snapshot(
+                &mut self.generations,
+                change,
+                &mut self.dictionary,
+                view,
+                copy_mode,
+                status,
+            ));
+        }
+        self.resources(terminal)?;
+        let render = self.render.as_mut().expect("render resources exist");
+        snapshot(
+            terminal,
+            &mut render.state,
+            &mut render.rows,
+            &mut render.cells,
+            &mut self.generations,
+            change,
+            &mut self.dictionary,
+            view,
+            status,
+        )
+    }
+
+    fn needs_cells(&self, active: &ActiveTerminalViews) -> bool {
+        *EAGER_FRAMES || self.preview || active.keys().any(|view| self.streaming(*view))
+    }
+
+    fn release_unused(&mut self, active: &ActiveTerminalViews) {
+        if self.needs_cells(active) {
+            self.retain_render_until = None;
+            return;
+        }
+        if self
+            .retain_render_until
+            .is_some_and(|until| Instant::now() < until)
+        {
+            return;
+        }
+        self.retain_render_until = None;
+        self.render = None;
+        self.dictionary.release_pools();
+    }
+
+    fn rebuild_due(&self) -> Option<Instant> {
+        let first = self.unbuilt_since?;
+        let last = self.last_unbuilt.unwrap_or(first);
+        Some((last + UNWATCHED_SETTLE_QUIET).min(first + UNWATCHED_SETTLE_MAX))
+    }
+
+    fn notify_due(&self) -> Option<Instant> {
+        self.notify_owed
+            .then(|| {
+                self.last_notify
+                    .map(|last| last + UNWATCHED_NOTIFY_INTERVAL)
+            })
+            .flatten()
+    }
+
+    fn settle_due(&self) -> Option<Instant> {
+        [
+            self.rebuild_due(),
+            self.notify_due(),
+            self.retain_render_until,
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+    }
+
+    fn admit_notify(&mut self, metadata_changed: bool) -> bool {
+        let now = Instant::now();
+        if metadata_changed
+            || self
+                .last_notify
+                .is_none_or(|last| now >= last + UNWATCHED_NOTIFY_INTERVAL)
+        {
+            self.last_notify = Some(now);
+            self.notify_owed = false;
+            true
+        } else {
+            self.notify_owed = true;
+            false
+        }
+    }
+}
+
 fn publish_active_views<'alloc: 'callbacks, 'callbacks>(
     terminal: &mut Terminal<'alloc, 'callbacks>,
     publisher: &Publisher,
-    render_state: &mut RenderState<'alloc>,
-    rows: &mut RowIterator<'alloc>,
-    cells: &mut CellIterator<'alloc>,
-    generations: &mut ViewportGenerations,
+    frames: &mut Frames<'alloc>,
     change: SnapshotChange,
-    dictionary: &mut ViewportDictionary,
     active: &mut ActiveTerminalViews,
     word_separators: &WordSeparators,
     status: SessionStatus,
 ) -> Result<(), WorkerError> {
-    if publisher.defer_synchronized_output(terminal, &status)? {
-        return Ok(());
-    }
-    if active.is_empty() {
-        publisher.publish(snapshot(
-            terminal,
-            render_state,
-            rows,
-            cells,
-            generations,
-            change,
-            dictionary,
-            None,
-            status,
-        )?);
-        return Ok(());
-    }
+    publish_views(
+        terminal,
+        publisher,
+        frames,
+        change,
+        active,
+        word_separators,
+        status,
+        true,
+    )
+}
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the publish entry point threads the actor's frame state and its notification choice"
+)]
+fn publish_views<'alloc: 'callbacks, 'callbacks>(
+    terminal: &mut Terminal<'alloc, 'callbacks>,
+    publisher: &Publisher,
+    frames: &mut Frames<'alloc>,
+    change: SnapshotChange,
+    active: &mut ActiveTerminalViews,
+    word_separators: &WordSeparators,
+    status: SessionStatus,
+    notify: bool,
+) -> Result<(), WorkerError> {
+    if frames.defer_synchronized_output(terminal, &status)? {
+        return Ok(());
+    }
+    let force_fallback = std::mem::take(&mut frames.force_fallback);
     let mut view_ids = active.keys().copied().collect::<Vec<_>>();
     view_ids.sort_by_key(|view| view.0);
     let mut viewports = Vec::with_capacity(view_ids.len());
-    let mut copy_facts = HashMap::with_capacity(view_ids.len());
+    let mut copy_facts = HashMap::new();
+    let mut streamed_any = false;
     for view_id in view_ids {
+        let streaming = frames.streaming(view_id);
         let view = active
             .get_mut(&view_id)
             .expect("active view id was collected from the same map");
-        if view.copy_mode.is_some() {
-            terminal.set_selection(None)?;
-        } else {
-            restore_view_state(terminal, view, word_separators)?;
-        }
-        let viewport = snapshot(
-            terminal,
-            render_state,
-            rows,
-            cells,
-            generations,
-            change,
-            dictionary,
-            Some(view),
-            status.clone(),
-        )?;
+        let in_mode = view.copy_mode.is_some();
         if let Some(facts) = view
             .copy_mode
             .as_deref()
@@ -13293,10 +14616,95 @@ fn publish_active_views<'alloc: 'callbacks, 'callbacks>(
         {
             copy_facts.insert(view_id, Arc::new(facts));
         }
-        viewports.push((view_id, viewport));
+        let left_mode = !in_mode && frames.mode_views.remove(&view_id);
+        if !streaming && !in_mode && !left_mode {
+            continue;
+        }
+        if in_mode {
+            frames.mode_views.insert(view_id);
+            terminal.set_selection(None)?;
+        } else {
+            restore_view_state(terminal, view, word_separators)?;
+        }
+        let viewport = frames.snapshot(terminal, change, Some(view), status.clone())?;
+        streamed_any |= streaming;
+        viewports.push((view_id, viewport, streaming.then(|| frames.epoch(view_id))));
     }
-    publisher.publish_copy_facts(copy_facts);
-    publisher.publish_viewports(viewports);
+    let refreshed = if streamed_any || force_fallback || *EAGER_FRAMES || frames.preview {
+        None
+    } else {
+        publisher.refresh_fallback(terminal, &mut frames.dictionary, &status)?
+    };
+    let mut notify = notify;
+    let fallback = if streamed_any {
+        frames.unbuilt_since = None;
+        frames.last_unbuilt = None;
+        FallbackFrame::FirstStreamed
+    } else if let Some((viewport, metadata_changed)) = refreshed {
+        if matches!(change, SnapshotChange::Content) {
+            let now = Instant::now();
+            frames.unbuilt_since.get_or_insert(now);
+            frames.last_unbuilt = Some(now);
+        }
+        notify = notify && frames.admit_notify(metadata_changed);
+        FallbackFrame::Metadata(viewport)
+    } else {
+        if !active.is_empty() {
+            terminal.set_selection(None)?;
+            terminal.scroll_viewport(ScrollViewport::Bottom);
+        }
+        frames.unbuilt_since = None;
+        frames.last_unbuilt = None;
+        FallbackFrame::Built(frames.snapshot(terminal, change, None, status)?)
+    };
+    frames.published.clear();
+    frames
+        .published
+        .extend(viewports.iter().map(|(view, _, _)| *view));
+    publisher.publish_frame(fallback, viewports, copy_facts, notify);
+    frames.release_unused(active);
+    Ok(())
+}
+
+fn settle_unwatched<'alloc: 'callbacks, 'callbacks>(
+    terminal: &mut Terminal<'alloc, 'callbacks>,
+    publisher: &Publisher,
+    frames: &mut Frames<'alloc>,
+    active: &mut ActiveTerminalViews,
+    word_separators: &WordSeparators,
+    status: SessionStatus,
+) -> Result<(), WorkerError> {
+    let now = Instant::now();
+    if frames.notify_due().is_some_and(|due| now >= due) {
+        frames.notify_owed = false;
+        frames.last_notify = Some(now);
+        publisher.notify_latest();
+    }
+    if frames.rebuild_due().is_none_or(|due| now < due) {
+        if frames.retain_render_until.is_some_and(|until| now >= until) {
+            frames.release_unused(active);
+        }
+        return Ok(());
+    }
+    let horizon = UNWATCHED_SETTLE_MAX + UNWATCHED_SETTLE_QUIET;
+    let recurring = frames
+        .last_unbuilt
+        .is_some_and(|last| now < last + UNWATCHED_SETTLE_QUIET)
+        || frames.last_settle.is_some_and(|last| now < last + horizon);
+    frames.last_settle = Some(now);
+    frames.retain_render_until = recurring.then(|| now + horizon);
+    frames.force_fallback = true;
+    publish_views(
+        terminal,
+        publisher,
+        frames,
+        SnapshotChange::Content,
+        active,
+        word_separators,
+        status,
+        false,
+    )?;
+    frames.force_fallback = false;
     Ok(())
 }
 
@@ -14820,6 +16228,7 @@ mod tests {
                 ..TerminalSpawn::default()
             },
         );
+        session.set_preview_watch(true);
         wait_for_test_viewport(&session, |viewport| {
             let mut contents = String::new();
             for cell in viewport.cells.iter() {
@@ -15653,7 +17062,7 @@ mod tests {
                 ..TerminalSpawn::default()
             },
         );
-        session.attach_view(view);
+        attach_streaming(&session, view);
         wait_for_test_viewport(&session, |viewport| {
             let mut contents = String::new();
             for cell in viewport.cells.iter() {
@@ -15779,7 +17188,7 @@ mod tests {
             matches!(viewport.status, SessionStatus::Running)
         });
         let view = TerminalViewId(1);
-        session.attach_view(view);
+        attach_streaming(&session, view);
         let deadline = Instant::now() + Duration::from_secs(2);
         while session.latest_viewport_for(view).is_none() {
             assert!(Instant::now() < deadline, "view never attached");
@@ -15858,7 +17267,7 @@ mod tests {
             },
         );
         let view = TerminalViewId(2);
-        session.attach_view(view);
+        attach_streaming(&session, view);
         wait_for_test_viewport(&session, |viewport| {
             let mut contents = String::new();
             for cell in viewport.cells.iter() {
@@ -15948,6 +17357,7 @@ mod tests {
                 control,
                 input: None,
                 liveness,
+                slot: Arc::default(),
             }),
             wake: ActorWake::none(),
         };
@@ -15974,6 +17384,7 @@ mod tests {
                 control,
                 input: Some(input),
                 liveness: crossbeam_channel::never(),
+                slot: Arc::default(),
             }),
             wake: ActorWake::none(),
         };
@@ -16426,7 +17837,7 @@ mod tests {
     #[test]
     fn actor_event_handles_share_compact_queue_state() {
         let word = std::mem::size_of::<usize>();
-        assert!(std::mem::size_of::<EventQueueState>() <= 6 * word);
+        assert!(std::mem::size_of::<EventQueueState>() <= 7 * word);
         assert_eq!(std::mem::size_of::<Publisher>(), 3 * word);
         assert_eq!(std::mem::size_of::<TerminalEvents>(), 3 * word);
         assert!(
@@ -17465,7 +18876,7 @@ mod tests {
             TerminalSession::spawn_output_view("selection".to_owned(), "abcdef".to_owned());
         let view = TerminalViewId(78);
         session.resize(3, 2, 8, 18);
-        session.attach_view(view);
+        attach_streaming(&session, view);
         let before = wait_for_test_viewport(&session, |viewport| {
             viewport.columns == 3
                 && viewport.rows == 2
@@ -18592,6 +20003,7 @@ mod tests {
             latest_requests: HashMap::new(),
             next_request: 0,
             match_scratch: Vec::new(),
+            idle: None,
         };
         let matches = Vec::with_capacity(16);
         let allocation = matches.as_ptr();
@@ -18743,6 +20155,7 @@ mod tests {
             latest_requests: HashMap::from([(view_id, Arc::new(AtomicU64::new(2)))]),
             next_request: 2,
             match_scratch: Vec::new(),
+            idle: None,
         };
 
         let stale = snapshot.search(&query, 1, || false).expect("stale result");
@@ -18816,6 +20229,7 @@ mod tests {
             latest_requests: HashMap::from([(view_id, Arc::new(AtomicU64::new(1)))]),
             next_request: 1,
             match_scratch: Vec::new(),
+            idle: None,
         };
         let mut matches = Vec::with_capacity(16);
         matches.push(SearchMatch {
@@ -20532,7 +21946,7 @@ mod tests {
             allocations.push(buffer.as_ptr() as usize);
             recycle_tx.send(buffer).expect("seed gather pool");
         }
-        let gather = thread::spawn(move || gather_pty_linux(read_fd, output_tx, recycle_rx));
+        let gather = thread::spawn(move || gather_pty_linux(read_fd, output_tx, recycle_rx, None));
         let expected = (0..PTY_READ_BUFFER_BYTES * 2 + 137)
             .map(|index| u8::try_from(index % 251).expect("bounded byte"))
             .collect::<Vec<_>>();
@@ -20581,7 +21995,7 @@ mod tests {
                 .send(vec![0_u8; PTY_READ_BUFFER_BYTES])
                 .expect("seed gather pool");
         }
-        let gather = thread::spawn(move || gather_pty_linux(read_fd, output_tx, recycle_rx));
+        let gather = thread::spawn(move || gather_pty_linux(read_fd, output_tx, recycle_rx, None));
 
         assert_eq!(
             rustix::io::write(&write_fd, b"prompt").expect("interactive fixture write"),
@@ -20750,7 +22164,7 @@ mod tests {
     #[test]
     fn synchronized_output_holds_the_frame_until_release() {
         let (session, before) = synchronized_output_session();
-        session.attach_view(TerminalViewId(991));
+        attach_streaming(&session, TerminalViewId(991));
         wait_for_test_capture(&session, |capture| capture.contains("AFTER!"));
         assert!(Arc::ptr_eq(&before, &session.latest_viewport()));
         assert!(session.feed(Arc::from(b"\x1b[?2026l".as_slice())));
@@ -20862,7 +22276,7 @@ mod tests {
                 ..TerminalSpawn::default()
             },
         );
-        session.attach_view(TerminalViewId(104));
+        attach_streaming(&session, TerminalViewId(104));
         wait_for_test_viewport(&session, |viewport| {
             matches!(viewport.status, SessionStatus::Running)
         });
@@ -21732,7 +23146,7 @@ mod tests {
         let session = TerminalSession::spawn_output_view("list-keys".to_owned(), text);
         let events = session.events();
         let view = TerminalViewId(77);
-        session.attach_view(view);
+        attach_streaming(&session, view);
 
         let viewport = wait_for_test_viewport(&session, |viewport| {
             matches!(viewport.mode, TerminalMode::View { .. })
@@ -21841,7 +23255,7 @@ mod tests {
             Arc::new(TerminalAppearance::default()),
         );
         let view = TerminalViewId(91);
-        session.attach_view(view);
+        attach_streaming(&session, view);
 
         let viewport = wait_for_test_viewport(&session, |viewport| {
             matches!(viewport.mode, TerminalMode::Live)
@@ -21880,7 +23294,7 @@ mod tests {
             "preserved content".to_owned(),
             Arc::new(initial.clone()),
         );
-        session.attach_view(TerminalViewId(93));
+        attach_streaming(&session, TerminalViewId(93));
         let before = wait_for_test_viewport(&session, |viewport| {
             matches!(viewport.status, SessionStatus::Running)
                 && viewport.background == initial.background
@@ -21906,6 +23320,11 @@ mod tests {
             })
             .expect("capture after appearance update");
         assert!(captured.contains("preserved content"));
+    }
+
+    fn attach_streaming(session: &TerminalSession, view: TerminalViewId) {
+        session.attach_view(view);
+        session.set_view_stream(view, ViewStream::Foreground);
     }
 
     fn wait_for_test_viewport(
@@ -21978,7 +23397,7 @@ mod tests {
         );
         let view = TerminalViewId(96);
         session.resize(24, 4, 8, 18);
-        session.attach_view(view);
+        attach_streaming(&session, view);
         wait_for_test_viewport(&session, |viewport| {
             viewport.columns == 24
                 && viewport.rows == 4
@@ -22038,7 +23457,7 @@ mod tests {
         let attached = TerminalViewId(11);
         let parked = TerminalViewId(12);
         session.resize(8, 2, 8, 18);
-        session.attach_view(attached);
+        attach_streaming(session, attached);
         session.attach_view(parked);
         session.detach_view(parked);
         wait_for_test_viewport(session, |viewport| {
@@ -22074,8 +23493,8 @@ mod tests {
         session.release_view(attached);
         fence(session);
         assert!(
-            session.latest_viewport().view_generation > before.view_generation,
-            "releasing an active view must publish"
+            session.latest_viewport_for(attached).is_none(),
+            "releasing an active view must publish without it"
         );
         assert!(session.latest_viewports().is_empty());
     }
@@ -22125,7 +23544,7 @@ mod tests {
             },
         );
         let view = TerminalViewId(43);
-        session.attach_view(view);
+        attach_streaming(&session, view);
         session.send_text("printf 'ZZ_WORKING_DIRECTORY:'; /bin/pwd -P\n");
 
         let expected = expected.to_string_lossy();
@@ -22162,7 +23581,7 @@ mod tests {
                 ..TerminalSpawn::default()
             },
         );
-        session.attach_view(TerminalViewId(47));
+        attach_streaming(&session, TerminalViewId(47));
         wait_for_test_viewport(&session, |viewport| {
             matches!(viewport.status, SessionStatus::Running)
         });
@@ -22200,7 +23619,7 @@ mod tests {
                         ..TerminalSpawn::default()
                     },
                 );
-                session.attach_view(TerminalViewId(view));
+                attach_streaming(&session, TerminalViewId(view));
                 let viewport = wait_for_test_viewport(&session, |viewport| {
                     let mut contents = String::new();
                     for cell in viewport.cells.iter() {
@@ -22308,7 +23727,7 @@ preexec_functions+=(__zz_fixture_preexec)
                 ..TerminalSpawn::default()
             },
         );
-        session.attach_view(TerminalViewId(144));
+        attach_streaming(&session, TerminalViewId(144));
         wait_for_test_capture(&session, |capture| capture.contains("zz-fixture-1:"));
         assert_eq!(
             session
@@ -22475,7 +23894,7 @@ PS1='zz-path-fixture> '
                 ..TerminalSpawn::default()
             },
         );
-        session.attach_view(TerminalViewId(145));
+        attach_streaming(&session, TerminalViewId(145));
         wait_for_test_capture(&session, |capture| capture.contains("zz-path-fixture>"));
         let command = "printf '%s\\n' \"${PATH%%:*}\"";
         session.send_text(format!("{command}\n").as_str());
@@ -22541,7 +23960,7 @@ PS1='zz-path-fixture> '
                 ..TerminalSpawn::default()
             },
         );
-        session.attach_view(TerminalViewId(44));
+        attach_streaming(&session, TerminalViewId(44));
 
         let expected_directory = expected_directory.to_string_lossy();
         wait_for_test_viewport(&session, |viewport| {
@@ -22595,7 +24014,7 @@ PS1='zz-path-fixture> '
             Arc::from(b"printf 'ZZ_HIDDEN_PASTE_OK\\n'\r".as_slice()),
             false,
         );
-        session.attach_view(view);
+        attach_streaming(&session, view);
 
         let viewport = wait_for_test_viewport(&session, |viewport| {
             let mut contents = String::new();
@@ -22616,7 +24035,7 @@ PS1='zz-path-fixture> '
             TerminalSpawn::default(),
         );
         let view = TerminalViewId(11);
-        session.attach_view(view);
+        attach_streaming(&session, view);
         session.resize(100, 30, 8, 18);
         session.send_text(
             "printf '\\033_Ga=T,f=100,i=78;iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91Jpz\
@@ -22652,7 +24071,7 @@ PS1='zz-path-fixture> '
             TerminalSpawn::default(),
         );
         let view = TerminalViewId(9);
-        session.attach_view(view);
+        attach_streaming(&session, view);
         session.resize(100, 30, 8, 18);
         session.send_text("printf '\\033_Ga=T,f=24,s=1,v=1,i=77;/wAA\\033\\\\'\n");
 
@@ -22698,7 +24117,7 @@ PS1='zz-path-fixture> '
             },
         );
         let view = TerminalViewId(21);
-        session.attach_view(view);
+        attach_streaming(&session, view);
         session.send_text("printf '\\033_Ga=T,f=24,s=1,v=1,i=77;/wAA\\033\\\\'\n");
 
         let deadline = std::time::Instant::now() + Duration::from_secs(30);
@@ -22730,7 +24149,7 @@ PS1='zz-path-fixture> '
             TerminalSpawn::default(),
         );
         let view = TerminalViewId(42);
-        session.attach_view(view);
+        attach_streaming(&session, view);
         session.send_text("printf 'ZZ_TERMINAL_ROUND_TRIP\\n'\n");
 
         let deadline = std::time::Instant::now() + Duration::from_secs(30);
@@ -23434,7 +24853,7 @@ PS1='zz-path-fixture> '
             },
         );
         let view = TerminalViewId(3);
-        session.attach_view(view);
+        attach_streaming(&session, view);
         wait_for_test_viewport(&session, |viewport| {
             let mut contents = String::new();
             for cell in viewport.cells.iter() {

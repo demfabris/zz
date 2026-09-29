@@ -714,6 +714,11 @@ As built (branch `perf/publish`), where it departs from the scope above:
   no per-event `tcgetpgrp`. `RegistryCache` in claude_peers.rs re-reads a record only when its
   (mtime, size, inode) changes, or when it was read within 2 s of its mtime (a coarse clock can
   hide a same-length rewrite, as git's racy-clean check), and re-lists the directory the same way.
+- Merged onto FOOTPRINT and FORMAT, the command path got fast enough that `display-message` right
+  after `copy-mode` ran before the terminal actor entered the mode (`#{pane_in_mode}` read 0 in
+  compat `smoke/copy-mode-formats`). A command that sends copy-mode view actions now ends with one
+  `TerminalSession::settle` request per terminal, answered once the actor has applied them
+  (`a_copy_mode_command_is_visible_to_the_next_command`).
 
 Measured at `--quick` on a loaded host (load 7-22 on 16 CPUs). Before is the W0 quick JSON
 (`baseline-quick-macbook-17e17115.json`), which a fresh 157ac6a3 build reproduces: fixed service
@@ -941,6 +946,249 @@ preview of a hidden printing pane is current. Compat: `compat/run.sh`, `tui-copy
 Expected: snapshot builds 71% of detached-pane CPU; RenderState 0.72 MB per 180x50 pane;
 `ttyname_r` 0.86 ms per spawn; 2.6 ms command-thread block per split; 2 s identity poll; threads 4
 -> 2 per pane; pages 288 MB -> 13-24 MB for 20x12k lines.
+
+Built on `perf/pane` (2026-09-28, on 157ac6a3, before the W1-FOOTPRINT merge). Where the build
+departs from the scope above:
+
+- Item 1: `publish_views` (behind `publish_active_views`) builds cells only for views whose
+  stream is on, for views holding copy or view mode (their copy-mode facts keep updating, plus
+  one frame when they leave it), and for the fallback when a caller forces it (exit, dead notice,
+  frozen output views, `fresh_viewport`) or a preview watch is on. Otherwise
+  `Publisher::refresh_fallback` copies the stored fallback with the title, OSC 7 directory,
+  status, scrollbar, mouse tracking and kitty keyboard flags read again; a new size, a mode, an
+  overlay, a search or a scrolled viewport makes it build instead. Cursor and progress are not
+  on this path: `#{cursor_x}` and friends come from `TerminalFacts` and the progress bar from its
+  own slot, both refreshed on every loop turn. The fallback of an unwatched pane is rebuilt once
+  its output has been quiet for 100 ms and at least once a second under continuous output
+  (`settle_unwatched`), which bounds how old the cells `#{C:}` reads can be.
+- Not in the brief: a pane nobody streams (no stream, no preview watch, no view in a mode)
+  publishes on the leading edge of output and then every 100 ms (`UNWATCHED_NOTIFY_INTERVAL`)
+  instead of every 16 ms, and wakes its watcher on the same beat (`Frames::admit_notify`). The
+  engine filter flags the sequences that change what the metadata refresh reads (OSC 0, 1, 2 and
+  7, the mouse modes, the kitty keyboard stack, `DECSTR`, `RIS` and the title stack), and one of
+  those, an exit, synchronized output ending or an echo publishes at once. Before review the
+  actor still ran the whole publish step every 16 ms for such a pane (in the flip profile 112
+  busy samples against 5 for parsing). The synchronized output deadline now lives in the
+  actor's `Frames` instead of the shared lock, copy-mode facts go out with the frame under one
+  write lock, and `TerminalFacts` are written only when they change. `pane_current_command`,
+  activity and silence times of an unwatched pane are at most 100 ms older; bells and exits are
+  separate events and are not delayed.
+- Item 2: the streamed set the daemon already kept (`streamed_terminal_panes`: the visible
+  window's panes as Foreground, a GUI sidebar's session panes as Preview) now drives
+  `set_view_stream` through `apply_view_streams` inside `refresh_terminal_visibility`, and
+  `detach_client_state` turns a leaving client's streams off. Turning a stream on for a view that
+  has no published frame starts a new stream epoch, and the watcher sends the first frame of an
+  epoch whole (`latest_view_frames` carries the epoch). Choosers do not attach views: the actor
+  keeps its fallback cells current while `set_preview_watch` is on, and
+  `refresh_preview_watches` turns it on for the panes the selected choose-tree row previews (a
+  session's window active panes, a window's panes, a pane, a client's pane), re-evaluated on
+  every chooser presentation and snapshot publish; once the first current frame of a newly
+  watched pane lands the watcher redraws the choosers (`take_preview_ready`). Popups stream their
+  own view. display-panes reads no cells. `#{C:}` is not in the streamed set: status.rs belongs to
+  W1-FORMAT and a template scan would miss `#{E:}` indirection, so `pane_search` reads the settled
+  fallback (at most 100 ms after output stops, 1 s under a flood; tmux reads the grid live).
+- Item 3: `forbid_actor_round_trips` is set in `execute_with_mux_source_routed_for_terminal_in_queue`
+  and around the status render in `refresh_status_filtered`, and the debug assertion sits in
+  `CommandSender::request`, so every blocking actor call (capture, history, pointer context,
+  kitty images, output taps, copy source) is checked, not only `fresh_viewport`, which has no
+  production caller. The call sites that wait on an actor during a command after releasing
+  `inner` lift the guard with `allow_actor_round_trips`: `capture_pane`, `pipe_pane` and the tap
+  start, rearm and stop helpers, `capture_last_command_for`, `capture_screen`, the kitty image
+  fetch and eviction, `pointer_format_variables` and the copy-source capture in
+  `DeferredTerminalCommand::run`.
+- Item 4: `Frames` owns the render state and its iterators and drops them, with the dictionary
+  pools, when no view streams and no preview watch is on. A settle rebuild keeps them for 1.1 s
+  after it runs, so a pane that keeps printing reuses one render state across its rebuilds, and an
+  idle pane lets it go a second after its last rebuild.
+- Item 5: compression as briefed, in both actors, re-armed after capture, copy-source capture,
+  history chunks, semantic capture, view actions and search refreshes. The byte backstop departs
+  from the brief's formula: 40 bytes a cell (4x of 10) cut history below `history-limit` for text
+  with combining marks, which costs about 58 bytes a cell in ghostty's pages (history-limit 2000
+  at 180 columns kept 1367 lines, tmux keeps them all). It is now history-limit x cols x 128
+  bytes, at least 64 MiB and at most 1 GiB, so the line count is the only limit for any text up
+  to about eight combining marks a cell; a test fills wide and narrow panes with combining marks. Measured restore: after idle
+  compression, `capture-pane -S - -E -` of a 180x50 pane holding 9.9k lines of `seq` costs 74.8
+  Minstr (5.3 ms daemon CPU) the first time and 64.6 Minstr after, against 64.2 Minstr with
+  `ZZ_PERF_NO_COMPRESS=1`, so restoring about 46 pages is 10 Minstr (about 30 us a page).
+- Item 6: the macOS child exit is a kqueue with `EVFILT_PROC NOTE_EXIT` in `wait_for_wake`'s poll
+  set (`ChildExitWatch`). `NOTE_EXIT` can fire before the child is reapable, so after the event
+  the actor waits for it with a blocking `waitpid` on that pid; `ESRCH` at registration goes
+  straight to `waitpid`. A child that outlives its actor (a shell that ignores `SIGHUP`, a kill
+  wait that ran out) is reaped by a short-lived `zz-child-reap` thread from `Drop`, where the old
+  per-pane `zz-child-wait` thread reaped it. On shutdown (kill-pane drops the session) the actor,
+  which is exiting anyway, waits up to 500 ms for the child it just sent `SIGHUP`, so the reap
+  thread is left for children that survive it; before review nearly every kill started one. Linux watches a pidfd in `zz-pty-gather`'s poll set
+  and keeps a `zz-child-wait` thread only when `pidfd_open` is missing. portable-pty's `Child` is
+  gone on unix; Windows keeps it.
+- Item 7: `session/unix_pty.rs` opens the pty with `posix_openpt`, `grantpt`, `unlockpt` and
+  `ptsname` (rustix, `TIOCPTYGNAME` on macOS). It resolves the program and builds argv and the
+  environment the way portable-pty's `spawn_command` did (same `PATH` search and errors, login
+  `argv[0]`, `SHELL`), all before the child exists; the environment comes from the command
+  builder's one snapshot of the process environment, with the process's own keys listed once per
+  process so a value that is not UTF-8 still passes. On macOS the daemon binary is its own pane
+  launcher: `posix_spawn` starts it with `--zz-pty-exec` (`POSIX_SPAWN_SETSID`, the slave on fds
+  0-2, `POSIX_SPAWN_CLOEXEC_DEFAULT`, every signal reset to default, an empty mask,
+  `posix_spawn_file_actions_addchdir_np`), and `run_pty_exec_mode`, which `zz_cli` calls first
+  thing in `main`, resets its signals again (the Rust runtime ignores `SIGPIPE`), claims fd 0 as
+  the controlling terminal with `TIOCSCTTY` and execs the program, retrying `ENOEXEC` under
+  `/bin/sh`. `posix_spawn` alone cannot do it: nothing in it makes the slave the controlling
+  terminal (a C probe with `POSIX_SPAWN_SETSID` and the slave opened by a file action still gets
+  `ENXIO` from `/dev/tty`), and only bash grabs one on its own, so the plain `posix_spawn` build
+  this lane first shipped left zsh, dash and directly exec'd programs without one (^C did
+  nothing, job control was off, `/dev/tty` failed; found in review). `fork` gets the tty right but
+  is worse than its 0.48 ms on macOS: memory the daemon writes after a fork stays in its footprint
+  even after `madvise(FREE_REUSABLE)`, so idle compression and mimalloc purges stop returning
+  anything (20 filled 180-column panes: 333 MiB with `fork`, 59 MiB with the launcher, 344 MiB
+  before the lane), and each split costs about 6 Minstr more. Linux, other hosts of zz-terminal
+  (tests, a GUI binary without the `cli` sibling) and a launcher that fails to start fork
+  instead: the child resets every signal, calls `setsid` and `TIOCSCTTY`, puts the slave on fds
+  0-2, closes inherited fds (`close_range` on Linux, a `proc_pidinfo` list on macOS) and execs.
+  Signals stay blocked from before the fork until the child has reset them, and a signal to the
+  pane's group that finds no group yet goes to the pid, so a terminate right after the spawn is
+  not lost (a popup test read `SIGKILL` for `SIGTERM` under load). Either way the pid is known at
+  once and published as the identity, and the actor waits on an exec fence (a close-on-exec pipe,
+  at most 500 ms) before its first frame, so the watcher's first runtime sync names the program
+  rather than the launcher or a fork of the daemon. Tests run `sleep` and `zsh -f`
+  directly and check that a typed ^C ends them, a daemon test checks job control,
+  `#{pane_current_command}` and `C-c` in an interactive zsh pane, and a `zz_cli` test does the
+  same against the real daemon (so through the launcher) and checks the command name of five
+  directly exec'd panes; it fails without `TIOCSCTTY` and without the fence. Pane settings travel in
+  `TerminalSpawn`, and every setting and view change (`set_word_separators`, `set_appearance`,
+  `set_allow_passthrough`, `set_wrap_search`, `set_engine_knobs`, `resize`, attach, detach,
+  release, stream, preview watch) goes through `ControlSlot`, which coalesces per key and per view
+  and never parks the caller. Order is kept: the handle counts control commands in flight, a
+  change made while nothing is queued is applied before the next command, and a change made while
+  commands are queued waits in a deferred list until those commands have run (so a copy-mode
+  cancel followed by a detach cancels first, and `send -X` followed by `set word-separators` runs
+  in that order).
+  Empty panes take word separators and wrap-search through the slot at creation.
+- Items 8-12 as briefed, with these details: views are recorded on the handle side
+  (`ControlSlot::known_views`), not by the actor; `is_current_terminal` reads a per-session
+  `retired` flag the daemon sets whenever it drops or replaces a pane's terminal; the resource
+  directory is `v1-<FNV-1a of the scripts>`, a cache root is materialized once per process, and
+  each spawn checks that the three scripts still exist (three `stat` calls) and writes them again
+  when a cache purge removed them; the echo window is 50 ms and allows four immediate publishes
+  per input.
+- The pane watcher now sends frames before the runtime sync, so an echo no longer waits for the
+  process lookup and `synchronize_pane_runtime`. Attach, detach and release publish only when
+  the view streams, holds a mode or had a frame, so an attach does not build a frame that the
+  stream then builds again. A pane told to terminate (kill-pane, respawn-pane -k) no longer
+  forces a full exit frame nobody reads; its exit status still reaches the fallback.
+- The foreground group is read with `libc::tcgetpgrp` and 0 means none; rustix asserted a
+  positive pid there, which panicked the watchers of exited panes in debug builds.
+
+Measured with the quick wave1 gate (`--only spawn,chatty,mem,echo,throughput,attach`, load 7-25)
+and a full `--only chatty,mem` run, against `/tmp` before-JSON of 157ac6a3 (quick) and W0:
+`spawn.cpu.split_shell` 4.71 -> 2.57 ms (36.8 -> 20.2 Minstr), `spawn.wall.split_empty_P` 2023 ->
+6.3 ms (1.9 ms CPU, 45.4 -> 17.0 Minstr), `spawn.cpu.new_window` 4.94 -> 2.67 ms (in an A/B on one
+isolated daemon each, daemon Minstr per command: split 37.6 -> 21.2, empty split with `-P` 47.1
+-> 17.5, new-window 46.3 -> 22.9, kill-pane 16.4 -> 15.5, against 12.6 -> 11.7 for
+`display-message`);
+`chatty.cpu_pct.steady` 9.86 (W0) -> 3.02% (102 Minstr/s, tmux 112), `.flip` 25.6 -> 5.4% (3285
+-> 351 Minstr/s), `.hidden` 51.5 -> 11.1% (6906 -> 1117 Minstr/s, tty 219 -> 43 KiB/s),
+`.visible` 17.0 -> 16.6%; `mem.footprint.p20` 54.1 -> 41.9 MiB, `mem.threads.p20` 89 -> 49,
+`mem.footprint.tui20` 56.7 -> 44.6 MiB, `mem.footprint.scroll180` 343.8 -> 55.9 MiB (tmux 61.5,
+0.91x), `.scroll80` 170.6 -> 49.0 MiB (tmux 35.6, 1.38x); `echo.p50.idle` 0.45 -> 0.25 ms,
+`echo.p99.idle` 0.68 -> 0.50 ms, `echo.p50.busy30` 3.84 -> 0.44 ms, `echo.p99.busy30` 17.7 -> 1.6
+ms. Throughput and attach measured against the pre-campaign binary in the same runs: detached
+ASCII 214-219 against 204-217 MB/s, unicode 101-102 against 98.5, attached 756-817 against
+722-755 ms at load 7-8, and at the lane head under load 13-18 detached ASCII 210 and 174 against
+179 and 152, unicode 106 and 103 against 101 and 103, attached 910 against 960 and 962 ms (one
+more lane run read 1506 ms with a 6 s outlier while another fixture ran; the quick gate's single
+run read 179-194 at load 14-20);
+`attach.instr.p1` 120 against 122 Minstr, `.p4` 126.6 against 126.5, `attach.ttfc.p1` 18.8
+against 19.7 ms, `attach.wire_s2c.p4` 257 -> 204 KB.
+
+After review (quick gate plus a full `--only chatty,mem`, load 12-14 from other sessions, so
+wall and CPU rows only warn): `spawn.instr.split_shell` 20.2 Minstr, `split_empty_P` 16.5,
+`new_window` 21.2, `kill_pane` 14.6; `chatty.instr_per_s.steady` 88.7 Minstr/s (tmux 99.9) at
+3.54% CPU, `.flip` 392-425 Minstr/s at 5.7-6.3%, `.hidden` 1165-1516 Minstr/s; `mem.threads.p20`
+49, `mem.footprint.p20` 43.1-43.2 MiB, `.tui20` 47.1, `.scroll180` 58.8 MiB (tmux 61.5, 0.96x,
+passes), `.scroll80` 51.1 MiB (1.44x); `echo.p99.busy30` 1.55 ms; `throughput.detached.ascii`
+221 MB/s (4.5x tmux); `attach.instr.p1` 128, `.p4` 118.8 Minstr. The publish change moves the
+actors off the top of the profile: in a 6 s `sample` of the flip workload (10 detached panes)
+`publish_views` has about 40 busy samples and the watcher signal 26, against 112 for the 16 ms
+publish before review, and the watchers' runtime sync is now most of what is left (see below).
+`zz-child-reap` threads in a 5 s split and kill loop: 1 in 312 kills, against 99 in 380 before.
+
+Missed or handed on:
+
+- `mem.footprint.scroll80` (1.38x, rule 1.15x): the scrolled history now costs 7 MiB over 20 idle
+  panes at 80 columns (tmux holds 33 MiB of it); the rest is the idle panes. A quiet 80x24 pane
+  costs about 1.5 MiB, 0.9 MiB more than an empty one, and almost all of it is mimalloc pages:
+  each pane runs two threads with their own heaps, and pages abandoned by exited connection
+  threads keep the pane state they allocated (creating the same 20 panes from one chained
+  command instead of 20 commands saves 5 MiB). The 64 KiB read buffer is not a factor (a 4 KiB
+  buffer measured the same). Handed to W1-EXEC (connection threads) and W3-SHARDS (threads per
+  pane).
+- `echo.p99.busy30` (1.6 ms against 1.5x tmux, about 0.3 ms) and `echo.p50.*`: the path still
+  crosses the client reader, the actor, the watcher and the mailbox writer, and
+  `publish_terminal_for_pane` takes `inner`; W3-SHARDS and W4-DELIVER own those hops.
+- `spawn.wall.*` and `spawn.cpu.*`: `display-message` alone costs as much wall time as a split
+  here; the remaining daemon work per split beyond it is the command and publication path
+  (W1-EXEC, W1-PUBLISH, W1-FORMAT) plus the actor's share (`posix_openpt`, the slave open,
+  `Terminal::new`, the spawn). The lane's own gate misses on a quiet host too, as review
+  measured: `split_empty_P` 6.4-6.9 ms (gate 6 ms) and `split_shell` 6.2-6.7 ms (gate 6.5 ms),
+  with `display-message` alone at 4.9 ms against tmux 3.3; the rest is the command path (W1-EXEC,
+  W1-PUBLISH).
+- Content-only watcher wakes stay at ten a second. Review asked to stretch them to the 1 s status
+  tick. In the flip profile after the 100 ms publish change the actors are a small share (about
+  40 busy samples in `publish_views` and 26 in the watcher signal over 6 s for 10 panes) and the
+  watchers dominate: `synchronize_pane_runtime` sees `pane_current_command` flip between `sh`
+  and `sleep` on almost every wake and republishes the snapshot (`publish_snapshot_state`,
+  `format_option_snapshot`, the status refresh). Stretching the wake would also make
+  `synchronize_pane_runtime` stamp activity and silence up to 1 s late, since it stamps
+  `last_output` with the wake time. The fix belongs in that function (read an output time the
+  actor keeps, and look up the current command lazily), which W1-PUBLISH owns.
+- The settle rebuild of an unwatched pane runs whether or not anything reads its cells. Only
+  `#{C:}` does; skipping the rebuild unless a status template uses `#{C:}` or a preview watch is
+  on needs the format side to say so (W1-FORMAT).
+- W1-FOOTPRINT's hand-off: the foreground lookup is one `tcgetpgrp` on the master without
+  portable-pty's mutex, and unwatched panes wake their watcher at most ten times a second; the
+  second lookup per event in `terminal_current_command` and `terminal_working_directory` stays
+  with whoever owns those functions after the merge.
+- Linux still forks: glibc's `posix_spawn` with `addclosefrom_np` needs glibc 2.34, newer than
+  the headless binary's floor, and Linux reclaims `MADV_DONTNEED` pages after a fork. The macOS
+  launcher adds one exec to each pane's start (a few ms before the program runs, off the command
+  path); a tiny dedicated launcher binary would halve that but needs a build step and a file to
+  ship.
+- Silent panes keep the command name of their first runtime sync: `zsh -c 'exec sleep 30'`
+  reports `zsh` until the pane prints, on 157ac6a3 too (tmux reads it live at format time). The
+  runtime sync is W1-PUBLISH's and W1-FOOTPRINT's.
+- `daemon::tests::mode_keys_scope_visible_command_output_separately_from_underlying_copy_mode`
+  takes 30 s on 157ac6a3 as well: Escape on the copy pane parks the command output, so the test
+  only passes when its `sleep 30` pane exits just before the 30 s deadline, and it fails under a
+  loaded full-crate run.
+
+Checks on macOS: the zz-terminal and zz-daemon suites pass (the daemon suite once under
+`--test-threads 8`), clippy is clean for zz-terminal, zz-daemon, zz-cli, zz-tui and zz, and for
+zz-terminal on `x86_64-unknown-linux-gnu`. `compat/run.sh` over the whole corpus,
+`attached-client.sh` in all three modes, `tui-copy-mode.sh` (147 cases) and
+`tui-pane-geometry.sh` agree with the pin except for scenarios that diverge the same way on
+157ac6a3 on this host (`census-hooks` reads the missing `/etc/hostname`, `prompt-history`,
+`if-shell-background-order` under load, and smoke `plugin-runtime-vim-tmux-navigator`,
+`resurrect-save`, `source-file-byte-name`, `status-background-jobs`). `tui-choosers.sh` and
+`tui-screen-diff.sh` stop at the same checkpoint on 157ac6a3 (the pin's session tree never
+settles; the zz wide-glyph line never settles), and `tui-output-backpressure.sh` reads
+`/proc` and runs only on Linux.
+
+Checks after review: zz-terminal (308 tests), zz-daemon lib (1053, twice under
+`--test-threads 8`; `client_focus_updates_activity_and_focus_in_owns_latest_geometry` and
+`popup_jobs_receive_sigterm_on_target_detach_and_kill_server` failed once under load and pass
+alone, the second fixed by the signal change above) and zz-cli (all suites) pass; clippy is clean
+for zz-terminal, zz-daemon, zz-cli and zz-tui, and for zz-terminal on `x86_64-unknown-linux-gnu`.
+`compat/run.sh` over 31 pane, copy-mode, capture, alert, spawn and format scenarios and all 145
+smoke scenarios agrees with the pin except `keys-prefix-attached`, `plugin-runtime-continuum`
+(`gsleep` from Homebrew's gnubin on `PATH`), `plugin-runtime-oh-my-tmux` and the four smoke rows
+listed above, all of which diverge the same way with the pre-campaign binary on this host.
+`attached-client.sh` in all three modes, `tui-copy-mode.sh` (147 cases) and
+`tui-pane-geometry.sh` agree.
+
+Left on this path after review, in a 6 s `sample` of the flip workload: the pane actors are
+about 40 busy samples in `publish_views` and 26 in the watcher signal, PTY parsing 12; the
+watchers are the bulk (`format_option_snapshot`, `publish_snapshot_state` and the status refresh
+behind `synchronize_pane_runtime`, W1-PUBLISH and W1-FORMAT, and `terminal_current_command`,
+W1-FOOTPRINT).
 
 ## W1-EXEC: one-frame commands, fast cold start (effort L)
 
@@ -1464,7 +1712,7 @@ revert. `ZZ_PTY_SHARDS=N` is a tuning knob, not a rollback.
 | socketpair / listener-fd handoff on cold start | a readiness pipe gives the same latency with less code |
 | Separate config batch-replay mode | the per-line costs are removed at their source; a second mode duplicates hook semantics |
 | Caching the option snapshot behind a generation | removing the calls plus the option index works without invalidation risk |
-| `posix_spawn` for panes | controlling tty on XNU unverified; fork cost already near tmux |
+| `posix_spawn` of the pane program itself | on XNU nothing in it makes the slave the controlling tty (W1-PANE tried it: zsh, dash and exec'd programs got none), so macOS spawns the daemon binary as a launcher that claims the tty and execs; on Linux glibc's `addclosefrom_np` is newer than the headless binary's floor and fork is fine |
 | Daemon-owned layout | GUI pixel gaps unresolved; sizing before the first frame removes the TUI round trip |
 | Version preamble and slimmer envelope | ~3 B per frame does not justify changing zz-web framing |
 | Shrinking the GUI HistoryRing | outside the daemon; revisit after W2-TERM |

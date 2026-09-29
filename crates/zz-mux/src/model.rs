@@ -4210,6 +4210,17 @@ impl GlobPattern {
         Self(glob_tokens(pattern))
     }
 
+    pub(crate) fn literal(&self) -> Option<String> {
+        self.0
+            .as_ref()?
+            .iter()
+            .map(|token| match token {
+                GlobToken::Literal(character) => Some(*character),
+                _ => None,
+            })
+            .collect()
+    }
+
     pub(crate) fn matches(&self, value: &str) -> bool {
         let Some(tokens) = &self.0 else {
             return false;

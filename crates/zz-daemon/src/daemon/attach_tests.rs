@@ -895,3 +895,43 @@ fn a_request_full_on_a_live_pane_with_a_patch_queued_is_answered_with_a_full() {
         "RequestFull answered with {names:?}"
     );
 }
+
+fn status_renders(messages: &[ProtocolMessage]) -> usize {
+    messages
+        .iter()
+        .filter(|message| {
+            matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::StatusChanged { .. },
+                    ..
+                })
+            )
+        })
+        .count()
+}
+
+#[test]
+fn a_detaching_client_gets_no_status_render_and_its_next_attach_gets_one() {
+    let shared = Arc::new(Shared::new(1));
+    let mailbox = OutboundMailbox::new();
+    let (client, _) =
+        shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+    let (session, _, _) = switch_test_session(&shared, "detach-status");
+    let snapshot = shared.attach(client, session).expect("attach");
+    assert!(shared.send_attached(client, &mailbox, session, snapshot));
+    shared.publish_snapshot();
+    assert_eq!(status_renders(&take_reliable_messages(&mailbox)), 1);
+
+    shared.detach(client);
+    assert_eq!(status_renders(&take_reliable_messages(&mailbox)), 0);
+
+    let snapshot = shared.attach(client, session).expect("attach again");
+    assert!(shared.send_attached(client, &mailbox, session, snapshot));
+    shared.publish_snapshot();
+    assert_eq!(
+        status_renders(&take_reliable_messages(&mailbox)),
+        1,
+        "the status the client dropped when it detached is sent again"
+    );
+}

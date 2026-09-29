@@ -5996,7 +5996,7 @@ impl Shared {
     fn unregister(self: &Arc<Self>, client: ClientId) {
         let (detached, _) = self.detach_client_state(client, false);
         if detached {
-            self.publish_snapshot();
+            self.publish_snapshot_after_detach(client);
         }
         self.enforce_destroy_unattached();
         self.fail_gui_requests_for(client);
@@ -17814,7 +17814,7 @@ impl Shared {
     fn detach_with_event_hooks(self: &Arc<Self>, client: ClientId, event_hooks_enabled: bool) {
         let (detached, events) = self.detach_client_state(client, event_hooks_enabled);
         if detached {
-            self.publish_snapshot();
+            self.publish_snapshot_after_detach(client);
         }
         self.enforce_destroy_unattached();
         if detached && self.inner.lock().client_kinds.get(&client) == Some(&ClientKind::Control) {
@@ -25305,8 +25305,22 @@ impl Shared {
     }
 
     fn publish_snapshot_state(&self) {
+        self.publish_snapshot_state_except(None);
+    }
+
+    fn publish_snapshot_after_detach(self: &Arc<Self>, client: ClientId) {
+        self.detach_removed_sessions();
+        if !*attach::ATTACH_DEDUP {
+            self.publish_snapshot_state();
+            return;
+        }
+        self.status.lock().forget(client);
+        self.publish_snapshot_state_except(Some(client));
+    }
+
+    fn publish_snapshot_state_except(&self, detached: Option<ClientId>) {
         self.note_published();
-        self.publish_mux_snapshots_as(true, true);
+        self.publish_mux_snapshots_except(true, true, detached);
         self.refresh_terminal_visibility();
         #[cfg(feature = "agent")]
         self.refresh_agent_visibility();
@@ -25324,6 +25338,15 @@ impl Shared {
     }
 
     fn publish_mux_snapshots_as(&self, owns_generation: bool, with_status: bool) {
+        self.publish_mux_snapshots_except(owns_generation, with_status, None);
+    }
+
+    fn publish_mux_snapshots_except(
+        &self,
+        owns_generation: bool,
+        with_status: bool,
+        detached: Option<ClientId>,
+    ) {
         let startup_ready = with_status.then(|| *self.startup_ready.lock());
         let order = self.snapshot_order.lock();
         let (snapshots, appearance_updates, requests) = {
@@ -25345,9 +25368,10 @@ impl Shared {
             } else {
                 Vec::new()
             };
-            let targets = startup_ready
+            let mut targets = startup_ready
                 .map(|_| status_targets(&inner, None, None))
                 .unwrap_or_default();
+            targets.retain(|client| Some(*client) != detached);
             if inner.subscribers.is_empty() && !*timers::EAGER_PUBLISH {
                 (Vec::new(), appearance_updates, Vec::new())
             } else {

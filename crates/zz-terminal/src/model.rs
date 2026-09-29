@@ -819,27 +819,45 @@ pub struct TerminalViewport {
     pub status: SessionStatus,
 }
 
-pub type TerminalPatchRowIndices = SmallVec<[u16; 4]>;
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalPatchSpan {
+    pub row: u16,
+    pub start: u16,
+    pub len: u16,
+    pub clear: bool,
+}
+
+impl TerminalPatchSpan {
+    #[must_use]
+    pub const fn end(self) -> usize {
+        self.start as usize + self.len as usize
+    }
+
+    #[must_use]
+    pub const fn covers_row(self, columns: u16) -> bool {
+        self.start == 0 && (self.clear || self.len == columns)
+    }
+}
+
+pub type TerminalPatchSpans = SmallVec<[TerminalPatchSpan; 4]>;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct TerminalPatchRowData {
-    row_indices: TerminalPatchRowIndices,
+    spans: TerminalPatchSpans,
     cells: Box<[PackedCell]>,
 }
 
-/// Flat changed-row storage for a viewport patch. Empty and overlay-only
-/// patches stay inline as `None`; content patches own one cell plane.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TerminalPatchRows(Option<Box<TerminalPatchRowData>>);
 
 impl TerminalPatchRows {
     #[must_use]
-    pub fn from_flat(row_indices: TerminalPatchRowIndices, cells: Vec<PackedCell>) -> Self {
-        if row_indices.is_empty() && cells.is_empty() {
+    pub fn from_spans(spans: TerminalPatchSpans, cells: Vec<PackedCell>) -> Self {
+        if spans.is_empty() && cells.is_empty() {
             Self::default()
         } else {
             Self(Some(Box::new(TerminalPatchRowData {
-                row_indices,
+                spans,
                 cells: cells.into_boxed_slice(),
             })))
         }
@@ -847,19 +865,23 @@ impl TerminalPatchRows {
 
     #[must_use]
     pub fn len(&self) -> usize {
-        self.row_indices().len()
+        self.spans().len()
     }
 
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.row_indices().is_empty()
+        self.spans().is_empty()
     }
 
     #[must_use]
-    pub fn row_indices(&self) -> &[u16] {
+    pub fn spans(&self) -> &[TerminalPatchSpan] {
         self.0
             .as_deref()
-            .map_or(&[], |changed| changed.row_indices.as_slice())
+            .map_or(&[], |changed| changed.spans.as_slice())
+    }
+
+    pub fn row_indices(&self) -> impl Iterator<Item = u16> + '_ {
+        self.spans().iter().map(|span| span.row)
     }
 
     #[must_use]
@@ -874,6 +896,64 @@ impl TerminalPatchRows {
         self.0
             .as_deref_mut()
             .map_or(&mut [], |changed| changed.cells.as_mut())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct TerminalPatchFields(u16);
+
+impl TerminalPatchFields {
+    pub const ROWS: Self = Self(1 << 0);
+    pub const CURSOR_AT: Self = Self(1 << 1);
+    pub const SCROLL: Self = Self(1 << 2);
+    pub const SCROLLBAR: Self = Self(1 << 3);
+    pub const DICTIONARY: Self = Self(1 << 4);
+    pub const OVERLAYS: Self = Self(1 << 5);
+    pub const CURSOR: Self = Self(1 << 6);
+    pub const PRESENTATION: Self = Self(1 << 7);
+    pub const COLORS: Self = Self(1 << 8);
+    pub const MODE: Self = Self(1 << 9);
+    pub const SEARCH: Self = Self(1 << 10);
+    pub const UNSEEN: Self = Self(1 << 11);
+    pub const INPUT_MODES: Self = Self(1 << 12);
+    pub const STATUS: Self = Self(1 << 13);
+    pub const KITTY: Self = Self(1 << 14);
+    pub const ALL: Self = Self((1 << 15) - 1);
+
+    #[must_use]
+    pub const fn empty() -> Self {
+        Self(0)
+    }
+
+    #[must_use]
+    pub const fn bits(self) -> u16 {
+        self.0
+    }
+
+    #[must_use]
+    pub const fn from_bits(bits: u16) -> Option<Self> {
+        if bits & !Self::ALL.0 == 0 {
+            Some(Self(bits))
+        } else {
+            None
+        }
+    }
+
+    #[must_use]
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    pub const fn insert(&mut self, other: Self) {
+        self.0 |= other.0;
+    }
+
+    pub const fn set(&mut self, other: Self, on: bool) {
+        if on {
+            self.0 |= other.0;
+        } else {
+            self.0 &= !other.0;
+        }
     }
 }
 
@@ -947,11 +1027,11 @@ pub struct TerminalViewportPatch {
     pub rows: u16,
     /// Destination row shift applied to retained rows before replacements.
     pub scroll: i16,
-    /// Replacement rows in strictly ascending destination order.
     pub changed_rows: TerminalPatchRows,
     pub style_base: u32,
     pub grapheme_base: u32,
     pub dictionary: TerminalDictionaryPatch,
+    pub fields: TerminalPatchFields,
     pub foreground: Color,
     pub background: Color,
     pub presentation: Arc<TerminalPresentation>,
@@ -982,6 +1062,84 @@ impl TerminalViewportPatch {
     pub fn hovered_uri(&self) -> Option<&str> {
         self.presentation.hovered_uri.as_deref()
     }
+
+    #[must_use]
+    pub const fn carries(&self, fields: TerminalPatchFields) -> bool {
+        self.fields.contains(fields)
+    }
+
+    #[must_use]
+    pub fn scrollbar_after(&self, base: &TerminalViewport) -> ScrollbarState {
+        if self.carries(TerminalPatchFields::SCROLLBAR) {
+            self.scrollbar
+        } else {
+            base.scrollbar
+        }
+    }
+
+    #[must_use]
+    pub fn cursor_after(&self, base: Option<Cursor>) -> Option<Option<Cursor>> {
+        if self.carries(TerminalPatchFields::CURSOR) {
+            Some(self.cursor)
+        } else if self.carries(TerminalPatchFields::CURSOR_AT) {
+            let (base, moved) = (base?, self.cursor?);
+            Some(Some(Cursor::new(
+                moved.column(),
+                moved.row(),
+                base.visible(),
+                base.blinking(),
+                moved.at_wide_tail(),
+                base.style(),
+                base.color(),
+            )))
+        } else {
+            Some(base)
+        }
+    }
+
+    pub fn widen_to_rows(&mut self, current: &TerminalViewport) {
+        if self.changed_rows.is_empty() {
+            return;
+        }
+        let mut spans = TerminalPatchSpans::new();
+        let mut cells = Vec::new();
+        for row in self.changed_rows.row_indices() {
+            let line = current.row(row).unwrap_or_default();
+            let end = line
+                .iter()
+                .rposition(|cell| *cell != PackedCell::EMPTY)
+                .map_or(0, |last| last + 1);
+            cells.extend_from_slice(&line[..end]);
+            spans.push(TerminalPatchSpan {
+                row,
+                start: 0,
+                len: u16::try_from(end).unwrap_or(u16::MAX),
+                clear: true,
+            });
+        }
+        self.changed_rows = TerminalPatchRows::from_spans(spans, cells);
+    }
+}
+
+#[must_use]
+pub fn shared_empty_overlays() -> Arc<[OverlaySpan]> {
+    static EMPTY: std::sync::LazyLock<Arc<[OverlaySpan]>> =
+        std::sync::LazyLock::new(|| Arc::from([]));
+    Arc::clone(&EMPTY)
+}
+
+#[must_use]
+pub fn shared_empty_kitty_placements() -> Arc<[KittyPlacement]> {
+    static EMPTY: std::sync::LazyLock<Arc<[KittyPlacement]>> =
+        std::sync::LazyLock::new(|| Arc::from([]));
+    Arc::clone(&EMPTY)
+}
+
+#[must_use]
+pub fn shared_default_presentation() -> Arc<TerminalPresentation> {
+    static DEFAULT: std::sync::LazyLock<Arc<TerminalPresentation>> =
+        std::sync::LazyLock::new(|| Arc::new(TerminalPresentation::default()));
+    Arc::clone(&DEFAULT)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -1201,7 +1359,6 @@ impl TerminalViewport {
         Self::diff_with_scratch(previous, current, &mut TerminalDiffScratch::default())
     }
 
-    /// [`Self::diff`] reusing caller-owned row-diff storage.
     #[must_use]
     pub fn diff_with_scratch(
         previous: &Self,
@@ -1228,27 +1385,23 @@ impl TerminalViewport {
         } else {
             best_row_shift(previous, current, scratch)
         };
-        let mut changed_row_indices = TerminalPatchRowIndices::new();
+        let mut spans = TerminalPatchSpans::new();
+        let mut changed_cells = Vec::new();
         if !shared_cells {
             for row in 0..current.rows {
                 let source = i32::from(row) - i32::from(scroll);
-                let unchanged = u16::try_from(source).ok().is_some_and(|source| {
-                    source < previous.rows && previous.row(source) == current.row(row)
-                });
-                if !unchanged {
-                    changed_row_indices.push(row);
+                let before = u16::try_from(source)
+                    .ok()
+                    .filter(|source| *source < previous.rows)
+                    .and_then(|source| previous.row(source));
+                let after = current.row(row).unwrap_or_default();
+                if let Some(span) = changed_span(row, before, after) {
+                    changed_cells.extend_from_slice(&after[usize::from(span.start)..span.end()]);
+                    spans.push(span);
                 }
             }
         }
-        let mut changed_cells = Vec::with_capacity(
-            changed_row_indices
-                .len()
-                .saturating_mul(usize::from(current.columns)),
-        );
-        for row in changed_row_indices.iter().copied() {
-            changed_cells.extend_from_slice(current.row(row).unwrap_or_default());
-        }
-        let changed_rows = TerminalPatchRows::from_flat(changed_row_indices, changed_cells);
+        let changed_rows = TerminalPatchRows::from_spans(spans, changed_cells);
 
         let grapheme_base = previous.grapheme_offsets().len().saturating_sub(1);
         let appended_grapheme_lengths = current.grapheme_offsets()[grapheme_base..]
@@ -1259,6 +1412,62 @@ impl TerminalViewport {
             current.styles()[previous.styles().len()..].to_vec(),
             appended_grapheme_lengths,
             current.grapheme_bytes()[previous.grapheme_bytes().len()..].to_vec(),
+        );
+
+        let mut fields = TerminalPatchFields::empty();
+        fields.set(TerminalPatchFields::ROWS, !changed_rows.is_empty());
+        fields.set(TerminalPatchFields::SCROLL, scroll != 0);
+        fields.set(TerminalPatchFields::DICTIONARY, !dictionary.is_empty());
+        fields.set(
+            TerminalPatchFields::COLORS,
+            previous.foreground != current.foreground || previous.background != current.background,
+        );
+        fields.set(
+            TerminalPatchFields::PRESENTATION,
+            !Arc::ptr_eq(&previous.presentation, &current.presentation)
+                && previous.presentation != current.presentation,
+        );
+        fields.set(
+            TerminalPatchFields::OVERLAYS,
+            !Arc::ptr_eq(&previous.overlays, &current.overlays)
+                && previous.overlays != current.overlays,
+        );
+        let kitty = !Arc::ptr_eq(&previous.kitty_placements, &current.kitty_placements)
+            && previous.kitty_placements != current.kitty_placements;
+        fields.set(TerminalPatchFields::KITTY, kitty);
+        fields.set(
+            TerminalPatchFields::SCROLLBAR,
+            kitty || previous.scrollbar != current.scrollbar,
+        );
+        match (previous.cursor, current.cursor) {
+            (before, after) if before == after => {}
+            (Some(before), Some(after))
+                if before.visible() == after.visible()
+                    && before.blinking() == after.blinking()
+                    && before.style() == after.style()
+                    && before.color() == after.color() =>
+            {
+                fields.insert(TerminalPatchFields::CURSOR_AT);
+            }
+            _ => fields.insert(TerminalPatchFields::CURSOR),
+        }
+        fields.set(TerminalPatchFields::MODE, previous.mode != current.mode);
+        fields.set(
+            TerminalPatchFields::SEARCH,
+            previous.search != current.search,
+        );
+        fields.set(
+            TerminalPatchFields::UNSEEN,
+            previous.unseen_output != current.unseen_output,
+        );
+        fields.set(
+            TerminalPatchFields::INPUT_MODES,
+            previous.kitty_keyboard != current.kitty_keyboard
+                || previous.mouse_tracking != current.mouse_tracking,
+        );
+        fields.set(
+            TerminalPatchFields::STATUS,
+            previous.status != current.status,
         );
 
         Some(TerminalViewportPatch {
@@ -1274,6 +1483,7 @@ impl TerminalViewport {
             style_base: u32::try_from(previous.styles().len()).ok()?,
             grapheme_base: u32::try_from(grapheme_base).ok()?,
             dictionary,
+            fields,
             foreground: current.foreground,
             background: current.background,
             presentation: Arc::clone(&current.presentation),
@@ -1309,7 +1519,12 @@ impl TerminalViewport {
             return Err(PatchError::Dimensions);
         }
 
-        let style_base = usize::try_from(patch.style_base).map_err(|_| PatchError::Dictionary)?;
+        let appends = !patch.dictionary.is_empty();
+        let style_base = if appends {
+            usize::try_from(patch.style_base).map_err(|_| PatchError::Dictionary)?
+        } else {
+            self.styles().len()
+        };
         if style_base != self.styles().len() {
             return Err(PatchError::Dictionary);
         }
@@ -1331,8 +1546,11 @@ impl TerminalViewport {
             return Err(PatchError::Dictionary);
         }
 
-        let grapheme_base =
-            usize::try_from(patch.grapheme_base).map_err(|_| PatchError::Dictionary)?;
+        let grapheme_base = if appends {
+            usize::try_from(patch.grapheme_base).map_err(|_| PatchError::Dictionary)?
+        } else {
+            self.grapheme_offsets().len().saturating_sub(1)
+        };
         if grapheme_base != self.grapheme_offsets().len().saturating_sub(1) {
             return Err(PatchError::Dictionary);
         }
@@ -1373,23 +1591,22 @@ impl TerminalViewport {
         if rows == 0 && shift != 0 {
             return Err(PatchError::Row);
         }
-        let changed_row_indices = patch.changed_rows.row_indices();
+        let spans = patch.changed_rows.spans();
         let changed_cells = patch.changed_rows.cells();
-        if changed_row_indices
-            .len()
-            .checked_mul(columns)
-            .is_none_or(|expected| expected != changed_cells.len())
-        {
-            return Err(PatchError::Row);
-        }
-
         let mut previous_row = None;
-        for row in changed_row_indices.iter().copied() {
-            let index = usize::from(row);
-            if index >= rows || previous_row.is_some_and(|previous| previous >= row) {
+        let mut span_cells = 0_usize;
+        for span in spans {
+            if usize::from(span.row) >= rows
+                || previous_row.is_some_and(|previous| previous >= span.row)
+                || span.end() > columns
+            {
                 return Err(PatchError::Row);
             }
-            previous_row = Some(row);
+            previous_row = Some(span.row);
+            span_cells += usize::from(span.len);
+        }
+        if span_cells != changed_cells.len() {
+            return Err(PatchError::Row);
         }
         for cell in changed_cells {
             if usize::from(cell.style_id()) >= style_count {
@@ -1406,55 +1623,49 @@ impl TerminalViewport {
                 return Err(PatchError::Cell);
             }
         }
-        if shift > 0 {
-            let exposed = usize::try_from(shift).map_err(|_| PatchError::Row)?;
-            if changed_row_indices.len() < exposed
-                || changed_row_indices[..exposed]
-                    .iter()
-                    .enumerate()
-                    .any(|(row, changed)| usize::from(*changed) != row)
-            {
-                return Err(PatchError::Row);
-            }
-        } else if shift < 0 {
-            let exposed = shift.unsigned_abs();
-            if changed_row_indices.len() < exposed
-                || changed_row_indices[changed_row_indices.len() - exposed..]
-                    .iter()
-                    .enumerate()
-                    .any(|(offset, changed)| usize::from(*changed) != rows - exposed + offset)
-            {
-                return Err(PatchError::Row);
-            }
+        if !exposed_rows_are_replaced(spans, patch.scroll, self.rows, self.columns) {
+            return Err(PatchError::Row);
         }
-        if patch.presentation.hovered_uri.as_ref().is_some_and(|uri| {
-            uri.len() > MAX_HOVERED_URI_BYTES
-                || uri
-                    .chars()
-                    .any(|character| character.is_control() || character.is_whitespace())
-        }) || patch.overlays.iter().any(|overlay| {
-            overlay.row >= patch.rows || overlay.start > overlay.end || overlay.end > patch.columns
-        }) || patch
-            .cursor
-            .is_some_and(|cursor| cursor.row() >= patch.rows || cursor.column() >= patch.columns)
-            || patch.scrollbar.offset > patch.scrollbar.total
-            || patch.scrollbar.len > patch.scrollbar.total
-            || patch.scrollbar.offset.saturating_add(patch.scrollbar.len) > patch.scrollbar.total
-            || matches!(
-                patch.mode,
-                TerminalMode::Copy {
-                    position, total, ..
-                } | TerminalMode::View { position, total }
-                    if total == 0 || position == 0 || position > total
-            )
-            || patch
-                .search
-                .is_some_and(|search| search.current() > search.total)
+        let cursor = patch
+            .cursor_after(self.cursor)
+            .ok_or(PatchError::Metadata)?;
+        let scrollbar = patch.scrollbar_after(self);
+        let carries = |fields| patch.carries(fields);
+        if carries(TerminalPatchFields::PRESENTATION)
+            && patch.presentation.hovered_uri.as_ref().is_some_and(|uri| {
+                uri.len() > MAX_HOVERED_URI_BYTES
+                    || uri
+                        .chars()
+                        .any(|character| character.is_control() || character.is_whitespace())
+            })
+            || carries(TerminalPatchFields::OVERLAYS)
+                && patch.overlays.iter().any(|overlay| {
+                    overlay.row >= self.rows
+                        || overlay.start > overlay.end
+                        || overlay.end > self.columns
+                })
+            || cursor
+                .is_some_and(|cursor| cursor.row() >= self.rows || cursor.column() >= self.columns)
+            || scrollbar.offset > scrollbar.total
+            || scrollbar.len > scrollbar.total
+            || scrollbar.offset.saturating_add(scrollbar.len) > scrollbar.total
+            || carries(TerminalPatchFields::MODE)
+                && matches!(
+                    patch.mode,
+                    TerminalMode::Copy {
+                        position, total, ..
+                    } | TerminalMode::View { position, total }
+                        if total == 0 || position == 0 || position > total
+                )
+            || carries(TerminalPatchFields::SEARCH)
+                && patch
+                    .search
+                    .is_some_and(|search| search.current() > search.total)
         {
             return Err(PatchError::Metadata);
         }
 
-        if !patch.dictionary.is_empty() {
+        if appends {
             let dictionary = Arc::make_mut(&mut self.dictionary);
             if !appended_styles.is_empty() {
                 dictionary.styles = append_shared_slice(&dictionary.styles, appended_styles);
@@ -1471,37 +1682,127 @@ impl TerminalViewport {
                     append_shared_slice(&dictionary.grapheme_bytes, appended_grapheme_bytes);
             }
         }
-        let cells = Arc::make_mut(&mut self.cells);
-        if shift > 0 {
-            let shift = shift.unsigned_abs();
-            cells.copy_within(0..(rows - shift) * columns, shift * columns);
-        } else if shift < 0 {
-            let shift = shift.unsigned_abs();
-            cells.copy_within(shift * columns..rows * columns, 0);
-        }
-        for (patch_row, row) in changed_row_indices.iter().copied().enumerate() {
-            let source = patch_row * columns;
-            let destination = usize::from(row) * columns;
-            cells[destination..destination + columns]
-                .copy_from_slice(&changed_cells[source..source + columns]);
+        if shift != 0 || !spans.is_empty() {
+            let cells = Arc::make_mut(&mut self.cells);
+            if shift > 0 {
+                let shift = shift.unsigned_abs();
+                cells.copy_within(0..(rows - shift) * columns, shift * columns);
+            } else if shift < 0 {
+                let shift = shift.unsigned_abs();
+                cells.copy_within(shift * columns..rows * columns, 0);
+            }
+            let mut source = 0_usize;
+            for span in spans {
+                let row_start = usize::from(span.row) * columns;
+                let start = row_start + usize::from(span.start);
+                let len = usize::from(span.len);
+                cells[start..start + len].copy_from_slice(&changed_cells[source..source + len]);
+                if span.clear {
+                    cells[start + len..row_start + columns].fill(PackedCell::EMPTY);
+                }
+                source += len;
+            }
         }
         self.generation = patch.generation;
         self.view_generation = patch.view_generation;
-        self.foreground = patch.foreground;
-        self.background = patch.background;
-        self.presentation = patch.presentation;
-        self.overlays = patch.overlays;
-        self.kitty_placements = patch.kitty_placements;
-        self.cursor = patch.cursor;
-        self.scrollbar = patch.scrollbar;
-        self.mode = patch.mode;
-        self.search = patch.search;
-        self.unseen_output = patch.unseen_output;
-        self.kitty_keyboard = patch.kitty_keyboard;
-        self.mouse_tracking = patch.mouse_tracking;
-        self.status = patch.status;
+        self.cursor = cursor;
+        self.scrollbar = scrollbar;
+        let fields = patch.fields;
+        if fields.contains(TerminalPatchFields::COLORS) {
+            self.foreground = patch.foreground;
+            self.background = patch.background;
+        }
+        if fields.contains(TerminalPatchFields::PRESENTATION) {
+            self.presentation = patch.presentation;
+        }
+        if fields.contains(TerminalPatchFields::OVERLAYS) {
+            self.overlays = patch.overlays;
+        }
+        if fields.contains(TerminalPatchFields::KITTY) {
+            self.kitty_placements = patch.kitty_placements;
+        }
+        if fields.contains(TerminalPatchFields::MODE) {
+            self.mode = patch.mode;
+        }
+        if fields.contains(TerminalPatchFields::SEARCH) {
+            self.search = patch.search;
+        }
+        if fields.contains(TerminalPatchFields::UNSEEN) {
+            self.unseen_output = patch.unseen_output;
+        }
+        if fields.contains(TerminalPatchFields::INPUT_MODES) {
+            self.kitty_keyboard = patch.kitty_keyboard;
+            self.mouse_tracking = patch.mouse_tracking;
+        }
+        if fields.contains(TerminalPatchFields::STATUS) {
+            self.status = patch.status;
+        }
         Ok(())
     }
+}
+
+#[must_use]
+pub fn exposed_rows_are_replaced(
+    spans: &[TerminalPatchSpan],
+    scroll: i16,
+    rows: u16,
+    columns: u16,
+) -> bool {
+    let exposed = usize::from(scroll.unsigned_abs());
+    if exposed == 0 {
+        return true;
+    }
+    let rows = usize::from(rows);
+    if spans.len() < exposed {
+        return false;
+    }
+    let (edge, first_row) = if scroll > 0 {
+        (&spans[..exposed], 0)
+    } else {
+        (&spans[spans.len() - exposed..], rows - exposed)
+    };
+    edge.iter().enumerate().all(|(offset, span)| {
+        usize::from(span.row) == first_row + offset && span.covers_row(columns)
+    })
+}
+
+fn changed_span(
+    row: u16,
+    before: Option<&[PackedCell]>,
+    after: &[PackedCell],
+) -> Option<TerminalPatchSpan> {
+    let content_end = after
+        .iter()
+        .rposition(|cell| *cell != PackedCell::EMPTY)
+        .map_or(0, |last| last + 1);
+    let Some(before) = before else {
+        return Some(TerminalPatchSpan {
+            row,
+            start: 0,
+            len: u16::try_from(content_end).ok()?,
+            clear: true,
+        });
+    };
+    let first = before
+        .iter()
+        .zip(after)
+        .position(|(before, after)| before != after)?;
+    let last = before
+        .iter()
+        .zip(after)
+        .rposition(|(before, after)| before != after)
+        .unwrap_or(first);
+    let (len, clear) = if last >= content_end {
+        (content_end.saturating_sub(first), true)
+    } else {
+        (last + 1 - first, false)
+    };
+    Some(TerminalPatchSpan {
+        row,
+        start: u16::try_from(first).ok()?,
+        len: u16::try_from(len).ok()?,
+        clear,
+    })
 }
 
 fn append_shared_slice<T: Copy>(current: &[T], appended: &[T]) -> Arc<[T]> {
@@ -1643,7 +1944,8 @@ mod tests {
             assert_eq!(size_of::<TerminalViewport>(), 160);
             assert_eq!(size_of::<TerminalDiffScratch>(), 40);
             assert_eq!(size_of::<TerminalPatchRows>(), 8);
-            assert_eq!(size_of::<TerminalPatchRowData>(), 40);
+            assert_eq!(size_of::<TerminalPatchRowData>(), 64);
+            assert_eq!(size_of::<TerminalPatchSpan>(), 8);
             assert_eq!(size_of::<TerminalDictionaryPatch>(), 8);
             assert_eq!(size_of::<TerminalDictionaryPatchData>(), 48);
             assert_eq!(size_of::<TerminalViewportPatch>(), 184);
@@ -1831,7 +2133,7 @@ mod tests {
 
         let patch = TerminalViewport::diff_with_scratch(&previous, &current, &mut scratch)
             .expect("compatible content frame");
-        assert_eq!(patch.changed_rows.row_indices(), [2]);
+        assert_eq!(patch.changed_rows.row_indices().collect::<Vec<_>>(), [2]);
         let fingerprints = scratch.row_fingerprints.as_ptr();
         let capacity = scratch.row_fingerprints.capacity();
         assert!(capacity >= 6);
@@ -1912,7 +2214,7 @@ mod tests {
         let patch = TerminalViewport::diff(&previous, &current).expect("compatible viewport");
         assert_eq!(patch.scroll, -1);
         assert_eq!(patch.changed_rows.len(), 1);
-        assert_eq!(patch.changed_rows.row_indices(), [2]);
+        assert_eq!(patch.changed_rows.row_indices().collect::<Vec<_>>(), [2]);
 
         let mut retained = previous;
         retained.apply_patch(patch).expect("valid patch");
@@ -1949,7 +2251,7 @@ mod tests {
         cells[2] = PackedCell::new(u32::from('c'), 0, CellWidth::Narrow);
 
         let mut patch = TerminalViewport::diff(&retained, &current).expect("compatible viewport");
-        assert_eq!(patch.changed_rows.row_indices(), [0, 2]);
+        assert_eq!(patch.changed_rows.row_indices().collect::<Vec<_>>(), [0, 2]);
         assert_eq!(
             patch
                 .changed_rows
@@ -1965,18 +2267,18 @@ mod tests {
                 .0
                 .as_deref()
                 .expect("content patch payload")
-                .row_indices
+                .spans
                 .spilled()
         );
         let reversed = patch
             .changed_rows
-            .row_indices()
+            .spans()
             .iter()
             .rev()
             .copied()
-            .collect::<TerminalPatchRowIndices>();
+            .collect::<TerminalPatchSpans>();
         let cells = patch.changed_rows.cells().to_vec();
-        patch.changed_rows = TerminalPatchRows::from_flat(reversed, cells);
+        patch.changed_rows = TerminalPatchRows::from_spans(reversed, cells);
 
         assert_eq!(retained.apply_patch(patch), Err(PatchError::Row));
         assert_eq!(retained, before);

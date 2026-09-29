@@ -2762,6 +2762,7 @@ pub enum ChooserPreview {
         current: u32,
     },
     Screen {
+        #[serde(with = "crate::pane_frame::viewport_bytes")]
         viewport: TerminalViewport,
     },
     Text {
@@ -2771,6 +2772,7 @@ pub enum ChooserPreview {
     /// a copy of that client's own status rows, which is what the preview box
     /// of the client mode holds.
     Client {
+        #[serde(with = "crate::pane_frame::optional_viewport_bytes")]
         viewport: Option<TerminalViewport>,
         status: Vec<String>,
         status_style: String,
@@ -2790,6 +2792,7 @@ pub struct ChooserPreviewTile {
     pub label: String,
     pub label_style: String,
     pub border_style: String,
+    #[serde(with = "crate::pane_frame::optional_viewport_bytes")]
     pub viewport: Option<TerminalViewport>,
 }
 
@@ -3270,6 +3273,7 @@ pub enum EventPayload {
     },
     TerminalViewport {
         pane: PaneId,
+        #[serde(with = "crate::pane_frame::viewport_bytes")]
         viewport: TerminalViewport,
     },
     TerminalPatch {
@@ -3306,6 +3310,7 @@ pub enum EventPayload {
     CommandOutput {
         pane: PaneId,
         output_id: u64,
+        #[serde(with = "crate::pane_frame::optional_viewport_bytes")]
         viewport: Option<TerminalViewport>,
     },
     ChooseTree {

@@ -4912,7 +4912,7 @@ fn apply_retained_patch(
 ) -> Result<(), zz_terminal::PatchError> {
     let scroll = patch.scroll;
     let previous_scrollbar = retained.history_scrollbar;
-    let next_scrollbar = patch.scrollbar;
+    let next_scrollbar = patch.scrollbar_after(&retained.viewport);
     let rows = usize::from(patch.rows);
     let shift = usize::from(scroll.unsigned_abs());
     let total_delta = next_scrollbar.total.checked_sub(previous_scrollbar.total);
@@ -4965,7 +4965,7 @@ fn apply_retained_patch(
     retained.revision_scratch.clear();
     retained
         .revision_scratch
-        .extend_from_slice(patch.changed_rows.row_indices());
+        .extend(patch.changed_rows.row_indices());
     let outgoing_dictionary =
         (!patch.dictionary.is_empty()).then(|| Arc::clone(&retained.viewport.dictionary));
     if let Err(error) = retained.viewport.apply_patch(patch) {

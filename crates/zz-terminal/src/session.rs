@@ -1575,6 +1575,7 @@ pub struct TerminalSession {
     terminating: AtomicBool,
     preview_pending: AtomicBool,
     retired: AtomicBool,
+    stream_sequence: AtomicU64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1754,6 +1755,7 @@ impl TerminalSession {
             terminating: AtomicBool::new(false),
             preview_pending: AtomicBool::new(false),
             retired: AtomicBool::new(false),
+            stream_sequence: AtomicU64::new(0),
         }
     }
 
@@ -1885,6 +1887,7 @@ impl TerminalSession {
             terminating: AtomicBool::new(false),
             preview_pending: AtomicBool::new(false),
             retired: AtomicBool::new(false),
+            stream_sequence: AtomicU64::new(0),
         }
     }
 
@@ -2086,6 +2089,10 @@ impl TerminalSession {
 
     pub fn retire(&self) {
         self.retired.store(true, Ordering::Release);
+    }
+
+    pub fn next_stream_sequence(&self) -> u64 {
+        self.stream_sequence.fetch_add(1, Ordering::Relaxed) + 1
     }
 
     #[must_use]

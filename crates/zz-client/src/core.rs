@@ -13,7 +13,7 @@ use zz_protocol::{
 };
 use zz_terminal::{
     AppearanceProvenance, ClipboardTarget, PackedCell, TerminalAppearance, TerminalDictionary,
-    TerminalViewport, TerminalViewportPatch,
+    TerminalPatchFields, TerminalViewport, TerminalViewportPatch,
 };
 
 /// Which viewport rows a terminal frame or patch touched, so a skin repaints
@@ -1060,16 +1060,18 @@ fn clamp_selected(selected: u32, items: usize) -> u32 {
 /// Which rows a patch will touch, computed against the pre-apply viewport.
 fn patch_damage(previous: &TerminalViewport, patch: &TerminalViewportPatch) -> ViewportDamage {
     if patch.scroll != 0
-        || patch.foreground != previous.foreground
-        || patch.background != previous.background
+        || patch.carries(TerminalPatchFields::COLORS)
+            && (patch.foreground != previous.foreground || patch.background != previous.background)
     {
         return ViewportDamage::All;
     }
-    let mut rows = patch.changed_rows.row_indices().to_vec();
-    rows.extend(previous.overlays.iter().map(|overlay| overlay.row));
-    rows.extend(patch.overlays.iter().map(|overlay| overlay.row));
-    rows.sort_unstable();
-    rows.dedup();
+    let mut rows = patch.changed_rows.row_indices().collect::<Vec<_>>();
+    if patch.carries(TerminalPatchFields::OVERLAYS) {
+        rows.extend(previous.overlays.iter().map(|overlay| overlay.row));
+        rows.extend(patch.overlays.iter().map(|overlay| overlay.row));
+        rows.sort_unstable();
+        rows.dedup();
+    }
     ViewportDamage::Rows(rows)
 }
 

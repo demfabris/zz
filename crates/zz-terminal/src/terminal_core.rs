@@ -36,9 +36,10 @@ pub use model::{
     KittyPlacement, MAX_HISTORY_LIMIT, MAX_KITTY_IMAGE_BYTES, MAX_KITTY_PLACEMENTS, NO_COLOR,
     OVERLAY_RECTANGLE, OverlayKind, OverlaySpan, PackedCell, PackedStyle, PatchError,
     ScrollbarState, SearchStatus, SessionStatus, TerminalDictionary, TerminalDictionaryPatch,
-    TerminalDiffScratch, TerminalExitStatus, TerminalMode, TerminalPatchRowIndices,
-    TerminalPatchRows, TerminalPresentation, TerminalViewport, TerminalViewportPatch,
-    UnderlineStyle,
+    TerminalDiffScratch, TerminalExitStatus, TerminalMode, TerminalPatchFields, TerminalPatchRows,
+    TerminalPatchSpan, TerminalPatchSpans, TerminalPresentation, TerminalViewport,
+    TerminalViewportPatch, UnderlineStyle, exposed_rows_are_replaced, shared_default_presentation,
+    shared_empty_kitty_placements, shared_empty_overlays,
 };
 pub use paste::{PastePreparationError, prepare_paste_buffer};
 #[cfg(all(feature = "session", target_os = "linux"))]

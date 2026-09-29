@@ -24517,6 +24517,7 @@ impl Shared {
             .spawn(move || {
                 let mut previous = BTreeMap::<TerminalViewId, (u64, Arc<TerminalViewport>)>::new();
                 let mut previous_title = None::<String>;
+                let mut previous_title_writes = 0;
                 let projects_agent = shared
                     .inner
                     .lock()
@@ -24628,17 +24629,21 @@ impl Shared {
                                     );
                                 }
                             }
+                            let title_writes = terminal.facts().program_title_writes;
                             if !projects_agent
-                                && previous_title
-                                    .as_deref()
-                                    .is_none_or(|previous| previous != runtime_viewport.title())
+                                && (previous_title_writes != title_writes
+                                    || previous_title.as_deref().is_none_or(|previous| {
+                                        previous != runtime_viewport.title()
+                                    }))
                             {
                                 shared.synchronize_pane_title(
                                     pane,
                                     &terminal,
                                     runtime_viewport.title(),
+                                    previous_title_writes != title_writes,
                                 );
                                 previous_title = Some(runtime_viewport.title().to_owned());
+                                previous_title_writes = title_writes;
                             }
                             if terminal.take_preview_ready() {
                                 shared.refresh_chooser_previews();
@@ -24983,6 +24988,7 @@ impl Shared {
         pane: PaneId,
         terminal: &Arc<TerminalSession>,
         title: &str,
+        program_wrote_title: bool,
     ) {
         let event = {
             let mut inner = self.inner.lock();
@@ -25002,7 +25008,7 @@ impl Shared {
             let changed = inner
                 .engine
                 .state
-                .update_pane_title(pane, title)
+                .update_pane_title_from_terminal(pane, title, program_wrote_title)
                 .unwrap_or(false);
             changed.then(|| {
                 let snapshot = MuxHookSnapshot::capture(&inner.engine);
@@ -53427,7 +53433,7 @@ mod tests {
             .lock()
             .terminals_mut()
             .insert(pane, Arc::clone(&replacement));
-        shared.synchronize_pane_title(pane, &terminal, "stale watcher title");
+        shared.synchronize_pane_title(pane, &terminal, "stale watcher title", true);
         assert_eq!(
             shared.inner.lock().engine.state.pane(pane).unwrap().title,
             "dynamic terminal title",
@@ -102556,7 +102562,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 &CommandInvocation::new("rename-window", ["-t", &window.to_string(), "manual"]),
             )
             .expect("explicit rename");
-        shared.synchronize_pane_title(pane, &terminal, "osc-title");
+        shared.synchronize_pane_title(pane, &terminal, "osc-title", true);
         shared.raise_pane_bell(pane);
         shared.raise_pane_bell(pane);
 
@@ -106809,7 +106815,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 ),
             )
             .expect("disable terminal titles");
-        shared.synchronize_pane_title(pane, &terminal, "blocked title");
+        shared.synchronize_pane_title(pane, &terminal, "blocked title", true);
         assert_ne!(
             shared.inner.lock().engine.state.pane(pane).unwrap().title,
             "blocked title"
@@ -106825,11 +106831,45 @@ bind - split-window -v -c "#{pane_current_path}"
                 ),
             )
             .expect("enable terminal titles");
-        shared.synchronize_pane_title(pane, &terminal, "allowed title");
+        shared.synchronize_pane_title(pane, &terminal, "allowed title", true);
         assert_eq!(
             shared.inner.lock().engine.state.pane(pane).unwrap().title,
             "allowed title"
         );
+    }
+
+    #[test]
+    fn select_pane_title_survives_shell_integration_titles_until_a_program_retitles() {
+        let shared = Arc::new(Shared::new(1));
+        let (_, pane, terminal) = output_view_session_fixture(&shared, "title-pin", "first");
+        let title = |shared: &Arc<Shared>| {
+            shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .pane(pane)
+                .unwrap()
+                .title
+                .clone()
+        };
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("title context");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("select-pane", ["-t", &pane.to_string(), "-T", "mytitle"]),
+            )
+            .expect("set the pane title");
+        shared.synchronize_pane_title(pane, &terminal, "bash", false);
+        shared.synchronize_pane_title(pane, &terminal, "ls -la", false);
+        assert_eq!(title(&shared), "mytitle");
+        shared.synchronize_pane_title(pane, &terminal, "vim", true);
+        assert_eq!(title(&shared), "vim");
+        shared.synchronize_pane_title(pane, &terminal, "bash", false);
+        assert_eq!(title(&shared), "bash");
     }
 
     #[test]

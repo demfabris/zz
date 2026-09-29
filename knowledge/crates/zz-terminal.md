@@ -51,7 +51,11 @@ On Unix, `run_terminal` obtains its default shell command from `shell_integratio
 Bash receive zz-owned startup hooks; Apple's `/bin/bash` 3.2 is skipped because it never reads
 `ENV`, the injection path. On zsh and Bash 4.4+, these publish
 the interactive command as OSC 2 before execution, then replace it with the shell name at the next
-prompt. A program's own later OSC 0/2 title wins while it runs. Shell resources are embedded in the
+prompt. A program's own later OSC 0/2 title wins while it runs. Each hook title is preceded by the
+private `OSC 2626`, so `EngineFilter` counts only unmarked OSC 0/2 writes in
+`TerminalFacts::program_title_writes`; the daemon's pane watcher passes whether that count moved, and
+a title set with `select-pane -T` or `split-window -T` ignores hook titles until an unmarked write
+lands. Shell resources are embedded in the
 binary and materialized into a versioned private cache on every spawn, never once per process: the
 cache root is a purgeable OS cache directory, and a daemon that memoized it would hand later panes an
 `ENV` path that no longer exists, leaving Bash in `--posix` with no startup files at all. Unsupported

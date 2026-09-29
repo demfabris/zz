@@ -82,7 +82,6 @@ try:
            False)
     print("RESTORE_SESSION_GONE=True")
 
-    tmux("set-option", "-g", "default-shell", "/bin/sh")
     subprocess.run(["tmux", "run-shell", str(plugin / "scripts/restore.sh")],
                    capture_output=True, timeout=120)
     settle(lambda: session in tmux("list-sessions", "-F", "#{session_name}").split(),

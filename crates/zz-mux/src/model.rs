@@ -225,6 +225,7 @@ pub struct Pane {
     /// so it keeps the screen it was created with until the next layout fix
     /// (spawn.c `spawn_pane`, layout.c `layout_assign_pane`).
     pub(crate) screen_extent: Option<(u16, u16)>,
+    title_pinned: bool,
     input_options: InputOptions,
 }
 
@@ -516,6 +517,7 @@ impl MuxState {
             input_off: false,
             screen_extent: None,
             empty: false,
+            title_pinned: false,
             input_options: InputOptions::default(),
         };
         let window = Window {
@@ -642,6 +644,7 @@ impl MuxState {
             input_off: false,
             screen_extent: None,
             empty: false,
+            title_pinned: false,
             input_options: InputOptions::default(),
         };
         let window = Window {
@@ -1196,6 +1199,7 @@ impl MuxState {
                 input_off: false,
                 screen_extent: None,
                 empty: false,
+                title_pinned: false,
                 input_options: InputOptions::default(),
             },
         );
@@ -1746,6 +1750,34 @@ impl MuxState {
         Ok(true)
     }
 
+    pub(crate) fn pin_pane_title(
+        &mut self,
+        pane: PaneId,
+        title: impl Into<String>,
+    ) -> Result<bool, ServerError> {
+        let changed = self.update_pane_title(pane, title)?;
+        if let Some(pane_state) = self.pane_mut(pane) {
+            pane_state.title_pinned = true;
+        }
+        Ok(changed)
+    }
+
+    pub fn update_pane_title_from_terminal(
+        &mut self,
+        pane: PaneId,
+        title: impl Into<String>,
+        program_wrote_title: bool,
+    ) -> Result<bool, ServerError> {
+        let pane_state = self
+            .pane_mut(pane)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        if !program_wrote_title && pane_state.title_pinned {
+            return Ok(false);
+        }
+        pane_state.title_pinned = false;
+        self.update_pane_title(pane, title)
+    }
+
     /// Set or clear a pane's pending bell, reporting whether it moved. A pane
     /// that already left is not an error: nothing changed either way.
     pub fn set_pane_bell(&mut self, pane: PaneId, bell: bool) -> bool {
@@ -1793,6 +1825,7 @@ impl MuxState {
             .pane_mut(pane)
             .expect("the validated picker pane still exists");
         pane_state.title = title;
+        pane_state.title_pinned = false;
         pane_state.kind = kind;
         self.bump_generation();
         Ok(inherit_cwd_from)

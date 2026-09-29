@@ -153,6 +153,8 @@ const PTY_BRIDGE_THRESHOLD_BYTES: usize = 1024;
 /// Probed on Mac16,5/macOS 27: spin 64/256/512 gave 281/332/348 MB/s.
 #[cfg(all(unix, not(target_os = "linux")))]
 const PTY_BRIDGE_SPIN_MAX: u32 = 512;
+#[cfg(all(unix, not(target_os = "linux")))]
+const PTY_BRIDGE_SPIN_MIN: u32 = 8;
 #[cfg(target_os = "linux")]
 const PTY_GATHER_BRIDGE_SPIN_MAX: u32 = 16;
 const CONTENT_PUBLISH_STALENESS: Duration = Duration::from_millis(16);
@@ -206,6 +208,7 @@ const DEAD_NOTICE_WAIT: Duration = Duration::from_secs(5);
 const MAX_ENGINE_SEQUENCE_BYTES: usize = 256;
 const MAX_ENGINE_RENAME_BYTES: usize = 1024;
 const MAX_ENGINE_OSC_BYTES: usize = 64;
+const SHELL_INTEGRATION_TITLE_MARK: &[u8] = b"2626";
 
 /// `enum progress_bar_state`: what the `ConEmu` OSC 9;4 sequence's first argument
 /// selects. A pane that has never seen one is `hidden`.
@@ -315,9 +318,13 @@ struct EngineFilter {
     state: EngineState,
     sequence: Vec<u8>,
     title: Vec<u8>,
-    /// The OSC payload being collected, passed through to the engine as it is
-    /// read; `None` once it outgrew the cap and can no longer be parsed.
-    osc: Option<Vec<u8>>,
+    /// The head of the OSC payload being collected, passed through to the
+    /// engine as it is read; `osc_overflowed` once it outgrew the cap and only
+    /// its command number can still be parsed.
+    osc: Vec<u8>,
+    osc_overflowed: bool,
+    integration_title: bool,
+    program_title_writes: u64,
     bar: ProgressBar,
     primary_history_size: usize,
     metadata_hint: bool,
@@ -340,6 +347,7 @@ impl EngineFilter {
             cursor_y: terminal.cursor_y()?,
             alternate_on,
             mouse_tracking: terminal.is_mouse_tracking()?,
+            program_title_writes: self.program_title_writes,
         })
     }
 
@@ -365,7 +373,6 @@ impl EngineFilter {
                     }
                     b']' => {
                         terminal.vt_write(b"\x1b]");
-                        self.osc = Some(Vec::new());
                         self.state = EngineState::Osc;
                         bytes = &bytes[1..];
                     }
@@ -522,7 +529,6 @@ impl EngineFilter {
                 }
                 b']' => {
                     terminal.vt_write(&bytes[start..escape + 2]);
-                    self.osc = Some(Vec::new());
                     self.state = EngineState::Osc;
                     return &bytes[escape + 2..];
                 }
@@ -580,14 +586,17 @@ impl EngineFilter {
     /// every other control byte inside an OSC is a null transition the pin
     /// drops.
     fn collect_osc(&mut self, bytes: &[u8]) {
-        let Some(osc) = self.osc.as_mut() else {
-            return;
-        };
-        if osc.len() + bytes.len() > MAX_ENGINE_OSC_BYTES {
-            self.osc = None;
-            return;
+        if self.osc.len() + bytes.len() > MAX_ENGINE_OSC_BYTES {
+            self.osc_overflowed = true;
         }
-        osc.extend(bytes.iter().copied().filter(|byte| *byte >= 0x20));
+        let room = MAX_ENGINE_OSC_BYTES - self.osc.len();
+        self.osc.extend(
+            bytes
+                .iter()
+                .copied()
+                .filter(|byte| *byte >= 0x20)
+                .take(room),
+        );
     }
 
     fn finish_osc(
@@ -595,11 +604,21 @@ impl EngineFilter {
         bar: &mut Option<ProgressBar>,
         last_command_status: &mut Option<CommandStatusUpdate>,
     ) {
-        let Some(osc) = self.osc.take() else {
-            self.metadata_hint = true;
+        let osc = std::mem::take(&mut self.osc);
+        let overflowed = std::mem::take(&mut self.osc_overflowed);
+        let integration_title = std::mem::take(&mut self.integration_title);
+        self.metadata_hint |= overflowed || osc_touches_metadata(&osc);
+        if matches!(osc_command(&osc), Some((0 | 2, _))) {
+            self.program_title_writes += u64::from(!integration_title);
             return;
-        };
-        self.metadata_hint |= osc_touches_metadata(&osc);
+        }
+        if overflowed {
+            return;
+        }
+        if osc == SHELL_INTEGRATION_TITLE_MARK {
+            self.integration_title = true;
+            return;
+        }
         if let Some(status) = parse_osc_command_status(&osc) {
             *last_command_status = Some(status);
             return;
@@ -684,8 +703,8 @@ fn parse_osc_command_status(payload: &[u8]) -> Option<CommandStatusUpdate> {
 
 /// `input_exit_osc` reads the leading digits as the OSC number, which must be
 /// followed by `;` or the end of the payload, and hands the rest to the
-/// per-number handler. Only 9 is read here.
-fn parse_osc_progress(payload: &[u8]) -> Option<(ProgressBarState, Option<u8>)> {
+/// per-number handler.
+fn osc_command(payload: &[u8]) -> Option<(u32, &[u8])> {
     let digits = payload
         .iter()
         .position(|byte| !byte.is_ascii_digit())
@@ -704,6 +723,11 @@ fn parse_osc_progress(payload: &[u8]) -> Option<(ProgressBarState, Option<u8>)> 
         Some(b';') => &payload[digits + 1..],
         Some(_) => return None,
     };
+    Some((option, rest))
+}
+
+fn parse_osc_progress(payload: &[u8]) -> Option<(ProgressBarState, Option<u8>)> {
+    let (option, rest) = osc_command(payload)?;
     (option == 9).then(|| parse_osc_9_progress(rest)).flatten()
 }
 
@@ -1385,6 +1409,7 @@ pub struct TerminalFacts {
     /// reads off `wp->base.mode`, which is what every stock pane-body row
     /// guards its `send -M` branch on.
     pub mouse_tracking: bool,
+    pub program_title_writes: u64,
 }
 
 struct PublishedViewports {
@@ -5866,6 +5891,8 @@ fn run_terminal(
     let no_output = crossbeam_channel::never();
     #[cfg(all(unix, not(target_os = "linux")))]
     let mut read_buffer = vec![0_u8; PTY_READ_BUFFER_BYTES];
+    #[cfg(all(unix, not(target_os = "linux")))]
+    let mut bridge_spins = PTY_BRIDGE_SPIN_MAX;
     let (mut search_worker, search_results) = SearchWorker::spawn(wake.clone());
     let mut search_refresh_due = None::<Instant>;
     let mut last_content_publish = Instant::now();
@@ -6856,6 +6883,9 @@ fn run_terminal(
                                 vt_diagnostics.record(parsed, started);
                                 output_pending |= parsed > 0;
                             }
+                            if spins > 0 {
+                                bridge_spins = (bridge_spins * 2).min(PTY_BRIDGE_SPIN_MAX);
+                            }
                             burst += length;
                             spins = 0;
                             if burst >= PTY_DRAIN_TURN_BYTES
@@ -6867,9 +6897,12 @@ fn run_terminal(
                         }
                         Err(rustix::io::Errno::INTR) => {}
                         Err(rustix::io::Errno::AGAIN) => {
-                            if burst >= PTY_BRIDGE_THRESHOLD_BYTES && spins < PTY_BRIDGE_SPIN_MAX {
-                                spins += 1;
-                                continue;
+                            if burst >= PTY_BRIDGE_THRESHOLD_BYTES {
+                                if spins < bridge_spins {
+                                    spins += 1;
+                                    continue;
+                                }
+                                bridge_spins = (bridge_spins / 2).max(PTY_BRIDGE_SPIN_MIN);
                             }
                             break;
                         }
@@ -15830,6 +15863,7 @@ mod tests {
                     cursor_y: 23,
                     alternate_on: true,
                     mouse_tracking: false,
+                    program_title_writes: 0,
                 }
             );
             filter.write(
@@ -15856,6 +15890,7 @@ mod tests {
                     cursor_y: 23,
                     alternate_on: false,
                     mouse_tracking: false,
+                    program_title_writes: 0,
                 }
             );
         }
@@ -16217,6 +16252,41 @@ mod tests {
                 Some(CommandStatusUpdate::Exit(7)),
                 "split at {split}"
             );
+        }
+    }
+
+    #[test]
+    fn engine_filter_counts_title_writes_the_shell_integration_did_not_mark() {
+        let long_title = format!("\x1b]2;{}\x07", "t".repeat(200));
+        let bytes = [
+            b"\x1b]2626\x07\x1b]2;bash\x07".as_slice(),
+            b"\x1b]2;vim\x1b\\",
+            b"\x1b]0;both\x07",
+            b"\x1b]1;icon\x07\x1b]22;text\x07",
+            b"\x1b]2626\x07\x1b]7;file://host/tmp\x07\x1b]2;after-cwd\x07",
+            long_title.as_bytes(),
+            b"\x1b]2626\x07\x1b]2;ls -la\x07",
+        ]
+        .concat();
+        for split in 1..bytes.len() {
+            let mut terminal = new_terminal(20, 4, 16).expect("terminal");
+            let mut filter = EngineFilter::default();
+            for chunk in [&bytes[..split], &bytes[split..]] {
+                filter.write(
+                    chunk,
+                    EngineKnobs::default(),
+                    &mut terminal,
+                    &mut Vec::new(),
+                    &mut None,
+                    &mut None,
+                );
+            }
+            assert_eq!(
+                filter.facts(&terminal).expect("facts").program_title_writes,
+                4,
+                "split at {split}"
+            );
+            assert_eq!(terminal.title().expect("title"), "ls -la");
         }
     }
 

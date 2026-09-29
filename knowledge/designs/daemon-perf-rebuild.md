@@ -564,8 +564,10 @@ scope above:
   `default-shell /bin/sh`: with a faster CLI, restore.sh's `select-pane -T` lands before the
   restored bash prints its first prompt, and zz's shell integration retitles the pane at every
   prompt. The race was there before; the old CLI was slow enough to lose it most of the time.
-  That tmux divergence (bash, zsh and PowerShell integrations) is recorded as the open gap
-  `terminal.shell-integration-prompt-title`.
+  That tmux divergence (bash, zsh and PowerShell integrations) was recorded as the gap
+  `terminal.shell-integration-prompt-title`, closed the same day: hook titles now carry a private
+  `OSC 2626` mark, a `select-pane -T` title ignores marked titles until an unmarked OSC 0/2
+  lands, and the row restores under the default bash again.
 - The verbose sampler logs disk read and write bytes again (`proc_pid_rusage` on macOS,
   `/proc/<pid>/io` on Linux, sysinfo on Windows); the process `status` field is gone.
 

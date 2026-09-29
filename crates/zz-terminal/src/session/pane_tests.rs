@@ -511,3 +511,21 @@ fn slot_changes_made_after_a_queued_command_run_after_it() {
         ["set-wrap-search", "wake"]
     );
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_pane_gets_transparent_huge_pages_back_when_zz_turned_them_off() {
+    let before = std::fs::read_to_string("/proc/self/status").expect("read own status");
+    if before.contains("THP_enabled:\t0") {
+        return;
+    }
+    super::unix_pty::disable_transparent_huge_pages();
+    let after = std::fs::read_to_string("/proc/self/status").expect("read own status");
+    assert!(after.contains("THP_enabled:\t0"), "zz turned them off here");
+    let session =
+        shell_session("awk '/^THP_enabled/ {print \"THP=\" $2}' /proc/self/status; read _");
+    wait_until("the pane's THP state", || {
+        text(&session.latest_viewport()).contains("THP=")
+    });
+    assert!(text(&session.latest_viewport()).contains("THP=1"));
+}

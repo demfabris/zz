@@ -90,6 +90,11 @@ pub fn run_pty_exec_mode() -> Option<std::process::ExitCode> {
     }
 }
 
+#[cfg(target_os = "linux")]
+pub extern "C" fn disable_transparent_huge_pages() {
+    unix_pty::disable_transparent_huge_pages();
+}
+
 #[must_use]
 pub fn allow_actor_round_trips() -> RoundTripGuard {
     RoundTripGuard(ROUND_TRIPS_FORBIDDEN.with(|forbidden| forbidden.replace(false)))

@@ -612,6 +612,20 @@ Both counts scale with how often the watcher asks, which W1-PUBLISH and W4-DELIV
 foreground lookup per event passed to both lookups, and a bare `TIOCGPGRP` in zz-terminal
 (W1-PANE), would halve the ioctls.
 
+Linux follow-up (2026-09-29, alienware, THP `always`): the Linux fold gate read
+`mem.footprint.p1` 16.1 MiB and `.p20` 103 MiB, against 6.1 and 26.1 on the Mac. The cause was
+transparent huge pages in mimalloc's arena: a first touch in a 2 MiB-aligned region can fault a
+whole huge page, a later partial purge splits it, and the 4K pages mimalloc never used stay
+resident. It happened in about one start in four, depending on free huge pages, which is why it
+looked like noise. The `no_thp` feature of `mimalloc` does not help: libmimalloc-sys 0.1.49
+defines `MI_NO_THP`, which in mimalloc v3 only skips `MADV_HUGEPAGE`, while mimalloc's own CMake
+also sets `MI_DEFAULT_ALLOW_THP=0`. `zz_cli` now registers a constructor in `.init_array.00100`,
+ahead of mimalloc's (priority 101), that sets `PR_SET_THP_DISABLE` for the process, and the Linux
+pane fork clears it again before exec, so pane programs keep the system setting (`run-shell` and
+status job children still inherit it). Same-binary A/B with `ZZ_PERF_THP=1`: footprint p1
+15.2 -> 3.1 MiB, p20 99-100 -> 18 MiB, detached throughput 90.6 -> 88-90 MB/s (unchanged within
+noise), spawn instructions unchanged.
+
 ## W1-PUBLISH: change-driven publication (effort M)
 
 Scope:
@@ -1934,6 +1948,7 @@ deletes most wave-1 fallback paths anyway).
 | `ZZ_PERF_ATTACH_DEDUP=0` | ATTACH | resync and Full enqueue as today |
 | `ZZ_PERF_READONLY_SKIP=0` | HOOKS | read-only commands take the before/after captures |
 | `ZZ_PERF_COPY_CLONE=1` | COPY | flat `ModeRevision` clone |
+| `ZZ_PERF_THP=1` | FOOTPRINT (Linux) | the daemon keeps transparent huge pages as the system sets them |
 
 Wire changes (W2-TERM, W2-CTRL) and the thread model (W3, W4) have no runtime switch; rollback is a
 revert. `ZZ_PTY_SHARDS=N` is a tuning knob, not a rollback.

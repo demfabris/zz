@@ -102,6 +102,28 @@ const PTY_EXEC_ARGUMENT: &str = "--zz-pty-exec";
 const PTY_EXEC_FENCE: RawFd = 3;
 static PTY_EXEC_HOST: AtomicBool = AtomicBool::new(false);
 
+#[cfg(target_os = "linux")]
+static THP_DISABLED_HERE: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_os = "linux")]
+#[allow(
+    unsafe_code,
+    reason = "getenv and prctl run in a constructor before the allocator starts and touch no memory the process owns"
+)]
+pub(super) fn disable_transparent_huge_pages() {
+    unsafe {
+        let knob = libc::getenv(c"ZZ_PERF_THP".as_ptr());
+        if !knob.is_null() && *knob == b'1'.cast_signed() {
+            return;
+        }
+        if libc::prctl(libc::PR_GET_THP_DISABLE, 0, 0, 0, 0) == 0
+            && libc::prctl(libc::PR_SET_THP_DISABLE, 1, 0, 0, 0) == 0
+        {
+            THP_DISABLED_HERE.store(true, Ordering::Relaxed);
+        }
+    }
+}
+
 pub(super) fn run_pty_exec_mode() -> Option<ExitCode> {
     let mut arguments = std::env::args_os().skip(1);
     if arguments.next().as_deref() != Some(OsStr::new(PTY_EXEC_ARGUMENT)) {
@@ -575,6 +597,10 @@ unsafe fn exec_child(
             libc::_exit(1);
         }
         descriptors.close_inherited(fence);
+        #[cfg(target_os = "linux")]
+        if THP_DISABLED_HERE.load(Ordering::Relaxed) {
+            libc::prctl(libc::PR_SET_THP_DISABLE, 0, 0, 0, 0);
+        }
         libc::execve(
             plan.program.as_ptr(),
             pointers.argv.as_ptr(),

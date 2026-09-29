@@ -21,8 +21,8 @@ use std::{
 use parking_lot::Mutex;
 use zz_protocol::{
     AgentAutoApprove, AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, ChooseTreeKind,
-    ClientId, CommandInvocation, CommandPromptMode, CommandPromptType, CommandResolution,
-    CommandSpec, DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND,
+    ClientEnvironmentBlob, ClientId, CommandInvocation, CommandPromptMode, CommandPromptType,
+    CommandResolution, CommandSpec, DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND,
     DEFAULT_AGENT_COMMAND, DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken,
     MAX_AGENT_COMMAND_BYTES, MAX_GUI_TEXT_BYTES, MuxOptionKey, NATIVE_COMMAND_NAMES,
     PaneBorderIndicators, PaneBorderLines, PaneBorderStatus, PaneId, PaneKindSnapshot,
@@ -626,7 +626,7 @@ pub struct ExecutionContext {
     client_terminal: ClientTerminal,
     client_size: Option<(u16, u16)>,
     client_working_directory: Option<PathBuf>,
-    client_environment: Option<Arc<BTreeMap<RawText, RawText>>>,
+    client_environment: Option<Arc<ClientEnvironmentBlob>>,
     client_attached: bool,
     client_attached_context: Option<(SessionId, WindowId, PaneId)>,
     target_format_client_override: Option<FormatClient>,
@@ -727,7 +727,7 @@ impl fmt::Debug for ExecutionContext {
                 &self
                     .client_environment
                     .as_ref()
-                    .map(|environment| environment.len()),
+                    .map(|environment| environment.entries().count()),
             )
             .field("client_attached", &self.client_attached)
             .field("client_attached_context", &self.client_attached_context)
@@ -764,7 +764,7 @@ impl Default for ExecutionContext {
             client_terminal: ClientTerminal::Present,
             client_size: None,
             client_working_directory: None,
-            client_environment: Some(Arc::new(BTreeMap::new())),
+            client_environment: Some(Arc::default()),
             client_attached: true,
             client_attached_context: None,
             target_format_client_override: None,
@@ -906,10 +906,12 @@ impl ExecutionContext {
 
     #[must_use]
     pub fn client_environment(&self) -> Option<&BTreeMap<RawText, RawText>> {
-        self.client_environment.as_deref()
+        self.client_environment
+            .as_deref()
+            .map(ClientEnvironmentBlob::map)
     }
 
-    pub fn set_client_environment(&mut self, environment: Option<Arc<BTreeMap<RawText, RawText>>>) {
+    pub fn set_client_environment(&mut self, environment: Option<Arc<ClientEnvironmentBlob>>) {
         self.client_environment = environment;
     }
 
@@ -20659,10 +20661,9 @@ mod tests {
         let mut engine = MuxEngine::default();
         engine.seed_global_environment([("DISPLAY", "daemon")]);
         let mut context = ExecutionContext::default();
-        context.set_client_environment(Some(Arc::new(BTreeMap::from([(
-            "DISPLAY".into(),
-            "client".into(),
-        )]))));
+        context.set_client_environment(Some(Arc::new(ClientEnvironmentBlob::from_map(
+            BTreeMap::from([("DISPLAY".into(), "client".into())]),
+        ))));
 
         engine
             .execute(
@@ -20824,11 +20825,11 @@ mod tests {
                 &command("set-option", &["-g", "update-environment", "EXACT APP_*"]),
             )
             .expect("global update patterns");
-        let snapshot = Arc::new(BTreeMap::from([
+        let snapshot = Arc::new(ClientEnvironmentBlob::from_map(BTreeMap::from([
             ("APP_ONE".into(), "one".into()),
             ("APP_TWO".into(), RawText::default()),
             ("UNSELECTED".into(), "client".into()),
-        ]));
+        ])));
         context.set_client_environment(Some(Arc::clone(&snapshot)));
         let cloned = context.clone();
         assert!(Arc::ptr_eq(
@@ -37969,10 +37970,12 @@ mod tests {
             ("PHASE4D_EXTRA", "global"),
         ]);
         let mut context = ExecutionContext::default();
-        context.set_client_environment(Some(Arc::new(BTreeMap::from([
-            ("DISPLAY".into(), ":7".into()),
-            ("SSH_AUTH_SOCK".into(), "/tmp/agent.sock".into()),
-        ]))));
+        context.set_client_environment(Some(Arc::new(ClientEnvironmentBlob::from_map(
+            BTreeMap::from([
+                ("DISPLAY".into(), ":7".into()),
+                ("SSH_AUTH_SOCK".into(), "/tmp/agent.sock".into()),
+            ]),
+        ))));
         engine
             .execute(&mut context, &command("new-session", &["-s", "work"]))
             .unwrap();
@@ -40015,10 +40018,9 @@ mod tests {
         let mut engine = MuxEngine::default();
         engine.seed_global_environment([("DISPLAY", ":7"), ("PHASE_C7", "seeded")]);
         let mut context = ExecutionContext::default();
-        context.set_client_environment(Some(Arc::new(BTreeMap::from([(
-            "PHASE_C7".into(),
-            "seeded".into(),
-        )]))));
+        context.set_client_environment(Some(Arc::new(ClientEnvironmentBlob::from_map(
+            BTreeMap::from([("PHASE_C7".into(), "seeded".into())]),
+        ))));
         engine
             .execute(
                 &mut context,

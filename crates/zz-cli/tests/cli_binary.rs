@@ -2971,6 +2971,110 @@ mod daemon_autostart {
         assert!(values.stderr.is_empty());
     }
 
+    fn wait_with_deadline(mut child: Child, limit: Duration) -> Output {
+        let deadline = Instant::now() + limit;
+        while child.try_wait().expect("poll child").is_none() {
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                panic!("command did not finish within {limit:?}");
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        child.wait_with_output().expect("collect child output")
+    }
+
+    #[test]
+    fn concurrent_cold_commands_finish_while_startup_and_hook_children_call_back() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let plugin = fixture.home.join("plugin.tmux");
+        std::fs::write(
+            &plugin,
+            b"#!/bin/sh
+tmux set-option -g @plugin loaded
+",
+        )
+        .expect("write plugin");
+        std::fs::set_permissions(&plugin, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .expect("plugin is executable");
+        let sourced = fixture.home.join("tpm.conf");
+        std::fs::write(
+            &sourced,
+            format!(
+                "run-shell '{}'\nrun-shell \"tmux set-option -g @tpm sourced\"\n",
+                plugin.display()
+            ),
+        )
+        .expect("write sourced config");
+        std::fs::write(
+            &fixture.config,
+            format!(
+                "run-shell \"tmux set-option -g @boot ready\"\nsource-file '{}'\nset-hook -g after-select-pane 'run-shell \"tmux set-option -g @hooked yes\"'\n",
+                sourced.display()
+            ),
+        )
+        .expect("write startup config");
+
+        let children = (0..2)
+            .map(|index| {
+                fixture
+                    .command()
+                    .args(["new-session", "-d", "-s", &format!("cold{index}")])
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .expect("spawn cold command")
+            })
+            .collect::<Vec<_>>();
+        for child in children {
+            let output = wait_with_deadline(child, Duration::from_secs(20));
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "stderr: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let selected = wait_with_deadline(
+            fixture
+                .command()
+                .args(["select-pane", "-t", "cold0"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("spawn select-pane"),
+            Duration::from_secs(20),
+        );
+        assert_eq!(selected.status.code(), Some(0));
+        let resourced = fixture.run(&["source-file", sourced.to_str().expect("UTF-8 path")]);
+        assert_eq!(resourced.status.code(), Some(0));
+        let values = fixture.run(&[
+            "show-options",
+            "-gqv",
+            "@boot",
+            ";",
+            "show-options",
+            "-gqv",
+            "@plugin",
+            ";",
+            "show-options",
+            "-gqv",
+            "@tpm",
+            ";",
+            "show-options",
+            "-gqv",
+            "@hooked",
+        ]);
+        assert_eq!(
+            String::from_utf8_lossy(&values.stdout),
+            "ready\nloaded\nsourced\nyes\n"
+        );
+        let sessions = fixture.run(&["list-sessions", "-F", "#{session_name}"]);
+        assert_eq!(String::from_utf8_lossy(&sessions.stdout), "cold0\ncold1\n");
+    }
+
     #[test]
     fn gui_style_default_attach_uses_its_working_directory_with_an_empty_daemon() {
         let fixture = Fixture::new();

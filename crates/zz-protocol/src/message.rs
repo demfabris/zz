@@ -3805,6 +3805,8 @@ pub enum ProtocolMessage {
     PathListCancel {
         request_id: u64,
     },
+    Exec(crate::ExecRequest),
+    ExecExit(crate::ExecExit),
 }
 
 fn deserialize_client_terminal_type<'de, D>(deserializer: D) -> Result<String, D::Error>

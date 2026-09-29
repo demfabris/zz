@@ -664,11 +664,13 @@ fn execute_file_command(
     expected: Option<(MuxOptionKey, String)>,
     server_id: Option<u64>,
 ) -> Result<String, String> {
+    const DAEMON_CHANGED: &str = "The local daemon changed. Reconnect before editing.";
+    let server_id = server_id.ok_or_else(|| DAEMON_CHANGED.to_owned())?;
     let mut client = config::local_command_client()?;
-    if Some(client.server_hello().server_id) != server_id {
-        return Err("The local daemon changed. Reconnect before editing.".to_owned());
-    }
-    let output = client.execute(command).map_err(|error| error.to_string())?;
+    let output = client
+        .execute_on_server(server_id, command)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| DAEMON_CHANGED.to_owned())?;
     if let Some((key, expected)) = expected {
         let actual = client
             .execute(CommandInvocation::new(

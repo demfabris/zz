@@ -1,7 +1,7 @@
 {
   "schema": 3,
   "pin": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
-  "updated_on": "2026-09-28",
+  "updated_on": "2026-09-29",
   "gaps": [
     {
       "id": "aliases.remote-client-preflight",
@@ -1563,35 +1563,6 @@
       ],
       "depends_on": [],
       "reason": "The acceptance had asked for one atomic terminal action that trims cursor-derived history, advances the cursor, and no-ops in pane mode. Read against the pin on 2026-09-02: cmd_resize_pane_exec's -T branch returns immediately when the pane holds any mode, then takes `adjust = screen_size_y(&wp->base) - 1 - wp->base.cy` clamped to the history size, calls grid_remove_history(gd, adjust) and adds adjust to wp->base.cy. grid_remove_history frees the last adjust lines of the whole grid, the blank rows below the cursor, and then shrinks hsize by the same count, so the visible window slides up into the scrollback: the screen gains adjust rows of history at the top, loses the blank rows at the bottom, the cursor ends on the last screen row, and history_size drops by adjust. That is grid surgery, not a VT operation. libghostty's terminal API is vt_write, resize, reset, scroll_viewport and readers; scroll_viewport moves what is displayed and never moves a row between the scrollback and the active grid, and nothing else can remove history rows or pull them back in. Resizing the terminal down and up again would come close on ghostty's reflow rules, but the geometry is the mux's to own and the round trip would send the child two spurious SIGWINCHes, so it is not the same operation. zz therefore keeps refusing the flag with `unsupported command: resize-pane -T` rather than accepting it as a no-op, because the pin's -T is visible in capture-pane and a silent no-op would be the worse divergence. Reopen if libghostty grows a scrollback API that can move rows across the active-grid boundary."
-    },
-    {
-      "id": "terminal.shell-integration-prompt-title",
-      "title": "Keep a pane title set with select-pane -T across the next prompt",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "next",
-      "ease": "easy",
-      "impact": [
-        "daily",
-        "scripts"
-      ],
-      "owner": "terminal",
-      "items": [
-        "semantic:shell-integration-prompt-title"
-      ],
-      "evidence": [
-        "resource:crates/zz-terminal/assets/shell-integration/bash/zz-integration.bash",
-        "resource:crates/zz-terminal/assets/shell-integration/zsh/zz-integration.zsh",
-        "resource:crates/zz-terminal/assets/shell-integration/powershell/zz-integration.ps1",
-        "resource:compat/scenarios/smoke/plugin-runtime-resurrect-restore.txt"
-      ],
-      "acceptance": [
-        "Measured by the W1-FOOTPRINT review on 2026-09-28 with default-shell /opt/homebrew/bin/bash: `new-window -d \\; select-pane -t :1 -T mytitle`, then #{pane_title} read at once, after the first prompt and after the second. zz answers mytitle, bash, bash; pinned tmux d77c9dc6 answers mytitle three times.",
-        "The cause is zz's own shell integration, not the mux: bash __zz_title_precmd, zsh's precmd hook and PowerShell's prompt function write OSC 2 with the shell name at every prompt, and the preexec hooks write the command name. The pin carries no shell integration, so a stock shell leaves the title alone.",
-        "A fix keeps an explicitly set title until the user or the program running in the pane changes it, and smoke/plugin-runtime-resurrect-restore passes again with the restored panes running bash instead of default-shell /bin/sh."
-      ],
-      "depends_on": [],
-      "reason": "Found by the W1-FOOTPRINT review. tmux-resurrect's restore.sh sets each pane title with select-pane -T right after creating the pane, so under bash, zsh or PowerShell with zz's integration a restore loses the titles whenever the shell prints its first prompt after the title lands. The faster command client in W1-FOOTPRINT made that order the common one: smoke/plugin-runtime-resurrect-restore went red on zz in 3 of 5 runs, and it now restores under default-shell /bin/sh, which has no integration, so it keeps testing the restore itself. This entry is the record of the divergence that change stopped exercising. Left open because whether the integration should stop titling, title only when the title is still the one it wrote, or leave titles to an option is fabrico's call."
     }
   ],
   "closed": [
@@ -4469,6 +4440,21 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "resolution": "`send-keys -R` is implemented and the catalog flag is promoted. zz composes the pin's `screen_write_reset` out of VT bytes instead of calling libghostty's `reset`, which is RIS and discards history: a bare ST abandons any half-parsed string sequence without printing a cell, an explicit SGR and charset reset restores the pen the way `input_reset_cell` does, DECSTBM drops the scroll region, and because the pinned libghostty (20c3eae0) ignores DECSTR outright (its `CSI p` arm implements only DECRQM and logs `ignoring unimplemented CSI p with intermediates` for `ESC[!p`), every flag the pin's `s->mode = MODE_CURSOR|MODE_WRAP` assignment drops gets its own sequence: DECAWM and DECTCEM come back on, and DECCKM, IRM, DECOM, LNM, DECKPAM, cursor blink, synchronized output, theme updates, the kitty keyboard flags, modifyOtherKeys, and the mouse, focus, and bracketed-paste modes go off. TBC 3 plus one HTS every eight columns reproduces `screen_reset_tabs`, a scroll-up sized to the used visible rows reproduces `grid_view_clear_history`, DECSC after the final home mirrors `input_reset_cell`'s `old_cx = old_cy = 0`, and OSC 104, 110, 111, and 112 reproduce `colour_palette_clear`. Measured against the pin on 2026-09-01 with a 20x6 pane printing twenty lines: history_size goes 15 to 20, the cursor lands at 0,0, `capture-pane -S -` still holds L01 through L20 followed by six blank rows, a custom tab stop at column 4 goes back to the default 8, and a pane whose scroll region was narrowed scrolls the full screen again afterwards. Four zz-terminal tests assert each of those; a fifth, `pane_reset_drops_the_modes_the_pin_clears_with_send_keys_r`, asserts the pin's mode numbers (`keypad_cursor_flag` 1 to 0 so Up encodes `ESC[A`, `insert_flag` 1 to 0 so `ab\\rX` captures `Xb`, the extended-key state dropped so Escape encodes a bare ESC, and the saved cursor back at 0,0), which the differential cannot see because zz's `keypad_cursor_flag`, `insert_flag`, and `origin_flag` formats are constant zero; and `send_keys_reset_runs_before_the_requested_key_delivery` asserts the command shape the pin's exec has: `-R` alone resets and sends nothing, `-R` with strings resets and then injects exactly what a bare `send-keys` would, and `-X` returns before the `-R` block ever runs. The differential scenario `send-keys-reset` runs the whole thing against the pin and is clean on all six axes at strict geometry. One qualification the acceptance did not name: the pin's clear runs through `screen_write_clearscreen`, so it only pushes into history because `scroll-on-clear` defaults on; zz reproduces that default unconditionally because the option itself is parked in `options.pane-engine-knobs`, which is where turning it off belongs. One mode survives by design: the pin keeps `MODE_KEYS_EXTENDED` when `extended-keys` is `always`, and zz drops it unconditionally because that option lives in `options.client-terminal-negotiation`. The redraw the acceptance names is the Content snapshot the terminal worker publishes after the reset; the pin's `PANE_STYLECHANGED` and `PANE_THEMECHANGED` flags have no observable effect after its own mode reset clears `MODE_THEME_UPDATES`, so nothing models them. `-R` reaches terminal panes only: zz-only browser, picker, agent, and editor panes have no pin equivalent and are skipped. Nothing wire-reachable changed: the reset rides an internal MuxEffect and a terminal worker command, not a protocol message."
+    },
+    {
+      "id": "terminal.shell-integration-prompt-title",
+      "title": "Keep a pane title set with select-pane -T across the next prompt",
+      "closed_on": "2026-09-29",
+      "evidence": [
+        "resource:crates/zz-terminal/src/session.rs",
+        "resource:crates/zz-mux/src/model.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-terminal/assets/shell-integration/bash/zz-integration.bash",
+        "resource:crates/zz-terminal/assets/shell-integration/zsh/zz-integration.zsh",
+        "resource:crates/zz-terminal/assets/shell-integration/powershell/zz-integration.ps1",
+        "scenario:compat/scenarios/smoke/plugin-runtime-resurrect-restore.txt"
+      ],
+      "resolution": "The bash, zsh and PowerShell integrations put a private OSC 2626 in front of every hook title. EngineFilter counts only unmarked OSC 0/2 writes in TerminalFacts::program_title_writes, the pane watcher passes whether that count moved, and a title set with select-pane -T or split-window -T is pinned: marked hook titles leave it alone until an unmarked OSC 0/2 from the program in the pane lands. select_pane_title_survives_shell_integration_titles_until_a_program_retitles and engine_filter_counts_title_writes_the_shell_integration_did_not_mark cover both halves, and smoke/plugin-runtime-resurrect-restore passes again without its default-shell /bin/sh workaround."
     },
     {
       "id": "tracker.args-parse-bind-key",

@@ -27,6 +27,7 @@ use crate::{
 /// mismatch instead of negotiating down.
 pub const PROTOCOL_VERSION: u16 = 107;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
+pub const PANE_FRAME_CAPABILITY: &str = "pane-frame-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
 /// Value-token prefix naming the caller's controlling tty, `client-tty-v1:/dev/ttys007`.

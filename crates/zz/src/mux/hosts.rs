@@ -57,6 +57,10 @@ impl HostState {
     pub fn failure_detail(&self) -> Option<String> {
         match self {
             Self::Unreachable { reason } => Some(reason.clone()),
+            Self::Incompatible { local, remote } if local == remote => Some(format!(
+                "That machine runs an older build of protocol v{remote}.\nUpgrade zz there, or \
+                 restart its daemon, then reconnect."
+            )),
             Self::Incompatible { local, remote } => Some(format!(
                 "This zz speaks protocol v{local}; that machine speaks v{remote}.\nUpgrade \
                  whichever side is older, then reconnect."

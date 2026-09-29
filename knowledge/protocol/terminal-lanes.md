@@ -51,10 +51,11 @@ The first payload byte after the 8-byte envelope:
 | `2` | command-output viewport | `EventPayload::CommandOutput { viewport: Some(..) }` |
 | `3` | history chunk | `EventPayload::HistoryChunk` |
 
-Then every kind has `pane` (varint) and `sequence` (varint). The sequence is the pane's
-**stream sequence**: `TerminalSession::next_stream_sequence`, counted per terminal session from 1
-(a respawned pane starts again), shared by the pane's frames to every client. Clients do not
-read it today; W4-DELIVER uses it to order pane notifications after the pane's frames. A
+Then every kind has `pane` (varint) and `sequence` (varint). The sequence is the daemon's event
+sequence (`Shared::next_sequence`), the one counter every event takes, so a pane's frames only
+ever count up, also across `respawn-pane`, and any later event about the pane carries a larger
+number than the frames sent before it. Each client's frame takes its own number. Clients do not
+read it today; W4-DELIVER orders pane notifications after the pane's frames with it. A
 command-output frame then has a nonzero `output_id` varint.
 
 All integers are LEB128 varints unless the table says otherwise. A signed or wrapping value is a
@@ -160,7 +161,8 @@ otherwise the run keeps the previous run's style, and each row starts at style 0
 
 A glyph code is `index << 1 | 1` for a grapheme dictionary entry and `scalar << 1` otherwise.
 The encoder starts a repeat run for 6 or more equal cells, so blank gaps and rules cost a few
-bytes. Diffs are column spans (`TerminalViewport::diff_with_scratch`): the first to the last
+bytes. Diffs are column spans (`TerminalViewport::diff_with_scratch`, or `diff_shared` in the
+daemon): the first to the last
 changed column of each changed row, or up to the last non-empty cell with `clear` when the change
 empties the row's tail.
 
@@ -185,9 +187,12 @@ Encoders and decoders validate the same things, so a frame the daemon writes alw
 style ids and grapheme indexes resolve, scalars are valid, runs stay inside their row, rows are
 ascending and inside the grid, overlays and the cursor are inside the grid, scrollbar, mode and
 search are consistent, the working directory has no control characters, the hovered URI no
-whitespace or control characters, kitty placements are well formed. Declared counts are checked
-against the bytes left before anything is allocated. Unknown field bits, a varint past 64 bits and
-trailing bytes are errors.
+whitespace or control characters, kitty placements are well formed. Declared counts of styles,
+graphemes, overlays and kitty placements are checked against the bytes left before anything is
+allocated. The grid is not: blank rows are not sent, so a full frame or history chunk of a few
+bytes can declare a large blank grid, and the decoder allocates `columns x rows` cells for it. The
+grid cap (`MAX_FRAME_BYTES / 8` cells, 8 Mi, 64 MiB of cells) is what bounds that allocation.
+Unknown field bits, a varint past 64 bits and trailing bytes are errors.
 
 | Limit | Value |
 |---|---|
@@ -197,6 +202,7 @@ trailing bytes are errors.
 | styles | 65,536 |
 | graphemes | 1 Mi entries, 16 MiB |
 | overlays | 1 Mi |
+| grid (full frame, patch, history chunk) | 8 Mi cells |
 | kitty placements | 65,536 (`MAX_KITTY_PLACEMENTS`, zz-terminal) |
 | history rows per chunk | 512 |
 
@@ -210,10 +216,17 @@ stale under backpressure (see [zz-daemon](/crates/zz-daemon.md)). A preview fram
 before the mailbox checks it against the preview byte budget; the old layout could size a frame
 without encoding it, a compact frame cannot, and it is cheap to encode.
 
-Every attached client holds its own view of a terminal (`TerminalViewId(client.0)`), and the daemon
-runs one diff stream per (pane, view) pair, so each client's frames are encoded for that client.
-Sharing one encoded frame between clients needs the views to share frames first (W3-SHARDS, then
-W4-DELIVER's per-(pane, base) encode).
+Every attached client holds its own view of a terminal (`TerminalViewId(client.0)`), and the pane
+actor builds one frame per view with that view's generations. Views that are live at the bottom
+still share one cell plane and one dictionary, so each view's frame and its base point at the same
+grids as every other such view. The pane's watcher diffs a view only after it checked that the
+client streams the pane and is not frozen, and `TerminalViewport::diff_shared` keeps the cell diff
+(row shift and spans) for the next view on the same two grids; the changed cells are read from the
+current plane, not copied into the patch. The encoder writes each client's header, fields and
+metadata, and copies the dictionary append and span section (`PatchTail`) from the first client that
+encoded it, so a second client costs a header and a copy. The generations still differ per view,
+which is why the header cannot be shared: one generation per publish for every plain live view is
+W3-SHARDS, and one encoded `Arc<[u8]>` per (pane, base) is W4-DELIVER.
 
 Protocol v87 separates terminal delivery scope from foreground authority. `visible_terminals`
 contains the attached client's focused window after zoom filtering and is the source for input,
@@ -243,19 +256,41 @@ or by more than the row shift, an offset delta inconsistent with the shift, or a
 every row drop the retained history. Rows leaving the top of the grid on a negative scroll are
 pushed onto the back of the ring. A patch without `SCROLLBAR` keeps the retained scrollbar
 (`TerminalViewportPatch::scrollbar_after`). A history request stays pending across tree changes
-until its chunk, a full viewport for the pane, or the pane's removal.
+until its chunk, a full viewport for the pane, or the pane's removal. The daemon drops a request
+without a reply when the pane's `history()` fails (its control queue is full or the reply takes
+longer than the 2 s capture timeout), so a request older than 3 s counts as lost and the next
+backfill or scroll-up asks again.
+
+# Mixed builds inside 107
+
+The PaneFrame layout replaced the 8-byte-a-cell frames without a version bump, so a daemon built
+before it also reports protocol 107. The daemon's `ServerHello` names `pane-frame-v1`
+(`PANE_FRAME_CAPABILITY`); an interactive client whose hello lacks it stops at the handshake with
+`ProtocolError::VersionMismatch` (107 against 107), which every client already treats as a stale
+daemon: the TUI offers to restart it, the GUI shows its stale-daemon prompt for the local host and
+"That machine runs an older build of protocol v107" for a remote one, the CLI says to run
+`zz kill-server`. Command and control clients do not read terminal frames and connect as before, so
+`zz kill-server` still reaches the old daemon. A client built before the capability cannot tell
+and fails on the first frame it decodes.
 
 # Examples
 
 ```rust
 let frame = encode_protocol_message(&ProtocolMessage::Event(Event {
-    sequence: terminal.next_stream_sequence(),
+    sequence,
     payload: EventPayload::TerminalViewport { pane, viewport },
 }))?;
 assert_eq!(frame[4], 1);
 
+let mut scratch = TerminalDiffScratch::default();
+let mut tail = PatchTail::default();
 let mut buffer = Vec::new();
-encode_terminal_patch_event_into(pane, sequence, &patch, &mut buffer)?;
+for (base, current, sequence) in views {
+    if let Some(patch) = TerminalViewport::diff_shared(base, current, &mut scratch) {
+        encode_terminal_patch_event_into(pane, sequence, &patch, &mut tail, &mut buffer)?;
+    }
+}
+scratch.release_shared();
 ```
 
 # Related

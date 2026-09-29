@@ -4,9 +4,10 @@ use zz_terminal::{
     CellWidth, Color, Cursor, CursorStyle, GRAPHEME_TABLE_BIT, KittyLayer, KittyPlacement,
     MAX_KITTY_PLACEMENTS, NO_COLOR, OverlayKind, OverlaySpan, PackedCell, PackedStyle,
     ScrollbarState, SearchStatus, SessionStatus, TerminalDictionary, TerminalDictionaryPatch,
-    TerminalMode, TerminalPatchFields, TerminalPatchRows, TerminalPatchSpan, TerminalPatchSpans,
-    TerminalPresentation, TerminalViewport, TerminalViewportPatch, exposed_rows_are_replaced,
-    shared_default_presentation, shared_empty_kitty_placements, shared_empty_overlays,
+    TerminalMode, TerminalPatchFields, TerminalPatchRef, TerminalPatchRows, TerminalPatchSpan,
+    TerminalPatchSpans, TerminalPresentation, TerminalViewport, TerminalViewportPatch,
+    exposed_rows_are_replaced, shared_default_presentation, shared_empty_kitty_placements,
+    shared_empty_overlays,
 };
 
 use crate::{
@@ -263,12 +264,50 @@ pub(crate) fn encode_patch_frame(
     sequence: u64,
     patch: &TerminalViewportPatch,
 ) -> Result<(), ProtocolError> {
-    begin_enveloped_into(output, Lane::Terminal, patch_capacity_hint(patch))?;
+    let parts = PatchParts::of_patch(patch);
+    begin_patch_frame(output, pane, sequence, &parts)?;
+    encode_patch_tail(output, &parts)?;
+    finish_enveloped_in_place(output)
+}
+
+#[derive(Debug, Default)]
+pub struct PatchTail {
+    diff: u64,
+    bytes: Vec<u8>,
+}
+
+pub(crate) fn encode_patch_ref_frame(
+    output: &mut Vec<u8>,
+    pane: PaneId,
+    sequence: u64,
+    patch: &TerminalPatchRef<'_>,
+    tail: &mut PatchTail,
+) -> Result<(), ProtocolError> {
+    let parts = PatchParts::of_ref(patch);
+    begin_patch_frame(output, pane, sequence, &parts)?;
+    if patch.diff != 0 && tail.diff == patch.diff {
+        output.extend_from_slice(&tail.bytes);
+    } else {
+        let start = output.len();
+        encode_patch_tail(output, &parts)?;
+        tail.bytes.clear();
+        tail.bytes.extend_from_slice(&output[start..]);
+        tail.diff = patch.diff;
+    }
+    finish_enveloped_in_place(output)
+}
+
+fn begin_patch_frame(
+    output: &mut Vec<u8>,
+    pane: PaneId,
+    sequence: u64,
+    parts: &PatchParts<'_>,
+) -> Result<(), ProtocolError> {
+    begin_enveloped_into(output, Lane::Terminal, parts.capacity_hint())?;
     output.push(VIEWPORT_PATCH);
     push_varint(output, pane.0);
     push_varint(output, sequence);
-    encode_patch_body(output, patch)?;
-    finish_enveloped_in_place(output)
+    encode_patch_head(output, parts)
 }
 
 pub(crate) fn encode_history_frame(
@@ -372,78 +411,203 @@ pub(crate) fn encode_viewport_body(
     Ok(())
 }
 
-fn encode_patch_body(
-    output: &mut Vec<u8>,
-    patch: &TerminalViewportPatch,
-) -> Result<(), ProtocolError> {
-    let base_view = patch.base_view_generation;
+struct PatchParts<'a> {
+    base_generation: u64,
+    base_view_generation: u64,
+    generation: u64,
+    view_generation: u64,
+    dictionary_generation: u32,
+    columns: u16,
+    rows: u16,
+    scroll: i16,
+    fields: TerminalPatchFields,
+    metadata: Metadata<'a>,
+    appends: bool,
+    style_base: usize,
+    appended_styles: &'a [PackedStyle],
+    grapheme_base: usize,
+    appended_graphemes: AppendedGraphemes<'a>,
+    appended_grapheme_bytes: &'a [u8],
+    spans: &'a [TerminalPatchSpan],
+    cells: SpanCells<'a>,
+}
+
+#[derive(Clone, Copy)]
+enum AppendedGraphemes<'a> {
+    Lengths(&'a [u32]),
+    Offsets(&'a [u32]),
+}
+
+impl AppendedGraphemes<'_> {
+    fn len(self) -> usize {
+        match self {
+            Self::Lengths(lengths) => lengths.len(),
+            Self::Offsets(offsets) => offsets.len().saturating_sub(1),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum SpanCells<'a> {
+    Packed(&'a [PackedCell]),
+    Plane {
+        cells: &'a [PackedCell],
+        columns: usize,
+    },
+}
+
+impl<'a> PatchParts<'a> {
+    fn of_patch(patch: &'a TerminalViewportPatch) -> Self {
+        Self {
+            base_generation: patch.base_generation,
+            base_view_generation: patch.base_view_generation,
+            generation: patch.generation,
+            view_generation: patch.view_generation,
+            dictionary_generation: patch.dictionary_generation,
+            columns: patch.columns,
+            rows: patch.rows,
+            scroll: patch.scroll,
+            fields: patch.fields,
+            metadata: Metadata::of_patch(patch),
+            appends: !patch.dictionary.is_empty(),
+            style_base: patch.style_base as usize,
+            appended_styles: patch.dictionary.appended_styles(),
+            grapheme_base: patch.grapheme_base as usize,
+            appended_graphemes: AppendedGraphemes::Lengths(
+                patch.dictionary.appended_grapheme_lengths(),
+            ),
+            appended_grapheme_bytes: patch.dictionary.appended_grapheme_bytes(),
+            spans: patch.changed_rows.spans(),
+            cells: SpanCells::Packed(patch.changed_rows.cells()),
+        }
+    }
+
+    fn of_ref(patch: &TerminalPatchRef<'a>) -> Self {
+        let (base, current) = (patch.base, patch.current);
+        Self {
+            base_generation: base.generation,
+            base_view_generation: base.view_generation,
+            generation: current.generation,
+            view_generation: current.view_generation,
+            dictionary_generation: current.dictionary_generation,
+            columns: current.columns,
+            rows: current.rows,
+            scroll: patch.scroll,
+            fields: patch.fields,
+            metadata: Metadata::of_viewport(current),
+            appends: patch.fields.contains(TerminalPatchFields::DICTIONARY),
+            style_base: patch.style_base(),
+            appended_styles: patch.appended_styles(),
+            grapheme_base: patch.grapheme_base(),
+            appended_graphemes: AppendedGraphemes::Offsets(patch.appended_grapheme_offsets()),
+            appended_grapheme_bytes: patch.appended_grapheme_bytes(),
+            spans: patch.spans,
+            cells: SpanCells::Plane {
+                cells: &current.cells,
+                columns: usize::from(current.columns),
+            },
+        }
+    }
+
+    fn capacity_hint(&self) -> usize {
+        let presentation = self.metadata.presentation;
+        64 + self
+            .spans
+            .iter()
+            .map(|span| usize::from(span.len))
+            .sum::<usize>()
+            + self.spans.len() * 4
+            + self.appended_styles.len() * 12
+            + self.appended_grapheme_bytes.len()
+            + if self.fields.contains(TerminalPatchFields::PRESENTATION) {
+                presentation.title.len()
+                    + presentation
+                        .working_directory
+                        .as_deref()
+                        .map_or(0, str::len)
+                    + presentation.hovered_uri.as_deref().map_or(0, str::len)
+            } else {
+                0
+            }
+            + if self.fields.contains(TerminalPatchFields::OVERLAYS) {
+                self.metadata.overlays.len() * 6
+            } else {
+                0
+            }
+            + if self.fields.contains(TerminalPatchFields::KITTY) {
+                self.metadata.kitty_placements.len() * KITTY_PLACEMENT_WIRE_BYTES
+            } else {
+                0
+            }
+    }
+}
+
+fn encode_patch_head(output: &mut Vec<u8>, parts: &PatchParts<'_>) -> Result<(), ProtocolError> {
+    let base_view = parts.base_view_generation;
     push_varint(output, base_view);
-    push_zigzag(output, base_view.wrapping_sub(patch.base_generation));
-    push_zigzag(output, patch.view_generation.wrapping_sub(base_view));
-    push_zigzag(output, patch.generation.wrapping_sub(patch.base_generation));
-    push_varint(output, u64::from(patch.dictionary_generation));
-    push_varint(output, u64::from(patch.columns));
-    push_varint(output, u64::from(patch.rows));
+    push_zigzag(output, base_view.wrapping_sub(parts.base_generation));
+    push_zigzag(output, parts.view_generation.wrapping_sub(base_view));
+    push_zigzag(output, parts.generation.wrapping_sub(parts.base_generation));
+    push_varint(output, u64::from(parts.dictionary_generation));
+    push_varint(output, u64::from(parts.columns));
+    push_varint(output, u64::from(parts.rows));
     let mut fields =
-        TerminalPatchFields::from_bits(patch.fields.bits() & METADATA_FIELDS).unwrap_or_default();
+        TerminalPatchFields::from_bits(parts.fields.bits() & METADATA_FIELDS).unwrap_or_default();
     if fields.contains(TerminalPatchFields::CURSOR) {
         fields.set(TerminalPatchFields::CURSOR_AT, false);
     }
     if fields.contains(TerminalPatchFields::KITTY) {
         fields.insert(TerminalPatchFields::SCROLLBAR);
     }
-    fields.set(TerminalPatchFields::ROWS, !patch.changed_rows.is_empty());
-    fields.set(TerminalPatchFields::SCROLL, patch.scroll != 0);
-    fields.set(
-        TerminalPatchFields::DICTIONARY,
-        !patch.dictionary.is_empty(),
-    );
+    fields.set(TerminalPatchFields::ROWS, !parts.spans.is_empty());
+    fields.set(TerminalPatchFields::SCROLL, parts.scroll != 0);
+    fields.set(TerminalPatchFields::DICTIONARY, parts.appends);
     push_varint(output, u64::from(fields.bits()));
-    if patch.scroll != 0 {
-        let shift = usize::from(patch.scroll.unsigned_abs());
-        if shift >= usize::from(patch.rows) {
+    if parts.scroll != 0 {
+        let shift = usize::from(parts.scroll.unsigned_abs());
+        if shift >= usize::from(parts.rows) {
             return invalid("terminal row shift is outside the viewport");
         }
-        push_zigzag(output, i64::from(patch.scroll).cast_unsigned());
+        push_zigzag(output, i64::from(parts.scroll).cast_unsigned());
     }
-    let metadata = Metadata::of_patch(patch);
     encode_metadata(
         output,
         fields,
-        &metadata,
-        patch.columns,
-        patch.rows,
-        patch.scrollbar,
-    )?;
-    let appended_styles = patch.dictionary.appended_styles();
-    let appended_lengths = patch.dictionary.appended_grapheme_lengths();
-    let style_count = usize::try_from(patch.style_base)
-        .ok()
-        .and_then(|base| base.checked_add(appended_styles.len()))
+        &parts.metadata,
+        parts.columns,
+        parts.rows,
+        parts.metadata.scrollbar,
+    )
+}
+
+fn encode_patch_tail(output: &mut Vec<u8>, parts: &PatchParts<'_>) -> Result<(), ProtocolError> {
+    let style_count = parts
+        .style_base
+        .checked_add(parts.appended_styles.len())
         .filter(|count| *count <= MAX_STYLE_COUNT)
         .ok_or_else(|| terminal_error("terminal patch style dictionary exceeds limit"))?;
-    let grapheme_count = usize::try_from(patch.grapheme_base)
-        .ok()
-        .and_then(|base| base.checked_add(appended_lengths.len()))
+    let grapheme_count = parts
+        .grapheme_base
+        .checked_add(parts.appended_graphemes.len())
         .filter(|count| *count <= MAX_GRAPHEME_COUNT)
         .ok_or_else(|| terminal_error("terminal patch grapheme dictionary exceeds limit"))?;
-    if !patch.dictionary.is_empty() {
-        push_varint(output, u64::from(patch.style_base));
-        encode_styles(output, appended_styles)?;
-        push_varint(output, u64::from(patch.grapheme_base));
+    if parts.appends {
+        push_varint(output, parts.style_base as u64);
+        encode_styles(output, parts.appended_styles)?;
+        push_varint(output, parts.grapheme_base as u64);
         encode_appended_graphemes(
             output,
-            appended_lengths,
-            patch.dictionary.appended_grapheme_bytes(),
+            parts.appended_graphemes,
+            parts.appended_grapheme_bytes,
         )?;
     }
-    if !patch.changed_rows.is_empty() {
+    if !parts.spans.is_empty() {
         let limits = CellLimits {
             styles: style_count,
             graphemes: grapheme_count,
         };
-        encode_spans(output, patch, limits)?;
-    } else if patch.scroll != 0 {
+        encode_spans(output, parts, limits)?;
+    } else if parts.scroll != 0 {
         return invalid("terminal patch does not replace newly exposed rows");
     }
     Ok(())
@@ -451,39 +615,52 @@ fn encode_patch_body(
 
 fn encode_spans(
     output: &mut Vec<u8>,
-    patch: &TerminalViewportPatch,
+    parts: &PatchParts<'_>,
     limits: CellLimits,
 ) -> Result<(), ProtocolError> {
-    let spans = patch.changed_rows.spans();
-    let cells = patch.changed_rows.cells();
     let mut previous_row = None::<u16>;
     let mut source = 0_usize;
-    for span in spans {
-        if span.row >= patch.rows
+    for span in parts.spans {
+        if span.row >= parts.rows
             || previous_row.is_some_and(|previous| previous >= span.row)
-            || span.end() > usize::from(patch.columns)
+            || span.end() > usize::from(parts.columns)
         {
             return invalid("terminal patch contains an invalid, duplicate, or out-of-order row");
         }
-        let end = source
-            .checked_add(usize::from(span.len))
-            .filter(|end| *end <= cells.len())
-            .ok_or_else(|| {
-                terminal_error("terminal patch flat cell plane does not match its rows")
-            })?;
+        let len = usize::from(span.len);
+        let cells = match parts.cells {
+            SpanCells::Packed(cells) => {
+                let end = source
+                    .checked_add(len)
+                    .filter(|end| *end <= cells.len())
+                    .ok_or_else(|| {
+                        terminal_error("terminal patch flat cell plane does not match its rows")
+                    })?;
+                let run = &cells[source..end];
+                source = end;
+                run
+            }
+            SpanCells::Plane { cells, columns } => {
+                let start = usize::from(span.row) * columns + usize::from(span.start);
+                cells.get(start..start + len).ok_or_else(|| {
+                    terminal_error("terminal patch span is outside the cell plane")
+                })?
+            }
+        };
         push_varint(
             output,
             u64::from(span.row) - previous_row.map_or(0, |row| u64::from(row) + 1) + 1,
         );
         push_varint(output, u64::from(span.start) << 1 | u64::from(span.clear));
-        encode_runs(output, &cells[source..end], limits)?;
+        encode_runs(output, cells, limits)?;
         previous_row = Some(span.row);
-        source = end;
     }
-    if source != cells.len() {
+    if let SpanCells::Packed(cells) = parts.cells
+        && source != cells.len()
+    {
         return invalid("terminal patch flat cell plane does not match its rows");
     }
-    if !exposed_rows_are_replaced(spans, patch.scroll, patch.rows, patch.columns) {
+    if !exposed_rows_are_replaced(parts.spans, parts.scroll, parts.rows, parts.columns) {
         return invalid("terminal patch does not replace newly exposed rows");
     }
     output.push(0);
@@ -900,7 +1077,26 @@ fn encode_full_graphemes(
 
 fn encode_appended_graphemes(
     output: &mut Vec<u8>,
-    lengths: &[u32],
+    graphemes: AppendedGraphemes<'_>,
+    bytes: &[u8],
+) -> Result<(), ProtocolError> {
+    match graphemes {
+        AppendedGraphemes::Lengths(lengths) => {
+            encode_appended_lengths(output, lengths.iter().copied(), bytes)
+        }
+        AppendedGraphemes::Offsets(offsets) => encode_appended_lengths(
+            output,
+            offsets
+                .windows(2)
+                .map(|offsets| offsets[1].wrapping_sub(offsets[0])),
+            bytes,
+        ),
+    }
+}
+
+fn encode_appended_lengths(
+    output: &mut Vec<u8>,
+    lengths: impl ExactSizeIterator<Item = u32>,
     bytes: &[u8],
 ) -> Result<(), ProtocolError> {
     if lengths.len() > MAX_GRAPHEME_COUNT || bytes.len() > MAX_GRAPHEME_BYTES {
@@ -910,12 +1106,12 @@ fn encode_appended_graphemes(
     let mut cursor = 0_usize;
     for length in lengths {
         let end = cursor
-            .checked_add(*length as usize)
+            .checked_add(length as usize)
             .filter(|end| *end <= bytes.len())
             .ok_or_else(|| terminal_error("grapheme lengths exceed appended arena"))?;
         std::str::from_utf8(&bytes[cursor..end])
             .map_err(|_| terminal_error("grapheme is not valid UTF-8"))?;
-        push_varint(output, u64::from(*length));
+        push_varint(output, u64::from(length));
         cursor = end;
     }
     if cursor != bytes.len() {
@@ -989,30 +1185,6 @@ fn viewport_capacity_hint(viewport: &TerminalViewport) -> usize {
         + viewport.overlays.len() * 6
         + viewport.kitty_placements.len() * KITTY_PLACEMENT_WIRE_BYTES
         + viewport.cells.len() / 2
-}
-
-fn patch_capacity_hint(patch: &TerminalViewportPatch) -> usize {
-    64 + patch.changed_rows.cells().len()
-        + patch.changed_rows.len() * 4
-        + patch.dictionary.appended_styles().len() * 12
-        + patch.dictionary.appended_grapheme_bytes().len()
-        + if patch.fields.contains(TerminalPatchFields::PRESENTATION) {
-            patch.title().len()
-                + patch.working_directory().map_or(0, str::len)
-                + patch.hovered_uri().map_or(0, str::len)
-        } else {
-            0
-        }
-        + if patch.fields.contains(TerminalPatchFields::OVERLAYS) {
-            patch.overlays.len() * 6
-        } else {
-            0
-        }
-        + if patch.fields.contains(TerminalPatchFields::KITTY) {
-            patch.kitty_placements.len() * KITTY_PLACEMENT_WIRE_BYTES
-        } else {
-            0
-        }
 }
 
 pub(crate) fn decode_viewport_frame(
@@ -1431,7 +1603,7 @@ fn decode_runs(
         } else {
             Some(count)
         };
-        if width.is_none_or(|width| cells.written() - first + width > room) {
+        if width.is_none_or(|width| width > room - (cells.written() - first)) {
             return invalid("terminal run overflows its row");
         }
         match kind {
@@ -2212,3 +2384,7 @@ pub(crate) mod optional_viewport_bytes {
 #[cfg(test)]
 #[path = "pane_frame_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "pane_frame_fuzz_tests.rs"]
+mod fuzz_tests;

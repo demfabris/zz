@@ -1,6 +1,6 @@
 use std::io::{Read, Write};
 
-use zz_terminal::{TerminalViewport, TerminalViewportPatch};
+use zz_terminal::{TerminalPatchRef, TerminalViewport};
 
 use crate::message::{
     MAX_CLIENT_ENVIRONMENT_BYTES, MAX_CLIENT_ENVIRONMENT_ENTRIES,
@@ -9,9 +9,9 @@ use crate::message::{
     MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES, client_environment_is_valid,
 };
 use crate::pane_frame::{
-    COMMAND_OUTPUT_VIEWPORT, FULL_VIEWPORT, HISTORY_CHUNK, HistoryChunkRef, VIEWPORT_PATCH,
-    decode_history_frame, decode_patch_frame, decode_viewport_frame, encode_history_frame,
-    encode_patch_frame, encode_viewport_frame,
+    COMMAND_OUTPUT_VIEWPORT, FULL_VIEWPORT, HISTORY_CHUNK, HistoryChunkRef, PatchTail,
+    VIEWPORT_PATCH, decode_history_frame, decode_patch_frame, decode_viewport_frame,
+    encode_history_frame, encode_patch_frame, encode_patch_ref_frame, encode_viewport_frame,
 };
 use crate::{
     AgentSessionOpKind, BrowserCommand, Event, EventPayload, MAX_AGENT_IMAGE_FORMAT_BYTES,
@@ -102,11 +102,12 @@ pub fn encode_terminal_viewport_event_into(
 pub fn encode_terminal_patch_event_into(
     pane: PaneId,
     sequence: u64,
-    patch: &TerminalViewportPatch,
+    patch: &TerminalPatchRef<'_>,
+    tail: &mut PatchTail,
     output: &mut Vec<u8>,
 ) -> Result<(), ProtocolError> {
     output.clear();
-    let result = encode_patch_frame(output, pane, sequence, patch);
+    let result = encode_patch_ref_frame(output, pane, sequence, patch, tail);
     if result.is_err() {
         output.clear();
     }

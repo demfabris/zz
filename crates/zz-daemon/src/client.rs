@@ -16,10 +16,10 @@ use zz_protocol::{
     ClientHello, ClientInstanceId, ClientKind, ClientPath, CommandInvocation, CommandRequest,
     CommandResponse, ConfigOverrideEntry, GuiResponse, InputMessage, MAX_CLIENT_ENVIRONMENT_BYTES,
     MAX_CLIENT_ENVIRONMENT_ENTRIES, MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES, MAX_CLIENT_FILE_BYTES,
-    MAX_CLIENT_WORKING_DIRECTORY_BYTES, MAX_PASTE_UPLOAD_CHUNK_BYTES, PROTOCOL_VERSION, PaneId,
-    PasteUploadPurpose, PreparedCommand, PreparedCommandResult, ProtocolError, ProtocolMessage,
-    RawText, ServerError, ServerHello, StdoutClaim, encode_protocol_message_into,
-    read_protocol_message_into,
+    MAX_CLIENT_WORKING_DIRECTORY_BYTES, MAX_PASTE_UPLOAD_CHUNK_BYTES, PANE_FRAME_CAPABILITY,
+    PROTOCOL_VERSION, PaneId, PasteUploadPurpose, PreparedCommand, PreparedCommandResult,
+    ProtocolError, ProtocolMessage, RawText, ServerError, ServerHello, StdoutClaim,
+    encode_protocol_message_into, read_protocol_message_into,
 };
 use zz_protocol::{
     ClientEnvironmentBlob, EXEC_CAPABILITY, ExecFlags, ExecOutcome, ExecRequest, ExecResume,
@@ -2358,6 +2358,17 @@ fn connect_stream_with_startup_owner<S: TransportStream>(
             )));
         }
     };
+    if kind == ClientKind::Interactive
+        && !hello
+            .capabilities
+            .iter()
+            .any(|capability| capability == PANE_FRAME_CAPABILITY)
+    {
+        return Err(DaemonError::Protocol(ProtocolError::VersionMismatch {
+            expected: PROTOCOL_VERSION,
+            received: hello.protocol_version,
+        }));
+    }
     log::debug!(
         target: "zz_daemon::diagnostics::client",
         "connected path={endpoint_display} kind={kind:?} server_hello={hello:#?} elapsed_us={}",
@@ -3044,6 +3055,85 @@ mod tests {
                     .any(|capability| capability == ClientHello::CLIENT_PATH_PICKER_CAPABILITY),
                 desktop,
             );
+        }
+    }
+
+    #[test]
+    fn an_interactive_client_refuses_a_daemon_without_pane_frames() {
+        use super::{ProtocolReceiver, ProtocolSender, connect_stream_with_startup_owner};
+        use crate::transport::{LocalTransport, Transport, TransportListener};
+        use zz_protocol::{
+            ClientId, ClientInstanceId, MuxOptions, PROTOCOL_VERSION, ProtocolError,
+            ProtocolMessage, ServerHello, StatusLine,
+        };
+
+        for kind in [ClientKind::Interactive, ClientKind::Command] {
+            let directory = tempfile::Builder::new()
+                .prefix("zz-paneframe-")
+                .tempdir_in("/tmp")
+                .expect("create socket directory");
+            let socket = directory.path().join("daemon.sock");
+            let listener = LocalTransport::bind(&socket).expect("bind handshake listener");
+            let server = std::thread::spawn(move || {
+                let stream = listener.accept().expect("accept client");
+                let mut reader = ProtocolReceiver::new(
+                    super::TransportStream::try_clone(&stream).expect("clone stream"),
+                );
+                let mut writer = ProtocolSender::new(stream);
+                let ProtocolMessage::ClientHello(_) = reader.recv().expect("receive handshake")
+                else {
+                    panic!("expected ClientHello");
+                };
+                writer
+                    .send(&ProtocolMessage::ServerHello(ServerHello {
+                        protocol_version: PROTOCOL_VERSION,
+                        server_id: 1,
+                        client_id: ClientId(1),
+                        client_instance_id: ClientInstanceId(1),
+                        capabilities: Vec::new(),
+                        appearance: zz_terminal::TerminalAppearance::default(),
+                        appearance_provenance: zz_terminal::AppearanceProvenance::default(),
+                        mux_options: MuxOptions::default(),
+                        status: StatusLine::default(),
+                        key_tables: Vec::new(),
+                    }))
+                    .expect("send hello");
+            });
+            let result = connect_stream_with_startup_owner(
+                LocalTransport::connect(&socket).expect("connect handshake client"),
+                socket.display(),
+                kind,
+                None,
+                None,
+                kind == ClientKind::Interactive,
+                false,
+                false,
+                &[],
+                EndpointFactsScope::None,
+            );
+            server.join().expect("join handshake server");
+            match kind {
+                ClientKind::Interactive => {
+                    let Err(error) = result else {
+                        panic!("an interactive client accepted a daemon without pane frames");
+                    };
+                    assert!(matches!(
+                        error,
+                        crate::DaemonError::Protocol(ProtocolError::VersionMismatch {
+                            expected: PROTOCOL_VERSION,
+                            received: PROTOCOL_VERSION,
+                        })
+                    ));
+                    assert!(matches!(
+                        crate::classify_local_connect_error(&socket, error),
+                        crate::DaemonError::IncompatibleDaemon {
+                            daemon: Some(PROTOCOL_VERSION),
+                            client: PROTOCOL_VERSION,
+                        }
+                    ));
+                }
+                _ => assert!(result.is_ok(), "a command client needs no terminal frames"),
+            }
         }
     }
 

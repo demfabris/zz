@@ -4518,7 +4518,7 @@ mod tests {
                     server_id: 1,
                     client_id: zz_protocol::ClientId(1),
                     client_instance_id: zz_protocol::ClientInstanceId(1),
-                    capabilities: Vec::new(),
+                    capabilities: vec![zz_protocol::PANE_FRAME_CAPABILITY.to_owned()],
                     appearance: zz_terminal::TerminalAppearance::default(),
                     appearance_provenance: zz_terminal::AppearanceProvenance::default(),
                     mux_options,

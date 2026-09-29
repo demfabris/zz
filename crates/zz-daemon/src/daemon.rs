@@ -57,13 +57,13 @@ use zz_protocol::{
     MAX_STARTUP_CONFIG_CAUSES_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES, MENU_ROW_MARGIN, MenuAction,
     MenuItem, MenuState, MuxOptionKey, MuxOptionSource, MuxOptions, MuxSnapshot,
     NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId, PaneIndicator, PaneKindSnapshot,
-    PaneMode, PasteUploadPurpose, PastedImageFormat, PopupAction, PopupBorderLines, PopupPointer,
-    PopupPointerButton, PopupState, PreparedCommand, PreparedCommandResult, ProtocolError,
-    ProtocolMessage, RawText, SERVER_OPTION_CAPABILITY_PREFIX, SPLIT_RATIO_BASIS, ServerError,
-    ServerHello, SessionId, SessionViewer, SourceSpan, SplitId, StatusLine, StdoutClaim, WindowId,
-    canonical_key, encode_protocol_message_into, encode_terminal_patch_event_into,
-    encode_terminal_viewport_event_into, is_key_name, layout_menu_row, menu_row_cells,
-    menu_row_width, read_protocol_message_into, resolve_command,
+    PaneMode, PasteUploadPurpose, PastedImageFormat, PatchTail, PopupAction, PopupBorderLines,
+    PopupPointer, PopupPointerButton, PopupState, PreparedCommand, PreparedCommandResult,
+    ProtocolError, ProtocolMessage, RawText, SERVER_OPTION_CAPABILITY_PREFIX, SPLIT_RATIO_BASIS,
+    ServerError, ServerHello, SessionId, SessionViewer, SourceSpan, SplitId, StatusLine,
+    StdoutClaim, WindowId, canonical_key, encode_protocol_message_into,
+    encode_terminal_patch_event_into, encode_terminal_viewport_event_into, is_key_name,
+    layout_menu_row, menu_row_cells, menu_row_width, read_protocol_message_into, resolve_command,
 };
 use zz_terminal::{
     AppearanceColor, AppearanceConfigDisposition, AppearanceLoad, AppearanceProvenance,
@@ -71,8 +71,9 @@ use zz_terminal::{
     CursorStyle, EngineKnobs, LastCommandCapture, PasteBufferAction, ProgressBarState,
     RawOutputTapError, TerminalAppearance, TerminalCaptureError, TerminalColorScheme,
     TerminalDiffScratch, TerminalEvent, TerminalEvents, TerminalMode, TerminalPalette,
-    TerminalSession, TerminalSize, TerminalSpawn, TerminalViewId, TerminalViewport, ViewStream,
-    WordSeparators, apply_appearance_overrides, parse_x11_color, prepare_paste_buffer,
+    TerminalPatchRef, TerminalSession, TerminalSize, TerminalSpawn, TerminalViewId,
+    TerminalViewport, ViewStream, WordSeparators, apply_appearance_overrides, parse_x11_color,
+    prepare_paste_buffer,
 };
 
 #[cfg(feature = "agent")]
@@ -2129,27 +2130,23 @@ struct TerminalTransition {
     current: TerminalGeneration,
 }
 
-enum TerminalFanout {
-    Full,
-    Patch(zz_terminal::TerminalViewportPatch),
-}
-
 static ROW_PATCHES: LazyLock<bool> =
     LazyLock::new(|| std::env::var_os("ZZ_PERF_ROW_PATCHES").is_some_and(|value| value == "1"));
 
-fn terminal_fanout(
-    previous: Option<&TerminalViewport>,
-    current: &TerminalViewport,
-    scratch: &mut TerminalDiffScratch,
-) -> TerminalFanout {
-    previous
-        .and_then(|previous| TerminalViewport::diff_with_scratch(previous, current, scratch))
-        .map_or(TerminalFanout::Full, |mut patch| {
-            if *ROW_PATCHES {
-                patch.widen_to_rows(current);
-            }
-            TerminalFanout::Patch(patch)
-        })
+struct PaneFrameFanout {
+    diff: TerminalDiffScratch,
+    tail: PatchTail,
+}
+
+impl PaneFrameFanout {
+    fn new() -> Self {
+        let mut diff = TerminalDiffScratch::default();
+        diff.set_whole_rows(*ROW_PATCHES);
+        Self {
+            diff,
+            tail: PatchTail::default(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2688,11 +2685,16 @@ impl OutboundMailbox {
         &self,
         pane: PaneId,
         sequence: u64,
-        patch: &zz_terminal::TerminalViewportPatch,
+        patch: &TerminalPatchRef<'_>,
         delivery: TerminalDelivery,
+        tail: &mut PatchTail,
     ) -> TerminalEnqueue {
-        self.enqueue_terminal_with(pane, patch_transition(patch), delivery, |frame| {
-            encode_terminal_patch_event_into(pane, sequence, patch, frame)
+        let transition = TerminalTransition {
+            base: Some(viewport_generation(patch.base)),
+            current: viewport_generation(patch.current),
+        };
+        self.enqueue_terminal_with(pane, transition, delivery, |frame| {
+            encode_terminal_patch_event_into(pane, sequence, patch, tail, frame)
         })
     }
 
@@ -5770,6 +5772,7 @@ impl Shared {
             "tmux-config-subset".to_owned(),
             NEW_SESSION_ATTACH_CAPABILITY.to_owned(),
             zz_protocol::EXEC_CAPABILITY.to_owned(),
+            zz_protocol::PANE_FRAME_CAPABILITY.to_owned(),
         ];
         if kind == ClientKind::Interactive && client_has_terminal {
             capabilities.extend(attach::terminal_option_capabilities(&inner.engine));
@@ -16330,7 +16333,7 @@ impl Shared {
         if let Some(subscriber) = self.inner.lock().subscribers.get(&target_client).cloned() {
             let _ = subscriber.replace_terminal_viewport(
                 state.pane,
-                terminal.next_stream_sequence(),
+                Self::next_sequence(),
                 terminal.latest_viewport().as_ref(),
             );
         }
@@ -23547,8 +23550,7 @@ impl Shared {
             if kind == TerminalStreamKind::Foreground {
                 self.enqueue_kitty_images_for_viewport(outbound, pane, &terminal, &viewport);
             }
-            let message =
-                Self::terminal_event(&terminal, EventPayload::TerminalViewport { pane, viewport });
+            let message = Self::event(EventPayload::TerminalViewport { pane, viewport });
             match kind {
                 TerminalStreamKind::Foreground => {
                     if outbound.enqueue_terminal(pane, &message) == TerminalEnqueue::NeedsFull {
@@ -23560,12 +23562,12 @@ impl Shared {
                 }
             }
         }
-        if let Some((state, terminal, viewport)) =
+        if let Some((state, _terminal, viewport)) =
             popup.filter(|_| !client_terminal_publication_frozen(&self.inner.lock(), client))
         {
             let _ = outbound.replace_terminal_viewport(
                 state.pane,
-                terminal.next_stream_sequence(),
+                Self::next_sequence(),
                 viewport.as_ref(),
             );
         }
@@ -23580,14 +23582,11 @@ impl Shared {
                 .terminal
                 .latest_viewport_for(TerminalViewId(client.0))
             {
-                let message = Self::terminal_event(
-                    &output.terminal,
-                    EventPayload::CommandOutput {
-                        output_id: output.output_id,
-                        pane: output.pane,
-                        viewport: Some((*viewport).clone()),
-                    },
-                );
+                let message = Self::event(EventPayload::CommandOutput {
+                    output_id: output.output_id,
+                    pane: output.pane,
+                    viewport: Some((*viewport).clone()),
+                });
                 let _ = outbound.replace_command_output(&message);
             }
         } else if everything {
@@ -23610,22 +23609,16 @@ impl Shared {
             }
             inner.popups.get(&client).and_then(|popup| {
                 (popup.state.pane == pane).then(|| {
-                    (
-                        Arc::clone(&popup.terminal),
-                        popup
-                            .terminal
-                            .latest_viewport_for(TerminalViewId(client.0))
-                            .unwrap_or_else(|| popup.terminal.latest_viewport()),
-                    )
+                    popup
+                        .terminal
+                        .latest_viewport_for(TerminalViewId(client.0))
+                        .unwrap_or_else(|| popup.terminal.latest_viewport())
                 })
             })
         };
-        if let Some((terminal, viewport)) = popup {
-            let _ = outbound.replace_terminal_viewport(
-                pane,
-                terminal.next_stream_sequence(),
-                viewport.as_ref(),
-            );
+        if let Some(viewport) = popup {
+            let _ =
+                outbound.replace_terminal_viewport(pane, Self::next_sequence(), viewport.as_ref());
             return;
         }
         let viewport = {
@@ -23656,7 +23649,7 @@ impl Shared {
                     self.enqueue_kitty_images_for_viewport(outbound, pane, &terminal, &viewport);
                     let _ = outbound.replace_terminal_viewport(
                         pane,
-                        terminal.next_stream_sequence(),
+                        Self::next_sequence(),
                         viewport.as_ref(),
                     );
                 }
@@ -23664,7 +23657,7 @@ impl Shared {
                     outbound.suspend_terminal(pane);
                     let _ = outbound.enqueue_terminal_viewport_preview(
                         pane,
-                        terminal.next_stream_sequence(),
+                        Self::next_sequence(),
                         viewport.as_ref(),
                         foreground_panes,
                     );
@@ -23699,8 +23692,8 @@ impl Shared {
         else {
             return;
         };
-        let _ = outbound.enqueue_reliable(&Self::terminal_event(
-            &terminal,
+        Self::send_event(
+            outbound,
             EventPayload::HistoryChunk {
                 pane,
                 start,
@@ -23710,7 +23703,7 @@ impl Shared {
                 rows,
                 dictionary,
             },
-        ));
+        );
     }
 
     fn open_command_output(
@@ -24076,7 +24069,7 @@ impl Shared {
             .name(format!("zz-popup-{}", client.0))
             .spawn(move || {
                 let mut previous = None::<Arc<TerminalViewport>>;
-                let mut diff_scratch = TerminalDiffScratch::default();
+                let mut fanout = PaneFrameFanout::new();
                 while let Ok(event) = events.recv_blocking() {
                     let Some(terminal) = terminal.upgrade() else {
                         return;
@@ -24089,9 +24082,14 @@ impl Shared {
                             let viewport = terminal
                                 .latest_viewport_for(TerminalViewId(client.0))
                                 .unwrap_or_else(|| terminal.latest_viewport());
-                            let payload =
-                                terminal_fanout(previous.as_deref(), &viewport, &mut diff_scratch);
-                            shared.publish_popup_terminal(client, &terminal, payload, &viewport);
+                            shared.publish_popup_terminal(
+                                client,
+                                &terminal,
+                                previous.as_deref(),
+                                &viewport,
+                                &mut fanout,
+                            );
+                            fanout.diff.release_shared();
                             previous = Some(viewport);
                             if let Some(exit_code) = popup_exit_code(&terminal) {
                                 shared.finish_popup(client, &terminal, exit_code);
@@ -24195,8 +24193,9 @@ impl Shared {
         &self,
         client: ClientId,
         terminal: &Arc<TerminalSession>,
-        payload: TerminalFanout,
+        base: Option<&TerminalViewport>,
         viewport: &TerminalViewport,
+        fanout: &mut PaneFrameFanout,
     ) {
         let (pane, subscriber) = {
             let inner = self.inner.lock();
@@ -24215,22 +24214,21 @@ impl Shared {
             return;
         };
         self.enqueue_kitty_images_for_viewport(&subscriber, pane, terminal, viewport);
-        let sequence = terminal.next_stream_sequence();
-        let result = match payload {
-            TerminalFanout::Full => subscriber.enqueue_terminal_viewport(pane, sequence, viewport),
-            TerminalFanout::Patch(patch) => subscriber.enqueue_terminal_patch(
+        let sequence = Self::next_sequence();
+        let patch =
+            base.and_then(|base| TerminalViewport::diff_shared(base, viewport, &mut fanout.diff));
+        let result = match patch {
+            Some(patch) => subscriber.enqueue_terminal_patch(
                 pane,
                 sequence,
                 &patch,
                 TerminalDelivery::Foreground,
+                &mut fanout.tail,
             ),
+            None => subscriber.enqueue_terminal_viewport(pane, sequence, viewport),
         };
         if result == TerminalEnqueue::NeedsFull {
-            let _ = subscriber.replace_terminal_viewport(
-                pane,
-                terminal.next_stream_sequence(),
-                viewport,
-            );
+            let _ = subscriber.replace_terminal_viewport(pane, Self::next_sequence(), viewport);
         }
     }
 
@@ -24326,14 +24324,11 @@ impl Shared {
                 "startup command output subscriber changed before admission".to_owned(),
             ));
         }
-        let message = Self::terminal_event(
-            terminal,
-            EventPayload::CommandOutput {
-                output_id,
-                pane,
-                viewport: Some(viewport.clone()),
-            },
-        );
+        let message = Self::event(EventPayload::CommandOutput {
+            output_id,
+            pane,
+            viewport: Some(viewport.clone()),
+        });
         let encoded = subscriber.encode_message(&message)?;
         let mut encoded = Some(encoded);
         let admitted = {
@@ -24376,14 +24371,11 @@ impl Shared {
         let Some((output_id, subscriber)) = current else {
             return;
         };
-        let message = Self::terminal_event(
-            terminal,
-            EventPayload::CommandOutput {
-                output_id,
-                pane,
-                viewport: Some(viewport.clone()),
-            },
-        );
+        let message = Self::event(EventPayload::CommandOutput {
+            output_id,
+            pane,
+            viewport: Some(viewport.clone()),
+        });
         let Ok(encoded) = encode(&subscriber, &message) else {
             log::error!("failed to encode command-output viewport");
             return;
@@ -24527,7 +24519,7 @@ impl Shared {
                     .pane(pane)
                     .is_some_and(|pane| matches!(pane.kind, PaneKind::Agent(_)));
                 let mut previous_bar_state = ProgressBarState::Hidden;
-                let mut diff_scratch = TerminalDiffScratch::default();
+                let mut fanout = PaneFrameFanout::new();
                 let mut mode_memo = BTreeMap::new();
                 while let Ok(event) = events.recv_blocking() {
                     let Some(terminal) = terminal.upgrade() else {
@@ -24572,13 +24564,13 @@ impl Shared {
                                         .filter(|(seen, _)| *seen == epoch)
                                         .map(|(_, previous)| previous.as_ref())
                                 });
-                                let payload = terminal_fanout(base, &viewport, &mut diff_scratch);
                                 shared.publish_terminal_for_pane(
                                     pane,
                                     ClientId(view.0),
-                                    payload,
+                                    base,
                                     &viewport,
                                     &terminal,
+                                    &mut fanout,
                                 );
                                 let key = (
                                     mode_kind(viewport.mode),
@@ -24600,6 +24592,7 @@ impl Shared {
                                     }
                                 }
                             }
+                            fanout.diff.release_shared();
                             mode_memo.retain(|view, _| active.contains(view));
                             previous.retain(|view, _| active.contains(view));
                             if !terminal_status_should_close(&runtime_viewport.status) {
@@ -25717,10 +25710,7 @@ impl Shared {
             }
             for (pane, terminal, viewport) in newly_foreground {
                 self.enqueue_kitty_images_for_viewport(&subscriber, pane, &terminal, &viewport);
-                let message = Self::terminal_event(
-                    &terminal,
-                    EventPayload::TerminalViewport { pane, viewport },
-                );
+                let message = Self::event(EventPayload::TerminalViewport { pane, viewport });
                 if subscriber.enqueue_terminal(pane, &message) == TerminalEnqueue::NeedsFull {
                     let _ = subscriber.replace_terminal(pane, &message);
                 }
@@ -25729,10 +25719,7 @@ impl Shared {
                 if kind == TerminalStreamKind::Foreground {
                     self.enqueue_kitty_images_for_viewport(&subscriber, pane, &terminal, &viewport);
                 }
-                let message = Self::terminal_event(
-                    &terminal,
-                    EventPayload::TerminalViewport { pane, viewport },
-                );
+                let message = Self::event(EventPayload::TerminalViewport { pane, viewport });
                 match kind {
                     TerminalStreamKind::Foreground => {
                         if subscriber.enqueue_terminal(pane, &message) == TerminalEnqueue::NeedsFull
@@ -26775,9 +26762,10 @@ impl Shared {
         self: &Arc<Self>,
         pane: PaneId,
         client: ClientId,
-        payload: TerminalFanout,
+        base: Option<&TerminalViewport>,
         current: &TerminalViewport,
         terminal: &TerminalSession,
+        fanout: &mut PaneFrameFanout,
     ) {
         let (subscriber, kind, foreground_panes, unclaimed, mode_event, kill_pending) = {
             let mut inner = self.inner.lock();
@@ -26842,36 +26830,40 @@ impl Shared {
             if kind == TerminalStreamKind::Foreground {
                 self.enqueue_kitty_images_for_viewport(&subscriber, pane, terminal, current);
             }
-            let sequence = terminal.next_stream_sequence();
-            let result = match (kind, payload) {
-                (TerminalStreamKind::Foreground, TerminalFanout::Full) => {
+            let sequence = Self::next_sequence();
+            let delivery = match kind {
+                TerminalStreamKind::Foreground => TerminalDelivery::Foreground,
+                TerminalStreamKind::Preview => TerminalDelivery::Preview { foreground_panes },
+            };
+            let patch = base
+                .and_then(|base| TerminalViewport::diff_shared(base, current, &mut fanout.diff));
+            let result = match (kind, patch) {
+                (_, Some(patch)) => subscriber.enqueue_terminal_patch(
+                    pane,
+                    sequence,
+                    &patch,
+                    delivery,
+                    &mut fanout.tail,
+                ),
+                (TerminalStreamKind::Foreground, None) => {
                     subscriber.enqueue_terminal_viewport(pane, sequence, current)
                 }
-                (TerminalStreamKind::Preview, TerminalFanout::Full) => subscriber
+                (TerminalStreamKind::Preview, None) => subscriber
                     .enqueue_terminal_viewport_preview(pane, sequence, current, foreground_panes),
-                (TerminalStreamKind::Foreground, TerminalFanout::Patch(patch)) => subscriber
-                    .enqueue_terminal_patch(pane, sequence, &patch, TerminalDelivery::Foreground),
-                (TerminalStreamKind::Preview, TerminalFanout::Patch(patch)) => subscriber
-                    .enqueue_terminal_patch(
-                        pane,
-                        sequence,
-                        &patch,
-                        TerminalDelivery::Preview { foreground_panes },
-                    ),
             };
             if result == TerminalEnqueue::NeedsFull {
                 match kind {
                     TerminalStreamKind::Foreground => {
                         let _ = subscriber.replace_terminal_viewport(
                             pane,
-                            terminal.next_stream_sequence(),
+                            Self::next_sequence(),
                             current,
                         );
                     }
                     TerminalStreamKind::Preview => {
                         let _ = subscriber.enqueue_terminal_viewport_preview(
                             pane,
-                            terminal.next_stream_sequence(),
+                            Self::next_sequence(),
                             current,
                             foreground_panes,
                         );
@@ -27517,13 +27509,6 @@ impl Shared {
     fn event(payload: EventPayload) -> ProtocolMessage {
         ProtocolMessage::Event(Event {
             sequence: Self::next_sequence(),
-            payload,
-        })
-    }
-
-    fn terminal_event(terminal: &TerminalSession, payload: EventPayload) -> ProtocolMessage {
-        ProtocolMessage::Event(Event {
-            sequence: terminal.next_stream_sequence(),
             payload,
         })
     }
@@ -69569,10 +69554,24 @@ set-option -g @alias-mixed-next yes
             .unwrap_or_else(|| terminal.latest_viewport());
         drain_terminal_lane(&frozen_mailbox);
         drain_terminal_lane(&live_mailbox);
-        shared.publish_terminal_for_pane(pane, frozen, TerminalFanout::Full, &viewport, &terminal);
+        shared.publish_terminal_for_pane(
+            pane,
+            frozen,
+            None,
+            &viewport,
+            &terminal,
+            &mut PaneFrameFanout::new(),
+        );
         shared.send_full(frozen, pane, &frozen_mailbox);
         shared.send_resync(frozen, &frozen_mailbox);
-        shared.publish_terminal_for_pane(pane, live, TerminalFanout::Full, &viewport, &terminal);
+        shared.publish_terminal_for_pane(
+            pane,
+            live,
+            None,
+            &viewport,
+            &terminal,
+            &mut PaneFrameFanout::new(),
+        );
         assert!(frozen_mailbox.state.lock().terminals.is_empty());
         assert!(live_mailbox.state.lock().terminals.contains_key(&pane));
 
@@ -69598,7 +69597,14 @@ set-option -g @alias-mixed-next yes
         ));
 
         drain_terminal_lane(&frozen_mailbox);
-        shared.publish_terminal_for_pane(pane, frozen, TerminalFanout::Full, &viewport, &terminal);
+        shared.publish_terminal_for_pane(
+            pane,
+            frozen,
+            None,
+            &viewport,
+            &terminal,
+            &mut PaneFrameFanout::new(),
+        );
         assert!(frozen_mailbox.state.lock().terminals.contains_key(&pane));
         let _ = session;
     }
@@ -69635,7 +69641,14 @@ set-option -g @alias-mixed-next yes
             .latest_viewport_for(TerminalViewId(client.0))
             .unwrap_or_else(|| terminal.latest_viewport());
         drain_terminal_lane(&mailbox);
-        shared.publish_terminal_for_pane(pane, client, TerminalFanout::Full, &viewport, &terminal);
+        shared.publish_terminal_for_pane(
+            pane,
+            client,
+            None,
+            &viewport,
+            &terminal,
+            &mut PaneFrameFanout::new(),
+        );
         assert!(mailbox.state.lock().terminals.contains_key(&pane));
     }
 
@@ -71291,9 +71304,10 @@ set-option -g @alias-mixed-next yes
             shared.publish_terminal_for_pane(
                 pane,
                 client,
-                TerminalFanout::Full,
+                None,
                 &viewport,
                 &terminal,
+                &mut PaneFrameFanout::new(),
             );
             assert_eq!(
                 mailbox.state.lock().terminals.contains_key(&pane),

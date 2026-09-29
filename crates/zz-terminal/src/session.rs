@@ -1575,7 +1575,6 @@ pub struct TerminalSession {
     terminating: AtomicBool,
     preview_pending: AtomicBool,
     retired: AtomicBool,
-    stream_sequence: AtomicU64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1755,7 +1754,6 @@ impl TerminalSession {
             terminating: AtomicBool::new(false),
             preview_pending: AtomicBool::new(false),
             retired: AtomicBool::new(false),
-            stream_sequence: AtomicU64::new(0),
         }
     }
 
@@ -1887,7 +1885,6 @@ impl TerminalSession {
             terminating: AtomicBool::new(false),
             preview_pending: AtomicBool::new(false),
             retired: AtomicBool::new(false),
-            stream_sequence: AtomicU64::new(0),
         }
     }
 
@@ -2089,10 +2086,6 @@ impl TerminalSession {
 
     pub fn retire(&self) {
         self.retired.store(true, Ordering::Release);
-    }
-
-    pub fn next_stream_sequence(&self) -> u64 {
-        self.stream_sequence.fetch_add(1, Ordering::Relaxed) + 1
     }
 
     #[must_use]
@@ -17930,7 +17923,7 @@ mod tests {
         assert_eq!(std::mem::size_of::<Publisher>(), 3 * word);
         assert_eq!(std::mem::size_of::<TerminalEvents>(), 3 * word);
         assert!(
-            std::mem::size_of::<TerminalSession>() <= 17 * word,
+            std::mem::size_of::<TerminalSession>() <= 16 * word,
             "{}",
             std::mem::size_of::<TerminalSession>()
         );

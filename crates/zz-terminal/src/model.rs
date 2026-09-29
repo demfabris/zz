@@ -1,7 +1,10 @@
 use std::{
     borrow::Cow,
     num::{NonZeroU32, NonZeroU64},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use serde::{Deserialize, Serialize};
@@ -1138,28 +1141,108 @@ impl TerminalViewportPatch {
             Some(base)
         }
     }
+}
 
-    pub fn widen_to_rows(&mut self, current: &TerminalViewport) {
-        if self.changed_rows.is_empty() {
-            return;
+#[derive(Clone, Copy, Debug)]
+pub struct TerminalPatchRef<'a> {
+    pub base: &'a TerminalViewport,
+    pub current: &'a TerminalViewport,
+    pub scroll: i16,
+    pub spans: &'a [TerminalPatchSpan],
+    pub fields: TerminalPatchFields,
+    pub diff: u64,
+}
+
+impl<'a> TerminalPatchRef<'a> {
+    #[must_use]
+    pub fn style_base(&self) -> usize {
+        self.base.styles().len()
+    }
+
+    #[must_use]
+    pub fn appended_styles(&self) -> &'a [PackedStyle] {
+        self.current
+            .styles()
+            .get(self.style_base()..)
+            .unwrap_or_default()
+    }
+
+    #[must_use]
+    pub fn grapheme_base(&self) -> usize {
+        self.base.grapheme_offsets().len().saturating_sub(1)
+    }
+
+    #[must_use]
+    pub fn appended_grapheme_offsets(&self) -> &'a [u32] {
+        self.current
+            .grapheme_offsets()
+            .get(self.grapheme_base()..)
+            .unwrap_or_default()
+    }
+
+    #[must_use]
+    pub fn appended_grapheme_bytes(&self) -> &'a [u8] {
+        self.current
+            .grapheme_bytes()
+            .get(self.base.grapheme_bytes().len()..)
+            .unwrap_or_default()
+    }
+
+    #[must_use]
+    pub fn span_cells(&self, span: TerminalPatchSpan) -> &'a [PackedCell] {
+        self.current
+            .row(span.row)
+            .and_then(|row| row.get(usize::from(span.start)..span.end()))
+            .unwrap_or_default()
+    }
+
+    #[must_use]
+    pub fn to_patch(&self) -> Option<TerminalViewportPatch> {
+        let mut cells =
+            Vec::with_capacity(self.spans.iter().map(|span| usize::from(span.len)).sum());
+        for span in self.spans {
+            cells.extend_from_slice(self.span_cells(*span));
         }
-        let mut spans = TerminalPatchSpans::new();
-        let mut cells = Vec::new();
-        for row in self.changed_rows.row_indices() {
-            let line = current.row(row).unwrap_or_default();
-            let end = line
-                .iter()
-                .rposition(|cell| *cell != PackedCell::EMPTY)
-                .map_or(0, |last| last + 1);
-            cells.extend_from_slice(&line[..end]);
-            spans.push(TerminalPatchSpan {
-                row,
-                start: 0,
-                len: u16::try_from(end).unwrap_or(u16::MAX),
-                clear: true,
-            });
-        }
-        self.changed_rows = TerminalPatchRows::from_spans(spans, cells);
+        let dictionary = TerminalDictionaryPatch::from_parts(
+            self.appended_styles().to_vec(),
+            self.appended_grapheme_offsets()
+                .windows(2)
+                .map(|offsets| offsets[1].saturating_sub(offsets[0]))
+                .collect(),
+            self.appended_grapheme_bytes().to_vec(),
+        );
+        let current = self.current;
+        Some(TerminalViewportPatch {
+            base_generation: self.base.generation,
+            base_view_generation: self.base.view_generation,
+            generation: current.generation,
+            view_generation: current.view_generation,
+            dictionary_generation: current.dictionary_generation,
+            columns: current.columns,
+            rows: current.rows,
+            scroll: self.scroll,
+            changed_rows: TerminalPatchRows::from_spans(
+                self.spans.iter().copied().collect(),
+                cells,
+            ),
+            style_base: u32::try_from(self.style_base()).ok()?,
+            grapheme_base: u32::try_from(self.grapheme_base()).ok()?,
+            dictionary,
+            fields: self.fields,
+            foreground: current.foreground,
+            background: current.background,
+            presentation: Arc::clone(&current.presentation),
+            overlays: Arc::clone(&current.overlays),
+            kitty_placements: Arc::clone(&current.kitty_placements),
+            cursor: current.cursor,
+            scrollbar: current.scrollbar,
+            mode: current.mode,
+            search: current.search,
+            unseen_output: current.unseen_output,
+            kitty_keyboard: current.kitty_keyboard,
+            mouse_tracking: current.mouse_tracking,
+            status: current.status.clone(),
+        })
     }
 }
 
@@ -1205,7 +1288,35 @@ pub enum PatchError {
 pub struct TerminalDiffScratch {
     cached_cells: Option<Arc<[PackedCell]>>,
     row_fingerprints: Vec<u64>,
+    spans: Vec<TerminalPatchSpan>,
+    shared: Option<SharedCellDiff>,
+    whole_rows: bool,
 }
+
+#[derive(Debug)]
+struct SharedCellDiff {
+    previous: Arc<[PackedCell]>,
+    current: Arc<[PackedCell]>,
+    previous_dictionary: Arc<TerminalDictionary>,
+    current_dictionary: Arc<TerminalDictionary>,
+    columns: u16,
+    rows: u16,
+    scroll: i16,
+    diff: u64,
+}
+
+impl SharedCellDiff {
+    fn matches(&self, previous: &TerminalViewport, current: &TerminalViewport) -> bool {
+        Arc::ptr_eq(&self.previous, &previous.cells)
+            && Arc::ptr_eq(&self.current, &current.cells)
+            && Arc::ptr_eq(&self.previous_dictionary, &previous.dictionary)
+            && Arc::ptr_eq(&self.current_dictionary, &current.dictionary)
+            && self.columns == current.columns
+            && self.rows == current.rows
+    }
+}
+
+static NEXT_SHARED_DIFF: AtomicU64 = AtomicU64::new(1);
 
 impl TerminalDiffScratch {
     /// Rebinds cached fingerprints after a patch applied.
@@ -1221,6 +1332,40 @@ impl TerminalDiffScratch {
     pub fn invalidate(&mut self) {
         self.cached_cells = None;
         self.row_fingerprints.clear();
+        self.shared = None;
+    }
+
+    pub fn set_whole_rows(&mut self, whole_rows: bool) {
+        self.whole_rows = whole_rows;
+        self.shared = None;
+    }
+
+    pub fn release_shared(&mut self) {
+        self.shared = None;
+    }
+
+    fn diff_cells(&mut self, previous: &TerminalViewport, current: &TerminalViewport) -> i16 {
+        self.spans.clear();
+        if Arc::ptr_eq(&previous.cells, &current.cells) {
+            return 0;
+        }
+        let scroll = best_row_shift(previous, current, self);
+        for row in 0..current.rows {
+            let source = i32::from(row) - i32::from(scroll);
+            let before = u16::try_from(source)
+                .ok()
+                .filter(|source| *source < previous.rows)
+                .and_then(|source| previous.row(source));
+            let after = current.row(row).unwrap_or_default();
+            let changed = changed_span(row, before, after);
+            let changed = if self.whole_rows {
+                changed.and_then(|_| changed_span(row, None, after))
+            } else {
+                changed
+            };
+            self.spans.extend(changed);
+        }
+        scroll
     }
 }
 
@@ -1407,139 +1552,81 @@ impl TerminalViewport {
         current: &Self,
         scratch: &mut TerminalDiffScratch,
     ) -> Option<TerminalViewportPatch> {
+        Self::diff_ref(previous, current, scratch, false)?.to_patch()
+    }
+
+    #[must_use]
+    pub fn diff_shared<'a>(
+        previous: &'a Self,
+        current: &'a Self,
+        scratch: &'a mut TerminalDiffScratch,
+    ) -> Option<TerminalPatchRef<'a>> {
+        Self::diff_ref(previous, current, scratch, true)
+    }
+
+    fn diff_ref<'a>(
+        previous: &'a Self,
+        current: &'a Self,
+        scratch: &'a mut TerminalDiffScratch,
+        share: bool,
+    ) -> Option<TerminalPatchRef<'a>> {
         if previous.columns != current.columns
             || previous.rows != current.rows
             || previous.dictionary_generation != current.dictionary_generation
-            || !Arc::ptr_eq(&previous.dictionary, &current.dictionary)
-                && !dictionary_extends(&previous.dictionary, &current.dictionary)
         {
             return None;
         }
-
-        let shared_cells = Arc::ptr_eq(&previous.cells, &current.cells);
-        let scroll = if shared_cells {
-            0
+        let remembered = scratch
+            .shared
+            .as_ref()
+            .filter(|shared| share && shared.matches(previous, current))
+            .map(|shared| (shared.scroll, shared.diff));
+        let (scroll, diff) = if let Some(remembered) = remembered {
+            remembered
         } else {
-            best_row_shift(previous, current, scratch)
-        };
-        let mut spans = TerminalPatchSpans::new();
-        if !shared_cells {
-            for row in 0..current.rows {
-                let source = i32::from(row) - i32::from(scroll);
-                let before = u16::try_from(source)
-                    .ok()
-                    .filter(|source| *source < previous.rows)
-                    .and_then(|source| previous.row(source));
-                spans.extend(changed_span(
-                    row,
-                    before,
-                    current.row(row).unwrap_or_default(),
-                ));
-            }
-        }
-        let mut changed_cells =
-            Vec::with_capacity(spans.iter().map(|span| usize::from(span.len)).sum());
-        for span in &spans {
-            let after = current.row(span.row).unwrap_or_default();
-            changed_cells.extend_from_slice(&after[usize::from(span.start)..span.end()]);
-        }
-        let changed_rows = TerminalPatchRows::from_spans(spans, changed_cells);
-
-        let grapheme_base = previous.grapheme_offsets().len().saturating_sub(1);
-        let appended_grapheme_lengths = current.grapheme_offsets()[grapheme_base..]
-            .windows(2)
-            .map(|offsets| offsets[1].saturating_sub(offsets[0]))
-            .collect();
-        let dictionary = TerminalDictionaryPatch::from_parts(
-            current.styles()[previous.styles().len()..].to_vec(),
-            appended_grapheme_lengths,
-            current.grapheme_bytes()[previous.grapheme_bytes().len()..].to_vec(),
-        );
-
-        let mut fields = TerminalPatchFields::empty();
-        fields.set(TerminalPatchFields::ROWS, !changed_rows.is_empty());
-        fields.set(TerminalPatchFields::SCROLL, scroll != 0);
-        fields.set(TerminalPatchFields::DICTIONARY, !dictionary.is_empty());
-        fields.set(
-            TerminalPatchFields::COLORS,
-            previous.foreground != current.foreground || previous.background != current.background,
-        );
-        fields.set(
-            TerminalPatchFields::PRESENTATION,
-            !Arc::ptr_eq(&previous.presentation, &current.presentation)
-                && previous.presentation != current.presentation,
-        );
-        fields.set(
-            TerminalPatchFields::OVERLAYS,
-            !Arc::ptr_eq(&previous.overlays, &current.overlays)
-                && previous.overlays != current.overlays,
-        );
-        let kitty = !Arc::ptr_eq(&previous.kitty_placements, &current.kitty_placements)
-            && previous.kitty_placements != current.kitty_placements;
-        fields.set(TerminalPatchFields::KITTY, kitty);
-        fields.set(
-            TerminalPatchFields::SCROLLBAR,
-            kitty || previous.scrollbar != current.scrollbar,
-        );
-        match (previous.cursor, current.cursor) {
-            (before, after) if before == after => {}
-            (Some(before), Some(after))
-                if before.visible() == after.visible()
-                    && before.blinking() == after.blinking()
-                    && before.style() == after.style()
-                    && before.color() == after.color() =>
+            if !Arc::ptr_eq(&previous.dictionary, &current.dictionary)
+                && !dictionary_extends(&previous.dictionary, &current.dictionary)
             {
-                fields.insert(TerminalPatchFields::CURSOR_AT);
+                return None;
             }
-            _ => fields.insert(TerminalPatchFields::CURSOR),
-        }
-        fields.set(TerminalPatchFields::MODE, previous.mode != current.mode);
-        fields.set(
-            TerminalPatchFields::SEARCH,
-            previous.search != current.search,
-        );
-        fields.set(
-            TerminalPatchFields::UNSEEN,
-            previous.unseen_output != current.unseen_output,
-        );
-        fields.set(
-            TerminalPatchFields::INPUT_MODES,
-            previous.kitty_keyboard != current.kitty_keyboard
-                || previous.mouse_tracking != current.mouse_tracking,
-        );
-        fields.set(
-            TerminalPatchFields::STATUS,
-            previous.status != current.status,
-        );
-
-        Some(TerminalViewportPatch {
-            base_generation: previous.generation,
-            base_view_generation: previous.view_generation,
-            generation: current.generation,
-            view_generation: current.view_generation,
-            dictionary_generation: current.dictionary_generation,
-            columns: current.columns,
-            rows: current.rows,
+            let scroll = scratch.diff_cells(previous, current);
+            let diff = if share {
+                let diff = NEXT_SHARED_DIFF.fetch_add(1, Ordering::Relaxed);
+                scratch.shared = Some(SharedCellDiff {
+                    previous: Arc::clone(&previous.cells),
+                    current: Arc::clone(&current.cells),
+                    previous_dictionary: Arc::clone(&previous.dictionary),
+                    current_dictionary: Arc::clone(&current.dictionary),
+                    columns: current.columns,
+                    rows: current.rows,
+                    scroll,
+                    diff,
+                });
+                diff
+            } else {
+                scratch.shared = None;
+                0
+            };
+            (scroll, diff)
+        };
+        let scratch: &'a TerminalDiffScratch = scratch;
+        let mut patch = TerminalPatchRef {
+            base: previous,
+            current,
             scroll,
-            changed_rows,
-            style_base: u32::try_from(previous.styles().len()).ok()?,
-            grapheme_base: u32::try_from(grapheme_base).ok()?,
-            dictionary,
-            fields,
-            foreground: current.foreground,
-            background: current.background,
-            presentation: Arc::clone(&current.presentation),
-            overlays: Arc::clone(&current.overlays),
-            kitty_placements: Arc::clone(&current.kitty_placements),
-            cursor: current.cursor,
-            scrollbar: current.scrollbar,
-            mode: current.mode,
-            search: current.search,
-            unseen_output: current.unseen_output,
-            kitty_keyboard: current.kitty_keyboard,
-            mouse_tracking: current.mouse_tracking,
-            status: current.status.clone(),
-        })
+            spans: &scratch.spans,
+            fields: metadata_fields(previous, current),
+            diff,
+        };
+        let appends = !patch.appended_styles().is_empty()
+            || patch.appended_grapheme_offsets().len() > 1
+            || !patch.appended_grapheme_bytes().is_empty();
+        patch
+            .fields
+            .set(TerminalPatchFields::ROWS, !patch.spans.is_empty());
+        patch.fields.set(TerminalPatchFields::SCROLL, scroll != 0);
+        patch.fields.set(TerminalPatchFields::DICTIONARY, appends);
+        Some(patch)
     }
 
     /// Applies a patch to this retained viewport.
@@ -1783,6 +1870,62 @@ impl TerminalViewport {
     }
 }
 
+fn metadata_fields(previous: &TerminalViewport, current: &TerminalViewport) -> TerminalPatchFields {
+    let mut fields = TerminalPatchFields::empty();
+    fields.set(
+        TerminalPatchFields::COLORS,
+        previous.foreground != current.foreground || previous.background != current.background,
+    );
+    fields.set(
+        TerminalPatchFields::PRESENTATION,
+        !Arc::ptr_eq(&previous.presentation, &current.presentation)
+            && previous.presentation != current.presentation,
+    );
+    fields.set(
+        TerminalPatchFields::OVERLAYS,
+        !Arc::ptr_eq(&previous.overlays, &current.overlays)
+            && previous.overlays != current.overlays,
+    );
+    let kitty = !Arc::ptr_eq(&previous.kitty_placements, &current.kitty_placements)
+        && previous.kitty_placements != current.kitty_placements;
+    fields.set(TerminalPatchFields::KITTY, kitty);
+    fields.set(
+        TerminalPatchFields::SCROLLBAR,
+        kitty || previous.scrollbar != current.scrollbar,
+    );
+    match (previous.cursor, current.cursor) {
+        (before, after) if before == after => {}
+        (Some(before), Some(after))
+            if before.visible() == after.visible()
+                && before.blinking() == after.blinking()
+                && before.style() == after.style()
+                && before.color() == after.color() =>
+        {
+            fields.insert(TerminalPatchFields::CURSOR_AT);
+        }
+        _ => fields.insert(TerminalPatchFields::CURSOR),
+    }
+    fields.set(TerminalPatchFields::MODE, previous.mode != current.mode);
+    fields.set(
+        TerminalPatchFields::SEARCH,
+        previous.search != current.search,
+    );
+    fields.set(
+        TerminalPatchFields::UNSEEN,
+        previous.unseen_output != current.unseen_output,
+    );
+    fields.set(
+        TerminalPatchFields::INPUT_MODES,
+        previous.kitty_keyboard != current.kitty_keyboard
+            || previous.mouse_tracking != current.mouse_tracking,
+    );
+    fields.set(
+        TerminalPatchFields::STATUS,
+        previous.status != current.status,
+    );
+    fields
+}
+
 #[must_use]
 pub fn exposed_rows_are_replaced(
     spans: &[TerminalPatchSpan],
@@ -1880,23 +2023,29 @@ fn best_row_shift(
     scratch: &mut TerminalDiffScratch,
 ) -> i16 {
     let rows = usize::from(current.rows);
-    let previous_is_cached = scratch
-        .cached_cells
-        .as_ref()
-        .is_some_and(|cells| Arc::ptr_eq(cells, &previous.cells))
-        && scratch.row_fingerprints.len() == rows;
-    if previous_is_cached {
+    let cached = |cells: &Arc<[PackedCell]>| {
+        scratch
+            .cached_cells
+            .as_ref()
+            .is_some_and(|cached| Arc::ptr_eq(cached, cells))
+            && scratch.row_fingerprints.len() == rows
+    };
+    let (previous_cached, current_cached) = (cached(&previous.cells), cached(&current.cells));
+    if current_cached {
+        scratch.row_fingerprints.extend(row_fingerprints(previous));
+        let (current, previous) = scratch.row_fingerprints.split_at(rows);
+        let shift = best_row_shift_from_fingerprints(previous, current);
+        scratch.row_fingerprints.truncate(rows);
+        return shift;
+    }
+    if previous_cached {
         scratch.row_fingerprints.reserve(rows);
     } else {
         scratch.row_fingerprints.clear();
         scratch.row_fingerprints.reserve(rows.saturating_mul(2));
-        scratch.row_fingerprints.extend(
-            (0..previous.rows).map(|row| row_fingerprint(previous.row(row).unwrap_or_default())),
-        );
+        scratch.row_fingerprints.extend(row_fingerprints(previous));
     }
-    scratch
-        .row_fingerprints
-        .extend((0..current.rows).map(|row| row_fingerprint(current.row(row).unwrap_or_default())));
+    scratch.row_fingerprints.extend(row_fingerprints(current));
     let shift = {
         let (previous, current) = scratch.row_fingerprints.split_at(rows);
         best_row_shift_from_fingerprints(previous, current)
@@ -1907,6 +2056,10 @@ fn best_row_shift(
     scratch.row_fingerprints.truncate(rows);
     scratch.cached_cells = Some(Arc::clone(&current.cells));
     shift
+}
+
+fn row_fingerprints(viewport: &TerminalViewport) -> impl Iterator<Item = u64> + '_ {
+    (0..viewport.rows).map(|row| row_fingerprint(viewport.row(row).unwrap_or_default()))
 }
 
 fn row_fingerprint(cells: &[PackedCell]) -> u64 {
@@ -2000,7 +2153,7 @@ mod tests {
             assert_eq!(size_of::<TerminalPresentation>(), 48);
             assert_eq!(size_of::<Arc<TerminalPresentation>>(), 8);
             assert_eq!(size_of::<TerminalViewport>(), 160);
-            assert_eq!(size_of::<TerminalDiffScratch>(), 40);
+            assert_eq!(size_of::<TerminalDiffScratch>(), 136);
             assert_eq!(size_of::<TerminalPatchRows>(), 8);
             assert_eq!(size_of::<TerminalPatchRowData>(), 64);
             assert_eq!(size_of::<TerminalPatchSpan>(), 8);
@@ -2452,8 +2605,10 @@ mod tests {
             .expect("span patch applies");
         assert_eq!(applied, current);
 
-        let mut widened = patch;
-        widened.widen_to_rows(&current);
+        let mut whole_rows = TerminalDiffScratch::default();
+        whole_rows.set_whole_rows(true);
+        let widened = TerminalViewport::diff_with_scratch(&previous, &current, &mut whole_rows)
+            .expect("compatible frames");
         assert!(
             widened
                 .changed_rows
@@ -2465,6 +2620,103 @@ mod tests {
         let mut applied = previous.clone();
         applied.apply_patch(widened).expect("widened patch applies");
         assert_eq!(applied, current);
+    }
+
+    #[test]
+    fn views_on_the_same_two_grids_share_one_cell_diff() {
+        let mut previous = TerminalViewport::blank(4, 3, SessionStatus::Running);
+        previous.generation = 1;
+        previous.view_generation = 1;
+        let mut current = previous.clone();
+        current.generation = 2;
+        current.view_generation = 2;
+        Arc::make_mut(&mut current.cells)[5] =
+            PackedCell::new(u32::from('q'), 0, CellWidth::Narrow);
+        let mut other_previous = previous.clone();
+        other_previous.generation = 3;
+        other_previous.view_generation = 3;
+        let mut other_current = current.clone();
+        other_current.generation = 4;
+        other_current.view_generation = 4;
+        other_current.cursor = Some(Cursor::new(
+            1,
+            1,
+            true,
+            false,
+            false,
+            CursorStyle::Block,
+            Color::rgb(1, 2, 3),
+        ));
+        let mut scratch = TerminalDiffScratch::default();
+
+        let first = TerminalViewport::diff_shared(&previous, &current, &mut scratch)
+            .expect("compatible frames");
+        let (first_diff, first_spans) = (first.diff, first.spans.to_vec());
+        assert_ne!(first_diff, 0);
+        let first = first.to_patch().expect("owned patch");
+        let fingerprints = scratch.row_fingerprints.clone();
+        let second = TerminalViewport::diff_shared(&other_previous, &other_current, &mut scratch)
+            .expect("compatible frames");
+        assert_eq!(second.diff, first_diff);
+        assert_eq!(second.spans, first_spans.as_slice());
+        assert!(second.fields.contains(TerminalPatchFields::CURSOR));
+        assert!(!first.fields.contains(TerminalPatchFields::CURSOR));
+        let second = second.to_patch().expect("owned patch");
+        assert_eq!(scratch.row_fingerprints, fingerprints);
+        assert_eq!(
+            Some(first),
+            TerminalViewport::diff(&previous, &current),
+            "a shared diff matches a fresh one"
+        );
+        assert_eq!(
+            Some(second),
+            TerminalViewport::diff(&other_previous, &other_current)
+        );
+
+        scratch.release_shared();
+        let again = TerminalViewport::diff_shared(&previous, &current, &mut scratch)
+            .expect("compatible frames");
+        assert_ne!(again.diff, first_diff);
+        assert_eq!(again.spans, first_spans.as_slice());
+        let owned = TerminalViewport::diff_with_scratch(&previous, &current, &mut scratch);
+        assert!(owned.is_some());
+        assert!(scratch.shared.is_none());
+    }
+
+    #[test]
+    fn a_view_on_the_cached_grid_fingerprints_only_its_own_base() {
+        let lettered = |letters: &str| {
+            let mut viewport = TerminalViewport::blank(1, 4, SessionStatus::Running);
+            let cells = Arc::make_mut(&mut viewport.cells);
+            for (row, letter) in letters.chars().enumerate() {
+                cells[row] = PackedCell::new(u32::from(letter), 0, CellWidth::Narrow);
+            }
+            viewport
+        };
+        let first_base = lettered("abcd");
+        let second_base = lettered("zabc");
+        let current = lettered("bcde");
+        let mut scratch = TerminalDiffScratch::default();
+        let first = TerminalViewport::diff_with_scratch(&first_base, &current, &mut scratch)
+            .expect("compatible frames");
+        assert_eq!(first.scroll, -1);
+        assert!(
+            scratch
+                .cached_cells
+                .as_ref()
+                .is_some_and(|cells| Arc::ptr_eq(cells, &current.cells))
+        );
+        let cached = scratch.row_fingerprints.clone();
+        let second = TerminalViewport::diff_with_scratch(&second_base, &current, &mut scratch)
+            .expect("compatible frames");
+        assert_eq!(Some(second), TerminalViewport::diff(&second_base, &current));
+        assert_eq!(scratch.row_fingerprints, cached);
+        assert!(
+            scratch
+                .cached_cells
+                .as_ref()
+                .is_some_and(|cells| Arc::ptr_eq(cells, &current.cells))
+        );
     }
 
     #[test]

@@ -145,6 +145,9 @@ pub enum DaemonError {
 
 fn incompatible_daemon_message(daemon: Option<u16>, client: u16) -> String {
     match daemon {
+        Some(daemon) if daemon == client => format!(
+            "the running zz daemon is an older build of protocol v{daemon} whose terminal frames this zz cannot read"
+        ),
         Some(daemon) => {
             format!("the running zz daemon speaks protocol v{daemon}; this zz speaks v{client}")
         }

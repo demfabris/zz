@@ -324,7 +324,7 @@ fn history_chunks_travel_on_the_terminal_lane_with_blank_tails_dropped() {
 
 #[cfg(unix)]
 #[test]
-fn each_pane_numbers_its_own_frame_stream() {
+fn a_pane_frame_sequence_keeps_growing_across_respawn_pane() {
     let shared = Arc::new(Shared::new(1));
     let mut context = ExecutionContext::default();
     command(
@@ -332,43 +332,37 @@ fn each_pane_numbers_its_own_frame_stream() {
         &mut context,
         &["new-session", "-d", "-s", "streams", QUIET_PANE_COMMAND],
     );
-    let first = context.pane.expect("first pane");
+    let pane = context.pane.expect("pane");
+    let target = pane.to_string();
+    let (_, mailbox) = attached_client(&shared, "streams", (100, 30));
+    let mut frames = drain(&mailbox, Duration::from_millis(200), |frames| {
+        full_for(frames, pane).is_some()
+    });
     command(
         &shared,
         &mut context,
-        &[
-            "split-window",
-            "-d",
-            "-h",
-            "-t",
-            "streams",
-            QUIET_PANE_COMMAND,
-        ],
+        &["send-keys", "-t", &target, "-l", "abc"],
     );
-    let second = {
-        let inner = shared.inner.lock();
-        let window = inner.engine.state.window_for_pane(first).expect("window");
-        inner.engine.state.windows[&window]
-            .panes
-            .keys()
-            .copied()
-            .find(|pane| *pane != first)
-            .expect("second pane")
-    };
-    let (_, mailbox) = attached_client(&shared, "streams", (100, 30));
-    let mut frames = drain(&mailbox, Duration::from_millis(200), |frames| {
-        full_for(frames, first).is_some() && full_for(frames, second).is_some()
-    });
-    for pane in [first, second] {
-        command(
-            &shared,
-            &mut context,
-            &["send-keys", "-t", &pane.to_string(), "-l", "abc"],
-        );
-    }
     frames.extend(drain(&mailbox, Duration::from_millis(200), |_| true));
-    for pane in [first, second] {
-        let sequences = frames
+    let before = pane_terminal(&shared, pane);
+    let respawned_at = frames.len();
+    command(
+        &shared,
+        &mut context,
+        &["respawn-pane", "-k", "-t", &target, QUIET_PANE_COMMAND],
+    );
+    wait_for("the respawned terminal", || {
+        !Arc::ptr_eq(&pane_terminal(&shared, pane), &before)
+    });
+    frames.extend(drain(&mailbox, Duration::from_millis(200), |_| true));
+    command(
+        &shared,
+        &mut context,
+        &["send-keys", "-t", &target, "-l", "def"],
+    );
+    frames.extend(drain(&mailbox, Duration::from_millis(200), |_| true));
+    let sequences = |frames: &[Frame]| {
+        frames
             .iter()
             .filter_map(|frame| match &frame.message {
                 ProtocolMessage::Event(Event {
@@ -379,16 +373,405 @@ fn each_pane_numbers_its_own_frame_stream() {
                 }) if *target == pane => Some(*sequence),
                 _ => None,
             })
-            .collect::<Vec<_>>();
-        assert!(sequences.len() >= 2, "{pane}: {sequences:?}");
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        !sequences(&frames[respawned_at..]).is_empty(),
+        "no frames after the respawn"
+    );
+    let sequences = sequences(&frames);
+    assert!(sequences.len() >= 4, "{sequences:?}");
+    assert!(
+        sequences.windows(2).all(|pair| pair[0] < pair[1]),
+        "{pane} frame sequences went back: {sequences:?}"
+    );
+}
+
+#[derive(Default)]
+struct ClientState {
+    retained: BTreeMap<PaneId, TerminalViewport>,
+    patches: usize,
+    fulls: usize,
+    rejected: usize,
+    refetch: Vec<PaneId>,
+    last_frame: Option<Instant>,
+}
+
+struct Client {
+    id: ClientId,
+    mailbox: Arc<OutboundMailbox>,
+    state: Arc<Mutex<ClientState>>,
+    stop: Arc<AtomicBool>,
+}
+
+impl Client {
+    fn new(id: ClientId, mailbox: Arc<OutboundMailbox>) -> Self {
+        let state = Arc::new(Mutex::new(ClientState::default()));
+        let stop = Arc::new(AtomicBool::new(false));
+        {
+            let state = Arc::clone(&state);
+            let stop = Arc::clone(&stop);
+            let mailbox = Arc::clone(&mailbox);
+            thread::spawn(move || {
+                while !stop.load(Ordering::Relaxed) {
+                    let frame = pop_ready_frame(&mut mailbox.state.lock());
+                    let Some(frame) = frame else {
+                        thread::sleep(Duration::from_micros(300));
+                        continue;
+                    };
+                    let mut state = state.lock();
+                    state.last_frame = Some(Instant::now());
+                    match decode_protocol_frame(&frame).expect("decode outbound frame") {
+                        ProtocolMessage::Event(Event {
+                            payload: EventPayload::TerminalViewport { pane, viewport },
+                            ..
+                        }) => {
+                            state.fulls += 1;
+                            state.retained.insert(pane, viewport);
+                        }
+                        ProtocolMessage::Event(Event {
+                            payload: EventPayload::TerminalPatch { pane, patch },
+                            ..
+                        }) => {
+                            state.patches += 1;
+                            let applied = state
+                                .retained
+                                .get_mut(&pane)
+                                .map(|retained| retained.apply_patch(patch));
+                            if !matches!(applied, Some(Ok(()))) {
+                                eprintln!(
+                                    "client {} rejected a patch for {pane}: {applied:?}",
+                                    id.0
+                                );
+                                state.rejected += 1;
+                                state.retained.remove(&pane);
+                                state.refetch.push(pane);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            });
+        }
+        Self {
+            id,
+            mailbox,
+            state,
+            stop,
+        }
+    }
+}
+
+impl Drop for Client {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+}
+
+fn describe(left: &TerminalViewport, right: &TerminalViewport) -> String {
+    let mut out = Vec::new();
+    if left.generation != right.generation || left.view_generation != right.view_generation {
+        out.push(format!(
+            "gen {}/{} vs {}/{}",
+            left.generation, left.view_generation, right.generation, right.view_generation
+        ));
+    }
+    if left.cells != right.cells {
+        let columns = usize::from(right.columns.max(1));
+        let first = left
+            .cells
+            .iter()
+            .zip(right.cells.iter())
+            .position(|(a, b)| a != b);
+        out.push(format!(
+            "cells differ at {:?} (row {:?})",
+            first,
+            first.map(|index| index / columns)
+        ));
+    }
+    if left.dictionary != right.dictionary {
+        out.push("dictionary".to_owned());
+    }
+    if left.cursor != right.cursor {
+        out.push(format!("cursor {:?} vs {:?}", left.cursor, right.cursor));
+    }
+    if left.scrollbar != right.scrollbar {
+        out.push(format!(
+            "scrollbar {:?} vs {:?}",
+            left.scrollbar, right.scrollbar
+        ));
+    }
+    if left.presentation != right.presentation {
+        out.push(format!(
+            "presentation {:?} vs {:?}",
+            left.presentation, right.presentation
+        ));
+    }
+    if left.mode != right.mode {
+        out.push(format!("mode {:?} vs {:?}", left.mode, right.mode));
+    }
+    if left.overlays != right.overlays {
+        out.push("overlays".to_owned());
+    }
+    if left.search != right.search {
+        out.push("search".to_owned());
+    }
+    if left.unseen_output != right.unseen_output {
+        out.push("unseen".to_owned());
+    }
+    if left.status != right.status {
+        out.push("status".to_owned());
+    }
+    if left.mouse_tracking != right.mouse_tracking || left.kitty_keyboard != right.kitty_keyboard {
+        out.push("input modes".to_owned());
+    }
+    if left.kitty_placements != right.kitty_placements {
+        out.push("kitty".to_owned());
+    }
+    if left.foreground != right.foreground || left.background != right.background {
+        out.push("colors".to_owned());
+    }
+    out.join("; ")
+}
+
+static COMPARED: AtomicU64 = AtomicU64::new(0);
+
+fn settle(shared: &Arc<Shared>, clients: &mut [Client], panes: &[PaneId], label: &str) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let mut mismatches = Vec::new();
+        let mut recent = false;
+        for client in clients.iter() {
+            let refetch = std::mem::take(&mut client.state.lock().refetch);
+            for pane in refetch {
+                shared.request_full(client.id, pane, &client.mailbox);
+            }
+            let state = client.state.lock();
+            recent |= state
+                .last_frame
+                .is_some_and(|last| last.elapsed() < Duration::from_millis(150));
+            for pane in panes {
+                let Some(terminal) = shared.inner.lock().terminals.get(pane).cloned() else {
+                    continue;
+                };
+                let Some(latest) = terminal.latest_viewport_for(TerminalViewId(client.id.0)) else {
+                    continue;
+                };
+                COMPARED.fetch_add(1, Ordering::Relaxed);
+                match state.retained.get(pane) {
+                    Some(retained) if *retained == *latest => {}
+                    Some(retained) => mismatches.push(format!(
+                        "client {} pane {pane}: {}",
+                        client.id.0,
+                        describe(retained, &latest)
+                    )),
+                    None => mismatches.push(format!(
+                        "client {} pane {pane}: nothing retained",
+                        client.id.0
+                    )),
+                }
+            }
+        }
+        if mismatches.is_empty() && !recent {
+            return;
+        }
         assert!(
-            sequences.windows(2).all(|pair| pair[0] < pair[1]),
-            "{pane} frames are out of order: {sequences:?}"
+            Instant::now() < deadline,
+            "{label}: client state never converged: {mismatches:#?}"
         );
-        let next = pane_terminal(&shared, pane).next_stream_sequence();
-        assert!(
-            sequences.iter().all(|sequence| *sequence < next),
-            "{pane} frames carry sequences its terminal never issued: {sequences:?} next {next}"
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn two_clients_rebuild_every_view_exactly_from_streamed_frames() {
+    let shared = Arc::new(Shared::new(1));
+    let mut context = ExecutionContext::default();
+    command(
+        &shared,
+        &mut context,
+        &[
+            "new-session",
+            "-d",
+            "-s",
+            "torture",
+            "-x",
+            "80",
+            "-y",
+            "24",
+            QUIET_PANE_COMMAND,
+        ],
+    );
+    let first = context.pane.expect("pane");
+    let (a, a_mailbox) = attached_client(&shared, "torture", (80, 25));
+    let (b, b_mailbox) = attached_client(&shared, "torture", (80, 25));
+    let mut clients = vec![Client::new(a, a_mailbox), Client::new(b, b_mailbox)];
+    let mut panes = vec![first];
+    settle(&shared, &mut clients, &panes, "attach");
+    let lines: &[&str] = &[
+        r"printf '\033[31mred\033[0m \033[44mblue-bg\033[K\033[0m\n'",
+        r"printf '\344\270\255\346\226\207wide\n'",
+        r"printf 'e\314\201 \360\237\221\215\360\237\217\275 zwj \360\237\221\250\342\200\215\360\237\221\251\n'",
+        r"printf '\033]8;;http://example.test/\033\\link\033]8;;\033\\ after\n'",
+        r"printf '\033]2;title-one\007'",
+        r"printf '\033]7;file://host/tmp/review\007'",
+        "seq 1 60",
+        r"printf '\033[5;15r\033[5;1H\033M\033M\033[r'",
+        r"printf '\033[3;1Habcdefghij\033[3;3H\033[4@\033[3;1H\033[2P'",
+        r"printf '\033[6;1H\033[2L\033[8;1H\033[3M'",
+        r"printf '\033[?1049h\033[2J\033[1;1Halt screen\033[10;70H\344\270\255'",
+        r"printf '\033[?1049l'",
+        r"printf '\033[5 q\033[?25l'",
+        r"printf '\033[?25h\033[2 q'",
+        r"printf '\033[?1000h'",
+        r"printf '\033[?1000l'",
+        r"printf '\033[4;79H\344\270\255X\n'",
+        r"printf '\033[4;1H\344\270\255\344\270\255\033[4;2Hx'",
+        r"printf '\033[S\033[T\033[2S'",
+        r"printf '%0200d\n' 0",
+        r"printf '\033[38;5;196mX\033[48;2;1;2;3mY\033[0m\n'",
+        r"printf '\033[4:3mcurly\033[0m \033[58;5;4m\033[4mcolored\033[0m\n'",
+        r"printf 'a\tb\tc\n'",
+        r"printf '\033[44m\033[2J\033[0m'",
+        r"printf '\033[1;1H\033[0J'",
+        r"printf '\033]2;title-two\007\033]8;;http://x.test/\033\\\033[45m  \033[K\033]8;;\033\\\033[0m\n'",
+        "seq 1 200",
+        r"printf '\033[2J\033[3J\033[H'",
+        r"printf '\033[10;1H\033[1;31m\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\342\224\200\033[0m\n'",
+    ];
+    for key in "echo typed".chars() {
+        command(
+            &shared,
+            &mut context,
+            &[
+                "send-keys",
+                "-t",
+                &first.to_string(),
+                "-l",
+                &key.to_string(),
+            ],
         );
+        settle(&shared, &mut clients, &panes, &format!("key {key}"));
+    }
+    command(
+        &shared,
+        &mut context,
+        &["send-keys", "-t", &first.to_string(), "Enter"],
+    );
+    settle(&shared, &mut clients, &panes, "typed enter");
+    for (index, line) in lines.iter().enumerate() {
+        command(
+            &shared,
+            &mut context,
+            &["send-keys", "-t", &first.to_string(), line, "Enter"],
+        );
+        settle(
+            &shared,
+            &mut clients,
+            &panes,
+            &format!("line {index}: {line}"),
+        );
+    }
+    let target = first.to_string();
+    for args in [
+        vec!["copy-mode", "-t", target.as_str()],
+        vec!["send-keys", "-t", target.as_str(), "-X", "cursor-up"],
+        vec!["send-keys", "-t", target.as_str(), "-X", "page-up"],
+        vec!["send-keys", "-t", target.as_str(), "-X", "begin-selection"],
+        vec!["send-keys", "-t", target.as_str(), "-X", "cursor-down"],
+        vec![
+            "send-keys",
+            "-t",
+            target.as_str(),
+            "-X",
+            "search-backward",
+            "1",
+        ],
+        vec!["send-keys", "-t", target.as_str(), "-X", "cancel"],
+    ] {
+        command(&shared, &mut context, &args);
+        settle(&shared, &mut clients, &panes, &format!("{args:?}"));
+    }
+    command(
+        &shared,
+        &mut context,
+        &["split-window", "-t", "torture", "-h", QUIET_PANE_COMMAND],
+    );
+    panes = {
+        let inner = shared.inner.lock();
+        let window = inner.engine.state.window_for_pane(first).expect("window");
+        inner.engine.state.windows[&window]
+            .panes
+            .keys()
+            .copied()
+            .collect()
+    };
+    settle(&shared, &mut clients, &panes, "split");
+    for pane in panes.clone() {
+        command(
+            &shared,
+            &mut context,
+            &["send-keys", "-t", &pane.to_string(), "seq 1 40", "Enter"],
+        );
+    }
+    settle(&shared, &mut clients, &panes, "split output");
+    command(
+        &shared,
+        &mut context,
+        &["resize-window", "-t", "torture", "-x", "100", "-y", "30"],
+    );
+    settle(&shared, &mut clients, &panes, "resize");
+    command(
+        &shared,
+        &mut context,
+        &["resize-pane", "-t", &target, "-L", "7"],
+    );
+    settle(&shared, &mut clients, &panes, "resize-pane");
+    for pane in panes.clone() {
+        command(
+            &shared,
+            &mut context,
+            &[
+                "send-keys",
+                "-t",
+                &pane.to_string(),
+                r"printf '\033[2;1H\344\270\255\033[31mafter\033[0m\033[K\n'; seq 1 5",
+                "Enter",
+            ],
+        );
+    }
+    settle(&shared, &mut clients, &panes, "after resize output");
+    command(&shared, &mut context, &["resize-pane", "-Z", "-t", &target]);
+    settle(&shared, &mut clients, &panes, "zoom");
+    command(&shared, &mut context, &["resize-pane", "-Z", "-t", &target]);
+    settle(&shared, &mut clients, &panes, "unzoom");
+    command(
+        &shared,
+        &mut context,
+        &["respawn-pane", "-k", "-t", &target, QUIET_PANE_COMMAND],
+    );
+    settle(&shared, &mut clients, &panes, "respawn");
+    command(
+        &shared,
+        &mut context,
+        &[
+            "send-keys",
+            "-t",
+            &target,
+            r"printf 'after respawn\n'",
+            "Enter",
+        ],
+    );
+    settle(&shared, &mut clients, &panes, "after respawn");
+    eprintln!("compared {} view frames", COMPARED.load(Ordering::Relaxed));
+    for client in &clients {
+        let state = client.state.lock();
+        eprintln!(
+            "client {}: {} patches, {} fulls, {} rejected",
+            client.id.0, state.patches, state.fulls, state.rejected
+        );
+        assert_eq!(state.rejected, 0, "client {} rejected a patch", client.id.0);
+        assert!(state.patches > 20);
     }
 }

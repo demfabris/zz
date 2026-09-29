@@ -3,8 +3,8 @@ use std::sync::Arc;
 use zz_terminal::{
     ATTR_BOLD, ATTR_HYPERLINK, ATTR_ITALIC, CellWidth, ColourClass, Cursor, CursorStyle,
     KittyLayer, KittyPlacement, OverlayKind, OverlaySpan, PackedCell, PackedStyle, ScrollbarState,
-    SearchStatus, SessionStatus, TerminalDictionary, TerminalMode, TerminalPatchFields,
-    TerminalViewport, TerminalViewportPatch, UnderlineStyle,
+    SearchStatus, SessionStatus, TerminalDictionary, TerminalDiffScratch, TerminalMode,
+    TerminalPatchFields, TerminalViewport, TerminalViewportPatch, UnderlineStyle,
 };
 
 use super::*;
@@ -99,7 +99,51 @@ fn assert_patch_applies(previous: &TerminalViewport, current: &TerminalViewport)
         .apply_patch(decoded_patch(&frame))
         .expect("the decoded patch applies");
     assert_eq!(&retained, current);
+    assert_views_share_the_patch_tail(previous, current, &frame);
     frame.len()
+}
+
+fn assert_views_share_the_patch_tail(
+    previous: &TerminalViewport,
+    current: &TerminalViewport,
+    owned_frame: &[u8],
+) {
+    let mut scratch = TerminalDiffScratch::default();
+    let mut tail = PatchTail::default();
+    let mut frame = Vec::new();
+    let first =
+        TerminalViewport::diff_shared(previous, current, &mut scratch).expect("compatible frames");
+    let first_diff = first.diff;
+    crate::encode_terminal_patch_event_into(PaneId(4), 3, &first, &mut tail, &mut frame)
+        .expect("a borrowed patch encodes");
+    assert_eq!(
+        frame, owned_frame,
+        "borrowed and owned patches encode alike"
+    );
+
+    let mut sibling_previous = previous.clone();
+    sibling_previous.generation = previous.generation.wrapping_add(7);
+    sibling_previous.view_generation = previous.view_generation.wrapping_add(9);
+    let mut sibling_current = current.clone();
+    sibling_current.generation = current.generation.wrapping_add(7);
+    sibling_current.view_generation = current.view_generation.wrapping_add(300);
+    sibling_current.unseen_output = current.unseen_output.wrapping_add(1);
+    let sibling = TerminalViewport::diff_shared(&sibling_previous, &sibling_current, &mut scratch)
+        .expect("compatible frames");
+    assert_eq!(
+        sibling.diff, first_diff,
+        "the sibling view reuses the cell diff"
+    );
+    crate::encode_terminal_patch_event_into(PaneId(4), 3, &sibling, &mut tail, &mut frame)
+        .expect("a sibling patch encodes from the shared tail");
+    let owned =
+        TerminalViewport::diff(&sibling_previous, &sibling_current).expect("compatible frames");
+    assert_eq!(frame, patch_frame(&owned), "a shared tail changes no byte");
+    let mut retained = sibling_previous.clone();
+    retained
+        .apply_patch(decoded_patch(&frame))
+        .expect("the sibling patch applies");
+    assert_eq!(retained, sibling_current);
 }
 
 fn styled_dictionary(viewport: &mut TerminalViewport) {

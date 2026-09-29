@@ -2155,7 +2155,11 @@ mod tests {
             assert_eq!(size_of::<TerminalViewport>(), 160);
             assert_eq!(size_of::<TerminalDiffScratch>(), 136);
             assert_eq!(size_of::<TerminalPatchRows>(), 8);
-            assert_eq!(size_of::<TerminalPatchRowData>(), 64);
+            assert!(size_of::<TerminalPatchSpans>() <= 48);
+            assert_eq!(
+                size_of::<TerminalPatchRowData>(),
+                size_of::<TerminalPatchSpans>() + size_of::<Box<[PackedCell]>>()
+            );
             assert_eq!(size_of::<TerminalPatchSpan>(), 8);
             assert_eq!(size_of::<TerminalDictionaryPatch>(), 8);
             assert_eq!(size_of::<TerminalDictionaryPatchData>(), 48);

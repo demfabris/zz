@@ -8,8 +8,8 @@ This directory is a source snapshot of `libghostty-vt-sys` from
 - Upstream crate version: `0.2.1` (no newer release exists; the stack is unreleased)
 - Upstream wrapper Ghostty pin: `56dbc4a768778753737a3b9cbe0a3f9b4e434553`
 - Upstream Ghostty base: `6301810a48aaa3426887a4316668f18833a40138` (main, 2026-09-25)
-- Local Ghostty pin: [`demfabris/ghostty@6fce227c`](https://github.com/demfabris/ghostty/commit/6fce227c55d288e35c9fedfd090f286cc74a8ad8)
-- Fork branch: `zz-2026-09-25`; the previous pin `fa7986a9` stays on `codex/cabi-signal-stack`
+- Local Ghostty pin: [`demfabris/ghostty@713374af`](https://github.com/demfabris/ghostty/commit/713374afee3d4890f14733877fb51d831ffc82ee)
+- Fork branch: `zz-2026-09-29`, two commits on upstream: the C ABI signal-stack option (`6fce227c`, still on `zz-2026-09-25`) and the PageList spare-page reuse (`713374af`: line-limit pruning keeps the last pruned pool page resident for the next grow instead of decommitting and refaulting it; `compress` releases it and trims the last page). The previous pin `fa7986a9` stays on `codex/cabi-signal-stack`
 - License: MIT OR Apache-2.0; the upstream MIT license is retained here.
 - Wrapper source: [`demfabris/libghostty-rs`](https://github.com/demfabris/libghostty-rs)
   branch `zz-2026-09-25`, a fork holding the same commit so a rebase of the PR branch

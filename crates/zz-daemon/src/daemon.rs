@@ -10740,6 +10740,7 @@ impl Shared {
         let capture = if dead {
             terminal.capture_frozen_frame(parsed.options)
         } else {
+            let _round_trips = zz_terminal::allow_actor_round_trips();
             match terminal.capture(parsed.options) {
                 Err(TerminalCaptureError::ActorStopped) => {
                     let retained = {
@@ -10962,6 +10963,7 @@ impl Shared {
             let old_pipe = inner.pane_pipes.remove(&pane);
             (pane, terminal, old_pipe)
         };
+        let _round_trips = zz_terminal::allow_actor_round_trips();
         let had_pipe = old_pipe.is_some();
         if let Some(pipe) = old_pipe {
             stop_pane_pipe(pipe);
@@ -11149,6 +11151,7 @@ impl Shared {
         if !valid || multiplexed {
             return;
         }
+        let _round_trips = zz_terminal::allow_actor_round_trips();
         let Err(error) = terminal.arm_raw_output_tap(token, output) else {
             return;
         };
@@ -11255,6 +11258,7 @@ impl Shared {
     }
 
     fn start_control_output_tap(self: &Arc<Self>, pane: PaneId, terminal: &Arc<TerminalSession>) {
+        let _round_trips = zz_terminal::allow_actor_round_trips();
         let next_token = |daemon: &Self| {
             let mut inner = daemon.inner.lock();
             inner.next_pipe_token = inner.next_pipe_token.wrapping_add(1).max(1);
@@ -14737,6 +14741,7 @@ impl Shared {
                 .ok_or(ServerError::PaneExited(pane))?;
             (pane, terminal, is_agent)
         };
+        let _round_trips = zz_terminal::allow_actor_round_trips();
         let capture = match terminal.capture_last_command() {
             Ok(capture) => capture,
             Err(TerminalCaptureError::NoSemanticMarks) if is_agent => {
@@ -22858,6 +22863,7 @@ impl Shared {
         if let Some(frames) = self.kitty_image_frames.lock().get(&key).cloned() {
             return Some(frames);
         }
+        let _round_trips = zz_terminal::allow_actor_round_trips();
         let image = match terminal.kitty_image(image_id) {
             Ok(Some(image)) if image.generation == generation => image,
             Ok(Some(image)) => {
@@ -22952,6 +22958,7 @@ impl Shared {
             .collect::<Vec<_>>();
         let mut removed = BTreeSet::new();
         let mut stale = Vec::new();
+        let _round_trips = zz_terminal::allow_actor_round_trips();
         for key in candidates {
             match terminal.kitty_image_generation(key.image_id) {
                 Ok(generation) if generation == Some(key.generation) => {}
@@ -35889,6 +35896,7 @@ fn mouse_format_variables(
 /// tree never carries expands the same empty a NULL does, so a read that finds
 /// nothing publishes nothing.
 fn pointer_format_variables(probe: &PointerProbe) -> BTreeMap<String, String> {
+    let _round_trips = zz_terminal::allow_actor_round_trips();
     let mut variables = BTreeMap::new();
     let Ok(context) = probe
         .terminal
@@ -38585,6 +38593,7 @@ fn stop_pane_pipe(mut pipe: PanePipe) {
         log::error!("pipe-pane worker panicked for pane process {}", pipe.pid);
     }
     let terminal = Arc::clone(&pipe.terminal.lock());
+    let _round_trips = zz_terminal::allow_actor_round_trips();
     let _ = terminal.disarm_raw_output_tap(pipe.token);
 }
 
@@ -38658,6 +38667,7 @@ fn drain_control_pane_output(
 }
 
 fn stop_control_output_tap(mut tap: ControlOutputTap) {
+    let _round_trips = zz_terminal::allow_actor_round_trips();
     tap.stop.store(true, Ordering::Release);
     let _ = tap.terminal.disarm_raw_output_tap(tap.token);
     if let Some(worker) = tap.thread.take()
@@ -38873,13 +38883,16 @@ impl DeferredTerminalCommand {
             }
             Self::SetWrapSearch { terminal, enabled } => terminal.set_wrap_search(enabled),
             Self::SetEngineKnobs { terminal, knobs } => terminal.set_engine_knobs(knobs),
-            Self::ArmCopySource { terminal, source } => match source.capture_copy_source() {
-                Ok(captured) => terminal.set_pending_copy_source(Some(Box::new(captured))),
-                Err(error) => log::warn!(
-                    target: "zz_daemon::diagnostics::terminal",
-                    "could not clone the copy-mode source screen: {error}"
-                ),
-            },
+            Self::ArmCopySource { terminal, source } => {
+                let _round_trips = zz_terminal::allow_actor_round_trips();
+                match source.capture_copy_source() {
+                    Ok(captured) => terminal.set_pending_copy_source(Some(Box::new(captured))),
+                    Err(error) => log::warn!(
+                        target: "zz_daemon::diagnostics::terminal",
+                        "could not clone the copy-mode source screen: {error}"
+                    ),
+                }
+            }
             Self::SetAppearance {
                 terminal,
                 appearance,
@@ -42695,6 +42708,7 @@ fn capture_screen(
     pane: PaneId,
     options: &CaptureOptions,
 ) -> Result<String, DaemonError> {
+    let _round_trips = zz_terminal::allow_actor_round_trips();
     match terminal.capture(*options) {
         Ok(screen) => Ok(screen),
         Err(TerminalCaptureError::ActorStopped) => Err(ServerError::PaneExited(pane).into()),

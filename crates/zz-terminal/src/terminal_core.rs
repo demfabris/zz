@@ -48,6 +48,6 @@ pub use session::{
     MAX_LAST_COMMAND_LINES, PointerContext, ProgressBar, ProgressBarState, RawOutputTapError,
     RoundTripGuard, TerminalCaptureError, TerminalCopyReady, TerminalEvent, TerminalEvents,
     TerminalFacts, TerminalProcessExit, TerminalSession, TerminalSessionDiagnostics, TerminalSize,
-    TerminalSpawn, ViewStream, forbid_actor_round_trips, perf_knobs,
+    TerminalSpawn, ViewStream, allow_actor_round_trips, forbid_actor_round_trips, perf_knobs,
 };
 pub use word::{DEFAULT_WORD_SEPARATORS, WordSeparators};

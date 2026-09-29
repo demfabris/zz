@@ -74,6 +74,11 @@ pub fn forbid_actor_round_trips() -> RoundTripGuard {
     RoundTripGuard(ROUND_TRIPS_FORBIDDEN.with(|forbidden| forbidden.replace(true)))
 }
 
+#[must_use]
+pub fn allow_actor_round_trips() -> RoundTripGuard {
+    RoundTripGuard(ROUND_TRIPS_FORBIDDEN.with(|forbidden| forbidden.replace(false)))
+}
+
 pub struct RoundTripGuard(bool);
 
 impl Drop for RoundTripGuard {
@@ -2232,10 +2237,6 @@ impl TerminalSession {
     }
 
     pub fn fresh_viewport(&self) -> Arc<TerminalViewport> {
-        debug_assert!(
-            !ROUND_TRIPS_FORBIDDEN.with(Cell::get),
-            "fresh_viewport called while actor round trips are forbidden"
-        );
         self.commands
             .request(Command::FreshViewport)
             .unwrap_or_else(|_| self.latest_viewport())
@@ -3107,8 +3108,14 @@ impl CommandSender {
         command: impl FnOnce(Sender<T>) -> Command,
     ) -> Result<T, ActorRequestError> {
         let (reply, response) = crossbeam_channel::bounded(1);
+        let command = command(reply);
+        debug_assert!(
+            !ROUND_TRIPS_FORBIDDEN.with(Cell::get),
+            "{} waits on the pane actor while actor round trips are forbidden",
+            command.name()
+        );
         let started = Instant::now();
-        self.send_timeout(command(reply), CAPTURE_TIMEOUT)
+        self.send_timeout(command, CAPTURE_TIMEOUT)
             .map_err(|error| match error {
                 crossbeam_channel::SendTimeoutError::Timeout(_) => ActorRequestError::TimedOut,
                 crossbeam_channel::SendTimeoutError::Disconnected(_) => {

@@ -548,3 +548,91 @@ fn an_interactive_zsh_pane_runs_jobs_in_the_foreground_of_its_tty() {
     });
     assert!(interrupted.elapsed() < Duration::from_secs(20));
 }
+
+#[cfg(unix)]
+#[test]
+fn a_lookup_that_loses_the_foreground_process_keeps_the_pane_command() {
+    let shared = Arc::new(Shared::new(1));
+    let mut context = ExecutionContext::default();
+    run(
+        &shared,
+        &mut context,
+        "new-session",
+        &["-d", "-s", "lost-foreground", "exec /bin/cat"],
+    );
+    let pane = pane_of(&shared, &mut context, "lost-foreground:0.0");
+    let terminal = terminal(&shared, pane);
+    let viewport = terminal.latest_viewport();
+    let command = || {
+        shared
+            .inner
+            .lock()
+            .engine
+            .pane_runtime_facts(pane)
+            .map(|facts| facts.current_command.clone())
+            .unwrap_or_default()
+    };
+    wait_until("the watcher's first runtime sync", || !command().is_empty());
+    thread::sleep(Duration::from_millis(500));
+    shared.synchronize_pane_runtime(pane, &terminal, &viewport, "sleep", false);
+    assert_eq!(command(), "sleep");
+    shared.synchronize_pane_runtime(pane, &terminal, &viewport, "", false);
+    assert_eq!(command(), "sleep");
+    shared.synchronize_pane_runtime(pane, &terminal, &viewport, "bash", false);
+    assert_eq!(command(), "bash");
+    shared.request_shutdown();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_rename_that_falls_due_reads_the_pane_command_afresh() {
+    let shared = Arc::new(Shared::new(1));
+    let mut context = ExecutionContext::default();
+    run(
+        &shared,
+        &mut context,
+        "new-session",
+        &["-d", "-s", "fresh-name", "exec /bin/cat"],
+    );
+    let pane = pane_of(&shared, &mut context, "fresh-name:0.0");
+    let terminal = terminal(&shared, pane);
+    wait_until("cat in the foreground", || {
+        terminal_current_command(&terminal) == "cat"
+    });
+    wait_until("the watcher's first runtime sync", || {
+        shared
+            .inner
+            .lock()
+            .engine
+            .pane_runtime_facts(pane)
+            .is_some_and(|facts| !facts.current_command.is_empty())
+    });
+    thread::sleep(Duration::from_millis(600));
+    let start = Instant::now();
+    {
+        let mut inner = shared.inner.lock();
+        let mut facts = inner
+            .engine
+            .pane_runtime_facts(pane)
+            .cloned()
+            .expect("runtime facts");
+        facts.current_command = "stale".to_owned();
+        let format_facts = FormatHookFacts::default();
+        let mut hooks = DaemonFormatHooks::command(&format_facts);
+        inner
+            .engine
+            .set_pane_runtime_facts_at(pane, facts, &mut hooks, start);
+        inner
+            .engine
+            .note_automatic_rename_output(pane, start + Duration::from_millis(100));
+    }
+    let name = |shared: &Arc<Shared>| {
+        let inner = shared.inner.lock();
+        let window = inner.engine.state.window_for_pane(pane).expect("window");
+        inner.engine.state.windows[&window].name.clone()
+    };
+    assert_eq!(name(&shared), "stale");
+    shared.apply_due_window_renames(start + Duration::from_secs(1));
+    assert_eq!(name(&shared), "cat");
+    shared.request_shutdown();
+}

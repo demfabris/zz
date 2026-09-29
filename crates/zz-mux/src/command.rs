@@ -4105,6 +4105,34 @@ impl MuxEngine {
             .min()
     }
 
+    pub fn note_automatic_rename_output(&mut self, pane: PaneId, now: Instant) {
+        if !self.automatic_rename_throttle {
+            return;
+        }
+        let Some(window) = self.automatic_rename_window(pane) else {
+            return;
+        };
+        match self.window_name_times.get(&window) {
+            Some(last) if *last == now => {}
+            Some(last) if now.saturating_duration_since(*last) < NAME_INTERVAL => {
+                self.pending_window_renames.insert(window);
+            }
+            _ => {
+                self.window_name_times.insert(window, now);
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn due_window_rename_panes(&self, now: Instant) -> Vec<PaneId> {
+        self.pending_window_renames
+            .iter()
+            .filter(|window| !self.window_name_waits(**window, now))
+            .filter_map(|window| self.state.windows.get(window))
+            .map(|window| window.active_pane)
+            .collect()
+    }
+
     pub fn apply_due_window_renames(&mut self, now: Instant, hooks: &mut impl StatusHooks) -> bool {
         self.window_name_times
             .retain(|window, _| self.state.windows.contains_key(window));

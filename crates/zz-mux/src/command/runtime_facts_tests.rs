@@ -91,6 +91,52 @@ fn renames_inside_the_name_interval_wait_for_the_deadline() {
 }
 
 #[test]
+fn output_inside_the_name_interval_leaves_the_name_check_to_the_deadline() {
+    let (mut engine, window, active, other) = engine_with_panes();
+    engine.set_automatic_rename_throttle(true);
+    let mut hooks = CommandHooks::new(engine.format_now());
+    let start = Instant::now();
+    let facts = |engine: &MuxEngine, command: &str| PaneRuntimeFacts {
+        current_command: command.to_owned(),
+        ..engine
+            .pane_runtime_facts(active)
+            .cloned()
+            .unwrap_or_default()
+    };
+    let vim = facts(&engine, "vim");
+    assert!(engine.set_pane_runtime_facts_at(active, vim, &mut hooks, start));
+    assert_eq!(engine.state.windows[&window].name, "vim");
+    engine.note_automatic_rename_output(active, start);
+    engine.note_automatic_rename_output(other, start + NAME_INTERVAL / 5);
+    assert_eq!(engine.next_window_rename_deadline(), None);
+    engine.note_automatic_rename_output(active, start + NAME_INTERVAL / 5);
+    assert_eq!(
+        engine.next_window_rename_deadline(),
+        Some(start + NAME_INTERVAL)
+    );
+    assert!(
+        engine
+            .due_window_rename_panes(start + NAME_INTERVAL / 2)
+            .is_empty()
+    );
+    assert_eq!(
+        engine.due_window_rename_panes(start + NAME_INTERVAL),
+        vec![active]
+    );
+    assert!(!engine.apply_due_window_renames(start + NAME_INTERVAL, &mut hooks));
+    let quiet = start + NAME_INTERVAL * 3;
+    engine.note_automatic_rename_output(active, quiet);
+    assert_eq!(engine.next_window_rename_deadline(), None);
+    let less = facts(&engine, "less");
+    assert!(engine.set_pane_runtime_facts_at(active, less, &mut hooks, quiet + NAME_INTERVAL / 5));
+    assert_eq!(engine.state.windows[&window].name, "vim");
+    assert_eq!(
+        engine.next_window_rename_deadline(),
+        Some(quiet + NAME_INTERVAL)
+    );
+}
+
+#[test]
 fn an_unthrottled_engine_renames_every_change() {
     let (mut engine, window, active, _) = engine_with_panes();
     assert!(run(&mut engine, active, "vim"));

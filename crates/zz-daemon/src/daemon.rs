@@ -24734,8 +24734,13 @@ impl Shared {
                 .cloned()
                 .unwrap_or_default();
             let current_path = live_path.unwrap_or_else(|| previous.start_path.clone());
+            let current_command = if current_command.is_empty() {
+                previous.current_command.clone()
+            } else {
+                current_command.to_owned()
+            };
             let runtime = PaneRuntimeFacts {
-                current_command: current_command.to_owned(),
+                current_command,
                 current_path,
                 dead_signal: previous.dead_signal,
                 reported_path,
@@ -24743,7 +24748,8 @@ impl Shared {
                 pid,
                 tty,
             };
-            if inner.engine.pane_runtime_facts(pane) == Some(&runtime) {
+            let now = Instant::now();
+            let result = if inner.engine.pane_runtime_facts(pane) == Some(&runtime) {
                 (
                     None,
                     Vec::new(),
@@ -24752,7 +24758,6 @@ impl Shared {
                     silence_schedule,
                 )
             } else {
-                let now = Instant::now();
                 let rename_due = previous.current_command != runtime.current_command
                     && inner.engine.automatic_rename_due(pane, now);
                 let facts = if rename_due {
@@ -24773,7 +24778,6 @@ impl Shared {
                     }
                     _ => Vec::new(),
                 };
-                self.schedule_window_renames(&mut inner);
                 (
                     changed.then_some(if renamed {
                         timers::PublishReason::Tree
@@ -24785,7 +24789,12 @@ impl Shared {
                     alert_window,
                     silence_schedule,
                 )
+            };
+            if output_activity {
+                inner.engine.note_automatic_rename_output(pane, now);
             }
+            self.schedule_window_renames(&mut inner);
+            result
         };
         if output_activity || changed.is_some() {
             self.request_peer_probe();

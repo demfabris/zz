@@ -396,6 +396,14 @@ Rule: every wave exit gets one `--strict` gate run on the Mac, committed as
 
 ## Traps
 
+- **Stale paint slips past a single fixture run.** At the wave-1 exit, `compat/tui-screen-diff.sh`
+  on the release build showed 13-14 of 147 checkpoints with stale pane or status rows per run
+  (1-6 on a debug build; the pre-ATTACH release build matched all 147 every time), while the lane
+  had reported it green. `ZZ_PERF_TUI_COALESCE=0` clears it, so it sits in zz-tui's coalesced
+  paint path. Merge checks now run screen-diff three times on the release build (`gen.py`).
+  Fix lane W1-ATTACH-PAINT (`~/dev/zz-attach-paint`, `perf/attach-paint`) in flight; perf/wave1
+  does not merge into main until it lands and the exit gate is rerun.
+
 - **Never `git stash`**, `reset --hard`, or path checkouts in a tree another session uses. To revert your own edit, re-edit. Keep the index empty.
 - **`isolation: worktree` fails** in this repo (`.claude -> .agents` is a committed symlink). Create worktrees by hand with `git worktree add`.
 - **Warm targets.** macOS cloned `target/` with APFS `cp -c`. On Linux `cp -R --reflink=always` works on btrfs, XFS with reflink, bcachefs; on ext4 it fails, so build fresh (about 10 min) or use sccache. Never let two builds share one `CARGO_TARGET_DIR`: the W1-ATTACH parity reviewer's probe overwrote the lane's test binary that way.

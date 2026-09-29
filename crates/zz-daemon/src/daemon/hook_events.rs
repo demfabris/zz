@@ -26,16 +26,24 @@ pub(super) fn format_facts_unread(command: &str, args: &[RawText]) -> bool {
     if *EAGER_FACTS {
         return false;
     }
-    let plain = || args.iter().all(|argument| !argument.contains('#'));
     match command {
         "bind-key" | "unbind-key" | "has-session" => true,
-        "set-option" | "set-window-option" => {
-            plain()
-                && args.iter().all(|argument| {
-                    argument.is_empty() || !"automatic-rename".starts_with(&**argument)
-                })
+        "set-option" | "set-window-option" => zz_protocol::catalog_command_spec(command)
+            .and_then(|spec| zz_protocol::parse_tmux_options(spec, args).ok())
+            .is_some_and(|parsed| {
+                let expanded = parsed
+                    .options
+                    .contains(&zz_protocol::TmuxOption::Flag("-F"));
+                let mut positionals = parsed.positionals.iter();
+                let name = positionals.next().map_or("", |name| &**name);
+                !name.is_empty()
+                    && !name.contains('#')
+                    && !"automatic-rename".starts_with(name)
+                    && !(expanded && positionals.any(|value| value.contains('#')))
+            }),
+        "show-options" | "show-window-options" => {
+            args.iter().all(|argument| !argument.contains('#'))
         }
-        "show-options" | "show-window-options" => plain(),
         _ => false,
     }
 }

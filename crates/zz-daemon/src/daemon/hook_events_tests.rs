@@ -125,8 +125,17 @@ fn facts_are_withheld_only_from_commands_that_expand_nothing() {
     assert!(unread(&["unbind-key", "-T", "table", "x"]));
     assert!(unread(&["show-options", "-gv", "status"]));
     assert!(unread(&["has-session", "-t", "s"]));
-    assert!(!unread(&["set-option", "-g", "@plugin", "#{session_name}"]));
-    assert!(!unread(&["set-option", "-g", "status-left", "#[fg=red]x"]));
+    assert!(unread(&["set-option", "-g", "@plugin", "#{session_name}"]));
+    assert!(unread(&["set-option", "-g", "status-left", "#[fg=red]x"]));
+    assert!(!unread(&[
+        "set-option",
+        "-gF",
+        "@plugin",
+        "#{session_name}"
+    ]));
+    assert!(!unread(&["set-option", "-g", "@#{session_name}", "value"]));
+    assert!(!unread(&["set-option", "-g"]));
+    assert!(!unread(&["set-option", "-Z", "@x", "value"]));
     assert!(!unread(&["set-option", "-g", "automatic-rename", "on"]));
     assert!(!unread(&["set-option", "-g", "automatic-ren", "on"]));
     assert!(!unread(&["set-window-option", "automatic-rename"]));
@@ -141,6 +150,12 @@ fn facts_are_withheld_only_from_commands_that_expand_nothing() {
         &["set-option", "-g", "@plain", "value"],
     )
     .expect("set");
+    run(
+        &shared,
+        &mut context,
+        &["set-option", "-g", "@literal", "#{session_name}"],
+    )
+    .expect("set literal");
     run(
         &shared,
         &mut context,
@@ -168,10 +183,14 @@ fn facts_are_withheld_only_from_commands_that_expand_nothing() {
     let shown = run(
         &shared,
         &mut context,
-        &["display-message", "-p", "#{@plain}|#{@expanded}"],
+        &[
+            "display-message",
+            "-p",
+            "#{@plain}|#{@expanded}|#{@literal}",
+        ],
     )
     .expect("display");
-    assert_eq!(shown.output, "value|facts:value");
+    assert_eq!(shown.output, "value|facts:value|#{session_name}");
     let listed = run(&shared, &mut context, &["list-keys", "-T", "hooks-table"]).expect("keys");
     assert!(listed.output.contains("hooks-table x"), "{}", listed.output);
 }

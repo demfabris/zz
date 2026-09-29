@@ -714,6 +714,11 @@ As built (branch `perf/publish`), where it departs from the scope above:
   no per-event `tcgetpgrp`. `RegistryCache` in claude_peers.rs re-reads a record only when its
   (mtime, size, inode) changes, or when it was read within 2 s of its mtime (a coarse clock can
   hide a same-length rewrite, as git's racy-clean check), and re-lists the directory the same way.
+- Merged onto FOOTPRINT and FORMAT, the command path got fast enough that `display-message` right
+  after `copy-mode` ran before the terminal actor entered the mode (`#{pane_in_mode}` read 0 in
+  compat `smoke/copy-mode-formats`). A command that sends copy-mode view actions now ends with one
+  `TerminalSession::settle` request per terminal, answered once the actor has applied them
+  (`a_copy_mode_command_is_visible_to_the_next_command`).
 
 Measured at `--quick` on a loaded host (load 7-22 on 16 CPUs). Before is the W0 quick JSON
 (`baseline-quick-macbook-17e17115.json`), which a fresh 157ac6a3 build reproduces: fixed service

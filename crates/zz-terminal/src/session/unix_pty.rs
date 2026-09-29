@@ -114,12 +114,25 @@ pub(super) fn spawn(
     let mut descriptors = DescriptorScratch::new();
     #[allow(
         unsafe_code,
-        reason = "the child only makes async-signal-safe calls on memory prepared before the fork"
+        reason = "the child only makes async-signal-safe calls on memory prepared before the fork, \
+                  and every signal stays blocked until it has reset their dispositions"
     )]
-    match unsafe { libc::fork() } {
-        -1 => Err(io::Error::last_os_error()),
-        0 => unsafe { exec_child(&plan, &pointers, slave.as_raw_fd(), &mut descriptors) },
-        pid => Ok(pid.cast_unsigned()),
+    unsafe {
+        let mut blocked: libc::sigset_t = std::mem::zeroed();
+        let mut previous: libc::sigset_t = std::mem::zeroed();
+        libc::sigfillset(&raw mut blocked);
+        libc::pthread_sigmask(libc::SIG_SETMASK, &raw const blocked, &raw mut previous);
+        let pid = libc::fork();
+        if pid == 0 {
+            exec_child(&plan, &pointers, slave.as_raw_fd(), &mut descriptors);
+        }
+        let error = io::Error::last_os_error();
+        libc::pthread_sigmask(libc::SIG_SETMASK, &raw const previous, std::ptr::null_mut());
+        if pid == -1 {
+            Err(error)
+        } else {
+            Ok(pid.cast_unsigned())
+        }
     }
 }
 
@@ -281,6 +294,11 @@ impl DescriptorScratch {
     }
 }
 
+#[cfg(target_os = "macos")]
+const SIGNAL_LIMIT: libc::c_int = 32;
+#[cfg(not(target_os = "macos"))]
+const SIGNAL_LIMIT: libc::c_int = 65;
+
 #[allow(
     unsafe_code,
     reason = "runs in the forked child between fork and exec, on memory prepared before the fork"
@@ -292,16 +310,10 @@ unsafe fn exec_child(
     descriptors: &mut DescriptorScratch,
 ) -> ! {
     unsafe {
-        for signal in [
-            libc::SIGCHLD,
-            libc::SIGHUP,
-            libc::SIGINT,
-            libc::SIGQUIT,
-            libc::SIGTERM,
-            libc::SIGALRM,
-            libc::SIGPIPE,
-        ] {
-            libc::signal(signal, libc::SIG_DFL);
+        for signal in 1..SIGNAL_LIMIT {
+            if signal != libc::SIGKILL && signal != libc::SIGSTOP {
+                libc::signal(signal, libc::SIG_DFL);
+            }
         }
         let empty: libc::sigset_t = std::mem::zeroed();
         libc::sigprocmask(libc::SIG_SETMASK, &raw const empty, std::ptr::null_mut());

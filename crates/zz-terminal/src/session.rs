@@ -7144,26 +7144,21 @@ fn signal_terminal_process_groups(
     shell_process_id: Option<u32>,
     signal: rustix::process::Signal,
 ) {
-    let mut groups = SmallVec::<[rustix::process::Pid; 2]>::new();
-    if let Some(group) = master
+    let shell = shell_process_id
+        .filter(|group| *group != 0)
+        .and_then(|group| i32::try_from(group).ok())
+        .and_then(rustix::process::Pid::from_raw);
+    let foreground = master
         .process_group_leader()
-        .and_then(|group| u32::try_from(group).ok())
-        .filter(|group| *group != 0)
-        .and_then(|group| i32::try_from(group).ok())
         .and_then(rustix::process::Pid::from_raw)
-    {
-        groups.push(group);
-    }
-    if let Some(group) = shell_process_id
-        .filter(|group| *group != 0)
-        .and_then(|group| i32::try_from(group).ok())
-        .and_then(rustix::process::Pid::from_raw)
-        && !groups.contains(&group)
-    {
-        groups.push(group);
-    }
-    for group in groups {
+        .filter(|group| Some(*group) != shell);
+    if let Some(group) = foreground {
         let _ = rustix::process::kill_process_group(group, signal);
+    }
+    if let Some(shell) = shell
+        && rustix::process::kill_process_group(shell, signal) == Err(rustix::io::Errno::SRCH)
+    {
+        let _ = rustix::process::kill_process(shell, signal);
     }
 }
 

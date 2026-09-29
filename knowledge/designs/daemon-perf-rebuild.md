@@ -2,7 +2,7 @@
 type: Design Plan
 title: Daemon performance rebuild
 description: "The campaign to bring the zz daemon to tmux cost per command, per pane and per attach while keeping the 5x output throughput lead - a permanent zz-vs-tmux gate first, then waves that remove unrequested work (one-frame Exec commands, change-driven publication, lazy formats, frames only for watchers, a compact wire under one unreleased protocol version), then one mux loop and PTY shards; the lane brief source with targets, merge order, write zones, gates and rollback switches."
-status: Approved 2026-09-28; wave 0 (gate and this plan) built; release freeze until W4 exits; wave 1 in progress on perf/wave1 (FOOTPRINT, FORMAT, PUBLISH and PANE merged)
+status: Approved 2026-09-28; wave 0 (gate and this plan) built; release freeze until W4 exits; wave 1 in progress on perf/wave1 (FOOTPRINT, FORMAT, PUBLISH, PANE and EXEC merged)
 resource: crates/zz-daemon/src/daemon.rs
 tags:
 - performance
@@ -1525,6 +1525,34 @@ real `zz wait-for` kept running. Killing the CLI process itself drops the waiter
 (threads 11 -> 10, the next `wait-for -S` sets the woken flag and a later `wait-for` returns 0). W2-CTRL: control lines can reuse `Exec` as built (results are
 `CommandResponse` frames, not `ExecOutput`; `ExecResumeKind` has no in-place attach upgrade yet),
 and the pinned wrapper path is `TmuxShimGuard.executable`.
+
+Merged onto FOOTPRINT, FORMAT, PUBLISH and PANE (`perf/wave1`, merge `a26b6368`). The rebase
+dropped the lane's `TerminalSession::barrier` for PUBLISH's `settle`, which is the same request
+(`ce835e6d`). Merge gate (`w1-5-exec-macbook-a26b6368.json`, full, load 4-5), W1-4 -> merge, tmux
+in the same run: `cli.cpu.display.p1` 0.61 -> 0.111 ms (tmux 0.100), `cli.cpu.display.p20` 0.85
+-> 0.117 ms (tmux 0.143, floor 0.40 now passes), `cli.cpu.list_panes_a.s20` 1.11 -> 0.217 ms and
+`list_windows_a.s20` 1.07 -> 0.175 ms (both below tmux), so PANE's `known_views` removed the
+`ReleaseView` wakes as planned; `cli.instr.display.p1` 3.77 -> 0.19 Minstr (tmux 0.48),
+`.display.p20` 6.85 -> 0.32 (tmux 0.87); `cold.wall.new_session` 36.3 -> 7.8 ms (tmux 12.5);
+`spawn.cpu.kill_pane` 1.09 -> 0.29 ms, `split_shell` 2.18 -> 0.96, `new_window` 2.35 -> 0.98 (all
+pass); `spawn.wall.split_empty_P` 4.8 -> 3.2 ms; `mem.footprint.p1` 6.63 -> 6.14 MiB (passes the
+6.5 rule), `.p20` 31.2 -> 26.1 MiB; `attach.wire_s2c.p1` 186 -> 101 KB; detached throughput 243
+MB/s (4.8x tmux). 59 pass, 11 fail, 0 regressed, 1 drifted. The failures are `chatty.tty_kibps.hidden`
+2.8 KiB/s (PANE's row, was 3.3), `attach.*` (W1-ATTACH; `attach.tty_total.p1` is the drifted row
+and reads the same 175.7 KB as at the PANE merge) and `echo.*`. `echo.p50.busy30` read 0.85 ms
+against 0.50 at W1-4; three interleaved A/B runs against a build of `6a8f36a0` gave 0.49-0.61 ms
+before and 0.48-0.97 ms after with tmux moving the same way (ratio 4.4-4.9 before, 4.6-5.4
+after), so it is load noise, not this lane.
+
+Merge checks: `cargo fmt --check`, workspace clippy `-D warnings`, `cargo test --workspace
+--all-features` (only zz-daemon lib tests failed under full load: `history_request_is_guarded_...`
+twice and `kitty_images_and_placements_...` once; each passes alone and 36 of 36 times with 12
+copies in parallel on both this merge and `6a8f36a0`), `just compat-check` (with Homebrew bash
+first on PATH; `/bin/bash` 3.2 trips `set -u` on an empty array in the roster tally test),
+`compat/run.sh` full corpus: the four `known/` rows match the accepted summary, the other red rows
+are the host rows above and are red on `6a8f36a0` too (`smoke/keys-prefix-attached` flips between
+runs on both builds), and the three installed-layout rows pass on both builds once the binary is
+named `zz_cli`; `compat/attached-client.sh` PASS.
 
 ## W1-ATTACH: attach path and TUI paint (effort M)
 

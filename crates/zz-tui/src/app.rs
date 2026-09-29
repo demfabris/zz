@@ -999,15 +999,14 @@ pub(crate) fn run(
                             })
                             .map_err(|error| error.to_string())?;
                     }
-                    if *crate::COALESCE && size == previous {
-                        continue;
+                    if !*crate::COALESCE || size != previous {
+                        send_resizes_and_sync_browser(
+                            &mut model,
+                            &client,
+                            &mut browser,
+                            &mut renderer,
+                        )?;
                     }
-                    send_resizes_and_sync_browser(
-                        &mut model,
-                        &client,
-                        &mut browser,
-                        &mut renderer,
-                    )?;
                     renderer.invalidate();
                     renderer
                         .paint(&model, true)

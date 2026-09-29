@@ -2071,6 +2071,12 @@ impl TerminalSession {
             .map_err(Into::into)
     }
 
+    pub fn settle(&self) -> bool {
+        self.commands
+            .request(|reply| Command::Settle { reply })
+            .is_ok()
+    }
+
     /// Open the observation window that binds one pasted image to the next
     /// numbered placeholder the application prints.
     pub fn open_pending_paste(&self, token: u64) {
@@ -2379,6 +2385,9 @@ enum Command {
         token: u64,
         reply: Sender<()>,
     },
+    Settle {
+        reply: Sender<()>,
+    },
     Capture(Box<CaptureRequest>),
     PointerContext(Box<PointerContextRequest>),
     SemanticCapture(Box<LastCommandRequest>),
@@ -2418,6 +2427,7 @@ impl Command {
             Self::Output(_) => "output",
             Self::ArmRawOutputTap { .. } => "arm-raw-output-tap",
             Self::DisarmRawOutputTap { .. } => "disarm-raw-output-tap",
+            Self::Settle { .. } => "settle",
             Self::Capture(_) => "capture",
             Self::PointerContext(_) => "pointer-context",
             Self::SemanticCapture(_) => "semantic-capture",
@@ -4794,6 +4804,9 @@ fn run_output_view(
                     }
                     let _ = reply.send(());
                 }
+                Ok(Command::Settle { reply }) => {
+                    let _ = reply.send(());
+                }
                 Ok(Command::Terminate | Command::Shutdown) | Err(_) => return Ok(()),
             },
             recv(search_results) -> result => {
@@ -5592,6 +5605,9 @@ fn run_terminal(
                     {
                         raw_output_tap = None;
                     }
+                    let _ = reply.send(());
+                }
+                Command::Settle { reply } => {
                     let _ = reply.send(());
                 }
                 Command::Resize(next) => {

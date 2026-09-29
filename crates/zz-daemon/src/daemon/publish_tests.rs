@@ -1,6 +1,6 @@
 use super::tests::{
-    input_test_key, key_table_events, key_table_fixture, run_test_command, table_active,
-    take_reliable_messages, test_key,
+    copy_mode_fixture, input_test_key, key_table_events, key_table_fixture, run_test_command,
+    table_active, take_reliable_messages, test_key,
 };
 use super::*;
 use zz_terminal::{KeyCode, Modifiers};
@@ -777,5 +777,49 @@ fn a_pane_whose_root_process_is_the_agent_gets_its_peer_state() {
         assert!(Instant::now() < deadline, "agent state never arrived");
         thread::sleep(Duration::from_millis(20));
     }
+    shared.request_shutdown();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_copy_mode_command_is_visible_to_the_next_command() {
+    let (shared, client, mut context, pane, _terminal, _mailbox) =
+        copy_mode_fixture("copy-mode-settles", "seq 1 3000");
+    let target = pane.to_string();
+    let mut answer = |format: &str| {
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-p", "-t", &target, format]),
+            )
+            .expect("display-message")
+            .output
+            .trim()
+            .to_owned()
+    };
+    assert_eq!(answer("#{pane_in_mode}"), "0");
+    shared
+        .execute(
+            client,
+            ClientKind::Interactive,
+            &mut ExecutionContext::default(),
+            &CommandInvocation::new("copy-mode", ["-t", &target]),
+        )
+        .expect("copy-mode");
+    assert_eq!(answer("#{pane_in_mode} #{pane_mode}"), "1 copy-mode");
+    let entry = answer("#{copy_cursor_y}")
+        .parse::<u32>()
+        .expect("cursor row");
+    shared
+        .execute(
+            client,
+            ClientKind::Interactive,
+            &mut ExecutionContext::default(),
+            &CommandInvocation::new("send-keys", ["-X", "-t", &target, "cursor-up"]),
+        )
+        .expect("send-keys -X");
+    assert_eq!(answer("#{copy_cursor_y}"), (entry - 1).to_string());
     shared.request_shutdown();
 }

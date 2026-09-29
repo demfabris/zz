@@ -9780,14 +9780,25 @@ impl Shared {
         }
         self.refresh_control_output_taps();
 
+        let mut copy_mode_terminals: Vec<Arc<TerminalSession>> = Vec::new();
         for command in deferred_terminal_commands {
             #[cfg(test)]
             let wrap_search = command.wrap_search();
+            if let Some(terminal) = command.copy_mode_terminal()
+                && !copy_mode_terminals
+                    .iter()
+                    .any(|settled| Arc::ptr_eq(settled, terminal))
+            {
+                copy_mode_terminals.push(Arc::clone(terminal));
+            }
             command.run();
             #[cfg(test)]
             if let Some(enabled) = wrap_search {
                 self.delivered_wrap_search_commands.lock().push(enabled);
             }
+        }
+        for terminal in copy_mode_terminals {
+            terminal.settle();
         }
         for (selected, pane, keys, repeat) in pane_mode_keys {
             self.inject_pane_mode_keys(selected, context, pane, &keys, repeat)?;
@@ -38791,6 +38802,23 @@ enum DeferredTerminalCommand {
 }
 
 impl DeferredTerminalCommand {
+    fn copy_mode_terminal(&self) -> Option<&Arc<TerminalSession>> {
+        match self {
+            Self::ViewAction {
+                terminal, action, ..
+            } if terminal_view_action_enters_copy_mode(action)
+                || matches!(
+                    action,
+                    zz_terminal::TerminalViewAction::CopyMode(_)
+                        | zz_terminal::TerminalViewAction::CopyModeCounted { .. }
+                ) =>
+            {
+                Some(terminal)
+            }
+            _ => None,
+        }
+    }
+
     #[cfg(test)]
     const fn wrap_search(&self) -> Option<bool> {
         match self {
@@ -83123,7 +83151,7 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[cfg(unix)]
-    fn copy_mode_fixture(
+    pub(super) fn copy_mode_fixture(
         name: &str,
         producer: &str,
     ) -> (

@@ -11779,6 +11779,7 @@ dependencies = [
  "filedescriptor",
  "foldhash",
  "image",
+ "libc",
  "libghostty-vt",
  "log",
  "parking_lot",

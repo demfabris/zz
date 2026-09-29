@@ -421,6 +421,93 @@ mod daemon_autostart {
     }
 
     #[test]
+    fn daemon_panes_own_their_tty_and_report_the_program_they_exec() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) || !Path::new("/bin/zsh").exists() {
+            eprintln!("SKIPPED: needs Unix socket binding and /bin/zsh");
+            return;
+        }
+        std::fs::write(&fixture.config, b"set -g default-shell /bin/zsh\n")
+            .expect("zsh default shell");
+        let created = fixture.run(&[
+            "new-session",
+            "-d",
+            "-s",
+            "tty",
+            "-x",
+            "80",
+            "-y",
+            "10",
+            "exec /bin/zsh -fi",
+        ]);
+        assert_eq!(created.status.code(), Some(0), "{created:?}");
+        let screen = || {
+            String::from_utf8_lossy(&fixture.run(&["capture-pane", "-p", "-t", "tty"]).stdout)
+                .into_owned()
+        };
+        let wait = |what: &str, ready: &dyn Fn() -> bool| {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while !ready() {
+                assert!(
+                    Instant::now() < deadline,
+                    "timed out waiting for {what}: {}",
+                    screen()
+                );
+                thread::sleep(Duration::from_millis(20));
+            }
+        };
+        let keys = |arguments: &[&str]| {
+            let mut command = vec!["send-keys", "-t", "tty"];
+            command.extend_from_slice(arguments);
+            assert_eq!(fixture.run(&command).status.code(), Some(0));
+        };
+        keys(&["[[ -o monitor ]] && print ZZ_MONITOR_ON", "Enter"]);
+        wait("job control", &|| screen().contains("\nZZ_MONITOR_ON"));
+        keys(&["sleep 30", "Enter"]);
+        wait("sleep in the foreground", &|| {
+            String::from_utf8_lossy(
+                &fixture
+                    .run(&[
+                        "display-message",
+                        "-p",
+                        "-t",
+                        "tty",
+                        "#{pane_current_command}",
+                    ])
+                    .stdout,
+            )
+            .trim()
+                == "sleep"
+        });
+        let interrupted = Instant::now();
+        keys(&["C-c"]);
+        keys(&["print ZZ_BACK", "Enter"]);
+        wait("the prompt after C-c", &|| screen().contains("\nZZ_BACK"));
+        assert!(interrupted.elapsed() < Duration::from_secs(15));
+
+        for window in 1..=5 {
+            let created = fixture.run(&["new-window", "-d", "-t", "tty:", "sleep", "30"]);
+            assert_eq!(created.status.code(), Some(0), "{created:?}");
+            let target = format!("tty:{window}");
+            wait("a silent pane to report its program", &|| {
+                String::from_utf8_lossy(
+                    &fixture
+                        .run(&[
+                            "display-message",
+                            "-p",
+                            "-t",
+                            &target,
+                            "#{pane_current_command}",
+                        ])
+                        .stdout,
+                )
+                .trim()
+                    == "sleep"
+            });
+        }
+    }
+
+    #[test]
     fn events_stream_ready_then_window_hook() {
         use std::io::BufRead as _;
 

@@ -1745,18 +1745,11 @@ impl Renderer {
             if previous == Some(line) {
                 continue;
             }
-            let (column, span) = match previous.filter(|_| *crate::COALESCE) {
-                Some(previous) => match changed_span(previous, line) {
-                    Some(changed) => changed,
-                    None => continue,
-                },
-                None => (0, line.clone()),
-            };
             write_styled_text(
                 &mut self.output,
-                x.saturating_add(column),
+                x,
                 row,
-                &span,
+                line,
                 model.appearance.foreground,
                 model.appearance.background,
                 &model.appearance,
@@ -2917,84 +2910,6 @@ fn fill_cells(fill: char, width: usize) -> String {
     )
 }
 
-/// One column of a styled line as the terminal holds it: a cluster starting
-/// there, or the right half of the wide cluster before it.
-#[derive(PartialEq)]
-enum StatusColumn<'a> {
-    Lead(&'a str, &'a TmuxStyle),
-    Tail,
-}
-
-fn status_columns(line: &StyledLine) -> Vec<StatusColumn<'_>> {
-    let mut columns = Vec::new();
-    for segment in &line.segments {
-        let text = segment.text.as_str();
-        let mut lead = None;
-        for (at, character) in text.char_indices() {
-            let end = at + character.len_utf8();
-            let width = character.width().unwrap_or(0);
-            if width == 0 {
-                if let Some((index, start)) = lead
-                    && let Some(StatusColumn::Lead(cluster, _)) = columns.get_mut(index)
-                {
-                    *cluster = &text[start..end];
-                }
-                continue;
-            }
-            lead = Some((columns.len(), at));
-            columns.push(StatusColumn::Lead(&text[at..end], &segment.style));
-            if width > 1 {
-                columns.push(StatusColumn::Tail);
-            }
-        }
-    }
-    columns
-}
-
-/// The columns of `next` that differ from `previous`, widened to whole
-/// clusters on both sides, as the column they start at and the text to write
-/// there. `None` when the two lines draw the same cells.
-fn changed_span(previous: &StyledLine, next: &StyledLine) -> Option<(u16, StyledLine)> {
-    let (before, after) = (status_columns(previous), status_columns(next));
-    if before.len() != after.len() {
-        return Some((0, next.clone()));
-    }
-    let mut start = before
-        .iter()
-        .zip(&after)
-        .position(|(old, new)| old != new)?;
-    let mut end = before.len()
-        - 1
-        - before
-            .iter()
-            .rev()
-            .zip(after.iter().rev())
-            .position(|(old, new)| old != new)?;
-    let tail = |columns: &[StatusColumn<'_>], index: usize| {
-        matches!(columns.get(index), Some(StatusColumn::Tail))
-    };
-    loop {
-        let widen_start = start > 0 && (tail(&before, start) || tail(&after, start));
-        let widen_end = tail(&before, end + 1) || tail(&after, end + 1);
-        if widen_start {
-            start -= 1;
-        }
-        if widen_end {
-            end += 1;
-        }
-        if !widen_start && !widen_end {
-            break;
-        }
-    }
-    let mut span = StyledLine::default();
-    for column in &after[start..=end] {
-        if let StatusColumn::Lead(text, style) = column {
-            span.push_segment(text, (*style).clone());
-        }
-    }
-    Some((u16::try_from(start).unwrap_or(u16::MAX), span))
-}
-
 /// Nothing but cursor placement and visibility, which a terminal already
 /// showing the same placement is not changed by.
 fn cursor_only(bytes: &[u8]) -> bool {
@@ -3959,40 +3874,6 @@ mod tests {
             receive.recv_timeout(wait).is_ok(),
             "an invalidated screen repaints"
         );
-    }
-
-    #[test]
-    fn a_status_row_repaints_only_the_columns_that_changed() {
-        let red = TmuxStyle {
-            fg: Some(TmuxColour::Basic(1)),
-            ..TmuxStyle::default()
-        };
-        let line = |segments: &[(&str, &TmuxStyle)]| {
-            let mut line = StyledLine::default();
-            for (text, style) in segments {
-                line.push_segment(text, (*style).clone());
-            }
-            line
-        };
-        let plain = TmuxStyle::default();
-        let before = line(&[("[po] 0:bash* 1:sleep ", &plain), ("12:00", &red)]);
-        let after = line(&[("[po] 0:bash* 1:bash  ", &plain), ("12:00", &red)]);
-        let (column, span) = changed_span(&before, &after).expect("names differ");
-        assert_eq!(column, 15);
-        assert_eq!(span.plain_text(), "bash ");
-        assert!(changed_span(&before, &before).is_none());
-
-        let clock = line(&[("[po] 0:bash* 1:sleep ", &plain), ("12:01", &red)]);
-        let (column, span) = changed_span(&before, &clock).expect("clock moved");
-        assert_eq!((column, span.plain_text()), (25, "1".to_owned()));
-        assert_eq!(span.segments[0].style, red);
-
-        let wide = line(&[("ab中d", &plain)]);
-        let narrow = line(&[("abxyd", &plain)]);
-        let (column, span) = changed_span(&wide, &narrow).expect("wide cell replaced");
-        assert_eq!((column, span.plain_text()), (2, "xy".to_owned()));
-        let (column, span) = changed_span(&narrow, &wide).expect("wide cell drawn");
-        assert_eq!((column, span.plain_text()), (2, "中".to_owned()));
     }
 
     #[test]

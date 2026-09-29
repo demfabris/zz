@@ -2798,7 +2798,7 @@ mod daemon_autostart {
         let (rendered, captured, early_status) = capture_tui_until_wide(
             &fixture,
             &["attach-session", "-t", "multirow"],
-            &[b"multirow]", b"ROWTWO"],
+            &[b"[multirow]", b"ROWTWO"],
         );
         assert!(
             rendered,
@@ -4301,8 +4301,11 @@ mod daemon_autostart {
         let created = fixture.run(&["new-session", "-d", "-s", "mousey"]);
         assert_eq!(created.status.code(), Some(0));
 
-        let (rendered, captured, early_status) =
-            capture_tui_until(&fixture, &["attach-session", "-t", "mousey"], &[b"mousey]"]);
+        let (rendered, captured, early_status) = capture_tui_until(
+            &fixture,
+            &["attach-session", "-t", "mousey"],
+            &[b"[mousey]"],
+        );
         assert!(
             rendered,
             "child exited early={early_status:?}; pty output={}",
@@ -4322,8 +4325,11 @@ mod daemon_autostart {
 
         let disabled = fixture.run(&["set", "-g", "mouse", "off"]);
         assert_eq!(disabled.status.code(), Some(0));
-        let (rendered, captured, early_status) =
-            capture_tui_until(&fixture, &["attach-session", "-t", "mousey"], &[b"mousey]"]);
+        let (rendered, captured, early_status) = capture_tui_until(
+            &fixture,
+            &["attach-session", "-t", "mousey"],
+            &[b"[mousey]"],
+        );
         assert!(
             rendered,
             "child exited early={early_status:?}; pty output={}",

@@ -935,3 +935,32 @@ fn a_detaching_client_gets_no_status_render_and_its_next_attach_gets_one() {
         "the status the client dropped when it detached is sent again"
     );
 }
+
+#[test]
+fn a_terminal_client_hello_skips_the_status_its_attach_sends() {
+    let shared = Arc::new(Shared::new(1));
+    let (session, _, _) = switch_test_session(&shared, "hello-status");
+    let register = |terminal: bool| {
+        shared
+            .register(
+                ClientKind::Interactive,
+                ClientInstanceId::default(),
+                None,
+                None,
+                terminal,
+                false,
+            )
+            .expect("register")
+    };
+    let (_, desktop) = register(false);
+    assert_ne!(desktop.status, StatusLine::default());
+    let (client, hello) = register(true);
+    assert_eq!(hello.status, StatusLine::default());
+
+    let mailbox = OutboundMailbox::new();
+    shared.subscribe(client, Arc::clone(&mailbox));
+    let snapshot = shared.attach(client, session).expect("attach");
+    assert!(shared.send_attached(client, &mailbox, session, snapshot));
+    shared.publish_snapshot();
+    assert_eq!(status_renders(&take_reliable_messages(&mailbox)), 1);
+}

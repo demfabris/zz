@@ -5784,6 +5784,9 @@ impl Shared {
                 inner.engine.keys.snapshot()
             },
         };
+        if kind == ClientKind::Interactive && client_has_terminal && *attach::ATTACH_BATCH {
+            return Some((client, hello));
+        }
         let option_snapshot = Arc::new(inner.engine.format_option_snapshot());
         let request = status_request(
             &inner,
@@ -23015,7 +23018,7 @@ impl Shared {
         };
         if armed_changed {
             let armed = is_prefix(&shown.0);
-            log::info!(
+            log::debug!(
                 target: "zz_daemon::diagnostics::input",
                 "prefix_armed_published client={client} armed={armed}"
             );
@@ -23097,7 +23100,7 @@ impl Shared {
         }
         drop(inner);
         if decision != KeyDecision::Pass {
-            log::info!(
+            log::debug!(
                 target: "zz_daemon::diagnostics::input",
                 "key_decision client={client} key={key} table={} decision={decision:?}",
                 table.as_deref().unwrap_or(&root_table)

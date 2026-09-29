@@ -2,7 +2,7 @@
 type: Design Plan
 title: Daemon performance rebuild
 description: "The campaign to bring the zz daemon to tmux cost per command, per pane and per attach while keeping the 5x output throughput lead - a permanent zz-vs-tmux gate first, then waves that remove unrequested work (one-frame Exec commands, change-driven publication, lazy formats, frames only for watchers, a compact wire under one unreleased protocol version), then one mux loop and PTY shards; the lane brief source with targets, merge order, write zones, gates and rollback switches."
-status: Approved 2026-09-28; wave 0 (gate and this plan) built; release freeze until W4 exits; wave 1 in progress on perf/wave1 (FOOTPRINT, FORMAT, PUBLISH, PANE and EXEC merged)
+status: Approved 2026-09-28; wave 0 (gate and this plan) built; release freeze until W4 exits; wave 1 in progress on perf/wave1 (FOOTPRINT, FORMAT, PUBLISH, PANE and EXEC merged; W1-ATTACH finishing on perf/attach); continued on Linux from bench/perf/campaign/HANDOFF.md
 resource: crates/zz-daemon/src/daemon.rs
 tags:
 - performance
@@ -12,8 +12,17 @@ tags:
 - benchmark
 - campaign
 - design-plan
-timestamp: 2026-09-28T15:56:52Z
+timestamp: 2026-09-29T12:00:00Z
 ---
+
+# Campaign status
+
+2026-09-29: `perf/wave1` (`9eb5888b`) holds W0 and five wave-1 lanes (FOOTPRINT, FORMAT, PUBLISH,
+PANE, EXEC) plus three folded side branches; W1-ATTACH is on `perf/attach` with an unverified fix
+pass (`73eafb94`). Neither branch is on main. The campaign continues on a Linux host:
+`bench/perf/campaign/HANDOFF.md` has the state, the numbers against tmux at the last gate, the
+next steps in order, the macOS-only checks and the traps; `bench/perf/campaign/attach-review.json`
+has the attach lane's reports; `bench/perf/campaign/scripts/` has the lane workflow template.
 
 # Outcome
 

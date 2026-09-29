@@ -1,5 +1,7 @@
 //! Shared metadata for tmux-compatible and native `zz` commands.
 
+use std::{collections::HashMap, sync::LazyLock};
+
 use crate::message::{CommandInvocation, RawText, ServerError};
 
 /// The kind of value accepted by an option or positional argument.
@@ -2682,28 +2684,36 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
     },
 ];
 
+type SpecIndex = HashMap<&'static str, &'static CommandSpec, foldhash::fast::FixedState>;
+
+fn spec_index(specs: &'static [CommandSpec]) -> SpecIndex {
+    let mut index = SpecIndex::default();
+    for spec in specs {
+        for name in std::iter::once(&spec.name).chain(spec.aliases) {
+            index.entry(*name).or_insert(spec);
+        }
+    }
+    index
+}
+
 /// Look up a command by canonical name or alias.
 #[must_use]
 pub fn command_spec(name: &str) -> Option<&'static CommandSpec> {
-    COMMAND_SPECS
-        .iter()
-        .find(|spec| spec.name == name || spec.aliases.contains(&name))
+    static INDEX: LazyLock<SpecIndex> = LazyLock::new(|| spec_index(COMMAND_SPECS));
+    INDEX.get(name).copied()
 }
 
 #[must_use]
 pub fn catalog_command_spec(name: &str) -> Option<&'static CommandSpec> {
-    command_spec(name).or_else(|| {
-        DAEMON_COMMAND_SPECS
-            .iter()
-            .find(|spec| spec.name == name || spec.aliases.contains(&name))
-    })
+    static INDEX: LazyLock<SpecIndex> = LazyLock::new(|| spec_index(DAEMON_COMMAND_SPECS));
+    command_spec(name).or_else(|| INDEX.get(name).copied())
 }
 
 #[must_use]
 pub fn unimplemented_tmux_command_spec(name: &str) -> Option<&'static CommandSpec> {
-    UNIMPLEMENTED_TMUX_COMMAND_SPECS
-        .iter()
-        .find(|spec| spec.name == name || spec.aliases.contains(&name))
+    static INDEX: LazyLock<SpecIndex> =
+        LazyLock::new(|| spec_index(UNIMPLEMENTED_TMUX_COMMAND_SPECS));
+    INDEX.get(name).copied()
 }
 
 pub fn command_specs() -> impl Iterator<Item = &'static CommandSpec> {
@@ -2729,13 +2739,22 @@ pub enum CommandResolution {
 
 #[must_use]
 pub fn resolve_command(command: &str) -> CommandResolution {
+    static EXACT: LazyLock<
+        HashMap<&'static str, (&'static str, bool), foldhash::fast::FixedState>,
+    > = LazyLock::new(|| {
+        let mut exact = HashMap::default();
+        for (name, aliases, implemented) in command_table() {
+            for spelling in std::iter::once(&name).chain(aliases) {
+                exact.entry(*spelling).or_insert((name, implemented));
+            }
+        }
+        exact
+    });
     if command.is_empty() {
         return CommandResolution::Unknown;
     }
-    for (name, aliases, implemented) in command_table() {
-        if name == command || aliases.contains(&command) {
-            return resolved(name, implemented);
-        }
+    if let Some(&(name, implemented)) = EXACT.get(command) {
+        return resolved(name, implemented);
     }
     prefix_resolution(command, false)
         .or_else(|| prefix_resolution(command, true))
@@ -2798,6 +2817,47 @@ mod tests {
     use serde::Deserialize;
 
     use super::*;
+
+    #[test]
+    fn indexed_lookups_match_the_table_scan() {
+        let scan = |specs: &'static [CommandSpec], name: &str| {
+            specs
+                .iter()
+                .find(|spec| spec.name == name || spec.aliases.contains(&name))
+                .map(std::ptr::from_ref)
+        };
+        let resolve_scan = |command: &str| {
+            command_table()
+                .find(|(name, aliases, _)| *name == command || aliases.contains(&command))
+                .map(|(name, _, implemented)| resolved(name, implemented))
+        };
+        let spellings = command_table()
+            .flat_map(|(name, aliases, _)| std::iter::once(name).chain(aliases.iter().copied()))
+            .collect::<Vec<_>>();
+        assert!(spellings.len() > 150);
+        for spelling in spellings {
+            assert_eq!(
+                command_spec(spelling).map(std::ptr::from_ref),
+                scan(COMMAND_SPECS, spelling),
+                "{spelling}"
+            );
+            assert_eq!(
+                catalog_command_spec(spelling).map(std::ptr::from_ref),
+                scan(COMMAND_SPECS, spelling).or_else(|| scan(DAEMON_COMMAND_SPECS, spelling)),
+                "{spelling}"
+            );
+            assert_eq!(
+                unimplemented_tmux_command_spec(spelling).map(std::ptr::from_ref),
+                scan(UNIMPLEMENTED_TMUX_COMMAND_SPECS, spelling),
+                "{spelling}"
+            );
+            assert_eq!(
+                Some(resolve_command(spelling)),
+                resolve_scan(spelling),
+                "{spelling}"
+            );
+        }
+    }
 
     #[test]
     fn mutates_is_a_predicate_over_arguments() {

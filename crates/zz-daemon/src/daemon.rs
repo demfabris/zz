@@ -8035,7 +8035,8 @@ impl Shared {
                             session.set_word_separators(word_separators);
                             session.set_wrap_search(terminal_options.wrap_search);
                         }
-                        if let Some(previous) = inner.terminals_mut().insert(*pane, Arc::clone(&session))
+                        if let Some(previous) =
+                            inner.terminals_mut().insert(*pane, Arc::clone(&session))
                         {
                             previous.retire();
                         }
@@ -8209,7 +8210,8 @@ impl Shared {
                             *entry = PaneExitWait::new();
                             entry.command_wait = command_wait;
                         }
-                        if let Some(previous) = inner.terminals_mut().insert(*pane, Arc::clone(&session))
+                        if let Some(previous) =
+                            inner.terminals_mut().insert(*pane, Arc::clone(&session))
                         {
                             previous.retire();
                         }

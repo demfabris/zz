@@ -1301,8 +1301,9 @@ Scope:
    the `take_preview_refresh` check after each frame.
 5. zz-tui: drain queued core events, paint once; on SnapshotChanged repaint only chrome whose
    layout, window list or pane set changed; never paint an empty pane before its first frame;
-   read extended-keys and focus-events with `CommandRequest` on the existing `InteractiveClient`,
-   pipelined with the has-session preflight, instead of two `CommandClient` connections.
+   read extended-keys and focus-events without two `CommandClient` connections. (Not with a
+   `CommandRequest` on the `InteractiveClient`: any command with output that an interactive
+   client runs opens a command-output view over its session. As built, the hello carries them.)
 
 Write zone: daemon.rs `newer_terminal_delivered`, `OutboundMailbox::enqueue_terminal_with`,
 `replace_terminal_with`, `recv`, `send_attached`, `attach`, `attach_with_event_hooks`,
@@ -1321,6 +1322,109 @@ the duplicates); zz-tui tests; `python3 compat/tui/tracker.py check` and every c
 
 Expected per attach: 69 KB duplicate Full, a 2.2 KB Snapshot and 9 blank repaints (4 panes), one
 72 KB wrong-size Full (new-session), two extra connections; 29 write syscalls -> ~2.
+
+As built (branch `perf/attach`, on perf/wave1 at da635845, merged with W1-PANE at ad9c0c9b),
+where the build departs from the scope above:
+
+- Item 1: `send_attached` calls `send_resync_as(.., ResyncScope::Attach)`: no Snapshot, and an
+  overlay event only for an overlay that exists (a command output that exists is still replayed;
+  a close for none is not sent). Every client resets overlays and viewports on `Attached`. A
+  requested `Resync` keeps the full scope. `send_attached` queues `Attached` and records the
+  client's snapshot digest under `snapshot_order`, so no publisher can slip a Snapshot between
+  them; each production caller publishes right after, which sends a Snapshot only when the tree
+  moved since the attach built it.
+- Item 2: the pending slot alone was not enough. The trace showed the second copy of the same
+  Full arriving 0.1 ms after the first had been written, so a pending-only check missed it. The
+  mailbox drops any update, patch included, whose generation is already queued or written:
+  `terminal_update_redundant`, since every publish moves the view generation. What was written
+  is forgotten exactly where a client drops viewports: when `Attached` is queued (inside the lock
+  that queues it, so no epoch is needed), on `RequestFull` for that pane (`Shared::request_full`)
+  and on a requested Resync. This also drops the empty patch the watcher sends when a wake lists
+  a view that did not change. A second source of duplicates was frames written before `Attached`:
+  the watcher publishes a view as soon as the attach turns it on, and `send_attached` runs after
+  the attach hooks. The four production attach paths (the `Attach` message, attach-session and
+  new-session, switch-client, a destroyed session's survivor) hold the client's terminal lane from
+  the start of the attach until `Attached` is queued (`hold_attach_terminals`); an attach error
+  releases it.
+- Item 3: the size alone is not enough. The TUI reports pixel sizes with each pane, and a
+  pixel-only difference resizes the pty (`SIGWINCH`) and publishes again. The shared client code
+  sends `client-cell-v1:WxH` next to `client-size-v1` (the 8x16 fallback moved from zz-tui into
+  `zz_daemon::cell_pixel_extent`). `presize_client_terminals` seeds `terminal_geometries` for the
+  attaching raw-terminal client's visible panes with the geometry the window takes at the
+  client's size less its status block (`interactive_client_window_extent`), so the existing
+  write-back and resize policy (window-size, aggressive-resize, ignore-size) runs as if the client
+  had already reported. The attach queues the pane resizes before it turns the view streams on
+  and attaches the views, and the control slot applies a resize before view commands, so the
+  first frame of a stream epoch is built at the final size. An attach resync frame whose grid
+  differs from the laid-out size is skipped (`attach_frame_superseded`). The cell size follows the
+  client's later `ResizeTerminal` reports.
+- Item 4: `recv_batch` takes ready frames in `recv`'s order up to 256 KiB, `attach::write_frames`
+  writes them with `writev` and resumes a short write mid-batch, and `LocalStream` forwards
+  `write_vectored` (before, the default wrote only the first buffer). `take_preview_refresh` runs
+  once per written frame after the batch.
+- Item 5: the TUI drains up to 256 queued protocol events and paints once (`PendingPaint`). A
+  snapshot repaints everything only when `Model::paint_structure` changes (layout, dividers and
+  their highlight, pane kinds and border colours, pane order, window, sidebar, status block) and
+  an attach always does; a pane card keeps its own record and repaints when its text changes.
+  Nothing is painted before the attach or in a terminal pane before its first frame. Borders are
+  written as runs, one cursor move per run and a rendition only where it changes, instead of 45
+  bytes a cell. A status row repaints only its changed columns, widened to whole clusters. A paint
+  that only puts the cursor back where the last paint left it is not written. An unchanged size
+  still sends `ClientTerminalSize`, since tmux fires `client-resized` on every `SIGWINCH`
+  (`attached-client.sh` checks it), but repaints nothing. The two terminal options: the daemon
+  puts `server-option-v1:extended-keys=<v>` and `server-option-v1:focus-events=<v>` in the hello
+  of an interactive client with a terminal, and the TUI arms from them. It falls back to the two
+  `CommandClient` reads for a daemon that sends neither and for a new-session chain of more than
+  one command, whose later commands may set them. A TUI on a remote host now arms from that
+  host's options (before, the reads were local only and a remote TUI never armed).
+- Knobs: `ZZ_PERF_ATTACH_DEDUP=0`, `ZZ_PERF_ATTACH_PRESIZE=0` and `ZZ_PERF_WRITEV=0` in the daemon
+  (logged at startup next to the publication knobs), `ZZ_PERF_TUI_COALESCE=0` in the CLI.
+- Tests: `daemon/attach_tests.rs` (11: switch away and back and re-attach, RequestFull at the
+  delivered generation, first frame at the final size and none before `Attached`, kitty chunks
+  before the placing frame in one `writev` and a short write, the hold, the dedup rules, the hello
+  options, the cell fact). Seven attach-sequence tests asserted the resync Snapshot or relied on it
+  to overflow the mailbox; the startup-cause pressure tests now overflow on the causes, and
+  `request_full_enqueues_only_the_requested_visible_pane` goes through `request_full`. zz-tui:
+  paint structure, paint order, the waiting pane, border runs, status spans, cursor-only paints,
+  the hello options. compat/tui fixtures on macOS with `LANG=en_US.UTF-8`: attached-client,
+  overlays, launch-diff, screen-diff, caps, pane-geometry, mouse, indicators, copy-mode and
+  superset pass; status-row (window name `tmux` against `bash`), client-commands (five cases,
+  among them the `XT` flag), choosers and output-backpressure (the pin's side), stock-keys
+  (`gcat` against `cat` with Homebrew coreutils first on `PATH`) fail the same way on the
+  perf/wave1 head build, and command-streams on the pin's `select` loop with stdin closed.
+  attached-client's replay check on the pin's screen timed out in two of four full runs and
+  passed its command-output part three times alone on both builds.
+
+Measured with `--quick` (`attach,echo,throughput,chatty`) at load 13-26 on 16 CPUs. Before is
+this lane's base (da635845), after is the lane merged with W1-PANE (tmux in the same runs):
+`attach.tty_total` 161554 -> 1785 B at p1 (tmux 974) and 321606 -> 5485 B at p4 (tmux 3653);
+`attach.ttfc` 14.5 -> 8.8 ms at p1 (tmux 8.6) and 23.2 -> 8.3 ms at p4 (tmux 8.7);
+`attach.cpu` 4.77 -> 2.72 ms at p1 (tmux 1.60) and 5.14 -> 3.88 ms at p4 (tmux 1.93);
+`attach.instr` 24.5 -> 19.7 Minstr at p1 and 26.8 -> 22.6 at p4 (tmux 17.4, 22.0);
+`attach.conns` 4 -> 2; `attach.wire_s2c` 256638 -> 128705 B at p1 and 203342 -> 128875 B at p4;
+`attach.wire_frames` 22 -> 7 and 25 -> 10; `chatty.tty_kibps.hidden` 5.81 -> 1.25 KiB/s (tmux
+0.58). The TUI's CPU in the hidden case is the same with `ZZ_PERF_TUI_COALESCE` on and off
+(0.16-0.19%) while its tty bytes drop from 14.5-17.6 to 1.2 KiB/s. Every wave1 rule in the four
+groups passes; the echo walls warn at this load.
+
+Handed on:
+
+- Two 28.3 KB `ServerHello`s remain in every TUI attach, 57 of its 129 KB: the CLI's prepare
+  connection (W1-EXEC's `Exec`) and the TUI's own (W2-CTRL's `Welcome`).
+- The status line is rendered by the publish that follows `send_attached`, so it reaches the TUI
+  after its first attach paint, and the status row (and the pane borders, whose styles travel with
+  it) is painted twice. W2-CTRL's attach `Batch` should carry it.
+- The TUI clears the screen to the theme background and then writes every blank pane row with
+  `ECH` to give it back the terminal default, about 18 bytes a row (880 bytes of a 180x50 attach).
+  A default-colour clear with an explicit fill of the gaps would remove them; left because the
+  sidebar, cards and window gaps rely on the themed clear.
+- The watcher still diffs every view a wake lists, changed or not; the mailbox now drops the empty
+  patch (W4-DELIVER).
+- Detach renders the status for every subscriber, including the TUI that is about to exit
+  (`publish_snapshot_state` after `detach_client_state`).
+- `tui-screen-diff.sh` failed once at the 80x6 unzoom checkpoint (the first row read `$` on zz
+  and `MARK-status-on` on the pin) in the lane's first full fixture run and passed every rerun;
+  the perf/wave1 head build passed all of its runs. Not reproduced by hand.
 
 ## W2-TERM: PaneFrame terminal lane (effort L)
 
@@ -1634,7 +1738,10 @@ deletes most wave-1 fallback paths anyway).
 | `ZZ_PERF_RENAME_THROTTLE=0` | PUBLISH | no 500 ms automatic-rename throttle |
 | `ZZ_PERF_PEER_SCAN=always` | PUBLISH | 1 Hz Claude peer scan as today, reading every record each tick; the status sampler ticks with no client |
 | `ZZ_PERF_EAGER_UNIVERSE=1` | FORMAT | full universe per expansion (also the differential oracle) |
-| `ZZ_PERF_ATTACH_DEDUP=0` | ATTACH | resync and Full enqueue as today |
+| `ZZ_PERF_ATTACH_DEDUP=0` | ATTACH | resync and Full enqueue as today: an attach resends the Snapshot and every overlay, frames are not held until `Attached`, no update is dropped for a generation already queued or written |
+| `ZZ_PERF_ATTACH_PRESIZE=0` | ATTACH | an attaching raw-terminal client's panes keep their size until its first `ResizeTerminal` |
+| `ZZ_PERF_WRITEV=0` | ATTACH | one write per outbound frame |
+| `ZZ_PERF_TUI_COALESCE=0` | ATTACH | the TUI (read at CLI start) paints after every event, repaints everything on every snapshot and unchanged resize, paints before attaching and a card in a pane with no frame, repeats identical paints, and reads the two terminal options over two connections of their own |
 | `ZZ_PERF_READONLY_SKIP=0` | HOOKS | read-only commands take the before/after captures |
 | `ZZ_PERF_COPY_CLONE=1` | COPY | flat `ModeRevision` clone |
 
@@ -1653,8 +1760,9 @@ revert. `ZZ_PTY_SHARDS=N` is a tuning knob, not a rollback.
 | Symlinked binary name | FOOTPRINT | `claude` -> `versions/X.Y.Z`: `#{pane_current_command}` is `claude`, `agent_state` updates; macOS and Linux |
 | Detached window-style appearance | PUBLISH | `set -w window-style bg=red` and select-pane with `window-active-style` in a detached session reach the terminal (OSC 11 reply, `capture-pane -e`) |
 | Control-mode ordering | HOOKS, DELIVER | `%begin`/`%end` with deferred notifications; final `%output` before `%exit` / `%window-close`; `%layout-change` |
-| Attach dedup | ATTACH | switch-client away and back with no output, re-attach, RequestFull after a bad patch: every visible pane gets a Full |
-| Kitty ordering under batched writes | ATTACH | image chunks precede the placing frame |
+| Attach dedup | ATTACH | switch-client away and back with no output, re-attach, RequestFull after a bad patch: every visible pane gets a Full, none twice at one generation (`daemon/attach_tests.rs`) |
+| Kitty ordering under batched writes | ATTACH | image chunks precede the placing frame in one `writev`; a short write resumes mid-batch (`daemon/attach_tests.rs`) |
+| First frame at the final size | ATTACH | a client that named its size and cell gets one Full per pane, at the laid-out size, and none before `Attached` (`daemon/attach_tests.rs`) |
 | Timer stall | PUBLISH | alert-silence hook `run-shell 'sleep 2'` while a repeat-time key table expires on time |
 | In-place peer status | PUBLISH | rewriting `<pid>.json` in place changes `agent_state` |
 | Lazy universe at escape points | FORMAT | lazy and eager give equal output for status, border, mode, chooser, control subscription, format monitor, hook |

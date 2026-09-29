@@ -5373,7 +5373,7 @@ impl MuxEngine {
         let session_state = self
             .state
             .sessions
-            .get_mut(&session)
+            .get_mut(&mut self.state.journal, &session)
             .expect("new session exists");
         session_state.created = created;
         session_state.activity = created;
@@ -5382,7 +5382,7 @@ impl MuxEngine {
                 &mut self
                     .state
                     .windows
-                    .get_mut(&window)
+                    .get_mut(&mut self.state.journal, &window)
                     .expect("new window exists")
                     .name,
             );
@@ -6818,7 +6818,7 @@ impl MuxEngine {
             if self
                 .state
                 .windows
-                .get_mut(&window)
+                .get_mut(&mut self.state.journal, &window)
                 .expect("resolved pane window exists")
                 .zoomed_pane
                 .take()
@@ -7170,7 +7170,11 @@ impl MuxEngine {
             .expect("new pane belongs to a window");
         if apply_tmux_zoom {
             let active_pane = self.state.windows[&window].active_pane;
-            let state = self.state.windows.get_mut(&window).expect("split window");
+            let state = self
+                .state
+                .windows
+                .get_mut(&mut self.state.journal, &window)
+                .expect("split window");
             state.zoomed_pane = options.has("-Z").then_some(active_pane);
             if state.zoomed_pane.is_some_and(|zoomed| zoomed != pane) {
                 let extent = state.layout.extent();
@@ -7699,7 +7703,11 @@ impl MuxEngine {
             .window_for_pane(pane)
             .expect("resolved pane has a window");
         if self.state.windows[&window].zoomed_pane.is_some() {
-            self.state.windows.get_mut(&window).unwrap().zoomed_pane = None;
+            self.state
+                .windows
+                .get_mut(&mut self.state.journal, &window)
+                .unwrap()
+                .zoomed_pane = None;
             self.state.bump_generation();
         }
         let mut absolute = Vec::new();
@@ -7873,7 +7881,7 @@ impl MuxEngine {
         );
         let generation = self.state.generation();
         self.state.resize_window(window, columns, rows)?;
-        if let Some(window) = self.state.windows.get_mut(&window) {
+        if let Some(window) = self.state.windows.get_mut(&mut self.state.journal, &window) {
             window.manual_extent = window.layout.extent();
         }
         if changed_mode && self.state.generation() == generation {
@@ -7899,7 +7907,10 @@ impl MuxEngine {
                 continue;
             }
             if self.state.resize_window(candidate, columns, rows).is_ok()
-                && let Some(state) = self.state.windows.get_mut(&candidate)
+                && let Some(state) = self
+                    .state
+                    .windows
+                    .get_mut(&mut self.state.journal, &candidate)
             {
                 state.manual_extent = state.layout.extent();
             }
@@ -7931,7 +7942,7 @@ impl MuxEngine {
             let window = self
                 .state
                 .windows
-                .get_mut(&window_id)
+                .get_mut(&mut self.state.journal, &window_id)
                 .expect("pane window exists");
             let probe = (pane, columns, rows);
             if let Some(zoomed_pane) = window.zoomed_pane {
@@ -8063,7 +8074,7 @@ impl MuxEngine {
         if self
             .state
             .windows
-            .get_mut(&window)
+            .get_mut(&mut self.state.journal, &window)
             .expect("window was resolved")
             .zoomed_pane
             .take()
@@ -22467,8 +22478,12 @@ mod tests {
                 .output,
             "A w B "
         );
-        for session in engine.state.sessions.values_mut() {
-            session.sort_activity = 41;
+        for session in engine.state.sessions.keys().copied().collect::<Vec<_>>() {
+            engine
+                .state
+                .session_mut(session)
+                .expect("listed session")
+                .sort_activity = 41;
         }
         assert_eq!(
             engine
@@ -22711,12 +22726,17 @@ mod tests {
                         engine
                             .state
                             .windows
-                            .get_mut(&alerted)
+                            .get_mut(&mut engine.state.journal, &alerted)
                             .unwrap()
                             .activity_flag = true;
                     }
                     "silence" => {
-                        engine.state.windows.get_mut(&alerted).unwrap().silence_flag = true;
+                        engine
+                            .state
+                            .windows
+                            .get_mut(&mut engine.state.journal, &alerted)
+                            .unwrap()
+                            .silence_flag = true;
                     }
                     _ => unreachable!(),
                 }

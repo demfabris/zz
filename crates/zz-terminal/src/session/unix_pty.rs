@@ -1,9 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::ffi::{CString, OsStr, OsString};
 use std::io::{self, ErrorKind};
 use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Component, Path, PathBuf};
+use std::sync::OnceLock;
 
 use portable_pty::{CommandBuilder, PtySize};
 use rustix::fs::{Access, Mode, OFlags};
@@ -70,22 +71,33 @@ pub(super) fn command_environment<'a>(
     builder: &CommandBuilder,
     named: impl IntoIterator<Item = &'a OsStr>,
 ) -> Vec<(OsString, OsString)> {
-    let mut keys = std::env::vars_os()
-        .map(|(key, _)| key)
-        .collect::<BTreeSet<_>>();
-    keys.extend(
-        builder
-            .iter_extra_env_as_str()
-            .map(|(key, _)| OsString::from(key)),
-    );
-    keys.extend(named.into_iter().map(OsStr::to_owned));
-    keys.insert(OsString::from("SHELL"));
-    keys.into_iter()
-        .filter_map(|key| {
-            let value = builder.get_env(&key)?.to_owned();
-            Some((key, value))
-        })
-        .collect()
+    let mut environment = builder
+        .iter_full_env_as_str()
+        .map(|(key, value)| (OsString::from(key), OsString::from(value)))
+        .collect::<BTreeMap<_, _>>();
+    for key in opaque_base_keys()
+        .iter()
+        .map(OsString::as_os_str)
+        .chain(named)
+        .chain(std::iter::once(OsStr::new("SHELL")))
+    {
+        if !environment.contains_key(key)
+            && let Some(value) = builder.get_env(key)
+        {
+            environment.insert(key.to_owned(), value.to_owned());
+        }
+    }
+    environment.into_iter().collect()
+}
+
+fn opaque_base_keys() -> &'static [OsString] {
+    static KEYS: OnceLock<Vec<OsString>> = OnceLock::new();
+    KEYS.get_or_init(|| {
+        std::env::vars_os()
+            .filter(|(key, value)| key.to_str().is_none() || value.to_str().is_none())
+            .map(|(key, _)| key)
+            .collect()
+    })
 }
 
 pub(super) fn spawn(
@@ -99,127 +111,6 @@ pub(super) fn spawn(
         envp: pointers(&plan.envp),
         fallback: pointers(&plan.fallback),
     };
-    start_child(&plan, &pointers, slave.as_raw_fd())
-}
-
-#[cfg(target_os = "macos")]
-const POSIX_SPAWN_SETSID: libc::c_int = 0x0400;
-
-#[cfg(target_os = "macos")]
-#[allow(
-    unsafe_code,
-    reason = "posix_spawn_file_actions_addchdir_np has no binding in the libc crate"
-)]
-unsafe extern "C" {
-    fn posix_spawn_file_actions_addchdir_np(
-        actions: *mut libc::posix_spawn_file_actions_t,
-        path: *const libc::c_char,
-    ) -> libc::c_int;
-}
-
-#[cfg(target_os = "macos")]
-struct SpawnAttributes(libc::posix_spawnattr_t);
-
-#[cfg(target_os = "macos")]
-impl Drop for SpawnAttributes {
-    #[allow(unsafe_code, reason = "destroys attributes this value initialized")]
-    fn drop(&mut self) {
-        unsafe {
-            libc::posix_spawnattr_destroy(&raw mut self.0);
-        }
-    }
-}
-
-#[cfg(target_os = "macos")]
-struct SpawnActions(libc::posix_spawn_file_actions_t);
-
-#[cfg(target_os = "macos")]
-impl Drop for SpawnActions {
-    #[allow(unsafe_code, reason = "destroys file actions this value initialized")]
-    fn drop(&mut self) {
-        unsafe {
-            libc::posix_spawn_file_actions_destroy(&raw mut self.0);
-        }
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn spawn_result(code: libc::c_int) -> io::Result<()> {
-    if code == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::from_raw_os_error(code))
-    }
-}
-
-#[cfg(target_os = "macos")]
-#[allow(
-    unsafe_code,
-    reason = "posix_spawn reads argv, envp and the actions from memory that outlives the call"
-)]
-fn start_child(plan: &ExecPlan, pointers: &ExecPointers, slave: RawFd) -> io::Result<u32> {
-    let mut attributes = SpawnAttributes(std::ptr::null_mut());
-    spawn_result(unsafe { libc::posix_spawnattr_init(&raw mut attributes.0) })?;
-    let flags = libc::POSIX_SPAWN_SETSIGDEF
-        | libc::POSIX_SPAWN_SETSIGMASK
-        | libc::POSIX_SPAWN_CLOEXEC_DEFAULT
-        | POSIX_SPAWN_SETSID;
-    spawn_result(unsafe {
-        libc::posix_spawnattr_setflags(
-            &raw mut attributes.0,
-            libc::c_short::try_from(flags).expect("spawn flags fit a short"),
-        )
-    })?;
-    let mut defaults: libc::sigset_t = 0;
-    let empty: libc::sigset_t = 0;
-    unsafe {
-        libc::sigfillset(&raw mut defaults);
-    }
-    spawn_result(unsafe {
-        libc::posix_spawnattr_setsigdefault(&raw mut attributes.0, &raw const defaults)
-    })?;
-    spawn_result(unsafe {
-        libc::posix_spawnattr_setsigmask(&raw mut attributes.0, &raw const empty)
-    })?;
-    let mut actions = SpawnActions(std::ptr::null_mut());
-    spawn_result(unsafe { libc::posix_spawn_file_actions_init(&raw mut actions.0) })?;
-    for target in 0..=2 {
-        spawn_result(unsafe {
-            libc::posix_spawn_file_actions_adddup2(&raw mut actions.0, slave, target)
-        })?;
-    }
-    spawn_result(unsafe {
-        posix_spawn_file_actions_addchdir_np(&raw mut actions.0, plan.directory.as_ptr())
-    })?;
-    let mut pid: libc::pid_t = 0;
-    let mut code = unsafe {
-        libc::posix_spawn(
-            &raw mut pid,
-            plan.program.as_ptr(),
-            &raw const actions.0,
-            &raw const attributes.0,
-            pointers.argv.as_ptr().cast(),
-            pointers.envp.as_ptr().cast(),
-        )
-    };
-    if code == libc::ENOEXEC {
-        code = unsafe {
-            libc::posix_spawn(
-                &raw mut pid,
-                c"/bin/sh".as_ptr(),
-                &raw const actions.0,
-                &raw const attributes.0,
-                pointers.fallback.as_ptr().cast(),
-                pointers.envp.as_ptr().cast(),
-            )
-        };
-    }
-    spawn_result(code)?;
-    Ok(pid.cast_unsigned())
-}
-
-#[cfg(not(target_os = "macos"))]
-fn start_child(plan: &ExecPlan, pointers: &ExecPointers, slave: RawFd) -> io::Result<u32> {
     let mut descriptors = DescriptorScratch::new();
     #[allow(
         unsafe_code,
@@ -227,7 +118,7 @@ fn start_child(plan: &ExecPlan, pointers: &ExecPointers, slave: RawFd) -> io::Re
     )]
     match unsafe { libc::fork() } {
         -1 => Err(io::Error::last_os_error()),
-        0 => unsafe { exec_child(plan, pointers, slave, &mut descriptors) },
+        0 => unsafe { exec_child(&plan, &pointers, slave.as_raw_fd(), &mut descriptors) },
         pid => Ok(pid.cast_unsigned()),
     }
 }
@@ -315,6 +206,51 @@ fn pointers(values: &[CString]) -> Vec<*const libc::c_char> {
         .collect()
 }
 
+#[cfg(target_os = "macos")]
+struct DescriptorScratch(Vec<libc::proc_fdinfo>);
+
+#[cfg(target_os = "macos")]
+impl DescriptorScratch {
+    fn new() -> Self {
+        let open = rustix::process::getrlimit(rustix::process::Resource::Nofile)
+            .current
+            .unwrap_or(4096)
+            .clamp(256, 65_536);
+        Self(Vec::with_capacity(usize::try_from(open).unwrap_or(4096)))
+    }
+
+    #[allow(
+        unsafe_code,
+        reason = "proc_pidinfo writes into capacity reserved before the fork"
+    )]
+    unsafe fn close_inherited(&mut self) {
+        let capacity = self.0.capacity();
+        let bytes =
+            i32::try_from(capacity * std::mem::size_of::<libc::proc_fdinfo>()).unwrap_or(i32::MAX);
+        let written = unsafe {
+            libc::proc_pidinfo(
+                libc::getpid(),
+                libc::PROC_PIDLISTFDS,
+                0,
+                self.0.as_mut_ptr().cast(),
+                bytes,
+            )
+        };
+        let Ok(written) = usize::try_from(written) else {
+            return;
+        };
+        let count = (written / std::mem::size_of::<libc::proc_fdinfo>()).min(capacity);
+        for index in 0..count {
+            let descriptor = unsafe { (*self.0.as_ptr().add(index)).proc_fd };
+            if descriptor > 2 {
+                unsafe {
+                    libc::close(descriptor);
+                }
+            }
+        }
+    }
+}
+
 #[cfg(not(target_os = "macos"))]
 struct DescriptorScratch(libc::c_int);
 
@@ -345,7 +281,6 @@ impl DescriptorScratch {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
 #[allow(
     unsafe_code,
     reason = "runs in the forked child between fork and exec, on memory prepared before the fork"

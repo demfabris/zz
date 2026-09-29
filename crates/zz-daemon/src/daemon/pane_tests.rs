@@ -472,3 +472,79 @@ fn styled_wide_lines_fill_the_history_limit_like_plain_ones() {
         "styled lines keep as much history as plain ones"
     );
 }
+
+#[test]
+fn an_interactive_zsh_pane_runs_jobs_in_the_foreground_of_its_tty() {
+    if !std::path::Path::new("/bin/zsh").exists() {
+        return;
+    }
+    let shared = Arc::new(Shared::new(1));
+    let mut context = ExecutionContext::default();
+    run(
+        &shared,
+        &mut context,
+        "set-option",
+        &["-g", "default-shell", "/bin/zsh"],
+    );
+    run(
+        &shared,
+        &mut context,
+        "new-session",
+        &[
+            "-d",
+            "-s",
+            "zsh-tty",
+            "-x",
+            "80",
+            "-y",
+            "10",
+            "exec /bin/zsh -fi",
+        ],
+    );
+    let pane = context.pane.expect("pane").to_string();
+    let screen = |context: &mut ExecutionContext| {
+        run(&shared, context, "capture-pane", &["-p", "-t", &pane])
+    };
+    run(
+        &shared,
+        &mut context,
+        "send-keys",
+        &[
+            "-t",
+            &pane,
+            "[[ -o monitor ]] && print ZZ_MONITOR_ON",
+            "Enter",
+        ],
+    );
+    wait_until("job control", || {
+        screen(&mut context).contains("\nZZ_MONITOR_ON")
+    });
+    run(
+        &shared,
+        &mut context,
+        "send-keys",
+        &["-t", &pane, "sleep 30", "Enter"],
+    );
+    wait_until("sleep in the foreground", || {
+        run(
+            &shared,
+            &mut context,
+            "display-message",
+            &["-p", "-t", &pane, "#{pane_current_command}"],
+        )
+        .trim()
+            == "sleep"
+    });
+    let interrupted = Instant::now();
+    run(&shared, &mut context, "send-keys", &["-t", &pane, "C-c"]);
+    run(
+        &shared,
+        &mut context,
+        "send-keys",
+        &["-t", &pane, "print ZZ_BACK", "Enter"],
+    );
+    wait_until("the prompt after C-c", || {
+        screen(&mut context).contains("\nZZ_BACK")
+    });
+    assert!(interrupted.elapsed() < Duration::from_secs(20));
+}

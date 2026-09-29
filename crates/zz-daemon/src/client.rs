@@ -169,6 +169,7 @@ pub struct ExecChain<'a> {
     pub expect_server_id: Option<u64>,
     pub resume: Option<ExecClassifier<'a>>,
     pub prepared: bool,
+    pub last: bool,
 }
 
 impl ExecChain<'_> {
@@ -180,6 +181,7 @@ impl ExecChain<'_> {
             expect_server_id: None,
             resume: None,
             prepared: false,
+            last: false,
         }
     }
 }
@@ -210,6 +212,7 @@ enum CommandLink {
         reader: ProtocolReceiver<LocalStream>,
         writer: ProtocolSender<LocalStream>,
         answered: bool,
+        spent: bool,
     },
     Legacy {
         reader: ProtocolReceiver<LocalStream>,
@@ -333,22 +336,17 @@ impl CommandRoute {
     fn exec_request(
         &self,
         commands: Vec<CommandInvocation>,
-        stdin_available: bool,
-        resume: bool,
-        prepared: bool,
+        flags: ExecFlags,
         spawned_server_id: Option<u64>,
         expect_server_id: Option<u64>,
     ) -> ExecRequest {
-        let mut flags = ExecFlags::default();
+        let mut flags = flags;
         flags.set(ExecFlags::UTF8, client_takes_utf8_terminal());
-        flags.set(ExecFlags::STDIN_AVAILABLE, stdin_available);
         flags.set(
             ExecFlags::NESTED,
             self.facts.includes_tty()
                 && std::env::var_os("TMUX").is_some_and(|value| !value.is_empty()),
         );
-        flags.set(ExecFlags::RESUME, resume);
-        flags.set(ExecFlags::PREPARED, prepared);
         ExecRequest {
             protocol_version: PROTOCOL_VERSION,
             flags,
@@ -416,6 +414,7 @@ impl CommandRoute {
             reader: ProtocolReceiver::new(stream.try_clone()?),
             writer: ProtocolSender::new(stream),
             answered: false,
+            spent: false,
         })
     }
 }
@@ -583,6 +582,9 @@ impl CommandClient {
         if matches!(self.link, CommandLink::Legacy { .. }) {
             return self.legacy_exec_chain(chain, emit);
         }
+        if matches!(self.link, CommandLink::Exec { spent: true, .. }) {
+            self.link = self.route.connect()?;
+        }
         #[cfg(all(unix, feature = "daemon"))]
         let _signal = self
             .stdin_enabled
@@ -594,12 +596,16 @@ impl CommandClient {
             expect_server_id,
             resume,
             prepared,
+            last,
         } = chain;
+        let mut flags = ExecFlags::default();
+        flags.set(ExecFlags::STDIN_AVAILABLE, self.stdin_enabled);
+        flags.set(ExecFlags::RESUME, resume.is_some());
+        flags.set(ExecFlags::PREPARED, prepared);
+        flags.set(ExecFlags::LAST, last);
         let request = ProtocolMessage::Exec(self.route.exec_request(
             commands,
-            self.stdin_enabled,
-            resume.is_some(),
-            prepared,
+            flags,
             spawned_server_id,
             expect_server_id,
         ));
@@ -607,10 +613,12 @@ impl CommandClient {
             reader,
             writer,
             answered,
+            spent,
         } = &mut self.link
         else {
             unreachable!("legacy links returned above");
         };
+        *spent = last;
         let sent = writer.send(&request);
         let first = match sent {
             Ok(()) => reader.recv(),
@@ -642,6 +650,7 @@ impl CommandClient {
                         expect_server_id,
                         resume,
                         prepared,
+                        last,
                     },
                     emit,
                 );

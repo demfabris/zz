@@ -379,6 +379,9 @@ pub(super) fn serve_exec<S: TransportStream>(
         )?;
         stream.write_all(&frame)?;
         stream.flush()?;
+        if request.flags.contains(ExecFlags::LAST) {
+            return Ok(());
+        }
         request = loop {
             match read_protocol_message_into(&mut stream, &mut frame) {
                 Ok(ProtocolMessage::Exec(next)) => break next,
@@ -438,7 +441,11 @@ fn serve_exec_ready<S: TransportStream>(
         live: None,
     };
     loop {
+        let last = request.flags.contains(ExecFlags::LAST);
         connection.run(request);
+        if last {
+            break;
+        }
         match connection.next_request() {
             Some(next) => request = next,
             None => break,

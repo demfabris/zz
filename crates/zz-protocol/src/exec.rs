@@ -22,6 +22,7 @@ impl ExecFlags {
     pub const NESTED: Self = Self(1 << 2);
     pub const RESUME: Self = Self(1 << 3);
     pub const PREPARED: Self = Self(1 << 4);
+    pub const LAST: Self = Self(1 << 5);
 
     #[must_use]
     pub const fn contains(self, other: Self) -> bool {

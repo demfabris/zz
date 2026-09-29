@@ -1127,6 +1127,7 @@ fn run_local_command_chain(
         expect_server_id: None,
         resume: Some(classify),
         prepared: false,
+        last: true,
     };
     match client.exec_chain(chain, emit_chain_outcome) {
         Ok(ExecChainEnd::Ran { exit_code }) => LocalChain::Done(ExitCode::from(exit_code)),

@@ -4,7 +4,7 @@ title: PTY drain topology (the IO fast path)
 description: How macOS keeps its tuned inline PTY actor while Linux overlaps a bounded gather stage with VT parsing; includes the probe and benchmark results behind each platform choice.
 resource: crates/zz-terminal/src/session.rs
 tags: [pty, throughput, drain, spin-bridge, poll, benchmark, session]
-timestamp: 2026-08-19T00:00:00Z
+timestamp: 2026-09-28T00:00:00Z
 ---
 
 # Overview
@@ -121,7 +121,7 @@ flowchart TD
     r -->|"n bytes"| parse["vt_write inline<br/>burst += n, spins = 0"]
     parse -->|"burst < 256 KiB turn budget"| r
     parse -->|"budget hit"| gate["16 ms publish gate:<br/>effects flush, view reconcile,<br/>snapshot publish"]
-    r -->|"EAGAIN, burst ≥ 1 KiB,<br/>spins < 512"| spin["spin: retry read<br/>(refill lands in ~µs)"]
+    r -->|"EAGAIN, burst ≥ 1 KiB,<br/>spins < bridge_spins (8..512)"| spin["spin: retry read<br/>(refill lands in ~µs)"]
     spin --> r
     r -->|"EAGAIN, interactive burst<br/>or spins exhausted"| gate
     gate --> sleep
@@ -182,9 +182,11 @@ const PTY_BRIDGE_THRESHOLD_BYTES: usize = 1024;
 /// 512 → 281/332/348. FIONREAD-gated spins (the 2026-07-27 "7x worse" scar)
 /// never observe the refill and are NOT the same thing.
 const PTY_BRIDGE_SPIN_MAX: u32 = 512;
+const PTY_BRIDGE_SPIN_MIN: u32 = 8;
 ```
 
-The drain turn itself:
+The budget adapts per pane: `bridge_spins` starts at 512, halves on every spin-out (floor 8)
+and doubles on every read that a spin bridged. The drain turn itself:
 
 ```rust
 let mut burst = 0_usize;
@@ -196,6 +198,7 @@ loop {
         Ok(length) => {
             terminal.vt_write(&read_buffer[..length]);
             output_pending = true;
+            if spins > 0 { bridge_spins = (bridge_spins * 2).min(PTY_BRIDGE_SPIN_MAX); }
             burst += length;
             spins = 0;
             if burst >= PTY_DRAIN_TURN_BYTES             // service commands
@@ -203,9 +206,12 @@ loop {
         }
         Err(rustix::io::Errno::INTR) => {}
         Err(rustix::io::Errno::AGAIN) => {
-            if burst >= PTY_BRIDGE_THRESHOLD_BYTES && spins < PTY_BRIDGE_SPIN_MAX {
-                spins += 1;
-                continue;                                 // bridge the refill gap
+            if burst >= PTY_BRIDGE_THRESHOLD_BYTES {
+                if spins < bridge_spins {
+                    spins += 1;
+                    continue;                             // bridge the refill gap
+                }
+                bridge_spins = (bridge_spins / 2).max(PTY_BRIDGE_SPIN_MIN);
             }
             break;                                        // interactive, or burst over
         }
@@ -225,6 +231,35 @@ under loaded parallel test runs with a Zig `Debug` VT build, a single 256 KiB tu
 observed stretching to ~2.8 s (that figure is the dev-profile daemon test environment
 under CPU contention, not the release bench), blowing every capture timeout behind it
 before the time bound existed.
+
+### Why the budget adapts: the loaded-host collapse (2026-09-28)
+
+The spin only pays while the producer runs on another core. Each 1 KiB drain wakes the
+writer (macOS blocks `cat` after every KiB: 153.7k voluntary switches per 150 MiB), and the
+refill normally lands within about 5 failed reads. When the host is CPU-saturated (parallel
+cargo builds, load 25-90 on 16 cores), the writer waits in the run queue instead. A fixed
+512 budget then keeps the actor spinning at 100% of a core on failed reads (about 3.1k
+instructions each), which takes a core from the writer it is waiting on, so it waits longer.
+The detached 150 MiB ASCII probe fell from ~250 MB/s to 12-15 MB/s and 3-6x the
+instructions, below tmux under the same load. The perf gate saw 2 of 36 runs at 12-13 MB/s
+and ~24 Ginstr.
+
+Two bounded runs under 20 extra spinning processes, variants alternating within each run:
+
+| drain | MB/s | Ginstr | daemon CPU |
+| --- | --- | --- | --- |
+| spin 512 fixed | 13.9-15.7 | 52-55 | 7.1-7.6 s |
+| spin 64 fixed | 18-19 | 34-37 | 5.3-5.5 s |
+| adaptive 8..512 | 35.6-44 | 15.5-16.6 | 2.4-2.5 s |
+| no spin | 43-51 | 12 | 1.9-2.0 s |
+| tmux 3.7c | 15.6-18.2 | 62 | 5.8-6.0 s |
+
+On a quiet host the adaptive budget costs nothing: 254 vs 256 MB/s median, 8.07 vs 8.06
+Ginstr, 40 alternating runs each. No spin at all costs about 9% there. The instruction count
+fits `7.4 G + 0.23 G per second of flood (16 ms snapshots) + 3.1k per failed read` over 150
+instrumented runs (max residual 0.27 G), so a slow run with 3x instructions is a spinning
+run, not a parse problem. Diagnose with `proc_pid_rusage` `ri_runnable_time` minus CPU time:
+a starved run shows seconds of run-queue wait for the writer and the daemon.
 
 ## The macOS sleep and wake pipe (`wait_for_wake`, `ActorWake`)
 

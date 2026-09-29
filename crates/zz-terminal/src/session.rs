@@ -153,6 +153,8 @@ const PTY_BRIDGE_THRESHOLD_BYTES: usize = 1024;
 /// Probed on Mac16,5/macOS 27: spin 64/256/512 gave 281/332/348 MB/s.
 #[cfg(all(unix, not(target_os = "linux")))]
 const PTY_BRIDGE_SPIN_MAX: u32 = 512;
+#[cfg(all(unix, not(target_os = "linux")))]
+const PTY_BRIDGE_SPIN_MIN: u32 = 8;
 #[cfg(target_os = "linux")]
 const PTY_GATHER_BRIDGE_SPIN_MAX: u32 = 16;
 const CONTENT_PUBLISH_STALENESS: Duration = Duration::from_millis(16);
@@ -5859,6 +5861,8 @@ fn run_terminal(
     let no_output = crossbeam_channel::never();
     #[cfg(all(unix, not(target_os = "linux")))]
     let mut read_buffer = vec![0_u8; PTY_READ_BUFFER_BYTES];
+    #[cfg(all(unix, not(target_os = "linux")))]
+    let mut bridge_spins = PTY_BRIDGE_SPIN_MAX;
     let (mut search_worker, search_results) = SearchWorker::spawn(wake.clone());
     let mut search_refresh_due = None::<Instant>;
     let mut last_content_publish = Instant::now();
@@ -6849,6 +6853,9 @@ fn run_terminal(
                                 vt_diagnostics.record(parsed, started);
                                 output_pending |= parsed > 0;
                             }
+                            if spins > 0 {
+                                bridge_spins = (bridge_spins * 2).min(PTY_BRIDGE_SPIN_MAX);
+                            }
                             burst += length;
                             spins = 0;
                             if burst >= PTY_DRAIN_TURN_BYTES
@@ -6860,9 +6867,12 @@ fn run_terminal(
                         }
                         Err(rustix::io::Errno::INTR) => {}
                         Err(rustix::io::Errno::AGAIN) => {
-                            if burst >= PTY_BRIDGE_THRESHOLD_BYTES && spins < PTY_BRIDGE_SPIN_MAX {
-                                spins += 1;
-                                continue;
+                            if burst >= PTY_BRIDGE_THRESHOLD_BYTES {
+                                if spins < bridge_spins {
+                                    spins += 1;
+                                    continue;
+                                }
+                                bridge_spins = (bridge_spins / 2).max(PTY_BRIDGE_SPIN_MIN);
                             }
                             break;
                         }

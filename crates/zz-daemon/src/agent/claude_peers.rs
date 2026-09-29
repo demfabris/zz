@@ -153,7 +153,7 @@ pub(crate) fn record_for_pane<'a>(
     pane: &str,
     pane_pid: Option<u32>,
 ) -> Option<&'a PeerRecord> {
-    record_for_pane_with_parents(records, pane, pane_pid, parent_pid)
+    record_for_pane_with_parents(records, pane, pane_pid, crate::process_info::parent)
 }
 
 pub(crate) fn record_for_pane_with_parents<'a>(
@@ -184,80 +184,6 @@ fn descends_from(mut pid: u32, root: u32, parent_of: impl Fn(u32) -> Option<u32>
         }
     }
     false
-}
-
-#[cfg(target_os = "macos")]
-#[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
-fn parent_pid(pid: u32) -> Option<u32> {
-    let process_id = libc::pid_t::try_from(pid).ok().filter(|pid| *pid > 0)?;
-    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
-    let size = i32::try_from(std::mem::size_of::<libc::proc_bsdinfo>()).ok()?;
-    let result = unsafe {
-        libc::proc_pidinfo(
-            process_id,
-            libc::PROC_PIDTBSDINFO,
-            0,
-            info.as_mut_ptr().cast(),
-            size,
-        )
-    };
-    (result == size).then(|| unsafe { info.assume_init() }.pbi_ppid)
-}
-
-#[cfg(target_os = "linux")]
-fn parent_pid(pid: u32) -> Option<u32> {
-    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    stat.rsplit_once(')')?
-        .1
-        .split_whitespace()
-        .nth(1)?
-        .parse()
-        .ok()
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn parent_pid(pid: u32) -> Option<u32> {
-    process_parents()
-        .ok()?
-        .into_iter()
-        .find_map(|(child, parent)| (child == pid).then_some(parent))
-}
-
-#[cfg(target_os = "macos")]
-#[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
-pub(crate) fn process_group(pid: u32) -> Option<u32> {
-    let process_id = libc::pid_t::try_from(pid).ok().filter(|pid| *pid > 0)?;
-    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
-    let size = i32::try_from(std::mem::size_of::<libc::proc_bsdinfo>()).ok()?;
-    let result = unsafe {
-        libc::proc_pidinfo(
-            process_id,
-            libc::PROC_PIDTBSDINFO,
-            0,
-            info.as_mut_ptr().cast(),
-            size,
-        )
-    };
-    (result == size).then(|| unsafe { info.assume_init() }.pbi_pgid)
-}
-
-#[cfg(target_os = "linux")]
-pub(crate) fn process_group(pid: u32) -> Option<u32> {
-    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    stat.rsplit_once(')')?
-        .1
-        .split_whitespace()
-        .nth(2)?
-        .parse()
-        .ok()
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-#[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
-pub(crate) fn process_group(pid: u32) -> Option<u32> {
-    let process_id = libc::pid_t::try_from(pid).ok().filter(|pid| *pid > 0)?;
-    let group = unsafe { libc::getpgid(process_id) };
-    u32::try_from(group).ok().filter(|group| *group > 0)
 }
 
 pub(crate) fn pane_process_ids(parents: &[(u32, u32)], pane_pid: u32) -> Vec<u32> {
@@ -1011,7 +937,7 @@ mod tests {
         let lookups = std::cell::Cell::new(0);
         let parent_of = |pid| {
             lookups.set(lookups.get() + 1);
-            parent_pid(pid)
+            crate::process_info::parent(pid)
         };
         let me = std::process::id();
         let records = [PeerRecord {

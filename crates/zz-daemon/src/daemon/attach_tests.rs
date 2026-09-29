@@ -708,3 +708,148 @@ fn a_full_the_client_asks_for_is_sent_at_the_generation_it_already_had() {
     });
     assert_eq!(fulls(&repaint).len(), 1);
 }
+
+fn is_full(message: &ProtocolMessage) -> bool {
+    matches!(
+        message,
+        ProtocolMessage::Event(Event {
+            payload: EventPayload::TerminalViewport { .. },
+            ..
+        })
+    )
+}
+
+#[test]
+fn a_requested_full_replaces_a_patch_queued_at_its_generation() {
+    let mailbox = OutboundMailbox::new();
+    let pane = PaneId(11);
+    assert_eq!(
+        mailbox.enqueue_terminal(pane, &terminal_test_message(pane, 1, 5)),
+        TerminalEnqueue::Queued
+    );
+    mailbox.recv().expect("first full");
+    assert_eq!(
+        mailbox.enqueue_terminal(pane, &terminal_patch_test_message(pane, 2, 5, 6)),
+        TerminalEnqueue::Queued
+    );
+    mailbox.forget_delivered_terminal(pane);
+    assert!(mailbox.replace_terminal(pane, &terminal_test_message(pane, 3, 6)));
+    let written = decode_protocol_frame(&mailbox.recv().expect("frame")).expect("decode");
+    assert!(is_full(&written), "got {}", message_name(&written));
+}
+
+#[test]
+fn a_patch_queued_before_attached_never_follows_it() {
+    let mailbox = OutboundMailbox::new();
+    let pane = PaneId(12);
+    assert_eq!(
+        mailbox.enqueue_terminal(pane, &terminal_test_message(pane, 1, 5)),
+        TerminalEnqueue::Queued
+    );
+    mailbox.recv().expect("first full");
+    mailbox.hold_terminals();
+    assert_eq!(
+        mailbox.enqueue_terminal(pane, &terminal_patch_test_message(pane, 2, 5, 6)),
+        TerminalEnqueue::Queued
+    );
+    let attached = ProtocolMessage::Attached {
+        session: SessionId(1),
+        snapshot: MuxSnapshot::default(),
+        read_only: false,
+        client_flags: String::new(),
+    };
+    assert!(mailbox.enqueue_attached(&attached));
+    assert!(
+        mailbox.state.lock().terminals.is_empty(),
+        "the patch lost its base"
+    );
+    assert_eq!(
+        mailbox.enqueue_terminal(pane, &terminal_test_message(pane, 3, 6)),
+        TerminalEnqueue::Queued
+    );
+    let first = decode_protocol_frame(&mailbox.recv().expect("attached")).expect("decode");
+    assert!(matches!(first, ProtocolMessage::Attached { .. }));
+    let written = decode_protocol_frame(&mailbox.recv().expect("frame")).expect("decode");
+    assert!(is_full(&written), "got {}", message_name(&written));
+}
+
+#[test]
+fn a_resync_drops_queued_patches_and_keeps_queued_fulls() {
+    let mailbox = OutboundMailbox::new();
+    let (patched, whole) = (PaneId(13), PaneId(14));
+    for pane in [patched, whole] {
+        assert_eq!(
+            mailbox.enqueue_terminal(pane, &terminal_test_message(pane, 1, 5)),
+            TerminalEnqueue::Queued
+        );
+    }
+    mailbox.recv().expect("first full");
+    mailbox.recv().expect("second full");
+    assert_eq!(
+        mailbox.enqueue_terminal(patched, &terminal_patch_test_message(patched, 2, 5, 6)),
+        TerminalEnqueue::Queued
+    );
+    assert!(mailbox.replace_terminal(whole, &terminal_test_message(whole, 2, 6)));
+    mailbox.forget_delivered_terminals();
+    let state = mailbox.state.lock();
+    assert!(!state.terminals.contains_key(&patched));
+    assert!(
+        state
+            .terminals
+            .get(&whole)
+            .is_some_and(|pending| pending.full)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_request_full_on_a_live_pane_with_a_patch_queued_is_answered_with_a_full() {
+    let shared = Arc::new(Shared::new(1));
+    let mut context = ExecutionContext::default();
+    command(
+        &shared,
+        &mut context,
+        &["new-session", "-d", "-s", "patched", QUIET_PANE_COMMAND],
+    );
+    let pane = context.pane.expect("pane");
+    let (client, mailbox) = terminal_client(&shared, (90, 20));
+    interactive(&shared, client, &["attach-session", "-t", "patched"]);
+    drain_until(
+        &mailbox,
+        Duration::from_millis(150),
+        every_pane_has_a_full(&[pane]),
+    );
+    command(
+        &shared,
+        &mut context,
+        &["send-keys", "-t", "patched", "-l", "x"],
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut settled: Option<Instant> = None;
+    loop {
+        let patch_queued = mailbox
+            .state
+            .lock()
+            .terminals
+            .get(&pane)
+            .is_some_and(|pending| !pending.full);
+        if patch_queued {
+            if settled.get_or_insert_with(Instant::now).elapsed() >= Duration::from_millis(150) {
+                break;
+            }
+        } else {
+            settled = None;
+        }
+        assert!(Instant::now() < deadline, "no patch settled in the queue");
+        thread::sleep(Duration::from_millis(5));
+    }
+    shared.request_full(client, pane, &mailbox);
+    let written = drain_until(&mailbox, Duration::from_millis(150), |messages| {
+        !messages.is_empty()
+    });
+    let names = written.iter().map(message_name).collect::<Vec<_>>();
+    assert!(
+        !fulls(&written).is_empty(),
+        "RequestFull answered with {names:?}"
+    );
+}

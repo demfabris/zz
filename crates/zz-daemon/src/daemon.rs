@@ -2063,7 +2063,9 @@ fn newer_terminal_delivered(
 /// An update that leaves the client where a frame already queued or written
 /// leaves it: an older Full, or any frame whose generation is the one the
 /// client holds or is about to hold. A viewport's generations move on every
-/// publish, so equal generations are an equal frame.
+/// publish, so equal generations are an equal frame, except that a queued
+/// patch never stands in for a Full: the Full is wanted because the client
+/// may not hold the patch's base.
 fn terminal_update_redundant(
     state: &OutboundState,
     pane: PaneId,
@@ -2073,17 +2075,41 @@ fn terminal_update_redundant(
     let current = transition.current;
     transition.base.is_none() && newer_terminal_delivered(state, pane, current)
         || *attach::ATTACH_DEDUP
-            && (state
-                .terminals
-                .get(&pane)
-                .is_some_and(|pending| pending.current == current && (preview || !pending.preview))
-                || state.delivered_terminals.get(&pane) == Some(&current))
+            && (state.terminals.get(&pane).is_some_and(|pending| {
+                pending.current == current
+                    && (preview || !pending.preview)
+                    && (pending.full || transition.base.is_some())
+            }) || state.delivered_terminals.get(&pane) == Some(&current))
+}
+
+fn forget_delivered_terminal_state(state: &mut OutboundState, pane: PaneId) {
+    state.delivered_terminals.remove(&pane);
+    if state
+        .terminals
+        .get(&pane)
+        .is_some_and(|pending| !pending.full)
+    {
+        remove_pending_terminal(state, pane);
+    }
+}
+
+fn forget_delivered_terminals_state(state: &mut OutboundState) {
+    state.delivered_terminals.clear();
+    let patches = state
+        .terminals
+        .iter()
+        .filter_map(|(pane, pending)| (!pending.full).then_some(*pane))
+        .collect::<Vec<_>>();
+    for pane in patches {
+        remove_pending_terminal(state, pane);
+    }
 }
 
 struct PendingTerminal {
     encoded: Vec<u8>,
     current: TerminalGeneration,
     preview: bool,
+    full: bool,
 }
 
 struct PendingCommandOutput {
@@ -2327,7 +2353,7 @@ impl OutboundMailbox {
         };
         self.enqueue_encoded_reliable_with(encoded, |state| {
             if *attach::ATTACH_DEDUP {
-                state.delivered_terminals.clear();
+                forget_delivered_terminals_state(state);
             }
             state.terminals_held = false;
         })
@@ -2381,13 +2407,14 @@ impl OutboundMailbox {
     }
 
     /// The client dropped this pane's viewport (a patch it could not apply),
-    /// so the next Full is wanted even at the generation last delivered.
+    /// so the next Full is wanted even at the generation last delivered, and
+    /// no patch queued against the dropped base may follow it.
     fn forget_delivered_terminal(&self, pane: PaneId) {
-        self.state.lock().delivered_terminals.remove(&pane);
+        forget_delivered_terminal_state(&mut self.state.lock(), pane);
     }
 
     fn forget_delivered_terminals(&self) {
-        self.state.lock().delivered_terminals.clear();
+        forget_delivered_terminals_state(&mut self.state.lock());
     }
 
     fn enqueue_kitty_image(
@@ -2823,6 +2850,7 @@ impl OutboundMailbox {
                 encoded,
                 current: transition.current,
                 preview: matches!(delivery, TerminalDelivery::Preview { .. }),
+                full: transition.base.is_none(),
             },
         );
         state.terminal_order.push_back(pane);
@@ -2915,6 +2943,7 @@ impl OutboundMailbox {
                 encoded,
                 current: transition.current,
                 preview: false,
+                full: transition.base.is_none(),
             },
         );
         if let Some(replaced) = replaced {

@@ -1343,14 +1343,35 @@ enum CallerTtyScope {
     StandardStreams,
 }
 
+pub const DEFAULT_CELL_WIDTH_PX: u32 = 8;
+pub const DEFAULT_CELL_HEIGHT_PX: u32 = 16;
+
+/// One cell's extent in pixels from a terminal's window size: the pixel
+/// extent over the cell count, or `fallback` when the terminal reports none.
+#[must_use]
+pub fn cell_pixel_extent(pixels: u16, cells: u16, fallback: u32) -> u32 {
+    if pixels == 0 || cells == 0 {
+        fallback
+    } else {
+        (u32::from(pixels) / u32::from(cells)).max(1)
+    }
+}
+
 #[cfg(unix)]
-fn caller_terminal_size() -> Option<(u16, u16)> {
+fn caller_terminal_size() -> Option<(u16, u16, u32, u32)> {
     let size = rustix::termios::tcgetwinsize(std::io::stdout()).ok()?;
-    (size.ws_col > 0 && size.ws_row > 0).then_some((size.ws_col, size.ws_row))
+    (size.ws_col > 0 && size.ws_row > 0).then(|| {
+        (
+            size.ws_col,
+            size.ws_row,
+            cell_pixel_extent(size.ws_xpixel, size.ws_col, DEFAULT_CELL_WIDTH_PX),
+            cell_pixel_extent(size.ws_ypixel, size.ws_row, DEFAULT_CELL_HEIGHT_PX),
+        )
+    })
 }
 
 #[cfg(not(unix))]
-fn caller_terminal_size() -> Option<(u16, u16)> {
+fn caller_terminal_size() -> Option<(u16, u16, u32, u32)> {
     None
 }
 
@@ -1567,16 +1588,20 @@ fn client_takes_utf8(lookup: impl Fn(&str) -> Option<OsString>) -> bool {
 fn terminal_facts_capabilities_with(
     scope: EndpointFactsScope,
     nested: bool,
-    terminal_size: impl FnOnce() -> Option<(u16, u16)>,
+    terminal_size: impl FnOnce() -> Option<(u16, u16, u32, u32)>,
     tty: impl FnOnce(CallerTtyScope) -> Option<String>,
     capabilities: &mut Vec<String>,
 ) {
     if scope.includes_terminal_size()
-        && let Some((columns, rows)) = terminal_size()
+        && let Some((columns, rows, cell_width_px, cell_height_px)) = terminal_size()
     {
         capabilities.push(format!(
             "{}{columns}x{rows}",
             ClientHello::CLIENT_SIZE_CAPABILITY_PREFIX
+        ));
+        capabilities.push(format!(
+            "{}{cell_width_px}x{cell_height_px}",
+            ClientHello::CLIENT_CELL_CAPABILITY_PREFIX
         ));
     }
     if let Some(tty_scope) = scope.tty_scope()

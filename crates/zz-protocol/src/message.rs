@@ -33,6 +33,12 @@ pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
 pub const CLIENT_TTY_CAPABILITY_PREFIX: &str = "client-tty-v1:";
 /// Value-token prefix naming the caller's terminal size, `client-size-v1:80x24`.
 pub const CLIENT_SIZE_CAPABILITY_PREFIX: &str = "client-size-v1:";
+/// Value-token prefix naming the cell size in pixels a terminal client will
+/// report for its panes, `client-cell-v1:8x16`.
+pub const CLIENT_CELL_CAPABILITY_PREFIX: &str = "client-cell-v1:";
+/// Value-token prefix of a server option a raw-terminal client arms its
+/// terminal from, read when the hello is built, `server-option-v1:focus-events=on`.
+pub const SERVER_OPTION_CAPABILITY_PREFIX: &str = "server-option-v1:";
 pub const CLIENT_FEATURES_CAPABILITY_PREFIX: &str = "client-features-v1:";
 /// Most feature names one [`ProtocolMessage::ClientTerminalFeatures`] may carry:
 /// the pin's own table holds twenty-one and a client reports the union of what
@@ -1560,6 +1566,7 @@ impl ClientHello {
     pub const CLIENT_NESTED_CAPABILITY: &'static str = CLIENT_NESTED_CAPABILITY;
     pub const CLIENT_TTY_CAPABILITY_PREFIX: &'static str = CLIENT_TTY_CAPABILITY_PREFIX;
     pub const CLIENT_SIZE_CAPABILITY_PREFIX: &'static str = CLIENT_SIZE_CAPABILITY_PREFIX;
+    pub const CLIENT_CELL_CAPABILITY_PREFIX: &'static str = CLIENT_CELL_CAPABILITY_PREFIX;
     pub const CLIENT_FEATURES_CAPABILITY_PREFIX: &'static str = CLIENT_FEATURES_CAPABILITY_PREFIX;
     pub const STARTUP_CONFIG_OWNER_CAPABILITY: &'static str = "startup-config-owner-v1";
     /// The client's terminal takes UTF-8, so the server hands it bytes

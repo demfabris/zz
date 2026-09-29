@@ -64,9 +64,9 @@ pub use message::{
     NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneBorderPresentation, PaneIndicator,
     PasteUploadPurpose, PastedImageFormat, PopupAction, PopupBorderLines, PopupPointer,
     PopupPointerButton, PopupState, PreparedCommand, PreparedCommandResult, ProtocolMessage,
-    RawText, SPLIT_RATIO_BASIS, ServerError, ServerHello, SourceSpan, StatusLine, StatusPosition,
-    StdoutClaim, TerminalUiCommand, agent_update_batch_bytes, paste_upload_extension_is_valid,
-    split_command_words,
+    RawText, SERVER_OPTION_CAPABILITY_PREFIX, SPLIT_RATIO_BASIS, ServerError, ServerHello,
+    SourceSpan, StatusLine, StatusPosition, StdoutClaim, TerminalUiCommand,
+    agent_update_batch_bytes, paste_upload_extension_is_valid, split_command_words,
 };
 pub use message::{
     MAX_STARTUP_CONFIG_CAUSE_BYTES, MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES,

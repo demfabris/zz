@@ -3094,6 +3094,11 @@ impl MuxEngine {
     }
 
     #[must_use]
+    pub const fn extended_keys(&self) -> &str {
+        self.server_options.extended_keys.as_str()
+    }
+
+    #[must_use]
     pub const fn history_file(&self) -> &str {
         self.server_options.history_file.as_str()
     }

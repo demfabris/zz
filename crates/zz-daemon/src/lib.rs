@@ -80,9 +80,9 @@ pub use agent::stream::{
 pub use askpass::run_helper;
 pub use askpass::{ASKPASS_SOCKET_ENV, AskpassPrompt, AskpassPromptKind, AskpassReply, SshPrompts};
 pub use client::{
-    ClientTerminalFlags, client_takes_utf8_terminal, client_terminal_colour_count,
-    client_terminal_feature_mask, learn_client_terminal_features, report_terminal_type,
-    set_client_terminal_flags,
+    ClientTerminalFlags, DEFAULT_CELL_HEIGHT_PX, DEFAULT_CELL_WIDTH_PX, cell_pixel_extent,
+    client_takes_utf8_terminal, client_terminal_colour_count, client_terminal_feature_mask,
+    learn_client_terminal_features, report_terminal_type, set_client_terminal_flags,
 };
 pub use client::{CommandClient, CommandOutcome, InteractiveClient, short_device_name};
 #[cfg(feature = "daemon")]

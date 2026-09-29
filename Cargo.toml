@@ -59,6 +59,7 @@ libc = "0.2.189"
 interprocess = "2.4.4"
 libghostty-vt = { version = "=0.2.1", git = "https://github.com/demfabris/libghostty-rs", rev = "359ef751c189540eafb9110b2de89ad95ce48fc3", default-features = false }
 log = "0.4.34"
+memchr = "2.8.3"
 merman = { version = "=0.6.2", features = ["render"] }
 mimalloc = "0.1.52"
 objc2 = "0.6.4"

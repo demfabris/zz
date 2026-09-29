@@ -21,6 +21,7 @@ session = [
     "dep:libc",
     "dep:libghostty-vt",
     "dep:log",
+    "dep:memchr",
     "dep:parking_lot",
     "dep:portable-pty",
     "dep:regex",
@@ -37,6 +38,7 @@ image = { version = "=0.25.10", optional = true, default-features = false, featu
 libc = { workspace = true, optional = true }
 libghostty-vt = { workspace = true, optional = true, features = ["kitty-graphics"] }
 log = { workspace = true, optional = true }
+memchr = { workspace = true, optional = true }
 parking_lot = { workspace = true, optional = true }
 portable-pty = { workspace = true, optional = true }
 regex = { workspace = true, optional = true }

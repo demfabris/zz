@@ -11782,6 +11782,7 @@ dependencies = [
  "libc",
  "libghostty-vt",
  "log",
+ "memchr",
  "parking_lot",
  "portable-pty",
  "regex",

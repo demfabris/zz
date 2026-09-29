@@ -352,6 +352,8 @@ def main():
     warnings = []
     if head_time and zz_mtime < head_time:
         warnings.append("zz binary is older than the HEAD commit; rebuild (cargo build --release -p zz-cli) unless HEAD changed no code")
+    if not probe.HAS_INSTRUCTIONS:
+        warnings.append(f"no instruction counts ({probe.INSTRUCTIONS_SOURCE}); instr metrics and the 5% rule are skipped")
     base = gate.load_result(args.baseline)
     w0_path = resolve_w0(args.w0, host, args.quick)
     w0 = gate.load_result(w0_path)
@@ -386,6 +388,7 @@ def main():
         "history_limit": isolate.HISTORY_LIMIT,
         "cpu_source": probe.CPU_SOURCE,
         "instructions": probe.HAS_INSTRUCTIONS,
+        "instructions_source": probe.INSTRUCTIONS_SOURCE,
         "warnings": warnings,
         "loadavg_start": timing.loadavg(),
     }

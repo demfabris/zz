@@ -2,7 +2,7 @@
 type: Design Plan
 title: Daemon performance rebuild
 description: "The campaign to bring the zz daemon to tmux cost per command, per pane and per attach while keeping the 5x output throughput lead - a permanent zz-vs-tmux gate first, then waves that remove unrequested work (one-frame Exec commands, change-driven publication, lazy formats, frames only for watchers, a compact wire under one unreleased protocol version), then one mux loop and PTY shards; the lane brief source with targets, merge order, write zones, gates and rollback switches."
-status: Approved 2026-09-28; wave 0 (gate and this plan) built; release freeze until W4 exits; wave 1 in progress on perf/wave1 (FOOTPRINT, FORMAT, PUBLISH, PANE, EXEC and ATTACH merged; wave-1 exit next); continued on Linux from bench/perf/campaign/HANDOFF.md
+status: Approved 2026-09-28; wave 0 (gate and this plan) built; release freeze until W4 exits; wave 1 done and on main; wave 2 in progress on perf/wave2 (HOOKS merged as w2-1); continued on Linux from bench/perf/campaign/HANDOFF.md
 resource: crates/zz-daemon/src/daemon.rs
 tags:
 - performance
@@ -17,9 +17,9 @@ timestamp: 2026-09-29T15:30:00Z
 
 # Campaign status
 
-2026-09-29: `perf/wave1` holds W0 and all six wave-1 lanes (FOOTPRINT, FORMAT, PUBLISH, PANE,
-EXEC, and ATTACH as merge 6, `ce1b34cd`, on Linux) plus three folded side branches; the wave-1
-exit is next. It is not on main. The campaign continues on a Linux host:
+2026-09-29: wave 1 (W0, all six wave-1 lanes, three folded side branches) passed its Linux exit
+and is on main (`1e0bfc6a`). Wave 2 runs on `perf/wave2`; W2-HOOKS is merge 1 (`0acd7f2a`,
+`w2-1-hooks-alienware-0acd7f2a.json`). The campaign continues on a Linux host:
 `bench/perf/campaign/HANDOFF.md` has the state, the numbers against tmux at the last gate, the
 next steps in order, the macOS-only checks and the traps; `bench/perf/campaign/attach-review.json`
 has the attach lane's reports; `bench/perf/campaign/scripts/` has the lane workflow template.
@@ -2170,6 +2170,14 @@ Handed on:
   to the next session, so it stays until the journal covers shutdown.
 - A key table change published between a client's `register` (its hello) and its `subscribe`
   never reaches it, for every hello-carried state; the base had the same gap.
+
+Merged into `perf/wave2` as `0acd7f2a` (w2-1, Linux), plus `74f35b65` for the web client
+lockfile. Strict gate `w2-1-hooks-alienware-0acd7f2a.json` against the wave-1 exit:
+`config.wall.source_1000` 0.74x tmux (rule 1.1x), `config.cpu.source_1000` 0.70x,
+`config.instr.source_1000` 41.7 Minstr (tmux 82.4); `cli.cpu.display.p20` 16-33% under the
+pre-merge binary in alternating A/B runs (target 5-15%); `spawn.cpu.kill_pane` passes the
+Linux-scaled bound (1.04 ms, bound 1.52) but is 2.3x tmux in raw time, the kernel-side gap handed
+to W3-SHARDS above. No instruction, byte, footprint or thread row regressed.
 
 ## W2-COPY: copy mode without flat clones (effort L)
 

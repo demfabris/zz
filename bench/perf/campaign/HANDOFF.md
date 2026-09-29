@@ -69,6 +69,25 @@ Fold checks on the Mac: fmt and clippy `-D warnings` clean; zz-terminal 309, zz-
 `cargo test --workspace --all-features --no-fail-fast` green on rerun (first run: 3 zz-daemon
 load flakes that pass alone); `just compat-check` green with Homebrew bash first.
 
+Wave 2 merge log on `perf/wave2` (Linux, alienware; gate JSON per merge in `bench/perf/results/`,
+each `--baseline` is the row above, the first one's is `wave1-alienware-aaaa8195.json`):
+
+| # | Lane | Merge | Follow-ups | Gate JSON |
+|---|---|---|---|---|
+| 1 | HOOKS | `0acd7f2a` | `74f35b65` (foldhash in `clients/web/Cargo.lock`, or `just web-build` stops at `--locked`) | `w2-1-hooks-alienware-0acd7f2a.json` (`--strict`, full, quiet, load 0.8-1.7: 55 pass, 17 fail, 7 regressed, 1 drifted) |
+
+Merge 1 (HOOKS): every instruction row dropped or held (`config.instr.source_1000` 139.4 -> 41.7
+Minstr, tmux 82.4; `cli.instr.display.p20` 0.248 -> 0.136, tmux 0.262; `cli.instr.chain5.p20`
+1.106 -> 0.425, tmux 0.493; `control.instr_per_cmd` 0.157 -> 0.128); bytes, footprint and threads
+held. The 7 regressed rows are cpu/wall (`cli.wall.version.p1`, `cli.wall.display.p20`,
+`cli.cpu.display.p20`, `spawn.wall/cpu.split_shell`, `cold.wall.new_session_noterm`,
+`control.burst_cmds_per_s`) with tmux moving the same way or the pre-merge binary reading the same
+in alternating A/B runs (`~/.cache/zz-perf/hooks/merge/ab*.json`); A/B medians put
+`cli.cpu.display.p20` 16-33% under the pre-merge binary and `control.burst_cmds_per_s` at 16.8k
+against 15.2k. Stage wave2 rules for unmerged lanes fail as expected (attach, echo wire, control
+latency and burst, `chatty.*.visible`), plus the W3 rows (spawn CPU, `mem.threads.p20`). Both
+throughput rows pass now because of the Ghostty pin (`2166bd31`), not HOOKS.
+
 ### Numbers at the last full gate (`w1-5-exec`, macOS M4 Max, tmux 3.7c, medians)
 
 | Metric | tmux | zz W0 | zz now | now/tmux | wave1 rule | verdict |
@@ -170,9 +189,9 @@ Lanes in flight:
 | Lane | Where | State |
 |---|---|---|
 | W1-ATTACH | was `~/dev/zz-attach`, `perf/attach` | merged 2026-09-29 as `ce1b34cd` (w1-6), worktree and branch removed; reports in `~/.cache/zz-perf/attach/` (`report.md`, `merge-report.md`), statuses in `attach-review.json` |
-| W1-LINUX-PAGES | fork: `~/dev/ghostty-zz` branch `zz/pagelist-reuse`, commit `713374af` (local clone, **not pushed**) | zz side merged (`0e590636`: memchr escape scan, doc note). The fork fix (detached ASCII 85 -> 120-134 MB/s, unicode 45 -> 91, actor 98% -> 30% CPU) lands once the owner OKs `git -C ~/dev/ghostty-zz push origin zz/pagelist-reuse:zz-2026-09-29` and the `GHOSTTY_COMMIT` bump (files to touch in `~/.cache/zz-perf/pages/report.md`); then one Mac gate `--only throughput,mem` for the Darwin trim path |
+| W1-LINUX-PAGES | fork `demfabris/ghostty` branch `zz-2026-09-29`, commit `713374af` | landed: zz side `0e590636` (memchr escape scan), fork pin `2166bd31` (detached ASCII 85 -> 120-134 MB/s, unicode 45 -> 91, actor 98% -> 30% CPU). The Darwin trim path still needs the Mac gate (checklist at the top) |
 | W1-ATTACH-PAINT | was `~/dev/zz-attach-paint`, `perf/attach-paint` | merged `aaaa8195`: `Renderer::note_frame` merged, instead of replacing, a pane's unpainted damage when a drain took a second frame; regression test in zz-tui app.rs |
-| W2-HOOKS | `~/dev/zz-hooks`, `perf/hooks` (branched from perf/wave1 `0e590636`) | implementer running from `~/.cache/zz-perf/prompts/hooks-impl.md`; reviews, fix and merge into perf/wave2 follow |
+| W2-HOOKS | was `~/dev/zz-hooks`, `perf/hooks` | merged into `perf/wave2` as `0acd7f2a` (w2-1), worktree and branch removed; reports in `~/.cache/zz-perf/hooks/` (`fix-report.md`, `merge-report.md`) |
 
 ## Owner decisions (binding)
 
@@ -465,6 +484,8 @@ Rule: every wave exit gets one `--strict` gate run on the Mac, committed as
 - **Stale daemons.** The daemon outlives clients; after a wire-changing merge, `kill-server` every dev daemon. Test sockets go directly under `/tmp` (`sun_path` limit).
 - **Wall and CPU noise.** Parallel lanes make wall and CPU time noisy; judge on instructions, bytes, counts, footprint and threads, and run merge-of-record gates with `--strict` on a quiet host.
 - **Compat rows red on the Mac only**: `smoke/resurrect-save` (macOS `/bin/sh` runs as bash, tmux fails it too), `smoke/plugin-runtime-continuum` (gnubin `sleep` is `gsleep`), `smoke/status-background-jobs` (BSD `date` lacks `%N`), `verify_claims_test.py` under `/bin/bash` 3.2. Expect them to pass here; if not, compare with the pre-merge binary before blaming a lane.
+- **The web client has its own lockfile.** A lane that adds a dependency to a crate `clients/web` builds (zz-protocol, zz-client, zz-mux, zz-ui) must refresh `clients/web/Cargo.lock` too (`cargo metadata --offline --manifest-path clients/web/Cargo.toml`), or `just web-build` fails at `cargo metadata --locked` with a Python JSON traceback. W2-HOOKS missed it (`74f35b65`).
+- **Pane-title rows under compile load.** `command-item-format` and `new-session-cwd` in `compat/run.sh` read `#{pane_title}` right after `new-session`; with a cargo build running they can see the shell's first title (zz `bash`, tmux `user@host:cwd`) and fail once. They pass alone; W2-HOOKS merge saw both clean in three quiet reruns and on the pre-merge binary.
 
 ## Known open bugs
 

@@ -223,6 +223,7 @@ pub(crate) struct Renderer {
     painted: HashMap<PaneId, PaintedPane>,
     headers: HashMap<PaneId, String>,
     picker_cards: HashMap<PaneId, (Rect, usize)>,
+    cards: HashMap<PaneId, (Rect, &'static str, String, String)>,
     sidebar_rows: Vec<PaintedSidebarRow>,
     status_rows: Vec<StyledLine>,
     status_geometry: Option<(u16, u16, u16)>,
@@ -265,6 +266,7 @@ impl Renderer {
             painted: HashMap::new(),
             headers: HashMap::new(),
             picker_cards: HashMap::new(),
+            cards: HashMap::new(),
             sidebar_rows: Vec::new(),
             status_rows: Vec::new(),
             status_geometry: None,
@@ -300,6 +302,7 @@ impl Renderer {
         self.painted.clear();
         self.headers.clear();
         self.picker_cards.clear();
+        self.cards.clear();
         self.sidebar_rows.clear();
         self.status_rows.clear();
         self.status_geometry = None;
@@ -371,6 +374,7 @@ impl Renderer {
         self.painted.remove(&pane);
         self.headers.remove(&pane);
         self.picker_cards.remove(&pane);
+        self.cards.remove(&pane);
         self.damage.remove(&pane);
         self.browser_placements.remove(&pane);
         self.browser_painted.remove(&pane);
@@ -754,12 +758,19 @@ impl Renderer {
                         self.picker_cards.insert(entry.pane, card_state);
                     }
                 }
-                kind if force || header_changed || browser_state_changed => {
+                kind => {
                     self.picker_cards.remove(&entry.pane);
                     let (label, detail) = placeholder_text(kind);
-                    self.paint_card(content, label, &pane.title, &detail, model);
+                    let card = (content, label, pane.title.clone(), detail);
+                    if force
+                        || header_changed
+                        || browser_state_changed
+                        || self.cards.get(&entry.pane) != Some(&card)
+                    {
+                        self.paint_card(content, card.1, &card.2, &card.3, model);
+                        self.cards.insert(entry.pane, card);
+                    }
                 }
-                _ => {}
             }
         }
         let popup = model.popup.as_ref().map(|popup| popup.pane);
@@ -770,6 +781,8 @@ impl Renderer {
             popup == Some(*pane) || model.layout.panes.iter().any(|entry| entry.pane == *pane)
         });
         self.picker_cards
+            .retain(|pane, _| model.layout.panes.iter().any(|entry| entry.pane == *pane));
+        self.cards
             .retain(|pane, _| model.layout.panes.iter().any(|entry| entry.pane == *pane));
         self.browser_painted
             .retain(|pane, _| model.layout.panes.iter().any(|entry| entry.pane == *pane));
@@ -1957,6 +1970,7 @@ impl Renderer {
         self.painted.clear();
         self.headers.clear();
         self.picker_cards.clear();
+        self.cards.clear();
         self.sidebar_rows.clear();
         self.status_rows.clear();
         self.status_geometry = None;
@@ -2907,29 +2921,30 @@ fn fill_cells(fill: char, width: usize) -> String {
 /// there, or the right half of the wide cluster before it.
 #[derive(PartialEq)]
 enum StatusColumn<'a> {
-    Lead(String, &'a TmuxStyle),
+    Lead(&'a str, &'a TmuxStyle),
     Tail,
 }
 
 fn status_columns(line: &StyledLine) -> Vec<StatusColumn<'_>> {
     let mut columns = Vec::new();
     for segment in &line.segments {
-        for character in segment.text.chars() {
-            match character.width().unwrap_or(0) {
-                0 => {
-                    if let Some(StatusColumn::Lead(text, _)) = columns
-                        .iter_mut()
-                        .rev()
-                        .find(|column| matches!(column, StatusColumn::Lead(..)))
-                    {
-                        text.push(character);
-                    }
+        let text = segment.text.as_str();
+        let mut lead = None;
+        for (at, character) in text.char_indices() {
+            let end = at + character.len_utf8();
+            let width = character.width().unwrap_or(0);
+            if width == 0 {
+                if let Some((index, start)) = lead
+                    && let Some(StatusColumn::Lead(cluster, _)) = columns.get_mut(index)
+                {
+                    *cluster = &text[start..end];
                 }
-                1 => columns.push(StatusColumn::Lead(character.to_string(), &segment.style)),
-                _ => {
-                    columns.push(StatusColumn::Lead(character.to_string(), &segment.style));
-                    columns.push(StatusColumn::Tail);
-                }
+                continue;
+            }
+            lead = Some((columns.len(), at));
+            columns.push(StatusColumn::Lead(&text[at..end], &segment.style));
+            if width > 1 {
+                columns.push(StatusColumn::Tail);
             }
         }
     }

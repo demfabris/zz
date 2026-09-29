@@ -1368,8 +1368,7 @@ where the build departs from the scope above:
   an attach always does; a pane card keeps its own record and repaints when its text changes.
   Nothing is painted before the attach or in a terminal pane before its first frame. Borders are
   written as runs, one cursor move per run and a rendition only where it changes, instead of 45
-  bytes a cell. A status row repaints only its changed columns, widened to whole clusters. A paint
-  that only puts the cursor back where the last paint left it is not written. An unchanged size
+  bytes a cell. A paint that only puts the cursor back where the last paint left it is not written. An unchanged size
   still sends `ClientTerminalSize`, since tmux fires `client-resized` on every `SIGWINCH`
   (`attached-client.sh` checks it), but repaints nothing. The two terminal options: the daemon
   puts `server-option-v1:extended-keys=<v>` and `server-option-v1:focus-events=<v>` in the hello
@@ -1385,8 +1384,8 @@ where the build departs from the scope above:
   options, the cell fact). Seven attach-sequence tests asserted the resync Snapshot or relied on it
   to overflow the mailbox; the startup-cause pressure tests now overflow on the causes, and
   `request_full_enqueues_only_the_requested_visible_pane` goes through `request_full`. zz-tui:
-  paint structure, paint order, the waiting pane, border runs, status spans, cursor-only paints,
-  the hello options. compat/tui fixtures on macOS with `LANG=en_US.UTF-8`: attached-client,
+  paint structure, paint order, the waiting pane, border runs, cursor-only paints, the hello
+  options. compat/tui fixtures on macOS with `LANG=en_US.UTF-8`: attached-client,
   overlays, launch-diff, screen-diff, caps, pane-geometry, mouse, indicators, copy-mode and
   superset pass; status-row (window name `tmux` against `bash`), client-commands (five cases,
   among them the `XT` flag), choosers and output-backpressure (the pin's side), stock-keys
@@ -1741,7 +1740,7 @@ deletes most wave-1 fallback paths anyway).
 | `ZZ_PERF_ATTACH_DEDUP=0` | ATTACH | resync and Full enqueue as today: an attach resends the Snapshot and every overlay, frames are not held until `Attached`, no update is dropped for a generation already queued or written |
 | `ZZ_PERF_ATTACH_PRESIZE=0` | ATTACH | an attaching raw-terminal client's panes keep their size until its first `ResizeTerminal` |
 | `ZZ_PERF_WRITEV=0` | ATTACH | one write per outbound frame |
-| `ZZ_PERF_TUI_COALESCE=0` | ATTACH | the TUI (read at CLI start) paints after every event, repaints everything on every snapshot and unchanged resize, paints before attaching and a card in a pane with no frame, repeats identical paints, and reads the two terminal options over two connections of their own |
+| `ZZ_PERF_TUI_COALESCE=0` | ATTACH | the TUI (read at CLI start) paints after every event, repaints everything on every snapshot and on an unchanged resize, paints before attaching and a card in a pane with no frame, writes a paint that only puts the cursor back, and reads the two terminal options over two connections of their own |
 | `ZZ_PERF_READONLY_SKIP=0` | HOOKS | read-only commands take the before/after captures |
 | `ZZ_PERF_COPY_CLONE=1` | COPY | flat `ModeRevision` clone |
 

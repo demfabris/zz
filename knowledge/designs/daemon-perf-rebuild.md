@@ -1571,7 +1571,8 @@ the duplicates); zz-tui tests; `python3 compat/tui/tracker.py check` and every c
 Expected per attach: 69 KB duplicate Full, a 2.2 KB Snapshot and 9 blank repaints (4 panes), one
 72 KB wrong-size Full (new-session), two extra connections; 29 write syscalls -> ~2.
 
-As built (branch `perf/attach`, on perf/wave1 at da635845, merged with W1-PANE at ad9c0c9b),
+As built (branch `perf/attach`, on perf/wave1 at da635845, merged with W1-PANE at ad9c0c9b and
+W1-EXEC at a26b6368),
 where the build departs from the scope above:
 
 - Item 1: `send_attached` calls `send_resync_as(.., ResyncScope::Attach)`: no Snapshot, and an
@@ -1640,7 +1641,15 @@ where the build departs from the scope above:
   (`gcat` against `cat` with Homebrew coreutils first on `PATH`) fail the same way on the
   perf/wave1 head build, and command-streams on the pin's `select` loop with stdin closed.
   attached-client's replay check on the pin's screen timed out in two of four full runs and
-  passed its command-output part three times alone on both builds.
+  passed its command-output part three times alone on both builds. After the W1-EXEC merge the
+  same fixtures give the same results, and the whole `compat/scenarios` corpus (254 scenarios)
+  is clean apart from the registered `known/` tuples and six that diverge the same way on the
+  W1-PANE and W1-EXEC merge builds: census-hooks, plugin-runtime-continuum,
+  plugin-runtime-vim-tmux-navigator, source-file-byte-name, resurrect-save and
+  status-background-jobs. A first build repainted a status row from its first changed column;
+  the corpus reads the raw bytes a client writes (`display-menu-action-queue` looks for
+  `Command list-p`, and the row shared its leading `C` with the message before), so a changed
+  status row is written whole again.
 
 Measured with `--quick` (`attach,echo,throughput,chatty`) at load 13-26 on 16 CPUs. Before is
 this lane's base (da635845), after is the lane merged with W1-PANE (tmux in the same runs):
@@ -1654,10 +1663,21 @@ this lane's base (da635845), after is the lane merged with W1-PANE (tmux in the 
 (0.16-0.19%) while its tty bytes drop from 14.5-17.6 to 1.2 KiB/s. Every wave1 rule in the four
 groups passes; the echo walls warn at this load.
 
+After the W1-EXEC merge (b56dec43, load 3-4, the machine slower than in the runs above: tmux's own
+`attach.ttfc.p1` read 9.3-15.3 ms against 8.6 before): `attach.wire_s2c` 100414 B at p1 and
+100586 B at p4 (the CLI's prepare connection no longer gets a hello), `attach.tty_total` 1915 B at
+p1 and 5149-5975 B at p4, `attach.conns` 2, `chatty.tty_kibps.hidden` 0.375 KiB/s (tmux 0.667).
+Three interleaved attach runs with every ATTACH knob off and on: `attach.ttfc.p1` 26.4-27.0 ->
+8.2-17.0 ms (tmux 9.9-15.9 in the same runs), `.p4` 28.9-36.3 -> 10.0-14.9 ms, `attach.tty_total.p1`
+169066-175738 -> 1915 B. `attach.ttfc` against its 14 ms bound passes or fails with tmux's own
+reading at this load (ratio 0.8-1.6). The echo rows fail at 2.2-4.6x tmux on the lane and read
+the same in the W1-PANE merge JSON (`echo.p50.idle` 0.403 ms against tmux 0.184); ATTACH does not
+touch the echo path.
+
 Handed on:
 
-- Two 28.3 KB `ServerHello`s remain in every TUI attach, 57 of its 129 KB: the CLI's prepare
-  connection (W1-EXEC's `Exec`) and the TUI's own (W2-CTRL's `Welcome`).
+- One 28.3 KB `ServerHello` remains in every TUI attach, the TUI's own, 28 of its 100 KB
+  (W2-CTRL's `Welcome`). W1-EXEC removed the CLI prepare connection's.
 - The status line is rendered by the publish that follows `send_attached`, so it reaches the TUI
   after its first attach paint, and the status row (and the pane borders, whose styles travel with
   it) is painted twice. W2-CTRL's attach `Batch` should carry it.

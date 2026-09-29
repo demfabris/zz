@@ -1261,6 +1261,26 @@ tui20 34.4 MiB, 46 threads at p20; chatty steady 2.89% (tmux 2.95%), flip 1.97% 
 split_empty_P 4.8 ms, new_window 7.1 Minstr; detached throughput 230 MB/s (4.4x tmux). Failing
 rows this lane shares: `mem.footprint.p1` 6.6 MiB (rule 6.5), spawn CPU, echo ratios, attach.
 
+Linux follow-up (W1-LINUX-PAGES, 2026-09-29, alienware, `perf/linux-pages`): during a detached
+`cat` into a 180x50 pane the actor ran at 97-99% CPU, 61-69% of it in the kernel, on about 468k
+page faults per 0.7 s. Once history is full, Ghostty's line limit prunes a page from `grow`'s
+fast path, `destroyNode` decommits it back to the pool, and the next `createPage` faults the same
+buffer back in 4 KiB at a time. The fix is in the fork (branch `zz/pagelist-reuse`, not pushed,
+so `GHOSTTY_COMMIT` still names the old pin): limit pruning keeps the last pruned pool page as a
+spare that `createPage` rebuilds with a memset; `compress` returns it to the pool and decommits
+the unused rows of the last page, so an idle pane holds what it did before (without that trim,
+scroll180 read 29.1 MiB). zz-terminal's escape scan (`find_escape`, a byte loop in both
+`EngineFilter` and `PassthroughFilter`, 28% of the actor's cycles once the faults were gone) now
+uses `memchr`. Same-host A/B against the old pin: actor 28-32% CPU, 0.6-0.8% of it kernel, 114-153
+faults per 0.7 s, none in libghostty; quick gate detached ASCII 84-89 -> 119-134 MB/s; full gate
+ASCII 77-84 -> 131 MB/s, unicode 43-45 -> 91 MB/s, attached ASCII 1844-1956 -> 1264 ms; footprint
+p1 3.2 -> 3.2, p20 17.9-18.5 -> 18.2, tui20 19.4-20.1 -> 19.7, scroll180 23.8-24.1 -> 24.4, scroll80
+22.4-22.5 -> 22.7 MiB; chatty CPU and instructions unchanged. The pane's `zz-pty-gather` thread
+(67-70% CPU, nearly all kernel) and the cooked tty are now the limit. What is left on the actor:
+printing 41%, the memset of the reused page 22% (the kernel's page zeroing did this work before;
+`rep stosb` would cut it by about a fifth, and a `baseline` CPU build gets 16-byte SSE2 stores),
+VT parsing and dispatch about 15%, `cursorScrollAbove` 7%.
+
 ## W1-EXEC: one-frame commands, fast cold start (effort L)
 
 Scope:

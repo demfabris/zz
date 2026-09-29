@@ -2,7 +2,7 @@
 type: Design Plan
 title: Daemon performance rebuild
 description: "The campaign to bring the zz daemon to tmux cost per command, per pane and per attach while keeping the 5x output throughput lead - a permanent zz-vs-tmux gate first, then waves that remove unrequested work (one-frame Exec commands, change-driven publication, lazy formats, frames only for watchers, a compact wire under one unreleased protocol version), then one mux loop and PTY shards; the lane brief source with targets, merge order, write zones, gates and rollback switches."
-status: Approved 2026-09-28; wave 0 (gate and this plan) built; release freeze until W4 exits; wave 1 not started
+status: Approved 2026-09-28; wave 0 (gate and this plan) built; release freeze until W4 exits; wave 1 in progress on perf/wave1 (FOOTPRINT, FORMAT, PUBLISH and PANE merged)
 resource: crates/zz-daemon/src/daemon.rs
 tags:
 - performance
@@ -1189,6 +1189,41 @@ about 40 busy samples in `publish_views` and 26 in the watcher signal, PTY parsi
 watchers are the bulk (`format_option_snapshot`, `publish_snapshot_state` and the status refresh
 behind `synchronize_pane_runtime`, W1-PUBLISH and W1-FORMAT, and `terminal_current_command`,
 W1-FOOTPRINT).
+
+Merged onto FOOTPRINT, FORMAT and PUBLISH (`perf/wave1`, merge `ad9c0c9b`, follow-up `04509ada`):
+- The rebase kept PUBLISH's `terminals_mut()` copy-on-write map and its `Command::Settle` arm
+  (now in the control-slot loop). PUBLISH's copy-mode `settle()` runs after `inner` is released,
+  so it lifts the round-trip guard with `allow_actor_round_trips`.
+- A respawned pane is dropped from `streamed_terminals`, and PUBLISH no longer publishes a
+  snapshot for a respawn, so nothing set the new terminal's view streams and its frames never
+  reached the client (`pipe_pane_survives_respawn_with_the_same_child`). A command that respawns
+  a terminal without a snapshot change now runs `refresh_terminal_visibility`.
+- `chatty.tty_kibps.hidden` went from 6.8 to 16.9 KiB/s. The leading-edge publish wakes the
+  watcher at output time, when a `while :; do echo; sleep 0.01; done` shell is usually still in
+  the foreground, so hidden windows flipped between `bash`, `sleep` and a blank name (a lookup
+  that raced the exiting `sleep`), and every rename repaints the whole attached TUI. names.c
+  instead arms a timer for output inside `NAME_INTERVAL` and reads the name when it fires. Output
+  inside the interval now marks the window pending (`note_automatic_rename_output`), the deadline
+  re-reads the active pane's command (`due_window_rename_panes` in `apply_due_window_renames`), and
+  an empty lookup keeps the last command. Hidden is now 3.3 KiB/s and `rename-timing.sh` counts
+  2 renames for tmux and 2 for zz.
+- Still regressed against the PUBLISH merge run, bisected with non-LTO builds to this lane's first
+  commit (frames only for watching views), not to the merge: `cli.instr.*.p1` +0.3 Minstr per
+  command and `attach.instr` +4 to +5 Minstr, `attach.tty_total` +16 KB. The CLI part is
+  allocator churn: with the daemon's purge delay of 0 (W1-FOOTPRINT), each connection thread's
+  fresh pages are recommitted with `madvise`; `MIMALLOC_PURGE_DELAY=-1` brings it to 3.42 against
+  3.36 Minstr. Before this lane, allocations that outlived the connection thread kept its pages
+  abandoned and reusable. Per-connection threads are W1-EXEC's. The attach bytes are one more
+  17 KB "waiting for frame" placeholder paint by the TUI, because the view's first frame now
+  comes from the watcher after `SetViewStream` instead of being ready when the snapshot goes out;
+  the TUI repainting everything on each snapshot and placeholder is W1-ATTACH's.
+
+Merge gate (`w1-4-pane-macbook-ad9c0c9b.json`, full, load 4-8 from other sessions, so wall and
+CPU rows are notes): scroll180 44.2 MiB (tmux 61.4), scroll80 37.9 MiB (tmux 35.4), p20 31.2 MiB,
+tui20 34.4 MiB, 46 threads at p20; chatty steady 2.89% (tmux 2.95%), flip 1.97% (1.97%), hidden
+2.14% (2.37%), instructions below tmux in all three; split_shell 6.9 Minstr and 5.3 ms,
+split_empty_P 4.8 ms, new_window 7.1 Minstr; detached throughput 230 MB/s (4.4x tmux). Failing
+rows this lane shares: `mem.footprint.p1` 6.6 MiB (rule 6.5), spawn CPU, echo ratios, attach.
 
 ## W1-EXEC: one-frame commands, fast cold start (effort L)
 

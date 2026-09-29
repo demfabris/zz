@@ -2378,7 +2378,11 @@ deletes most wave-1 fallback paths anyway).
 | `ZZ_PERF_THP=1` | FOOTPRINT (Linux) | the daemon keeps transparent huge pages as the system sets them |
 
 Wire changes (W2-TERM, W2-CTRL) and the thread model (W3, W4) have no runtime switch; rollback is a
-revert. `ZZ_PTY_SHARDS=N` is a tuning knob, not a rollback.
+revert. `ZZ_PTY_SHARDS=N` is a tuning knob, not a rollback. W2-HOOKS changes that keep behaviour
+have no knob either: the catalogue name index, the skipped lookup for empty hook arrays, the sweep
+that runs only after a removal (debug builds assert a skipped one would remove nothing), the
+focus early return and the shared change window (debug builds diff the focus candidates against
+whole-state probes), and the blocking run-shell wait.
 
 # Tests and fixtures to add
 

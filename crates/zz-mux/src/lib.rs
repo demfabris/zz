@@ -11,6 +11,8 @@ mod format_universe_tests;
 mod formats;
 mod honest_knobs;
 mod journal;
+#[cfg(test)]
+mod journal_tests;
 mod layout;
 #[cfg(test)]
 mod layout_pin_tests;

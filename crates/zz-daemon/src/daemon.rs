@@ -8031,7 +8031,7 @@ impl Shared {
                 .then(|| hook_events::FocusProbeScope::open(&mut inner));
             let copy_modes_before =
                 (event_hooks_enabled && captures).then(|| active_copy_mode_panes(&inner));
-            let captured_active = (captures && !journal).then(|| {
+            let captured_active = (captures && (!journal || cfg!(debug_assertions))).then(|| {
                 (
                     inner
                         .engine
@@ -8176,20 +8176,28 @@ impl Shared {
             if !inner.engine.state.sessions.is_empty() {
                 self.exit_empty_armed.store(true, Ordering::Release);
             }
+            let journal_active = hook_scope
+                .as_ref()
+                .and_then(|scope| scope.changes(&inner.engine))
+                .map(|changes| {
+                    (
+                        hook_events::journal_active_windows(&changes),
+                        hook_events::journal_active_panes(&changes),
+                        hook_events::journal_belled_panes(&changes),
+                    )
+                });
             let (active_windows_before, active_panes_before, belled_panes_before) =
-                match (captured_active, &hook_scope) {
-                    (Some(active), _) => active,
-                    (None, Some(scope)) => {
-                        scope
-                            .changes(&inner.engine)
-                            .map_or_else(Default::default, |changes| {
-                                (
-                                    hook_events::journal_active_windows(&changes),
-                                    hook_events::journal_active_panes(&changes),
-                                    hook_events::journal_belled_panes(&changes),
-                                )
-                            })
+                match (captured_active, journal_active) {
+                    (Some(captured), Some(journal)) => {
+                        hook_events::assert_same_active_changes(
+                            &inner.engine.state,
+                            &captured,
+                            &journal,
+                        );
+                        journal
                     }
+                    (Some(captured), None) => captured,
+                    (None, Some(journal)) => journal,
                     (None, None) => Default::default(),
                 };
             let selected_panes = active_panes_before

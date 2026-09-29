@@ -319,3 +319,51 @@ pub(super) fn live_session_context(state: &MuxState, session: SessionId) -> Exec
         .map(|window| window.active_pane);
     ExecutionContext::new(Some(session), Some(active_window), pane)
 }
+
+type ActiveBefore = (
+    BTreeMap<SessionId, WindowId>,
+    BTreeMap<WindowId, PaneId>,
+    BTreeSet<PaneId>,
+);
+
+pub(super) fn assert_same_active_changes(
+    state: &MuxState,
+    captured: &ActiveBefore,
+    journal: &ActiveBefore,
+) {
+    let moved = |active: &ActiveBefore| {
+        let windows = active
+            .0
+            .iter()
+            .filter(|(session, window)| {
+                state
+                    .sessions
+                    .get(session)
+                    .is_some_and(|current| current.active_window != **window)
+            })
+            .map(|(session, _)| *session)
+            .collect::<BTreeSet<_>>();
+        let panes = active
+            .1
+            .iter()
+            .filter(|(window, pane)| {
+                state
+                    .windows
+                    .get(window)
+                    .is_some_and(|current| current.active_pane != **pane)
+            })
+            .map(|(window, _)| *window)
+            .collect::<BTreeSet<_>>();
+        let bells = active
+            .2
+            .iter()
+            .filter(|pane| state.pane(**pane).is_none_or(|current| !current.bell))
+            .copied()
+            .collect::<BTreeSet<_>>();
+        (windows, panes, bells)
+    };
+    assert!(
+        moved(captured) == moved(journal),
+        "the change journal missed an active window, active pane or bell change"
+    );
+}

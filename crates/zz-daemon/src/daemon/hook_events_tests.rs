@@ -1,4 +1,4 @@
-use super::tests::output_view_session_fixture;
+use super::tests::{key_table_fixture, output_view_session_fixture};
 use super::*;
 
 const CLIENT: ClientId = ClientId(7);
@@ -202,4 +202,139 @@ fn a_format_read_with_withheld_facts_is_caught() {
     let facts = FormatHookFacts::default();
     let mut hooks = DaemonFormatHooks::command(&facts).withhold_facts(true);
     zz_mux::StatusHooks::tree_entries(&mut hooks);
+}
+
+const MUX_HOOKS: [&str; 11] = [
+    "session-created",
+    "session-renamed",
+    "session-closed",
+    "session-window-changed",
+    "window-linked",
+    "window-unlinked",
+    "window-renamed",
+    "window-pane-changed",
+    "window-layout-changed",
+    "window-resized",
+    "pane-title-changed",
+];
+
+fn record_mux_hooks(shared: &Arc<Shared>, context: &mut ExecutionContext) {
+    for hook in MUX_HOOKS {
+        run(
+            shared,
+            context,
+            &[
+                "set-hook",
+                "-g",
+                hook,
+                "display-message '#{hook}:#{hook_window}'",
+            ],
+        )
+        .expect("set-hook");
+    }
+    shared.inner.lock().message_log.clear();
+}
+
+#[test]
+fn journal_hooks_match_the_snapshot_diff_across_structural_commands() {
+    let (shared, mut context) = pane_fixture("journal");
+    record_mux_hooks(&shared, &mut context);
+    let commands: &[&[&str]] = &[
+        &["new-window", "-d", "-n", "second"],
+        &["split-window", "-d"],
+        &["select-layout", "tiled"],
+        &["rename-window", "renamed"],
+        &["rename-session", "journal-renamed"],
+        &["select-pane", "-t", ":.1"],
+        &["resize-pane", "-Z"],
+        &["resize-pane", "-Z"],
+        &["select-pane", "-T", "titled"],
+        &["swap-pane", "-D"],
+        &["rotate-window"],
+        &["next-window"],
+        &["previous-window"],
+        &["break-pane", "-d"],
+        &["join-pane", "-d", "-s", ":2", "-t", ":0"],
+        &["new-session", "-d", "-s", "other"],
+        &[
+            "link-window",
+            "-d",
+            "-s",
+            "journal-renamed:1",
+            "-t",
+            "other:5",
+        ],
+        &["unlink-window", "-t", "other:5"],
+        &[
+            "move-window",
+            "-d",
+            "-s",
+            "journal-renamed:1",
+            "-t",
+            "other:7",
+        ],
+        &["swap-window", "-d", "-s", "other:7", "-t", "other:0"],
+        &["kill-pane", "-t", ":.1"],
+        &["kill-window", "-t", "other:7"],
+        &["kill-session", "-t", "other"],
+    ];
+    for command in commands {
+        let _ = run(&shared, &mut context, command);
+    }
+    let fired = messages(&shared);
+    for hook in [
+        "window-linked",
+        "window-unlinked",
+        "window-renamed",
+        "session-renamed",
+        "window-layout-changed",
+        "window-pane-changed",
+        "session-window-changed",
+        "pane-title-changed",
+        "session-created",
+        "session-closed",
+    ] {
+        assert!(
+            fired.iter().any(|message| message.starts_with(hook)),
+            "{hook} never fired: {fired:?}"
+        );
+    }
+}
+
+#[test]
+fn an_attached_client_is_detached_by_the_journal_when_its_session_goes() {
+    let (shared, client, mut context, _, _) = key_table_fixture("detach-journal");
+    run(
+        &shared,
+        &mut context,
+        &[
+            "set-hook",
+            "-g",
+            "client-detached",
+            "display-message 'detached #{hook}'",
+        ],
+    )
+    .expect("set-hook");
+    run(
+        &shared,
+        &mut context,
+        &["new-session", "-d", "-s", "survivor"],
+    )
+    .expect("survivor");
+    shared.inner.lock().message_log.clear();
+    shared
+        .execute(
+            client,
+            ClientKind::Interactive,
+            &mut context,
+            &CommandInvocation::new("kill-session", ["-t", "detach-journal"]),
+        )
+        .expect("kill-session");
+    assert!(
+        messages(&shared)
+            .iter()
+            .any(|message| message == "detached client-detached"),
+        "{:?}",
+        messages(&shared)
+    );
 }

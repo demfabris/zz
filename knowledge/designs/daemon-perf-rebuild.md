@@ -1930,6 +1930,134 @@ dictionary growth), zz-client, zz-tui, GUI mux client tests, `tui-screen-diff.sh
 
 Expected (re-encoded captures): patches 15x smaller, Full 10x, blank screens ~140x, echo ~30-40 B.
 
+As built (branch `perf/term`, on perf/wave2 `c65e49f0`, Linux only), where it departs from the scope
+above:
+
+- Item 1: the codec is its own module, `zz-protocol/src/pane_frame.rs`; `terminal_codec.rs` only
+  routes to it. The metadata flags are a varint bitset, `zz_terminal::TerminalPatchFields`
+  (15 bits), shared by full frames (absent means the default) and patches (absent means unchanged):
+  rows, cursor move, scroll, scrollbar, dictionary append, overlays, cursor, presentation (title,
+  cwd, hovered URI), colours, mode, search, unseen output, input modes, status, kitty placements.
+  Size is always sent: a patch never changes it (the diff returns `None`), and the decoder needs
+  it to bound every span. A cursor that only moved is its own bit (`CURSOR_AT`, 2 bytes), which
+  is what keeps an echo small. Rows are a row step (0 ends the section), `x0 << 1 | clear`, then
+  runs whose header is `count << 3 | style << 2 | kind`: text (one UTF-8 scalar a narrow cell),
+  wide (one scalar a wide head plus its spacer tail), repeat (one cell, 6 or more times) and raw
+  (glyph code and flags a cell, for graphemes, spacer heads and odd flags). The style carries over
+  from the previous run and starts at 0 each row. Generations travel as one varint and zigzag
+  deltas. `terminal-lanes.md` has the byte layout.
+- Item 2: `diff_with_scratch` sends one span a changed row, from the first to the last changed
+  column, or up to the last non-blank cell with `clear` when the change empties the row's tail;
+  rows exposed by a scroll are sent whole (`start 0`, `clear`). A patch carries only the metadata
+  that changed; `apply_patch` keeps the retained value for the rest, and a dictionary append is
+  the only case that puts `style_base`/`grapheme_base` on the wire. Clients that read patch
+  metadata before applying it use `carries`, `scrollbar_after` and `cursor_after`.
+- Item 3: the per-pane stream sequence is `TerminalSession::next_stream_sequence` (per terminal
+  session, so a respawned pane starts again at 1), used for every terminal frame, command-output
+  frame and history chunk; the global counter stays for other events. **Encode once per (pane,
+  base) is not built**: each attached client has its own view and the pane actor builds one frame
+  per view (`publish_views`), with its own generations, so two clients never hold the same base and
+  there is no second encode to share. Sharing needs one live frame for every plain live view first,
+  which W3-SHARDS lists; W4-DELIVER's per-(pane, base) `Arc<[u8]>` then follows. The encoders are
+  callable alone (`encode_terminal_viewport_event_into`, `encode_terminal_patch_event_into`) for
+  W2-CTRL's `Batch`. The preview mailbox no longer sizes a frame before encoding it (only the old
+  fixed layout could); it encodes and checks the byte budget after, as the foreground path did.
+- Item 4: the decoder produces the same `TerminalViewport`, `TerminalViewportPatch` and
+  `HistoryChunk` values, so zz-tui (its `terminal_event.rs` is the tty input decoder and has no
+  frames), gpui-shared, zz-client-ffi and the renderers did not change. zz-client core's damage and
+  the GUI's retained-patch history logic now read the patch fields. HistoryChunk keeps its
+  in-memory `Vec<Vec<PackedCell>>` and moved from postcard to the Terminal lane (kind 3). Chooser
+  previews and a postcard-encoded `CommandOutput` carry the full-frame body as one postcard byte
+  string (`pane_frame::viewport_bytes`). The GUI keeps `history_requests_pending` across tree
+  changes: every `Snapshot` used to clear it and re-request, so a chunk in flight arrived with no
+  request, was dropped, and was asked for again (twice the history bytes during a backfill that
+  overlaps any tree change). A pane that stops being visible gets a Full when it returns, which
+  resets its request; `PaneRemoved` forgets it (`a_tree_change_keeps_the_history_chunk_in_flight`).
+- Not in the brief: decoded grids are capped at `MAX_FRAME_BYTES / 8` cells (8 Mi), the bound the
+  8-byte layout had implicitly, since a compact frame could otherwise declare a 65535x65535 blank
+  grid in a few bytes. The diff compares rows eight cells at a time as `u64` words, hashes row
+  fingerprints in four lanes, searches row shifts nearest first and stops once no shift can win
+  (it scanned all `2 x rows` shifts), and skips the dictionary prefix checks when both frames share
+  one dictionary; these cut the watchers' diff share of the visible chatty profile.
+- Knob `ZZ_PERF_ROW_PATCHES=1` widens every span to its whole row (the pre-W2 granularity) on the
+  same wire, for bisecting a span-apply bug. The 8-byte frames have no knob.
+- W0 TODO, partly built: `crates/zz-client/examples/perf_client.rs` is the frame-sink client
+  (attach, decode and apply every frame with `ClientCore`, render nothing) and the throughput group
+  times the ASCII flood through it as `throughput.headless.ascii_ms` (zz only, info: the W0 JSONs
+  predate it, so its ">= 0.85x W0" rule has no reference). The GUI-like mode (all sessions, history
+  backfill, 8 visible panes) is still TODO.
+- Tests: `zz-protocol` `pane_frame_tests.rs` (16: seeded random grids with ASCII, wide pairs,
+  graphemes, hyperlink and classed styles, spacer heads, odd flags and repeats through full frames
+  and patches with scrolls and dictionary growth; every truncation; hand-built frames that lie about
+  rows, runs, styles, graphemes, counts, fields and grid size; echo and blank-screen size bounds;
+  history chunks; postcard previews; cursor moves; kitty placements), zz-terminal model tests for
+  spans, whole-row widening and the chunked row scans, and `daemon/pane_frame_tests.rs` (3: an echo
+  through a real pane is a patch of at most 64 bytes and the client's retained grid equals the
+  daemon's frame; history chunks ride the terminal lane with blank tails dropped; each pane numbers
+  its own frame stream). The old terminal-lane byte-layout tests went with the layout.
+
+Measured on Linux (alienware, tmux 3.7c; `--quick --only attach,echo,throughput,chatty` against the
+quick Linux W0; before is the wave-2 base `c65e49f0`, after is this branch; load 1.6-3.9 on 16 CPUs
+with another lane idle or compiling, so wall and CPU rows are notes and the host changed power state
+between the two runs, tmux included):
+
+| Metric | Before | After | Rule |
+|---|---|---|---|
+| `echo.wire_bytes.idle` | 1,133 B | 31 B | <= 64 B, passes |
+| `echo.wire_bytes.busy30` (info, includes the 30 Hz ticker) | 3,399 B | 137 B | |
+| `attach.wire_s2c.p1` / `.p4` | 100,064 / 100,236 B | 29,400 / 29,674 B | 8 KB at wave 2, W2-CTRL's |
+| terminal frames inside the p1 / p4 attach | 70,725 / 70,828 B (four 17-18 KB Fulls) | 62 / 265 B (four 66-67 B Fulls) | <= 15 KB, passes |
+| `attach.instr.p1` / `.p4` | 10.7 / 11.1 Minstr | 10.2 / 10.6 (two reruns; one run read 14.0 at p1 with a 24 Minstr outlier) | |
+| `chatty.instr_per_s.flip` / `.hidden` | 34.4 / 38.9 | 34.3 / 36.6 Minstr/s | no worse |
+| `throughput.detached.ascii` | 95.3 MB/s (ceiling 125) | 88.1 MB/s (ceiling 116) | 1.75x tmux, the Linux ceiling as before |
+| `throughput.headless.ascii_ms` (new) | - | 1,761-1,784 ms (detached is about 1,600) | info |
+
+Full-group A/B against the base binary in the same session (`--only chatty,throughput`, then
+`--only chatty` on the final build): `chatty.instr_per_s.visible` 391.8-392.0 -> 383.8 Minstr/s
+(tmux 157-160), `chatty.client_cpu_pct.visible` 2.52 -> 1.81% in the first pair and 2.22 -> 2.27%
+in the second (the TUI's CPU over 10 s moves that much between runs of one binary),
+`chatty.tty_kibps.visible` unchanged at 415-418 KiB/s, `throughput.attached.ascii_ms` 2,081 ->
+2,092 ms (tmux 3,922 / 3,740), `throughput.detached.unicode` 43.9 -> 42.2 MB/s (8.5-8.9x tmux).
+`chatty.cpu_pct.visible` still fails its wave-1 rule (2.3-2.5x tmux) on both builds.
+
+Profile of the daemon under the visible chatty workload (`perf record -e cycles:u` for 6 s, four
+90x24 panes printing through a TUI): the pane actors are 84% of the samples, almost all of it
+building frames out of libghostty (`build_snapshot` 30%, `ghostty_render_state_row_cells_get`
+12%, style interning, row and cell iterators), which is W4-ROWS and W3-SHARDS. The four watchers
+were 17.3% on the first cut, with this lane's diff and encode about 7.8% (`best_row_shift` 4.0%,
+the row compare 2.6%, encoding 1.2%); after the diff changes above they are 13.8%, and the lane's
+path is about 5% (row compare and shift search 2.1%, row fingerprints 1.5%, encoding 0.9%, the
+mailbox 0.4%). Under a flood watched by the headless client the watcher is 1.2% and the actor 94%
+(parsing, and page faults the unpushed PageList fork fix removes).
+
+Checks on Linux: `cargo fmt`; clippy `-D warnings` on zz-terminal, zz-protocol, zz-daemon,
+zz-client, zz-tui, zz-cli, zz-client-ffi, zz-web, zz, zz-mux and zz-config (all targets, all
+features); tests of zz-terminal, zz-protocol, zz-client (with the daemon-backed simulator), zz-tui,
+zz-client-ffi, zz-web, zz-cli and zz pass; zz-daemon passes except the known
+`endpoint::tests::remote_scripts_fall_back_to_the_mac_app_bundle_cli` and one russh port test
+that passes alone. `compat/tui-screen-diff.sh` 147/147 three times on the release build;
+`attached-client.sh`, `tui-choosers.sh` (previews ride the new postcard body),
+`tui-output-backpressure.sh`, overlays, pane-geometry, caps, launch-diff, indicators, superset,
+command-streams and stock-keys pass; copy-mode (the six fresh-entry search prompt cases),
+status-row, mouse and client-commands (`switch-mode-duplicate-windows`, `sh` against `bash`, the
+same on the base binary) fail as on the base. `compat/wire-version.py`: 107 unreleased.
+`just web-build` builds. Not run here: `just ios-gpui iPad build` (needs the Mac; gpui-shared
+decodes through zz-client core and did not change), and `bench/run.sh` (it drives the packaged GUI
+app in a window, not the daemon; the gate's throughput rows and the headless client cover the
+wire).
+
+Handed on:
+
+- W2-CTRL: the 28 KB `ServerHello` is now 95% of an attach's bytes. `Batch` can carry the
+  enveloped PaneFrames the two public encoders write, or the bare full-frame body
+  (`pane_frame::encode_viewport_body`, crate-private today).
+- W3-SHARDS: one live frame shared by every plain live view of a pane, which makes the per-(pane,
+  base) encode worth having; the snapshot build is most of the visible chatty profile.
+- W4-DELIVER: the per-terminal stream sequence is on every terminal frame, command-output frame and
+  history chunk, ready for "after seq N" barriers. A respawn restarts it.
+- W4-ROWS: the profile above is the "does row extraction show" evidence: it does, at about 60% of
+  the actor's samples in visible chatty.
+
 ## W2-CTRL: control plane v2 (effort XL)
 
 Scope:

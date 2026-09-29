@@ -33,9 +33,12 @@ callable on their own: `encode_terminal_viewport_event_into` and
 
 | Frame | Old layout | PaneFrame |
 |---|---|---|
-| blank 180x50 full viewport | 72,203 B | under 64 B |
-| echo of one key (`§001` plus the cursor move), 120x40 | 1,133 B on the wire per key | under 40 B |
-| attach of four panes (`attach.wire_s2c.p4`), terminal part | about 72 KB | see the W2-TERM as-built notes |
+| blank 180x50 full viewport | about 72 KB | under 64 B |
+| one echoed key through an attached TUI (`echo.wire_bytes.idle`) | 1,133 B | 31 B |
+| the four full frames of a four-pane attach (`attach.wire_s2c.p4`) | 70,828 B | 265 B |
+
+Measured on Linux with the gate; see the W2-TERM notes in
+[the daemon performance plan](/designs/daemon-perf-rebuild.md).
 
 # Frame kinds
 
@@ -239,7 +242,8 @@ applying a patch from what the patch says: a column change, a `scrollbar.total` 
 or by more than the row shift, an offset delta inconsistent with the shift, or a patch with a span in
 every row drop the retained history. Rows leaving the top of the grid on a negative scroll are
 pushed onto the back of the ring. A patch without `SCROLLBAR` keeps the retained scrollbar
-(`TerminalViewportPatch::scrollbar_after`).
+(`TerminalViewportPatch::scrollbar_after`). A history request stays pending across tree changes
+until its chunk, a full viewport for the pane, or the pane's removal.
 
 # Examples
 

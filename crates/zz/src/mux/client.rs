@@ -4120,7 +4120,6 @@ impl MuxClient {
                 let connection = self.attached_connection_mut();
                 connection.resync_pending = false;
                 connection.full_requests_pending.clear();
-                connection.history_requests_pending.clear();
                 connection.history_backfill_deferred.clear();
                 if !*attaching {
                     self.backfill_retained_history();
@@ -10603,6 +10602,59 @@ mod tests {
             &*fake.history_requests.borrow(),
             &[(pane, 688, 512), (pane, 688, 512)]
         );
+    }
+
+    #[gpui::test]
+    fn a_tree_change_keeps_the_history_chunk_in_flight(cx: &mut TestAppContext) {
+        let pane = PaneId(78);
+        let (mux, fake, initial) = cx.update(|cx| history_backfill_debounce_fixture(cx, pane));
+        cx.update(|cx| {
+            mux.update(cx, |mux, cx| {
+                mux.handle_message(
+                    HostId::LOCAL,
+                    ProtocolMessage::Event(zz_protocol::Event {
+                        sequence: 2,
+                        payload: EventPayload::Snapshot(MuxSnapshot {
+                            generation: 5,
+                            ..MuxSnapshot::default()
+                        }),
+                    }),
+                    cx,
+                );
+                assert!(
+                    mux.attached_connection()
+                        .history_requests_pending
+                        .contains_key(&pane)
+                );
+            });
+        });
+        assert_eq!(&*fake.history_requests.borrow(), &[(pane, 688, 512)]);
+
+        let ids = (688..1_200).collect::<Vec<_>>();
+        cx.update(|cx| {
+            mux.update(cx, |mux, cx| {
+                mux.handle_message(
+                    HostId::LOCAL,
+                    ProtocolMessage::Event(zz_protocol::Event {
+                        sequence: 3,
+                        payload: EventPayload::HistoryChunk {
+                            pane,
+                            start: 688,
+                            total: 1_203,
+                            offset: 1_200,
+                            columns: 1,
+                            rows: chunk_rows(&ids),
+                            dictionary: initial.dictionary.as_ref().clone(),
+                        },
+                    }),
+                    cx,
+                );
+            });
+            let mux = mux.read(cx);
+            let retained_ids = retained_history_ids(&mux.viewports[&pane].read());
+            assert_eq!(retained_ids.len(), 512);
+            assert_eq!(retained_ids.first(), Some(&688));
+        });
     }
 
     #[gpui::test]

@@ -41,6 +41,8 @@ class Env:
             TERM="xterm-256color",
             BASH_SILENCE_DEPRECATION_WARNING="1",
         )
+        self.knobs = {k: v for k, v in os.environ.items() if k.startswith("ZZ_PERF_")}
+        env.update(self.knobs)
         for key in SCRUB:
             env.pop(key, None)
         for path in (home, env["XDG_RUNTIME_DIR"], env["TMPDIR"], env["ZZ_DATA_DIR"], env["ZZ_LOG_DIR"]):

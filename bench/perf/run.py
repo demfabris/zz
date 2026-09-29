@@ -399,6 +399,9 @@ def main():
 
     env = isolate.Env(keep=args.keep)
     meta["root"] = env.root
+    meta["knobs"] = env.knobs
+    if env.knobs:
+        print(f"rollback knobs passed to both muxes: {' '.join(f'{k}={v}' for k, v in sorted(env.knobs.items()))}", flush=True)
     zz = isolate.Zz(zz_bin, env)
     tmux = isolate.Tmux(tmux_bin, env)
     ctx = Ctx(args, env, zz, tmux)

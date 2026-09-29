@@ -15,6 +15,7 @@ use zz_protocol::{
 
 use crate::{
     PresetOptions,
+    journal::{ChangeJournal, Tracked},
     layout::{CellGeometry, CellLayout, LayoutError, SplitSize, carve_border_row},
 };
 
@@ -413,8 +414,9 @@ pub struct MuxState {
     last_active_session: Option<SessionId>,
     input_options: InputOptions,
     marked_pane: Option<(SessionId, WindowId, PaneId)>,
-    pub sessions: BTreeMap<SessionId, Session>,
-    pub windows: BTreeMap<WindowId, Window>,
+    pub sessions: Tracked<SessionId, Session>,
+    pub windows: Tracked<WindowId, Window>,
+    pub(crate) journal: ChangeJournal,
 }
 
 impl MuxState {
@@ -462,7 +464,7 @@ impl MuxState {
     ) -> Result<bool, ServerError> {
         let state = self
             .sessions
-            .get_mut(&session)
+            .get_mut(&mut self.journal, &session)
             .ok_or_else(|| ServerError::MissingTarget(session.to_string()))?;
         if state.working_directory.as_ref() == Some(&working_directory) {
             return Ok(false);
@@ -543,8 +545,9 @@ impl MuxState {
             manual_extent: extent,
             input_options: InputOptions::default(),
         };
-        self.windows.insert(window_id, window);
+        self.windows.insert(&mut self.journal, window_id, window);
         self.sessions.insert(
+            &mut self.journal,
             session_id,
             Session {
                 id: session_id,
@@ -587,7 +590,7 @@ impl MuxState {
             )));
         }
         self.sessions
-            .get_mut(&session)
+            .get_mut(&mut self.journal, &session)
             .expect("session target was resolved")
             .name = name;
         self.bump_generation();
@@ -670,9 +673,9 @@ impl MuxState {
             manual_extent: extent,
             input_options: InputOptions::default(),
         };
-        self.windows.insert(window_id, window);
+        self.windows.insert(&mut self.journal, window_id, window);
         self.sessions
-            .get_mut(&session)
+            .get_mut(&mut self.journal, &session)
             .ok_or_else(|| ServerError::MissingTarget(session.to_string()))?
             .windows
             .push(window_id);
@@ -768,7 +771,7 @@ impl MuxState {
         }
         for window in moved {
             self.windows
-                .get_mut(&window)
+                .get_mut(&mut self.journal, &window)
                 .expect("shifted window exists")
                 .index += 1;
         }
@@ -792,7 +795,7 @@ impl MuxState {
             )));
         }
         self.windows
-            .get_mut(&window)
+            .get_mut(&mut self.journal, &window)
             .expect("window target was resolved")
             .index = index;
         self.sort_session_windows(session);
@@ -836,11 +839,11 @@ impl MuxState {
         if let Some(occupant) = occupant {
             let removed = self
                 .windows
-                .remove(&occupant)
+                .remove(&mut self.journal, &occupant)
                 .expect("destination occupant exists");
             removed_panes.extend(removed.pane_order);
             self.sessions
-                .get_mut(&destination_session)
+                .get_mut(&mut self.journal, &destination_session)
                 .expect("destination session exists")
                 .forget_window(occupant);
         }
@@ -877,7 +880,7 @@ impl MuxState {
         if source_session != destination_session {
             let source_state = self
                 .sessions
-                .get_mut(&source_session)
+                .get_mut(&mut self.journal, &source_session)
                 .expect("source session exists");
             source_state.forget_window(source);
             if let Some(fallback) = source_fallback {
@@ -886,13 +889,16 @@ impl MuxState {
             }
         }
         {
-            let window = self.windows.get_mut(&source).expect("source window exists");
+            let window = self
+                .windows
+                .get_mut(&mut self.journal, &source)
+                .expect("source window exists");
             window.session = destination_session;
             window.index = destination_index;
         }
         if source_session != destination_session {
             self.sessions
-                .get_mut(&destination_session)
+                .get_mut(&mut self.journal, &destination_session)
                 .expect("destination session exists")
                 .windows
                 .push(source);
@@ -903,7 +909,7 @@ impl MuxState {
         if destination_was_empty {
             let destination = self
                 .sessions
-                .get_mut(&destination_session)
+                .get_mut(&mut self.journal, &destination_session)
                 .expect("destination session exists");
             destination.active_window = source;
             destination.last_window = None;
@@ -916,7 +922,7 @@ impl MuxState {
         {
             let session = self
                 .sessions
-                .get_mut(&source_session)
+                .get_mut(&mut self.journal, &source_session)
                 .expect("source session exists");
             session.active_window = fallback;
             session.last_window = None;
@@ -927,7 +933,7 @@ impl MuxState {
         if source_session != destination_session {
             let source_empty = self.sessions[&source_session].windows.is_empty();
             if source_empty {
-                self.sessions.remove(&source_session);
+                self.sessions.remove(&mut self.journal, &source_session);
             } else if let Some(fallback) = source_fallback {
                 self.touch_window_activity(fallback);
                 self.clear_window_alerts(fallback);
@@ -966,7 +972,7 @@ impl MuxState {
         if source_session == target_session {
             let session = self
                 .sessions
-                .get_mut(&source_session)
+                .get_mut(&mut self.journal, &source_session)
                 .expect("window session exists");
             session.active_window = swap_window_id(session.active_window, source, target);
             session.last_window = session
@@ -975,7 +981,7 @@ impl MuxState {
         } else {
             let source_state = self
                 .sessions
-                .get_mut(&source_session)
+                .get_mut(&mut self.journal, &source_session)
                 .expect("source session exists");
             for window in &mut source_state.windows {
                 if *window == source {
@@ -991,7 +997,7 @@ impl MuxState {
 
             let target_state = self
                 .sessions
-                .get_mut(&target_session)
+                .get_mut(&mut self.journal, &target_session)
                 .expect("target session exists");
             for window in &mut target_state.windows {
                 if *window == target {
@@ -1007,12 +1013,18 @@ impl MuxState {
         }
 
         {
-            let source_state = self.windows.get_mut(&source).expect("source window exists");
+            let source_state = self
+                .windows
+                .get_mut(&mut self.journal, &source)
+                .expect("source window exists");
             source_state.session = target_session;
             source_state.index = target_index;
         }
         {
-            let target_state = self.windows.get_mut(&target).expect("target window exists");
+            let target_state = self
+                .windows
+                .get_mut(&mut self.journal, &target)
+                .expect("target window exists");
             target_state.session = source_session;
             target_state.index = source_index;
         }
@@ -1057,7 +1069,7 @@ impl MuxState {
             .collect::<Vec<_>>();
         self.swap_windows(current, other, false)?;
         for (session, active) in held {
-            if let Some(state) = self.sessions.get_mut(&session) {
+            if let Some(state) = self.sessions.get_mut(&mut self.journal, &session) {
                 state.active_window = active;
                 if active == current {
                     state.last_window = Some(other);
@@ -1096,12 +1108,12 @@ impl MuxState {
             .any(|(window, index)| self.windows[window].index != *index);
         for (window, index) in assignments {
             self.windows
-                .get_mut(&window)
+                .get_mut(&mut self.journal, &window)
                 .expect("renumbered window exists")
                 .index = index;
         }
         self.sessions
-            .get_mut(&session)
+            .get_mut(&mut self.journal, &session)
             .expect("renumbered session exists")
             .windows = windows;
         if changed {
@@ -1117,7 +1129,7 @@ impl MuxState {
         let mut windows = state.windows.clone();
         windows.sort_by_key(|window| self.windows.get(window).map(|window| window.index));
         self.sessions
-            .get_mut(&session)
+            .get_mut(&mut self.journal, &session)
             .expect("session was just read")
             .windows = windows;
     }
@@ -1130,7 +1142,7 @@ impl MuxState {
         let name = name.into();
         let window = self
             .windows
-            .get_mut(&window)
+            .get_mut(&mut self.journal, &window)
             .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
         if window.name != name {
             window.name = name;
@@ -1171,7 +1183,10 @@ impl MuxState {
             *next_split_id = (*next_split_id).saturating_add(1);
             id
         };
-        let window = self.windows.get_mut(&window_id).expect("window exists");
+        let window = self
+            .windows
+            .get_mut(&mut self.journal, &window_id)
+            .expect("window exists");
         window
             .layout
             .split(
@@ -1225,7 +1240,7 @@ impl MuxState {
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
         let removed = self
             .windows
-            .get_mut(&window_id)
+            .get_mut(&mut self.journal, &window_id)
             .expect("window exists")
             .layout
             .remove(pane);
@@ -1234,9 +1249,13 @@ impl MuxState {
             Err(LayoutError::LastPane) => return self.kill_window(window_id),
             Err(error) => return Err(pane_layout_error(error, pane)),
         }
-        let window = self.windows.get_mut(&window_id).expect("window exists");
+        let window = self
+            .windows
+            .get_mut(&mut self.journal, &window_id)
+            .expect("window exists");
         window.panes.remove(&pane);
         repair_window_after_pane_removal(window, pane);
+        self.journal.note_removal();
         self.bump_generation();
         Ok(vec![pane])
     }
@@ -1244,19 +1263,19 @@ impl MuxState {
     pub fn kill_window(&mut self, window: WindowId) -> Result<Vec<PaneId>, ServerError> {
         let removed = self
             .windows
-            .remove(&window)
+            .remove(&mut self.journal, &window)
             .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
         let removed_panes = removed.pane_order.clone();
         let (activated, session_empty) = {
             let session = self
                 .sessions
-                .get_mut(&removed.session)
+                .get_mut(&mut self.journal, &removed.session)
                 .expect("window session exists");
             let activated = session.forget_window(window);
             (activated, session.windows.is_empty())
         };
         if session_empty {
-            self.sessions.remove(&removed.session);
+            self.sessions.remove(&mut self.journal, &removed.session);
         } else if let Some(window) = activated {
             self.touch_window_activity(window);
             self.clear_window_alerts(window);
@@ -1268,11 +1287,11 @@ impl MuxState {
     pub fn kill_session(&mut self, session: SessionId) -> Result<Vec<PaneId>, ServerError> {
         let session = self
             .sessions
-            .remove(&session)
+            .remove(&mut self.journal, &session)
             .ok_or_else(|| ServerError::MissingTarget(session.to_string()))?;
         let mut panes = Vec::new();
         for window in session.windows {
-            if let Some(window) = self.windows.remove(&window) {
+            if let Some(window) = self.windows.remove(&mut self.journal, &window) {
                 panes.extend(window.pane_order);
             }
         }
@@ -1317,7 +1336,7 @@ impl MuxState {
     fn activate_window(&mut self, session: SessionId, window: WindowId) -> bool {
         let changed = self
             .sessions
-            .get_mut(&session)
+            .get_mut(&mut self.journal, &session)
             .expect("session exists")
             .activate_window(window);
         if changed {
@@ -1329,7 +1348,7 @@ impl MuxState {
 
     fn force_activate_window(&mut self, session: SessionId, window: WindowId) {
         self.sessions
-            .get_mut(&session)
+            .get_mut(&mut self.journal, &session)
             .expect("session exists")
             .activate_window(window);
         self.touch_window_activity(window);
@@ -1339,7 +1358,10 @@ impl MuxState {
     fn touch_window_activity(&mut self, window: WindowId) {
         let activity = self.allocate_sort_point();
         let activity_time = self.format_time();
-        let window = self.windows.get_mut(&window).expect("active window exists");
+        let window = self
+            .windows
+            .get_mut(&mut self.journal, &window)
+            .expect("active window exists");
         window.activity = activity;
         window.activity_time = activity_time;
     }
@@ -1356,7 +1378,7 @@ impl MuxState {
     /// Set or clear a window's pin-`WINLINK_ACTIVITY` flag, reporting whether
     /// it moved. A window that already left is not an error.
     pub fn set_window_activity_flag(&mut self, window: WindowId, raised: bool) -> bool {
-        let Some(window_state) = self.windows.get_mut(&window) else {
+        let Some(window_state) = self.windows.get_mut(&mut self.journal, &window) else {
             return false;
         };
         if window_state.activity_flag == raised {
@@ -1370,7 +1392,7 @@ impl MuxState {
     /// Set or clear a window's pin-`WINLINK_SILENCE` flag, reporting whether
     /// it moved. A window that already left is not an error.
     pub fn set_window_silence_flag(&mut self, window: WindowId, raised: bool) -> bool {
-        let Some(window_state) = self.windows.get_mut(&window) else {
+        let Some(window_state) = self.windows.get_mut(&mut self.journal, &window) else {
             return false;
         };
         if window_state.silence_flag == raised {
@@ -1394,7 +1416,10 @@ impl MuxState {
             .window_for_pane(pane)
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
         let active_point = self.allocate_sort_point();
-        let window = self.windows.get_mut(&window_id).expect("window exists");
+        let window = self
+            .windows
+            .get_mut(&mut self.journal, &window_id)
+            .expect("window exists");
         if window.active_pane == pane && window.zoomed_pane.is_some() && !preserve_zoom {
             window.zoomed_pane = None;
             self.bump_generation();
@@ -1417,7 +1442,10 @@ impl MuxState {
             .window_for_pane(pane)
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
         let active_point = self.allocate_sort_point();
-        let window = self.windows.get_mut(&window_id).expect("window exists");
+        let window = self
+            .windows
+            .get_mut(&mut self.journal, &window_id)
+            .expect("window exists");
         if window.panes.len() <= 1 {
             return Ok(());
         }
@@ -1452,7 +1480,7 @@ impl MuxState {
         let active_point = self.allocate_sort_point();
         if let Some(pane) = self
             .windows
-            .get_mut(&window)
+            .get_mut(&mut self.journal, &window)
             .and_then(|window| window.panes.get_mut(&pane))
         {
             pane.active_point = active_point;
@@ -1470,7 +1498,10 @@ impl MuxState {
         let window_id = self
             .window_for_pane(pane)
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
-        let window = self.windows.get_mut(&window_id).expect("window exists");
+        let window = self
+            .windows
+            .get_mut(&mut self.journal, &window_id)
+            .expect("window exists");
         window
             .layout
             .resize_pane(pane, axis, delta_cells)
@@ -1490,7 +1521,10 @@ impl MuxState {
         let window_id = self
             .window_for_pane(pane)
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
-        let window = self.windows.get_mut(&window_id).expect("window exists");
+        let window = self
+            .windows
+            .get_mut(&mut self.journal, &window_id)
+            .expect("window exists");
         window
             .layout
             .resize_pane_to(pane, axis, cells)
@@ -1508,7 +1542,7 @@ impl MuxState {
     ) -> Result<(), ServerError> {
         let window = self
             .windows
-            .get_mut(&window)
+            .get_mut(&mut self.journal, &window)
             .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
         let before = window.layout.extent();
         window.layout.resize(columns, rows);
@@ -1534,7 +1568,7 @@ impl MuxState {
         }
         let window = self
             .windows
-            .get_mut(&window)
+            .get_mut(&mut self.journal, &window)
             .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
         let changed = window
             .layout
@@ -1566,7 +1600,10 @@ impl MuxState {
         let mut split_ids = split_ids.into_iter();
         let mut ids = || split_ids.next().expect("preset has one split ID per edge");
 
-        let window = self.windows.get_mut(&window).expect("window was resolved");
+        let window = self
+            .windows
+            .get_mut(&mut self.journal, &window)
+            .expect("window was resolved");
         let previous = window.layout.clone();
         window
             .layout
@@ -1618,7 +1655,10 @@ impl MuxState {
             "parsed layout consumes one fresh ID per split"
         );
 
-        let window = self.windows.get_mut(&window).expect("window was resolved");
+        let window = self
+            .windows
+            .get_mut(&mut self.journal, &window)
+            .expect("window was resolved");
         let previous = std::mem::replace(&mut window.layout, next);
         window.z_order = window.layout.panes_in_order();
         window.previous_layout = Some(Box::new(previous));
@@ -1655,7 +1695,10 @@ impl MuxState {
             .previous_layout
             .is_some();
         if !has_previous {
-            let window = self.windows.get_mut(&window).expect("window was resolved");
+            let window = self
+                .windows
+                .get_mut(&mut self.journal, &window)
+                .expect("window was resolved");
             window.previous_layout = Some(Box::new(window.layout.clone()));
             return Ok(());
         }
@@ -1682,7 +1725,10 @@ impl MuxState {
             .map(|_| self.allocate_split_id())
             .collect::<Vec<_>>();
 
-        let window = self.windows.get_mut(&window).expect("window was resolved");
+        let window = self
+            .windows
+            .get_mut(&mut self.journal, &window)
+            .expect("window was resolved");
         let mut restored = *window
             .previous_layout
             .take()
@@ -1714,7 +1760,7 @@ impl MuxState {
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
         let window = self
             .windows
-            .get_mut(&window_id)
+            .get_mut(&mut self.journal, &window_id)
             .expect("pane window exists");
         let previous = window.layout.clone();
         window
@@ -2111,7 +2157,7 @@ impl MuxState {
     ) -> Result<(), ServerError> {
         let window = self
             .windows
-            .get_mut(&window)
+            .get_mut(&mut self.journal, &window)
             .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
         if window.input_options.aggressive_resize() != value {
             window.input_options.set_aggressive_resize(value);
@@ -2148,7 +2194,7 @@ impl MuxState {
     ) -> Result<(), ServerError> {
         let window = self
             .windows
-            .get_mut(&window)
+            .get_mut(&mut self.journal, &window)
             .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
         if window.input_options.automatic_rename() != value {
             window.input_options.set_automatic_rename(value);
@@ -2192,7 +2238,7 @@ impl MuxState {
     ) -> Result<(), ServerError> {
         let window = self
             .windows
-            .get_mut(&window)
+            .get_mut(&mut self.journal, &window)
             .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
         if window.input_options.synchronize_panes() != value {
             window.input_options.set_synchronize_panes(value);
@@ -2248,7 +2294,7 @@ impl MuxState {
     ) -> Result<(), ServerError> {
         let window = self
             .windows
-            .get_mut(&window)
+            .get_mut(&mut self.journal, &window)
             .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
         let mut changed = false;
         for pane in window.panes.values_mut() {
@@ -2327,7 +2373,7 @@ impl MuxState {
             let activity = self.allocate_sort_point();
             let state = self
                 .sessions
-                .get_mut(&session)
+                .get_mut(&mut self.journal, &session)
                 .expect("active session exists");
             state.activity = i64::try_from(now).ok();
             state.sort_activity = activity;
@@ -3047,9 +3093,11 @@ impl MuxState {
     }
 
     pub fn pane_mut(&mut self, pane: PaneId) -> Option<&mut Pane> {
+        let window = self.window_for_pane(pane)?;
         self.windows
-            .values_mut()
-            .find_map(|window| window.panes.get_mut(&pane))
+            .get_mut(&mut self.journal, &window)?
+            .panes
+            .get_mut(&pane)
     }
 
     pub fn mark_pane_dead(
@@ -3232,7 +3280,7 @@ impl MuxState {
     ) -> Result<PaneId, ServerError> {
         let window = self
             .windows
-            .get_mut(&window)
+            .get_mut(&mut self.journal, &window)
             .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
         let active = window.active_pane;
         let was_zoomed = window.zoomed_pane.is_some();
@@ -3282,7 +3330,10 @@ impl MuxState {
             .ok_or_else(|| ServerError::MissingTarget(target.to_string()))?;
 
         if source == target {
-            let window = self.windows.get_mut(&source_window).expect("window exists");
+            let window = self
+                .windows
+                .get_mut(&mut self.journal, &source_window)
+                .expect("window exists");
             if window.zoomed_pane.is_some() && !preserve_zoom {
                 window.zoomed_pane = None;
                 self.bump_generation();
@@ -3292,7 +3343,10 @@ impl MuxState {
 
         if source_window == target_window {
             let was_zoomed = {
-                let window = self.windows.get_mut(&source_window).expect("window exists");
+                let window = self
+                    .windows
+                    .get_mut(&mut self.journal, &source_window)
+                    .expect("window exists");
                 let was_zoomed = window.zoomed_pane.is_some();
                 let swapped = window.layout.swap(source, target);
                 debug_assert!(swapped);
@@ -3303,7 +3357,9 @@ impl MuxState {
             if detached {
                 if self.windows[&source_window].active_pane == source {
                     let changed = activate_window_pane(
-                        self.windows.get_mut(&source_window).expect("window exists"),
+                        self.windows
+                            .get_mut(&mut self.journal, &source_window)
+                            .expect("window exists"),
                         target,
                         false,
                     );
@@ -3313,7 +3369,9 @@ impl MuxState {
                 }
                 if self.windows[&source_window].active_pane == target {
                     let changed = activate_window_pane(
-                        self.windows.get_mut(&source_window).expect("window exists"),
+                        self.windows
+                            .get_mut(&mut self.journal, &source_window)
+                            .expect("window exists"),
                         source,
                         false,
                     );
@@ -3323,7 +3381,9 @@ impl MuxState {
                 }
             } else {
                 let changed = activate_window_pane(
-                    self.windows.get_mut(&source_window).expect("window exists"),
+                    self.windows
+                        .get_mut(&mut self.journal, &source_window)
+                        .expect("window exists"),
                     target,
                     false,
                 );
@@ -3333,7 +3393,7 @@ impl MuxState {
             }
             let active = self.windows[&source_window].active_pane;
             self.windows
-                .get_mut(&source_window)
+                .get_mut(&mut self.journal, &source_window)
                 .expect("window exists")
                 .zoomed_pane = (preserve_zoom && was_zoomed).then_some(active);
             self.bump_generation();
@@ -3347,11 +3407,11 @@ impl MuxState {
 
         let mut source_state = self
             .windows
-            .remove(&source_window)
+            .remove(&mut self.journal, &source_window)
             .expect("source window exists");
         let target_state = self
             .windows
-            .get_mut(&target_window)
+            .get_mut(&mut self.journal, &target_window)
             .expect("target window exists");
         let source_replaced = source_state.layout.replace(source, target);
         debug_assert!(source_replaced);
@@ -3390,7 +3450,8 @@ impl MuxState {
             (preserve_zoom && source_was_zoomed).then_some(source_state.active_pane);
         target_state.zoomed_pane =
             (preserve_zoom && target_was_zoomed).then_some(target_state.active_pane);
-        self.windows.insert(source_window, source_state);
+        self.windows
+            .insert(&mut self.journal, source_window, source_state);
         if source_changed {
             self.touch_pane_active_point(next_source_active);
         }
@@ -3440,7 +3501,7 @@ impl MuxState {
             self.move_window(source_window, destination_session, index, false, !detached)?;
             if let Some(name) = name {
                 self.windows
-                    .get_mut(&source_window)
+                    .get_mut(&mut self.journal, &source_window)
                     .expect("moved source window exists")
                     .name = name;
             }
@@ -3454,13 +3515,14 @@ impl MuxState {
         let activity_time = self.format_time();
         let mut source = self
             .windows
-            .remove(&source_window)
+            .remove(&mut self.journal, &source_window)
             .expect("source window exists");
         let source_will_close = match source.layout.remove(pane) {
             Ok(()) => false,
             Err(LayoutError::LastPane) => true,
             Err(error) => {
-                self.windows.insert(source_window, source);
+                self.windows
+                    .insert(&mut self.journal, source_window, source);
                 return Err(pane_layout_error(error, pane));
             }
         };
@@ -3470,16 +3532,18 @@ impl MuxState {
             .expect("source window contains pane");
         let activated = if source_will_close {
             self.sessions
-                .get_mut(&source_session)
+                .get_mut(&mut self.journal, &source_session)
                 .expect("source session exists")
                 .forget_window(source_window)
         } else {
             repair_window_after_pane_removal(&mut source, pane);
-            self.windows.insert(source_window, source);
+            self.windows
+                .insert(&mut self.journal, source_window, source);
             None
         };
         let window_name = name.unwrap_or_else(|| pane_state.title.clone());
         self.windows.insert(
+            &mut self.journal,
             window_id,
             Window {
                 id: window_id,
@@ -3508,7 +3572,7 @@ impl MuxState {
         let destination_was_empty = {
             let destination = self
                 .sessions
-                .get_mut(&destination_session)
+                .get_mut(&mut self.journal, &destination_session)
                 .expect("destination session exists");
             let was_empty = destination.windows.is_empty();
             destination.windows.push(window_id);
@@ -3528,7 +3592,7 @@ impl MuxState {
         if source_session != destination_session
             && self.sessions[&source_session].windows.is_empty()
         {
-            self.sessions.remove(&source_session);
+            self.sessions.remove(&mut self.journal, &source_session);
         }
         self.sort_session_windows(destination_session);
         self.bump_generation();
@@ -3575,7 +3639,10 @@ impl MuxState {
                 *next_split_id = (*next_split_id).saturating_add(1);
                 id
             };
-            let window = self.windows.get_mut(&source_window).expect("window exists");
+            let window = self
+                .windows
+                .get_mut(&mut self.journal, &source_window)
+                .expect("window exists");
             let original_layout = window.layout.clone();
             window
                 .layout
@@ -3605,14 +3672,15 @@ impl MuxState {
 
         let mut source_state = self
             .windows
-            .remove(&source_window)
+            .remove(&mut self.journal, &source_window)
             .expect("source window exists");
         let source_backup = source_state.clone();
         let source_will_close = match source_state.layout.remove(source) {
             Ok(()) => false,
             Err(LayoutError::LastPane) => true,
             Err(error) => {
-                self.windows.insert(source_window, source_state);
+                self.windows
+                    .insert(&mut self.journal, source_window, source_state);
                 return Err(pane_layout_error(error, source));
             }
         };
@@ -3632,17 +3700,18 @@ impl MuxState {
         };
         let split_result = self
             .windows
-            .get_mut(&target_window)
+            .get_mut(&mut self.journal, &target_window)
             .expect("target window exists")
             .layout
             .split(target, axis, size, before, full_size, source, &mut ids);
         if let Err(error) = split_result {
-            self.windows.insert(source_window, source_backup);
+            self.windows
+                .insert(&mut self.journal, source_window, source_backup);
             return Err(split_layout_error(error, target));
         }
         let target_state = self
             .windows
-            .get_mut(&target_window)
+            .get_mut(&mut self.journal, &target_window)
             .expect("target window exists");
         target_state.panes.insert(source, pane_state);
         insert_pane_order(&mut target_state.pane_order, source, target, false, false);
@@ -3660,11 +3729,12 @@ impl MuxState {
 
         let activated = if source_will_close {
             self.sessions
-                .get_mut(&source_session)
+                .get_mut(&mut self.journal, &source_session)
                 .expect("source session exists")
                 .forget_window(source_window)
         } else {
-            self.windows.insert(source_window, source_state);
+            self.windows
+                .insert(&mut self.journal, source_window, source_state);
             None
         };
         if let Some(window) = activated {
@@ -6368,7 +6438,7 @@ mod tests {
             .unwrap();
         state
             .windows
-            .get_mut(&target_window)
+            .get_mut(&mut state.journal, &target_window)
             .unwrap()
             .layout
             .resize(80, 1);

@@ -441,14 +441,42 @@ impl Shared {
         let _ = self.timer_tx.send(TimerCommand::Rename(deadline));
     }
 
-    fn apply_due_window_renames(self: &Arc<Self>, now: Instant) {
+    pub(super) fn apply_due_window_renames(self: &Arc<Self>, now: Instant) {
+        let due = {
+            let inner = self.inner.lock();
+            inner
+                .engine
+                .due_window_rename_panes(now)
+                .into_iter()
+                .filter_map(|pane| Some((pane, Arc::clone(inner.terminals.get(&pane)?))))
+                .collect::<Vec<_>>()
+        };
+        let commands = due
+            .into_iter()
+            .map(|(pane, terminal)| (pane, terminal_current_command(&terminal)))
+            .filter(|(_, command)| !command.is_empty())
+            .collect::<Vec<_>>();
         let (renamed, events) = {
             let mut inner = self.inner.lock();
             inner.scheduled_window_rename = None;
             let facts = format_hook_facts(&inner);
             let mut hooks = DaemonFormatHooks::command(&facts);
             let before = MuxHookSnapshot::capture(&inner.engine);
-            let renamed = inner.engine.apply_due_window_renames(now, &mut hooks);
+            let mut renamed = false;
+            for (pane, command) in commands {
+                let Some(mut runtime) = inner.engine.pane_runtime_facts(pane).cloned() else {
+                    continue;
+                };
+                if runtime.current_command != command {
+                    runtime.current_command = command;
+                    let generation = inner.engine.state.generation();
+                    inner
+                        .engine
+                        .set_pane_runtime_facts_at(pane, runtime, &mut hooks, now);
+                    renamed |= inner.engine.state.generation() != generation;
+                }
+            }
+            renamed |= inner.engine.apply_due_window_renames(now, &mut hooks);
             let events = if renamed {
                 mux_hook_events(&before, &MuxHookSnapshot::capture(&inner.engine), "")
             } else {

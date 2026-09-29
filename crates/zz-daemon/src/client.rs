@@ -5,7 +5,7 @@ use std::{
     io::{self, Read, Write},
     path::{Path, PathBuf},
     sync::{
-        Arc, OnceLock, Weak,
+        Arc, LazyLock, OnceLock, Weak,
         atomic::{AtomicU32, AtomicU64, Ordering},
     },
 };
@@ -17,8 +17,13 @@ use zz_protocol::{
     CommandResponse, ConfigOverrideEntry, GuiResponse, InputMessage, MAX_CLIENT_ENVIRONMENT_BYTES,
     MAX_CLIENT_ENVIRONMENT_ENTRIES, MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES, MAX_CLIENT_FILE_BYTES,
     MAX_CLIENT_WORKING_DIRECTORY_BYTES, MAX_PASTE_UPLOAD_CHUNK_BYTES, PROTOCOL_VERSION, PaneId,
-    PasteUploadPurpose, PreparedCommand, ProtocolError, ProtocolMessage, RawText, ServerError,
-    ServerHello, StdoutClaim, encode_protocol_message_into, read_protocol_message_into,
+    PasteUploadPurpose, PreparedCommand, PreparedCommandResult, ProtocolError, ProtocolMessage,
+    RawText, ServerError, ServerHello, StdoutClaim, encode_protocol_message_into,
+    read_protocol_message_into,
+};
+use zz_protocol::{
+    ClientEnvironmentBlob, EXEC_CAPABILITY, ExecFlags, ExecOutcome, ExecRequest, ExecResume,
+    ExecResumeKind,
 };
 
 /// `EIO`, the error the pin's client reports for anything that fails after the
@@ -145,16 +150,82 @@ pub struct CommandOutcome {
     pub client_exit: bool,
 }
 
+static LEGACY_COMMAND: LazyLock<bool> = LazyLock::new(|| {
+    let legacy = std::env::var_os("ZZ_PERF_LEGACY_COMMAND").is_some_and(|value| value == "1");
+    if legacy {
+        log::debug!(
+            "ZZ_PERF_LEGACY_COMMAND=1: command clients use ClientHello, PrepareCommandList and CommandRequest"
+        );
+    }
+    legacy
+});
+
+pub type ExecClassifier<'a> =
+    &'a dyn Fn(&[CommandInvocation], &[PreparedCommand]) -> Option<ExecResumeKind>;
+
+pub struct ExecChain<'a> {
+    pub commands: Vec<CommandInvocation>,
+    pub spawned_server_id: Option<u64>,
+    pub expect_server_id: Option<u64>,
+    pub resume: Option<ExecClassifier<'a>>,
+    pub prepared: bool,
+    pub last: bool,
+}
+
+impl ExecChain<'_> {
+    #[must_use]
+    pub fn new(commands: Vec<CommandInvocation>) -> Self {
+        Self {
+            commands,
+            spawned_server_id: None,
+            expect_server_id: None,
+            resume: None,
+            prepared: false,
+            last: false,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum ExecChainEnd {
+    Ran { exit_code: u8 },
+    Failed(DaemonError),
+    Resume(ExecResume),
+    Rejected(ServerError),
+    ServerMismatch,
+}
+
 pub struct CommandClient {
     stdin_enabled: bool,
     stdin_spent: bool,
     stderr_handler: Option<fn(&str)>,
     stdout_handler: Option<fn(&RawText)>,
-    reader: ProtocolReceiver<LocalStream>,
-    writer: ProtocolSender<LocalStream>,
-    hello: ServerHello,
+    link: CommandLink,
+    route: CommandRoute,
+    server_id: Option<u64>,
     #[cfg(all(any(unix, windows), not(target_os = "ios")))]
     _ssh_forward: Option<SshForward>,
+}
+
+enum CommandLink {
+    Exec {
+        reader: ProtocolReceiver<LocalStream>,
+        writer: ProtocolSender<LocalStream>,
+        answered: bool,
+        spent: bool,
+    },
+    Legacy {
+        reader: ProtocolReceiver<LocalStream>,
+        writer: ProtocolSender<LocalStream>,
+        server_id: u64,
+    },
+}
+
+struct CommandRoute {
+    socket: PathBuf,
+    display: String,
+    facts: EndpointFactsScope,
+    send_origin: bool,
 }
 
 fn attach_session_command(
@@ -179,38 +250,214 @@ fn attach_session_command(
     CommandInvocation::new("attach-session", args)
 }
 
-impl CommandClient {
-    pub fn connect(path: &Path) -> Result<Self, DaemonError> {
-        let connected = connect::<LocalTransport>(
-            path,
-            path.display(),
+fn stdout_or_exit(outcome: CommandOutcome) -> Result<String, DaemonError> {
+    if outcome.exit_code == 0 {
+        Ok(outcome.stdout.to_string())
+    } else {
+        Err(DaemonError::CommandExit {
+            output: outcome.stdout,
+            exit_code: outcome.exit_code,
+        })
+    }
+}
+
+fn exec_maybe_unsupported(error: &DaemonError) -> bool {
+    match error {
+        DaemonError::Protocol(ProtocolError::Decode(_)) => true,
+        DaemonError::Protocol(ProtocolError::Io(error)) | DaemonError::Io(error) => {
+            error.kind() == io::ErrorKind::UnexpectedEof
+        }
+        _ => false,
+    }
+}
+
+fn command_failure(error: ServerError, output: RawText) -> DaemonError {
+    let error = DaemonError::Server(error);
+    if output.is_empty() {
+        error
+    } else {
+        DaemonError::CommandFailed {
+            output,
+            error: Box::new(error),
+        }
+    }
+}
+
+fn exec_environment() -> ClientEnvironmentBlob {
+    exec_environment_with(std::env::vars_os())
+}
+
+fn exec_environment_with<I, K, V>(environment: I) -> ClientEnvironmentBlob
+where
+    I: IntoIterator<Item = (K, V)>,
+    K: Into<OsString>,
+    V: Into<OsString>,
+{
+    let mut blob = Vec::new();
+    let mut count = 0usize;
+    let mut total = 0usize;
+    for (name, value) in environment {
+        if count == MAX_CLIENT_ENVIRONMENT_ENTRIES {
+            break;
+        }
+        let name = RawText::from_os_str(&name.into()).into_bytes();
+        let value = RawText::from_os_str(&value.into()).into_bytes();
+        if name.is_empty() || name.contains(&b'=') || name.contains(&0) || value.contains(&0) {
+            continue;
+        }
+        let entry_bytes = name.len() + 1 + value.len();
+        if entry_bytes > MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES
+            || total + entry_bytes > MAX_CLIENT_ENVIRONMENT_BYTES
+        {
+            continue;
+        }
+        blob.extend_from_slice(&name);
+        blob.push(b'=');
+        blob.extend_from_slice(&value);
+        blob.push(0);
+        count += 1;
+        total += entry_bytes;
+    }
+    ClientEnvironmentBlob::from_bytes(blob)
+}
+
+fn exec_feature_mask() -> u32 {
+    crate::terminal_features::terminal_feature_mask(
+        client_terminal_flags()
+            .features
+            .iter()
+            .filter(|spec| spec.len() <= MAX_CLIENT_FEATURE_SPEC_BYTES)
+            .take(MAX_CLIENT_FEATURE_SPECS)
+            .map(String::as_str),
+    ) | LEARNED_TERMINAL_FEATURES.load(Ordering::Relaxed)
+}
+
+impl CommandRoute {
+    fn exec_request(
+        &self,
+        commands: Vec<CommandInvocation>,
+        flags: ExecFlags,
+        spawned_server_id: Option<u64>,
+        expect_server_id: Option<u64>,
+    ) -> ExecRequest {
+        let mut flags = flags;
+        flags.set(ExecFlags::UTF8, client_takes_utf8_terminal());
+        flags.set(
+            ExecFlags::NESTED,
+            self.facts.includes_tty()
+                && std::env::var_os("TMUX").is_some_and(|value| !value.is_empty()),
+        );
+        ExecRequest {
+            protocol_version: PROTOCOL_VERSION,
+            flags,
+            client_instance_id: client_instance_id(),
+            origin: self
+                .send_origin
+                .then(|| std::env::var("ZZ_PANE").ok())
+                .flatten()
+                .and_then(|pane| pane.parse().ok()),
+            working_directory: client_working_directory(self.facts, logical_current_dir),
+            tty: self
+                .facts
+                .tty_scope()
+                .and_then(caller_tty)
+                .filter(|tty| tty.len() <= zz_protocol::MAX_EXEC_TTY_BYTES),
+            size: self
+                .facts
+                .includes_terminal_size()
+                .then(caller_terminal_size)
+                .flatten()
+                .map(|(cols, rows, _, _)| (cols, rows)),
+            features: exec_feature_mask(),
+            startup_reentry: std::env::var(crate::STARTUP_REENTRY_ENVIRONMENT_VARIABLE)
+                .ok()
+                .and_then(|token| token.parse().ok()),
+            spawned_server_id,
+            expect_server_id,
+            process_id: std::process::id(),
+            environment: exec_environment(),
+            commands,
+        }
+    }
+
+    fn connect_legacy(&self) -> Result<(CommandLink, bool), DaemonError> {
+        let stream = LocalTransport::connect(&self.socket)?;
+        let (reader, writer, hello) = connect_stream(
+            stream,
+            &self.display,
             ClientKind::Command,
             None,
             None,
             false,
-            true,
-            EndpointFactsScope::LocalHostWorkingDirectoryAndTerminal,
+            self.send_origin,
+            self.facts,
         )?;
-        Ok(Self::from_connected(connected))
+        let speaks_exec = hello
+            .capabilities
+            .iter()
+            .any(|capability| capability == EXEC_CAPABILITY);
+        Ok((
+            CommandLink::Legacy {
+                reader,
+                writer,
+                server_id: hello.server_id,
+            },
+            speaks_exec,
+        ))
+    }
+
+    fn connect(&self) -> Result<CommandLink, DaemonError> {
+        if *LEGACY_COMMAND {
+            return self.connect_legacy().map(|(link, _)| link);
+        }
+        let stream = LocalTransport::connect(&self.socket)?;
+        Ok(CommandLink::Exec {
+            reader: ProtocolReceiver::new(stream.try_clone()?),
+            writer: ProtocolSender::new(stream),
+            answered: false,
+            spent: false,
+        })
+    }
+}
+
+impl CommandClient {
+    pub fn connect(path: &Path) -> Result<Self, DaemonError> {
+        Self::connect_route(CommandRoute {
+            socket: path.to_path_buf(),
+            display: path.display().to_string(),
+            facts: EndpointFactsScope::LocalHostWorkingDirectoryAndTerminal,
+            send_origin: true,
+        })
+    }
+
+    fn connect_route(route: CommandRoute) -> Result<Self, DaemonError> {
+        let link = route.connect()?;
+        let server_id = match &link {
+            CommandLink::Legacy { server_id, .. } => Some(*server_id),
+            CommandLink::Exec { .. } => None,
+        };
+        Ok(Self {
+            stdin_enabled: false,
+            stdin_spent: false,
+            stderr_handler: None,
+            stdout_handler: None,
+            link,
+            route,
+            server_id,
+            #[cfg(all(any(unix, windows), not(target_os = "ios")))]
+            _ssh_forward: None,
+        })
     }
 
     /// Connect a short-lived command client to a configured fleet endpoint.
     pub fn connect_endpoint(endpoint: &Endpoint) -> Result<Self, DaemonError> {
         match endpoint {
-            Endpoint::Local(path) => {
-                let stream = LocalTransport::connect(path)?;
-                let connected = connect_stream(
-                    stream,
-                    path.display(),
-                    ClientKind::Command,
-                    None,
-                    None,
-                    false,
-                    false,
-                    EndpointFactsScope::LocalHostWorkingDirectoryAndTerminal,
-                )?;
-                Ok(Self::from_connected(connected))
-            }
+            Endpoint::Local(path) => Self::connect_route(CommandRoute {
+                socket: path.clone(),
+                display: path.display().to_string(),
+                facts: EndpointFactsScope::LocalHostWorkingDirectoryAndTerminal,
+                send_origin: false,
+            }),
             Endpoint::Ssh(endpoint) => {
                 #[cfg(target_os = "ios")]
                 {
@@ -220,18 +467,14 @@ impl CommandClient {
                 #[cfg(all(any(unix, windows), not(target_os = "ios")))]
                 {
                     let ssh_forward = SshForward::start(endpoint, None)?;
-                    let stream = LocalTransport::connect(ssh_forward.local_socket())?;
-                    let connected = connect_stream(
-                        stream,
-                        endpoint,
-                        ClientKind::Command,
-                        None,
-                        None,
-                        false,
-                        false,
-                        EndpointFactsScope::PortableTerminalSize,
-                    )?;
-                    Ok(Self::from_connected_with_ssh(connected, ssh_forward))
+                    let mut client = Self::connect_route(CommandRoute {
+                        socket: ssh_forward.local_socket().to_path_buf(),
+                        display: endpoint.to_string(),
+                        facts: EndpointFactsScope::PortableTerminalSize,
+                        send_origin: false,
+                    })?;
+                    client._ssh_forward = Some(ssh_forward);
+                    Ok(client)
                 }
                 #[cfg(not(any(unix, windows)))]
                 {
@@ -242,30 +485,16 @@ impl CommandClient {
         }
     }
 
-    fn from_connected((reader, writer, hello): Connected<LocalStream>) -> Self {
-        Self {
-            stdin_enabled: false,
-            stdin_spent: false,
-            stderr_handler: None,
-            stdout_handler: None,
-            reader,
-            writer,
-            hello,
-            #[cfg(all(any(unix, windows), not(target_os = "ios")))]
-            _ssh_forward: None,
+    pub fn server_id(&mut self) -> Result<u64, DaemonError> {
+        if let Some(server_id) = self.server_id {
+            return Ok(server_id);
         }
-    }
-
-    #[cfg(all(any(unix, windows), not(target_os = "ios")))]
-    fn from_connected_with_ssh(connected: Connected<LocalStream>, ssh_forward: SshForward) -> Self {
-        let mut client = Self::from_connected(connected);
-        client._ssh_forward = Some(ssh_forward);
-        client
-    }
-
-    #[must_use]
-    pub fn server_hello(&self) -> &ServerHello {
-        &self.hello
+        self.exec_chain(ExecChain::new(Vec::new()), |_| 0)?;
+        self.server_id.ok_or_else(|| {
+            DaemonError::Server(ServerError::Internal(
+                "daemon did not report its identity".to_owned(),
+            ))
+        })
     }
 
     pub fn set_stderr_handler(&mut self, handler: fn(&str)) {
@@ -280,24 +509,22 @@ impl CommandClient {
         self.stdin_enabled = true;
     }
 
-    pub fn wait_for_disconnect(mut self) {
-        while self.reader.recv().is_ok() {}
-    }
-
     /// Run one command and keep only its stdout, folding a nonzero exit into
     /// `DaemonError::CommandExit`. Callers that need the command's stderr or
     /// that must treat a nonzero exit as a completed command use
     /// [`CommandClient::execute_streams`].
     pub fn execute(&mut self, command: CommandInvocation) -> Result<String, DaemonError> {
-        let outcome = self.execute_streams(command)?;
-        if outcome.exit_code == 0 {
-            Ok(outcome.stdout.to_string())
-        } else {
-            Err(DaemonError::CommandExit {
-                output: outcome.stdout,
-                exit_code: outcome.exit_code,
-            })
-        }
+        stdout_or_exit(self.execute_streams(command)?)
+    }
+
+    pub fn execute_on_server(
+        &mut self,
+        server_id: u64,
+        command: CommandInvocation,
+    ) -> Result<Option<String>, DaemonError> {
+        let mut chain = ExecChain::new(vec![command]);
+        chain.expect_server_id = Some(server_id);
+        self.run_single(chain)?.map(stdout_or_exit).transpose()
     }
 
     /// Run one command and keep all three of its streams. A command that ran to
@@ -307,71 +534,195 @@ impl CommandClient {
         &mut self,
         command: CommandInvocation,
     ) -> Result<CommandOutcome, DaemonError> {
-        self.execute_streams_with_prepared(command, false)
+        if matches!(self.link, CommandLink::Legacy { .. }) {
+            return self.execute_streams_with_prepared(command, false);
+        }
+        self.run_single(ExecChain::new(vec![command]))?
+            .ok_or_else(|| {
+                DaemonError::Server(ServerError::Internal("daemon ran no command".to_owned()))
+            })
     }
 
     pub fn execute_prepared_streams(
         &mut self,
         command: CommandInvocation,
     ) -> Result<CommandOutcome, DaemonError> {
-        self.execute_streams_with_prepared(command, true)
+        if matches!(self.link, CommandLink::Legacy { .. }) {
+            return self.execute_streams_with_prepared(command, true);
+        }
+        let mut chain = ExecChain::new(vec![command]);
+        chain.prepared = true;
+        self.run_single(chain)?.ok_or_else(|| {
+            DaemonError::Server(ServerError::Internal("daemon ran no command".to_owned()))
+        })
     }
 
-    fn execute_streams_with_prepared(
+    fn run_single(&mut self, chain: ExecChain<'_>) -> Result<Option<CommandOutcome>, DaemonError> {
+        let mut outcome = None;
+        let end = self.exec_chain(chain, |ran| {
+            outcome = Some(ran.clone());
+            0
+        })?;
+        match end {
+            ExecChainEnd::Rejected(error) => Err(DaemonError::Server(error)),
+            ExecChainEnd::Failed(error) => Err(error),
+            ExecChainEnd::ServerMismatch => Ok(None),
+            ExecChainEnd::Ran { .. } | ExecChainEnd::Resume(_) => {
+                outcome.map(Some).ok_or_else(|| {
+                    DaemonError::Server(ServerError::Internal("daemon ran no command".to_owned()))
+                })
+            }
+        }
+    }
+
+    pub fn exec_chain(
         &mut self,
-        command: CommandInvocation,
-        prepared: bool,
-    ) -> Result<CommandOutcome, DaemonError> {
+        chain: ExecChain<'_>,
+        mut emit: impl FnMut(&CommandOutcome) -> u8,
+    ) -> Result<ExecChainEnd, DaemonError> {
+        if matches!(self.link, CommandLink::Legacy { .. }) {
+            return self.legacy_exec_chain(chain, emit);
+        }
+        if matches!(self.link, CommandLink::Exec { spent: true, .. }) {
+            self.link = self.route.connect()?;
+        }
         #[cfg(all(unix, feature = "daemon"))]
         let _signal = self
             .stdin_enabled
             .then(StdinReadSignal::install)
             .transpose()?;
-        let mut command = command;
-        command.set_stdin_available(self.stdin_enabled);
+        let ExecChain {
+            commands,
+            spawned_server_id,
+            expect_server_id,
+            resume,
+            prepared,
+            last,
+        } = chain;
+        let mut flags = ExecFlags::default();
+        flags.set(ExecFlags::STDIN_AVAILABLE, self.stdin_enabled);
+        flags.set(ExecFlags::RESUME, resume.is_some());
+        flags.set(ExecFlags::PREPARED, prepared);
+        flags.set(ExecFlags::LAST, last);
+        let request = ProtocolMessage::Exec(self.route.exec_request(
+            commands,
+            flags,
+            spawned_server_id,
+            expect_server_id,
+        ));
+        let CommandLink::Exec {
+            reader,
+            writer,
+            answered,
+            spent,
+        } = &mut self.link
+        else {
+            unreachable!("legacy links returned above");
+        };
+        *spent = last;
+        let sent = writer.send(&request);
+        let first = match sent {
+            Ok(()) => reader.recv(),
+            Err(error) => Err(error),
+        };
+        let first = match first {
+            Err(error) if !*answered && exec_maybe_unsupported(&error) => {
+                let Ok((link, speaks_exec)) = self.route.connect_legacy() else {
+                    return Ok(ExecChainEnd::Failed(error));
+                };
+                if speaks_exec {
+                    return Ok(ExecChainEnd::Failed(error));
+                }
+                log::debug!(
+                    target: "zz_daemon::diagnostics::client",
+                    "daemon did not take Exec ({error}); retrying over the hello path",
+                );
+                let ProtocolMessage::Exec(request) = request else {
+                    unreachable!("request is an Exec");
+                };
+                self.link = link;
+                if let CommandLink::Legacy { server_id, .. } = &self.link {
+                    self.server_id = Some(*server_id);
+                }
+                return self.legacy_exec_chain(
+                    ExecChain {
+                        commands: request.commands,
+                        spawned_server_id,
+                        expect_server_id,
+                        resume,
+                        prepared,
+                        last,
+                    },
+                    emit,
+                );
+            }
+            result => result?,
+        };
+        if let ProtocolMessage::CommandResponse(CommandResponse::Error {
+            request_id: 0,
+            error,
+            ..
+        }) = first
+        {
+            return Err(DaemonError::Server(error));
+        }
+        *answered = true;
+        let mut message = Some(first);
+        let mut exit_code = 0u8;
+        let mut pending_error = None;
         let mut streamed_stderr = String::new();
         let mut client_exit = false;
-        let request_id = REQUEST_ID.fetch_add(1, Ordering::Relaxed);
-        self.writer
-            .send(&ProtocolMessage::CommandRequest(CommandRequest {
-                request_id,
-                command,
-                prepared,
-            }))?;
         loop {
-            match self.reader.recv()? {
+            let current = match message.take() {
+                Some(current) => current,
+                None => match reader.recv() {
+                    Ok(current) => current,
+                    Err(error) => return Ok(ExecChainEnd::Failed(pending_error.unwrap_or(error))),
+                },
+            };
+            match current {
+                ProtocolMessage::ExecExit(finished) => {
+                    self.server_id = Some(finished.server_id);
+                    if let Some(error) = pending_error {
+                        return Ok(ExecChainEnd::Failed(error));
+                    }
+                    return Ok(match finished.outcome {
+                        ExecOutcome::Ran => ExecChainEnd::Ran { exit_code },
+                        ExecOutcome::Resume(resume) => ExecChainEnd::Resume(resume),
+                        ExecOutcome::Rejected(error) => ExecChainEnd::Rejected(error),
+                        ExecOutcome::ServerMismatch => ExecChainEnd::ServerMismatch,
+                    });
+                }
+                ProtocolMessage::CommandResponse(CommandResponse::Error {
+                    error, output, ..
+                }) => {
+                    pending_error = Some(command_failure(error, output));
+                }
                 ProtocolMessage::CommandResponse(CommandResponse::Success {
-                    request_id: response_id,
                     output,
-                    exit_code,
+                    exit_code: status,
                     stderr,
                     stdout_claim,
-                }) if response_id == request_id => {
-                    return Ok(CommandOutcome {
+                    ..
+                }) => {
+                    let outcome = CommandOutcome {
                         stdout: output,
                         stderr: stderr
                             .strip_prefix(&streamed_stderr)
                             .unwrap_or(&stderr)
                             .to_owned(),
-                        exit_code,
+                        exit_code: status,
                         stdout_claim,
-                        client_exit,
-                    });
-                }
-                ProtocolMessage::CommandResponse(CommandResponse::Error {
-                    request_id: response_id,
-                    error,
-                    output,
-                }) if response_id == request_id => {
-                    let error = DaemonError::Server(error);
-                    return if output.is_empty() {
-                        Err(error)
-                    } else {
-                        Err(DaemonError::CommandFailed {
-                            output,
-                            error: Box::new(error),
-                        })
+                        client_exit: std::mem::take(&mut client_exit),
                     };
+                    streamed_stderr.clear();
+                    let output_status = emit(&outcome);
+                    if outcome.exit_code != 0 {
+                        exit_code = outcome.exit_code;
+                    }
+                    if output_status != 0 {
+                        exit_code = output_status;
+                    }
                 }
                 ProtocolMessage::Event(zz_protocol::Event {
                     payload:
@@ -401,44 +752,207 @@ impl CommandClient {
                     client_exit = true;
                 }
                 ProtocolMessage::ClientFileRequest(request) => {
-                    let readable = self.stdin_enabled && !self.stdin_spent;
-                    let result = match request.operation {
-                        ClientFileOperation::ReadStdin { binary } if readable => {
-                            self.stdin_spent = true;
-                            read_command_stdin(binary)
-                        }
-                        ClientFileOperation::ReadStdinChunk if readable => {
-                            let chunk = read_command_stdin_chunk();
-                            self.stdin_spent = !matches!(&chunk, Ok(chunk) if !chunk.is_empty());
-                            chunk
-                        }
-                        _ => {
-                            self.writer.send(&ProtocolMessage::ClientFileResponse(
-                                answer_client_file(&request),
-                            ))?;
-                            continue;
-                        }
-                    };
-                    self.writer
-                        .send(&ProtocolMessage::ClientFileResponse(ClientFileResponse {
-                            request_id: request.request_id,
-                            data: result.as_ref().cloned().unwrap_or_default(),
-                            error: result.err(),
-                        }))?;
+                    let response =
+                        answer_command_file(&request, self.stdin_enabled, &mut self.stdin_spent);
+                    if let Err(error) = writer.send(&ProtocolMessage::ClientFileResponse(response))
+                    {
+                        return Ok(ExecChainEnd::Failed(error));
+                    }
                 }
                 _ => {}
             }
         }
     }
 
-    pub fn prepare_commands(
+    fn legacy_exec_chain(
+        &mut self,
+        chain: ExecChain<'_>,
+        mut emit: impl FnMut(&CommandOutcome) -> u8,
+    ) -> Result<ExecChainEnd, DaemonError> {
+        let CommandLink::Legacy { server_id, .. } = self.link else {
+            unreachable!("legacy chains run on a hello link");
+        };
+        if chain
+            .expect_server_id
+            .is_some_and(|expected| expected != server_id)
+        {
+            return Ok(ExecChainEnd::ServerMismatch);
+        }
+        if chain.commands.is_empty() {
+            return Ok(ExecChainEnd::Ran { exit_code: 0 });
+        }
+        if chain.prepared {
+            let mut exit_code = 0;
+            for command in chain.commands {
+                let outcome = match self.execute_streams_with_prepared(command, true) {
+                    Ok(outcome) => outcome,
+                    Err(error) => return Ok(ExecChainEnd::Failed(error)),
+                };
+                let output_status = emit(&outcome);
+                if outcome.exit_code != 0 {
+                    exit_code = outcome.exit_code;
+                }
+                if output_status != 0 {
+                    exit_code = output_status;
+                }
+                if outcome.client_exit {
+                    break;
+                }
+            }
+            return Ok(ExecChainEnd::Ran { exit_code });
+        }
+        let typed = chain.resume.is_some().then(|| chain.commands.clone());
+        let prepared = match chain.spawned_server_id {
+            Some(spawned) => self.prepare_commands_or_stop_empty(chain.commands, spawned)?,
+            None => self.prepare_commands(chain.commands)?,
+        };
+        if let Some(error) = prepared.iter().find_map(|command| match &command.result {
+            PreparedCommandResult::Ready => None,
+            PreparedCommandResult::Error(error) => Some(error.clone()),
+        }) {
+            return Ok(ExecChainEnd::Rejected(error));
+        }
+        if let (Some(classify), Some(typed)) = (chain.resume, typed)
+            && let Some(kind) = classify(&typed, &prepared)
+        {
+            return Ok(ExecChainEnd::Resume(ExecResume {
+                kind,
+                commands: prepared,
+            }));
+        }
+        let mut exit_code = 0;
+        for command in prepared {
+            let outcome = match self.execute_streams_with_prepared(command.invocation, true) {
+                Ok(outcome) => outcome,
+                Err(error) => return Ok(ExecChainEnd::Failed(error)),
+            };
+            let output_status = emit(&outcome);
+            if outcome.exit_code != 0 {
+                exit_code = outcome.exit_code;
+            }
+            if output_status != 0 {
+                exit_code = output_status;
+            }
+            if outcome.client_exit {
+                break;
+            }
+        }
+        Ok(ExecChainEnd::Ran { exit_code })
+    }
+
+    fn legacy_link(
+        &mut self,
+    ) -> (
+        &mut ProtocolReceiver<LocalStream>,
+        &mut ProtocolSender<LocalStream>,
+    ) {
+        match &mut self.link {
+            CommandLink::Legacy { reader, writer, .. }
+            | CommandLink::Exec { reader, writer, .. } => (reader, writer),
+        }
+    }
+
+    fn execute_streams_with_prepared(
+        &mut self,
+        command: CommandInvocation,
+        prepared: bool,
+    ) -> Result<CommandOutcome, DaemonError> {
+        #[cfg(all(unix, feature = "daemon"))]
+        let _signal = self
+            .stdin_enabled
+            .then(StdinReadSignal::install)
+            .transpose()?;
+        let mut command = command;
+        command.set_stdin_available(self.stdin_enabled);
+        let mut streamed_stderr = String::new();
+        let mut client_exit = false;
+        let request_id = REQUEST_ID.fetch_add(1, Ordering::Relaxed);
+        let stdin_enabled = self.stdin_enabled;
+        let stderr_handler = self.stderr_handler;
+        let stdout_handler = self.stdout_handler;
+        let mut stdin_spent = self.stdin_spent;
+        let (reader, writer) = self.legacy_link();
+        let result = (|| {
+            writer.send(&ProtocolMessage::CommandRequest(CommandRequest {
+                request_id,
+                command,
+                prepared,
+            }))?;
+            loop {
+                match reader.recv()? {
+                    ProtocolMessage::CommandResponse(CommandResponse::Success {
+                        request_id: response_id,
+                        output,
+                        exit_code,
+                        stderr,
+                        stdout_claim,
+                    }) if response_id == request_id => {
+                        return Ok(CommandOutcome {
+                            stdout: output,
+                            stderr: stderr
+                                .strip_prefix(&streamed_stderr)
+                                .unwrap_or(&stderr)
+                                .to_owned(),
+                            exit_code,
+                            stdout_claim,
+                            client_exit,
+                        });
+                    }
+                    ProtocolMessage::CommandResponse(CommandResponse::Error {
+                        request_id: response_id,
+                        error,
+                        output,
+                    }) if response_id == request_id => {
+                        return Err(command_failure(error, output));
+                    }
+                    ProtocolMessage::Event(zz_protocol::Event {
+                        payload:
+                            zz_protocol::EventPayload::ClientMessage {
+                                kind: zz_protocol::ClientMessageKind::Error,
+                                text,
+                                ..
+                            },
+                        ..
+                    }) if stderr_handler.is_some() => {
+                        let line = format!("{text}\n");
+                        stderr_handler.expect("stderr handler checked")(&line);
+                        streamed_stderr.push_str(&line);
+                    }
+                    ProtocolMessage::Event(zz_protocol::Event {
+                        payload: zz_protocol::EventPayload::CommandStdout { output },
+                        ..
+                    }) => {
+                        if let Some(handler) = stdout_handler {
+                            handler(&output);
+                        }
+                    }
+                    ProtocolMessage::Event(zz_protocol::Event {
+                        payload: zz_protocol::EventPayload::CommandClientExit,
+                        ..
+                    }) => {
+                        client_exit = true;
+                    }
+                    ProtocolMessage::ClientFileRequest(request) => {
+                        let response =
+                            answer_command_file(&request, stdin_enabled, &mut stdin_spent);
+                        writer.send(&ProtocolMessage::ClientFileResponse(response))?;
+                    }
+                    _ => {}
+                }
+            }
+        })();
+        self.stdin_spent = stdin_spent;
+        result
+    }
+
+    fn prepare_commands(
         &mut self,
         commands: Vec<CommandInvocation>,
     ) -> Result<Vec<PreparedCommand>, DaemonError> {
         self.prepare_commands_with_count(commands, None)
     }
 
-    pub fn prepare_commands_or_stop_empty(
+    fn prepare_commands_or_stop_empty(
         &mut self,
         mut commands: Vec<CommandInvocation>,
         server_id: u64,
@@ -458,7 +972,8 @@ impl CommandClient {
     ) -> Result<Vec<PreparedCommand>, DaemonError> {
         let command_count = command_count.unwrap_or(commands.len());
         let request_id = REQUEST_ID.fetch_add(1, Ordering::Relaxed);
-        self.writer.send(&ProtocolMessage::PrepareCommandList {
+        let (reader, writer) = self.legacy_link();
+        writer.send(&ProtocolMessage::PrepareCommandList {
             request_id,
             commands,
         })?;
@@ -466,7 +981,7 @@ impl CommandClient {
             if let ProtocolMessage::PreparedCommandList {
                 request_id: response_id,
                 commands,
-            } = self.reader.recv()?
+            } = reader.recv()?
                 && response_id == request_id
             {
                 if commands.len() != command_count {
@@ -478,6 +993,31 @@ impl CommandClient {
                 return Ok(commands);
             }
         }
+    }
+}
+
+fn answer_command_file(
+    request: &ClientFileRequest,
+    stdin_enabled: bool,
+    stdin_spent: &mut bool,
+) -> ClientFileResponse {
+    let readable = stdin_enabled && !*stdin_spent;
+    let result = match request.operation {
+        ClientFileOperation::ReadStdin { binary } if readable => {
+            *stdin_spent = true;
+            read_command_stdin(binary)
+        }
+        ClientFileOperation::ReadStdinChunk if readable => {
+            let chunk = read_command_stdin_chunk();
+            *stdin_spent = !matches!(&chunk, Ok(chunk) if !chunk.is_empty());
+            chunk
+        }
+        _ => return answer_client_file(request),
+    };
+    ClientFileResponse {
+        request_id: request.request_id,
+        data: result.as_ref().cloned().unwrap_or_default(),
+        error: result.err(),
     }
 }
 
@@ -1699,29 +2239,6 @@ where
         total_bytes = next_total_bytes;
     }
     snapshot
-}
-
-fn connect<T: Transport>(
-    endpoint: &T::Endpoint,
-    endpoint_display: impl fmt::Display,
-    kind: ClientKind,
-    device_name: Option<String>,
-    color_scheme: Option<TerminalColorScheme>,
-    client_has_terminal: bool,
-    send_origin: bool,
-    client_facts: EndpointFactsScope,
-) -> Result<Connected<T::Stream>, DaemonError> {
-    let stream = T::connect(endpoint)?;
-    connect_stream(
-        stream,
-        endpoint_display,
-        kind,
-        device_name,
-        color_scheme,
-        client_has_terminal,
-        send_origin,
-        client_facts,
-    )
 }
 
 #[expect(clippy::too_many_arguments)]

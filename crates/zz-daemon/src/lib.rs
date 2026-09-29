@@ -84,13 +84,16 @@ pub use client::{
     client_takes_utf8_terminal, client_terminal_colour_count, client_terminal_feature_mask,
     learn_client_terminal_features, report_terminal_type, set_client_terminal_flags,
 };
-pub use client::{CommandClient, CommandOutcome, InteractiveClient, short_device_name};
+pub use client::{
+    CommandClient, CommandOutcome, ExecChain, ExecChainEnd, ExecClassifier, InteractiveClient,
+    short_device_name,
+};
 #[cfg(feature = "daemon")]
 pub use daemon::path_listing::path_walk_enters;
 #[cfg(feature = "daemon")]
 pub use daemon::{
     CommandStdinSink, Daemon, agent_send_reads_stdin, append_stdin_payload, command_stdin_sink,
-    load_buffer_reads_stdin, send_text_reads_stdin,
+    exec_resume_kind, load_buffer_reads_stdin, send_text_reads_stdin,
 };
 pub use endpoint::{Endpoint, EndpointError, SshEndpoint, run_socket_proxy};
 pub use fleet_hosts::{

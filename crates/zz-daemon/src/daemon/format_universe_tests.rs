@@ -442,7 +442,10 @@ fn terminal_features_and_overrides_reach_a_connected_client_on_the_next_read() {
         inner.client_terminals.insert(client);
         inner.client_environments.insert(
             client,
-            Arc::new(BTreeMap::from([("TERM".into(), "xterm-256color".into())])),
+            Arc::new(ClientEnvironmentBlob::from_map(BTreeMap::from([(
+                "TERM".into(),
+                "xterm-256color".into(),
+            )]))),
         );
     }
     let read = || {

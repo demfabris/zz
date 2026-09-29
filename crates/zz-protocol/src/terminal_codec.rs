@@ -331,6 +331,16 @@ fn validate_control_message(message: &ProtocolMessage) -> Result<(), ProtocolErr
             )));
         }
     }
+    if let ProtocolMessage::Exec(request) = message
+        && !request.is_valid()
+    {
+        return Err(ProtocolError::InvalidClientHello(format!(
+            "exec request facts must stay within the working directory, tty and environment \
+             limits ({MAX_CLIENT_ENVIRONMENT_ENTRIES} entries of at most \
+             {MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES} bytes, {MAX_CLIENT_ENVIRONMENT_BYTES} bytes \
+             total)"
+        )));
+    }
     if let ProtocolMessage::ServerHello(hello) = message {
         if hello.protocol_version != PROTOCOL_VERSION {
             return Err(ProtocolError::VersionMismatch {

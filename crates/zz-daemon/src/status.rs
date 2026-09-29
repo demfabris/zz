@@ -21,8 +21,8 @@ use zz_mux::{
     StatusFormats, StatusHooks, StatusRowVariables, TtyTerm, display_width, expand_status,
 };
 use zz_protocol::{
-    ClientId, MAX_STATUS_ROWS, MAX_STATUS_TEXT_BYTES, MuxSnapshot, PaneId, RawText, SessionId,
-    StatusLine, TmuxColour, WindowId,
+    ClientEnvironmentBlob, ClientId, MAX_STATUS_ROWS, MAX_STATUS_TEXT_BYTES, MuxSnapshot, PaneId,
+    RawText, SessionId, StatusLine, TmuxColour, WindowId,
 };
 use zz_terminal::{
     CellWidth, CopyModeFacts, ProgressBar, TerminalColorScheme, TerminalSession, TerminalViewport,
@@ -396,7 +396,7 @@ pub(crate) struct FormatHookFacts {
     /// The environment of the client this expansion was created for, which is
     /// the invoking client for a command and the rendering client for a status
     /// line. `#{Vc:}` reads it.
-    pub(crate) client_environment: Arc<Vec<FormatEnvironRow>>,
+    pub(crate) client_environment: Option<Arc<ClientEnvironmentBlob>>,
     pub(crate) message: Option<MessageFormatFacts>,
     pub(crate) mux: Arc<zz_mux::FormatFacts>,
     /// Every pane some client holds a live copy session on, with that client's
@@ -441,7 +441,7 @@ pub(crate) struct ClientFormatFacts {
     pub(crate) width: String,
     pub(crate) written: String,
     pub(crate) line: usize,
-    pub(crate) environment: Vec<FormatEnvironRow>,
+    pub(crate) environment: Option<Arc<ClientEnvironmentBlob>>,
     /// The `struct tty_term` tmux would build for this client, which is what
     /// `#{I/c:}` and `#{I/f:}` interrogate. Absent for a client with no tty,
     /// which is `format_replace`'s null-term early exit.
@@ -716,10 +716,11 @@ pub(crate) fn client_terminal_facts(
 /// A client's own process environment as `#{Vc:}` rows. A client store has no
 /// hidden or removed entries: the client sends what it has.
 pub(crate) fn client_environment_rows(
-    environment: Option<&Arc<BTreeMap<RawText, RawText>>>,
+    environment: Option<&Arc<ClientEnvironmentBlob>>,
 ) -> Vec<FormatEnvironRow> {
     environment.map_or_else(Vec::new, |environment| {
         environment
+            .map()
             .iter()
             .map(|(name, value)| FormatEnvironRow {
                 name: name.to_string(),
@@ -738,7 +739,7 @@ impl ClientFormatFacts {
         FormatClientRow {
             name: self.name.clone(),
             activity,
-            environment: self.environment.clone(),
+            environment: client_environment_rows(self.environment.as_ref()),
             variables: BTreeMap::from([
                 ("client_activity".to_owned(), self.activity.clone()),
                 ("client_cell_height".to_owned(), self.cell_height.clone()),
@@ -1737,7 +1738,7 @@ impl StatusHooks for DaemonFormatHooks<'_> {
     }
 
     fn client_environment_rows(&mut self) -> Vec<FormatEnvironRow> {
-        self.facts.client_environment.as_ref().clone()
+        client_environment_rows(self.facts.client_environment.as_ref())
     }
 
     fn client_tty_term(&mut self) -> Option<Arc<TtyTerm>> {
@@ -1745,11 +1746,12 @@ impl StatusHooks for DaemonFormatHooks<'_> {
     }
 
     fn client_terminal_environment(&mut self) -> Vec<FormatEnvironRow> {
-        self.facts
-            .client
-            .as_ref()
-            .map(|client| client.environment.clone())
-            .unwrap_or_default()
+        client_environment_rows(
+            self.facts
+                .client
+                .as_ref()
+                .and_then(|client| client.environment.as_ref()),
+        )
     }
 
     /// `cmdq_merge_formats` copies the queue item's own entries into `ft->tree`

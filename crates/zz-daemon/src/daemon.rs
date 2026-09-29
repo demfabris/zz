@@ -21,6 +21,10 @@ use std::{
 use parking_lot::{Condvar, Mutex};
 
 mod chooser_presentation;
+mod exec;
+#[cfg(test)]
+mod exec_tests;
+pub use exec::exec_resume_kind;
 pub(crate) mod path_listing;
 use zz_mux::{
     CUSTOMIZE_MENU_ITEMS, CUSTOMIZE_OUTSIDE_MENU_ITEMS, CellLayout, CommandAliasResolution,
@@ -40,24 +44,24 @@ use zz_protocol::{
     AgentCommand, BrowserCommand, COMMAND_ARGS_PARSE_BEHAVES, ChooseBufferAction, ChooseBufferItem,
     ChooseBufferSearchState, ChooseBufferState, ChooseTreeAction, ChooseTreeItem, ChooseTreeKind,
     ChooseTreePaneKind, ChooseTreeSearchState, ChooseTreeState, ChooseTreeTarget,
-    ChooserPreviewSize, ChooserRow, ClientExitAction, ClientFileOperation, ClientFileRequest,
-    ClientFileResponse, ClientHello, ClientId, ClientInstanceId, ClientKind, ClientMessageKind,
-    ClientPath, ClipboardProducer, CommandInvocation, CommandPromptAction, CommandPromptKind,
-    CommandPromptMode, CommandPromptState, CommandPromptType, CommandRequest, CommandResolution,
-    CommandResponse, ConfigOverrideEntry, ConfirmAction, ConfirmState, ControlSourceFileEvent,
-    DisplayPanesAction, DisplayPanesState, Event, EventPayload, GuiResponse, InputMessage,
-    MAX_AGENT_SEND_BYTES, MAX_BROWSER_KEY_REPEAT, MAX_CHOOSE_BUFFER_QUERY_BYTES,
-    MAX_CHOOSE_ITEM_KEY_BYTES, MAX_CHOOSE_ITEM_TEXT_BYTES, MAX_CHOOSE_TREE_QUERY_BYTES,
-    MAX_ENCODED_FRAME_BYTES, MAX_KITTY_IMAGE_REMOVALS, MAX_PANE_INDICATOR_LABEL_BYTES,
-    MAX_STARTUP_CONFIG_CAUSE_BYTES, MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES,
-    MAX_WINDOW_STATUS_LABEL_BYTES, MENU_ROW_MARGIN, MenuAction, MenuItem, MenuState, MuxOptionKey,
-    MuxOptionSource, MuxOptions, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION,
-    PaneId, PaneIndicator, PaneKindSnapshot, PaneMode, PasteUploadPurpose, PastedImageFormat,
-    PopupAction, PopupBorderLines, PopupPointer, PopupPointerButton, PopupState, PreparedCommand,
-    PreparedCommandResult, ProtocolError, ProtocolMessage, RawText,
-    SERVER_OPTION_CAPABILITY_PREFIX, SPLIT_RATIO_BASIS, ServerError, ServerHello, SessionId,
-    SessionViewer, SourceSpan, SplitId, StatusLine, StdoutClaim, WindowId, canonical_key,
-    encode_protocol_message_into, encode_terminal_viewport_event_into, is_key_name,
+    ChooserPreviewSize, ChooserRow, ClientEnvironmentBlob, ClientExitAction, ClientFileOperation,
+    ClientFileRequest, ClientFileResponse, ClientHello, ClientId, ClientInstanceId, ClientKind,
+    ClientMessageKind, ClientPath, ClipboardProducer, CommandInvocation, CommandPromptAction,
+    CommandPromptKind, CommandPromptMode, CommandPromptState, CommandPromptType, CommandRequest,
+    CommandResolution, CommandResponse, ConfigOverrideEntry, ConfirmAction, ConfirmState,
+    ControlSourceFileEvent, DisplayPanesAction, DisplayPanesState, Event, EventPayload,
+    GuiResponse, InputMessage, MAX_AGENT_SEND_BYTES, MAX_BROWSER_KEY_REPEAT,
+    MAX_CHOOSE_BUFFER_QUERY_BYTES, MAX_CHOOSE_ITEM_KEY_BYTES, MAX_CHOOSE_ITEM_TEXT_BYTES,
+    MAX_CHOOSE_TREE_QUERY_BYTES, MAX_ENCODED_FRAME_BYTES, MAX_KITTY_IMAGE_REMOVALS,
+    MAX_PANE_INDICATOR_LABEL_BYTES, MAX_STARTUP_CONFIG_CAUSE_BYTES, MAX_STARTUP_CONFIG_CAUSES,
+    MAX_STARTUP_CONFIG_CAUSES_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES, MENU_ROW_MARGIN, MenuAction,
+    MenuItem, MenuState, MuxOptionKey, MuxOptionSource, MuxOptions, MuxSnapshot,
+    NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId, PaneIndicator, PaneKindSnapshot,
+    PaneMode, PasteUploadPurpose, PastedImageFormat, PopupAction, PopupBorderLines, PopupPointer,
+    PopupPointerButton, PopupState, PreparedCommand, PreparedCommandResult, ProtocolError,
+    ProtocolMessage, RawText, SERVER_OPTION_CAPABILITY_PREFIX, SPLIT_RATIO_BASIS, ServerError,
+    ServerHello, SessionId, SessionViewer, SourceSpan, SplitId, StatusLine, StdoutClaim, WindowId,
+    canonical_key, encode_protocol_message_into, encode_terminal_viewport_event_into, is_key_name,
     layout_menu_row, menu_row_cells, menu_row_width, read_protocol_message_into, resolve_command,
     terminal_patch_frame_len, terminal_viewport_frame_len,
 };
@@ -98,9 +102,8 @@ use crate::{
     shell_process,
     status::{
         BufferFormatFacts, ClientFormatFacts, ClientViewportFacts, DaemonFormatHooks,
-        FormatHookFacts, MessageFormatFacts, StatusRenderer, StatusRequest,
-        client_environment_rows, client_terminal_facts, host_names, status_context,
-        warm_terminfo_entries,
+        FormatHookFacts, MessageFormatFacts, StatusRenderer, StatusRequest, client_terminal_facts,
+        host_names, status_context, warm_terminfo_entries,
     },
     terminal_features::{terminal_colour_count, terminal_feature_mask, terminal_features_list},
     transport::{AcceptWake, LocalTransport, Transport, TransportListener, TransportStream},
@@ -1414,6 +1417,7 @@ pub struct Daemon {
     zz_mux_config_path: Option<PathBuf>,
     server_id: Option<u64>,
     initial_client_working_directory: Option<PathBuf>,
+    bootstrap_ready_fd: Option<i32>,
 }
 
 impl Daemon {
@@ -1426,7 +1430,14 @@ impl Daemon {
             zz_mux_config_path: None,
             server_id: None,
             initial_client_working_directory: None,
+            bootstrap_ready_fd: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_bootstrap_ready_fd(mut self, fd: i32) -> Self {
+        self.bootstrap_ready_fd = Some(fd);
+        self
     }
 
     #[must_use]
@@ -1472,7 +1483,8 @@ impl Daemon {
         &self,
         ready: impl FnOnce(u64) -> R,
     ) -> Result<(), DaemonError> {
-        prepare_socket(&self.socket_path)?;
+        let mut bootstrap_ready = BootstrapReady::adopt(self.bootstrap_ready_fd);
+        let start_lock = prepare_socket(&self.socket_path, &mut bootstrap_ready)?;
         let listener = LocalTransport::bind(&self.socket_path).map_err(|error| {
             if error.kind() == ErrorKind::AddrInUse {
                 DaemonError::AlreadyRunning(self.socket_path.clone())
@@ -1480,6 +1492,8 @@ impl Daemon {
                 DaemonError::Io(error)
             }
         })?;
+        drop(start_lock);
+        bootstrap_ready.signal();
         restrict_socket_permissions(&self.socket_path)?;
         listener.set_nonblocking(true)?;
         let socket_guard = SocketGuard::new(self.socket_path.clone());
@@ -1504,10 +1518,7 @@ impl Daemon {
         T::Listener: Send + 'static,
     {
         let (mut socket_guard, identity_guard) = socket_guards;
-        #[cfg(all(feature = "agent", unix))]
-        if let Err(error) = crate::agent::claude_peers::sweep_stale_records() {
-            log::warn!(target: "zz::agent", "could not sweep Claude peers: {error}");
-        }
+        exec::ConnectionThreads::log_knob();
         let color_scheme = daemon_color_scheme();
         let load = AppearanceLoad::defaults_for(color_scheme);
         log_appearance_load("startup", &load);
@@ -1564,7 +1575,12 @@ impl Daemon {
         })();
         let _ready_guard = if startup_result.is_ok() {
             shared.finish_startup();
-            Some(ready(shared.server_id))
+            let ready_guard = ready(shared.server_id);
+            #[cfg(all(feature = "agent", unix))]
+            if let Err(error) = crate::agent::claude_peers::sweep_stale_records() {
+                log::warn!(target: "zz::agent", "could not sweep Claude peers: {error}");
+            }
+            Some(ready_guard)
         } else {
             shared.request_shutdown();
             None
@@ -1656,16 +1672,12 @@ fn accept_connections<T: Transport>(
     while !shared.stopping.load(Ordering::Acquire) {
         match listener.accept() {
             Ok(stream) => {
-                let shared = Arc::clone(shared);
-                if let Err(error) =
-                    thread::Builder::new()
-                        .name("zz-client".to_owned())
-                        .spawn(move || {
-                            if let Err(error) = handle_connection(stream, &shared) {
-                                log::debug!("client disconnected: {error}");
-                            }
-                        })
-                {
+                let connection_shared = Arc::clone(shared);
+                if let Err(error) = shared.connection_threads.run(Box::new(move || {
+                    if let Err(error) = handle_connection(stream, &connection_shared) {
+                        log::debug!("client disconnected: {error}");
+                    }
+                })) {
                     log::warn!("could not start client connection thread: {error}");
                 }
             }
@@ -1733,8 +1745,61 @@ struct TmuxShimGuard {
 }
 
 #[cfg(unix)]
+fn pinned_executable(directory: &Path, executable: &Path) -> PathBuf {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = directory;
+        let own = PathBuf::from(format!("/proc/{}/exe", std::process::id()));
+        if own.exists() {
+            return own;
+        }
+        executable.to_path_buf()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let Some(name) = executable.file_name() else {
+            return executable.to_path_buf();
+        };
+        let clone = directory.join(name);
+        if clone_file(executable, &clone).is_ok() || fs::hard_link(executable, &clone).is_ok() {
+            return clone;
+        }
+        executable.to_path_buf()
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = directory;
+        executable.to_path_buf()
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[allow(
+    unsafe_code,
+    reason = "clonefile copies one file the daemon can read into its own directory"
+)]
+fn clone_file(source: &Path, target: &Path) -> std::io::Result<()> {
+    use std::os::unix::ffi::OsStrExt as _;
+
+    unsafe extern "C" {
+        fn clonefile(
+            src: *const std::ffi::c_char,
+            dst: *const std::ffi::c_char,
+            flags: u32,
+        ) -> std::ffi::c_int;
+    }
+    let source = std::ffi::CString::new(source.as_os_str().as_bytes())?;
+    let target = std::ffi::CString::new(target.as_os_str().as_bytes())?;
+    if unsafe { clonefile(source.as_ptr(), target.as_ptr(), 0) } == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(unix)]
 impl TmuxShimGuard {
-    fn install(executable: PathBuf) -> std::io::Result<Self> {
+    fn install(executable: PathBuf, pin: bool) -> std::io::Result<Self> {
         use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
 
         let directory = loop {
@@ -1762,6 +1827,11 @@ impl TmuxShimGuard {
             let _ = fs::remove_dir(&directory);
             return Err(error);
         }
+        let executable = if pin {
+            pinned_executable(&directory, &executable)
+        } else {
+            executable
+        };
         Ok(Self {
             directory,
             executable,
@@ -1772,9 +1842,64 @@ impl TmuxShimGuard {
 #[cfg(unix)]
 impl Drop for TmuxShimGuard {
     fn drop(&mut self) {
+        if self.executable.parent() == Some(self.directory.as_path()) {
+            let _ = fs::remove_file(&self.executable);
+        }
         let _ = fs::remove_file(self.directory.join("tmux"));
         let _ = fs::remove_dir(&self.directory);
     }
+}
+
+struct BootstrapReady(Option<i32>);
+
+impl BootstrapReady {
+    #[cfg(unix)]
+    #[allow(
+        unsafe_code,
+        reason = "the spawning client handed this descriptor to the daemon alone"
+    )]
+    fn adopt(fd: Option<i32>) -> Self {
+        let fd = fd.filter(|fd| unsafe { libc::fcntl(*fd, libc::F_SETFD, libc::FD_CLOEXEC) } == 0);
+        Self(fd)
+    }
+
+    #[cfg(not(unix))]
+    fn adopt(fd: Option<i32>) -> Self {
+        let _ = fd;
+        Self(None)
+    }
+
+    #[cfg(unix)]
+    #[allow(
+        unsafe_code,
+        reason = "one byte to a pipe the daemon owns, then close it"
+    )]
+    fn signal(&mut self) {
+        if let Some(fd) = self.0.take() {
+            unsafe {
+                let _ = libc::write(fd, [1_u8].as_ptr().cast(), 1);
+                libc::close(fd);
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn signal(&mut self) {}
+}
+
+impl Drop for BootstrapReady {
+    #[cfg(unix)]
+    #[allow(unsafe_code, reason = "close a descriptor the daemon owns")]
+    fn drop(&mut self) {
+        if let Some(fd) = self.0.take() {
+            unsafe {
+                libc::close(fd);
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn drop(&mut self) {}
 }
 
 fn paste_upload_directory(socket_path: &Path) -> PathBuf {
@@ -1875,6 +2000,7 @@ struct OutboundState {
     closed: bool,
     writer_finished: bool,
     terminals_held: bool,
+    buffered: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2165,7 +2291,7 @@ impl OutboundMailbox {
         if !reserve_outbound_bytes(&mut state, encoded.len(), 0) {
             shed_preview_terminals(&mut state);
         }
-        if state.reliable.len() >= MAX_RELIABLE_MESSAGES
+        if (!state.buffered && state.reliable.len() >= MAX_RELIABLE_MESSAGES)
             || !reserve_outbound_bytes(&mut state, encoded.len(), 0)
         {
             close_outbound_too_far_behind(&mut state);
@@ -2239,7 +2365,7 @@ impl OutboundMailbox {
         if !reserve_outbound_bytes(&mut state, encoded.len(), 0) {
             shed_preview_terminals(&mut state);
         }
-        if state.reliable.len() >= MAX_RELIABLE_MESSAGES
+        if (!state.buffered && state.reliable.len() >= MAX_RELIABLE_MESSAGES)
             || !reserve_outbound_bytes(&mut state, encoded.len(), 0)
         {
             close_outbound_too_far_behind(&mut state);
@@ -2920,6 +3046,29 @@ impl OutboundMailbox {
         self.ready.notify_all();
     }
 
+    fn buffered() -> Arc<Self> {
+        Arc::new(Self {
+            state: Mutex::new(OutboundState {
+                buffered: true,
+                ..OutboundState::default()
+            }),
+            ready: Condvar::new(),
+        })
+    }
+
+    fn stop_buffering(&self) {
+        self.state.lock().buffered = false;
+    }
+
+    fn drain_reliable_into(&self, output: &mut Vec<u8>) {
+        let mut state = self.state.lock();
+        while let Some(frame) = state.reliable.pop_front() {
+            state.queued_bytes = state.queued_bytes.saturating_sub(frame.len());
+            output.extend_from_slice(&frame);
+            recycle_outbound_frame(&mut state, frame);
+        }
+    }
+
     fn mark_writer_finished(&self) {
         let mut state = self.state.lock();
         state.writer_finished = true;
@@ -3482,6 +3631,11 @@ struct Shared {
     peer_probe: AtomicBool,
     #[cfg(all(feature = "agent", unix))]
     peer_registry: Mutex<crate::agent::claude_peers::RegistryCache>,
+    pending_execs: Mutex<Vec<Box<dyn FnOnce() + Send>>>,
+    exec_links: Mutex<BTreeMap<ClientId, Arc<exec::ExecLink>>>,
+    prompt_history_source: Mutex<Option<(PathBuf, usize)>>,
+    prompt_history_settled: AtomicBool,
+    connection_threads: Arc<exec::ConnectionThreads>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -4387,10 +4541,10 @@ fn prepare_config_command(
 impl Shared {
     #[cfg(unix)]
     fn install_tmux_shim(&self) -> Result<(), DaemonError> {
-        let executable = std::env::var_os(crate::TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE)
-            .map(PathBuf::from)
-            .map_or_else(std::env::current_exe, Ok)?;
-        let shim = TmuxShimGuard::install(executable)?;
+        let shim = match std::env::var_os(crate::TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE) {
+            Some(executable) => TmuxShimGuard::install(PathBuf::from(executable), false)?,
+            None => TmuxShimGuard::install(std::env::current_exe()?, true)?,
+        };
         self.status
             .lock()
             .set_tmux_shim(shim.directory.clone(), shim.executable.clone());
@@ -4594,6 +4748,11 @@ impl Shared {
             peer_probe: AtomicBool::new(false),
             #[cfg(all(feature = "agent", unix))]
             peer_registry: Mutex::new(crate::agent::claude_peers::RegistryCache::default()),
+            pending_execs: Mutex::new(Vec::new()),
+            exec_links: Mutex::new(BTreeMap::new()),
+            prompt_history_source: Mutex::new(None),
+            prompt_history_settled: AtomicBool::new(true),
+            connection_threads: Arc::default(),
         }
     }
 
@@ -4604,6 +4763,7 @@ impl Shared {
     fn finish_startup(&self) {
         *self.startup_ready.lock() = true;
         self.startup_changed.notify_all();
+        self.resume_pending_execs();
     }
 
     fn wait_for_startup(&self) -> bool {
@@ -4663,13 +4823,25 @@ impl Shared {
             prompt_history_path(inner.engine.history_file())
                 .map(|path| (path, inner.engine.prompt_history_limit()))
         };
-        if let Some((path, limit)) = history_settings {
+        if let Some(source) = history_settings {
+            *self.prompt_history_source.lock() = Some(source);
+            self.prompt_history_settled.store(false, Ordering::Release);
+        }
+        Ok(())
+    }
+
+    fn ensure_prompt_history(&self) {
+        if self.prompt_history_settled.load(Ordering::Acquire) {
+            return;
+        }
+        let mut source = self.prompt_history_source.lock();
+        if let Some((path, limit)) = source.take() {
             let (command, search) = load_command_prompt_history(&path, limit);
             let mut inner = self.inner.lock();
             inner.command_history = command;
             inner.search_history = search;
         }
-        Ok(())
+        self.prompt_history_settled.store(true, Ordering::Release);
     }
 
     fn freeze_response_admissions_and_wait(&self, timeout: Duration) -> bool {
@@ -4737,6 +4909,7 @@ impl Shared {
         self.stopping.store(true, Ordering::Release);
         self.accept_wake.wake();
         self.startup_changed.notify_all();
+        self.drop_pending_execs();
         let events = self.stop_shutdown_resources(true, run_hooks);
         if run_hooks && !self.shutdown_drops_event_hooks.load(Ordering::Acquire) {
             self.run_shutdown_event_hooks(events);
@@ -5564,6 +5737,7 @@ impl Shared {
             "browser-panes".to_owned(),
             "tmux-config-subset".to_owned(),
             NEW_SESSION_ATTACH_CAPABILITY.to_owned(),
+            zz_protocol::EXEC_CAPABILITY.to_owned(),
         ];
         if kind == ClientKind::Interactive && client_has_terminal {
             capabilities.extend(attach::terminal_option_capabilities(&inner.engine));
@@ -5814,7 +5988,7 @@ impl Shared {
             inner.client_color_schemes.remove(&client);
             inner.client_names.remove(&client);
             inner.client_instances.remove(&client);
-            inner.client_kinds.remove(&client);
+            let control = inner.client_kinds.remove(&client) == Some(ClientKind::Control);
             inner.client_terminals.remove(&client);
             inner.native_terminal_search_clients.remove(&client);
             inner.native_chooser_clients.remove(&client);
@@ -5909,9 +6083,10 @@ impl Shared {
                 popup_waiters,
                 menu_waiters,
                 confirm_waiters,
-                shutdown,
+                (shutdown, control),
             )
         };
+        let (shutdown, control) = shutdown;
         let view = TerminalViewId(client.0);
         if let Some(command_output) = command_output {
             command_output.terminal.view_action(
@@ -5931,7 +6106,9 @@ impl Shared {
         for waiter in confirm_waiters {
             let _ = waiter.try_send(false);
         }
-        self.refresh_control_output_taps();
+        if detached && control {
+            self.refresh_control_output_taps();
+        }
         if shutdown {
             self.request_shutdown_without_hooks();
         }
@@ -5960,26 +6137,44 @@ impl Shared {
         command: &CommandInvocation,
         prepared: bool,
     ) -> CommandResponse {
+        self.execute_command_request_with_streams(
+            client, kind, context, request_id, command, prepared,
+        )
+        .0
+    }
+
+    fn execute_command_request_with_streams(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        request_id: u64,
+        command: &CommandInvocation,
+        prepared: bool,
+    ) -> (CommandResponse, bool) {
         let stdin_available = kind == ClientKind::Command && command.stdin_available();
-        let (command, blocked) = match self.prepare_command_request(client, command, prepared) {
-            Ok(prepared) => prepared,
-            Err(error) => {
-                return CommandResponse::Error {
-                    request_id,
-                    error,
-                    output: RawText::default(),
-                };
-            }
-        };
-        if blocked {
-            return CommandResponse::Error {
-                request_id,
-                error: ServerError::InvalidCommand("client is read-only".to_owned()),
-                output: RawText::default(),
-            };
-        }
-        let client_name = {
+        let (command, client_name) = {
             let mut inner = self.inner.lock();
+            let refusal = match prepare_command_request(&mut inner, client, command, prepared) {
+                Ok((command, false)) => Ok(command),
+                Ok((_, true)) => Err(ServerError::InvalidCommand(
+                    "client is read-only".to_owned(),
+                )),
+                Err(error) => Err(error),
+            };
+            let command = match refusal {
+                Ok(command) => command,
+                Err(error) => {
+                    return (
+                        CommandResponse::Error {
+                            request_id,
+                            error,
+                            output: RawText::default(),
+                        },
+                        false,
+                    );
+                }
+            };
             let client_name = server_log_client_name(&inner, client);
             let command_line = command_log_line(&command);
             push_server_message(&mut inner, format!("{client_name} command: {command_line}"));
@@ -5997,7 +6192,7 @@ impl Shared {
                     },
                 );
             }
-            client_name
+            (command, client_name)
         };
         let previous_control_target = context.control_command_target();
         if kind == ClientKind::Control {
@@ -6065,15 +6260,20 @@ impl Shared {
                 }
             }
         };
-        let streams = self.inner.lock().command_streams.remove(&client);
+        let (streams, sanitizes) = {
+            let mut inner = self.inner.lock();
+            (
+                inner.command_streams.remove(&client),
+                sanitizes_output_for(&inner, client, kind, &command.name),
+            )
+        };
+        let client_exit = streams.as_ref().is_some_and(|streams| streams.client_exit);
         let recorded_claim = streams.as_ref().and_then(|streams| streams.stdout_claim);
         let mut response = match streams {
             Some(streams) if !streams.is_empty() => merge_command_streams(response, &streams),
             _ => response,
         };
-        if recorded_claim != Some(StdoutClaim::Raw)
-            && self.sanitizes_output_for(client, kind, &command.name)
-        {
+        if recorded_claim != Some(StdoutClaim::Raw) && sanitizes {
             let output = match &mut response {
                 CommandResponse::Success { output, .. } | CommandResponse::Error { output, .. } => {
                     output
@@ -6112,35 +6312,12 @@ impl Shared {
                 },
             );
         }
-        response
+        (response, client_exit)
     }
 
-    /// `server_client_print` runs `utf8_sanitize` over a message bound for a
-    /// client with no session of its own or for a control client, which is
-    /// every shape but an attached one: an attached client is shown the message
-    /// in a pane instead. The gate is tmux's `CLIENT_UTF8`, which the client
-    /// raised for itself out of `$TMUX` and the locale before it dialled.
-    ///
-    /// Three commands answer their client without passing through
-    /// `server_client_print` at all, so the pin leaves their bytes alone for
-    /// every client shape and every encoding. `capture-pane -p` writes
-    /// `control_write` for a control client and `file_print_buffer` for
-    /// everyone else. `save-buffer` always writes `file_write`, a real path and
-    /// `-` alike. `show-buffer` reaches `cmdq_print_data` only when the client
-    /// has a session of its own or is a control client, so it is sanitized for
-    /// a control client but falls through to the same raw `file_write` for a
-    /// session-less command client, which is the only shape zz's `Command`
-    /// kind has.
+    #[cfg(test)]
     fn sanitizes_output_for(&self, client: ClientId, kind: ClientKind, command: &str) -> bool {
-        if !matches!(kind, ClientKind::Command | ClientKind::Control) {
-            return false;
-        }
-        match canonical_command(command) {
-            "capture-pane" | "save-buffer" => return false,
-            "show-buffer" if kind == ClientKind::Command => return false,
-            _ => {}
-        }
-        !self.inner.lock().utf8_clients.contains(&client)
+        sanitizes_output_for(&self.inner.lock(), client, kind, command)
     }
 
     fn execute_command_request_with_prepared_into(
@@ -6182,6 +6359,7 @@ impl Shared {
     /// to block on something that answers later, so tell the client once that
     /// nothing else it queued runs until this request resumes.
     fn report_command_queue_park(&self) {
+        self.go_live_current_exec();
         let Some((client, request_id)) = take_unreported_command_queue_park() else {
             return;
         };
@@ -6293,28 +6471,6 @@ impl Shared {
             .lock()
             .get(&client)
             .is_some_and(|cancel| cancel.load(Ordering::Acquire))
-    }
-
-    fn prepare_command_request(
-        &self,
-        client: ClientId,
-        command: &CommandInvocation,
-        prepared: bool,
-    ) -> Result<(CommandInvocation, bool), ServerError> {
-        let mut inner = self.inner.lock();
-        inner.cold_bootstrap.command(client);
-        let command = if prepared {
-            command.clone()
-        } else {
-            resolve_and_prepare_command(&inner.engine, command)?.0
-        };
-        if !prepared && canonical_command(&command.name) == "load-buffer" {
-            parse_buffer_command_args("load-buffer", &command.args, &['b', 't'], &['w'])?;
-        }
-        let guarded = read_only_guard_client(&inner, client, &command);
-        let blocked = guarded.is_some_and(|guarded| inner.client_flags.contains(guarded))
-            && !command_is_read_only_safe(&command);
-        Ok((command, blocked))
     }
 
     #[cfg(test)]
@@ -7757,6 +7913,9 @@ impl Shared {
         let mut format_variables = context.format_variables.clone();
         let event_hooks_enabled = !context.no_hooks;
         let command_name = canonical_command(&command.name);
+        if command_name == "command-prompt" {
+            self.ensure_prompt_history();
+        }
         let split_caller_stream = command_name == "split-window"
             && command_stdin_sink(command_name, &command.args) == Some(CommandStdinSink::PaneInput);
         let mut terminals_to_watch = Vec::new();
@@ -10045,7 +10204,7 @@ impl Shared {
                 if let Some(environment) = inner.client_environments.get(&client).cloned() {
                     inner
                         .engine
-                        .update_session_environment_from_client(session, &environment)?;
+                        .update_session_environment_from_client(session, environment.map())?;
                 }
             }
             if invoking_client_terminal == ClientTerminal::Present {
@@ -11352,6 +11511,14 @@ impl Shared {
         let serial = self.pipe_effects.lock();
         let (stale, desired) = {
             let mut inner = self.inner.lock();
+            if inner.control_output_taps.is_empty()
+                && !inner
+                    .client_kinds
+                    .values()
+                    .any(|kind| *kind == ClientKind::Control)
+            {
+                return;
+            }
             let desired = inner
                 .terminals
                 .iter()
@@ -15320,7 +15487,7 @@ impl Shared {
             if let Some(environment) = inner.client_environments.get(&target_client).cloned() {
                 inner
                     .engine
-                    .update_session_environment_from_client(target_session, &environment)?;
+                    .update_session_environment_from_client(target_session, environment.map())?;
             }
         }
         let held = self.hold_attach_terminals(target_client);
@@ -15431,6 +15598,7 @@ impl Shared {
         name: &str,
         args: &[RawText],
     ) -> Result<Execution, DaemonError> {
+        self.ensure_prompt_history();
         let parsed = parse_buffer_command_args(name, args, &['T'], &[])?;
         require_no_positionals(name, &parsed)?;
         let prompt_type = parsed
@@ -16165,6 +16333,7 @@ impl Shared {
         if self.inner.lock().client_kinds.get(&client) != Some(&ClientKind::Command) {
             return None;
         }
+        self.go_live_exec(client);
         let writer = self.client_writers.lock().get(&client).cloned()?;
         let (request_id, wait) = {
             let mut inner = self.inner.lock();
@@ -17610,7 +17779,7 @@ impl Shared {
             if let Some(environment) = inner.client_environments.get(&client).cloned() {
                 inner
                     .engine
-                    .update_session_environment_from_client(session, &environment)?;
+                    .update_session_environment_from_client(session, environment.map())?;
             }
         }
         let snapshot = self.attach(client, session)?;
@@ -17627,7 +17796,9 @@ impl Shared {
             self.publish_snapshot();
         }
         self.enforce_destroy_unattached();
-        self.refresh_control_output_taps();
+        if detached && self.inner.lock().client_kinds.get(&client) == Some(&ClientKind::Control) {
+            self.refresh_control_output_taps();
+        }
         self.run_event_hooks(events);
     }
 
@@ -17742,6 +17913,7 @@ impl Shared {
             .filter_map(|(session, clients)| clients.contains(&client).then_some(*session))
             .collect::<Vec<_>>();
         let was_attached = !sessions.is_empty();
+        let event_hooks_enabled = event_hooks_enabled && !detach_is_inert(&inner, client);
         let hook_state_before = event_hooks_enabled.then(|| {
             (
                 MuxHookSnapshot::capture(&inner.engine),
@@ -21860,6 +22032,7 @@ impl Shared {
         context: &mut ExecutionContext,
         text: &str,
     ) -> bool {
+        self.ensure_prompt_history();
         let result = {
             let mut inner = self.inner.lock();
             let Some(prompt) = inner.command_prompts.get(&client) else {
@@ -21916,6 +22089,7 @@ impl Shared {
         input: &zz_terminal::KeyInput,
         text_follows: bool,
     ) -> bool {
+        self.ensure_prompt_history();
         let outcome = {
             let mut inner = self.inner.lock();
             let Some(mut prompt) = inner.command_prompts.remove(&client) else {
@@ -22053,6 +22227,7 @@ impl Shared {
             )
             .into());
         }
+        self.ensure_prompt_history();
         let (read_only, read_only_pane) = {
             let inner = self.inner.lock();
             let read_only = inner.client_flags.contains(client);
@@ -22171,6 +22346,7 @@ impl Shared {
         if input.is_empty() {
             return;
         }
+        self.ensure_prompt_history();
         let changed = {
             let mut inner = self.inner.lock();
             let limit = inner.engine.prompt_history_limit();
@@ -24938,8 +25114,13 @@ impl Shared {
                 .cloned()
                 .unwrap_or_default();
             let current_path = live_path.unwrap_or_else(|| previous.start_path.clone());
+            let current_command = if current_command.is_empty() {
+                previous.current_command.clone()
+            } else {
+                current_command.to_owned()
+            };
             let runtime = PaneRuntimeFacts {
-                current_command: current_command.to_owned(),
+                current_command,
                 current_path,
                 dead_signal: previous.dead_signal,
                 reported_path,
@@ -24947,7 +25128,8 @@ impl Shared {
                 pid,
                 tty,
             };
-            if inner.engine.pane_runtime_facts(pane) == Some(&runtime) {
+            let now = Instant::now();
+            let result = if inner.engine.pane_runtime_facts(pane) == Some(&runtime) {
                 (
                     None,
                     Vec::new(),
@@ -24956,7 +25138,6 @@ impl Shared {
                     silence_schedule,
                 )
             } else {
-                let now = Instant::now();
                 let rename_due = previous.current_command != runtime.current_command
                     && inner.engine.automatic_rename_due(pane, now);
                 let facts = if rename_due {
@@ -24977,7 +25158,6 @@ impl Shared {
                     }
                     _ => Vec::new(),
                 };
-                self.schedule_window_renames(&mut inner);
                 (
                     changed.then_some(if renamed {
                         timers::PublishReason::Tree
@@ -24989,7 +25169,12 @@ impl Shared {
                     alert_window,
                     silence_schedule,
                 )
+            };
+            if output_activity {
+                inner.engine.note_automatic_rename_output(pane, now);
             }
+            self.schedule_window_renames(&mut inner);
+            result
         };
         if output_activity || changed.is_some() {
             self.request_peer_probe();
@@ -31089,7 +31274,7 @@ struct ServerState {
     client_ttys: BTreeMap<ClientId, String>,
     client_sizes: BTreeMap<ClientId, (u16, u16)>,
     client_working_directories: BTreeMap<ClientId, PathBuf>,
-    client_environments: BTreeMap<ClientId, Arc<BTreeMap<RawText, RawText>>>,
+    client_environments: BTreeMap<ClientId, Arc<ClientEnvironmentBlob>>,
     client_origins: BTreeMap<ClientId, PaneId>,
     last_sessions: BTreeMap<ClientId, SessionId>,
     client_flags: ClientFlags,
@@ -35294,13 +35479,13 @@ fn client_working_directory_fact(working_directory: Option<&ClientPath>) -> Opti
         .filter(|working_directory| working_directory.is_absolute())
 }
 
-fn client_environment_fact(entries: &[RawText]) -> Arc<BTreeMap<RawText, RawText>> {
-    Arc::new(
+fn client_environment_fact(entries: &[RawText]) -> Arc<ClientEnvironmentBlob> {
+    Arc::new(ClientEnvironmentBlob::from_map(
         entries
             .iter()
             .filter_map(|entry| entry.split_once_byte(b'='))
             .collect(),
-    )
+    ))
 }
 
 fn effective_mux_options(inner: &ServerState, client: ClientId) -> MuxOptions {
@@ -35635,6 +35820,7 @@ fn client_environment_value<'a>(
     inner
         .client_environments
         .get(&client)?
+        .map()
         .get(name)
         .map(RawText::as_str)
 }
@@ -35932,7 +36118,9 @@ fn client_format_facts(
     client: ClientId,
     session: SessionId,
 ) -> ClientFormatFacts {
-    let session_state = &inner.engine.state.sessions[&session];
+    let Some(session_state) = inner.engine.state.sessions.get(&session) else {
+        return ClientFormatFacts::default();
+    };
     let window = client_focused_window(inner, client, session_state);
     let kind = inner.client_kinds.get(&client).copied();
     let has_terminal =
@@ -36024,7 +36212,7 @@ fn client_format_facts(
         width: width.to_string(),
         written: written.to_string(),
         line: 0,
-        environment: client_environment_rows(inner.client_environments.get(&client)),
+        environment: inner.client_environments.get(&client).cloned(),
         terminal: has_terminal
             .then(|| {
                 client_terminal_facts(
@@ -36600,6 +36788,72 @@ fn set_current_window_latest_client(
     set_window_latest_client(inner, client, window, event_hooks_enabled)
 }
 
+fn prepare_command_request(
+    inner: &mut ServerState,
+    client: ClientId,
+    command: &CommandInvocation,
+    prepared: bool,
+) -> Result<(CommandInvocation, bool), ServerError> {
+    inner.cold_bootstrap.command(client);
+    let command = if prepared {
+        command.clone()
+    } else {
+        resolve_and_prepare_command(&inner.engine, command)?.0
+    };
+    if !prepared && canonical_command(&command.name) == "load-buffer" {
+        parse_buffer_command_args("load-buffer", &command.args, &['b', 't'], &['w'])?;
+    }
+    let guarded = read_only_guard_client(inner, client, &command);
+    let blocked = guarded.is_some_and(|guarded| inner.client_flags.contains(guarded))
+        && !command_is_read_only_safe(&command);
+    Ok((command, blocked))
+}
+
+/// `server_client_print` runs `utf8_sanitize` over a message bound for a
+/// client with no session of its own or for a control client, which is
+/// every shape but an attached one: an attached client is shown the message
+/// in a pane instead. The gate is tmux's `CLIENT_UTF8`, which the client
+/// raised for itself out of `$TMUX` and the locale before it dialled.
+///
+/// Three commands answer their client without passing through
+/// `server_client_print` at all, so the pin leaves their bytes alone for
+/// every client shape and every encoding. `capture-pane -p` writes
+/// `control_write` for a control client and `file_print_buffer` for
+/// everyone else. `save-buffer` always writes `file_write`, a real path and
+/// `-` alike. `show-buffer` reaches `cmdq_print_data` only when the client
+/// has a session of its own or is a control client, so it is sanitized for
+/// a control client but falls through to the same raw `file_write` for a
+/// session-less command client, which is the only shape zz's `Command`
+/// kind has.
+fn sanitizes_output_for(
+    inner: &ServerState,
+    client: ClientId,
+    kind: ClientKind,
+    command: &str,
+) -> bool {
+    if !matches!(kind, ClientKind::Command | ClientKind::Control) {
+        return false;
+    }
+    match canonical_command(command) {
+        "capture-pane" | "save-buffer" => return false,
+        "show-buffer" if kind == ClientKind::Command => return false,
+        _ => {}
+    }
+    !inner.utf8_clients.contains(&client)
+}
+
+fn detach_is_inert(inner: &ServerState, client: ClientId) -> bool {
+    client_attached_session(inner, client).is_none()
+        && !inner.copy_sessions.contains_key(&client)
+        && !inner.focused_windows.contains_key(&client)
+        && !inner.visible_terminals.contains_key(&client)
+        && inner.client_kinds.get(&client) != Some(&ClientKind::Control)
+        && !inner
+            .window_latest_clients
+            .values()
+            .any(|latest| *latest == client)
+}
+
 fn promote_window_latest_clients(
     inner: &mut ServerState,
     detached: ClientId,
@@ -36747,9 +37001,7 @@ fn status_request_with(
 ) -> StatusRequest {
     let attached = client_attached_session(inner, client);
     let mut facts = facts;
-    facts.client_environment = Arc::new(client_environment_rows(
-        inner.client_environments.get(&client),
-    ));
+    facts.client_environment = inner.client_environments.get(&client).cloned();
     if let Some(session) = attached {
         facts.client = Some(client_format_facts(inner, client, session));
     }
@@ -40484,9 +40736,7 @@ fn format_hook_facts_for_client(
     // reads that client's environment even when the format's own client is the
     // command's target.
     if let Some(invoking) = format_provenance_client(context, client) {
-        facts.client_environment = Arc::new(client_environment_rows(
-            inner.client_environments.get(&invoking),
-        ));
+        facts.client_environment = inner.client_environments.get(&invoking).cloned();
     }
     let format_client = if context.has_no_client() {
         hook_body_format_client(inner)
@@ -44169,11 +44419,15 @@ fn handle_connection<S: TransportStream>(
         }
         Err(error) => return Err(error.into()),
     };
-    let ProtocolMessage::ClientHello(hello) = first_message else {
-        return Err(ServerError::InvalidCommand(
-            "first protocol message must be ClientHello".to_owned(),
-        )
-        .into());
+    let hello = match first_message {
+        ProtocolMessage::ClientHello(hello) => hello,
+        ProtocolMessage::Exec(request) => return exec::serve_exec(stream, shared, request),
+        _ => {
+            return Err(ServerError::InvalidCommand(
+                "first protocol message must be ClientHello".to_owned(),
+            )
+            .into());
+        }
     };
     if let Err(error) = validate_hello(&hello) {
         best_effort_protocol_mismatch_reply(&mut stream, hello.protocol_version);
@@ -44849,22 +45103,40 @@ fn post_admission_callback_error(error: DaemonError) -> DaemonError {
 }
 
 #[cfg(unix)]
-fn prepare_socket(path: &Path) -> Result<(), DaemonError> {
+fn prepare_socket(path: &Path, ready: &mut BootstrapReady) -> Result<fs::File, DaemonError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
+    let mut lock_path = path.as_os_str().to_owned();
+    lock_path.push(".lock");
+    let lock = {
+        use std::os::unix::fs::OpenOptionsExt as _;
+
+        fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .mode(0o600)
+            .open(PathBuf::from(lock_path))?
+    };
+    rustix::fs::flock(&lock, rustix::fs::FlockOperation::LockExclusive)
+        .map_err(std::io::Error::from)?;
     // A stopping daemon releases its endpoint within one accept tick; wait
     // that out so a spawn racing a kill-server binds instead of dying to a
     // socket that only looks alive. The deadline is generous because loaded
     // schedulers stretch the tick.
     let deadline = Instant::now() + Duration::from_secs(3);
     while path.exists() {
-        match LocalTransport::connect(path) {
-            Ok(_) if Instant::now() >= deadline => {
+        match daemon_answers_at(path) {
+            Some(true) => {
+                ready.signal();
                 return Err(DaemonError::AlreadyRunning(path.to_owned()));
             }
-            Ok(_) => thread::sleep(Duration::from_millis(20)),
-            Err(_) => {
+            Some(false) if Instant::now() >= deadline => {
+                return Err(DaemonError::AlreadyRunning(path.to_owned()));
+            }
+            Some(false) => thread::sleep(Duration::from_millis(20)),
+            None => {
                 match fs::remove_file(path) {
                     Ok(()) => {}
                     Err(error) if error.kind() == ErrorKind::NotFound => {}
@@ -44874,11 +45146,51 @@ fn prepare_socket(path: &Path) -> Result<(), DaemonError> {
             }
         }
     }
-    Ok(())
+    Ok(lock)
+}
+
+#[cfg(unix)]
+fn daemon_answers_at(path: &Path) -> Option<bool> {
+    let mut stream = LocalTransport::connect(path).ok()?;
+    let (answered, answer) = crossbeam_channel::bounded(1);
+    let probe = thread::Builder::new()
+        .name("zz-socket-probe".to_owned())
+        .spawn(move || {
+            let request = ProtocolMessage::Exec(zz_protocol::ExecRequest {
+                protocol_version: PROTOCOL_VERSION,
+                flags: zz_protocol::ExecFlags::default(),
+                client_instance_id: ClientInstanceId::default(),
+                origin: None,
+                working_directory: None,
+                tty: None,
+                size: None,
+                features: 0,
+                startup_reentry: None,
+                spawned_server_id: None,
+                expect_server_id: None,
+                process_id: std::process::id(),
+                environment: ClientEnvironmentBlob::default(),
+                commands: Vec::new(),
+            });
+            let live = zz_protocol::write_protocol_message(&mut stream, &request).is_ok()
+                && matches!(
+                    zz_protocol::read_protocol_message(&mut stream),
+                    Ok(ProtocolMessage::ExecExit(_))
+                );
+            let _ = answered.send(live);
+        });
+    if probe.is_err() {
+        return Some(false);
+    }
+    Some(
+        answer
+            .recv_timeout(Duration::from_millis(250))
+            .unwrap_or(false),
+    )
 }
 
 #[cfg(windows)]
-fn prepare_socket(_: &Path) -> Result<(), DaemonError> {
+fn prepare_socket(_: &Path, _: &mut BootstrapReady) -> Result<(), DaemonError> {
     Ok(())
 }
 
@@ -71655,10 +71967,16 @@ set-option -g @alias-mixed-next yes
             "EXACT=last".into(),
             "VALUE=contains=equals".into(),
         ]);
-        assert_eq!(environment.get("EMPTY").map(RawText::as_str), Some(""));
-        assert_eq!(environment.get("EXACT").map(RawText::as_str), Some("last"));
         assert_eq!(
-            environment.get("VALUE").map(RawText::as_str),
+            environment.map().get("EMPTY").map(RawText::as_str),
+            Some("")
+        );
+        assert_eq!(
+            environment.map().get("EXACT").map(RawText::as_str),
+            Some("last")
+        );
+        assert_eq!(
+            environment.map().get("VALUE").map(RawText::as_str),
             Some("contains=equals")
         );
     }
@@ -75818,7 +76136,7 @@ set-option -g @alias-mixed-next yes
             .lock()
             .engine
             .seed_global_environment([("PATH", "/modeled/bin:/modeled/sbin")]);
-        let shim = TmuxShimGuard::install(executable).expect("install tmux executable path");
+        let shim = TmuxShimGuard::install(executable, false).expect("install tmux executable path");
         let expected_directory = shim.directory.clone();
         let expected_path = std::env::join_paths([
             shim.directory.clone(),
@@ -75884,8 +76202,8 @@ set-option -g @alias-mixed-next yes
     #[cfg(unix)]
     #[test]
     fn tmux_shim_refuses_bare_nested_invocation_before_running_zz() {
-        let shim =
-            TmuxShimGuard::install(PathBuf::from("/bin/echo")).expect("install tmux wrapper");
+        let shim = TmuxShimGuard::install(PathBuf::from("/bin/echo"), false)
+            .expect("install tmux wrapper");
         let output = std::process::Command::new(shim.directory.join("tmux"))
             .env("TMUX", "/tmp/zzprobe-nested.sock,1,0")
             .env(
@@ -93892,7 +94210,10 @@ bind - split-window -v -c "#{pane_current_path}"
             inner.client_terminals.insert(client);
             inner.client_environments.insert(
                 client,
-                Arc::new(BTreeMap::from([("TERM".into(), "xterm".into())])),
+                Arc::new(ClientEnvironmentBlob::from_map(BTreeMap::from([(
+                    "TERM".into(),
+                    "xterm".into(),
+                )]))),
             );
             inner.client_features.insert(
                 client,
@@ -93943,7 +94264,10 @@ bind - split-window -v -c "#{pane_current_path}"
             inner.client_terminals.insert(client);
             inner.client_environments.insert(
                 client,
-                Arc::new(BTreeMap::from([("TERM".into(), "xterm".into())])),
+                Arc::new(ClientEnvironmentBlob::from_map(BTreeMap::from([(
+                    "TERM".into(),
+                    "xterm".into(),
+                )]))),
             );
         }
         let facts = || {
@@ -94001,11 +94325,11 @@ bind - split-window -v -c "#{pane_current_path}"
             inner.client_sizes.insert(client, (132, 43));
             inner.client_environments.insert(
                 client,
-                Arc::new(BTreeMap::from([
+                Arc::new(ClientEnvironmentBlob::from_map(BTreeMap::from([
                     ("COLORTERM".into(), "truecolor".into()),
                     ("LANG".into(), "en_US.UTF-8".into()),
                     ("TERM".into(), "xterm-256color".into()),
-                ])),
+                ]))),
             );
             inner.client_activity_times.insert(client, 222);
             inner.client_created_times.insert(client, 111);
@@ -94197,10 +94521,10 @@ bind - split-window -v -c "#{pane_current_path}"
             inner.client_ttys.insert(control, "/dev/pts/43".to_owned());
             inner.client_environments.insert(
                 control,
-                Arc::new(BTreeMap::from([
+                Arc::new(ClientEnvironmentBlob::from_map(BTreeMap::from([
                     ("LANG".into(), "C.UTF-8".into()),
                     ("TERM".into(), "xterm-256color".into()),
-                ])),
+                ]))),
             );
             client_format_facts(&inner, control, session)
         };
@@ -107237,8 +107561,8 @@ bind - split-window -v -c "#{pane_current_path}"
         let server_id = started
             .recv_timeout(Duration::from_secs(10))
             .expect("ready callback");
-        let passive = connect_command_retry(&socket);
-        assert_eq!(passive.server_hello().server_id, server_id);
+        let mut passive = connect_command_retry(&socket);
+        assert_eq!(passive.server_id().expect("probe"), server_id);
         let mut commands = connect_command_retry(&socket);
         commands
             .execute(CommandInvocation::new("new-session", ["-d"]))
@@ -108114,7 +108438,7 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("connection handler failed");
     }
 
-    fn connect_command_retry(path: &Path) -> CommandClient {
+    pub(super) fn connect_command_retry(path: &Path) -> CommandClient {
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             match CommandClient::connect(path) {
@@ -108125,7 +108449,7 @@ bind - split-window -v -c "#{pane_current_path}"
         }
     }
 
-    fn daemon_test_endpoint(name: &str) -> PathBuf {
+    pub(super) fn daemon_test_endpoint(name: &str) -> PathBuf {
         #[cfg(windows)]
         {
             PathBuf::from(format!(

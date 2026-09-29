@@ -434,7 +434,6 @@ fn write_identity_atomically(path: &Path, contents: &[u8]) -> io::Result<()> {
         }
         let mut file = options.open(&temporary)?;
         file.write_all(contents)?;
-        file.sync_all()?;
         drop(file);
 
         #[cfg(unix)]

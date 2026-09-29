@@ -1762,8 +1762,9 @@ struct ProtocolReceiver<S> {
     frame: Vec<u8>,
 }
 
-static BUFFERED_READS: std::sync::LazyLock<bool> =
-    std::sync::LazyLock::new(|| std::env::var_os("ZZ_PERF_WRITEV").is_none_or(|value| value != "0"));
+static BUFFERED_READS: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| {
+    std::env::var_os("ZZ_PERF_WRITEV").is_none_or(|value| value != "0")
+});
 
 const RECEIVE_BUFFER_BYTES: usize = 64 * 1024;
 

@@ -3146,8 +3146,7 @@ fn write_border_runs(
     let mut rendition: Option<&Rc<Vec<u8>>> = None;
     for (&(row, column), (sgr, glyph)) in cells {
         match last {
-            Some((last_row, last_column))
-                if last_row == row && last_column + 1 == column => {}
+            Some((last_row, last_column)) if last_row == row && last_column + 1 == column => {}
             Some((last_row, last_column))
                 if *crate::COALESCE && last_row + 1 == row && last_column == column =>
             {

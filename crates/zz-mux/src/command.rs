@@ -40081,7 +40081,10 @@ mod tests {
             (RawText::from("SSH_AGENT_PID"), RawText::from("7")),
             (RawText::from("SSH_AUTH_SOCK"), RawText::from("/sock")),
             (RawText::from("STAR*"), RawText::from("star")),
-            (RawText::from_bytes(b"BYTE\xff".to_vec()), RawText::from("raw")),
+            (
+                RawText::from_bytes(b"BYTE\xff".to_vec()),
+                RawText::from("raw"),
+            ),
         ]);
         let mut environment = Environment::default();
         apply_client_environment_update(

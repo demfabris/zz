@@ -17,8 +17,11 @@ resize scrollback pull option, over #84's Ghostty `56dbc4a` bindings and #83's K
 no crates.io release after v0.2.1 carries the updated C API. The `-vt` crate is a safe Rust binding
 over `libghostty-vt-sys`, and the workspace replaces that sys crate with the local snapshot documented
 in `third_party/rust/libghostty-vt-sys/UPSTREAM.md`. It statically builds Ghostty commit
-`6fce227c55d288e35c9fedfd090f286cc74a8ad8` from `demfabris/ghostty` branch `zz-2026-09-25`, based on
-upstream `6301810a48aaa3426887a4316668f18833a40138` (2026-09-25). The carried one-line
+`713374afee3d4890f14733877fb51d831ffc82ee` from `demfabris/ghostty` branch `zz-2026-09-29`, based on
+upstream `6301810a48aaa3426887a4316668f18833a40138` (2026-09-25). It carries two commits. PageList
+spare-page reuse (2026-09-29) keeps the page that line-limit pruning retires resident for the next
+grow; before it, a full history refaulted a whole page per grow (on Linux about 485k faults in 0.7 s
+while printing a large file, two thirds of the pane thread in the kernel). The one-line
 `signal_stack_size = null` option removes the unused Zig signal-stack TLS allocation in C hosts; since
 upstream's TinyIo change, release builds no longer carry it, but the ReleaseSafe dev and test builds
 (any profile cargo reports as `PROFILE=debug`) still do. Rust retains ownership of thread startup and signal handling. See the [macOS measurements](/research/2026-09-23-macos-performance.md). The repository pins **Zig 0.16.0** in `.zigversion`,

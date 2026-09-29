@@ -2,7 +2,7 @@
 
 Raw FFI bindings for libghostty-vt.
 
-This zz-maintained snapshot builds `demfabris/ghostty` commit `6fce227c55d288e35c9fedfd090f286cc74a8ad8` with Zig 0.16.0. The fork adds one C ABI memory option on upstream `6301810a48aaa3426887a4316668f18833a40138`; see [UPSTREAM.md](UPSTREAM.md).
+This zz-maintained snapshot builds `demfabris/ghostty` commit `713374afee3d4890f14733877fb51d831ffc82ee` with Zig 0.16.0. The fork adds a C ABI memory option and PageList spare-page reuse on upstream `6301810a48aaa3426887a4316668f18833a40138`; see [UPSTREAM.md](UPSTREAM.md).
 
 - Fetches and builds `libghostty-vt.a` from ghostty sources via Zig by default.
 - Exposes checked-in generated bindings in `src/bindings.rs`.

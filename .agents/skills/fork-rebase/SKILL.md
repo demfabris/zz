@@ -128,12 +128,13 @@ Current forks and why:
 ## Native Ghostty fork
 
 `libghostty-vt-sys/build.rs` fetches `demfabris/ghostty` directly at
-`6fce227c55d288e35c9fedfd090f286cc74a8ad8` (branch `zz-2026-09-25`), based on upstream
+`713374afee3d4890f14733877fb51d831ffc82ee` (branch `zz-2026-09-29`), based on upstream
 `6301810a48aaa3426887a4316668f18833a40138`. Earlier pins stay on their own branches
-(`codex/cabi-signal-stack` holds `fa7986a9` on `20c3eae`). Its one-line C ABI option
-removes unused Zig signal-stack TLS storage from ReleaseSafe builds (TinyIo already
-removed it from release builds); it does not change terminal grid
-semantics. `third_party/rust/libghostty-vt-sys/UPSTREAM.md` owns its rationale,
+(`zz-2026-09-25` holds `6fce227c`, `codex/cabi-signal-stack` holds `fa7986a9` on `20c3eae`).
+It carries two commits: a one-line C ABI option that removes unused Zig signal-stack TLS
+storage from ReleaseSafe builds (TinyIo already removed it from release builds), and
+PageList spare-page reuse, which keeps a line-limit-pruned page resident for the next grow
+instead of decommitting and refaulting it. Neither changes terminal grid semantics. `third_party/rust/libghostty-vt-sys/UPSTREAM.md` owns its rationale,
 validation, and removal condition.
 
 `just forks`, `forks.conf`, and `fork-sync.sh` only handle Cargo forks. Do not

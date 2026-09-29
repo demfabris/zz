@@ -428,16 +428,14 @@ fn serve_exec_ready<S: TransportStream>(
         client,
         released: AtomicBool::new(false),
     });
-    let writer = stream.try_clone().ok();
     let mut connection = ExecConnection {
         shared: Arc::clone(shared),
-        stream,
+        stream: Arc::new(Mutex::new(Some(stream))),
         frame: Vec::new(),
         client,
         context,
         cancel,
         registration,
-        writer: Arc::new(Mutex::new(writer)),
         live: None,
     };
     loop {
@@ -461,13 +459,12 @@ fn serve_exec_ready<S: TransportStream>(
 
 struct ExecConnection<S: TransportStream> {
     shared: Arc<Shared>,
-    stream: S,
+    stream: Arc<Mutex<Option<S>>>,
     frame: Vec<u8>,
     client: ClientId,
     context: ExecutionContext,
     cancel: Arc<AtomicBool>,
     registration: Arc<ExecRegistration>,
-    writer: Arc<Mutex<Option<S>>>,
     live: Option<(Arc<OutboundMailbox>, Arc<ExecLink>)>,
 }
 
@@ -517,10 +514,7 @@ impl<S: TransportStream> ExecConnection<S> {
         if encode_protocol_message_into(&exit, &mut frame).is_ok() {
             output.extend_from_slice(&frame);
         }
-        let _ = self
-            .stream
-            .write_all(&output)
-            .and_then(|()| self.stream.flush());
+        let _ = self.write_direct(&output);
         drop(direct);
         mailbox.mark_writer_finished();
         self.shared.exec_links.lock().remove(&self.client);
@@ -645,26 +639,31 @@ impl<S: TransportStream> ExecConnection<S> {
         };
         let mut output = Vec::new();
         mailbox.drain_reliable_into(&mut output);
-        let written = self
-            .stream
-            .write_all(&output)
-            .and_then(|()| self.stream.flush());
+        let written = self.write_direct(&output);
         drop(direct);
         if written.is_err() {
             mailbox.close();
         }
     }
 
+    fn write_direct(&self, output: &[u8]) -> std::io::Result<()> {
+        let mut stream = self.stream.lock();
+        let Some(stream) = stream.as_mut() else {
+            return Err(ErrorKind::NotConnected.into());
+        };
+        stream.write_all(output).and_then(|()| stream.flush())
+    }
+
     fn starter(&self, mailbox: &Arc<OutboundMailbox>) -> ExecStarter {
-        let writer = Arc::clone(&self.writer);
+        let slot = Arc::clone(&self.stream);
         let mailbox = Arc::clone(mailbox);
         let shared = Arc::downgrade(&self.shared);
         let client = self.client;
         let cancel = Arc::clone(&self.cancel);
         let registration = Arc::clone(&self.registration);
         Box::new(move || {
-            let mut stream = writer.lock().take()?;
-            let mut reader = stream.try_clone().ok()?;
+            let mut reader = slot.lock().as_ref()?.try_clone().ok()?;
+            let mut stream = slot.lock().take()?;
             let mut buffered = Vec::new();
             mailbox.drain_reliable_into(&mut buffered);
             if !buffered.is_empty()
@@ -725,8 +724,10 @@ impl<S: TransportStream> ExecConnection<S> {
             let requests = link.live.lock().as_ref()?.requests.clone();
             return requests.recv().ok();
         }
+        let mut stream = self.stream.lock();
+        let stream = stream.as_mut()?;
         loop {
-            match read_protocol_message_into(&mut self.stream, &mut self.frame) {
+            match read_protocol_message_into(stream, &mut self.frame) {
                 Ok(ProtocolMessage::Exec(request)) => return Some(request),
                 Ok(ProtocolMessage::ClientFileResponse(response)) => {
                     self.shared.complete_client_file(self.client, response);

@@ -1957,7 +1957,8 @@ Two commits, the first mergeable alone.
 
 1. `mutates` is **zz's own predicate over arguments**, not tmux `CMD_READONLY` (tmux.h:1999 is a
    read-only-client permission flag, set on attach-session, send-keys and others that mutate).
-   `capture-pane -b`, `display-message -I`/`-d` count as mutating. Read-only commands skip
+   `capture-pane` without `-p` (it writes a paste buffer, `-b` or a new one, as
+   cmd-capture-pane.c does), `display-message -I`/`-d` count as mutating. Read-only commands skip
    `MuxHookSnapshot::capture`, `capture_pane_focus_probe`, copy-mode / active window / pane /
    bell / focused-window captures and the after-diff (debug-assert generation unchanged).
    **`after-<cmd>` hooks still fire for read-only commands** (pinned tmux `CMD_AFTERHOOK`,
@@ -1987,6 +1988,91 @@ tests (`splice_pane_focus_events`, window-layout-changed order, client-detached 
 after-list-keys and other read-only after-hooks, debug assert "generation moved implies journal
 entry" over the whole daemon suite, control-mode `%begin`/`%end` ordering fixtures,
 `compat/run.sh` hooks and source-file scenarios.
+
+As built (branch `perf/hooks`, 2026-09-29, from `perf/wave1` `0e590636`, Linux only). Where it
+departs from the scope above:
+
+- Item 1 (commit `fbb70f6b`, mergeable alone): `CommandSpec::mutates(args)` in catalog.rs is
+  false for list-*, show-*, has-session, list-commands, start-server, `display-message` without
+  `-I`/`-d` and `capture-pane -p`; a spelling the option parser rejects counts as mutating.
+  Only engine commands reach the captures (`capture-pane`, the buffer commands and
+  `list-clients` are daemon-dispatched and never took them). A read-only command in a release
+  build takes no hook snapshot, focus probe, copy-mode, active window, active pane, bell or
+  focused-window capture. Debug builds still take them and assert that the command moved no
+  generation, selected no pane, changed no window and raised no hook event, so the whole daemon
+  suite and every debug compat run check the predicate. After-hooks are untouched: they fire
+  from `execute_with_mux_source_routed_for_terminal_in_queue` for every command.
+- The facts rule is a second predicate, `hook_events::format_facts_unread`: bind-key,
+  unbind-key, has-session, show-options with no `#` in its arguments, and set-option or
+  set-window-option unless the option name holds a `#`, `-F` expands a value with a `#`, or the
+  name is a prefix of `automatic-rename` (the only setter that takes format hooks). Those run
+  with a shared empty `FormatHookFacts`, so a config line no longer holds refcounts on the user
+  option maps, and `set -g @x` stopped cloning the whole map and dropping the copy (27% of a
+  1000-line `source-file` with 400 `@options`). `DaemonFormatHooks::withhold_facts` makes every
+  fact-reading `StatusHooks` method debug-assert. `synchronize_pane_runtime` uses the same empty
+  facts when no rename is due. Knob `ZZ_PERF_EAGER_FACTS=1`.
+- Item 2 is a journal of pre-images, not of semantic events. `MuxState.sessions` and `.windows`
+  are `Tracked` maps (zz-mux `journal.rs`): reads go through `Deref` to the `BTreeMap`, and the
+  only mutable accessors (`get_mut`, `insert`, `remove` inside zz-mux; `session_mut`,
+  `window_mut`, `remove_session` for other crates) hand `MuxState.journal` the entry's state
+  first, so no mutation can bypass it; the compiler listed the 120 or so sites to route, and
+  `pane_mut` now touches only the pane's window. A record happens only while a `ChangeWindow`
+  is open and only on an entity's first touch after the newest open mark; a window is a
+  refcounted token, so one dropped on an early return closes itself, and the entries go when
+  the last window closes. The daemon opens
+  `hook_events::HookScope` where it used to capture `MuxHookSnapshot` twice (the command path,
+  attach, detach, input resizes and copy-mode switches, control client sizes, switch-client,
+  exited panes, the rename timer) and `FocusProbeScope` where it captured the focus probe; the
+  probe now takes only its client half up front. `mux_hook_events` is unchanged in order and
+  output: it reads through a `HookView`, which the snapshot (rollback and oracle), the journal
+  overlaid on live state (before) and the live state (after) implement. Lookups answer for any
+  id; iteration covers only the touched sessions and windows and their panes, the only ones
+  whose hooks can differ. The command path reads its active window, active pane and bell
+  pre-images from the same journal. Single-pane events (alerts, title, mode, clipboard, agent
+  state, pane-exited/died) look their pane up instead of snapshotting everything. Why not the
+  event enum: the current diff's order is what the compat corpus pins against tmux, and events
+  derived from the same diff over pre-images keep that order exactly; option, key-table,
+  environment and client changes raise their hooks through effects today and needed no entries.
+- `MuxHookSnapshot` and the full diff stay as the rollback path (`ZZ_PERF_HOOK_JOURNAL=0`) and
+  as the oracle: debug builds capture both and assert the journal gives the same events, the
+  same focus candidates and the same moved active windows, panes and bells. That replaces the
+  "generation moved implies journal entry" assert, which could not see a missed pre-image.
+  Delete both with the wave-2 knobs.
+- Found by profile on the lane's path and removed: `resolve_command`, `command_spec` and
+  `catalog_command_spec` scanned the catalogue about eight times per command (10% of config
+  replay); exact spellings now go through hash maps built in table order. The after-hook lookup
+  built `hook_arguments` and the flag variables for hook arrays with no commands. The pane
+  focus candidates return at once while no pane and no client has focus. A CLI bind-key with no
+  subscriber snapshotted and compared every binding to publish them to nobody (60% of its
+  cost; oh-my-tmux and plugin managers run hundreds before anything attaches).
+  `close_agent_panes` took three locks with nothing to close.
+
+Measured on alienware (Linux, battery with the powersave governor: CPU and wall swing up to 3x
+between runs of one binary, so instructions are the signal), lane head against the lane base,
+tmux 3.7c in the same run. Quick gate (`before.json` / `after.json` in the lane cache):
+`config.instr.source_1000` 139.8 -> 44.4 Minstr (tmux 82.6); `cli.instr.display.p1` 0.109 ->
+0.080 (tmux 0.135), `.display.p20` 0.248 -> 0.157 (tmux 0.260), `.has_session.p20` 0.208 ->
+0.075, `.show_options.p20` 0.248 -> 0.080, `.select_pane.p20` 0.234 -> 0.139, `.send_keys.p20`
+0.245 -> 0.143, `.chain5.p20` 1.10 -> 0.53 (tmux 0.49); `spawn.instr.kill_pane` 0.205 -> 0.184
+(tmux 0.179); `cli.cpu.display.p20` 0.103 -> 0.078 ms. Three alternating full config runs per
+binary: `config.wall.source_1000` 1.74-1.78x tmux -> 0.80-0.91x, CPU 1.94-1.99x -> 0.78-0.92x.
+Daemon user instructions per command from `perf stat` A/B loops: CLI bind-key 0.777 -> 0.066
+Minstr; config at 20 panes 211 -> 51 Minstr.
+
+Handed on:
+
+- `spawn.cpu.kill_pane` <= 0.4 ms is not met here: user instructions are 1.03x tmux, and the gap
+  is kernel time (the pane's actor and pty-gather threads exiting, PTY close); tmux itself read
+  0.24-0.48 ms across runs (W3-SHARDS).
+- oh-my-tmux cold server CPU <= 30 ms is not met: tmux 18-19 ms, lane base 64-70, lane head
+  59-63. User time is one 10 ms tick for both zz and tmux; the rest is system time. In a
+  daemon-only profile of sourcing it, 44% of samples are `run_shell_job` threads, one per
+  run-shell job, polling the job's output and exit every 20 ms (W3-LOOP).
+- Per-command `format_hook_facts_for_client` is still 11% of `display-message` and
+  `select-pane` at 20 panes: it copies pane kinds, pane windows and user option refcounts into
+  a snapshot (W2-FMT, which also removes `withhold_facts` once facts are borrowed).
+- A select-pane in a 20-pane window still clones that window's layout and 20 titles into the
+  journal. A layout and title generation per window would let the image skip them.
 
 ## W2-COPY: copy mode without flat clones (effort L)
 
@@ -2188,6 +2274,8 @@ deletes most wave-1 fallback paths anyway).
 | `ZZ_PERF_WRITEV=0` | ATTACH | one write per outbound frame, a writer thread of its own per connection, the default socket send buffer, and unbuffered protocol reads in the daemon and in the client (the client reads it at start) |
 | `ZZ_PERF_TUI_COALESCE=0` | ATTACH | the TUI (read at CLI start) paints after every event, repaints everything on every snapshot and on an unchanged resize, paints before attaching and a card in a pane with no frame, writes a paint that only puts the cursor back, clears to the theme colour and erases every blank pane row, reads the two terminal options over two connections of their own, sends the kitty graphics probe on every attach, sends the client size for a cell-size reply, and places the cursor for every border cell |
 | `ZZ_PERF_READONLY_SKIP=0` | HOOKS | read-only commands take the before/after captures |
+| `ZZ_PERF_EAGER_FACTS=1` | HOOKS | every command builds format hook facts, and a pane runtime fact change builds them with no rename due |
+| `ZZ_PERF_HOOK_JOURNAL=0` | HOOKS | hook events come from whole-mux snapshots before and after, the command path captures every active window, active pane and bell, and the focus probe captures every window and session |
 | `ZZ_PERF_COPY_CLONE=1` | COPY | flat `ModeRevision` clone |
 | `ZZ_PERF_THP=1` | FOOTPRINT (Linux) | the daemon keeps transparent huge pages as the system sets them |
 
@@ -2216,7 +2304,7 @@ revert. `ZZ_PTY_SHARDS=N` is a tuning knob, not a rollback.
 | Early prompt history | EXEC | `command-prompt` right after cold start sees history; a new entry survives |
 | Immediate child exit | PANE | `split-window 'true'` reports its status once |
 | Chooser preview freshness | PANE | choose-tree preview of a hidden printing pane shows current content |
-| Journal completeness | HOOKS | debug assert over the whole daemon suite; after-list-keys fires |
+| Journal completeness | HOOKS | debug builds diff the journal against whole-mux snapshots at every hook scope (events, focus candidates, active windows, panes and bells) over the whole daemon suite and every debug compat run; after-list-keys fires (`daemon/hook_events_tests.rs`, zz-mux `journal_tests.rs`) |
 | Echo under load | W3 | `capture-pane -S -` on a 20-pane large history while another pane echoes: p99 no worse than tmux |
 
 # Lane mechanics

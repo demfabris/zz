@@ -14333,6 +14333,7 @@ struct Frames<'alloc> {
     notify_owed: bool,
     synchronized_output_deadline: Option<Instant>,
     retain_render_until: Option<Instant>,
+    last_settle: Option<Instant>,
 }
 
 impl<'alloc> Frames<'alloc> {
@@ -14355,6 +14356,7 @@ impl<'alloc> Frames<'alloc> {
             notify_owed: false,
             synchronized_output_deadline: None,
             retain_render_until: None,
+            last_settle: None,
         })
     }
 
@@ -14669,7 +14671,13 @@ fn settle_unwatched<'alloc: 'callbacks, 'callbacks>(
         }
         return Ok(());
     }
-    frames.retain_render_until = Some(now + UNWATCHED_SETTLE_MAX + UNWATCHED_SETTLE_QUIET);
+    let horizon = UNWATCHED_SETTLE_MAX + UNWATCHED_SETTLE_QUIET;
+    let recurring = frames
+        .last_unbuilt
+        .is_some_and(|last| now < last + UNWATCHED_SETTLE_QUIET)
+        || frames.last_settle.is_some_and(|last| now < last + horizon);
+    frames.last_settle = Some(now);
+    frames.retain_render_until = recurring.then(|| now + horizon);
     frames.force_fallback = true;
     publish_views(
         terminal,

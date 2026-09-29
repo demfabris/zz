@@ -144,7 +144,9 @@ Lanes in flight:
 | Lane | Where | State |
 |---|---|---|
 | W1-ATTACH | was `~/dev/zz-attach`, `perf/attach` | merged 2026-09-29 as `ce1b34cd` (w1-6), worktree and branch removed; reports in `~/.cache/zz-perf/attach/` (`report.md`, `merge-report.md`), statuses in `attach-review.json` |
-| W1-LINUX-PAGES | `~/dev/ghostty-zz` branch `zz/pagelist-reuse` (local clone of the fork) + `~/dev/zz-pages` `perf/linux-pages` | agent running from `~/.cache/zz-perf/prompts/pagelist.md`. Needs an owner push of the fork branch and a `GHOSTTY_COMMIT` bump before it can merge |
+| W1-LINUX-PAGES | fork: `~/dev/ghostty-zz` branch `zz/pagelist-reuse`, commit `713374af` (local clone, **not pushed**) | zz side merged (`0e590636`: memchr escape scan, doc note). The fork fix (detached ASCII 85 -> 120-134 MB/s, unicode 45 -> 91, actor 98% -> 30% CPU) lands once the owner OKs `git -C ~/dev/ghostty-zz push origin zz/pagelist-reuse:zz-2026-09-29` and the `GHOSTTY_COMMIT` bump (files to touch in `~/.cache/zz-perf/pages/report.md`); then one Mac gate `--only throughput,mem` for the Darwin trim path |
+| W1-ATTACH-PAINT | was `~/dev/zz-attach-paint`, `perf/attach-paint` | merged `aaaa8195`: `Renderer::note_frame` merged, instead of replacing, a pane's unpainted damage when a drain took a second frame; regression test in zz-tui app.rs |
+| W2-HOOKS | `~/dev/zz-hooks`, `perf/hooks` (branched from perf/wave1 `0e590636`) | implementer running from `~/.cache/zz-perf/prompts/hooks-impl.md`; reviews, fix and merge into perf/wave2 follow |
 
 ## Owner decisions (binding)
 
@@ -332,7 +334,19 @@ W3), `chatty.cpu_pct.visible` (W2-TERM, W4), `mem.threads.p20` 66 (W3-SHARDS), t
 (no wave-1 owner, same on the pre-merge binary in an A/B), `throughput.detached.ascii` (Linux
 ceiling, W1-LINUX-PAGES) and `throughput.attached.ascii_ms` 0.53x (rule 0.25x).
 
-### 7. Wave-1 exit
+### 7. Wave-1 exit (done on Linux 2026-09-29, `wave1-alienware-aaaa8195.json`)
+
+Strict, full, quiet (load 1.4-1.5): 59 pass, 7 fail, 0 drifted; the 10 regressed rows are cpu/wall
+kinds whose tmux moved the same way (this laptop flips between a fast and a slow power state, and
+cold-start samples are bimodal, 4-5 ms and 13-15 ms, for both muxes); instructions, bytes,
+memory and threads did not regress. Failing rows and owners: `spawn.cpu.split_empty_P`,
+`spawn.cpu.new_window` (about 2x tmux in kernel time; W3), `cold.wall.new_session` (bimodal noise:
+two reruns pass at 0.68-0.83x tmux), `chatty.cpu_pct.visible` 2.5x (W2-TERM, W4),
+`mem.threads.p20` 66 (the per-pane Linux gather thread; W3-SHARDS), both throughput rows (pass
+the ceiling rule only with the unpushed PageList fork fix). `tui-screen-diff.sh`: 147/147 in three
+release runs and one debug run after W1-ATTACH-PAINT; `attached-client.sh` passes. The Mac strict
+run (`wave1-macbook-<sha8>.json`) is still owed by the owner.
+
 
 On a quiet machine: `just perf-gate wave1 --strict --baseline <w1-6 JSON> --json
 bench/perf/results/wave1-<host>-<sha8>.json`, plus `compat/tui-screen-diff.sh` and
@@ -401,8 +415,10 @@ Rule: every wave exit gets one `--strict` gate run on the Mac, committed as
   (1-6 on a debug build; the pre-ATTACH release build matched all 147 every time), while the lane
   had reported it green. `ZZ_PERF_TUI_COALESCE=0` clears it, so it sits in zz-tui's coalesced
   paint path. Merge checks now run screen-diff three times on the release build (`gen.py`).
-  Fix lane W1-ATTACH-PAINT (`~/dev/zz-attach-paint`, `perf/attach-paint`) in flight; perf/wave1
-  does not merge into main until it lands and the exit gate is rerun.
+  Fixed by W1-ATTACH-PAINT (`aaaa8195`). Under a concurrent cargo build a few `unzoom`
+  checkpoints can still differ on both the pre- and post-ATTACH builds: the daemon holds a stale
+  pane geometry after unzoom (likely a client size report landing after the layout change,
+  `InputMessage::ResizeTerminal` -> `set_pane_geometry` with no layout generation). Open bug below.
 
 - **Never `git stash`**, `reset --hard`, or path checkouts in a tree another session uses. To revert your own edit, re-edit. Keep the index empty.
 - **`isolation: worktree` fails** in this repo (`.claude -> .agents` is a committed symlink). Create worktrees by hand with `git worktree add`.
@@ -419,6 +435,7 @@ Rule: every wave exit gets one `--strict` gate run on the Mac, committed as
 
 | Bug | Where | Fix idea |
 |---|---|---|
+| Stale pane geometry after unzoom under load: a client's size report can land after the layout change | daemon `InputMessage::ResizeTerminal` -> `set_pane_geometry` | tag size reports with a layout generation and drop stale ones (protocol change; W2-CTRL or its own lane) |
 | Title race: the pane watcher can see a program's new title before `program_title_writes` moves, so a `select-pane -T` title then hides it until the next viewport publish | zz-terminal `run_terminal` publishes facts at the top of each pass, after the viewport; daemon `watch_terminal` | set facts right before `publish_active_views` |
 | `verify_claims_test.py` "unattributed: unbound variable" under bash 3.2 | `compat/tui/` | Mac-only; empty array under `set -u` |
 | `mode_keys_scope_visible_command_output_separately_from_underlying_copy_mode` takes 30.05 s alone and fails under load: the Escape never closes the output view, it closes when the window's `sleep 30` exits, just inside the test's 30 s wait (with `sleep 50` it fails at 30 s). Same on `a41b1fbf` | daemon.rs test and the command-output Escape path | find why the emacs-table Escape does not cancel the output view; then the test stops depending on the sleep |

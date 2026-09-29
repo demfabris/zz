@@ -7650,6 +7650,7 @@ impl Shared {
         let mut import_tmux_config = None;
         let mut reload_config = false;
         let mut snapshot_changed = false;
+        let mut respawned_terminals = false;
         let mut mux_options_changed = false;
         let mut mux_option_refresh_sessions = BTreeSet::new();
         #[cfg(feature = "agent")]
@@ -8220,6 +8221,7 @@ impl Shared {
                             streamed.remove(pane);
                         }
                         inner.preview_watched.remove(pane);
+                        respawned_terminals = true;
                         inner.engine.set_pane_runtime_facts_with_hooks(
                             *pane,
                             PaneRuntimeFacts {
@@ -9804,6 +9806,9 @@ impl Shared {
             for terminal in copy_mode_terminals {
                 terminal.settle();
             }
+        }
+        if respawned_terminals && !snapshot_changed {
+            self.refresh_terminal_visibility();
         }
         for (selected, pane, keys, repeat) in pane_mode_keys {
             self.inject_pane_mode_keys(selected, context, pane, &keys, repeat)?;

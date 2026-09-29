@@ -2089,13 +2089,14 @@ departs from the scope above:
     maps after every command, read-only ones included, with a scan of every window per pane
     entry (18.6% of config replay at 20 windows, 36% of `has-session` at 100). The sweep now
     runs only when a session, window or pane was removed since the last one, against a set of
-    live panes built once. The removal count lives in the journal: `Tracked::remove` and
-    `kill_pane` (the only place a pane leaves a window that stays) bump it. A generation
+    live panes built once. The removal count lives in the journal: `Tracked::remove` bumps it
+    (break, join and move take the source window out of the map first) and so does
+    `kill_pane`, the one place a pane leaves a window that stays in the map. A generation
     trigger was tried first and still swept on 5.9% of config replay at 20 windows, since most
     option sets move the generation. Debug builds run the sweep anyway when it is skipped and
     assert it removed nothing.
   - `run_shell_job` slept 20 ms between checks of the job's output and exit for the job's whole
-    life (2131 voluntary switches while sourcing oh-my-tmux, 80% of the daemon's CPU there). It
+    life (2131 voluntary switches while sourcing oh-my-tmux, about 80% of the daemon's CPU). It
     now blocks in `poll` on the output socket and a pidfd (Linux) or a kqueue `EVFILT_PROC`
     (macOS, type-checked for `aarch64-apple-darwin` but not run); without either it keeps a
     20 ms poll of the output alone. After EOF it waits on the same descriptor.
@@ -2123,17 +2124,20 @@ binary: `config.wall.source_1000` 1.74-1.78x tmux -> 0.80-0.91x, CPU 1.94-1.99x 
 Daemon user instructions per command from `perf stat` A/B loops: CLI bind-key 0.777 -> 0.066
 Minstr; config at 20 panes 211 -> 51 Minstr.
 
-After the review fixes, same host, quick gate `fixed.json` against the pre-fix lane binary:
-`config.instr.source_1000` 44.4 -> 42.0 Minstr (tmux 82.6); `cli.instr.display.p20` 0.157 ->
-0.136 (tmux 0.262), `.has_session.p20` 0.075 -> 0.054, `.show_options.p20` 0.080 -> 0.058,
-`.select_pane.p20` 0.139 -> 0.117, `.send_keys.p20` 0.143 -> 0.121, `.list_panes.p20` 0.198 ->
-0.176, `.chain5.p20` 0.53 -> 0.42 (tmux 0.49, now below it). With 100 windows
-(`meas.py`, daemon instructions per command): `display-message` 0.890 -> 0.433 Minstr (tmux
-0.783), `has-session` 0.529 -> 0.074 (tmux 0.613); config replay at 20 windows 64.8 -> 45.5
-(tmux 98.7). A CLI bind-key with a control client attached 0.753 -> 0.072 Minstr (tmux 0.164).
-oh-my-tmux cold, server CPU from exec until idle, three runs: 72-95 -> 19-22 ms (tmux 18.6-18.9;
-user time 10-11 ms against tmux 12, kernel 9-10 ms against 6-7); while sourcing it the run-shell
-threads' voluntary switches go 2131 -> 24.
+After the review fixes, same host, quick gate `fixed.json` (lane cache) against the pre-fix lane
+binary: `config.instr.source_1000` 44.4 -> 41.7 Minstr (tmux 82.5); `cli.instr.display.p20`
+0.157 -> 0.136 (tmux 0.260), `.has_session.p20` 0.075 -> 0.054, `.show_options.p20` 0.080 ->
+0.058, `.select_pane.p20` 0.139 -> 0.117, `.send_keys.p20` 0.143 -> 0.121, `.list_panes.p20`
+0.198 -> 0.176, `.chain5.p20` 0.53 -> 0.42 (tmux 0.49, now below it); `config.wall.source_1000`
+0.83x tmux, CPU 0.77x; 33 pass, 3 fail (`spawn.cpu.split_shell`, `split_empty_P`, `new_window`,
+red on the base too, W3), 0 regressed. With 100 windows (`meas.py`, daemon instructions per
+command): `display-message` 0.890 -> 0.433 Minstr (tmux 0.783), `has-session` 0.529 -> 0.074
+(tmux 0.613); config replay at 20 windows 64.8 -> 41.9 (tmux 98.7), the same as at one window.
+A CLI bind-key with a control client attached 0.753 -> 0.072 Minstr (tmux 0.164). oh-my-tmux
+cold, server CPU from exec until idle, three quiet runs: 72-95 -> 19-22 ms (tmux 18.6-18.9;
+user time 10-11 ms against tmux 12, kernel 9-10 ms against 6-7); interleaved again while another
+lane compiled (load 20): 21-33 ms against tmux 18-32 and the pre-fix lane 81-136. While sourcing
+it the run-shell threads' voluntary switches go 2131 -> 20-24.
 
 Handed on:
 
@@ -2147,7 +2151,25 @@ Handed on:
   `select-pane` at 20 panes: it copies pane kinds, pane windows and user option refcounts into
   a snapshot (W2-FMT, which also removes `withhold_facts` once facts are borrowed).
 - A select-pane in a 20-pane window still clones that window's layout and 20 titles into the
-  journal. A layout and title generation per window would let the image skip them.
+  journal. A layout and title generation per window would let the image skip them, but only
+  once `Window.layout` and pane titles are private behind journaling setters; today any
+  `window_mut` caller can change them.
+- Every CLI command's `Shared::unregister` is 11.5% of `select-pane` at 20 windows and 10.6% of
+  `display-message` at 100; half of the latter is `release_view` on every terminal for a
+  client that never had a view (EXEC).
+- `resolve_command` is still about 2.8% of config replay: eight exact-name lookups per line,
+  now hashed; resolving once and passing the name down is EXEC's.
+- Other 20 ms pollers of the `run_shell_job` kind remain: `run_copy_pipe_with_timeout`,
+  `run_control_output_tap` (a `recv_timeout` per control client and pane) and `run_pane_pipe`
+  (W3-LOOP; none is on this lane's gate rows).
+- Commands run from a hook body raise no control-mode notifications (`%window-renamed`,
+  `%layout-change`), because hook bodies run with `no_hooks` and open no hook scope; tmux
+  suppresses only on the global queue. Base and lane alike (W2-CTRL or a follow-up here).
+- With `destroy_sessions`, shutdown still takes a whole-mux snapshot per session (O(sessions
+  squared)). One snapshot before the loop is not the same when grouped sessions hand a window
+  to the next session, so it stays until the journal covers shutdown.
+- A key table change published between a client's `register` (its hello) and its `subscribe`
+  never reaches it, for every hello-carried state; the base had the same gap.
 
 ## W2-COPY: copy mode without flat clones (effort L)
 

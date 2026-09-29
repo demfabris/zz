@@ -83,8 +83,11 @@ repaints changed rows.
 # Diffing and patches
 
 To avoid resending whole grids, `TerminalViewport::diff` (or `diff_with_scratch`) produces a
-`TerminalViewportPatch`: a `scroll` shift plus strictly-ascending replacement rows (`TerminalPatchRows`,
-one contiguous cell plane) and an append-only dictionary delta (`TerminalDictionaryPatch`). Row-shift
+`TerminalViewportPatch`: a `scroll` shift plus one changed column span per changed row, in ascending
+row order (`TerminalPatchRows`: `TerminalPatchSpan { row, start, len, clear }` over one contiguous
+cell plane; `clear` empties the row past the span), an append-only dictionary delta
+(`TerminalDictionaryPatch`), and `TerminalPatchFields`, the metadata the patch carries. Metadata a
+patch does not carry keeps the retained frame's value. Row-shift
 detection uses per-row fingerprints (`best_row_shift`). Diff returns `None`, forcing a full reset, when
 dimensions or the dictionary generation change, or when the new dictionary does not extend the old one.
 `apply_patch` validates the entire patch **atomically** against `base_generation` / dictionary /

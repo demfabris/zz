@@ -28,6 +28,7 @@ Flags of `run.py`:
 | flag | meaning |
 | --- | --- |
 | `--zz PATH` | zz binary, default `target/release/zz_cli` |
+| `--headless PATH` | headless frame-sink client for `throughput.headless.*`, default `target/release/examples/perf_client` (`cargo build --release -p zz-client --example perf_client`); the row is skipped with a note when it is missing |
 | `--tmux PATH` | tmux binary; default: see [tmux](#tmux) |
 | `--stage S` | `baseline`, `wave1`, `wave2`, `wave3` or `final`; picks the thresholds |
 | `--json PATH` | output, default `bench/perf/results/local/<stage>-<host>-<sha>-<time>.json` |
@@ -243,7 +244,7 @@ or `s20` (20 sessions).
 | mem | `mem.footprint.<p>`, `mem.rss.<p>`, `mem.threads.<p>` | `p1`, `p20` (idle shells), `tui20` (p20 with a TUI attached), `scroll180` and `scroll80` (20 panes with history-limit 10000 filled by `seq 1 12000`, sampled 5 s after the fill) |
 | attach | `attach.ttfc.<p>`, `attach.tty_total.<p>`, `attach.tty_bytes.<p>`, `attach.cpu.<p>`, `attach.instr.<p>`, `attach.conns.<p>`, `attach.wire_s2c.<p>`, `attach.wire_frames.<p>`, `attach.wire_c2s.<p>` | TUI attach in a 180x50 pty. `p1`: a pane showing a marker; `p4`: four tiled panes with markers. Time from fork to all markers on the tty; `tty_total` is every tty byte until the output has been quiet for 200 ms (gated); `tty_bytes` is the bytes up to the last marker (info, it depends on draw order); daemon CPU per attach+detach. Through the proxy (zz only): connections, bytes and frames from spawn to 1 s after content |
 | echo | `echo.p50.<v>`, `echo.p99.<v>`, `echo.wire_bytes.<v>` | keystroke written to the outer pty until its echo comes back, through an attached TUI, with a raw-mode echo program in the pane and status off. The pane answers key N with `§` and N as three digits, and the gate looks for that token in the tty bytes with escape sequences removed, so an SGR `m` or a redraw split across a scroll cannot pass for the echo. `idle`, and `busy30` where the same pane prints a line 30 times a second. Keys are 20 to 50 ms apart. Wire bytes per keystroke through the proxy (zz only) |
-| throughput | `throughput.detached.ascii`, `throughput.detached.unicode`, `throughput.attached.ascii_ms`, `throughput.attached.tty_bytes`, `throughput.ceiling.ascii`, `throughput.ceiling.unicode`, `throughput.ceiling.ascii_ms` | `/bin/cat` of a 150 MiB seeded fixture in a detached 180x50 pane, timed inside the pane; MB/s. The attached run shows the same file in the window a TUI is looking at. The ceiling rows are a bare reader of the same `cat` through a cooked 180x50 pty, once per run before the muxes (its rate sits in the `zz` column); `ascii_ms` is that rate as the time to read the file |
+| throughput | `throughput.detached.ascii`, `throughput.detached.unicode`, `throughput.attached.ascii_ms`, `throughput.attached.tty_bytes`, `throughput.headless.ascii_ms`, `throughput.ceiling.ascii`, `throughput.ceiling.unicode`, `throughput.ceiling.ascii_ms` | `/bin/cat` of a 150 MiB seeded fixture in a detached 180x50 pane, timed inside the pane; MB/s. The attached run shows the same file in the window a TUI is looking at. The headless run (zz only, info) shows it to `perf_client`, which decodes and applies every frame with the zz-client core and renders nothing, so it measures the daemon's frames and their decoding without the TUI's painting. The ceiling rows are a bare reader of the same `cat` through a cooked 180x50 pty, once per run before the muxes (its rate sits in the `zz` column); `ascii_ms` is that rate as the time to read the file |
 | control | `control.latency`, `control.cpu_per_cmd`, `control.instr_per_cmd`, `control.burst_cmds_per_s`, `control.output_mbps`, `control.output_bytes_per_byte` | `-C attach` over pipes: one `display-message -p x` at a time until `%end`, then 200 at once; `%output` throughput for a 16 MiB cat from the first `%output` line to a done marker (pane spawn time is not counted), and control bytes per pane byte |
 | statusjob | `statusjob.cpu_pct`, `statusjob.instr_per_s`, `statusjob.threads_per_s`, `statusjob.child_cpu_pct`, `statusjob.tty_kibps` | three `#()` jobs in status-right at status-interval 1 with a TUI attached. Threads per second counts new thread ids seen by a 2 ms sampler, a lower bound for short-lived threads |
 
@@ -264,14 +265,14 @@ These are known gaps, not silent omissions:
   that subscribes like the desktop app: all sessions, history backfill, 8
   visible panes. Gate daemon CPU, attach CPU, HistoryChunk bytes and RSS with
   it attached.
-- TODO: a headless frame-decoding throughput client, so throughput through a
-  real client does not depend on the TUI's own rendering.
+- Built (W2-TERM): the frame-decoding throughput client
+  (`crates/zz-client/examples/perf_client.rs`, `throughput.headless.ascii_ms`). It is info only:
+  the W0 JSONs predate it, so the plan's ">= 0.85x W0" rule has no reference yet.
 - TODO: RTT injection in `sockproxy.py` (for example 20 ms) and an
   ssh-localhost variant, for remote CLI latency, attach time and echo over a
   link with real round-trip time.
 - TODO: agent pane streaming (the fixture ACP provider): daemon CPU, threads
   per agent pane, stream fanout bytes.
 - TODO: copy-mode entry memory delta on a 10k x 180 pane.
-- TODO: Linux is written from the /proc interfaces and `clock_getcpuclockid`
-  but has not been run yet. Run the gate once on the Linux box before any
-  lane relies on a Linux number.
+- Done (2026-09-29): the gate runs on Linux; the Linux W0 is
+  `results/baseline-alienware-17e17115.json` and its quick twin.

@@ -523,7 +523,6 @@ fn encode_runs(
     let mut index = 0;
     while index < cells.len() {
         let cell = cells[index];
-        check_cell(cell, limits)?;
         let repeat = repeat_len(cells, index);
         let (kind, count, advance) = if repeat >= REPEAT_MIN {
             (RUN_REPEAT, repeat, repeat)
@@ -561,6 +560,7 @@ fn encode_runs(
                 }
             }
             RUN_REPEAT => {
+                check_cell(cell, limits)?;
                 push_varint(output, glyph_code(cell.glyph()));
                 push_varint(output, u64::from(cell.flags()));
             }

@@ -2217,12 +2217,13 @@ deletes most wave-1 fallback paths anyway).
 | `ZZ_PERF_ATTACH_PRESIZE=0` | ATTACH | an attaching raw-terminal client's panes keep their size until its first `ResizeTerminal` |
 | `ZZ_PERF_WRITEV=0` | ATTACH | one write per outbound frame, a writer thread of its own per connection, the default socket send buffer, and unbuffered protocol reads in the daemon and in the client (the client reads it at start) |
 | `ZZ_PERF_TUI_COALESCE=0` | ATTACH | the TUI (read at CLI start) paints after every event, repaints everything on every snapshot and on an unchanged resize, paints before attaching and a card in a pane with no frame, writes a paint that only puts the cursor back, clears to the theme colour and erases every blank pane row, reads the two terminal options over two connections of their own, sends the kitty graphics probe on every attach, sends the client size for a cell-size reply, and places the cursor for every border cell |
+| `ZZ_PERF_ROW_PATCHES=1` | TERM | patches replace every changed row whole (from column 0, the rest of the row cleared), the pre-W2 row granularity; the frames stay PaneFrames |
 | `ZZ_PERF_READONLY_SKIP=0` | HOOKS | read-only commands take the before/after captures |
 | `ZZ_PERF_COPY_CLONE=1` | COPY | flat `ModeRevision` clone |
 | `ZZ_PERF_THP=1` | FOOTPRINT (Linux) | the daemon keeps transparent huge pages as the system sets them |
 
 Wire changes (W2-TERM, W2-CTRL) and the thread model (W3, W4) have no runtime switch; rollback is a
-revert. `ZZ_PTY_SHARDS=N` is a tuning knob, not a rollback.
+revert. The 8-byte-a-cell frames cannot come back behind a knob: both ends speak one format. `ZZ_PTY_SHARDS=N` is a tuning knob, not a rollback.
 
 # Tests and fixtures to add
 
@@ -2247,6 +2248,8 @@ revert. `ZZ_PTY_SHARDS=N` is a tuning knob, not a rollback.
 | Immediate child exit | PANE | `split-window 'true'` reports its status once |
 | Chooser preview freshness | PANE | choose-tree preview of a hidden printing pane shows current content |
 | Journal completeness | HOOKS | debug assert over the whole daemon suite; after-list-keys fires |
+| PaneFrame codec | TERM | random grids (ASCII, wide pairs, graphemes, hyperlink and classed styles, spacer heads, odd flags, repeats) round-trip through full frames and apply through patches with dictionary growth and scrolls; every truncation and every lying count is rejected before allocating; echo patch <= 40 B, blank 180x50 frame <= 64 B (`zz-protocol` `pane_frame_tests.rs`) |
+| Frames through the daemon | TERM | a typed key reaches an attached client as a patch of at most 64 B and the retained grid equals the daemon's frame; history chunks ride the terminal lane; each pane numbers its own frame stream (`daemon/pane_frame_tests.rs`) |
 | Echo under load | W3 | `capture-pane -S -` on a 20-pane large history while another pane echoes: p99 no worse than tmux |
 
 # Lane mechanics

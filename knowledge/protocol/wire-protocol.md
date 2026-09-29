@@ -27,8 +27,8 @@ lives in `crates/zz-protocol/src/framing.rs`, the message vocabulary in
 `crates/zz-protocol/src/message.rs`.
 
 There are two lanes sharing one envelope: **Control** (lane `0`, `postcard`-encoded
-`ProtocolMessage`) and **Terminal** (lane `1`, hand-packed; see
-[packed terminal lanes](/protocol/terminal-lanes.md)). Both lanes ride one ordered stream, local or
+`ProtocolMessage`) and **Terminal** (lane `1`, PaneFrames; see
+[PaneFrame terminal lane](/protocol/terminal-lanes.md)). Both lanes ride one ordered stream, local or
 SSH-tunneled, and every frame is delivered reliably and in order. This concept documents the Control
 lane and the shared framing.
 

@@ -321,6 +321,7 @@ def targets(args):
 def main():
     parser = argparse.ArgumentParser(description="zz vs tmux daemon benchmark gate")
     parser.add_argument("--zz", default=os.path.join(REPO, "target", "release", "zz_cli"))
+    parser.add_argument("--headless", default=os.path.join(REPO, "target", "release", "examples", "perf_client"))
     parser.add_argument("--tmux")
     parser.add_argument("--stage", default="baseline", choices=gate.STAGES)
     parser.add_argument("--json")

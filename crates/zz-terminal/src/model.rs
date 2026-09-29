@@ -158,6 +158,48 @@ impl PackedCell {
     pub const fn width(self) -> CellWidth {
         CellWidth::from_flags(self.flags)
     }
+
+    #[must_use]
+    pub const fn bits(self) -> u64 {
+        self.glyph as u64 | (self.style as u64) << 32 | (self.flags as u64) << 48
+    }
+}
+
+const COMPARE_LANES: usize = 8;
+
+fn first_difference(before: &[PackedCell], after: &[PackedCell]) -> Option<usize> {
+    let len = before.len().min(after.len());
+    let whole = len - len % COMPARE_LANES;
+    let mut index = 0;
+    while index < whole {
+        let mut differs = 0;
+        for lane in 0..COMPARE_LANES {
+            differs |= before[index + lane].bits() ^ after[index + lane].bits();
+        }
+        if differs != 0 {
+            break;
+        }
+        index += COMPARE_LANES;
+    }
+    (index..len).find(|&index| before[index].bits() != after[index].bits())
+}
+
+fn last_difference(before: &[PackedCell], after: &[PackedCell]) -> Option<usize> {
+    let len = before.len().min(after.len());
+    let mut end = len;
+    while end >= COMPARE_LANES {
+        let mut differs = 0;
+        for lane in end - COMPARE_LANES..end {
+            differs |= before[lane].bits() ^ after[lane].bits();
+        }
+        if differs != 0 {
+            break;
+        }
+        end -= COMPARE_LANES;
+    }
+    (0..end)
+        .rev()
+        .find(|&index| before[index].bits() != after[index].bits())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1368,13 +1410,8 @@ impl TerminalViewport {
         if previous.columns != current.columns
             || previous.rows != current.rows
             || previous.dictionary_generation != current.dictionary_generation
-            || !current.styles().starts_with(previous.styles())
-            || !current
-                .grapheme_offsets()
-                .starts_with(previous.grapheme_offsets())
-            || !current
-                .grapheme_bytes()
-                .starts_with(previous.grapheme_bytes())
+            || !Arc::ptr_eq(&previous.dictionary, &current.dictionary)
+                && !dictionary_extends(&previous.dictionary, &current.dictionary)
         {
             return None;
         }
@@ -1386,7 +1423,6 @@ impl TerminalViewport {
             best_row_shift(previous, current, scratch)
         };
         let mut spans = TerminalPatchSpans::new();
-        let mut changed_cells = Vec::new();
         if !shared_cells {
             for row in 0..current.rows {
                 let source = i32::from(row) - i32::from(scroll);
@@ -1394,12 +1430,18 @@ impl TerminalViewport {
                     .ok()
                     .filter(|source| *source < previous.rows)
                     .and_then(|source| previous.row(source));
-                let after = current.row(row).unwrap_or_default();
-                if let Some(span) = changed_span(row, before, after) {
-                    changed_cells.extend_from_slice(&after[usize::from(span.start)..span.end()]);
-                    spans.push(span);
-                }
+                spans.extend(changed_span(
+                    row,
+                    before,
+                    current.row(row).unwrap_or_default(),
+                ));
             }
+        }
+        let mut changed_cells =
+            Vec::with_capacity(spans.iter().map(|span| usize::from(span.len)).sum());
+        for span in &spans {
+            let after = current.row(span.row).unwrap_or_default();
+            changed_cells.extend_from_slice(&after[usize::from(span.start)..span.end()]);
         }
         let changed_rows = TerminalPatchRows::from_spans(spans, changed_cells);
 
@@ -1766,32 +1808,38 @@ pub fn exposed_rows_are_replaced(
     })
 }
 
+fn dictionary_extends(previous: &TerminalDictionary, current: &TerminalDictionary) -> bool {
+    shared_prefix(&previous.styles, &current.styles)
+        && shared_prefix(&previous.grapheme_offsets, &current.grapheme_offsets)
+        && shared_prefix(&previous.grapheme_bytes, &current.grapheme_bytes)
+}
+
+fn shared_prefix<T: PartialEq>(previous: &Arc<[T]>, current: &Arc<[T]>) -> bool {
+    Arc::ptr_eq(previous, current) || current.starts_with(previous)
+}
+
 fn changed_span(
     row: u16,
     before: Option<&[PackedCell]>,
     after: &[PackedCell],
 ) -> Option<TerminalPatchSpan> {
-    let content_end = after
-        .iter()
-        .rposition(|cell| *cell != PackedCell::EMPTY)
-        .map_or(0, |last| last + 1);
+    let content_end = || {
+        after
+            .iter()
+            .rposition(|cell| *cell != PackedCell::EMPTY)
+            .map_or(0, |last| last + 1)
+    };
     let Some(before) = before else {
         return Some(TerminalPatchSpan {
             row,
             start: 0,
-            len: u16::try_from(content_end).ok()?,
+            len: u16::try_from(content_end()).ok()?,
             clear: true,
         });
     };
-    let first = before
-        .iter()
-        .zip(after)
-        .position(|(before, after)| before != after)?;
-    let last = before
-        .iter()
-        .zip(after)
-        .rposition(|(before, after)| before != after)
-        .unwrap_or(first);
+    let first = first_difference(before, after)?;
+    let content_end = content_end();
+    let last = last_difference(before, after).unwrap_or(first);
     let (len, clear) = if last >= content_end {
         (content_end.saturating_sub(first), true)
     } else {
@@ -1862,17 +1910,28 @@ fn best_row_shift(
 }
 
 fn row_fingerprint(cells: &[PackedCell]) -> u64 {
-    let mut hash = 0x9e37_79b9_7f4a_7c15_u64 ^ cells.len() as u64;
-    for cell in cells {
-        let packed = u64::from(cell.glyph())
-            | (u64::from(cell.style_id()) << 32)
-            | (u64::from(cell.flags()) << 48);
-        hash ^= packed.wrapping_mul(0xd6e8_feb8_6659_fd93);
-        hash = hash
-            .rotate_left(27)
-            .wrapping_mul(0x3c79_ac49_2ba7_b653)
-            .wrapping_add(0x1c69_b3f7_4ac4_ae35);
+    const LANES: usize = 4;
+    let mut lanes = [
+        0x9e37_79b9_7f4a_7c15_u64 ^ cells.len() as u64,
+        0xc2b2_ae3d_27d4_eb4f,
+        0x1656_67b1_9e37_79f9,
+        0x27d4_eb2f_1656_67c5,
+    ];
+    let mut chunks = cells.chunks_exact(LANES);
+    for chunk in &mut chunks {
+        for (lane, cell) in lanes.iter_mut().zip(chunk) {
+            *lane = (*lane ^ cell.bits().wrapping_mul(0xd6e8_feb8_6659_fd93))
+                .rotate_left(27)
+                .wrapping_mul(0x3c79_ac49_2ba7_b653);
+        }
     }
+    for (lane, cell) in lanes.iter_mut().zip(chunks.remainder()) {
+        *lane = (*lane ^ cell.bits().wrapping_mul(0xd6e8_feb8_6659_fd93))
+            .rotate_left(27)
+            .wrapping_mul(0x3c79_ac49_2ba7_b653);
+    }
+    let mut hash =
+        lanes[0] ^ lanes[1].rotate_left(17) ^ lanes[2].rotate_left(31) ^ lanes[3].rotate_left(47);
     hash ^= hash >> 33;
     hash = hash.wrapping_mul(0xff51_afd7_ed55_8ccd);
     hash ^ (hash >> 33)
@@ -1880,36 +1939,35 @@ fn row_fingerprint(cells: &[PackedCell]) -> u64 {
 
 fn best_row_shift_from_fingerprints(previous: &[u64], current: &[u64]) -> i16 {
     debug_assert_eq!(previous.len(), current.len());
-    let rows = i32::try_from(current.len()).unwrap_or(i32::MAX);
+    let rows = current.len();
     if rows < 2 {
         return 0;
     }
-    let mut best_shift = 0_i32;
-    let mut best_matches = previous
-        .iter()
-        .zip(current)
-        .filter(|(previous, current)| previous == current)
-        .count();
-    for shift in -(rows - 1)..rows {
-        if shift == 0 {
-            continue;
+    let matches = |source: &[u64], destination: &[u64]| {
+        source
+            .iter()
+            .zip(destination)
+            .filter(|(source, destination)| source == destination)
+            .count()
+    };
+    let mut best_shift = 0_isize;
+    let mut best_matches = matches(previous, current);
+    for distance in 1..rows {
+        if rows - distance <= best_matches {
+            break;
         }
-        let matches = (0..rows)
-            .filter(|source| {
-                let destination = source + shift;
-                destination >= 0 && destination < rows && {
-                    let source = usize::try_from(*source).unwrap_or_default();
-                    let destination = usize::try_from(destination).unwrap_or_default();
-                    previous[source] == current[destination]
-                }
-            })
-            .count();
-        if matches > best_matches {
-            best_matches = matches;
-            best_shift = shift;
+        let up = matches(&previous[distance..], &current[..rows - distance]);
+        if up > best_matches {
+            best_matches = up;
+            best_shift = -distance.cast_signed();
+        }
+        let down = matches(&previous[..rows - distance], &current[distance..]);
+        if down > best_matches {
+            best_matches = down;
+            best_shift = distance.cast_signed();
         }
     }
-    let minimum = current.len().saturating_div(2).max(2);
+    let minimum = rows.saturating_div(2).max(2);
     if best_matches < minimum {
         0
     } else {
@@ -2323,6 +2381,90 @@ mod tests {
         previous.apply_patch(patch).expect("valid append patch");
         assert_eq!(previous, current);
         assert!(!Arc::ptr_eq(&previous.dictionary, &previous_dictionary));
+    }
+
+    #[test]
+    fn row_differences_are_found_at_every_offset() {
+        for len in [0_usize, 1, 7, 8, 9, 16, 17, 180] {
+            let row = vec![PackedCell::new(u32::from('a'), 0, CellWidth::Narrow); len];
+            assert_eq!(first_difference(&row, &row), None);
+            assert_eq!(last_difference(&row, &row), None);
+            for (first, last) in
+                (0..len).flat_map(|first| (first..len).map(move |last| (first, last)))
+            {
+                let mut changed = row.clone();
+                changed[first] = PackedCell::new(u32::from('b'), 0, CellWidth::Narrow);
+                changed[last] = PackedCell::new(u32::from('a'), 0, CellWidth::Wide);
+                assert_eq!(
+                    first_difference(&row, &changed),
+                    Some(first),
+                    "{len} {first} {last}"
+                );
+                assert_eq!(
+                    last_difference(&row, &changed),
+                    Some(last),
+                    "{len} {first} {last}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn patches_carry_changed_spans_and_widen_to_whole_rows() {
+        let mut previous = TerminalViewport::blank(8, 2, SessionStatus::Running);
+        previous.generation = 1;
+        let cells = Arc::make_mut(&mut previous.cells);
+        for (column, glyph) in "abcdefgh".chars().enumerate() {
+            cells[column] = PackedCell::new(u32::from(glyph), 0, CellWidth::Narrow);
+        }
+        cells[8] = PackedCell::new(u32::from('z'), 0, CellWidth::Narrow);
+        let mut current = previous.clone();
+        current.generation = 2;
+        current.view_generation = 2;
+        let cells = Arc::make_mut(&mut current.cells);
+        cells[3] = PackedCell::new(u32::from('X'), 0, CellWidth::Narrow);
+        cells[4] = PackedCell::new(u32::from('Y'), 0, CellWidth::Narrow);
+        cells[6..8].fill(PackedCell::EMPTY);
+        cells[8] = PackedCell::EMPTY;
+
+        let patch = TerminalViewport::diff(&previous, &current).expect("compatible frames");
+        assert_eq!(
+            patch.changed_rows.spans(),
+            [
+                TerminalPatchSpan {
+                    row: 0,
+                    start: 3,
+                    len: 3,
+                    clear: true,
+                },
+                TerminalPatchSpan {
+                    row: 1,
+                    start: 0,
+                    len: 0,
+                    clear: true,
+                },
+            ]
+        );
+        assert_eq!(patch.fields, TerminalPatchFields::ROWS);
+        let mut applied = previous.clone();
+        applied
+            .apply_patch(patch.clone())
+            .expect("span patch applies");
+        assert_eq!(applied, current);
+
+        let mut widened = patch;
+        widened.widen_to_rows(&current);
+        assert!(
+            widened
+                .changed_rows
+                .spans()
+                .iter()
+                .all(|span| span.covers_row(8))
+        );
+        assert_eq!(widened.changed_rows.cells().len(), 6);
+        let mut applied = previous.clone();
+        applied.apply_patch(widened).expect("widened patch applies");
+        assert_eq!(applied, current);
     }
 
     #[test]

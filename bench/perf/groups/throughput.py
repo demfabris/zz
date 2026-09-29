@@ -1,7 +1,9 @@
 import fcntl
+import json
 import os
 import pty
 import struct
+import subprocess
 import termios
 import time
 
@@ -95,10 +97,44 @@ def attached(ctx, path, runs):
         clients[mux.name].detach(mux.detach_keys)
 
 
+def headless(ctx, path, runs):
+    binary = os.path.abspath(ctx.args.headless) if ctx.args.headless else None
+    if not binary or not os.access(binary, os.X_OK):
+        print(f"[throughput] no headless client at {binary}; cargo build --release -p zz-client --example perf_client", flush=True)
+        return
+    zz = ctx.zz
+    ctx.session(zz, "th", 180, 50)
+    time.sleep(0.5)
+    client = subprocess.Popen([binary, zz.socket, "th", "180", "51"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=zz.env)
+    ms = []
+    stats = {}
+    try:
+        time.sleep(0.5)
+        for i in range(runs):
+            out = ctx.env.path(f"tph-{i}.txt")
+            zz.run("new-window", "-t", "th:", ctx.pane("timer.py", path, out), check=True)
+            seconds = read_seconds(out, 300)
+            if seconds:
+                ms.append(seconds * 1000)
+            zz.run("kill-window", "-t", "th:1")
+            time.sleep(0.5)
+        client.stdin.close()
+        stats = json.loads(client.stdout.read() or "{}")
+    finally:
+        if client.poll() is None:
+            client.kill()
+        client.wait()
+    note = "zz only: the same file shown to a headless client that decodes and applies every frame with the zz-client core and renders nothing"
+    if stats:
+        note += f"; frames: {stats.get('fulls', 0)} full, {stats.get('patches', 0)} patches, {stats.get('full_requests', 0)} full requests"
+    ctx.add("throughput.headless.ascii_ms", "ms", "throughput", ms, None, note)
+
+
 def run(ctx):
     runs = ctx.pick(3, 1)
     ascii_path = fixtures.fixture("ascii", 150)
     detached(ctx, "ascii", ascii_path, runs)
+    headless(ctx, ascii_path, runs)
     if not ctx.quick:
         detached(ctx, "unicode", fixtures.fixture("unicode", 150), runs)
         attached(ctx, ascii_path, runs)

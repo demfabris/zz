@@ -2396,6 +2396,79 @@ mod tests {
         assert!(PendingPaint::Frames < PendingPaint::Repaint);
     }
 
+    fn with_row_text(viewport: &TerminalViewport, row: u16, text: &str) -> TerminalViewport {
+        let mut viewport = viewport.clone();
+        let mut cells = viewport.cells.to_vec();
+        let start = usize::from(row) * usize::from(viewport.columns);
+        for (offset, glyph) in text.chars().enumerate() {
+            cells[start + offset] =
+                zz_terminal::PackedCell::new(u32::from(glyph), 0, zz_terminal::CellWidth::Narrow);
+        }
+        viewport.cells = Arc::from(cells);
+        viewport
+    }
+
+    #[test]
+    fn a_drained_run_of_frames_paints_every_row_any_of_them_changed() {
+        let (mut model, pane) = paned_model();
+        let mut snapshot = (*model.snapshot).clone();
+        snapshot.generation = 2;
+        snapshot.sessions[0].windows[0].panes.insert(
+            pane,
+            zz_protocol::PaneSnapshot {
+                id: pane,
+                title: "shell".to_owned(),
+                kind: zz_protocol::PaneKindSnapshot::Terminal,
+                synchronized_input: false,
+                bell: false,
+                dead: false,
+                dead_status: None,
+                border_colour: None,
+                active_border_colour: None,
+                border_status_text: String::new(),
+                mode: None,
+            },
+        );
+        model.update_snapshot(Arc::new(snapshot));
+        let content = model.layout.panes[0].content();
+        let prompt = with_row_text(
+            &TerminalViewport::blank(
+                content.width,
+                content.height,
+                zz_terminal::SessionStatus::Running,
+            ),
+            1,
+            "$",
+        );
+        model.viewports.insert(pane, prompt.clone());
+        let (send, receive) = mpsc::channel();
+        let mut renderer = Renderer::with_sink(Box::new(move |bytes| {
+            send.send(bytes.to_vec()).expect("paint receiver");
+            Ok(())
+        }));
+        let wait = Duration::from_secs(5);
+        renderer.paint(&model, true).expect("attach paint");
+        receive.recv_timeout(wait).expect("attach paint written");
+
+        let inbox = FrameInbox::default();
+        let (events, _incoming) = mpsc::channel();
+        let typed = with_row_text(&prompt, 1, "$ printf 'MARK-%s' split");
+        inbox.publish(pane, typed.clone(), FrameDamage::Rows(vec![1]), 7, &events);
+        take_frames(&inbox, &mut model, &mut renderer);
+        let answered = with_row_text(&with_row_text(&typed, 2, "MARK-split"), 3, "$");
+        inbox.publish(pane, answered, FrameDamage::Rows(vec![2, 3]), 7, &events);
+        take_frames(&inbox, &mut model, &mut renderer);
+        renderer.paint_frames(&model).expect("drained paint");
+
+        let painted = String::from_utf8(receive.recv_timeout(wait).expect("drained paint written"))
+            .expect("paint is UTF-8");
+        assert!(
+            painted.contains("$ printf 'MARK-%s' split"),
+            "the row only the first frame changed reaches the tty: {painted:?}"
+        );
+        assert!(painted.contains("MARK-split"), "{painted:?}");
+    }
+
     #[test]
     #[cfg(unix)]
     fn signal_reader_delivers_suspend_and_resume() {

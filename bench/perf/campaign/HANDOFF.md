@@ -144,7 +144,9 @@ Lanes in flight:
 | Lane | Where | State |
 |---|---|---|
 | W1-ATTACH | was `~/dev/zz-attach`, `perf/attach` | merged 2026-09-29 as `ce1b34cd` (w1-6), worktree and branch removed; reports in `~/.cache/zz-perf/attach/` (`report.md`, `merge-report.md`), statuses in `attach-review.json` |
-| W1-LINUX-PAGES | `~/dev/ghostty-zz` branch `zz/pagelist-reuse` (local clone of the fork) + `~/dev/zz-pages` `perf/linux-pages` | agent running from `~/.cache/zz-perf/prompts/pagelist.md`. Needs an owner push of the fork branch and a `GHOSTTY_COMMIT` bump before it can merge |
+| W1-LINUX-PAGES | fork: `~/dev/ghostty-zz` branch `zz/pagelist-reuse`, commit `713374af` (local clone, **not pushed**) | zz side merged (`0e590636`: memchr escape scan, doc note). The fork fix (detached ASCII 85 -> 120-134 MB/s, unicode 45 -> 91, actor 98% -> 30% CPU) lands once the owner OKs `git -C ~/dev/ghostty-zz push origin zz/pagelist-reuse:zz-2026-09-29` and the `GHOSTTY_COMMIT` bump (files to touch in `~/.cache/zz-perf/pages/report.md`); then one Mac gate `--only throughput,mem` for the Darwin trim path |
+| W1-ATTACH-PAINT | was `~/dev/zz-attach-paint`, `perf/attach-paint` | merged `aaaa8195`: `Renderer::note_frame` merged, instead of replacing, a pane's unpainted damage when a drain took a second frame; regression test in zz-tui app.rs |
+| W2-HOOKS | `~/dev/zz-hooks`, `perf/hooks` (branched from perf/wave1 `0e590636`) | implementer running from `~/.cache/zz-perf/prompts/hooks-impl.md`; reviews, fix and merge into perf/wave2 follow |
 
 ## Owner decisions (binding)
 
@@ -164,13 +166,17 @@ Lanes in flight:
 - **`9eb5888b` (gap registry close): kept.** The behaviour it records is real and tested.
 - **Ghostty fork: nothing is pushed.** Fork fixes are developed on a local clone and wait for the
   owner to push the branch and bump `GHOSTTY_COMMIT`.
-- **Echo rows at wave 1: decided at the wave-1 exit**, after W1-ATTACH lands, from the Linux
-  numbers. They are not relaxed quietly: any change goes into `thresholds.json`, the Targets
-  table and this file with its reason.
-- **Mac-calibrated rules on Linux: decided at the wave-1 exit.** Absolute ms and MiB rules and the
-  4x throughput ratio were set on the M4 Max; where tmux itself misses them here (config replay,
-  throughput ceiling), a Linux override derived from the same multiple of tmux replaces them,
-  recorded in `thresholds.json`. Ratio rules are unchanged.
+- **Echo rows move from wave 1 to wave 3** (unchanged 1.5x tmux). No wave-1 lane owned the
+  remaining hops; W1-ATTACH left echo unchanged against its pre-merge binary (2.0-3.0x tmux on
+  Linux). W3-SHARDS, W3-LOOP and W4-DELIVER remove those hops. In `thresholds.json`, the Targets
+  table and its notes.
+- **Mac-calibrated rules on other hosts: scaled, not overridden.** `thresholds.json` names the
+  macOS W0 as `reference`; elsewhere `abs` rules of kind `cpu`/`wall` keep their multiple of the
+  reference tmux and `mem` rules keep their margin over it (`abs@ratio`, `abs@plus` in the
+  checks). The throughput rules also pass at 85% of a pty ceiling measured in the same run
+  (`throughput.ceiling.*`). Counts, bytes, threads and ratio rules are unchanged. Rescored this
+  way, w1-6 reads 59 pass, 7 fail (spawn CPU x3, `chatty.cpu_pct.visible`, `mem.threads.p20`,
+  both throughput rows, whose ceiling pass needs the unpushed PageList fork fix).
 
 ## Next steps, in order
 
@@ -328,7 +334,19 @@ W3), `chatty.cpu_pct.visible` (W2-TERM, W4), `mem.threads.p20` 66 (W3-SHARDS), t
 (no wave-1 owner, same on the pre-merge binary in an A/B), `throughput.detached.ascii` (Linux
 ceiling, W1-LINUX-PAGES) and `throughput.attached.ascii_ms` 0.53x (rule 0.25x).
 
-### 7. Wave-1 exit
+### 7. Wave-1 exit (done on Linux 2026-09-29, `wave1-alienware-aaaa8195.json`)
+
+Strict, full, quiet (load 1.4-1.5): 59 pass, 7 fail, 0 drifted; the 10 regressed rows are cpu/wall
+kinds whose tmux moved the same way (this laptop flips between a fast and a slow power state, and
+cold-start samples are bimodal, 4-5 ms and 13-15 ms, for both muxes); instructions, bytes,
+memory and threads did not regress. Failing rows and owners: `spawn.cpu.split_empty_P`,
+`spawn.cpu.new_window` (about 2x tmux in kernel time; W3), `cold.wall.new_session` (bimodal noise:
+two reruns pass at 0.68-0.83x tmux), `chatty.cpu_pct.visible` 2.5x (W2-TERM, W4),
+`mem.threads.p20` 66 (the per-pane Linux gather thread; W3-SHARDS), both throughput rows (pass
+the ceiling rule only with the unpushed PageList fork fix). `tui-screen-diff.sh`: 147/147 in three
+release runs and one debug run after W1-ATTACH-PAINT; `attached-client.sh` passes. The Mac strict
+run (`wave1-macbook-<sha8>.json`) is still owed by the owner.
+
 
 On a quiet machine: `just perf-gate wave1 --strict --baseline <w1-6 JSON> --json
 bench/perf/results/wave1-<host>-<sha8>.json`, plus `compat/tui-screen-diff.sh` and
@@ -336,7 +354,7 @@ bench/perf/results/wave1-<host>-<sha8>.json`, plus `compat/tui-screen-diff.sh` a
 could blank a pane). Settle the echo decision first. The owner runs the same strict gate once on
 the Mac for `wave1-macbook-<sha8>.json`.
 
-### 8. Merge `perf/wave1` into `main`
+### 8. Merge `perf/wave1` into `main` (done 2026-09-29, `1e0bfc6a`, local only)
 
 `git merge --no-ff perf/wave1` in a main worktree nobody else is using. Then remove
 `~/dev/zz-perf-int`. Do not push unless the owner says so; do not tag (freeze).
@@ -383,6 +401,15 @@ Rule: every wave exit gets one `--strict` gate run on the Mac, committed as
 
 ## Orchestration that worked
 
+- Linux leg: lanes run as Agent-tool subagents from brief files generated by
+  `~/.cache/zz-perf/prompts/gen.py` (impl, parity and perf reviews, fix, merge); reports go to
+  `~/.cache/zz-perf/<slug>/`. `~/.cache/zz-perf/quiet-gate.sh` pauses other trees' compiles
+  (SIGSTOP, always resumed) while a gate or timing fixture runs. The integration worktree
+  `~/dev/zz-perf-int` stays put and switches branch per wave (`perf/wave2` from `main`).
+- Owner rule (2026-09-29): commit and merge finished work back to `main` right away; no ghost work
+  left in worktrees or side branches. After each wave-2 merge into `perf/wave2`, `main` is
+  fast-forwarded to it. Nothing is pushed without the owner.
+
 - One integration worktree (`~/dev/zz-perf-int`, branch `perf/waveN`), one worktree per lane (`~/dev/zz-<slug>`, branch `perf/<slug>`) from the integration head.
 - Per lane: implementer at `xhigh` effort, then a parity reviewer and a perf reviewer in parallel at `high`, then a fix agent at `high`. All return structured JSON (schemas in the script); keep those reports outside the repo, they are the resume point.
 - Merges strictly serial in the plan's order (wave 1 swapped FORMAT and PUBLISH, see above): merge the integration head into the lane, `--no-ff` into integration, fmt, clippy, workspace tests, `just compat-check`, full `compat/run.sh`, `compat/attached-client.sh`, then a full `--strict` gate JSON `w<wave>-<n>-<slug>-<host>-<sha8>.json` on a quiet host whose `--baseline` is the previous merge's JSON.
@@ -391,6 +418,16 @@ Rule: every wave exit gets one `--strict` gate run on the Mac, committed as
 - `scripts/wave1-resume.js` is the run that resumed wave 1 after the usage-limit cut, kept as the example of RESUME notes per lane (paths moved into constants, logic unchanged; its `execDone` line uses `&&` on a promise, so EXEC did not actually wait for PANE).
 
 ## Traps
+
+- **Stale paint slips past a single fixture run.** At the wave-1 exit, `compat/tui-screen-diff.sh`
+  on the release build showed 13-14 of 147 checkpoints with stale pane or status rows per run
+  (1-6 on a debug build; the pre-ATTACH release build matched all 147 every time), while the lane
+  had reported it green. `ZZ_PERF_TUI_COALESCE=0` clears it, so it sits in zz-tui's coalesced
+  paint path. Merge checks now run screen-diff three times on the release build (`gen.py`).
+  Fixed by W1-ATTACH-PAINT (`aaaa8195`). Under a concurrent cargo build a few `unzoom`
+  checkpoints can still differ on both the pre- and post-ATTACH builds: the daemon holds a stale
+  pane geometry after unzoom (likely a client size report landing after the layout change,
+  `InputMessage::ResizeTerminal` -> `set_pane_geometry` with no layout generation). Open bug below.
 
 - **Never `git stash`**, `reset --hard`, or path checkouts in a tree another session uses. To revert your own edit, re-edit. Keep the index empty.
 - **`isolation: worktree` fails** in this repo (`.claude -> .agents` is a committed symlink). Create worktrees by hand with `git worktree add`.
@@ -407,6 +444,7 @@ Rule: every wave exit gets one `--strict` gate run on the Mac, committed as
 
 | Bug | Where | Fix idea |
 |---|---|---|
+| Stale pane geometry after unzoom under load: a client's size report can land after the layout change | daemon `InputMessage::ResizeTerminal` -> `set_pane_geometry` | tag size reports with a layout generation and drop stale ones (protocol change; W2-CTRL or its own lane) |
 | Title race: the pane watcher can see a program's new title before `program_title_writes` moves, so a `select-pane -T` title then hides it until the next viewport publish | zz-terminal `run_terminal` publishes facts at the top of each pass, after the viewport; daemon `watch_terminal` | set facts right before `publish_active_views` |
 | `verify_claims_test.py` "unattributed: unbound variable" under bash 3.2 | `compat/tui/` | Mac-only; empty array under `set -u` |
 | `mode_keys_scope_visible_command_output_separately_from_underlying_copy_mode` takes 30.05 s alone and fails under load: the Escape never closes the output view, it closes when the window's `sleep 30` exits, just inside the test's 30 s wait (with `sleep 50` it fails at 30 s). Same on `a41b1fbf` | daemon.rs test and the command-output Escape path | find why the emacs-table Escape does not cancel the output view; then the test stops depending on the sleep |

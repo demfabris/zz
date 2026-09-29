@@ -23,6 +23,9 @@ THRESHOLDS = {
         "cli.cpu.display.p1": {"wave1": {"abs": 0.25}, "wave3": {"abs": 0.12}},
         "cli.wall.*": {"wave1": {"ratio": 1.1}},
         "tp.*": {"better": "higher", "baseline": {"ratio": 4.0, "vs_w0": 0.85}},
+        "throughput.detached.*": {"better": "higher", "baseline": {"ratio": 4.0, "ceiling": 0.85}},
+        "throughput.attached.ascii_ms": {"baseline": {"ratio": 0.25, "ceiling": 0.85}},
+        "mem.footprint.p1": {"wave1": {"abs": 6.5}},
         "cli.instr.noisy": {"tolerance": {"factor": 1.5}},
     },
 }
@@ -161,6 +164,31 @@ class ShippedThresholdsTest(unittest.TestCase):
             if not gate.rule_for(gate.find_entry(self.shipped, m["id"]), "final"):
                 missing.append(m["id"])
         self.assertEqual(missing, [], "add a final rule or list these under report_only")
+
+    def test_abs_rules_keep_their_multiple_of_tmux_off_the_reference_host(self):
+        scaled = dict(THRESHOLDS, reference={"host": "macbook", "scale": {"cpu": "ratio", "mem": "plus"}})
+        reference = {"cli.cpu.display.p1": {"tmux": {"median": 0.1}}, "mem.footprint.p1": {"tmux": {"median": 2.7}}}
+        m = gate.evaluate(metric("cli.cpu.display.p1", "cpu", 0.4, 0.2), scaled, "wave1", reference=reference)
+        self.assertEqual(m["verdict"], "pass")
+        self.assertEqual(m["checks"], [{"kind": "abs@ratio", "bound": 0.5, "ok": True}])
+        m = gate.evaluate(metric("mem.footprint.p1", "mem", 5.0, 0.9), scaled, "wave1", reference=reference)
+        self.assertEqual(m["checks"][0]["bound"], 4.7)
+        self.assertEqual(m["verdict"], "fail")
+        m = gate.evaluate(metric("cli.cpu.display.p1", "cpu", 0.4, 0.2), scaled, "wave1")
+        self.assertEqual(m["verdict"], "fail")
+
+    def test_throughput_passes_near_the_host_ceiling_when_the_ratio_is_out_of_reach(self):
+        run = {"throughput.ceiling.ascii": {"zz": {"median": 130.0}}, "throughput.ceiling.ascii_ms": {"zz": {"median": 1200.0}}}
+        m = gate.evaluate(metric("throughput.detached.ascii", "throughput", 120.0, 50.0), THRESHOLDS, "baseline", run=run)
+        self.assertEqual((m["verdict"], m["checks"][0]["kind"]), ("pass", "ceiling"))
+        m = gate.evaluate(metric("throughput.detached.ascii", "throughput", 90.0, 50.0), THRESHOLDS, "baseline", run=run)
+        self.assertEqual(m["verdict"], "fail")
+        m = gate.evaluate(metric("throughput.detached.ascii", "throughput", 210.0, 50.0), THRESHOLDS, "baseline", run=run)
+        self.assertEqual((m["verdict"], m["checks"][0]["kind"]), ("pass", "ratio"))
+        m = gate.evaluate(metric("throughput.attached.ascii_ms", "throughput", 1300.0, 3300.0), THRESHOLDS, "baseline", run=run)
+        self.assertEqual(m["verdict"], "pass")
+        m = gate.evaluate(metric("throughput.detached.ascii", "throughput", 120.0, 50.0), THRESHOLDS, "baseline")
+        self.assertEqual(m["verdict"], "fail")
 
 
 class TmuxChoiceTest(unittest.TestCase):

@@ -259,14 +259,14 @@ instead (see Waves and merge order).
 | `attach.wire_s2c.p1` | B | - | 257146 |  | <= 133120 B | <= 8192 B |  |  |
 | `attach.conns.p4` | count | - | 4 |  | <= 2 | <= 1 |  |  |
 | `attach.wire_s2c.p4` | B | - | 239976 |  | <= 133120 B | <= 8192 B |  |  |
-| `echo.p50.idle` | ms | 0.0728 | 0.262 |  | <= 1.5x |  |  |  |
-| `echo.p99.idle` | ms | 0.158 | 0.489 |  | <= 1.5x |  |  |  |
-| `echo.p50.busy30` | ms | 0.0715 | 6.38 |  | <= 1.5x |  |  |  |
-| `echo.p99.busy30` | ms | 0.162 | 18.5 |  | <= 1.5x |  |  |  |
+| `echo.p50.idle` | ms | 0.0728 | 0.262 |  |  |  | <= 1.5x |  |
+| `echo.p99.idle` | ms | 0.158 | 0.489 |  |  |  | <= 1.5x |  |
+| `echo.p50.busy30` | ms | 0.0715 | 6.38 |  |  |  | <= 1.5x |  |
+| `echo.p99.busy30` | ms | 0.162 | 18.5 |  |  |  | <= 1.5x |  |
 | `echo.wire_bytes.idle` | B | - | 1133 |  | <= 1700 B | <= 64 B |  |  |
-| `throughput.detached.ascii` | MB/s | 49.2 | 244.9 | >= 4x, >= 0.85x W0 |  |  |  |  |
-| `throughput.detached.unicode` | MB/s | 9.9 | 103.4 | >= 4x, >= 0.85x W0 |  |  |  |  |
-| `throughput.attached.ascii_ms` | ms | 3821 | 630.7 | <= 0.25x, <= 1.18x W0 |  |  |  |  |
+| `throughput.detached.ascii` | MB/s | 49.2 | 244.9 | >= 4x or >= 0.85x the pty ceiling, >= 0.85x W0 |  |  |  |  |
+| `throughput.detached.unicode` | MB/s | 9.9 | 103.4 | >= 4x or >= 0.85x the pty ceiling, >= 0.85x W0 |  |  |  |  |
+| `throughput.attached.ascii_ms` | ms | 3821 | 630.7 | <= 0.25x or <= the pty ceiling's time / 0.85, <= 1.18x W0 |  |  |  |  |
 | `control.latency` | ms | 0.0201 | 0.549 |  |  | <= 1.2x |  | <= 1.1x |
 | `control.cpu_per_cmd` | ms | 0.0141 | 0.536 |  |  | <= 1.5x or <= tmux + 0.1 ms |  | <= 1.2x or <= tmux + 0.03 ms |
 | `control.burst_cmds_per_s` | cmd/s | 183136 | 1863 |  |  | >= 0.8x |  | >= 0.9x |
@@ -275,6 +275,22 @@ instead (see Waves and merge order).
 | `statusjob.threads_per_s` | 1/s | 0 | 3 |  |  |  | <= 0.5/s |  |
 
 Notes on the rules:
+
+- Other hosts (2026-09-29, Linux leg). The rules above were set against the macOS reference host
+  (`reference` in `thresholds.json`). On any other host the gate keeps each absolute rule's
+  distance from tmux instead of its number: `cpu` and `wall` rules keep their multiple of the
+  reference W0's tmux median (this Linux laptop runs tmux 1.3-2.8x slower than the M4 Max), and
+  `mem` rules keep their margin over it (footprint definitions differ by a fixed per-process
+  amount: tmux is 2.7 MiB on macOS and 0.95 MiB on Linux). The check is labelled `abs@ratio` or
+  `abs@plus` with the bound used. Counts, bytes, threads and ratio rules are the same everywhere.
+- Throughput rules also pass at 85% of the host's pty ceiling (`throughput.ceiling.*`: a bare
+  reader of the same `cat` through a cooked 180x50 pty, measured in the same run), for hosts where
+  4x tmux is above what the kernel lets any reader do: on Linux the cooked tty caps a reader near
+  135 MB/s while tmux does 50, so 4x would need 200. On macOS 4x tmux stays the bar.
+- Echo latency moved from wave 1 to wave 3 on 2026-09-29: no wave-1 lane owned the remaining
+  hops (client reader, actor, watcher, mailbox writer, the `inner` lock in
+  `publish_terminal_for_pane`), which W3-SHARDS, W3-LOOP and W4-DELIVER remove. The rule itself
+  (1.5x tmux) is unchanged.
 
 - `cli.wall.display.p1` <= 1.10x at W1 comes from Exec alone; no process spawn saving is claimed.
 - `spawn.cpu.kill_pane` is staged: 0.8 ms at W1, 0.4 ms after W2-HOOKS, tmux + 0.1 ms after
@@ -1867,6 +1883,20 @@ and 344894 -> 1435 B at p4 (tmux 3655); `attach.instr` 15.8 -> 10.7 and 16.3 -> 
 this lane. The footprint rows moved with the THP fix, not this lane (the pre-merge binary reads
 the same). An A/B against the pre-merge binary shows no change in `spawn.instr.*`,
 `chatty.instr_per_s.*` or the echo rows (p50 idle 1.94-1.96 vs 1.97-1.99 ms, tmux 0.83-0.91).
+
+Stale-paint fix (W1-ATTACH-PAINT, `perf/attach-paint`, Linux, 2026-09-29): at the wave-1 exit
+`tui-screen-diff.sh` found 13-14 of 147 checkpoints with a stale pane row per release run. Cause:
+a drained run of events can take the frame inbox more than once before it paints, and
+`Renderer::note_frame` replaced the damage still pending for a pane, so a row that only the
+earlier frame changed was never written (before the drain every take was painted at once). Fix:
+`note_frame` folds the new damage into the pending damage with `merge_damage`, as
+`FrameInbox::publish` already did; zz-tui test
+`a_drained_run_of_frames_paints_every_row_any_of_them_changed`. After it screen-diff matched 147
+of 147 in 5 release and 3 debug runs, and the attach and chatty gate reads the same (504 B at p1,
+2 connections, 0.30 KiB/s hidden). Under a concurrent cargo build, `unzoom` at 80x10 and 80x6 can
+still differ, the same way on the pre-ATTACH build: the daemon's own `list-panes` shows the wrong
+geometry (a window one row short, a hidden pane left at an old size), so that one is a daemon-side
+resize race and not a paint.
 
 ## W2-TERM: PaneFrame terminal lane (effort L)
 

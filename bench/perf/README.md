@@ -202,10 +202,22 @@ it carries its own later stages. A stage uses the latest rule at or before
 it, so `wave2` inherits `wave1` unless it has its own. A rule holds any of
 `abs` (bound on zz), `ratio` (zz <= ratio x tmux + `slack`), `plus` (zz <=
 tmux + plus) and `vs_w0` (zz <= factor x the W0 zz); all must hold unless
-`combine` is `any`. For `better: higher` metrics the comparisons flip.
+`combine` is `any`. For `better: higher` metrics the comparisons flip. A rule
+with `ceiling` (the throughput rules) also passes when zz is within that
+fraction of the host's pty ceiling, `throughput.ceiling.*` in the same run: a
+bare Python reader of the same `cat` through a cooked 180x50 pty. It exists
+because a Linux cooked tty caps any reader near 135 MB/s, below 4x tmux.
 
-The baseline stage records only, except the throughput rules (>= 4x tmux and
->= 0.85x W0 detached; attached <= 0.25x tmux and <= 1.18x W0). `report_only`
+`reference` names the host the absolute rules were set on (the macOS W0). On
+any other host, `abs` rules of kind `cpu` and `wall` keep their multiple of the
+reference W0's tmux median (`abs@ratio`: bound = abs x tmux here / tmux there)
+and `mem` rules keep their margin over it (`abs@plus`: bound = abs - tmux there
++ tmux here); other kinds, and every `ratio`, `plus` and `vs_w0` rule, are the
+same everywhere. `meta.reference` records the file used.
+
+The baseline stage records only, except the throughput rules (>= 4x tmux or
+>= 0.85x the pty ceiling, and >= 0.85x W0 detached; attached <= 0.25x tmux or
+the ceiling's time / 0.85, and <= 1.18x W0). `report_only`
 lists the metrics that never gate: `cli.wall.version.p1` (process spawn
 floor), `cold.infocmp_forks`, `attach.wire_frames.*`, `attach.wire_c2s.*`,
 `echo.wire_bytes.busy30` (includes the ticker) and `statusjob.tty_kibps`.
@@ -231,7 +243,7 @@ or `s20` (20 sessions).
 | mem | `mem.footprint.<p>`, `mem.rss.<p>`, `mem.threads.<p>` | `p1`, `p20` (idle shells), `tui20` (p20 with a TUI attached), `scroll180` and `scroll80` (20 panes with history-limit 10000 filled by `seq 1 12000`, sampled 5 s after the fill) |
 | attach | `attach.ttfc.<p>`, `attach.tty_total.<p>`, `attach.tty_bytes.<p>`, `attach.cpu.<p>`, `attach.instr.<p>`, `attach.conns.<p>`, `attach.wire_s2c.<p>`, `attach.wire_frames.<p>`, `attach.wire_c2s.<p>` | TUI attach in a 180x50 pty. `p1`: a pane showing a marker; `p4`: four tiled panes with markers. Time from fork to all markers on the tty; `tty_total` is every tty byte until the output has been quiet for 200 ms (gated); `tty_bytes` is the bytes up to the last marker (info, it depends on draw order); daemon CPU per attach+detach. Through the proxy (zz only): connections, bytes and frames from spawn to 1 s after content |
 | echo | `echo.p50.<v>`, `echo.p99.<v>`, `echo.wire_bytes.<v>` | keystroke written to the outer pty until its echo comes back, through an attached TUI, with a raw-mode echo program in the pane and status off. The pane answers key N with `§` and N as three digits, and the gate looks for that token in the tty bytes with escape sequences removed, so an SGR `m` or a redraw split across a scroll cannot pass for the echo. `idle`, and `busy30` where the same pane prints a line 30 times a second. Keys are 20 to 50 ms apart. Wire bytes per keystroke through the proxy (zz only) |
-| throughput | `throughput.detached.ascii`, `throughput.detached.unicode`, `throughput.attached.ascii_ms`, `throughput.attached.tty_bytes` | `/bin/cat` of a 150 MiB seeded fixture in a detached 180x50 pane, timed inside the pane; MB/s. The attached run shows the same file in the window a TUI is looking at |
+| throughput | `throughput.detached.ascii`, `throughput.detached.unicode`, `throughput.attached.ascii_ms`, `throughput.attached.tty_bytes`, `throughput.ceiling.ascii`, `throughput.ceiling.unicode`, `throughput.ceiling.ascii_ms` | `/bin/cat` of a 150 MiB seeded fixture in a detached 180x50 pane, timed inside the pane; MB/s. The attached run shows the same file in the window a TUI is looking at. The ceiling rows are a bare reader of the same `cat` through a cooked 180x50 pty, once per run before the muxes (its rate sits in the `zz` column); `ascii_ms` is that rate as the time to read the file |
 | control | `control.latency`, `control.cpu_per_cmd`, `control.instr_per_cmd`, `control.burst_cmds_per_s`, `control.output_mbps`, `control.output_bytes_per_byte` | `-C attach` over pipes: one `display-message -p x` at a time until `%end`, then 200 at once; `%output` throughput for a 16 MiB cat from the first `%output` line to a done marker (pane spawn time is not counted), and control bytes per pane byte |
 | statusjob | `statusjob.cpu_pct`, `statusjob.instr_per_s`, `statusjob.threads_per_s`, `statusjob.child_cpu_pct`, `statusjob.tty_kibps` | three `#()` jobs in status-right at status-interval 1 with a TUI attached. Threads per second counts new thread ids seen by a 2 ms sampler, a lower bound for short-lived threads |
 

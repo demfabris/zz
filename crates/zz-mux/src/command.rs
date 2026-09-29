@@ -10,7 +10,7 @@ pub use switch_mode::{SwitchAction, SwitchMode};
 
 use std::{
     cmp::Ordering,
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     fmt::{self, Write as _},
     path::{Path, PathBuf},
     str::FromStr as _,
@@ -2049,6 +2049,7 @@ impl CommandAliasResolution {
 #[derive(Debug)]
 pub struct MuxEngine {
     pub state: MuxState,
+    swept_generation: u64,
     pub keys: KeyTables,
     global_mode_keys: ModeKeys,
     window_mode_keys: BTreeMap<WindowId, ModeKeys>,
@@ -2357,6 +2358,7 @@ impl Default for MuxEngine {
     fn default() -> Self {
         Self {
             state: MuxState::default(),
+            swept_generation: 0,
             keys: KeyTables::default(),
             global_mode_keys: ModeKeys::default(),
             window_mode_keys: BTreeMap::new(),
@@ -5187,82 +5189,83 @@ impl MuxEngine {
         if self.state.generation() != generation {
             execution.effects.push(MuxEffect::SnapshotChanged);
         }
-        self.session_history_limits
-            .retain(|session, _| self.state.sessions.contains_key(session));
-        self.session_base_indices
-            .retain(|session, _| self.state.sessions.contains_key(session));
-        self.session_renumber_windows
-            .retain(|session, _| self.state.sessions.contains_key(session));
-        self.session_word_separators
-            .retain(|session, _| self.state.sessions.contains_key(session));
-        self.session_mouse
-            .retain(|session, _| self.state.sessions.contains_key(session));
-        self.session_display_time_ms
-            .retain(|session, _| self.state.sessions.contains_key(session));
-        self.session_initial_repeat_time_ms
-            .retain(|session, _| self.state.sessions.contains_key(session));
-        self.session_repeat_time_ms
-            .retain(|session, _| self.state.sessions.contains_key(session));
-        self.session_options
-            .retain(|session, _| self.state.sessions.contains_key(session));
-        self.session_default_commands
-            .retain(|session, _| self.state.sessions.contains_key(session));
-        self.session_default_shells
-            .retain(|session, _| self.state.sessions.contains_key(session));
-        self.session_lock_commands
-            .retain(|session, _| self.state.sessions.contains_key(session));
-        self.session_lock_after_times
-            .retain(|session, _| self.state.sessions.contains_key(session));
-        self.session_user_options
-            .retain(|session, _| self.state.sessions.contains_key(session));
-        self.session_hooks
-            .retain(|session, _| self.state.sessions.contains_key(session));
-        self.window_user_options
-            .retain(|window, _| self.state.windows.contains_key(window));
-        self.window_options
-            .retain(|window, _| self.state.windows.contains_key(window));
-        self.window_pane_options
-            .retain(|window, _| self.state.windows.contains_key(window));
-        self.window_hooks
-            .retain(|window, _| self.state.windows.contains_key(window));
-        self.pane_user_options
-            .retain(|pane, _| self.state.pane(*pane).is_some());
-        self.pane_options
-            .retain(|pane, _| self.state.pane(*pane).is_some());
-        self.pane_hooks
-            .retain(|pane, _| self.state.pane(*pane).is_some());
-        self.pane_start_commands
-            .retain(|pane, _| self.state.pane(*pane).is_some());
-        self.session_environments
-            .retain(|session, _| self.state.sessions.contains_key(session));
-        self.window_mode_keys
-            .retain(|window, _| self.state.windows.contains_key(window));
-        self.window_automatic_rename_formats
-            .retain(|window, _| self.state.windows.contains_key(window));
-        self.window_remain_on_exit
-            .retain(|window, _| self.state.windows.contains_key(window));
-        self.window_popup_styles
-            .retain(|window, _| self.state.windows.contains_key(window));
-        self.window_popup_border_styles
-            .retain(|window, _| self.state.windows.contains_key(window));
-        self.window_popup_border_lines
-            .retain(|window, _| self.state.windows.contains_key(window));
-        self.window_menu_styles
-            .retain(|window, _| self.state.windows.contains_key(window));
-        self.window_menu_selected_styles
-            .retain(|window, _| self.state.windows.contains_key(window));
-        self.window_menu_border_styles
-            .retain(|window, _| self.state.windows.contains_key(window));
-        self.window_menu_border_lines
-            .retain(|window, _| self.state.windows.contains_key(window));
-        self.window_pane_base_indices
-            .retain(|window, _| self.state.windows.contains_key(window));
-        self.pane_runtime_facts
-            .retain(|pane, _| self.state.pane(*pane).is_some());
-        self.pane_remain_on_exit
-            .retain(|pane, _| self.state.pane(*pane).is_some());
+        if self.state.generation() != self.swept_generation {
+            self.swept_generation = self.state.generation();
+            self.retain_live_entries();
+        } else if cfg!(debug_assertions) {
+            assert!(
+                !self.retain_live_entries(),
+                "{name} left an entry for a removed session, window or pane without moving the generation"
+            );
+        }
         self.repair_context(context);
         Ok(execution)
+    }
+
+    fn retain_live_entries(&mut self) -> bool {
+        let mut removed = false;
+        let sessions = &self.state.sessions;
+        let windows = &self.state.windows;
+        let panes = windows
+            .values()
+            .flat_map(|window| window.panes.keys().copied())
+            .collect::<HashSet<_>>();
+        macro_rules! retain_live {
+            ($live:expr; $($map:ident),+ $(,)?) => {
+                $(
+                    let before = self.$map.len();
+                    self.$map.retain(|key, _| $live(key));
+                    removed |= self.$map.len() != before;
+                )+
+            };
+        }
+        retain_live!(
+            |session| sessions.contains_key(session);
+            session_history_limits,
+            session_base_indices,
+            session_renumber_windows,
+            session_word_separators,
+            session_mouse,
+            session_display_time_ms,
+            session_initial_repeat_time_ms,
+            session_repeat_time_ms,
+            session_options,
+            session_default_commands,
+            session_default_shells,
+            session_lock_commands,
+            session_lock_after_times,
+            session_user_options,
+            session_hooks,
+            session_environments,
+        );
+        retain_live!(
+            |window| windows.contains_key(window);
+            window_user_options,
+            window_options,
+            window_pane_options,
+            window_hooks,
+            window_mode_keys,
+            window_automatic_rename_formats,
+            window_remain_on_exit,
+            window_popup_styles,
+            window_popup_border_styles,
+            window_popup_border_lines,
+            window_menu_styles,
+            window_menu_selected_styles,
+            window_menu_border_styles,
+            window_menu_border_lines,
+            window_pane_base_indices,
+        );
+        retain_live!(
+            |pane| panes.contains(pane);
+            pane_user_options,
+            pane_options,
+            pane_hooks,
+            pane_start_commands,
+            pane_runtime_facts,
+            pane_remain_on_exit,
+        );
+        removed
     }
 
     fn new_session(

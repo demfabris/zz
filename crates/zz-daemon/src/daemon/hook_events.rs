@@ -99,6 +99,10 @@ impl HookScope {
         }
     }
 
+    pub(super) fn change_window(&self) -> Option<&ChangeWindow> {
+        self.window.as_ref()
+    }
+
     pub(super) fn changes<'a>(&self, engine: &'a MuxEngine) -> Option<JournalChanges<'a>> {
         self.window
             .as_ref()
@@ -882,11 +886,19 @@ pub(super) struct FocusProbeScope {
 
 impl FocusProbeScope {
     pub(super) fn open(inner: &mut ServerState) -> Self {
+        Self::open_within(inner, None)
+    }
+
+    pub(super) fn open_within(inner: &mut ServerState, window: Option<&ChangeWindow>) -> Self {
         if *HOOK_JOURNAL {
             Self {
                 probe: capture_client_focus_probe(inner),
                 full: cfg!(debug_assertions).then(|| capture_pane_focus_probe(inner)),
-                window: Some(inner.engine.state.open_change_window()),
+                window: Some(
+                    window
+                        .cloned()
+                        .unwrap_or_else(|| inner.engine.state.open_change_window()),
+                ),
             }
         } else {
             Self {
@@ -895,6 +907,32 @@ impl FocusProbeScope {
                 full: None,
             }
         }
+    }
+
+    fn materialize(&mut self, inner: &ServerState) {
+        let Some(window) = self.window.take() else {
+            return;
+        };
+        let state = &inner.engine.state;
+        let changes = state.changes_since(&window);
+        let mut window_active_panes = journal_active_panes(&changes);
+        window_active_panes.extend(
+            state
+                .windows
+                .iter()
+                .filter(|(window, _)| !changes.windows.contains_key(*window))
+                .map(|(window, state)| (*window, state.active_pane)),
+        );
+        let mut session_windows = journal_active_windows(&changes);
+        session_windows.extend(
+            state
+                .sessions
+                .iter()
+                .filter(|(session, _)| !changes.sessions.contains_key(*session))
+                .map(|(session, state)| (*session, state.active_window)),
+        );
+        self.probe.window_active_panes = window_active_panes;
+        self.probe.session_windows = session_windows;
     }
 
     pub(super) fn close(self, inner: &ServerState) -> PaneFocusProbe {
@@ -914,6 +952,40 @@ impl FocusProbeScope {
         }
         probe
     }
+}
+
+thread_local! {
+    static INPUT_FOCUS: RefCell<Option<FocusProbeScope>> = const { RefCell::new(None) };
+}
+
+pub(super) struct InputFocusScope(());
+
+impl InputFocusScope {
+    pub(super) fn open(inner: &mut ServerState) -> Self {
+        let scope = FocusProbeScope::open(inner);
+        INPUT_FOCUS.with_borrow_mut(|slot| *slot = Some(scope));
+        Self(())
+    }
+
+    pub(super) fn close(self, inner: &ServerState) -> Option<PaneFocusProbe> {
+        INPUT_FOCUS
+            .with_borrow_mut(Option::take)
+            .map(|scope| scope.close(inner))
+    }
+}
+
+impl Drop for InputFocusScope {
+    fn drop(&mut self) {
+        INPUT_FOCUS.with_borrow_mut(Option::take);
+    }
+}
+
+pub(super) fn release_input_change_window(shared: &Shared) {
+    INPUT_FOCUS.with_borrow_mut(|slot| {
+        if let Some(scope) = slot.as_mut().filter(|scope| scope.window.is_some()) {
+            scope.materialize(&shared.inner.lock());
+        }
+    });
 }
 
 pub(super) fn live_session_context(state: &MuxState, session: SessionId) -> ExecutionContext {

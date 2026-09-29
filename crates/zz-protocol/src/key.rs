@@ -107,6 +107,7 @@ pub struct KeyTables {
     prefix: String,
     prefix2: Option<String>,
     tables: BTreeMap<String, BTreeMap<String, StoredBinding>>,
+    table_generations: BTreeMap<String, u64>,
     generation: u64,
 }
 
@@ -1326,6 +1327,7 @@ impl KeyTables {
             prefix: "C-b".to_owned(),
             prefix2: None,
             tables: BTreeMap::new(),
+            table_generations: BTreeMap::new(),
             generation: next_key_tables_generation(),
         }
     }
@@ -1335,8 +1337,31 @@ impl KeyTables {
         self.generation
     }
 
+    /// Each table's generation: it moves whenever that table's bindings do,
+    /// so a publisher can send only the tables that changed.
+    pub fn table_generations(&self) -> impl Iterator<Item = (&str, u64)> {
+        self.table_generations
+            .iter()
+            .map(|(name, generation)| (name.as_str(), *generation))
+    }
+
     fn touch(&mut self) {
         self.generation = next_key_tables_generation();
+    }
+
+    fn touch_table(&mut self, table: &str) {
+        self.touch();
+        let generation = self.generation;
+        if let Some(current) = self.table_generations.get_mut(table) {
+            *current = generation;
+        } else {
+            self.table_generations.insert(table.to_owned(), generation);
+        }
+    }
+
+    fn forget_table(&mut self, table: &str) {
+        self.table_generations.remove(table);
+        self.touch();
     }
 
     /// The pin's stock prompted copy-mode bindings. All of them are
@@ -1484,11 +1509,16 @@ impl KeyTables {
     }
 
     pub fn bind(&mut self, table: &str, key: &str, binding: Binding) {
-        self.tables
-            .entry(table.to_owned())
-            .or_default()
-            .insert(canonical_key(key), StoredBinding::new(binding));
-        self.touch();
+        let bindings = self.tables.entry(table.to_owned()).or_default();
+        let key = canonical_key(key);
+        if bindings
+            .get(&key)
+            .is_some_and(|stored| stored.binding == binding)
+        {
+            return;
+        }
+        bindings.insert(key, StoredBinding::new(binding));
+        self.touch_table(table);
     }
 
     pub fn update_binding_metadata(
@@ -1500,7 +1530,7 @@ impl KeyTables {
     ) {
         if !self.tables.contains_key(table) {
             self.tables.insert(table.to_owned(), BTreeMap::new());
-            self.touch();
+            self.touch_table(table);
         }
         let Some(stored) = self
             .tables
@@ -1518,7 +1548,7 @@ impl KeyTables {
             binding.note = Some(note);
         }
         binding.repeat |= repeat;
-        self.touch();
+        self.touch_table(table);
     }
 
     pub fn unbind(&mut self, table: &str, key: &str) -> bool {
@@ -1527,19 +1557,22 @@ impl KeyTables {
             .get_mut(table)
             .and_then(|bindings| bindings.remove(&canonical_key(key)))
             .is_some();
-        if removed && self.tables.get(table).is_some_and(BTreeMap::is_empty) {
+        if !removed {
+            return false;
+        }
+        if self.tables.get(table).is_some_and(BTreeMap::is_empty) {
             self.tables.remove(table);
+            self.forget_table(table);
+        } else {
+            self.touch_table(table);
         }
-        if removed {
-            self.touch();
-        }
-        removed
+        true
     }
 
     pub fn remove_table(&mut self, table: &str) -> bool {
         let removed = self.tables.remove(table).is_some();
         if removed {
-            self.touch();
+            self.forget_table(table);
         }
         removed
     }
@@ -1547,7 +1580,7 @@ impl KeyTables {
     pub fn ensure_table(&mut self, table: &str) {
         if !self.tables.contains_key(table) {
             self.tables.insert(table.to_owned(), BTreeMap::new());
-            self.touch();
+            self.touch_table(table);
         }
     }
 
@@ -1600,14 +1633,26 @@ impl KeyTables {
     pub fn snapshot(&self) -> Vec<KeyTableSnapshot> {
         self.tables
             .iter()
-            .map(|(name, bindings)| KeyTableSnapshot {
-                name: name.clone(),
-                bindings: bindings
-                    .iter()
-                    .map(|(key, stored)| stored.snapshot(key))
-                    .collect(),
-            })
+            .map(|(name, bindings)| table_snapshot(name, bindings))
             .collect()
+    }
+
+    /// One table flattened for the wire, as [`Self::snapshot`] flattens it.
+    #[must_use]
+    pub fn snapshot_table(&self, table: &str) -> Option<KeyTableSnapshot> {
+        self.tables
+            .get_key_value(table)
+            .map(|(name, bindings)| table_snapshot(name, bindings))
+    }
+}
+
+fn table_snapshot(name: &str, bindings: &BTreeMap<String, StoredBinding>) -> KeyTableSnapshot {
+    KeyTableSnapshot {
+        name: name.to_owned(),
+        bindings: bindings
+            .iter()
+            .map(|(key, stored)| stored.snapshot(key))
+            .collect(),
     }
 }
 

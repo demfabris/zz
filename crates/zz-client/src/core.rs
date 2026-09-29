@@ -662,6 +662,25 @@ impl ClientCore {
                 self.key_tables = tables;
                 self.events.push_back(CoreEvent::KeyTablesChanged);
             }
+            EventPayload::KeyTablesPatched { tables, removed } => {
+                self.key_tables
+                    .retain(|table| !removed.contains(&table.name));
+                for table in tables {
+                    if let Some(current) = self
+                        .key_tables
+                        .iter_mut()
+                        .find(|current| current.name == table.name)
+                    {
+                        *current = table;
+                    } else {
+                        let at = self
+                            .key_tables
+                            .partition_point(|current| current.name < table.name);
+                        self.key_tables.insert(at, table);
+                    }
+                }
+                self.events.push_back(CoreEvent::KeyTablesChanged);
+            }
             EventPayload::TerminalViewport { pane, viewport } => {
                 self.full_pending.remove(&pane);
                 self.viewports.insert(pane, viewport);
@@ -1931,6 +1950,44 @@ mod tests {
                 CoreEvent::PopupChanged,
                 CoreEvent::MenuChanged,
                 CoreEvent::ConfirmChanged,
+            ]
+        );
+    }
+
+    #[test]
+    fn patched_key_tables_replace_insert_and_remove_by_name() {
+        let table = |name: &str, keys: &[&str]| KeyTableSnapshot {
+            name: name.to_owned(),
+            bindings: keys
+                .iter()
+                .map(|key| KeyBindingSnapshot {
+                    key: (*key).to_owned(),
+                    commands: Vec::new(),
+                    repeat: false,
+                    note: None,
+                })
+                .collect(),
+        };
+        let mut core = ClientCore::new();
+        core.handle_message(event(EventPayload::KeyTablesChanged {
+            tables: vec![
+                table("copy-mode", &["q"]),
+                table("prefix", &["c"]),
+                table("root", &["F1"]),
+            ],
+        }));
+        drain(&mut core);
+        core.handle_message(event(EventPayload::KeyTablesPatched {
+            tables: vec![table("resize", &["h"]), table("root", &["F2"])],
+            removed: vec!["copy-mode".to_owned()],
+        }));
+        assert_eq!(drain(&mut core), vec![CoreEvent::KeyTablesChanged]);
+        assert_eq!(
+            core.key_tables(),
+            [
+                table("prefix", &["c"]),
+                table("resize", &["h"]),
+                table("root", &["F2"]),
             ]
         );
     }

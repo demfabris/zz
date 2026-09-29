@@ -1067,6 +1067,47 @@ fn push_notice_colour(parameters: &mut Vec<String>, colour: zz_protocol::TmuxCol
     }
 }
 
+fn key_table_publication(
+    keys: &zz_protocol::KeyTables,
+    published: &mut BTreeMap<String, u64>,
+) -> Option<EventPayload> {
+    let changed = keys
+        .table_generations()
+        .filter(|(name, generation)| published.get(*name) != Some(generation))
+        .collect::<Vec<_>>();
+    let removed = published
+        .keys()
+        .filter(|name| !keys.has_table(name))
+        .cloned()
+        .collect::<Vec<_>>();
+    if changed.is_empty() && removed.is_empty() {
+        return None;
+    }
+    for name in &removed {
+        published.remove(name);
+    }
+    for (name, generation) in &changed {
+        if let Some(current) = published.get_mut(*name) {
+            *current = *generation;
+        } else {
+            published.insert((*name).to_owned(), *generation);
+        }
+    }
+    Some(if *timers::KEY_TABLE_DELTA {
+        EventPayload::KeyTablesPatched {
+            tables: changed
+                .into_iter()
+                .filter_map(|(name, _)| keys.snapshot_table(name))
+                .collect(),
+            removed,
+        }
+    } else {
+        EventPayload::KeyTablesChanged {
+            tables: keys.snapshot(),
+        }
+    })
+}
+
 fn published_appearance(inner: &ServerState) -> Arc<TerminalAppearance> {
     let styles = inner.engine.copy_mode_style_values();
     if styles == CopyModeStyleValues::default() {
@@ -4578,10 +4619,11 @@ impl Shared {
     ) -> Result<(), DaemonError> {
         log::info!(
             target: "zz_daemon::perf",
-            "publication knobs: ZZ_PERF_EAGER_PUBLISH={} ZZ_PERF_RENAME_THROTTLE={} ZZ_PERF_PEER_SCAN={}",
+            "publication knobs: ZZ_PERF_EAGER_PUBLISH={} ZZ_PERF_RENAME_THROTTLE={} ZZ_PERF_PEER_SCAN={} ZZ_PERF_KEY_TABLE_DELTA={}",
             u8::from(*timers::EAGER_PUBLISH),
             u8::from(*timers::RENAME_THROTTLE),
             if *timers::PEER_SCAN_ALWAYS { "always" } else { "changes" },
+            u8::from(*timers::KEY_TABLE_DELTA),
         );
         attach::log_knobs();
         hook_events::log_knobs();
@@ -5543,11 +5585,7 @@ impl Shared {
             appearance_provenance: inner.appearance_provenance.clone(),
             mux_options: hello_mux_options,
             status: StatusLine::default(),
-            key_tables: if inner.key_tables_generation == inner.engine.keys.generation() {
-                inner.key_tables.clone()
-            } else {
-                inner.engine.keys.snapshot()
-            },
+            key_tables: inner.engine.keys.snapshot(),
         };
         if kind == ClientKind::Interactive && client_has_terminal && *attach::ATTACH_BATCH {
             return Some((client, hello));
@@ -6524,6 +6562,7 @@ impl Shared {
         queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
         let _round_trips = zz_terminal::forbid_actor_round_trips();
+        hook_events::release_input_change_window(self);
         let split_input = canonical_command(&command.name) == "split-window"
             && command_stdin_sink("split-window", &command.args)
                 == Some(CommandStdinSink::PaneInput);
@@ -7766,8 +7805,14 @@ impl Shared {
             let generation_before = inner.engine.state.generation();
             let hook_scope = (captures && (event_hooks_enabled || journal))
                 .then(|| hook_events::HookScope::open(&mut inner.engine));
-            let pane_focus_before = (event_hooks_enabled && captures)
-                .then(|| hook_events::FocusProbeScope::open(&mut inner));
+            let pane_focus_before = (event_hooks_enabled && captures).then(|| {
+                hook_events::FocusProbeScope::open_within(
+                    &mut inner,
+                    hook_scope
+                        .as_ref()
+                        .and_then(hook_events::HookScope::change_window),
+                )
+            });
             let copy_modes_before =
                 (event_hooks_enabled && captures).then(|| active_copy_mode_panes(&inner));
             let captured_active = (captures && (!journal || cfg!(debug_assertions))).then(|| {
@@ -10794,7 +10839,7 @@ impl Shared {
     }
 
     fn publish_key_tables_if_changed(&self) {
-        let (tables, reset_clients) = {
+        let (publication, reset_clients) = {
             let mut inner = self.inner.lock();
             let ServerState {
                 engine,
@@ -10826,26 +10871,27 @@ impl Shared {
                 inner.engine.keys.ensure_table(&table);
             }
             let generation = inner.engine.keys.generation();
-            let tables = if generation == inner.key_tables_generation
+            let publication = if generation == inner.key_tables_generation
                 || timers::KeyTablePublishHold::active()
-                || inner.subscribers.is_empty()
+                || inner.subscribers.is_empty() && !*timers::EAGER_PUBLISH
             {
                 None
             } else {
                 inner.key_tables_generation = generation;
-                let tables = inner.engine.keys.snapshot();
-                (tables != inner.key_tables).then(|| {
-                    inner.key_tables.clone_from(&tables);
-                    tables
-                })
+                let ServerState {
+                    engine,
+                    key_table_generations,
+                    ..
+                } = &mut *inner;
+                key_table_publication(&engine.keys, key_table_generations)
             };
-            (tables, reset_clients)
+            (publication, reset_clients)
         };
         for client in reset_clients {
             self.sync_key_table(client, false);
         }
-        if let Some(tables) = tables {
-            self.publish(EventPayload::KeyTablesChanged { tables });
+        if let Some(publication) = publication {
+            self.publish(publication);
         }
     }
 
@@ -18087,7 +18133,7 @@ impl Shared {
                 (hook_events::HookScope::open(&mut inner.engine), copy_modes)
             });
         let pane_focus_before =
-            (!context.no_hooks).then(|| hook_events::FocusProbeScope::open(&mut self.inner.lock()));
+            (!context.no_hooks).then(|| hook_events::InputFocusScope::open(&mut self.inner.lock()));
         let result = (|| -> Result<(), DaemonError> {
             match input {
                 InputMessage::Text { pane, text } => {
@@ -18465,8 +18511,10 @@ impl Shared {
         if let Some(pane_focus_before) = pane_focus_before {
             let events = {
                 let mut inner = self.inner.lock();
-                let probe = pane_focus_before.close(&inner);
-                pane_focus_settle(&mut inner, &probe)
+                pane_focus_before
+                    .close(&inner)
+                    .map(|probe| pane_focus_settle(&mut inner, &probe))
+                    .unwrap_or_default()
             };
             self.run_event_hooks(events);
         }
@@ -28288,7 +28336,8 @@ impl Shared {
                 );
                 continue;
             }
-            let caller_source_stream = source_file_reads_stdin(&routed.args)
+            let caller_source_stream = routed_name == "source-file"
+                && source_file_reads_stdin(&routed.args)
                 && (options.control_target.is_some()
                     || options.replay_client.is_some_and(|client| {
                         self.inner
@@ -31115,7 +31164,7 @@ struct ServerState {
     mux_options: MuxOptions,
     mux_option_underlay: MuxOptions,
     published_mux_options: BTreeMap<ClientId, MuxOptions>,
-    key_tables: Vec<zz_protocol::KeyTableSnapshot>,
+    key_table_generations: BTreeMap<String, u64>,
     active_color_scheme: TerminalColorScheme,
     client_color_schemes: BTreeMap<ClientId, TerminalColorScheme>,
     client_names: BTreeMap<ClientId, String>,
@@ -36456,7 +36505,7 @@ fn pane_focus_candidates(
     inner: &ServerState,
     before: &PaneFocusProbe,
 ) -> (Vec<PaneId>, Vec<(WindowId, PaneId)>) {
-    if inner.pane_focus.is_empty() && !inner.client_focused.values().any(|focused| *focused) {
+    if no_pane_can_hold_focus(inner) {
         return (Vec::new(), Vec::new());
     }
     let gated = inner.engine.focus_events();
@@ -36535,6 +36584,15 @@ fn pane_focus_candidates(
         }
     }
     (leading, removals)
+}
+
+fn no_pane_can_hold_focus(inner: &ServerState) -> bool {
+    inner.pane_focus.is_empty()
+        && !inner
+            .attached
+            .values()
+            .flatten()
+            .any(|client| inner.client_focused.get(client) == Some(&true))
 }
 
 fn pane_focus_hook_events(inner: &mut ServerState, before: &PaneFocusProbe) -> PaneFocusEvents {
@@ -38519,6 +38577,7 @@ fn run_shell_job(
     let child = process.spawn().map_err(|_| ())?;
     drop(process);
     drop(child_socket);
+    let exit = ShellJobExit::watch(child.id());
     install_shell_job_process(job_process, stopping, child, detached)?;
     if let Some(started) = started {
         let _ = started.send(());
@@ -38531,34 +38590,91 @@ fn run_shell_job(
                 terminate_managed_process(job_process);
             })?;
         if reached_eof {
-            break wait_shell_job_process(job_process)?;
+            break wait_shell_job_process(job_process, || exit.wait(None))?;
         }
-
-        let mut process = job_process.lock();
-        let Some(child) = process.as_mut() else {
-            return Err(());
-        };
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                process.take();
-                drop(process);
-                read_available_shell_job_output(&mut output, &mut bytes, &mut buffer)?;
-                break status;
-            }
-            Ok(None) => drop(process),
-            Err(_) => {
-                let mut child = process.take().expect("shell job process was present");
-                drop(process);
-                let _ = terminate_copy_pipe(&mut child);
-                return Err(());
-            }
+        if let Some(status) = reap_shell_job_process(job_process)? {
+            read_available_shell_job_output(&mut output, &mut bytes, &mut buffer)?;
+            break status;
         }
-        thread::sleep(COPY_PIPE_POLL_INTERVAL);
+        exit.wait(Some(&output));
     };
     Ok(ShellJobResult {
         output: bytes,
         status,
     })
+}
+
+#[cfg(unix)]
+struct ShellJobExit(Option<std::os::fd::OwnedFd>);
+
+#[cfg(unix)]
+impl ShellJobExit {
+    #[cfg(target_os = "linux")]
+    fn watch(pid: u32) -> Self {
+        Self(
+            i32::try_from(pid)
+                .ok()
+                .and_then(rustix::process::Pid::from_raw)
+                .and_then(|pid| {
+                    rustix::process::pidfd_open(pid, rustix::process::PidfdFlags::empty()).ok()
+                }),
+        )
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn watch(pid: u32) -> Self {
+        use rustix::event::kqueue::{Event, EventFilter, EventFlags, ProcessEvents};
+
+        let Some(pid) = i32::try_from(pid)
+            .ok()
+            .and_then(rustix::process::Pid::from_raw)
+        else {
+            return Self(None);
+        };
+        let Ok(kqueue) = rustix::event::kqueue::kqueue() else {
+            return Self(None);
+        };
+        let change = [Event::new(
+            EventFilter::Proc {
+                pid,
+                flags: ProcessEvents::EXIT,
+            },
+            EventFlags::ADD | EventFlags::ONESHOT,
+            std::ptr::null_mut(),
+        )];
+        #[allow(
+            unsafe_code,
+            reason = "a process filter names no descriptor that could close under the kqueue"
+        )]
+        let registered = unsafe {
+            rustix::event::kqueue::kevent(&kqueue, &change, &mut [] as &mut [Event; 0], None)
+        };
+        Self(registered.ok().map(|_| kqueue))
+    }
+
+    fn wait(&self, output: Option<&std::os::unix::net::UnixStream>) {
+        use rustix::event::{PollFd, PollFlags, Timespec, poll};
+
+        let interval = Timespec::try_from(COPY_PIPE_POLL_INTERVAL)
+            .expect("the shell job poll interval fits in a timespec");
+        let _ = match (&self.0, output) {
+            (Some(exit), Some(output)) => poll(
+                &mut [
+                    PollFd::new(exit, PollFlags::IN),
+                    PollFd::new(output, PollFlags::IN),
+                ],
+                None,
+            ),
+            (Some(exit), None) => poll(&mut [PollFd::new(exit, PollFlags::IN)], None),
+            (None, Some(output)) => {
+                poll(&mut [PollFd::new(output, PollFlags::IN)], Some(&interval))
+            }
+            (None, None) => {
+                thread::sleep(COPY_PIPE_POLL_INTERVAL);
+                Ok(0)
+            }
+        };
+    }
 }
 
 #[cfg(unix)]
@@ -38663,7 +38779,7 @@ fn run_shell_job(
             stderr.read_to_end(&mut output).map(|_| output)
         })
     });
-    let status = wait_shell_job_process(job_process);
+    let status = wait_shell_job_process(job_process, || thread::sleep(COPY_PIPE_POLL_INTERVAL));
     let mut output = stdout.join().map_err(|_| ())?.map_err(|_| ())?;
     if let Some(stderr) = stderr {
         output.extend(stderr.join().map_err(|_| ())?.map_err(|_| ())?);
@@ -38688,26 +38804,35 @@ fn install_shell_job_process(
     Ok(())
 }
 
-fn wait_shell_job_process(process: &Mutex<Option<Child>>) -> Result<ExitStatus, ()> {
-    loop {
-        let mut process = process.lock();
-        let Some(child) = process.as_mut() else {
-            return Err(());
-        };
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                process.take();
-                return Ok(status);
-            }
-            Ok(None) => drop(process),
-            Err(_) => {
-                let mut child = process.take().expect("shell job process was present");
-                drop(process);
-                let _ = terminate_copy_pipe(&mut child);
-                return Err(());
-            }
+fn reap_shell_job_process(process: &Mutex<Option<Child>>) -> Result<Option<ExitStatus>, ()> {
+    let mut process = process.lock();
+    let Some(child) = process.as_mut() else {
+        return Err(());
+    };
+    match child.try_wait() {
+        Ok(Some(status)) => {
+            process.take();
+            Ok(Some(status))
         }
-        thread::sleep(COPY_PIPE_POLL_INTERVAL);
+        Ok(None) => Ok(None),
+        Err(_) => {
+            let mut child = process.take().expect("shell job process was present");
+            drop(process);
+            let _ = terminate_copy_pipe(&mut child);
+            Err(())
+        }
+    }
+}
+
+fn wait_shell_job_process(
+    process: &Mutex<Option<Child>>,
+    mut pause: impl FnMut(),
+) -> Result<ExitStatus, ()> {
+    loop {
+        if let Some(status) = reap_shell_job_process(process)? {
+            return Ok(status);
+        }
+        pause();
     }
 }
 
@@ -53209,16 +53334,16 @@ mod tests {
             let pane_exists = inner.engine.state.window_for_pane(pane).is_some();
             let terminal_exists = inner.terminals.contains_key(&pane);
             drop(inner);
-            if !pane_exists && !terminal_exists {
+            let stopping = shared.stopping.load(Ordering::Acquire);
+            if !pane_exists && !terminal_exists && stopping {
                 break;
             }
             assert!(
                 Instant::now() < deadline,
-                "exited terminal pane remained in mux state"
+                "exited terminal pane remained in mux state ({pane_exists}, {terminal_exists}) or no shutdown was requested ({stopping})"
             );
             thread::sleep(Duration::from_millis(10));
         }
-        assert!(shared.stopping.load(Ordering::Acquire));
     }
 
     #[test]

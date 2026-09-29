@@ -58,7 +58,7 @@ pub struct ChangeJournal {
     open: Vec<(u64, Weak<()>)>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ChangeWindow {
     mark: u64,
     _alive: Arc<()>,
@@ -275,6 +275,11 @@ impl MuxState {
     #[must_use]
     pub fn changes_since(&self, window: &ChangeWindow) -> JournalChanges<'_> {
         self.journal.changes(window)
+    }
+
+    #[must_use]
+    pub fn journal_len(&self) -> usize {
+        self.journal.entries.len()
     }
 
     pub fn session_mut(&mut self, session: SessionId) -> Option<&mut Session> {

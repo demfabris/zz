@@ -1,5 +1,6 @@
-use super::tests::{key_table_fixture, output_view_session_fixture};
+use super::tests::{key_table_fixture, output_view_session_fixture, take_reliable_messages};
 use super::*;
+use zz_protocol::KeyTableSnapshot;
 
 const CLIENT: ClientId = ClientId(7);
 
@@ -336,4 +337,310 @@ fn an_attached_client_is_detached_by_the_journal_when_its_session_goes() {
         "{:?}",
         messages(&shared)
     );
+}
+
+fn subscriber(shared: &Arc<Shared>) -> (ClientId, Arc<OutboundMailbox>, Vec<KeyTableSnapshot>) {
+    let mailbox = OutboundMailbox::new();
+    let (client, hello) =
+        shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+    (client, mailbox, hello.key_tables)
+}
+
+fn key_table_payloads(mailbox: &OutboundMailbox) -> Vec<EventPayload> {
+    take_reliable_messages(mailbox)
+        .into_iter()
+        .filter_map(|message| match message {
+            ProtocolMessage::Event(Event {
+                payload:
+                    payload @ (EventPayload::KeyTablesChanged { .. }
+                    | EventPayload::KeyTablesPatched { .. }),
+                ..
+            }) => Some(payload),
+            _ => None,
+        })
+        .collect()
+}
+
+fn fold_key_tables(view: &mut Vec<KeyTableSnapshot>, payloads: Vec<EventPayload>) {
+    for payload in payloads {
+        match payload {
+            EventPayload::KeyTablesChanged { tables } => *view = tables,
+            EventPayload::KeyTablesPatched { tables, removed } => {
+                view.retain(|table| !removed.contains(&table.name));
+                for table in tables {
+                    if let Some(current) =
+                        view.iter_mut().find(|current| current.name == table.name)
+                    {
+                        *current = table;
+                    } else {
+                        let at = view.partition_point(|current| current.name < table.name);
+                        view.insert(at, table);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn binds(tables: &[KeyTableSnapshot], table: &str, key: &str) -> bool {
+    tables
+        .iter()
+        .filter(|candidate| candidate.name == table)
+        .flat_map(|candidate| candidate.bindings.iter())
+        .any(|binding| binding.key == key)
+}
+
+#[test]
+fn a_revert_after_an_unpublished_change_reaches_the_next_subscriber() {
+    let shared = Arc::new(Shared::new(1));
+    let mut context = ExecutionContext::default();
+    let (early, first, mut first_view) = subscriber(&shared);
+    run(&shared, &mut context, &["new-session", "-d", "-s", "keys"]).expect("session");
+    let bind = ["bind-key", "-n", "F7", "display-message", "seed"];
+    run(&shared, &mut context, &bind).expect("bind");
+    fold_key_tables(&mut first_view, key_table_payloads(&first));
+    assert!(
+        binds(&first_view, "root", "F7"),
+        "the first subscriber saw F7"
+    );
+    shared.unregister(early);
+    run(&shared, &mut context, &["unbind-key", "-n", "F7"]).expect("unbind");
+    let (_, second, mut view) = subscriber(&shared);
+    assert!(!binds(&view, "root", "F7"), "the hello carries the unbind");
+    run(&shared, &mut context, &bind).expect("rebind");
+    fold_key_tables(&mut view, key_table_payloads(&second));
+    assert!(
+        binds(&view, "root", "F7"),
+        "the subscriber that joined after the unbind never learned F7 is bound again"
+    );
+    assert_eq!(view, shared.inner.lock().engine.keys.snapshot());
+}
+
+#[test]
+fn a_bind_with_a_subscriber_publishes_only_the_table_it_changed() {
+    let shared = Arc::new(Shared::new(1));
+    let mut context = ExecutionContext::default();
+    run(&shared, &mut context, &["new-session", "-d", "-s", "delta"]).expect("session");
+    let (_, mailbox, mut view) = subscriber(&shared);
+    run(
+        &shared,
+        &mut context,
+        &["bind-key", "-T", "zzprime", "x", "display-message", "x"],
+    )
+    .expect("first bind");
+    fold_key_tables(&mut view, key_table_payloads(&mailbox));
+    assert_eq!(view, shared.inner.lock().engine.keys.snapshot());
+    run(
+        &shared,
+        &mut context,
+        &["bind-key", "-T", "zzdelta", "x", "display-message", "x"],
+    )
+    .expect("bind");
+    let payloads = key_table_payloads(&mailbox);
+    if *timers::KEY_TABLE_DELTA {
+        assert!(
+            matches!(
+                payloads.as_slice(),
+                [EventPayload::KeyTablesPatched { tables, removed }]
+                    if removed.is_empty()
+                        && tables.len() == 1
+                        && tables[0].name == "zzdelta"
+            ),
+            "{payloads:?}"
+        );
+    }
+    fold_key_tables(&mut view, payloads);
+    run(
+        &shared,
+        &mut context,
+        &["bind-key", "-T", "zzdelta", "x", "display-message", "x"],
+    )
+    .expect("same binding again");
+    assert!(key_table_payloads(&mailbox).is_empty());
+    run(&shared, &mut context, &["unbind-key", "-T", "zzdelta", "x"]).expect("unbind");
+    let payloads = key_table_payloads(&mailbox);
+    if *timers::KEY_TABLE_DELTA {
+        assert!(
+            matches!(
+                payloads.as_slice(),
+                [EventPayload::KeyTablesPatched { tables, removed }]
+                    if tables.is_empty() && removed == &["zzdelta".to_owned()]
+            ),
+            "{payloads:?}"
+        );
+    }
+    fold_key_tables(&mut view, payloads);
+    for command in [
+        &["bind-key", "-r", "C-Up", "resize-pane", "-U"][..],
+        &["unbind-key", "-a", "-T", "copy-mode"],
+        &["set-option", "-g", "prefix", "C-a"],
+        &["bind-key", "-N", "note", "c", "new-window"],
+        &["unbind-key", "-a"],
+        &[
+            "bind-key",
+            "-T",
+            "copy-mode-vi",
+            "v",
+            "send-keys",
+            "-X",
+            "begin-selection",
+        ],
+    ] {
+        run(&shared, &mut context, command).unwrap_or_else(|error| panic!("{command:?}: {error}"));
+        fold_key_tables(&mut view, key_table_payloads(&mailbox));
+        assert_eq!(
+            view,
+            shared.inner.lock().engine.keys.snapshot(),
+            "after {command:?}"
+        );
+    }
+}
+
+fn focused_panes(shared: &Shared) -> BTreeSet<PaneId> {
+    shared.inner.lock().pane_focus.iter().copied().collect()
+}
+
+fn session_active_pane_set(shared: &Shared, name: &str) -> BTreeSet<PaneId> {
+    let inner = shared.inner.lock();
+    let state = &inner.engine.state;
+    state
+        .sessions
+        .values()
+        .filter(|session| session.name == name)
+        .filter_map(|session| state.windows.get(&session.active_window))
+        .map(|window| window.active_pane)
+        .collect()
+}
+
+#[test]
+fn focus_follows_active_pane_and_window_moves_under_an_attached_client() {
+    let (shared, _, mut context, _, _) = key_table_fixture("focus-oracle");
+    let mut focus = focused_panes(&shared);
+    for (command, gated) in [
+        (&["set-option", "-g", "focus-events", "on"][..], false),
+        (&["split-window", "-t", "focus-oracle"], false),
+        (&["select-pane", "-t", "focus-oracle:0.0"], false),
+        (&["new-window", "-t", "focus-oracle"], false),
+        (&["select-window", "-t", "focus-oracle:0"], false),
+        (&["kill-pane", "-t", "focus-oracle:0.0"], false),
+        (&["set-option", "-g", "focus-events", "off"], false),
+        (&["split-window", "-t", "focus-oracle"], true),
+        (&["kill-pane", "-t", "focus-oracle:0.1"], false),
+    ] {
+        run(&shared, &mut context, command).unwrap_or_else(|error| panic!("{command:?}: {error}"));
+        let expected = if gated {
+            focus.clone()
+        } else {
+            session_active_pane_set(&shared, "focus-oracle")
+        };
+        focus = focused_panes(&shared);
+        assert_eq!(focus, expected, "after {command:?}");
+    }
+}
+
+#[test]
+fn a_blocking_key_binding_holds_no_change_window() {
+    let (shared, client, mut context, pane, _) = key_table_fixture("sleepy");
+    run(
+        &shared,
+        &mut context,
+        &["split-window", "-d", "-t", "sleepy"],
+    )
+    .expect("split");
+    run(
+        &shared,
+        &mut context,
+        &["bind-key", "-n", "z", "run-shell", "sleep 1"],
+    )
+    .expect("bind");
+    let pressing = {
+        let shared = Arc::clone(&shared);
+        thread::spawn(move || {
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    &mut ExecutionContext::default(),
+                    InputMessage::Key {
+                        pane,
+                        input: super::tests::test_key(
+                            zz_terminal::KeyCode::Character('z'),
+                            zz_terminal::Modifiers::default(),
+                            Some("z"),
+                        ),
+                        text_follows: false,
+                    },
+                )
+                .expect("input");
+        })
+    };
+    thread::sleep(Duration::from_millis(200));
+    let mut peak = 0;
+    let mut commands = 0;
+    while !pressing.is_finished() {
+        run(
+            &shared,
+            &mut context,
+            &["select-pane", "-t", &format!("sleepy:0.{}", commands % 2)],
+        )
+        .expect("select-pane");
+        commands += 1;
+        peak = peak.max(shared.inner.lock().engine.state.journal_len());
+    }
+    pressing.join().expect("press");
+    assert!(
+        commands > 10,
+        "only {commands} commands ran beside the binding"
+    );
+    assert!(
+        peak <= 4,
+        "the journal held {peak} entries across {commands} commands"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_run_shell_job_sleeps_until_its_output_or_its_exit() {
+    fn switches() -> u64 {
+        fs::read_to_string("/proc/thread-self/status")
+            .expect("thread status")
+            .lines()
+            .find_map(|line| line.strip_prefix("voluntary_ctxt_switches:"))
+            .and_then(|value| value.trim().parse().ok())
+            .expect("voluntary switches")
+    }
+    let job = |command: &str| {
+        let process = Mutex::new(None);
+        let stopping = AtomicBool::new(false);
+        let before = switches();
+        let started = Instant::now();
+        let result = run_shell_job(
+            command,
+            &std::env::temp_dir(),
+            "tmux",
+            &[],
+            "screen",
+            Path::new("/tmp/zz-hooks-no-socket"),
+            None,
+            None,
+            None,
+            false,
+            &process,
+            &stopping,
+            false,
+            None,
+        )
+        .expect("shell job");
+        (result, started.elapsed(), switches() - before)
+    };
+    let (result, elapsed, woke) = job("sleep 0.6; echo done");
+    assert_eq!(result.output, b"done\n");
+    assert!(result.status.success());
+    assert!(elapsed >= Duration::from_millis(600), "{elapsed:?}");
+    assert!(woke < 10, "the job thread woke {woke} times in {elapsed:?}");
+    let (result, elapsed, woke) = job("sleep 3 & sleep 0.4; echo left");
+    assert_eq!(result.output, b"left\n");
+    assert!(elapsed < Duration::from_secs(2), "{elapsed:?}");
+    assert!(woke < 10, "the job thread woke {woke} times in {elapsed:?}");
 }

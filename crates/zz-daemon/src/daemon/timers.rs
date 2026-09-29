@@ -12,6 +12,9 @@ pub(super) static EAGER_PUBLISH: LazyLock<bool> =
 pub(super) static RENAME_THROTTLE: LazyLock<bool> =
     LazyLock::new(|| std::env::var_os("ZZ_PERF_RENAME_THROTTLE").is_none_or(|value| value != "0"));
 
+pub(super) static KEY_TABLE_DELTA: LazyLock<bool> =
+    LazyLock::new(|| std::env::var_os("ZZ_PERF_KEY_TABLE_DELTA").is_none_or(|value| value != "0"));
+
 pub(super) static PEER_SCAN_ALWAYS: LazyLock<bool> =
     LazyLock::new(|| std::env::var_os("ZZ_PERF_PEER_SCAN").is_some_and(|value| value == "always"));
 

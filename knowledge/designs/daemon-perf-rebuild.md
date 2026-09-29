@@ -2,7 +2,7 @@
 type: Design Plan
 title: Daemon performance rebuild
 description: "The campaign to bring the zz daemon to tmux cost per command, per pane and per attach while keeping the 5x output throughput lead - a permanent zz-vs-tmux gate first, then waves that remove unrequested work (one-frame Exec commands, change-driven publication, lazy formats, frames only for watchers, a compact wire under one unreleased protocol version), then one mux loop and PTY shards; the lane brief source with targets, merge order, write zones, gates and rollback switches."
-status: Approved 2026-09-28; wave 0 (gate and this plan) built; release freeze until W4 exits; wave 1 in progress on perf/wave1 (FOOTPRINT, FORMAT, PUBLISH, PANE and EXEC merged)
+status: Approved 2026-09-28; wave 0 (gate and this plan) built; release freeze until W4 exits; wave 1 in progress on perf/wave1 (FOOTPRINT, FORMAT, PUBLISH, PANE and EXEC merged; W1-ATTACH finishing on perf/attach); continued on Linux from bench/perf/campaign/HANDOFF.md
 resource: crates/zz-daemon/src/daemon.rs
 tags:
 - performance
@@ -12,8 +12,22 @@ tags:
 - benchmark
 - campaign
 - design-plan
-timestamp: 2026-09-28T15:56:52Z
+timestamp: 2026-09-29T12:00:00Z
 ---
+
+# Campaign status
+
+2026-09-29: `perf/wave1` (`9eb5888b`) holds W0 and five wave-1 lanes (FOOTPRINT, FORMAT, PUBLISH,
+PANE, EXEC) plus three folded side branches; W1-ATTACH is on `perf/attach` with an unverified fix
+pass (`73eafb94`). Neither branch is on main. The campaign continues on a Linux host:
+`bench/perf/campaign/HANDOFF.md` has the state, the numbers against tmux at the last gate, the
+next steps in order, the macOS-only checks and the traps; `bench/perf/campaign/attach-review.json`
+has the attach lane's reports; `bench/perf/campaign/scripts/` has the lane workflow template.
+
+Wave 1 merged FORMAT before PUBLISH (merges 2 and 3), against the order below: a usage-limit cut
+left PUBLISH's fix pass unfinished while FORMAT was ready. Merges 1-5 ran the gate without
+`--strict` because other lanes were compiling; whether they need strict reruns is an open owner
+decision in the handoff.
 
 # Outcome
 
@@ -155,8 +169,8 @@ Every gated metric with its W0 values and its rule per stage, printed by
 source of these numbers: change it, then regenerate this table. A blank cell keeps the rule of the
 stage before it. `x` is times tmux in the same run; `W0` is the committed wave 0 value.
 
-Memory is gated on footprint (macOS `ri_phys_footprint`, Linux `smaps_rollup` `Pss_Anon`); RSS is
-reported, never gated, because ~9.6 MB of it is file-backed pages of the multi-role `zz_cli`
+Memory is gated on footprint (macOS `ri_phys_footprint`, Linux `smaps_rollup`
+`Pss_Anon + Pss_Shmem + SwapPss`, else `RssAnon + VmSwap`); RSS is reported, never gated, because ~9.6 MB of it is file-backed pages of the multi-role `zz_cli`
 binary. Wall rules fail on a quiet host and with `--strict`, and warn on a loaded one; the others
 always fail on a miss. Report-only, never gated: `cli.wall.version.p1`, `cold.infocmp_forks`,
 `attach.wire_frames.*`, `attach.wire_c2s.*`, `echo.wire_bytes.busy30`, `statusjob.tty_kibps`, the
@@ -346,9 +360,12 @@ per-caller reuse).
 - **Release freeze until W4 exits** (owner, 2026-09-28: zz is not fully launched, nothing ships
   mid-campaign). No tags, no beta channel pushes, no TestFlight uploads until `--stage final`
   passes. Any wire change in any wave may land in 107, including non-append rewrites.
+- **Performance before features** (owner, 2026-09-28). No plugins or other features until the
+  daemon is at least as lean as tmux.
 - **No compromises** (owner, 2026-09-28). A lane may not stop at "meets the target" when the
   profile still shows avoidable work on its path; targets are floors. The three deferrals the
-  architect rejected as good enough are reinstated as lanes W2-FMT, W4-ROWS and W4-BINARY.
+  architect rejected as good enough are reinstated as lanes W2-FMT, W4-ROWS and W4-BINARY. Wave 3
+  is committed, not optional.
 - **Pin the in-pane `tmux` wrapper to the daemon's own executable.** `install_tmux_shim` pointed
   the wrapper at `current_exe()` (or `ZZ_TMUX_EXECUTABLE`), a path an app swap replaces, so panes
   of an old daemon ran a newer CLI. Built in W1-EXEC: the wrapper runs `/proc/<daemon pid>/exe`
@@ -421,8 +438,8 @@ noise policy; this section records what the lanes rely on.
   servers and every descendant killed after each group and on exit; zz and tmux runs alternate.
 - Probes: CPU (macOS `RUSAGE_INFO_V4` user+system x timebase; Linux `clock_getcpuclockid` in ns,
   falling back to `/proc/<pid>/task/*/schedstat`), instructions (macOS `ri_instructions`, for every
-  CPU metric; none on Linux), footprint (`ri_phys_footprint`; Linux `Pss_Anon`) and RSS as info,
-  threads (`PROC_PIDTASKINFO`; `/proc` Threads), thread spawns (`PROC_PIDLISTTHREADIDS` sampled
+  CPU metric; none on Linux), footprint (`ri_phys_footprint`; Linux
+  `Pss_Anon + Pss_Shmem + SwapPss`) and RSS as info, threads (`PROC_PIDTASKINFO`; `/proc` Threads), thread spawns (`PROC_PIDLISTTHREADIDS` sampled
   every ~2 ms; Linux task ids), wakeups (`ri_interrupt_wkups + ri_pkg_idle_wkups`; ctxt switches).
 - `sockproxy.py`: Unix-socket relay counting bytes, u32-prefixed frames and connections (zz only;
   tmux passes the tty fd).

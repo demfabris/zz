@@ -1884,6 +1884,20 @@ this lane. The footprint rows moved with the THP fix, not this lane (the pre-mer
 the same). An A/B against the pre-merge binary shows no change in `spawn.instr.*`,
 `chatty.instr_per_s.*` or the echo rows (p50 idle 1.94-1.96 vs 1.97-1.99 ms, tmux 0.83-0.91).
 
+Stale-paint fix (W1-ATTACH-PAINT, `perf/attach-paint`, Linux, 2026-09-29): at the wave-1 exit
+`tui-screen-diff.sh` found 13-14 of 147 checkpoints with a stale pane row per release run. Cause:
+a drained run of events can take the frame inbox more than once before it paints, and
+`Renderer::note_frame` replaced the damage still pending for a pane, so a row that only the
+earlier frame changed was never written (before the drain every take was painted at once). Fix:
+`note_frame` folds the new damage into the pending damage with `merge_damage`, as
+`FrameInbox::publish` already did; zz-tui test
+`a_drained_run_of_frames_paints_every_row_any_of_them_changed`. After it screen-diff matched 147
+of 147 in 5 release and 3 debug runs, and the attach and chatty gate reads the same (504 B at p1,
+2 connections, 0.30 KiB/s hidden). Under a concurrent cargo build, `unzoom` at 80x10 and 80x6 can
+still differ, the same way on the pre-ATTACH build: the daemon's own `list-panes` shows the wrong
+geometry (a window one row short, a hidden pane left at an old size), so that one is a daemon-side
+resize race and not a paint.
+
 ## W2-TERM: PaneFrame terminal lane (effort L)
 
 Scope:

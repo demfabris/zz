@@ -1930,6 +1930,236 @@ dictionary growth), zz-client, zz-tui, GUI mux client tests, `tui-screen-diff.sh
 
 Expected (re-encoded captures): patches 15x smaller, Full 10x, blank screens ~140x, echo ~30-40 B.
 
+As built (branch `perf/term`, on perf/wave2 `c65e49f0`, Linux only), where it departs from the scope
+above:
+
+- Item 1: the codec is its own module, `zz-protocol/src/pane_frame.rs`; `terminal_codec.rs` only
+  routes to it. The metadata flags are a varint bitset, `zz_terminal::TerminalPatchFields`
+  (15 bits), shared by full frames (absent means the default) and patches (absent means unchanged):
+  rows, cursor move, scroll, scrollbar, dictionary append, overlays, cursor, presentation (title,
+  cwd, hovered URI), colours, mode, search, unseen output, input modes, status, kitty placements.
+  Size is always sent: a patch never changes it (the diff returns `None`), and the decoder needs
+  it to bound every span. A cursor that only moved is its own bit (`CURSOR_AT`, 2 bytes), which
+  is what keeps an echo small. Rows are a row step (0 ends the section), `x0 << 1 | clear`, then
+  runs whose header is `count << 3 | style << 2 | kind`: text (one UTF-8 scalar a narrow cell),
+  wide (one scalar a wide head plus its spacer tail), repeat (one cell, 6 or more times) and raw
+  (glyph code and flags a cell, for graphemes, spacer heads and odd flags). The style carries over
+  from the previous run and starts at 0 each row. Generations travel as one varint and zigzag
+  deltas. `terminal-lanes.md` has the byte layout.
+- Item 2: `diff_with_scratch` sends one span a changed row, from the first to the last changed
+  column, or up to the last non-blank cell with `clear` when the change empties the row's tail;
+  rows exposed by a scroll are sent whole (`start 0`, `clear`). A patch carries only the metadata
+  that changed; `apply_patch` keeps the retained value for the rest, and a dictionary append is
+  the only case that puts `style_base`/`grapheme_base` on the wire. Clients that read patch
+  metadata before applying it use `carries`, `scrollbar_after` and `cursor_after`.
+- Item 3: terminal frames, command-output frames and history chunks take the daemon's event
+  sequence (`Shared::next_sequence`). The first cut gave each `TerminalSession` its own counter,
+  which started again at 1 on `respawn-pane` under the same `PaneId`; one daemon-wide counter never
+  goes back, needs no field on the session, and orders a pane's frames against every later event
+  about the pane, which is what W4-DELIVER's barriers compare. **Encode once per (pane, base)**,
+  as far as this lane can take it: views that are live at the bottom already share the actor's
+  cell plane and dictionary (the second and later views of a publish find the render state clean
+  and return the same `Arc`s); only their generations differ, because `build_snapshot` bumps
+  `generations.content` and `.view` once per view. So every client's patch had the same spans and
+  the same bytes after a header of about 12 bytes, and the watcher diffed, fingerprinted and
+  encoded it once per client (+20.2 Minstr/s of daemon work per extra TUI on visible chatty).
+  `TerminalViewport::diff_shared` keeps the row shift and spans in the watcher's scratch for the
+  next view on the same two grids (keyed by the two cell planes and the two dictionaries, held
+  until `release_shared` at the end of the frame, so a recycled plane can never match), and
+  returns a `TerminalPatchRef` that reads the changed cells from the current plane instead of
+  copying them into a boxed patch (the two allocations a patch made per client are gone). The
+  encoder writes each client's header, fields and metadata, then copies the dictionary append and
+  span section from the first client that encoded it (`PatchTail`, keyed by the diff). The
+  watcher diffs a view only after `publish_terminal_for_pane` found the client attached, not
+  frozen and streaming the pane. The fingerprint cache also serves a view whose current grid is
+  cached but whose base is not. The encoders stay callable alone
+  (`encode_terminal_viewport_event_into`, and `encode_terminal_patch_event_into`, which now takes
+  the borrowed patch and the tail) for W2-CTRL's `Batch`. The preview mailbox no longer sizes a
+  frame before encoding it (only the old fixed layout could); it encodes and checks the byte
+  budget after, as the foreground path did.
+- Item 4: the decoder produces the same `TerminalViewport`, `TerminalViewportPatch` and
+  `HistoryChunk` values, so zz-tui (its `terminal_event.rs` is the tty input decoder and has no
+  frames), gpui-shared, zz-client-ffi and the renderers did not change. zz-client core's damage and
+  the GUI's retained-patch history logic now read the patch fields. HistoryChunk keeps its
+  in-memory `Vec<Vec<PackedCell>>` and moved from postcard to the Terminal lane (kind 3). Chooser
+  previews and a postcard-encoded `CommandOutput` carry the full-frame body as one postcard byte
+  string (`pane_frame::viewport_bytes`). The GUI keeps `history_requests_pending` across tree
+  changes: every `Snapshot` used to clear it and re-request, so a chunk in flight arrived with no
+  request, was dropped, and was asked for again (twice the history bytes during a backfill that
+  overlaps any tree change). A pane that stops being visible gets a Full when it returns, which
+  resets its request; `PaneRemoved` forgets it (`a_tree_change_keeps_the_history_chunk_in_flight`).
+  The daemon sends no reply when `history()` fails (a full control queue or the 2 s capture
+  timeout), so a request older than 3 s counts as lost and the next backfill or scroll-up sends it
+  again (`a_history_reply_that_never_came_is_requested_again`).
+- Not in the brief: decoded grids are capped at `MAX_FRAME_BYTES / 8` cells (8 Mi), the bound the
+  8-byte layout had implicitly, since a compact frame could otherwise declare a 65535x65535 blank
+  grid in a few bytes. The diff compares rows eight cells at a time as `u64` words, hashes row
+  fingerprints in four lanes, searches row shifts nearest first and stops once no shift can win
+  (it scanned all `2 x rows` shifts), and skips the dictionary prefix checks when both frames share
+  one dictionary; these cut the watchers' diff share of the visible chatty profile.
+- Knob `ZZ_PERF_ROW_PATCHES=1` widens every span to its whole row (the pre-W2 granularity) on the
+  same wire, for bisecting a span-apply bug (`TerminalDiffScratch::set_whole_rows`). It fails
+  `echo.wire_bytes.idle` by design (about 80 B, the whole prompt row). The 8-byte frames have no
+  knob.
+- Mixed builds inside 107: the daemon's `ServerHello` names `pane-frame-v1`. An interactive
+  client whose daemon does not stops at the handshake with a same-version `VersionMismatch`, which
+  the TUI, the GUI and the CLI already turn into "restart the daemon" (the messages now say "an
+  older build of protocol v107" when both sides report 107); command and control clients connect
+  as before, so `zz kill-server` still reaches the old daemon. Clients built before the capability
+  cannot tell. The web client checks nothing: the gateway relays bytes and the browser decodes the
+  hello in zz-client core, so a stale daemon behind `just web-serve` still shows decode errors.
+- W0 TODO, partly built: `crates/zz-client/examples/perf_client.rs` is the frame-sink client
+  (attach, decode and apply every frame with `ClientCore`, render nothing) and the throughput group
+  times the ASCII flood through it as `throughput.headless.ascii_ms` (zz only, info: the W0 JSONs
+  predate it, so its ">= 0.85x W0" rule has no reference). The GUI-like mode (all sessions, history
+  backfill, 8 visible panes) is still TODO.
+- Tests: `zz-protocol` `pane_frame_tests.rs` (16: seeded random grids with ASCII, wide pairs,
+  graphemes, hyperlink and classed styles, spacer heads, odd flags and repeats through full frames
+  and patches with scrolls and dictionary growth; every truncation; hand-built frames that lie about
+  rows, runs, styles, graphemes, counts, fields and grid size; echo and blank-screen size bounds;
+  history chunks; postcard previews; cursor moves; kitty placements; every patch they build is
+  also encoded from the borrowed frames, and again for a sibling view from the shared tail, and
+  must match the owned encoding byte for byte), `pane_frame_fuzz_tests.rs` (from the parity
+  review: 400 seeds of 80 chained steps where every metadata field, scroll, dictionary growth,
+  dictionary reset and resize change at random and a client that only applies decoded frames must
+  equal the daemon after every step, through the owned, the borrowed and shared and the whole-row
+  paths; mutated full, patch and history frames; 200k random byte strings; edge grids),
+  zz-terminal model tests for spans, whole-row widening, the chunked row scans, the shared diff
+  (`views_on_the_same_two_grids_share_one_cell_diff`) and the fingerprint reuse
+  (`a_view_on_the_cached_grid_fingerprints_only_its_own_base`), and `daemon/pane_frame_tests.rs`
+  (4: an echo through a real pane is a patch of at most 64 bytes and the client's retained grid
+  equals the daemon's frame; history chunks ride the terminal lane with blank tails dropped; a
+  pane's frame sequence keeps growing across `respawn-pane`; and, from the parity review, two
+  attached clients that apply every streamed frame equal the daemon's view field for field after
+  typed keys, SGR, wide and combining text, OSC 8/2/7, scroll regions, insert and delete, the
+  alternate screen, cursor styles, mouse mode, copy mode, split, resize, zoom and respawn). zz-daemon
+  `an_interactive_client_refuses_a_daemon_without_pane_frames` covers the handshake. The old
+  terminal-lane byte-layout tests went with the layout.
+
+Measured on Linux (alienware, tmux 3.7c; `--quick --only attach,echo,throughput,chatty` against the
+quick Linux W0; before is the wave-2 base `c65e49f0`, after is this branch; load 1.6-3.9 on 16 CPUs
+with another lane idle or compiling, so wall and CPU rows are notes and the host changed power state
+between the two runs, tmux included):
+
+| Metric | Before | After | Rule |
+|---|---|---|---|
+| `echo.wire_bytes.idle` | 1,133 B | 31 B | <= 64 B, passes |
+| `echo.wire_bytes.busy30` (info, includes the 30 Hz ticker) | 3,399 B | 137 B | |
+| `attach.wire_s2c.p1` / `.p4` | 100,064 / 100,236 B | 29,400 / 29,674 B | 8 KB at wave 2, W2-CTRL's |
+| terminal frames inside the p1 / p4 attach | 70,725 / 70,828 B (four 17-18 KB Fulls) | 62 / 265 B (four 66-67 B Fulls) | <= 15 KB, passes |
+| `attach.instr.p1` / `.p4` | 10.7 / 11.1 Minstr | 10.2 / 10.6 (two reruns; one run read 14.0 at p1 with a 24 Minstr outlier) | |
+| `chatty.instr_per_s.flip` / `.hidden` | 34.4 / 38.9 | 34.3 / 36.6 Minstr/s | no worse |
+| `throughput.detached.ascii` | 95.3 MB/s (ceiling 125) | 88.1 MB/s (ceiling 116) | 1.75x tmux, the Linux ceiling as before |
+| `throughput.headless.ascii_ms` (new) | - | 1,761-1,784 ms (detached is about 1,600) | info |
+
+Full-group A/B against the base binary in the same session (`--only chatty,throughput`, then
+`--only chatty` on the final build): `chatty.instr_per_s.visible` 391.8-392.0 -> 383.8 Minstr/s
+(tmux 157-160), `chatty.client_cpu_pct.visible` 2.52 -> 1.81% in the first pair and 2.22 -> 2.27%
+in the second (the TUI's CPU over 10 s moves that much between runs of one binary),
+`chatty.tty_kibps.visible` unchanged at 415-418 KiB/s, `throughput.attached.ascii_ms` 2,081 ->
+2,092 ms (tmux 3,922 / 3,740), `throughput.detached.unicode` 43.9 -> 42.2 MB/s (8.5-8.9x tmux).
+`chatty.cpu_pct.visible` still fails its wave-1 rule (2.3-2.5x tmux) on both builds.
+
+Profile of the daemon under the visible chatty workload (`perf record -e cycles:u` for 6 s, four
+90x24 panes printing through a TUI): the pane actors are 84% of the samples, almost all of it
+building frames out of libghostty (`build_snapshot` 30%, `ghostty_render_state_row_cells_get`
+12%, style interning, row and cell iterators), which is W4-ROWS and W3-SHARDS. The four watchers
+were 17.3% on the first cut, with this lane's diff and encode about 7.8% (`best_row_shift` 4.0%,
+the row compare 2.6%, encoding 1.2%); after the diff changes above they are 13.8%, and the lane's
+path is about 5% (row compare and shift search 2.1%, row fingerprints 1.5%, encoding 0.9%, the
+mailbox 0.4%). Under a flood watched by the headless client the watcher is 1.2% and the actor 94%
+(parsing, and page faults the unpushed PageList fork fix removes).
+
+Checks on Linux: `cargo fmt`; clippy `-D warnings` on zz-terminal, zz-protocol, zz-daemon,
+zz-client, zz-tui, zz-cli, zz-client-ffi, zz-web, zz, zz-mux and zz-config (all targets, all
+features); tests of zz-terminal, zz-protocol, zz-client (with the daemon-backed simulator), zz-tui,
+zz-client-ffi, zz-web, zz-cli and zz pass; zz-daemon passes except the known
+`endpoint::tests::remote_scripts_fall_back_to_the_mac_app_bundle_cli` and one russh port test
+that passes alone. `compat/tui-screen-diff.sh` 147/147 three times on the first release build
+and three times on the final one;
+`attached-client.sh`, `tui-choosers.sh` (previews ride the new postcard body),
+`tui-output-backpressure.sh`, overlays, pane-geometry, caps, launch-diff, indicators, superset,
+command-streams and stock-keys pass; copy-mode (the six fresh-entry search prompt cases),
+status-row, mouse and client-commands (`switch-mode-duplicate-windows`, `sh` against `bash`, the
+same on the base binary) fail as on the base. `compat/run.sh` over the whole corpus
+(`LC_ALL=en_US.UTF-8`, debug build): only `lane2-store`, `show-options-hooks` (the pin's `vlock`
+`lock-command`) and `smoke/plugin-runtime-resurrect-restore` fail twice, the three host rows the
+wave-1 merge recorded, and the `known/` rows keep their documented divergences.
+`compat/tui/tracker.py check` passes. `compat/wire-version.py`: 107 unreleased.
+`just web-build` builds. Not run here: `just ios-gpui iPad build` (needs the Mac; gpui-shared
+decodes through zz-client core and did not change), and `bench/run.sh` (it drives the packaged GUI
+app in a window, not the daemon; the gate's throughput rows and the headless client cover the
+wire).
+
+Fix pass (after both reviews, on perf/wave2 `c3d48b63`, so both builds link Ghostty `713374af`):
+the per-client work above, the review minors, and the reviewers' tests. Daemon user instructions
+under visible chatty (four 90x25 panes printing, N attached TUIs, three 5 s windows a run, two
+interleaved rounds; before is the first cut merged with the same perf/wave2):
+
+| Clients | Before (Minstr/s) | After (Minstr/s) |
+|---|---|---|
+| 1 | 384.7 / 383.9 | 380.6 / 383.7 |
+| 2 | 404.7 / 404.2 | 389.0 / 389.0 |
+| 4 | 444.7 / 443.1 | 398.7 / 399.0 |
+| each extra client | +19.9 | +5.6 |
+
+A profile of the same workload with 1 and 4 TUIs (`cycles:u` at 15 kHz, profiling build): the
+watchers go from 12.2% to 14.3% of the daemon's cycles (the review measured 15.4% to 22.9% on
+the first cut); `row_fingerprint`, `encode_runs`, `push_scalar` and `check_cell` do not grow with
+the client count (the review had `row_fingerprint` at 0.95% then 4.71%); what a view still adds on
+the watcher is its metadata compare (`diff_shared` +0.3 points), its header, metadata and tail copy,
+and the mailbox and `publish_terminal_for_pane` lock traffic that W4-DELIVER deletes. The actors'
+share of the extra cost is a snapshot per view (W3-SHARDS).
+
+Quick gate (`--quick --only attach,echo,throughput,chatty` against the quick Linux W0,
+`fixed.json` in the lane's report directory): `echo.wire_bytes.idle` 32 B (31 on the first cut:
+the event sequence of a fresh daemon is a byte longer than a fresh per-terminal counter; both
+grow with uptime), `echo.wire_bytes.busy30` 137 B, `attach.wire_s2c.p1` / `.p4` 29,415 / 29,692 B
+(+15 and +18 B for `pane-frame-v1`), `attach.instr` 10.2 / 10.6 Minstr and `chatty.instr_per_s`
+34.3 / 35.6 Minstr/s unchanged, `throughput.detached.ascii` 134.1 MB/s against a same-run pty
+ceiling of 130.1 (tmux 55.0; it passes now because perf/wave2 brought the PageList pin),
+`throughput.headless.ascii_ms` 1,306 ms. 10 pass, 6 fail, 0 regressed, 0 drifted; the failures
+are `attach.conns` and `attach.wire_s2c` (W2-CTRL) and `attach.ttfc.p4` / `attach.cpu.p4`, wall
+and CPU rows that failed the same way on the wave-2 base.
+
+Fix-pass checks on Linux: `cargo fmt`; clippy `-D warnings` on every crate listed above; tests of
+zz-terminal (313), zz-protocol (252), zz-client (167 and the daemon-backed simulator), zz-tui (229),
+zz-mux (586), zz-client-ffi, zz-web, zz-cli and zz (583) pass; zz-daemon 1129 of 1133, the known
+`remote_scripts_fall_back_to_the_mac_app_bundle_cli` plus two `process_info` exec-name tests and
+the russh port test, which pass alone 3 of 3. The two-client daemon test passes three times plain
+and twice with `ZZ_PERF_ROW_PATCHES=1` (the knob reads 80.5 B on `echo.wire_bytes.idle`, as the
+rollback table says). Release build, with other trees' compiles paused: `tui-screen-diff.sh`
+147/147 three times, `attached-client.sh` PASS, choosers 78/78, overlays 48/48,
+output-backpressure 9/9, copy-mode 141/147 (the six fresh-entry search prompt cases of the base);
+`diff-scenario.sh` on capture-pane, the eight copy-mode scenarios, zoom, resize, resize-window,
+switch-client, alerts, panes, display-panes-format, pane-dead-time and windows: 18/18.
+`just web-build` builds. `compat/tui/tracker.py check`, `compat/wire-version.py` (107 unreleased),
+`bench/perf/test_gate.py` and the OKF validator pass. Not run: `just ios-gpui iPad build` and
+`bench/run.sh`, for the reasons above.
+
+Handed on:
+
+- W2-CTRL: the 28 KB `ServerHello` is now 95% of an attach's bytes. `Batch` can carry the
+  enveloped PaneFrames the two public encoders write, or the bare full-frame body
+  (`pane_frame::encode_viewport_body`, crate-private today).
+- W3-SHARDS: one generation per publish for every plain live view of a pane. The actor already
+  shares the cell plane and dictionary between those views; only `build_snapshot`'s per-view
+  `generations.content += 1` / `.view += 1` keeps their bases apart, so each client's patch still
+  needs its own header (base and generation deltas) and W4's per-(pane, base) cache could never
+  hit. With one generation per publish the views' frames become equal, and the actor can skip
+  building a second snapshot for them at all (the 263 M cycles the three extra views cost the
+  actors in the perf review's 4-client profile). A clean-row hint from `build_snapshot` would let
+  the diff skip rows the actor did not re-extract (the row compare is most of the diff for in-place
+  updates); W3-SHARDS or W4-ROWS owns both ends of that.
+- W4-DELIVER: frames carry the daemon's event sequence, which only grows, also across a respawn,
+  and orders a pane's frames against every later event about the pane, ready for "after seq N"
+  barriers. Each client's frame takes its own number today; a shard that encodes one
+  `Arc<[u8]>` per (pane, base) for every sink needs one number per pane frame instead (the
+  sequence sits in the header). Until then `diff_shared` and `PatchTail` are the shared part: one
+  diff and one span encoding per pane per frame.
+- W4-ROWS: the profile above is the "does row extraction show" evidence: it does, at about 60% of
+  the actor's samples in visible chatty.
+
 ## W2-CTRL: control plane v2 (effort XL)
 
 Scope:
@@ -2378,6 +2608,7 @@ deletes most wave-1 fallback paths anyway).
 | `ZZ_PERF_ATTACH_PRESIZE=0` | ATTACH | an attaching raw-terminal client's panes keep their size until its first `ResizeTerminal` |
 | `ZZ_PERF_WRITEV=0` | ATTACH | one write per outbound frame, a writer thread of its own per connection, the default socket send buffer, and unbuffered protocol reads in the daemon and in the client (the client reads it at start) |
 | `ZZ_PERF_TUI_COALESCE=0` | ATTACH | the TUI (read at CLI start) paints after every event, repaints everything on every snapshot and on an unchanged resize, paints before attaching and a card in a pane with no frame, writes a paint that only puts the cursor back, clears to the theme colour and erases every blank pane row, reads the two terminal options over two connections of their own, sends the kitty graphics probe on every attach, sends the client size for a cell-size reply, and places the cursor for every border cell |
+| `ZZ_PERF_ROW_PATCHES=1` | TERM | patches replace every changed row whole (from column 0, the rest of the row cleared), the pre-W2 row granularity; the frames stay PaneFrames. Fails `echo.wire_bytes.idle` (about 80 B against the 64 B rule) by design: a key echo resends its whole prompt row |
 | `ZZ_PERF_READONLY_SKIP=0` | HOOKS | read-only commands take the before/after captures |
 | `ZZ_PERF_EAGER_FACTS=1` | HOOKS | every command builds format hook facts, and a pane runtime fact change builds them with no rename due |
 | `ZZ_PERF_HOOK_JOURNAL=0` | HOOKS | hook events come from whole-mux snapshots before and after, the command path captures every active window, active pane and bell, and the focus probe captures every window and session |
@@ -2386,7 +2617,7 @@ deletes most wave-1 fallback paths anyway).
 | `ZZ_PERF_THP=1` | FOOTPRINT (Linux) | the daemon keeps transparent huge pages as the system sets them |
 
 Wire changes (W2-TERM, W2-CTRL) and the thread model (W3, W4) have no runtime switch; rollback is a
-revert. `ZZ_PTY_SHARDS=N` is a tuning knob, not a rollback. W2-HOOKS changes that keep behaviour
+revert. The 8-byte-a-cell frames cannot come back behind a knob: both ends speak one format. `ZZ_PTY_SHARDS=N` is a tuning knob, not a rollback. W2-HOOKS changes that keep behaviour
 have no knob either: the catalogue name index, the skipped lookup for empty hook arrays, the sweep
 that runs only after a removal (debug builds assert a skipped one would remove nothing), the
 focus early return and the shared change window (debug builds diff the focus candidates against
@@ -2417,6 +2648,8 @@ whole-state probes), and the blocking run-shell wait.
 | Journal completeness | HOOKS | debug builds diff the journal against whole-mux snapshots at every hook scope (events, focus candidates, active windows, panes and bells) over the whole daemon suite and every debug compat run; after-list-keys fires (`daemon/hook_events_tests.rs`, zz-mux `journal_tests.rs`) |
 | Key table deltas | HOOKS | a subscriber's tables, folded from its hello and every publication, equal a fresh snapshot after binds, unbinds, `unbind -a`, prefix changes and a revert made while nobody listened; an identical rebind publishes nothing (`daemon/hook_events_tests.rs`, zz-protocol `key/generation_tests.rs`, zz-client `core.rs`) |
 | Blocking work holds no journal | HOOKS | a `run-shell 'sleep 1'` key binding keeps the journal at a few entries while other commands run; a run-shell job thread wakes fewer than 10 times over 0.6 s (Linux, `daemon/hook_events_tests.rs`) |
+| PaneFrame codec | TERM | random grids (ASCII, wide pairs, graphemes, hyperlink and classed styles, spacer heads, odd flags, repeats) round-trip through full frames and apply through patches with dictionary growth and scrolls; every truncation is rejected, and a lying count of styles, graphemes, overlays or placements before allocating (the grid is bounded by the 8 Mi cell cap); echo patch <= 40 B, blank 180x50 frame <= 64 B (`zz-protocol` `pane_frame_tests.rs`) |
+| Frames through the daemon | TERM | a typed key reaches an attached client as a patch of at most 64 B and the retained grid equals the daemon's frame; history chunks ride the terminal lane; a pane's frame sequence keeps growing across respawn-pane; two attached clients rebuild every view exactly from the streamed frames (`daemon/pane_frame_tests.rs`) |
 | Echo under load | W3 | `capture-pane -S -` on a 20-pane large history while another pane echoes: p99 no worse than tmux |
 
 # Lane mechanics

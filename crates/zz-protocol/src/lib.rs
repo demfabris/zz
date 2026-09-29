@@ -10,6 +10,7 @@ mod key;
 pub mod layout;
 mod menu;
 mod message;
+mod pane_frame;
 mod path_list;
 mod snapshot;
 mod style;
@@ -66,16 +67,17 @@ pub use message::{
     MAX_PANE_INDICATOR_LABEL_BYTES, MAX_PASTE_UPLOAD_BYTES, MAX_PASTE_UPLOAD_CHUNK_BYTES,
     MAX_PASTE_UPLOAD_EXTENSION_BYTES, MAX_STATUS_ROWS, MAX_STATUS_TEXT_BYTES, MenuAction, MenuItem,
     MenuState, ModePresentation, MuxOptionKey, MuxOptionSource, MuxOptionValue, MuxOptions,
-    NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneBorderPresentation, PaneIndicator,
-    PasteUploadPurpose, PastedImageFormat, PopupAction, PopupBorderLines, PopupPointer,
-    PopupPointerButton, PopupState, PreparedCommand, PreparedCommandResult, ProtocolMessage,
-    RawText, SERVER_OPTION_CAPABILITY_PREFIX, SPLIT_RATIO_BASIS, ServerError, ServerHello,
-    SourceSpan, StatusLine, StatusPosition, StdoutClaim, TerminalUiCommand,
+    NEW_SESSION_ATTACH_CAPABILITY, PANE_FRAME_CAPABILITY, PROTOCOL_VERSION, PaneBorderPresentation,
+    PaneIndicator, PasteUploadPurpose, PastedImageFormat, PopupAction, PopupBorderLines,
+    PopupPointer, PopupPointerButton, PopupState, PreparedCommand, PreparedCommandResult,
+    ProtocolMessage, RawText, SERVER_OPTION_CAPABILITY_PREFIX, SPLIT_RATIO_BASIS, ServerError,
+    ServerHello, SourceSpan, StatusLine, StatusPosition, StdoutClaim, TerminalUiCommand,
     agent_update_batch_bytes, paste_upload_extension_is_valid, split_command_words,
 };
 pub use message::{
     MAX_STARTUP_CONFIG_CAUSE_BYTES, MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES,
 };
+pub use pane_frame::{MAX_HISTORY_CHUNK_ROWS, PatchTail};
 pub use path_list::{
     GitMark, InsertStyle, MAX_PATH_LIST_CHUNK_BYTES, MAX_PATH_LIST_DEPTH, MAX_PATH_LIST_ENTRIES,
     MAX_PATH_LIST_TEXT_BYTES, PathEntry, PathKind, PathListRoot, ShellKind,
@@ -96,7 +98,7 @@ pub use style::{
 };
 pub use terminal_codec::{
     decode_protocol_frame, encode_protocol_message, encode_protocol_message_into,
-    encode_terminal_viewport_event, encode_terminal_viewport_event_into, read_protocol_message,
-    read_protocol_message_into, terminal_patch_frame_len, terminal_viewport_frame_len,
+    encode_terminal_patch_event_into, encode_terminal_viewport_event,
+    encode_terminal_viewport_event_into, read_protocol_message, read_protocol_message_into,
     write_protocol_message,
 };

@@ -435,7 +435,7 @@ calls `handle_message`. That depth-1 bound is deliberate backpressure: if the GP
 behind, the reader thread stops draining the socket instead of buffering unbounded terminal frames
 client-side (pressure then lands on the daemon's own per-pane mailbox).
 
-`handle_message` keeps the terminal hot path outside the shared core: full viewports, row patches,
+`handle_message` keeps the terminal hot path outside the shared core: full viewports, span patches,
 and command-output frames go straight into `RetainedTerminalViewport` and `CommandOutputModel`,
 preserving the history ring, row revisions, and diff scratch the painter consumes. Every other
 message goes through `zz_client::ClientCore`; `MuxClient` drains its `Outbound` requests and typed

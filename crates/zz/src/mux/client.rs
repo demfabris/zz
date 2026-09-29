@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use gpui::{ClipboardItem, Context, EventEmitter, Image, RenderImage, Task};
@@ -98,6 +98,7 @@ const MAX_HISTORY_ROWS: usize = 10_000;
 const MIN_HISTORY_DICTIONARY_COMPACTION_BYTES: usize = 1024;
 const MAX_HISTORY_CHUNK_ROWS: u32 = 512;
 const HISTORY_BACKFILL_QUIET: Duration = Duration::from_millis(100);
+const HISTORY_REQUEST_RETRY: Duration = Duration::from_secs(3);
 const MAX_PANE_IMAGE_SNAPSHOTS: usize = 8;
 const MAX_TRACKED_COMMANDS: usize = 32;
 const TERMINAL_FONT_SIZE_STEP_POINTS: f32 = 1.0;
@@ -929,6 +930,7 @@ impl FakeConnectedHost {
 struct PendingHistoryRequest {
     mutations: u64,
     prefetch_target: Option<u32>,
+    sent: Instant,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1611,24 +1613,24 @@ impl MuxClient {
         {
             return;
         }
-        if self
-            .attached_connection()
+        let mut prefetch_target = prefetch_target;
+        if let Some(pending) = self
+            .attached_connection_mut()
             .history_requests_pending
-            .contains_key(&pane)
+            .get_mut(&pane)
         {
-            if let Some(target) = prefetch_target {
-                let pending = self
-                    .attached_connection_mut()
-                    .history_requests_pending
-                    .get_mut(&pane)
-                    .expect("pending history request was checked above");
-                pending.prefetch_target = Some(
-                    pending
-                        .prefetch_target
-                        .map_or(target, |previous| previous.min(target)),
-                );
+            let target = match (prefetch_target, pending.prefetch_target) {
+                (Some(target), Some(previous)) => Some(target.min(previous)),
+                (target, previous) => target.or(previous),
+            };
+            if pending.sent.elapsed() < HISTORY_REQUEST_RETRY {
+                pending.prefetch_target = target;
+                return;
             }
-            return;
+            prefetch_target = target;
+            self.attached_connection_mut()
+                .history_requests_pending
+                .remove(&pane);
         }
 
         let budget =
@@ -1673,6 +1675,7 @@ impl MuxClient {
             PendingHistoryRequest {
                 mutations,
                 prefetch_target,
+                sent: Instant::now(),
             },
         );
         if let Some(client) = &connection.client {
@@ -4120,7 +4123,6 @@ impl MuxClient {
                 let connection = self.attached_connection_mut();
                 connection.resync_pending = false;
                 connection.full_requests_pending.clear();
-                connection.history_requests_pending.clear();
                 connection.history_backfill_deferred.clear();
                 if !*attaching {
                     self.backfill_retained_history();
@@ -4912,7 +4914,7 @@ fn apply_retained_patch(
 ) -> Result<(), zz_terminal::PatchError> {
     let scroll = patch.scroll;
     let previous_scrollbar = retained.history_scrollbar;
-    let next_scrollbar = patch.scrollbar;
+    let next_scrollbar = patch.scrollbar_after(&retained.viewport);
     let rows = usize::from(patch.rows);
     let shift = usize::from(scroll.unsigned_abs());
     let total_delta = next_scrollbar.total.checked_sub(previous_scrollbar.total);
@@ -4965,7 +4967,7 @@ fn apply_retained_patch(
     retained.revision_scratch.clear();
     retained
         .revision_scratch
-        .extend_from_slice(patch.changed_rows.row_indices());
+        .extend(patch.changed_rows.row_indices());
     let outgoing_dictionary =
         (!patch.dictionary.is_empty()).then(|| Arc::clone(&retained.viewport.dictionary));
     if let Err(error) = retained.viewport.apply_patch(patch) {
@@ -5087,7 +5089,7 @@ mod tests {
             server_id: 1,
             client_id: zz_protocol::ClientId(1),
             client_instance_id: zz_protocol::ClientInstanceId(1),
-            capabilities: Vec::new(),
+            capabilities: vec![zz_protocol::PANE_FRAME_CAPABILITY.to_owned()],
             appearance: TerminalAppearance::default(),
             appearance_provenance: AppearanceProvenance::default(),
             mux_options: MuxOptions::default(),
@@ -10599,6 +10601,83 @@ mod tests {
         cx.executor()
             .advance_clock(HISTORY_BACKFILL_QUIET + Duration::from_millis(1));
         cx.run_until_parked();
+        assert_eq!(
+            &*fake.history_requests.borrow(),
+            &[(pane, 688, 512), (pane, 688, 512)]
+        );
+    }
+
+    #[gpui::test]
+    fn a_tree_change_keeps_the_history_chunk_in_flight(cx: &mut TestAppContext) {
+        let pane = PaneId(78);
+        let (mux, fake, initial) = cx.update(|cx| history_backfill_debounce_fixture(cx, pane));
+        cx.update(|cx| {
+            mux.update(cx, |mux, cx| {
+                mux.handle_message(
+                    HostId::LOCAL,
+                    ProtocolMessage::Event(zz_protocol::Event {
+                        sequence: 2,
+                        payload: EventPayload::Snapshot(MuxSnapshot {
+                            generation: 5,
+                            ..MuxSnapshot::default()
+                        }),
+                    }),
+                    cx,
+                );
+                assert!(
+                    mux.attached_connection()
+                        .history_requests_pending
+                        .contains_key(&pane)
+                );
+            });
+        });
+        assert_eq!(&*fake.history_requests.borrow(), &[(pane, 688, 512)]);
+
+        let ids = (688..1_200).collect::<Vec<_>>();
+        cx.update(|cx| {
+            mux.update(cx, |mux, cx| {
+                mux.handle_message(
+                    HostId::LOCAL,
+                    ProtocolMessage::Event(zz_protocol::Event {
+                        sequence: 3,
+                        payload: EventPayload::HistoryChunk {
+                            pane,
+                            start: 688,
+                            total: 1_203,
+                            offset: 1_200,
+                            columns: 1,
+                            rows: chunk_rows(&ids),
+                            dictionary: initial.dictionary.as_ref().clone(),
+                        },
+                    }),
+                    cx,
+                );
+            });
+            let mux = mux.read(cx);
+            let retained_ids = retained_history_ids(&mux.viewports[&pane].read());
+            assert_eq!(retained_ids.len(), 512);
+            assert_eq!(retained_ids.first(), Some(&688));
+        });
+    }
+
+    #[gpui::test]
+    fn a_history_reply_that_never_came_is_requested_again(cx: &mut TestAppContext) {
+        let pane = PaneId(79);
+        let (mux, fake, _) = cx.update(|cx| history_backfill_debounce_fixture(cx, pane));
+        cx.update(|cx| {
+            mux.update(cx, |mux, _| {
+                mux.request_history_backfill(pane);
+                assert_eq!(fake.history_requests.borrow().len(), 1);
+                mux.attached_connection_mut()
+                    .history_requests_pending
+                    .get_mut(&pane)
+                    .expect("the first request is pending")
+                    .sent = Instant::now()
+                    .checked_sub(HISTORY_REQUEST_RETRY + Duration::from_millis(1))
+                    .expect("a clock past the retry interval");
+                mux.request_history_backfill(pane);
+            });
+        });
         assert_eq!(
             &*fake.history_requests.borrow(),
             &[(pane, 688, 512), (pane, 688, 512)]

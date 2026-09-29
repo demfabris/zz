@@ -115,20 +115,22 @@ non-owning watcher so it can exit. The daemon also publishes `PaneRemoved`. Brow
 Each pane gets a `zz-pane-{n}` watcher thread created by `watch_terminal`. It blocks on the worker's
 event channel without holding a strong session reference. After each event it upgrades its weak
 handle, verifies the pane still maps to that exact session, and then handles the event. One pane runs
-one diff stream per view. The watcher keeps `previous: BTreeMap<TerminalViewId, Arc<TerminalViewport>>`
-and, on every `TerminalEvent::ViewportReady`, walks `latest_viewports()` in view order, diffing each
-frame against that view's own predecessor to emit either a full frame or a compact patch:
+one diff stream per view. The watcher keeps `previous: BTreeMap<TerminalViewId, (epoch,
+Arc<TerminalViewport>)>` and, on every `TerminalEvent::ViewportReady`, walks `latest_view_frames()` in
+view order. `publish_terminal_for_pane` first checks that the view's client is attached, not frozen and
+streams the pane, then diffs the frame against that view's own predecessor to send either a full frame
+or a compact patch. Views live at the bottom share the actor's cell plane and dictionary, so
+`TerminalViewport::diff_shared` computes the row shift and spans once per frame for all of them, and
+the encoder copies the span section after each client's own header (`PatchTail`):
 
 ```rust
 // watch_terminal, per ViewportReady
-for (view, viewport) in current {                     // latest_viewports(), sorted by view id
-    let payload = previous
-        .get(&view)
-        .and_then(|prev| TerminalViewport::diff_with_scratch(prev, &viewport, &mut diff_scratch))
-        .map_or_else(|| TerminalFanout::Full, TerminalFanout::Patch);
-    shared.publish_terminal_for_pane(pane, ClientId(view.0), payload, &viewport);
-    previous.insert(view, viewport);
+for (view, viewport, epoch) in current {              // latest_view_frames(), sorted by view id
+    let base = epoch.and_then(|epoch| previous.get(&view).filter(|(seen, _)| *seen == epoch));
+    shared.publish_terminal_for_pane(pane, ClientId(view.0), base, &viewport, &terminal, &mut fanout);
+    previous.insert(view, (epoch, viewport));
 }
+fanout.diff.release_shared();                         // lets go of the frames the shared diff held
 previous.retain(|view, _| active.contains(view));     // a view that went away drops its diff base
 ```
 

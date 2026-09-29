@@ -12,7 +12,7 @@ timestamp: 2026-08-31T00:00:00-03:00
 `zz-protocol` is the
 **renderer-neutral, versioned contract** that every zz process speaks. It defines the stable IDs
 (`$session`, `@window`, `%pane`, `^split`, client `c`), the length-prefixed enveloped framing, the
-`ProtocolMessage` control enum encoded with `postcard`, a hand-packed terminal fanout lane, and the
+`ProtocolMessage` control enum encoded with `postcard`, the PaneFrame terminal fanout lane, and the
 `MuxSnapshot` state tree. It deliberately owns **no** renderer, transport, or business logic; it is
 the shared vocabulary that keeps [the mux state machine](/crates/zz-mux.md), [the daemon](/crates/zz-daemon.md),
 and [the GPUI client](/crates/zz.md) interoperable across a socket or named pipe.
@@ -38,13 +38,14 @@ encoding-affecting change requires bumping `PROTOCOL_VERSION`**, currently 103. 
 | `message` | `ProtocolMessage`, v99 `CommandResponse::Success.stdout_claim` with its `StdoutClaim` enum, `EventPayload::Clipboard.producer` with its `ClipboardProducer` enum, and the appended `EnvironmentRequest`/`EnvironmentResponse` pair, v98 `RawText` byte strings on `ClientHello.environment`, `CommandInvocation.args` and both `CommandResponse` `output` fields, v98 chooser mode-tree vocabulary (`ChooseTreeAction::SwapUp`/`SwapDown`/`SortNext`/`SortReverse`/`Help`/`CollapseAll`/`ExpandAll`/`Mark`/`MarkClear`/`CommandPrompt`, `ChooseBufferAction::Tag`/`TagNone`/`TagAll`/`SortNext`/`SortReverse`/`Help`/`CollapseAll`/`ExpandAll`/`DeleteTagged`/`PasteTagged`, `ChooseTreeState.help`, `ChooseBufferState.help`, `ChooseBufferItem.tagged`), v97 chooser kill vocabulary (`ChooseTreeAction::Tag`/`TagNone`/`TagAll`/`KillCurrent`/`KillTagged`, `ChooseTreeState.prompt`, `ChooseTreeItem::TAGGED`), v96 `CommandQueueParked`, `CopyModeAction::Search(Box<CopyModeSearch>)` with the new `CopyModeSearch` payload, and `PopupAction::Pointer` with `PopupPointer`/`PopupPointerButton`, v95 pane border chrome on `MuxSnapshot` (`WindowSnapshot.pane_border_status`/`pane_border_lines`/`pane_border_indicators`/`pane_order`/`pane_z_order` and `PaneSnapshot.border_status_text`), v94 `CopyModeAction` refresh tail and `CopyLine`, `MuxOptionKey::FocusFollowsMouse` and `MenuState.mouse_keys`, v93 `KeyToken::Raw`, `CommandInvocation.expanded_alias_group`, and `ChooseTreeItem.text`/`ChooseBufferItem.text`, v92 `HomeDirectoryRequest`/`HomeDirectoryResponse`, v91 `ClientExitAction` on `Detached` and `ControlConfigError`, v90 `MenuItem.annotation`, v89 `ClientFileRequest`/`ClientFileResponse`, v87 `SetTerminalPreview`, `CommandInvocation` with v84 typed command-block positions, `ProtocolMessage::Attached` with v85 effective reconnect state, `Event`, `EventPayload` including v81 `ControlCommandOutput`, v80 `StartupConfigCauses`, v79 command-output actor IDs, v77 `ControlCommandGuard`, and v78 `ControlSourceFile`, `ControlSourceFileEvent`, `InputMessage`, v83 `ClientHello.process_id`, v82 `ClientHello.environment`, `ServerHello`, `ServerError` including v76 `CommandParse` and v85 `PostAdmissionCallback`, `ConfigOverrideEntry`, `MuxOptions`/`MuxOptionKey`/`MuxOptionValue`, `StatusLine`/`StatusPosition`, `CommandPromptType`/`CommandPromptMode`, `PROTOCOL_VERSION`, `NEW_SESSION_ATTACH_CAPABILITY`, the terminal-fact constants exposed through `ClientHello`, `SPLIT_RATIO_BASIS`, choose-tree / choose-buffer / display-panes types | [wire protocol](/protocol/wire-protocol.md) |
 | `snapshot` | `MuxSnapshot`, `SessionSnapshot`, `SessionViewer`, `WindowSnapshot` with the v86 activity tail, `PaneSnapshot`, `LayoutNode`, `Axis`, `BrowserDescriptor`, `AgentDescriptor`, `AgentProvider`, `EditorDescriptor`, `PaneKindSnapshot` | [snapshots](/protocol/snapshots.md) |
 | `style` | `StyledSegment`, `TmuxAlign`, `TmuxAttributeState`, `TmuxAttributes`, `TmuxColour`, `TmuxDefaultType`, `TmuxList`, `TmuxRange`, `TmuxStyle`, `TmuxWidth`, and the style and colour parsers | [wire protocol](/protocol/wire-protocol.md) |
-| `terminal_codec` | `encode_protocol_message`, `decode_protocol_frame`, `read_protocol_message`, `write_protocol_message`, their `_into` buffer-reusing variants, and exact terminal viewport and patch frame lengths | [packed terminal lanes](/protocol/terminal-lanes.md) |
+| `terminal_codec`, `pane_frame` | `encode_protocol_message`, `decode_protocol_frame`, `read_protocol_message`, `write_protocol_message`, their `_into` buffer-reusing variants, `encode_terminal_viewport_event_into`, `encode_terminal_patch_event_into` and `MAX_HISTORY_CHUNK_ROWS` | [PaneFrame terminal lane](/protocol/terminal-lanes.md) |
 
 # One way to encode a message
 
 `terminal_codec::encode_protocol_message` / `write_protocol_message` is the only encoder. It routes
-`TerminalViewport`, `TerminalPatch`, and populated `CommandOutput` events to the compact **Terminal
-lane** (hand-packed fixed-width sections) and everything else to the **Control lane** (`postcard`).
+`TerminalViewport`, `TerminalPatch`, populated `CommandOutput` and `HistoryChunk` events to the
+**Terminal lane** (PaneFrames: varint headers, changed spans, style runs with UTF-8 text) and
+everything else to the **Control lane** (`postcard`).
 The [server](/crates/zz-daemon.md) uses this path for high-rate terminal fanout.
 
 `framing` is private machinery: it owns the envelope (`Lane`, header write/parse, length prefix) and

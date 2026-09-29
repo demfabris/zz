@@ -10,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Child, ExitStatus, Stdio},
     sync::{
-        Arc, Weak,
+        Arc, LazyLock, Weak,
         atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
         mpsc,
     },
@@ -57,13 +57,13 @@ use zz_protocol::{
     MAX_STARTUP_CONFIG_CAUSES_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES, MENU_ROW_MARGIN, MenuAction,
     MenuItem, MenuState, MuxOptionKey, MuxOptionSource, MuxOptions, MuxSnapshot,
     NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId, PaneIndicator, PaneKindSnapshot,
-    PaneMode, PasteUploadPurpose, PastedImageFormat, PopupAction, PopupBorderLines, PopupPointer,
-    PopupPointerButton, PopupState, PreparedCommand, PreparedCommandResult, ProtocolError,
-    ProtocolMessage, RawText, SERVER_OPTION_CAPABILITY_PREFIX, SPLIT_RATIO_BASIS, ServerError,
-    ServerHello, SessionId, SessionViewer, SourceSpan, SplitId, StatusLine, StdoutClaim, WindowId,
-    canonical_key, encode_protocol_message_into, encode_terminal_viewport_event_into, is_key_name,
+    PaneMode, PasteUploadPurpose, PastedImageFormat, PatchTail, PopupAction, PopupBorderLines,
+    PopupPointer, PopupPointerButton, PopupState, PreparedCommand, PreparedCommandResult,
+    ProtocolError, ProtocolMessage, RawText, SERVER_OPTION_CAPABILITY_PREFIX, SPLIT_RATIO_BASIS,
+    ServerError, ServerHello, SessionId, SessionViewer, SourceSpan, SplitId, StatusLine,
+    StdoutClaim, WindowId, canonical_key, encode_protocol_message_into,
+    encode_terminal_patch_event_into, encode_terminal_viewport_event_into, is_key_name,
     layout_menu_row, menu_row_cells, menu_row_width, read_protocol_message_into, resolve_command,
-    terminal_patch_frame_len, terminal_viewport_frame_len,
 };
 use zz_terminal::{
     AppearanceColor, AppearanceConfigDisposition, AppearanceLoad, AppearanceProvenance,
@@ -71,8 +71,9 @@ use zz_terminal::{
     CursorStyle, EngineKnobs, LastCommandCapture, PasteBufferAction, ProgressBarState,
     RawOutputTapError, TerminalAppearance, TerminalCaptureError, TerminalColorScheme,
     TerminalDiffScratch, TerminalEvent, TerminalEvents, TerminalMode, TerminalPalette,
-    TerminalSession, TerminalSize, TerminalSpawn, TerminalViewId, TerminalViewport, ViewStream,
-    WordSeparators, apply_appearance_overrides, parse_x11_color, prepare_paste_buffer,
+    TerminalPatchRef, TerminalSession, TerminalSize, TerminalSpawn, TerminalViewId,
+    TerminalViewport, ViewStream, WordSeparators, apply_appearance_overrides, parse_x11_color,
+    prepare_paste_buffer,
 };
 
 #[cfg(feature = "agent")]
@@ -2169,10 +2170,27 @@ struct TerminalTransition {
     current: TerminalGeneration,
 }
 
-enum TerminalFanout {
-    Full,
-    Patch(zz_terminal::TerminalViewportPatch),
+static ROW_PATCHES: LazyLock<bool> =
+    LazyLock::new(|| std::env::var_os("ZZ_PERF_ROW_PATCHES").is_some_and(|value| value == "1"));
+
+struct PaneFrameFanout {
+    diff: TerminalDiffScratch,
+    tail: PatchTail,
 }
+
+impl PaneFrameFanout {
+    fn new() -> Self {
+        let mut diff = TerminalDiffScratch::default();
+        diff.set_whole_rows(*ROW_PATCHES);
+        Self {
+            diff,
+            tail: PatchTail::default(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod pane_frame_tests;
 
 #[derive(Clone, Copy)]
 enum TerminalDelivery {
@@ -2204,6 +2222,25 @@ fn viewport_generation(viewport: &TerminalViewport) -> TerminalGeneration {
     }
 }
 
+fn patch_transition(patch: &zz_terminal::TerminalViewportPatch) -> TerminalTransition {
+    TerminalTransition {
+        base: Some(TerminalGeneration {
+            content: patch.base_generation,
+            view: patch.base_view_generation,
+            dictionary: patch.dictionary_generation,
+            columns: patch.columns,
+            rows: patch.rows,
+        }),
+        current: TerminalGeneration {
+            content: patch.generation,
+            view: patch.view_generation,
+            dictionary: patch.dictionary_generation,
+            columns: patch.columns,
+            rows: patch.rows,
+        },
+    }
+}
+
 fn terminal_transition(pane: PaneId, message: &ProtocolMessage) -> Option<TerminalTransition> {
     let ProtocolMessage::Event(Event { payload, .. }) = message else {
         return None;
@@ -2219,22 +2256,7 @@ fn terminal_transition(pane: PaneId, message: &ProtocolMessage) -> Option<Termin
         EventPayload::TerminalPatch {
             pane: target,
             patch,
-        } if *target == pane => Some(TerminalTransition {
-            base: Some(TerminalGeneration {
-                content: patch.base_generation,
-                view: patch.base_view_generation,
-                dictionary: patch.dictionary_generation,
-                columns: patch.columns,
-                rows: patch.rows,
-            }),
-            current: TerminalGeneration {
-                content: patch.generation,
-                view: patch.view_generation,
-                dictionary: patch.dictionary_generation,
-                columns: patch.columns,
-                rows: patch.rows,
-            },
-        }),
+        } if *target == pane => Some(patch_transition(patch)),
         _ => None,
     }
 }
@@ -2676,13 +2698,9 @@ impl OutboundMailbox {
             log::error!("refusing a non-terminal update in the terminal mailbox for {pane}");
             return TerminalEnqueue::Closed;
         };
-        self.enqueue_terminal_with(
-            pane,
-            transition,
-            TerminalDelivery::Foreground,
-            None,
-            |frame| encode_protocol_message_into(message, frame),
-        )
+        self.enqueue_terminal_with(pane, transition, TerminalDelivery::Foreground, |frame| {
+            encode_protocol_message_into(message, frame)
+        })
     }
 
     fn enqueue_terminal_preview(
@@ -2695,27 +2713,29 @@ impl OutboundMailbox {
             log::error!("refusing a non-terminal preview in the terminal mailbox for {pane}");
             return TerminalEnqueue::Closed;
         };
-        let frame_len = match message {
-            ProtocolMessage::Event(Event {
-                payload: EventPayload::TerminalViewport { viewport, .. },
-                ..
-            }) => terminal_viewport_frame_len(viewport),
-            ProtocolMessage::Event(Event {
-                payload: EventPayload::TerminalPatch { patch, .. },
-                ..
-            }) => terminal_patch_frame_len(patch),
-            _ => unreachable!(),
-        };
-        let Ok(frame_len) = frame_len else {
-            return TerminalEnqueue::Dropped;
-        };
         self.enqueue_terminal_with(
             pane,
             transition,
             TerminalDelivery::Preview { foreground_panes },
-            Some(frame_len),
             |frame| encode_protocol_message_into(message, frame),
         )
+    }
+
+    fn enqueue_terminal_patch(
+        &self,
+        pane: PaneId,
+        sequence: u64,
+        patch: &TerminalPatchRef<'_>,
+        delivery: TerminalDelivery,
+        tail: &mut PatchTail,
+    ) -> TerminalEnqueue {
+        let transition = TerminalTransition {
+            base: Some(viewport_generation(patch.base)),
+            current: viewport_generation(patch.current),
+        };
+        self.enqueue_terminal_with(pane, transition, delivery, |frame| {
+            encode_terminal_patch_event_into(pane, sequence, patch, tail, frame)
+        })
     }
 
     fn enqueue_terminal_viewport(
@@ -2731,7 +2751,6 @@ impl OutboundMailbox {
                 current: viewport_generation(viewport),
             },
             TerminalDelivery::Foreground,
-            None,
             |frame| encode_terminal_viewport_event_into(pane, sequence, viewport, frame),
         )
     }
@@ -2743,9 +2762,6 @@ impl OutboundMailbox {
         viewport: &TerminalViewport,
         foreground_panes: usize,
     ) -> TerminalEnqueue {
-        let Ok(frame_len) = terminal_viewport_frame_len(viewport) else {
-            return TerminalEnqueue::Dropped;
-        };
         self.enqueue_terminal_with(
             pane,
             TerminalTransition {
@@ -2753,7 +2769,6 @@ impl OutboundMailbox {
                 current: viewport_generation(viewport),
             },
             TerminalDelivery::Preview { foreground_panes },
-            Some(frame_len),
             |frame| encode_terminal_viewport_event_into(pane, sequence, viewport, frame),
         )
     }
@@ -2763,7 +2778,6 @@ impl OutboundMailbox {
         pane: PaneId,
         transition: TerminalTransition,
         delivery: TerminalDelivery,
-        frame_len: Option<usize>,
         encode: impl FnOnce(&mut Vec<u8>) -> Result<(), ProtocolError>,
     ) -> TerminalEnqueue {
         {
@@ -2794,16 +2808,9 @@ impl OutboundMailbox {
             }
             if let TerminalDelivery::Preview { foreground_panes } = delivery
                 && (state.terminals.len() >= MAX_PENDING_TERMINALS.saturating_sub(foreground_panes)
-                    || frame_len.is_some_and(|frame_len| {
-                        state
-                            .queued_bytes
-                            .checked_add(frame_len)
-                            .is_none_or(|total| total > MAX_PREVIEW_OUTBOUND_BYTES)
-                    }))
+                    || state.queued_bytes >= MAX_PREVIEW_OUTBOUND_BYTES)
             {
-                if foreground_panes < MAX_PENDING_TERMINALS
-                    && frame_len.is_some_and(|frame_len| frame_len <= MAX_PREVIEW_OUTBOUND_BYTES)
-                {
+                if foreground_panes < MAX_PENDING_TERMINALS {
                     mark_preview_refresh(&mut state, pane);
                 }
                 return TerminalEnqueue::Dropped;
@@ -4626,6 +4633,11 @@ impl Shared {
             u8::from(*timers::KEY_TABLE_DELTA),
         );
         attach::log_knobs();
+        log::info!(
+            target: "zz_daemon::perf",
+            "terminal knobs: ZZ_PERF_ROW_PATCHES={}",
+            u8::from(*ROW_PATCHES),
+        );
         hook_events::log_knobs();
         self.start_timers()?;
         let mut context = ExecutionContext::default();
@@ -5567,6 +5579,7 @@ impl Shared {
             "tmux-config-subset".to_owned(),
             NEW_SESSION_ATTACH_CAPABILITY.to_owned(),
             zz_protocol::EXEC_CAPABILITY.to_owned(),
+            zz_protocol::PANE_FRAME_CAPABILITY.to_owned(),
         ];
         if kind == ClientKind::Interactive && client_has_terminal {
             capabilities.extend(attach::terminal_option_capabilities(&inner.engine));
@@ -23935,7 +23948,7 @@ impl Shared {
             .name(format!("zz-popup-{}", client.0))
             .spawn(move || {
                 let mut previous = None::<Arc<TerminalViewport>>;
-                let mut diff_scratch = TerminalDiffScratch::default();
+                let mut fanout = PaneFrameFanout::new();
                 while let Ok(event) = events.recv_blocking() {
                     let Some(terminal) = terminal.upgrade() else {
                         return;
@@ -23948,17 +23961,14 @@ impl Shared {
                             let viewport = terminal
                                 .latest_viewport_for(TerminalViewId(client.0))
                                 .unwrap_or_else(|| terminal.latest_viewport());
-                            let payload = previous
-                                .as_ref()
-                                .and_then(|previous| {
-                                    TerminalViewport::diff_with_scratch(
-                                        previous,
-                                        &viewport,
-                                        &mut diff_scratch,
-                                    )
-                                })
-                                .map_or_else(|| TerminalFanout::Full, TerminalFanout::Patch);
-                            shared.publish_popup_terminal(client, &terminal, payload, &viewport);
+                            shared.publish_popup_terminal(
+                                client,
+                                &terminal,
+                                previous.as_deref(),
+                                &viewport,
+                                &mut fanout,
+                            );
+                            fanout.diff.release_shared();
                             previous = Some(viewport);
                             if let Some(exit_code) = popup_exit_code(&terminal) {
                                 shared.finish_popup(client, &terminal, exit_code);
@@ -24062,8 +24072,9 @@ impl Shared {
         &self,
         client: ClientId,
         terminal: &Arc<TerminalSession>,
-        payload: TerminalFanout,
+        base: Option<&TerminalViewport>,
         viewport: &TerminalViewport,
+        fanout: &mut PaneFrameFanout,
     ) {
         let (pane, subscriber) = {
             let inner = self.inner.lock();
@@ -24083,15 +24094,17 @@ impl Shared {
         };
         self.enqueue_kitty_images_for_viewport(&subscriber, pane, terminal, viewport);
         let sequence = Self::next_sequence();
-        let result = match payload {
-            TerminalFanout::Full => subscriber.enqueue_terminal_viewport(pane, sequence, viewport),
-            TerminalFanout::Patch(patch) => subscriber.enqueue_terminal(
+        let patch =
+            base.and_then(|base| TerminalViewport::diff_shared(base, viewport, &mut fanout.diff));
+        let result = match patch {
+            Some(patch) => subscriber.enqueue_terminal_patch(
                 pane,
-                &ProtocolMessage::Event(Event {
-                    sequence,
-                    payload: EventPayload::TerminalPatch { pane, patch },
-                }),
+                sequence,
+                &patch,
+                TerminalDelivery::Foreground,
+                &mut fanout.tail,
             ),
+            None => subscriber.enqueue_terminal_viewport(pane, sequence, viewport),
         };
         if result == TerminalEnqueue::NeedsFull {
             let _ = subscriber.replace_terminal_viewport(pane, Self::next_sequence(), viewport);
@@ -24385,7 +24398,7 @@ impl Shared {
                     .pane(pane)
                     .is_some_and(|pane| matches!(pane.kind, PaneKind::Agent(_)));
                 let mut previous_bar_state = ProgressBarState::Hidden;
-                let mut diff_scratch = TerminalDiffScratch::default();
+                let mut fanout = PaneFrameFanout::new();
                 let mut mode_memo = BTreeMap::new();
                 while let Ok(event) = events.recv_blocking() {
                     let Some(terminal) = terminal.upgrade() else {
@@ -24424,27 +24437,19 @@ impl Shared {
                             let mut mode_clients = BTreeSet::new();
                             for (view, viewport, epoch) in current {
                                 finished |= terminal_status_should_close(&viewport.status);
-                                let payload = epoch
-                                    .and_then(|epoch| {
-                                        previous
-                                            .get(&view)
-                                            .filter(|(seen, _)| *seen == epoch)
-                                            .map(|(_, previous)| previous)
-                                    })
-                                    .and_then(|previous| {
-                                        TerminalViewport::diff_with_scratch(
-                                            previous,
-                                            &viewport,
-                                            &mut diff_scratch,
-                                        )
-                                    })
-                                    .map_or_else(|| TerminalFanout::Full, TerminalFanout::Patch);
+                                let base = epoch.and_then(|epoch| {
+                                    previous
+                                        .get(&view)
+                                        .filter(|(seen, _)| *seen == epoch)
+                                        .map(|(_, previous)| previous.as_ref())
+                                });
                                 shared.publish_terminal_for_pane(
                                     pane,
                                     ClientId(view.0),
-                                    payload,
+                                    base,
                                     &viewport,
                                     &terminal,
+                                    &mut fanout,
                                 );
                                 let key = (
                                     mode_kind(viewport.mode),
@@ -24466,6 +24471,7 @@ impl Shared {
                                     }
                                 }
                             }
+                            fanout.diff.release_shared();
                             mode_memo.retain(|view, _| active.contains(view));
                             previous.retain(|view, _| active.contains(view));
                             if !terminal_status_should_close(&runtime_viewport.status) {
@@ -26629,9 +26635,10 @@ impl Shared {
         self: &Arc<Self>,
         pane: PaneId,
         client: ClientId,
-        payload: TerminalFanout,
+        base: Option<&TerminalViewport>,
         current: &TerminalViewport,
         terminal: &TerminalSession,
+        fanout: &mut PaneFrameFanout,
     ) {
         let (subscriber, kind, foreground_panes, unclaimed, mode_event, kill_pending) = {
             let mut inner = self.inner.lock();
@@ -26693,26 +26700,25 @@ impl Shared {
                 self.enqueue_kitty_images_for_viewport(&subscriber, pane, terminal, current);
             }
             let sequence = Self::next_sequence();
-            let result = match (kind, payload) {
-                (TerminalStreamKind::Foreground, TerminalFanout::Full) => {
+            let delivery = match kind {
+                TerminalStreamKind::Foreground => TerminalDelivery::Foreground,
+                TerminalStreamKind::Preview => TerminalDelivery::Preview { foreground_panes },
+            };
+            let patch = base
+                .and_then(|base| TerminalViewport::diff_shared(base, current, &mut fanout.diff));
+            let result = match (kind, patch) {
+                (_, Some(patch)) => subscriber.enqueue_terminal_patch(
+                    pane,
+                    sequence,
+                    &patch,
+                    delivery,
+                    &mut fanout.tail,
+                ),
+                (TerminalStreamKind::Foreground, None) => {
                     subscriber.enqueue_terminal_viewport(pane, sequence, current)
                 }
-                (TerminalStreamKind::Preview, TerminalFanout::Full) => subscriber
+                (TerminalStreamKind::Preview, None) => subscriber
                     .enqueue_terminal_viewport_preview(pane, sequence, current, foreground_panes),
-                (TerminalStreamKind::Foreground, TerminalFanout::Patch(patch)) => {
-                    let message = ProtocolMessage::Event(Event {
-                        sequence,
-                        payload: EventPayload::TerminalPatch { pane, patch },
-                    });
-                    subscriber.enqueue_terminal(pane, &message)
-                }
-                (TerminalStreamKind::Preview, TerminalFanout::Patch(patch)) => {
-                    let message = ProtocolMessage::Event(Event {
-                        sequence,
-                        payload: EventPayload::TerminalPatch { pane, patch },
-                    });
-                    subscriber.enqueue_terminal_preview(pane, &message, foreground_panes)
-                }
             };
             if result == TerminalEnqueue::NeedsFull {
                 match kind {
@@ -69400,10 +69406,24 @@ set-option -g @alias-mixed-next yes
             .unwrap_or_else(|| terminal.latest_viewport());
         drain_terminal_lane(&frozen_mailbox);
         drain_terminal_lane(&live_mailbox);
-        shared.publish_terminal_for_pane(pane, frozen, TerminalFanout::Full, &viewport, &terminal);
+        shared.publish_terminal_for_pane(
+            pane,
+            frozen,
+            None,
+            &viewport,
+            &terminal,
+            &mut PaneFrameFanout::new(),
+        );
         shared.send_full(frozen, pane, &frozen_mailbox);
         shared.send_resync(frozen, &frozen_mailbox);
-        shared.publish_terminal_for_pane(pane, live, TerminalFanout::Full, &viewport, &terminal);
+        shared.publish_terminal_for_pane(
+            pane,
+            live,
+            None,
+            &viewport,
+            &terminal,
+            &mut PaneFrameFanout::new(),
+        );
         assert!(frozen_mailbox.state.lock().terminals.is_empty());
         assert!(live_mailbox.state.lock().terminals.contains_key(&pane));
 
@@ -69429,7 +69449,14 @@ set-option -g @alias-mixed-next yes
         ));
 
         drain_terminal_lane(&frozen_mailbox);
-        shared.publish_terminal_for_pane(pane, frozen, TerminalFanout::Full, &viewport, &terminal);
+        shared.publish_terminal_for_pane(
+            pane,
+            frozen,
+            None,
+            &viewport,
+            &terminal,
+            &mut PaneFrameFanout::new(),
+        );
         assert!(frozen_mailbox.state.lock().terminals.contains_key(&pane));
         let _ = session;
     }
@@ -69466,7 +69493,14 @@ set-option -g @alias-mixed-next yes
             .latest_viewport_for(TerminalViewId(client.0))
             .unwrap_or_else(|| terminal.latest_viewport());
         drain_terminal_lane(&mailbox);
-        shared.publish_terminal_for_pane(pane, client, TerminalFanout::Full, &viewport, &terminal);
+        shared.publish_terminal_for_pane(
+            pane,
+            client,
+            None,
+            &viewport,
+            &terminal,
+            &mut PaneFrameFanout::new(),
+        );
         assert!(mailbox.state.lock().terminals.contains_key(&pane));
     }
 
@@ -71122,9 +71156,10 @@ set-option -g @alias-mixed-next yes
             shared.publish_terminal_for_pane(
                 pane,
                 client,
-                TerminalFanout::Full,
+                None,
                 &viewport,
                 &terminal,
+                &mut PaneFrameFanout::new(),
             );
             assert_eq!(
                 mailbox.state.lock().terminals.contains_key(&pane),
@@ -82839,8 +82874,10 @@ bind - split-window -v -c "#{pane_current_path}"
                 TerminalDelivery::Preview {
                     foreground_panes: 1,
                 },
-                Some(MAX_PREVIEW_OUTBOUND_BYTES + 1),
-                |_| panic!("oversized preview reached the encoder"),
+                |frame| {
+                    frame.resize(MAX_PREVIEW_OUTBOUND_BYTES + 1, 0);
+                    Ok(())
+                },
             ),
             TerminalEnqueue::Dropped
         );

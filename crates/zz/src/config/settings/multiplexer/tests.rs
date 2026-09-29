@@ -67,7 +67,7 @@ fn test_server(tables: Vec<KeyTableSnapshot>) -> (InteractiveClient, TestServer)
                 server_id: 1,
                 client_id: ClientId(1),
                 client_instance_id: ClientInstanceId(1),
-                capabilities: Vec::new(),
+                capabilities: vec![zz_protocol::PANE_FRAME_CAPABILITY.to_owned()],
                 appearance: TerminalAppearance::default(),
                 appearance_provenance: AppearanceProvenance::default(),
                 mux_options: MuxOptions::default(),

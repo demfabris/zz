@@ -4181,7 +4181,16 @@ impl GlobPattern {
         let Some(tokens) = &self.0 else {
             return false;
         };
-        glob_matches(tokens, value)
+        let mut rest = value.chars();
+        for (index, token) in tokens.iter().enumerate() {
+            let GlobToken::Literal(expected) = token else {
+                return glob_matches(&tokens[index..], rest.as_str());
+            };
+            if rest.next() != Some(*expected) {
+                return false;
+            }
+        }
+        rest.next().is_none()
     }
 }
 

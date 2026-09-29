@@ -172,13 +172,15 @@ pub(super) fn write_frames(stream: &mut impl Write, frames: &[Vec<u8>]) -> io::R
 }
 
 impl Shared {
-    /// Holds the client's terminal frames for the attach about to run; the
-    /// `Attached` it ends with releases them, and a failed attach releases
-    /// them through [`release_held_terminals`].
-    pub(super) fn hold_attach_terminals(&self, client: ClientId) -> Option<Arc<OutboundMailbox>> {
-        let subscriber = self.inner.lock().subscribers.get(&client).cloned()?;
-        subscriber.hold_terminals();
-        Some(subscriber)
+    /// Holds the client's outbound frames for the attach about to run, until
+    /// the returned hold is dropped: after the attach and the publish that
+    /// follows it, or when the attach fails.
+    pub(super) fn hold_attach_terminals(&self, client: ClientId) -> AttachHold {
+        let subscriber = self.inner.lock().subscribers.get(&client).cloned();
+        if let Some(subscriber) = &subscriber {
+            subscriber.hold_terminals();
+        }
+        AttachHold(subscriber)
     }
 
     /// The client dropped the pane's viewport and asked for it whole.
@@ -188,8 +190,46 @@ impl Shared {
     }
 }
 
-pub(super) fn release_held_terminals(held: Option<&Arc<OutboundMailbox>>) {
-    if let Some(held) = held {
-        held.release_terminals();
+pub(super) struct AttachHold(Option<Arc<OutboundMailbox>>);
+
+impl AttachHold {
+    pub(super) fn release(&mut self) {
+        if let Some(held) = self.0.take() {
+            held.release_terminals();
+        }
     }
+}
+
+impl Drop for AttachHold {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
+pub(super) struct WriterThread(crossbeam_channel::Receiver<()>);
+
+impl WriterThread {
+    pub(super) fn join(self) -> Result<(), ()> {
+        self.0.recv().map_err(drop)
+    }
+}
+
+pub(super) fn spawn_writer(
+    threads: &Arc<exec::ConnectionThreads>,
+    client: ClientId,
+    write: impl FnOnce() + Send + 'static,
+) -> std::io::Result<WriterThread> {
+    let (done, finished) = crossbeam_channel::bounded(1);
+    let job = move || {
+        write();
+        let _ = done.send(());
+    };
+    if *BATCHED_WRITES {
+        threads.run(Box::new(job))?;
+    } else {
+        thread::Builder::new()
+            .name(format!("zz-client-writer-{}", client.0))
+            .spawn(job)?;
+    }
+    Ok(WriterThread(finished))
 }

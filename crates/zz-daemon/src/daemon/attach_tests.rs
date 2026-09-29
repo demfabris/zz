@@ -334,8 +334,17 @@ fn the_client_wiping_its_viewports_lets_the_same_generation_through_again() {
     );
 }
 
+fn attached_message() -> ProtocolMessage {
+    ProtocolMessage::Attached {
+        session: SessionId(1),
+        snapshot: MuxSnapshot::default(),
+        read_only: false,
+        client_flags: String::new(),
+    }
+}
+
 #[test]
-fn held_frames_follow_the_attached_that_releases_them() {
+fn an_attach_is_written_as_one_batch_once_its_hold_is_released() {
     let mailbox = OutboundMailbox::new();
     let pane = PaneId(5);
     mailbox.hold_terminals();
@@ -344,33 +353,42 @@ fn held_frames_follow_the_attached_that_releases_them() {
         TerminalEnqueue::Queued
     );
     assert!(mailbox.enqueue_reliable(&Shared::event(EventPayload::ServerStopping)));
-    let mut batch = Vec::new();
-    assert!(mailbox.recv_batch(&mut batch, attach::MAX_BATCHED_WRITE_BYTES));
-    assert_eq!(batch.len(), 1, "a held frame is not written");
-    batch.clear();
+    assert!(mailbox.enqueue_attached(&attached_message()));
+    assert!(mailbox.enqueue_reliable(&Shared::event(EventPayload::ServerStopping)));
+    assert!(
+        pop_ready_frame(&mut mailbox.state.lock()).is_none(),
+        "nothing is written while the attach holds the mailbox"
+    );
 
-    let attached = ProtocolMessage::Attached {
-        session: SessionId(1),
-        snapshot: MuxSnapshot::default(),
-        read_only: false,
-        client_flags: String::new(),
-    };
-    assert!(mailbox.enqueue_attached(&attached));
+    mailbox.release_terminals();
+    let mut batch = Vec::new();
     assert!(mailbox.recv_batch(&mut batch, attach::MAX_BATCHED_WRITE_BYTES));
     let decoded = batch
         .iter()
         .map(|frame| decode_protocol_frame(frame).expect("decode batch"))
         .collect::<Vec<_>>();
-    assert!(matches!(
-        decoded.as_slice(),
-        [
-            ProtocolMessage::Attached { .. },
-            ProtocolMessage::Event(Event {
-                payload: EventPayload::TerminalViewport { .. },
-                ..
-            })
-        ]
-    ));
+    assert!(
+        matches!(
+            decoded.as_slice(),
+            [
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ServerStopping,
+                    ..
+                }),
+                ProtocolMessage::Attached { .. },
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ServerStopping,
+                    ..
+                }),
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::TerminalViewport { .. },
+                    ..
+                })
+            ]
+        ),
+        "{:?}",
+        decoded.iter().map(message_name).collect::<Vec<_>>()
+    );
 
     mailbox.hold_terminals();
     assert_eq!(
@@ -382,6 +400,34 @@ fn held_frames_follow_the_attached_that_releases_them() {
         mailbox.recv().is_some(),
         "a failed attach releases the hold"
     );
+}
+
+#[test]
+fn a_held_attach_lets_a_long_reliable_queue_drain_but_keeps_its_frames() {
+    let mailbox = OutboundMailbox::new();
+    let pane = PaneId(6);
+    mailbox.hold_terminals();
+    assert_eq!(
+        mailbox.enqueue_terminal(pane, &terminal_test_message(pane, 1, 2)),
+        TerminalEnqueue::Queued
+    );
+    for _ in 0..=MAX_RELIABLE_MESSAGES / 2 {
+        assert!(mailbox.enqueue_reliable(&Shared::event(EventPayload::ServerStopping)));
+    }
+    let mut written = 0;
+    while let Some(frame) = pop_ready_frame(&mut mailbox.state.lock()) {
+        assert!(!is_full(&decode_protocol_frame(&frame).expect("decode")));
+        written += 1;
+    }
+    assert_eq!(written, MAX_RELIABLE_MESSAGES / 2 + 1);
+    assert!(mailbox.enqueue_attached(&attached_message()));
+    assert!(matches!(
+        decode_protocol_frame(&mailbox.recv().expect("attached")),
+        Ok(ProtocolMessage::Attached { .. })
+    ));
+    assert!(is_full(
+        &decode_protocol_frame(&mailbox.recv().expect("frame")).expect("decode")
+    ));
 }
 
 /// Writes at most `limit` bytes per call, as a full socket buffer does.
@@ -767,6 +813,7 @@ fn a_patch_queued_before_attached_never_follows_it() {
         mailbox.enqueue_terminal(pane, &terminal_test_message(pane, 3, 6)),
         TerminalEnqueue::Queued
     );
+    mailbox.release_terminals();
     let first = decode_protocol_frame(&mailbox.recv().expect("attached")).expect("decode");
     assert!(matches!(first, ProtocolMessage::Attached { .. }));
     let written = decode_protocol_frame(&mailbox.recv().expect("frame")).expect("decode");

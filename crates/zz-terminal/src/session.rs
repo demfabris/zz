@@ -2191,6 +2191,10 @@ impl TerminalSession {
             cell_height_px: cell_height_px.max(1),
         };
         self.commands.with_slot(|slot| {
+            if slot.requested_geometry == Some(geometry) {
+                return false;
+            }
+            slot.requested_geometry = Some(geometry);
             slot.pending.resize = Some(geometry);
             true
         });
@@ -2668,6 +2672,8 @@ struct ControlSlot {
     deferred: Vec<(usize, Command)>,
     in_flight: usize,
     known_views: HashSet<TerminalViewId>,
+    requested_geometry: Option<Geometry>,
+    wake_queued: bool,
 }
 
 impl ControlSlot {
@@ -2762,6 +2768,7 @@ fn take_control_slot(
     from_control: bool,
 ) -> Vec<Command> {
     let mut slot = slot.lock();
+    slot.wake_queued = false;
     let mut commands = slot.pending.take();
     slot.release_deferred(&mut commands);
     let Some(command) = woke_by else {
@@ -3029,7 +3036,7 @@ impl CommandSender {
     fn with_slot(&self, update: impl FnOnce(&mut ControlSlot) -> bool) {
         let mut slot = self.queues.slot.lock();
         if slot.in_flight == 0 {
-            let wake = update(&mut slot);
+            let wake = update(&mut slot) && !std::mem::replace(&mut slot.wake_queued, true);
             drop(slot);
             if wake {
                 let _ = self.try_send(Command::Wake);

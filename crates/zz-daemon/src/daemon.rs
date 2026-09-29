@@ -2000,6 +2000,7 @@ struct OutboundState {
     closed: bool,
     writer_finished: bool,
     terminals_held: bool,
+    attach_batch: bool,
     buffered: bool,
 }
 
@@ -2314,6 +2315,9 @@ impl OutboundMailbox {
             state.queued_bytes = state.queued_bytes.saturating_sub(pending.encoded.len());
             discard_outbound_frame(&mut state, pending.encoded);
         }
+        if state.attach_batch && state.reliable.len() >= MAX_RELIABLE_MESSAGES / 2 {
+            state.attach_batch = false;
+        }
         if !reserve_outbound_bytes(&mut state, encoded.len(), 0) {
             shed_preview_terminals(&mut state);
         }
@@ -2360,23 +2364,25 @@ impl OutboundMailbox {
     }
 
     /// Keeps terminal frames queued until `Attached` is: a frame written
-    /// before it is one the client throws away when it reads it.
+    /// before it is one the client throws away when it reads it. Nothing is
+    /// written until the attach releases the hold, so the client reads the
+    /// attach, its status and its first frames as one batch.
     fn hold_terminals(&self) {
         if *attach::ATTACH_DEDUP {
-            self.state.lock().terminals_held = true;
+            let mut state = self.state.lock();
+            state.terminals_held = true;
+            state.attach_batch = true;
         }
     }
 
     fn release_terminals(&self) {
         let mut state = self.state.lock();
-        if !std::mem::take(&mut state.terminals_held) {
+        let held = std::mem::take(&mut state.terminals_held);
+        if !std::mem::take(&mut state.attach_batch) && !held {
             return;
         }
-        let ready = !state.terminals.is_empty();
         drop(state);
-        if ready {
-            self.ready.notify_one();
-        }
+        self.ready.notify_one();
     }
 
     fn enqueue_encoded_reliable_with(
@@ -2387,6 +2393,9 @@ impl OutboundMailbox {
         let mut state = self.state.lock();
         if state.closed {
             return false;
+        }
+        if state.attach_batch && state.reliable.len() >= MAX_RELIABLE_MESSAGES / 2 {
+            state.attach_batch = false;
         }
         if !reserve_outbound_bytes(&mut state, encoded.len(), 0) {
             shed_preview_terminals(&mut state);
@@ -3200,6 +3209,9 @@ impl OutboundMailbox {
 }
 
 fn pop_ready_frame(state: &mut OutboundState) -> Option<Vec<u8>> {
+    if state.attach_batch {
+        return None;
+    }
     if let Some(frame) = state.reliable.pop_front() {
         state.queued_bytes = state.queued_bytes.saturating_sub(frame.len());
         return Some(frame);
@@ -10237,10 +10249,9 @@ impl Shared {
                 }
             }
             if invoking_client_terminal == ClientTerminal::Present {
-                let held = self.hold_attach_terminals(client);
-                let (mut snapshot, attach_hook_events) = self
-                    .attach_collect_event_hooks(client, session, event_hooks_enabled)
-                    .inspect_err(|_| attach::release_held_terminals(held.as_ref()))?;
+                let _held = self.hold_attach_terminals(client);
+                let (mut snapshot, attach_hook_events) =
+                    self.attach_collect_event_hooks(client, session, event_hooks_enabled)?;
                 self.refresh_control_output_taps();
                 pending_hook_events.extend(attach_hook_events);
                 if detach_others {
@@ -15519,10 +15530,9 @@ impl Shared {
                     .update_session_environment_from_client(target_session, environment.map())?;
             }
         }
-        let held = self.hold_attach_terminals(target_client);
-        let (snapshot, mut attach_events) = self
-            .attach_collect_event_hooks(target_client, target_session, !context.no_hooks)
-            .inspect_err(|_| attach::release_held_terminals(held.as_ref()))?;
+        let mut held = self.hold_attach_terminals(target_client);
+        let (snapshot, mut attach_events) =
+            self.attach_collect_event_hooks(target_client, target_session, !context.no_hooks)?;
         if same_session && !context.no_hooks {
             let inner = self.inner.lock();
             let hook_snapshot = MuxHookSnapshot::capture(&inner.engine);
@@ -15557,6 +15567,7 @@ impl Shared {
                 self.send_attached(target_client, outbound, target_session, snapshot.clone());
             }
             self.publish_mux_snapshots();
+            held.release();
             attach_events.sort_by_key(|event| event.name != "client-session-changed");
         }
         self.run_event_hooks(attach_events);
@@ -25277,7 +25288,7 @@ impl Shared {
         for (session, clients) in destroyed {
             for (client, survivor) in clients {
                 if let Some(survivor) = survivor {
-                    let held = self.hold_attach_terminals(client);
+                    let _held = self.hold_attach_terminals(client);
                     match self.attach_collect_event_hooks(client, survivor, true) {
                         Ok((snapshot, events)) => {
                             let mut inner = self.inner.lock();
@@ -25292,7 +25303,6 @@ impl Shared {
                             continue;
                         }
                         Err(error) => {
-                            attach::release_held_terminals(held.as_ref());
                             log::warn!(
                                 target: "zz_daemon::detach_on_destroy",
                                 "client {client} could not move to survivor {survivor} after session {session} died: {error}"
@@ -44561,12 +44571,15 @@ fn handle_connection<S: TransportStream>(
         hello.kind,
     );
     let mut writer = stream.try_clone()?;
+    if *attach::BATCHED_WRITES {
+        let _ = writer.set_send_buffer_size(attach::MAX_BATCHED_WRITE_BYTES);
+    }
     let writer_mailbox = Arc::clone(&outbound);
     let writer_shared = Arc::downgrade(shared);
-    let writer_thread = thread::Builder::new()
-        .name(format!("zz-client-writer-{}", client.0))
-        .spawn(move || write_outbound(&mut writer, &writer_mailbox, &writer_shared, client))
-        .map_err(|error| DaemonError::Thread(error.to_string()))?;
+    let writer_thread = attach::spawn_writer(&shared.connection_threads, client, move || {
+        write_outbound(&mut writer, &writer_mailbox, &writer_shared, client);
+    })
+    .map_err(|error| DaemonError::Thread(error.to_string()))?;
     let mut writer_registration =
         ClientWriterRegistrationGuard::new(shared, client, Arc::clone(&outbound));
     let _ = outbound.enqueue_reliable(&ProtocolMessage::ServerHello(server_hello));
@@ -44799,6 +44812,7 @@ fn handle_connection<S: TransportStream>(
                         shared.clear_pending_committed_text(client);
                         shared.send_attached(client, &outbound, session, snapshot);
                         shared.publish_snapshot();
+                        outbound.release_terminals();
                     }
                     Err(error) => {
                         outbound.release_terminals();

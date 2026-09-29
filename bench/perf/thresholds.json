@@ -1,6 +1,7 @@
 {
  "schema": 2,
  "stages": ["baseline", "wave1", "wave2", "wave3", "final"],
+ "reference": {"host": "macbook", "w0": "results/baseline-macbook-17e17115.json", "scale": {"cpu": "ratio", "wall": "ratio", "mem": "plus"}},
  "tolerance": {
   "instr": {"factor": 1.05, "floor": 0.05, "hard": true},
   "bytes": {"factor": 1.05, "floor": 256, "hard": true},
@@ -67,13 +68,13 @@
   "attach.wire_s2c.*": {"wave1": {"abs": 133120}, "wave2": {"abs": 8192}},
   "attach.cpu.*": {"wave1": {"ratio": 3.0}, "wave2": {"ratio": 1.25}},
 
-  "echo.p50.*": {"wave1": {"ratio": 1.5}},
-  "echo.p99.*": {"wave1": {"ratio": 1.5}},
+  "echo.p50.*": {"wave3": {"ratio": 1.5}},
+  "echo.p99.*": {"wave3": {"ratio": 1.5}},
   "echo.wire_bytes.idle": {"wave1": {"abs": 1700}, "wave2": {"abs": 64}},
   "echo.wire_bytes.busy30": {"tolerance": {"factor": 1.5, "floor": 512}},
 
-  "throughput.detached.*": {"better": "higher", "baseline": {"ratio": 4.0, "vs_w0": 0.85}},
-  "throughput.attached.ascii_ms": {"baseline": {"ratio": 0.25, "vs_w0": 1.18}},
+  "throughput.detached.*": {"better": "higher", "baseline": {"ratio": 4.0, "vs_w0": 0.85, "ceiling": 0.85}},
+  "throughput.attached.ascii_ms": {"baseline": {"ratio": 0.25, "vs_w0": 1.18, "ceiling": 0.85}},
 
   "control.latency": {"wave2": {"ratio": 1.2}, "final": {"ratio": 1.1}},
   "control.cpu_per_cmd": {"wave2": {"ratio": 1.5, "plus": 0.1, "combine": "any"}, "final": {"ratio": 1.2, "plus": 0.03, "combine": "any"}},

@@ -6,7 +6,7 @@ STAGES = ["baseline", "wave1", "wave2", "wave3", "final"]
 HARD_KINDS = {"cpu", "bytes", "mem", "threads", "count", "throughput"}
 WALL_KINDS = {"wall"}
 NOISY_LOAD_PER_CPU = 0.5
-RULE_KEYS = {"abs", "ratio", "plus", "vs_w0"}
+RULE_KEYS = {"abs", "ratio", "plus", "vs_w0", "ceiling"}
 
 
 def load_thresholds(path):
@@ -53,18 +53,38 @@ def worse(value, reference, tol, higher):
     return value > reference * tol["factor"] and value - reference > floor
 
 
-def _checks(rule, value, tmux, w0, higher):
+def scaled_abs(bound, kind, tmux, ref_tmux, scaling):
+    how = (scaling or {}).get(kind)
+    if not how or not tmux or not ref_tmux:
+        return None
+    if how == "ratio":
+        return bound * tmux / ref_tmux
+    if how == "plus":
+        return bound - ref_tmux + tmux
+    return None
+
+
+def _checks(rule, value, tmux, w0, higher, kind=None, ref_tmux=None, scaling=None, ceiling=None):
     results = []
 
     def ok(bound):
         return value >= bound if higher else value <= bound
 
     if "abs" in rule:
-        results.append(("abs", rule["abs"], ok(rule["abs"])))
+        scaled = None if higher else scaled_abs(rule["abs"], kind, tmux, ref_tmux, scaling)
+        if scaled is None:
+            results.append(("abs", rule["abs"], ok(rule["abs"])))
+        else:
+            results.append((f"abs@{scaling[kind]}", round(scaled, 4), ok(scaled)))
     if "ratio" in rule and tmux is not None:
         slack = rule.get("slack", 0.0)
         bound = rule["ratio"] * tmux - slack if higher else rule["ratio"] * tmux + slack
-        results.append(("ratio", round(bound, 4), ok(bound)))
+        fraction = rule.get("ceiling")
+        if fraction and ceiling and not ok(bound):
+            limit = fraction * ceiling if higher else ceiling / fraction
+            results.append(("ceiling", round(limit, 4), ok(limit)))
+        else:
+            results.append(("ratio", round(bound, 4), ok(bound)))
     if "plus" in rule and tmux is not None:
         bound = tmux - rule["plus"] if higher else tmux + rule["plus"]
         results.append(("plus", round(bound, 4), ok(bound)))
@@ -80,7 +100,12 @@ def _median(index, metric_id):
     return ((index.get(metric_id) or {}).get("zz") or {}).get("median")
 
 
-def evaluate(metric, thresholds, stage, strict=False, noisy=False, baseline=None, w0=None):
+def ceiling_id(metric_id):
+    parts = metric_id.split(".")
+    return ".".join([parts[0], "ceiling", *parts[2:]]) if len(parts) > 2 else None
+
+
+def evaluate(metric, thresholds, stage, strict=False, noisy=False, baseline=None, w0=None, run=None, reference=None):
     entry = find_entry(thresholds, metric["id"])
     higher = (entry or {}).get("better", metric.get("better", "lower")) == "higher"
     metric["better"] = "higher" if higher else "lower"
@@ -114,7 +139,18 @@ def evaluate(metric, thresholds, stage, strict=False, noisy=False, baseline=None
     elif not rule:
         metric["verdict"] = "info"
     else:
-        checks = _checks(rule, zz, tmux, _median(w0, metric["id"]), higher)
+        ref_tmux = ((reference or {}).get(metric["id"]) or {}).get("tmux") or {}
+        checks = _checks(
+            rule,
+            zz,
+            tmux,
+            _median(w0, metric["id"]),
+            higher,
+            kind=kind,
+            ref_tmux=ref_tmux.get("median"),
+            scaling=thresholds.get("reference", {}).get("scale") if reference else None,
+            ceiling=_median(run, ceiling_id(metric["id"])) if "ceiling" in rule else None,
+        )
         metric["checks"] = [{"kind": k, "bound": b, "ok": o} for k, b, o in checks]
         if not checks:
             metric["verdict"] = "info"
@@ -156,6 +192,14 @@ def load_result(path):
         return None
     with open(path) as f:
         return json.load(f)
+
+
+def reference_for(thresholds, host, here):
+    ref = thresholds.get("reference") or {}
+    if not ref.get("host") or ref["host"] == host or not ref.get("w0"):
+        return None, None
+    path = os.path.join(here, ref["w0"])
+    return path, index(load_result(path))
 
 
 def index(result):

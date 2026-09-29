@@ -41,6 +41,7 @@ class Ctx:
         self.group = None
         self.python = sys.executable
         self.history = {}
+        self.ceilings = {}
 
     def order(self, i):
         return self.muxes if i % 2 == 0 else self.muxes[::-1]
@@ -235,8 +236,11 @@ def rescore(args):
     w0_path = resolve_w0(args.w0, host, quick)
     w0 = gate.load_result(w0_path)
     noisy = result["meta"].get("noisy", False)
+    ref_path, reference = gate.reference_for(thresholds, host, HERE)
+    run = gate.index(result)
     for metric in result["metrics"]:
-        gate.evaluate(metric, thresholds, args.stage, strict=args.strict, noisy=noisy, baseline=gate.index(base), w0=gate.index(w0))
+        gate.evaluate(metric, thresholds, args.stage, strict=args.strict, noisy=noisy, baseline=gate.index(base), w0=gate.index(w0), run=run, reference=reference)
+    result["meta"]["reference"] = ref_path
     result["summary"] = gate.summarize(result["metrics"])
     result["meta"]["rescored_stage"] = args.stage
     result["meta"]["w0"] = w0_path
@@ -274,7 +278,11 @@ def rule_md(rule, unit, higher):
         parts.append(f"{op} {with_unit(rule['abs'], unit)}")
     if "ratio" in rule:
         slack = rule.get("slack")
-        parts.append(f"{op} {rule['ratio']:g}x" + (f" {'-' if higher else '+'} {with_unit(slack, unit)}" if slack else ""))
+        ceiling = rule.get("ceiling")
+        near = ""
+        if ceiling:
+            near = f" or {op} {ceiling:g}x the pty ceiling" if higher else f" or {op} the pty ceiling's time / {ceiling:g}"
+        parts.append(f"{op} {rule['ratio']:g}x" + (f" {'-' if higher else '+'} {with_unit(slack, unit)}" if slack else "") + near)
     if "plus" in rule:
         parts.append(f"{op} tmux {'-' if higher else '+'} {with_unit(rule['plus'], unit)}")
     if "vs_w0" in rule:
@@ -452,8 +460,11 @@ def main():
     meta["noisy"] = noisy
 
     thresholds = gate.load_thresholds(args.thresholds)
+    ref_path, reference = gate.reference_for(thresholds, host, HERE)
+    meta["reference"] = ref_path
+    run = {m["id"]: m for m in ctx.metrics}
     for metric in ctx.metrics:
-        gate.evaluate(metric, thresholds, args.stage, strict=args.strict, noisy=noisy, baseline=gate.index(base), w0=gate.index(w0))
+        gate.evaluate(metric, thresholds, args.stage, strict=args.strict, noisy=noisy, baseline=gate.index(base), w0=gate.index(w0), run=run, reference=reference)
     summary = gate.summarize(ctx.metrics)
     if strays:
         errors.append({"group": None, "error": f"stray processes after cleanup: {strays}"})

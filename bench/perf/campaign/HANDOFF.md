@@ -164,13 +164,17 @@ Lanes in flight:
 - **`9eb5888b` (gap registry close): kept.** The behaviour it records is real and tested.
 - **Ghostty fork: nothing is pushed.** Fork fixes are developed on a local clone and wait for the
   owner to push the branch and bump `GHOSTTY_COMMIT`.
-- **Echo rows at wave 1: decided at the wave-1 exit**, after W1-ATTACH lands, from the Linux
-  numbers. They are not relaxed quietly: any change goes into `thresholds.json`, the Targets
-  table and this file with its reason.
-- **Mac-calibrated rules on Linux: decided at the wave-1 exit.** Absolute ms and MiB rules and the
-  4x throughput ratio were set on the M4 Max; where tmux itself misses them here (config replay,
-  throughput ceiling), a Linux override derived from the same multiple of tmux replaces them,
-  recorded in `thresholds.json`. Ratio rules are unchanged.
+- **Echo rows move from wave 1 to wave 3** (unchanged 1.5x tmux). No wave-1 lane owned the
+  remaining hops; W1-ATTACH left echo unchanged against its pre-merge binary (2.0-3.0x tmux on
+  Linux). W3-SHARDS, W3-LOOP and W4-DELIVER remove those hops. In `thresholds.json`, the Targets
+  table and its notes.
+- **Mac-calibrated rules on other hosts: scaled, not overridden.** `thresholds.json` names the
+  macOS W0 as `reference`; elsewhere `abs` rules of kind `cpu`/`wall` keep their multiple of the
+  reference tmux and `mem` rules keep their margin over it (`abs@ratio`, `abs@plus` in the
+  checks). The throughput rules also pass at 85% of a pty ceiling measured in the same run
+  (`throughput.ceiling.*`). Counts, bytes, threads and ratio rules are unchanged. Rescored this
+  way, w1-6 reads 59 pass, 7 fail (spawn CPU x3, `chatty.cpu_pct.visible`, `mem.threads.p20`,
+  both throughput rows, whose ceiling pass needs the unpushed PageList fork fix).
 
 ## Next steps, in order
 

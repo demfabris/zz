@@ -1,7 +1,28 @@
+import fcntl
 import os
+import pty
+import struct
+import termios
 import time
 
 import fixtures
+
+
+def ceiling_seconds(path, cols=180, rows=50):
+    start = time.perf_counter()
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.execv("/bin/cat", ["/bin/cat", path])
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+    try:
+        while os.read(fd, 65536):
+            pass
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+    os.waitpid(pid, 0)
+    return time.perf_counter() - start
 
 
 def read_seconds(path, timeout, pump=None):
@@ -22,11 +43,13 @@ def read_seconds(path, timeout, pump=None):
 def detached(ctx, kind, path, runs):
     size = os.path.getsize(path)
     rate = {m.name: [] for m in ctx.muxes}
+    ceiling = []
     grid = {}
     for mux in ctx.muxes:
         ctx.session(mux, "t", 180, 50)
     time.sleep(0.5)
     for i in range(runs):
+        ceiling.append(size / ceiling_seconds(path) / 1e6)
         for mux in ctx.order(i):
             out = ctx.env.path(f"tp-{kind}-{mux.name}-{i}.txt")
             mux.run("new-window", "-d", "-t", "t:", ctx.pane("timer.py", path, out), check=True)
@@ -38,6 +61,8 @@ def detached(ctx, kind, path, runs):
             time.sleep(0.3)
     notes = [f"grid {n} {g}" for n, g in grid.items()]
     ctx.add(f"throughput.detached.{kind}", "MB/s", "throughput", rate["zz"], rate["tmux"], notes, better="higher")
+    ctx.add(f"throughput.ceiling.{kind}", "MB/s", "ceiling", ceiling, None, "a bare reader of cat through a cooked 180x50 pty, in the same run", better="higher")
+    ctx.ceilings[kind] = ceiling
     for mux in ctx.muxes:
         mux.kill()
 
@@ -63,6 +88,8 @@ def attached(ctx, path, runs):
             mux.run("kill-window", "-t", "ta:1")
             ctx.drain(list(clients.values()), 0.5)
     ctx.add("throughput.attached.ascii_ms", "ms", "throughput", ms["zz"], ms["tmux"])
+    size = os.path.getsize(path)
+    ctx.add("throughput.ceiling.ascii_ms", "ms", "ceiling", [size / (c * 1e6) * 1000 for c in ctx.ceilings.get("ascii", [])] or None, None, "the detached ASCII ceiling as the time to read this file")
     ctx.add("throughput.attached.tty_bytes", "B", "bytes_info", tty["zz"], tty["tmux"])
     for mux in ctx.muxes:
         clients[mux.name].detach(mux.detach_keys)

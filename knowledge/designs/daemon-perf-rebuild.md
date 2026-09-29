@@ -335,8 +335,9 @@ per-caller reuse).
   `kill-server` every zz Dev daemon; a lane never tests against a daemon built before its merge
   base; every wire-changing merge is noted in the campaign log.
 - A pre-campaign 107 daemon cannot decode `Exec`. On a same-version first-frame decode failure or
-  EOF, the CLI retries once over the legacy hello path (kept behind `ZZ_PERF_LEGACY_COMMAND`
-  anyway). A released 106 daemon rejects at the envelope check with
+  EOF, the CLI opens a hello connection and reruns the chain there only when that hello lacks
+  `exec-v1`, so a chain an Exec daemon took is never run twice (the legacy path stays behind
+  `ZZ_PERF_LEGACY_COMMAND` anyway). A released 106 daemon rejects at the envelope check with
   `CommandResponse::Error(ProtocolMismatch)`, which `classify_local_connect_error` already turns
   into today's mismatch prompt.
 - **No release tags mid-campaign.** A tag freezes 107; the next wire change must then bump to 108
@@ -351,7 +352,8 @@ per-caller reuse).
 - **Pin the in-pane `tmux` wrapper to the daemon's own executable.** `install_tmux_shim` pointed
   the wrapper at `current_exe()` (or `ZZ_TMUX_EXECUTABLE`), a path an app swap replaces, so panes
   of an old daemon ran a newer CLI. Built in W1-EXEC: the wrapper runs `/proc/<daemon pid>/exe`
-  on Linux (the running image, no copy) and a `clonefile(2)` clone beside the wrapper on macOS
+  on Linux (the running image, no copy; a CLI whose installed image was replaced spawns through
+  `/proc/self/exe`, since its `current_exe()` then names a deleted path) and a `clonefile(2)` clone beside the wrapper on macOS
   (hard link if that fails, else the installed path); the clone goes with the wrapper on daemon
   exit. `spawn_daemon` no longer exports `ZZ_TMUX_EXECUTABLE`, and an explicit one still wins
   unpinned.
@@ -1314,7 +1316,8 @@ provenance, daemon-upgrade mismatch tests, the concurrency tests in item 4, repe
 Expected: removes the hello build (47-51%), unregister wakeups (8%), thread churn (5-10%), 2 of 3
 round trips, 14.6 ms of retry slack and 3.8 ms of fsync on cold start.
 
-Built on `perf/exec` (2026-09-28). Where the build departs from the scope above:
+Built on `perf/exec` (2026-09-28), rebased onto `perf/wave1` d5542787 (FORMAT and PUBLISH
+merged) after review. Where the build departs from the scope above:
 
 - Wire (appended to `ProtocolMessage`, new module `zz-protocol/src/exec.rs`): `Exec(ExecRequest)`
   and `ExecExit(ExecExit)`. There is no `ExecOutput`: each command's result is today's
@@ -1328,7 +1331,9 @@ Built on `perf/exec` (2026-09-28). Where the build departs from the scope above:
   mismatch, server stopping) is today's `CommandResponse::Error { request_id: 0 }`. Flags: `UTF8`,
   `STDIN_AVAILABLE`, `NESTED`, `RESUME` (the caller can take an attaching chain back; only the CLI
   sets it), `PREPARED` (run the commands as given, no alias lookup: the raw `--kill-server` path
-  that `execute_prepared_streams` served). No `HAS_TTY`/`READ_ONLY` flag and no `TERM` field:
+  that `execute_prepared_streams` served), `LAST` (the CLI sends no second Exec, so the daemon
+  unregisters right after the reply instead of blocking in one more read until the CLI's EOF; a
+  `CommandClient` that sent one reconnects if it is used again). No `HAS_TTY`/`READ_ONLY` flag and no `TERM` field:
   nothing reads the first two, and TERM rides the environment. Features travel as the folded
   `u32` mask. The environment is one NUL-separated byte string (`ClientEnvironmentBlob`,
   serialized with `serialize_bytes`, wire-identical to a byte `Vec`).
@@ -1342,15 +1347,26 @@ Built on `perf/exec` (2026-09-28). Where the build departs from the scope above:
   `execute_command_request_with_streams` (the old body, now also returning `client_exit`) with
   `prepared = true`; the chain stops at the first error or client exit, as the CLI loop did. That
   wrapper takes the state lock twice per command (preparation with the message-log entry, stream
-  removal with the sanitize check) instead of four times; the engine's own locks are W3-LOOP's. A
+  removal with the sanitize check) instead of four times. Only the wrapper changed: a
+  `display-message` still takes the state lock about eight times in all on its way through
+  `execute_with_mux_source_*`, `clock_modes_are_open` and the publish check, which is W3-LOOP's
+  to cut. `refresh_control_output_taps`, which every command calls, returns before it walks the
+  panes when there is no control client and no tap. A
   zero-command Exec is answered on the spot, before the startup wait and without registering a
   client, so it neither owns a cold daemon's bootstrap lease nor waits out a slow config.
 - One write: when nothing parked, the connection thread drains the per-Exec mailbox and writes
-  every frame plus the `ExecExit` in one `write_all`. The mailbox sits in `client_writers` only
-  while that Exec runs, so an idle connection never holds up the shutdown drain. The first
+  every frame plus the `ExecExit` in one `write_all`. That mailbox is created buffered: it has no
+  256-frame cap (the byte cap stays), and between commands the connection writes it out once it
+  holds 64 frames or 64 KiB, so a `\;` chain of any length streams its output (review found a
+  300-command chain stopped at 257 and lost every line). The mailbox sits in `client_writers`
+  only while that Exec runs, so an idle connection never holds up the shutdown drain. The first
   `report_command_queue_park` (via a thread-local exec client) or `client_file_operation` for the
-  client starts a writer thread and a reader thread on that connection (`ExecLink::go_live`), and
-  later Execs on it go through them; the reader's EOF cancels the queue and unregisters, as the
+  client starts a writer thread and a reader thread on that connection (`ExecLink::go_live`): the
+  starter writes out what the buffered mailbox holds, switches it to the normal cap, hands the
+  connection's own stream to the writer and clones only the reader's (no connection dups its
+  socket up front any more). Direct writes and the starter serialize on the starter lock, so a
+  go-live from another thread cannot interleave with a direct write. Later Execs on the
+  connection go through the live pair; the reader's EOF cancels the queue and unregisters, as the
   old reader did. One `ResponseAdmissionGuard` spans the whole Exec, so a `kill-server` answer and
   the `ExecExit` are queued before shutdown freezes admissions and drains writers.
 - Startup: an Exec that is not a startup reentry waits in `Shared.pending_execs` as a boxed job;
@@ -1365,6 +1381,12 @@ Built on `perf/exec` (2026-09-28). Where the build departs from the scope above:
   `detach_client_state`, and an inert exec client skips `detach` entirely. Control output taps
   refresh only when a control client leaves an attachment. `release_view` still goes to every pane
   on unregister: W1-PANE's known-view set makes that a no-op for a client that never streamed.
+  Client environments stay `Arc<ClientEnvironmentBlob>` in `FormatHookFacts` and
+  `ClientFormatFacts` too; rows are built only when `#{Vc:}`, a client loop or the client terminal
+  lookup reads them (before, every command parsed the blob and copied every variable).
+  `client_format_facts` returns empty facts for a session that is gone instead of panicking on
+  the index (review saw one such panic on a `zz-client` thread under pty exhaustion; not
+  reproduced).
 - CLI: one `CommandClient::exec_chain` per invocation; `ExecResume` drives the TUI and native
   attach branches (the classification moved to the daemon as `exec_resume_kind`, which the legacy
   path also uses). A daemon that never answers is the `Err` of `exec_chain` and takes the old
@@ -1375,9 +1397,17 @@ Built on `perf/exec` (2026-09-28). Where the build departs from the scope above:
   mismatch message.
 - `CommandClient`: `connect` opens the socket only; `server_id()` is lazy; `server_hello()` is gone
   (the one daemon test that read it probes instead); `execute_on_server` is the settings file
-  path (`expect_server_id`). `ZZ_PERF_LEGACY_COMMAND=1` and the once-only fallback (EOF, reset or an
-  undecodable frame before the daemon answered) run the hello path with the old prepare and
-  per-command loop, including the cold-start abort pseudo-command.
+  path (`expect_server_id`). `ZZ_PERF_LEGACY_COMMAND=1` runs the hello path with the old prepare
+  and per-command loop, including the cold-start abort pseudo-command. The automatic fallback is
+  narrower than first built: with one reply write per Exec, an EOF before the first frame also
+  means "the daemon ran the chain and died before writing", and the first build then reran the
+  whole chain on a freshly spawned daemon. Now the daemon lists `exec-v1` in its `ServerHello`
+  capabilities; on EOF or an undecodable first frame the CLI opens a hello connection and reruns
+  there only if the capability is missing (a pre-campaign 107 daemon, which reads and drops the
+  frame without running it). With the capability, or with no daemon left to answer, the chain
+  ends as a transport failure (`zz: daemon protocol error: ...`, as the legacy path printed for
+  a daemon that died mid-command) and never reaches the spawn branch. A reset or broken pipe means
+  the daemon never read the frame and is `Err` as before (a reset spawns, as it did).
 - Cold start: `--bootstrap-ready-fd N` after the server id; the daemon writes one byte right after
   `bind` and closes it; the CLI polls the pipe (6 s) and dials once. The backoff (0.5/1/2/5 ms) runs
   only without the pipe (Windows) or when a racing daemon won the socket. `prepare_socket` now
@@ -1390,11 +1420,16 @@ Built on `perf/exec` (2026-09-28). Where the build departs from the scope above:
   an orphan), and one that does not answer is still waited out as a stopping daemon. Identity
   without `sync_all`; Claude peer sweep after the ready callback; `history-file` read on first use
   (`ensure_prompt_history` at every prompt reader and writer).
-- `copy-mode` from a command or control client now answers once the target view publishes its
-  copy facts (polled, at most 100 ms): entering copy mode is a view action the pane actor applies
-  later, and without the old CLI's two extra round trips a following `display -p
-  '#{pane_in_mode}'` read 0 every time (compat `smoke/copy-mode-formats`). tmux enters the mode
-  before the command returns.
+- `copy-mode` from a command or control client now answers once the pane actor has applied the
+  view action: entering copy mode is a view action the actor applies later, and without the old
+  CLI's two extra round trips a following `display -p '#{pane_in_mode}'` read 0 every time
+  (compat `smoke/copy-mode-formats`). tmux enters the mode before the command returns. The first
+  build sleep-polled the published facts every 1 ms for up to 100 ms (19 ms per CLI `copy-mode`
+  against 8 ms on `main`, the full 100 ms for a view the actor ignores); it is now
+  `TerminalSession::barrier`, a request the actor answers after every command queued before it,
+  and the view action publishes its snapshot and copy facts synchronously (6 ms per CLI
+  `copy-mode`, hidden window included). Control clients keep the wait: it is what makes a
+  control-mode `copy-mode` then `display -p` read like tmux's.
 - The tmux wrapper is pinned (see Protocol and release policy) but still installed at startup, not
   at the first pane: a cold `new-session` spawns a pane and needs it anyway, and install plus clone
   measured 0.2 ms (clonefile 80 us, directory and script 110 us).
@@ -1405,8 +1440,10 @@ in the same run. Instructions: `cli.instr.display.p1` 10.3 -> 2.78 Minstr (tmux 
 `.show_options.p1` 10.4 -> 2.80, `.has_session.p1` 9.7 -> 2.17, `.send_keys.p1` 9.77 -> 2.23,
 `.select_pane.p1` 9.72 -> 2.19, `.display.p20` 28.6 -> 6.0, `.has_session.p20` 25.6 -> 3.06,
 `.chain5.p1` 19.9 -> 12.0, `.chain5.p20` 43.3 -> 20.4, `spawn.instr.kill_pane` 13.8 -> 5.97,
-`spawn.instr.split_shell` 36.0 -> 28.1, `spawn.instr.split_empty_P` 45.6 -> 32.8. CPU (noisy at
-this load): `cli.cpu.display.p1` 1.17 -> 0.31-0.34 ms, `spawn.cpu.kill_pane` 1.9 -> 0.74-0.86 ms.
+`spawn.instr.split_empty_P` 45.6 -> 32.8 (`split_shell` and `new_window` swing 29-41 Minstr
+between runs of one binary with the shell's startup output, so no gain is claimed for them).
+CPU (noisy at this load): `cli.cpu.display.p1` 1.17 -> 0.31-0.34 ms, `spawn.cpu.kill_pane` 1.9 ->
+0.67-1.48 ms over review's seven runs (borderline against 0.8 before the rebase).
 Wall: `cli.wall.display.p1` 3.41 -> 2.52 ms (tmux 3.55), `cold.wall.new_session` 36.5 -> 11.7 ms
 (tmux 12.1), `cold.wall.new_session_noterm` 31.0 -> 11.7 ms. Control-mode rows are unchanged (that
 path is W2-CTRL's). Wire per `display-message -p x` through a counting proxy: 1 frame and 1 write
@@ -1419,7 +1456,23 @@ Daemon threads: 13 before and after 500 CLI commands; `mem.threads.p1` reads 14 
 `#{pid}` lookup runs right before the sample and its connection thread is still parked (it retires
 after 1 s). Thread reuse alone is 2.95 -> 2.75 Minstr per `display-message` (A/B with the knob).
 
-Checks on this branch: `cargo test` for zz-protocol, zz-mux, zz-daemon (lib and every test target),
+Review fixes, checked on the rebased branch: `cargo test` for zz-protocol, zz-terminal, zz-mux,
+zz-daemon (lib and every test target; one russh port test failed under load and passes alone),
+zz-cli (also with `ZZ_PERF_LEGACY_COMMAND=1`), zz-client, zz-tui, zz-web, zz-client-ffi; clippy
+`-D warnings` on those and `zz`; `compat/wire-version.py`; `compat/run.sh` full corpus on a pinned
+copy (red twice: the nine host rows below plus the two `known/` rows with their documented
+divergences; `if-shell-background-order` was red once under load and passed alone;
+`smoke/copy-mode-formats` passes); `tui-copy-mode.sh` 147/147; `attached-client.sh` PASS;
+`startup-diagnostics.sh` 8/8; `tui-command-streams.sh` and `tui-client-commands.sh` the same 11
+and 5 differences as `main` (one earlier `tui-client-commands` run timed out attaching under load);
+the review's repro scripts: a 300-command `\;` chain sets 300 options and prints 300 lines, the
+`kill -9 $PPID` pane runs once with exit 0, `run-shell 'kill -9 <daemon>'` prints the protocol
+error and spawns nothing, `copy-mode` takes 6 ms. New tests in `exec_tests.rs`: a 640-command
+chain with 160 KB of output, a proxy that runs an Exec then drops the reply (no rerun), a proxy
+hiding `exec-v1` (one rerun over hello), and a `LAST` Exec closed by the daemon. Not run: Linux
+(the `/proc/self/exe` fallback is compile-checked only), `packaged-cli.sh`.
+
+Checks before review: `cargo test` for zz-protocol, zz-mux, zz-daemon (lib and every test target),
 zz-cli (also with `ZZ_PERF_LEGACY_COMMAND=1`), zz-tui, zz-client, zz-client-ffi, zz-web and
 zz-config; clippy `-D warnings` on those and `zz`; Linux `cargo check` of zz-daemon and zz-cli,
 Windows of the client half; `just web-build`; `just ios-gpui iPad build`. `compat/run.sh` (316
@@ -1432,12 +1485,44 @@ pre-campaign `main` binary on this host (`census-hooks` needs `/etc/hostname`, `
 11 and 5 cases as `main` on this host; `compat/startup-diagnostics.sh` passes 8/8. Not run:
 `compat/packaged-cli.sh` (needs a bundle).
 
-Handed on: the `cli.cpu.display.*` floors (0.25 / 0.40 ms) and `spawn.cpu.split_*` wait on the
-other wave-1 lanes. A `sample` of 3000 `display-message -p x` on this branch puts 49% of the
-connection thread's CPU in `publish_key_tables_if_changed` (the 370-binding snapshot and its
-catalog lookups, W1-PUBLISH item 1) and 23% in the format universe built for a template with no
-`#` (W1-FORMAT items 2-3); p20 adds the per-pane universe rows and one `release_view` per pane on
-unregister (W1-PANE item 9). W2-CTRL: control lines can reuse `Exec` as built (results are
+After review (rebased onto d5542787, the fixes above, `LAST` and the shared stream), quick gate
+against `w1-2-format-macbook-a5c5cab7.json` at load 4-5, W1-2 -> this branch, tmux in the same
+run: `cli.instr.display.p1` 6.94 -> 0.217 Minstr (tmux 0.485), `.chain5.p1` 0.509 (tmux 0.929),
+`.display.p20` 10.4 -> 1.08 (tmux 0.87); `cli.cpu.display.p1` 0.74 -> 0.109-0.117 ms (floor 0.25,
+passes); `cli.wall.display.p1` 0.63x tmux; `cold.wall.new_session` 10.5-10.9 ms (tmux 12.5);
+`spawn.cpu.kill_pane` 0.42-0.44 ms and 0.92 Minstr (was 7.66); `config.cpu.source_1000` 8.4 ms.
+`control.output_mbps` read 85.5 once and 103.8-105.3 in three reruns (noise; EXEC does not touch
+that path). `throughput.detached.ascii` interleaved against a build of the wave1 tip itself:
+160-246 MB/s (median 222) for this branch, 203-249 (median 225) for d5542787, so the drop from
+W1-2's 271 is not this lane's. Wire per `display-message -p x` through `bench/perf/sockproxy.py`:
+one connection, 4.2 KB up (a full shell environment), 35 B in 2 frames down. The daemon ends at
+11 threads after the gate's commands (`mem.threads.p1`).
+
+Still red in that run, none on this lane's own path: `cli.cpu.display.p20` 1.12-1.19 ms (floor
+0.40), `cli.cpu.list_panes_a.s20` / `list_windows_a.s20` 1.22-1.29 ms (1.2x tmux), all
+`spawn.cpu.split_*` / `new_window`, `spawn.wall.split_empty_P` (2 s identity wait, the same in W0
+and every merge since), `mem.threads.p20` / `mem.footprint.p20`, and `attach.*` (ATTACH). The
+p20/s20 CPU rows are one cost: every command's unregister sends `ReleaseView` to every pane and
+wakes all 20 actors (instructions are 1.08 Minstr while CPU is 1.1 ms: kernel wakeups). A
+throwaway build that skipped that loop for command clients read `cli.cpu.display.p20` 0.132 ms,
+`list_panes_a.s20` 0.202 ms and `list_windows_a.s20` 0.179 ms (all passing, below tmux) with p1
+unchanged at 0.103 ms. That skip is not committed: W1-PANE item 9 (`known_views`, release of an
+unknown view sends nothing) removes the same cost in zz-terminal for every client kind, and the
+plan merges PANE before EXEC for exactly this reason. A Time Profiler trace at p1 (0.14 ms of
+daemon CPU per command) leaves: the one pane actor woken by that `release_view` (12%), the
+accept thread's poll wake and `accept` (13%), handing the connection to a parked worker (7%), the
+final `close` of the socket (6%) and the two reads of the Exec frame (4%).
+
+Review items not taken, and why: a leader/follower accept loop would not cut CPU. The thread
+that accepts must hand the accept role on before it serves the connection, which is the same
+one wakeup as today's hand-off to a parked worker, only moved; serving inline without a hand-off
+would stall every new connection behind a slow command. The threading model is W3-LOOP's. Reading
+the first frame in one syscall needs a buffered stream that owns any bytes read past that
+frame, on both the hello and the Exec paths; with `LAST` the Exec path is already down to the
+prefix read and the body read. The review's `wait-for` report (a killed waiter keeps its slot)
+does not hold: its script backgrounds the shell function `c`, so `kill` hit the subshell and the
+real `zz wait-for` kept running. Killing the CLI process itself drops the waiter on this branch
+(threads 11 -> 10, the next `wait-for -S` sets the woken flag and a later `wait-for` returns 0). W2-CTRL: control lines can reuse `Exec` as built (results are
 `CommandResponse` frames, not `ExecOutput`; `ExecResumeKind` has no in-place attach upgrade yet),
 and the pinned wrapper path is `TmuxShimGuard.executable`.
 

@@ -40103,7 +40103,7 @@ mod tests {
             .map(|(name, entry)| {
                 (
                     name.as_bytes().to_vec(),
-                    entry.value.as_ref().map(|value| value.to_string()),
+                    entry.value.as_ref().map(ToString::to_string),
                 )
             })
             .collect::<Vec<_>>();

@@ -1389,6 +1389,11 @@ Built on `perf/exec` (2026-09-28). Where the build departs from the scope above:
   an orphan), and one that does not answer is still waited out as a stopping daemon. Identity
   without `sync_all`; Claude peer sweep after the ready callback; `history-file` read on first use
   (`ensure_prompt_history` at every prompt reader and writer).
+- `copy-mode` from a command or control client now answers once the target view publishes its
+  copy facts (polled, at most 100 ms): entering copy mode is a view action the pane actor applies
+  later, and without the old CLI's two extra round trips a following `display -p
+  '#{pane_in_mode}'` read 0 every time (compat `smoke/copy-mode-formats`). tmux enters the mode
+  before the command returns.
 - The tmux wrapper is pinned (see Protocol and release policy) but still installed at startup, not
   at the first pane: a cold `new-session` spawns a pane and needs it anyway, and install plus clone
   measured 0.2 ms (clonefile 80 us, directory and script 110 us).
@@ -1406,9 +1411,25 @@ Wall: `cli.wall.display.p1` 3.41 -> 2.52 ms (tmux 3.55), `cold.wall.new_session`
 path is W2-CTRL's). Wire per `display-message -p x` through a counting proxy: 1 frame and 1 write
 up (1.1 KB with the gate's environment, 3.9 KB with a 3.2 KB shell environment), 1 read of 35 B
 down (the response and the exit); the hello path moved 3 frames up and 28.4 KB down in 6 reads.
+The TUI's option reads at attach are command clients too: `attach.wire_s2c.p1` 257146 -> 172270
+B and `.p4` 239976 -> 118970 B (W0 -> this branch; each no longer gets a 28 KB hello), with
+`attach.conns.*` still 4 (W1-ATTACH) and `throughput.detached.ascii` 241 MB/s (4.9x tmux).
 Daemon threads: 13 before and after 500 CLI commands; `mem.threads.p1` reads 14 because the gate's
 `#{pid}` lookup runs right before the sample and its connection thread is still parked (it retires
 after 1 s). Thread reuse alone is 2.95 -> 2.75 Minstr per `display-message` (A/B with the knob).
+
+Checks on this branch: `cargo test` for zz-protocol, zz-mux, zz-daemon (lib and every test target),
+zz-cli (also with `ZZ_PERF_LEGACY_COMMAND=1`), zz-tui, zz-client, zz-client-ffi, zz-web and
+zz-config; clippy `-D warnings` on those and `zz`; Linux `cargo check` of zz-daemon and zz-cli,
+Windows of the client half; `just web-build`; `just ios-gpui iPad build`. `compat/run.sh` (316
+rows) on this macbook: nine rows fail on both passes here, and the same nine fail with the
+pre-campaign `main` binary on this host (`census-hooks` needs `/etc/hostname`, `prompt-history`,
+`smoke/keys-prefix-attached`, `smoke/plugin-runtime-continuum`, `-oh-my-tmux`,
+`-vim-tmux-navigator`, `smoke/resurrect-save`, `smoke/source-file-byte-name`,
+`smoke/status-background-jobs`); `smoke/copy-mode-formats` failed only here and is fixed above.
+`compat/tui-command-streams.sh` and `tui-client-commands.sh` differ from pinned tmux in the same
+11 and 5 cases as `main` on this host; `compat/startup-diagnostics.sh` passes 8/8. Not run:
+`compat/packaged-cli.sh` (needs a bundle).
 
 Handed on: the `cli.cpu.display.*` floors (0.25 / 0.40 ms) and `spawn.cpu.split_*` wait on the
 other wave-1 lanes. A `sample` of 3000 `display-message -p x` on this branch puts 49% of the

@@ -11,6 +11,9 @@ pub(super) static ATTACH_DEDUP: LazyLock<bool> =
 pub(super) static ATTACH_PRESIZE: LazyLock<bool> =
     LazyLock::new(|| std::env::var_os("ZZ_PERF_ATTACH_PRESIZE").is_none_or(|value| value != "0"));
 
+pub(super) static ATTACH_BATCH: LazyLock<bool> =
+    LazyLock::new(|| std::env::var_os("ZZ_PERF_ATTACH_BATCH").is_none_or(|value| value != "0"));
+
 pub(super) static BATCHED_WRITES: LazyLock<bool> =
     LazyLock::new(|| std::env::var_os("ZZ_PERF_WRITEV").is_none_or(|value| value != "0"));
 
@@ -19,8 +22,9 @@ pub(super) const MAX_BATCHED_WRITE_BYTES: usize = 256 * 1024;
 pub(super) fn log_knobs() {
     log::info!(
         target: "zz_daemon::perf",
-        "attach knobs: ZZ_PERF_ATTACH_DEDUP={} ZZ_PERF_ATTACH_PRESIZE={} ZZ_PERF_WRITEV={}",
+        "attach knobs: ZZ_PERF_ATTACH_DEDUP={} ZZ_PERF_ATTACH_BATCH={} ZZ_PERF_ATTACH_PRESIZE={} ZZ_PERF_WRITEV={}",
         u8::from(*ATTACH_DEDUP),
+        u8::from(*ATTACH_BATCH),
         u8::from(*ATTACH_PRESIZE),
         u8::from(*BATCHED_WRITES),
     );

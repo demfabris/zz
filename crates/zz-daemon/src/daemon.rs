@@ -2371,7 +2371,7 @@ impl OutboundMailbox {
         if *attach::ATTACH_DEDUP {
             let mut state = self.state.lock();
             state.terminals_held = true;
-            state.attach_batch = true;
+            state.attach_batch = *attach::ATTACH_BATCH;
         }
     }
 

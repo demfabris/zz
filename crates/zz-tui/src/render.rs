@@ -685,7 +685,7 @@ impl Renderer {
                     }
                 }
             }
-            write_border_runs(&mut self.output, &border);
+            write_border_runs(&mut self.output, &border, model.size.columns);
         }
 
         let active = model.active_pane();
@@ -3134,22 +3134,34 @@ fn write_colored_sgr(output: &mut Vec<u8>, foreground: Color, background: Color)
     .expect("writing to Vec cannot fail");
 }
 
-fn write_border_runs(output: &mut Vec<u8>, cells: &BTreeMap<(u16, u16), (Rc<Vec<u8>>, String)>) {
+fn write_border_runs(
+    output: &mut Vec<u8>,
+    cells: &BTreeMap<(u16, u16), (Rc<Vec<u8>>, String)>,
+    columns: u16,
+) {
     if cells.is_empty() {
         return;
     }
-    let mut cursor = None;
+    let mut last = None;
     let mut rendition: Option<&Rc<Vec<u8>>> = None;
     for (&(row, column), (sgr, glyph)) in cells {
-        if cursor != Some((row, column)) {
-            write_cursor_position(output, column, row);
+        match last {
+            Some((last_row, last_column))
+                if last_row == row && last_column + 1 == column => {}
+            Some((last_row, last_column))
+                if *crate::COALESCE && last_row + 1 == row && last_column == column =>
+            {
+                output.extend_from_slice(b"\x08\n");
+            }
+            _ => write_cursor_position(output, column, row),
         }
         if rendition.is_none_or(|current| !Rc::ptr_eq(current, sgr) && current != sgr) {
             output.extend_from_slice(sgr);
             rendition = Some(sgr);
         }
         output.extend_from_slice(glyph.as_bytes());
-        cursor = (text_display_width(glyph) == 1).then(|| (row, column.saturating_add(1)));
+        last = (text_display_width(glyph) == 1 && column.saturating_add(1) < columns)
+            .then_some((row, column));
     }
     output.extend_from_slice(b"\x1b[0m");
 }
@@ -4083,10 +4095,17 @@ mod tests {
             ((2, 2), (green, "│".to_owned())),
         ]);
         let mut output = Vec::new();
-        write_border_runs(&mut output, &cells);
+        write_border_runs(&mut output, &cells, 80);
         assert_eq!(
             String::from_utf8(output).unwrap(),
-            "\x1b[1;1H\x1b[0;31m──┬\x1b[2;3H│\x1b[3;3H\x1b[0;32m│\x1b[0m"
+            "\x1b[1;1H\x1b[0;31m──┬\x08\n│\x08\n\x1b[0;32m│\x1b[0m"
+        );
+        let mut output = Vec::new();
+        write_border_runs(&mut output, &cells, 3);
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "\x1b[1;1H\x1b[0;31m──┬\x1b[2;3H│\x1b[3;3H\x1b[0;32m│\x1b[0m",
+            "a cell in the last column leaves the cursor waiting to wrap"
         );
     }
 

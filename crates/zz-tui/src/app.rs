@@ -59,6 +59,7 @@ const KITTY_GATE_DISABLED: u8 = 2;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum KittyProbeState {
+    Idle,
     Probing,
     Enabled,
     Disabled,
@@ -72,10 +73,14 @@ struct KittyProbe {
 }
 
 impl KittyProbe {
-    const fn new(transport_override: Option<FrameTransport>) -> Self {
+    const fn new(transport_override: Option<FrameTransport>, probing: bool) -> Self {
         Self {
-            state: KittyProbeState::Probing,
-            file_pending: true,
+            state: if probing {
+                KittyProbeState::Probing
+            } else {
+                KittyProbeState::Idle
+            },
+            file_pending: probing,
             transport_override,
             transport: match transport_override {
                 Some(transport) => transport,
@@ -86,6 +91,15 @@ impl KittyProbe {
 
     const fn transport(&self) -> FrameTransport {
         self.transport
+    }
+
+    fn start(&mut self) -> bool {
+        if self.state != KittyProbeState::Idle {
+            return false;
+        }
+        self.state = KittyProbeState::Probing;
+        self.file_pending = true;
+        true
     }
 
     fn observe(&mut self, event: &TerminalEvent) -> KittyProbeUpdate {
@@ -557,7 +571,10 @@ pub(crate) fn run(
     }
     let mut renderer = Renderer::new();
     let mut browser = BrowserState::new(browser_provider);
-    let mut kitty_probe = KittyProbe::new(configured_frame_transport_override());
+    let mut kitty_probe = KittyProbe::new(
+        configured_frame_transport_override(),
+        terminal.kitty_probe_sent(),
+    );
     renderer.set_frame_transport(kitty_probe.transport());
     browser.set_transport(kitty_probe.transport(), Instant::now());
     let kitty_gate = Arc::new(AtomicU8::new(KITTY_GATE_PROBING));
@@ -596,6 +613,9 @@ pub(crate) fn run(
     }
 
     let outcome = loop {
+        if browser.wants_graphics() {
+            start_kitty_probe(&mut kitty_probe, &mut terminal)?;
+        }
         let now = Instant::now();
         if model.expire_client_message(now) {
             renderer
@@ -748,6 +768,9 @@ pub(crate) fn run(
                 if kitty_probe.state == KittyProbeState::Disabled {
                     continue;
                 }
+                if !updates.is_empty() {
+                    start_kitty_probe(&mut kitty_probe, &mut terminal)?;
+                }
                 let changed = !updates.is_empty();
                 for update in updates {
                     match update {
@@ -836,8 +859,10 @@ pub(crate) fn run(
                     }
                     InputOutcome::Resize(size) => {
                         let unchanged = *crate::COALESCE && size == model.size;
+                        let same_grid = *crate::COALESCE
+                            && (size.columns, size.rows) == (model.size.columns, model.size.rows);
                         model.set_size(size);
-                        if size.columns > 0 && size.rows > 0 {
+                        if size.columns > 0 && size.rows > 0 && !same_grid {
                             client
                                 .send_input(InputMessage::ClientTerminalSize {
                                     columns: size.columns,
@@ -1095,6 +1120,15 @@ fn hangup_parent() {
 
 #[cfg(not(unix))]
 const fn hangup_parent() {}
+
+fn start_kitty_probe(probe: &mut KittyProbe, terminal: &mut TerminalGuard) -> Result<(), String> {
+    if probe.start() {
+        terminal
+            .probe_kitty_graphics()
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
 
 fn take_frames(frames: &FrameInbox, model: &mut Model, renderer: &mut Renderer) {
     for (pane, frame) in frames.take() {
@@ -2867,7 +2901,7 @@ mod tests {
 
     #[test]
     fn kitty_probe_enables_on_a_matching_ok_response() {
-        let mut probe = KittyProbe::new(None);
+        let mut probe = KittyProbe::new(None, true);
         let update = probe.observe(&TerminalEvent::KittyGraphicsResponse {
             image_id: PROBE_IMAGE_ID,
             ok: true,
@@ -2881,8 +2915,26 @@ mod tests {
     }
 
     #[test]
+    fn an_unprobed_terminal_is_asked_only_once_something_needs_graphics() {
+        let mut probe = KittyProbe::new(None, false);
+        let reply = probe.observe(&TerminalEvent::DeviceAttributes);
+        assert!(reply.consumed);
+        assert_eq!(reply.graphics, None);
+        assert!(!reply.finish_file_probe);
+        assert_eq!(probe.state, KittyProbeState::Idle);
+
+        assert!(probe.start());
+        assert!(!probe.start());
+        let fence = probe.observe(&TerminalEvent::DeviceAttributes);
+        assert_eq!(fence.graphics, Some(false));
+        assert!(fence.finish_file_probe);
+        assert_eq!(probe.state, KittyProbeState::Disabled);
+        assert!(!probe.start());
+    }
+
+    #[test]
     fn kitty_probe_disables_when_device_attributes_arrive_first() {
-        let mut probe = KittyProbe::new(None);
+        let mut probe = KittyProbe::new(None, true);
         let fence = probe.observe(&TerminalEvent::DeviceAttributes);
         assert_eq!(fence.graphics, Some(false));
         assert!(fence.finish_file_probe);
@@ -2897,7 +2949,7 @@ mod tests {
 
     #[test]
     fn file_probe_selects_file_only_on_ok_and_honors_the_override() {
-        let mut supported = KittyProbe::new(None);
+        let mut supported = KittyProbe::new(None, true);
         let update = supported.observe(&TerminalEvent::KittyGraphicsResponse {
             image_id: FILE_PROBE_IMAGE_ID,
             ok: true,
@@ -2906,7 +2958,7 @@ mod tests {
         assert!(update.finish_file_probe);
         assert_eq!(supported.transport(), FrameTransport::File);
 
-        let mut rejected = KittyProbe::new(None);
+        let mut rejected = KittyProbe::new(None, true);
         let update = rejected.observe(&TerminalEvent::KittyGraphicsResponse {
             image_id: FILE_PROBE_IMAGE_ID,
             ok: false,

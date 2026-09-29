@@ -79,6 +79,7 @@ const MOUSE_CLEAR_SEQUENCE: &[u8] = b"\x1b[?1016l\x1b[?1006l\x1b[?1000l\x1b[?100
 /// fences on, then the secondary and the extended ones, whose replies name the
 /// terminal and the features it carries.
 const TERMINAL_REQUESTS: &[u8] = b"\x1b[c\x1b[>c\x1b[>q";
+const DEVICE_ATTRIBUTES_REQUEST: &[u8] = b"\x1b[c";
 
 /// How many colours the terminal this client writes to takes. `tty.c` asks it
 /// of every cell it sends (`tty_check_fg` and `tty_check_bg`) and never lowers
@@ -293,15 +294,15 @@ impl TerminalGuard {
     #[cfg(unix)]
     pub fn enter(mouse: MouseArming, extended_keys: bool, focus_events: bool) -> io::Result<Self> {
         let original = rustix::termios::tcgetattr(io::stdin())?;
-        let file_probe = probe_file_path();
-        remove_file_if_present(&file_probe)?;
-        fs::write(&file_probe, [0_u8; 4])?;
+        let file_probe = (!*crate::COALESCE || supports_kitty_graphics())
+            .then(create_probe_file)
+            .transpose()?;
         let mut guard = Self {
             active: false,
             pixel_mouse: supports_pixel_mouse(),
             kitty_keyboard: supports_kitty_keyboard(),
             kitty_graphics: false,
-            file_probe: Some(file_probe),
+            file_probe,
             original,
         };
         guard.resume(mouse, extended_keys, focus_events)?;
@@ -336,11 +337,7 @@ impl TerminalGuard {
             output.write_all(b"\x1b[>3u")?;
         }
         if let Some(file_probe) = &self.file_probe {
-            let encoded_probe_path = STANDARD.encode(file_probe.as_os_str().as_encoded_bytes());
-            write!(
-                output,
-                "\x1b_Gi={PROBE_IMAGE_ID},s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b_Gi={FILE_PROBE_IMAGE_ID},s=1,v=1,a=q,t=f,f=32;{encoded_probe_path}\x1b\\"
-            )?;
+            write_kitty_probe(&mut output, file_probe)?;
         }
         output.write_all(TERMINAL_REQUESTS)?;
         output.write_all(THEME_SUBSCRIBE)?;
@@ -369,6 +366,23 @@ impl TerminalGuard {
 
     pub const fn kitty_keyboard(&self) -> bool {
         self.kitty_keyboard
+    }
+
+    pub const fn kitty_probe_sent(&self) -> bool {
+        self.file_probe.is_some()
+    }
+
+    pub fn probe_kitty_graphics(&mut self) -> io::Result<()> {
+        if self.file_probe.is_some() {
+            return Ok(());
+        }
+        let file_probe = create_probe_file()?;
+        let mut output = io::stdout().lock();
+        write_kitty_probe(&mut output, &file_probe)?;
+        output.write_all(DEVICE_ATTRIBUTES_REQUEST)?;
+        output.flush()?;
+        self.file_probe = Some(file_probe);
+        Ok(())
     }
 
     pub const fn activate_kitty_graphics(&mut self) {
@@ -418,6 +432,21 @@ impl Drop for TerminalGuard {
     }
 }
 
+fn create_probe_file() -> io::Result<PathBuf> {
+    let file_probe = probe_file_path();
+    remove_file_if_present(&file_probe)?;
+    fs::write(&file_probe, [0_u8; 4])?;
+    Ok(file_probe)
+}
+
+fn write_kitty_probe(output: &mut impl io::Write, file_probe: &std::path::Path) -> io::Result<()> {
+    let encoded_probe_path = STANDARD.encode(file_probe.as_os_str().as_encoded_bytes());
+    write!(
+        output,
+        "\x1b_Gi={PROBE_IMAGE_ID},s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b_Gi={FILE_PROBE_IMAGE_ID},s=1,v=1,a=q,t=f,f=32;{encoded_probe_path}\x1b\\"
+    )
+}
+
 fn probe_file_path() -> PathBuf {
     std::env::temp_dir().join(format!("zz-tui-{}-probe.rgba", std::process::id()))
 }
@@ -432,6 +461,10 @@ fn remove_file_if_present(path: &std::path::Path) -> io::Result<()> {
 
 fn supports_pixel_mouse() -> bool {
     terminal_supports(["ghostty", "kitty", "wezterm", "foot"])
+}
+
+fn supports_kitty_graphics() -> bool {
+    terminal_supports(["ghostty", "kitty", "wezterm", "konsole", "zz"])
 }
 
 fn supports_kitty_keyboard() -> bool {

@@ -7309,7 +7309,7 @@ impl Shared {
             .lock()
             .engine
             .hook_commands(context.session, hook);
-        let Some(commands) = commands else {
+        let Some(commands) = commands.filter(|commands| !commands.is_empty()) else {
             return String::new();
         };
         self.run_hook_commands(
@@ -29400,6 +29400,9 @@ impl Shared {
     }
 
     fn close_agent_panes(&self, panes: &[PaneId]) {
+        if panes.is_empty() {
+            return;
+        }
         let _effects = self.agent_effects.lock();
         #[cfg(unix)]
         {
@@ -36452,6 +36455,9 @@ fn pane_focus_candidates(
     inner: &ServerState,
     before: &PaneFocusProbe,
 ) -> (Vec<PaneId>, Vec<(WindowId, PaneId)>) {
+    if inner.pane_focus.is_empty() && !inner.client_focused.values().any(|focused| *focused) {
+        return (Vec::new(), Vec::new());
+    }
     let gated = inner.engine.focus_events();
     let mut leading = Vec::new();
     let mut removals = Vec::new();

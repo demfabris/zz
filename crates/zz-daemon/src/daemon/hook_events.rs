@@ -124,7 +124,11 @@ impl HookScope {
             engine,
             changes: &before.changes,
         };
-        let events = mux_hook_events(&before, &after, command);
+        let events = if before.changes.sessions.is_empty() && before.changes.windows.is_empty() {
+            Vec::new()
+        } else {
+            mux_hook_events(&before, &after, command)
+        };
         if let Some(full_before) = &self.before {
             let expected = mux_hook_events(full_before, &MuxHookSnapshot::capture(engine), command);
             assert!(
@@ -203,7 +207,7 @@ pub(super) trait HookView {
 
     fn listed_windows(&self) -> Vec<WindowId>;
 
-    fn listed_panes(&self) -> Vec<PaneId>;
+    fn listed_panes(&self) -> Vec<(PaneId, PaneFacts<'_>)>;
 
     fn links(&self) -> BTreeSet<(SessionId, WindowId)>;
 }
@@ -270,8 +274,20 @@ impl HookView for MuxHookSnapshot {
         self.windows.keys().copied().collect()
     }
 
-    fn listed_panes(&self) -> Vec<PaneId> {
-        self.panes.keys().copied().collect()
+    fn listed_panes(&self) -> Vec<(PaneId, PaneFacts<'_>)> {
+        self.panes
+            .iter()
+            .map(|(pane, state)| {
+                (
+                    *pane,
+                    PaneFacts {
+                        session: state.session,
+                        window: state.window,
+                        title: &state.title,
+                    },
+                )
+            })
+            .collect()
     }
 
     fn links(&self) -> BTreeSet<(SessionId, WindowId)> {
@@ -355,15 +371,26 @@ impl HookView for JournalView<'_> {
             .collect()
     }
 
-    fn listed_panes(&self) -> Vec<PaneId> {
+    fn listed_panes(&self) -> Vec<(PaneId, PaneFacts<'_>)> {
         let mut panes = self
             .changes
             .windows
-            .values()
-            .flatten()
-            .flat_map(|image| image.panes.iter().map(|pane| pane.id))
+            .iter()
+            .filter_map(|(window, image)| image.map(|image| (*window, image)))
+            .flat_map(|(window, image)| {
+                image.panes.iter().map(move |pane| {
+                    (
+                        pane.id,
+                        PaneFacts {
+                            session: image.session,
+                            window,
+                            title: &pane.title,
+                        },
+                    )
+                })
+            })
             .collect::<Vec<_>>();
-        panes.sort_unstable();
+        panes.sort_unstable_by_key(|(pane, _)| *pane);
         panes
     }
 
@@ -430,15 +457,32 @@ impl HookView for LiveView<'_, '_> {
             .collect()
     }
 
-    fn listed_panes(&self) -> Vec<PaneId> {
+    fn listed_panes(&self) -> Vec<(PaneId, PaneFacts<'_>)> {
         let mut panes = self
             .changes
             .windows
             .keys()
-            .filter_map(|window| self.engine.state.windows.get(window))
-            .flat_map(|state| state.panes.keys().copied())
+            .filter_map(|window| {
+                self.engine
+                    .state
+                    .windows
+                    .get(window)
+                    .map(|state| (*window, state))
+            })
+            .flat_map(|(window, state)| {
+                state.panes.iter().map(move |(pane, pane_state)| {
+                    (
+                        *pane,
+                        PaneFacts {
+                            session: state.session,
+                            window,
+                            title: &pane_state.title,
+                        },
+                    )
+                })
+            })
             .collect::<Vec<_>>();
-        panes.sort_unstable();
+        panes.sort_unstable_by_key(|(pane, _)| *pane);
         panes
     }
 
@@ -499,7 +543,7 @@ impl HookView for BeforeView<'_> {
         }
     }
 
-    fn listed_panes(&self) -> Vec<PaneId> {
+    fn listed_panes(&self) -> Vec<(PaneId, PaneFacts<'_>)> {
         match self {
             Self::Snapshot(view) => view.listed_panes(),
             Self::Journal(view) => view.listed_panes(),
@@ -732,12 +776,13 @@ pub(super) fn mux_hook_events(
             }
         }
     }
-    for pane in after.listed_panes() {
-        let Some(state) = after.pane(pane) else {
-            continue;
-        };
-        if before
-            .pane(pane)
+    let before_panes = before
+        .listed_panes()
+        .into_iter()
+        .collect::<BTreeMap<_, _>>();
+    for (pane, state) in after.listed_panes() {
+        if before_panes
+            .get(&pane)
             .is_some_and(|previous| previous.title != state.title)
         {
             events.push(pane_event(

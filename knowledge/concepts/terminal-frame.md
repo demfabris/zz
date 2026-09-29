@@ -94,7 +94,10 @@ dimensions or the dictionary generation change, or when the new dictionary does 
 dimensions / row bounds / cell references / metadata before mutating retained state, returning a typed
 `PatchError` (`Generation`, `Dictionary`, `Dimensions`, `Row`, `Cell`, `Metadata`) that leaves the last
 renderable frame intact so the client can resynchronize. `TerminalDiffScratch` reuses fingerprint and
-source-identity buffers across successive diffs.
+source-identity buffers across successive diffs. The daemon uses `TerminalViewport::diff_shared`
+instead: it returns a `TerminalPatchRef` that reads the changed cells from the current frame rather
+than copying them, and keeps the row shift and spans for the next view on the same two grids, so
+several clients of one pane cost one diff per frame.
 
 Applying a patch is also where the client keeps its scrollback: a negative `scroll` shift pushes the
 departing top rows into that pane's `HistoryRing` before they are overwritten, which is what lets a

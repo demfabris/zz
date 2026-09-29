@@ -996,6 +996,21 @@ impl Connection {
                 self.send(ProtocolMessage::ClientHello(browser::hello()), cx);
             }
             inbox::SocketEvent::Frame(bytes) => match zz_protocol::decode_protocol_frame(&bytes) {
+                Ok(ProtocolMessage::ServerHello(hello))
+                    if !hello
+                        .capabilities
+                        .iter()
+                        .any(|capability| capability == zz_protocol::PANE_FRAME_CAPABILITY) =>
+                {
+                    self.disconnected(
+                        format!(
+                            "The zz daemon is an older build of protocol v{} whose terminal frames this client cannot read. Restart it with zz kill-server.",
+                            zz_protocol::PROTOCOL_VERSION
+                        ),
+                        cx,
+                    );
+                    return false;
+                }
                 Ok(message) => self.receive(message, cx),
                 Err(error) => {
                     self.disconnected(format!("Connection rejected: {error}. Rebuild zz-web and the browser client together."), cx);

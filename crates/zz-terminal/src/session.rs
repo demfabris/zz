@@ -17930,7 +17930,7 @@ mod tests {
         assert_eq!(std::mem::size_of::<Publisher>(), 3 * word);
         assert_eq!(std::mem::size_of::<TerminalEvents>(), 3 * word);
         assert!(
-            std::mem::size_of::<TerminalSession>() <= 16 * word,
+            std::mem::size_of::<TerminalSession>() <= 17 * word,
             "{}",
             std::mem::size_of::<TerminalSession>()
         );

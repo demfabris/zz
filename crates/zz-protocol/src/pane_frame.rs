@@ -157,7 +157,7 @@ impl<'a> Metadata<'a> {
         );
         fields.set(
             TerminalPatchFields::PRESENTATION,
-            *self.presentation != TerminalPresentation::default(),
+            *self.presentation != *shared_default_presentation(),
         );
         fields.set(TerminalPatchFields::OVERLAYS, !self.overlays.is_empty());
         fields.set(
@@ -1476,11 +1476,10 @@ fn decode_raw_cell(
             .ok_or_else(|| terminal_error("cell references a missing grapheme"))?;
         GRAPHEME_TABLE_BIT | index as u32
     } else {
-        let glyph = u32::try_from(code >> 1)
+        u32::try_from(code >> 1)
             .ok()
             .filter(|glyph| *glyph == 0 || char::from_u32(*glyph).is_some())
-            .ok_or_else(|| terminal_error("cell contains an invalid Unicode scalar"))?;
-        glyph
+            .ok_or_else(|| terminal_error("cell contains an invalid Unicode scalar"))?
     };
     let flags = reader.u16("cell flags")?;
     Ok(PackedCell::from_raw(glyph, style, flags))
@@ -2188,6 +2187,10 @@ pub(crate) mod viewport_bytes {
 pub(crate) mod optional_viewport_bytes {
     use zz_terminal::TerminalViewport;
 
+    #[expect(
+        clippy::ref_option,
+        reason = "serde passes a `with` field by reference"
+    )]
     pub(crate) fn serialize<S: serde::Serializer>(
         viewport: &Option<TerminalViewport>,
         serializer: S,

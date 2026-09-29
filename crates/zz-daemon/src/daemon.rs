@@ -528,10 +528,9 @@ fn window_alert_notifications(
         session_current,
     } = alert;
     let applies = action.applies(session_current);
-    let hook = applies.then(|| {
-        let snapshot = MuxHookSnapshot::capture(&inner.engine);
-        PendingHookEvent::pane(hook_name, pane, &snapshot.panes[&pane], &snapshot)
-    });
+    let hook = applies
+        .then(|| PendingHookEvent::live_pane(hook_name, pane, &inner.engine))
+        .flatten();
     let duration_ms = inner.engine.display_time_for_session(session);
     let clients = if applies {
         inner
@@ -1067,6 +1066,47 @@ fn push_notice_colour(parameters: &mut Vec<String>, colour: zz_protocol::TmuxCol
         }
         zz_protocol::TmuxColour::Theme(_) => {}
     }
+}
+
+fn key_table_publication(
+    keys: &zz_protocol::KeyTables,
+    published: &mut BTreeMap<String, u64>,
+) -> Option<EventPayload> {
+    let changed = keys
+        .table_generations()
+        .filter(|(name, generation)| published.get(*name) != Some(generation))
+        .collect::<Vec<_>>();
+    let removed = published
+        .keys()
+        .filter(|name| !keys.has_table(name))
+        .cloned()
+        .collect::<Vec<_>>();
+    if changed.is_empty() && removed.is_empty() {
+        return None;
+    }
+    for name in &removed {
+        published.remove(name);
+    }
+    for (name, generation) in &changed {
+        if let Some(current) = published.get_mut(*name) {
+            *current = *generation;
+        } else {
+            published.insert((*name).to_owned(), *generation);
+        }
+    }
+    Some(if *timers::KEY_TABLE_DELTA {
+        EventPayload::KeyTablesPatched {
+            tables: changed
+                .into_iter()
+                .filter_map(|(name, _)| keys.snapshot_table(name))
+                .collect(),
+            removed,
+        }
+    } else {
+        EventPayload::KeyTablesChanged {
+            tables: keys.snapshot(),
+        }
+    })
 }
 
 fn published_appearance(inner: &ServerState) -> Arc<TerminalAppearance> {
@@ -3689,7 +3729,7 @@ impl StartupConfigDelivery {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 struct PendingHookEvent {
     name: &'static str,
     context: ExecutionContext,
@@ -3752,6 +3792,12 @@ const PRODUCED_NON_AFTER_PINNED_HOOKS: &[&str] = &[
     "window-unlinked",
 ];
 
+mod hook_events;
+#[cfg(test)]
+mod hook_events_tests;
+#[cfg(test)]
+use hook_events::mux_hook_events;
+
 #[derive(Clone)]
 struct HookSessionState {
     name: String,
@@ -3775,6 +3821,7 @@ struct HookPaneState {
     title: String,
 }
 
+#[derive(Default)]
 struct MuxHookSnapshot {
     sessions: BTreeMap<SessionId, HookSessionState>,
     windows: BTreeMap<WindowId, HookWindowState>,
@@ -3789,55 +3836,24 @@ impl PendingHookEvent {
         state: &HookSessionState,
         snapshot: &MuxHookSnapshot,
     ) -> Self {
-        let context = snapshot.session_context(session);
-        Self {
-            name,
-            context,
-            exclude_client: None,
-            variables: BTreeMap::from([
-                (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
-                (HOOK_SESSION_CONTEXT_FORMAT.to_owned(), session.to_string()),
-                (
-                    HOOK_SESSION_NAME_CONTEXT_FORMAT.to_owned(),
-                    state.name.clone(),
-                ),
-            ]),
-        }
+        hook_events::session_event(name, session, &state.name, snapshot)
     }
 
+    #[cfg(test)]
     fn window(
         name: &'static str,
         window: WindowId,
         state: &HookWindowState,
         snapshot: &MuxHookSnapshot,
     ) -> Self {
-        let session_name = snapshot
-            .sessions
-            .get(&state.session)
-            .map(|session| session.name.clone())
-            .unwrap_or_default();
-        Self {
+        hook_events::window_event(
             name,
-            context: snapshot.window_context(window),
-            exclude_client: None,
-            variables: BTreeMap::from([
-                (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
-                (
-                    HOOK_SESSION_CONTEXT_FORMAT.to_owned(),
-                    state.session.to_string(),
-                ),
-                (HOOK_SESSION_NAME_CONTEXT_FORMAT.to_owned(), session_name),
-                (HOOK_WINDOW_CONTEXT_FORMAT.to_owned(), window.to_string()),
-                (
-                    HOOK_WINDOW_NAME_CONTEXT_FORMAT.to_owned(),
-                    state.name.clone(),
-                ),
-                (
-                    HOOK_PANE_CONTEXT_FORMAT.to_owned(),
-                    state.active_pane.to_string(),
-                ),
-            ]),
-        }
+            window,
+            state.session,
+            &state.name,
+            state.active_pane,
+            snapshot,
+        )
     }
 
     fn winlink(
@@ -3848,57 +3864,43 @@ impl PendingHookEvent {
         window_state: &HookWindowState,
         snapshot: &MuxHookSnapshot,
     ) -> Self {
-        Self {
+        hook_events::winlink_event(
             name,
-            context: snapshot.window_context(window),
-            exclude_client: None,
-            variables: BTreeMap::from([
-                (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
-                (HOOK_SESSION_CONTEXT_FORMAT.to_owned(), session.to_string()),
-                (
-                    HOOK_SESSION_NAME_CONTEXT_FORMAT.to_owned(),
-                    session_state.name.clone(),
-                ),
-                (HOOK_WINDOW_CONTEXT_FORMAT.to_owned(), window.to_string()),
-                (
-                    HOOK_WINDOW_NAME_CONTEXT_FORMAT.to_owned(),
-                    window_state.name.clone(),
-                ),
-            ]),
-        }
+            session,
+            &session_state.name,
+            window,
+            &window_state.name,
+            snapshot,
+        )
     }
 
+    #[cfg(test)]
     fn pane(
         name: &'static str,
         pane: PaneId,
         state: &HookPaneState,
         snapshot: &MuxHookSnapshot,
     ) -> Self {
-        let window_name = snapshot
-            .windows
-            .get(&state.window)
-            .map(|window| window.name.clone())
-            .unwrap_or_default();
-        let session_name = snapshot
-            .sessions
-            .get(&state.session)
-            .map(|session| session.name.clone())
-            .unwrap_or_default();
+        hook_events::pane_event(name, pane, state.session, state.window, snapshot)
+    }
+
+    fn pane_named(
+        name: &'static str,
+        pane: PaneId,
+        session: SessionId,
+        window: WindowId,
+        session_name: String,
+        window_name: String,
+    ) -> Self {
         Self {
             name,
-            context: ExecutionContext::new(Some(state.session), Some(state.window), Some(pane)),
+            context: ExecutionContext::new(Some(session), Some(window), Some(pane)),
             exclude_client: None,
             variables: BTreeMap::from([
                 (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
-                (
-                    HOOK_SESSION_CONTEXT_FORMAT.to_owned(),
-                    state.session.to_string(),
-                ),
+                (HOOK_SESSION_CONTEXT_FORMAT.to_owned(), session.to_string()),
                 (HOOK_SESSION_NAME_CONTEXT_FORMAT.to_owned(), session_name),
-                (
-                    HOOK_WINDOW_CONTEXT_FORMAT.to_owned(),
-                    state.window.to_string(),
-                ),
+                (HOOK_WINDOW_CONTEXT_FORMAT.to_owned(), window.to_string()),
                 (HOOK_WINDOW_NAME_CONTEXT_FORMAT.to_owned(), window_name),
                 (HOOK_PANE_CONTEXT_FORMAT.to_owned(), pane.to_string()),
             ]),
@@ -3941,267 +3943,70 @@ impl PendingHookEvent {
 
 impl MuxHookSnapshot {
     fn capture(engine: &MuxEngine) -> Self {
-        let sessions = engine
-            .state
-            .sessions
-            .iter()
-            .map(|(session, state)| {
-                (
-                    *session,
-                    HookSessionState {
-                        name: state.name.clone(),
-                        active_window: state.active_window,
-                    },
-                )
-            })
-            .collect();
-        let windows = engine
-            .state
-            .windows
-            .iter()
-            .map(|(window, state)| {
-                (
-                    *window,
-                    HookWindowState {
-                        session: state.session,
-                        name: state.name.clone(),
-                        active_pane: state.active_pane,
-                        zoomed_pane: state.zoomed_pane,
-                        layout: state.layout.clone(),
-                        extent: (
-                            engine
-                                .window_extent(*window, zz_protocol::Axis::Horizontal)
-                                .unwrap_or_default(),
-                            engine
-                                .window_extent(*window, zz_protocol::Axis::Vertical)
-                                .unwrap_or_default(),
-                        ),
-                    },
-                )
-            })
-            .collect::<BTreeMap<_, _>>();
-        let panes = engine
-            .state
-            .windows
-            .iter()
-            .flat_map(|(window, window_state)| {
-                window_state.panes.iter().map(move |(pane, pane_state)| {
-                    (
-                        *pane,
-                        HookPaneState {
-                            session: window_state.session,
-                            window: *window,
-                            title: pane_state.title.clone(),
-                        },
-                    )
-                })
-            })
-            .collect();
-        let links = engine
-            .state
-            .sessions
-            .iter()
-            .flat_map(|(session, state)| {
-                state.windows.iter().map(move |window| (*session, *window))
-            })
-            .collect();
-        Self {
-            sessions,
-            windows,
-            panes,
-            links,
+        let mut snapshot = Self::default();
+        for (session, state) in &engine.state.sessions {
+            snapshot.add_session(*session, &state.name, state.active_window, &state.windows);
         }
+        for (window, state) in &engine.state.windows {
+            snapshot.add_window(engine, *window, state);
+        }
+        snapshot
     }
 
-    fn session_context(&self, session: SessionId) -> ExecutionContext {
-        let Some(state) = self.sessions.get(&session) else {
-            return ExecutionContext::new(Some(session), None, None);
-        };
-        let pane = self
-            .windows
-            .get(&state.active_window)
-            .map(|window| window.active_pane);
-        ExecutionContext::new(Some(session), Some(state.active_window), pane)
-    }
-
-    fn window_context(&self, window: WindowId) -> ExecutionContext {
-        self.windows.get(&window).map_or_else(
-            || ExecutionContext::new(None, Some(window), None),
-            |state| {
-                ExecutionContext::new(Some(state.session), Some(window), Some(state.active_pane))
+    fn add_session(
+        &mut self,
+        session: SessionId,
+        name: &str,
+        active_window: WindowId,
+        windows: &[WindowId],
+    ) {
+        self.sessions.insert(
+            session,
+            HookSessionState {
+                name: name.to_owned(),
+                active_window,
             },
-        )
+        );
+        self.links
+            .extend(windows.iter().map(|window| (session, *window)));
     }
-}
 
-fn mux_hook_events(
-    before: &MuxHookSnapshot,
-    after: &MuxHookSnapshot,
-    command: &str,
-) -> Vec<PendingHookEvent> {
-    let mut events = Vec::new();
-    for (session, window) in after.links.difference(&before.links) {
-        if let (Some(session_state), Some(window_state)) =
-            (after.sessions.get(session), after.windows.get(window))
-        {
-            events.push(PendingHookEvent::winlink(
-                "window-linked",
-                *session,
-                session_state,
-                *window,
-                window_state,
-                after,
-            ));
-        }
+    fn add_window(&mut self, engine: &MuxEngine, window: WindowId, state: &zz_mux::Window) {
+        self.windows.insert(
+            window,
+            HookWindowState {
+                session: state.session,
+                name: state.name.clone(),
+                active_pane: state.active_pane,
+                zoomed_pane: state.zoomed_pane,
+                layout: state.layout.clone(),
+                extent: (
+                    engine
+                        .window_extent(window, zz_protocol::Axis::Horizontal)
+                        .unwrap_or_default(),
+                    engine
+                        .window_extent(window, zz_protocol::Axis::Vertical)
+                        .unwrap_or_default(),
+                ),
+            },
+        );
+        self.panes
+            .extend(state.panes.iter().map(|(pane, pane_state)| {
+                (
+                    *pane,
+                    HookPaneState {
+                        session: state.session,
+                        window,
+                        title: pane_state.title.clone(),
+                    },
+                )
+            }));
     }
-    if command == "new-session" {
-        for (session, state) in &after.sessions {
-            if !before.sessions.contains_key(session) {
-                events.push(PendingHookEvent::session(
-                    "session-created",
-                    *session,
-                    state,
-                    after,
-                ));
-            }
-        }
-    }
-    if command == "rename-session" {
-        for (session, state) in &after.sessions {
-            if before
-                .sessions
-                .get(session)
-                .is_some_and(|previous| previous.name != state.name)
-            {
-                events.push(PendingHookEvent::session(
-                    "session-renamed",
-                    *session,
-                    state,
-                    after,
-                ));
-            }
-        }
-    }
-    for (session, state) in &after.sessions {
-        if before
-            .sessions
-            .get(session)
-            .is_some_and(|previous| previous.active_window != state.active_window)
-            && let Some(window) = after.windows.get(&state.active_window)
-        {
-            events.push(PendingHookEvent::winlink(
-                "session-window-changed",
-                *session,
-                state,
-                state.active_window,
-                window,
-                after,
-            ));
-        }
-    }
-    for (window, state) in &after.windows {
-        let Some(previous) = before.windows.get(window) else {
-            continue;
-        };
-        if previous.name != state.name {
-            events.push(PendingHookEvent::window(
-                "window-renamed",
-                *window,
-                state,
-                after,
-            ));
-        }
-        if previous.active_pane != state.active_pane {
-            events.push(PendingHookEvent::window(
-                "window-pane-changed",
-                *window,
-                state,
-                after,
-            ));
-        }
-        if previous.layout != state.layout || previous.zoomed_pane != state.zoomed_pane {
-            events.push(PendingHookEvent::window(
-                "window-layout-changed",
-                *window,
-                state,
-                after,
-            ));
-            if previous.extent != state.extent {
-                events.push(PendingHookEvent::window(
-                    "window-resized",
-                    *window,
-                    state,
-                    after,
-                ));
-            }
-        }
-    }
-    for (pane, state) in &after.panes {
-        if before
-            .panes
-            .get(pane)
-            .is_some_and(|previous| previous.title != state.title)
-        {
-            events.push(PendingHookEvent::pane(
-                "pane-title-changed",
-                *pane,
-                state,
-                after,
-            ));
-        }
-    }
-    let removed_links = before
-        .links
-        .difference(&after.links)
-        .filter_map(|(session, window)| {
-            Some(PendingHookEvent::winlink(
-                "window-unlinked",
-                *session,
-                before.sessions.get(session)?,
-                *window,
-                before.windows.get(window)?,
-                before,
-            ))
-        })
-        .collect::<Vec<_>>();
-    let closed_sessions = before
-        .sessions
-        .iter()
-        .filter(|(session, _)| !after.sessions.contains_key(session))
-        .map(|(session, state)| {
-            PendingHookEvent::session("session-closed", *session, state, before)
-        })
-        .collect::<Vec<_>>();
-    if command == "kill-session" {
-        events.extend(closed_sessions);
-        events.extend(removed_links);
-    } else {
-        events.extend(removed_links);
-        events.extend(closed_sessions);
-    }
-    events
-}
 
-fn pane_mode_hook_events(
-    before: &MuxHookSnapshot,
-    after: &MuxHookSnapshot,
-    before_modes: &BTreeSet<PaneId>,
-    after_modes: &BTreeSet<PaneId>,
-) -> Vec<PendingHookEvent> {
-    before_modes
-        .symmetric_difference(after_modes)
-        .filter_map(|pane| {
-            after
-                .panes
-                .get(pane)
-                .map(|state| PendingHookEvent::pane("pane-mode-changed", *pane, state, after))
-                .or_else(|| {
-                    before.panes.get(pane).map(|state| {
-                        PendingHookEvent::pane("pane-mode-changed", *pane, state, before)
-                    })
-                })
-        })
-        .collect()
+    #[cfg(test)]
+    fn session_context(&self, session: SessionId) -> ExecutionContext {
+        hook_events::session_context(self, session)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -4821,10 +4626,11 @@ impl Shared {
     ) -> Result<(), DaemonError> {
         log::info!(
             target: "zz_daemon::perf",
-            "publication knobs: ZZ_PERF_EAGER_PUBLISH={} ZZ_PERF_RENAME_THROTTLE={} ZZ_PERF_PEER_SCAN={}",
+            "publication knobs: ZZ_PERF_EAGER_PUBLISH={} ZZ_PERF_RENAME_THROTTLE={} ZZ_PERF_PEER_SCAN={} ZZ_PERF_KEY_TABLE_DELTA={}",
             u8::from(*timers::EAGER_PUBLISH),
             u8::from(*timers::RENAME_THROTTLE),
             if *timers::PEER_SCAN_ALWAYS { "always" } else { "changes" },
+            u8::from(*timers::KEY_TABLE_DELTA),
         );
         attach::log_knobs();
         log::info!(
@@ -4832,6 +4638,7 @@ impl Shared {
             "terminal knobs: ZZ_PERF_ROW_PATCHES={}",
             u8::from(*ROW_PATCHES),
         );
+        hook_events::log_knobs();
         self.start_timers()?;
         let mut context = ExecutionContext::default();
         *self.mux_config_selection.lock() =
@@ -5791,11 +5598,7 @@ impl Shared {
             appearance_provenance: inner.appearance_provenance.clone(),
             mux_options: hello_mux_options,
             status: StatusLine::default(),
-            key_tables: if inner.key_tables_generation == inner.engine.keys.generation() {
-                inner.key_tables.clone()
-            } else {
-                inner.engine.keys.snapshot()
-            },
+            key_tables: inner.engine.keys.snapshot(),
         };
         if kind == ClientKind::Interactive && client_has_terminal && *attach::ATTACH_BATCH {
             return Some((client, hello));
@@ -6772,6 +6575,7 @@ impl Shared {
         queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
         let _round_trips = zz_terminal::forbid_actor_round_trips();
+        hook_events::release_input_change_window(self);
         let split_input = canonical_command(&command.name) == "split-window"
             && command_stdin_sink("split-window", &command.args)
                 == Some(CommandStdinSink::PaneInput);
@@ -7557,7 +7361,7 @@ impl Shared {
             .lock()
             .engine
             .hook_commands(context.session, hook);
-        let Some(commands) = commands else {
+        let Some(commands) = commands.filter(|commands| !commands.is_empty()) else {
             return String::new();
         };
         self.run_hook_commands(
@@ -7954,6 +7758,7 @@ impl Shared {
         if command_name == "command-prompt" {
             self.ensure_prompt_history();
         }
+        let read_only = hook_events::command_is_read_only(command_name, &command.args);
         let split_caller_stream = command_name == "split-window"
             && command_stdin_sink(command_name, &command.args) == Some(CommandStdinSink::PaneInput);
         let mut terminals_to_watch = Vec::new();
@@ -8008,35 +7813,50 @@ impl Shared {
         let (mut execution, mux_options_event, recheck_shutdown_requested) = {
             let mut inner = self.inner.lock();
             format_variables.insert("config_files".to_owned(), inner.config_files.clone());
-            let hook_snapshot_before =
-                event_hooks_enabled.then(|| MuxHookSnapshot::capture(&inner.engine));
-            let pane_focus_before = event_hooks_enabled.then(|| capture_pane_focus_probe(&inner));
-            let copy_modes_before = event_hooks_enabled.then(|| active_copy_mode_panes(&inner));
-            let active_windows_before = inner
-                .engine
-                .state
-                .sessions
-                .iter()
-                .map(|(session, state)| (*session, state.active_window))
-                .collect::<BTreeMap<_, _>>();
-            let active_panes_before = inner
-                .engine
-                .state
-                .windows
-                .iter()
-                .map(|(window, state)| (*window, state.active_pane))
-                .collect::<BTreeMap<_, _>>();
-            let belled_panes_before = inner
-                .engine
-                .state
-                .windows
-                .values()
-                .flat_map(|window| window.panes.values())
-                .filter(|pane| pane.bell)
-                .map(|pane| pane.id)
-                .collect::<BTreeSet<_>>();
+            let captures = !read_only || cfg!(debug_assertions);
+            let journal = *hook_events::HOOK_JOURNAL;
+            let generation_before = inner.engine.state.generation();
+            let hook_scope = (captures && (event_hooks_enabled || journal))
+                .then(|| hook_events::HookScope::open(&mut inner.engine));
+            let pane_focus_before = (event_hooks_enabled && captures).then(|| {
+                hook_events::FocusProbeScope::open_within(
+                    &mut inner,
+                    hook_scope
+                        .as_ref()
+                        .and_then(hook_events::HookScope::change_window),
+                )
+            });
+            let copy_modes_before =
+                (event_hooks_enabled && captures).then(|| active_copy_mode_panes(&inner));
+            let captured_active = (captures && (!journal || cfg!(debug_assertions))).then(|| {
+                (
+                    inner
+                        .engine
+                        .state
+                        .sessions
+                        .iter()
+                        .map(|(session, state)| (*session, state.active_window))
+                        .collect::<BTreeMap<_, _>>(),
+                    inner
+                        .engine
+                        .state
+                        .windows
+                        .iter()
+                        .map(|(window, state)| (*window, state.active_pane))
+                        .collect::<BTreeMap<_, _>>(),
+                    inner
+                        .engine
+                        .state
+                        .windows
+                        .values()
+                        .flat_map(|window| window.panes.values())
+                        .filter(|pane| pane.bell)
+                        .map(|pane| pane.id)
+                        .collect::<BTreeSet<_>>(),
+                )
+            });
             let mut focused_windows_before = BTreeMap::new();
-            for (session, clients) in &inner.attached {
+            for (session, clients) in inner.attached.iter().filter(|_| captures) {
                 let Some(state) = inner.engine.state.sessions.get(session) else {
                     continue;
                 };
@@ -8047,11 +7867,15 @@ impl Shared {
                     );
                 }
             }
-            let mut facts = format_hook_facts_for_client(&inner, client, context);
+            let facts_unread = hook_events::format_facts_unread(command_name, &command.args);
+            let mut built_facts =
+                (!facts_unread).then(|| format_hook_facts_for_client(&inner, client, context));
             // cmd-list-windows.c, cmd-list-sessions.c and cmd-list-panes.c all
             // call `format_defaults(ft, NULL, ...)`, so a row answers null for
             // every client-scoped name even while a client is attached.
-            if CLIENTLESS_ROW_COMMANDS.contains(&command_name) {
+            if CLIENTLESS_ROW_COMMANDS.contains(&command_name)
+                && let Some(facts) = built_facts.as_mut()
+            {
                 facts.client = None;
             }
             if command_name == "display-message" {
@@ -8071,17 +7895,23 @@ impl Shared {
                                 .map(|client_session| (client, client_session))
                         })
                 });
-                facts.client = format_client.map(|(client, client_session)| {
-                    client_format_facts(&inner, client, client_session)
-                });
+                if let Some(facts) = built_facts.as_mut() {
+                    facts.client = format_client.map(|(client, client_session)| {
+                        client_format_facts(&inner, client, client_session)
+                    });
+                }
                 context.set_format_client_session(
                     format_client.map(|(_, client_session)| client_session),
                 );
             }
+            let facts = built_facts
+                .as_ref()
+                .unwrap_or_else(|| hook_events::unread_format_facts());
             let mut hooks = DaemonFormatHooks::command_with_optional_variables(
-                &facts,
+                facts,
                 (!format_variables.is_empty()).then_some(&format_variables),
-            );
+            )
+            .withhold_facts(facts_unread);
             inner.engine.set_format_now(unix_timestamp());
             let mut prospective_context = context.clone();
             set_context_client_terminal(&mut prospective_context, invoking_client_terminal);
@@ -8143,18 +7973,41 @@ impl Shared {
             if !inner.engine.state.sessions.is_empty() {
                 self.exit_empty_armed.store(true, Ordering::Release);
             }
-            let selected_panes = inner
-                .engine
-                .state
-                .windows
+            let journal_active = hook_scope
+                .as_ref()
+                .and_then(|scope| scope.changes(&inner.engine))
+                .map(|changes| {
+                    (
+                        hook_events::journal_active_windows(&changes),
+                        hook_events::journal_active_panes(&changes),
+                        hook_events::journal_belled_panes(&changes),
+                    )
+                });
+            let (active_windows_before, active_panes_before, belled_panes_before) =
+                match (captured_active, journal_active) {
+                    (Some(full), Some(journal)) => {
+                        hook_events::assert_same_active_changes(
+                            &inner.engine.state,
+                            &full,
+                            &journal,
+                        );
+                        journal
+                    }
+                    (Some(full), None) => full,
+                    (None, Some(journal)) => journal,
+                    (None, None) => Default::default(),
+                };
+            let selected_panes = active_panes_before
                 .iter()
-                .filter_map(|(window, state)| {
-                    active_panes_before
-                        .get(window)
-                        .is_some_and(|previous| *previous != state.active_pane)
-                        .then_some(state.active_pane)
+                .filter_map(|(window, previous)| {
+                    let state = inner.engine.state.windows.get(window)?;
+                    (*previous != state.active_pane).then_some(state.active_pane)
                 })
                 .collect::<Vec<_>>();
+            debug_assert!(
+                !read_only || selected_panes.is_empty(),
+                "read-only {command_name} selected a pane"
+            );
             for pane in selected_panes {
                 if inner.engine.state.set_pane_bell(pane, false) {
                     snapshot_changed = true;
@@ -8195,6 +8048,10 @@ impl Shared {
                     .then_some((*session, state.active_window))
                 })
                 .collect::<Vec<_>>();
+            debug_assert!(
+                !read_only || changed_windows.is_empty(),
+                "read-only {command_name} changed a window"
+            );
             for (_, window) in &changed_windows {
                 if let Some(deadline) = schedule_window_silence(&mut inner, *window) {
                     silence_schedules.push(deadline);
@@ -8236,6 +8093,10 @@ impl Shared {
                 })
                 .flatten()
                 .collect::<BTreeSet<_>>();
+            debug_assert!(
+                !read_only || resized_windows.is_empty(),
+                "read-only {command_name} moved a client's window"
+            );
             let resized_panes = panes_for_windows(&inner, &resized_windows);
             snapshot_changed |= write_back_terminal_geometries(&mut inner, &resized_panes);
             let mut pane_format_output = None;
@@ -10010,41 +9871,49 @@ impl Shared {
                     }
                 }
             }
-            if let Some(before) = hook_snapshot_before.as_ref() {
-                let after = MuxHookSnapshot::capture(&inner.engine);
+            debug_assert!(
+                !read_only || inner.engine.state.generation() == generation_before,
+                "read-only {command_name} moved the tree generation"
+            );
+            let hook_events_before = pending_hook_events.len();
+            if event_hooks_enabled && let Some(scope) = hook_scope {
+                let pane_focus_before = pane_focus_before.map(|scope| scope.close(&inner));
                 let anchor = pending_hook_events.len();
-                pending_hook_events.extend(mux_hook_events(before, &after, command_name));
-                if let Some(pane_focus_before) = pane_focus_before.as_ref() {
-                    let focus = pane_focus_hook_events(&mut inner, pane_focus_before, &after);
-                    splice_pane_focus_events(&mut pending_hook_events, anchor, focus);
-                }
-                for session in before
-                    .sessions
-                    .keys()
-                    .filter(|session| !after.sessions.contains_key(session))
                 {
-                    if let Some(clients) = inner.attached.get(session) {
-                        for attached_client in clients {
-                            let client_name = client_format_name(&inner, *attached_client);
-                            pending_hook_events.push(PendingHookEvent::client(
-                                "client-detached",
-                                before.session_context(*session),
-                                *attached_client,
-                                Some(client_name.as_str()),
-                            ));
+                    let mut diff = scope.finish(&inner.engine, command_name);
+                    pending_hook_events.append(&mut diff.events);
+                    for session in diff.closed_sessions(&inner.engine.state) {
+                        if let Some(clients) = inner.attached.get(&session) {
+                            for attached_client in clients {
+                                let client_name = client_format_name(&inner, *attached_client);
+                                pending_hook_events.push(PendingHookEvent::client(
+                                    "client-detached",
+                                    diff.before_session_context(session),
+                                    *attached_client,
+                                    Some(client_name.as_str()),
+                                ));
+                            }
                         }
                     }
+                    if let Some(copy_modes_before) = copy_modes_before.as_ref() {
+                        let copy_modes_after = active_copy_mode_panes(&inner);
+                        pending_hook_events.extend(hook_events::pane_mode_hook_events(
+                            &inner.engine,
+                            &diff.before,
+                            copy_modes_before,
+                            &copy_modes_after,
+                        ));
+                    }
                 }
-                if let Some(copy_modes_before) = copy_modes_before.as_ref() {
-                    let copy_modes_after = active_copy_mode_panes(&inner);
-                    pending_hook_events.extend(pane_mode_hook_events(
-                        before,
-                        &after,
-                        copy_modes_before,
-                        &copy_modes_after,
-                    ));
+                if let Some(pane_focus_before) = pane_focus_before.as_ref() {
+                    let focus = pane_focus_hook_events(&mut inner, pane_focus_before);
+                    splice_pane_focus_events(&mut pending_hook_events, anchor, focus);
                 }
             }
+            debug_assert!(
+                !read_only || pending_hook_events.len() == hook_events_before,
+                "read-only {command_name} raised hook events"
+            );
             (execution, mux_options_changed, recheck_shutdown_requested)
         };
 
@@ -10368,31 +10237,34 @@ impl Shared {
             {
                 let event = {
                     let inner = self.inner.lock();
-                    let snapshot = MuxHookSnapshot::capture(&inner.engine);
-                    snapshot.panes.get(&pane).map(|pane_state| {
-                        let value = inner
-                            .engine
-                            .format_facts()
-                            .user_option(
-                                &pane.to_string(),
-                                &pane_state.window.to_string(),
-                                &pane_state.session.to_string(),
-                                "@agent_state",
-                            )
-                            .unwrap_or_default()
-                            .to_owned();
-                        let mut event = PendingHookEvent::pane(
-                            "agent-state-changed",
-                            pane,
-                            pane_state,
-                            &snapshot,
-                        );
-                        event.variables.insert("agent_state".to_owned(), value);
-                        event
-                            .variables
-                            .insert("agent_pending_permission".to_owned(), String::new());
-                        event
-                    })
+                    PendingHookEvent::live_pane("agent-state-changed", pane, &inner.engine).map(
+                        |mut event| {
+                            let value = inner
+                                .engine
+                                .format_facts()
+                                .user_option(
+                                    &pane.to_string(),
+                                    &event
+                                        .context
+                                        .window
+                                        .map(|window| window.to_string())
+                                        .unwrap_or_default(),
+                                    &event
+                                        .context
+                                        .session
+                                        .map(|session| session.to_string())
+                                        .unwrap_or_default(),
+                                    "@agent_state",
+                                )
+                                .unwrap_or_default()
+                                .to_owned();
+                            event.variables.insert("agent_state".to_owned(), value);
+                            event
+                                .variables
+                                .insert("agent_pending_permission".to_owned(), String::new());
+                            event
+                        },
+                    )
                 };
                 if let Some(event) = event {
                     self.run_event_hooks(vec![event]);
@@ -10980,7 +10852,7 @@ impl Shared {
     }
 
     fn publish_key_tables_if_changed(&self) {
-        let (tables, reset_clients) = {
+        let (publication, reset_clients) = {
             let mut inner = self.inner.lock();
             let ServerState {
                 engine,
@@ -11012,25 +10884,27 @@ impl Shared {
                 inner.engine.keys.ensure_table(&table);
             }
             let generation = inner.engine.keys.generation();
-            let tables = if generation == inner.key_tables_generation
+            let publication = if generation == inner.key_tables_generation
                 || timers::KeyTablePublishHold::active()
+                || inner.subscribers.is_empty() && !*timers::EAGER_PUBLISH
             {
                 None
             } else {
                 inner.key_tables_generation = generation;
-                let tables = inner.engine.keys.snapshot();
-                (tables != inner.key_tables).then(|| {
-                    inner.key_tables.clone_from(&tables);
-                    tables
-                })
+                let ServerState {
+                    engine,
+                    key_table_generations,
+                    ..
+                } = &mut *inner;
+                key_table_publication(&engine.keys, key_table_generations)
             };
-            (tables, reset_clients)
+            (publication, reset_clients)
         };
         for client in reset_clients {
             self.sync_key_table(client, false);
         }
-        if let Some(tables) = tables {
-            self.publish(EventPayload::KeyTablesChanged { tables });
+        if let Some(publication) = publication {
+            self.publish(publication);
         }
     }
 
@@ -15496,20 +15370,18 @@ impl Shared {
                 target_window
                     .is_some_and(|window| inner.engine.state.windows[&window].active_pane != *pane)
             }) {
-                let before = MuxHookSnapshot::capture(&inner.engine);
+                let scope = hook_events::HookScope::open(&mut inner.engine);
                 inner
                     .engine
                     .state
                     .select_pane_with_zoom(pane, parsed.has('Z'))?;
-                let after = MuxHookSnapshot::capture(&inner.engine);
-                events.extend(mux_hook_events(&before, &after, "switch-client"));
+                events.extend(scope.finish(&inner.engine, "switch-client").events);
             }
             if let Some(window) = target_window {
-                let before = MuxHookSnapshot::capture(&inner.engine);
+                let scope = hook_events::HookScope::open(&mut inner.engine);
                 inner.engine.set_format_now(unix_timestamp());
                 inner.engine.state.select_window(target_session, window)?;
-                let after = MuxHookSnapshot::capture(&inner.engine);
-                events.extend(mux_hook_events(&before, &after, "switch-client"));
+                events.extend(scope.finish(&inner.engine, "switch-client").events);
             }
             events
         } else {
@@ -15532,8 +15404,8 @@ impl Shared {
             self.attach_collect_event_hooks(target_client, target_session, !context.no_hooks)?;
         if same_session && !context.no_hooks {
             let inner = self.inner.lock();
-            let hook_snapshot = MuxHookSnapshot::capture(&inner.engine);
-            let hook_context = hook_snapshot.session_context(target_session);
+            let hook_context =
+                hook_events::live_session_context(&inner.engine.state, target_session);
             let client_name = client_format_name(&inner, target_client);
             attach_events.push(PendingHookEvent::client(
                 "client-session-changed",
@@ -15794,7 +15666,7 @@ impl Shared {
         let update = parse_control_client_size(value)?;
         let (changed, resizes, notifications) = {
             let mut inner = self.inner.lock();
-            let before = MuxHookSnapshot::capture(&inner.engine);
+            let scope = hook_events::HookScope::open(&mut inner.engine);
             let mut affected = control_client_sized_panes(&inner, client);
             let output = inner.control_outputs.entry(client).or_default();
             match update {
@@ -15809,8 +15681,9 @@ impl Shared {
             affected.extend(control_client_sized_panes(&inner, client));
             let changed = write_back_terminal_geometries(&mut inner, &affected);
             let resizes = terminal_resizes_for_panes(&inner, &affected);
-            let after = MuxHookSnapshot::capture(&inner.engine);
-            let notifications = mux_hook_events(&before, &after, "refresh-client")
+            let notifications = scope
+                .finish(&inner.engine, "refresh-client")
+                .events
                 .into_iter()
                 .filter(|event| event.name == "window-layout-changed")
                 .collect::<Vec<_>>();
@@ -17508,11 +17381,12 @@ impl Shared {
         }
         let hook_state_before = event_hooks_enabled.then(|| {
             (
-                MuxHookSnapshot::capture(&inner.engine),
+                hook_events::HookScope::open(&mut inner.engine),
                 active_copy_mode_panes(&inner),
             )
         });
-        let pane_focus_before = event_hooks_enabled.then(|| capture_pane_focus_probe(&inner));
+        let pane_focus_before =
+            event_hooks_enabled.then(|| hook_events::FocusProbeScope::open(&mut inner));
         let previous_session = client_attached_session(&inner, client);
         let client_name = client_format_name(&inner, client);
         let previous_sessions = inner
@@ -17642,27 +17516,26 @@ impl Shared {
         stamp_snapshot_for_client(&inner, client, &mut snapshot, &presence);
         inner.client_focused.insert(client, true);
         let mut hook_events = Vec::new();
-        if let Some((hook_snapshot_before, copy_modes_before)) = hook_state_before.as_ref() {
-            let hook_snapshot_after = MuxHookSnapshot::capture(&inner.engine);
-            hook_events.extend(mux_hook_events(
-                hook_snapshot_before,
-                &hook_snapshot_after,
-                "",
-            ));
+        if let Some((hook_scope, copy_modes_before)) = hook_state_before {
+            let pane_focus_before = pane_focus_before.map(|scope| scope.close(&inner));
+            let mode_events = {
+                let mut diff = hook_scope.finish(&inner.engine, "");
+                hook_events.append(&mut diff.events);
+                let copy_modes_after = active_copy_mode_panes(&inner);
+                hook_events::pane_mode_hook_events(
+                    &inner.engine,
+                    &diff.before,
+                    &copy_modes_before,
+                    &copy_modes_after,
+                )
+            };
             if let Some(pane_focus_before) = pane_focus_before.as_ref() {
-                let focus =
-                    pane_focus_hook_events(&mut inner, pane_focus_before, &hook_snapshot_after);
+                let focus = pane_focus_hook_events(&mut inner, pane_focus_before);
                 splice_pane_focus_events(&mut hook_events, 0, focus);
             }
-            let copy_modes_after = active_copy_mode_panes(&inner);
-            hook_events.extend(pane_mode_hook_events(
-                hook_snapshot_before,
-                &hook_snapshot_after,
-                copy_modes_before,
-                &copy_modes_after,
-            ));
+            hook_events.extend(mode_events);
             if previous_session != Some(session) {
-                let context = hook_snapshot_after.session_context(session);
+                let context = hook_events::live_session_context(&inner.engine.state, session);
                 hook_events.push(PendingHookEvent::client(
                     "client-session-changed",
                     context.clone(),
@@ -17953,11 +17826,12 @@ impl Shared {
         let event_hooks_enabled = event_hooks_enabled && !detach_is_inert(&inner, client);
         let hook_state_before = event_hooks_enabled.then(|| {
             (
-                MuxHookSnapshot::capture(&inner.engine),
+                hook_events::HookScope::open(&mut inner.engine),
                 active_copy_mode_panes(&inner),
             )
         });
-        let pane_focus_before = event_hooks_enabled.then(|| capture_pane_focus_probe(&inner));
+        let pane_focus_before =
+            event_hooks_enabled.then(|| hook_events::FocusProbeScope::open(&mut inner));
         let client_name = client_format_name(&inner, client);
         let terminals = sessions
             .iter()
@@ -18029,30 +17903,34 @@ impl Shared {
         write_back_terminal_geometries(&mut inner, &affected_panes);
         let resizes = terminal_resizes_for_panes(&inner, &affected_panes);
         let mut events = Vec::new();
-        if let Some((hook_snapshot_before, copy_modes_before)) = hook_state_before.as_ref() {
-            let hook_snapshot_after = MuxHookSnapshot::capture(&inner.engine);
-            events.extend(mux_hook_events(
-                hook_snapshot_before,
-                &hook_snapshot_after,
-                "",
-            ));
+        if let Some((hook_scope, copy_modes_before)) = hook_state_before {
+            let pane_focus_before = pane_focus_before.map(|scope| scope.close(&inner));
+            let (mode_events, detached_context) = {
+                let mut diff = hook_scope.finish(&inner.engine, "");
+                events.append(&mut diff.events);
+                let copy_modes_after = active_copy_mode_panes(&inner);
+                (
+                    hook_events::pane_mode_hook_events(
+                        &inner.engine,
+                        &diff.before,
+                        &copy_modes_before,
+                        &copy_modes_after,
+                    ),
+                    sessions
+                        .first()
+                        .map(|session| diff.before_session_context(*session)),
+                )
+            };
             if let Some(pane_focus_before) = pane_focus_before.as_ref() {
-                let focus =
-                    pane_focus_hook_events(&mut inner, pane_focus_before, hook_snapshot_before);
+                let focus = pane_focus_hook_events(&mut inner, pane_focus_before);
                 splice_pane_focus_events(&mut events, 0, focus);
             }
-            let copy_modes_after = active_copy_mode_panes(&inner);
-            events.extend(pane_mode_hook_events(
-                hook_snapshot_before,
-                &hook_snapshot_after,
-                copy_modes_before,
-                &copy_modes_after,
-            ));
+            events.extend(mode_events);
             events.extend(client_active_events);
-            if let Some(session) = sessions.first() {
+            if let Some(context) = detached_context {
                 events.push(PendingHookEvent::client(
                     "client-detached",
-                    hook_snapshot_before.session_context(*session),
+                    context,
                     client,
                     Some(client_name.as_str()),
                 ));
@@ -18263,12 +18141,12 @@ impl Shared {
                 InputMessage::ResizeTerminal { .. } | InputMessage::ResizeSplit { .. }
             ) || copy_mode_change))
             .then(|| {
-                let inner = self.inner.lock();
+                let mut inner = self.inner.lock();
                 let copy_modes = copy_mode_change.then(|| active_copy_mode_panes(&inner));
-                (MuxHookSnapshot::capture(&inner.engine), copy_modes)
+                (hook_events::HookScope::open(&mut inner.engine), copy_modes)
             });
         let pane_focus_before =
-            (!context.no_hooks).then(|| capture_pane_focus_probe(&self.inner.lock()));
+            (!context.no_hooks).then(|| hook_events::InputFocusScope::open(&mut self.inner.lock()));
         let result = (|| -> Result<(), DaemonError> {
             match input {
                 InputMessage::Text { pane, text } => {
@@ -18625,30 +18503,32 @@ impl Shared {
             self.publish_snapshot();
         }
         if result.is_ok()
-            && let Some((before, copy_modes_before)) = hook_state_before.as_ref()
+            && let Some((hook_scope, copy_modes_before)) = hook_state_before
         {
-            let (after, copy_modes_after) = {
+            let events = {
                 let inner = self.inner.lock();
-                let copy_modes = copy_modes_before
-                    .as_ref()
-                    .map(|_| active_copy_mode_panes(&inner));
-                (MuxHookSnapshot::capture(&inner.engine), copy_modes)
+                let mut diff = hook_scope.finish(&inner.engine, "");
+                if let Some(copy_modes_before) = copy_modes_before {
+                    let copy_modes_after = active_copy_mode_panes(&inner);
+                    diff.events.extend(hook_events::pane_mode_hook_events(
+                        &inner.engine,
+                        &diff.before,
+                        &copy_modes_before,
+                        &copy_modes_after,
+                    ));
+                }
+                diff.events
             };
-            let mut events = mux_hook_events(before, &after, "");
-            if let (Some(copy_modes_before), Some(copy_modes_after)) =
-                (copy_modes_before, copy_modes_after)
-            {
-                events.extend(pane_mode_hook_events(
-                    before,
-                    &after,
-                    copy_modes_before,
-                    &copy_modes_after,
-                ));
-            }
             self.run_event_hooks(events);
         }
-        if let Some(pane_focus_before) = pane_focus_before.as_ref() {
-            let events = pane_focus_settle(&mut self.inner.lock(), pane_focus_before);
+        if let Some(pane_focus_before) = pane_focus_before {
+            let events = {
+                let mut inner = self.inner.lock();
+                pane_focus_before
+                    .close(&inner)
+                    .map(|probe| pane_focus_settle(&mut inner, &probe))
+                    .unwrap_or_default()
+            };
             self.run_event_hooks(events);
         }
         log::trace!(
@@ -19100,7 +18980,7 @@ impl Shared {
             let Some(window) = inner.engine.state.window_for_pane(source) else {
                 return;
             };
-            if let Some(window) = inner.engine.state.windows.get_mut(&window) {
+            if let Some(window) = inner.engine.state.window_mut(window) {
                 window.zoomed_pane = None;
             }
             let Ok(pane) = inner
@@ -19635,13 +19515,12 @@ impl Shared {
     ) -> Option<(bool, bool, Vec<PendingHookEvent>)> {
         let mut inner = self.inner.lock();
         client_attached_session(&inner, client)?;
-        let pane_focus_before = (!context.no_hooks).then(|| capture_pane_focus_probe(&inner));
+        let pane_focus_before = (!context.no_hooks).then(|| capture_client_focus_probe(&inner));
         inner.client_focused.insert(client, focused);
         let mut hook_events = Vec::new();
-        let pane_focus = pane_focus_before.as_ref().map(|before| {
-            let snapshot = MuxHookSnapshot::capture(&inner.engine);
-            pane_focus_hook_events(&mut inner, before, &snapshot)
-        });
+        let pane_focus = pane_focus_before
+            .as_ref()
+            .map(|before| pane_focus_hook_events(&mut inner, before));
         // `tty_keys_next` updates pane focus before it notifies
         // `client-focus-out` and after it notifies `client-focus-in`.
         let pane_focus = pane_focus.unwrap_or_default();
@@ -24741,7 +24620,7 @@ impl Shared {
         if let Some(pipe) = pipe {
             stop_pane_pipe(pipe);
         }
-        let Some((mut context, retained, changed, mut events, before, pane_focus_before)) = ({
+        let Some((mut context, retained, changed, mut events, hook_scope, pane_focus_before)) = ({
             let mut inner = self.inner.lock();
             if !inner
                 .terminals
@@ -24754,8 +24633,9 @@ impl Shared {
                 return;
             };
             inner.engine.set_format_now(unix_timestamp());
-            let before = MuxHookSnapshot::capture(&inner.engine);
-            let pane_focus_before = capture_pane_focus_probe(&inner);
+            let hook_scope = hook_events::HookScope::open(&mut inner.engine);
+            let pane_focus_before = hook_events::FocusProbeScope::open(&mut inner);
+            let exited = PendingHookEvent::live_pane("pane-exited", pane, &inner.engine);
             let retained = inner
                 .engine
                 .retain_exited_pane(pane, failed)
@@ -24775,17 +24655,17 @@ impl Shared {
             } else {
                 false
             };
-            let mut events = if retained {
-                let after = MuxHookSnapshot::capture(&inner.engine);
-                let mut events = mux_hook_events(&before, &after, "");
-                if changed && let Some(state) = after.panes.get(&pane) {
-                    events.push(PendingHookEvent::pane("pane-died", pane, state, &after));
+            let (mut events, hook_scope) = if retained {
+                let mut events = hook_scope.finish(&inner.engine, "").events;
+                if changed
+                    && let Some(event) =
+                        PendingHookEvent::live_pane("pane-died", pane, &inner.engine)
+                {
+                    events.push(event);
                 }
-                events
+                (events, None)
             } else {
-                before.panes.get(&pane).map_or_else(Vec::new, |state| {
-                    vec![PendingHookEvent::pane("pane-exited", pane, state, &before)]
-                })
+                (exited.into_iter().collect(), Some(hook_scope))
             };
             if !changed && retained {
                 events.clear();
@@ -24795,7 +24675,7 @@ impl Shared {
                 retained,
                 changed,
                 events,
-                before,
+                hook_scope,
                 pane_focus_before,
             ))
         }) else {
@@ -24858,12 +24738,14 @@ impl Shared {
                 "failed to close exited terminal pane={pane}: {error}"
             );
         }
-        if result.is_ok() {
+        if result.is_ok()
+            && let Some(hook_scope) = hook_scope
+        {
             let mut inner = self.inner.lock();
-            let after = MuxHookSnapshot::capture(&inner.engine);
+            let pane_focus_before = pane_focus_before.close(&inner);
             let anchor = events.len();
-            events.extend(mux_hook_events(&before, &after, ""));
-            let focus = pane_focus_hook_events(&mut inner, &pane_focus_before, &after);
+            events.extend(hook_scope.finish(&inner.engine, "").events);
+            let focus = pane_focus_hook_events(&mut inner, &pane_focus_before);
             splice_pane_focus_events(&mut events, anchor, focus);
         }
         if result.is_ok() || !self.is_current_terminal(pane, terminal) {
@@ -24996,15 +24878,9 @@ impl Shared {
                 .state
                 .update_pane_title_from_terminal(pane, title, program_wrote_title)
                 .unwrap_or(false);
-            changed.then(|| {
-                let snapshot = MuxHookSnapshot::capture(&inner.engine);
-                PendingHookEvent::pane(
-                    "pane-title-changed",
-                    pane,
-                    &snapshot.panes[&pane],
-                    &snapshot,
-                )
-            })
+            changed
+                .then(|| PendingHookEvent::live_pane("pane-title-changed", pane, &inner.engine))
+                .flatten()
         };
         if let Some(event) = event {
             self.request_publish(timers::PublishReason::Tree);
@@ -25172,22 +25048,19 @@ impl Shared {
             } else {
                 let rename_due = previous.current_command != runtime.current_command
                     && inner.engine.automatic_rename_due(pane, now);
-                let facts = if rename_due {
-                    format_hook_facts(&inner)
-                } else {
-                    FormatHookFacts::default()
-                };
-                let mut hooks = DaemonFormatHooks::command(&facts);
-                let before = rename_due.then(|| MuxHookSnapshot::capture(&inner.engine));
+                let built_facts = rename_due.then(|| format_hook_facts(&inner));
+                let facts = built_facts
+                    .as_ref()
+                    .unwrap_or_else(|| hook_events::unread_format_facts());
+                let mut hooks = DaemonFormatHooks::command(facts).withhold_facts(!rename_due);
+                let scope = rename_due.then(|| hook_events::HookScope::open(&mut inner.engine));
                 let generation = inner.engine.state.generation();
                 let changed = inner
                     .engine
                     .set_pane_runtime_facts_at(pane, runtime, &mut hooks, now);
                 let renamed = inner.engine.state.generation() != generation;
-                let events = match before {
-                    Some(before) if renamed => {
-                        mux_hook_events(&before, &MuxHookSnapshot::capture(&inner.engine), "")
-                    }
+                let events = match scope {
+                    Some(scope) if renamed => scope.finish(&inner.engine, "").events,
                     _ => Vec::new(),
                 };
                 (
@@ -26801,12 +26674,8 @@ impl Shared {
                 0
             };
             let mode_event = mode_changed
-                .then(|| MuxHookSnapshot::capture(&inner.engine))
-                .and_then(|snapshot| {
-                    snapshot.panes.get(&pane).map(|state| {
-                        PendingHookEvent::pane("pane-mode-changed", pane, state, &snapshot)
-                    })
-                });
+                .then(|| PendingHookEvent::live_pane("pane-mode-changed", pane, &inner.engine))
+                .flatten();
             (
                 subscriber,
                 kind,
@@ -26970,11 +26839,7 @@ impl Shared {
     fn raise_pane_set_clipboard(self: &Arc<Self>, pane: PaneId) {
         let event = {
             let inner = self.inner.lock();
-            let snapshot = MuxHookSnapshot::capture(&inner.engine);
-            snapshot
-                .panes
-                .get(&pane)
-                .map(|state| PendingHookEvent::pane("pane-set-clipboard", pane, state, &snapshot))
+            PendingHookEvent::live_pane("pane-set-clipboard", pane, &inner.engine)
         };
         if let Some(event) = event {
             self.run_event_hooks(vec![event]);
@@ -28477,7 +28342,8 @@ impl Shared {
                 );
                 continue;
             }
-            let caller_source_stream = source_file_reads_stdin(&routed.args)
+            let caller_source_stream = routed_name == "source-file"
+                && source_file_reads_stdin(&routed.args)
                 && (options.control_target.is_some()
                     || options.replay_client.is_some_and(|client| {
                         self.inner
@@ -29590,6 +29456,9 @@ impl Shared {
     }
 
     fn close_agent_panes(&self, panes: &[PaneId]) {
+        if panes.is_empty() {
+            return;
+        }
         let _effects = self.agent_effects.lock();
         #[cfg(unix)]
         {
@@ -30083,24 +29952,23 @@ impl AgentPublisher for Shared {
             self.signal_wait_channel(&format!("agent_state@{pane}"));
             let event = {
                 let inner = self.inner.lock();
-                let snapshot = MuxHookSnapshot::capture(&inner.engine);
-                snapshot.panes.get(&pane).map(|pane_state| {
-                    let mut event =
-                        PendingHookEvent::pane("agent-state-changed", pane, pane_state, &snapshot);
-                    event.variables.insert(
-                        "agent_state".to_owned(),
-                        crate::status::agent_state_name(&state.phase).to_owned(),
-                    );
-                    event.variables.insert(
-                        "agent_pending_permission".to_owned(),
-                        state
-                            .pending_permission
-                            .as_ref()
-                            .map(|permission| permission.request_id.to_string())
-                            .unwrap_or_default(),
-                    );
-                    event
-                })
+                PendingHookEvent::live_pane("agent-state-changed", pane, &inner.engine).map(
+                    |mut event| {
+                        event.variables.insert(
+                            "agent_state".to_owned(),
+                            crate::status::agent_state_name(&state.phase).to_owned(),
+                        );
+                        event.variables.insert(
+                            "agent_pending_permission".to_owned(),
+                            state
+                                .pending_permission
+                                .as_ref()
+                                .map(|permission| permission.request_id.to_string())
+                                .unwrap_or_default(),
+                        );
+                        event
+                    },
+                )
             };
             let owner = self.agent_peer_owner.lock().upgrade();
             if let (Some(owner), Some(event)) = (owner, event) {
@@ -30113,10 +29981,7 @@ impl AgentPublisher for Shared {
     fn publish_agent_tool_call(&self, pane: PaneId, call: AgentToolCall) {
         let event = {
             let inner = self.inner.lock();
-            let snapshot = MuxHookSnapshot::capture(&inner.engine);
-            snapshot.panes.get(&pane).map(|pane_state| {
-                let mut event =
-                    PendingHookEvent::pane("agent-tool-call", pane, pane_state, &snapshot);
+            PendingHookEvent::live_pane("agent-tool-call", pane, &inner.engine).map(|mut event| {
                 event.variables.extend([
                     ("tool_call_id".to_owned(), call.id),
                     ("tool_title".to_owned(), call.title),
@@ -31305,7 +31170,7 @@ struct ServerState {
     mux_options: MuxOptions,
     mux_option_underlay: MuxOptions,
     published_mux_options: BTreeMap<ClientId, MuxOptions>,
-    key_tables: Vec<zz_protocol::KeyTableSnapshot>,
+    key_table_generations: BTreeMap<String, u64>,
     active_color_scheme: TerminalColorScheme,
     client_color_schemes: BTreeMap<ClientId, TerminalColorScheme>,
     client_names: BTreeMap<ClientId, String>,
@@ -36558,6 +36423,14 @@ fn capture_pane_focus_probe(inner: &ServerState) -> PaneFocusProbe {
             .iter()
             .map(|(session, state)| (*session, state.active_window))
             .collect(),
+        ..capture_client_focus_probe(inner)
+    }
+}
+
+fn capture_client_focus_probe(inner: &ServerState) -> PaneFocusProbe {
+    PaneFocusProbe {
+        window_active_panes: BTreeMap::new(),
+        session_windows: BTreeMap::new(),
         client_sessions: inner
             .attached
             .iter()
@@ -36601,11 +36474,7 @@ fn pane_is_focused(inner: &ServerState, pane: PaneId) -> bool {
 
 /// One `window_pane_update_focus` call: a pane that has exited is skipped
 /// entirely, and a hook is raised only when the pane-level flag moves.
-fn pane_focus_transition(
-    inner: &mut ServerState,
-    pane: PaneId,
-    snapshot: &MuxHookSnapshot,
-) -> Option<PendingHookEvent> {
+fn pane_focus_transition(inner: &mut ServerState, pane: PaneId) -> Option<PendingHookEvent> {
     if inner.engine.state.pane(pane).is_none_or(|state| state.dead) {
         return None;
     }
@@ -36620,8 +36489,7 @@ fn pane_focus_transition(
         inner.pane_focus.remove(&pane);
         "pane-focus-out"
     };
-    let state = snapshot.panes.get(&pane)?;
-    Some(PendingHookEvent::pane(name, pane, state, snapshot))
+    PendingHookEvent::live_pane(name, pane, &inner.engine)
 }
 
 fn session_active_pane(inner: &ServerState, session: SessionId) -> Option<PaneId> {
@@ -36643,6 +36511,9 @@ fn pane_focus_candidates(
     inner: &ServerState,
     before: &PaneFocusProbe,
 ) -> (Vec<PaneId>, Vec<(WindowId, PaneId)>) {
+    if no_pane_can_hold_focus(inner) {
+        return (Vec::new(), Vec::new());
+    }
     let gated = inner.engine.focus_events();
     let mut leading = Vec::new();
     let mut removals = Vec::new();
@@ -36721,25 +36592,28 @@ fn pane_focus_candidates(
     (leading, removals)
 }
 
-fn pane_focus_hook_events(
-    inner: &mut ServerState,
-    before: &PaneFocusProbe,
-    snapshot: &MuxHookSnapshot,
-) -> PaneFocusEvents {
+fn no_pane_can_hold_focus(inner: &ServerState) -> bool {
+    inner.pane_focus.is_empty()
+        && !inner
+            .attached
+            .values()
+            .flatten()
+            .any(|client| inner.client_focused.get(client) == Some(&true))
+}
+
+fn pane_focus_hook_events(inner: &mut ServerState, before: &PaneFocusProbe) -> PaneFocusEvents {
     inner
         .pane_focus
         .retain(|pane| inner.engine.state.pane(*pane).is_some());
     let (leading, removals) = pane_focus_candidates(inner, before);
     let mut events = PaneFocusEvents::default();
     for pane in leading {
-        events
-            .leading
-            .extend(pane_focus_transition(inner, pane, snapshot));
+        events.leading.extend(pane_focus_transition(inner, pane));
     }
     for (window, pane) in removals {
         events
             .after_window_pane_changed
-            .extend(pane_focus_transition(inner, pane, snapshot).map(|event| (window, event)));
+            .extend(pane_focus_transition(inner, pane).map(|event| (window, event)));
     }
     events
 }
@@ -36752,8 +36626,7 @@ fn pane_focus_settle(inner: &mut ServerState, before: &PaneFocusProbe) -> Vec<Pe
     if leading.is_empty() && removals.is_empty() {
         return Vec::new();
     }
-    let snapshot = MuxHookSnapshot::capture(&inner.engine);
-    let events = pane_focus_hook_events(inner, before, &snapshot);
+    let events = pane_focus_hook_events(inner, before);
     let mut flattened = Vec::new();
     splice_pane_focus_events(&mut flattened, 0, events);
     flattened
@@ -38710,6 +38583,7 @@ fn run_shell_job(
     let child = process.spawn().map_err(|_| ())?;
     drop(process);
     drop(child_socket);
+    let exit = ShellJobExit::watch(child.id());
     install_shell_job_process(job_process, stopping, child, detached)?;
     if let Some(started) = started {
         let _ = started.send(());
@@ -38722,34 +38596,91 @@ fn run_shell_job(
                 terminate_managed_process(job_process);
             })?;
         if reached_eof {
-            break wait_shell_job_process(job_process)?;
+            break wait_shell_job_process(job_process, || exit.wait(None))?;
         }
-
-        let mut process = job_process.lock();
-        let Some(child) = process.as_mut() else {
-            return Err(());
-        };
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                process.take();
-                drop(process);
-                read_available_shell_job_output(&mut output, &mut bytes, &mut buffer)?;
-                break status;
-            }
-            Ok(None) => drop(process),
-            Err(_) => {
-                let mut child = process.take().expect("shell job process was present");
-                drop(process);
-                let _ = terminate_copy_pipe(&mut child);
-                return Err(());
-            }
+        if let Some(status) = reap_shell_job_process(job_process)? {
+            read_available_shell_job_output(&mut output, &mut bytes, &mut buffer)?;
+            break status;
         }
-        thread::sleep(COPY_PIPE_POLL_INTERVAL);
+        exit.wait(Some(&output));
     };
     Ok(ShellJobResult {
         output: bytes,
         status,
     })
+}
+
+#[cfg(unix)]
+struct ShellJobExit(Option<std::os::fd::OwnedFd>);
+
+#[cfg(unix)]
+impl ShellJobExit {
+    #[cfg(target_os = "linux")]
+    fn watch(pid: u32) -> Self {
+        Self(
+            i32::try_from(pid)
+                .ok()
+                .and_then(rustix::process::Pid::from_raw)
+                .and_then(|pid| {
+                    rustix::process::pidfd_open(pid, rustix::process::PidfdFlags::empty()).ok()
+                }),
+        )
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn watch(pid: u32) -> Self {
+        use rustix::event::kqueue::{Event, EventFilter, EventFlags, ProcessEvents};
+
+        let Some(pid) = i32::try_from(pid)
+            .ok()
+            .and_then(rustix::process::Pid::from_raw)
+        else {
+            return Self(None);
+        };
+        let Ok(kqueue) = rustix::event::kqueue::kqueue() else {
+            return Self(None);
+        };
+        let change = [Event::new(
+            EventFilter::Proc {
+                pid,
+                flags: ProcessEvents::EXIT,
+            },
+            EventFlags::ADD | EventFlags::ONESHOT,
+            std::ptr::null_mut(),
+        )];
+        #[allow(
+            unsafe_code,
+            reason = "a process filter names no descriptor that could close under the kqueue"
+        )]
+        let registered = unsafe {
+            rustix::event::kqueue::kevent(&kqueue, &change, &mut [] as &mut [Event; 0], None)
+        };
+        Self(registered.ok().map(|_| kqueue))
+    }
+
+    fn wait(&self, output: Option<&std::os::unix::net::UnixStream>) {
+        use rustix::event::{PollFd, PollFlags, Timespec, poll};
+
+        let interval = Timespec::try_from(COPY_PIPE_POLL_INTERVAL)
+            .expect("the shell job poll interval fits in a timespec");
+        let _ = match (&self.0, output) {
+            (Some(exit), Some(output)) => poll(
+                &mut [
+                    PollFd::new(exit, PollFlags::IN),
+                    PollFd::new(output, PollFlags::IN),
+                ],
+                None,
+            ),
+            (Some(exit), None) => poll(&mut [PollFd::new(exit, PollFlags::IN)], None),
+            (None, Some(output)) => {
+                poll(&mut [PollFd::new(output, PollFlags::IN)], Some(&interval))
+            }
+            (None, None) => {
+                thread::sleep(COPY_PIPE_POLL_INTERVAL);
+                Ok(0)
+            }
+        };
+    }
 }
 
 #[cfg(unix)]
@@ -38854,7 +38785,7 @@ fn run_shell_job(
             stderr.read_to_end(&mut output).map(|_| output)
         })
     });
-    let status = wait_shell_job_process(job_process);
+    let status = wait_shell_job_process(job_process, || thread::sleep(COPY_PIPE_POLL_INTERVAL));
     let mut output = stdout.join().map_err(|_| ())?.map_err(|_| ())?;
     if let Some(stderr) = stderr {
         output.extend(stderr.join().map_err(|_| ())?.map_err(|_| ())?);
@@ -38879,26 +38810,35 @@ fn install_shell_job_process(
     Ok(())
 }
 
-fn wait_shell_job_process(process: &Mutex<Option<Child>>) -> Result<ExitStatus, ()> {
-    loop {
-        let mut process = process.lock();
-        let Some(child) = process.as_mut() else {
-            return Err(());
-        };
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                process.take();
-                return Ok(status);
-            }
-            Ok(None) => drop(process),
-            Err(_) => {
-                let mut child = process.take().expect("shell job process was present");
-                drop(process);
-                let _ = terminate_copy_pipe(&mut child);
-                return Err(());
-            }
+fn reap_shell_job_process(process: &Mutex<Option<Child>>) -> Result<Option<ExitStatus>, ()> {
+    let mut process = process.lock();
+    let Some(child) = process.as_mut() else {
+        return Err(());
+    };
+    match child.try_wait() {
+        Ok(Some(status)) => {
+            process.take();
+            Ok(Some(status))
         }
-        thread::sleep(COPY_PIPE_POLL_INTERVAL);
+        Ok(None) => Ok(None),
+        Err(_) => {
+            let mut child = process.take().expect("shell job process was present");
+            drop(process);
+            let _ = terminate_copy_pipe(&mut child);
+            Err(())
+        }
+    }
+}
+
+fn wait_shell_job_process(
+    process: &Mutex<Option<Child>>,
+    mut pause: impl FnMut(),
+) -> Result<ExitStatus, ()> {
+    loop {
+        if let Some(status) = reap_shell_job_process(process)? {
+            return Ok(status);
+        }
+        pause();
     }
 }
 
@@ -48987,13 +48927,7 @@ mod tests {
 
         let first_sort = {
             let mut inner = shared.inner.lock();
-            inner
-                .engine
-                .state
-                .sessions
-                .get_mut(&first)
-                .unwrap()
-                .activity = Some(1);
+            inner.engine.state.session_mut(first).unwrap().activity = Some(1);
             inner.engine.state.sessions[&first].sort_activity
         };
         shared.attach(client, first).unwrap();
@@ -49012,13 +48946,7 @@ mod tests {
         }
         let same_sort = {
             let mut inner = shared.inner.lock();
-            inner
-                .engine
-                .state
-                .sessions
-                .get_mut(&first)
-                .unwrap()
-                .activity = Some(2);
+            inner.engine.state.session_mut(first).unwrap().activity = Some(2);
             inner.engine.state.sessions[&first].sort_activity
         };
         shared.attach(client, first).unwrap();
@@ -49029,13 +48957,7 @@ mod tests {
         }
         let second_sort = {
             let mut inner = shared.inner.lock();
-            inner
-                .engine
-                .state
-                .sessions
-                .get_mut(&second)
-                .unwrap()
-                .activity = Some(3);
+            inner.engine.state.session_mut(second).unwrap().activity = Some(3);
             inner.engine.state.sessions[&second].sort_activity
         };
         shared.attach(client, second).unwrap();
@@ -49075,13 +48997,7 @@ mod tests {
 
         let ordinary_sort = {
             let mut inner = shared.inner.lock();
-            inner
-                .engine
-                .state
-                .sessions
-                .get_mut(&first)
-                .unwrap()
-                .activity = Some(4);
+            inner.engine.state.session_mut(first).unwrap().activity = Some(4);
             inner.engine.state.sessions[&first].sort_activity
         };
         shared
@@ -49113,13 +49029,7 @@ mod tests {
         let read_only_sort = {
             let mut inner = shared.inner.lock();
             inner.client_flags.insert(client);
-            inner
-                .engine
-                .state
-                .sessions
-                .get_mut(&first)
-                .unwrap()
-                .activity = Some(5);
+            inner.engine.state.session_mut(first).unwrap().activity = Some(5);
             inner.engine.state.sessions[&first].sort_activity
         };
         shared
@@ -49151,13 +49061,7 @@ mod tests {
             .unwrap();
         let consumed_sort = {
             let mut inner = shared.inner.lock();
-            inner
-                .engine
-                .state
-                .sessions
-                .get_mut(&first)
-                .unwrap()
-                .activity = Some(6);
+            inner.engine.state.session_mut(first).unwrap().activity = Some(6);
             inner.engine.state.sessions[&first].sort_activity
         };
         shared
@@ -49223,13 +49127,7 @@ mod tests {
             .unwrap();
         let prompt_sort = {
             let mut inner = shared.inner.lock();
-            inner
-                .engine
-                .state
-                .sessions
-                .get_mut(&first)
-                .unwrap()
-                .activity = Some(7);
+            inner.engine.state.session_mut(first).unwrap().activity = Some(7);
             inner.engine.state.sessions[&first].sort_activity
         };
         shared
@@ -49284,13 +49182,7 @@ mod tests {
 
         let theme_sort = {
             let mut inner = shared.inner.lock();
-            inner
-                .engine
-                .state
-                .sessions
-                .get_mut(&first)
-                .unwrap()
-                .activity = Some(8);
+            inner.engine.state.session_mut(first).unwrap().activity = Some(8);
             inner.engine.state.sessions[&first].sort_activity
         };
         shared.set_client_color_scheme(client, TerminalColorScheme::Light);
@@ -49305,13 +49197,7 @@ mod tests {
 
         let untouched_sort = {
             let mut inner = shared.inner.lock();
-            inner
-                .engine
-                .state
-                .sessions
-                .get_mut(&first)
-                .unwrap()
-                .activity = Some(9);
+            inner.engine.state.session_mut(first).unwrap().activity = Some(9);
             inner.engine.state.sessions[&first].sort_activity
         };
         shared
@@ -49459,13 +49345,7 @@ mod tests {
         {
             let mut inner = shared.inner.lock();
             assert!(inner.engine.state.set_pane_bell(pane, true));
-            inner
-                .engine
-                .state
-                .sessions
-                .get_mut(&session)
-                .unwrap()
-                .activity = Some(-10);
+            inner.engine.state.session_mut(session).unwrap().activity = Some(-10);
         }
         wait_for_viewport(
             &terminal,
@@ -49613,13 +49493,7 @@ mod tests {
 
         let focus_out_state = {
             let mut inner = shared.inner.lock();
-            inner
-                .engine
-                .state
-                .sessions
-                .get_mut(&session)
-                .unwrap()
-                .activity = Some(-11);
+            inner.engine.state.session_mut(session).unwrap().activity = Some(-11);
             (
                 inner.engine.state.sessions[&session].sort_activity,
                 inner.activity_sequence,
@@ -49659,13 +49533,7 @@ mod tests {
             .expect("disable focus events");
         let inactive = {
             let mut inner = shared.inner.lock();
-            inner
-                .engine
-                .state
-                .sessions
-                .get_mut(&session)
-                .unwrap()
-                .activity = Some(-12);
+            inner.engine.state.session_mut(session).unwrap().activity = Some(-12);
             (
                 inner.engine.state.sessions[&session].activity,
                 inner.engine.state.sessions[&session].sort_activity,
@@ -50687,8 +50555,7 @@ mod tests {
             inner
                 .engine
                 .state
-                .sessions
-                .get_mut(&session)
+                .session_mut(session)
                 .expect("focus session")
                 .activity = Some(-10);
             assert!(inner.client_flags.contains(client));
@@ -50769,8 +50636,7 @@ mod tests {
             inner
                 .engine
                 .state
-                .sessions
-                .get_mut(&session)
+                .session_mut(session)
                 .expect("focus session")
                 .activity = Some(-11);
             (
@@ -51302,13 +51168,7 @@ mod tests {
             let mut inner = shared.inner.lock();
             inner.client_flags.insert(client);
             inner.engine.mark_session_active_at(other, 1_700_000_020);
-            inner
-                .engine
-                .state
-                .sessions
-                .get_mut(&session)
-                .unwrap()
-                .activity = Some(-30);
+            inner.engine.state.session_mut(session).unwrap().activity = Some(-30);
             assert!(inner.engine.state.set_pane_bell(pane, true));
         }
         let (other_sort, activity_sequence, geometry, terminal_input_sequence) = {
@@ -51398,13 +51258,7 @@ mod tests {
             let mut inner = shared.inner.lock();
             inner.client_flags.remove(client);
             assert!(inner.engine.state.set_pane_bell(pane, true));
-            inner
-                .engine
-                .state
-                .sessions
-                .get_mut(&session)
-                .unwrap()
-                .activity = Some(-31);
+            inner.engine.state.session_mut(session).unwrap().activity = Some(-31);
             (
                 inner.engine.state.sessions[&session].activity,
                 inner.engine.state.sessions[&session].sort_activity,
@@ -53486,16 +53340,16 @@ mod tests {
             let pane_exists = inner.engine.state.window_for_pane(pane).is_some();
             let terminal_exists = inner.terminals.contains_key(&pane);
             drop(inner);
-            if !pane_exists && !terminal_exists {
+            let stopping = shared.stopping.load(Ordering::Acquire);
+            if !pane_exists && !terminal_exists && stopping {
                 break;
             }
             assert!(
                 Instant::now() < deadline,
-                "exited terminal pane remained in mux state"
+                "exited terminal pane remained in mux state ({pane_exists}, {terminal_exists}) or no shutdown was requested ({stopping})"
             );
             thread::sleep(Duration::from_millis(10));
         }
-        assert!(shared.stopping.load(Ordering::Acquire));
     }
 
     #[test]
@@ -56246,8 +56100,7 @@ mod tests {
         let before = MuxHookSnapshot::capture(&engine);
         engine
             .state
-            .sessions
-            .get_mut(&linked_session)
+            .session_mut(linked_session)
             .expect("linked session state")
             .windows
             .push(window);
@@ -56263,8 +56116,7 @@ mod tests {
 
         engine
             .state
-            .sessions
-            .get_mut(&linked_session)
+            .session_mut(linked_session)
             .expect("linked session state")
             .windows
             .retain(|candidate| *candidate != window);
@@ -94758,7 +94610,7 @@ bind - split-window -v -c "#{pane_current_path}"
         let (_, zulu_window, _) = switch_test_session(&shared, "zulu");
         let mut inner = shared.inner.lock();
         for window in [cli_window, alpha_window, zulu_window] {
-            inner.engine.state.windows.get_mut(&window).unwrap().name = "win".into();
+            inner.engine.state.window_mut(window).unwrap().name = "win".into();
         }
         let mut mode = zz_mux::SwitchMode::new(
             true,
@@ -94791,11 +94643,20 @@ bind - split-window -v -c "#{pane_current_path}"
             [("zulu".to_owned(), vec![0])]
         );
         mode.key("BSpace", 1, 23);
-        inner.engine.state.sessions.remove(&alpha);
+        inner.engine.state.remove_session(alpha);
         assert_eq!(texts(&inner, &mode)[0].1, "=cli:0.");
-        inner.engine.state.sessions.remove(&cli);
+        inner.engine.state.remove_session(cli);
         assert_eq!(texts(&inner, &mode)[0].1, "=zulu:0.");
-        inner.engine.state.sessions.clear();
+        for session in inner
+            .engine
+            .state
+            .sessions
+            .keys()
+            .copied()
+            .collect::<Vec<_>>()
+        {
+            inner.engine.state.remove_session(session);
+        }
         assert!(texts(&inner, &mode).is_empty());
     }
 
@@ -99217,7 +99078,7 @@ bind - split-window -v -c "#{pane_current_path}"
         }
         let rejected_sort = {
             let mut inner = shared.inner.lock();
-            inner.engine.state.sessions.get_mut(&a).unwrap().activity = Some(11);
+            inner.engine.state.session_mut(a).unwrap().activity = Some(11);
             inner.engine.state.sessions[&a].sort_activity
         };
         shared
@@ -100904,7 +100765,7 @@ bind - split-window -v -c "#{pane_current_path}"
         take_reliable_messages(&mailbox);
         let survivor_sort = {
             let mut inner = shared.inner.lock();
-            inner.engine.state.sessions.get_mut(&c).unwrap().activity = Some(9);
+            inner.engine.state.session_mut(c).unwrap().activity = Some(9);
             inner.engine.state.sessions[&c].sort_activity
         };
         let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, b_pane)
@@ -106987,8 +106848,7 @@ bind - split-window -v -c "#{pane_current_path}"
             inner
                 .engine
                 .state
-                .sessions
-                .get_mut(&session)
+                .session_mut(session)
                 .unwrap()
                 .active_window = window;
             inner.engine.state.set_window_activity_flag(window, true);
@@ -108603,7 +108463,7 @@ bind - split-window -v -c "#{pane_current_path}"
         "echo zz-terminal-ready & findstr .*"
     }
 
-    fn output_view_session_fixture(
+    pub(super) fn output_view_session_fixture(
         shared: &Arc<Shared>,
         name: &str,
         text: impl Into<String>,

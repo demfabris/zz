@@ -598,7 +598,7 @@ returned `ChromeAction`, which may stay local or send a protocol command.
   source. Platform (`cmd`) chords are never claimed; autorepeat of a held claimed key is swallowed
   so holding the prefix cannot spam `send-prefix`; releases of claimed presses are forwarded and
   stopped, keeping the daemon's swallowed-key pairing balanced and the widget release-free.
-- `ServerHello.key_tables` and `KeyTablesChanged` give the client every daemon table for labels,
+- `ServerHello.key_tables`, `KeyTablesPatched` and `KeyTablesChanged` give the client every daemon table for labels,
   hints, and help. Pane semantics still resolve on the daemon.
 - `bind -n` root bindings fire from Terminal panes. Browser pages and local text widgets expose
   only the captured prefix/armed sequence to the key tables.

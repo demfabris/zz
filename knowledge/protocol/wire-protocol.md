@@ -207,7 +207,7 @@ unpaired keys.
 `OpenUri { pane, uri }`, `FocusSidebar`, `PrefixArmed { armed }`,
 `PrefixCancelled { request_id }`, `Bell { pane }`,
 `KeyTablesChanged { tables }`, `KeyTableActive { table, repeat }`,
-`OpenPathPicker { pane, start_dir }`,
+`OpenPathPicker { pane, start_dir }`, `KeyTablesPatched { tables, removed }`,
 `Detached { session: SessionId, by: Option<String>, reason: DetachReason }`, `HistoryChunk { pane, start: u32, total: u32,
 offset: u32, columns: u16, rows: Vec<Vec<PackedCell>>, dictionary: TerminalDictionary }`,
 `KittyImageBegin { pane, image_id, generation, width, height, total_bytes }`
@@ -726,6 +726,11 @@ advertises `ClientHello::CLIENT_PATH_PICKER_CAPABILITY` (`client-path-picker-v1`
 TUI and FFI clients do not, and `choose-path` answers them with an error, as does a
 `PathListRequest` from them or for a pane outside the client's attached session. `EventPayload` gains
 `OpenPathPicker { pane, start_dir }` after `KeyTableActive`, pushed only to the invoking client.
+v107 also appends `EventPayload::KeyTablesPatched { tables, removed }` after `OpenPathPicker`: the
+tables whose bindings changed since the previous publication, each replacing the client's table of
+the same name, and the names of tables that no longer exist. The daemon sends it instead of
+`KeyTablesChanged` (every table), which it keeps for `ZZ_PERF_KEY_TABLE_DELTA=0`; `ClientCore`
+applies both. `key_tables_patched_appends_after_the_path_picker` pins the tag.
 `ProtocolMessage` gains five variants after `ClientTerminalType`: `PathListRequest { request_id,
 pane, dir }`, `PathListBegin { request_id, result: Result<PathListRoot, String> }`, `PathListChunk
 { request_id, entries, done, truncated }`, `PathListGit { request_id, marks }` and

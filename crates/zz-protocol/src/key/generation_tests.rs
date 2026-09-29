@@ -87,3 +87,60 @@ fn snapshots_carry_canonical_names_resolved_once() {
         "splitw"
     );
 }
+
+#[test]
+fn table_generations_move_with_their_own_table_only() {
+    let mut tables = KeyTables::empty();
+    let of = |tables: &KeyTables| {
+        tables
+            .table_generations()
+            .map(|(name, generation)| (name.to_owned(), generation))
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    tables.bind("root", "F1", binding("new-window"));
+    tables.bind("prefix", "c", binding("new-window"));
+    let first = of(&tables);
+    assert_eq!(first.keys().collect::<Vec<_>>(), ["prefix", "root"]);
+    let global = tables.generation();
+    tables.bind("root", "F1", binding("new-window"));
+    assert_eq!(tables.generation(), global);
+    assert_eq!(of(&tables), first);
+    tables.bind("root", "F2", binding("kill-pane"));
+    let second = of(&tables);
+    assert_ne!(second["root"], first["root"]);
+    assert_eq!(second["prefix"], first["prefix"]);
+    assert_eq!(second["root"], tables.generation());
+    tables.update_binding_metadata("prefix", "c", Some("window".to_owned()), false);
+    let third = of(&tables);
+    assert_eq!(third["root"], second["root"]);
+    assert_ne!(third["prefix"], second["prefix"]);
+    tables.ensure_table("resize");
+    assert!(of(&tables).contains_key("resize"));
+    assert!(tables.unbind("prefix", "c"));
+    assert!(!of(&tables).contains_key("prefix"));
+    assert!(tables.remove_table("resize"));
+    assert_eq!(of(&tables).keys().collect::<Vec<_>>(), ["root"]);
+    let before_prefix2 = of(&tables);
+    tables.set_prefix2(Some("C-x"));
+    assert_eq!(of(&tables), before_prefix2);
+    assert_eq!(
+        tables.snapshot_table("root"),
+        tables
+            .snapshot()
+            .into_iter()
+            .find(|table| table.name == "root")
+    );
+    assert_eq!(tables.snapshot_table("prefix"), None);
+}
+
+#[test]
+fn every_table_of_the_stock_set_has_a_generation() {
+    let tables = KeyTables::default();
+    assert_eq!(
+        tables
+            .table_generations()
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>(),
+        tables.table_names().collect::<Vec<_>>()
+    );
+}

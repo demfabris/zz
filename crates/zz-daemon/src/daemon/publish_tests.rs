@@ -18,7 +18,12 @@ fn events(mailbox: &OutboundMailbox) -> Vec<EventPayload> {
 fn key_table_publications(events: &[EventPayload]) -> usize {
     events
         .iter()
-        .filter(|event| matches!(event, EventPayload::KeyTablesChanged { .. }))
+        .filter(|event| {
+            matches!(
+                event,
+                EventPayload::KeyTablesChanged { .. } | EventPayload::KeyTablesPatched { .. }
+            )
+        })
         .count()
 }
 
@@ -133,7 +138,8 @@ fn source_file_publishes_its_key_tables_once() {
     let published = events(&mailbox)
         .into_iter()
         .filter_map(|event| match event {
-            EventPayload::KeyTablesChanged { tables } => Some(tables),
+            EventPayload::KeyTablesChanged { tables }
+            | EventPayload::KeyTablesPatched { tables, .. } => Some(tables),
             _ => None,
         })
         .collect::<Vec<_>>();

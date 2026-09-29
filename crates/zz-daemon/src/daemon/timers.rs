@@ -12,6 +12,9 @@ pub(super) static EAGER_PUBLISH: LazyLock<bool> =
 pub(super) static RENAME_THROTTLE: LazyLock<bool> =
     LazyLock::new(|| std::env::var_os("ZZ_PERF_RENAME_THROTTLE").is_none_or(|value| value != "0"));
 
+pub(super) static KEY_TABLE_DELTA: LazyLock<bool> =
+    LazyLock::new(|| std::env::var_os("ZZ_PERF_KEY_TABLE_DELTA").is_none_or(|value| value != "0"));
+
 pub(super) static PEER_SCAN_ALWAYS: LazyLock<bool> =
     LazyLock::new(|| std::env::var_os("ZZ_PERF_PEER_SCAN").is_some_and(|value| value == "always"));
 
@@ -461,7 +464,7 @@ impl Shared {
             inner.scheduled_window_rename = None;
             let facts = format_hook_facts(&inner);
             let mut hooks = DaemonFormatHooks::command(&facts);
-            let before = MuxHookSnapshot::capture(&inner.engine);
+            let scope = hook_events::HookScope::open(&mut inner.engine);
             let mut renamed = false;
             for (pane, command) in commands {
                 let Some(mut runtime) = inner.engine.pane_runtime_facts(pane).cloned() else {
@@ -478,7 +481,7 @@ impl Shared {
             }
             renamed |= inner.engine.apply_due_window_renames(now, &mut hooks);
             let events = if renamed {
-                mux_hook_events(&before, &MuxHookSnapshot::capture(&inner.engine), "")
+                scope.finish(&inner.engine, "").events
             } else {
                 Vec::new()
             };

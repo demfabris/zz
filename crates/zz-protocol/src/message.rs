@@ -3517,6 +3517,10 @@ pub enum EventPayload {
         #[serde(deserialize_with = "deserialize_optional_path_list_text")]
         start_dir: Option<String>,
     },
+    KeyTablesPatched {
+        tables: Vec<KeyTableSnapshot>,
+        removed: Vec<String>,
+    },
 }
 
 impl EventPayload {
@@ -5020,6 +5024,34 @@ mod tests {
                 event
             );
         }
+    }
+
+    #[test]
+    fn key_tables_patched_appends_after_the_path_picker() {
+        let open = postcard::to_stdvec(&super::Event {
+            sequence: 0,
+            payload: super::EventPayload::OpenPathPicker {
+                pane: crate::PaneId(1),
+                start_dir: None,
+            },
+        })
+        .expect("encode open path picker")[1];
+        let event = super::Event {
+            sequence: 5,
+            payload: super::EventPayload::KeyTablesPatched {
+                tables: vec![super::KeyTableSnapshot {
+                    name: "root".to_owned(),
+                    bindings: Vec::new(),
+                }],
+                removed: vec!["resize".to_owned()],
+            },
+        };
+        let bytes = postcard::to_stdvec(&event).expect("encode key tables patched");
+        assert_eq!(bytes[1], open + 1);
+        assert_eq!(
+            postcard::from_bytes::<super::Event>(&bytes).expect("decode key tables patched"),
+            event
+        );
     }
 
     #[test]

@@ -10,6 +10,9 @@ mod copy_actions;
 mod format_universe_tests;
 mod formats;
 mod honest_knobs;
+mod journal;
+#[cfg(test)]
+mod journal_tests;
 mod layout;
 #[cfg(test)]
 mod layout_pin_tests;
@@ -55,6 +58,7 @@ pub use formats::{
     parse_tmux_colour, sanitize_client_output, utf8_sanitize, with_eager_universe,
 };
 pub use honest_knobs::{BellAction, PresetOptions, VisualBell, WindowSize};
+pub use journal::{ChangeWindow, JournalChanges, PaneImage, SessionImage, Tracked, WindowImage};
 pub use layout::{CellLayout, SplitSize};
 pub use localtime::local_time;
 pub use model::{

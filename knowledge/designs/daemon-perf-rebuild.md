@@ -1425,11 +1425,11 @@ merged) after review. Where the build departs from the scope above:
   CLI's two extra round trips a following `display -p '#{pane_in_mode}'` read 0 every time
   (compat `smoke/copy-mode-formats`). tmux enters the mode before the command returns. The first
   build sleep-polled the published facts every 1 ms for up to 100 ms (19 ms per CLI `copy-mode`
-  against 8 ms on `main`, the full 100 ms for a view the actor ignores); it is now
-  `TerminalSession::barrier`, a request the actor answers after every command queued before it,
-  and the view action publishes its snapshot and copy facts synchronously (6 ms per CLI
-  `copy-mode`, hidden window included). Control clients keep the wait: it is what makes a
-  control-mode `copy-mode` then `display -p` read like tmux's.
+  against 8 ms on `main`, the full 100 ms for a view the actor ignores); the lane then added a
+  `TerminalSession::barrier` request (6 ms per CLI `copy-mode`, hidden window included). Rebased
+  onto W1-PANE, the barrier and the poll are gone: PUBLISH's `TerminalSession::settle` is the same
+  request and already runs for every client kind after copy-mode view actions, so it covers the
+  Exec path and keeps a control-mode `copy-mode` then `display -p` reading like tmux's.
 - The tmux wrapper is pinned (see Protocol and release policy) but still installed at startup, not
   at the first pane: a cold `new-session` spawns a pane and needs it anyway, and install plus clone
   measured 0.2 ms (clonefile 80 us, directory and script 110 us).

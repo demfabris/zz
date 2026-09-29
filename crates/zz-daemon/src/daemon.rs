@@ -3747,6 +3747,8 @@ const PRODUCED_NON_AFTER_PINNED_HOOKS: &[&str] = &[
 mod hook_events;
 #[cfg(test)]
 mod hook_events_tests;
+#[cfg(test)]
+use hook_events::mux_hook_events;
 
 #[derive(Clone)]
 struct HookSessionState {
@@ -3786,55 +3788,24 @@ impl PendingHookEvent {
         state: &HookSessionState,
         snapshot: &MuxHookSnapshot,
     ) -> Self {
-        let context = snapshot.session_context(session);
-        Self {
-            name,
-            context,
-            exclude_client: None,
-            variables: BTreeMap::from([
-                (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
-                (HOOK_SESSION_CONTEXT_FORMAT.to_owned(), session.to_string()),
-                (
-                    HOOK_SESSION_NAME_CONTEXT_FORMAT.to_owned(),
-                    state.name.clone(),
-                ),
-            ]),
-        }
+        hook_events::session_event(name, session, &state.name, snapshot)
     }
 
+    #[cfg(test)]
     fn window(
         name: &'static str,
         window: WindowId,
         state: &HookWindowState,
         snapshot: &MuxHookSnapshot,
     ) -> Self {
-        let session_name = snapshot
-            .sessions
-            .get(&state.session)
-            .map(|session| session.name.clone())
-            .unwrap_or_default();
-        Self {
+        hook_events::window_event(
             name,
-            context: snapshot.window_context(window),
-            exclude_client: None,
-            variables: BTreeMap::from([
-                (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
-                (
-                    HOOK_SESSION_CONTEXT_FORMAT.to_owned(),
-                    state.session.to_string(),
-                ),
-                (HOOK_SESSION_NAME_CONTEXT_FORMAT.to_owned(), session_name),
-                (HOOK_WINDOW_CONTEXT_FORMAT.to_owned(), window.to_string()),
-                (
-                    HOOK_WINDOW_NAME_CONTEXT_FORMAT.to_owned(),
-                    state.name.clone(),
-                ),
-                (
-                    HOOK_PANE_CONTEXT_FORMAT.to_owned(),
-                    state.active_pane.to_string(),
-                ),
-            ]),
-        }
+            window,
+            state.session,
+            &state.name,
+            state.active_pane,
+            snapshot,
+        )
     }
 
     fn winlink(
@@ -3845,50 +3816,24 @@ impl PendingHookEvent {
         window_state: &HookWindowState,
         snapshot: &MuxHookSnapshot,
     ) -> Self {
-        Self {
+        hook_events::winlink_event(
             name,
-            context: snapshot.window_context(window),
-            exclude_client: None,
-            variables: BTreeMap::from([
-                (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
-                (HOOK_SESSION_CONTEXT_FORMAT.to_owned(), session.to_string()),
-                (
-                    HOOK_SESSION_NAME_CONTEXT_FORMAT.to_owned(),
-                    session_state.name.clone(),
-                ),
-                (HOOK_WINDOW_CONTEXT_FORMAT.to_owned(), window.to_string()),
-                (
-                    HOOK_WINDOW_NAME_CONTEXT_FORMAT.to_owned(),
-                    window_state.name.clone(),
-                ),
-            ]),
-        }
+            session,
+            &session_state.name,
+            window,
+            &window_state.name,
+            snapshot,
+        )
     }
 
+    #[cfg(test)]
     fn pane(
         name: &'static str,
         pane: PaneId,
         state: &HookPaneState,
         snapshot: &MuxHookSnapshot,
     ) -> Self {
-        let window_name = snapshot
-            .windows
-            .get(&state.window)
-            .map(|window| window.name.clone())
-            .unwrap_or_default();
-        let session_name = snapshot
-            .sessions
-            .get(&state.session)
-            .map(|session| session.name.clone())
-            .unwrap_or_default();
-        Self::pane_named(
-            name,
-            pane,
-            state.session,
-            state.window,
-            session_name,
-            window_name,
-        )
+        hook_events::pane_event(name, pane, state.session, state.window, snapshot)
     }
 
     fn pane_named(
@@ -4010,216 +3955,10 @@ impl MuxHookSnapshot {
             }));
     }
 
-    fn add_window_image(&mut self, window: WindowId, image: &zz_mux::WindowImage) {
-        self.windows.insert(
-            window,
-            HookWindowState {
-                session: image.session,
-                name: image.name.clone(),
-                active_pane: image.active_pane,
-                zoomed_pane: image.zoomed_pane,
-                layout: image.layout.clone(),
-                extent: image.extent,
-            },
-        );
-        self.panes.extend(image.panes.iter().map(|pane| {
-            (
-                pane.id,
-                HookPaneState {
-                    session: image.session,
-                    window,
-                    title: pane.title.clone(),
-                },
-            )
-        }));
-    }
-
+    #[cfg(test)]
     fn session_context(&self, session: SessionId) -> ExecutionContext {
-        let Some(state) = self.sessions.get(&session) else {
-            return ExecutionContext::new(Some(session), None, None);
-        };
-        let pane = self
-            .windows
-            .get(&state.active_window)
-            .map(|window| window.active_pane);
-        ExecutionContext::new(Some(session), Some(state.active_window), pane)
+        hook_events::session_context(self, session)
     }
-
-    fn window_context(&self, window: WindowId) -> ExecutionContext {
-        self.windows.get(&window).map_or_else(
-            || ExecutionContext::new(None, Some(window), None),
-            |state| {
-                ExecutionContext::new(Some(state.session), Some(window), Some(state.active_pane))
-            },
-        )
-    }
-}
-
-fn mux_hook_events(
-    before: &MuxHookSnapshot,
-    after: &MuxHookSnapshot,
-    command: &str,
-) -> Vec<PendingHookEvent> {
-    let mut events = Vec::new();
-    for (session, window) in after.links.difference(&before.links) {
-        if let (Some(session_state), Some(window_state)) =
-            (after.sessions.get(session), after.windows.get(window))
-        {
-            events.push(PendingHookEvent::winlink(
-                "window-linked",
-                *session,
-                session_state,
-                *window,
-                window_state,
-                after,
-            ));
-        }
-    }
-    if command == "new-session" {
-        for (session, state) in &after.sessions {
-            if !before.sessions.contains_key(session) {
-                events.push(PendingHookEvent::session(
-                    "session-created",
-                    *session,
-                    state,
-                    after,
-                ));
-            }
-        }
-    }
-    if command == "rename-session" {
-        for (session, state) in &after.sessions {
-            if before
-                .sessions
-                .get(session)
-                .is_some_and(|previous| previous.name != state.name)
-            {
-                events.push(PendingHookEvent::session(
-                    "session-renamed",
-                    *session,
-                    state,
-                    after,
-                ));
-            }
-        }
-    }
-    for (session, state) in &after.sessions {
-        if before
-            .sessions
-            .get(session)
-            .is_some_and(|previous| previous.active_window != state.active_window)
-            && let Some(window) = after.windows.get(&state.active_window)
-        {
-            events.push(PendingHookEvent::winlink(
-                "session-window-changed",
-                *session,
-                state,
-                state.active_window,
-                window,
-                after,
-            ));
-        }
-    }
-    for (window, state) in &after.windows {
-        let Some(previous) = before.windows.get(window) else {
-            continue;
-        };
-        if previous.name != state.name {
-            events.push(PendingHookEvent::window(
-                "window-renamed",
-                *window,
-                state,
-                after,
-            ));
-        }
-        if previous.active_pane != state.active_pane {
-            events.push(PendingHookEvent::window(
-                "window-pane-changed",
-                *window,
-                state,
-                after,
-            ));
-        }
-        if previous.layout != state.layout || previous.zoomed_pane != state.zoomed_pane {
-            events.push(PendingHookEvent::window(
-                "window-layout-changed",
-                *window,
-                state,
-                after,
-            ));
-            if previous.extent != state.extent {
-                events.push(PendingHookEvent::window(
-                    "window-resized",
-                    *window,
-                    state,
-                    after,
-                ));
-            }
-        }
-    }
-    for (pane, state) in &after.panes {
-        if before
-            .panes
-            .get(pane)
-            .is_some_and(|previous| previous.title != state.title)
-        {
-            events.push(PendingHookEvent::pane(
-                "pane-title-changed",
-                *pane,
-                state,
-                after,
-            ));
-        }
-    }
-    let removed_links = before
-        .links
-        .difference(&after.links)
-        .filter_map(|(session, window)| {
-            Some(PendingHookEvent::winlink(
-                "window-unlinked",
-                *session,
-                before.sessions.get(session)?,
-                *window,
-                before.windows.get(window)?,
-                before,
-            ))
-        })
-        .collect::<Vec<_>>();
-    let closed_sessions = before
-        .sessions
-        .iter()
-        .filter(|(session, _)| !after.sessions.contains_key(session))
-        .map(|(session, state)| {
-            PendingHookEvent::session("session-closed", *session, state, before)
-        })
-        .collect::<Vec<_>>();
-    if command == "kill-session" {
-        events.extend(closed_sessions);
-        events.extend(removed_links);
-    } else {
-        events.extend(removed_links);
-        events.extend(closed_sessions);
-    }
-    events
-}
-
-fn pane_mode_hook_events(
-    engine: &MuxEngine,
-    before: &MuxHookSnapshot,
-    before_modes: &BTreeSet<PaneId>,
-    after_modes: &BTreeSet<PaneId>,
-) -> Vec<PendingHookEvent> {
-    before_modes
-        .symmetric_difference(after_modes)
-        .filter_map(|pane| {
-            PendingHookEvent::live_pane("pane-mode-changed", *pane, engine).or_else(|| {
-                before
-                    .panes
-                    .get(pane)
-                    .map(|state| PendingHookEvent::pane("pane-mode-changed", *pane, state, before))
-            })
-        })
-        .collect()
 }
 
 #[derive(Clone, Copy)]
@@ -8188,15 +7927,15 @@ impl Shared {
                 });
             let (active_windows_before, active_panes_before, belled_panes_before) =
                 match (captured_active, journal_active) {
-                    (Some(captured), Some(journal)) => {
+                    (Some(full), Some(journal)) => {
                         hook_events::assert_same_active_changes(
                             &inner.engine.state,
-                            &captured,
+                            &full,
                             &journal,
                         );
                         journal
                     }
-                    (Some(captured), None) => captured,
+                    (Some(full), None) => full,
                     (None, Some(journal)) => journal,
                     (None, None) => Default::default(),
                 };
@@ -10081,39 +9820,36 @@ impl Shared {
             let hook_events_before = pending_hook_events.len();
             if event_hooks_enabled && let Some(scope) = hook_scope {
                 let pane_focus_before = pane_focus_before.map(|scope| scope.close(&inner));
-                let diff = scope.finish(&inner.engine, command_name);
-                let before = &diff.before;
                 let anchor = pending_hook_events.len();
-                pending_hook_events.extend(diff.events);
+                {
+                    let mut diff = scope.finish(&inner.engine, command_name);
+                    pending_hook_events.append(&mut diff.events);
+                    for session in diff.closed_sessions(&inner.engine.state) {
+                        if let Some(clients) = inner.attached.get(&session) {
+                            for attached_client in clients {
+                                let client_name = client_format_name(&inner, *attached_client);
+                                pending_hook_events.push(PendingHookEvent::client(
+                                    "client-detached",
+                                    diff.before_session_context(session),
+                                    *attached_client,
+                                    Some(client_name.as_str()),
+                                ));
+                            }
+                        }
+                    }
+                    if let Some(copy_modes_before) = copy_modes_before.as_ref() {
+                        let copy_modes_after = active_copy_mode_panes(&inner);
+                        pending_hook_events.extend(hook_events::pane_mode_hook_events(
+                            &inner.engine,
+                            &diff.before,
+                            copy_modes_before,
+                            &copy_modes_after,
+                        ));
+                    }
+                }
                 if let Some(pane_focus_before) = pane_focus_before.as_ref() {
                     let focus = pane_focus_hook_events(&mut inner, pane_focus_before);
                     splice_pane_focus_events(&mut pending_hook_events, anchor, focus);
-                }
-                for session in before
-                    .sessions
-                    .keys()
-                    .filter(|session| !inner.engine.state.sessions.contains_key(session))
-                {
-                    if let Some(clients) = inner.attached.get(session) {
-                        for attached_client in clients {
-                            let client_name = client_format_name(&inner, *attached_client);
-                            pending_hook_events.push(PendingHookEvent::client(
-                                "client-detached",
-                                before.session_context(*session),
-                                *attached_client,
-                                Some(client_name.as_str()),
-                            ));
-                        }
-                    }
-                }
-                if let Some(copy_modes_before) = copy_modes_before.as_ref() {
-                    let copy_modes_after = active_copy_mode_panes(&inner);
-                    pending_hook_events.extend(pane_mode_hook_events(
-                        &inner.engine,
-                        before,
-                        copy_modes_before,
-                        &copy_modes_after,
-                    ));
                 }
             }
             debug_assert!(
@@ -17722,19 +17458,22 @@ impl Shared {
         let mut hook_events = Vec::new();
         if let Some((hook_scope, copy_modes_before)) = hook_state_before {
             let pane_focus_before = pane_focus_before.map(|scope| scope.close(&inner));
-            let diff = hook_scope.finish(&inner.engine, "");
-            hook_events.extend(diff.events);
+            let mode_events = {
+                let mut diff = hook_scope.finish(&inner.engine, "");
+                hook_events.append(&mut diff.events);
+                let copy_modes_after = active_copy_mode_panes(&inner);
+                hook_events::pane_mode_hook_events(
+                    &inner.engine,
+                    &diff.before,
+                    &copy_modes_before,
+                    &copy_modes_after,
+                )
+            };
             if let Some(pane_focus_before) = pane_focus_before.as_ref() {
                 let focus = pane_focus_hook_events(&mut inner, pane_focus_before);
                 splice_pane_focus_events(&mut hook_events, 0, focus);
             }
-            let copy_modes_after = active_copy_mode_panes(&inner);
-            hook_events.extend(pane_mode_hook_events(
-                &inner.engine,
-                &diff.before,
-                &copy_modes_before,
-                &copy_modes_after,
-            ));
+            hook_events.extend(mode_events);
             if previous_session != Some(session) {
                 let context = hook_events::live_session_context(&inner.engine.state, session);
                 hook_events.push(PendingHookEvent::client(
@@ -18106,24 +17845,32 @@ impl Shared {
         let mut events = Vec::new();
         if let Some((hook_scope, copy_modes_before)) = hook_state_before {
             let pane_focus_before = pane_focus_before.map(|scope| scope.close(&inner));
-            let mut diff = hook_scope.finish(&inner.engine, "");
-            events.append(&mut diff.events);
+            let (mode_events, detached_context) = {
+                let mut diff = hook_scope.finish(&inner.engine, "");
+                events.append(&mut diff.events);
+                let copy_modes_after = active_copy_mode_panes(&inner);
+                (
+                    hook_events::pane_mode_hook_events(
+                        &inner.engine,
+                        &diff.before,
+                        &copy_modes_before,
+                        &copy_modes_after,
+                    ),
+                    sessions
+                        .first()
+                        .map(|session| diff.before_session_context(*session)),
+                )
+            };
             if let Some(pane_focus_before) = pane_focus_before.as_ref() {
                 let focus = pane_focus_hook_events(&mut inner, pane_focus_before);
                 splice_pane_focus_events(&mut events, 0, focus);
             }
-            let copy_modes_after = active_copy_mode_panes(&inner);
-            events.extend(pane_mode_hook_events(
-                &inner.engine,
-                &diff.before,
-                &copy_modes_before,
-                &copy_modes_after,
-            ));
+            events.extend(mode_events);
             events.extend(client_active_events);
-            if let Some(session) = sessions.first() {
+            if let Some(context) = detached_context {
                 events.push(PendingHookEvent::client(
                     "client-detached",
-                    diff.before_session_context(&inner.engine.state, *session),
+                    context,
                     client,
                     Some(client_name.as_str()),
                 ));
@@ -18703,7 +18450,7 @@ impl Shared {
                 let mut diff = hook_scope.finish(&inner.engine, "");
                 if let Some(copy_modes_before) = copy_modes_before {
                     let copy_modes_after = active_copy_mode_panes(&inner);
-                    diff.events.extend(pane_mode_hook_events(
+                    diff.events.extend(hook_events::pane_mode_hook_events(
                         &inner.engine,
                         &diff.before,
                         &copy_modes_before,

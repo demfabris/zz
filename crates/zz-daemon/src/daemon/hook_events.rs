@@ -64,22 +64,22 @@ pub(super) struct HookScope {
     before: Option<MuxHookSnapshot>,
 }
 
-pub(super) struct HookDiff {
-    pub(super) before: MuxHookSnapshot,
+pub(super) struct HookDiff<'a> {
+    pub(super) before: BeforeView<'a>,
     pub(super) events: Vec<PendingHookEvent>,
-    partial: Option<BTreeSet<SessionId>>,
 }
 
-impl HookDiff {
-    pub(super) fn before_session_context(
-        &self,
-        state: &MuxState,
-        session: SessionId,
-    ) -> ExecutionContext {
-        match &self.partial {
-            Some(touched) if !touched.contains(&session) => live_session_context(state, session),
-            _ => self.before.session_context(session),
-        }
+impl HookDiff<'_> {
+    pub(super) fn before_session_context(&self, session: SessionId) -> ExecutionContext {
+        session_context(&self.before, session)
+    }
+
+    pub(super) fn closed_sessions(&self, state: &MuxState) -> Vec<SessionId> {
+        self.before
+            .listed_sessions()
+            .into_iter()
+            .filter(|session| !state.sessions.contains_key(session))
+            .collect()
     }
 }
 
@@ -104,7 +104,7 @@ impl HookScope {
             .map(|window| engine.state.changes_since(window))
     }
 
-    pub(super) fn finish(self, engine: &MuxEngine, command: &str) -> HookDiff {
+    pub(super) fn finish<'a>(self, engine: &'a MuxEngine, command: &str) -> HookDiff<'a> {
         let Some(window) = self.window else {
             let before = self
                 .before
@@ -112,13 +112,18 @@ impl HookScope {
             let after = MuxHookSnapshot::capture(engine);
             let events = mux_hook_events(&before, &after, command);
             return HookDiff {
-                before,
+                before: BeforeView::Snapshot(before),
                 events,
-                partial: None,
             };
         };
-        let changes = engine.state.changes_since(&window);
-        let (before, after) = journal_snapshots(engine, &changes);
+        let before = JournalView {
+            engine,
+            changes: engine.state.changes_since(&window),
+        };
+        let after = LiveView {
+            engine,
+            changes: &before.changes,
+        };
         let events = mux_hook_events(&before, &after, command);
         if let Some(full_before) = &self.before {
             let expected = mux_hook_events(full_before, &MuxHookSnapshot::capture(engine), command);
@@ -130,9 +135,8 @@ impl HookScope {
             );
         }
         HookDiff {
-            before,
+            before: BeforeView::Journal(before),
             events,
-            partial: Some(changes.sessions.keys().copied().collect()),
         }
     }
 }
@@ -171,75 +175,636 @@ pub(super) fn journal_belled_panes(changes: &JournalChanges) -> BTreeSet<PaneId>
         .collect()
 }
 
-fn journal_snapshots(
-    engine: &MuxEngine,
-    changes: &JournalChanges,
-) -> (MuxHookSnapshot, MuxHookSnapshot) {
-    let state = &engine.state;
-    let mut windows = changes.windows.keys().copied().collect::<BTreeSet<_>>();
-    for (session, image) in &changes.sessions {
-        if let Some(image) = image {
-            windows.extend(image.windows.iter().copied());
-            windows.insert(image.active_window);
-        }
-        if let Some(current) = state.sessions.get(session) {
-            windows.extend(current.windows.iter().copied());
+#[derive(Clone, Copy)]
+pub(super) struct WindowFacts<'a> {
+    session: SessionId,
+    name: &'a str,
+    active_pane: PaneId,
+    zoomed_pane: Option<PaneId>,
+    layout: &'a CellLayout,
+    extent: (u16, u16),
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct PaneFacts<'a> {
+    session: SessionId,
+    window: WindowId,
+    title: &'a str,
+}
+
+pub(super) trait HookView {
+    fn session(&self, session: SessionId) -> Option<(&str, WindowId)>;
+
+    fn window(&self, window: WindowId) -> Option<WindowFacts<'_>>;
+
+    fn pane(&self, pane: PaneId) -> Option<PaneFacts<'_>>;
+
+    fn listed_sessions(&self) -> Vec<SessionId>;
+
+    fn listed_windows(&self) -> Vec<WindowId>;
+
+    fn listed_panes(&self) -> Vec<PaneId>;
+
+    fn links(&self) -> BTreeSet<(SessionId, WindowId)>;
+}
+
+fn live_window(engine: &MuxEngine, window: WindowId) -> Option<WindowFacts<'_>> {
+    let state = engine.state.windows.get(&window)?;
+    Some(WindowFacts {
+        session: state.session,
+        name: &state.name,
+        active_pane: state.active_pane,
+        zoomed_pane: state.zoomed_pane,
+        layout: &state.layout,
+        extent: (
+            engine
+                .window_extent(window, zz_protocol::Axis::Horizontal)
+                .unwrap_or_default(),
+            engine
+                .window_extent(window, zz_protocol::Axis::Vertical)
+                .unwrap_or_default(),
+        ),
+    })
+}
+
+fn live_pane_in(engine: &MuxEngine, window: WindowId, pane: PaneId) -> Option<PaneFacts<'_>> {
+    let state = engine.state.windows.get(&window)?;
+    Some(PaneFacts {
+        session: state.session,
+        window,
+        title: &state.panes.get(&pane)?.title,
+    })
+}
+
+impl HookView for MuxHookSnapshot {
+    fn session(&self, session: SessionId) -> Option<(&str, WindowId)> {
+        self.sessions
+            .get(&session)
+            .map(|state| (state.name.as_str(), state.active_window))
+    }
+
+    fn window(&self, window: WindowId) -> Option<WindowFacts<'_>> {
+        self.windows.get(&window).map(|state| WindowFacts {
+            session: state.session,
+            name: &state.name,
+            active_pane: state.active_pane,
+            zoomed_pane: state.zoomed_pane,
+            layout: &state.layout,
+            extent: state.extent,
+        })
+    }
+
+    fn pane(&self, pane: PaneId) -> Option<PaneFacts<'_>> {
+        self.panes.get(&pane).map(|state| PaneFacts {
+            session: state.session,
+            window: state.window,
+            title: &state.title,
+        })
+    }
+
+    fn listed_sessions(&self) -> Vec<SessionId> {
+        self.sessions.keys().copied().collect()
+    }
+
+    fn listed_windows(&self) -> Vec<WindowId> {
+        self.windows.keys().copied().collect()
+    }
+
+    fn listed_panes(&self) -> Vec<PaneId> {
+        self.panes.keys().copied().collect()
+    }
+
+    fn links(&self) -> BTreeSet<(SessionId, WindowId)> {
+        self.links.clone()
+    }
+}
+
+pub(super) struct JournalView<'a> {
+    engine: &'a MuxEngine,
+    changes: JournalChanges<'a>,
+}
+
+impl JournalView<'_> {
+    fn image_pane(&self, pane: PaneId) -> Option<PaneFacts<'_>> {
+        self.changes.windows.iter().find_map(|(window, image)| {
+            let image = (*image)?;
+            image
+                .panes
+                .iter()
+                .find(|candidate| candidate.id == pane)
+                .map(|candidate| PaneFacts {
+                    session: image.session,
+                    window: *window,
+                    title: &candidate.title,
+                })
+        })
+    }
+}
+
+impl HookView for JournalView<'_> {
+    fn session(&self, session: SessionId) -> Option<(&str, WindowId)> {
+        match self.changes.sessions.get(&session) {
+            Some(image) => image.map(|image| (image.name.as_str(), image.active_window)),
+            None => self
+                .engine
+                .state
+                .sessions
+                .get(&session)
+                .map(|state| (state.name.as_str(), state.active_window)),
         }
     }
-    let mut sessions = changes.sessions.keys().copied().collect::<BTreeSet<_>>();
-    for window in &windows {
-        if let Some(Some(image)) = changes.windows.get(window) {
-            sessions.insert(image.session);
-        }
-        if let Some(current) = state.windows.get(window) {
-            sessions.insert(current.session);
+
+    fn window(&self, window: WindowId) -> Option<WindowFacts<'_>> {
+        match self.changes.windows.get(&window) {
+            Some(image) => image.map(|image| WindowFacts {
+                session: image.session,
+                name: &image.name,
+                active_pane: image.active_pane,
+                zoomed_pane: image.zoomed_pane,
+                layout: &image.layout,
+                extent: image.extent,
+            }),
+            None => live_window(self.engine, window),
         }
     }
-    let mut before = MuxHookSnapshot::default();
-    let mut after = MuxHookSnapshot::default();
-    for session in &sessions {
-        let current = state.sessions.get(session);
-        if let Some(current) = current {
-            after.add_session(
+
+    fn pane(&self, pane: PaneId) -> Option<PaneFacts<'_>> {
+        if let Some(facts) = self.image_pane(pane) {
+            return Some(facts);
+        }
+        let window = self.engine.state.window_for_pane(pane)?;
+        if self.changes.windows.contains_key(&window) {
+            return None;
+        }
+        live_pane_in(self.engine, window, pane)
+    }
+
+    fn listed_sessions(&self) -> Vec<SessionId> {
+        self.changes
+            .sessions
+            .iter()
+            .filter_map(|(session, image)| image.map(|_| *session))
+            .collect()
+    }
+
+    fn listed_windows(&self) -> Vec<WindowId> {
+        self.changes
+            .windows
+            .iter()
+            .filter_map(|(window, image)| image.map(|_| *window))
+            .collect()
+    }
+
+    fn listed_panes(&self) -> Vec<PaneId> {
+        let mut panes = self
+            .changes
+            .windows
+            .values()
+            .flatten()
+            .flat_map(|image| image.panes.iter().map(|pane| pane.id))
+            .collect::<Vec<_>>();
+        panes.sort_unstable();
+        panes
+    }
+
+    fn links(&self) -> BTreeSet<(SessionId, WindowId)> {
+        self.changes
+            .sessions
+            .iter()
+            .filter_map(|(session, image)| image.map(|image| (*session, image)))
+            .flat_map(|(session, image)| image.windows.iter().map(move |window| (session, *window)))
+            .collect()
+    }
+}
+
+struct LiveView<'a, 'j> {
+    engine: &'a MuxEngine,
+    changes: &'j JournalChanges<'a>,
+}
+
+impl HookView for LiveView<'_, '_> {
+    fn session(&self, session: SessionId) -> Option<(&str, WindowId)> {
+        self.engine
+            .state
+            .sessions
+            .get(&session)
+            .map(|state| (state.name.as_str(), state.active_window))
+    }
+
+    fn window(&self, window: WindowId) -> Option<WindowFacts<'_>> {
+        live_window(self.engine, window)
+    }
+
+    fn pane(&self, pane: PaneId) -> Option<PaneFacts<'_>> {
+        let window = self
+            .changes
+            .windows
+            .keys()
+            .copied()
+            .find(|window| {
+                self.engine
+                    .state
+                    .windows
+                    .get(window)
+                    .is_some_and(|state| state.panes.contains_key(&pane))
+            })
+            .or_else(|| self.engine.state.window_for_pane(pane))?;
+        live_pane_in(self.engine, window, pane)
+    }
+
+    fn listed_sessions(&self) -> Vec<SessionId> {
+        self.changes
+            .sessions
+            .keys()
+            .copied()
+            .filter(|session| self.engine.state.sessions.contains_key(session))
+            .collect()
+    }
+
+    fn listed_windows(&self) -> Vec<WindowId> {
+        self.changes
+            .windows
+            .keys()
+            .copied()
+            .filter(|window| self.engine.state.windows.contains_key(window))
+            .collect()
+    }
+
+    fn listed_panes(&self) -> Vec<PaneId> {
+        let mut panes = self
+            .changes
+            .windows
+            .keys()
+            .filter_map(|window| self.engine.state.windows.get(window))
+            .flat_map(|state| state.panes.keys().copied())
+            .collect::<Vec<_>>();
+        panes.sort_unstable();
+        panes
+    }
+
+    fn links(&self) -> BTreeSet<(SessionId, WindowId)> {
+        self.changes
+            .sessions
+            .keys()
+            .filter_map(|session| {
+                self.engine
+                    .state
+                    .sessions
+                    .get(session)
+                    .map(|state| (*session, state))
+            })
+            .flat_map(|(session, state)| state.windows.iter().map(move |window| (session, *window)))
+            .collect()
+    }
+}
+
+pub(super) enum BeforeView<'a> {
+    Snapshot(MuxHookSnapshot),
+    Journal(JournalView<'a>),
+}
+
+impl HookView for BeforeView<'_> {
+    fn session(&self, session: SessionId) -> Option<(&str, WindowId)> {
+        match self {
+            Self::Snapshot(view) => view.session(session),
+            Self::Journal(view) => view.session(session),
+        }
+    }
+
+    fn window(&self, window: WindowId) -> Option<WindowFacts<'_>> {
+        match self {
+            Self::Snapshot(view) => view.window(window),
+            Self::Journal(view) => view.window(window),
+        }
+    }
+
+    fn pane(&self, pane: PaneId) -> Option<PaneFacts<'_>> {
+        match self {
+            Self::Snapshot(view) => view.pane(pane),
+            Self::Journal(view) => view.pane(pane),
+        }
+    }
+
+    fn listed_sessions(&self) -> Vec<SessionId> {
+        match self {
+            Self::Snapshot(view) => view.listed_sessions(),
+            Self::Journal(view) => view.listed_sessions(),
+        }
+    }
+
+    fn listed_windows(&self) -> Vec<WindowId> {
+        match self {
+            Self::Snapshot(view) => view.listed_windows(),
+            Self::Journal(view) => view.listed_windows(),
+        }
+    }
+
+    fn listed_panes(&self) -> Vec<PaneId> {
+        match self {
+            Self::Snapshot(view) => view.listed_panes(),
+            Self::Journal(view) => view.listed_panes(),
+        }
+    }
+
+    fn links(&self) -> BTreeSet<(SessionId, WindowId)> {
+        match self {
+            Self::Snapshot(view) => view.links(),
+            Self::Journal(view) => view.links(),
+        }
+    }
+}
+
+pub(super) fn session_context(view: &impl HookView, session: SessionId) -> ExecutionContext {
+    let Some((_, active_window)) = view.session(session) else {
+        return ExecutionContext::new(Some(session), None, None);
+    };
+    let pane = view.window(active_window).map(|window| window.active_pane);
+    ExecutionContext::new(Some(session), Some(active_window), pane)
+}
+
+pub(super) fn window_context(view: &impl HookView, window: WindowId) -> ExecutionContext {
+    view.window(window).map_or_else(
+        || ExecutionContext::new(None, Some(window), None),
+        |state| ExecutionContext::new(Some(state.session), Some(window), Some(state.active_pane)),
+    )
+}
+
+pub(super) fn session_event(
+    name: &'static str,
+    session: SessionId,
+    session_name: &str,
+    view: &impl HookView,
+) -> PendingHookEvent {
+    PendingHookEvent {
+        name,
+        context: session_context(view, session),
+        exclude_client: None,
+        variables: BTreeMap::from([
+            (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
+            (HOOK_SESSION_CONTEXT_FORMAT.to_owned(), session.to_string()),
+            (
+                HOOK_SESSION_NAME_CONTEXT_FORMAT.to_owned(),
+                session_name.to_owned(),
+            ),
+        ]),
+    }
+}
+
+pub(super) fn window_event(
+    name: &'static str,
+    window: WindowId,
+    session: SessionId,
+    window_name: &str,
+    active_pane: PaneId,
+    view: &impl HookView,
+) -> PendingHookEvent {
+    let session_name = view
+        .session(session)
+        .map(|(name, _)| name.to_owned())
+        .unwrap_or_default();
+    PendingHookEvent {
+        name,
+        context: window_context(view, window),
+        exclude_client: None,
+        variables: BTreeMap::from([
+            (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
+            (HOOK_SESSION_CONTEXT_FORMAT.to_owned(), session.to_string()),
+            (HOOK_SESSION_NAME_CONTEXT_FORMAT.to_owned(), session_name),
+            (HOOK_WINDOW_CONTEXT_FORMAT.to_owned(), window.to_string()),
+            (
+                HOOK_WINDOW_NAME_CONTEXT_FORMAT.to_owned(),
+                window_name.to_owned(),
+            ),
+            (HOOK_PANE_CONTEXT_FORMAT.to_owned(), active_pane.to_string()),
+        ]),
+    }
+}
+
+pub(super) fn winlink_event(
+    name: &'static str,
+    session: SessionId,
+    session_name: &str,
+    window: WindowId,
+    window_name: &str,
+    view: &impl HookView,
+) -> PendingHookEvent {
+    PendingHookEvent {
+        name,
+        context: window_context(view, window),
+        exclude_client: None,
+        variables: BTreeMap::from([
+            (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
+            (HOOK_SESSION_CONTEXT_FORMAT.to_owned(), session.to_string()),
+            (
+                HOOK_SESSION_NAME_CONTEXT_FORMAT.to_owned(),
+                session_name.to_owned(),
+            ),
+            (HOOK_WINDOW_CONTEXT_FORMAT.to_owned(), window.to_string()),
+            (
+                HOOK_WINDOW_NAME_CONTEXT_FORMAT.to_owned(),
+                window_name.to_owned(),
+            ),
+        ]),
+    }
+}
+
+pub(super) fn pane_event(
+    name: &'static str,
+    pane: PaneId,
+    session: SessionId,
+    window: WindowId,
+    view: &impl HookView,
+) -> PendingHookEvent {
+    let window_name = view
+        .window(window)
+        .map(|window| window.name.to_owned())
+        .unwrap_or_default();
+    let session_name = view
+        .session(session)
+        .map(|(name, _)| name.to_owned())
+        .unwrap_or_default();
+    PendingHookEvent::pane_named(name, pane, session, window, session_name, window_name)
+}
+
+pub(super) fn mux_hook_events(
+    before: &impl HookView,
+    after: &impl HookView,
+    command: &str,
+) -> Vec<PendingHookEvent> {
+    let mut events = Vec::new();
+    let before_links = before.links();
+    let after_links = after.links();
+    for (session, window) in after_links.difference(&before_links) {
+        if let (Some((session_name, _)), Some(window_state)) =
+            (after.session(*session), after.window(*window))
+        {
+            events.push(winlink_event(
+                "window-linked",
                 *session,
-                &current.name,
-                current.active_window,
-                &current.windows,
-            );
+                session_name,
+                *window,
+                window_state.name,
+                after,
+            ));
         }
-        match changes.sessions.get(session) {
-            Some(Some(image)) => {
-                before.add_session(*session, &image.name, image.active_window, &image.windows);
-            }
-            Some(None) => {}
-            None => {
-                if let Some(current) = current {
-                    before.add_session(
-                        *session,
-                        &current.name,
-                        current.active_window,
-                        &current.windows,
-                    );
-                }
+    }
+    if command == "new-session" {
+        for session in after.listed_sessions() {
+            if before.session(session).is_none()
+                && let Some((name, _)) = after.session(session)
+            {
+                events.push(session_event("session-created", session, name, after));
             }
         }
     }
-    for window in &windows {
-        let current = state.windows.get(window);
-        if let Some(current) = current {
-            after.add_window(engine, *window, current);
-        }
-        match changes.windows.get(window) {
-            Some(Some(image)) => before.add_window_image(*window, image),
-            Some(None) => {}
-            None => {
-                if let Some(current) = current {
-                    before.add_window(engine, *window, current);
-                }
+    if command == "rename-session" {
+        for session in after.listed_sessions() {
+            if let Some((name, _)) = after.session(session)
+                && before
+                    .session(session)
+                    .is_some_and(|(previous, _)| previous != name)
+            {
+                events.push(session_event("session-renamed", session, name, after));
             }
         }
     }
-    (before, after)
+    for session in after.listed_sessions() {
+        let Some((name, active_window)) = after.session(session) else {
+            continue;
+        };
+        if before
+            .session(session)
+            .is_some_and(|(_, previous)| previous != active_window)
+            && let Some(window) = after.window(active_window)
+        {
+            events.push(winlink_event(
+                "session-window-changed",
+                session,
+                name,
+                active_window,
+                window.name,
+                after,
+            ));
+        }
+    }
+    for window in after.listed_windows() {
+        let (Some(previous), Some(state)) = (before.window(window), after.window(window)) else {
+            continue;
+        };
+        if previous.name != state.name {
+            events.push(window_event(
+                "window-renamed",
+                window,
+                state.session,
+                state.name,
+                state.active_pane,
+                after,
+            ));
+        }
+        if previous.active_pane != state.active_pane {
+            events.push(window_event(
+                "window-pane-changed",
+                window,
+                state.session,
+                state.name,
+                state.active_pane,
+                after,
+            ));
+        }
+        if previous.layout != state.layout || previous.zoomed_pane != state.zoomed_pane {
+            events.push(window_event(
+                "window-layout-changed",
+                window,
+                state.session,
+                state.name,
+                state.active_pane,
+                after,
+            ));
+            if previous.extent != state.extent {
+                events.push(window_event(
+                    "window-resized",
+                    window,
+                    state.session,
+                    state.name,
+                    state.active_pane,
+                    after,
+                ));
+            }
+        }
+    }
+    for pane in after.listed_panes() {
+        let Some(state) = after.pane(pane) else {
+            continue;
+        };
+        if before
+            .pane(pane)
+            .is_some_and(|previous| previous.title != state.title)
+        {
+            events.push(pane_event(
+                "pane-title-changed",
+                pane,
+                state.session,
+                state.window,
+                after,
+            ));
+        }
+    }
+    let removed_links = before_links
+        .difference(&after_links)
+        .filter_map(|(session, window)| {
+            let (session_name, _) = before.session(*session)?;
+            let window_state = before.window(*window)?;
+            Some(winlink_event(
+                "window-unlinked",
+                *session,
+                session_name,
+                *window,
+                window_state.name,
+                before,
+            ))
+        })
+        .collect::<Vec<_>>();
+    let closed_sessions = before
+        .listed_sessions()
+        .into_iter()
+        .filter(|session| after.session(*session).is_none())
+        .filter_map(|session| {
+            let (name, _) = before.session(session)?;
+            Some(session_event("session-closed", session, name, before))
+        })
+        .collect::<Vec<_>>();
+    if command == "kill-session" {
+        events.extend(closed_sessions);
+        events.extend(removed_links);
+    } else {
+        events.extend(removed_links);
+        events.extend(closed_sessions);
+    }
+    events
+}
+
+pub(super) fn pane_mode_hook_events(
+    engine: &MuxEngine,
+    before: &impl HookView,
+    before_modes: &BTreeSet<PaneId>,
+    after_modes: &BTreeSet<PaneId>,
+) -> Vec<PendingHookEvent> {
+    before_modes
+        .symmetric_difference(after_modes)
+        .filter_map(|pane| {
+            PendingHookEvent::live_pane("pane-mode-changed", *pane, engine).or_else(|| {
+                before.pane(*pane).map(|state| {
+                    pane_event(
+                        "pane-mode-changed",
+                        *pane,
+                        state.session,
+                        state.window,
+                        before,
+                    )
+                })
+            })
+        })
+        .collect()
 }
 
 impl PendingHookEvent {

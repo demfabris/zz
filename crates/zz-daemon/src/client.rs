@@ -1758,16 +1758,28 @@ struct ProtocolSender<S> {
 }
 
 struct ProtocolReceiver<S> {
-    stream: S,
+    stream: io::BufReader<S>,
     frame: Vec<u8>,
 }
+
+static BUFFERED_READS: std::sync::LazyLock<bool> =
+    std::sync::LazyLock::new(|| std::env::var_os("ZZ_PERF_WRITEV").is_none_or(|value| value != "0"));
+
+const RECEIVE_BUFFER_BYTES: usize = 64 * 1024;
 
 type Connected<S> = (ProtocolReceiver<S>, ProtocolSender<S>, ServerHello);
 
 impl<S: TransportStream> ProtocolReceiver<S> {
     fn new(stream: S) -> Self {
         Self {
-            stream,
+            stream: io::BufReader::with_capacity(
+                if *BUFFERED_READS {
+                    RECEIVE_BUFFER_BYTES
+                } else {
+                    0
+                },
+                stream,
+            ),
             frame: Vec::new(),
         }
     }

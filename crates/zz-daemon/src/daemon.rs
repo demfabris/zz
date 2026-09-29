@@ -44680,6 +44680,7 @@ fn handle_connection<S: TransportStream>(
 
     let mut path_list: Option<(u64, Arc<AtomicBool>)> = None;
     let path_list_turn = Arc::new(Mutex::new(()));
+    let mut stream = attach::inbound_reader(stream);
     let result = loop {
         let message = match read_protocol_message_into(&mut stream, &mut inbound_frame) {
             Ok(message) => message,

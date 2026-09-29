@@ -19,6 +19,19 @@ pub(super) static BATCHED_WRITES: LazyLock<bool> =
 
 pub(super) const MAX_BATCHED_WRITE_BYTES: usize = 256 * 1024;
 
+const INBOUND_BUFFER_BYTES: usize = 8 * 1024;
+
+pub(super) fn inbound_reader<S: io::Read>(stream: S) -> io::BufReader<S> {
+    io::BufReader::with_capacity(
+        if *BATCHED_WRITES {
+            INBOUND_BUFFER_BYTES
+        } else {
+            0
+        },
+        stream,
+    )
+}
+
 pub(super) fn log_knobs() {
     log::info!(
         target: "zz_daemon::perf",

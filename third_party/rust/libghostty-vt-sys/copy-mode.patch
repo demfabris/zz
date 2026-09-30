@@ -434,7 +434,7 @@
  
 --- a/src/terminal/c/terminal.zig
 +++ b/src/terminal/c/terminal.zig
-@@ -860,6 +860,40 @@
+@@ -860,6 +860,43 @@
          io,
          default_continuation_max_bytes,
      );
@@ -454,12 +454,12 @@
 +    const cloned = try new_(null, source.cols, source.rows);
 +    errdefer free(cloned);
 +    const target = cloned.?.terminal;
-+    const active = source.screens.active_key;
-+    const target_screen = try target.screens.getInit(io.io(), alloc, active, .{ .cols = source.cols, .rows = source.rows });
++    const target_screen = try target.screens.getInit(io.io(), alloc, .primary, .{ .cols = source.cols, .rows = source.rows });
 +    const screen = try source.screens.active.clonePreserving(io.io(), alloc);
 +    target_screen.deinit();
 +    target_screen.* = screen;
-+    target.screens.switchTo(active);
++    target_screen.no_scrollback = false;
++    target.screens.switchTo(.primary);
 +    target.colors.background = source.colors.background;
 +    target.colors.foreground = source.colors.foreground;
 +    target.colors.cursor = source.colors.cursor;
@@ -467,7 +467,10 @@
 +    target.colors.palette.current = source.colors.palette.current;
 +    target.colors.palette.mask = source.colors.palette.mask;
 +    target.flags = source.flags;
++    target.flags.shell_redraws_prompt = .false;
++    target.flags.resize_pull_scrollback = false;
 +    target.modes = source.modes;
++    target.modes.set(.wraparound, true);
 +    target.cursor = source.cursor;
 +    try target.title.appendSlice(alloc, source.title.items);
 +    try target.pwd.appendSlice(alloc, source.pwd.items);

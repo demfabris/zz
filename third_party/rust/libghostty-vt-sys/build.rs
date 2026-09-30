@@ -136,6 +136,9 @@ fn build_vendored(link_mode: LinkMode, target: &str) {
                 std::fs::remove_dir_all(&staged).expect("replace staged Ghostty source");
             }
             copy_ghostty_source(&p, &staged);
+            let mut initialize = Command::new("git");
+            initialize.args(["init", "--quiet"]).arg(&staged);
+            run(initialize, "initialize private Ghostty source");
             staged
         }
         Err(_) => fetch_ghostty(&out_dir),
@@ -321,27 +324,28 @@ fn warn_unused_xcframework(lib_dir: &Path) {
 #[cfg(feature = "pkg-config")]
 fn try_pkg_config(link_mode: LinkMode, target: &str) -> bool {
     let mut config = pkg_config::Config::new();
-    let lib = match link_mode {
-        LinkMode::Dynamic => config.probe(link_mode.pkg_config_name()),
-        LinkMode::Static => config
-            .statik(true)
-            .cargo_metadata(false)
-            .probe(link_mode.pkg_config_name()),
-    };
+    let lib = config
+        .statik(matches!(link_mode, LinkMode::Static))
+        .cargo_metadata(false)
+        .probe(link_mode.pkg_config_name());
     let lib = match lib {
         Ok(lib) => lib,
         Err(_) => return false,
     };
-
-    if let LinkMode::Static = link_mode {
-        emit_static_pkg_config_metadata(&lib, target);
+    if !lib.include_paths.iter().any(|path| {
+        std::fs::read_to_string(path.join("ghostty/vt/terminal.h"))
+            .is_ok_and(|header| header.contains("ghostty_terminal_clone_screen("))
+    }) {
+        return false;
     }
+
+    emit_pkg_config_metadata(&lib, link_mode, target);
     emit_include_metadata(&lib.include_paths);
     true
 }
 
 #[cfg(feature = "pkg-config")]
-fn emit_static_pkg_config_metadata(lib: &pkg_config::Library, target: &str) {
+fn emit_pkg_config_metadata(lib: &pkg_config::Library, link_mode: LinkMode, target: &str) {
     for path in &lib.link_paths {
         println!("cargo:rustc-link-search=native={}", path.display());
     }
@@ -357,7 +361,10 @@ fn emit_static_pkg_config_metadata(lib: &pkg_config::Library, target: &str) {
         println!("cargo:rustc-link-lib=framework={framework}");
     }
 
-    emit_static_link_lib(target);
+    match link_mode {
+        LinkMode::Dynamic => println!("cargo:rustc-link-lib=ghostty-vt"),
+        LinkMode::Static => emit_static_link_lib(target),
+    }
     for library in &lib.libs {
         if library != "ghostty-vt" {
             println!("cargo:rustc-link-lib={library}");
@@ -422,9 +429,15 @@ fn copy_ghostty_source(source: &Path, destination: &Path) {
     for entry in std::fs::read_dir(source).expect("read Ghostty source directory") {
         let entry = entry.expect("read Ghostty source entry");
         let name = entry.file_name();
-        if [".zig-cache", "zig-cache", "zig-out", ".zz-copy-mode.patch"]
-            .iter()
-            .any(|ignored| name == *ignored)
+        if [
+            ".git",
+            ".zig-cache",
+            "zig-cache",
+            "zig-out",
+            ".zz-copy-mode.patch",
+        ]
+        .iter()
+        .any(|ignored| name == *ignored)
         {
             continue;
         }

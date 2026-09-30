@@ -284,3 +284,44 @@ fn frozen_narrow_reflow_retains_history_beyond_source_limits() {
         assert_eq!(snapshot_text(&snapshot), expected);
     }
 }
+
+#[test]
+fn frozen_alternate_screen_reflows_with_wraparound_disabled_in_source() {
+    let mut terminal = Terminal::new(180, 8).expect("terminal");
+    terminal.vt_write(b"primary\x1b[?1049h\x1b[?7l");
+    for row in 0..8 {
+        let text = format!(
+            "\x1b[{};1Hrow-{row} {} e\u{301} 界 end",
+            row + 1,
+            "x".repeat(144)
+        );
+        terminal.vt_write(text.as_bytes());
+    }
+    terminal.vt_write(b"\x1b]133;A;redraw=1\x07");
+    let mut snapshot = terminal.clone_screen().expect("snapshot");
+    let expected = snapshot_text(&snapshot);
+    assert_eq!(
+        snapshot.active_screen().expect("screen"),
+        crate::screen::Screen::Alternate
+    );
+    terminal.vt_write(b"\x1b[?1049l\x1b[3J\x1b[2J\x1b[Hreplacement");
+    drop(terminal);
+    let anchor = snapshot
+        .resize_anchored(30, 8, PointCoordinate { x: 5, y: 0 })
+        .expect("narrow reflow");
+    assert!(anchor.is_some());
+    assert!(snapshot.total_rows().expect("reflowed rows") > 8);
+    assert_eq!(snapshot_text(&snapshot), expected);
+    assert_eq!(
+        snapshot.active_screen().expect("screen"),
+        crate::screen::Screen::Alternate
+    );
+    let mut nested = snapshot.clone_screen().expect("nested snapshot");
+    drop(snapshot);
+    nested.resize(180, 8).expect("wide reflow");
+    assert_eq!(snapshot_text(&nested), expected);
+    assert_eq!(
+        nested.active_screen().expect("screen"),
+        crate::screen::Screen::Alternate
+    );
+}

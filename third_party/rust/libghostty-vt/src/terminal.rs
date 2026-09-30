@@ -232,6 +232,7 @@ pub struct Terminal<'alloc: 'cb, 'cb> {
 #[derive(Debug)]
 pub struct ScreenSnapshot {
     terminal: Terminal<'static, 'static>,
+    source_screen: Screen,
 }
 
 unsafe impl Send for ScreenSnapshot {}
@@ -265,7 +266,9 @@ impl GridRead for ScreenSnapshot {
 #[expect(missing_docs, reason = "local snapshot API has no upstream documentation")]
 impl ScreenSnapshot {
     pub fn clone_screen(&self) -> Result<Self> {
-        self.terminal.clone_screen()
+        let mut snapshot = self.terminal.clone_screen()?;
+        snapshot.source_screen = self.source_screen;
+        Ok(snapshot)
     }
 
     pub fn grid_ref(&self, point: Point) -> Result<GridRef<'_>> {
@@ -289,7 +292,7 @@ impl ScreenSnapshot {
     }
 
     pub fn active_screen(&self) -> Result<Screen> {
-        self.terminal.active_screen()
+        Ok(self.source_screen)
     }
 
     pub fn fg_color(&self) -> Result<Option<RgbColor>> {
@@ -426,12 +429,14 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
 
     #[expect(missing_docs, reason = "local snapshot API has no upstream documentation")]
     pub fn clone_screen(&self) -> Result<ScreenSnapshot> {
+        let source_screen = self.active_screen()?;
         let mut raw: ffi::Terminal = std::ptr::null_mut();
         let result =
             unsafe { ffi::ghostty_terminal_clone_screen(self.inner.as_raw(), &raw mut raw) };
         from_result(result)?;
         Ok(ScreenSnapshot {
             terminal: unsafe { Terminal::from_raw(raw)? },
+            source_screen,
         })
     }
 

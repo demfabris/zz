@@ -1,5 +1,5 @@
 use std::sync::{
-    Arc,
+    Arc, LazyLock,
     atomic::{AtomicU64, Ordering},
 };
 
@@ -10,6 +10,10 @@ use libghostty_vt::{
     terminal::{PointCoordinate, ScrollViewport},
 };
 
+use parking_lot::Mutex;
+
+use super::copy_grid::CopyGrid;
+
 use crate::{CellWidth, Color, PackedCell, PackedStyle, TerminalDictionary};
 
 use super::{
@@ -18,7 +22,8 @@ use super::{
     resolve_style_color, style_attributes, underline_style,
 };
 
-const MAX_MODE_REVISION_BYTES: usize = 128 * 1024 * 1024;
+static COPY_CLONE: LazyLock<bool> =
+    LazyLock::new(|| std::env::var_os("ZZ_PERF_COPY_CLONE").is_some_and(|value| value == "1"));
 const ROW_WRAPPED: u8 = 1 << 0;
 const ROW_WRAP_CONTINUATION: u8 = 1 << 1;
 const SEMANTIC_OUTPUT: u8 = 0;
@@ -36,7 +41,7 @@ pub(super) struct ModeRowMeta {
 }
 
 impl ModeRowMeta {
-    fn new(wrapped: bool, continuation: bool, prompt: RowSemanticPrompt) -> Self {
+    pub(super) fn new(wrapped: bool, continuation: bool, prompt: RowSemanticPrompt) -> Self {
         Self {
             flags: (u8::from(wrapped) * ROW_WRAPPED)
                 | (u8::from(continuation) * ROW_WRAP_CONTINUATION),
@@ -86,25 +91,166 @@ pub(super) struct ModeRevision {
     pub(super) rows: Vec<ModeRowMeta>,
     semantics: Vec<u8>,
     pub(super) search: Arc<HistorySearchSnapshot>,
+    grid: Option<Mutex<CopyGrid>>,
+    total: u32,
 }
 
 impl ModeRevision {
     pub(super) fn capture(terminal: &mut Terminal<'_, '_>) -> Result<Arc<Self>, WorkerError> {
+        if *COPY_CLONE {
+            Self::capture_flat(terminal)
+        } else {
+            Self::capture_paged(terminal)
+        }
+    }
+
+    pub(super) fn clone_enabled() -> bool {
+        *COPY_CLONE
+    }
+
+    fn capture_paged(terminal: &Terminal<'_, '_>) -> Result<Arc<Self>, WorkerError> {
+        let snapshot = terminal.clone_screen()?;
+        Self::from_snapshot(snapshot)
+    }
+
+    fn from_snapshot(
+        snapshot: libghostty_vt::terminal::ScreenSnapshot,
+    ) -> Result<Arc<Self>, WorkerError> {
+        let screen = snapshot.active_screen()?;
+        let columns = snapshot.cols()?.max(1);
+        let viewport_rows = snapshot.rows()?.max(1);
+        let total = u32::try_from(snapshot.total_rows()?)
+            .map_err(|_| WorkerError::ViewportMetadataTooLarge)?
+            .max(1);
+        let foreground = color(
+            snapshot
+                .fg_color()?
+                .unwrap_or(libghostty_vt::style::RgbColor {
+                    r: 255,
+                    g: 255,
+                    b: 255,
+                }),
+        );
+        let background = color(
+            snapshot
+                .bg_color()?
+                .unwrap_or(libghostty_vt::style::RgbColor { r: 0, g: 0, b: 0 }),
+        );
+        let raw_palette = snapshot.color_palette()?.0;
+        let palette = Box::new(raw_palette.map(color));
+        let title = Arc::from(snapshot.title().unwrap_or("zz"));
+        let working_directory = snapshot
+            .pwd()
+            .ok()
+            .and_then(reported_working_directory)
+            .map(Arc::from);
+        let mut grid = CopyGrid::new(snapshot, foreground, background, raw_palette, columns);
+        let dictionary = grid.dictionary();
+        let search = Arc::new(HistorySearchSnapshot {
+            columns,
+            text: String::new(),
+            rows: Vec::new(),
+            offsets: Vec::new(),
+            terminal: Some(Arc::clone(&grid.terminal)),
+            total_rows: total,
+        });
+        Ok(Arc::new(Self {
+            id: NEXT_MODE_REVISION_ID.fetch_add(1, Ordering::Relaxed).max(1),
+            screen,
+            columns,
+            viewport_rows,
+            foreground,
+            background,
+            palette,
+            title,
+            working_directory,
+            cells: Vec::new(),
+            dictionary,
+            rows: Vec::new(),
+            semantics: Vec::new(),
+            search,
+            grid: Some(Mutex::new(grid)),
+            total,
+        }))
+    }
+
+    pub(super) fn viewport_cells(&self, offset: u32) -> Arc<[PackedCell]> {
+        if let Some(grid) = &self.grid {
+            let mut grid = grid.lock();
+            grid.begin_viewport();
+            let mut cells =
+                Vec::with_capacity(usize::from(self.columns) * usize::from(self.viewport_rows));
+            for row in offset..offset.saturating_add(u32::from(self.viewport_rows)) {
+                if row < self.total {
+                    cells.extend_from_slice(&grid.row(row).expect("frozen row").cells);
+                } else {
+                    cells.resize(cells.len() + usize::from(self.columns), PackedCell::EMPTY);
+                }
+            }
+            grid.end_viewport();
+            return cells.into();
+        }
+        let start = usize::try_from(offset)
+            .unwrap_or(usize::MAX)
+            .saturating_mul(usize::from(self.columns));
+        let len = usize::from(self.columns) * usize::from(self.viewport_rows);
+        let source = self.cells.get(start..).unwrap_or_default();
+        (0..len)
+            .map(|index| source.get(index).copied().unwrap_or(PackedCell::EMPTY))
+            .collect()
+    }
+
+    pub(super) fn dictionary_generation(&self) -> u32 {
+        self.grid
+            .as_ref()
+            .map_or(0, |grid| grid.lock().generation())
+    }
+
+    pub(super) fn shared_dictionary(&self) -> Arc<TerminalDictionary> {
+        self.grid.as_ref().map_or_else(
+            || Arc::clone(&self.dictionary),
+            |grid| grid.lock().dictionary(),
+        )
+    }
+
+    pub(super) fn with_appearance(
+        &self,
+        terminal: &mut Terminal<'_, '_>,
+    ) -> Result<Arc<Self>, WorkerError> {
+        let Some(grid) = &self.grid else {
+            return Self::capture_flat(terminal);
+        };
+        let snapshot = grid.lock().terminal.lock().clone_screen()?;
+        let mut snapshot = snapshot;
+        snapshot.set_colors_from(terminal)?;
+        Self::from_snapshot(snapshot)
+    }
+
+    pub(super) fn resized(
+        self: &Arc<Self>,
+        columns: u16,
+        rows: u16,
+        cursor: PointCoordinate,
+    ) -> Result<(Arc<Self>, PointCoordinate), WorkerError> {
+        let Some(grid) = &self.grid else {
+            return Ok((Arc::clone(self), self.clamp_point(cursor)));
+        };
+        let mut snapshot = grid.lock().terminal.lock().clone_screen()?;
+        let cursor = snapshot
+            .resize_anchored(columns, rows, self.clamp_point(cursor))?
+            .unwrap_or(cursor);
+        let revision = Self::from_snapshot(snapshot)?;
+        Ok((revision, cursor))
+    }
+
+    fn capture_flat(terminal: &mut Terminal<'_, '_>) -> Result<Arc<Self>, WorkerError> {
         let screen = terminal.active_screen()?;
         let columns = terminal.cols()?.max(1);
         let viewport_rows = terminal.rows()?.max(1);
         let total_rows = terminal.total_rows()?.max(1);
         let cell_count = total_rows
             .checked_mul(usize::from(columns))
-            .ok_or(WorkerError::ModeRevisionTooLarge)?;
-        let base_bytes = cell_count
-            .checked_mul(std::mem::size_of::<PackedCell>() + std::mem::size_of::<u8>())
-            .and_then(|bytes| bytes.checked_add(total_rows * std::mem::size_of::<ModeRowMeta>()))
-            .ok_or(WorkerError::ModeRevisionTooLarge)?;
-        if base_bytes > MAX_MODE_REVISION_BYTES {
-            return Err(WorkerError::ModeRevisionTooLarge);
-        }
-
+            .ok_or(WorkerError::ViewportMetadataTooLarge)?;
         let saved_offset = terminal.scrollbar()?.offset;
         let title: Arc<str> = Arc::from(terminal.title().unwrap_or("zz"));
         let working_directory = terminal
@@ -240,19 +386,6 @@ impl ModeRevision {
                         .map_err(|_| WorkerError::SearchSnapshotTooLarge)?,
                 });
                 captured_until = absolute_row.saturating_add(1);
-                let search_bytes = search_text
-                    .len()
-                    .saturating_add(search_offsets.len() * std::mem::size_of::<SearchCellOffset>())
-                    .saturating_add(search_rows.len() * std::mem::size_of::<HistorySearchRow>());
-                if base_bytes.saturating_add(search_bytes) > MAX_MODE_REVISION_BYTES
-                    || search_bytes > MAX_SEARCH_SNAPSHOT_BYTES
-                {
-                    terminal.scroll_viewport(ScrollViewport::Top);
-                    terminal.scroll_viewport(ScrollViewport::Delta(super::saturating_isize(
-                        i64::try_from(saved_offset).unwrap_or(i64::MAX),
-                    )));
-                    return Err(WorkerError::ModeRevisionTooLarge);
-                }
             }
             if scrollbar.offset >= maximum || captured_until >= total_rows {
                 break;
@@ -287,7 +420,11 @@ impl ModeRevision {
                 text: search_text,
                 rows: search_rows,
                 offsets: search_offsets,
+                terminal: None,
+                total_rows: u32::try_from(total_rows).unwrap_or(u32::MAX),
             }),
+            grid: None,
+            total: u32::try_from(total_rows).unwrap_or(u32::MAX),
         }))
     }
 
@@ -304,7 +441,7 @@ impl ModeRevision {
     }
 
     pub(super) fn total_rows(&self) -> u32 {
-        u32::try_from(self.rows.len()).unwrap_or(u32::MAX).max(1)
+        self.total
     }
 
     pub(super) fn maximum_offset(&self) -> u32 {
@@ -320,6 +457,9 @@ impl ModeRevision {
 
     pub(super) fn cell(&self, point: PointCoordinate) -> PackedCell {
         let point = self.clamp_point(point);
+        if let Some(grid) = &self.grid {
+            return grid.lock().row(point.y).expect("frozen row").cells[usize::from(point.x)];
+        }
         let index = usize::try_from(point.y)
             .unwrap_or(usize::MAX)
             .saturating_mul(usize::from(self.columns))
@@ -333,9 +473,10 @@ impl ModeRevision {
             return char::from_u32(cell.glyph()).filter(|character| *character != '\0');
         }
         let index = usize::try_from(cell.glyph() & !crate::GRAPHEME_TABLE_BIT).ok()?;
-        let start = usize::try_from(*self.dictionary.grapheme_offsets.get(index)?).ok()?;
-        let end = usize::try_from(*self.dictionary.grapheme_offsets.get(index + 1)?).ok()?;
-        std::str::from_utf8(self.dictionary.grapheme_bytes.get(start..end)?)
+        let dictionary = self.shared_dictionary();
+        let start = usize::try_from(*dictionary.grapheme_offsets.get(index)?).ok()?;
+        let end = usize::try_from(*dictionary.grapheme_offsets.get(index + 1)?).ok()?;
+        std::str::from_utf8(dictionary.grapheme_bytes.get(start..end)?)
             .ok()?
             .chars()
             .next()
@@ -358,23 +499,22 @@ impl ModeRevision {
         let Ok(index) = usize::try_from(glyph & !crate::GRAPHEME_TABLE_BIT) else {
             return false;
         };
-        let Some(start) = self
-            .dictionary
+        let dictionary = self.shared_dictionary();
+        let Some(start) = dictionary
             .grapheme_offsets
             .get(index)
             .and_then(|offset| usize::try_from(*offset).ok())
         else {
             return false;
         };
-        let Some(end) = self
-            .dictionary
+        let Some(end) = dictionary
             .grapheme_offsets
             .get(index + 1)
             .and_then(|offset| usize::try_from(*offset).ok())
         else {
             return false;
         };
-        self.dictionary.grapheme_bytes.get(start..end) == Some(target.as_bytes())
+        dictionary.grapheme_bytes.get(start..end) == Some(target.as_bytes())
     }
 
     pub(super) fn push_cell_text(&self, cell: PackedCell, output: &mut String) {
@@ -391,24 +531,22 @@ impl ModeRevision {
         let Ok(index) = usize::try_from(glyph & !crate::GRAPHEME_TABLE_BIT) else {
             return;
         };
-        let Some(start) = self
-            .dictionary
+        let dictionary = self.shared_dictionary();
+        let Some(start) = dictionary
             .grapheme_offsets
             .get(index)
             .and_then(|offset| usize::try_from(*offset).ok())
         else {
             return;
         };
-        let Some(end) = self
-            .dictionary
+        let Some(end) = dictionary
             .grapheme_offsets
             .get(index + 1)
             .and_then(|offset| usize::try_from(*offset).ok())
         else {
             return;
         };
-        if let Some(text) = self
-            .dictionary
+        if let Some(text) = dictionary
             .grapheme_bytes
             .get(start..end)
             .and_then(|bytes| std::str::from_utf8(bytes).ok())
@@ -419,6 +557,9 @@ impl ModeRevision {
 
     pub(super) fn semantic(&self, point: PointCoordinate) -> u8 {
         let point = self.clamp_point(point);
+        if let Some(grid) = &self.grid {
+            return grid.lock().row(point.y).expect("frozen row").semantics[usize::from(point.x)];
+        }
         let index = usize::try_from(point.y)
             .unwrap_or(usize::MAX)
             .saturating_mul(usize::from(self.columns))
@@ -442,6 +583,13 @@ impl ModeRevision {
     }
 
     pub(super) fn row(&self, row: u32) -> ModeRowMeta {
+        if let Some(grid) = &self.grid {
+            return grid
+                .lock()
+                .row(row.min(self.total.saturating_sub(1)))
+                .expect("frozen row")
+                .meta;
+        }
         usize::try_from(row)
             .ok()
             .and_then(|row| self.rows.get(row))
@@ -604,7 +752,7 @@ impl ModeRevision {
                 }
                 if active_style != Some(cell.style_id()) {
                     if let Some(style) = self
-                        .dictionary
+                        .shared_dictionary()
                         .styles
                         .get(usize::from(cell.style_id()))
                         .copied()

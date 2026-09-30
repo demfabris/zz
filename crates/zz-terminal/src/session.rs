@@ -30,10 +30,11 @@ use libghostty_vt::{
     selection::{FormatOptions, SelectLineOptions, SelectWordOptions, Selection},
     style::{Palette, RgbColor, StyleColor, Underline},
     terminal::{
-        ClipboardContent, ClipboardLocation, ClipboardWriteError, ColorScheme, ConformanceLevel,
-        CursorStyle as GhosttyCursorStyle, DeviceAttributeFeature, DeviceAttributes, DeviceType,
-        Mode, Point, PointCoordinate, PointSpace, PrimaryDeviceAttributes, ScrollViewport,
-        SecondaryDeviceAttributes, SizeReportSize, TertiaryDeviceAttributes,
+        ClipboardContent, ClipboardLocation, ClipboardWriteError, ColorScheme, CompressionMode,
+        ConformanceLevel, CursorStyle as GhosttyCursorStyle, DeviceAttributeFeature,
+        DeviceAttributes, DeviceType, Mode, Point, PointCoordinate, PointSpace,
+        PrimaryDeviceAttributes, ScrollViewport, SecondaryDeviceAttributes, SizeReportSize,
+        TertiaryDeviceAttributes,
     },
 };
 use parking_lot::{Mutex, RwLock};
@@ -59,6 +60,7 @@ use crate::{
     TerminalViewId, TerminalViewport, UnderlineStyle, WordSeparators,
 };
 
+mod copy_grid;
 mod mode_revision;
 #[cfg(test)]
 mod pane_tests;
@@ -1423,7 +1425,6 @@ struct PublishedViewports {
     epochs: HashMap<TerminalViewId, u64>,
     fallback_current: bool,
     copy_facts: HashMap<TerminalViewId, Arc<CopyModeFacts>>,
-    frozen: Option<Arc<FrozenHistory>>,
     bar: ProgressBar,
     last_command_status: Option<i32>,
     facts: TerminalFacts,
@@ -1438,22 +1439,12 @@ impl PublishedViewports {
             epochs: HashMap::new(),
             fallback_current: false,
             copy_facts: HashMap::new(),
-            frozen: None,
             bar: ProgressBar::default(),
             last_command_status: None,
             facts: TerminalFacts::default(),
             search_string: String::new(),
         }
     }
-}
-
-/// The whole grid a retained pane keeps after its child exits: scrollback plus
-/// the visible screen, so `capture-pane` answers negative `-S` boundaries on a
-/// dead pane the way `screen_write_collect_add` left them on the pin, where the
-/// pane's `struct screen` simply outlives the process.
-#[derive(Debug)]
-pub struct FrozenHistory {
-    revision: Arc<ModeRevision>,
 }
 
 /// What `window_copy_formats` reads off one pane's mode entry, computed for
@@ -2393,23 +2384,17 @@ impl TerminalSession {
             .request(|reply| Command::Capture(Box::new(CaptureRequest { options, reply })))?
     }
 
-    /// Answers `capture-pane` on a pane whose worker has already returned. The
-    /// grid the worker froze on its way out carries the scrollback, so the rows
-    /// the dead-pane notice scrolled off are still reachable; only the two
-    /// flags that need a live screen fall back on the published viewport.
     pub fn capture_frozen_frame(
         &self,
         options: CaptureOptions,
     ) -> Result<String, TerminalCaptureError> {
-        let frozen = self.latest.read().frozen.clone();
-        if let Some(frozen) = frozen
-            && !options.alternate
-            && !options.mode
-        {
-            let revision = &frozen.revision;
-            return capture_revision(revision, revision.maximum_offset(), options);
+        let _round_trips = allow_actor_round_trips();
+        match self.capture(options) {
+            Err(TerminalCaptureError::ActorStopped) => {
+                capture_viewport(&self.latest_viewport(), options)
+            }
+            result => result,
         }
-        capture_viewport(&self.latest_viewport(), options)
     }
 
     /// Copies one absolute span of retained primary-screen history without moving
@@ -3575,7 +3560,7 @@ struct ViewportDictionary {
     generation: u32,
     last_style_id: u16,
     mode_revision: Option<u64>,
-    mode_viewport: Option<(u64, u32)>,
+    mode_viewport: Option<(u64, u32, u32)>,
     default_style: Option<PackedStyle>,
     palette: Option<Box<[RgbColor; 256]>>,
     class_hints: ClassHints,
@@ -3830,21 +3815,9 @@ impl ViewportDictionary {
             self.style_overflowed = false;
             self.grapheme_overflowed = false;
         }
-        if self.mode_viewport != Some((revision.id, offset)) {
-            let columns = usize::from(revision.columns);
-            let start = usize::try_from(offset)
-                .unwrap_or(usize::MAX)
-                .saturating_mul(columns);
-            let len = usize::from(revision.viewport_rows).saturating_mul(columns);
-            let source = revision.cells.get(start..).unwrap_or_default();
-            self.shared_cells = if source.len() >= len {
-                Arc::from(&source[..len])
-            } else {
-                (0..len)
-                    .map(|index| source.get(index).copied().unwrap_or(PackedCell::EMPTY))
-                    .collect()
-            };
-            self.mode_viewport = Some((revision.id, offset));
+        if self.mode_viewport != Some((revision.id, offset, revision.dictionary_generation())) {
+            self.shared_cells = revision.viewport_cells(offset);
+            self.mode_viewport = Some((revision.id, offset, revision.dictionary_generation()));
         }
         Arc::clone(&self.shared_cells)
     }
@@ -4329,8 +4302,6 @@ enum WorkerError {
     Io(#[from] std::io::Error),
     #[error("terminal search snapshot exceeds the {MAX_SEARCH_SNAPSHOT_BYTES}-byte limit")]
     SearchSnapshotTooLarge,
-    #[error("native mode revision exceeds the 128 MiB limit")]
-    ModeRevisionTooLarge,
     #[error("terminal viewport metadata exceeds its 32-bit in-memory limits")]
     ViewportMetadataTooLarge,
     #[error(
@@ -4359,7 +4330,7 @@ fn normalize_view_action_result(
     result: Result<ViewActionResult, WorkerError>,
 ) -> Result<ViewActionResult, WorkerError> {
     match result {
-        Err(error @ (WorkerError::SearchSnapshotTooLarge | WorkerError::ModeRevisionTooLarge)) => {
+        Err(error @ WorkerError::SearchSnapshotTooLarge) => {
             log::warn!("skipping terminal view action: {error}");
             Ok(ViewActionResult::Snapshot)
         }
@@ -4514,10 +4485,6 @@ impl Publisher {
         if self.latest.read().search_string != text {
             text.clone_into(&mut self.latest.write().search_string);
         }
-    }
-
-    fn publish_frozen_history(&self, revision: Arc<ModeRevision>) {
-        self.latest.write().frozen = Some(Arc::new(FrozenHistory { revision }));
     }
 
     fn notify_viewports(&self, viewport: &TerminalViewport, view_count: usize) {
@@ -4948,7 +4915,7 @@ fn run_output_view(
     frozen: bool,
 ) -> Result<(), WorkerError> {
     install_kitty_png_decoder();
-    let mut geometry = Geometry::default();
+    let geometry = Geometry::default();
     let mut terminal = new_terminal(geometry.columns, geometry.rows, max_scrollback)?;
     let reported_color_scheme = Rc::new(Cell::new(ghostty_color_scheme(appearance.color_scheme)));
     let color_scheme_source = Rc::clone(&reported_color_scheme);
@@ -4958,19 +4925,82 @@ fn run_output_view(
     if frozen {
         write_output_view_content(&mut terminal, title, text);
     }
+    run_surface_terminal(
+        command_rx,
+        slot,
+        publisher,
+        SurfaceTerminal {
+            terminal,
+            geometry,
+            frames: Frames::new(appearance)?,
+            active_views: ActiveTerminalViews::new(),
+            inactive_views: InactiveTerminalViews::new(),
+            word_separators: WordSeparators::default(),
+            wrap_search: true,
+            mode_keys_vi: false,
+            reported_color_scheme,
+            max_scrollback,
+            status: SessionStatus::Running,
+            pending_commands: Vec::new(),
+            pending_copy_source: None,
+            pane_search: None,
+        },
+        frozen,
+    )
+}
+
+struct SurfaceTerminal<'a, 'b> {
+    terminal: Terminal<'a, 'b>,
+    geometry: Geometry,
+    frames: Frames<'a>,
+    active_views: ActiveTerminalViews,
+    inactive_views: InactiveTerminalViews,
+    word_separators: WordSeparators,
+    wrap_search: bool,
+    mode_keys_vi: bool,
+    reported_color_scheme: Rc<Cell<ColorScheme>>,
+    max_scrollback: usize,
+    status: SessionStatus,
+    pending_commands: Vec<Command>,
+    pending_copy_source: Option<Box<CapturedCopySource>>,
+    pane_search: Option<CopyModeSearch>,
+}
+
+fn run_surface_terminal(
+    command_rx: &Receiver<Command>,
+    slot: &Mutex<ControlSlot>,
+    publisher: &Publisher,
+    surface: SurfaceTerminal<'_, '_>,
+    frozen: bool,
+) -> Result<(), WorkerError> {
+    let SurfaceTerminal {
+        mut terminal,
+        mut geometry,
+        mut frames,
+        mut active_views,
+        mut inactive_views,
+        mut word_separators,
+        mut wrap_search,
+        mut mode_keys_vi,
+        reported_color_scheme,
+        max_scrollback,
+        status,
+        pending_commands,
+        mut pending_copy_source,
+        mut pane_search,
+    } = surface;
+    let (pending_sender, pending_receiver) = crossbeam_channel::unbounded();
+    for command in pending_commands {
+        let _ = pending_sender.send(command);
+    }
+    drop(pending_sender);
     let mut raw_output_tap: Option<(u64, Sender<Arc<[u8]>>)> = None;
     let mut engine_filter = EngineFilter::default();
 
-    let mut frames = Frames::new(appearance)?;
     let mut mouse_encoder = mouse::Encoder::new()?;
     let mut mouse_event = mouse::Event::new()?;
     let mut input_bytes = Vec::with_capacity(LINK_URI_SCRATCH_BYTES);
     let mut writer: Box<dyn Write + Send> = Box::new(std::io::sink());
-    let mut word_separators = WordSeparators::default();
-    let mut wrap_search = true;
-    let mut mode_keys_vi = false;
-    let mut active_views = ActiveTerminalViews::new();
-    let mut inactive_views = InactiveTerminalViews::new();
     let bound_pasted_images = HashSet::new();
     let (mut search_worker, search_results) = SearchWorker::spawn(ActorWake::none());
     let mut compression = IdleCompression::default();
@@ -4983,12 +5013,17 @@ fn run_output_view(
             SnapshotChange::Content,
             &mut active_views,
             &word_separators,
-            SessionStatus::Running,
+            status.clone(),
             false,
         )?;
     }
 
     loop {
+        let commands_ready = if pending_receiver.is_empty() {
+            command_rx
+        } else {
+            &pending_receiver
+        };
         let synchronized_output_timeout = frames
             .synchronized_output_deadline
             .map_or_else(crossbeam_channel::never, |deadline| {
@@ -5014,7 +5049,7 @@ fn run_output_view(
                     SnapshotChange::Content,
                     &mut active_views,
                     &word_separators,
-                    SessionStatus::Running,
+                    status.clone(),
                 )?;
             }
             recv(settle_timeout) -> _ => {
@@ -5024,12 +5059,12 @@ fn run_output_view(
                     &mut frames,
                     &mut active_views,
                     &word_separators,
-                    SessionStatus::Running,
+                    status.clone(),
                 )?;
             }
             recv(compress_timeout) -> _ => compression.run(&mut terminal),
 
-            recv(command_rx) -> message => {
+            recv(commands_ready) -> message => {
                 let Ok(message) = message else {
                     return Ok(());
                 };
@@ -5067,7 +5102,7 @@ fn run_output_view(
                                 SnapshotChange::Content,
                                 &mut active_views,
                                 &word_separators,
-                                SessionStatus::Running,
+                                status.clone(),
                             )?;
                         }
                         Command::DetachView(view_id) => {
@@ -5092,7 +5127,7 @@ fn run_output_view(
                                 SnapshotChange::View,
                                 &mut active_views,
                                 &word_separators,
-                                SessionStatus::Running,
+                                status.clone(),
                             )?;
                         }
                         Command::ReleaseView(view_id) => {
@@ -5117,7 +5152,7 @@ fn run_output_view(
                                     SnapshotChange::View,
                                     &mut active_views,
                                     &word_separators,
-                                    SessionStatus::Running,
+                                    status.clone(),
                                 )?;
                             }
                         }
@@ -5134,6 +5169,10 @@ fn run_output_view(
                                     max_scrollback.min(MAX_HISTORY_LIMIT),
                                     geometry.columns.max(1),
                                 )))?;
+                                if !frozen {
+                                    resize_copy_modes(&mut active_views, geometry.columns.max(1), geometry.rows.max(1), &mut search_worker)?;
+                                    resize_copy_modes(&mut inactive_views, geometry.columns.max(1), geometry.rows.max(1), &mut search_worker)?;
+                                }
                                 for view in inactive_views.values_mut() {
                                     if frozen {
                                         refresh_output_view(&mut terminal, view)?;
@@ -5160,7 +5199,7 @@ fn run_output_view(
                                     SnapshotChange::Content,
                                     &mut active_views,
                                     &word_separators,
-                                    SessionStatus::Running,
+                                    status.clone(),
                                 )?;
                             }
                         }
@@ -5185,7 +5224,7 @@ fn run_output_view(
                                 SnapshotChange::Content,
                                 &mut active_views,
                                 &word_separators,
-                                SessionStatus::Running,
+                                status.clone(),
                             )?;
                         }
                         Command::ViewAction { view, action } => {
@@ -5208,9 +5247,10 @@ fn run_output_view(
                                 mode_keys_vi,
                                 &word_separators,
                                 &bound_pasted_images,
-                                &mut None,
-                                &mut None,
+                                &mut pending_copy_source,
+                                &mut pane_search,
                             ))?;
+                            publisher.publish_search_string(pane_search.as_ref());
                             let closed = frozen && state.copy_mode.is_none();
                             match result {
                                 ViewActionResult::Snapshot | ViewActionResult::ContentSnapshot if !closed => {
@@ -5221,7 +5261,7 @@ fn run_output_view(
                                         SnapshotChange::View,
                                         &mut active_views,
                                         &word_separators,
-                                        SessionStatus::Running,
+                                        status.clone(),
                                     )?;
                                 }
                                 ViewActionResult::OverlaySnapshot if !closed => {
@@ -5232,7 +5272,7 @@ fn run_output_view(
                                         SnapshotChange::Overlay,
                                         &mut active_views,
                                         &word_separators,
-                                        SessionStatus::Running,
+                                        status.clone(),
                                     )?;
                                 }
                                 ViewActionResult::Copy(copy) => publisher.copy_ready(view, copy)?,
@@ -5254,7 +5294,7 @@ fn run_output_view(
                                     SnapshotChange::View,
                                     &mut active_views,
                                     &word_separators,
-                                    SessionStatus::Running,
+                                    status.clone(),
                                 )?;
                             }
                         }
@@ -5289,8 +5329,8 @@ fn run_output_view(
                             let _ = request.reply.send(capture_last_command(&terminal));
                         }
                         Command::History(request) => {
-                            let HistoryCommand { start, reply, .. } = *request;
-                            let _ = reply.send(empty_history_capture(&terminal, start));
+                            let HistoryCommand { start, count, reply } = *request;
+                            let _ = reply.send(capture_history(&terminal, start, count, &frames.dictionary.class_hints));
                         }
                         Command::KittyImage(request) => {
                             let _ = request.reply.send(None);
@@ -5299,12 +5339,12 @@ fn run_output_view(
                             let _ = request.reply.send(None);
                         }
                         Command::SetEngineKnobs(next) => mode_keys_vi = next.mode_keys_vi,
+                        Command::SetPendingCopySource(source) => pending_copy_source = source,
                         Command::Text { .. }
                         | Command::Key { .. }
                         | Command::PastePreparedBytes { .. }
                         | Command::RawInput(_)
                         | Command::SetAllowPassthrough(_)
-                        | Command::SetPendingCopySource(_)
                         | Command::WriteDeadNotice(_)
                         | Command::PendingPasteOpened { .. }
                         | Command::ResetScreen
@@ -5345,7 +5385,7 @@ fn run_output_view(
                                 SnapshotChange::Content,
                                 &mut active_views,
                                 &word_separators,
-                                SessionStatus::Running,
+                                status.clone(),
                             )?;
                         }
                         Command::ArmRawOutputTap {
@@ -5378,7 +5418,7 @@ fn run_output_view(
                                     SnapshotChange::View,
                                     &mut active_views,
                                     &word_separators,
-                                    SessionStatus::Running,
+                                    status.clone(),
                                 )?;
                             }
                         }
@@ -5393,7 +5433,7 @@ fn run_output_view(
                                     SnapshotChange::View,
                                     &mut active_views,
                                     &word_separators,
-                                    SessionStatus::Running,
+                                    status.clone(),
                                 )?;
                             } else {
                                 frames.release_unused(&active_views);
@@ -5408,7 +5448,7 @@ fn run_output_view(
                                 SnapshotChange::View,
                                 &mut active_views,
                                 &word_separators,
-                                SessionStatus::Running,
+                                status.clone(),
                                 false,
                             )?;
                             frames.force_fallback = false;
@@ -5435,7 +5475,7 @@ fn run_output_view(
                         SnapshotChange::View,
                         &mut active_views,
                         &word_separators,
-                        SessionStatus::Running,
+                        status.clone(),
                     )?;
                 }
             }
@@ -5526,6 +5566,59 @@ fn refresh_output_view(
     Ok(())
 }
 
+fn resize_copy_modes(
+    views: &mut ActiveTerminalViews,
+    columns: u16,
+    rows: u16,
+    worker: &mut SearchWorker,
+) -> Result<(), WorkerError> {
+    for (view_id, view) in views {
+        let request_id = worker.cancel(*view_id);
+        for state in [&mut view.primary, &mut view.alternate] {
+            let Some(mode) = state.copy_mode.as_mut() else {
+                continue;
+            };
+            let (revision, cursor) = mode.revision.resized(columns, rows, mode.cursor)?;
+            mode.revision = revision;
+            mode.cursor = mode.revision.clamp_point(cursor);
+            mode.viewport_offset = mode.cursor.y.min(mode.revision.maximum_offset());
+            mode.selection = None;
+            mode.selecting = false;
+            mode.recentre = None;
+            if let Some(origin) = mode.incremental_origin.as_mut() {
+                origin.row = mode.cursor.y;
+                origin.viewport_offset = mode.viewport_offset;
+            }
+            state.search_snapshot = None;
+            if mode.search_marks
+                && let Some(previous) = state.search.take()
+            {
+                let mut search = mode
+                    .revision
+                    .search
+                    .search(&previous.query, request_id, || false)
+                    .expect("resize search");
+                search.current = search.matches.iter().position(|found| {
+                    found.row == mode.cursor.y
+                        && found.start <= mode.cursor.x
+                        && mode.cursor.x < found.end
+                });
+                mode.search_count = Some((
+                    u32::try_from(search.matches.len()).unwrap_or(u32::MAX),
+                    false,
+                ));
+                state.search_snapshot = Some(Arc::clone(&mode.revision.search));
+                state.search = Some(Box::new(search));
+            } else {
+                mode.search_marks = false;
+                mode.search_count = None;
+                state.search = None;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn refresh_frozen_view_appearance(
     terminal: &mut Terminal<'_, '_>,
     view: &mut TerminalViewState,
@@ -5537,7 +5630,7 @@ fn refresh_frozen_view_appearance(
         return Ok(false);
     }
 
-    let revision = ModeRevision::capture(terminal)?;
+    let revision = mode.revision.with_appearance(terminal)?;
     mode.cursor = revision.clamp_point(mode.cursor);
     mode.viewport_offset = mode.viewport_offset.min(revision.maximum_offset());
     if let Some(selection) = mode.selection.as_mut() {
@@ -6309,6 +6402,12 @@ fn run_terminal(
                             max_scrollback.min(MAX_HISTORY_LIMIT),
                             geometry.columns.max(1),
                         )))?;
+                        resize_copy_modes(
+                            &mut inactive_views,
+                            geometry.columns.max(1),
+                            geometry.rows.max(1),
+                            &mut search_worker,
+                        )?;
                         for view in inactive_views.values_mut() {
                             view.invalidate_layout();
                         }
@@ -6316,6 +6415,12 @@ fn run_terminal(
                         drain_effects_if_writer_ready(&effects, &mut writer)?;
                         #[cfg(not(unix))]
                         drain_effects(&effects, &mut writer)?;
+                        resize_copy_modes(
+                            &mut active_views,
+                            geometry.columns.max(1),
+                            geometry.rows.max(1),
+                            &mut search_worker,
+                        )?;
                         for (view_id, view) in &mut active_views {
                             view.invalidate_layout();
                             reconcile_view_screen(&mut terminal, view, &word_separators)?;
@@ -7087,6 +7192,7 @@ fn run_terminal(
             )?;
             let notice_deadline = Instant::now() + DEAD_NOTICE_WAIT;
             let mut retained = false;
+            let mut pending_commands = Vec::new();
             while let Some(remaining) = notice_deadline.checked_duration_since(Instant::now()) {
                 match control_rx.recv_timeout(remaining) {
                     Ok(Command::WriteDeadNotice(text)) => {
@@ -7110,17 +7216,43 @@ fn run_terminal(
                         }
                         break;
                     }
-                    Ok(_) => {}
+                    Ok(command) => pending_commands.push(command),
                     Err(_) => break,
                 }
             }
             if retained {
-                match ModeRevision::capture(&mut terminal) {
-                    Ok(revision) => publisher.publish_frozen_history(revision),
-                    Err(error) => {
-                        log::warn!("retained pane kept no frozen history: {error}");
-                    }
+                if !*NO_COMPRESS {
+                    terminal.compress(CompressionMode::Full)?;
                 }
+                publisher.set_foreground_source(None);
+                drop(writer);
+                drop(master);
+                drop(search_worker);
+                return run_surface_terminal(
+                    control_rx,
+                    slot,
+                    publisher,
+                    SurfaceTerminal {
+                        terminal,
+                        geometry,
+                        frames,
+                        active_views,
+                        inactive_views,
+                        word_separators,
+                        wrap_search,
+                        mode_keys_vi: engine_knobs.mode_keys_vi,
+                        reported_color_scheme,
+                        max_scrollback,
+                        status: SessionStatus::exited(
+                            status.exit_code(),
+                            status.signal().map(str::to_owned),
+                        ),
+                        pending_commands,
+                        pending_copy_source,
+                        pane_search,
+                    },
+                    false,
+                );
             }
             return Ok(());
         }
@@ -9014,21 +9146,6 @@ fn history_scrollbar_state(
             TerminalCaptureError::Failed("terminal history is too large".to_owned())
         })?,
     })
-}
-
-fn empty_history_capture(
-    terminal: &Terminal<'_, '_>,
-    start: u32,
-) -> Result<HistoryCapture, TerminalCaptureError> {
-    let history_rows =
-        u32::try_from(terminal.scrollback_rows().map_err(capture_failure)?).unwrap_or(u32::MAX);
-    Ok((
-        start.min(history_rows),
-        Vec::new(),
-        TerminalDictionary::default(),
-        history_scrollbar_state(terminal)?,
-        terminal.cols().map_err(capture_failure)?,
-    ))
 }
 
 fn capture_history(
@@ -12038,6 +12155,8 @@ struct HistorySearchSnapshot {
     text: String,
     rows: Vec<HistorySearchRow>,
     offsets: Vec<SearchCellOffset>,
+    terminal: Option<Arc<Mutex<libghostty_vt::terminal::ScreenSnapshot>>>,
+    total_rows: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -12556,8 +12675,33 @@ fn complete_view_search(
     sync_viewport_anchor(terminal, view)
 }
 
+struct SearchSnapshotCompression<'a>(&'a HistorySearchSnapshot);
+
+impl Drop for SearchSnapshotCompression<'_> {
+    fn drop(&mut self) {
+        if !*NO_COMPRESS && let Some(terminal) = &self.0.terminal {
+            let _ = terminal.lock().compress(CompressionMode::Full);
+        }
+    }
+}
+
 impl HistorySearchSnapshot {
     fn capture(terminal: &Terminal<'_, '_>) -> Result<Self, WorkerError> {
+        if ModeRevision::clone_enabled() {
+            return Self::capture_flat(terminal);
+        }
+        Ok(Self {
+            columns: terminal.cols()?,
+            text: String::new(),
+            rows: Vec::new(),
+            offsets: Vec::new(),
+            total_rows: u32::try_from(terminal.total_rows()?)
+                .map_err(|_| WorkerError::ViewportMetadataTooLarge)?,
+            terminal: Some(Arc::new(Mutex::new(terminal.clone_screen()?))),
+        })
+    }
+
+    fn capture_flat(terminal: &Terminal<'_, '_>) -> Result<Self, WorkerError> {
         let row_count = terminal.total_rows()?;
         let columns = terminal.cols()?;
         let mut rows = Vec::with_capacity(row_count);
@@ -12610,6 +12754,8 @@ impl HistorySearchSnapshot {
             text,
             rows,
             offsets,
+            terminal: None,
+            total_rows: u32::try_from(row_count).unwrap_or(u32::MAX),
         })
     }
 
@@ -12666,27 +12812,49 @@ impl HistorySearchSnapshot {
                 ..SearchState::default()
             });
         };
-        for (row, captured) in self.rows.iter().enumerate() {
+        let _compression = SearchSnapshotCompression(self);
+        let mut text = String::new();
+        let mut offsets = Vec::new();
+        let mut graphemes = Vec::new();
+        for row in 0..self.total_rows {
             if cancelled() {
                 return None;
             }
-            let text_start = usize::try_from(captured.text_start).ok()?;
-            let text_end = usize::try_from(captured.text_end).ok()?;
-            let offset_start = usize::try_from(captured.offset_start).ok()?;
-            let offset_end = usize::try_from(captured.offset_end).ok()?;
-            let row_text = self.text.get(text_start..text_end)?;
-            let row_offsets = self.offsets.get(offset_start..offset_end)?;
+            let (row_text, row_offsets) = if let Some(terminal) = &self.terminal {
+                text.clear();
+                offsets.clear();
+                let mut terminal = terminal.lock();
+                if !*NO_COMPRESS && row > 0 && row % 512 == 0 {
+                    terminal.compress(CompressionMode::Full).ok()?;
+                }
+                append_history_row(
+                    &*terminal,
+                    row,
+                    self.columns,
+                    &mut text,
+                    &mut offsets,
+                    &mut graphemes,
+                )
+                .ok()?;
+                (text.as_str(), offsets.as_slice())
+            } else {
+                let captured = self.rows.get(usize::try_from(row).ok()?)?;
+                let text_start = usize::try_from(captured.text_start).ok()?;
+                let text_end = usize::try_from(captured.text_end).ok()?;
+                let offset_start = usize::try_from(captured.offset_start).ok()?;
+                let offset_end = usize::try_from(captured.offset_end).ok()?;
+                (
+                    self.text.get(text_start..text_end)?,
+                    self.offsets.get(offset_start..offset_end)?,
+                )
+            };
             for found in expression.find_iter(row_text) {
                 let Some((start, end)) =
                     search_match_span(row_offsets, found.start(), found.end(), self.columns)
                 else {
                     continue;
                 };
-                match_scratch.push(SearchMatch {
-                    row: u32::try_from(row).unwrap_or(u32::MAX),
-                    start,
-                    end,
-                });
+                match_scratch.push(SearchMatch { row, start, end });
                 if match_scratch.len() >= MAX_SEARCH_MATCHES {
                     return Some(SearchState {
                         query: query.clone(),
@@ -12738,7 +12906,7 @@ fn search_history(terminal: &Terminal<'_, '_>, query: &str) -> Result<SearchStat
 }
 
 fn append_history_row(
-    terminal: &Terminal<'_, '_>,
+    terminal: &impl libghostty_vt::terminal::GridRead,
     row: u32,
     columns: u16,
     text: &mut String,
@@ -12747,8 +12915,9 @@ fn append_history_row(
 ) -> Result<(), WorkerError> {
     let row_text_start = text.len();
     let mut stack = ['\0'; 8];
+    let native_row = terminal.grid_row(Point::Screen(PointCoordinate { x: 0, y: row }))?;
     for column in 0..columns {
-        let grid_ref = terminal.grid_ref(Point::Screen(PointCoordinate { x: column, y: row }))?;
+        let grid_ref = native_row.cell(column).expect("history column");
         let wide = grid_ref.cell()?.wide()?;
         if matches!(wide, CellWide::SpacerTail | CellWide::SpacerHead) {
             continue;
@@ -14232,8 +14401,9 @@ fn perf_flag(name: &str, value: &str) -> bool {
 }
 
 #[must_use]
-pub fn perf_knobs() -> [(&'static str, bool); 3] {
+pub fn perf_knobs() -> [(&'static str, bool); 4] {
     [
+        ("ZZ_PERF_COPY_CLONE=1", ModeRevision::clone_enabled()),
         ("ZZ_PERF_EAGER_FRAMES=1", *EAGER_FRAMES),
         ("ZZ_PERF_NO_COMPRESS=1", *NO_COMPRESS),
         ("ZZ_PERF_ECHO_FASTPATH=0", *NO_ECHO_FASTPATH),
@@ -15620,14 +15790,16 @@ fn copy_mode_snapshot(
     TerminalViewport {
         generation: generations.content,
         view_generation: generations.view,
-        dictionary_generation: dictionary.generation,
+        dictionary_generation: dictionary
+            .generation
+            .wrapping_add(revision.dictionary_generation()),
         columns: revision.columns,
         rows: revision.viewport_rows,
         foreground: revision.foreground,
         background: revision.background,
         presentation,
         cells,
-        dictionary: Arc::clone(&revision.dictionary),
+        dictionary: revision.shared_dictionary(),
         overlays,
         kitty_placements: Arc::from([]),
         cursor: None,
@@ -17119,10 +17291,7 @@ mod tests {
 
     #[test]
     fn view_action_size_limits_are_nonfatal() {
-        for error in [
-            WorkerError::SearchSnapshotTooLarge,
-            WorkerError::ModeRevisionTooLarge,
-        ] {
+        for error in [WorkerError::SearchSnapshotTooLarge] {
             assert!(matches!(
                 normalize_view_action_result(Err(error)),
                 Ok(ViewActionResult::Snapshot)
@@ -20102,6 +20271,8 @@ mod tests {
                 text: String::new(),
                 rows: Vec::new(),
                 offsets: Vec::new(),
+                terminal: None,
+                total_rows: 0,
             }),
             selection: SearchSelectionPolicy::Last,
             match_scratch: matches,

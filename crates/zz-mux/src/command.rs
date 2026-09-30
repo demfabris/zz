@@ -568,6 +568,10 @@ struct RowFormatHooks<'a, H> {
 }
 
 impl<H: StatusHooks> StatusHooks for RowFormatHooks<'_, H> {
+    fn stable_option_lookups(&self) -> bool {
+        self.inner.stable_option_lookups()
+    }
+
     fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
         self.inner.option_variable(name, context)
     }
@@ -1353,8 +1357,16 @@ struct ListKeyHooks<'a, H> {
     prefix: &'a str,
     notes_only: bool,
     has_repeat: bool,
-    key_width: usize,
-    table_width: usize,
+    key_width: &'a str,
+    table_width: &'a str,
+}
+
+#[derive(Debug)]
+struct CachedKeyListing {
+    generation: u64,
+    args: Vec<RawText>,
+    output: String,
+    had_binding: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -1393,6 +1405,10 @@ struct ConfigConditionHooks<'a> {
 }
 
 impl StatusHooks for ConfigConditionHooks<'_> {
+    fn stable_option_lookups(&self) -> bool {
+        self.inner.stable_option_lookups()
+    }
+
     fn strftime(&mut self, literal: &str) -> String {
         self.inner.strftime(literal)
     }
@@ -1424,6 +1440,10 @@ impl StatusHooks for ConfigConditionHooks<'_> {
 }
 
 impl<H: StatusHooks> StatusHooks for CommandItemHooks<'_, H> {
+    fn stable_option_lookups(&self) -> bool {
+        self.inner.stable_option_lookups()
+    }
+
     fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
         self.inner.option_variable(name, context)
     }
@@ -1498,6 +1518,10 @@ impl<H: StatusHooks> StatusHooks for CommandItemHooks<'_, H> {
 }
 
 impl<H: StatusHooks> StatusHooks for ListCommandHooks<'_, H> {
+    fn stable_option_lookups(&self) -> bool {
+        self.inner.stable_option_lookups()
+    }
+
     fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
         self.inner.option_variable(name, context)
     }
@@ -1558,6 +1582,10 @@ impl<H: StatusHooks> StatusHooks for ListCommandHooks<'_, H> {
 }
 
 impl<H: StatusHooks> StatusHooks for ListKeyHooks<'_, H> {
+    fn stable_option_lookups(&self) -> bool {
+        self.inner.stable_option_lookups()
+    }
+
     fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
         self.inner.option_variable(name, context)
     }
@@ -1577,8 +1605,8 @@ impl<H: StatusHooks> StatusHooks for ListKeyHooks<'_, H> {
             "key_string" => Cow::Borrowed(self.key),
             "key_command" => Cow::Owned(format_key_command(self.binding)),
             "key_has_repeat" => Cow::Borrowed(if self.has_repeat { "1" } else { "0" }),
-            "key_string_width" => Cow::Owned(self.key_width.to_string()),
-            "key_table_width" => Cow::Owned(self.table_width.to_string()),
+            "key_string_width" => Cow::Borrowed(self.key_width),
+            "key_table_width" => Cow::Borrowed(self.table_width),
             _ => unreachable!(),
         })
     }
@@ -2197,6 +2225,11 @@ pub struct MuxEngine {
     format_needs_cache: Mutex<BTreeMap<u64, (u64, Vec<String>, crate::FormatNeeds)>>,
     pub(crate) format_reference_cache:
         Mutex<Option<(u64, BTreeMap<String, Arc<BTreeSet<String>>>)>>,
+    key_listing_cache: Mutex<Option<CachedKeyListing>>,
+    pub(crate) format_data_generation: u64,
+    pub(crate) format_context_cache: Mutex<Option<crate::formats::DetachedContextCache>>,
+    pub(crate) format_reference_union_cache:
+        Mutex<Option<crate::formats::FormatReferenceUnionCache>>,
 }
 
 const NAME_INTERVAL: Duration = Duration::from_millis(500);
@@ -2301,6 +2334,39 @@ pub struct StatusRowVariables {
 }
 
 impl StatusRowVariables {
+    #[must_use]
+    pub fn retained_bytes(&self) -> usize {
+        fn values_bytes(values: &BTreeMap<String, String>) -> usize {
+            values.iter().fold(0usize, |total, (name, value)| {
+                total
+                    .saturating_add(std::mem::size_of::<(String, String)>())
+                    .saturating_add(name.capacity())
+                    .saturating_add(value.capacity())
+            })
+        }
+        let scoped = [&self.sessions, &self.windows, &self.panes]
+            .into_iter()
+            .flat_map(BTreeMap::iter)
+            .fold(0usize, |total, (scope, values)| {
+                total
+                    .saturating_add(std::mem::size_of::<(String, BTreeMap<String, String>)>())
+                    .saturating_add(scope.capacity())
+                    .saturating_add(values_bytes(values))
+            });
+        [
+            &self.base,
+            &self.session_active_windows,
+            &self.window_active_panes,
+            &self.pane_windows,
+            &self.window_sessions,
+        ]
+        .into_iter()
+        .fold(
+            std::mem::size_of::<Self>().saturating_add(scoped),
+            |total, values| total.saturating_add(values_bytes(values)),
+        )
+    }
+
     #[must_use]
     pub fn lookup(
         &self,
@@ -2513,6 +2579,10 @@ impl Default for MuxEngine {
             format_option_cache: Mutex::new(None),
             format_needs_cache: Mutex::new(BTreeMap::new()),
             format_reference_cache: Mutex::new(None),
+            key_listing_cache: Mutex::new(None),
+            format_data_generation: 0,
+            format_context_cache: Mutex::new(None),
+            format_reference_union_cache: Mutex::new(None),
         }
     }
 }
@@ -3704,6 +3774,7 @@ impl MuxEngine {
         self.format_start_time = start_time;
         self.state.set_default_pane_title(self.format_host.clone());
         self.state.set_format_now(start_time);
+        self.format_data_generation = self.format_data_generation.wrapping_add(1);
     }
 
     pub const fn set_format_now(&mut self, now: u64) {
@@ -3943,6 +4014,7 @@ impl MuxEngine {
         self.format_pid = pid;
         self.format_uid = uid.into();
         self.format_user = user.into();
+        self.format_data_generation = self.format_data_generation.wrapping_add(1);
     }
 
     pub fn set_default_mode_keys(&mut self, value: &str) -> Result<(), ServerError> {
@@ -4054,6 +4126,7 @@ impl MuxEngine {
             return Err(ServerError::MissingTarget(pane.to_string()));
         }
         self.pane_start_commands.insert(pane, command);
+        self.format_data_generation = self.format_data_generation.wrapping_add(1);
         Ok(())
     }
 
@@ -4066,19 +4139,28 @@ impl MuxEngine {
             match effect {
                 MuxEffect::PaneCreated { pane, command, .. }
                 | MuxEffect::PaneMaterialized { pane, command, .. } => {
-                    self.pane_start_commands
-                        .insert(*pane, command.clone().unwrap_or_default());
+                    let command = command.clone().unwrap_or_default();
+                    if self.pane_start_commands.get(pane) != Some(&command) {
+                        self.pane_start_commands.insert(*pane, command);
+                        self.format_data_generation = self.format_data_generation.wrapping_add(1);
+                    }
                 }
                 MuxEffect::PaneRespawned {
                     pane,
                     command: Some(command),
                     ..
                 } if !command.is_empty() => {
-                    self.pane_start_commands.insert(*pane, command.clone());
+                    if self.pane_start_commands.get(pane) != Some(command) {
+                        self.pane_start_commands.insert(*pane, command.clone());
+                        self.format_data_generation = self.format_data_generation.wrapping_add(1);
+                    }
                 }
                 MuxEffect::PanesRemoved(panes) => {
                     for pane in panes {
-                        self.pane_start_commands.remove(pane);
+                        if self.pane_start_commands.remove(pane).is_some() {
+                            self.format_data_generation =
+                                self.format_data_generation.wrapping_add(1);
+                        }
                     }
                 }
                 _ => {}
@@ -4104,6 +4186,7 @@ impl MuxEngine {
                 )
             })
             .collect();
+        self.format_data_generation = self.format_data_generation.wrapping_add(1);
     }
 
     #[must_use]
@@ -4121,10 +4204,38 @@ impl MuxEngine {
                 hidden,
             },
         );
+        self.format_data_generation = self.format_data_generation.wrapping_add(1);
     }
 
     pub fn mark_session_active_at(&mut self, session: SessionId, now: u64) {
+        let before = self
+            .state
+            .sessions
+            .get(&session)
+            .map(|session| (session.activity, session.sort_activity));
         self.state.mark_session_active_at(session, now);
+        let after = self
+            .state
+            .sessions
+            .get(&session)
+            .map(|session| (session.activity, session.sort_activity));
+        if before != after {
+            self.format_data_generation = self.format_data_generation.wrapping_add(1);
+        }
+    }
+
+    pub fn touch_window_activity_for_pane(&mut self, pane: PaneId) {
+        let window = self.state.window_for_pane(pane);
+        let before = window
+            .and_then(|window| self.state.windows.get(&window))
+            .map(|window| (window.activity, window.activity_time));
+        self.state.touch_window_activity_for_pane(pane);
+        let after = window
+            .and_then(|window| self.state.windows.get(&window))
+            .map(|window| (window.activity, window.activity_time));
+        if before != after {
+            self.format_data_generation = self.format_data_generation.wrapping_add(1);
+        }
     }
 
     pub fn set_pane_runtime_facts(&mut self, pane: PaneId, facts: PaneRuntimeFacts) -> bool {
@@ -4162,6 +4273,7 @@ impl MuxEngine {
             return false;
         }
         self.pane_runtime_facts.insert(pane, facts);
+        self.format_data_generation = self.format_data_generation.wrapping_add(1);
         if command_changed {
             self.refresh_automatic_window_name_throttled(pane, hooks, now);
         }
@@ -4832,6 +4944,7 @@ impl MuxEngine {
         let patterns = self.update_environment_names_for_session(Some(session));
         let retained = self.session_environments.entry(session).or_default();
         apply_client_environment_update(&mut retained.inner.lock(), &patterns, client_environment);
+        self.format_data_generation = self.format_data_generation.wrapping_add(1);
         Ok(())
     }
 
@@ -9645,6 +9758,28 @@ impl MuxEngine {
             )));
         }
         let notes_only = options.has("-N");
+        let format = options.value("-F").unwrap_or(DEFAULT_LIST_KEYS_FORMAT);
+        let prepared = PreparedFormat::new(
+            self,
+            FormatContext {
+                session: context.session,
+                window: context.window,
+                pane: context.pane,
+                active_session: context.session,
+                format_client: context.target_format_client(),
+                format_type: FormatType::None,
+            },
+        );
+        let cacheable = crate::format_cache_knob()
+            && format == DEFAULT_LIST_KEYS_FORMAT
+            && hooks.stable_option_lookups()
+            && !LIST_KEY_BINDING_CONTEXT_FORMATS
+                .iter()
+                .chain(LIST_KEY_SUMMARY_CONTEXT_FORMATS)
+                .any(|name| hooks.option_variable(name, prepared.values()).is_some());
+        if cacheable && let Some((output, had_binding)) = self.cached_key_listing(args) {
+            return Ok(self.key_listing_execution(context, options.has("-1"), had_binding, output));
+        }
         let mut bindings;
         if let Some(table) = options.value("-T") {
             bindings = listed_keys(self.keys.list(Some(table)));
@@ -9685,7 +9820,8 @@ impl MuxEngine {
             .map(|binding| crate::display_width(binding.table))
             .max()
             .unwrap_or_default();
-        let format = options.value("-F").unwrap_or(DEFAULT_LIST_KEYS_FORMAT);
+        let key_width = key_width.to_string();
+        let table_width = table_width.to_string();
         let prefix = options.value("-P").map_or_else(
             || {
                 let prefix = self.keys.prefix();
@@ -9699,17 +9835,6 @@ impl MuxEngine {
         );
         let had_binding = !bindings.is_empty();
         let mut output = Vec::new();
-        let prepared = PreparedFormat::new(
-            self,
-            FormatContext {
-                session: context.session,
-                window: context.window,
-                pane: context.pane,
-                active_session: context.session,
-                format_client: context.target_format_client(),
-                format_type: FormatType::None,
-            },
-        );
         for listed in bindings {
             let mut item_hooks = ListKeyHooks {
                 inner: &mut *hooks,
@@ -9719,8 +9844,8 @@ impl MuxEngine {
                 prefix: &prefix,
                 notes_only,
                 has_repeat,
-                key_width,
-                table_width,
+                key_width: &key_width,
+                table_width: &table_width,
             };
             let line = prepared.expand(format, &mut item_hooks);
             if !line.is_empty() {
@@ -9728,20 +9853,53 @@ impl MuxEngine {
             }
         }
         let output = output.join("\n");
-        if options.has("-1") && had_binding {
+        if cacheable {
+            let bytes = std::mem::size_of::<CachedKeyListing>()
+                + output.len()
+                + args
+                    .iter()
+                    .map(|argument| {
+                        std::mem::size_of::<RawText>() + argument.len() + argument.as_bytes().len()
+                    })
+                    .sum::<usize>();
+            *self.key_listing_cache.lock() = (bytes <= 1024 * 1024).then(|| CachedKeyListing {
+                generation: self.keys.generation(),
+                args: args.to_vec(),
+                output: output.clone(),
+                had_binding,
+            });
+        }
+        Ok(self.key_listing_execution(context, options.has("-1"), had_binding, output))
+    }
+
+    fn cached_key_listing(&self, args: &[RawText]) -> Option<(String, bool)> {
+        let cache = self.key_listing_cache.lock();
+        let cached = cache.as_ref()?;
+        (cached.generation == self.keys.generation() && cached.args == args)
+            .then(|| (cached.output.clone(), cached.had_binding))
+    }
+
+    fn key_listing_execution(
+        &self,
+        context: &ExecutionContext,
+        single: bool,
+        had_binding: bool,
+        output: String,
+    ) -> Execution {
+        if single && had_binding {
             let duration_ms = context
                 .session
                 .map_or(self.global_display_time_ms, |session| {
                     self.display_time_for_session(session)
                 });
-            Ok(Execution::effect(MuxEffect::PrintOrMessage {
+            Execution::effect(MuxEffect::PrintOrMessage {
                 pane: context.pane,
                 text: output,
                 duration_ms,
                 freeze: true,
-            }))
+            })
         } else {
-            Ok(Execution::output(output))
+            Execution::output(output)
         }
     }
 
@@ -11582,6 +11740,7 @@ impl MuxEngine {
                 .or_default();
             apply(&mut retained.inner.lock());
         }
+        self.format_data_generation = self.format_data_generation.wrapping_add(1);
         Ok(Execution::default())
     }
 
@@ -12455,6 +12614,7 @@ impl MuxEngine {
             .or_default()
             .inner
             .lock() = environment;
+        self.format_data_generation = self.format_data_generation.wrapping_add(1);
     }
 
     fn native_option_readback(&self, name: &str) -> (String, bool) {
@@ -13156,58 +13316,58 @@ impl MuxEngine {
         if options.has("-o") && !unset && already_set {
             return already_set_or_quiet(options, option.as_str());
         }
-        let previous = window.map_or_else(
-            || self.window_status.clone(),
-            |window| self.window_status_formats(window),
-        );
-        if unset {
+        let previous = window
+            .and_then(|window| self.window_status_options.get(&window))
+            .and_then(|values| values.get(&option))
+            .map_or_else(|| self.window_status.value(option), String::as_str);
+        let changed = if unset {
             if let Some(window) = window {
+                let changed = previous != self.window_status.value(option);
                 if let Some(values) = self.window_status_options.get_mut(&window) {
                     values.remove(&option);
                     if values.is_empty() {
                         self.window_status_options.remove(&window);
                     }
                 }
+                changed
             } else {
                 self.window_status
                     .set(option, None)
-                    .map_err(ServerError::InvalidCommand)?;
+                    .map_err(ServerError::InvalidCommand)?
             }
         } else {
             let value = value.ok_or_else(|| {
                 ServerError::InvalidCommand(format!("set-option {} needs a value", option.as_str()))
             })?;
             let appended = options.has("-a").then(|| {
-                let current = previous.value(option);
-                let separator = if option.is_style() && !current.is_empty() && !value.is_empty() {
+                let separator = if option.is_style() && !previous.is_empty() && !value.is_empty() {
                     ","
                 } else {
                     ""
                 };
-                format!("{current}{separator}{value}")
+                format!("{previous}{separator}{value}")
             });
             let value = appended.as_deref().unwrap_or(value);
-            let mut next = previous.clone();
-            next.set(option, Some(value))
-                .map_err(ServerError::InvalidCommand)?;
             if let Some(window) = window {
+                let next = WindowStatusFormats::parse_value(option, value)
+                    .map_err(ServerError::InvalidCommand)?;
+                let changed = previous != next;
                 self.window_status_options
                     .entry(window)
                     .or_default()
-                    .insert(option, next.value(option).to_owned());
+                    .insert(option, next);
+                changed
             } else {
-                self.window_status = next;
+                self.window_status
+                    .set(option, Some(value))
+                    .map_err(ServerError::InvalidCommand)?
             }
-        }
-        let next = window.map_or_else(
-            || self.window_status.clone(),
-            |window| self.window_status_formats(window),
-        );
-        if next == previous {
-            Ok(Execution::default())
-        } else {
+        };
+        if changed {
             self.state.bump_generation();
             Ok(Execution::effect(MuxEffect::SnapshotChanged))
+        } else {
+            Ok(Execution::default())
         }
     }
 

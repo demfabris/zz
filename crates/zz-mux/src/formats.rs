@@ -36,7 +36,8 @@ pub use tree::with_borrowed_formats;
 
 mod compiled;
 
-pub(crate) fn format_references(format: &str) -> Arc<[String]> {
+#[must_use]
+pub fn format_references(format: &str) -> Arc<[String]> {
     compiled::get(format).references.clone()
 }
 
@@ -281,12 +282,67 @@ pub struct StatusValues {
     pub session_sort_activity: u64,
 }
 
+const FORMAT_CAPTURE_CACHE_BYTES: usize = 1024 * 1024;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FormatCaptureRevision {
+    state: u64,
+    options: u64,
+    data: u64,
+    now: u64,
+}
+
+impl FormatCaptureRevision {
+    fn new(engine: &MuxEngine) -> Self {
+        Self {
+            state: engine.state.generation(),
+            options: engine.format_options_generation(),
+            data: engine.format_data_generation,
+            now: engine.format_now(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct DetachedContextCache {
+    target: (Option<SessionId>, Option<WindowId>, Option<PaneId>),
+    input_variables: Arc<BTreeMap<String, String>>,
+    needs: FormatNeeds,
+    references: Option<BTreeSet<String>>,
+    context: StatusContext<'static>,
+}
+
+#[derive(Debug)]
+pub(crate) struct FormatReferenceUnionCache {
+    generation: u64,
+    sources: Vec<String>,
+    references: Arc<BTreeSet<String>>,
+}
+
+fn variable_bytes(variables: &BTreeMap<String, String>) -> usize {
+    variables.iter().fold(0usize, |bytes, (name, value)| {
+        bytes
+            .saturating_add(std::mem::size_of::<(String, String)>())
+            .saturating_add(name.capacity())
+            .saturating_add(value.capacity())
+    })
+}
+
+fn reference_bytes(references: &BTreeSet<String>) -> usize {
+    references.iter().fold(0usize, |bytes, name| {
+        bytes
+            .saturating_add(std::mem::size_of::<String>())
+            .saturating_add(name.capacity())
+    })
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct StatusContext<'e> {
     values: OnceLock<Box<StatusValues>>,
     tree: Option<FormatTree<'e>>,
-    variables: BTreeMap<String, String>,
+    variables: Arc<BTreeMap<String, String>>,
     format_client: FormatClient,
+    capture_revision: Option<Arc<FormatCaptureRevision>>,
     pub session_id: String,
     pub window_id: String,
     pub pane_id: String,
@@ -312,7 +368,7 @@ impl std::ops::Deref for StatusContext<'_> {
                         &mut LayoutDumps::default(),
                     )
                 });
-            for (name, value) in &self.variables {
+            for (name, value) in self.variables.iter() {
                 apply_context_value(&mut values, name, value);
             }
             Box::new(values)
@@ -324,7 +380,8 @@ impl std::ops::DerefMut for StatusContext<'_> {
     fn deref_mut(&mut self) -> &mut StatusValues {
         let _ = std::ops::Deref::deref(self);
         self.tree = None;
-        self.variables.clear();
+        Arc::make_mut(&mut self.variables).clear();
+        self.capture_revision = None;
         self.values.get_mut().expect("materialized context")
     }
 }
@@ -338,8 +395,9 @@ impl From<StatusValues> for StatusContext<'static> {
             format_now: values.format_now,
             values: OnceLock::from(Box::new(values)),
             tree: None,
-            variables: BTreeMap::new(),
+            variables: Arc::default(),
             format_client: FormatClient::NoClient,
+            capture_revision: None,
             format_universe: FormatUniverseRef::default(),
         }
     }
@@ -609,7 +667,7 @@ impl FormatUniverse {
         self.built.fetch_or(needs.0, AtomicOrdering::AcqRel);
     }
 
-    fn detached(&self, engine: &MuxEngine, references: Option<&BTreeSet<String>>) -> Self {
+    fn detached(&self, engine: &MuxEngine, specs: Option<&[&'static FormatVariableSpec]>) -> Self {
         let detached = Self::with_built(self.format_client, self.built());
         let detach_items = |items: &LoopItems| -> LoopItems {
             items
@@ -618,7 +676,7 @@ impl FormatUniverse {
                     let mut context = item
                         .context
                         .borrowed_child(Some(engine))
-                        .detach_values(references);
+                        .detach_values(specs);
                     context.values = item.context.values.clone();
                     FormatLoopItem {
                         context,
@@ -648,6 +706,108 @@ impl FormatUniverse {
         *detached.environments.lock() = self.environments.lock().clone();
         *detached.window_user_options.lock() = self.window_user_options.lock().clone();
         detached
+    }
+
+    fn same_owned(&self, other: &Self) -> bool {
+        let same_items = |left: Option<&LoopItems>, right: Option<&LoopItems>| match (left, right) {
+            (None, None) => true,
+            (Some(left), Some(right)) => {
+                Arc::ptr_eq(left, right)
+                    || left.len() == right.len()
+                        && left.iter().zip(right.iter()).all(|(left, right)| {
+                            left.active == right.active
+                                && left.metadata == right.metadata
+                                && left.context.same_detached(&right.context)
+                        })
+            }
+            _ => false,
+        };
+        if self.format_client != other.format_client
+            || self.built() != other.built()
+            || !same_items(self.sessions.get(), other.sessions.get())
+        {
+            return false;
+        }
+        let left_windows = self.windows.lock().clone();
+        let right_windows = other.windows.lock().clone();
+        if left_windows.len() != right_windows.len()
+            || !left_windows.iter().all(|(key, left)| {
+                right_windows
+                    .get(key)
+                    .is_some_and(|right| same_items(left.as_ref(), right.as_ref()))
+            })
+        {
+            return false;
+        }
+        let left_panes = self.panes.lock().clone();
+        let right_panes = other.panes.lock().clone();
+        if left_panes.len() != right_panes.len()
+            || !left_panes.iter().all(|(key, left)| {
+                right_panes
+                    .get(key)
+                    .is_some_and(|right| same_items(left.as_ref(), right.as_ref()))
+            })
+        {
+            return false;
+        }
+        let left_options = self.options.lock().clone();
+        let right_options = other.options.lock().clone();
+        let left_environment = self.environments.lock().clone();
+        let right_environment = other.environments.lock().clone();
+        let left_user_options = self.window_user_options.lock().clone();
+        let right_user_options = other.window_user_options.lock().clone();
+        left_options == right_options
+            && left_environment == right_environment
+            && left_user_options == right_user_options
+    }
+
+    fn retained_bytes(&self) -> usize {
+        let item_bytes = |items: &LoopItems| {
+            items.iter().fold(0usize, |bytes, item| {
+                bytes
+                    .saturating_add(item.context.retained_bytes())
+                    .saturating_add(std::mem::size_of::<LoopMetadata>())
+                    .saturating_add(item.metadata.session_name.capacity())
+                    .saturating_add(item.metadata.window_name.capacity())
+            })
+        };
+        let mut bytes = std::mem::size_of::<Self>();
+        if let Some(items) = self.sessions.get() {
+            bytes = bytes.saturating_add(item_bytes(items));
+        }
+        for items in self.windows.lock().values().flatten() {
+            bytes = bytes.saturating_add(item_bytes(items));
+        }
+        for items in self.panes.lock().values().flatten() {
+            bytes = bytes.saturating_add(item_bytes(items));
+        }
+        for rows in self.options.lock().values().flatten() {
+            for row in rows.iter() {
+                bytes = bytes
+                    .saturating_add(std::mem::size_of::<FormatOptionRow>())
+                    .saturating_add(row.name.capacity())
+                    .saturating_add(row.value.capacity())
+                    .saturating_add(row.array_key.capacity())
+                    .saturating_add(row.array_index.capacity());
+            }
+        }
+        for rows in self.environments.lock().values().flatten() {
+            for row in rows.iter() {
+                bytes = bytes
+                    .saturating_add(std::mem::size_of::<FormatEnvironRow>())
+                    .saturating_add(row.name.capacity())
+                    .saturating_add(row.value.as_bytes().len());
+            }
+        }
+        for rows in self.window_user_options.lock().values().flatten() {
+            for (name, value) in rows.iter() {
+                bytes = bytes
+                    .saturating_add(std::mem::size_of::<(String, String)>())
+                    .saturating_add(name.capacity())
+                    .saturating_add(value.capacity());
+            }
+        }
+        bytes
     }
 
     #[cfg(test)]
@@ -727,7 +887,7 @@ struct FormatLoopItem {
     metadata: LoopMetadata,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct LoopMetadata {
     session_name: String,
     session_sort_activity: u64,
@@ -1548,12 +1708,15 @@ impl StatusContext<'_> {
         if let Some(values) = self.values.get_mut() {
             apply_context_value(values, &name, &value);
         }
-        self.variables.insert(name, value);
+        Arc::make_mut(&mut self.variables).insert(name, value);
     }
 
     #[must_use]
     pub fn detach(self, needs: FormatNeeds) -> StatusContext<'static> {
-        self.detach_selected(needs, None)
+        if let Some(context) = self.cached_detached(needs, None) {
+            return context;
+        }
+        self.detach_selected(needs, None, None)
     }
 
     #[must_use]
@@ -1562,81 +1725,221 @@ impl StatusContext<'_> {
         needs: FormatNeeds,
         templates: impl IntoIterator<Item = &'t str>,
     ) -> StatusContext<'static> {
-        let mut references = BTreeSet::new();
-        for template in templates {
-            if let Some(engine) = self.engine() {
-                references.extend(engine.cached_format_references(template).iter().cloned());
-            } else {
-                references.extend(format_references(template).iter().cloned());
-            }
+        let references = if let Some(engine) = self.engine() {
+            engine.cached_format_references_for_templates(templates)
+        } else {
+            Arc::new(
+                templates
+                    .into_iter()
+                    .flat_map(|template| format_references(template).as_ref().to_owned())
+                    .collect::<BTreeSet<_>>(),
+            )
+        };
+        self.detach_with_references(needs, &references)
+    }
+
+    #[must_use]
+    pub fn detach_with_references(
+        self,
+        needs: FormatNeeds,
+        references: &BTreeSet<String>,
+    ) -> StatusContext<'static> {
+        if let Some(context) = self.cached_detached(needs, Some(references)) {
+            return context;
         }
-        let references = (!references.contains("*")).then_some(&references);
-        self.detach_selected(needs, references)
+        self.detach_selected(
+            needs,
+            (!references.contains("*")).then_some(references),
+            Some(references),
+        )
+    }
+
+    fn cached_detached(
+        &self,
+        needs: FormatNeeds,
+        references: Option<&BTreeSet<String>>,
+    ) -> Option<StatusContext<'static>> {
+        let tree = self.tree.as_ref()?;
+        if !format_cache_knob() || !tree::borrowed_formats() || self.values.get().is_some() {
+            return None;
+        }
+        let cache = tree.engine.format_context_cache.lock();
+        let cached = cache.as_ref()?;
+        (cached.needs == needs
+            && cached.references.as_ref() == references
+            && cached.target == (tree.session, tree.window, tree.pane)
+            && cached.input_variables == self.variables
+            && cached.context.capture_revision.as_deref()
+                == Some(&FormatCaptureRevision::new(tree.engine))
+            && cached.context.format_client == self.format_client
+            && cached.context.session_id == self.session_id
+            && cached.context.window_id == self.window_id
+            && cached.context.pane_id == self.pane_id
+            && cached.context.format_now == self.format_now)
+            .then(|| cached.context.clone())
+    }
+
+    fn capture_variables(
+        &self,
+        specs: impl IntoIterator<Item = &'static FormatVariableSpec>,
+        preserve_overrides: bool,
+    ) -> BTreeMap<String, String> {
+        if self.tree.is_none() {
+            return BTreeMap::new();
+        }
+        specs
+            .into_iter()
+            .filter(|spec| !preserve_overrides || !self.variables.contains_key(spec.name))
+            .map(|spec| {
+                (
+                    spec.name.to_owned(),
+                    self.resolve(spec, FormatType::None).into_owned(),
+                )
+            })
+            .collect()
     }
 
     fn detach_selected(
         self,
         needs: FormatNeeds,
         references: Option<&BTreeSet<String>>,
+        cache_references: Option<&BTreeSet<String>>,
     ) -> StatusContext<'static> {
+        let engine = self.tree.as_ref().map(|tree| tree.engine);
+        let revision = engine.map(|engine| Arc::new(FormatCaptureRevision::new(engine)));
+        let cache_key = self
+            .tree
+            .as_ref()
+            .filter(|_| {
+                format_cache_knob() && tree::borrowed_formats() && self.values.get().is_none()
+            })
+            .map(|tree| {
+                (
+                    tree.engine,
+                    (tree.session, tree.window, tree.pane),
+                    Arc::clone(&self.variables),
+                )
+            });
+        let specs = references.map(|names| {
+            names
+                .iter()
+                .filter_map(|name| format_variable(name))
+                .collect::<Vec<_>>()
+        });
         let format_universe = self.format_universe.detach(
             needs,
             &self.session_id,
             &self.window_id,
             &self.pane_id,
-            references,
+            specs.as_deref(),
         );
-        let mut captured = BTreeMap::new();
-        if self.tree.is_some() {
-            for spec in FORMAT_VARIABLES.iter().filter(|spec| {
-                references.is_none_or(|names| names.contains(spec.name))
-                    && !self.variables.contains_key(spec.name)
-            }) {
-                captured.insert(
-                    spec.name.to_owned(),
-                    self.resolve(spec, FormatType::None).into_owned(),
-                );
-            }
-        }
+        let captured = specs.as_ref().map_or_else(
+            || self.capture_variables(FORMAT_VARIABLES.iter(), true),
+            |specs| self.capture_variables(specs.iter().copied(), true),
+        );
         let mut variables = self.variables;
-        variables.extend(captured);
-        StatusContext {
+        if !captured.is_empty() {
+            Arc::make_mut(&mut variables).extend(captured);
+        }
+        let context = StatusContext {
             values: self.values,
             tree: None,
             variables,
             format_client: self.format_client,
+            capture_revision: revision.or(self.capture_revision),
             session_id: self.session_id,
             window_id: self.window_id,
             pane_id: self.pane_id,
             format_now: self.format_now,
             format_universe,
+        };
+        if let Some((engine, target, input_variables)) = cache_key {
+            let bytes = context
+                .retained_bytes()
+                .saturating_add(variable_bytes(&input_variables))
+                .saturating_add(cache_references.map_or(0, reference_bytes));
+            let mut cache = engine.format_context_cache.lock();
+            *cache = (bytes <= FORMAT_CAPTURE_CACHE_BYTES).then(|| DetachedContextCache {
+                target,
+                input_variables,
+                needs,
+                references: cache_references.cloned(),
+                context: context.clone(),
+            });
         }
+        context
     }
 
-    fn detach_values(&self, references: Option<&BTreeSet<String>>) -> StatusContext<'static> {
-        let mut variables = self.variables.clone();
-        if self.tree.is_some() {
-            for spec in FORMAT_VARIABLES
-                .iter()
-                .filter(|spec| references.is_none_or(|names| names.contains(spec.name)))
-            {
-                variables.insert(
-                    spec.name.to_owned(),
-                    self.resolve(spec, FormatType::None).into_owned(),
-                );
-            }
+    fn detach_values(
+        &self,
+        specs: Option<&[&'static FormatVariableSpec]>,
+    ) -> StatusContext<'static> {
+        let captured = specs.map_or_else(
+            || self.capture_variables(FORMAT_VARIABLES.iter(), false),
+            |specs| self.capture_variables(specs.iter().copied(), false),
+        );
+        let mut variables = Arc::clone(&self.variables);
+        if !captured.is_empty() {
+            Arc::make_mut(&mut variables).extend(captured);
         }
         StatusContext {
             values: self.values.clone(),
             tree: None,
             variables,
             format_client: self.format_client,
+            capture_revision: self.capture_revision.clone(),
             session_id: self.session_id.clone(),
             window_id: self.window_id.clone(),
             pane_id: self.pane_id.clone(),
             format_now: self.format_now,
             format_universe: FormatUniverseRef::default(),
         }
+    }
+
+    #[must_use]
+    pub fn has_captured_environment(&self) -> bool {
+        self.capture_revision.is_some()
+            && self.tree.is_none()
+            && self.format_universe.engine.is_none()
+            && self
+                .format_universe
+                .parts
+                .built()
+                .contains(FormatNeeds::ENVIRONMENT)
+    }
+
+    #[must_use]
+    pub fn same_detached(&self, other: &StatusContext<'_>) -> bool {
+        self.tree.is_none()
+            && other.tree.is_none()
+            && self.format_universe.engine.is_none()
+            && other.format_universe.engine.is_none()
+            && self.capture_revision == other.capture_revision
+            && self.format_client == other.format_client
+            && self.session_id == other.session_id
+            && self.window_id == other.window_id
+            && self.pane_id == other.pane_id
+            && self.format_now == other.format_now
+            && self.values.get() == other.values.get()
+            && (Arc::ptr_eq(&self.variables, &other.variables) || self.variables == other.variables)
+            && (Arc::ptr_eq(&self.format_universe.parts, &other.format_universe.parts)
+                || self
+                    .format_universe
+                    .parts
+                    .same_owned(&other.format_universe.parts))
+    }
+
+    #[must_use]
+    pub fn retained_bytes(&self) -> usize {
+        if self.values.get().is_some() {
+            return FORMAT_CAPTURE_CACHE_BYTES + 1;
+        }
+        std::mem::size_of::<Self>()
+            .saturating_add(self.session_id.capacity())
+            .saturating_add(self.window_id.capacity())
+            .saturating_add(self.pane_id.capacity())
+            .saturating_add(variable_bytes(&self.variables))
+            .saturating_add(self.format_universe.parts.retained_bytes())
     }
 
     #[must_use]
@@ -1663,8 +1966,9 @@ impl<'e> StatusContext<'e> {
                 pane,
                 format_client,
             }),
-            variables: BTreeMap::new(),
+            variables: Arc::default(),
             format_client,
+            capture_revision: None,
             session_id: session.map(|id| id.to_string()).unwrap_or_default(),
             window_id: window.map(|id| id.to_string()).unwrap_or_default(),
             pane_id: pane.map(|id| id.to_string()).unwrap_or_default(),
@@ -1720,7 +2024,7 @@ impl<'e> FormatUniverseRef<'e> {
         session: &str,
         window: &str,
         pane: &str,
-        references: Option<&BTreeSet<String>>,
+        specs: Option<&[&'static FormatVariableSpec]>,
     ) -> FormatUniverseRef<'static> {
         if self.engine.is_some() {
             let needs = if eager_universe() {
@@ -1733,7 +2037,7 @@ impl<'e> FormatUniverseRef<'e> {
         FormatUniverseRef {
             parts: self.engine.map_or_else(
                 || Arc::clone(&self.parts),
-                |engine| Arc::new(self.parts.detached(engine, references)),
+                |engine| Arc::new(self.parts.detached(engine, specs)),
             ),
             engine: None,
         }
@@ -2083,7 +2387,8 @@ impl NeedsScan<'_> {
 }
 
 impl MuxEngine {
-    fn cached_format_references(&self, template: &str) -> Arc<BTreeSet<String>> {
+    #[must_use]
+    pub fn cached_format_references(&self, template: &str) -> Arc<BTreeSet<String>> {
         let generation = self.format_options_generation();
         let cached = format_cache_knob();
         if cached {
@@ -2135,6 +2440,51 @@ impl MuxEngine {
             entries.clear();
         }
         entries.insert(template.to_owned(), Arc::clone(&references));
+        references
+    }
+
+    #[must_use]
+    pub fn cached_format_references_for_templates<'t>(
+        &self,
+        templates: impl IntoIterator<Item = &'t str>,
+    ) -> Arc<BTreeSet<String>> {
+        let sources = templates.into_iter().collect::<Vec<_>>();
+        let generation = self.format_options_generation();
+        let cached = format_cache_knob();
+        if cached {
+            let cache = self.format_reference_union_cache.lock();
+            if let Some(cache) = cache.as_ref()
+                && cache.generation == generation
+                && cache
+                    .sources
+                    .iter()
+                    .map(String::as_str)
+                    .eq(sources.iter().copied())
+            {
+                return Arc::clone(&cache.references);
+            }
+        }
+        let mut references = BTreeSet::new();
+        for source in &sources {
+            references.extend(self.cached_format_references(source).iter().cloned());
+        }
+        let references = Arc::new(references);
+        let bytes = reference_bytes(&references).saturating_add(sources.iter().fold(
+            0usize,
+            |bytes, source| {
+                bytes
+                    .saturating_add(std::mem::size_of::<String>())
+                    .saturating_add(source.len())
+            },
+        ));
+        if cached {
+            *self.format_reference_union_cache.lock() =
+                (bytes <= FORMAT_CAPTURE_CACHE_BYTES).then(|| FormatReferenceUnionCache {
+                    generation,
+                    sources: sources.into_iter().map(str::to_owned).collect(),
+                    references: Arc::clone(&references),
+                });
+        }
         references
     }
 
@@ -2758,6 +3108,19 @@ fn format_variable(name: &str) -> Option<&'static FormatVariableSpec> {
         .map(|index| &FORMAT_VARIABLES[index])
 }
 
+#[must_use]
+pub fn format_variable_is_known(name: &str) -> bool {
+    format_variable(name).is_some()
+}
+
+#[must_use]
+pub fn format_variable_is_captured(name: &str) -> bool {
+    format_variable(name).is_some_and(|spec| {
+        !matches!(spec.backing, FormatBacking::StatusHook)
+            && !matches!(spec.scope, FormatScope::Terminal)
+    })
+}
+
 #[cfg(test)]
 pub(crate) fn format_variable_names() -> impl Iterator<Item = &'static str> {
     FORMAT_VARIABLES.iter().map(|variable| variable.name)
@@ -2904,6 +3267,10 @@ pub trait StatusHooks {
     fn strftime(&mut self, literal: &str) -> String;
     fn shell(&mut self, command: &str, tag: &FormatJobTag) -> String;
 
+    fn stable_option_lookups(&self) -> bool {
+        false
+    }
+
     fn variable(&mut self, _name: &str, _context: &StatusContext) -> Option<String> {
         None
     }
@@ -3045,6 +3412,10 @@ impl CommandHooks {
 }
 
 impl StatusHooks for CommandHooks {
+    fn stable_option_lookups(&self) -> bool {
+        true
+    }
+
     fn strftime(&mut self, literal: &str) -> String {
         self.now
             .and_then(crate::localtime::local_time)
@@ -3340,6 +3711,10 @@ struct OptionFormatHooks<'a, H> {
 }
 
 impl<H: StatusHooks> StatusHooks for OptionFormatHooks<'_, H> {
+    fn stable_option_lookups(&self) -> bool {
+        self.inner.stable_option_lookups()
+    }
+
     fn strftime(&mut self, literal: &str) -> String {
         self.inner.strftime(literal)
     }

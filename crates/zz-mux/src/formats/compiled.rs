@@ -117,6 +117,25 @@ impl Replacement {
                     .cloned(),
             );
         }
+        let dynamic_fact_flags = |kind| {
+            modifiers.iter().any(|modifier| {
+                modifier.kind == kind
+                    && modifier
+                        .args
+                        .iter()
+                        .any(|argument| argument.contains(['#', '%']))
+            })
+        };
+        if flags.interrogate.is_some()
+            || dynamic_fact_flags(ModifierKind::Interrogate)
+            || !flags.literal
+                && (flags.loop_clients
+                    || flags.content_search.is_some()
+                    || flags.loop_environment == Some("c")
+                    || dynamic_fact_flags(ModifierKind::Environments))
+        {
+            references.insert("*".to_owned());
+        }
         if flags.expand || flags.expand_time {
             if !copy.contains("#{") && !flags.literal {
                 let modifier = if flags.expand { "E" } else { "T" };
@@ -835,6 +854,89 @@ mod tests {
                 );
             });
         }
+    }
+
+    #[test]
+    fn implicit_fact_modifiers_capture_unknown_dependencies() {
+        for source in [
+            "#{L:constant}",
+            "#{L:#{client_name}}",
+            "#{Vc:constant}",
+            "#{V/c:constant}",
+            "#{V/#{@scope}:constant}",
+            "#{C:pattern}",
+            "#{I/c:RGB}",
+            "#{I/f:RGB}",
+            "#{I/e:SHELL}",
+            "#{I/#{@flags}:RGB}",
+            "#{l;I/c:RGB}",
+            "#[fg=#{C:pattern}]",
+            "#[fg=#{I/c:RGB}]",
+            "#{p/#{L:constant}/:pane_title}",
+            "#{?pane_active,#{Vc:constant},plain}",
+        ] {
+            let references = get(source).references.clone();
+            assert!(
+                references.iter().any(|name| name == "*"),
+                "{source}: {references:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn escaped_literal_and_nonclient_environment_templates_remain_selective() {
+        for source in [
+            "##{L:constant}",
+            "##{C:pattern}",
+            "##{I/c:RGB}",
+            "#{l:#{L:constant}}",
+            "#{l:#{Vc:constant}}",
+            "#{l:#{I/c:RGB}}",
+            "#{l;L:constant}",
+            "#{l;C:pattern}",
+            "#{l;Vc:constant}",
+            "#{Vg:#{environ_name}}",
+            "#{Vs:#{environ_name}}",
+            "#S #{pane_title}",
+        ] {
+            let references = get(source).references.clone();
+            assert!(
+                !references.iter().any(|name| name == "*"),
+                "{source}: {references:?}"
+            );
+        }
+        assert_eq!(
+            get("#S #{pane_title}").references.as_ref(),
+            ["pane_title", "session_name"]
+        );
+    }
+
+    #[test]
+    fn cached_reference_access_respects_cache_rollback_and_option_changes() {
+        let (mut engine, _) = scene();
+        for source in ["#{pane_title}", "#{L:constant}", "#{E:@fmt}"] {
+            let first = engine.cached_format_references(source);
+            let second = engine.cached_format_references(source);
+            assert_eq!(first, second, "{source}");
+            assert_eq!(
+                Arc::ptr_eq(&first, &second),
+                format_cache_knob(),
+                "{source}"
+            );
+        }
+        let before = engine.cached_format_references("#{E:@fmt}");
+        assert!(before.contains("pane_id"));
+        assert!(!before.contains("*"));
+        engine
+            .execute(
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("set-option", ["-g", "@fmt", "#{I/c:RGB}"]),
+            )
+            .unwrap();
+        let after = engine.cached_format_references("#{E:@fmt}");
+        assert!(after.contains("*"));
+        assert!(!after.contains("pane_id"));
+        assert!(!Arc::ptr_eq(&before, &after));
     }
 
     #[test]

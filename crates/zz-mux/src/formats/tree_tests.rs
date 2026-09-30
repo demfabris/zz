@@ -60,6 +60,88 @@ fn selective_detach_captures_only_referenced_table_values() {
 }
 
 #[test]
+fn default_status_templates_keep_detached_capture_selective() {
+    let mut engine = MuxEngine::default();
+    let (session, window, pane) = engine.state.create_session("work").unwrap();
+    for index in 1..20 {
+        engine
+            .state
+            .create_window(
+                session,
+                Some(format!("window-{index}")),
+                crate::PaneKind::Terminal,
+            )
+            .unwrap();
+    }
+    let formats = engine.status_formats_for_session(Some(session));
+    let rows = engine.status_format_array_for_session(Some(session));
+    let styles = engine.message_styles_for_session(Some(session));
+    let mut templates = vec![
+        formats.left,
+        formats.right,
+        formats.style,
+        styles.0,
+        styles.1,
+        "#{socket_path}:#{session_path}:#{pane_current_path}".to_owned(),
+        "#{theme}".to_owned(),
+    ];
+    templates.extend(rows.into_values());
+    for half in ["light", "dark"] {
+        for suffix in [
+            "black",
+            "white",
+            "light-grey",
+            "dark-grey",
+            "green",
+            "yellow",
+            "red",
+            "blue",
+            "cyan",
+            "magenta",
+        ] {
+            templates.push(format!("#{{E:{half}-theme-{suffix}}}"));
+        }
+    }
+    let mut references = BTreeSet::new();
+    for template in &templates {
+        let raw = format_references(template);
+        let cached = engine.cached_format_references(template);
+        assert!(
+            !raw.iter().any(|name| name == "*"),
+            "raw {template}: {raw:?}"
+        );
+        assert!(!cached.contains("*"), "cached {template}: {cached:?}");
+        references.extend(cached.iter().cloned());
+    }
+    let table_count = FORMAT_VARIABLES
+        .iter()
+        .filter(|spec| references.contains(spec.name))
+        .count();
+    assert!(table_count < FORMAT_VARIABLES.len() / 2);
+    with_borrowed_formats(true, || {
+        let templates = templates.iter().map(String::as_str).collect::<Vec<_>>();
+        let context = engine
+            .format_status_context(Some(session), Some(window), Some(pane))
+            .detach_with_templates(engine.format_needs(templates.iter().copied()), templates);
+        assert_eq!(context.variables.len(), table_count);
+        assert!(context.values.get().is_none());
+        let parts = &context.format_universe.parts;
+        for items in parts
+            .windows
+            .lock()
+            .values()
+            .chain(parts.panes.lock().values())
+            .flatten()
+        {
+            for item in items.iter() {
+                assert_eq!(item.context.variables.len(), table_count);
+                assert!(item.context.values.get().is_none());
+            }
+        }
+    });
+}
+
+#[test]
 fn detached_nested_loops_keep_whole_status_values_uninitialized() {
     let mut engine = MuxEngine::default();
     let (session, _, pane) = engine.state.create_session("alpha").unwrap();
@@ -264,4 +346,302 @@ fn indirect_references_follow_option_generations_and_scopes() {
         );
     assert!(detached.variables.contains_key("pane_title"));
     assert!(!detached.variables.contains_key("session_name"));
+}
+
+fn cache_context(
+    engine: &MuxEngine,
+    target: FormatContext,
+    template: &str,
+) -> StatusContext<'static> {
+    with_borrowed_formats(true, || {
+        engine
+            .format_status_context_with_format_client(
+                target.session,
+                target.window,
+                target.pane,
+                target.active_session,
+                target.format_client,
+            )
+            .detach_with_templates(engine.format_needs([template]), [template])
+    })
+}
+
+fn assert_cache_context_matches_w1(
+    engine: &MuxEngine,
+    target: FormatContext,
+    template: &str,
+    captured: &StatusContext<'static>,
+) {
+    let expected = with_borrowed_formats(false, || {
+        let legacy = engine
+            .format_status_context_with_format_client(
+                target.session,
+                target.window,
+                target.pane,
+                target.active_session,
+                target.format_client,
+            )
+            .detach(engine.format_needs([template]));
+        expand_status(template, &legacy, &mut Hooks(engine))
+    });
+    assert_eq!(
+        expand_status(template, captured, &mut Hooks(engine)),
+        expected
+    );
+    assert!(captured.values.get().is_none());
+}
+
+#[test]
+fn detached_capture_cache_reuses_selected_maps_and_preserves_exact_inputs() {
+    let mut engine = MuxEngine::default();
+    let (session, window, pane) = engine.state.create_session("work").unwrap();
+    let target = FormatContext {
+        session: Some(session),
+        window: Some(window),
+        pane: Some(pane),
+        active_session: Some(session),
+        format_client: FormatClient::Attached(session),
+        format_type: FormatType::Pane,
+    };
+    let template = "#{S:#{session_name}[#{W:#{window_name}(#{P:#{pane_id};})}]}";
+    let first = cache_context(&engine, target, template);
+    let second = cache_context(&engine, target, template);
+    assert_eq!(
+        Arc::ptr_eq(&first.variables, &second.variables),
+        format_cache_knob()
+    );
+    assert_eq!(
+        Arc::ptr_eq(&first.format_universe.parts, &second.format_universe.parts),
+        format_cache_knob()
+    );
+    assert!(first.same_detached(&second));
+    assert_cache_context_matches_w1(&engine, target, template, &second);
+    let borrowed = with_borrowed_formats(true, || {
+        engine.format_status_context(Some(session), Some(window), Some(pane))
+    });
+    assert!(!borrowed.same_detached(&first));
+    assert!(borrowed.values.get().is_none());
+    let capture_override = |value: &str| {
+        with_borrowed_formats(true, || {
+            let mut context = engine.format_status_context(Some(session), Some(window), Some(pane));
+            context.set_format_value("config_files", value);
+            context.detach_with_templates(FormatNeeds::NONE, ["#{config_files}"])
+        })
+    };
+    let override_first = capture_override("first.conf");
+    let override_same = capture_override("first.conf");
+    let override_second = capture_override("second.conf");
+    assert!(override_first.same_detached(&override_same));
+    assert!(!override_first.same_detached(&override_second));
+    assert_eq!(
+        override_second.variable("config_files").as_deref(),
+        Some("second.conf")
+    );
+    let mut changed = override_same.clone();
+    changed.set_format_value("config_files", "changed.conf");
+    assert_eq!(
+        override_same.variable("config_files").as_deref(),
+        Some("first.conf")
+    );
+    assert!(!changed.same_detached(&override_same));
+    let other_client = cache_context(
+        &engine,
+        FormatContext {
+            format_client: FormatClient::Unattached,
+            ..target
+        },
+        template,
+    );
+    assert!(!first.same_detached(&other_client));
+    let legacy = with_borrowed_formats(false, || {
+        engine
+            .format_status_context(Some(session), Some(window), Some(pane))
+            .detach_with_templates(engine.format_needs([template]), [template])
+    });
+    assert!(legacy.values.get().is_some());
+    assert!(!Arc::ptr_eq(&legacy.variables, &first.variables));
+}
+
+#[test]
+fn detached_capture_cache_invalidates_runtime_environment_identity_and_clocks() {
+    let mut engine = MuxEngine::default();
+    engine.set_format_server_context("host-one", "one", "/tmp/one", 10);
+    engine.set_format_server_identity(11, "12", "first-user");
+    engine.seed_global_environment([("CACHE_ENV", "first-env")]);
+    let (session, window, pane) = engine.state.create_session("work").unwrap();
+    engine.set_pane_runtime_facts(
+        pane,
+        crate::PaneRuntimeFacts {
+            current_path: "/first".to_owned(),
+            ..crate::PaneRuntimeFacts::default()
+        },
+    );
+    engine
+        .set_pane_start_command(pane, vec!["first-command".to_owned()])
+        .unwrap();
+    let target = FormatContext {
+        session: Some(session),
+        window: Some(window),
+        pane: Some(pane),
+        active_session: Some(session),
+        format_client: FormatClient::Attached(session),
+        format_type: FormatType::Pane,
+    };
+    let template = "#{P:#{pane_id}|#{pane_current_path}|#{pane_start_command}|#{pid}|#{uid}|#{user}|#{host}|#{socket_path}|#{CACHE_ENV}|#{t/R:session_created}|#{session_activity}|#{window_activity};}";
+    let mut previous = cache_context(&engine, target, template);
+    let state_generation = engine.state.generation();
+    engine.set_pane_runtime_facts(
+        pane,
+        crate::PaneRuntimeFacts {
+            current_path: "/second".to_owned(),
+            ..crate::PaneRuntimeFacts::default()
+        },
+    );
+    assert_eq!(engine.state.generation(), state_generation);
+    let next = cache_context(&engine, target, template);
+    assert!(!previous.same_detached(&next));
+    assert_cache_context_matches_w1(&engine, target, template, &next);
+    previous = next;
+    engine.set_format_server_identity(21, "22", "second-user");
+    let next = cache_context(&engine, target, template);
+    assert!(!previous.same_detached(&next));
+    assert_cache_context_matches_w1(&engine, target, template, &next);
+    previous = next;
+    engine.set_format_server_context("host-two", "two", "/tmp/two", 10);
+    let next = cache_context(&engine, target, template);
+    assert!(!previous.same_detached(&next));
+    assert_cache_context_matches_w1(&engine, target, template, &next);
+    previous = next;
+    engine.set_config_environment("CACHE_ENV".to_owned(), "second-env".to_owned(), false);
+    let next = cache_context(&engine, target, template);
+    assert!(!previous.same_detached(&next));
+    assert_cache_context_matches_w1(&engine, target, template, &next);
+    previous = next;
+    let mut execution = crate::ExecutionContext::default();
+    execution.session = Some(session);
+    execution.window = Some(window);
+    execution.pane = Some(pane);
+    engine
+        .execute(
+            &mut execution,
+            &zz_protocol::CommandInvocation::new("set-environment", ["CACHE_ENV", "session-env"]),
+        )
+        .unwrap();
+    let next = cache_context(&engine, target, template);
+    assert!(!previous.same_detached(&next));
+    assert_cache_context_matches_w1(&engine, target, template, &next);
+    previous = next;
+    engine
+        .execute(
+            &mut execution,
+            &zz_protocol::CommandInvocation::new("respawn-pane", ["-k", "second-command"]),
+        )
+        .unwrap();
+    let next = cache_context(&engine, target, template);
+    assert!(!previous.same_detached(&next));
+    assert_cache_context_matches_w1(&engine, target, template, &next);
+    previous = next;
+    engine.mark_session_active_at(session, 11);
+    let next = cache_context(&engine, target, template);
+    assert!(!previous.same_detached(&next));
+    assert_cache_context_matches_w1(&engine, target, template, &next);
+    previous = next;
+    engine.touch_window_activity_for_pane(pane);
+    let next = cache_context(&engine, target, template);
+    assert!(!previous.same_detached(&next));
+    assert_cache_context_matches_w1(&engine, target, template, &next);
+    previous = next;
+    engine.set_format_now(20);
+    let next = cache_context(&engine, target, template);
+    assert_eq!(previous.format_now, Some(10));
+    assert_eq!(next.format_now, Some(20));
+    assert!(!previous.same_detached(&next));
+    for items in next.format_universe.parts.panes.lock().values().flatten() {
+        for item in items.iter() {
+            assert_eq!(item.context.format_now, Some(20));
+        }
+    }
+    assert_cache_context_matches_w1(&engine, target, template, &next);
+}
+
+#[test]
+fn capture_and_reference_union_caches_are_bounded_and_follow_rollback() {
+    let mut engine = MuxEngine::default();
+    let (session, window, pane) = engine.state.create_session("work").unwrap();
+    let sources = ["#{pane_title}", "#{S:#{session_name}}"];
+    let first = engine.cached_format_references_for_templates(sources);
+    let same = engine.cached_format_references_for_templates(sources);
+    assert_eq!(Arc::ptr_eq(&first, &same), format_cache_knob());
+    assert_eq!(
+        first.as_ref(),
+        &BTreeSet::from(["pane_title".to_owned(), "session_name".to_owned()])
+    );
+    let changed = engine.cached_format_references_for_templates(["#{pane_id}"]);
+    assert!(!Arc::ptr_eq(&first, &changed));
+    assert_eq!(changed.as_ref(), &BTreeSet::from(["pane_id".to_owned()]));
+    let oversized = "x".repeat(FORMAT_CAPTURE_CACHE_BYTES);
+    let _ = engine.cached_format_references_for_templates([oversized.as_str()]);
+    if format_cache_knob() {
+        assert!(engine.format_reference_union_cache.lock().is_none());
+    }
+    engine.state.update_pane_title(pane, oversized).unwrap();
+    let target = FormatContext {
+        session: Some(session),
+        window: Some(window),
+        pane: Some(pane),
+        ..FormatContext::default()
+    };
+    let template = "#{P:#{pane_title}}";
+    let first = cache_context(&engine, target, template);
+    let same = cache_context(&engine, target, template);
+    assert!(!Arc::ptr_eq(&first.variables, &same.variables));
+    assert!(engine.format_context_cache.lock().is_none());
+    assert!(first.values.get().is_none());
+    assert!(same.values.get().is_none());
+}
+
+#[test]
+fn detached_source_revisions_preserve_environment_and_legacy_equality_boundaries() {
+    let mut engine = MuxEngine::default();
+    let (session, window, pane) = engine.state.create_session("work").unwrap();
+    let target = FormatContext {
+        session: Some(session),
+        window: Some(window),
+        pane: Some(pane),
+        ..FormatContext::default()
+    };
+    let first = cache_context(&engine, target, "#{pane_title}");
+    assert!(!first.has_captured_environment());
+    engine.set_config_environment("prompt_flags".to_owned(), "fresh".to_owned(), false);
+    let second = cache_context(&engine, target, "#{pane_title}");
+    assert_eq!(first.variables, second.variables);
+    assert!(
+        first
+            .format_universe
+            .parts
+            .same_owned(&second.format_universe.parts)
+    );
+    assert!(!first.same_detached(&second));
+    let captured = cache_context(&engine, target, "#{prompt_flags}");
+    assert!(captured.has_captured_environment());
+    assert_eq!(
+        expand_status("#{prompt_flags}", &captured, &mut Hooks(&engine)),
+        "fresh"
+    );
+    assert!(!format_variable_is_known("prompt_flags"));
+    assert!(format_variable_is_known("pane_title"));
+    assert!(format_variable_is_captured("pane_title"));
+    assert!(format_variable_is_known("cursor_x"));
+    assert!(!format_variable_is_captured("cursor_x"));
+    assert!(format_variable_is_known("window_bigger"));
+    assert!(!format_variable_is_captured("window_bigger"));
+    let legacy = StatusContext::from(StatusValues::default());
+    let mut changed = legacy.clone();
+    assert!(legacy.same_detached(&changed));
+    assert!(!legacy.has_captured_environment());
+    changed.host = "different-host".to_owned();
+    assert!(!legacy.same_detached(&changed));
+    assert!(captured.values.get().is_none());
+    assert!(first.values.get().is_none());
+    assert!(second.values.get().is_none());
 }

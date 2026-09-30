@@ -195,3 +195,283 @@ fn default_setters_invalidate_existing_option_snapshots() {
         );
     }
 }
+
+struct KeyListingHooks<'a> {
+    calls: usize,
+    command: Option<&'a str>,
+}
+
+impl StatusHooks for KeyListingHooks<'_> {
+    fn stable_option_lookups(&self) -> bool {
+        true
+    }
+
+    fn strftime(&mut self, _: &str) -> String {
+        String::new()
+    }
+
+    fn shell(&mut self, _: &str, _: &FormatJobTag) -> String {
+        String::new()
+    }
+
+    fn option_variable(&mut self, name: &str, _: &StatusContext) -> Option<String> {
+        self.calls += 1;
+        (name == "key_command")
+            .then_some(self.command)
+            .flatten()
+            .map(str::to_owned)
+    }
+}
+
+fn key_listing_engine() -> MuxEngine {
+    let mut engine = MuxEngine {
+        keys: KeyTables::empty(),
+        ..MuxEngine::default()
+    };
+    for (table, key, repeat, note) in [
+        ("x", "a", false, Some("first")),
+        ("x", "C-a", true, None),
+        ("prefix", "b", false, Some("prefix")),
+        ("root", "c", false, Some("root")),
+    ] {
+        engine.keys.bind(
+            table,
+            key,
+            Binding {
+                commands: vec![CommandInvocation::new("display-message", [key])],
+                repeat,
+                note: note.map(str::to_owned),
+            },
+        );
+    }
+    engine
+}
+
+#[test]
+fn default_key_listing_reuses_output_and_bypasses_option_hook_overrides() {
+    let engine = key_listing_engine();
+    let args = [RawText::from("-T"), RawText::from("x")];
+    let context = ExecutionContext::default();
+    let mut hooks = KeyListingHooks {
+        calls: 0,
+        command: None,
+    };
+    let first = engine.list_keys(&context, &args, &mut hooks).unwrap();
+    let cold_calls = hooks.calls;
+    hooks.calls = 0;
+    assert_eq!(
+        engine.list_keys(&context, &args, &mut hooks).unwrap(),
+        first
+    );
+    assert_eq!(
+        engine.key_listing_cache.lock().is_some(),
+        crate::format_cache_knob()
+    );
+    if crate::format_cache_knob() {
+        assert_eq!(hooks.calls, 10);
+        assert!(cold_calls > hooks.calls);
+    } else {
+        assert_eq!(hooks.calls, cold_calls);
+    }
+    for command in ["override-one", "override-two"] {
+        hooks.command = Some(command);
+        let output = engine
+            .list_keys(&context, &args, &mut hooks)
+            .unwrap()
+            .output;
+        assert!(output.lines().all(|line| line.ends_with(command)));
+    }
+}
+
+#[test]
+fn stateful_option_hooks_keep_uncached_listing_output_and_lookup_order() {
+    #[derive(Default)]
+    struct StatefulHooks {
+        names: Vec<String>,
+        commands: usize,
+    }
+
+    impl StatusHooks for StatefulHooks {
+        fn strftime(&mut self, _: &str) -> String {
+            String::new()
+        }
+
+        fn shell(&mut self, _: &str, _: &FormatJobTag) -> String {
+            String::new()
+        }
+
+        fn option_variable(&mut self, name: &str, _: &StatusContext) -> Option<String> {
+            self.names.push(name.to_owned());
+            if name != "key_command" {
+                return None;
+            }
+            self.commands += 1;
+            (self.commands > 1).then(|| format!("override-{}", self.commands))
+        }
+    }
+
+    let engine = key_listing_engine();
+    let context = ExecutionContext::default();
+    let args = [RawText::from("-T"), RawText::from("x")];
+    engine
+        .list_keys(&context, &args, &mut CommandHooks::new(0))
+        .unwrap();
+    let mut hooks = StatefulHooks::default();
+    let actual = engine.list_keys(&context, &args, &mut hooks).unwrap();
+    let uncached_args = [
+        RawText::from("-T"),
+        RawText::from("x"),
+        RawText::from("-F"),
+        RawText::from(format!("{DEFAULT_LIST_KEYS_FORMAT}#{{l:}}")),
+    ];
+    let mut uncached_hooks = StatefulHooks::default();
+    let expected = engine
+        .list_keys(&context, &uncached_args, &mut uncached_hooks)
+        .unwrap();
+    assert_eq!(actual, expected);
+    assert_eq!(hooks.names, uncached_hooks.names);
+    assert_eq!(hooks.commands, 2);
+    assert!(actual.output.contains("override-2"));
+}
+
+#[test]
+fn default_key_listing_variants_match_the_existing_formatter() {
+    let engine = key_listing_engine();
+    let context = ExecutionContext::default();
+    let custom = format!("{DEFAULT_LIST_KEYS_FORMAT}#{{l:}}");
+    for args in [
+        vec![],
+        vec!["-T", "x"],
+        vec!["-N"],
+        vec!["-N", "-a"],
+        vec!["-N", "-a", "-P", "ZZ"],
+        vec!["-1", "-T", "x"],
+        vec!["-O", "key", "-r"],
+        vec!["-T", "x", "C-a"],
+        vec!["-T", "x", "--", "a"],
+        vec!["-a"],
+        vec!["-r"],
+        vec!["-F", DEFAULT_LIST_KEYS_FORMAT],
+    ] {
+        let mut hooks = CommandHooks::new(0);
+        let args = args.into_iter().map(RawText::from).collect::<Vec<_>>();
+        let first = engine.list_keys(&context, &args, &mut hooks).unwrap();
+        assert_eq!(
+            engine.list_keys(&context, &args, &mut hooks).unwrap(),
+            first
+        );
+        let mut uncached = vec![RawText::from("-F"), RawText::from(custom.as_str())];
+        uncached.extend(args.iter().cloned());
+        if args.first().is_some_and(|argument| argument == "-F") {
+            uncached.truncate(2);
+        }
+        assert_eq!(
+            engine.list_keys(&context, &uncached, &mut hooks).unwrap(),
+            first,
+            "{args:?}"
+        );
+    }
+}
+
+#[test]
+fn default_key_listing_refreshes_after_binding_metadata_and_prefix_changes() {
+    let mut engine = key_listing_engine();
+    let mut context = ExecutionContext::default();
+    let list = |engine: &mut MuxEngine, context: &mut ExecutionContext, args: &[&str]| {
+        engine
+            .execute(
+                context,
+                &CommandInvocation::new("list-keys", args.iter().copied()),
+            )
+            .unwrap()
+            .output
+    };
+    let args = ["-N", "-a", "-T", "x"];
+    let before = list(&mut engine, &mut context, &args);
+    assert_eq!(list(&mut engine, &mut context, &args), before);
+    engine
+        .keys
+        .update_binding_metadata("x", "a", Some("changed".to_owned()), true);
+    assert!(list(&mut engine, &mut context, &args).contains("changed"));
+    engine.keys.set_prefix("C-z");
+    assert!(
+        list(&mut engine, &mut context, &args)
+            .lines()
+            .all(|line| line.starts_with("C-z "))
+    );
+    engine.keys.bind(
+        "x",
+        "C-a",
+        Binding {
+            commands: vec![CommandInvocation::new("display-message", ["replacement"])],
+            repeat: false,
+            note: None,
+        },
+    );
+    assert!(list(&mut engine, &mut context, &args).contains("replacement"));
+    engine.keys.unbind("x", "a");
+    assert!(!list(&mut engine, &mut context, &args).contains("changed"));
+    engine.keys.remove_table("x");
+    assert!(
+        engine
+            .execute(&mut context, &CommandInvocation::new("list-keys", args))
+            .is_err()
+    );
+}
+
+#[test]
+fn cached_key_listing_rebuilds_single_effects_and_custom_formats_stay_live() {
+    let mut engine = key_listing_engine();
+    let (session, window, pane) = engine.state.create_session("live").unwrap();
+    let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+    let single = CommandInvocation::new("list-keys", ["-1", "-T", "x"]);
+    engine.execute(&mut context, &single).unwrap();
+    set(&mut engine, &mut context, &["display-time", "321"]);
+    assert!(matches!(
+        engine.execute(&mut context, &single).unwrap().effects.as_slice(),
+        [MuxEffect::PrintOrMessage { pane: target, duration_ms: 321, .. }] if *target == Some(pane)
+    ));
+    let (_, _, second_pane) = engine.state.create_session("second").unwrap();
+    context.pane = Some(second_pane);
+    assert!(matches!(
+        engine.execute(&mut context, &single).unwrap().effects.as_slice(),
+        [MuxEffect::PrintOrMessage { pane: target, .. }] if *target == Some(second_pane)
+    ));
+    context.pane = Some(pane);
+    let custom = CommandInvocation::new("list-keys", ["-T", "x", "-F", "#{pane_title}"]);
+    for title in ["first-title", "second-title"] {
+        engine.state.update_pane_title(pane, title).unwrap();
+        assert!(
+            engine
+                .execute(&mut context, &custom)
+                .unwrap()
+                .output
+                .lines()
+                .all(|line| line == title)
+        );
+    }
+}
+
+#[test]
+fn default_key_listing_does_not_cache_oversized_output() {
+    let mut engine = key_listing_engine();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new("list-keys", [] as [&str; 0]),
+        )
+        .unwrap();
+    engine
+        .keys
+        .update_binding_metadata("x", "a", Some("x".repeat(1024 * 1024)), false);
+    let output = engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new("list-keys", ["-N", "-T", "x"]),
+        )
+        .unwrap()
+        .output;
+    assert!(output.len() > 1024 * 1024);
+    assert!(engine.key_listing_cache.lock().is_none());
+}

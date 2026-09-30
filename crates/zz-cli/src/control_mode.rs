@@ -198,9 +198,14 @@ impl DirectControl {
         })
     }
 
-    fn read_protocol(&mut self) {
+    fn read_protocol(&mut self, read_socket: bool) {
         if self.pending_protocol.is_none() && !self.disconnected {
-            match self.client.try_recv() {
+            let result = if read_socket {
+                self.client.try_recv()
+            } else {
+                self.client.try_recv_buffered()
+            };
+            match result {
                 Ok(Some(message)) => {
                     self.pending_protocol = Some(MainEvent::Protocol(message));
                 }
@@ -227,7 +232,9 @@ impl DirectControl {
             return Ok(self.take_ready(false));
         }
         if probe_protocol {
-            self.read_protocol();
+            self.read_protocol(true);
+        } else if !poll_empty {
+            self.read_protocol(false);
         }
         if self.input.has_event() || (self.pending_protocol.is_some() && !self.prefer_stdin) {
             return Ok(self.take_ready(false));
@@ -269,7 +276,7 @@ impl DirectControl {
             self.input.read();
         }
         if socket_ready {
-            self.read_protocol();
+            self.read_protocol(true);
         }
         Ok(self.take_ready(true))
     }
@@ -389,7 +396,7 @@ fn receive_buffered_control_event<W: Write>(
     if TERMINATION_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
         return Err(io::Error::from(io::ErrorKind::Interrupted));
     }
-    if let Some(event) = receiver.receive_with_probe(None, true, false)? {
+    if let Some(event) = receiver.receive_with_probe(None, output.block_open, false)? {
         if !matches!(
             &event,
             MainEvent::Protocol(message)
@@ -2688,6 +2695,83 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn an_open_guard_joins_a_kernel_ready_response_before_pending_exit_and_eof() {
+        #[derive(Default)]
+        struct Writes(Vec<Vec<u8>>);
+        impl Write for Writes {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.0.push(bytes.to_vec());
+                Ok(bytes.len())
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let (_directory, mut server, mut receiver, _input) = direct_control_fixture();
+        assert!(matches!(
+            receiver.receive(None).unwrap(),
+            Some(MainEvent::Protocol(_))
+        ));
+        let response = ProtocolMessage::CommandResponse(CommandResponse::Success {
+            request_id: 1,
+            output: "body".into(),
+            exit_code: 0,
+            stderr: String::new(),
+            stdout_claim: StdoutClaim::None,
+        });
+        let finished = ProtocolMessage::ExecExit(zz_protocol::ExecExit {
+            server_id: 1,
+            outcome: ExecOutcome::Ran,
+        });
+        let notification = ProtocolMessage::Attach {
+            session: "after-exit".to_owned(),
+        };
+        server
+            .write_all(
+                &zz_protocol::encode_protocol_message(&ProtocolMessage::Batch(
+                    zz_protocol::Batch::from_messages(
+                        2,
+                        [response, finished.clone(), notification.clone()],
+                    )
+                    .unwrap(),
+                ))
+                .unwrap(),
+            )
+            .unwrap();
+        server.shutdown(std::net::Shutdown::Write).unwrap();
+        let mut writer = ControlWriter::new(io::BufWriter::new(Writes::default()), false);
+        let frame = writer.begin_buffered_at(21, 1).unwrap();
+        let MainEvent::Protocol(message) =
+            receive_buffered_control_event(&mut receiver, &mut writer).unwrap()
+        else {
+            panic!("response expected");
+        };
+        let ProtocolMessage::CommandResponse(response) = *message else {
+            panic!("response expected");
+        };
+        assert!(writer.output.get_ref().0.is_empty());
+        writer.response(&frame, response).unwrap();
+        assert_eq!(
+            writer.output.get_ref().0,
+            [b"%begin 21 1 1\nbody\n%end 21 1 1\n".to_vec()]
+        );
+        for expected in [finished, notification] {
+            assert!(matches!(
+                receive_buffered_control_event(&mut receiver, &mut writer).unwrap(),
+                MainEvent::Protocol(message) if *message == expected
+            ));
+        }
+        assert!(matches!(
+            receive_buffered_control_event(&mut receiver, &mut writer).unwrap(),
+            MainEvent::Disconnected
+        ));
+        assert_eq!(writer.output.get_ref().0.len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn an_empty_probe_continuation_receives_stdin_and_protocol_ready_at_flush() {
         struct FlushReady {
             bytes: Vec<u8>,
@@ -2709,7 +2793,9 @@ mod tests {
             }
         }
 
-        for stdin_ready in [false, true] {
+        for (stdin_ready, block_open) in
+            [(false, false), (true, false), (false, true), (true, true)]
+        {
             let (_directory, mut server, mut receiver, input) = direct_control_fixture();
             assert!(matches!(
                 receiver.receive(None).unwrap(),
@@ -2738,10 +2824,19 @@ mod tests {
                 },
                 false,
             );
-            writer.begin_buffered_at(21, 1).unwrap();
+            if block_open {
+                writer.begin_buffered_at(21, 1).unwrap();
+            }
             let event = receive_buffered_control_event(&mut receiver, &mut writer).unwrap();
             assert_eq!(writer.output.flushes, 1);
-            assert_eq!(writer.output.bytes, b"%begin 21 1 1\n");
+            assert_eq!(
+                writer.output.bytes,
+                if block_open {
+                    b"%begin 21 1 1\n".as_slice()
+                } else {
+                    b"".as_slice()
+                }
+            );
             if stdin_ready {
                 assert!(matches!(event, MainEvent::Stdin(StdinEvent::Line(line))
                     if line == "after empty"));

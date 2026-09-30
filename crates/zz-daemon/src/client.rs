@@ -1972,7 +1972,20 @@ impl InteractiveClient {
 
     #[cfg(unix)]
     pub fn try_recv(&self) -> Result<Option<Box<ProtocolMessage>>, DaemonError> {
-        let result = self.reader.lock().try_recv_decodable()?;
+        self.try_recv_with_read(true)
+    }
+
+    #[cfg(unix)]
+    pub fn try_recv_buffered(&self) -> Result<Option<Box<ProtocolMessage>>, DaemonError> {
+        self.try_recv_with_read(false)
+    }
+
+    #[cfg(unix)]
+    fn try_recv_with_read(
+        &self,
+        read_socket: bool,
+    ) -> Result<Option<Box<ProtocolMessage>>, DaemonError> {
+        let result = self.reader.lock().try_recv_decodable(read_socket)?;
         if let Some((message, skipped)) = result {
             if skipped {
                 self.request_resync()?;
@@ -2131,9 +2144,12 @@ impl<S: TransportStream> ProtocolReceiver<S> {
     }
 
     #[cfg(unix)]
-    fn try_recv_decodable(&mut self) -> Result<Option<(Box<ProtocolMessage>, bool)>, DaemonError> {
+    fn try_recv_decodable(
+        &mut self,
+        read_socket: bool,
+    ) -> Result<Option<(Box<ProtocolMessage>, bool)>, DaemonError> {
         loop {
-            match self.try_recv() {
+            match self.try_recv(read_socket) {
                 Err(DaemonError::Protocol(ProtocolError::Decode(error))) => {
                     self.skipped_decode = true;
                     log::warn!(
@@ -2151,7 +2167,7 @@ impl<S: TransportStream> ProtocolReceiver<S> {
     }
 
     #[cfg(unix)]
-    fn try_recv(&mut self) -> Result<Option<Box<ProtocolMessage>>, DaemonError> {
+    fn try_recv(&mut self, read_socket: bool) -> Result<Option<Box<ProtocolMessage>>, DaemonError> {
         use std::io::BufRead as _;
         if let Some(message) = self.pending.pop_front() {
             return Ok(Some(Box::new(message)));
@@ -2164,6 +2180,9 @@ impl<S: TransportStream> ProtocolReceiver<S> {
         loop {
             if let Some(message) = ready.message()? {
                 return Ok(Some(message));
+            }
+            if !read_socket {
+                return Ok(None);
             }
             match ready.read(&mut self.frame, |buffer| {
                 self.stream.get_ref().read_ready(buffer)

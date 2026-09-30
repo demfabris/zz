@@ -34,17 +34,19 @@ fn readiness_retains_partial_frames_and_resumes_blocking_receive() {
     for cut in [1, 3, 9] {
         let start = receiver.ready.as_ref().map_or(0, |ready| ready.bytes.len());
         daemon.write_all(&frame[start..cut]).unwrap();
-        assert!(receiver.try_recv_decodable().unwrap().is_none());
+        assert!(receiver.try_recv_decodable(true).unwrap().is_none());
         assert_eq!(receiver.ready.as_ref().unwrap().bytes, frame[..cut]);
     }
     let scratch = receiver.frame.as_ptr();
     for _ in 0..4 {
-        assert!(receiver.try_recv_decodable().unwrap().is_none());
+        assert!(receiver.try_recv_decodable(true).unwrap().is_none());
         assert_eq!(receiver.frame.as_ptr(), scratch);
     }
     daemon.write_all(&frame[9..]).unwrap();
+    assert!(receiver.try_recv_decodable(false).unwrap().is_none());
+    assert_eq!(receiver.ready.as_ref().unwrap().bytes, frame[..9]);
     assert_eq!(receiver.recv_decodable().unwrap(), (message, false));
-    assert!(receiver.try_recv_decodable().unwrap().is_none());
+    assert!(receiver.try_recv_decodable(true).unwrap().is_none());
     assert_eq!(rustix::fs::fcntl_getfl(&fd).unwrap(), flags);
 }
 
@@ -71,17 +73,18 @@ fn readiness_drains_initial_pending_and_buffered_frames_before_eof() {
     receiver.pending.push_back(initial.clone());
     drop(daemon);
     assert_eq!(
-        receiver.try_recv_decodable().unwrap(),
+        receiver.try_recv_decodable(false).unwrap(),
         Some((Box::new(initial), false))
     );
     for message in &messages[1..] {
         assert_eq!(
-            receiver.try_recv_decodable().unwrap(),
+            receiver.try_recv_decodable(false).unwrap(),
             Some((Box::new(message.clone()), false))
         );
     }
+    assert!(receiver.try_recv_decodable(false).unwrap().is_none());
     assert!(
-        matches!(receiver.try_recv_decodable(), Err(crate::DaemonError::Io(error))
+        matches!(receiver.try_recv_decodable(true), Err(crate::DaemonError::Io(error))
         if error.kind() == std::io::ErrorKind::UnexpectedEof)
     );
 }
@@ -89,8 +92,7 @@ fn readiness_drains_initial_pending_and_buffered_frames_before_eof() {
 #[cfg(all(unix, feature = "daemon"))]
 #[test]
 fn readiness_preserves_decode_resync_across_an_empty_poll() {
-    use std::io::Write as _;
-    let (_directory, mut daemon, client) = readiness_pair();
+    use std::io::{BufRead as _, Write as _};
     let oversized = zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
         sequence: 1,
         payload: zz_protocol::EventPayload::ChooseTree {
@@ -105,34 +107,48 @@ fn readiness_preserves_decode_resync_across_an_empty_poll() {
             }),
         },
     });
-    daemon
-        .write_all(&zz_protocol::encode_protocol_message(&oversized).unwrap())
-        .unwrap();
-    let mut receiver = super::ProtocolReceiver::new(client);
-    assert!(receiver.try_recv_decodable().unwrap().is_none());
-    assert!(receiver.try_recv_decodable().unwrap().is_none());
-    let next = zz_protocol::ProtocolMessage::Attach {
-        session: "next".to_owned(),
-    };
-    daemon
-        .write_all(&zz_protocol::encode_protocol_message(&next).unwrap())
-        .unwrap();
-    assert_eq!(
-        receiver.try_recv_decodable().unwrap(),
-        Some((Box::new(next), true))
-    );
+    for read_socket in [false, true] {
+        let (_directory, mut daemon, client) = readiness_pair();
+        daemon
+            .write_all(&zz_protocol::encode_protocol_message(&oversized).unwrap())
+            .unwrap();
+        let mut receiver = super::ProtocolReceiver::new(client);
+        if !read_socket {
+            receiver.stream.fill_buf().unwrap();
+        }
+        assert!(receiver.try_recv_decodable(read_socket).unwrap().is_none());
+        assert!(receiver.try_recv_decodable(read_socket).unwrap().is_none());
+        let next = zz_protocol::ProtocolMessage::Attach {
+            session: "next".to_owned(),
+        };
+        daemon
+            .write_all(&zz_protocol::encode_protocol_message(&next).unwrap())
+            .unwrap();
+        if !read_socket {
+            assert!(receiver.try_recv_decodable(false).unwrap().is_none());
+        }
+        assert_eq!(
+            receiver.try_recv_decodable(true).unwrap(),
+            Some((Box::new(next), true))
+        );
+    }
 }
-
 #[cfg(all(unix, feature = "daemon"))]
 #[test]
 fn readiness_rejects_invalid_lengths_before_reading_a_body() {
-    use std::io::Write as _;
-    for length in [0, 3, zz_protocol::MAX_FRAME_BYTES as u32 + 1] {
+    use std::io::{BufRead as _, Write as _};
+    for (length, read_socket) in [0, 3, zz_protocol::MAX_FRAME_BYTES as u32 + 1]
+        .into_iter()
+        .flat_map(|length| [(length, false), (length, true)])
+    {
         let (_directory, mut daemon, client) = readiness_pair();
         daemon.write_all(&length.to_le_bytes()).unwrap();
         let mut receiver = super::ProtocolReceiver::new(client);
+        if !read_socket {
+            receiver.stream.fill_buf().unwrap();
+        }
         assert!(matches!(
-            receiver.try_recv_decodable(),
+            receiver.try_recv_decodable(read_socket),
             Err(crate::DaemonError::Protocol(
                 zz_protocol::ProtocolError::Truncated
                     | zz_protocol::ProtocolError::FrameTooLarge(_)
@@ -141,4 +157,29 @@ fn readiness_rejects_invalid_lengths_before_reading_a_body() {
         assert_eq!(receiver.ready.as_ref().unwrap().bytes.len(), 4);
         assert!(receiver.frame.capacity() <= super::RECEIVE_BUFFER_BYTES);
     }
+}
+
+#[test]
+fn readiness_buffered_decode_leaves_kernel_data_and_eof_for_the_readiness_read() {
+    use std::io::Write as _;
+    let (_directory, mut daemon, client) = readiness_pair();
+    let message = zz_protocol::ProtocolMessage::Attach {
+        session: "still in the socket".to_owned(),
+    };
+    daemon
+        .write_all(&zz_protocol::encode_protocol_message(&message).unwrap())
+        .unwrap();
+    drop(daemon);
+    let mut receiver = super::ProtocolReceiver::new(client);
+    assert!(receiver.try_recv_decodable(false).unwrap().is_none());
+    assert!(receiver.ready.as_ref().unwrap().bytes.is_empty());
+    assert_eq!(
+        receiver.try_recv_decodable(true).unwrap(),
+        Some((Box::new(message), false))
+    );
+    assert!(receiver.try_recv_decodable(false).unwrap().is_none());
+    assert!(
+        matches!(receiver.try_recv_decodable(true), Err(crate::DaemonError::Io(error))
+        if error.kind() == std::io::ErrorKind::UnexpectedEof)
+    );
 }

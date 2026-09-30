@@ -948,7 +948,7 @@ impl Renderer {
         {
             return;
         }
-        let previous = self.painted.get(&pane).cloned();
+        let previous = self.painted.remove(&pane);
         let structural_change = previous.as_ref().is_none_or(|previous| {
             previous.rect != rect
                 || previous.viewport.columns != viewport.columns

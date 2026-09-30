@@ -45,6 +45,10 @@ fn set_option(inner: &mut ServerState, context: &mut ExecutionContext, name: &st
 }
 
 fn request(inner: &ServerState, client: ClientId) -> StatusRequest {
+    shared_request(inner, client).as_ref().clone()
+}
+
+fn shared_request(inner: &ServerState, client: ClientId) -> Arc<StatusRequest> {
     status_request_with_selected_facts(
         inner,
         client,
@@ -56,6 +60,39 @@ fn request(inner: &ServerState, client: ClientId) -> StatusRequest {
 
 fn reuse_enabled() -> bool {
     zz_mux::format_cache_knob() && *BORROWED_FORMAT_FACTS && zz_mux::borrowed_formats_enabled()
+}
+
+#[test]
+fn selected_preparation_keeps_scalar_and_string_border_callbacks_fresh() {
+    let (mut inner, client, mut context) = fixture("#{session_name}");
+    set_option(
+        &mut inner,
+        &mut context,
+        "pane-active-border-style",
+        "fg=#{?pane_in_mode,red,green}",
+    );
+    let first = shared_request(&inner, client);
+    assert_eq!(first.pane_borders[0].style, "fg=green");
+    let same = shared_request(&inner, client);
+    assert_eq!(same.pane_borders[0].style, "fg=green");
+    inner
+        .pane_modes
+        .insert(context.pane.unwrap(), vec![PaneModeRequest::Clock]);
+    let changed = shared_request(&inner, client);
+    assert_eq!(changed.pane_borders[0].style, "fg=red");
+    assert_eq!(first.pane_borders[0].style, "fg=green");
+    set_option(
+        &mut inner,
+        &mut context,
+        "pane-active-border-style",
+        "fg=#{?pane_mode,red,green}",
+    );
+    let with_mode = shared_request(&inner, client);
+    assert_eq!(with_mode.pane_borders[0].style, "fg=red");
+    inner.pane_modes.remove(&context.pane.unwrap());
+    let without_mode = shared_request(&inner, client);
+    assert_eq!(without_mode.pane_borders[0].style, "fg=green");
+    assert_eq!(with_mode.pane_borders[0].style, "fg=red");
 }
 
 fn assert_left(request: &StatusRequest, expected: &str) {
@@ -70,6 +107,92 @@ fn assert_left(request: &StatusRequest, expected: &str) {
 fn assert_fresh(first: &StatusRequest, next: &StatusRequest) {
     assert!(!Arc::ptr_eq(&first.context, &next.context));
     assert!(!Arc::ptr_eq(&first.facts, &next.facts));
+}
+
+#[test]
+fn status_preparation_shares_the_whole_immutable_request() {
+    zz_mux::with_borrowed_formats(true, || {
+        let (inner, client, _) = fixture("#{session_name}:#{client_width}");
+        let first = shared_request(&inner, client);
+        let second = shared_request(&inner, client);
+        assert_eq!(Arc::ptr_eq(&first, &second), reuse_enabled());
+        assert_left(&second, "prepared:80");
+        if reuse_enabled() {
+            let cache = inner.status_preparation_cache.lock();
+            let cached = cache.as_ref().unwrap();
+            assert!(Arc::ptr_eq(&cached.request, &first));
+            assert!(Arc::ptr_eq(
+                &cached.request.pane_borders,
+                &first.pane_borders
+            ));
+        }
+        let owned = zz_mux::with_borrowed_formats(false, || shared_request(&inner, client));
+        assert!(!Arc::ptr_eq(&first, &owned));
+        assert_left(&owned, "prepared:80");
+        let startup = status_request_with_selected_facts(
+            &inner,
+            client,
+            inner.engine.cached_format_option_snapshot(),
+            false,
+            FormatNeeds::NONE,
+        );
+        assert!(!Arc::ptr_eq(&first, &startup));
+        assert!(startup.startup);
+        assert!(!first.startup);
+    });
+}
+
+#[test]
+fn status_preparation_replaces_shared_requests_for_border_clock_and_source_changes() {
+    zz_mux::with_borrowed_formats(true, || {
+        let (mut inner, client, mut context) = fixture("#{session_name}:#{config_files}");
+        set_option(
+            &mut inner,
+            &mut context,
+            "pane-active-border-style",
+            "fg=#{?pane_in_mode,red,green}",
+        );
+        let first = shared_request(&inner, client);
+        inner
+            .pane_modes
+            .insert(context.pane.unwrap(), vec![PaneModeRequest::Clock]);
+        let changed = shared_request(&inner, client);
+        assert!(!Arc::ptr_eq(&first, &changed));
+        assert_eq!(first.pane_borders[0].style, "fg=green");
+        assert_eq!(changed.pane_borders[0].style, "fg=red");
+        assert_eq!(
+            Arc::ptr_eq(&changed, &shared_request(&inner, client)),
+            reuse_enabled(),
+        );
+        inner.engine.set_format_now(1_700_000_001);
+        let tick = shared_request(&inner, client);
+        assert!(!Arc::ptr_eq(&changed, &tick));
+        assert_eq!(changed.context.format_now, Some(1_700_000_000));
+        assert_eq!(tick.context.format_now, Some(1_700_000_001));
+        inner.config_files = "/new.conf".to_owned();
+        let source = shared_request(&inner, client);
+        assert!(!Arc::ptr_eq(&tick, &source));
+        assert_left(&source, "prepared:/new.conf");
+        assert_left(&first, "prepared:");
+    });
+}
+
+#[test]
+fn status_preparation_bounds_the_retained_shared_border_payload() {
+    zz_mux::with_borrowed_formats(true, || {
+        let (inner, client, context) = fixture("#{session_name}");
+        let mut request = shared_request(&inner, client);
+        Arc::make_mut(&mut Arc::make_mut(&mut request).pane_borders)[0].style =
+            "x".repeat(STATUS_PREPARATION_MAX_BYTES);
+        let cached = CachedStatusPreparation::new(
+            &inner,
+            context.session,
+            context.window,
+            inner.engine.format_cache_revision().unwrap_or_default(),
+            request,
+        );
+        assert!(cached.retained_bytes() > STATUS_PREPARATION_MAX_BYTES);
+    });
 }
 
 #[test]
@@ -458,10 +581,130 @@ fn status_preparation_rejects_oversized_context_and_environment_capture() {
             context.session,
             context.window,
             inner.engine.format_cache_revision().unwrap_or_default(),
-            large,
+            Arc::new(large),
         );
         assert!(candidate.retained_bytes() > STATUS_PREPARATION_MAX_BYTES);
         assert!(inner.status_preparation_cache.lock().is_none());
+    });
+}
+
+#[test]
+fn raw_text_bound_rejects_large_prepared_job_environment_and_reuses_small_values() {
+    zz_mux::with_borrowed_formats(true, || {
+        let (mut inner, client, mut context) = fixture("#{session_name}");
+        for name in ["message-style", "message-command-style"] {
+            set_option(&mut inner, &mut context, name, "fg=blue");
+        }
+        for raw in [b"a\xffb".to_vec(), vec![0xff; 300_000]] {
+            let value = RawText::from_bytes(raw);
+            inner
+                .engine
+                .execute(
+                    &mut context,
+                    &CommandInvocation::new(
+                        "set-environment",
+                        ["-g".into(), "RAW_TEXT_BOUND".into(), value.clone()],
+                    ),
+                )
+                .unwrap();
+            let first = request(&inner, client);
+            let same = request(&inner, client);
+            let stored = first
+                .environment
+                .iter()
+                .find(|(name, _)| name.as_bytes() == b"RAW_TEXT_BOUND")
+                .and_then(|(_, value)| value.as_ref())
+                .unwrap();
+            assert_eq!(stored.as_bytes(), value.as_bytes());
+            assert_eq!(stored.as_str(), value.as_str());
+            assert_eq!(
+                StatusRenderer::default().render_initial(&first),
+                StatusRenderer::default().render_initial(&same)
+            );
+            let candidate = CachedStatusPreparation::new(
+                &inner,
+                context.session,
+                context.window,
+                inner.engine.format_cache_revision().unwrap_or_default(),
+                Arc::new(first.clone()),
+            );
+            if value.as_bytes().len() == 300_000 {
+                let mut without_job_environment = first;
+                without_job_environment.environment = Arc::default();
+                let empty = CachedStatusPreparation::new(
+                    &inner,
+                    context.session,
+                    context.window,
+                    inner.engine.format_cache_revision().unwrap_or_default(),
+                    Arc::new(without_job_environment),
+                );
+                assert!(candidate.retained_bytes() >= empty.retained_bytes() + 2_400_000);
+                assert!(candidate.retained_bytes() > STATUS_PREPARATION_MAX_BYTES);
+                assert!(inner.status_preparation_cache.lock().is_none());
+            } else {
+                assert!(candidate.retained_bytes() < STATUS_PREPARATION_MAX_BYTES);
+                assert_eq!(Arc::ptr_eq(&first.context, &same.context), reuse_enabled());
+                assert_eq!(Arc::ptr_eq(&first.facts, &same.facts), reuse_enabled());
+            }
+        }
+    });
+}
+
+#[test]
+fn raw_text_bound_client_blob_guard_reuses_without_retaining_parsed_payloads() {
+    zz_mux::with_borrowed_formats(true, || {
+        let (mut inner, client, context) = fixture("#{session_name}:#{client_colours}");
+        for lazy in [false, true] {
+            for size in [3, 15_000] {
+                let mut values = BTreeMap::from([("TERM".into(), "xterm".into())]);
+                for index in 0..16 {
+                    values.insert(
+                        format!("BAD_{index}").into(),
+                        RawText::from_bytes(vec![0xff; size]),
+                    );
+                }
+                let blob = ClientEnvironmentBlob::from_map(values);
+                let blob = if lazy {
+                    ClientEnvironmentBlob::from_bytes(blob.as_bytes().to_vec())
+                } else {
+                    blob
+                };
+                assert!(blob.is_valid());
+                assert_eq!(blob.map().get("BAD_0").unwrap().as_bytes().len(), size);
+                let minimum_payload = blob.as_bytes().len() + 16 * size * 4;
+                inner.client_environments.insert(client, Arc::new(blob));
+                let identity = Arc::downgrade(inner.client_environments.get(&client).unwrap());
+                let first = request(&inner, client);
+                let same = request(&inner, client);
+                assert_left(&first, "prepared:8");
+                assert_eq!(
+                    StatusRenderer::default().render_initial(&first),
+                    StatusRenderer::default().render_initial(&same)
+                );
+                let candidate = CachedStatusPreparation::new(
+                    &inner,
+                    context.session,
+                    context.window,
+                    inner.engine.format_cache_revision().unwrap_or_default(),
+                    Arc::new(first.clone()),
+                );
+                assert!(candidate.retained_bytes() < STATUS_PREPARATION_MAX_BYTES);
+                if size == 15_000 {
+                    assert!(minimum_payload > STATUS_PREPARATION_MAX_BYTES);
+                }
+                assert_eq!(Arc::ptr_eq(&first.context, &same.context), reuse_enabled());
+                assert_eq!(Arc::ptr_eq(&first.facts, &same.facts), reuse_enabled());
+                assert_eq!(
+                    candidate.environment.as_ref().unwrap().as_ptr(),
+                    identity.as_ptr()
+                );
+                drop(candidate);
+                drop(first);
+                drop(same);
+                assert!(inner.client_environments.remove(&client).is_some());
+                assert!(identity.upgrade().is_none());
+            }
+        }
     });
 }
 

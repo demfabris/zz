@@ -15853,7 +15853,7 @@ impl Shared {
         };
         let status = {
             let mut renderer = self.status.lock();
-            renderer.render_forced(&request)
+            renderer.render_forced_shared(&request)
         };
         self.publish_to_client(target, EventPayload::StatusChanged { status });
         Ok(Execution::default())
@@ -37293,7 +37293,9 @@ fn status_requests_with_selected_facts(
                     Arc::clone(&option_snapshot),
                     startup_ready,
                     job_needs.get(&client).copied().unwrap_or_default(),
-                );
+                )
+                .as_ref()
+                .clone();
             }
             let facts = (inner.client_kinds.get(&client) == Some(&ClientKind::Control))
                 .then(|| format_hook_facts(inner));
@@ -37317,7 +37319,7 @@ fn status_request_with_selected_facts(
     option_snapshot: Arc<zz_mux::StatusRowVariables>,
     startup_ready: bool,
     job_needs: FormatNeeds,
-) -> StatusRequest {
+) -> Arc<StatusRequest> {
     let revision = (*BORROWED_FORMAT_FACTS
         && zz_mux::borrowed_formats_enabled()
         && inner.client_kinds.get(&client) != Some(&ClientKind::Control)
@@ -37330,7 +37332,7 @@ fn status_request_with_selected_facts(
     let window = client_focused_window_for_attachment(inner, client);
     let mut reuse_admission = false;
     if let Some(revision) = revision {
-        let cache = inner.status_preparation_cache.lock();
+        let mut cache = inner.status_preparation_cache.lock();
         if let Some(cached) = cache.as_ref()
             && cached.matches(
                 inner,
@@ -37342,20 +37344,47 @@ fn status_request_with_selected_facts(
                 startup_ready,
             )
         {
-            let mut request = cached.request.clone();
-            let facts = readonly_borrowed_format_hook_facts(
-                inner,
-                CommandFormatSeed {
-                    client: cached
-                        .border_client
-                        .then(|| request.facts.client.clone())
-                        .flatten(),
-                    invoking: Some(client),
+            let request = Arc::clone(&cached.request);
+            let pane_borders = attached.map_or_else(
+                || Arc::clone(&request.pane_borders),
+                |session| {
+                    cached_live_border_presentations(
+                        inner,
+                        client,
+                        session,
+                        &option_snapshot,
+                        || {
+                            SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .map_or(0, |duration| duration.as_secs())
+                        },
+                    )
+                    .unwrap_or_else(|| {
+                        let facts = readonly_borrowed_format_hook_facts(
+                            inner,
+                            CommandFormatSeed {
+                                client: cached
+                                    .border_client
+                                    .then(|| request.facts.client.clone())
+                                    .flatten(),
+                                invoking: Some(client),
+                            },
+                        );
+                        border_presentations(inner, client, session, &facts)
+                    })
                 },
             );
-            request.pane_borders = attached.map_or_else(Arc::default, |session| {
-                border_presentations(inner, client, session, &facts)
+            if Arc::ptr_eq(&request.pane_borders, &pane_borders) {
+                return request;
+            }
+            let request = Arc::new(StatusRequest {
+                pane_borders,
+                ..request.as_ref().clone()
             });
+            cache.as_mut().unwrap().request = Arc::clone(&request);
+            if cache.as_ref().unwrap().retained_bytes() > STATUS_PREPARATION_MAX_BYTES {
+                *cache = None;
+            }
             return request;
         }
         if let Some(cached) = cache.as_ref() {
@@ -37374,7 +37403,7 @@ fn status_request_with_selected_facts(
         || inner.client_kinds.get(&client) == Some(&ClientKind::Control))
     .then(|| format_hook_facts(inner));
     let snapshot = facts.is_some().then(|| inner.engine.state.snapshot());
-    let request = status_request_with_facts(
+    let request = Arc::new(status_request_with_facts(
         inner,
         client,
         snapshot.as_ref(),
@@ -37383,7 +37412,7 @@ fn status_request_with_selected_facts(
         startup_ready,
         job_needs,
         &mut BTreeMap::new(),
-    );
+    ));
     if let Some(revision) = revision {
         let reusable = reuse_admission || {
             let parameters = status_parameters(inner, attached, &request.option_snapshot);
@@ -37426,9 +37455,9 @@ struct CachedStatusPreparation {
     kind: Option<ClientKind>,
     terminal: bool,
     features: Option<u32>,
-    environment: Option<Arc<ClientEnvironmentBlob>>,
+    environment: Option<Weak<ClientEnvironmentBlob>>,
     config_files: String,
-    request: StatusRequest,
+    request: Arc<StatusRequest>,
     viewport_requested: bool,
     border_client: bool,
 }
@@ -37439,10 +37468,9 @@ impl CachedStatusPreparation {
         attached: Option<SessionId>,
         window: Option<WindowId>,
         revision: (u64, u64, u64, u64),
-        mut request: StatusRequest,
+        request: Arc<StatusRequest>,
     ) -> Self {
         let client = request.client;
-        request.pane_borders = Arc::default();
         let viewport_requested = status_parameters(inner, attached, &request.option_snapshot)
             .client_fact_selection
             .viewport;
@@ -37465,7 +37493,7 @@ impl CachedStatusPreparation {
             kind: inner.client_kinds.get(&client).copied(),
             terminal: inner.client_terminals.contains(&client),
             features: inner.client_features.get(&client).copied(),
-            environment: inner.client_environments.get(&client).cloned(),
+            environment: inner.client_environments.get(&client).map(Arc::downgrade),
             config_files: inner.config_files.clone(),
             request,
             viewport_requested,
@@ -37528,18 +37556,15 @@ impl CachedStatusPreparation {
                 })
             && match (&self.environment, inner.client_environments.get(&client)) {
                 (None, None) => true,
-                (Some(cached), Some(current)) => Arc::ptr_eq(cached, current),
+                (Some(cached), Some(current)) => cached.as_ptr() == Arc::as_ptr(current),
                 _ => false,
             }
     }
 
     fn retained_bytes(&self) -> usize {
-        let environment = self.environment.as_ref().map_or(0, |environment| {
-            environment
-                .as_bytes()
-                .len()
-                .saturating_mul(3)
-                .saturating_add(environment.entries().count().saturating_mul(128))
+        let environment = self.environment.as_ref().map_or(0, |_| {
+            std::mem::size_of::<ClientEnvironmentBlob>()
+                .saturating_add(std::mem::size_of::<usize>().saturating_mul(2))
         });
         let job_environment =
             self.request
@@ -37547,8 +37572,8 @@ impl CachedStatusPreparation {
                 .iter()
                 .fold(0_usize, |bytes, (name, value)| {
                     bytes
-                        .saturating_add(name.as_bytes().len())
-                        .saturating_add(value.as_ref().map_or(0, |value| value.as_bytes().len()))
+                        .saturating_add(zz_mux::cloned_raw_text_bytes(name))
+                        .saturating_add(value.as_ref().map_or(0, zz_mux::cloned_raw_text_bytes))
                         .saturating_add(128)
                 });
         crate::status::completed_status_bytes(
@@ -37662,8 +37687,8 @@ impl StatusParameters {
             .fold(0_usize, |bytes, (name, value)| {
                 bytes
                     .saturating_add(std::mem::size_of::<(RawText, Option<RawText>)>())
-                    .saturating_add(name.as_bytes().len())
-                    .saturating_add(value.as_ref().map_or(0, |value| value.as_bytes().len()))
+                    .saturating_add(zz_mux::cloned_raw_text_bytes(name))
+                    .saturating_add(value.as_ref().map_or(0, zz_mux::cloned_raw_text_bytes))
             });
         text.saturating_add(environment)
             .saturating_add(std::mem::size_of::<Self>())
@@ -37933,6 +37958,7 @@ struct CachedBorderPresentations {
     callbacks: Vec<String>,
     panes: Vec<CachedBorderPane>,
     presentations: Arc<Vec<zz_protocol::PaneBorderPresentation>>,
+    clock_dependent: bool,
 }
 
 struct CachedBorderPane {
@@ -37943,6 +37969,19 @@ struct CachedBorderPane {
 }
 
 impl CachedBorderPresentations {
+    fn matches(
+        &self,
+        revision: (u64, u64, u64, u64),
+        second: u64,
+        target: (ClientId, SessionId, WindowId),
+        option_snapshot: &Arc<zz_mux::StatusRowVariables>,
+    ) -> bool {
+        (self.revision.0, self.revision.1, self.revision.2) == (revision.0, revision.1, revision.2)
+            && (!self.clock_dependent || (self.revision.3 == revision.3 && self.second == second))
+            && (self.client, self.session, self.window) == target
+            && Arc::ptr_eq(&self.option_snapshot, option_snapshot)
+    }
+
     fn same_callbacks(&self, facts: &dyn crate::status::FormatFactSource) -> bool {
         if !self.panes.iter().all(|pane| {
             pane.pane_in_mode
@@ -38082,6 +38121,41 @@ fn border_format_callbacks(
     Some(callbacks)
 }
 
+fn border_format_clock_dependent(
+    engine: &MuxEngine,
+    context: &zz_mux::StatusContext,
+    option_snapshot: &zz_mux::StatusRowVariables,
+    references: &BTreeSet<String>,
+) -> bool {
+    BORDER_FORMAT_TEMPLATES
+        .into_iter()
+        .any(zz_mux::format_clock_dependent)
+        || references.iter().any(|name| {
+            if name == "*" || name.starts_with("T:") {
+                return true;
+            }
+            let Some(name) = name.strip_prefix("E:") else {
+                return false;
+            };
+            if let Some(source) = option_snapshot.lookup(
+                &context.session_id,
+                &context.window_id,
+                &context.pane_id,
+                name,
+            ) {
+                return zz_mux::format_clock_dependent(&source);
+            }
+            engine
+                .format_user_option(
+                    &context.pane_id,
+                    &context.window_id,
+                    &context.session_id,
+                    name,
+                )
+                .is_none_or(zz_mux::format_clock_dependent)
+        })
+}
+
 #[cfg(test)]
 thread_local! {
     static BORDER_FORMAT_EXPANSIONS: Cell<usize> = const { Cell::new(0) };
@@ -38113,6 +38187,39 @@ fn border_presentations(
     border_presentations_at(inner, client, session, facts, second)
 }
 
+fn cached_live_border_presentations(
+    inner: &ServerState,
+    client: ClientId,
+    session: SessionId,
+    option_snapshot: &Arc<zz_mux::StatusRowVariables>,
+    second: impl FnOnce() -> u64,
+) -> Option<Arc<Vec<zz_protocol::PaneBorderPresentation>>> {
+    let revision = inner.engine.format_cache_revision()?;
+    let session_state = inner.engine.state.sessions.get(&session)?;
+    let window = client_focused_window(inner, client, session_state);
+    inner.engine.state.windows.get(&window)?;
+    let cache = inner.border_presentations_cache.lock();
+    let cached = cache.as_ref()?;
+    let second = if cached.clock_dependent {
+        second()
+    } else {
+        cached.second
+    };
+    (cached.callbacks.is_empty()
+        && cached.matches(revision, second, (client, session, window), option_snapshot)
+        && cached.panes.iter().all(|pane| {
+            pane.pane_in_mode.is_none_or(|count| {
+                pane_in_mode_count_from_parts(
+                    pane.presentation.pane,
+                    &inner.pane_modes,
+                    &inner.copy_sessions,
+                    &inner.terminals,
+                ) == count
+            })
+        }))
+    .then(|| cached.presentations())
+}
+
 fn border_presentations_at(
     inner: &ServerState,
     client: ClientId,
@@ -38134,12 +38241,12 @@ fn border_presentations_at(
     {
         let cache = inner.border_presentations_cache.lock();
         if let Some(cached) = cache.as_ref()
-            && cached.revision == revision
-            && cached.second == second
-            && cached.client == client
-            && cached.session == session
-            && cached.window == window
-            && Arc::ptr_eq(&cached.option_snapshot, &option_snapshot)
+            && cached.matches(
+                revision,
+                second,
+                (client, session, window),
+                &option_snapshot,
+            )
             && cached.same_callbacks(facts)
         {
             return cached.presentations();
@@ -38162,12 +38269,19 @@ fn border_presentations_at(
     let pane_in_mode = callbacks.iter().any(|name| name == "pane_in_mode");
     callbacks.retain(|name| name != "pane_in_mode");
     let mut hooks = DaemonFormatHooks::command(facts).with_option_engine(&inner.engine);
+    let mut clock_dependent = false;
     let panes: Vec<CachedBorderPane> = window_state
         .panes
         .keys()
         .take(zz_protocol::MAX_PANE_BORDER_PRESENTATIONS)
         .map(|pane| {
             let context = contexts.status_context(Some(session), Some(window), Some(*pane));
+            clock_dependent |= border_format_clock_dependent(
+                &inner.engine,
+                &context,
+                &option_snapshot,
+                &references,
+            );
             let pane_in_mode = pane_in_mode.then(|| facts.pane_in_mode_count(*pane));
             if let Some(count) = pane_in_mode {
                 hooks.set_pane_in_mode_count(*pane, count);
@@ -38205,6 +38319,7 @@ fn border_presentations_at(
         callbacks,
         panes,
         presentations,
+        clock_dependent,
     };
     let result = cached.presentations();
     *inner.border_presentations_cache.lock() =
@@ -42042,6 +42157,22 @@ impl BorrowedFormatHookFacts<'_> {
     }
 }
 
+fn pane_in_mode_count_from_parts(
+    pane: PaneId,
+    pane_modes: &BTreeMap<PaneId, Vec<PaneModeRequest>>,
+    copy_sessions: &BTreeMap<ClientId, CopySession>,
+    terminals: &BTreeMap<PaneId, Arc<TerminalSession>>,
+) -> usize {
+    pane_modes.get(&pane).map_or(0, Vec::len)
+        + usize::from(copy_sessions.iter().any(|(client, session)| {
+            session.pane == pane
+                && !session.exiting
+                && terminals.get(&pane).is_some_and(|terminal| {
+                    terminal.copy_mode_facts(TerminalViewId(client.0)).is_some()
+                })
+        }))
+}
+
 impl crate::status::FormatFactSource for BorrowedFormatHookFacts<'_> {
     fn agent_states(&self) -> &BTreeMap<PaneId, zz_protocol::AgentPaneWire> {
         self.agent_states
@@ -42215,14 +42346,7 @@ impl crate::status::FormatFactSource for BorrowedFormatHookFacts<'_> {
     }
 
     fn pane_in_mode_count(&self, pane: PaneId) -> usize {
-        self.pane_modes.get(&pane).map_or(0, Vec::len)
-            + usize::from(self.copy_sessions.iter().any(|(client, session)| {
-                session.pane == pane
-                    && !session.exiting
-                    && self.terminals.get(&pane).is_some_and(|terminal| {
-                        terminal.copy_mode_facts(TerminalViewId(client.0)).is_some()
-                    })
-            }))
+        pane_in_mode_count_from_parts(pane, self.pane_modes, self.copy_sessions, self.terminals)
     }
 }
 

@@ -998,3 +998,51 @@ fn detached_source_revisions_preserve_environment_and_legacy_equality_boundaries
     assert!(first.values.get().is_none());
     assert!(second.values.get().is_none());
 }
+
+#[test]
+fn raw_text_bound_rejects_large_lossy_environment_captures_and_keeps_small_parity() {
+    let mut engine = MuxEngine::default();
+    let (session, window, pane) = engine.state.create_session("work").unwrap();
+    let target = FormatContext {
+        session: Some(session),
+        window: Some(window),
+        pane: Some(pane),
+        ..FormatContext::default()
+    };
+    let template = "#{Vg:#{environ_value}}";
+    for raw in [b"a\xffb".to_vec(), vec![0xff; 300_000]] {
+        let value = RawText::from_bytes(raw);
+        engine
+            .execute(
+                &mut crate::ExecutionContext::default(),
+                &zz_protocol::CommandInvocation::new(
+                    "set-environment",
+                    ["-g".into(), "RAW_TEXT_BOUND".into(), value.clone()],
+                ),
+            )
+            .unwrap();
+        let first = cache_context(&engine, target, template);
+        let same = cache_context(&engine, target, template);
+        assert_eq!(
+            expand_status(template, &first, &mut Hooks(&engine)),
+            value.as_str()
+        );
+        assert_cache_context_matches_w1(&engine, target, template, &first);
+        let payload = value.as_bytes().len() + value.as_str().len();
+        assert_eq!(cloned_raw_text_bytes(&value), payload);
+        assert!(first.retained_bytes() >= payload);
+        if value.as_bytes().len() == 300_000 {
+            assert_eq!(payload, 1_200_000);
+            assert!(first.retained_bytes() > FORMAT_CAPTURE_CACHE_BYTES);
+            assert!(engine.format_context_cache.lock().is_none());
+        } else {
+            assert_eq!(payload, 8);
+            assert!(first.retained_bytes() < FORMAT_CAPTURE_CACHE_BYTES);
+            assert_eq!(
+                Arc::ptr_eq(&first.variables, &same.variables),
+                format_cache_knob()
+            );
+        }
+    }
+    assert_eq!(cloned_raw_text_bytes(&RawText::from("valid")), 5);
+}

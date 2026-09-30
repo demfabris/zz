@@ -176,7 +176,7 @@ fn status_forget_cleans_rendered_clients_before_publication() {
     let request = request(9, "#(printf ready)", "");
     let mut renderer = StatusRenderer::default();
     let mut touched = BTreeSet::new();
-    let _ = renderer.render_request(&request, &mut touched, false, 1_700_000_000);
+    let _ = renderer.render_request(&request, &mut touched, false, 1_700_000_000, None);
     assert!(renderer.owned_clients.contains(&request.client));
     assert!(!renderer.published.contains_key(&request.client));
     assert_eq!(renderer.shell_cache.len(), 1);
@@ -434,6 +434,136 @@ fn completed_request(left: &str) -> (MuxEngine, zz_mux::ExecutionContext, Status
     Arc::make_mut(&mut request.formats).foreground = "default".to_owned();
     Arc::make_mut(&mut request.formats).background = "default".to_owned();
     (engine, context, request)
+}
+
+#[test]
+fn completed_status_shared_request_identity_keeps_clock_and_mutations_fresh() {
+    let cache_enabled = zz_mux::format_cache_knob() && zz_mux::borrowed_formats_enabled();
+    let (_, _, request) = completed_request("#{session_name}:#{client_prefix}:%S");
+    let mut request = Arc::new(request);
+    let mut renderer = StatusRenderer::default();
+    let mut wire = renderer.render_forced_shared_at(&request, 1_700_000_000);
+    let first = wire.clone();
+    wire.left = "wire-only".to_owned();
+    assert_eq!(
+        renderer.render_forced_shared_at(&request, 1_700_000_000),
+        first
+    );
+    assert_eq!(renderer.expansions, if cache_enabled { 1 } else { 2 });
+    request = Arc::new(request.as_ref().clone());
+    assert_eq!(
+        renderer.render_forced_shared_at(&request, 1_700_000_000),
+        first
+    );
+    assert_eq!(renderer.expansions, if cache_enabled { 1 } else { 3 });
+    if cache_enabled {
+        assert_eq!(
+            renderer
+                .completed
+                .as_ref()
+                .unwrap()
+                .request_identity
+                .as_ptr(),
+            Arc::as_ptr(&request),
+        );
+    }
+    let tick = renderer.render_forced_shared_at(&request, 1_700_000_001);
+    assert_ne!(tick.left, first.left);
+    let old_request = Arc::clone(&request);
+    let old_published = Arc::clone(renderer.published.get(&request.client).unwrap());
+    Arc::make_mut(&mut Arc::make_mut(&mut request).facts)
+        .client
+        .as_mut()
+        .unwrap()
+        .prefix = "1".to_owned();
+    assert!(!Arc::ptr_eq(&old_request, &request));
+    let changed = renderer.render_forced_shared_at(&request, 1_700_000_001);
+    assert!(changed.left.starts_with("cached:1:"));
+    assert_eq!(old_request.facts.client.as_ref().unwrap().prefix, "");
+    assert_eq!(old_published.left, tick.left);
+    Arc::make_mut(&mut Arc::make_mut(&mut request).context)
+        .set_format_value("session_name", "fresh");
+    assert!(
+        renderer
+            .render_forced_shared_at(&request, 1_700_000_001)
+            .left
+            .starts_with("fresh:1:"),
+    );
+    let pane = request.context.pane_id.parse().unwrap();
+    let context = request.context.as_ref().clone();
+    Arc::make_mut(&mut request).modes.push(ModeRequest {
+        pane,
+        view: false,
+        context,
+        position: 0,
+        limit: 0,
+        vi_keys: false,
+    });
+    assert_eq!(
+        renderer
+            .render_forced_shared_at(&request, 1_700_000_001)
+            .modes
+            .len(),
+        1,
+    );
+    assert!(renderer.completed.is_none());
+    let expansions = renderer.expansions;
+    renderer.render_forced_shared_at(&request, 1_700_000_001);
+    assert_eq!(renderer.expansions, expansions + 1);
+}
+
+#[test]
+fn completed_status_shared_request_make_mut_disassociates_weak_identity() {
+    let cache_enabled = zz_mux::format_cache_knob() && zz_mux::borrowed_formats_enabled();
+    let (_, _, request) = completed_request("#{session_name}");
+    let mut request = Arc::new(request);
+    let mut renderer = StatusRenderer::default();
+    assert_eq!(
+        renderer
+            .render_forced_shared_at(&request, 1_700_000_000)
+            .left,
+        "cached"
+    );
+    let prior_identity = renderer
+        .completed
+        .as_ref()
+        .map(|completed| completed.request_identity.clone());
+    assert_eq!(Arc::strong_count(&request), 1);
+    Arc::make_mut(&mut Arc::make_mut(&mut request).formats).left = "changed".to_owned();
+    if cache_enabled {
+        assert_ne!(prior_identity.unwrap().as_ptr(), Arc::as_ptr(&request));
+    }
+    assert_eq!(
+        renderer
+            .render_forced_shared_at(&request, 1_700_000_000)
+            .left,
+        "changed"
+    );
+    assert_eq!(renderer.expansions, 2);
+}
+
+#[test]
+fn completed_status_shared_request_bypasses_unsafe_and_forced_job_formats() {
+    for template in ["#{cursor_x}", "#{copy_cursor_line}", "#{agent_state}"] {
+        let (_, _, request) = completed_request(template);
+        let request = Arc::new(request);
+        let mut renderer = StatusRenderer::default();
+        renderer.render_forced_shared_at(&request, 1_700_000_000);
+        renderer.render_forced_shared_at(&request, 1_700_000_000);
+        assert_eq!(renderer.expansions, 2, "{template}");
+        assert!(renderer.completed.is_none(), "{template}");
+    }
+    let directory = tempfile::tempdir().expect("shared forced job fixture");
+    let count = directory.path().join("count");
+    let format = format!("#(echo run >> '{}'; echo value)", count.display());
+    let request = Arc::new(request(1, &format, ""));
+    let mut renderer = StatusRenderer::default();
+    assert_eq!(settled(&mut renderer, &request).left, "value");
+    let runs = std::fs::read_to_string(&count).unwrap().lines().count();
+    renderer.render_forced_shared(&request);
+    assert_eq!(settled(&mut renderer, &request).left, "value");
+    assert!(std::fs::read_to_string(&count).unwrap().lines().count() > runs);
+    assert!(renderer.completed.is_none());
 }
 
 #[test]

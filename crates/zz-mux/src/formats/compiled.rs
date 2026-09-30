@@ -4,6 +4,7 @@ use super::*;
 
 const CACHE_ENTRIES: usize = 512;
 const CACHE_BYTES: usize = 1024 * 1024;
+const CACHE_CONTAINER_BYTES: usize = 64 * 1024;
 
 static COMPILED_FORMATS: LazyLock<bool> =
     LazyLock::new(|| std::env::var("ZZ_PERF_COMPILED_FORMATS").as_deref() != Ok("0"));
@@ -42,24 +43,33 @@ struct Cache {
 }
 
 pub(super) fn get(source: &str) -> Arc<Template> {
+    if !format_cache_knob() {
+        return Arc::new(Template::parse(source, false));
+    }
     if let Some(template) = CACHE.with_borrow(|cache| cache.entries.get(source).cloned()) {
         return template;
     }
     let template = Arc::new(Template::parse(source, false));
-    let bytes = template.bytes + source.len();
-    if bytes > CACHE_BYTES {
+    let bytes = template
+        .bytes
+        .saturating_add(source.len().saturating_mul(2));
+    if bytes > CACHE_BYTES - CACHE_CONTAINER_BYTES {
         return template;
     }
     CACHE.with_borrow_mut(|cache| {
-        while cache.entries.len() >= CACHE_ENTRIES || cache.bytes + bytes > CACHE_BYTES {
+        while cache.entries.len() >= CACHE_ENTRIES
+            || cache.bytes.saturating_add(bytes) > CACHE_BYTES - CACHE_CONTAINER_BYTES
+        {
             let Some(oldest) = cache.order.pop_front() else {
                 break;
             };
             if let Some(removed) = cache.entries.remove(oldest.as_ref()) {
-                cache.bytes -= removed.bytes + oldest.len();
+                cache.bytes = cache
+                    .bytes
+                    .saturating_sub(removed.bytes.saturating_add(oldest.len().saturating_mul(2)));
             }
         }
-        cache.bytes += bytes;
+        cache.bytes = cache.bytes.saturating_add(bytes);
         cache.order.push_back(source.into());
         cache.entries.insert(source.into(), template.clone());
     });
@@ -71,6 +81,7 @@ pub(super) struct Template {
     pub(super) parts: Arc<[Range<usize>]>,
     pub(super) references: Arc<[String]>,
     bytes: usize,
+    pub(super) clock_dependent: bool,
 }
 
 pub(super) enum Operation {
@@ -94,7 +105,50 @@ pub(super) struct Replacement {
 }
 
 impl Replacement {
-    fn parse(body: &str, references: &mut BTreeSet<String>, depth: usize) -> Self {
+    fn allocation_bytes(&self) -> usize {
+        let mut bytes = self
+            .body
+            .len()
+            .saturating_add(self.copy.len())
+            .saturating_add(
+                self.modifiers
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<Modifier>()),
+            )
+            .saturating_add(
+                self.discarded
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<String>()),
+            )
+            .saturating_add(self.dynamic_padding.as_ref().map_or(0, |padding| {
+                padding
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<(usize, bool)>())
+            }))
+            .saturating_add(self.flags.as_ref().map_or(0, Flags::allocation_bytes));
+        for modifier in &self.modifiers {
+            bytes = bytes.saturating_add(
+                modifier
+                    .args
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<String>()),
+            );
+            for argument in &modifier.args {
+                bytes = bytes.saturating_add(argument.capacity());
+            }
+        }
+        for argument in &self.discarded {
+            bytes = bytes.saturating_add(argument.capacity());
+        }
+        bytes
+    }
+
+    fn parse(
+        body: &str,
+        references: &mut BTreeSet<String>,
+        clock_dependent: &mut bool,
+        depth: usize,
+    ) -> Self {
         let mut arguments = Vec::new();
         let parsed = parse_modifiers(body, |argument| {
             arguments.push(argument.to_owned());
@@ -105,17 +159,15 @@ impl Replacement {
             None => (Vec::new(), body, arguments),
         };
         let flags = ModifierFlags::from_modifiers(&modifiers);
+        *clock_dependent |= flags.time.enabled || flags.expand_time;
         for argument in modifiers
             .iter()
             .flat_map(|modifier| &modifier.args)
             .chain(&discarded)
         {
-            references.extend(
-                Template::parse_depth(argument, false, depth + 1)
-                    .references
-                    .iter()
-                    .cloned(),
-            );
+            let template = Template::parse_depth(argument, false, depth + 1);
+            *clock_dependent |= template.clock_dependent;
+            references.extend(template.references.iter().cloned());
         }
         let dynamic_fact_flags = |kind| {
             modifiers.iter().any(|modifier| {
@@ -150,12 +202,9 @@ impl Replacement {
                 if index % 2 == 0 && index + 1 < parts.len() && !part.contains("#{") {
                     references.insert((*part).to_owned());
                 }
-                references.extend(
-                    Template::parse_depth(part, false, depth + 1)
-                        .references
-                        .iter()
-                        .cloned(),
-                );
+                let template = Template::parse_depth(part, false, depth + 1);
+                *clock_dependent |= template.clock_dependent;
+                references.extend(template.references.iter().cloned());
             }
         } else if !flags.literal {
             if copy.contains("#{")
@@ -177,12 +226,9 @@ impl Replacement {
                 || flags.comparison.is_some()
                 || flags.expression.is_some()
             {
-                references.extend(
-                    Template::parse_depth(copy, false, depth + 1)
-                        .references
-                        .iter()
-                        .cloned(),
-                );
+                let template = Template::parse_depth(copy, false, depth + 1);
+                *clock_dependent |= template.clock_dependent;
+                references.extend(template.references.iter().cloned());
             } else {
                 references.insert(copy.to_owned());
             }
@@ -191,6 +237,7 @@ impl Replacement {
             .iter()
             .flat_map(|modifier| &modifier.args)
             .any(|argument| argument.contains(['#', '%']));
+        *clock_dependent |= dynamic;
         let last_padding = modifiers
             .iter()
             .rposition(|modifier| modifier.kind == ModifierKind::Padding);
@@ -244,15 +291,22 @@ impl Template {
 
     fn parse_depth(source: &str, style: bool, depth: usize) -> Self {
         if depth == FORMAT_LOOP_LIMIT {
-            return Self {
+            let mut template = Self {
                 operations: vec![Operation::Text(source.into())],
                 parts: std::iter::once(0..source.len()).collect(),
                 references: Arc::from(["*".to_owned()]),
-                bytes: source.len(),
+                bytes: 0,
+                clock_dependent: true,
             };
+            template.bytes = template
+                .allocation_bytes()
+                .saturating_add(std::mem::size_of::<Self>())
+                .saturating_add(std::mem::size_of::<usize>().saturating_mul(2));
+            return template;
         }
         let mut operations = Vec::new();
         let mut references = BTreeSet::new();
+        let mut clock_dependent = source.contains('%');
         let mut literal = String::new();
         let mut index = 0;
         while index < source.len() {
@@ -272,6 +326,7 @@ impl Template {
                 };
                 Self::flush(&mut operations, &mut literal);
                 let body = Self::parse_depth(&source[hashes_end + 1..end], true, depth + 1);
+                clock_dependent |= body.clock_dependent;
                 references.extend(body.references.iter().cloned());
                 operations.push(Operation::Style(source[index..=hashes_end].into(), body));
                 index = end + 1;
@@ -291,12 +346,9 @@ impl Template {
                     Self::flush(&mut operations, &mut literal);
                     let command = &source[after_next..end];
                     references.insert("*".to_owned());
-                    references.extend(
-                        Self::parse_depth(command, false, depth + 1)
-                            .references
-                            .iter()
-                            .cloned(),
-                    );
+                    let template = Self::parse_depth(command, false, depth + 1);
+                    clock_dependent |= template.clock_dependent;
+                    references.extend(template.references.iter().cloned());
                     operations.push(Operation::Shell(command.into()));
                     index = end + 1;
                     continue;
@@ -306,8 +358,12 @@ impl Template {
                         break;
                     };
                     Self::flush(&mut operations, &mut literal);
-                    let replacement =
-                        Replacement::parse(&source[after_next..end], &mut references, depth);
+                    let replacement = Replacement::parse(
+                        &source[after_next..end],
+                        &mut references,
+                        &mut clock_dependent,
+                        depth,
+                    );
                     if !replacement.modifiers.is_empty()
                         && replacement
                             .modifiers
@@ -341,40 +397,54 @@ impl Template {
             parts.push(offset..offset + part.len());
             offset += part.len() + 1;
         }
-        let bytes = source.len() * 3
-            + operations.len() * std::mem::size_of::<Operation>()
-            + operations
-                .iter()
-                .map(|operation| match operation {
-                    Operation::Replacement(replacement) => {
-                        std::mem::size_of::<Replacement>()
-                            + replacement
-                                .modifiers
-                                .iter()
-                                .map(|modifier| {
-                                    std::mem::size_of::<Modifier>()
-                                        + modifier
-                                            .args
-                                            .iter()
-                                            .map(|argument| {
-                                                argument.len() + std::mem::size_of::<String>()
-                                            })
-                                            .sum::<usize>()
-                                })
-                                .sum::<usize>()
-                    }
-                    Operation::Style(_, style) => style.bytes,
-                    _ => 0,
-                })
-                .sum::<usize>()
-            + parts.len() * std::mem::size_of::<Range<usize>>()
-            + references.iter().map(String::len).sum::<usize>();
-        Self {
+        clock_dependent |= references
+            .iter()
+            .any(|name| name == "*" || name.starts_with("T:"));
+        let mut template = Self {
             operations,
             parts: parts.into(),
             references: references.into_iter().collect(),
-            bytes,
+            bytes: 0,
+            clock_dependent,
+        };
+        template.bytes = template
+            .allocation_bytes()
+            .saturating_add(std::mem::size_of::<Self>())
+            .saturating_add(std::mem::size_of::<usize>().saturating_mul(2));
+        template
+    }
+
+    fn allocation_bytes(&self) -> usize {
+        let mut bytes = self
+            .operations
+            .capacity()
+            .saturating_mul(std::mem::size_of::<Operation>())
+            .saturating_add(
+                self.parts
+                    .len()
+                    .saturating_mul(std::mem::size_of::<Range<usize>>()),
+            )
+            .saturating_add(
+                self.references
+                    .len()
+                    .saturating_mul(std::mem::size_of::<String>()),
+            )
+            .saturating_add(std::mem::size_of::<usize>().saturating_mul(4));
+        for operation in &self.operations {
+            bytes = bytes.saturating_add(match operation {
+                Operation::Text(value) | Operation::Shell(value) => value.len(),
+                Operation::Variable(_) => 0,
+                Operation::Replacement(replacement) => std::mem::size_of::<Replacement>()
+                    .saturating_add(replacement.allocation_bytes()),
+                Operation::Style(prefix, body) => {
+                    prefix.len().saturating_add(body.allocation_bytes())
+                }
+            });
         }
+        for reference in self.references.iter() {
+            bytes = bytes.saturating_add(reference.capacity());
+        }
+        bytes
     }
 
     fn flush(operations: &mut Vec<Operation>, literal: &mut String) {
@@ -428,6 +498,27 @@ pub(super) struct Flags {
 }
 
 impl Flags {
+    fn allocation_bytes(&self) -> usize {
+        [
+            &self.colour,
+            &self.loop_options,
+            &self.loop_environment,
+            &self.content_search,
+            &self.interrogate,
+            &self.match_flags,
+            &self.time_format,
+        ]
+        .into_iter()
+        .flatten()
+        .chain(self.limit.iter().filter_map(|(_, marker)| marker.as_ref()))
+        .fold(
+            self.substitutions
+                .capacity()
+                .saturating_mul(std::mem::size_of::<usize>()),
+            |bytes, value| bytes.saturating_add(value.capacity()),
+        )
+    }
+
     fn new(modifiers: &[Modifier]) -> Self {
         let flags = ModifierFlags::from_modifiers(modifiers);
         let (comparison, match_flags) = match flags.comparison {
@@ -857,6 +948,82 @@ mod tests {
     }
 
     #[test]
+    fn compiled_clock_dependencies_include_nested_time_and_dynamic_formats() {
+        for source in [
+            "%S",
+            "literal 100%",
+            "#{t:start_time}",
+            "#{t/r:start_time}",
+            "#{t/d:start_time}",
+            "#{t/f/%Y:start_time}",
+            "#{T:status-right}",
+            "#{?pane_active,#{t/r:start_time},plain}",
+            "#{?#{==:#{t/d:start_time},0},fresh,old}",
+            "#{p/#{t/d:start_time}/:pane_title}",
+            "#{s/foo/#{t/r:start_time}/:pane_title}",
+            "#{P:#{t/d:pane_dead_time}}",
+            "#[fg=#{?pane_active,#{t/d:start_time},green}]",
+            "#(printf constant)",
+            "#[fg=#(printf red)]",
+            "#{E:#{@format}}",
+            "#{p/#{pane_width}/:pane_title}",
+            "#{L:constant}",
+            "#{I/c:RGB}",
+        ] {
+            assert!(format_clock_dependent(source), "{source}");
+        }
+        let deep = format!(
+            "{}plain{}",
+            "#{?pane_active,".repeat(FORMAT_LOOP_LIMIT),
+            ",plain}".repeat(FORMAT_LOOP_LIMIT)
+        );
+        assert!(format_clock_dependent(&deep));
+    }
+
+    #[test]
+    fn compiled_clock_dependencies_keep_static_native_and_literal_formats_independent() {
+        for source in [
+            "",
+            "arbitrary literal fg=cyan,bg=black",
+            "#S #{pane_title}",
+            "#{session_created}:#{start_time}",
+            "#{?pane_active,#{session_name},plain}",
+            "#{==:#{window_index},2}",
+            "#{p/8/:session_name}",
+            "#[fg=#{?pane_active,red,green}]",
+            "#{E:pane-border-style}",
+            "##{t/r:start_time}",
+            "##(printf constant)",
+            "#{l:#{t/r:start_time}}",
+        ] {
+            assert!(!format_clock_dependent(source), "{source}");
+        }
+    }
+
+    #[test]
+    fn compiled_cache_retention_respects_format_cache_rollback() {
+        CACHE.with_borrow_mut(|cache| *cache = Cache::default());
+        let before =
+            CACHE.with_borrow(|cache| (cache.entries.len(), cache.order.len(), cache.bytes));
+        let first = get("clock-retention:#{t/d:start_time}");
+        let second = get("clock-retention:#{t/d:start_time}");
+        assert_eq!(Arc::ptr_eq(&first, &second), format_cache_knob());
+        assert!(first.clock_dependent);
+        assert_eq!(first.references, second.references);
+        CACHE.with_borrow(|cache| {
+            if format_cache_knob() {
+                assert_eq!(cache.entries.len(), before.0 + 1);
+                assert_eq!(cache.order.len(), before.1 + 1);
+            } else {
+                assert_eq!(
+                    (cache.entries.len(), cache.order.len(), cache.bytes),
+                    before
+                );
+            }
+        });
+    }
+
+    #[test]
     fn implicit_fact_modifiers_capture_unknown_dependencies() {
         for source in [
             "#{L:constant}",
@@ -940,6 +1107,30 @@ mod tests {
     }
 
     #[test]
+    fn compiled_cache_rejects_templates_with_oversized_spare_operation_capacity() {
+        CACHE.with_borrow_mut(|cache| *cache = Cache::default());
+        let count = (CACHE_BYTES / (std::mem::size_of::<Operation>() * 2)).next_power_of_two() + 1;
+        let source = "#S".repeat(count);
+        let template = Template::parse(&source, false);
+        assert!(template.operations.capacity() > template.operations.len());
+        let bytes = template
+            .bytes
+            .saturating_add(source.len().saturating_mul(2));
+        let spare = template
+            .operations
+            .capacity()
+            .saturating_sub(template.operations.len())
+            .saturating_mul(std::mem::size_of::<Operation>());
+        assert!(bytes > CACHE_BYTES - CACHE_CONTAINER_BYTES);
+        assert!(bytes.saturating_sub(spare) <= CACHE_BYTES - CACHE_CONTAINER_BYTES);
+        get(&source);
+        CACHE.with_borrow(|cache| {
+            assert!(!cache.entries.contains_key(source.as_str()));
+            assert_eq!(cache.bytes, 0);
+        });
+    }
+
+    #[test]
     fn compiled_cache_bounds_and_references_follow_operations() {
         CACHE.with_borrow_mut(|cache| *cache = Cache::default());
         for index in 0..CACHE_ENTRIES * 2 {
@@ -947,7 +1138,25 @@ mod tests {
         }
         CACHE.with_borrow(|cache| {
             assert!(cache.entries.len() <= CACHE_ENTRIES);
-            assert!(cache.bytes <= CACHE_BYTES);
+            assert!(cache.bytes.saturating_add(CACHE_CONTAINER_BYTES) <= CACHE_BYTES);
+            assert_eq!(
+                cache.bytes,
+                cache
+                    .entries
+                    .iter()
+                    .fold(0_usize, |bytes, (source, template)| {
+                        bytes.saturating_add(
+                            template
+                                .bytes
+                                .saturating_add(source.len().saturating_mul(2)),
+                        )
+                    }),
+            );
+            if !format_cache_knob() {
+                assert!(cache.entries.is_empty());
+                assert!(cache.order.is_empty());
+                assert_eq!(cache.bytes, 0);
+            }
         });
         let template = get("#S #{?pane_active,#{p/#{@width}/:pane_id},#{E:status-left}}");
         for name in [

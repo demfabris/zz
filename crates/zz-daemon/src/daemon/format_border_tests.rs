@@ -39,6 +39,94 @@ fn expansions() -> usize {
 }
 
 #[test]
+fn live_scalar_border_probe_preserves_headers_options_and_fresh_mode_counts() {
+    let (mut inner, client, mut context) = fixture();
+    set_style(
+        &mut inner,
+        &mut context,
+        "@border-outer",
+        "#{E:@border-inner}",
+    );
+    set_style(
+        &mut inner,
+        &mut context,
+        "@border-inner",
+        "fg=#{?pane_in_mode,red,green}",
+    );
+    set_style(
+        &mut inner,
+        &mut context,
+        "pane-active-border-style",
+        "#{E:@border-outer}",
+    );
+    let session = context.session.unwrap();
+    let pane = context.pane.unwrap();
+    let second = 1_700_000_000;
+    let first = {
+        let facts = readonly_borrowed_format_hook_facts(&inner, CommandFormatSeed::default());
+        borders(&inner, client, session, &facts)
+    };
+    let options = inner.engine.cached_format_option_snapshot();
+    let clock_reads = Cell::new(0);
+    let hit = cached_live_border_presentations(&inner, client, session, &options, || {
+        clock_reads.set(clock_reads.get() + 1);
+        second
+    });
+    assert_eq!(hit.is_some(), zz_mux::format_cache_knob());
+    assert_eq!(clock_reads.get(), 0);
+    if let Some(hit) = hit {
+        assert!(Arc::ptr_eq(&first, &hit));
+    }
+    let copied_options = Arc::new(inner.engine.format_option_snapshot());
+    for (probe_client, probe_session, probe_options, probe_second) in [
+        (ClientId(client.0 + 1), session, &options, second),
+        (client, SessionId(u64::MAX), &options, second),
+        (client, session, &copied_options, second),
+    ] {
+        assert!(
+            cached_live_border_presentations(
+                &inner,
+                probe_client,
+                probe_session,
+                probe_options,
+                || probe_second,
+            )
+            .is_none()
+        );
+    }
+    inner.engine.set_format_now(second + 1);
+    let later = cached_live_border_presentations(&inner, client, session, &options, || second + 1);
+    assert_eq!(later.is_some(), zz_mux::format_cache_knob());
+    if let Some(later) = later {
+        assert!(Arc::ptr_eq(&first, &later));
+    }
+    inner.engine.set_format_now(second);
+    inner.pane_modes.insert(pane, vec![PaneModeRequest::Clock]);
+    assert!(
+        cached_live_border_presentations(&inner, client, session, &options, || second).is_none()
+    );
+    let changed = {
+        let facts = readonly_borrowed_format_hook_facts(&inner, CommandFormatSeed::default());
+        borders(&inner, client, session, &facts)
+    };
+    assert_eq!(first[0].style, "fg=green");
+    assert_eq!(changed[0].style, "fg=red");
+    assert!(!Arc::ptr_eq(&first, &changed));
+    set_style(
+        &mut inner,
+        &mut context,
+        "pane-active-border-style",
+        "fg=#{?pane_mode,red,green}",
+    );
+    let facts = readonly_borrowed_format_hook_facts(&inner, CommandFormatSeed::default());
+    borders(&inner, client, session, &facts);
+    let options = inner.engine.cached_format_option_snapshot();
+    assert!(
+        cached_live_border_presentations(&inner, client, session, &options, || second).is_none()
+    );
+}
+
+#[test]
 fn border_format_cache_reuses_default_styles_at_twenty_windows() {
     let (mut inner, client, context) = fixture();
     for index in 1..20 {
@@ -175,7 +263,7 @@ fn border_format_cache_tracks_referenced_client_and_daemon_facts() {
 }
 
 #[test]
-fn border_format_cache_invalidates_options_target_clock_and_environment_revision() {
+fn border_format_cache_reuses_static_styles_across_clocks_and_invalidates_other_revisions() {
     let (mut inner, client, mut context) = fixture();
     set_style(
         &mut inner,
@@ -212,7 +300,90 @@ fn border_format_cache_invalidates_options_target_clock_and_environment_revision
     inner.focused_windows.insert(client, window);
     let focused = borders(&inner, client, session, &facts);
     assert_ne!(focused[0].pane, context.pane.unwrap());
-    assert_eq!(expansions(), 6);
+    assert_eq!(
+        expansions(),
+        if zz_mux::format_cache_knob() { 4 } else { 6 }
+    );
+}
+
+#[test]
+fn border_format_cache_keeps_clock_guards_for_raw_nested_and_time_modifier_sources() {
+    let (mut inner, client, mut context) = fixture();
+    let facts = FormatHookFacts::default();
+    let session = context.session.unwrap();
+    let second = 1_700_000_000;
+    inner.engine.state.session_mut(session).unwrap().created = Some(1_700_000_000);
+    set_style(&mut inner, &mut context, "@border-colour", "green");
+    set_style(
+        &mut inner,
+        &mut context,
+        "@border-time-choice",
+        "#{?#{==:#{t/d:session_created},0},green,red}",
+    );
+    set_style(
+        &mut inner,
+        &mut context,
+        "@border-outer",
+        "#{E:@border-inner}",
+    );
+    set_style(
+        &mut inner,
+        &mut context,
+        "pane-active-border-style",
+        "#{E:@border-outer}",
+    );
+    for source in [
+        "fg=colour%S",
+        "fg=colour#{t/d:session_created}",
+        "fg=#{?#{==:#{t/r:session_created},0s},red,green}",
+        "fg=#{T:@border-colour}",
+        "fg=#{?pane_active,#{T:@border-colour},red}",
+        "fg=#{?pane_active,#{E:@border-time-choice},red}",
+    ] {
+        inner.engine.set_format_now(second);
+        set_style(&mut inner, &mut context, "@border-inner", source);
+        let before = expansions();
+        let first = borders(&inner, client, session, &facts);
+        if zz_mux::format_cache_knob() {
+            assert!(
+                inner
+                    .border_presentations_cache
+                    .lock()
+                    .as_ref()
+                    .unwrap()
+                    .clock_dependent
+            );
+        }
+        let options = inner.engine.cached_format_option_snapshot();
+        let clock_reads = Cell::new(0);
+        assert!(
+            cached_live_border_presentations(&inner, client, session, &options, || {
+                clock_reads.set(clock_reads.get() + 1);
+                second + 1
+            })
+            .is_none(),
+            "{source}"
+        );
+        assert_eq!(
+            clock_reads.get(),
+            usize::from(zz_mux::format_cache_knob()),
+            "{source}"
+        );
+        let next_second = border_presentations_at(&inner, client, session, &facts, second + 1);
+        assert!(!Arc::ptr_eq(&first, &next_second), "{source}");
+        inner.engine.set_format_now(second + 1);
+        let next_clock = borders(&inner, client, session, &facts);
+        assert!(!Arc::ptr_eq(&next_second, &next_clock), "{source}");
+        assert_eq!(expansions(), before + 3, "{source}");
+        assert_eq!(
+            next_clock,
+            uncached_border_presentations(&inner, client, session, &facts)
+        );
+        if source == "fg=colour#{t/d:session_created}" {
+            assert_eq!(first[0].style, "fg=colour0");
+            assert_eq!(next_clock[0].style, "fg=colour1");
+        }
+    }
 }
 
 #[test]

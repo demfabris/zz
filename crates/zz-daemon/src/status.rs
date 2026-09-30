@@ -228,6 +228,7 @@ struct CompletedStatus {
     now: i64,
     status: Arc<StatusLine>,
     fact_identity: Weak<FormatHookFacts>,
+    request_identity: Weak<StatusRequest>,
 }
 
 const COMPLETED_STATUS_MAX_BYTES: usize = 1024 * 1024;
@@ -239,6 +240,7 @@ pub(crate) fn completed_status_bytes(
     status: &StatusLine,
 ) -> usize {
     let mut bytes = std::mem::size_of::<CompletedStatus>()
+        .saturating_add(std::mem::size_of::<StatusRequest>())
         .saturating_add(request.context.retained_bytes())
         .saturating_add(request.option_snapshot.retained_bytes())
         .saturating_add(std::mem::size_of::<FormatHookFacts>());
@@ -330,6 +332,7 @@ impl CompletedStatus {
         callbacks: Vec<Option<String>>,
         now: i64,
         status: Arc<StatusLine>,
+        identity: Option<&Arc<StatusRequest>>,
     ) -> Self {
         Self {
             client: request.client,
@@ -349,6 +352,7 @@ impl CompletedStatus {
             now,
             status,
             fact_identity: Arc::downgrade(&request.facts),
+            request_identity: identity.map_or_else(Weak::new, Arc::downgrade),
         }
     }
 }
@@ -1231,13 +1235,32 @@ impl StatusRenderer {
         changed
     }
 
+    #[cfg(test)]
     pub(crate) fn render_forced(&mut self, request: &StatusRequest) -> StatusLine {
         self.render_forced_at(request, format_second())
     }
 
+    pub(crate) fn render_forced_shared(&mut self, request: &Arc<StatusRequest>) -> StatusLine {
+        self.render_forced_shared_at(request, format_second())
+    }
+
+    fn render_forced_shared_at(&mut self, request: &Arc<StatusRequest>, now: i64) -> StatusLine {
+        self.render_forced_with_identity(request, Some(request), now)
+    }
+
+    #[cfg(test)]
     fn render_forced_at(&mut self, request: &StatusRequest, now: i64) -> StatusLine {
+        self.render_forced_with_identity(request, None, now)
+    }
+
+    fn render_forced_with_identity(
+        &mut self,
+        request: &StatusRequest,
+        identity: Option<&Arc<StatusRequest>>,
+        now: i64,
+    ) -> StatusLine {
         let mut touched = BTreeSet::new();
-        let status = self.render_request(request, &mut touched, true, now);
+        let status = self.render_request(request, &mut touched, true, now, identity);
         if !touched.is_empty() {
             self.note_uncovered_jobs(request, &touched);
         }
@@ -1257,17 +1280,28 @@ impl StatusRenderer {
         touched: &mut BTreeSet<ShellCacheKey>,
         refresh: bool,
         now: i64,
+        identity: Option<&Arc<StatusRequest>>,
     ) -> Arc<StatusLine> {
         self.owned_clients.insert(request.client);
+        if let Some(identity) = identity
+            && let Some(completed) = &self.completed
+            && completed.now == now
+            && completed.request_identity.as_ptr() == Arc::as_ptr(identity)
+        {
+            return Arc::clone(&completed.status);
+        }
         let mut callback_names = None;
         if request.modes.is_empty()
-            && let Some(completed) = &self.completed
+            && let Some(completed) = &mut self.completed
             && completed.same_templates(request)
         {
             let fresh_callbacks = (completed.fact_identity.as_ptr() != Arc::as_ptr(&request.facts))
                 .then(|| status_callback_values(request, &completed.callback_names));
             let callbacks = fresh_callbacks.as_deref().unwrap_or(&completed.callbacks);
             if completed.matches(request, callbacks, now) {
+                if let Some(identity) = identity {
+                    completed.request_identity = Arc::downgrade(identity);
+                }
                 return Arc::clone(&completed.status);
             }
             if completed.same_lookup_scope(request) {
@@ -1293,7 +1327,16 @@ impl StatusRenderer {
             let callbacks = status_callback_values(request, &names);
             (completed_status_bytes(request, &names, &callbacks, &status)
                 <= COMPLETED_STATUS_MAX_BYTES)
-                .then(|| CompletedStatus::new(request, names, callbacks, now, Arc::clone(&status)))
+                .then(|| {
+                    CompletedStatus::new(
+                        request,
+                        names,
+                        callbacks,
+                        now,
+                        Arc::clone(&status),
+                        identity,
+                    )
+                })
         });
         status
     }
@@ -1324,7 +1367,7 @@ impl StatusRenderer {
         let mut touched = BTreeSet::new();
         let mut changed = Vec::new();
         for request in requests {
-            let status = self.render_request(request, &mut touched, false, format_second());
+            let status = self.render_request(request, &mut touched, false, format_second(), None);
             if self.note_uncovered_jobs(request, &touched)
                 || self.published.get(&request.client) == Some(&status)
             {
@@ -1338,7 +1381,7 @@ impl StatusRenderer {
 
     pub(crate) fn render_initial(&mut self, request: &StatusRequest) -> StatusLine {
         let mut touched = BTreeSet::new();
-        let status = self.render_request(request, &mut touched, false, format_second());
+        let status = self.render_request(request, &mut touched, false, format_second(), None);
         self.note_uncovered_jobs(request, &touched);
         self.published.insert(request.client, Arc::clone(&status));
         status.as_ref().clone()

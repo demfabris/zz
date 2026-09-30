@@ -42,6 +42,21 @@ pub fn format_references(format: &str) -> Arc<[String]> {
 }
 
 #[must_use]
+pub fn format_clock_dependent(format: &str) -> bool {
+    compiled::get(format).clock_dependent
+}
+
+#[must_use]
+pub fn cloned_raw_text_bytes(value: &RawText) -> usize {
+    let text = value.as_str().len();
+    if value.to_utf8().is_some() {
+        text
+    } else {
+        text.saturating_add(value.as_bytes().len())
+    }
+}
+
+#[must_use]
 pub fn compiled_formats_knob() -> bool {
     compiled::enabled()
 }
@@ -360,6 +375,8 @@ fn format_id_matches(value: &str, expected: Option<u64>, prefix: char) -> bool {
 #[derive(Clone, Debug, Default)]
 pub struct StatusContext<'e> {
     values: OnceLock<Box<StatusValues>>,
+    #[doc(hidden)]
+    pub format_universe: FormatUniverseRef<'e>,
     tree: Option<FormatTree<'e>>,
     variables: Arc<BTreeMap<String, String>>,
     format_client: FormatClient,
@@ -367,8 +384,6 @@ pub struct StatusContext<'e> {
     pub window_id: String,
     pub pane_id: String,
     pub format_now: Option<i64>,
-    #[doc(hidden)]
-    pub format_universe: FormatUniverseRef<'e>,
     capture_revision: Option<Arc<FormatCaptureRevision>>,
 }
 
@@ -817,7 +832,7 @@ impl FormatUniverse {
                 bytes = bytes
                     .saturating_add(std::mem::size_of::<FormatEnvironRow>())
                     .saturating_add(row.name.capacity())
-                    .saturating_add(row.value.as_bytes().len());
+                    .saturating_add(cloned_raw_text_bytes(&row.value));
             }
         }
         for rows in self.window_user_options.lock().values().flatten() {

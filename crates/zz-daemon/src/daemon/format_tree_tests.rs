@@ -283,6 +283,8 @@ fn selected_request(inner: &ServerState, client: ClientId) -> StatusRequest {
         true,
         FormatNeeds::NONE,
     )
+    .as_ref()
+    .clone()
 }
 
 fn complete_request(inner: &ServerState, client: ClientId) -> StatusRequest {

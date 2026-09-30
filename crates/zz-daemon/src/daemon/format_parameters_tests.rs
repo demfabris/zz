@@ -127,6 +127,45 @@ fn status_parameters_bound_includes_environment_and_disables_retention_on_rollba
 }
 
 #[test]
+fn raw_text_bound_rejects_large_job_parameters_and_keeps_small_raw_values() {
+    let mut inner = ServerState::default();
+    for raw in [b"a\xffb".to_vec(), vec![0xff; 300_000]] {
+        let value = RawText::from_bytes(raw);
+        inner
+            .engine
+            .execute(
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "set-environment",
+                    ["-g".into(), "RAW_TEXT_BOUND".into(), value.clone()],
+                ),
+            )
+            .unwrap();
+        let first = parameters(&inner, None);
+        let same = parameters(&inner, None);
+        let stored = first
+            .environment
+            .iter()
+            .find(|(name, _)| name.as_bytes() == b"RAW_TEXT_BOUND")
+            .and_then(|(_, value)| value.as_ref())
+            .unwrap();
+        assert_eq!(stored.as_bytes(), value.as_bytes());
+        assert_eq!(stored.as_str(), value.as_str());
+        if value.as_bytes().len() == 300_000 {
+            assert!(first.retained_bytes() > STATUS_PREPARATION_MAX_BYTES);
+            assert!(inner.status_parameters_cache.lock().is_none());
+            assert!(!Arc::ptr_eq(&first, &same));
+        } else {
+            assert!(first.retained_bytes() < STATUS_PREPARATION_MAX_BYTES);
+            assert_eq!(
+                Arc::ptr_eq(&first, &same),
+                inner.engine.format_cache_revision().is_some()
+            );
+        }
+    }
+}
+
+#[test]
 fn status_preparation_reuses_engine_capture_and_keeps_client_and_config_values_fresh() {
     let mut inner = ServerState::default();
     let (session, window, _) = inner.engine.state.create_session("work").unwrap();

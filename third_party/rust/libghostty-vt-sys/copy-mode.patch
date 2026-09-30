@@ -3,7 +3,7 @@
 @@ -136,6 +136,18 @@
              self.live -= 1;
          }
- 
+
 +        pub fn disown(self: *Self, item: ItemPtr) void {
 +            _ = item;
 +            assert(self.free.items.len < self.live);
@@ -45,13 +45,13 @@
 +    result.alloc = alloc;
 +    return result;
 +}
- 
+
  /// Return the largest scratch buffer that can produce a useful compressed
  /// representation for `raw_len` bytes.
 @@ -133,10 +153,15 @@
      assert(@sizeOf(Page) + encoded_len <
          @sizeOf(TerminalPage) + source.memory.len);
- 
+
 +    const encoded = try alloc.dupe(u8, scratch[0..encoded_len]);
 +    errdefer alloc.free(encoded);
 +    const shared = try alloc.create(Shared);
@@ -64,7 +64,7 @@
 +        .shared = shared,
      };
  }
- 
+
 @@ -145,7 +170,10 @@
  /// This intentionally does not free `page.memory`. The PageList node which
  /// supplied the source page continues to own that pool or heap allocation.
@@ -76,7 +76,7 @@
 +    }
      self.* = undefined;
  }
- 
+
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
 @@ -80,6 +80,38 @@
@@ -115,7 +115,7 @@
 +        self.shared = null;
 +        shared.release();
 +    }
- 
+
      /// The physical representation of the page contents.
      ///
 @@ -105,7 +137,15 @@
@@ -149,7 +149,7 @@
 +        self.detach();
          return &self.data.resident;
      }
- 
+
 @@ -954,6 +996,11 @@
      var it = list.first;
      while (it) |node| {
@@ -167,7 +167,7 @@
      top: point.Point,
      bot: ?point.Point = null,
 +    cow: bool = false,
- 
+
      // If this is non-null then cloning will attempt to remap the tracked
      // pins into the new cloned area and will keep track of the old to
 @@ -1147,7 +1195,7 @@
@@ -178,7 +178,7 @@
 +        if (opts.cow) 0 else page_count,
      );
      errdefer pool.deinit();
- 
+
 @@ -1166,32 +1214,86 @@
      var total_rows: usize = 0;
      var page_size: usize = 0;
@@ -288,9 +288,9 @@
 -        );
 -
 -        dst_page.dirty = src_page.dirty;
- 
+
          total_rows += node.rows();
- 
+
 @@ -1224,7 +1326,7 @@
          .page_serial = page_serial,
          .page_serial_epoch = 0,
@@ -336,12 +336,12 @@
 +        return;
 +    }
      const page = node.restore(.discard);
- 
+
      // Update our accounting for page size. This must mirror what was
 @@ -7288,6 +7410,14 @@
      /// semantics.
      garbage: bool = false,
- 
+
 +    pub inline fn rowAndCellRead(self: Pin) struct {
 +        row: *const pagepkg.Row,
 +        cell: *const pagepkg.Cell,
@@ -431,7 +431,7 @@
 +        .cow = cow,
      });
      errdefer pages.deinit();
- 
+
 --- a/src/terminal/c/terminal.zig
 +++ b/src/terminal/c/terminal.zig
 @@ -860,6 +860,43 @@
@@ -468,7 +468,7 @@
 +    target.colors.palette.mask = source.colors.palette.mask;
 +    target.flags = source.flags;
 +    target.flags.shell_redraws_prompt = .false;
-+    target.flags.resize_pull_scrollback = false;
++    target.flags.resize_pull_scrollback = true;
 +    target.modes = source.modes;
 +    target.modes.set(.wraparound, true);
 +    target.cursor = source.cursor;
@@ -476,14 +476,14 @@
 +    try target.pwd.appendSlice(alloc, source.pwd.items);
 +    return cloned;
  }
- 
+
  pub fn vt_write(
 --- a/include/ghostty/vt/terminal.h
 +++ b/include/ghostty/vt/terminal.h
 @@ -2132,6 +2132,9 @@
                                                 uint16_t cols,
                                                 uint16_t rows);
- 
+
 +GHOSTTY_API GhosttyResult ghostty_terminal_clone_screen(GhosttyTerminal terminal,
 +                                                      GhosttyTerminal* result);
 +
@@ -492,7 +492,19 @@
   *
 --- a/src/terminal/c/grid_ref.zig
 +++ b/src/terminal/c/grid_ref.zig
-@@ -45,7 +45,7 @@
+@@ -32,8 +32,10 @@
+     }
+
+     pub fn toPin(self: CGridRef) ?PageList.Pin {
++        const node = self.node orelse return null;
++        if (self.x >= node.cols() or self.y >= node.rows()) return null;
+         return .{
+-            .node = self.node orelse return null,
++            .node = node,
+             .x = self.x,
+             .y = self.y,
+         };
+@@ -45,7 +47,7 @@
      out: ?*cell_c.CCell,
  ) callconv(lib.calling_conv) Result {
      const p = ref.toPin() orelse return .invalid_value;
@@ -500,8 +512,8 @@
 +    if (out) |o| o.* = @bitCast(p.rowAndCellRead().cell.*);
      return .success;
  }
- 
-@@ -54,7 +54,7 @@
+
+@@ -54,7 +56,7 @@
      out: ?*row_c.CRow,
  ) callconv(lib.calling_conv) Result {
      const p = ref.toPin() orelse return .invalid_value;
@@ -509,26 +521,26 @@
 +    if (out) |o| o.* = @bitCast(p.rowAndCellRead().row.*);
      return .success;
  }
- 
-@@ -65,7 +65,7 @@
+
+@@ -65,7 +67,7 @@
      out_len: *usize,
  ) callconv(lib.calling_conv) Result {
      const p = ref.toPin() orelse return .invalid_value;
 -    const cell = p.rowAndCell().cell;
 +    const cell = p.rowAndCellRead().cell;
- 
+
      if (!cell.hasText()) {
          out_len.* = 0;
-@@ -73,7 +73,7 @@
+@@ -73,7 +75,7 @@
      }
- 
+
      const cp = cell.codepoint();
 -    const extra = if (cell.hasGrapheme()) p.grapheme(cell) else null;
 +    const extra = if (cell.hasGrapheme()) p.node.pageRead().lookupGrapheme(cell) else null;
      const total = 1 + if (extra) |e| e.len else 0;
- 
+
      if (out_buf == null or buf_len < total) {
-@@ -98,7 +98,7 @@
+@@ -98,7 +100,7 @@
      out_len: *usize,
  ) callconv(lib.calling_conv) Result {
      const p = ref.toPin() orelse return .invalid_value;
@@ -536,8 +548,8 @@
 +    const terminal_page = p.node.pageRead();
      const rac = terminal_page.getRowAndCell(p.x, p.y);
      const cell = rac.cell;
- 
-@@ -133,11 +133,11 @@
+
+@@ -133,11 +135,11 @@
  ) callconv(lib.calling_conv) Result {
      const p = ref.toPin() orelse return .invalid_value;
      if (out) |o| {
@@ -551,11 +563,39 @@
              o.* = .fromStyle(terminal_page.styles.get(
                  terminal_page.memory,
                  cell.style_id,
+@@ -255,3 +257,27 @@
+     try testing.expectEqual(Result.success, grid_ref_hyperlink_uri(&ref, &buf, buf.len, &len));
+     try testing.expectEqualStrings("https://example.com", buf[0..len]);
+ }
++
++test "copy-on-write grid references reject coordinates outside node dimensions" {
++    var list = try PageList.init(testing.allocator, .{ .cols = 10, .rows = 2 });
++    defer list.deinit();
++    list.cols = 80;
++    defer list.cols = 10;
++    var ref = CGridRef.fromPin(list.pin(.{ .screen = .{} }).?);
++    ref.x = 79;
++    try testing.expect(ref.toPin() == null);
++    try testing.expectEqual(Result.invalid_value, grid_ref_cell(&ref, null));
++    try testing.expectEqual(Result.invalid_value, grid_ref_row(&ref, null));
++    try testing.expectEqual(Result.invalid_value, grid_ref_style(&ref, null));
++    var len: usize = undefined;
++    try testing.expectEqual(Result.invalid_value, grid_ref_graphemes(&ref, null, 0, &len));
++    try testing.expectEqual(Result.invalid_value, grid_ref_hyperlink_uri(&ref, null, 0, &len));
++    ref.x = 0;
++    ref.y = 2;
++    try testing.expect(ref.toPin() == null);
++    try testing.expectEqual(Result.invalid_value, grid_ref_cell(&ref, null));
++    ref.x = 9;
++    ref.y = 1;
++    try testing.expect(ref.toPin() != null);
++    try testing.expectEqual(Result.success, grid_ref_cell(&ref, null));
++}
 --- a/src/terminal/c/main.zig
 +++ b/src/terminal/c/main.zig
 @@ -181,6 +181,7 @@
  pub const sys_set = sys.set;
- 
+
  pub const terminal_new = terminal.new;
 +pub const terminal_clone_screen = terminal.clone_screen;
  pub const terminal_free = terminal.free;

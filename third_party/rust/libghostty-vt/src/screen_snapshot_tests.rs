@@ -325,3 +325,39 @@ fn frozen_alternate_screen_reflows_with_wraparound_disabled_in_source() {
         crate::screen::Screen::Alternate
     );
 }
+
+#[test]
+fn frozen_resize_geometry_matches_copy_backing_history_pull() {
+    let mut terminal = Terminal::new(80, 24).expect("terminal");
+    terminal.set_scrollback_max_bytes(None).expect("bytes");
+    terminal
+        .set_scrollback_max_lines(Some(10_000))
+        .expect("lines");
+    for row in 1..=128 {
+        terminal.vt_write(
+            format!("F{row:04} payload-{row:04} abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ\r\n")
+                .as_bytes(),
+        );
+    }
+    terminal.vt_write(b"READY0128\r\n");
+    let mut snapshot = terminal.clone_screen().expect("snapshot");
+    assert_eq!(snapshot.total_rows().expect("captured rows"), 130);
+    let expected = snapshot_text(&snapshot);
+    terminal.vt_write(b"\x1b[H\x1b[2J\x1b[3JLIVE-REPLACEMENT\r\n");
+    drop(terminal);
+    let mut cursor = PointCoordinate { x: 5, y: 92 };
+    for (cols, rows, total, offset) in [(40, 16, 258, 58), (100, 28, 130, 10), (80, 24, 130, 14)] {
+        let mut next = snapshot.clone_screen().expect("resize backing");
+        cursor = next
+            .resize_anchored(cols, rows, cursor)
+            .expect("resize")
+            .expect("anchor");
+        assert_eq!(next.total_rows().expect("resized rows"), total);
+        assert_eq!(
+            u32::try_from(total).expect("total") - u32::from(rows) - cursor.y,
+            offset
+        );
+        assert_eq!(snapshot_text(&next), expected);
+        snapshot = next;
+    }
+}

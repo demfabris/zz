@@ -190,3 +190,79 @@ fn status_preparation_reuses_engine_capture_and_keeps_client_and_config_values_f
     );
     assert_eq!(renderer.render_initial(&first).left, first_left);
 }
+
+#[test]
+fn status_fact_selection_plans_reuse_dependencies_and_keep_referenced_facts_fresh() {
+    let mut inner = ServerState::default();
+    let (session, window, pane) = inner.engine.state.create_session("work").unwrap();
+    let client = ClientId(3);
+    inner.attached.insert(session, BTreeSet::from([client]));
+    inner.focused_windows.insert(client, window);
+    inner.client_kinds.insert(client, ClientKind::Interactive);
+    inner.client_names.insert(client, "first".to_owned());
+    inner.client_ttys.insert(client, "/dev/first".to_owned());
+    inner.client_sizes.insert(client, (80, 24));
+    let template = "#{client_name}:#{client_width}:#{session_attached_list}:#{pane_in_mode}";
+    execute(&mut inner, &["set-option", "-g", "status-left", template]);
+    let first = parameters(&inner, Some(session));
+    let builds = FORMAT_FACT_SELECTION_BUILDS.with(Cell::get);
+    let facts = |inner: &ServerState, selection: &StatusParameters| {
+        let context = inner
+            .engine
+            .format_status_context(Some(session), Some(window), Some(pane));
+        let mut facts =
+            selected_status_format_facts_with_selection(inner, &context, &selection.fact_selection);
+        facts.client = Some(selected_client_format_facts_with_selection(
+            inner,
+            client,
+            session,
+            &selection.client_fact_selection,
+        ));
+        facts
+    };
+    let expand = |inner: &ServerState, facts: &FormatHookFacts| {
+        let context = inner
+            .engine
+            .format_status_context(Some(session), Some(window), Some(pane));
+        expand_format_values(template, &context, &mut DaemonFormatHooks::command(facts))
+    };
+    let original = facts(&inner, &first);
+    assert_eq!(expand(&inner, &original), "/dev/first:80:/dev/first:0");
+    let revision = inner.engine.format_cache_revision();
+    inner.client_names.insert(client, "changed".to_owned());
+    inner.client_ttys.insert(client, "/dev/changed".to_owned());
+    inner.client_sizes.insert(client, (120, 24));
+    inner.pane_modes.insert(pane, vec![PaneModeRequest::Clock]);
+    assert_eq!(inner.engine.format_cache_revision(), revision);
+    for _ in 0..3 {
+        let current = parameters(&inner, Some(session));
+        if zz_mux::format_cache_knob() {
+            assert!(Arc::ptr_eq(&first, &current));
+            assert_eq!(FORMAT_FACT_SELECTION_BUILDS.with(Cell::get), builds);
+        }
+        let selected = facts(&inner, &current);
+        assert_eq!(expand(&inner, &selected), "/dev/changed:120:/dev/changed:1");
+        let request = status_request_with_selected_facts(
+            &inner,
+            client,
+            inner.engine.cached_format_option_snapshot(),
+            true,
+            FormatNeeds::NONE,
+        );
+        assert_eq!(
+            expand_format_values(
+                template,
+                &request.context,
+                &mut DaemonFormatHooks::command(request.facts.as_ref()),
+            ),
+            "/dev/changed:120:/dev/changed:1"
+        );
+        let mut complete = format_hook_facts(&inner);
+        complete.client = Some(client_format_facts(&inner, client, session));
+        assert_eq!(expand(&inner, &selected), expand(&inner, &complete));
+    }
+    assert_eq!(expand(&inner, &original), "/dev/first:80:/dev/first:0");
+    if zz_mux::format_cache_knob() {
+        assert_eq!(FORMAT_FACT_SELECTION_BUILDS.with(Cell::get), builds);
+    }
+}

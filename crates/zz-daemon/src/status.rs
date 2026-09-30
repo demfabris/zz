@@ -183,6 +183,7 @@ pub(crate) struct StatusRenderer {
     expansions: usize,
 }
 
+#[derive(Clone)]
 pub(crate) struct StatusRequest {
     pub(crate) client: ClientId,
     pub(crate) formats: Arc<StatusFormats>,
@@ -194,8 +195,8 @@ pub(crate) struct StatusRequest {
     pub(crate) environment: Arc<Vec<(RawText, Option<RawText>)>>,
     pub(crate) default_terminal: Arc<String>,
     pub(crate) startup: bool,
-    pub(crate) context: StatusContext<'static>,
-    pub(crate) facts: FormatHookFacts,
+    pub(crate) context: Arc<StatusContext<'static>>,
+    pub(crate) facts: Arc<FormatHookFacts>,
     /// What this client's terminal reported, for the `theme detect` arm. The
     /// pin keeps `c->theme` `THEME_UNKNOWN` until the terminal answers its theme
     /// query and falls back to the background it can see; the daemon records a
@@ -217,7 +218,7 @@ struct CompletedStatus {
     message_line: u8,
     customized: bool,
     title_format: Arc<Option<String>>,
-    context: StatusContext<'static>,
+    context: Arc<StatusContext<'static>>,
     client_scheme: Option<TerminalColorScheme>,
     message_styles: Arc<(String, String)>,
     pane_borders: Vec<zz_protocol::PaneBorderPresentation>,
@@ -229,7 +230,7 @@ struct CompletedStatus {
 
 const COMPLETED_STATUS_MAX_BYTES: usize = 1024 * 1024;
 
-fn completed_status_bytes(
+pub(crate) fn completed_status_bytes(
     request: &StatusRequest,
     names: &[String],
     callbacks: &[Option<String>],
@@ -341,7 +342,7 @@ impl CompletedStatus {
     }
 }
 
-fn status_cache_callbacks(request: &StatusRequest) -> Option<Vec<String>> {
+pub(crate) fn status_cache_callbacks(request: &StatusRequest) -> Option<Vec<String>> {
     if !zz_mux::format_cache_knob()
         || !request.modes.is_empty()
         || request.references.contains("*")
@@ -424,7 +425,7 @@ fn status_cache_callbacks(request: &StatusRequest) -> Option<Vec<String>> {
 }
 
 fn status_callback_values(request: &StatusRequest, names: &[String]) -> Vec<Option<String>> {
-    let mut hooks = DaemonFormatHooks::command(&request.facts);
+    let mut hooks = DaemonFormatHooks::command(request.facts.as_ref());
     names
         .iter()
         .map(|name| {
@@ -440,6 +441,7 @@ fn status_callback_values(request: &StatusRequest, names: &[String]) -> Vec<Opti
         .collect()
 }
 
+#[derive(Clone)]
 pub(crate) struct ModeRequest {
     pub(crate) pane: PaneId,
     pub(crate) view: bool,
@@ -808,13 +810,13 @@ pub(crate) struct ClientViewportFacts {
 }
 
 impl ClientViewportFacts {
-    fn bigger(self) -> bool {
+    pub(crate) fn bigger(self) -> bool {
         self.columns < self.window_width || self.rows < self.window_height
     }
 
     /// The `else` half of `tty_window_offset1`, which zz reaches with no pan
     /// window because `refresh-client -U/-D/-L/-R` is not implemented here.
-    fn offsets(self) -> Option<(u16, u16)> {
+    pub(crate) fn offsets(self) -> Option<(u16, u16)> {
         if !self.bigger() {
             return None;
         }
@@ -1471,7 +1473,7 @@ fn render(
         .map_or_else(String::new, |format| {
             let mut hooks = DaemonFormatHooks::status(
                 request.client,
-                &request.facts,
+                request.facts.as_ref(),
                 &request.context,
                 Some(&request.option_snapshot),
                 cache,
@@ -1490,7 +1492,7 @@ fn render(
     let theme = {
         let mut hooks = DaemonFormatHooks::status(
             request.client,
-            &request.facts,
+            request.facts.as_ref(),
             &request.context,
             Some(&request.option_snapshot),
             cache,
@@ -1509,7 +1511,7 @@ fn render(
     let (message_style, message_command_style) = {
         let mut hooks = DaemonFormatHooks::status(
             request.client,
-            &request.facts,
+            request.facts.as_ref(),
             &request.context,
             Some(&request.option_snapshot),
             cache,
@@ -1539,7 +1541,7 @@ fn render(
             ]);
             let mut hooks = DaemonFormatHooks::status(
                 request.client,
-                &request.facts,
+                request.facts.as_ref(),
                 &mode.context,
                 Some(&request.option_snapshot),
                 cache,
@@ -1574,7 +1576,7 @@ fn render(
     let (left, right) = {
         let mut hooks = DaemonFormatHooks::status(
             request.client,
-            &request.facts,
+            request.facts.as_ref(),
             &request.context,
             Some(&request.option_snapshot),
             cache,
@@ -1595,7 +1597,7 @@ fn render(
     };
     let mut hooks = DaemonFormatHooks::status(
         request.client,
-        &request.facts,
+        request.facts.as_ref(),
         &request.context,
         Some(&request.option_snapshot),
         cache,
@@ -2919,14 +2921,14 @@ mod tests {
             environment: Arc::new(Vec::new()),
             default_terminal: Arc::new("tmux-256color".to_owned()),
             startup: false,
-            context: StatusContext::from(StatusValues {
+            context: Arc::new(StatusContext::from(StatusValues {
                 session_name: "work".to_owned(),
                 ..StatusValues::default()
-            }),
-            facts: FormatHookFacts {
+            })),
+            facts: Arc::new(FormatHookFacts {
                 client: Some(ClientFormatFacts::default()),
                 ..FormatHookFacts::default()
-            },
+            }),
             client_scheme: None,
             message_styles: Arc::new((String::new(), String::new())),
             modes: Vec::new(),
@@ -2972,11 +2974,11 @@ mod tests {
             environment: Arc::new(engine.job_environment(None)),
             default_terminal: Arc::new(engine.default_terminal_for_spawn().to_owned()),
             startup: false,
-            context,
-            facts: FormatHookFacts {
+            context: Arc::new(context),
+            facts: Arc::new(FormatHookFacts {
                 client: session.map(|_| ClientFormatFacts::default()),
                 ..FormatHookFacts::default()
-            },
+            }),
             client_scheme: None,
             message_styles: Arc::new(message_styles),
             modes: Vec::new(),
@@ -3018,14 +3020,14 @@ mod tests {
             )
             .unwrap();
         let mut request = request(1, "url=#{browser_url}", "");
-        request.facts.mux = Arc::new(engine.format_facts());
+        Arc::make_mut(&mut request.facts).mux = Arc::new(engine.format_facts());
         let mut renderer = StatusRenderer::default();
-        request.context.pane_id = browser.to_string();
+        Arc::make_mut(&mut request.context).pane_id = browser.to_string();
         assert_eq!(
             renderer.render_initial(&request).left,
             "url=https://example.com/active"
         );
-        request.context.pane_id = terminal.to_string();
+        Arc::make_mut(&mut request.context).pane_id = terminal.to_string();
         assert_eq!(renderer.render_initial(&request).left, "url=");
     }
 
@@ -3822,7 +3824,7 @@ mod tests {
 
         let renamed = [request(1, "[#S]", ""), {
             let mut request = request(2, "[#S]", "");
-            request.context.session_name = "infra".to_owned();
+            Arc::make_mut(&mut request.context).session_name = "infra".to_owned();
             request
         }];
         let second = renderer.render_changed(&renamed);
@@ -4088,11 +4090,11 @@ mod tests {
         let first_cwd = std::fs::canonicalize(first_cwd).expect("first cwd resolves");
         let second_cwd = std::fs::canonicalize(second_cwd).expect("second cwd resolves");
         let mut first = request(1, "#(pwd -P)", "");
-        first.context.session_path = first_cwd.to_string_lossy().into_owned();
-        first.facts.client = Some(ClientFormatFacts::default());
+        Arc::make_mut(&mut first.context).session_path = first_cwd.to_string_lossy().into_owned();
+        Arc::make_mut(&mut first.facts).client = Some(ClientFormatFacts::default());
         let mut second = request(2, "#(pwd -P)", "");
-        second.context.session_path = second_cwd.to_string_lossy().into_owned();
-        second.facts.client = Some(ClientFormatFacts::default());
+        Arc::make_mut(&mut second.context).session_path = second_cwd.to_string_lossy().into_owned();
+        Arc::make_mut(&mut second.facts).client = Some(ClientFormatFacts::default());
 
         let mut renderer = StatusRenderer::default();
         let statuses = [
@@ -4114,10 +4116,10 @@ mod tests {
         let format = format!("#(cat '{}')", source.display());
         let cwd = std::fs::canonicalize(directory.path()).expect("working directory resolves");
         let mut attached = request(1, &format, "");
-        attached.context.session_path = cwd.to_string_lossy().into_owned();
+        Arc::make_mut(&mut attached.context).session_path = cwd.to_string_lossy().into_owned();
         let mut clientless = request(2, &format, "");
-        clientless.context.session_path = cwd.to_string_lossy().into_owned();
-        clientless.facts.client = None;
+        Arc::make_mut(&mut clientless.context).session_path = cwd.to_string_lossy().into_owned();
+        Arc::make_mut(&mut clientless.facts).client = None;
         let mut renderer = StatusRenderer::default();
 
         assert_eq!(settled(&mut renderer, &attached).left, "first");
@@ -4140,15 +4142,15 @@ mod tests {
         let format = format!("#(cat '{}')", source.display());
         let cwd = std::fs::canonicalize(directory.path()).expect("working directory resolves");
         let mut first = request(1, &format, "");
-        first.context.session_path = cwd.to_string_lossy().into_owned();
-        first.facts.client = Some(ClientFormatFacts::default());
+        Arc::make_mut(&mut first.context).session_path = cwd.to_string_lossy().into_owned();
+        Arc::make_mut(&mut first.facts).client = Some(ClientFormatFacts::default());
         let mut renderer = StatusRenderer::default();
 
         assert_eq!(settled(&mut renderer, &first).left, "first");
         std::fs::write(&source, "second\n").expect("the second value is written");
         let mut second = request(2, &format, "");
-        second.context.session_path = cwd.to_string_lossy().into_owned();
-        second.facts.client = Some(ClientFormatFacts::default());
+        Arc::make_mut(&mut second.context).session_path = cwd.to_string_lossy().into_owned();
+        Arc::make_mut(&mut second.facts).client = Some(ClientFormatFacts::default());
 
         assert_eq!(settled(&mut renderer, &second).left, "second");
         assert_eq!(renderer.shell_cache.len(), 2);
@@ -4173,14 +4175,14 @@ mod tests {
             "#(echo \"$TMUX|$ZZ_SOCKET|$PWD|${TMUX_PANE-unset}\")",
             "",
         );
-        status_request.context.socket_path = socket.to_owned();
-        status_request.context.session_path = directory
+        Arc::make_mut(&mut status_request.context).socket_path = socket.to_owned();
+        Arc::make_mut(&mut status_request.context).session_path = directory
             .path()
             .canonicalize()
             .expect("the working directory resolves")
             .to_string_lossy()
             .into_owned();
-        status_request.context.pane_current_path = pane_directory
+        Arc::make_mut(&mut status_request.context).pane_current_path = pane_directory
             .path()
             .canonicalize()
             .expect("the pane working directory resolves")
@@ -4262,7 +4264,7 @@ mod tests {
             ..StatusFormats::default()
         }
         .into();
-        post_startup.context.socket_path = socket.to_owned();
+        Arc::make_mut(&mut post_startup.context).socket_path = socket.to_owned();
         let status = settled(&mut StatusRenderer::default(), &post_startup);
         assert_eq!(
             status.left,
@@ -4285,7 +4287,7 @@ mod tests {
             ..StatusFormats::default()
         }
         .into();
-        startup.context.socket_path = socket.to_owned();
+        Arc::make_mut(&mut startup.context).socket_path = socket.to_owned();
         startup.startup = true;
         let status = settled(&mut StatusRenderer::default(), &startup);
         assert_eq!(
@@ -4325,7 +4327,7 @@ mod tests {
 
         let socket = "/tmp/zz-status-shim.sock";
         let mut status_request = request(1, "#(tmux status)", "");
-        status_request.context.socket_path = socket.to_owned();
+        Arc::make_mut(&mut status_request.context).socket_path = socket.to_owned();
         let mut renderer = StatusRenderer::default();
         renderer.set_tmux_shim(shim, executable);
 
@@ -4416,7 +4418,7 @@ mod tests {
             release.display()
         );
         let mut request = request(1, &format, "");
-        request.facts.client = Some(ClientFormatFacts::default());
+        Arc::make_mut(&mut request.facts).client = Some(ClientFormatFacts::default());
         let mut renderer = StatusRenderer::default();
         let started = Instant::now();
         assert!(renderer.render_initial(&request).left.is_empty());

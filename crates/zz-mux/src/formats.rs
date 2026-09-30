@@ -54,6 +54,10 @@ pub fn format_cache_knob() -> bool {
     *FORMAT_CACHE
 }
 
+pub fn borrowed_formats_enabled() -> bool {
+    tree::borrowed_formats()
+}
+
 const FORMAT_LOOP_LIMIT: usize = 100;
 const FORMAT_MAX_REPEAT: usize = 10_000;
 const FORMAT_MAX_REPEAT_BYTES: usize = MAX_STATUS_TEXT_BYTES * FORMAT_MAX_REPEAT;

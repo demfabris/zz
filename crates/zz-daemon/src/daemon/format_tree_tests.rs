@@ -547,12 +547,12 @@ fn selected_status_explicit_fact_groups_match_complete_capture() {
         expand_format_values(
             template,
             &selected.context,
-            &mut DaemonFormatHooks::command(&selected.facts)
+            &mut DaemonFormatHooks::command(selected.facts.as_ref())
         ),
         expand_format_values(
             template,
             &complete.context,
-            &mut DaemonFormatHooks::command(&complete.facts)
+            &mut DaemonFormatHooks::command(complete.facts.as_ref())
         )
     );
     assert_eq!(selected.facts.buffer.as_ref().unwrap().name, "kept-buffer");

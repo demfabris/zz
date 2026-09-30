@@ -285,6 +285,45 @@ fn border_format_cache_reuses_arbitrary_captured_option_styles() {
 }
 
 #[test]
+fn border_format_cache_tracks_linked_window_owner_attachments_in_the_same_second() {
+    let (mut inner, owner_client, mut context) = fixture();
+    let window = context.window.unwrap();
+    let (viewer, _, _) = inner.engine.state.create_session("viewer").unwrap();
+    let viewer_client = ClientId(4);
+    inner
+        .engine
+        .state
+        .session_mut(viewer)
+        .unwrap()
+        .windows
+        .push(window);
+    inner
+        .attached
+        .insert(viewer, BTreeSet::from([viewer_client]));
+    inner.focused_windows.insert(viewer_client, window);
+    set_style(
+        &mut inner,
+        &mut context,
+        "pane-active-border-style",
+        "fg=#{?session_attached,green,red}",
+    );
+    let revision = inner.engine.format_cache_revision();
+    let first = {
+        let facts = readonly_borrowed_format_hook_facts(&inner, CommandFormatSeed::default());
+        borders(&inner, viewer_client, viewer, &facts)
+    };
+    assert_eq!(first[0].style, "fg=green");
+    inner.suspended_clients.insert(owner_client);
+    assert_eq!(inner.engine.format_cache_revision(), revision);
+    let second = {
+        let facts = readonly_borrowed_format_hook_facts(&inner, CommandFormatSeed::default());
+        borders(&inner, viewer_client, viewer, &facts)
+    };
+    assert_eq!(second[0].style, "fg=red");
+    assert_eq!(expansions(), 2);
+}
+
+#[test]
 fn border_format_cache_preserves_borrowed_window_client_callbacks() {
     let (mut inner, client, mut context) = fixture();
     set_style(

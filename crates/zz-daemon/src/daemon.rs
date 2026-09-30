@@ -31326,6 +31326,7 @@ struct ServerState {
     client_cell_pixels: BTreeMap<ClientId, (u32, u32)>,
     border_presentations_cache: Mutex<Option<CachedBorderPresentations>>,
     status_parameters_cache: Mutex<Option<CachedStatusParameters>>,
+    status_preparation_cache: Mutex<Option<CachedStatusPreparation>>,
 }
 
 struct WaitItem {
@@ -36157,12 +36158,104 @@ fn client_format_facts(
     client_format_facts_from_source(&ClientFormatSource::from_inner(inner), client, session)
 }
 
+#[derive(Clone, Copy, Default)]
+struct ClientFactSelection {
+    full: bool,
+    activity: bool,
+    cell_height: bool,
+    cell_width: bool,
+    colours: bool,
+    control_mode: bool,
+    created: bool,
+    discarded: bool,
+    flags: bool,
+    height: bool,
+    key_table: bool,
+    last_session: bool,
+    name: bool,
+    pid: bool,
+    prefix: bool,
+    readonly: bool,
+    session: bool,
+    termfeatures: bool,
+    termname: bool,
+    termtype: bool,
+    theme: bool,
+    tty: bool,
+    uid: bool,
+    user: bool,
+    utf8: bool,
+    width: bool,
+    written: bool,
+    viewport: bool,
+}
+
+#[cfg(test)]
+thread_local! {
+    static FORMAT_FACT_SELECTION_BUILDS: Cell<usize> = const { Cell::new(0) };
+}
+
+impl ClientFactSelection {
+    fn complete() -> Self {
+        Self {
+            full: true,
+            ..Self::default()
+        }
+    }
+
+    fn from_references(references: &BTreeSet<String>) -> Self {
+        #[cfg(test)]
+        FORMAT_FACT_SELECTION_BUILDS.with(|count| count.set(count.get() + 1));
+        let mut selection = Self {
+            width: true,
+            ..Self::default()
+        };
+        for name in references {
+            match name.as_str() {
+                "*" => return Self::complete(),
+                "client_activity" => selection.activity = true,
+                "client_cell_height" | "window_cell_height" => selection.cell_height = true,
+                "client_cell_width" | "window_cell_width" => selection.cell_width = true,
+                "client_colours" => selection.colours = true,
+                "client_control_mode" => selection.control_mode = true,
+                "client_created" => selection.created = true,
+                "client_discarded" => selection.discarded = true,
+                "client_flags" => selection.flags = true,
+                "client_height" => selection.height = true,
+                "client_key_table" => selection.key_table = true,
+                "client_last_session" => selection.last_session = true,
+                "client_name" => selection.name = true,
+                "client_pid" => selection.pid = true,
+                "client_prefix" => selection.prefix = true,
+                "client_readonly" => selection.readonly = true,
+                "client_session" => selection.session = true,
+                "client_termfeatures" => selection.termfeatures = true,
+                "client_termname" => selection.termname = true,
+                "client_termtype" => selection.termtype = true,
+                "client_theme" => selection.theme = true,
+                "client_tty" => selection.tty = true,
+                "client_uid" => selection.uid = true,
+                "client_user" => selection.user = true,
+                "client_utf8" => selection.utf8 = true,
+                "client_width" => selection.width = true,
+                "client_written" => selection.written = true,
+                "window_bigger" | "window_offset_x" | "window_offset_y" => {
+                    selection.viewport = true;
+                }
+                name if name.starts_with("mode_") => return Self::complete(),
+                _ => {}
+            }
+        }
+        selection
+    }
+}
+
 fn client_format_facts_from_source(
     inner: &ClientFormatSource<'_>,
     client: ClientId,
     session: SessionId,
 ) -> ClientFormatFacts {
-    client_format_facts_requested(inner, client, session, |_| true)
+    client_format_facts_requested(inner, client, session, &ClientFactSelection::complete())
 }
 
 #[cfg(test)]
@@ -36190,17 +36283,25 @@ fn selected_client_format_facts_with_references(
     session: SessionId,
     references: &BTreeSet<String>,
 ) -> ClientFormatFacts {
-    if references
-        .iter()
-        .any(|name| name == "*" || name.starts_with("mode_"))
-    {
-        return client_format_facts(inner, client, session);
-    }
+    selected_client_format_facts_with_selection(
+        inner,
+        client,
+        session,
+        &ClientFactSelection::from_references(references),
+    )
+}
+
+fn selected_client_format_facts_with_selection(
+    inner: &ServerState,
+    client: ClientId,
+    session: SessionId,
+    selection: &ClientFactSelection,
+) -> ClientFormatFacts {
     client_format_facts_requested(
         &ClientFormatSource::from_inner(inner),
         client,
         session,
-        |name| name == "client_width" || references.contains(name),
+        selection,
     )
 }
 
@@ -36208,11 +36309,11 @@ fn client_format_facts_requested(
     inner: &ClientFormatSource<'_>,
     client: ClientId,
     session: SessionId,
-    requested: impl Fn(&str) -> bool,
+    selection: &ClientFactSelection,
 ) -> ClientFormatFacts {
     macro_rules! capture {
-        ($name:literal, $value:expr) => {
-            if requested($name) {
+        ($field:ident, $value:expr) => {
+            if selection.full || selection.$field {
                 $value
             } else {
                 String::new()
@@ -36225,11 +36326,9 @@ fn client_format_facts_requested(
     let kind = inner.client_kinds.get(&client).copied();
     let has_terminal =
         kind == Some(ClientKind::Interactive) && inner.client_terminals.contains(&client);
-    let cell_height = requested("client_cell_height") || requested("window_cell_height");
-    let cell_width = requested("client_cell_width") || requested("window_cell_width");
-    let viewport = ["window_bigger", "window_offset_x", "window_offset_y"]
-        .into_iter()
-        .any(&requested);
+    let cell_height = selection.full || selection.cell_height;
+    let cell_width = selection.full || selection.cell_width;
+    let viewport = selection.full || selection.viewport;
     let window = (cell_height || cell_width || viewport || kind == Some(ClientKind::Control))
         .then(|| client_focused_window_from_source(inner, client, session_state));
     let control_geometry = (kind == Some(ClientKind::Control))
@@ -36244,7 +36343,7 @@ fn client_format_facts_requested(
     } else {
         retained_size.map_or(80, |size| size.0)
     };
-    let (key_table, prefix) = if requested("client_key_table") || requested("client_prefix") {
+    let (key_table, prefix) = if selection.full || selection.key_table || selection.prefix {
         let default_key_table = inner.engine.key_table_for_session(session);
         let key_table = inner
             .key_engines
@@ -36252,16 +36351,16 @@ fn client_format_facts_requested(
             .and_then(KeyEngine::active_table)
             .unwrap_or(default_key_table.as_str());
         (
-            capture!("client_key_table", key_table.to_owned()),
+            capture!(key_table, key_table.to_owned()),
             capture!(
-                "client_prefix",
+                prefix,
                 usize::from(key_table != default_key_table).to_string()
             ),
         )
     } else {
         (String::new(), String::new())
     };
-    let (written, discarded) = if requested("client_written") || requested("client_discarded") {
+    let (written, discarded) = if selection.full || selection.written || selection.discarded {
         inner
             .subscribers
             .get(&client)
@@ -36271,7 +36370,7 @@ fn client_format_facts_requested(
     };
     ClientFormatFacts {
         activity: capture!(
-            "client_activity",
+            activity,
             client_format_time(inner.client_activity_times.get(&client).copied())
         ),
         cell_height: if cell_height {
@@ -36295,32 +36394,29 @@ fn client_format_facts_requested(
             String::new()
         },
         colours: capture!(
-            "client_colours",
+            colours,
             client_colour_count_from_source(inner, client)
                 .map_or_else(String::new, |colours| colours.to_string())
         ),
         control_mode: capture!(
-            "client_control_mode",
+            control_mode,
             usize::from(kind == Some(ClientKind::Control)).to_string()
         ),
         created: capture!(
-            "client_created",
+            created,
             client_format_time(inner.client_created_times.get(&client).copied())
         ),
-        discarded: capture!("client_discarded", discarded.to_string()),
-        flags: capture!(
-            "client_flags",
-            format_client_flags_from_source(inner, client)
-        ),
+        discarded: capture!(discarded, discarded.to_string()),
+        flags: capture!(flags, format_client_flags_from_source(inner, client)),
         height: capture!(
-            "client_height",
+            height,
             has_terminal
                 .then(|| retained_size.map_or(24, |size| size.1))
                 .map_or_else(String::new, |height| height.to_string())
         ),
         key_table,
         last_session: capture!(
-            "client_last_session",
+            last_session,
             inner
                 .last_sessions
                 .get(&client)
@@ -36328,9 +36424,9 @@ fn client_format_facts_requested(
                 .map(|session| session.name.clone())
                 .unwrap_or_default()
         ),
-        name: capture!("client_name", client_format_name_from_source(inner, client)),
+        name: capture!(name, client_format_name_from_source(inner, client)),
         pid: capture!(
-            "client_pid",
+            pid,
             inner
                 .client_pids
                 .get(&client)
@@ -36340,23 +36436,23 @@ fn client_format_facts_requested(
         ),
         prefix,
         readonly: capture!(
-            "client_readonly",
+            readonly,
             usize::from(inner.client_flags.contains(client)).to_string()
         ),
-        session: capture!("client_session", session_state.name.clone()),
+        session: capture!(session, session_state.name.clone()),
         termfeatures: capture!(
-            "client_termfeatures",
+            termfeatures,
             client_term_features_from_source(inner, client)
         ),
         termname: capture!(
-            "client_termname",
+            termname,
             client_environment_value_from_source(inner, client, "TERM")
                 .filter(|term| !term.is_empty())
                 .unwrap_or("unknown")
                 .to_owned()
         ),
         termtype: capture!(
-            "client_termtype",
+            termtype,
             inner
                 .client_terminal_types
                 .get(&client)
@@ -36364,7 +36460,7 @@ fn client_format_facts_requested(
                 .unwrap_or_default()
         ),
         theme: capture!(
-            "client_theme",
+            theme,
             inner
                 .client_color_schemes
                 .get(&client)
@@ -36372,22 +36468,23 @@ fn client_format_facts_requested(
                 .unwrap_or_default()
         ),
         tty: capture!(
-            "client_tty",
+            tty,
             inner.client_ttys.get(&client).cloned().unwrap_or_default()
         ),
-        uid: capture!("client_uid", inner.engine.format_uid().to_owned()),
-        user: capture!("client_user", inner.engine.format_user().to_owned()),
+        uid: capture!(uid, inner.engine.format_uid().to_owned()),
+        user: capture!(user, inner.engine.format_user().to_owned()),
         utf8: capture!(
-            "client_utf8",
+            utf8,
             usize::from(client_uses_utf8_from_source(inner, client)).to_string()
         ),
-        width: capture!("client_width", width.to_string()),
-        written: capture!("client_written", written.to_string()),
+        width: capture!(width, width.to_string()),
+        written: capture!(written, written.to_string()),
         line: 0,
-        environment: requested("*")
+        environment: selection
+            .full
             .then(|| inner.client_environments.get(&client).cloned())
             .flatten(),
-        terminal: (requested("*") && has_terminal)
+        terminal: (selection.full && has_terminal)
             .then(|| {
                 client_terminal_facts(
                     client_environment_value_from_source(inner, client, "TERM").unwrap_or_default(),
@@ -37189,6 +37286,15 @@ fn status_requests_with_selected_facts(
     targets
         .into_iter()
         .map(|client| {
+            if inner.client_kinds.get(&client) != Some(&ClientKind::Control) {
+                return status_request_with_selected_facts(
+                    inner,
+                    client,
+                    Arc::clone(&option_snapshot),
+                    startup_ready,
+                    job_needs.get(&client).copied().unwrap_or_default(),
+                );
+            }
             let facts = (inner.client_kinds.get(&client) == Some(&ClientKind::Control))
                 .then(|| format_hook_facts(inner));
             status_request_with_facts(
@@ -37212,11 +37318,51 @@ fn status_request_with_selected_facts(
     startup_ready: bool,
     job_needs: FormatNeeds,
 ) -> StatusRequest {
+    let revision = (*BORROWED_FORMAT_FACTS
+        && zz_mux::borrowed_formats_enabled()
+        && inner.client_kinds.get(&client) != Some(&ClientKind::Control)
+        && job_needs.is_empty()
+        && !inner.copy_sessions.contains_key(&client)
+        && !inner.command_outputs.contains_key(&client))
+    .then(|| inner.engine.format_cache_revision())
+    .flatten();
+    let attached = client_attached_session(inner, client);
+    let window = client_focused_window_for_attachment(inner, client);
+    if let Some(revision) = revision {
+        let cache = inner.status_preparation_cache.lock();
+        if let Some(cached) = cache.as_ref()
+            && cached.matches(
+                inner,
+                client,
+                attached,
+                window,
+                revision,
+                &option_snapshot,
+                startup_ready,
+            )
+        {
+            let mut request = cached.request.clone();
+            let facts = readonly_borrowed_format_hook_facts(
+                inner,
+                CommandFormatSeed {
+                    client: cached
+                        .border_client
+                        .then(|| request.facts.client.clone())
+                        .flatten(),
+                    invoking: Some(client),
+                },
+            );
+            request.pane_borders = attached.map_or_else(Vec::new, |session| {
+                border_presentations(inner, client, session, &facts)
+            });
+            return request;
+        }
+    }
     let facts = (!*BORROWED_FORMAT_FACTS
         || inner.client_kinds.get(&client) == Some(&ClientKind::Control))
     .then(|| format_hook_facts(inner));
     let snapshot = facts.is_some().then(|| inner.engine.state.snapshot());
-    status_request_with_facts(
+    let request = status_request_with_facts(
         inner,
         client,
         snapshot.as_ref(),
@@ -37225,8 +37371,179 @@ fn status_request_with_selected_facts(
         startup_ready,
         job_needs,
         &mut BTreeMap::new(),
-    )
+    );
+    if let Some(revision) = revision {
+        let parameters = status_parameters(inner, attached, &request.option_snapshot);
+        let client_dependencies_safe = !parameters.client_fact_selection.full
+            && parameters.client_references.iter().all(|name| {
+                (!name.starts_with("client_")
+                    || matches!(name.as_str(), "client_width" | "client_colours"))
+                    && !matches!(name.as_str(), "window_cell_height" | "window_cell_width")
+            });
+        let reusable = crate::status::status_cache_callbacks(&request).is_some_and(|names| {
+            names.iter().all(|name| {
+                matches!(
+                    name.as_str(),
+                    "client_width"
+                        | "client_colours"
+                        | "window_bigger"
+                        | "window_offset_x"
+                        | "window_offset_y"
+                )
+            })
+        }) && client_dependencies_safe
+            && !request.references.iter().any(|name| name.starts_with('@'));
+        let cached = reusable.then(|| {
+            CachedStatusPreparation::new(inner, attached, window, revision, request.clone())
+        });
+        *inner.status_preparation_cache.lock() =
+            cached.filter(|cached| cached.retained_bytes() <= STATUS_PREPARATION_MAX_BYTES);
+    }
+    request
 }
+
+const STATUS_PREPARATION_MAX_BYTES: usize = 1024 * 1024;
+
+struct CachedStatusPreparation {
+    revision: (u64, u64, u64, u64),
+    attached: Option<SessionId>,
+    window: Option<WindowId>,
+    size: Option<(u16, u16)>,
+    kind: Option<ClientKind>,
+    terminal: bool,
+    features: Option<u32>,
+    environment: Option<Arc<ClientEnvironmentBlob>>,
+    config_files: String,
+    request: StatusRequest,
+    viewport_requested: bool,
+    border_client: bool,
+}
+
+impl CachedStatusPreparation {
+    fn new(
+        inner: &ServerState,
+        attached: Option<SessionId>,
+        window: Option<WindowId>,
+        revision: (u64, u64, u64, u64),
+        mut request: StatusRequest,
+    ) -> Self {
+        let client = request.client;
+        request.pane_borders = Vec::new();
+        let viewport_requested = status_parameters(inner, attached, &request.option_snapshot)
+            .client_fact_selection
+            .viewport;
+        let border_client = inner
+            .engine
+            .cached_format_references_for_templates(BORDER_FORMAT_TEMPLATES)
+            .iter()
+            .any(|name| {
+                name.starts_with("client_")
+                    || matches!(
+                        name.as_str(),
+                        "window_bigger" | "window_offset_x" | "window_offset_y"
+                    )
+            });
+        Self {
+            revision,
+            attached,
+            window,
+            size: inner.client_sizes.get(&client).copied(),
+            kind: inner.client_kinds.get(&client).copied(),
+            terminal: inner.client_terminals.contains(&client),
+            features: inner.client_features.get(&client).copied(),
+            environment: inner.client_environments.get(&client).cloned(),
+            config_files: inner.config_files.clone(),
+            request,
+            viewport_requested,
+            border_client,
+        }
+    }
+
+    fn matches(
+        &self,
+        inner: &ServerState,
+        client: ClientId,
+        attached: Option<SessionId>,
+        window: Option<WindowId>,
+        revision: (u64, u64, u64, u64),
+        options: &Arc<zz_mux::StatusRowVariables>,
+        startup_ready: bool,
+    ) -> bool {
+        self.revision == revision
+            && self.request.client == client
+            && self.attached == attached
+            && self.window == window
+            && Arc::ptr_eq(&self.request.option_snapshot, options)
+            && self.request.startup != startup_ready
+            && self.request.client_scheme == inner.client_color_schemes.get(&client).copied()
+            && self.size == inner.client_sizes.get(&client).copied()
+            && self.kind == inner.client_kinds.get(&client).copied()
+            && self.terminal == inner.client_terminals.contains(&client)
+            && self.features == inner.client_features.get(&client).copied()
+            && self.config_files == inner.config_files
+            && (!self.viewport_requested || {
+                let current = (self.kind == Some(ClientKind::Interactive) && self.terminal)
+                    .then(|| {
+                        client_viewport_facts_from_source(
+                            &ClientFormatSource::from_inner(inner),
+                            client,
+                            attached?,
+                            window?,
+                        )
+                    })
+                    .flatten();
+                let values =
+                    |viewport: ClientViewportFacts| (viewport.bigger(), viewport.offsets());
+                current.map(values)
+                    == self
+                        .request
+                        .facts
+                        .client
+                        .as_ref()
+                        .and_then(|client| client.viewport)
+                        .map(values)
+            })
+            && match (&self.environment, inner.client_environments.get(&client)) {
+                (None, None) => true,
+                (Some(cached), Some(current)) => Arc::ptr_eq(cached, current),
+                _ => false,
+            }
+    }
+
+    fn retained_bytes(&self) -> usize {
+        let environment = self.environment.as_ref().map_or(0, |environment| {
+            environment
+                .as_bytes()
+                .len()
+                .saturating_mul(3)
+                .saturating_add(environment.entries().count().saturating_mul(128))
+        });
+        let job_environment =
+            self.request
+                .environment
+                .iter()
+                .fold(0_usize, |bytes, (name, value)| {
+                    bytes
+                        .saturating_add(name.as_bytes().len())
+                        .saturating_add(value.as_ref().map_or(0, |value| value.as_bytes().len()))
+                        .saturating_add(128)
+                });
+        crate::status::completed_status_bytes(
+            &self.request,
+            &[],
+            &[],
+            &zz_protocol::StatusLine::default(),
+        )
+        .saturating_add(environment)
+        .saturating_add(job_environment.saturating_mul(2))
+        .saturating_add(self.config_files.capacity().saturating_mul(2))
+        .saturating_add(self.request.default_terminal.capacity().saturating_mul(2))
+        .saturating_add(4096)
+    }
+}
+
+#[cfg(test)]
+mod format_preparation_tests;
 
 fn status_request(
     inner: &ServerState,
@@ -37283,6 +37600,8 @@ struct StatusParameters {
     needs: FormatNeeds,
     references: Arc<BTreeSet<String>>,
     client_references: Arc<BTreeSet<String>>,
+    fact_selection: StatusFactSelection,
+    client_fact_selection: ClientFactSelection,
 }
 
 struct CachedStatusParameters {
@@ -37383,6 +37702,8 @@ fn status_parameters(
             .cloned()
             .collect(),
     );
+    let fact_selection = StatusFactSelection::from_references(&references);
+    let client_fact_selection = ClientFactSelection::from_references(&client_references);
     let parameters = Arc::new(StatusParameters {
         formats,
         row_formats,
@@ -37395,6 +37716,8 @@ fn status_parameters(
         needs,
         references,
         client_references,
+        fact_selection,
+        client_fact_selection,
     });
     if let Some(key) = key {
         *inner.status_parameters_cache.lock() = (parameters
@@ -37485,6 +37808,13 @@ fn status_request_with_facts(
         .expect("status context");
     let selected = facts.is_none();
     let mut facts = facts.unwrap_or_else(|| {
+        if modes.is_empty() && job_needs.is_empty() {
+            return selected_status_format_facts_with_selection(
+                inner,
+                context,
+                &parameters.fact_selection,
+            );
+        }
         let mode_references;
         let fact_references = if modes.is_empty() {
             references.as_ref()
@@ -37508,17 +37838,15 @@ fn status_request_with_facts(
         facts.client_environment = inner.client_environments.get(&client).cloned();
     }
     if let Some(session) = attached {
-        facts.client = Some(if selected && modes.is_empty() {
-            selected_client_format_facts_with_references(
+        facts.client = Some(if selected && modes.is_empty() && job_needs.is_empty() {
+            selected_client_format_facts_with_selection(
                 inner,
                 client,
                 session,
-                if job_needs.is_empty() {
-                    &parameters.client_references
-                } else {
-                    &references
-                },
+                &parameters.client_fact_selection,
             )
+        } else if selected && modes.is_empty() {
+            selected_client_format_facts_with_references(inner, client, session, &references)
         } else {
             client_format_facts(inner, client, session)
         });
@@ -37557,8 +37885,8 @@ fn status_request_with_facts(
         environment: Arc::clone(&parameters.environment),
         default_terminal: Arc::clone(&parameters.default_terminal),
         startup: !startup_ready,
-        context,
-        facts,
+        context: Arc::new(context),
+        facts: Arc::new(facts),
         client_scheme: inner.client_color_schemes.get(&client).copied(),
         message_styles: Arc::clone(&parameters.message_styles),
         modes,
@@ -37805,9 +38133,9 @@ fn border_presentations_at(
                 style: border_format_style(format, &context, &mut hooks),
             };
             let mut callback_context = zz_mux::StatusContext::default();
-            callback_context.session_id = session.to_string();
-            callback_context.window_id = window.to_string();
-            callback_context.pane_id = pane.to_string();
+            callback_context.session_id.clone_from(&context.session_id);
+            callback_context.window_id.clone_from(&context.window_id);
+            callback_context.pane_id.clone_from(&context.pane_id);
             let callback_values = callbacks
                 .iter()
                 .map(|name| hooks.variable(name, &context))
@@ -42077,76 +42405,134 @@ thread_local! {
     static OWNED_FORMAT_FACT_BUILDS: Cell<usize> = const { Cell::new(0) };
 }
 
+#[derive(Clone, Copy, Default)]
+struct StatusFactSelection {
+    full: bool,
+    mux: bool,
+    agent_states: bool,
+    terminals: bool,
+    pane_pipes: bool,
+    session_attachments: bool,
+    session_last_attached: bool,
+    window_clients: bool,
+    unseen_changes: bool,
+    buffer: bool,
+    copy_modes: bool,
+    pane_modes: bool,
+}
+
+impl StatusFactSelection {
+    fn from_references(references: &BTreeSet<String>) -> Self {
+        #[cfg(test)]
+        FORMAT_FACT_SELECTION_BUILDS.with(|count| count.set(count.get() + 1));
+        let mut selection = Self::default();
+        for name in references {
+            match name.as_str() {
+                "*" => {
+                    selection.full = true;
+                    return selection;
+                }
+                "pane_kind" | "browser_url" => selection.mux = true,
+                "agent_state" | "agent_pending_permission" => {
+                    selection.mux = true;
+                    selection.agent_states = true;
+                }
+                "pane_search_string"
+                | "history_size"
+                | "cursor_x"
+                | "cursor_y"
+                | "alternate_on"
+                | "mouse_any_flag"
+                | "pane_last_command_status"
+                | "pane_pb_progress"
+                | "pane_pb_state" => selection.terminals = true,
+                "pane_pipe" | "pane_pipe_pid" => selection.pane_pipes = true,
+                "session_attached" | "session_attached_list" | "session_many_attached" => {
+                    selection.session_attachments = true;
+                }
+                "session_last_attached" => selection.session_last_attached = true,
+                "window_active_clients" | "window_active_clients_list" => {
+                    selection.window_clients = true;
+                }
+                "pane_unseen_changes" => selection.unseen_changes = true,
+                "buffer_created" | "buffer_full" | "buffer_name" | "buffer_sample"
+                | "buffer_size" => {
+                    selection.buffer = true;
+                }
+                "pane_in_mode" | "pane_mode" => {
+                    selection.copy_modes = true;
+                    selection.pane_modes = true;
+                }
+                name if name.starts_with("mode_") => {
+                    selection.full = true;
+                    return selection;
+                }
+                name if name.starts_with('@') => selection.mux = true,
+                name if crate::status::COPY_MODE_CONTEXT_FORMATS.contains(&name) => {
+                    selection.copy_modes = true;
+                }
+                _ => {}
+            }
+        }
+        selection
+    }
+}
+
 fn selected_status_format_facts(
     inner: &ServerState,
     context: &zz_mux::StatusContext,
     references: &BTreeSet<String>,
 ) -> FormatHookFacts {
+    selected_status_format_facts_with_selection(
+        inner,
+        context,
+        &StatusFactSelection::from_references(references),
+    )
+}
+
+fn selected_status_format_facts_with_selection(
+    inner: &ServerState,
+    context: &zz_mux::StatusContext,
+    selection: &StatusFactSelection,
+) -> FormatHookFacts {
     use crate::status::FormatFactSource;
 
-    if references.contains("*") || references.iter().any(|name| name.starts_with("mode_")) {
+    if selection.full {
         return format_hook_facts(inner);
     }
     let source = readonly_borrowed_format_hook_facts(inner, CommandFormatSeed::default());
-    let has = |names: &[&str]| names.iter().any(|name| references.contains(*name));
     let mut facts = FormatHookFacts::shared_empty();
-    if has(&[
-        "pane_kind",
-        "browser_url",
-        "agent_state",
-        "agent_pending_permission",
-    ]) || references.iter().any(|name| name.starts_with('@'))
-    {
+    if selection.mux {
         facts.mux = Arc::new(inner.engine.format_facts());
     }
-    if has(&["agent_state", "agent_pending_permission"]) {
+    if selection.agent_states {
         facts.agent_states = Arc::clone(&inner.agent_states);
     }
-    if has(&[
-        "pane_search_string",
-        "history_size",
-        "cursor_x",
-        "cursor_y",
-        "alternate_on",
-        "mouse_any_flag",
-        "pane_last_command_status",
-        "pane_pb_progress",
-        "pane_pb_state",
-    ]) {
+    if selection.terminals {
         facts.terminals = Arc::clone(&inner.terminals);
     }
-    if has(&["pane_pipe", "pane_pipe_pid"]) {
+    if selection.pane_pipes {
         facts.pane_pipes = Arc::new(source.pane_pipes().clone());
     }
-    if has(&[
-        "session_attached",
-        "session_attached_list",
-        "session_many_attached",
-    ]) {
+    if selection.session_attachments {
         facts.session_attachments = Arc::new(source.session_attachments().clone());
     }
-    if references.contains("session_last_attached") {
+    if selection.session_last_attached {
         facts.session_last_attached = Arc::new(inner.session_last_attached.clone());
     }
-    if has(&["window_active_clients", "window_active_clients_list"]) {
+    if selection.window_clients {
         facts.window_clients = Arc::new(source.window_clients(context).clone());
     }
-    if references.contains("pane_unseen_changes") {
+    if selection.unseen_changes {
         facts.unseen_changes = Arc::new(source.unseen_changes().clone());
     }
-    if has(&[
-        "buffer_created",
-        "buffer_full",
-        "buffer_name",
-        "buffer_sample",
-        "buffer_size",
-    ]) {
+    if selection.buffer {
         facts.buffer = source.buffer().cloned();
     }
-    if has(&crate::status::COPY_MODE_CONTEXT_FORMATS) || has(&["pane_in_mode", "pane_mode"]) {
+    if selection.copy_modes {
         facts.copy_modes = Arc::new(source.copy_modes().clone());
     }
-    if has(&["pane_in_mode", "pane_mode"]) {
+    if selection.pane_modes {
         facts.pane_modes = Arc::new(source.pane_modes().clone());
     }
     facts

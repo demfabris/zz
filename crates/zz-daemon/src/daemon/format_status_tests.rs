@@ -105,9 +105,9 @@ fn completed_status_reads_fresh_scoped_daemon_overrides_with_the_same_detached_c
             let (_, _, mut request) = completed_request(&template);
             let session = request.context.session_id.parse().unwrap();
             let window = request.context.window_id.parse().unwrap();
-            request.facts.session_attachments =
+            Arc::make_mut(&mut request.facts).session_attachments =
                 Arc::new(BTreeMap::from([(session, (1, "one".to_owned()))]));
-            request.facts.window_clients =
+            Arc::make_mut(&mut request.facts).window_clients =
                 Arc::new(BTreeMap::from([(window, vec!["one".to_owned()])]));
             let mut renderer = StatusRenderer::default();
             assert_eq!(
@@ -115,9 +115,9 @@ fn completed_status_reads_fresh_scoped_daemon_overrides_with_the_same_detached_c
                 first
             );
             let retained = request.context.clone();
-            request.facts.session_attachments =
+            Arc::make_mut(&mut request.facts).session_attachments =
                 Arc::new(BTreeMap::from([(session, (2, "two".to_owned()))]));
-            request.facts.window_clients = Arc::new(BTreeMap::from([(
+            Arc::make_mut(&mut request.facts).window_clients = Arc::new(BTreeMap::from([(
                 window,
                 vec!["two".to_owned(), "other".to_owned()],
             )]));
@@ -134,6 +134,7 @@ fn completed_status_reads_fresh_scoped_daemon_overrides_with_the_same_detached_c
 
 #[test]
 fn completed_status_twenty_windows_fit_the_bound_and_reuse_fresh_requests() {
+    let cache_enabled = zz_mux::format_cache_knob() && zz_mux::borrowed_formats_enabled();
     let mut engine = MuxEngine::default();
     let mut context = zz_mux::ExecutionContext::default();
     execute(&mut engine, &mut context, &["new-session", "-s", "twenty"]);
@@ -141,7 +142,11 @@ fn completed_status_twenty_windows_fit_the_bound_and_reuse_fresh_requests() {
         execute(&mut engine, &mut context, &["new-window"]);
     }
     let mut request = engine_request(1, &engine, context.session);
-    request.facts.client.as_mut().unwrap().viewport = Some(ClientViewportFacts {
+    Arc::make_mut(&mut request.facts)
+        .client
+        .as_mut()
+        .unwrap()
+        .viewport = Some(ClientViewportFacts {
         columns: 180,
         rows: 50,
         window_width: 180,
@@ -150,7 +155,7 @@ fn completed_status_twenty_windows_fit_the_bound_and_reuse_fresh_requests() {
     });
     let mut renderer = StatusRenderer::default();
     let first = renderer.render_forced_at(&request, 1_700_000_000);
-    if zz_mux::format_cache_knob() {
+    if cache_enabled {
         let entry = renderer
             .completed
             .as_ref()
@@ -165,13 +170,22 @@ fn completed_status_twenty_windows_fit_the_bound_and_reuse_fresh_requests() {
         assert!(bytes <= COMPLETED_STATUS_MAX_BYTES);
     }
     let mut fresh = engine_request(1, &engine, context.session);
-    fresh.facts.client.as_mut().unwrap().viewport = request.facts.client.as_ref().unwrap().viewport;
-    fresh.facts.client.as_mut().unwrap().written = "456".to_owned();
+    Arc::make_mut(&mut fresh.facts)
+        .client
+        .as_mut()
+        .unwrap()
+        .viewport = Arc::make_mut(&mut request.facts)
+        .client
+        .as_ref()
+        .unwrap()
+        .viewport;
+    Arc::make_mut(&mut fresh.facts)
+        .client
+        .as_mut()
+        .unwrap()
+        .written = "456".to_owned();
     assert_eq!(renderer.render_forced_at(&fresh, 1_700_000_000), first);
-    assert_eq!(
-        renderer.expansions,
-        if zz_mux::format_cache_knob() { 1 } else { 2 }
-    );
+    assert_eq!(renderer.expansions, if cache_enabled { 1 } else { 2 });
 }
 
 #[test]
@@ -181,7 +195,13 @@ fn completed_status_does_not_retain_oversized_sources_callbacks_or_borders() {
         let large = "x".repeat(COMPLETED_STATUS_MAX_BYTES);
         match kind {
             "source" => *Arc::make_mut(&mut request.title_format) = Some(large),
-            "callback" => request.facts.client.as_mut().unwrap().prefix = large,
+            "callback" => {
+                Arc::make_mut(&mut request.facts)
+                    .client
+                    .as_mut()
+                    .unwrap()
+                    .prefix = large;
+            }
             _ => {
                 request
                     .pane_borders
@@ -230,29 +250,35 @@ fn completed_request(left: &str) -> (MuxEngine, zz_mux::ExecutionContext, Status
 
 #[test]
 fn completed_status_reuses_forced_output_and_ignores_unreferenced_client_fields() {
+    let cache_enabled = zz_mux::format_cache_knob() && zz_mux::borrowed_formats_enabled();
     let (_, _, mut request) = completed_request("#{session_name}:#{client_prefix}");
     let mut renderer = StatusRenderer::default();
     let first = renderer.render_forced_at(&request, 1_700_000_000);
     assert_eq!(first.left, "cached:");
-    if zz_mux::format_cache_knob() {
-        assert!(renderer.completed.is_some(), "{:?}", request.references);
-    }
+    assert_eq!(
+        renderer.completed.is_some(),
+        cache_enabled,
+        "{:?}",
+        request.references
+    );
     renderer.published.clear();
-    request.facts.client.as_mut().unwrap().written = "999".to_owned();
-    request.facts.client.as_mut().unwrap().activity = "123".to_owned();
+    Arc::make_mut(&mut request.facts)
+        .client
+        .as_mut()
+        .unwrap()
+        .written = "999".to_owned();
+    Arc::make_mut(&mut request.facts)
+        .client
+        .as_mut()
+        .unwrap()
+        .activity = "123".to_owned();
     assert_eq!(renderer.render_forced_at(&request, 1_700_000_000), first);
     assert_eq!(renderer.published.get(&request.client), Some(&first));
-    assert_eq!(
-        renderer.expansions,
-        if zz_mux::format_cache_knob() { 1 } else { 2 }
-    );
+    assert_eq!(renderer.expansions, if cache_enabled { 1 } else { 2 });
     renderer.forget(request.client);
     assert!(renderer.completed.is_none());
     assert_eq!(renderer.render_forced_at(&request, 1_700_000_000), first);
-    assert_eq!(
-        renderer.expansions,
-        if zz_mux::format_cache_knob() { 2 } else { 3 }
-    );
+    assert_eq!(renderer.expansions, if cache_enabled { 2 } else { 3 });
 }
 
 #[test]
@@ -278,7 +304,11 @@ fn completed_status_invalidates_referenced_client_context_option_and_time_inputs
             .starts_with("20:cached::")
     );
     let initial = renderer.expansions;
-    request.facts.client.as_mut().unwrap().prefix = "1".to_owned();
+    Arc::make_mut(&mut request.facts)
+        .client
+        .as_mut()
+        .unwrap()
+        .prefix = "1".to_owned();
     assert!(
         renderer
             .render_forced_at(&request, 1_700_000_000)
@@ -286,7 +316,7 @@ fn completed_status_invalidates_referenced_client_context_option_and_time_inputs
             .starts_with("20:cached:1:")
     );
     assert_eq!(renderer.expansions, initial + 1);
-    request.context.set_format_value("session_name", "changed");
+    Arc::make_mut(&mut request.context).set_format_value("session_name", "changed");
     assert!(
         renderer
             .render_forced_at(&request, 1_700_000_000)
@@ -344,7 +374,7 @@ fn completed_status_rejects_terminal_mode_and_unknown_dependencies() {
         64,
         Arc::new(zz_terminal::TerminalAppearance::default()),
     ));
-    request.facts.terminals = Arc::new(BTreeMap::from([(
+    Arc::make_mut(&mut request.facts).terminals = Arc::new(BTreeMap::from([(
         context.pane.unwrap(),
         Arc::clone(&terminal),
     )]));
@@ -360,7 +390,7 @@ fn completed_status_rejects_terminal_mode_and_unknown_dependencies() {
     request.modes.push(ModeRequest {
         pane: request.context.pane_id.parse().unwrap(),
         view: false,
-        context: request.context.clone(),
+        context: request.context.as_ref().clone(),
         position: 0,
         limit: 0,
         vi_keys: false,
@@ -395,6 +425,7 @@ fn completed_status_cache_keeps_forced_shell_jobs_running() {
 
 #[test]
 fn completed_status_invalidates_captured_global_and_session_environment_values() {
+    let cache_enabled = zz_mux::format_cache_knob() && zz_mux::borrowed_formats_enabled();
     let (mut engine, mut context, _) = completed_request("#{CACHE_ENV}");
     let mut renderer = StatusRenderer::default();
     for (args, expected) in [
@@ -427,7 +458,7 @@ fn completed_status_invalidates_captured_global_and_session_environment_values()
         );
         assert_eq!(
             renderer.expansions,
-            expansions + usize::from(!zz_mux::format_cache_knob())
+            expansions + usize::from(!cache_enabled)
         );
     }
 }

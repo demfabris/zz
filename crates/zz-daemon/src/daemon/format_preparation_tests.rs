@@ -1,0 +1,547 @@
+use super::*;
+
+fn fixture(left: &str) -> (ServerState, ClientId, ExecutionContext) {
+    let mut inner = ServerState::default();
+    let (session, window, pane) = inner.engine.state.create_session("prepared").unwrap();
+    let client = ClientId(3);
+    inner.attached.insert(session, BTreeSet::from([client]));
+    inner.focused_windows.insert(client, window);
+    inner.client_kinds.insert(client, ClientKind::Interactive);
+    inner.client_terminals.insert(client);
+    inner.client_sizes.insert(client, (80, 24));
+    inner
+        .client_environments
+        .insert(client, environment("xterm"));
+    inner.engine.set_format_now(1_700_000_000);
+    let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+    for (name, value) in [
+        ("status-left", left),
+        ("status-right", ""),
+        ("status-left-length", "32767"),
+        ("status-format[0]", "#{session_name}"),
+        ("pane-border-style", "fg=green"),
+        ("pane-active-border-style", "fg=green"),
+    ] {
+        set_option(&mut inner, &mut context, name, value);
+    }
+    (inner, client, context)
+}
+
+fn environment(term: &str) -> Arc<ClientEnvironmentBlob> {
+    Arc::new(ClientEnvironmentBlob::from_map(BTreeMap::from([(
+        "TERM".into(),
+        term.into(),
+    )])))
+}
+
+fn set_option(inner: &mut ServerState, context: &mut ExecutionContext, name: &str, value: &str) {
+    inner
+        .engine
+        .execute(
+            context,
+            &CommandInvocation::new("set-option", ["-g", name, value]),
+        )
+        .unwrap();
+}
+
+fn request(inner: &ServerState, client: ClientId) -> StatusRequest {
+    status_request_with_selected_facts(
+        inner,
+        client,
+        inner.engine.cached_format_option_snapshot(),
+        true,
+        FormatNeeds::NONE,
+    )
+}
+
+fn reuse_enabled() -> bool {
+    zz_mux::format_cache_knob() && *BORROWED_FORMAT_FACTS && zz_mux::borrowed_formats_enabled()
+}
+
+fn assert_left(request: &StatusRequest, expected: &str) {
+    let rendered = StatusRenderer::default().render_initial(request);
+    assert!(
+        rendered.left.contains(expected),
+        "{:?} lacks {expected:?}",
+        rendered.left
+    );
+}
+
+fn assert_fresh(first: &StatusRequest, next: &StatusRequest) {
+    assert!(!Arc::ptr_eq(&first.context, &next.context));
+    assert!(!Arc::ptr_eq(&first.facts, &next.facts));
+}
+
+#[test]
+fn status_preparation_reuses_safe_engine_width_and_colour_dependencies() {
+    zz_mux::with_borrowed_formats(true, || {
+        let (inner, client, _) = fixture("#{session_name}:#{client_width}:#{client_colours}");
+        let first = request(&inner, client);
+        let second = request(&inner, client);
+        assert_left(&first, "prepared:80:8");
+        assert_eq!(
+            StatusRenderer::default().render_initial(&first),
+            StatusRenderer::default().render_initial(&second)
+        );
+        assert_eq!(
+            Arc::ptr_eq(&first.context, &second.context),
+            reuse_enabled()
+        );
+        assert_eq!(Arc::ptr_eq(&first.facts, &second.facts), reuse_enabled());
+        let cache = inner.status_preparation_cache.lock();
+        if reuse_enabled() {
+            assert!(cache.as_ref().unwrap().retained_bytes() <= STATUS_PREPARATION_MAX_BYTES);
+        } else {
+            assert!(cache.is_none());
+        }
+    });
+}
+
+#[test]
+fn status_preparation_tracks_fresh_width_features_and_client_environment() {
+    zz_mux::with_borrowed_formats(true, || {
+        let (mut inner, client, _) = fixture("#{client_width}:#{client_colours}");
+        let first = request(&inner, client);
+        let revision = inner.engine.format_cache_revision();
+        inner.client_sizes.insert(client, (100, 30));
+        let wider = request(&inner, client);
+        assert_fresh(&first, &wider);
+        assert_left(&wider, "100:8");
+        inner.client_features.insert(
+            client,
+            client_features_fact(&["client-features-v1:RGB".to_owned()]),
+        );
+        let rgb = request(&inner, client);
+        assert_fresh(&wider, &rgb);
+        assert_left(&rgb, "100:16777216");
+        inner.client_features.remove(&client);
+        inner
+            .client_environments
+            .insert(client, environment("xterm-256color"));
+        let colours = request(&inner, client);
+        assert_fresh(&rgb, &colours);
+        assert_left(&colours, "100:256");
+        inner.client_terminals.remove(&client);
+        let no_terminal = request(&inner, client);
+        assert_fresh(&colours, &no_terminal);
+        assert_eq!(no_terminal.facts.client.as_ref().unwrap().colours, "");
+        assert_eq!(inner.engine.format_cache_revision(), revision);
+        assert_left(&first, "80:8");
+    });
+}
+
+#[test]
+fn status_preparation_invalidates_config_state_options_data_environment_and_clock() {
+    zz_mux::with_borrowed_formats(true, || {
+        let (mut inner, client, mut context) =
+            fixture("#{pane_title}:#{pid}:#{PREPARATION_ENV}:#{config_files}");
+        let pane = context.pane.unwrap();
+        inner.engine.state.update_pane_title(pane, "first").unwrap();
+        inner.engine.set_format_server_identity(11, "22", "user");
+        inner.config_files = "/first.conf".to_owned();
+        let first = request(&inner, client);
+        inner.config_files = "/second.conf".to_owned();
+        let config = request(&inner, client);
+        assert_fresh(&first, &config);
+        assert_eq!(
+            config.context.variable("config_files").as_deref(),
+            Some("/second.conf")
+        );
+        inner
+            .engine
+            .state
+            .update_pane_title(pane, "second")
+            .unwrap();
+        let state = request(&inner, client);
+        assert_fresh(&config, &state);
+        assert_eq!(
+            state.context.variable("pane_title").as_deref(),
+            Some("second")
+        );
+        set_option(
+            &mut inner,
+            &mut context,
+            "status-left",
+            "updated:#{pane_title}:#{pid}:#{PREPARATION_ENV}:#{config_files}",
+        );
+        let options = request(&inner, client);
+        assert_fresh(&state, &options);
+        assert!(options.formats.left.starts_with("updated:"));
+        inner.engine.set_format_server_identity(33, "44", "other");
+        let data = request(&inner, client);
+        assert_fresh(&options, &data);
+        assert_eq!(data.context.variable("pid").as_deref(), Some("33"));
+        inner
+            .engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("set-environment", ["-g", "PREPARATION_ENV", "fresh"]),
+            )
+            .unwrap();
+        let environment = request(&inner, client);
+        assert_fresh(&data, &environment);
+        assert_left(&environment, "updated:second:33:fresh:/second.conf");
+        inner.engine.set_format_now(1_700_000_001);
+        let clock = request(&inner, client);
+        assert_fresh(&environment, &clock);
+        assert_eq!(clock.context.format_now, Some(1_700_000_001));
+        assert_eq!(
+            first.context.variable("pane_title").as_deref(),
+            Some("first")
+        );
+        assert_eq!(
+            first.context.variable("config_files").as_deref(),
+            Some("/first.conf")
+        );
+    });
+}
+
+#[test]
+fn status_preparation_retargets_focus_session_and_replaced_engine() {
+    zz_mux::with_borrowed_formats(true, || {
+        let (mut inner, client, context) = fixture("#{session_name}:#{pane_title}");
+        let session = context.session.unwrap();
+        let (other_window, other_pane) = inner
+            .engine
+            .state
+            .create_window(session, None, zz_mux::PaneKind::Terminal)
+            .unwrap();
+        let (other_session, third_window, third_pane) =
+            inner.engine.state.create_session("other").unwrap();
+        for (pane, title) in [
+            (context.pane.unwrap(), "first"),
+            (other_pane, "second"),
+            (third_pane, "third"),
+        ] {
+            inner.engine.state.update_pane_title(pane, title).unwrap();
+        }
+        let first = request(&inner, client);
+        let revision = inner.engine.format_cache_revision();
+        inner.focused_windows.insert(client, other_window);
+        let focused = request(&inner, client);
+        assert_fresh(&first, &focused);
+        assert_left(&focused, "prepared:second");
+        inner.attached.get_mut(&session).unwrap().remove(&client);
+        inner
+            .attached
+            .insert(other_session, BTreeSet::from([client]));
+        inner.focused_windows.insert(client, third_window);
+        let attached = request(&inner, client);
+        assert_fresh(&focused, &attached);
+        assert_left(&attached, "other:third");
+        assert_eq!(inner.engine.format_cache_revision(), revision);
+
+        let (mut replacement, replacement_client, _) = fixture("replacement");
+        let old = request(&replacement, replacement_client);
+        let revision = replacement.engine.format_cache_revision();
+        let (fresh, _, _) = fixture("changed");
+        replacement.engine = fresh.engine;
+        assert_eq!(replacement.engine.format_cache_revision(), revision);
+        let changed = request(&replacement, replacement_client);
+        assert_fresh(&old, &changed);
+        assert_left(&changed, "changed");
+    });
+}
+
+#[test]
+fn status_preparation_invalidates_scheme_startup_and_client_identity() {
+    zz_mux::with_borrowed_formats(true, || {
+        let (mut inner, client, context) = fixture("#{session_name}:#{client_width}");
+        let first = request(&inner, client);
+        let revision = inner.engine.format_cache_revision();
+        inner
+            .client_color_schemes
+            .insert(client, TerminalColorScheme::Light);
+        let light = request(&inner, client);
+        assert_fresh(&first, &light);
+        assert_eq!(light.client_scheme, Some(TerminalColorScheme::Light));
+        let startup = status_request_with_selected_facts(
+            &inner,
+            client,
+            inner.engine.cached_format_option_snapshot(),
+            false,
+            FormatNeeds::NONE,
+        );
+        assert_fresh(&light, &startup);
+        assert!(startup.startup);
+        let other_client = ClientId(4);
+        inner
+            .attached
+            .get_mut(&context.session.unwrap())
+            .unwrap()
+            .insert(other_client);
+        inner
+            .focused_windows
+            .insert(other_client, context.window.unwrap());
+        inner.client_sizes.insert(other_client, (55, 24));
+        inner
+            .client_kinds
+            .insert(other_client, ClientKind::Interactive);
+        let other = request(&inner, other_client);
+        assert_fresh(&startup, &other);
+        assert_eq!(other.client, other_client);
+        assert_left(&other, "prepared:55");
+        assert_eq!(inner.engine.format_cache_revision(), revision);
+    });
+}
+
+#[test]
+fn status_preparation_bypasses_live_callbacks_jobs_modes_control_and_rollback() {
+    zz_mux::with_borrowed_formats(true, || {
+        let (mut inner, client, mut context) = fixture("#{session_name}");
+        for template in [
+            "#{session_attached}",
+            "#{window_active_clients}",
+            "#{cursor_x}",
+            "#{pane_in_mode}",
+            "#{client_prefix}",
+            "#(printf dynamic)",
+            "#{@preparation}",
+        ] {
+            set_option(&mut inner, &mut context, "status-left", template);
+            let first = request(&inner, client);
+            let second = request(&inner, client);
+            assert_fresh(&first, &second);
+            assert!(
+                inner.status_preparation_cache.lock().is_none(),
+                "{template}"
+            );
+        }
+        set_option(&mut inner, &mut context, "status-left", "#{session_name}");
+        let first = request(&inner, client);
+        let job = status_request_with_selected_facts(
+            &inner,
+            client,
+            inner.engine.cached_format_option_snapshot(),
+            true,
+            FormatNeeds::PANES,
+        );
+        assert_fresh(&first, &job);
+        assert!(job.references.contains("*"));
+        enter_copy_session(&mut inner, client, context.pane.unwrap()).unwrap();
+        let mode = request(&inner, client);
+        assert_fresh(&first, &mode);
+        inner.copy_sessions.remove(&client);
+        inner.client_kinds.insert(client, ClientKind::Control);
+        let control = request(&inner, client);
+        assert_fresh(&first, &control);
+        inner.client_kinds.insert(client, ClientKind::Interactive);
+        let owned = zz_mux::with_borrowed_formats(false, || request(&inner, client));
+        assert_fresh(&first, &owned);
+        assert_left(&owned, "prepared");
+    });
+}
+
+#[test]
+fn status_preparation_reuse_keeps_border_mode_callbacks_fresh() {
+    zz_mux::with_borrowed_formats(true, || {
+        let (mut inner, client, mut context) = fixture("#{session_name}:#{client_width}");
+        set_option(
+            &mut inner,
+            &mut context,
+            "pane-active-border-style",
+            "fg=#{?pane_in_mode,red,green}",
+        );
+        let first = request(&inner, client);
+        assert_eq!(first.pane_borders[0].style, "fg=green");
+        let revision = inner.engine.format_cache_revision();
+        inner
+            .pane_modes
+            .insert(context.pane.unwrap(), vec![PaneModeRequest::Clock]);
+        let second = request(&inner, client);
+        assert_eq!(inner.engine.format_cache_revision(), revision);
+        assert_eq!(
+            Arc::ptr_eq(&first.context, &second.context),
+            reuse_enabled()
+        );
+        assert_eq!(second.pane_borders[0].style, "fg=red");
+        assert_eq!(first.pane_borders[0].style, "fg=green");
+    });
+}
+
+#[test]
+fn status_preparation_bypasses_border_prefix_and_cell_dependencies() {
+    zz_mux::with_borrowed_formats(true, || {
+        let (mut inner, client, mut context) = fixture("#{session_name}");
+        set_option(
+            &mut inner,
+            &mut context,
+            "pane-active-border-style",
+            "fg=#{?client_prefix,red,green}",
+        );
+        let first = request(&inner, client);
+        assert_eq!(first.pane_borders[0].style, "fg=green");
+        let revision = inner.engine.format_cache_revision();
+        inner
+            .key_engines
+            .entry(client)
+            .or_default()
+            .switch_table(Some("copy-mode".to_owned()));
+        let prefix = request(&inner, client);
+        assert_fresh(&first, &prefix);
+        assert_eq!(prefix.pane_borders[0].style, "fg=red");
+        assert!(inner.status_preparation_cache.lock().is_none());
+        assert_eq!(inner.engine.format_cache_revision(), revision);
+        set_option(
+            &mut inner,
+            &mut context,
+            "pane-active-border-style",
+            "fg=#{?#{==:#{window_cell_width},9},red,green},bg=#{?#{==:#{window_cell_height},19},blue,black}",
+        );
+        let before = request(&inner, client);
+        assert_eq!(before.pane_borders[0].style, "fg=green,bg=black");
+        let revision = inner.engine.format_cache_revision();
+        inner
+            .terminal_geometries
+            .entry(context.pane.unwrap())
+            .or_default()
+            .insert(
+                client,
+                TerminalGeometry {
+                    columns: 80,
+                    rows: 24,
+                    cell_width_px: 9,
+                    cell_height_px: 19,
+                },
+            );
+        let geometry = request(&inner, client);
+        assert_fresh(&before, &geometry);
+        assert_eq!(geometry.pane_borders[0].style, "fg=red,bg=blue");
+        assert!(inner.status_preparation_cache.lock().is_none());
+        assert_eq!(inner.engine.format_cache_revision(), revision);
+    });
+}
+
+#[test]
+fn status_preparation_rejects_oversized_context_and_environment_capture() {
+    zz_mux::with_borrowed_formats(true, || {
+        let (mut inner, client, mut context) = fixture("#{session_name}:#{config_files}");
+        let small = request(&inner, client);
+        if reuse_enabled() {
+            assert!(inner.status_preparation_cache.lock().is_some());
+        }
+        inner.config_files = "c".repeat(400_000);
+        let large_environment = "e".repeat(400_000);
+        inner
+            .engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "set-environment",
+                    ["-g", "PREPARATION_LARGE", large_environment.as_str()],
+                ),
+            )
+            .unwrap();
+        let large = request(&inner, client);
+        assert_fresh(&small, &large);
+        assert_eq!(
+            large.context.variable("config_files").unwrap().len(),
+            400_000
+        );
+        assert!(large.environment.iter().any(|(name, value)| {
+            name.as_bytes() == b"PREPARATION_LARGE"
+                && value
+                    .as_ref()
+                    .is_some_and(|value| value.as_bytes().len() == 400_000)
+        }));
+        let candidate = CachedStatusPreparation::new(
+            &inner,
+            context.session,
+            context.window,
+            inner.engine.format_cache_revision().unwrap_or_default(),
+            large,
+        );
+        assert!(candidate.retained_bytes() > STATUS_PREPARATION_MAX_BYTES);
+        assert!(inner.status_preparation_cache.lock().is_none());
+    });
+}
+
+#[test]
+fn status_preparation_reuses_the_default_status_templates() {
+    zz_mux::with_borrowed_formats(true, || {
+        let (mut inner, client, mut context) = fixture("#{session_name}");
+        for name in [
+            "status-left",
+            "status-right",
+            "status-left-length",
+            "status-format[0]",
+            "pane-border-style",
+            "pane-active-border-style",
+        ] {
+            inner
+                .engine
+                .execute(
+                    &mut context,
+                    &CommandInvocation::new("set-option", ["-gu", name]),
+                )
+                .unwrap();
+        }
+        let first = request(&inner, client);
+        let second = request(&inner, client);
+        assert!(first.references.contains("window_bigger"));
+        assert!(first.references.contains("window_offset_x"));
+        assert!(first.references.contains("window_offset_y"));
+        assert_eq!(
+            Arc::ptr_eq(&first.context, &second.context),
+            reuse_enabled()
+        );
+        assert_eq!(Arc::ptr_eq(&first.facts, &second.facts), reuse_enabled());
+        assert_left(&second, "prepared");
+    });
+}
+
+#[test]
+fn status_preparation_tracks_viewport_changes_without_engine_revisions() {
+    zz_mux::with_borrowed_formats(true, || {
+        let (mut inner, client, mut context) =
+            fixture("#{window_bigger}:#{window_offset_x}:#{window_offset_y}");
+        set_option(
+            &mut inner,
+            &mut context,
+            "pane-active-border-style",
+            "fg=#{?window_bigger,red,green}",
+        );
+        inner.client_sizes.remove(&client);
+        inner
+            .terminal_geometries
+            .entry(context.pane.unwrap())
+            .or_default()
+            .insert(
+                client,
+                TerminalGeometry {
+                    columns: 100,
+                    rows: 100,
+                    cell_width_px: 9,
+                    cell_height_px: 19,
+                },
+            );
+        let first = request(&inner, client);
+        let unchanged = request(&inner, client);
+        assert_eq!(
+            Arc::ptr_eq(&first.context, &unchanged.context),
+            reuse_enabled()
+        );
+        assert_left(&first, "0::");
+        assert_eq!(first.pane_borders[0].style, "fg=green");
+        let revision = inner.engine.format_cache_revision();
+        inner
+            .terminal_geometries
+            .get_mut(&context.pane.unwrap())
+            .unwrap()
+            .insert(
+                client,
+                TerminalGeometry {
+                    columns: 40,
+                    rows: 12,
+                    cell_width_px: 9,
+                    cell_height_px: 19,
+                },
+            );
+        let smaller = request(&inner, client);
+        assert_fresh(&first, &smaller);
+        assert_left(&smaller, "1:0:0");
+        assert_eq!(smaller.pane_borders[0].style, "fg=red");
+        assert_eq!(inner.engine.format_cache_revision(), revision);
+        assert_left(&first, "0::");
+    });
+}

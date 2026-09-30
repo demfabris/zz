@@ -60,6 +60,68 @@ fn selective_detach_captures_only_referenced_table_values() {
 }
 
 #[test]
+fn detached_nested_loops_keep_whole_status_values_uninitialized() {
+    let mut engine = MuxEngine::default();
+    let (session, _, pane) = engine.state.create_session("alpha").unwrap();
+    engine
+        .state
+        .split_pane(
+            pane,
+            zz_protocol::Axis::Horizontal,
+            crate::PaneKind::Terminal,
+        )
+        .unwrap();
+    engine
+        .state
+        .create_window(session, Some("logs".to_owned()), crate::PaneKind::Terminal)
+        .unwrap();
+    engine.state.create_session("beta").unwrap();
+    let template = "#{S:#{session_name}[#{W:#{window_name}(#{P:#{pane_index};})}]}";
+    let expected = with_borrowed_formats(false, || {
+        compiled::with_enabled(false, || {
+            let context = engine.format_status_context(Some(session), None, None);
+            expand_status(template, &context, &mut Hooks(&engine))
+        })
+    });
+    with_borrowed_formats(true, || {
+        let context = engine
+            .format_status_context(Some(session), None, None)
+            .detach_with_templates(engine.format_needs([template]), [template]);
+        let assert_lazy = || {
+            assert!(context.values.get().is_none());
+            let assert_items = |items: &LoopItems| {
+                assert!(!items.is_empty());
+                for item in items.iter() {
+                    assert!(item.context.values.get().is_none());
+                    assert!(item.context.borrowed_child(None).values.get().is_none());
+                }
+            };
+            let parts = &context.format_universe.parts;
+            assert_items(parts.sessions.get().unwrap());
+            for items in parts.windows.lock().values().flatten() {
+                assert_items(items);
+            }
+            for items in parts.panes.lock().values().flatten() {
+                assert_items(items);
+            }
+        };
+        assert_lazy();
+        for compiled in [false, true] {
+            assert_eq!(
+                compiled::with_enabled(compiled, || {
+                    expand_status(template, &context, &mut Hooks(&engine))
+                }),
+                expected
+            );
+            assert_lazy();
+        }
+        with_borrowed_formats(false, || {
+            assert!(context.borrowed_child(None).values.get().is_some());
+        });
+    });
+}
+
+#[test]
 fn selective_detach_keeps_table_values_introduced_by_shell_output() {
     struct OutputHooks<'a> {
         context: &'a StatusContext<'static>,

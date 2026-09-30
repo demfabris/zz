@@ -1687,6 +1687,8 @@ impl<'e> StatusContext<'e> {
             );
             child.variables.clone_from(&self.variables);
             child
+        } else if tree::borrowed_formats() {
+            self.detach_values(None)
         } else {
             let mut context = StatusContext::from((**self).clone());
             context.variables.clone_from(&self.variables);
@@ -3549,9 +3551,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                 }
                 compiled::Operation::Style(prefix, style) => {
                     output.extend_from_slice(prefix.as_bytes());
-                    let mut value = Vec::new();
-                    self.expand_compiled_ops(style, depth, &mut value, true);
-                    output.extend_from_slice(&value);
+                    self.expand_compiled_ops(style, depth, output, true);
                     output.push(b']');
                 }
             }

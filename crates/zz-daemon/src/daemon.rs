@@ -15851,7 +15851,7 @@ impl Shared {
                 &inner,
                 target,
                 &inner.engine.state.snapshot(),
-                Arc::new(inner.engine.format_option_snapshot()),
+                inner.engine.cached_format_option_snapshot(),
                 format_hook_facts(&inner),
                 startup_ready,
                 self.status_job_needs(target),

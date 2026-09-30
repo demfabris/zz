@@ -25,6 +25,34 @@ use crate::{
     terminfo::TtyTerm,
 };
 
+mod tree;
+
+#[cfg(test)]
+mod tree_tests;
+
+use tree::FormatTree;
+pub use tree::borrowed_formats_knob;
+pub use tree::with_borrowed_formats;
+
+mod compiled;
+
+pub(crate) fn format_references(format: &str) -> Arc<[String]> {
+    compiled::get(format).references.clone()
+}
+
+#[must_use]
+pub fn compiled_formats_knob() -> bool {
+    compiled::enabled()
+}
+
+static FORMAT_CACHE: LazyLock<bool> =
+    LazyLock::new(|| std::env::var_os("ZZ_PERF_FORMAT_CACHE").is_none_or(|value| value != "0"));
+
+#[must_use]
+pub fn format_cache_knob() -> bool {
+    *FORMAT_CACHE
+}
+
 const FORMAT_LOOP_LIMIT: usize = 100;
 const FORMAT_MAX_REPEAT: usize = 10_000;
 const FORMAT_MAX_REPEAT_BYTES: usize = MAX_STATUS_TEXT_BYTES * FORMAT_MAX_REPEAT;
@@ -255,7 +283,14 @@ pub struct StatusValues {
 
 #[derive(Clone, Debug, Default)]
 pub struct StatusContext<'e> {
-    values: StatusValues,
+    values: OnceLock<Box<StatusValues>>,
+    tree: Option<FormatTree<'e>>,
+    variables: BTreeMap<String, String>,
+    format_client: FormatClient,
+    pub session_id: String,
+    pub window_id: String,
+    pub pane_id: String,
+    pub format_now: Option<i64>,
     #[doc(hidden)]
     pub format_universe: FormatUniverseRef<'e>,
 }
@@ -264,22 +299,195 @@ impl std::ops::Deref for StatusContext<'_> {
     type Target = StatusValues;
 
     fn deref(&self) -> &StatusValues {
-        &self.values
+        self.values.get_or_init(|| {
+            let mut values = self
+                .tree
+                .as_ref()
+                .map_or_else(StatusValues::default, |tree| {
+                    tree.engine.build_status_values(
+                        tree.session,
+                        tree.window,
+                        tree.pane,
+                        tree.format_client,
+                        &mut LayoutDumps::default(),
+                    )
+                });
+            for (name, value) in &self.variables {
+                apply_context_value(&mut values, name, value);
+            }
+            Box::new(values)
+        })
     }
 }
 
 impl std::ops::DerefMut for StatusContext<'_> {
     fn deref_mut(&mut self) -> &mut StatusValues {
-        &mut self.values
+        let _ = std::ops::Deref::deref(self);
+        self.tree = None;
+        self.variables.clear();
+        self.values.get_mut().expect("materialized context")
     }
 }
 
 impl From<StatusValues> for StatusContext<'static> {
     fn from(values: StatusValues) -> Self {
         Self {
-            values,
+            session_id: values.session_id.clone(),
+            window_id: values.window_id.clone(),
+            pane_id: values.pane_id.clone(),
+            format_now: values.format_now,
+            values: OnceLock::from(Box::new(values)),
+            tree: None,
+            variables: BTreeMap::new(),
+            format_client: FormatClient::NoClient,
             format_universe: FormatUniverseRef::default(),
         }
+    }
+}
+
+fn apply_context_value(values: &mut StatusValues, name: &str, value: &str) {
+    let Some(spec) = format_variable(name) else {
+        return;
+    };
+    match spec.backing {
+        FormatBacking::ActiveWindowIndex => values.active_window_index = value.parse().ok(),
+        FormatBacking::ConfigFiles => value.clone_into(&mut values.config_files),
+        FormatBacking::HistoryLimit => values.history_limit = value.parse().ok(),
+        FormatBacking::Host => value.clone_into(&mut values.host),
+        FormatBacking::HostShort => value.clone_into(&mut values.host_short),
+        FormatBacking::LastWindowIndex => values.last_window_index = value.parse().ok(),
+        FormatBacking::NextSessionId => value.clone_into(&mut values.next_session_id),
+        FormatBacking::PaneActive => {
+            values.pane_active = (!value.is_empty()).then_some(value == "1")
+        }
+        FormatBacking::PaneAtBottom => {
+            values.pane_at_bottom = (!value.is_empty()).then_some(value == "1")
+        }
+        FormatBacking::PaneAtLeft => {
+            values.pane_at_left = (!value.is_empty()).then_some(value == "1")
+        }
+        FormatBacking::PaneAtRight => {
+            values.pane_at_right = (!value.is_empty()).then_some(value == "1")
+        }
+        FormatBacking::PaneAtTop => {
+            values.pane_at_top = (!value.is_empty()).then_some(value == "1")
+        }
+        FormatBacking::PaneBottom => values.pane_bottom = value.parse().ok(),
+        FormatBacking::PaneCurrentCommand => value.clone_into(&mut values.pane_current_command),
+        FormatBacking::PaneCurrentPath => value.clone_into(&mut values.pane_current_path),
+        FormatBacking::PaneDead => values.pane_dead = (!value.is_empty()).then_some(value == "1"),
+        FormatBacking::PaneDeadSignal => value.clone_into(&mut values.pane_dead_signal),
+        FormatBacking::PaneDeadStatus => values.pane_dead_status = value.parse().ok(),
+        FormatBacking::PaneDeadTime => values.pane_dead_time = value.parse().ok(),
+        FormatBacking::PaneInputOff => {
+            values.pane_input_off = (!value.is_empty()).then_some(value == "1")
+        }
+        FormatBacking::PaneMarked => {
+            values.pane_marked = (!value.is_empty()).then_some(value == "1")
+        }
+        FormatBacking::PaneMarkedSet => {
+            values.pane_marked_set = (!value.is_empty()).then_some(value == "1")
+        }
+        FormatBacking::PanePath => value.clone_into(&mut values.pane_path),
+        FormatBacking::PaneFlags => value.clone_into(&mut values.pane_flags),
+        FormatBacking::PaneHeight => values.pane_height = value.parse().ok(),
+        FormatBacking::PaneId => value.clone_into(&mut values.pane_id),
+        FormatBacking::PaneIndex => values.pane_index = value.parse().unwrap_or_default(),
+        FormatBacking::PaneLast => values.pane_last = (!value.is_empty()).then_some(value == "1"),
+        FormatBacking::PaneLeft => values.pane_left = value.parse().ok(),
+        FormatBacking::PaneRight => values.pane_right = value.parse().ok(),
+        FormatBacking::PanePid => values.pane_pid = value.parse().ok(),
+        FormatBacking::PaneStartCommand => value.clone_into(&mut values.pane_start_command),
+        FormatBacking::PaneStartCommandList => {
+            value.clone_into(&mut values.pane_start_command_list)
+        }
+        FormatBacking::PaneStartPath => value.clone_into(&mut values.pane_start_path),
+        FormatBacking::PaneSynchronized => values.pane_synchronized = value == "1",
+        FormatBacking::PaneTitle => value.clone_into(&mut values.pane_title),
+        FormatBacking::PaneTop => values.pane_top = value.parse().ok(),
+        FormatBacking::PaneTty => value.clone_into(&mut values.pane_tty),
+        FormatBacking::PaneWidth => values.pane_width = value.parse().ok(),
+        FormatBacking::PaneX => values.pane_x = value.parse().ok(),
+        FormatBacking::PaneY => values.pane_y = value.parse().ok(),
+        FormatBacking::PaneZ => values.pane_z = value.parse().ok(),
+        FormatBacking::PaneZoomed => values.pane_zoomed = value == "1",
+        FormatBacking::Pid => values.pid = value.parse().unwrap_or_default(),
+        FormatBacking::ServerSessions => values.server_sessions = value.parse().unwrap_or_default(),
+        FormatBacking::SessionAlert => value.clone_into(&mut values.session_alert),
+        FormatBacking::SessionAlerts => value.clone_into(&mut values.session_alerts),
+        FormatBacking::SessionAttached => {
+            values.session_attached = value.parse().unwrap_or_default()
+        }
+        FormatBacking::SessionAttachedList => value.clone_into(&mut values.session_attached_list),
+        FormatBacking::SessionBell => values.session_bell = value == "1",
+        FormatBacking::SessionActivity => values.session_activity = value.parse().ok(),
+        FormatBacking::SessionActive => {
+            values.session_active = (!value.is_empty()).then_some(value == "1")
+        }
+        FormatBacking::SessionCreated => values.session_created = value.parse().ok(),
+        FormatBacking::SessionId => value.clone_into(&mut values.session_id),
+        FormatBacking::SessionManyAttached => values.session_many_attached = value == "1",
+        FormatBacking::SessionMarked => {
+            values.session_marked = (!value.is_empty()).then_some(value == "1")
+        }
+        FormatBacking::SessionName => value.clone_into(&mut values.session_name),
+        FormatBacking::SessionPath => value.clone_into(&mut values.session_path),
+        FormatBacking::SessionStack => value.clone_into(&mut values.session_stack),
+        FormatBacking::SessionWindows => values.session_windows = value.parse().unwrap_or_default(),
+        FormatBacking::SocketPath => value.clone_into(&mut values.socket_path),
+        FormatBacking::StartTime => values.start_time = value.parse().ok(),
+        FormatBacking::Uid => value.clone_into(&mut values.uid),
+        FormatBacking::User => value.clone_into(&mut values.user),
+        FormatBacking::Version => value.clone_into(&mut values.version),
+        FormatBacking::WindowActive => {
+            values.window_active = (!value.is_empty()).then_some(value == "1")
+        }
+        FormatBacking::WindowActiveClients => {
+            values.window_active_clients = value.parse().unwrap_or_default()
+        }
+        FormatBacking::WindowActiveClientsList => {
+            value.clone_into(&mut values.window_active_clients_list)
+        }
+        FormatBacking::WindowActiveSessions => {
+            values.window_active_sessions = value.parse().unwrap_or_default()
+        }
+        FormatBacking::WindowActiveSessionsList => {
+            value.clone_into(&mut values.window_active_sessions_list)
+        }
+        FormatBacking::WindowActivity => values.window_activity = value.parse().ok(),
+        FormatBacking::WindowActivityFlag => values.window_activity_alert = value == "1",
+        FormatBacking::WindowBell => values.window_bell = value == "1",
+        FormatBacking::WindowEnd => values.window_end = (!value.is_empty()).then_some(value == "1"),
+        FormatBacking::WindowHeight => values.window_height = value.parse().ok(),
+        FormatBacking::WindowId => value.clone_into(&mut values.window_id),
+        FormatBacking::WindowIndex => values.window_index = value.parse().unwrap_or_default(),
+        FormatBacking::WindowLast => {
+            values.window_last = (!value.is_empty()).then_some(value == "1")
+        }
+        FormatBacking::WindowLayout => value.clone_into(&mut values.window_layout),
+        FormatBacking::WindowLinkedSessions => {
+            values.window_linked_sessions = value.parse().unwrap_or_default()
+        }
+        FormatBacking::WindowLinkedSessionsList => {
+            value.clone_into(&mut values.window_linked_sessions_list)
+        }
+        FormatBacking::WindowManualHeight => values.window_manual_height = value.parse().ok(),
+        FormatBacking::WindowManualWidth => values.window_manual_width = value.parse().ok(),
+        FormatBacking::WindowMarkedFlag => {
+            values.window_marked_flag = (!value.is_empty()).then_some(value == "1")
+        }
+        FormatBacking::WindowName => value.clone_into(&mut values.window_name),
+        FormatBacking::WindowPanes => values.window_panes = value.parse().unwrap_or_default(),
+        FormatBacking::WindowStackIndex => {
+            values.window_stack_index = value.parse().unwrap_or_default()
+        }
+        FormatBacking::WindowStart => {
+            values.window_start = (!value.is_empty()).then_some(value == "1")
+        }
+        FormatBacking::WindowVisibleLayout => value.clone_into(&mut values.window_visible_layout),
+        FormatBacking::WindowWidth => values.window_width = value.parse().ok(),
+        FormatBacking::WindowZoomed => values.window_zoomed = value == "1",
+        _ => {}
     }
 }
 
@@ -401,6 +609,47 @@ impl FormatUniverse {
         self.built.fetch_or(needs.0, AtomicOrdering::AcqRel);
     }
 
+    fn detached(&self, engine: &MuxEngine, references: Option<&BTreeSet<String>>) -> Self {
+        let detached = Self::with_built(self.format_client, self.built());
+        let detach_items = |items: &LoopItems| -> LoopItems {
+            items
+                .iter()
+                .map(|item| {
+                    let mut context = item
+                        .context
+                        .borrowed_child(Some(engine))
+                        .detach_values(references);
+                    context.values = item.context.values.clone();
+                    FormatLoopItem {
+                        context,
+                        active: item.active,
+                        metadata: item.metadata.clone(),
+                    }
+                })
+                .collect::<Vec<_>>()
+                .into()
+        };
+        if let Some(items) = self.sessions.get() {
+            let _ = detached.sessions.set(detach_items(items));
+        }
+        *detached.windows.lock() = self
+            .windows
+            .lock()
+            .iter()
+            .map(|(key, items)| (*key, items.as_ref().map(&detach_items)))
+            .collect();
+        *detached.panes.lock() = self
+            .panes
+            .lock()
+            .iter()
+            .map(|(key, items)| (*key, items.as_ref().map(&detach_items)))
+            .collect();
+        *detached.options.lock() = self.options.lock().clone();
+        *detached.environments.lock() = self.environments.lock().clone();
+        *detached.window_user_options.lock() = self.window_user_options.lock().clone();
+        detached
+    }
+
     #[cfg(test)]
     pub(crate) fn with_global_environment(rows: Vec<FormatEnvironRow>) -> Self {
         let universe = Self::default();
@@ -475,6 +724,17 @@ pub(crate) struct FormatOptionRow {
 struct FormatLoopItem {
     context: StatusContext<'static>,
     active: bool,
+    metadata: LoopMetadata,
+}
+
+#[derive(Clone, Debug)]
+struct LoopMetadata {
+    session_name: String,
+    session_sort_activity: u64,
+    window_name: String,
+    window_index: u32,
+    pane_index: u32,
+    pane_z: Option<usize>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1077,7 +1337,7 @@ impl StatusValues {
 
 impl FormatVariables for StatusContext<'_> {
     fn variable(&self, name: &str) -> Option<Cow<'_, str>> {
-        self.values.variable(name)
+        self.variable(name)
     }
 
     fn variable_kind(&self, name: &str) -> Option<FormatKind> {
@@ -1172,12 +1432,17 @@ impl FormatContext {
         dumps: &mut LayoutDumps,
     ) -> ResolvedFormatContext<'e> {
         let (session, window, pane) = engine.format_target(self.session, self.window, self.pane);
-        let values = engine.build_status_values(session, window, pane, self.format_client, dumps);
+        let values = if tree::borrowed_formats() {
+            StatusContext::borrowed(engine, session, window, pane, self.format_client, universe)
+        } else {
+            let mut values: StatusContext<'e> = engine
+                .build_status_values(session, window, pane, self.format_client, dumps)
+                .into();
+            values.format_universe = universe;
+            values
+        };
         ResolvedFormatContext {
-            values: StatusContext {
-                values,
-                format_universe: universe,
-            },
+            values,
             has_session: session.is_some(),
             has_window: window.is_some(),
             has_pane: pane.is_some(),
@@ -1207,22 +1472,224 @@ pub(crate) struct LayoutDumps {
 
 impl StatusContext<'_> {
     #[must_use]
+    pub fn engine(&self) -> Option<&MuxEngine> {
+        self.tree.as_ref().map(|tree| tree.engine)
+    }
+    #[must_use]
+    pub fn variable(&self, name: &str) -> Option<Cow<'_, str>> {
+        format_variable(name).map_or_else(
+            || {
+                self.variables
+                    .get(name)
+                    .map(|value| Cow::Borrowed(value.as_str()))
+            },
+            |spec| Some(self.resolve(spec, FormatType::None)),
+        )
+    }
+
+    fn resolve(&self, spec: &FormatVariableSpec, format_type: FormatType) -> Cow<'_, str> {
+        let scope_id = match spec.backing {
+            FormatBacking::SessionFormat => Some((&self.session_id, FormatType::Session)),
+            FormatBacking::WindowFormat => Some((&self.window_id, FormatType::Window)),
+            FormatBacking::PaneFormat => Some((&self.pane_id, FormatType::Pane)),
+            _ => None,
+        };
+        if let Some((id, expected)) = scope_id {
+            let available = !id.is_empty()
+                || self.values.get().is_some_and(|values| match expected {
+                    FormatType::Session => {
+                        !values.session_name.is_empty() || values.active_window_index.is_some()
+                    }
+                    FormatType::Window => {
+                        !values.window_name.is_empty() || values.window_width.is_some()
+                    }
+                    FormatType::Pane => {
+                        !values.pane_title.is_empty() || values.pane_width.is_some()
+                    }
+                    FormatType::None => false,
+                });
+            return Cow::Borrowed(if available {
+                bool_string(format_type == expected)
+            } else {
+                ""
+            });
+        }
+        match spec.backing {
+            FormatBacking::SessionId => return Cow::Borrowed(&self.session_id),
+            FormatBacking::WindowId => return Cow::Borrowed(&self.window_id),
+            FormatBacking::PaneId => return Cow::Borrowed(&self.pane_id),
+            _ => {}
+        }
+        if let Some(value) = self.variables.get(spec.name) {
+            return Cow::Borrowed(value);
+        }
+        self.tree.as_ref().map_or_else(
+            || (**self).resolve(spec, format_type),
+            |tree| tree.resolve(spec, format_type),
+        )
+    }
+
+    pub fn set_format_value(&mut self, name: impl Into<String>, value: impl Into<String>) {
+        let name = name.into();
+        let value = value.into();
+        match name.as_str() {
+            "session_id" => self.session_id.clone_from(&value),
+            "window_id" => self.window_id.clone_from(&value),
+            "pane_id" => self.pane_id.clone_from(&value),
+            _ => {}
+        }
+        if let Some(values) = self.values.get_mut() {
+            apply_context_value(values, &name, &value);
+        }
+        self.variables.insert(name, value);
+    }
+
+    #[must_use]
     pub fn detach(self, needs: FormatNeeds) -> StatusContext<'static> {
+        self.detach_selected(needs, None)
+    }
+
+    #[must_use]
+    pub fn detach_with_templates<'t>(
+        self,
+        needs: FormatNeeds,
+        templates: impl IntoIterator<Item = &'t str>,
+    ) -> StatusContext<'static> {
+        let mut references = BTreeSet::new();
+        for template in templates {
+            if let Some(engine) = self.engine() {
+                references.extend(engine.cached_format_references(template).iter().cloned());
+            } else {
+                references.extend(format_references(template).iter().cloned());
+            }
+        }
+        let references = (!references.contains("*")).then_some(&references);
+        self.detach_selected(needs, references)
+    }
+
+    fn detach_selected(
+        self,
+        needs: FormatNeeds,
+        references: Option<&BTreeSet<String>>,
+    ) -> StatusContext<'static> {
         let format_universe = self.format_universe.detach(
             needs,
-            &self.values.session_id,
-            &self.values.window_id,
-            &self.values.pane_id,
+            &self.session_id,
+            &self.window_id,
+            &self.pane_id,
+            references,
         );
+        let mut captured = BTreeMap::new();
+        if self.tree.is_some() {
+            for spec in FORMAT_VARIABLES.iter().filter(|spec| {
+                references.is_none_or(|names| names.contains(spec.name))
+                    && !self.variables.contains_key(spec.name)
+            }) {
+                captured.insert(
+                    spec.name.to_owned(),
+                    self.resolve(spec, FormatType::None).into_owned(),
+                );
+            }
+        }
+        let mut variables = self.variables;
+        variables.extend(captured);
         StatusContext {
             values: self.values,
+            tree: None,
+            variables,
+            format_client: self.format_client,
+            session_id: self.session_id,
+            window_id: self.window_id,
+            pane_id: self.pane_id,
+            format_now: self.format_now,
             format_universe,
+        }
+    }
+
+    fn detach_values(&self, references: Option<&BTreeSet<String>>) -> StatusContext<'static> {
+        let mut variables = self.variables.clone();
+        if self.tree.is_some() {
+            for spec in FORMAT_VARIABLES
+                .iter()
+                .filter(|spec| references.is_none_or(|names| names.contains(spec.name)))
+            {
+                variables.insert(
+                    spec.name.to_owned(),
+                    self.resolve(spec, FormatType::None).into_owned(),
+                );
+            }
+        }
+        StatusContext {
+            values: self.values.clone(),
+            tree: None,
+            variables,
+            format_client: self.format_client,
+            session_id: self.session_id.clone(),
+            window_id: self.window_id.clone(),
+            pane_id: self.pane_id.clone(),
+            format_now: self.format_now,
+            format_universe: FormatUniverseRef::default(),
         }
     }
 
     #[must_use]
     pub fn format_universe_covers(&self, needs: FormatNeeds) -> bool {
         self.format_universe.engine.is_some() || self.format_universe.parts.built().contains(needs)
+    }
+}
+
+impl<'e> StatusContext<'e> {
+    fn borrowed(
+        engine: &'e MuxEngine,
+        session: Option<SessionId>,
+        window: Option<WindowId>,
+        pane: Option<PaneId>,
+        format_client: FormatClient,
+        format_universe: FormatUniverseRef<'e>,
+    ) -> Self {
+        Self {
+            values: OnceLock::new(),
+            tree: Some(FormatTree {
+                engine,
+                session,
+                window,
+                pane,
+                format_client,
+            }),
+            variables: BTreeMap::new(),
+            format_client,
+            session_id: session.map(|id| id.to_string()).unwrap_or_default(),
+            window_id: window.map(|id| id.to_string()).unwrap_or_default(),
+            pane_id: pane.map(|id| id.to_string()).unwrap_or_default(),
+            format_now: i64::try_from(engine.format_now())
+                .ok()
+                .filter(|time| *time != 0),
+            format_universe,
+        }
+    }
+
+    fn borrowed_child<'a>(&self, engine: Option<&'a MuxEngine>) -> StatusContext<'a> {
+        if let Some(engine) = engine.filter(|_| tree::borrowed_formats()) {
+            let mut child = StatusContext::borrowed(
+                engine,
+                parse_session(&self.session_id),
+                parse_window(&self.window_id),
+                parse_pane(&self.pane_id),
+                self.format_client,
+                FormatUniverseRef::default(),
+            );
+            child.variables.clone_from(&self.variables);
+            child
+        } else {
+            let mut context = StatusContext::from((**self).clone());
+            context.variables.clone_from(&self.variables);
+            context.format_client = self.format_client;
+            context.session_id.clone_from(&self.session_id);
+            context.window_id.clone_from(&self.window_id);
+            context.pane_id.clone_from(&self.pane_id);
+            context.format_now = self.format_now;
+            context
+        }
     }
 }
 
@@ -1244,6 +1711,7 @@ impl<'e> FormatUniverseRef<'e> {
         session: &str,
         window: &str,
         pane: &str,
+        references: Option<&BTreeSet<String>>,
     ) -> FormatUniverseRef<'static> {
         if self.engine.is_some() {
             let needs = if eager_universe() {
@@ -1254,7 +1722,10 @@ impl<'e> FormatUniverseRef<'e> {
             self.fill(needs, session, window, pane);
         }
         FormatUniverseRef {
-            parts: Arc::clone(&self.parts),
+            parts: self.engine.map_or_else(
+                || Arc::clone(&self.parts),
+                |engine| Arc::new(self.parts.detached(engine, references)),
+            ),
             engine: None,
         }
     }
@@ -1603,6 +2074,61 @@ impl NeedsScan<'_> {
 }
 
 impl MuxEngine {
+    fn cached_format_references(&self, template: &str) -> Arc<BTreeSet<String>> {
+        let generation = self.format_options_generation();
+        let cached = format_cache_knob();
+        if cached {
+            let cache = self.format_reference_cache.lock();
+            if let Some((cached_generation, entries)) = cache.as_ref()
+                && *cached_generation == generation
+                && let Some(references) = entries.get(template)
+            {
+                return Arc::clone(references);
+            }
+        }
+        let mut references = format_references(template)
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let mut followed = BTreeSet::new();
+        while !references.contains("*") {
+            let indirect = references
+                .iter()
+                .filter_map(|name| name.strip_prefix("E:").or_else(|| name.strip_prefix("T:")))
+                .filter(|name| !followed.contains(*name))
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            if indirect.is_empty() {
+                break;
+            }
+            for name in indirect {
+                followed.insert(name.clone());
+                if !self.format_option_texts(&name, &mut |text| {
+                    references.extend(format_references(text).iter().cloned());
+                }) {
+                    references.insert("*".to_owned());
+                }
+            }
+        }
+        let references = Arc::new(references);
+        if !cached {
+            return references;
+        }
+        let mut cache = self.format_reference_cache.lock();
+        if cache
+            .as_ref()
+            .is_none_or(|(cached, _)| *cached != generation)
+        {
+            *cache = Some((generation, BTreeMap::new()));
+        }
+        let entries = &mut cache.as_mut().expect("initialized reference cache").1;
+        if entries.len() >= 128 {
+            entries.clear();
+        }
+        entries.insert(template.to_owned(), Arc::clone(&references));
+        references
+    }
+
     #[must_use]
     pub fn format_needs<'t>(&self, templates: impl IntoIterator<Item = &'t str>) -> FormatNeeds {
         scan_format_needs(Some(self), templates)
@@ -1789,15 +2315,18 @@ impl MuxEngine {
                 let active_window = self.state.windows.get(&session.active_window);
                 FormatLoopItem {
                     active: active_session == Some(session.id),
-                    context: self
-                        .build_status_values(
-                            Some(session.id),
-                            active_window.map(|window| window.id),
-                            active_window.map(|window| window.active_pane),
-                            format_client,
-                            &mut LayoutDumps::default(),
-                        )
-                        .into(),
+                    metadata: self.loop_metadata(
+                        Some(session.id),
+                        active_window.map(|window| window.id),
+                        active_window.map(|window| window.active_pane),
+                    ),
+                    context: self.loop_status_values(
+                        Some(session.id),
+                        active_window.map(|window| window.id),
+                        active_window.map(|window| window.active_pane),
+                        format_client,
+                        &mut LayoutDumps::default(),
+                    ),
                 }
             })
             .collect()
@@ -1815,18 +2344,21 @@ impl MuxEngine {
             .filter_map(|window| self.state.windows.get(window))
             .map(|window| FormatLoopItem {
                 active: window.id == session.active_window,
-                context: self
-                    .build_status_values(
-                        Some(session.id),
-                        Some(window.id),
-                        Some(window.active_pane),
-                        format_client,
-                        &mut LayoutDumps::default(),
-                    )
-                    .into(),
+                metadata: self.loop_metadata(
+                    Some(session.id),
+                    Some(window.id),
+                    Some(window.active_pane),
+                ),
+                context: self.loop_status_values(
+                    Some(session.id),
+                    Some(window.id),
+                    Some(window.active_pane),
+                    format_client,
+                    &mut LayoutDumps::default(),
+                ),
             })
             .collect::<Vec<_>>();
-        items.sort_by_key(|item| item.context.window_index);
+        items.sort_by_key(|item| item.metadata.window_index);
         Some(items)
     }
 
@@ -1845,15 +2377,14 @@ impl MuxEngine {
             .values()
             .map(|pane| FormatLoopItem {
                 active: pane.id == window.active_pane,
-                context: self
-                    .build_status_values(
-                        Some(window.session),
-                        Some(window.id),
-                        Some(pane.id),
-                        format_client,
-                        &mut dumps,
-                    )
-                    .into(),
+                metadata: self.loop_metadata(Some(window.session), Some(window.id), Some(pane.id)),
+                context: self.loop_status_values(
+                    Some(window.session),
+                    Some(window.id),
+                    Some(pane.id),
+                    format_client,
+                    &mut dumps,
+                ),
             })
             .collect::<Vec<_>>();
         items.sort_by_key(|item| pane_number(&item.context.pane_id));
@@ -1888,6 +2419,51 @@ impl MuxEngine {
             }
         };
         Some(self.format_option_rows(target))
+    }
+
+    fn loop_status_values(
+        &self,
+        session_id: Option<SessionId>,
+        window_id: Option<WindowId>,
+        pane_id: Option<PaneId>,
+        format_client: FormatClient,
+        dumps: &mut LayoutDumps,
+    ) -> StatusContext<'static> {
+        let mut context = if tree::borrowed_formats() {
+            StatusContext {
+                session_id: session_id.map(|id| id.to_string()).unwrap_or_default(),
+                window_id: window_id.map(|id| id.to_string()).unwrap_or_default(),
+                pane_id: pane_id.map(|id| id.to_string()).unwrap_or_default(),
+                ..StatusContext::default()
+            }
+        } else {
+            self.build_status_values(session_id, window_id, pane_id, format_client, dumps)
+                .into()
+        };
+        context.format_client = format_client;
+        context
+    }
+
+    fn loop_metadata(
+        &self,
+        session: Option<SessionId>,
+        window: Option<WindowId>,
+        pane: Option<PaneId>,
+    ) -> LoopMetadata {
+        let session = session.and_then(|id| self.state.sessions.get(&id));
+        let window = window.and_then(|id| self.state.windows.get(&id));
+        LoopMetadata {
+            session_name: session
+                .map(|session| session.name.clone())
+                .unwrap_or_default(),
+            session_sort_activity: session.map_or(0, |session| session.sort_activity),
+            window_name: window.map(|window| window.name.clone()).unwrap_or_default(),
+            window_index: window.map_or(0, |window| window.index),
+            pane_index: window
+                .and_then(|window| pane.and_then(|pane| self.pane_index(window.id, pane)))
+                .unwrap_or_default(),
+            pane_z: pane.map(|_| 1),
+        }
     }
 
     fn build_status_values(
@@ -2323,6 +2899,14 @@ pub trait StatusHooks {
         None
     }
 
+    fn option_variable(&mut self, _name: &str, _context: &StatusContext) -> Option<String> {
+        None
+    }
+
+    fn tree_variable(&mut self, _name: &str, _context: &StatusContext) -> Option<Cow<'_, str>> {
+        None
+    }
+
     fn window_activity(&mut self, _window: WindowId) -> u64 {
         0
     }
@@ -2342,7 +2926,7 @@ pub trait StatusHooks {
     }
 
     /// Every attached client eligible for an `L` loop row, in any order.
-    fn client_loop_rows(&mut self) -> Vec<FormatClientRow> {
+    fn client_loop_rows(&mut self, _context: &StatusContext) -> Vec<FormatClientRow> {
         Vec::new()
     }
 
@@ -2590,12 +3174,17 @@ fn listing_value(
     if matches!(
         spec.name,
         "pane_dead_signal" | "pane_dead_status" | "pane_dead_time"
-    ) && resolved.values.pane_dead != Some(true)
+    ) && resolved.values.variable("pane_dead").as_deref() != Some("1")
     {
         return None;
     }
     // format_cb_session_active needs both ft->s and ft->c.
-    if spec.name == "session_active" && resolved.values.session_active.is_none() {
+    if spec.name == "session_active"
+        && resolved
+            .values
+            .variable("session_active")
+            .is_none_or(|value| value.is_empty())
+    {
         return None;
     }
     Some(value)
@@ -2750,7 +3339,7 @@ impl<H: StatusHooks> StatusHooks for OptionFormatHooks<'_, H> {
         self.inner.shell(command, tag)
     }
 
-    fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
         let option_context = if context.session_id.is_empty()
             && context.window_id.is_empty()
             && context.pane_id.is_empty()
@@ -2761,7 +3350,15 @@ impl<H: StatusHooks> StatusHooks for OptionFormatHooks<'_, H> {
         };
         self.engine
             .format_option_value(option_context, name)
-            .or_else(|| self.inner.variable(name, context))
+            .or_else(|| self.inner.option_variable(name, context))
+    }
+
+    fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+        self.inner.variable(name, context)
+    }
+
+    fn tree_variable(&mut self, name: &str, context: &StatusContext) -> Option<Cow<'_, str>> {
+        self.inner.tree_variable(name, context)
     }
 
     fn window_activity(&mut self, window: WindowId) -> u64 {
@@ -2782,8 +3379,8 @@ impl<H: StatusHooks> StatusHooks for OptionFormatHooks<'_, H> {
         self.inner.pane_search(pane, pattern, regex, ignore_case)
     }
 
-    fn client_loop_rows(&mut self) -> Vec<FormatClientRow> {
-        self.inner.client_loop_rows()
+    fn client_loop_rows(&mut self, context: &StatusContext) -> Vec<FormatClientRow> {
+        self.inner.client_loop_rows(context)
     }
 
     fn client_environment_rows(&mut self) -> Vec<FormatEnvironRow> {
@@ -2828,6 +3425,133 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
     }
 
     fn expand(&mut self, format: &str, depth: usize) -> RawText {
+        if self.tracing() || !compiled::enabled() {
+            return self.expand_interpreted(format, depth);
+        }
+        if format.is_empty() || depth == FORMAT_LOOP_LIMIT {
+            return RawText::default();
+        }
+        let expanded;
+        let format = if self.time && format.contains('%') {
+            expanded = self.hooks.strftime(format);
+            expanded.as_str()
+        } else {
+            format
+        };
+        if plain_format(format, false) {
+            return RawText::from(format);
+        }
+        let template = compiled::get(format);
+        let mut output = Vec::with_capacity(format.len());
+        self.expand_compiled_ops(&template, depth, &mut output, false);
+        RawText::from_bytes(output)
+    }
+
+    fn expand_compiled_ops(
+        &mut self,
+        template: &compiled::Template,
+        depth: usize,
+        output: &mut Vec<u8>,
+        style: bool,
+    ) {
+        for operation in &template.operations {
+            match operation {
+                compiled::Operation::Text(text) => output.extend_from_slice(text.as_bytes()),
+                compiled::Operation::Variable(name) => {
+                    output.extend_from_slice(
+                        self.context.variable(name).unwrap_or_default().as_bytes(),
+                    );
+                }
+                compiled::Operation::Shell(command) => {
+                    output.extend_from_slice(self.hooks.shell(command, &self.job_tag).as_bytes());
+                }
+                compiled::Operation::Replacement(replacement) => {
+                    if replacement.direct && !style {
+                        self.append_lookup(&replacement.copy, output, 0);
+                        continue;
+                    }
+                    let value = if depth + 1 == FORMAT_LOOP_LIMIT {
+                        self.expand_replacement_inner(&replacement.body, depth + 1)
+                    } else if let Some(arguments) = &replacement.dynamic_padding {
+                        let mut flags = replacement
+                            .flags
+                            .as_ref()
+                            .unwrap()
+                            .view(&replacement.modifiers);
+                        for (modifier, last) in arguments {
+                            let width =
+                                self.expand(&replacement.modifiers[*modifier].args[0], depth + 1);
+                            if *last {
+                                flags.padding = width
+                                    .parse::<isize>()
+                                    .ok()
+                                    .filter(|width| {
+                                        (-FORMAT_MAX_WIDTH..=FORMAT_MAX_WIDTH).contains(width)
+                                    })
+                                    .unwrap_or_default();
+                            }
+                        }
+                        if replacement.padding_direct && !style {
+                            self.append_lookup(&replacement.copy, output, flags.padding);
+                            continue;
+                        }
+                        self.expand_replacement_value(&replacement.copy, depth + 1, &flags)
+                    } else {
+                        for argument in &replacement.discarded {
+                            self.expand(argument, depth + 1);
+                        }
+                        let expanded;
+                        let modifiers = if replacement.dynamic {
+                            expanded = replacement
+                                .modifiers
+                                .iter()
+                                .map(|modifier| Modifier {
+                                    kind: modifier.kind,
+                                    text: modifier.text,
+                                    args: modifier
+                                        .args
+                                        .iter()
+                                        .map(|argument| {
+                                            self.expand(argument, depth + 1).to_string()
+                                        })
+                                        .collect(),
+                                })
+                                .collect::<Vec<_>>();
+                            expanded.as_slice()
+                        } else {
+                            &replacement.modifiers
+                        };
+                        let flags = replacement.flags.as_ref().map_or_else(
+                            || ModifierFlags::from_modifiers(modifiers),
+                            |flags| flags.view(modifiers),
+                        );
+                        if replacement.padding_direct && !style {
+                            self.append_lookup(&replacement.copy, output, flags.padding);
+                            continue;
+                        }
+                        self.expand_replacement_value(&replacement.copy, depth + 1, &flags)
+                    };
+                    match value {
+                        Ok(value) => output.extend_from_slice(if style {
+                            value.as_str().as_bytes()
+                        } else {
+                            value.as_bytes()
+                        }),
+                        Err(()) => break,
+                    }
+                }
+                compiled::Operation::Style(prefix, style) => {
+                    output.extend_from_slice(prefix.as_bytes());
+                    let mut value = Vec::new();
+                    self.expand_compiled_ops(style, depth, &mut value, true);
+                    output.extend_from_slice(&value);
+                    output.push(b']');
+                }
+            }
+        }
+    }
+
+    fn expand_interpreted(&mut self, format: &str, depth: usize) -> RawText {
         if format.is_empty() {
             return RawText::default();
         }
@@ -3068,6 +3792,15 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             }
         }
         let flags = ModifierFlags::from_modifiers(&modifiers);
+        self.expand_replacement_value(copy, depth, &flags)
+    }
+
+    fn expand_replacement_value(
+        &mut self,
+        copy: &str,
+        depth: usize,
+        flags: &ModifierFlags<'_>,
+    ) -> Result<RawText, ()> {
         let mut value = if let Some(word) = flags.interrogate {
             self.expand_interrogate(copy, word)
         } else if flags.literal {
@@ -3080,13 +3813,13 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         } else if let Some(colour_flags) = flags.colour {
             RawText::from(self.expand_colour(copy, depth, colour_flags))
         } else if flags.loop_sessions {
-            RawText::from(self.expand_loop(copy, depth, LoopTarget::Sessions, &flags)?)
+            RawText::from(self.expand_loop(copy, depth, LoopTarget::Sessions, flags)?)
         } else if flags.loop_windows {
-            RawText::from(self.expand_loop(copy, depth, LoopTarget::Windows, &flags)?)
+            RawText::from(self.expand_loop(copy, depth, LoopTarget::Windows, flags)?)
         } else if flags.loop_panes {
-            RawText::from(self.expand_loop(copy, depth, LoopTarget::Panes, &flags)?)
+            RawText::from(self.expand_loop(copy, depth, LoopTarget::Panes, flags)?)
         } else if flags.loop_clients {
-            RawText::from(self.expand_client_loop(copy, depth, &flags))
+            RawText::from(self.expand_client_loop(copy, depth, flags))
         } else if let Some(loop_flags) = flags.loop_options {
             RawText::from(self.expand_option_loop(copy, depth, loop_flags))
         } else if let Some(loop_flags) = flags.loop_environment {
@@ -3108,7 +3841,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         } else if let Some(comparison) = flags.comparison {
             RawText::from(self.expand_comparison(copy, depth, comparison)?)
         } else if let Some(conditional) = copy.strip_prefix('?') {
-            self.expand_conditional(conditional, depth, &flags)
+            self.expand_conditional(conditional, depth, flags)
         } else if let Some(expression) = flags.expression {
             RawText::from(self.expand_expression(copy, depth, expression))
         } else if copy.contains("#{") {
@@ -3117,7 +3850,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             }
             self.expand(copy, depth)
         } else {
-            let found = self.lookup(copy, &flags);
+            let found = self.lookup(copy, flags);
             if self.tracing() {
                 match found.as_deref() {
                     Some(value) => self.log(depth, &format!("format '{copy}' found: {value}")),
@@ -3134,7 +3867,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             value = self.reexpand(value, depth);
             self.time = previous;
         }
-        for substitution in flags.substitutions {
+        for substitution in &flags.substitutions {
             let pattern = self.expand(&substitution.args[0], depth);
             let replacement = self.expand(&substitution.args[1], depth);
             value = RawText::from(substitute(
@@ -3153,8 +3886,8 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                 );
             }
         }
-        if let Some((limit, marker)) = flags.limit {
-            value = truncate_value(&value, limit, marker.as_deref());
+        if let Some((limit, marker)) = &flags.limit {
+            value = truncate_value(&value, *limit, *marker);
             if self.tracing() {
                 self.log(depth, &format!("applied length limit {limit}: {value}"));
             }
@@ -3183,6 +3916,18 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
 
     fn build_modifiers(&mut self, body: &str, depth: usize) -> Option<(Vec<Modifier>, usize)> {
         parse_modifiers(body, |value| self.expand(value, depth).to_string())
+    }
+
+    fn split_once<'s>(&self, source: &'s str) -> (&'s str, Option<&'s str>) {
+        if self.tracing() || !compiled::enabled() {
+            return split_once_top(source, ',');
+        }
+        let template = compiled::get(source);
+        let first = &template.parts[0];
+        (
+            &source[first.clone()],
+            (template.parts.len() > 1).then(|| &source[first.end + 1..]),
+        )
     }
 
     fn expand_character(&mut self, copy: &str, depth: usize) -> String {
@@ -3240,12 +3985,12 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             }
             self.universe
                 .windows(session)
-                .is_some_and(|items| items.iter().any(|item| item.context.window_name == name))
+                .is_some_and(|items| items.iter().any(|item| item.metadata.window_name == name))
         } else {
             self.universe
                 .sessions()
                 .iter()
-                .any(|item| item.context.session_name == name)
+                .any(|item| item.metadata.session_name == name)
         };
         Ok(bool_string(exists).to_owned())
     }
@@ -3265,7 +4010,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
     }
 
     fn expand_repeat(&mut self, copy: &str, depth: usize) -> Result<String, ()> {
-        let (value, count) = split_once_top(copy, ',');
+        let (value, count) = self.split_once(copy);
         let count = count.ok_or(())?;
         let value = self.expand(value, depth);
         let count = self
@@ -3314,7 +4059,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         } else {
             0
         };
-        let (left, right) = split_once_top(copy, ',');
+        let (left, right) = self.split_once(copy);
         let Some(right) = right else {
             return String::new();
         };
@@ -3410,7 +4155,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         if flags.loop_reversed {
             items.reverse();
         }
-        let (all, active) = split_once_top(copy, ',');
+        let (all, active) = self.split_once(copy);
         let mut output = String::new();
         let last = items.len().saturating_sub(1);
         for index in 0..items.len() {
@@ -3434,7 +4179,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                 if let Some(next) = items.get(index + 1) {
                     dynamic.insert(
                         WINDOW_NEIGHBOUR_INDEX_CONTEXT_FORMATS[0].to_owned(),
-                        next.context.window_index.to_string(),
+                        next.metadata.window_index.to_string(),
                     );
                     dynamic.insert(
                         WINDOW_NEIGHBOUR_ACTIVE_CONTEXT_FORMATS[0].to_owned(),
@@ -3451,7 +4196,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                     let previous = items[index - 1];
                     dynamic.insert(
                         WINDOW_NEIGHBOUR_INDEX_CONTEXT_FORMATS[1].to_owned(),
-                        previous.context.window_index.to_string(),
+                        previous.metadata.window_index.to_string(),
                     );
                     dynamic.insert(
                         WINDOW_NEIGHBOUR_ACTIVE_CONTEXT_FORMATS[1].to_owned(),
@@ -3465,8 +4210,9 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                     );
                 }
             }
+            let child = item.context.borrowed_child(self.universe.engine);
             let variables = LoopVariables {
-                context: &item.context,
+                context: &child,
                 format_type: target.format_type(),
                 dynamic,
             };
@@ -3495,7 +4241,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         depth: usize,
         flags: &ModifierFlags<'_>,
     ) -> String {
-        let mut rows = self.hooks.client_loop_rows();
+        let mut rows = self.hooks.client_loop_rows(self.context.values());
         sort_client_loop_rows(&mut rows, flags.loop_sort, flags.loop_reversed);
         let outer = self.context;
         let context = outer.values();
@@ -3605,7 +4351,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         let mut result = and;
         let mut rest = copy;
         loop {
-            let (operand, next) = split_once_top(rest, ',');
+            let (operand, next) = self.split_once(rest);
             let truth = format_true(&self.expand(operand, depth));
             result = if and {
                 result && truth
@@ -3626,7 +4372,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         depth: usize,
         comparison: Comparison,
     ) -> Result<String, ()> {
-        let (left, right) = split_once_top(copy, ',');
+        let (left, right) = self.split_once(copy);
         let Some(right) = right else {
             if self.tracing() {
                 let text = comparison_text(comparison);
@@ -3659,10 +4405,21 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         depth: usize,
         flags: &ModifierFlags<'_>,
     ) -> RawText {
-        let parts = split_top(copy, ',');
-        let paired = parts.len() / 2 * 2;
-        for pair in parts[..paired].chunks_exact(2) {
-            let condition = pair[0];
+        let compiled = (compiled::enabled() && !self.tracing()).then(|| compiled::get(copy));
+        let parts = compiled.is_none().then(|| split_top(copy, ','));
+        let count = compiled.as_ref().map_or_else(
+            || parts.as_ref().unwrap().len(),
+            |template| template.parts.len(),
+        );
+        let part = |index: usize| {
+            compiled.as_ref().map_or_else(
+                || parts.as_ref().unwrap()[index],
+                |template| &copy[template.parts[index].clone()],
+            )
+        };
+        let paired = count / 2 * 2;
+        for index in (0..paired).step_by(2) {
+            let condition = part(index);
             if self.tracing() {
                 self.log(depth, &format!("condition is: {condition}"));
             }
@@ -3691,17 +4448,17 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                 self.log(depth, &format!("condition '{condition}' is {state}"));
             }
             if truthy {
-                return self.expand(pair[1], depth);
+                return self.expand(part(index + 1), depth);
             }
         }
-        if parts.len() % 2 == 1 {
+        if count % 2 == 1 {
             if self.tracing() {
                 self.log(
                     depth,
                     &format!("no condition matched in '{copy}'; using last arg"),
                 );
             }
-            self.expand(parts[parts.len() - 1], depth)
+            self.expand(part(count - 1), depth)
         } else {
             if self.tracing() {
                 self.log(
@@ -3732,17 +4489,58 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         (!row.removed).then(|| row.value.clone())
     }
 
-    fn lookup(&mut self, key: &str, flags: &ModifierFlags<'_>) -> Option<RawText> {
-        let hooked = match self.client_row {
-            Some(row) if client_loop_scoped(key) => {
-                Some(row.variables.get(key).cloned().unwrap_or_default())
+    fn append_lookup(&mut self, key: &str, output: &mut Vec<u8>, padding: isize) {
+        if let Some(value) = self.hooks.option_variable(key, self.context.values()) {
+            append_padded(output, value.as_bytes(), padding);
+            return;
+        }
+        if let Some(row) = self.client_row.filter(|_| client_loop_scoped(key)) {
+            append_padded(
+                output,
+                row.variables.get(key).map_or(b"", |value| value.as_bytes()),
+                padding,
+            );
+            return;
+        }
+        if let Some(value) = self.hooks.variable(key, self.context.values()) {
+            append_padded(output, value.as_bytes(), padding);
+            return;
+        }
+        if self.context.variable_kind(key).is_some() {
+            if let Some(value) = self.context.variable(key) {
+                append_padded(output, value.as_bytes(), padding);
+            } else {
+                append_padded(output, b"", padding);
             }
-            _ => self.hooks.variable(key, self.context.values()),
-        };
+            return;
+        }
+        if let Some(value) = self.hooks.tree_variable(key, self.context.values()) {
+            append_padded(output, value.as_bytes(), padding);
+            return;
+        }
+        append_padded(
+            output,
+            self.environment_value(key).unwrap_or_default().as_bytes(),
+            padding,
+        );
+    }
+
+    fn lookup(&mut self, key: &str, flags: &ModifierFlags<'_>) -> Option<RawText> {
+        let hooked = self
+            .hooks
+            .option_variable(key, self.context.values())
+            .or_else(|| match self.client_row {
+                Some(row) if client_loop_scoped(key) => {
+                    Some(row.variables.get(key).cloned().unwrap_or_default())
+                }
+                _ => self.hooks.variable(key, self.context.values()),
+            });
         let mut value = if let Some(hooked) = hooked {
             RawText::from(hooked)
         } else if self.context.variable_kind(key).is_some() {
             RawText::from(self.context.variable(key).map(Cow::into_owned)?)
+        } else if let Some(value) = self.hooks.tree_variable(key, self.context.values()) {
+            RawText::from(value.into_owned())
         } else if flags.time.enabled {
             return None;
         } else {
@@ -4098,7 +4896,7 @@ struct ModifierFlags<'a> {
     bool_op: Option<bool>,
     comparison: Option<Comparison<'a>>,
     substitutions: Vec<&'a Modifier>,
-    limit: Option<(isize, Option<String>)>,
+    limit: Option<(isize, Option<&'a str>)>,
     padding: isize,
     expression: Option<&'a Modifier>,
     colour: Option<&'a str>,
@@ -4189,9 +4987,11 @@ impl<'a> ModifierFlags<'a> {
                             .ok()
                             .filter(|limit| (-FORMAT_MAX_WIDTH..=FORMAT_MAX_WIDTH).contains(limit))
                             .unwrap_or_default();
-                        let marker = modifier.args.get(1).cloned().or_else(|| {
-                            flags.limit.as_ref().and_then(|(_, marker)| marker.clone())
-                        });
+                        let marker = modifier
+                            .args
+                            .get(1)
+                            .map(String::as_str)
+                            .or_else(|| flags.limit.as_ref().and_then(|(_, marker)| *marker));
                         flags.limit = Some((limit, marker));
                     }
                 }
@@ -4348,9 +5148,9 @@ fn sort_client_loop_rows(rows: &mut [FormatClientRow], sort: Option<LoopSort>, r
 fn sort_loop_items(items: &mut [&FormatLoopItem], target: LoopTarget, sort: Option<LoopSort>) {
     match (target, sort) {
         (LoopTarget::Sessions, Some(LoopSort::Name)) => items.sort_by(|left, right| {
-            left.context
+            left.metadata
                 .session_name
-                .cmp(&right.context.session_name)
+                .cmp(&right.metadata.session_name)
                 .then_with(|| {
                     session_number(&left.context.session_id)
                         .cmp(&session_number(&right.context.session_id))
@@ -4358,27 +5158,27 @@ fn sort_loop_items(items: &mut [&FormatLoopItem], target: LoopTarget, sort: Opti
         }),
         (LoopTarget::Sessions, Some(LoopSort::Activity)) => items.sort_by(|left, right| {
             right
-                .context
+                .metadata
                 .session_sort_activity
-                .cmp(&left.context.session_sort_activity)
-                .then_with(|| left.context.session_name.cmp(&right.context.session_name))
+                .cmp(&left.metadata.session_sort_activity)
+                .then_with(|| left.metadata.session_name.cmp(&right.metadata.session_name))
         }),
         (LoopTarget::Sessions, _) => {
             items.sort_by_key(|item| session_number(&item.context.session_id));
         }
         (LoopTarget::Windows, Some(LoopSort::Name)) => items.sort_by(|left, right| {
-            left.context
+            left.metadata
                 .window_name
-                .cmp(&right.context.window_name)
-                .then_with(|| left.context.window_index.cmp(&right.context.window_index))
+                .cmp(&right.metadata.window_name)
+                .then_with(|| left.metadata.window_index.cmp(&right.metadata.window_index))
         }),
-        (LoopTarget::Windows, _) => items.sort_by_key(|item| item.context.window_index),
+        (LoopTarget::Windows, _) => items.sort_by_key(|item| item.metadata.window_index),
         (LoopTarget::Panes, Some(LoopSort::Index)) => {
-            items.sort_by_key(|item| item.context.pane_index);
+            items.sort_by_key(|item| item.metadata.pane_index);
         }
         (LoopTarget::Panes, Some(LoopSort::Z)) => items.sort_by_key(|item| {
             (
-                item.context.pane_z.unwrap_or_default(),
+                item.metadata.pane_z.unwrap_or_default(),
                 pane_number(&item.context.pane_id),
             )
         }),
@@ -4552,7 +5352,7 @@ fn find_format_end(text: &str, start: usize) -> Option<usize> {
     None
 }
 
-fn option_loop_key(loop_flags: &str, values: &StatusValues) -> Option<OptionRowsKey> {
+fn option_loop_key(loop_flags: &str, values: &StatusContext) -> Option<OptionRowsKey> {
     let loop_flags = if loop_flags.is_empty() {
         "s"
     } else {
@@ -5556,17 +6356,6 @@ fn next_format_unit(value: &[u8], index: usize) -> (usize, usize, bool) {
     }
 }
 
-fn format_units(value: &[u8]) -> Vec<(usize, usize, bool)> {
-    let mut units = Vec::new();
-    let mut index = 0usize;
-    while index < value.len() {
-        let unit = next_format_unit(value, index);
-        index += unit.0;
-        units.push(unit);
-    }
-    units
-}
-
 /// utf8.c `utf8_sanitize`, which `server_client_print` runs over a message
 /// bound for a client that never raised `CLIENT_UTF8`. A complete UTF-8
 /// sequence becomes one underscore per column it would have taken, so a wide
@@ -5610,10 +6399,31 @@ pub fn sanitize_client_output(output: &RawText) -> RawText {
 }
 
 fn format_byte_width(value: &[u8]) -> usize {
-    format_units(value)
-        .into_iter()
-        .map(|(_, width, _)| width)
-        .sum()
+    let mut width = 0;
+    let mut index = 0;
+    while index < value.len() {
+        let (length, columns, _) = next_format_unit(value, index);
+        index += length;
+        width += columns;
+    }
+    width
+}
+
+fn append_padded(output: &mut Vec<u8>, value: &[u8], width: isize) {
+    if width == 0 {
+        output.extend_from_slice(value);
+        return;
+    }
+    let padding = width
+        .unsigned_abs()
+        .saturating_sub(format_byte_width(value));
+    if width < 0 {
+        output.extend(std::iter::repeat_n(b' ', padding));
+    }
+    output.extend_from_slice(value);
+    if width > 0 {
+        output.extend(std::iter::repeat_n(b' ', padding));
+    }
 }
 
 fn format_trim_left(bytes: &[u8], limit: usize) -> Vec<u8> {
@@ -7166,7 +7976,7 @@ mod tests {
                 String::new()
             }
 
-            fn client_loop_rows(&mut self) -> Vec<FormatClientRow> {
+            fn client_loop_rows(&mut self, _context: &StatusContext) -> Vec<FormatClientRow> {
                 vec![FormatClientRow {
                     name: "/dev/pts/2".to_owned(),
                     activity: 0,

@@ -9,6 +9,7 @@ pub use mode_prompt::{ModeKey, ModePrompt, PromptOutcome};
 pub use switch_mode::{SwitchAction, SwitchMode};
 
 use std::{
+    borrow::Cow,
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet, HashSet},
     fmt::{self, Write as _},
@@ -567,6 +568,18 @@ struct RowFormatHooks<'a, H> {
 }
 
 impl<H: StatusHooks> StatusHooks for RowFormatHooks<'_, H> {
+    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+        self.inner.option_variable(name, context)
+    }
+
+    fn tree_variable(&mut self, name: &str, context: &StatusContext) -> Option<Cow<'_, str>> {
+        if ROW_CONTEXT_FORMATS.contains(&name) {
+            Some(Cow::Owned(self.line.to_string()))
+        } else {
+            self.inner.tree_variable(name, context)
+        }
+    }
+
     fn strftime(&mut self, literal: &str) -> String {
         self.inner.strftime(literal)
     }
@@ -577,7 +590,7 @@ impl<H: StatusHooks> StatusHooks for RowFormatHooks<'_, H> {
 
     fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
         if ROW_CONTEXT_FORMATS.contains(&name) {
-            Some(self.line.to_string())
+            None
         } else {
             self.inner.variable(name, context)
         }
@@ -601,8 +614,8 @@ impl<H: StatusHooks> StatusHooks for RowFormatHooks<'_, H> {
         self.inner.pane_search(pane, pattern, regex, ignore_case)
     }
 
-    fn client_loop_rows(&mut self) -> Vec<FormatClientRow> {
-        self.inner.client_loop_rows()
+    fn client_loop_rows(&mut self, context: &StatusContext) -> Vec<FormatClientRow> {
+        self.inner.client_loop_rows(context)
     }
 
     fn client_environment_rows(&mut self) -> Vec<FormatEnvironRow> {
@@ -1411,6 +1424,20 @@ impl StatusHooks for ConfigConditionHooks<'_> {
 }
 
 impl<H: StatusHooks> StatusHooks for CommandItemHooks<'_, H> {
+    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+        self.inner.option_variable(name, context)
+    }
+
+    fn tree_variable(&mut self, name: &str, context: &StatusContext) -> Option<Cow<'_, str>> {
+        if !COMMAND_ITEM_CONTEXT_FORMATS.contains(&name) {
+            return self.inner.tree_variable(name, context);
+        }
+        let command = self.command?;
+        self.inner
+            .tree_variable(name, context)
+            .or(Some(Cow::Borrowed(command)))
+    }
+
     fn strftime(&mut self, literal: &str) -> String {
         self.inner.strftime(literal)
     }
@@ -1420,13 +1447,7 @@ impl<H: StatusHooks> StatusHooks for CommandItemHooks<'_, H> {
     }
 
     fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
-        if !COMMAND_ITEM_CONTEXT_FORMATS.contains(&name) {
-            return self.inner.variable(name, context);
-        }
-        let command = self.command?;
-        self.inner
-            .variable(name, context)
-            .or_else(|| Some(command.to_owned()))
+        self.inner.variable(name, context)
     }
 
     fn window_activity(&mut self, window: WindowId) -> u64 {
@@ -1447,8 +1468,8 @@ impl<H: StatusHooks> StatusHooks for CommandItemHooks<'_, H> {
         self.inner.pane_search(pane, pattern, regex, ignore_case)
     }
 
-    fn client_loop_rows(&mut self) -> Vec<FormatClientRow> {
-        self.inner.client_loop_rows()
+    fn client_loop_rows(&mut self, context: &StatusContext) -> Vec<FormatClientRow> {
+        self.inner.client_loop_rows(context)
     }
 
     fn client_environment_rows(&mut self) -> Vec<FormatEnvironRow> {
@@ -1477,6 +1498,22 @@ impl<H: StatusHooks> StatusHooks for CommandItemHooks<'_, H> {
 }
 
 impl<H: StatusHooks> StatusHooks for ListCommandHooks<'_, H> {
+    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+        self.inner.option_variable(name, context)
+    }
+
+    fn tree_variable(&mut self, name: &str, context: &StatusContext) -> Option<Cow<'_, str>> {
+        if !LIST_COMMAND_CONTEXT_FORMATS.contains(&name) {
+            return self.inner.tree_variable(name, context);
+        }
+        Some(Cow::Borrowed(match name {
+            "command_list_name" => self.spec.name,
+            "command_list_alias" => self.spec.aliases.first().copied().unwrap_or_default(),
+            "command_list_usage" => self.spec.usage,
+            _ => unreachable!(),
+        }))
+    }
+
     fn strftime(&mut self, literal: &str) -> String {
         self.inner.strftime(literal)
     }
@@ -1486,21 +1523,10 @@ impl<H: StatusHooks> StatusHooks for ListCommandHooks<'_, H> {
     }
 
     fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
-        if !LIST_COMMAND_CONTEXT_FORMATS.contains(&name) {
-            return self.inner.variable(name, context);
-        }
-        match name {
-            "command_list_name" => Some(self.spec.name.to_owned()),
-            "command_list_alias" => Some(
-                self.spec
-                    .aliases
-                    .first()
-                    .copied()
-                    .unwrap_or_default()
-                    .to_owned(),
-            ),
-            "command_list_usage" => Some(self.spec.usage.to_owned()),
-            _ => unreachable!(),
+        if LIST_COMMAND_CONTEXT_FORMATS.contains(&name) {
+            None
+        } else {
+            self.inner.variable(name, context)
         }
     }
 
@@ -1514,8 +1540,8 @@ impl<H: StatusHooks> StatusHooks for ListCommandHooks<'_, H> {
         self.inner.pane_search(pane, pattern, regex, ignore_case)
     }
 
-    fn client_loop_rows(&mut self) -> Vec<FormatClientRow> {
-        self.inner.client_loop_rows()
+    fn client_loop_rows(&mut self, context: &StatusContext) -> Vec<FormatClientRow> {
+        self.inner.client_loop_rows(context)
     }
 
     fn client_environment_rows(&mut self) -> Vec<FormatEnvironRow> {
@@ -1532,6 +1558,31 @@ impl<H: StatusHooks> StatusHooks for ListCommandHooks<'_, H> {
 }
 
 impl<H: StatusHooks> StatusHooks for ListKeyHooks<'_, H> {
+    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+        self.inner.option_variable(name, context)
+    }
+
+    fn tree_variable(&mut self, name: &str, context: &StatusContext) -> Option<Cow<'_, str>> {
+        if !LIST_KEY_BINDING_CONTEXT_FORMATS.contains(&name)
+            && !LIST_KEY_SUMMARY_CONTEXT_FORMATS.contains(&name)
+        {
+            return self.inner.tree_variable(name, context);
+        }
+        Some(match name {
+            "notes_only" => Cow::Borrowed(if self.notes_only { "1" } else { "0" }),
+            "key_repeat" => Cow::Borrowed(if self.binding.repeat { "1" } else { "0" }),
+            "key_note" => Cow::Borrowed(self.binding.note.as_deref().unwrap_or_default()),
+            "key_prefix" => Cow::Borrowed(self.prefix),
+            "key_table" => Cow::Borrowed(self.table),
+            "key_string" => Cow::Borrowed(self.key),
+            "key_command" => Cow::Owned(format_key_command(self.binding)),
+            "key_has_repeat" => Cow::Borrowed(if self.has_repeat { "1" } else { "0" }),
+            "key_string_width" => Cow::Owned(self.key_width.to_string()),
+            "key_table_width" => Cow::Owned(self.table_width.to_string()),
+            _ => unreachable!(),
+        })
+    }
+
     fn strftime(&mut self, literal: &str) -> String {
         self.inner.strftime(literal)
     }
@@ -1541,23 +1592,12 @@ impl<H: StatusHooks> StatusHooks for ListKeyHooks<'_, H> {
     }
 
     fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
-        if !LIST_KEY_BINDING_CONTEXT_FORMATS.contains(&name)
-            && !LIST_KEY_SUMMARY_CONTEXT_FORMATS.contains(&name)
+        if LIST_KEY_BINDING_CONTEXT_FORMATS.contains(&name)
+            || LIST_KEY_SUMMARY_CONTEXT_FORMATS.contains(&name)
         {
-            return self.inner.variable(name, context);
-        }
-        match name {
-            "notes_only" => Some(if self.notes_only { "1" } else { "0" }.to_owned()),
-            "key_repeat" => Some(if self.binding.repeat { "1" } else { "0" }.to_owned()),
-            "key_note" => Some(self.binding.note.clone().unwrap_or_default()),
-            "key_prefix" => Some(self.prefix.to_owned()),
-            "key_table" => Some(self.table.to_owned()),
-            "key_string" => Some(self.key.to_owned()),
-            "key_command" => Some(format_key_command(self.binding)),
-            "key_has_repeat" => Some(if self.has_repeat { "1" } else { "0" }.to_owned()),
-            "key_string_width" => Some(self.key_width.to_string()),
-            "key_table_width" => Some(self.table_width.to_string()),
-            _ => unreachable!(),
+            None
+        } else {
+            self.inner.variable(name, context)
         }
     }
 
@@ -1571,8 +1611,8 @@ impl<H: StatusHooks> StatusHooks for ListKeyHooks<'_, H> {
         self.inner.pane_search(pane, pattern, regex, ignore_case)
     }
 
-    fn client_loop_rows(&mut self) -> Vec<FormatClientRow> {
-        self.inner.client_loop_rows()
+    fn client_loop_rows(&mut self, context: &StatusContext) -> Vec<FormatClientRow> {
+        self.inner.client_loop_rows(context)
     }
 
     fn client_environment_rows(&mut self) -> Vec<FormatEnvironRow> {
@@ -2152,6 +2192,11 @@ pub struct MuxEngine {
     automatic_rename_throttle: bool,
     window_name_times: BTreeMap<WindowId, Instant>,
     pending_window_renames: BTreeSet<WindowId>,
+    format_options_generation: u64,
+    format_option_cache: Mutex<Option<(u64, u64, Arc<StatusRowVariables>)>>,
+    format_needs_cache: Mutex<BTreeMap<u64, (u64, Vec<String>, crate::FormatNeeds)>>,
+    pub(crate) format_reference_cache:
+        Mutex<Option<(u64, BTreeMap<String, Arc<BTreeSet<String>>>)>>,
 }
 
 const NAME_INTERVAL: Duration = Duration::from_millis(500);
@@ -2181,6 +2226,9 @@ fn template_reads_runtime_facts(template: &str) -> bool {
 
 #[cfg(test)]
 mod runtime_facts_tests;
+
+#[cfg(test)]
+mod format_cache_tests;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PaneRuntimeFacts {
@@ -2461,6 +2509,10 @@ impl Default for MuxEngine {
             automatic_rename_throttle: false,
             window_name_times: BTreeMap::new(),
             pending_window_renames: BTreeSet::new(),
+            format_options_generation: 0,
+            format_option_cache: Mutex::new(None),
+            format_needs_cache: Mutex::new(BTreeMap::new()),
+            format_reference_cache: Mutex::new(None),
         }
     }
 }
@@ -2677,6 +2729,64 @@ impl MuxEngine {
             pane_windows,
             window_sessions,
         }
+    }
+
+    #[must_use]
+    pub const fn format_options_generation(&self) -> u64 {
+        self.format_options_generation
+    }
+
+    #[must_use]
+    pub fn cached_format_option_snapshot(&self) -> Arc<StatusRowVariables> {
+        if !crate::format_cache_knob() {
+            return Arc::new(self.format_option_snapshot());
+        }
+        let key = (self.format_options_generation, self.state.generation());
+        let mut cache = self.format_option_cache.lock();
+        if let Some((options, tree, snapshot)) = cache.as_ref()
+            && (*options, *tree) == key
+        {
+            return Arc::clone(snapshot);
+        }
+        let snapshot = Arc::new(self.format_option_snapshot());
+        *cache = Some((key.0, key.1, Arc::clone(&snapshot)));
+        snapshot
+    }
+
+    #[must_use]
+    pub fn cached_format_needs<'t>(
+        &self,
+        templates: impl IntoIterator<Item = &'t str>,
+    ) -> crate::FormatNeeds {
+        if !crate::format_cache_knob() {
+            return self.format_needs(templates);
+        }
+        let templates = templates.into_iter().collect::<Vec<_>>();
+        let key =
+            std::hash::BuildHasher::hash_one(&foldhash::fast::FixedState::default(), &templates);
+        let mut cache = self.format_needs_cache.lock();
+        if let Some((generation, sources, needs)) = cache.get(&key)
+            && *generation == self.format_options_generation
+            && sources
+                .iter()
+                .map(String::as_str)
+                .eq(templates.iter().copied())
+        {
+            return *needs;
+        }
+        let needs = self.format_needs(templates.iter().copied());
+        if cache.len() >= 128 {
+            cache.clear();
+        }
+        cache.insert(
+            key,
+            (
+                self.format_options_generation,
+                templates.into_iter().map(str::to_owned).collect(),
+                needs,
+            ),
+        );
+        needs
     }
 
     fn extend_format_option_values(
@@ -10063,6 +10173,7 @@ impl MuxEngine {
         value: Option<&str>,
         options: &Options,
     ) -> Result<Execution, ServerError> {
+        self.format_options_generation = self.format_options_generation.wrapping_add(1);
         let index = index.map(ArrayIndex::parse);
         let unset = option_is_unset(options);
         let already = self
@@ -10319,6 +10430,7 @@ impl MuxEngine {
         options: &Options,
         target: TmuxOptionTarget,
     ) -> Result<Execution, ServerError> {
+        self.format_options_generation = self.format_options_generation.wrapping_add(1);
         let metadata = tmux_stored_scalar(name).expect("stored scalar metadata");
         let unset = option_is_unset(options);
         let locally_set = match target {
@@ -10474,6 +10586,7 @@ impl MuxEngine {
         value: Option<&str>,
         options: &Options,
     ) -> Result<Execution, ServerError> {
+        self.format_options_generation = self.format_options_generation.wrapping_add(1);
         let metadata = tmux_stored_array(name).expect("stored array metadata");
         let index = index.map(ArrayIndex::parse);
         let unset = option_is_unset(options);
@@ -10578,6 +10691,7 @@ impl MuxEngine {
         name: &'static str,
         index: Option<&ArrayIndex>,
     ) {
+        self.format_options_generation = self.format_options_generation.wrapping_add(1);
         if let Some(index) = index {
             if let Some(array) = self
                 .array_table_mut(target)
@@ -10826,6 +10940,7 @@ impl MuxEngine {
         hooks: &mut impl StatusHooks,
         default_shell_is_valid: &mut impl FnMut(&str) -> bool,
     ) -> Result<Execution, ServerError> {
+        self.format_options_generation = self.format_options_generation.wrapping_add(1);
         let command_name = if force_window {
             "set-window-option"
         } else {
@@ -16540,6 +16655,52 @@ fn exactly_one_argument<'a>(
 }
 
 impl MuxEngine {
+    #[must_use]
+    pub fn format_pane_kind(&self, pane: &str) -> Option<&'static str> {
+        self.state
+            .pane(pane.parse().ok()?)
+            .map(|pane| pane_kind_name(&pane.kind))
+    }
+
+    #[must_use]
+    pub fn format_browser_url(&self, pane: &str) -> Option<&str> {
+        match &self.state.pane(pane.parse().ok()?)?.kind {
+            PaneKind::Browser(browser) => Some(browser.url()),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn format_user_option(
+        &self,
+        pane: &str,
+        window: &str,
+        session: &str,
+        name: &str,
+    ) -> Option<&str> {
+        let pane = pane.parse().ok();
+        let window = pane
+            .and_then(|pane| self.state.window_for_pane(pane))
+            .or_else(|| window.parse().ok());
+        let session = session.parse().ok();
+        pane.and_then(|pane| self.pane_user_options.get(&pane))
+            .and_then(|values| values.get(name))
+            .or_else(|| {
+                window
+                    .and_then(|window| self.window_user_options.get(&window))
+                    .and_then(|values| values.get(name))
+            })
+            .or_else(|| {
+                session
+                    .and_then(|session| self.session_user_options.get(&session))
+                    .and_then(|values| values.get(name))
+            })
+            .or_else(|| self.global_window_user_options.get(name))
+            .or_else(|| self.global_session_user_options.get(name))
+            .or_else(|| self.server_user_options.get(name))
+            .map(String::as_str)
+    }
+
     #[must_use]
     pub fn format_facts(&self) -> FormatFacts {
         let mut pane_kinds = BTreeMap::new();

@@ -52,7 +52,7 @@ impl StatusHooks for Roster {
         (name == "client_name").then(|| "outer".to_owned())
     }
 
-    fn client_loop_rows(&mut self) -> Vec<FormatClientRow> {
+    fn client_loop_rows(&mut self, _context: &StatusContext) -> Vec<FormatClientRow> {
         self.rows.clone()
     }
 }

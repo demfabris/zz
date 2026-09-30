@@ -36,7 +36,7 @@ impl StatusHooks for Stores {
         String::new()
     }
 
-    fn client_loop_rows(&mut self) -> Vec<FormatClientRow> {
+    fn client_loop_rows(&mut self, _context: &StatusContext) -> Vec<FormatClientRow> {
         self.clients.clone()
     }
 

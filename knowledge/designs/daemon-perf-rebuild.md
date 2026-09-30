@@ -2,7 +2,7 @@
 type: Design Plan
 title: Daemon performance rebuild
 description: "The campaign to bring the zz daemon to tmux cost per command, per pane and per attach while keeping the 5x output throughput lead - a permanent zz-vs-tmux gate first, then waves that remove unrequested work (one-frame Exec commands, change-driven publication, lazy formats, frames only for watchers, a compact wire under one unreleased protocol version), then one mux loop and PTY shards; the lane brief source with targets, merge order, write zones, gates and rollback switches."
-status: Approved 2026-09-28; wave 0 (gate and this plan) built; release freeze until W4 exits; wave 1 done and on main; wave 2 in progress on perf/wave2 (HOOKS merged as w2-1, TERM as w2-2; W2-CTRL can start); continued on Linux from bench/perf/campaign/HANDOFF.md
+status: Approved 2026-09-28; wave 0 (gate and this plan) built; release freeze until W4 exits; wave 1 done and on main; wave 2 in progress on perf/wave2 (HOOKS merged as w2-1, TERM as w2-2); W2-CTRL implementation and Mac checks ongoing on perf/ctrl; continued on Linux from bench/perf/campaign/HANDOFF.md
 resource: crates/zz-daemon/src/daemon.rs
 tags:
 - performance
@@ -12,7 +12,7 @@ tags:
 - benchmark
 - campaign
 - design-plan
-timestamp: 2026-09-29T15:30:00Z
+timestamp: 2026-09-30T00:00:00Z
 ---
 
 # Campaign status
@@ -20,7 +20,7 @@ timestamp: 2026-09-29T15:30:00Z
 2026-09-29: wave 1 (W0, all six wave-1 lanes, three folded side branches) passed its Linux exit
 and is on main (`1e0bfc6a`). Wave 2 runs on `perf/wave2`; W2-HOOKS is merge 1 (`0acd7f2a`,
 `w2-1-hooks-alienware-0acd7f2a.json`) and W2-TERM merge 2 (`d7e3fc95`,
-`w2-2-term-alienware-d7e3fc95.json`). W2-CTRL can start from there: its `Batch` carries TERM's
+`w2-2-term-alienware-d7e3fc95.json`). W2-CTRL is being built on `perf/ctrl`: its `Batch` carries TERM's
 PaneFrames through `encode_terminal_viewport_event_into` and `encode_terminal_patch_event_into`.
 The campaign continues on a Linux host:
 `bench/perf/campaign/HANDOFF.md` has the state, the numbers against tmux at the last gate, the
@@ -2250,12 +2250,16 @@ As built on `perf/ctrl`, 2026-09-30:
   Both `pane-frame-v1` and `control-plane-v2` are required inside unreleased protocol 107.
 - `send_attached` and `send_resync_inner` collect one flat `Batch` containing the scoped
   tree, `ClientView`, requested status/options/keys, image chunks, and each visible pane's
-  Full at final size. Typed queued groups expand into the collector without decoding or
-  copying TERM bodies. Image chunks remain ahead of their placement frame.
+  Full at final size. Typed queued groups expand into the collector without decoding
+  TERM bodies or copying them into intermediate child buffers. Image chunks remain
+  ahead of their placement frame.
 - `publish_compact_trees` retains raw trees per scope, publishes small `TreeDelta`
   operations, and emits nothing for an empty diff. Per-client overlays stay in
   `ClientView`; attachment epochs reset frame state once, and forced state shares the
   same publication lock and atomic tree/view group as ordinary publication.
+  Scoped tree children keep their shared encoded allocation through each client's
+  group and collector. The Batch encoder borrows child bytes and writes each slice
+  at once, with the same frame and count bounds and output as the owned encoder.
 - Hash subscribers receive revision plus exact root/copy mouse bits. Full subscribers
   receive per-table patches. A first Full subscriber cannot consume a pending Hash
   revision. Control requests no keys because its frontend does not use them; TUI requests
@@ -2268,9 +2272,10 @@ As built on `perf/ctrl`, 2026-09-30:
   opens native parent guards before callback output; responses close them. Raw callback
   guards preserve bytes. Cancellation is checked before dispatch and between commands,
   preventing disconnected queues from acting on later clients. Hook notification order
-  is unchanged. Synchronous read-only queries without hooks queue Started without a separate
-  wake; their response wakes and drains the same FIFO. Hook dispatch wakes the control queue
-  before it can block, including hooks installed after that eligibility check.
+  is unchanged. Synchronous read-only queries without hooks collect Started, Response and
+  ExecExit in one flat Batch. The existing collector field records Attach or Quiet ownership,
+  so a query cannot release a newer resync collector. Hook dispatch and parking release the
+  quiet collection before blocking, including hooks installed after the eligibility check.
 - `ClientCore` reduces a whole Batch before publishing grouped events and requests one
   `TreeSync` on a base mismatch. Desktop keeps its retained-history terminal path and a
   separate tree-only mirror for inactive hosts, without a second terminal grid.
@@ -2279,22 +2284,51 @@ As built on `perf/ctrl`, 2026-09-30:
   resize behavior. Native and shared reports capture generation synchronously; the C
   API also accepts an explicitly captured generation.
 - The control frontend buffers payload/end writes and joins a ready Started guard to its
-  response, flushing before it waits. The existing literal-format predicate
+  response, flushing before it waits. Hook names and effective hook bodies are borrowed
+  from the existing registry and option arrays. The existing literal-format predicate
   skips unused facts while preserving target selection and formatted after-hooks. Read-only
   commands skip key publication and tap refresh; their mutating after-hooks still update both.
-  The final control response and ExecExit share one existing reliable queue group and cross the
-  frontend channel once. Its receiver retains all remaining Batch children in order. TUI
-  reuses unchanged rows, borders, status and message composition, then limits narrow-cell
-  incremental painting to changed columns. Full-frame and scroll damage compare retained rows; equal dictionary contents also retain
-  the painted cache. Wide cells, overlays and changed dictionaries keep full-row drawing.
+  The final control response and ExecExit share one existing reliable queue group; quiet
+  queries also join Started through the existing collector. The receiver retains all remaining
+  Batch children in order. On Unix, `DirectControl` selects stdin and the existing socket on
+  the control thread, removing both forwarding threads. `ProtocolReceiver::try_recv` keeps
+  incomplete frames, initial pending messages and buffered bytes; per-call `DONTWAIT` reads
+  leave blocking clients' descriptor flags intact. Split UTF-8 lines, EOF tails and signal
+  polling retain their prior behavior. Buffered events bypass readiness polling. The decoder
+  returns the same box through the ready-receive layers, avoiding repeated large enum copies.
+  The initialized receiver buffer is reused for reads.
+  TUI startup reduces the connection's already-held Batch synchronously and lays out
+  that complete state before the first paint. The same reducer forwards attachment
+  reset, image delivery and placing frames in stream order for later attachments.
+  The TUI reuses unchanged rows, borders, status and message composition, then limits narrow-cell
+  incremental painting to changed columns. Full-frame and scroll damage compare retained
+  rows; equal dictionary contents also retain the painted cache. Wide cells, overlays and
+  changed dictionaries keep full-row drawing.
   The existing output writer returns one cleared buffer, bounded by its queue budget, to the
   next paint instead of regrowing a buffer every frame. One cached terminal style reuses the
   existing formatter's exact ANSI bytes instead of formatting the same RGB style on every row.
+- `status_sampler_sessions` filters compact clients that request no status. Legacy clients
+  retain their default status subscription. Format monitors, control subscriptions, peer
+  checks and rename deadlines keep their independent timers; repeated read-only queries
+  leave an idle sampler parked when none of that work exists.
+- `config_expansion_names` skips discovery when raw input contains neither `$` nor `~`.
+  Empty environment/home lookup lists return before locking. The actual parser still checks
+  the whole line before mutation, and stored aliases keep their existing expansion and
+  same-line freezing behavior.
+- The command worker uses the existing Crossbeam Select API to park directly instead
+  of yielding through the empty receive retry. Its queue, context, cancellation and
+  thread ownership stay the same. Completed groups return owned child and outer buffers
+  to the existing bounded pool after the writer finishes; shared children are released.
+- Broad validation exposed an existing cold-start agent projection bug: SessionReset
+  dropped text queued before readiness. The projection now retains that text until its
+  turn and clears it on explicit restart or reclaim. The original capture assertion and
+  new cold/reset/reclaim/restart proofs pass.
 
 `ZZ_PERF_TREE_DELTA=0` publishes full scoped trees on the new wire. The existing
-`ZZ_PERF_EAGER_FACTS=1` restores eager facts for the literal-output optimization. `ZZ_PERF_READONLY_SKIP=0` restores the
-read-only key/tap work and eager Started wakes. `ZZ_PERF_TUI_COALESCE=0` restores eager full-row paints and uncached
-border/status work. Full wire rollback requires reverting matching daemon and clients.
+`ZZ_PERF_EAGER_FACTS=1` restores eager facts for the literal-output optimization.
+`ZZ_PERF_READONLY_SKIP=0` restores read-only key/tap work and eager Started wakes.
+`ZZ_PERF_TUI_COALESCE=0` restores eager full-row paints and uncached border/status work.
+Full wire rollback requires reverting matching daemon and clients.
 
 ## W2-HOOKS: read-only skip, then change journal (effort L)
 

@@ -2156,16 +2156,18 @@ fn expand_base_status_style(
     if zz_protocol::parse_style(&style).is_none() {
         style = String::new();
     }
+    let mut appended = false;
     for (key, value) in [("fg", &formats.foreground), ("bg", &formats.background)] {
         if value.as_str() != "default" {
             let separator = if style.is_empty() { "" } else { "," };
             let addition = format!("{separator}{key}={value}");
             if style.len() + addition.len() <= MAX_STATUS_TEXT_BYTES {
                 style.push_str(&addition);
+                appended = true;
             }
         }
     }
-    if zz_protocol::parse_style(&style).is_none() {
+    if appended && zz_protocol::parse_style(&style).is_none() {
         return String::new();
     }
     style

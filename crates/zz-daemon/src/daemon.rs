@@ -37418,11 +37418,19 @@ fn status_request_with_selected_options(
             let pane_borders = attached.map_or_else(
                 || Arc::clone(&request.pane_borders),
                 |session| {
-                    cached_live_border_presentations(inner, client, session, options, || {
-                        SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .map_or(0, |duration| duration.as_secs())
-                    })
+                    cached_live_border_presentations(
+                        inner,
+                        client,
+                        session,
+                        window,
+                        revision,
+                        options,
+                        || {
+                            SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .map_or(0, |duration| duration.as_secs())
+                        },
+                    )
                     .unwrap_or_else(|| {
                         let facts = readonly_borrowed_format_hook_facts(
                             inner,
@@ -38307,12 +38315,12 @@ fn cached_live_border_presentations(
     inner: &ServerState,
     client: ClientId,
     session: SessionId,
+    window: Option<WindowId>,
+    revision: (u64, u64, u64, u64),
     option_snapshot: &Arc<zz_mux::StatusRowVariables>,
     second: impl FnOnce() -> u64,
 ) -> Option<Arc<Vec<zz_protocol::PaneBorderPresentation>>> {
-    let revision = inner.engine.format_cache_revision()?;
-    let session_state = inner.engine.state.sessions.get(&session)?;
-    let window = client_focused_window(inner, client, session_state);
+    let window = window?;
     inner.engine.state.windows.get(&window)?;
     let cache = inner.border_presentations_cache.lock();
     let cached = cache.as_ref()?;

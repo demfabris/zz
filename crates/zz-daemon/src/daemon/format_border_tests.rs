@@ -68,26 +68,50 @@ fn live_scalar_border_probe_preserves_headers_options_and_fresh_mode_counts() {
     };
     let options = inner.engine.cached_format_option_snapshot();
     let clock_reads = Cell::new(0);
-    let hit = cached_live_border_presentations(&inner, client, session, &options, || {
-        clock_reads.set(clock_reads.get() + 1);
-        second
-    });
+    let hit = cached_live_border_presentations(
+        &inner,
+        client,
+        session,
+        context.window,
+        inner.engine.format_cache_revision().unwrap_or_default(),
+        &options,
+        || {
+            clock_reads.set(clock_reads.get() + 1);
+            second
+        },
+    );
     assert_eq!(hit.is_some(), zz_mux::format_cache_knob());
     assert_eq!(clock_reads.get(), 0);
     if let Some(hit) = hit {
         assert!(Arc::ptr_eq(&first, &hit));
     }
     let copied_options = Arc::new(inner.engine.format_option_snapshot());
-    for (probe_client, probe_session, probe_options, probe_second) in [
-        (ClientId(client.0 + 1), session, &options, second),
-        (client, SessionId(u64::MAX), &options, second),
-        (client, session, &copied_options, second),
+    for (probe_client, probe_session, probe_window, probe_options, probe_second) in [
+        (
+            ClientId(client.0 + 1),
+            session,
+            context.window,
+            &options,
+            second,
+        ),
+        (
+            client,
+            SessionId(u64::MAX),
+            context.window,
+            &options,
+            second,
+        ),
+        (client, session, context.window, &copied_options, second),
+        (client, session, None, &options, second),
+        (client, session, Some(WindowId(u64::MAX)), &options, second),
     ] {
         assert!(
             cached_live_border_presentations(
                 &inner,
                 probe_client,
                 probe_session,
+                probe_window,
+                inner.engine.format_cache_revision().unwrap_or_default(),
                 probe_options,
                 || probe_second,
             )
@@ -95,7 +119,15 @@ fn live_scalar_border_probe_preserves_headers_options_and_fresh_mode_counts() {
         );
     }
     inner.engine.set_format_now(second + 1);
-    let later = cached_live_border_presentations(&inner, client, session, &options, || second + 1);
+    let later = cached_live_border_presentations(
+        &inner,
+        client,
+        session,
+        context.window,
+        inner.engine.format_cache_revision().unwrap_or_default(),
+        &options,
+        || second + 1,
+    );
     assert_eq!(later.is_some(), zz_mux::format_cache_knob());
     if let Some(later) = later {
         assert!(Arc::ptr_eq(&first, &later));
@@ -103,7 +135,16 @@ fn live_scalar_border_probe_preserves_headers_options_and_fresh_mode_counts() {
     inner.engine.set_format_now(second);
     inner.pane_modes.insert(pane, vec![PaneModeRequest::Clock]);
     assert!(
-        cached_live_border_presentations(&inner, client, session, &options, || second).is_none()
+        cached_live_border_presentations(
+            &inner,
+            client,
+            session,
+            context.window,
+            inner.engine.format_cache_revision().unwrap_or_default(),
+            &options,
+            || second,
+        )
+        .is_none()
     );
     let changed = {
         let facts = readonly_borrowed_format_hook_facts(&inner, CommandFormatSeed::default());
@@ -122,7 +163,16 @@ fn live_scalar_border_probe_preserves_headers_options_and_fresh_mode_counts() {
     borders(&inner, client, session, &facts);
     let options = inner.engine.cached_format_option_snapshot();
     assert!(
-        cached_live_border_presentations(&inner, client, session, &options, || second).is_none()
+        cached_live_border_presentations(
+            &inner,
+            client,
+            session,
+            context.window,
+            inner.engine.format_cache_revision().unwrap_or_default(),
+            &options,
+            || second,
+        )
+        .is_none()
     );
 }
 
@@ -357,10 +407,18 @@ fn border_format_cache_keeps_clock_guards_for_raw_nested_and_time_modifier_sourc
         let options = inner.engine.cached_format_option_snapshot();
         let clock_reads = Cell::new(0);
         assert!(
-            cached_live_border_presentations(&inner, client, session, &options, || {
-                clock_reads.set(clock_reads.get() + 1);
-                second + 1
-            })
+            cached_live_border_presentations(
+                &inner,
+                client,
+                session,
+                context.window,
+                inner.engine.format_cache_revision().unwrap_or_default(),
+                &options,
+                || {
+                    clock_reads.set(clock_reads.get() + 1);
+                    second + 1
+                },
+            )
             .is_none(),
             "{source}"
         );

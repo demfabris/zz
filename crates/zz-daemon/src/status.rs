@@ -697,6 +697,11 @@ pub(crate) trait FormatFactSource {
     fn mux(&self) -> &zz_mux::FormatFacts;
     fn copy_modes(&self) -> &BTreeMap<PaneId, Vec<(String, Arc<CopyModeFacts>)>>;
     fn pane_modes(&self) -> &BTreeMap<PaneId, (usize, &'static str)>;
+
+    fn pane_in_mode_count(&self, pane: PaneId) -> usize {
+        self.pane_modes().get(&pane).map_or(0, |(count, _)| *count)
+            + usize::from(self.copy_modes().contains_key(&pane))
+    }
 }
 
 impl FormatFactSource for FormatHookFacts {
@@ -1233,8 +1238,16 @@ impl StatusRenderer {
     fn render_forced_at(&mut self, request: &StatusRequest, now: i64) -> StatusLine {
         let mut touched = BTreeSet::new();
         let status = self.render_request(request, &mut touched, true, now);
-        self.note_uncovered_jobs(request, &touched);
-        self.published.insert(request.client, Arc::clone(&status));
+        if !touched.is_empty() {
+            self.note_uncovered_jobs(request, &touched);
+        }
+        if let Some(published) = self.published.get_mut(&request.client) {
+            if !Arc::ptr_eq(published, &status) {
+                *published = Arc::clone(&status);
+            }
+        } else {
+            self.published.insert(request.client, Arc::clone(&status));
+        }
         status.as_ref().clone()
     }
 
@@ -1886,7 +1899,6 @@ fn status_style_end(value: &str, start: usize) -> Option<usize> {
 pub(crate) struct DaemonFormatHooks<'a> {
     status_client: Option<ClientId>,
     facts: &'a dyn FormatFactSource,
-    buffer_override: Option<BufferFormatFacts>,
     option_engine: Option<&'a MuxEngine>,
     status_context: Option<&'a StatusContext<'a>>,
     variables: Option<&'a BTreeMap<String, String>>,
@@ -1903,6 +1915,8 @@ pub(crate) struct DaemonFormatHooks<'a> {
     zz_executable: Option<&'a std::path::Path>,
     job_waker: Option<&'a thread::Thread>,
     facts_withheld: bool,
+    buffer_override: Option<BufferFormatFacts>,
+    pane_in_mode_override: Option<(PaneId, usize)>,
 }
 
 impl<'a> DaemonFormatHooks<'a> {
@@ -1934,6 +1948,7 @@ impl<'a> DaemonFormatHooks<'a> {
             zz_executable: None,
             job_waker: None,
             facts_withheld: false,
+            pane_in_mode_override: None,
         }
     }
 
@@ -1947,6 +1962,10 @@ impl<'a> DaemonFormatHooks<'a> {
     pub(crate) fn with_buffer(mut self, buffer: BufferFormatFacts) -> Self {
         self.buffer_override = Some(buffer);
         self
+    }
+
+    pub(crate) fn set_pane_in_mode_count(&mut self, pane: PaneId, count: usize) {
+        self.pane_in_mode_override = Some((pane, count));
     }
 
     fn buffer(&self) -> Option<&BufferFormatFacts> {
@@ -2006,6 +2025,7 @@ impl<'a> DaemonFormatHooks<'a> {
             zz_executable,
             job_waker,
             facts_withheld: false,
+            pane_in_mode_override: None,
         }
     }
 
@@ -2109,6 +2129,10 @@ impl DaemonFormatHooks<'_> {
 
 impl StatusHooks for DaemonFormatHooks<'_> {
     fn stable_option_lookups(&self) -> bool {
+        true
+    }
+
+    fn only_tmux_options(&self) -> bool {
         true
     }
 
@@ -2326,14 +2350,15 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                     .unwrap_or_default(),
             ),
             "pane_in_mode" => Some(
-                (context
+                context
                     .pane_id
                     .parse()
                     .ok()
-                    .and_then(|pane| self.facts.pane_modes().get(&pane))
-                    .map_or(0, |(count, _)| *count)
-                    + usize::from(self.copy_mode_rows(context).is_some()))
-                .to_string(),
+                    .map_or(0, |pane| match self.pane_in_mode_override {
+                        Some((target, count)) if target == pane => count,
+                        _ => self.facts.pane_in_mode_count(pane),
+                    })
+                    .to_string(),
             ),
             "pane_search_string" => Some(
                 context

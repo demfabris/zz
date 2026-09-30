@@ -360,6 +360,140 @@ fn default_key_listing_reuses_output_and_bypasses_option_hook_overrides() {
 }
 
 #[test]
+fn default_key_listing_proven_tmux_hooks_skip_scoped_option_probes() {
+    struct ProvenHooks;
+
+    impl StatusHooks for ProvenHooks {
+        fn stable_option_lookups(&self) -> bool {
+            true
+        }
+
+        fn only_tmux_options(&self) -> bool {
+            true
+        }
+
+        fn strftime(&mut self, _: &str) -> String {
+            String::new()
+        }
+
+        fn shell(&mut self, _: &str, _: &FormatJobTag) -> String {
+            String::new()
+        }
+
+        fn option_variable(&mut self, name: &str, _: &StatusContext) -> Option<String> {
+            panic!("cached listing unexpectedly probed {name}")
+        }
+    }
+
+    assert!(*LIST_KEY_FORMAT_NAMES_ARE_NOT_OPTIONS);
+    let engine = key_listing_engine();
+    let args = [RawText::from("-T"), RawText::from("x")];
+    let context = ExecutionContext::default();
+    let first = engine
+        .list_keys(&context, &args, &mut CommandHooks::new(0))
+        .unwrap();
+    if crate::format_cache_knob() {
+        assert_eq!(
+            engine.list_keys(&context, &args, &mut ProvenHooks).unwrap(),
+            first,
+        );
+        let mut hooks = RowFormatHooks {
+            inner: &mut ProvenHooks,
+            line: 5,
+        };
+        assert_eq!(
+            engine.list_keys(&context, &args, &mut hooks).unwrap(),
+            first
+        );
+    } else {
+        assert!(engine.key_listing_cache.lock().is_none());
+    }
+}
+
+#[test]
+fn default_key_listing_custom_option_hooks_keep_the_resolved_target_context() {
+    struct ScopedHooks {
+        contexts: Vec<(String, String, String)>,
+    }
+
+    impl StatusHooks for ScopedHooks {
+        fn stable_option_lookups(&self) -> bool {
+            true
+        }
+
+        fn strftime(&mut self, _: &str) -> String {
+            String::new()
+        }
+
+        fn shell(&mut self, _: &str, _: &FormatJobTag) -> String {
+            String::new()
+        }
+
+        fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+            if name != "key_command" {
+                return None;
+            }
+            self.contexts.push((
+                context.session_id.clone(),
+                context.window_id.clone(),
+                context.pane_id.clone(),
+            ));
+            Some(context.pane_id.clone())
+        }
+    }
+
+    let mut engine = key_listing_engine();
+    let first = engine.state.create_session("first").unwrap();
+    let second = engine.state.create_session("second").unwrap();
+    let args = [RawText::from("-T"), RawText::from("x")];
+    engine
+        .list_keys(
+            &ExecutionContext::new(Some(first.0), Some(first.1), Some(first.2)),
+            &args,
+            &mut CommandHooks::new(0),
+        )
+        .unwrap();
+    for (session, window, pane) in [first, second] {
+        let context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        let mut hooks = ScopedHooks {
+            contexts: Vec::new(),
+        };
+        assert!(!hooks.only_tmux_options());
+        let output = engine
+            .list_keys(&context, &args, &mut hooks)
+            .unwrap()
+            .output;
+        let expected = (session.to_string(), window.to_string(), pane.to_string());
+        assert!(!hooks.contexts.is_empty());
+        assert!(hooks.contexts.iter().all(|context| context == &expected));
+        assert!(output.lines().all(|line| line.ends_with(&pane.to_string())));
+    }
+}
+
+#[test]
+fn default_key_listing_user_options_do_not_override_ordinary_binding_names() {
+    let mut engine = key_listing_engine();
+    let mut context = ExecutionContext::default();
+    let command = CommandInvocation::new("list-keys", ["-T", "x"]);
+    let first = engine.execute(&mut context, &command).unwrap();
+    for name in LIST_KEY_BINDING_CONTEXT_FORMATS
+        .iter()
+        .chain(LIST_KEY_SUMMARY_CONTEXT_FORMATS)
+    {
+        set(
+            &mut engine,
+            &mut context,
+            &["-g", &format!("@{name}"), "override"],
+        );
+    }
+    assert_eq!(
+        engine.format_user_option("", "", "", "@key_command"),
+        Some("override"),
+    );
+    assert_eq!(engine.execute(&mut context, &command).unwrap(), first);
+}
+
+#[test]
 fn stateful_option_hooks_keep_uncached_listing_output_and_lookup_order() {
     #[derive(Default)]
     struct StatefulHooks {

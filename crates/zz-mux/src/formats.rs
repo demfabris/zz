@@ -305,6 +305,10 @@ impl FormatCaptureRevision {
             now: engine.format_now(),
         }
     }
+
+    fn same_data(&self, other: &Self) -> bool {
+        self.state == other.state && self.options == other.options && self.data == other.data
+    }
 }
 
 #[derive(Debug)]
@@ -1785,18 +1789,33 @@ impl StatusContext<'_> {
         }
         let cache = tree.engine.format_context_cache.lock();
         let cached = cache.as_ref()?;
+        let revision = FormatCaptureRevision::new(tree.engine);
         (cached.needs == needs
             && cached.references.as_ref() == references
             && cached.target == (tree.session, tree.window, tree.pane)
             && cached.input_variables == self.variables
-            && cached.context.capture_revision.as_deref()
-                == Some(&FormatCaptureRevision::new(tree.engine))
+            && cached
+                .context
+                .capture_revision
+                .as_deref()
+                .is_some_and(|captured| captured.same_data(&revision))
             && cached.context.format_client == self.format_client
             && cached.context.session_id == self.session_id
             && cached.context.window_id == self.window_id
-            && cached.context.pane_id == self.pane_id
-            && cached.context.format_now == self.format_now)
-            .then(|| cached.context.clone())
+            && cached.context.pane_id == self.pane_id)
+            .then(|| cached.context.with_capture_clock(revision, self.format_now))
+    }
+
+    fn with_capture_clock(&self, revision: FormatCaptureRevision, now: Option<i64>) -> Self {
+        let mut context = self.clone();
+        context.format_now = now;
+        if let Some(values) = context.values.get_mut() {
+            values.format_now = now;
+        }
+        if context.capture_revision.as_deref() != Some(&revision) {
+            context.capture_revision = Some(Arc::new(revision));
+        }
+        context
     }
 
     fn capture_variables(
@@ -2436,16 +2455,16 @@ impl MuxEngine {
         let target_ids = self.format_target(target.0, target.1, target.2);
         let cache = self.format_context_cache.lock();
         let cached = cache.as_ref()?;
+        let revision = FormatCaptureRevision::new(self);
         (cached.target == target_ids
             && cached.needs == needs
             && cached.references.as_ref() == Some(references)
-            && cached.context.capture_revision.as_deref()
-                == Some(&FormatCaptureRevision::new(self))
+            && cached
+                .context
+                .capture_revision
+                .as_deref()
+                .is_some_and(|captured| captured.same_data(&revision))
             && cached.context.format_client == format_client
-            && cached.context.format_now
-                == i64::try_from(self.format_now())
-                    .ok()
-                    .filter(|now| *now != 0)
             && format_id_matches(&cached.context.session_id, target_ids.0.map(|id| id.0), '$')
             && format_id_matches(&cached.context.window_id, target_ids.1.map(|id| id.0), '@')
             && format_id_matches(&cached.context.pane_id, target_ids.2.map(|id| id.0), '%')
@@ -2459,7 +2478,12 @@ impl MuxEngine {
                         })
                 }) && overrides.next().is_none()
             })
-        .then(|| cached.context.clone())
+        .then(|| {
+            cached.context.with_capture_clock(
+                revision,
+                i64::try_from(revision.now).ok().filter(|now| *now != 0),
+            )
+        })
     }
 
     #[must_use]
@@ -3346,6 +3370,10 @@ pub trait StatusHooks {
         false
     }
 
+    fn only_tmux_options(&self) -> bool {
+        false
+    }
+
     fn variable(&mut self, _name: &str, _context: &StatusContext) -> Option<String> {
         None
     }
@@ -3488,6 +3516,10 @@ impl CommandHooks {
 
 impl StatusHooks for CommandHooks {
     fn stable_option_lookups(&self) -> bool {
+        true
+    }
+
+    fn only_tmux_options(&self) -> bool {
         true
     }
 
@@ -3788,6 +3820,10 @@ struct OptionFormatHooks<'a, H> {
 impl<H: StatusHooks> StatusHooks for OptionFormatHooks<'_, H> {
     fn stable_option_lookups(&self) -> bool {
         self.inner.stable_option_lookups()
+    }
+
+    fn only_tmux_options(&self) -> bool {
+        self.inner.only_tmux_options()
     }
 
     fn strftime(&mut self, literal: &str) -> String {
@@ -4667,7 +4703,11 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                     );
                 }
             }
-            let child = item.context.borrowed_child(self.universe.engine);
+            let mut child = item.context.borrowed_child(self.universe.engine);
+            child.format_now = self.context.values().format_now;
+            if let Some(values) = child.values.get_mut() {
+                values.format_now = child.format_now;
+            }
             let variables = LoopVariables {
                 context: &child,
                 format_type: target.format_type(),

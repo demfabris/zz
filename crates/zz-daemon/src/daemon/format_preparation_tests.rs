@@ -510,6 +510,19 @@ fn status_preparation_tracks_viewport_changes_without_engine_revisions() {
             "pane-active-border-style",
             "fg=#{?window_bigger,red,green}",
         );
+        inner.client_sizes.insert(client, (100, 100));
+        let fitting = request(&inner, client);
+        let same_fitting = request(&inner, client);
+        assert_eq!(
+            Arc::ptr_eq(&fitting.context, &same_fitting.context),
+            reuse_enabled()
+        );
+        assert_left(&same_fitting, "0::");
+        inner.client_sizes.insert(client, (40, 12));
+        let narrowed = request(&inner, client);
+        assert_fresh(&fitting, &narrowed);
+        assert_left(&narrowed, "1:0:0");
+        assert_left(&fitting, "0::");
         inner.client_sizes.remove(&client);
         inner
             .terminal_geometries

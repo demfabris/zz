@@ -37495,28 +37495,37 @@ impl CachedStatusPreparation {
             && self.terminal == inner.client_terminals.contains(&client)
             && self.features == inner.client_features.get(&client).copied()
             && self.config_files == inner.config_files
-            && (!self.viewport_requested || {
-                let current = (self.kind == Some(ClientKind::Interactive) && self.terminal)
-                    .then(|| {
-                        client_viewport_facts_from_source(
-                            &ClientFormatSource::from_inner(inner),
-                            client,
-                            attached?,
-                            window?,
-                        )
-                    })
-                    .flatten();
-                let values =
-                    |viewport: ClientViewportFacts| (viewport.bigger(), viewport.offsets());
-                current.map(values)
-                    == self
+            && (!self.viewport_requested
+                || (self.size.is_some()
+                    && self
                         .request
                         .facts
                         .client
                         .as_ref()
                         .and_then(|client| client.viewport)
-                        .map(values)
-            })
+                        .is_some_and(|viewport| !viewport.bigger()))
+                || {
+                    let current = (self.kind == Some(ClientKind::Interactive) && self.terminal)
+                        .then(|| {
+                            client_viewport_facts_from_source(
+                                &ClientFormatSource::from_inner(inner),
+                                client,
+                                attached?,
+                                window?,
+                            )
+                        })
+                        .flatten();
+                    let values =
+                        |viewport: ClientViewportFacts| (viewport.bigger(), viewport.offsets());
+                    current.map(values)
+                        == self
+                            .request
+                            .facts
+                            .client
+                            .as_ref()
+                            .and_then(|client| client.viewport)
+                            .map(values)
+                })
             && match (&self.environment, inner.client_environments.get(&client)) {
                 (None, None) => true,
                 (Some(cached), Some(current)) => Arc::ptr_eq(cached, current),
@@ -37930,10 +37939,20 @@ struct CachedBorderPane {
     context: zz_mux::StatusContext<'static>,
     callback_values: Vec<Option<String>>,
     presentation: zz_protocol::PaneBorderPresentation,
+    pane_in_mode: Option<usize>,
 }
 
 impl CachedBorderPresentations {
     fn same_callbacks(&self, facts: &dyn crate::status::FormatFactSource) -> bool {
+        if !self.panes.iter().all(|pane| {
+            pane.pane_in_mode
+                .is_none_or(|count| facts.pane_in_mode_count(pane.presentation.pane) == count)
+        }) {
+            return false;
+        }
+        if self.callbacks.is_empty() {
+            return true;
+        }
         let mut hooks = DaemonFormatHooks::command(facts);
         self.panes.iter().all(|pane| {
             self.callbacks
@@ -38134,12 +38153,14 @@ fn border_presentations_at(
         .format_context_snapshot(FormatClient::Attached(session));
     let first_context =
         contexts.status_context(Some(session), Some(window), Some(window_state.active_pane));
-    let Some(callbacks) =
+    let Some(mut callbacks) =
         border_format_callbacks(&inner.engine, &first_context, &option_snapshot, &references)
     else {
         *inner.border_presentations_cache.lock() = None;
         return uncached_border_presentations(inner, client, session, facts);
     };
+    let pane_in_mode = callbacks.iter().any(|name| name == "pane_in_mode");
+    callbacks.retain(|name| name != "pane_in_mode");
     let mut hooks = DaemonFormatHooks::command(facts).with_option_engine(&inner.engine);
     let panes: Vec<CachedBorderPane> = window_state
         .panes
@@ -38147,6 +38168,10 @@ fn border_presentations_at(
         .take(zz_protocol::MAX_PANE_BORDER_PRESENTATIONS)
         .map(|pane| {
             let context = contexts.status_context(Some(session), Some(window), Some(*pane));
+            let pane_in_mode = pane_in_mode.then(|| facts.pane_in_mode_count(*pane));
+            if let Some(count) = pane_in_mode {
+                hooks.set_pane_in_mode_count(*pane, count);
+            }
             let format = BORDER_FORMAT_TEMPLATES[usize::from(*pane == window_state.active_pane)];
             let presentation = zz_protocol::PaneBorderPresentation {
                 pane: *pane,
@@ -38164,6 +38189,7 @@ fn border_presentations_at(
                 context: callback_context,
                 callback_values,
                 presentation,
+                pane_in_mode,
             }
         })
         .collect();
@@ -42187,6 +42213,17 @@ impl crate::status::FormatFactSource for BorrowedFormatHookFacts<'_> {
                 .collect()
         })
     }
+
+    fn pane_in_mode_count(&self, pane: PaneId) -> usize {
+        self.pane_modes.get(&pane).map_or(0, Vec::len)
+            + usize::from(self.copy_sessions.iter().any(|(client, session)| {
+                session.pane == pane
+                    && !session.exiting
+                    && self.terminals.get(&pane).is_some_and(|terminal| {
+                        terminal.copy_mode_facts(TerminalViewId(client.0)).is_some()
+                    })
+            }))
+    }
 }
 
 fn split_borrowed_format_hook_facts(
@@ -42339,6 +42376,9 @@ impl crate::status::FormatFactSource for FormatHookFactsView<'_> {
     }
     fn pane_modes(&self) -> &BTreeMap<PaneId, (usize, &'static str)> {
         self.source().pane_modes()
+    }
+    fn pane_in_mode_count(&self, pane: PaneId) -> usize {
+        self.source().pane_in_mode_count(pane)
     }
 }
 

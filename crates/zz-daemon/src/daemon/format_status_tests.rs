@@ -1,6 +1,55 @@
 use super::tests::{engine_request, execute, request, settled};
 use super::*;
 
+#[test]
+fn daemon_option_proof_rejects_ordinary_snapshot_rows_and_preserves_scoped_native_values() {
+    let mut engine = MuxEngine::default();
+    let mut execution = zz_mux::ExecutionContext::default();
+    let context = StatusContext::from(zz_mux::StatusValues {
+        session_id: "$7".to_owned(),
+        ..Default::default()
+    });
+    let variables = BTreeMap::from([("key_command".to_owned(), "tree-command".to_owned())]);
+    let mut options = StatusRowVariables::default();
+    options.base.extend([
+        ("key_command".to_owned(), "snapshot-collision".to_owned()),
+        ("status-left".to_owned(), "global".to_owned()),
+    ]);
+    for value in ["first", "second"] {
+        execute(
+            &mut engine,
+            &mut execution,
+            &["set-option", "-g", "@key_command", value],
+        );
+        let facts = FormatHookFacts {
+            mux: Arc::new(engine.format_facts()),
+            ..Default::default()
+        };
+        options.sessions.insert(
+            context.session_id.clone(),
+            BTreeMap::from([("status-left".to_owned(), value.to_owned())]),
+        );
+        let mut hooks =
+            DaemonFormatHooks::command_with_optional_variables(&facts, Some(&variables));
+        hooks.option_snapshot = Some(&options);
+        assert!(hooks.stable_option_lookups());
+        assert!(hooks.only_tmux_options());
+        assert_eq!(hooks.option_variable("key_command", &context), None);
+        assert_eq!(
+            hooks.option_variable("status-left", &context),
+            Some(value.to_owned()),
+        );
+        assert_eq!(
+            zz_mux::expand_format_values("#{key_command}:#{status-left}", &context, &mut hooks),
+            format!("tree-command:{value}"),
+        );
+        assert_eq!(
+            zz_mux::expand_format_values("#{@key_command}:#{key_command}", &context, &mut hooks),
+            format!("{value}:tree-command"),
+        );
+    }
+}
+
 fn forget_without_job_lock(mut renderer: StatusRenderer, client: ClientId) -> StatusRenderer {
     let needs = renderer.job_needs();
     let guard = needs.lock();

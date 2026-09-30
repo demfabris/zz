@@ -627,7 +627,7 @@ fn early_capture_lookup_rejects_changed_compact_ids_and_source_revisions() {
             }
         }
         with_borrowed_formats(true, || {
-            assert!(
+            assert_eq!(
                 engine
                     .cached_detached_format_context(
                         target,
@@ -636,7 +636,8 @@ fn early_capture_lookup_rejects_changed_compact_ids_and_source_revisions() {
                         &references,
                         [],
                     )
-                    .is_none()
+                    .is_some(),
+                change == 3 && format_cache_knob()
             );
         });
         previous = next;
@@ -739,7 +740,7 @@ fn detached_capture_cache_invalidates_runtime_environment_identity_and_clocks() 
         format_client: FormatClient::Attached(session),
         format_type: FormatType::Pane,
     };
-    let template = "#{P:#{pane_id}|#{pane_current_path}|#{pane_start_command}|#{pid}|#{uid}|#{user}|#{host}|#{socket_path}|#{CACHE_ENV}|#{t/R:session_created}|#{session_activity}|#{window_activity};}";
+    let template = "#{P:#{pane_id}|#{pane_current_path}|#{pane_start_command}|#{pid}|#{uid}|#{user}|#{host}|#{socket_path}|#{CACHE_ENV}|#{t/r:session_created}|#{session_activity}|#{window_activity};}";
     let mut previous = cache_context(&engine, target, template);
     let state_generation = engine.state.generation();
     engine.set_pane_runtime_facts(
@@ -808,12 +809,112 @@ fn detached_capture_cache_invalidates_runtime_environment_identity_and_clocks() 
     assert_eq!(previous.format_now, Some(10));
     assert_eq!(next.format_now, Some(20));
     assert!(!previous.same_detached(&next));
-    for items in next.format_universe.parts.panes.lock().values().flatten() {
-        for item in items.iter() {
-            assert_eq!(item.context.format_now, Some(20));
+    assert_eq!(
+        Arc::ptr_eq(&previous.variables, &next.variables),
+        format_cache_knob()
+    );
+    assert_eq!(
+        Arc::ptr_eq(&previous.format_universe.parts, &next.format_universe.parts),
+        format_cache_knob()
+    );
+    assert_cache_context_matches_w1(&engine, target, template, &next);
+}
+
+#[test]
+fn detached_clock_overlay_reuses_capture_and_updates_every_nested_hook_and_modifier() {
+    struct ClockHooks(Vec<Option<i64>>);
+
+    impl StatusHooks for ClockHooks {
+        fn strftime(&mut self, literal: &str) -> String {
+            literal.to_owned()
+        }
+
+        fn shell(&mut self, _: &str, _: &FormatJobTag) -> String {
+            String::new()
+        }
+
+        fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+            (name == "clock_probe").then(|| {
+                self.0.push(context.format_now);
+                context.format_now.unwrap().to_string()
+            })
         }
     }
-    assert_cache_context_matches_w1(&engine, target, template, &next);
+
+    for borrowed in [false, true] {
+        let mut engine = MuxEngine::default();
+        engine.set_format_now(10);
+        let (session, window, pane) = engine.state.create_session("work").unwrap();
+        engine.state.session_mut(session).unwrap().created = Some(10);
+        let target = (Some(session), Some(window), Some(pane));
+        let template = "#{clock_probe}/#{t/r:session_created}[#{S:#{clock_probe}/#{t/r:session_created}[#{W:#{clock_probe}/#{t/r:session_created}[#{P:#{clock_probe}/#{t/r:session_created}}]}]}]";
+        let references = engine.cached_format_references_for_templates([template]);
+        let needs = engine.format_needs([template]);
+        let capture = |engine: &MuxEngine| {
+            with_borrowed_formats(borrowed, || {
+                engine
+                    .format_status_context(target.0, target.1, target.2)
+                    .detach_with_references(needs, &references)
+            })
+        };
+        let first = capture(&engine);
+        engine.set_format_now(20);
+        let second = capture(&engine);
+        let materialized = StatusContext::from(StatusValues {
+            format_now: Some(10),
+            ..StatusValues::default()
+        });
+        let overlaid =
+            materialized.with_capture_clock(FormatCaptureRevision::new(&engine), Some(20));
+        assert_eq!(overlaid.format_now, Some(20));
+        assert_eq!(overlaid.values.get().unwrap().format_now, Some(20));
+        assert_eq!(materialized.values.get().unwrap().format_now, Some(10));
+        let shared = borrowed && format_cache_knob();
+        assert_eq!(Arc::ptr_eq(&first.variables, &second.variables), shared);
+        assert_eq!(
+            Arc::ptr_eq(&first.format_universe.parts, &second.format_universe.parts),
+            shared
+        );
+        assert_eq!(first.format_now, Some(10));
+        assert_eq!(second.format_now, Some(20));
+        assert!(!first.same_detached(&second));
+        assert_eq!(
+            second.capture_revision.as_deref().map(|value| value.now),
+            borrowed.then_some(20)
+        );
+        let early = with_borrowed_formats(borrowed, || {
+            engine.cached_detached_format_context(
+                target,
+                FormatClient::NoClient,
+                needs,
+                &references,
+                [],
+            )
+        });
+        assert_eq!(early.is_some(), shared);
+        if let Some(early) = &early {
+            assert!(second.same_detached(early));
+            assert!(Arc::ptr_eq(&first.variables, &early.variables));
+            assert!(Arc::ptr_eq(
+                &first.format_universe.parts,
+                &early.format_universe.parts
+            ));
+        }
+        for compiled in [false, true] {
+            with_borrowed_formats(borrowed, || {
+                compiled::with_enabled(compiled, || {
+                    for (context, now, expected) in [
+                        (&first, 10, "10/0s[10/0s[10/0s[10/0s]]]"),
+                        (&second, 20, "20/10s[20/10s[20/10s[20/10s]]]"),
+                    ] {
+                        let mut hooks = ClockHooks(Vec::new());
+                        assert_eq!(expand_status(template, context, &mut hooks), expected);
+                        assert_eq!(hooks.0, vec![Some(now); 4]);
+                    }
+                });
+            });
+        }
+    }
 }
 
 #[test]

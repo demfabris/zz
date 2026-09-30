@@ -288,6 +288,12 @@ const LIST_KEY_SUMMARY_CONTEXT_FORMATS: &[&str] = &[
     "key_table_width",
     "notes_only",
 ];
+static LIST_KEY_FORMAT_NAMES_ARE_NOT_OPTIONS: LazyLock<bool> = LazyLock::new(|| {
+    LIST_KEY_BINDING_CONTEXT_FORMATS
+        .iter()
+        .chain(LIST_KEY_SUMMARY_CONTEXT_FORMATS)
+        .all(|name| !name.starts_with('@') && parse_format_option(name).is_none())
+});
 const CURRENT_FILE_CONTEXT_FORMAT: &str = "current_file";
 const HOOK_CONTEXT_FORMAT: &str = "hook";
 const HOOK_ARGUMENTS_CONTEXT_FORMAT: &str = "hook_arguments";
@@ -570,6 +576,10 @@ struct RowFormatHooks<'a, H> {
 impl<H: StatusHooks> StatusHooks for RowFormatHooks<'_, H> {
     fn stable_option_lookups(&self) -> bool {
         self.inner.stable_option_lookups()
+    }
+
+    fn only_tmux_options(&self) -> bool {
+        self.inner.only_tmux_options()
     }
 
     fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
@@ -1409,6 +1419,10 @@ impl StatusHooks for ConfigConditionHooks<'_> {
         self.inner.stable_option_lookups()
     }
 
+    fn only_tmux_options(&self) -> bool {
+        self.inner.only_tmux_options()
+    }
+
     fn strftime(&mut self, literal: &str) -> String {
         self.inner.strftime(literal)
     }
@@ -1442,6 +1456,10 @@ impl StatusHooks for ConfigConditionHooks<'_> {
 impl<H: StatusHooks> StatusHooks for CommandItemHooks<'_, H> {
     fn stable_option_lookups(&self) -> bool {
         self.inner.stable_option_lookups()
+    }
+
+    fn only_tmux_options(&self) -> bool {
+        self.inner.only_tmux_options()
     }
 
     fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
@@ -1522,6 +1540,10 @@ impl<H: StatusHooks> StatusHooks for ListCommandHooks<'_, H> {
         self.inner.stable_option_lookups()
     }
 
+    fn only_tmux_options(&self) -> bool {
+        self.inner.only_tmux_options()
+    }
+
     fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
         self.inner.option_variable(name, context)
     }
@@ -1584,6 +1606,10 @@ impl<H: StatusHooks> StatusHooks for ListCommandHooks<'_, H> {
 impl<H: StatusHooks> StatusHooks for ListKeyHooks<'_, H> {
     fn stable_option_lookups(&self) -> bool {
         self.inner.stable_option_lookups()
+    }
+
+    fn only_tmux_options(&self) -> bool {
+        self.inner.only_tmux_options()
     }
 
     fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
@@ -9779,7 +9805,7 @@ impl MuxEngine {
         let cacheable = crate::format_cache_knob()
             && format == DEFAULT_LIST_KEYS_FORMAT
             && hooks.stable_option_lookups()
-            && {
+            && ((hooks.only_tmux_options() && *LIST_KEY_FORMAT_NAMES_ARE_NOT_OPTIONS) || {
                 let values = self.format_status_context_with_format_client(
                     context.session,
                     context.window,
@@ -9791,7 +9817,7 @@ impl MuxEngine {
                     .iter()
                     .chain(LIST_KEY_SUMMARY_CONTEXT_FORMATS)
                     .any(|name| hooks.option_variable(name, &values).is_some())
-            };
+            });
         if cacheable && let Some((output, had_binding)) = self.cached_key_listing(args) {
             return Ok(self.key_listing_execution(context, options.has("-1"), had_binding, output));
         }

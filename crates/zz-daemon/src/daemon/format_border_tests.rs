@@ -350,3 +350,325 @@ fn border_format_cache_preserves_borrowed_window_client_callbacks() {
     assert_eq!(expansions(), 2);
     assert!(inner.border_presentations_cache.lock().is_none());
 }
+
+#[test]
+fn border_format_cache_checks_borrowed_mode_counts_without_materializing_maps() {
+    let (mut inner, client, mut context) = fixture();
+    let first_pane = context.pane.unwrap();
+    inner
+        .engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new("split-window", ["-h"]),
+        )
+        .unwrap();
+    let second_pane = context.pane.unwrap();
+    for name in ["pane-border-style", "pane-active-border-style"] {
+        set_style(
+            &mut inner,
+            &mut context,
+            name,
+            "fg=#{?#{==:#{pane_in_mode},2},red,green}",
+        );
+    }
+    let session = context.session.unwrap();
+    let first = {
+        let facts = readonly_borrowed_format_hook_facts(&inner, CommandFormatSeed::default());
+        let first = borders(&inner, client, session, &facts);
+        let second = borders(&inner, client, session, &facts);
+        assert_eq!(first, second);
+        assert_eq!(Arc::ptr_eq(&first, &second), zz_mux::format_cache_knob());
+        assert!(facts.derived.pane_modes.get().is_none());
+        assert!(facts.derived.copy_modes.get().is_none());
+        first
+    };
+    assert!(first.iter().all(|pane| pane.style == "fg=green"));
+    if zz_mux::format_cache_knob() {
+        let cache = inner.border_presentations_cache.lock();
+        let cache = cache.as_ref().unwrap();
+        assert!(cache.callbacks.is_empty());
+        assert!(
+            cache
+                .panes
+                .iter()
+                .all(|pane| { pane.pane_in_mode == Some(0) && pane.callback_values.is_empty() })
+        );
+    }
+    let revision = inner.engine.format_cache_revision();
+    for (active, inactive) in [(first_pane, second_pane), (second_pane, first_pane)] {
+        inner.pane_modes.insert(inactive, Vec::new());
+        inner
+            .pane_modes
+            .insert(active, vec![PaneModeRequest::Clock, PaneModeRequest::Clock]);
+        let facts = readonly_borrowed_format_hook_facts(&inner, CommandFormatSeed::default());
+        let actual = borders(&inner, client, session, &facts);
+        assert_eq!(inner.engine.format_cache_revision(), revision);
+        assert_eq!(
+            actual
+                .iter()
+                .find(|pane| pane.pane == active)
+                .unwrap()
+                .style,
+            "fg=red"
+        );
+        assert_eq!(
+            actual
+                .iter()
+                .find(|pane| pane.pane == inactive)
+                .unwrap()
+                .style,
+            "fg=green"
+        );
+        assert!(facts.derived.pane_modes.get().is_none());
+        assert!(facts.derived.copy_modes.get().is_none());
+    }
+}
+
+#[test]
+fn border_format_cache_checks_live_copy_sessions_without_materializing_maps() {
+    let (mut inner, client, mut context) = fixture();
+    let pane = context.pane.unwrap();
+    let copy_client = ClientId(4);
+    let terminal = Arc::new(TerminalSession::spawn_empty_with_appearance(
+        64,
+        Arc::new(TerminalAppearance::default()),
+    ));
+    let view = TerminalViewId(copy_client.0);
+    terminal.attach_view(view);
+    terminal.view_action(view, zz_terminal::TerminalViewAction::EnterCopyMode);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while terminal.copy_mode_facts(view).is_none() {
+        assert!(Instant::now() < deadline, "copy facts did not become ready");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    inner.terminals_mut().insert(pane, terminal);
+    enter_copy_session(&mut inner, copy_client, pane).unwrap();
+    inner
+        .pane_modes
+        .insert(pane, vec![PaneModeRequest::Clock, PaneModeRequest::Clock]);
+    set_style(
+        &mut inner,
+        &mut context,
+        "pane-active-border-style",
+        "fg=#{?#{==:#{pane_in_mode},3},red,green}",
+    );
+    let session = context.session.unwrap();
+    let revision = inner.engine.format_cache_revision();
+    for (exiting, expected) in [(false, "fg=red"), (true, "fg=green"), (false, "fg=red")] {
+        inner.copy_sessions.get_mut(&copy_client).unwrap().exiting = exiting;
+        let owned = format_hook_facts(&inner);
+        let facts = readonly_borrowed_format_hook_facts(
+            &inner,
+            CommandFormatSeed {
+                client: Some(ClientFormatFacts {
+                    name: "another-client".to_owned(),
+                    ..Default::default()
+                }),
+                invoking: Some(client),
+            },
+        );
+        assert_eq!(
+            crate::status::FormatFactSource::pane_in_mode_count(&facts, pane),
+            crate::status::FormatFactSource::pane_in_mode_count(&owned, pane)
+        );
+        let actual = borders(&inner, client, session, &facts);
+        assert_eq!(actual[0].style, expected);
+        assert_eq!(
+            actual,
+            uncached_border_presentations(&inner, client, session, &owned)
+        );
+        assert_eq!(inner.engine.format_cache_revision(), revision);
+        assert!(facts.derived.pane_modes.get().is_none());
+        assert!(facts.derived.copy_modes.get().is_none());
+    }
+    assert!(inner.terminals_mut().remove(&pane).is_some());
+    let owned = format_hook_facts(&inner);
+    let facts = readonly_borrowed_format_hook_facts(&inner, CommandFormatSeed::default());
+    let actual = borders(&inner, client, session, &facts);
+    assert_eq!(actual[0].style, "fg=green");
+    assert_eq!(
+        actual,
+        uncached_border_presentations(&inner, client, session, &owned)
+    );
+    assert!(facts.derived.pane_modes.get().is_none());
+    assert!(facts.derived.copy_modes.get().is_none());
+}
+
+#[test]
+fn pane_in_mode_typed_counts_preserve_owned_rows_and_provider_selection() {
+    let (inner, _, context) = fixture();
+    let pane = context.pane.unwrap();
+    let owned = FormatHookFacts {
+        pane_modes: Arc::new(BTreeMap::from([(pane, (2, "clock-mode"))])),
+        copy_modes: Arc::new(BTreeMap::from([(pane, Vec::new())])),
+        ..Default::default()
+    };
+    let facts = FormatHookFactsView {
+        borrowed: readonly_borrowed_format_hook_facts(&inner, CommandFormatSeed::default()),
+        owned: Some(owned),
+    };
+    assert_eq!(
+        crate::status::FormatFactSource::pane_in_mode_count(&facts, pane),
+        3
+    );
+    let context = inner
+        .engine
+        .format_status_context(context.session, context.window, context.pane);
+    assert_eq!(
+        DaemonFormatHooks::command(&facts).variable("pane_in_mode", &context),
+        Some("3".to_owned())
+    );
+    assert!(facts.borrowed.derived.pane_modes.get().is_none());
+    assert!(facts.borrowed.derived.copy_modes.get().is_none());
+    let facts = FormatHookFactsView {
+        borrowed: readonly_borrowed_format_hook_facts(&inner, CommandFormatSeed::default()),
+        owned: None,
+    };
+    assert_eq!(
+        DaemonFormatHooks::command(&facts).variable("pane_in_mode", &context),
+        Some("0".to_owned())
+    );
+    assert!(facts.borrowed.derived.pane_modes.get().is_none());
+    assert!(facts.borrowed.derived.copy_modes.get().is_none());
+}
+
+#[derive(Default)]
+struct ChangingModeCount {
+    facts: FormatHookFacts,
+    count: Cell<usize>,
+    reads: Cell<usize>,
+    change_after_read: Cell<bool>,
+}
+
+impl crate::status::FormatFactSource for ChangingModeCount {
+    fn agent_states(&self) -> &BTreeMap<PaneId, zz_protocol::AgentPaneWire> {
+        &self.facts.agent_states
+    }
+
+    fn terminals(&self) -> &BTreeMap<PaneId, Arc<TerminalSession>> {
+        &self.facts.terminals
+    }
+
+    fn pane_pipes(&self) -> &BTreeMap<PaneId, u32> {
+        &self.facts.pane_pipes
+    }
+
+    fn session_attachments(&self) -> &BTreeMap<SessionId, (usize, String)> {
+        &self.facts.session_attachments
+    }
+
+    fn session_last_attached(&self) -> &BTreeMap<SessionId, u64> {
+        &self.facts.session_last_attached
+    }
+
+    fn unseen_changes(&self) -> &BTreeSet<PaneId> {
+        &self.facts.unseen_changes
+    }
+
+    fn window_clients(&self, _context: &zz_mux::StatusContext) -> &BTreeMap<WindowId, Vec<String>> {
+        &self.facts.window_clients
+    }
+
+    fn buffer(&self) -> Option<&BufferFormatFacts> {
+        self.facts.buffer.as_ref()
+    }
+
+    fn client(&self) -> Option<&ClientFormatFacts> {
+        self.facts.client.as_ref()
+    }
+
+    fn clients(&self, _context: &zz_mux::StatusContext) -> &[zz_mux::FormatClientRow] {
+        &self.facts.clients
+    }
+
+    fn client_environment(&self) -> Option<&Arc<ClientEnvironmentBlob>> {
+        self.facts.client_environment.as_ref()
+    }
+
+    fn message(&self) -> Option<&MessageFormatFacts> {
+        self.facts.message.as_ref()
+    }
+
+    fn mux(&self) -> &zz_mux::FormatFacts {
+        &self.facts.mux
+    }
+
+    fn copy_modes(&self) -> &BTreeMap<PaneId, Vec<(String, Arc<zz_terminal::CopyModeFacts>)>> {
+        &self.facts.copy_modes
+    }
+
+    fn pane_modes(&self) -> &BTreeMap<PaneId, (usize, &'static str)> {
+        &self.facts.pane_modes
+    }
+
+    fn pane_in_mode_count(&self, _pane: PaneId) -> usize {
+        self.reads.set(self.reads.get() + 1);
+        let count = self.count.get();
+        if self.change_after_read.get() {
+            self.count.set(count ^ 1);
+        }
+        count
+    }
+}
+
+#[test]
+fn border_format_cache_pins_one_mode_count_for_style_and_expected_callbacks() {
+    let (mut inner, client, mut context) = fixture();
+    let source = "fg=#{?pane_in_mode,red,green},bg=#{?pane_in_mode,red,green}";
+    set_style(&mut inner, &mut context, "pane-active-border-style", source);
+    let facts = ChangingModeCount {
+        change_after_read: Cell::new(true),
+        ..Default::default()
+    };
+    let pane = context.pane.unwrap();
+    let format_context =
+        inner
+            .engine
+            .format_status_context(context.session, context.window, context.pane);
+    let mut hooks = DaemonFormatHooks::command(&facts);
+    let count = crate::status::FormatFactSource::pane_in_mode_count(&facts, pane);
+    hooks.set_pane_in_mode_count(pane, count);
+    assert_eq!(
+        crate::status::expand_style(source, &format_context, &mut hooks),
+        "fg=green,bg=green"
+    );
+    assert_eq!(facts.reads.get(), 1);
+    if zz_mux::format_cache_knob() {
+        facts.reads.set(0);
+        facts.count.set(0);
+        let session = context.session.unwrap();
+        let first = borders(&inner, client, session, &facts);
+        assert_eq!(first[0].style, "fg=green,bg=green");
+        assert_eq!(facts.reads.get(), 1);
+        assert_eq!(
+            inner
+                .border_presentations_cache
+                .lock()
+                .as_ref()
+                .unwrap()
+                .panes[0]
+                .pane_in_mode,
+            Some(0)
+        );
+        facts.change_after_read.set(false);
+        facts.count.set(0);
+        let second = borders(&inner, client, session, &facts);
+        assert!(Arc::ptr_eq(&first, &second));
+        assert_eq!(facts.reads.get(), 2);
+        facts.count.set(1);
+        let third = borders(&inner, client, session, &facts);
+        assert_eq!(third[0].style, "fg=red,bg=red");
+        assert!(!Arc::ptr_eq(&second, &third));
+        assert_eq!(facts.reads.get(), 4);
+        assert_eq!(
+            inner
+                .border_presentations_cache
+                .lock()
+                .as_ref()
+                .unwrap()
+                .panes[0]
+                .pane_in_mode,
+            Some(1)
+        );
+    }
+}

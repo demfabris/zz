@@ -6647,6 +6647,13 @@ impl Shared {
         let original_context = context.clone();
         let name = canonical_command(&command.name).to_owned();
         let previous_client_terminal = context_client_terminal(context);
+        let format_facts_unread = (kind == ClientKind::Command
+            && client_terminal == ClientTerminal::Absent
+            && matches!(
+                name.as_str(),
+                "bind-key" | "set-option" | "set-window-option"
+            ))
+        .then(|| hook_events::format_facts_unread(&name, &command.args));
         if kind != ClientKind::Command || name != "refresh-client" {
             let provenance_client = format_provenance_client(context, client);
             let client_attached_context = if client_terminal == ClientTerminal::Present {
@@ -6663,14 +6670,7 @@ impl Shared {
             };
             set_context_client_terminal(context, client_terminal);
             context.set_attached_client_context(client_attached_context);
-            if kind != ClientKind::Command
-                || client_terminal != ClientTerminal::Absent
-                || !matches!(
-                    name.as_str(),
-                    "bind-key" | "set-option" | "set-window-option"
-                )
-                || !hook_events::format_facts_unread(&name, &command.args)
-            {
+            if format_facts_unread != Some(true) {
                 let target_format_client = {
                     let inner = self.inner.lock();
                     if context.has_no_client() {
@@ -6694,6 +6694,7 @@ impl Shared {
             mux_source,
             client_terminal,
             queue_execution,
+            format_facts_unread,
         );
         let (result, pane_exit_code) = self.wait_for_pane_command(client, kind, result);
         set_context_client_terminal(context, previous_client_terminal);
@@ -6876,6 +6877,7 @@ impl Shared {
         mux_source: MuxOptionSource,
         invoking_client_terminal: ClientTerminal,
         queue_execution: Option<&CommandQueueExecution>,
+        format_facts_unread: Option<bool>,
     ) -> Result<Execution, DaemonError> {
         let canonical = canonical_command(&command.name);
         let argument_sink =
@@ -6925,6 +6927,8 @@ impl Shared {
             .invoking_mouse()
             .and_then(|mouse| zz_mux::resolve_invoking_mouse_targets(command, mouse));
         let command = mouse_resolved.as_ref().unwrap_or(command);
+        let format_facts_unread =
+            format_facts_unread.filter(|_| streamed_command.is_none() && mouse_resolved.is_none());
         let unattached_watch = {
             let inner = self.inner.lock();
             inner
@@ -7117,6 +7121,7 @@ impl Shared {
                     mux_source,
                     target_terminal,
                     queue_execution,
+                    None,
                 );
                 if result.is_ok() && wait {
                     self.wait_for_display_panes(target);
@@ -7132,6 +7137,7 @@ impl Shared {
                 mux_source,
                 route.terminal,
                 queue_execution,
+                None,
             );
             if result.is_ok() && route.wait {
                 self.wait_for_command_prompt(route.client);
@@ -7146,6 +7152,7 @@ impl Shared {
                 mux_source,
                 invoking_client_terminal,
                 queue_execution,
+                None,
             );
             // `cmd_find_target` reports through `cmdq_error`, which is a
             // message plus `c->retval = 1` and not a command failure, and
@@ -7164,6 +7171,7 @@ impl Shared {
                 mux_source,
                 invoking_client_terminal,
                 queue_execution,
+                format_facts_unread,
             )
         };
         let publish_snapshot = {
@@ -7769,6 +7777,7 @@ impl Shared {
         mux_source: MuxOptionSource,
         invoking_client_terminal: ClientTerminal,
         queue_execution: Option<&CommandQueueExecution>,
+        format_facts_unread: Option<bool>,
     ) -> Result<Execution, DaemonError> {
         let mut format_variables = context.format_variables.clone();
         let event_hooks_enabled = !context.no_hooks;
@@ -7885,7 +7894,8 @@ impl Shared {
                     );
                 }
             }
-            let facts_unread = hook_events::format_facts_unread(command_name, &command.args);
+            let facts_unread = format_facts_unread
+                .unwrap_or_else(|| hook_events::format_facts_unread(command_name, &command.args));
             let borrow_facts = *BORROWED_FORMAT_FACTS && !facts_unread;
             let mut command_seed =
                 borrow_facts.then(|| command_format_seed(&inner, client, context));
@@ -21501,6 +21511,7 @@ impl Shared {
                 &CommandInvocation::new("kill-pane", ["-t", target.as_str()]),
                 MuxOptionSource::RuntimeCommand,
                 terminal,
+                None,
                 None,
             ) {
                 log::debug!(
@@ -36150,12 +36161,12 @@ fn control_client_geometry_from_source(
 }
 
 fn control_client_sized_panes(inner: &ServerState, client: ClientId) -> BTreeSet<PaneId> {
+    let Some(output) = inner.control_outputs.get(&client) else {
+        return BTreeSet::new();
+    };
     let Some(session) = client_attached_session(inner, client)
         .and_then(|session| inner.engine.state.sessions.get(&session))
     else {
-        return BTreeSet::new();
-    };
-    let Some(output) = inner.control_outputs.get(&client) else {
         return BTreeSet::new();
     };
     session

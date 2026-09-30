@@ -6663,19 +6663,28 @@ impl Shared {
             };
             set_context_client_terminal(context, client_terminal);
             context.set_attached_client_context(client_attached_context);
-            let target_format_client = {
-                let inner = self.inner.lock();
-                if context.has_no_client() {
-                    FormatClient::NoClient
-                } else {
-                    provenance_client
-                        .and_then(|client| current_format_client_with_session(&inner, client))
-                        .map_or(FormatClient::NoClient, |(_, session)| {
-                            FormatClient::Attached(session)
-                        })
-                }
-            };
-            context.set_format_client(target_format_client);
+            if kind != ClientKind::Command
+                || client_terminal != ClientTerminal::Absent
+                || !matches!(
+                    name.as_str(),
+                    "bind-key" | "set-option" | "set-window-option"
+                )
+                || !hook_events::format_facts_unread(&name, &command.args)
+            {
+                let target_format_client = {
+                    let inner = self.inner.lock();
+                    if context.has_no_client() {
+                        FormatClient::NoClient
+                    } else {
+                        provenance_client
+                            .and_then(|client| current_format_client_with_session(&inner, client))
+                            .map_or(FormatClient::NoClient, |(_, session)| {
+                                FormatClient::Attached(session)
+                            })
+                    }
+                };
+                context.set_format_client(target_format_client);
+            }
         }
         let result = self.execute_with_mux_source_raw(
             client,
@@ -10364,9 +10373,13 @@ impl Shared {
                     .copied()
                     .unwrap_or(kind)
             };
-            let source_session_working_directory = client_attached_session(&inner, cwd_client)
-                .and_then(|session| inner.engine.state.session_working_directory(session))
-                .map(Path::to_owned);
+            let source_session_working_directory = (reload_config || !source_files.is_empty())
+                .then(|| {
+                    client_attached_session(&inner, cwd_client)
+                        .and_then(|session| inner.engine.state.session_working_directory(session))
+                        .map(Path::to_owned)
+                })
+                .flatten();
             let source_client_terminal = if context.has_no_client() {
                 ClientTerminal::NoClient
             } else if replay_client.is_some() && registered {

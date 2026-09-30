@@ -415,3 +415,254 @@ fn refresh_command_after_and_error_hooks_recompute_their_format_context_and_fact
         "command-error|beta|alpha-low|B2|bottom"
     );
 }
+
+#[test]
+fn literal_command_routing_preserves_scoped_targets_and_stored_format_text() {
+    let fixture = fixture();
+    let mut context = fixture.targets[2].context.clone();
+    context.set_format_client(FormatClient::NoClient);
+    let before = context.clone();
+    let literal = "literal:#{session_name}|#{client_name}|#{@flavour}";
+    execute(
+        &fixture,
+        &mut context,
+        &["set-option", "-t", "alpha", "@route-literal", literal],
+    )
+    .unwrap();
+    assert_attachment_restored(&context, &before);
+    assert_eq!(
+        engine_command(
+            &fixture.shared,
+            &["show-options", "-t", "alpha", "-qv", "@route-literal"]
+        )
+        .output,
+        literal
+    );
+    execute(
+        &fixture,
+        &mut context,
+        &[
+            "set-window-option",
+            "-t",
+            "alpha",
+            "window-status-format",
+            literal,
+        ],
+    )
+    .unwrap();
+    assert_attachment_restored(&context, &before);
+    assert_eq!(
+        engine_command(
+            &fixture.shared,
+            &[
+                "show-window-options",
+                "-t",
+                "alpha",
+                "-v",
+                "window-status-format"
+            ]
+        )
+        .output,
+        literal
+    );
+    execute(
+        &fixture,
+        &mut context,
+        &[
+            "bind-key",
+            "-T",
+            "route-literals",
+            "-N",
+            literal,
+            "x",
+            "display-message",
+            literal,
+        ],
+    )
+    .unwrap();
+    assert_attachment_restored(&context, &before);
+    let binding = execute(
+        &fixture,
+        &mut context,
+        &[
+            "list-keys",
+            "-T",
+            "route-literals",
+            "-F",
+            "#{key_note}|#{key_command}",
+        ],
+    )
+    .unwrap();
+    assert!(binding.output.starts_with(literal));
+    assert!(binding.output.contains("#{client_name}"));
+    assert!(binding.output.contains("display-message"));
+}
+
+#[test]
+fn literal_command_routing_recomputes_immediate_after_and_error_hook_facts() {
+    let fixture = fixture();
+    fixture
+        .shared
+        .inner
+        .lock()
+        .client_origins
+        .insert(fixture.invoking, fixture.targets[0].context.pane.unwrap());
+    for (hook, option) in [
+        ("@option-changed", "@route-immediate"),
+        ("after-set-option", "@route-after"),
+        ("command-error", "@route-error"),
+    ] {
+        engine_command(
+            &fixture.shared,
+            &[
+                "set-hook",
+                "-g",
+                hook,
+                &format!(
+                    "set-option -gF {option} '#{{hook}}|#{{session_name}}|#{{client_name}}|#{{@flavour}}|#{{status-position}}|#{{hook_option}}'"
+                ),
+            ],
+        );
+    }
+    let mut context = fixture.targets[2].context.clone();
+    context.set_format_client(FormatClient::NoClient);
+    let before = context.clone();
+    execute(
+        &fixture,
+        &mut context,
+        &["set-option", "-g", "@route-value", "stored:#{client_name}"],
+    )
+    .unwrap();
+    assert_attachment_restored(&context, &before);
+    for (option, expected) in [
+        (
+            "@route-immediate",
+            "@option-changed|beta|alpha-high|B|bottom|@route-value",
+        ),
+        ("@route-after", "after-set-option|beta|alpha-high|B|bottom|"),
+    ] {
+        assert_eq!(
+            engine_command(&fixture.shared, &["show-options", "-gqv", option])
+                .output
+                .trim(),
+            expected
+        );
+    }
+    fixture
+        .shared
+        .inner
+        .lock()
+        .client_activity
+        .insert(fixture.targets[0].client, 40);
+    for args in [
+        vec!["set-option", "definitely-invalid-format-option", "value"],
+        vec!["set-option", "-Z", "@route-invalid", "value"],
+    ] {
+        assert!(execute(&fixture, &mut context, &args).is_err());
+        assert_attachment_restored(&context, &before);
+        assert_eq!(
+            engine_command(&fixture.shared, &["show-options", "-gqv", "@route-error"])
+                .output
+                .trim(),
+            "command-error|beta|alpha-low|B|bottom|"
+        );
+    }
+    context.set_replay_client(Some(fixture.targets[2].client));
+    let before_present = context.clone();
+    execute(
+        &fixture,
+        &mut context,
+        &[
+            "set-option",
+            "-g",
+            "@route-present",
+            "stored:#{client_name}",
+        ],
+    )
+    .unwrap();
+    assert_attachment_restored(&context, &before_present);
+    assert_eq!(
+        engine_command(
+            &fixture.shared,
+            &["show-options", "-gqv", "@route-immediate"]
+        )
+        .output
+        .trim(),
+        "@option-changed|beta|beta-viewer|B|bottom|@route-present"
+    );
+}
+
+#[test]
+fn literal_routing_keeps_formatted_setters_sources_and_listings_on_client_fact_path() {
+    let fixture = fixture();
+    fixture
+        .shared
+        .inner
+        .lock()
+        .client_origins
+        .insert(fixture.invoking, fixture.targets[0].context.pane.unwrap());
+    let mut context = fixture.targets[2].context.clone();
+    context.set_format_client(FormatClient::NoClient);
+    let before = context.clone();
+    let fields = "#{session_name}|#{client_name}|#{client_width}|#{@flavour}|#{status-position}";
+    execute(
+        &fixture,
+        &mut context,
+        &["set-option", "-gF", "@route-formatted", fields],
+    )
+    .unwrap();
+    assert_attachment_restored(&context, &before);
+    assert_eq!(
+        engine_command(
+            &fixture.shared,
+            &["show-options", "-gqv", "@route-formatted"]
+        )
+        .output,
+        "beta|alpha-high|100|B|bottom"
+    );
+    engine_command(
+        &fixture.shared,
+        &[
+            "bind-key",
+            "-T",
+            "route-formatted",
+            "x",
+            "display-message",
+            "value",
+        ],
+    );
+    assert_eq!(
+        execute(
+            &fixture,
+            &mut context,
+            &["list-keys", "-T", "route-formatted", "-F", fields]
+        )
+        .unwrap()
+        .output,
+        "beta|alpha-high|100|B|bottom"
+    );
+    assert_attachment_restored(&context, &before);
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("beta-alpha-high.conf");
+    fs::write(
+        &source,
+        "set-option -gF @route-source '#{session_name}|#{client_name}|#{current_file}'\n",
+    )
+    .unwrap();
+    let source_format = directory
+        .path()
+        .join("#{session_name}-#{client_name}.conf")
+        .display()
+        .to_string();
+    execute(
+        &fixture,
+        &mut context,
+        &["source-file", "-F", "-t", "beta:0", &source_format],
+    )
+    .unwrap();
+    assert_attachment_restored(&context, &before);
+    assert_eq!(
+        engine_command(&fixture.shared, &["show-options", "-gqv", "@route-source"]).output,
+        format!("beta|alpha-high|{}", source.display())
+    );
+}

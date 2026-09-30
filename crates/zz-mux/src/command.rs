@@ -1613,6 +1613,13 @@ impl<H: StatusHooks> StatusHooks for ListKeyHooks<'_, H> {
     }
 
     fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+        if self.inner.only_tmux_options()
+            && *LIST_KEY_FORMAT_NAMES_ARE_NOT_OPTIONS
+            && (LIST_KEY_BINDING_CONTEXT_FORMATS.contains(&name)
+                || LIST_KEY_SUMMARY_CONTEXT_FORMATS.contains(&name))
+        {
+            return None;
+        }
         self.inner.option_variable(name, context)
     }
 

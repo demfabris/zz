@@ -35,6 +35,17 @@ pub(super) fn format_facts_unread(command: &str, args: &[RawText]) -> bool {
 pub(super) fn expands_no_format(command: &str, args: &[RawText]) -> bool {
     match command {
         "bind-key" | "unbind-key" | "has-session" => true,
+        "list-keys" | "source-file" => zz_protocol::catalog_command_spec(command)
+            .and_then(|spec| zz_protocol::parse_tmux_options(spec, args).ok())
+            .is_some_and(|parsed| {
+                !parsed.options.iter().any(|option| {
+                    matches!(
+                        option,
+                        zz_protocol::TmuxOption::Flag("-F")
+                            | zz_protocol::TmuxOption::Value("-F", _)
+                    )
+                })
+            }),
         "set-option" | "set-window-option" => zz_protocol::catalog_command_spec(command)
             .and_then(|spec| zz_protocol::parse_tmux_options(spec, args).ok())
             .is_some_and(|parsed| {

@@ -124,6 +124,24 @@ impl ClientStream {
 }
 
 impl TransportStream for ClientStream {
+    #[cfg(unix)]
+    fn receive_fd(&self) -> io::Result<std::os::fd::OwnedFd> {
+        match self {
+            Self::Local(stream) => stream.receive_fd(),
+            #[cfg(target_os = "ios")]
+            Self::Ssh(_) => Err(io::Error::from(io::ErrorKind::Unsupported)),
+        }
+    }
+
+    #[cfg(unix)]
+    fn read_ready(&self, buffer: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Self::Local(stream) => stream.read_ready(buffer),
+            #[cfg(target_os = "ios")]
+            Self::Ssh(_) => Err(io::Error::from(io::ErrorKind::Unsupported)),
+        }
+    }
+
     fn try_clone(&self) -> io::Result<Self> {
         match self {
             Self::Local(stream) => stream.try_clone().map(Self::Local),
@@ -1943,6 +1961,24 @@ impl InteractiveClient {
         Ok(())
     }
 
+    #[cfg(unix)]
+    pub fn receive_fd(&self) -> io::Result<std::os::fd::OwnedFd> {
+        self.reader.lock().stream.get_ref().receive_fd()
+    }
+
+    #[cfg(unix)]
+    pub fn try_recv(&self) -> Result<Option<ProtocolMessage>, DaemonError> {
+        let result = self.reader.lock().try_recv_decodable()?;
+        if let Some((message, skipped)) = result {
+            if skipped {
+                self.request_resync()?;
+            }
+            Ok(Some(message))
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn recv(&self) -> Result<ProtocolMessage, DaemonError> {
         let started = diagnostic_timer();
         let lock_started = diagnostic_timer();
@@ -1993,6 +2029,73 @@ struct ProtocolReceiver<S> {
     stream: io::BufReader<S>,
     frame: Vec<u8>,
     pending: VecDeque<ProtocolMessage>,
+    #[cfg(unix)]
+    ready: Option<ReadyFrames>,
+    #[cfg(unix)]
+    skipped_decode: bool,
+}
+
+#[cfg(all(test, unix, feature = "daemon"))]
+#[path = "daemon/ctrl_client_tests.rs"]
+mod ctrl_client_tests;
+
+#[cfg(unix)]
+#[derive(Default)]
+struct ReadyFrames {
+    bytes: Vec<u8>,
+    consumed: usize,
+}
+
+#[cfg(unix)]
+impl ReadyFrames {
+    fn message(&mut self) -> Result<Option<ProtocolMessage>, ProtocolError> {
+        let remaining = &self.bytes[self.consumed..];
+        let Some(prefix) = remaining.get(..4) else {
+            return Ok(None);
+        };
+        let length = u32::from_le_bytes(prefix.try_into().expect("four-byte prefix")) as usize;
+        if length > zz_protocol::MAX_FRAME_BYTES {
+            return Err(ProtocolError::FrameTooLarge(length));
+        }
+        if length < 4 {
+            return Err(ProtocolError::Truncated);
+        }
+        let Some(frame) = remaining.get(..length + 4) else {
+            return Ok(None);
+        };
+        let message = zz_protocol::decode_protocol_frame(frame);
+        self.consumed += length + 4;
+        message.map(Some)
+    }
+
+    fn read(
+        &mut self,
+        scratch: &mut Vec<u8>,
+        read: impl FnOnce(&mut [u8]) -> io::Result<usize>,
+    ) -> io::Result<usize> {
+        let remaining = &self.bytes[self.consumed..];
+        let count = if *BUFFERED_READS {
+            RECEIVE_BUFFER_BYTES
+        } else if remaining.len() < 4 {
+            4 - remaining.len()
+        } else {
+            let length =
+                u32::from_le_bytes(remaining[..4].try_into().expect("four-byte prefix")) as usize;
+            (length + 4 - remaining.len()).min(RECEIVE_BUFFER_BYTES)
+        };
+        if scratch.len() < count {
+            scratch.resize(count, 0);
+        }
+        let read = read(&mut scratch[..count])?;
+        if read != 0 {
+            if self.consumed != 0 {
+                self.bytes.drain(..self.consumed);
+                self.consumed = 0;
+            }
+            self.bytes.extend_from_slice(&scratch[..read]);
+        }
+        Ok(read)
+    }
 }
 
 static BUFFERED_READS: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| {
@@ -2016,10 +2119,70 @@ impl<S: TransportStream> ProtocolReceiver<S> {
             ),
             frame: Vec::new(),
             pending: VecDeque::new(),
+            #[cfg(unix)]
+            ready: None,
+            #[cfg(unix)]
+            skipped_decode: false,
+        }
+    }
+
+    #[cfg(unix)]
+    fn try_recv_decodable(&mut self) -> Result<Option<(ProtocolMessage, bool)>, DaemonError> {
+        loop {
+            match self.try_recv() {
+                Err(DaemonError::Protocol(ProtocolError::Decode(error))) => {
+                    self.skipped_decode = true;
+                    log::warn!(
+                        target: "zz_daemon::diagnostics::client",
+                        "skipping an undecodable daemon message: {error}"
+                    );
+                }
+                Ok(Some(message)) => {
+                    return Ok(Some((message, std::mem::take(&mut self.skipped_decode))));
+                }
+                Ok(None) => return Ok(None),
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    fn try_recv(&mut self) -> Result<Option<ProtocolMessage>, DaemonError> {
+        use std::io::BufRead as _;
+        if let Some(message) = self.pending.pop_front() {
+            return Ok(Some(message));
+        }
+        let ready = self.ready.get_or_insert_with(ReadyFrames::default);
+        let buffered = self.stream.buffer();
+        ready.bytes.extend_from_slice(buffered);
+        let count = buffered.len();
+        self.stream.consume(count);
+        loop {
+            if let Some(message) = ready.message()? {
+                return Ok(Some(message));
+            }
+            match ready.read(&mut self.frame, |buffer| {
+                self.stream.get_ref().read_ready(buffer)
+            }) {
+                Ok(0) => return Err(io::Error::from(io::ErrorKind::UnexpectedEof).into()),
+                Ok(_) => {}
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+                    ) =>
+                {
+                    return Ok(None);
+                }
+                Err(error) => return Err(error.into()),
+            }
         }
     }
 
     fn recv_decodable(&mut self) -> Result<(ProtocolMessage, bool), DaemonError> {
+        #[cfg(unix)]
+        let mut skipped = std::mem::take(&mut self.skipped_decode);
+        #[cfg(not(unix))]
         let mut skipped = false;
         loop {
             match self.recv() {
@@ -2038,6 +2201,17 @@ impl<S: TransportStream> ProtocolReceiver<S> {
     fn recv(&mut self) -> Result<ProtocolMessage, DaemonError> {
         if let Some(message) = self.pending.pop_front() {
             return Ok(message);
+        }
+        #[cfg(unix)]
+        if let Some(ready) = self.ready.as_mut() {
+            loop {
+                if let Some(message) = ready.message()? {
+                    return Ok(message);
+                }
+                if ready.read(&mut self.frame, |buffer| self.stream.read(buffer))? == 0 {
+                    return Err(io::Error::from(io::ErrorKind::UnexpectedEof).into());
+                }
+            }
         }
         let started = diagnostic_timer();
         let message = read_protocol_message_into(&mut self.stream, &mut self.frame)?;

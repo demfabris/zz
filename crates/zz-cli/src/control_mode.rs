@@ -1,12 +1,20 @@
 use std::{
     collections::{BTreeMap, VecDeque},
-    io::{self, BufRead as _, IsTerminal as _, Write},
+    io::{self, IsTerminal as _, Write},
     path::{Path, PathBuf},
     process::ExitCode,
-    sync::{Arc, mpsc},
-    thread,
+    sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
+
+#[cfg(not(unix))]
+use std::io::BufRead as _;
+#[cfg(unix)]
+use std::os::fd::{AsFd as _, AsRawFd as _, OwnedFd};
+#[cfg(any(not(unix), test))]
+use std::sync::mpsc;
+#[cfg(any(not(unix), test))]
+use std::thread;
 
 use zz_daemon::InteractiveClient;
 use zz_protocol::{
@@ -68,16 +76,32 @@ impl Drop for ControlSignal {
 }
 
 struct ControlReceiver {
-    events: mpsc::Receiver<MainEvent>,
+    source: ControlSource,
     pending: VecDeque<ProtocolMessage>,
 }
 
+enum ControlSource {
+    #[cfg(any(not(unix), test))]
+    Channel(mpsc::Receiver<MainEvent>),
+    #[cfg(unix)]
+    Direct(DirectControl),
+}
+
 impl ControlReceiver {
+    #[cfg(any(not(unix), test))]
     fn new(events: mpsc::Receiver<MainEvent>) -> Self {
         Self {
-            events,
+            source: ControlSource::Channel(events),
             pending: VecDeque::new(),
         }
+    }
+
+    #[cfg(unix)]
+    fn direct(client: Arc<InteractiveClient>) -> io::Result<Self> {
+        Ok(Self {
+            source: ControlSource::Direct(DirectControl::new(client)?),
+            pending: VecDeque::new(),
+        })
     }
 
     fn receive(&mut self, timeout: Option<std::time::Duration>) -> io::Result<Option<MainEvent>> {
@@ -85,21 +109,30 @@ impl ControlReceiver {
             if let Some(message) = self.pending.pop_front() {
                 return Ok(Some(MainEvent::Protocol(Box::new(message))));
             }
-            let event = if let Some(timeout) = timeout {
-                match self.events.recv_timeout(timeout) {
-                    Ok(event) => event,
-                    Err(mpsc::RecvTimeoutError::Timeout) => return Ok(None),
-                    Err(mpsc::RecvTimeoutError::Disconnected) => MainEvent::Disconnected,
+            let event = match &mut self.source {
+                #[cfg(any(not(unix), test))]
+                ControlSource::Channel(events) => {
+                    if let Some(timeout) = timeout {
+                        match events.recv_timeout(timeout) {
+                            Ok(event) => Some(event),
+                            Err(mpsc::RecvTimeoutError::Timeout) => None,
+                            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                                Some(MainEvent::Disconnected)
+                            }
+                        }
+                    } else {
+                        match events.try_recv() {
+                            Ok(event) => Some(event),
+                            Err(mpsc::TryRecvError::Empty) => None,
+                            Err(mpsc::TryRecvError::Disconnected) => Some(MainEvent::Disconnected),
+                        }
+                    }
                 }
-            } else {
-                match self.events.try_recv() {
-                    Ok(event) => event,
-                    Err(mpsc::TryRecvError::Empty) => return Ok(None),
-                    Err(mpsc::TryRecvError::Disconnected) => MainEvent::Disconnected,
-                }
+                #[cfg(unix)]
+                ControlSource::Direct(direct) => direct.receive(timeout)?,
             };
             match event {
-                MainEvent::Protocol(message)
+                Some(MainEvent::Protocol(message))
                     if matches!(message.as_ref(), ProtocolMessage::Batch(_)) =>
                 {
                     let ProtocolMessage::Batch(batch) = *message else {
@@ -110,9 +143,188 @@ impl ControlReceiver {
                         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?
                         .into();
                 }
-                event => return Ok(Some(event)),
+                event => return Ok(event),
             }
         }
+    }
+}
+
+#[cfg(unix)]
+struct DirectControl {
+    client: Arc<InteractiveClient>,
+    socket: OwnedFd,
+    input: ControlInput,
+    readable: Vec<rustix::event::FdSetElement>,
+    pending_protocol: Option<MainEvent>,
+    disconnected: bool,
+    prefer_stdin: bool,
+}
+
+#[cfg(unix)]
+impl DirectControl {
+    fn new(client: Arc<InteractiveClient>) -> io::Result<Self> {
+        Self::with_input(client, io::stdin().as_fd().try_clone_to_owned()?)
+    }
+
+    fn with_input(client: Arc<InteractiveClient>, input: OwnedFd) -> io::Result<Self> {
+        let socket = client.receive_fd()?;
+        let input = ControlInput::new(input);
+        let bound = socket.as_raw_fd().max(input.fd.as_raw_fd()) + 1;
+        Ok(Self {
+            client,
+            socket,
+            input,
+            readable: vec![
+                rustix::event::FdSetElement::default();
+                rustix::event::fd_set_num_elements(2, bound)
+            ],
+            pending_protocol: None,
+            disconnected: false,
+            prefer_stdin: false,
+        })
+    }
+
+    fn read_protocol(&mut self) {
+        if self.pending_protocol.is_none() && !self.disconnected {
+            match self.client.try_recv() {
+                Ok(Some(message)) => {
+                    self.pending_protocol = Some(MainEvent::Protocol(Box::new(message)));
+                }
+                Ok(None) => {}
+                Err(_) => {
+                    self.disconnected = true;
+                    self.pending_protocol = Some(MainEvent::Disconnected);
+                }
+            }
+        }
+    }
+
+    #[allow(
+        unsafe_code,
+        reason = "select only borrows the two owned open descriptors"
+    )]
+    fn receive(&mut self, timeout: Option<std::time::Duration>) -> io::Result<Option<MainEvent>> {
+        self.read_protocol();
+        self.readable.fill(rustix::event::FdSetElement::default());
+        if self.input.can_read() && !self.input.has_event() {
+            rustix::event::fd_set_insert(&mut self.readable, self.input.fd.as_raw_fd());
+        }
+        if self.pending_protocol.is_none() && !self.disconnected {
+            rustix::event::fd_set_insert(&mut self.readable, self.socket.as_raw_fd());
+        }
+        let timeout = if self.pending_protocol.is_some() || self.input.has_event() {
+            std::time::Duration::ZERO
+        } else {
+            timeout.unwrap_or_default()
+        };
+        let timeout = rustix::event::Timespec {
+            tv_sec: timeout.as_secs().try_into().unwrap_or(i64::MAX),
+            tv_nsec: i64::from(timeout.subsec_nanos()),
+        };
+        let bound = rustix::event::fd_set_bound(&self.readable);
+        match unsafe {
+            rustix::event::select(bound, Some(&mut self.readable), None, None, Some(&timeout))
+        } {
+            Ok(_) => {}
+            Err(rustix::io::Errno::INTR) => return Ok(None),
+            Err(error) => return Err(error.into()),
+        }
+        let mut input_ready = false;
+        let mut socket_ready = false;
+        for fd in rustix::event::FdSetIter::new(&self.readable) {
+            input_ready |= fd == self.input.fd.as_raw_fd();
+            socket_ready |= fd == self.socket.as_raw_fd();
+        }
+        if input_ready {
+            self.input.read();
+        }
+        if socket_ready {
+            self.read_protocol();
+        }
+        if self.input.has_event() && (self.prefer_stdin || self.pending_protocol.is_none()) {
+            self.prefer_stdin = false;
+            return Ok(self.input.event().map(MainEvent::Stdin));
+        }
+        if let Some(event) = self.pending_protocol.take() {
+            self.prefer_stdin = true;
+            return Ok(Some(event));
+        }
+        if self.disconnected {
+            return Ok(Some(MainEvent::Disconnected));
+        }
+        Ok(None)
+    }
+}
+
+#[cfg(unix)]
+struct ControlInput {
+    fd: OwnedFd,
+    bytes: Vec<u8>,
+    closed: bool,
+    eof_sent: bool,
+    error: Option<String>,
+}
+
+#[cfg(unix)]
+impl ControlInput {
+    fn new(fd: OwnedFd) -> Self {
+        Self {
+            fd,
+            bytes: Vec::new(),
+            closed: false,
+            eof_sent: false,
+            error: None,
+        }
+    }
+
+    fn can_read(&self) -> bool {
+        !self.closed
+    }
+
+    fn has_event(&self) -> bool {
+        self.error.is_some() || (self.closed && !self.eof_sent) || self.bytes.contains(&b'\n')
+    }
+
+    fn read(&mut self) {
+        let mut bytes = [0; 4096];
+        match rustix::io::read(&self.fd, &mut bytes) {
+            Ok(0) => self.closed = true,
+            Ok(count) => self.bytes.extend_from_slice(&bytes[..count]),
+            Err(rustix::io::Errno::INTR | rustix::io::Errno::AGAIN) => {}
+            Err(error) => {
+                self.closed = true;
+                self.error = Some(error.to_string());
+            }
+        }
+    }
+
+    fn event(&mut self) -> Option<StdinEvent> {
+        if let Some(error) = self.error.take() {
+            self.bytes.clear();
+            self.eof_sent = true;
+            return Some(StdinEvent::Error(error));
+        }
+        let bytes = if let Some(end) = self.bytes.iter().position(|byte| *byte == b'\n') {
+            let mut line: Vec<_> = self.bytes.drain(..=end).collect();
+            line.pop();
+            line
+        } else if self.closed && !self.bytes.is_empty() {
+            std::mem::take(&mut self.bytes)
+        } else if self.closed && !self.eof_sent {
+            self.eof_sent = true;
+            return Some(StdinEvent::Eof);
+        } else {
+            return None;
+        };
+        Some(match String::from_utf8(bytes) {
+            Ok(line) => StdinEvent::Line(line),
+            Err(error) => {
+                self.bytes.clear();
+                self.closed = true;
+                self.eof_sent = true;
+                StdinEvent::Error(error.to_string())
+            }
+        })
     }
 }
 
@@ -235,13 +447,17 @@ fn drive<W: Write>(
     initial: Vec<CommandInvocation>,
     output: &mut ControlWriter<W>,
 ) -> io::Result<u8> {
-    let (events, receiver) = mpsc::sync_channel(32);
-    let mut receiver = ControlReceiver::new(receiver);
-    spawn_protocol_reader(Arc::clone(client), events.clone());
-    let mut stdin_started = false;
+    #[cfg(unix)]
+    let mut receiver = ControlReceiver::direct(Arc::clone(client))?;
+    #[cfg(not(unix))]
+    let mut receiver = {
+        let (events, receiver) = mpsc::sync_channel(32);
+        spawn_protocol_reader(Arc::clone(client), events.clone());
+        spawn_stdin_reader(events);
+        ControlReceiver::new(receiver)
+    };
     let mut state = ControlState::default();
     let mut pending_stdin = VecDeque::new();
-    ensure_stdin_reader(&events, &mut stdin_started);
     let initial_result = execute_command_unit(
         client.as_ref(),
         &mut receiver,
@@ -259,8 +475,6 @@ fn drive<W: Write>(
             initial_result.exit.reason(),
             state.wait_exit,
             false,
-            &events,
-            &mut stdin_started,
             &mut receiver,
             &mut pending_stdin,
         )?;
@@ -276,8 +490,6 @@ fn drive<W: Write>(
             None,
             state.wait_exit,
             false,
-            &events,
-            &mut stdin_started,
             &mut receiver,
             &mut pending_stdin,
         )?;
@@ -290,8 +502,6 @@ fn drive<W: Write>(
             pending_return,
             output,
             &mut state,
-            &events,
-            &mut stdin_started,
             &mut receiver,
             &mut pending_stdin,
         );
@@ -322,8 +532,6 @@ fn drive<W: Write>(
                         },
                         output,
                         &mut state,
-                        &events,
-                        &mut stdin_started,
                         &mut receiver,
                         &mut pending_stdin,
                     );
@@ -348,8 +556,6 @@ fn drive<W: Write>(
                         result.exit.reason(),
                         state.wait_exit,
                         false,
-                        &events,
-                        &mut stdin_started,
                         &mut receiver,
                         &mut pending_stdin,
                     )?;
@@ -365,8 +571,6 @@ fn drive<W: Write>(
                         pending_return,
                         output,
                         &mut state,
-                        &events,
-                        &mut stdin_started,
                         &mut receiver,
                         &mut pending_stdin,
                     );
@@ -382,8 +586,6 @@ fn drive<W: Write>(
                     },
                     output,
                     &mut state,
-                    &events,
-                    &mut stdin_started,
                     &mut receiver,
                     &mut pending_stdin,
                 );
@@ -397,8 +599,6 @@ fn drive<W: Write>(
                     },
                     output,
                     &mut state,
-                    &events,
-                    &mut stdin_started,
                     &mut receiver,
                     &mut pending_stdin,
                 );
@@ -411,8 +611,6 @@ fn drive<W: Write>(
                         exit.reason(),
                         state.wait_exit,
                         false,
-                        &events,
-                        &mut stdin_started,
                         &mut receiver,
                         &mut pending_stdin,
                     )?;
@@ -429,8 +627,6 @@ fn drive<W: Write>(
                     Some("server exited unexpectedly"),
                     state.wait_exit,
                     false,
-                    &events,
-                    &mut stdin_started,
                     &mut receiver,
                     &mut pending_stdin,
                 )?;
@@ -1392,8 +1588,6 @@ fn finish_control_return<W: Write>(
     pending_return: PendingReturn,
     output: &mut ControlWriter<W>,
     state: &mut ControlState,
-    events: &mpsc::SyncSender<MainEvent>,
-    stdin_started: &mut bool,
     receiver: &mut ControlReceiver,
     pending_stdin: &mut VecDeque<StdinEvent>,
 ) -> io::Result<u8> {
@@ -1418,8 +1612,6 @@ fn finish_control_return<W: Write>(
         None,
         state.wait_exit,
         input_closed,
-        events,
-        stdin_started,
         receiver,
         pending_stdin,
     )?;
@@ -1455,6 +1647,7 @@ fn drain_before_exit<W: Write>(
     }
 }
 
+#[cfg(not(unix))]
 fn spawn_protocol_reader(client: Arc<InteractiveClient>, events: mpsc::SyncSender<MainEvent>) {
     let _ = thread::Builder::new()
         .name("zz-control-protocol".to_owned())
@@ -1472,6 +1665,7 @@ fn spawn_protocol_reader(client: Arc<InteractiveClient>, events: mpsc::SyncSende
         });
 }
 
+#[cfg(any(not(unix), test))]
 fn forward_protocol_message(
     message: ProtocolMessage,
     events: &mpsc::SyncSender<MainEvent>,
@@ -1481,6 +1675,7 @@ fn forward_protocol_message(
         .map_err(|_| ())
 }
 
+#[cfg(not(unix))]
 fn spawn_stdin_reader(events: mpsc::SyncSender<MainEvent>) {
     let _ = thread::Builder::new()
         .name("zz-control-stdin".to_owned())
@@ -1522,26 +1717,16 @@ fn spawn_stdin_reader(events: mpsc::SyncSender<MainEvent>) {
         });
 }
 
-fn ensure_stdin_reader(events: &mpsc::SyncSender<MainEvent>, started: &mut bool) {
-    if !*started {
-        spawn_stdin_reader(events.clone());
-        *started = true;
-    }
-}
-
 fn finish_exit<W: Write>(
     output: &mut ControlWriter<W>,
     reason: Option<&str>,
     wait_exit: bool,
     input_closed: bool,
-    events: &mpsc::SyncSender<MainEvent>,
-    stdin_started: &mut bool,
     receiver: &mut ControlReceiver,
     pending_stdin: &mut VecDeque<StdinEvent>,
 ) -> io::Result<()> {
     output.emit_exit(reason)?;
     if wait_exit && !input_closed {
-        ensure_stdin_reader(events, stdin_started);
         wait_for_exit_input(receiver, pending_stdin);
     }
     output.finish()
@@ -2259,6 +2444,154 @@ impl Drop for ControlTerminal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn direct_input_preserves_split_utf8_cr_and_trailing_eof_once() {
+        let (read, write) = rustix::pipe::pipe().unwrap();
+        let mut input = ControlInput::new(read);
+        rustix::io::write(&write, b"display-message -p \xc3").unwrap();
+        input.read();
+        assert!(!input.has_event());
+        assert!(input.event().is_none());
+        rustix::io::write(&write, b"\xa9\r\n\nlast line").unwrap();
+        input.read();
+        assert!(matches!(input.event(), Some(StdinEvent::Line(line))
+            if line == "display-message -p é\r"));
+        assert!(matches!(input.event(), Some(StdinEvent::Line(line)) if line.is_empty()));
+        assert!(input.event().is_none());
+        drop(write);
+        input.read();
+        assert!(matches!(input.event(), Some(StdinEvent::Line(line)) if line == "last line"));
+        assert!(matches!(input.event(), Some(StdinEvent::Eof)));
+        assert!(input.event().is_none());
+        assert!(!input.can_read());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn direct_input_invalid_utf8_stops_before_later_lines_and_eof() {
+        let (read, write) = rustix::pipe::pipe().unwrap();
+        let mut input = ControlInput::new(read);
+        rustix::io::write(&write, b"\xff\nnever execute\n").unwrap();
+        input.read();
+        assert!(matches!(input.event(), Some(StdinEvent::Error(_))));
+        assert!(input.event().is_none());
+        assert!(!input.has_event());
+        assert!(!input.can_read());
+    }
+
+    #[cfg(unix)]
+    fn direct_control_fixture() -> (
+        tempfile::TempDir,
+        std::os::unix::net::UnixStream,
+        ControlReceiver,
+        OwnedFd,
+    ) {
+        use std::os::unix::net::UnixListener;
+        let directory = tempfile::Builder::new()
+            .prefix("zz-pump-")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let socket = directory.path().join("s");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(std::time::Duration::from_secs(2)))
+                .unwrap();
+            assert!(matches!(
+                zz_protocol::read_protocol_message(&mut stream).unwrap(),
+                ProtocolMessage::Hello(_)
+            ));
+            let capabilities = [
+                zz_protocol::PANE_FRAME_CAPABILITY.to_owned(),
+                zz_protocol::CONTROL_CAPABILITY.to_owned(),
+            ];
+            let welcome = ProtocolMessage::Welcome(zz_protocol::Welcome {
+                protocol_version: zz_protocol::PROTOCOL_VERSION,
+                server_id: 1,
+                client_id: zz_protocol::ClientId(1),
+                client_instance_id: zz_protocol::ClientInstanceId(1),
+                caps: zz_protocol::Welcome::caps_from_strings(&capabilities),
+            });
+            let initial = ProtocolMessage::Batch(
+                zz_protocol::Batch::from_messages(
+                    1,
+                    [ProtocolMessage::Event(zz_protocol::Event {
+                        sequence: 1,
+                        payload: EventPayload::ClientView(zz_protocol::ClientView::default()),
+                    })],
+                )
+                .unwrap(),
+            );
+            for message in [welcome, initial] {
+                stream
+                    .write_all(&zz_protocol::encode_protocol_message(&message).unwrap())
+                    .unwrap();
+            }
+            stream
+        });
+        let client = Arc::new(InteractiveClient::connect_control(&socket).unwrap());
+        let server = server.join().unwrap();
+        let (input, writer) = rustix::pipe::pipe().unwrap();
+        let receiver = ControlReceiver {
+            source: ControlSource::Direct(DirectControl::with_input(client, input).unwrap()),
+            pending: VecDeque::new(),
+        };
+        (directory, server, receiver, writer)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn direct_pump_handles_ready_stdin_while_a_protocol_frame_is_incomplete() {
+        let (_directory, mut server, mut receiver, input) = direct_control_fixture();
+        assert!(
+            matches!(receiver.receive(None).unwrap(), Some(MainEvent::Protocol(message))
+            if matches!(*message, ProtocolMessage::Event(zz_protocol::Event { payload: EventPayload::ClientView(_), .. })))
+        );
+        let messages = [
+            ProtocolMessage::Attach {
+                session: "first".to_owned(),
+            },
+            ProtocolMessage::Attach {
+                session: "second".to_owned(),
+            },
+        ];
+        let frame = zz_protocol::encode_protocol_message(&ProtocolMessage::Batch(
+            zz_protocol::Batch::from_messages(2, messages.clone()).unwrap(),
+        ))
+        .unwrap();
+        server.write_all(&frame[..2]).unwrap();
+        rustix::io::write(&input, b"ready input\n").unwrap();
+        assert!(
+            matches!(receiver.receive(Some(std::time::Duration::from_millis(20))).unwrap(),
+            Some(MainEvent::Stdin(StdinEvent::Line(line))) if line == "ready input")
+        );
+        assert!(receiver.receive(None).unwrap().is_none());
+        server.write_all(&frame[2..]).unwrap();
+        rustix::io::write(&input, b"next input\n").unwrap();
+        for expected in messages {
+            assert!(
+                matches!(receiver.receive(Some(std::time::Duration::from_millis(20))).unwrap(),
+                Some(MainEvent::Protocol(message)) if *message == expected)
+            );
+        }
+        assert!(
+            matches!(receiver.receive(None).unwrap(), Some(MainEvent::Stdin(StdinEvent::Line(line)))
+            if line == "next input")
+        );
+        drop(input);
+        assert!(matches!(
+            receiver
+                .receive(Some(std::time::Duration::from_millis(20)))
+                .unwrap(),
+            Some(MainEvent::Stdin(StdinEvent::Eof))
+        ));
+    }
 
     #[test]
     fn pipelined_lines_preserve_order_and_stop_at_the_pending_return() {

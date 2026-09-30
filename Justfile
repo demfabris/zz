@@ -190,6 +190,9 @@ run platform *args:
 watch platform *args:
     @scripts/run-watch.sh {{ platform }} {{ args }}
 
+hot platform *args:
+    @scripts/run-hot.sh {{ platform }} {{ args }}
+
 # Serve the landing page + docs site with live reload (localhost:4321/zz).
 site:
     npm --prefix site install

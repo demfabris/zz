@@ -7,6 +7,7 @@ members = [
     "crates/zz-client",
     "crates/zz-config",
     "crates/zz-gpui-ios",
+    "crates/zz-hotreload",
     "crates/zz-client-ffi",
     "crates/zz-daemon",
     "crates/zz-mux",
@@ -155,6 +156,14 @@ opt-level = 3
 lto = "fat"
 codegen-units = 1
 strip = true
+
+[profile.hotreload]
+inherits = "dev"
+debug = 0
+strip = "none"
+
+[profile.hotreload.package.fff-search]
+opt-level = 0
 
 [profile.profiling]
 inherits = "release"

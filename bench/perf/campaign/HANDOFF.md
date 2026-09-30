@@ -3,23 +3,65 @@
 Entry point for a fresh session continuing the zz daemon performance rebuild. Written 2026-09-29 on
 the macbook, continued the same day on the Linux host alienware (see "Linux leg"). Wave 0 and wave 1
 are on `main` and pushed; wave 2 runs on `perf/wave2`, and `main` is fast-forwarded and pushed after
-every merge. State at the end of the Linux session (2026-09-29): W2-HOOKS and W2-TERM merged and
-pushed; no lane in flight, no side branch or lane worktree left; W2-CTRL, W2-FMT and W2-COPY not
-started.
+every merge. State at the end of the Mac leg (2026-09-30): W2-HOOKS and W2-TERM merged and
+pushed; the wave-1 macOS gate is recorded; the Ghostty fork pin moved to `c3941417` (a data-loss fix
+the Mac review found, see "Mac leg"); no lane in flight, no side branch or lane worktree left;
+W2-CTRL, W2-FMT and W2-COPY not started.
 
 ## Next session on Linux
 
-1. Rerun the W2-TERM merge gate on a quiet host (the recorded one ran at load 3-7 under a game):
+1. Pull `main` (Ghostty pin `c3941417`) and check the trim fix where it matters: on Linux the old
+   pin blanks a pane one idle second after `clear`. `cargo test -p zz-terminal
+   a_cleared_screen_survives_idle_compression` must pass; for proof it has teeth, run it once with
+   `GHOSTTY_SOURCE_DIR` at a checkout of `713374af` (a fresh path each time, Cargo does not see edits
+   inside one) and watch it fail. Then a quick gate `--only throughput,mem` against
+   `w2-2-term-alienware-d7e3fc95.json`: the fix only runs in `compress`, so neither row should move.
+2. Rerun the W2-TERM merge gate on a quiet host (the recorded one ran at load 3-7 under a game):
    `~/.cache/zz-perf/quiet-gate.sh --stage wave2 --strict --baseline bench/perf/results/w2-1-hooks-alienware-0acd7f2a.json --json bench/perf/results/w2-2-term-alienware-d7e3fc95.json`
-   from `~/dev/zz-perf-int` after `cargo build --release -p zz-cli`; commit the overwrite.
-2. W2-CTRL (after TERM; carries TERM's PaneFrame in its Batch via `encode_terminal_viewport_event_into`
+   from `~/dev/zz-perf-int` after `cargo build --release -p zz-cli`; commit the overwrite. It now
+   builds the new pin; say so in the commit.
+3. W2-CTRL (after TERM; carries TERM's PaneFrame in its Batch via `encode_terminal_viewport_event_into`
    / `encode_terminal_patch_event_into`), then W2-FMT (after HOOKS; its hand-offs are in the HOOKS
    as-built notes), then W2-COPY. Briefs: `python3 ~/.cache/zz-perf/prompts/gen.py '<json spec>'`
-   (see the existing `*-impl.md`, `*-merge.md` there for the shape); two lanes at a time.
-3. Known red on every build here, not lane regressions: `tui-screen-diff.sh` unzoom checkpoints
+   (see the existing `*-impl.md`, `*-merge.md` there for the shape); two lanes at a time. W2-CTRL
+   owns 6 of the 10 failing rows of the Mac wave-2 view (`attach.conns.*` 2 vs 1,
+   `attach.wire_s2c.*` 29.4 KB vs 8 KiB, `control.latency` 3.3x, `control.burst_cmds_per_s` 0.28x),
+   and should look at `chatty.client_cpu_pct.visible` (1.67% vs tmux 0, rule 1.0%).
+4. Known red on every build here, not lane regressions: `tui-screen-diff.sh` unzoom checkpoints
    under load (stale pane geometry after unzoom, open bug below), the three compat rows
    `lane2-store`, `show-options-hooks`, `smoke/plugin-runtime-resurrect-restore`, and the four
    known workspace tests.
+
+## Next session on the Mac
+
+1. After each wire-changing merge (W2-CTRL next): kill every zz Dev daemon older than the merge,
+   `just ios-gpui iPad build`, then the simulator smoke below; `just web-build` runs on Linux.
+2. Wave-2 exit: one strict Mac gate, `python3 bench/perf/run.py --zz target/release/zz_cli --stage
+   wave2 --strict --baseline bench/perf/results/w2-2-term-macbook-adbc5407.json --json
+   bench/perf/results/wave2-macbook-<sha8>.json` after `cargo build --release -p zz-cli`, on a quiet
+   Mac (wait for the 1-minute load under 6 with no `rustc` running; a fresh worktree or a big
+   `cp -c` of a target sets Spotlight indexing for ~10 minutes, see Traps).
+3. Explain every failing row with a same-host A/B against the previous binary (the Mac leg's
+   method: `run.py --only <groups> --w0 none`, three alternating pairs) before calling anything a
+   regression. This Mac swings 2-2.5x on wall and CPU between sessions (tmux too).
+4. Input for W3-LOOP, measurable only here: `spawn.instr.split_empty_P` is bimodal on every
+   binary since at least `a26b6368` (samples near 0.9 or 2.1 Minstr, tmux 1.1). Find the extra
+   ~1.2 Minstr path with Instruments (`just profile-cpu mac daemon`) on a loop of
+   `split-window -d -P -F '#{pane_id}' ""` + `kill-pane`.
+
+Simulator smoke for the GPUI iOS client (the build alone does not prove the wire decodes):
+
+```sh
+target/release/zz_cli --socket /tmp/zzios.sock -f /dev/null new-session -d -s smoke -x 100 -y 30
+target/release/zz_cli --socket /tmp/zzios.sock split-window -h -t smoke
+ZZ_GPUI_ENDPOINT=/tmp/zzios.sock ZZ_GPUI_SESSION=smoke just ios-gpui iPad run
+xcrun simctl io booted screenshot /tmp/ios.png
+```
+
+Drive it with `send-keys` (styled output, wide characters) and `bind-key` (a `KeyTablesPatched`
+event); a decode failure drops the app to its connection screen. The simulator MCP tool needs a
+one-time grant from the owner; `simctl` screenshots do not. `kill-server` and `xcrun simctl
+shutdown booted` afterwards.
 
 Read next, in this order: `knowledge/designs/daemon-perf-rebuild.md` (the plan: targets, lanes,
 write zones, as-built notes per merged lane), `bench/perf/README.md` (the gate),
@@ -82,6 +124,38 @@ and 2166bd31 binaries at load 3.6-4.6 (scratch results, not committed).
   discard the whole range (as `MADV_DONTNEED` does) instead of only the dirty prefix. Full
   `zig build test-lib-vt -Demit-lib-vt=true` on the Mac: 6488 pass, 52 skipped, 0 fail.
 
+### Gate `w2-2-term-macbook-adbc5407.json` (strict, full, `--stage wave2`, baseline the wave-1 Mac JSON)
+
+`main` after the repin: W2-HOOKS, W2-TERM and Ghostty `c3941417`. 62 pass, 10 fail, 6 regressed,
+2 drifted, 367 s, load 2.8 -> 2.2. The Mac view of the two wave-2 merges, on rows that do not
+depend on host speed:
+
+| Row | wave1 Mac | wave2 Mac | tmux | Lane |
+|---|---|---|---|---|
+| `config.instr.source_1000` | 133.4 | 39.3 Minstr | 198.5 | HOOKS |
+| `cli.instr.chain5.p20` | 1.085 | 0.479 Minstr | 1.296 | HOOKS |
+| `cli.instr.show_options.p20` | 0.311 | 0.144 Minstr | 0.888 | HOOKS |
+| `echo.wire_bytes.idle` / `.busy30` | 1133 / 3399 | 33 / 137 B | - | TERM |
+| `attach.wire_s2c.p1` | 100,040 | 29,391 B | - | TERM (the rest is the 28 KB hello, W2-CTRL) |
+| `attach.instr.p1` | 11.1 | 10.4 Minstr | 17.4 | TERM |
+| `chatty.instr_per_s.visible` | 396 | 378 Minstr/s | 171 | TERM |
+| `throughput.detached.ascii` | 310 | 345 MB/s | 50.8 | TERM |
+| `mem.footprint.scroll180` / `scroll80` | 35.3 / 28.5 | 33.8 / 27.0 MiB | 61.3 / 35.9 | both, on the fixed pin |
+| `mem.footprint.p1` / `p20` | 6.19 / 26.4 | 5.88 / 25.1 MiB | 2.69 / 2.84 | both |
+
+Failing rows and owners: W2-CTRL `attach.conns.p1` / `.p4` (2, rule 1), `attach.wire_s2c.p1` /
+`.p4` (29.4 / 29.7 KB, rule 8 KiB), `control.latency` (3.3x, rule 1.2x), `control.burst_cmds_per_s`
+(0.28x, rule 0.8x); `chatty.client_cpu_pct.visible` 1.67% (tmux 0, rule 1.0%; wave1 Mac 1.86%, so
+TERM did not move it here; W2-CTRL or W4-DELIVER must find the client's per-frame work);
+`spawn.cpu.split_shell` 2.13 ms (abs 1.5, tmux 1.76) and `spawn.cpu.split_empty_P` (bimodal, above),
+W3; `spawn.cpu.kill_pane` 0.45 ms (wave2 abs 0.4, tmux 0.17, instructions 0.66 -> 0.64 Minstr), W3-LOOP.
+The six regressed rows are cpu/wall rows whose tmux moved the same way (`attach.ttfc.p4` 14.7 ->
+20.4 ms with tmux 15.8 -> 20.9, `chatty.cpu_pct.steady` 3.7 -> 7.1% with tmux 3.4 -> 5.6%) or
+bimodal (`split_empty_P`), plus `echo.p50.busy30` 1.76 -> 2.47 ms (tmux 0.38 -> 0.44; a wave-3
+row) and `statusjob.cpu_pct` 0.37 -> 0.50% at +3% instructions. The two
+drifted rows are the echo idle rows again. Attach ttfc passes the wave2 ratio rule (0.90x and 0.98x
+tmux).
+
 ### macOS-only checks
 
 | Check | Result |
@@ -94,8 +168,8 @@ and 2166bd31 binaries at load 3.6-4.6 (scratch results, not committed).
 
 | Branch | Head | Contents | State |
 |---|---|---|---|
-| `main` (origin) | fast-forwarded to `perf/wave2` after each merge | W0, wave 1 (merged `1e0bfc6a`), the Ghostty pin, W2-HOOKS, W2-TERM | pushed |
-| `perf/wave2` | same as `main` | integration branch in `~/dev/zz-perf-int` | lanes merge here first |
+| `main` (origin) | fast-forwarded to `perf/wave2` after each merge | W0, wave 1 (merged `1e0bfc6a`), the Ghostty pin, W2-HOOKS, W2-TERM, the Mac leg (gate JSONs, Ghostty repin `f822301d`) | pushed |
+| `perf/wave2` | behind `main` by the Mac leg's commits | integration branch in `~/dev/zz-perf-int` | fast-forward it to `main` before the next lane |
 | `perf/wave1` | deleted after merging into `main` | W0 gate + plan and all of wave 1 | history kept in `main` |
 | `perf/attach` | `9a72b53b` (was `00831246` at handoff) | W1-ATTACH | fix pass finished on Linux, merged into `perf/wave1` as `ce1b34cd` (w1-6); branch and worktree removed |
 
@@ -262,11 +336,34 @@ Lanes in flight:
 | Lane | Where | State |
 |---|---|---|
 | W1-ATTACH | was `~/dev/zz-attach`, `perf/attach` | merged 2026-09-29 as `ce1b34cd` (w1-6), worktree and branch removed; reports in `~/.cache/zz-perf/attach/` (`report.md`, `merge-report.md`), statuses in `attach-review.json` |
-| W1-LINUX-PAGES | fork `demfabris/ghostty` branch `zz-2026-09-29`, commit `713374af` | landed: zz side `0e590636` (memchr escape scan), fork pin `2166bd31` (detached ASCII 85 -> 120-134 MB/s, unicode 45 -> 91, actor 98% -> 30% CPU). The Darwin trim path still needs the Mac gate (checklist at the top) |
+| W1-LINUX-PAGES | fork `demfabris/ghostty`, now branch `zz-2026-09-30` at `c3941417` (`zz-2026-09-29` keeps `713374af`) | landed: zz side `0e590636` (memchr escape scan), fork pin `2166bd31` (detached ASCII 85 -> 120-134 MB/s, unicode 45 -> 91, actor 98% -> 30% CPU); the Mac leg found and fixed its trim bug, repin `f822301d` |
 | W1-ATTACH-PAINT | was `~/dev/zz-attach-paint`, `perf/attach-paint` | merged `aaaa8195`: `Renderer::note_frame` merged, instead of replacing, a pane's unpainted damage when a drain took a second frame; regression test in zz-tui app.rs |
 | W2-HOOKS | was `~/dev/zz-hooks`, `perf/hooks` | merged into `perf/wave2` as `0acd7f2a` (w2-1), worktree and branch removed; reports in `~/.cache/zz-perf/hooks/` (`fix-report.md`, `merge-report.md`) |
 | W2-TERM | was `~/dev/zz-term`, `perf/term` | merged into `perf/wave2` as `d7e3fc95` (w2-2) plus `8f18e4d7`, worktree and branch removed; reports in `~/.cache/zz-perf/term/` (`impl-report.md`, `fix-report.md`, `merge-report.md`). After pulling it, `kill-server` every zz daemon built before it: the wire changed inside 107 |
 | W2-CTRL | not started | can start now from `perf/wave2`: its `Batch` carries TERM's PaneFrames; the encoder entry points are `encode_terminal_viewport_event_into` and `encode_terminal_patch_event_into` (zz-protocol `terminal_codec.rs`, the patch one takes a `TerminalPatchRef` and a `PatchTail`) |
+
+## Decisions taken on the Mac leg (owner away; revisit if you disagree)
+
+- **Gate of record at `2166bd31`, as asked, with no rerun.** Its five failures are explained by
+  a same-host A/B against the w1-5 binary (`a26b6368`); none is a wave-1 regression.
+- **`spawn.instr.split_empty_P` (a hard instruction row) accepted as bimodal.** The old binary
+  reads the same on this host; owner W3-LOOP (next Mac session, item 4).
+- **CoreFoundation check and bundle at `main`, not `2166bd31`.** W1-FOOTPRINT's link change is in
+  both; checking `main` also covers wave 2 and, after the repin, the new pin (`f822301d`).
+- **The Ghostty fix is pushed and pinned.** This revisits the Linux leg's "Ghostty fork: nothing
+  is pushed": the pin on `main` could blank a Linux pane after `clear`, and the native-fork process
+  in `.agents/skills/fork-rebase/SKILL.md` publishes a new dated branch (`zz-2026-09-30`) without
+  touching the published one. Validation: full `zig build test-lib-vt` (6488 pass, 52 skipped),
+  zz-terminal 314 pass, clippy, a bundle build that fetched the commit from GitHub, 204 exported
+  `ghostty_*` symbols as before.
+- **The fork's test discard zeroes the whole range** (as `MADV_DONTNEED` does), not only the dirty
+  prefix, so its unit tests can see a trim that loses live cells. The zz test
+  `a_cleared_screen_survives_idle_compression` passes on macOS on either pin (the discard keeps the
+  contents there); proven against both pins with a Linux-like discard patched into a local checkout.
+- **The first wave-2 run at `ae63c577` was stopped and discarded**: a zig build of mine overlapped
+  its cli and spawn groups. The record is `w2-2-term-macbook-adbc5407.json`, after the repin, with
+  the Mac wave-1 JSON as its baseline.
+- **No echo A/B.** Echo rules are wave 3 since the Linux leg, and tmux moved as much in both runs.
 
 ## Owner decisions (binding)
 
@@ -530,6 +627,14 @@ Rule: every wave exit gets one `--strict` gate run on the Mac, committed as
   left in worktrees or side branches. After each wave-2 merge into `perf/wave2`, `main` is
   fast-forwarded to it. Nothing is pushed without the owner.
 
+- Mac leg: codex (`gpt-6.1-sol`, reasoning `ultra`, `service_tier` `priority`) did the Ghostty
+  review, the fix and the repin from brief files, and I reviewed and reran every gate. Run it as
+  `codex exec -m gpt-6.1-sol -c model_reasoning_effort='"ultra"' -c service_tier='"priority"' -s
+  <sandbox> -C <dir> -o <report.md> "Read <brief> and do exactly what it says." < /dev/null`: without
+  the `/dev/null` stdin a backgrounded run waits on stdin forever. OpenAI's cyber filter ended a
+  review that wrote an madvise / `phys_footprint` C probe; a source-only review with the
+  measurements pasted into the brief went through. The review of the fork commit found the
+  blocker that every test had missed: give each fork change one such review.
 - One integration worktree (`~/dev/zz-perf-int`, branch `perf/waveN`), one worktree per lane (`~/dev/zz-<slug>`, branch `perf/<slug>`) from the integration head.
 - Per lane: implementer at `xhigh` effort, then a parity reviewer and a perf reviewer in parallel at `high`, then a fix agent at `high`. All return structured JSON (schemas in the script); keep those reports outside the repo, they are the resume point.
 - Merges strictly serial in the plan's order (wave 1 swapped FORMAT and PUBLISH, see above): merge the integration head into the lane, `--no-ff` into integration, fmt, clippy, workspace tests, `just compat-check`, full `compat/run.sh`, `compat/attached-client.sh`, then a full `--strict` gate JSON `w<wave>-<n>-<slug>-<host>-<sha8>.json` on a quiet host whose `--baseline` is the previous merge's JSON.
@@ -549,6 +654,14 @@ Rule: every wave exit gets one `--strict` gate run on the Mac, committed as
   pane geometry after unzoom (likely a client size report landing after the layout change,
   `InputMessage::ResizeTerminal` -> `set_pane_geometry` with no layout generation). Open bug below.
 
+- **Ghostty's unit tests never reach the OS.** `mem.zig` skips madvise under `builtin.is_test`,
+  so a green PageList suite says nothing about the decommit and recommit paths. Rows own cell
+  blocks by offset, not by index: `eraseRows` swaps row headers, so no code may derive a cell range
+  from `size.rows`. The repro for a trim that loses cells is zz-terminal's
+  `a_cleared_screen_survives_idle_compression` on Linux.
+- **Spotlight on the Mac.** A new worktree or an APFS clone of a 5-30 GB `target/` sets `mds`
+  indexing for about ten minutes (load 18-30). `touch <worktree>/target/.metadata_never_index`
+  before cloning into it.
 - **Never `git stash`**, `reset --hard`, or path checkouts in a tree another session uses. To revert your own edit, re-edit. Keep the index empty.
 - **`isolation: worktree` fails** in this repo (`.claude -> .agents` is a committed symlink). Create worktrees by hand with `git worktree add`.
 - **Warm targets.** macOS cloned `target/` with APFS `cp -c`. On Linux `cp -R --reflink=always` works on btrfs, XFS with reflink, bcachefs; on ext4 it fails, so build fresh (about 10 min) or use sccache. Never let two builds share one `CARGO_TARGET_DIR`: the W1-ATTACH parity reviewer's probe overwrote the lane's test binary that way.

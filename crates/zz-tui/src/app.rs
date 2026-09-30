@@ -238,6 +238,15 @@ impl FrameInbox {
         mem::take(&mut state.pending)
     }
 
+    fn recycle(&self, mut completed: HashMap<PaneId, PendingFrame>) {
+        debug_assert!(completed.is_empty());
+        let mut state = self.0.lock().expect("frame inbox poisoned");
+        if completed.capacity() > state.pending.capacity() {
+            completed.extend(state.pending.drain());
+            state.pending = completed;
+        }
+    }
+
     fn clear(&self) {
         let mut state = self.0.lock().expect("frame inbox poisoned");
         state.pending.clear();
@@ -1131,7 +1140,8 @@ fn start_kitty_probe(probe: &mut KittyProbe, terminal: &mut TerminalGuard) -> Re
 }
 
 fn take_frames(frames: &FrameInbox, model: &mut Model, renderer: &mut Renderer) {
-    for (pane, frame) in frames.take() {
+    let mut pending = frames.take();
+    for (pane, frame) in pending.drain() {
         if !model.accepts_viewport(pane) {
             model.viewports.remove(&pane);
             renderer.forget_pane(pane);
@@ -1140,6 +1150,7 @@ fn take_frames(frames: &FrameInbox, model: &mut Model, renderer: &mut Renderer) 
         model.viewports.insert(pane, frame.viewport);
         renderer.note_frame(pane, frame.damage);
     }
+    frames.recycle(pending);
 }
 
 fn paint_pending(
@@ -3024,10 +3035,14 @@ mod tests {
         let (events, _incoming) = mpsc::channel();
         let typed = with_row_text(&prompt, 1, "$ printf 'MARK-%s' split");
         inbox.publish(pane, typed.clone(), FrameDamage::Rows(vec![1]), 7, &events);
+        let capacity = inbox.0.lock().unwrap().pending.capacity();
         take_frames(&inbox, &mut model, &mut renderer);
+        assert_eq!(inbox.0.lock().unwrap().pending.capacity(), capacity);
         let answered = with_row_text(&with_row_text(&typed, 2, "MARK-split"), 3, "$");
         inbox.publish(pane, answered, FrameDamage::Rows(vec![2, 3]), 7, &events);
+        assert_eq!(inbox.0.lock().unwrap().pending.capacity(), capacity);
         take_frames(&inbox, &mut model, &mut renderer);
+        assert_eq!(inbox.0.lock().unwrap().pending.capacity(), capacity);
         renderer.paint_frames(&model).expect("drained paint");
 
         let painted = String::from_utf8(receive.recv_timeout(wait).expect("drained paint written"))
@@ -3502,6 +3517,52 @@ mod tests {
         let pending = inbox.take();
         assert_eq!(pending[&PaneId(1)].viewport.columns, 120);
         assert_eq!(pending[&PaneId(1)].damage, FrameDamage::Rows(vec![1, 2]));
+    }
+
+    #[test]
+    fn frame_capacity_return_keeps_new_publication_and_attachment_reset() {
+        for reset in [false, true] {
+            let inbox = FrameInbox::default();
+            let (events, incoming) = mpsc::channel();
+            let first = TerminalViewport::blank(80, 24, zz_terminal::SessionStatus::Running);
+            for pane in 1..=16 {
+                inbox.publish(PaneId(pane), first.clone(), FrameDamage::All, 7, &events);
+            }
+            assert!(matches!(incoming.recv().unwrap(), MainEvent::Frames(7)));
+            let mut completed = inbox.take();
+            let capacity = completed.capacity();
+            completed.clear();
+            if reset {
+                inbox.clear();
+            }
+            inbox.publish(PaneId(1), first, FrameDamage::Rows(vec![1]), 7, &events);
+            inbox.publish(
+                PaneId(1),
+                TerminalViewport::blank(120, 40, zz_terminal::SessionStatus::Running),
+                FrameDamage::Rows(vec![2]),
+                7,
+                &events,
+            );
+            inbox.recycle(completed);
+            {
+                let state = inbox.0.lock().unwrap();
+                assert_eq!(state.pending.capacity(), capacity);
+                assert_eq!(state.pending.len(), 1);
+                assert!(state.wake_pending);
+            }
+            assert!(matches!(incoming.recv().unwrap(), MainEvent::Frames(7)));
+            assert!(incoming.try_recv().is_err());
+            let mut pending = inbox.take();
+            assert_eq!(pending.len(), 1);
+            assert_eq!(pending[&PaneId(1)].viewport.columns, 120);
+            assert_eq!(pending[&PaneId(1)].damage, FrameDamage::Rows(vec![1, 2]));
+            pending.clear();
+            inbox.recycle(pending);
+            let state = inbox.0.lock().unwrap();
+            assert!(state.pending.is_empty());
+            assert_eq!(state.pending.capacity(), capacity);
+            assert!(!state.wake_pending);
+        }
     }
 
     #[test]

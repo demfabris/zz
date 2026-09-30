@@ -37328,6 +37328,7 @@ fn status_request_with_selected_facts(
     .flatten();
     let attached = client_attached_session(inner, client);
     let window = client_focused_window_for_attachment(inner, client);
+    let mut reuse_admission = false;
     if let Some(revision) = revision {
         let cache = inner.status_preparation_cache.lock();
         if let Some(cached) = cache.as_ref()
@@ -37352,10 +37353,21 @@ fn status_request_with_selected_facts(
                     invoking: Some(client),
                 },
             );
-            request.pane_borders = attached.map_or_else(Vec::new, |session| {
+            request.pane_borders = attached.map_or_else(Arc::default, |session| {
                 border_presentations(inner, client, session, &facts)
             });
             return request;
+        }
+        if let Some(cached) = cache.as_ref() {
+            reuse_admission = cached.matches(
+                inner,
+                client,
+                attached,
+                window,
+                (revision.0, revision.1, revision.2, cached.revision.3),
+                &option_snapshot,
+                startup_ready,
+            );
         }
     }
     let facts = (!*BORROWED_FORMAT_FACTS
@@ -37373,26 +37385,28 @@ fn status_request_with_selected_facts(
         &mut BTreeMap::new(),
     );
     if let Some(revision) = revision {
-        let parameters = status_parameters(inner, attached, &request.option_snapshot);
-        let client_dependencies_safe = !parameters.client_fact_selection.full
-            && parameters.client_references.iter().all(|name| {
-                (!name.starts_with("client_")
-                    || matches!(name.as_str(), "client_width" | "client_colours"))
-                    && !matches!(name.as_str(), "window_cell_height" | "window_cell_width")
-            });
-        let reusable = crate::status::status_cache_callbacks(&request).is_some_and(|names| {
-            names.iter().all(|name| {
-                matches!(
-                    name.as_str(),
-                    "client_width"
-                        | "client_colours"
-                        | "window_bigger"
-                        | "window_offset_x"
-                        | "window_offset_y"
-                )
-            })
-        }) && client_dependencies_safe
-            && !request.references.iter().any(|name| name.starts_with('@'));
+        let reusable = reuse_admission || {
+            let parameters = status_parameters(inner, attached, &request.option_snapshot);
+            let client_dependencies_safe = !parameters.client_fact_selection.full
+                && parameters.client_references.iter().all(|name| {
+                    (!name.starts_with("client_")
+                        || matches!(name.as_str(), "client_width" | "client_colours"))
+                        && !matches!(name.as_str(), "window_cell_height" | "window_cell_width")
+                });
+            crate::status::status_cache_callbacks(&request).is_some_and(|names| {
+                names.iter().all(|name| {
+                    matches!(
+                        name.as_str(),
+                        "client_width"
+                            | "client_colours"
+                            | "window_bigger"
+                            | "window_offset_x"
+                            | "window_offset_y"
+                    )
+                })
+            }) && client_dependencies_safe
+                && !request.references.iter().any(|name| name.starts_with('@'))
+        };
         let cached = reusable.then(|| {
             CachedStatusPreparation::new(inner, attached, window, revision, request.clone())
         });
@@ -37428,7 +37442,7 @@ impl CachedStatusPreparation {
         mut request: StatusRequest,
     ) -> Self {
         let client = request.client;
-        request.pane_borders = Vec::new();
+        request.pane_borders = Arc::default();
         let viewport_requested = status_parameters(inner, attached, &request.option_snapshot)
             .client_fact_selection
             .viewport;
@@ -37859,13 +37873,13 @@ fn status_request_with_facts(
                 invoking: Some(client),
             },
         );
-        let borders = attached.map_or_else(Vec::new, |session| {
+        let borders = attached.map_or_else(Arc::default, |session| {
             border_presentations(inner, client, session, &borrowed)
         });
         facts.client = borrowed.seed.client.take();
         borders
     } else {
-        attached.map_or_else(Vec::new, |session| {
+        attached.map_or_else(Arc::default, |session| {
             border_presentations(inner, client, session, &facts)
         })
     };
@@ -37909,6 +37923,7 @@ struct CachedBorderPresentations {
     references: Arc<BTreeSet<String>>,
     callbacks: Vec<String>,
     panes: Vec<CachedBorderPane>,
+    presentations: Arc<Vec<zz_protocol::PaneBorderPresentation>>,
 }
 
 struct CachedBorderPane {
@@ -37928,11 +37943,8 @@ impl CachedBorderPresentations {
         })
     }
 
-    fn presentations(&self) -> Vec<zz_protocol::PaneBorderPresentation> {
-        self.panes
-            .iter()
-            .map(|pane| pane.presentation.clone())
-            .collect()
+    fn presentations(&self) -> Arc<Vec<zz_protocol::PaneBorderPresentation>> {
+        Arc::clone(&self.presentations)
     }
 
     fn retained_bytes(&self) -> usize {
@@ -37960,6 +37972,14 @@ impl CachedBorderPresentations {
             for value in pane.callback_values.iter().flatten() {
                 bytes = bytes.saturating_add(value.capacity());
             }
+        }
+        bytes = bytes.saturating_add(
+            self.presentations
+                .capacity()
+                .saturating_mul(std::mem::size_of::<zz_protocol::PaneBorderPresentation>()),
+        );
+        for presentation in self.presentations.iter() {
+            bytes = bytes.saturating_add(presentation.style.capacity());
         }
         bytes.saturating_mul(2).saturating_add(4096)
     }
@@ -38067,7 +38087,7 @@ fn border_presentations(
     client: ClientId,
     session: SessionId,
     facts: &dyn crate::status::FormatFactSource,
-) -> Vec<zz_protocol::PaneBorderPresentation> {
+) -> Arc<Vec<zz_protocol::PaneBorderPresentation>> {
     let second = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| duration.as_secs());
@@ -38080,16 +38100,16 @@ fn border_presentations_at(
     session: SessionId,
     facts: &dyn crate::status::FormatFactSource,
     second: u64,
-) -> Vec<zz_protocol::PaneBorderPresentation> {
+) -> Arc<Vec<zz_protocol::PaneBorderPresentation>> {
     let Some(revision) = inner.engine.format_cache_revision() else {
         return uncached_border_presentations(inner, client, session, facts);
     };
     let Some(session_state) = inner.engine.state.sessions.get(&session) else {
-        return Vec::new();
+        return Arc::default();
     };
     let window = client_focused_window(inner, client, session_state);
     let Some(window_state) = inner.engine.state.windows.get(&window) else {
-        return Vec::new();
+        return Arc::default();
     };
     let option_snapshot = inner.engine.cached_format_option_snapshot();
     {
@@ -38121,7 +38141,7 @@ fn border_presentations_at(
         return uncached_border_presentations(inner, client, session, facts);
     };
     let mut hooks = DaemonFormatHooks::command(facts).with_option_engine(&inner.engine);
-    let panes = window_state
+    let panes: Vec<CachedBorderPane> = window_state
         .panes
         .keys()
         .take(zz_protocol::MAX_PANE_BORDER_PRESENTATIONS)
@@ -38147,6 +38167,7 @@ fn border_presentations_at(
             }
         })
         .collect();
+    let presentations = Arc::new(panes.iter().map(|pane| pane.presentation.clone()).collect());
     let cached = CachedBorderPresentations {
         revision,
         second,
@@ -38157,6 +38178,7 @@ fn border_presentations_at(
         references,
         callbacks,
         panes,
+        presentations,
     };
     let result = cached.presentations();
     *inner.border_presentations_cache.lock() =
@@ -38169,35 +38191,37 @@ fn uncached_border_presentations(
     client: ClientId,
     session: SessionId,
     facts: &dyn crate::status::FormatFactSource,
-) -> Vec<zz_protocol::PaneBorderPresentation> {
+) -> Arc<Vec<zz_protocol::PaneBorderPresentation>> {
     let Some(session_state) = inner.engine.state.sessions.get(&session) else {
-        return Vec::new();
+        return Arc::default();
     };
     let window = client_focused_window(inner, client, session_state);
     let Some(window_state) = inner.engine.state.windows.get(&window) else {
-        return Vec::new();
+        return Arc::default();
     };
     let mut hooks = DaemonFormatHooks::command(facts).with_option_engine(&inner.engine);
     let contexts = inner
         .engine
         .format_context_snapshot(FormatClient::Attached(session));
-    window_state
-        .panes
-        .keys()
-        .take(zz_protocol::MAX_PANE_BORDER_PRESENTATIONS)
-        .map(|pane| {
-            let context = contexts.status_context(Some(session), Some(window), Some(*pane));
-            let format = if *pane == window_state.active_pane {
-                "#{E:pane-active-border-style}"
-            } else {
-                "#{E:pane-border-style}"
-            };
-            zz_protocol::PaneBorderPresentation {
-                pane: *pane,
-                style: border_format_style(format, &context, &mut hooks),
-            }
-        })
-        .collect()
+    Arc::new(
+        window_state
+            .panes
+            .keys()
+            .take(zz_protocol::MAX_PANE_BORDER_PRESENTATIONS)
+            .map(|pane| {
+                let context = contexts.status_context(Some(session), Some(window), Some(*pane));
+                let format = if *pane == window_state.active_pane {
+                    "#{E:pane-active-border-style}"
+                } else {
+                    "#{E:pane-border-style}"
+                };
+                zz_protocol::PaneBorderPresentation {
+                    pane: *pane,
+                    style: border_format_style(format, &context, &mut hooks),
+                }
+            })
+            .collect(),
+    )
 }
 
 fn mode_requests(

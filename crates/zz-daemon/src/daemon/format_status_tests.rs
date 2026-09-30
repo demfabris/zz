@@ -1,6 +1,145 @@
 use super::tests::{engine_request, execute, request, settled};
 use super::*;
 
+fn forget_without_job_lock(mut renderer: StatusRenderer, client: ClientId) -> StatusRenderer {
+    let needs = renderer.job_needs();
+    let guard = needs.lock();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let worker = thread::spawn(move || {
+        renderer.forget(client);
+        sender.send(renderer).unwrap();
+    });
+    let result = receiver.recv_timeout(std::time::Duration::from_secs(1));
+    drop(guard);
+    worker.join().unwrap();
+    result.expect("forget attempted job cleanup for a client the renderer does not own")
+}
+
+#[test]
+fn status_forget_never_rendered_clients_skips_state_and_job_lock_cleanup() {
+    let (_, _, request) = completed_request("#{session_name}");
+    let mut renderer = StatusRenderer::default();
+    renderer.render_initial(&request);
+    let published = renderer.published.clone();
+    let completed = renderer.completed.as_ref().map(|entry| entry.client);
+    let expansions = renderer.expansions;
+    let command_client = ClientId(77);
+    assert!(!renderer.owned_clients.contains(&command_client));
+    let renderer = forget_without_job_lock(renderer, command_client);
+    assert_eq!(renderer.published, published);
+    assert_eq!(
+        renderer.completed.as_ref().map(|entry| entry.client),
+        completed
+    );
+    assert_eq!(renderer.expansions, expansions);
+    assert_eq!(renderer.owned_clients, BTreeSet::from([request.client]));
+    assert!(renderer.shell_cache.is_empty());
+    assert!(renderer.uncovered_jobs.is_empty());
+    assert!(renderer.job_needs.lock().is_empty());
+}
+
+#[test]
+fn status_forget_cleans_rendered_clients_and_preserves_other_clients_and_jobs() {
+    let (engine, context, mut first) = completed_request("#(printf '\\043{P:first}\\n')");
+    first.context = Arc::new(
+        engine
+            .format_status_context(context.session, context.window, context.pane)
+            .detach(FormatNeeds::ENVIRONMENT),
+    );
+    first.row_formats = Arc::new(BTreeMap::new());
+    let mut second = first.clone();
+    second.client = ClientId(2);
+    let mut renderer = StatusRenderer::default();
+    settled(&mut renderer, &first);
+    settled(&mut renderer, &second);
+    renderer.render_initial(&first);
+    renderer.render_initial(&second);
+    assert_eq!(renderer.shell_cache.len(), 2);
+    assert_eq!(
+        renderer.job_needs.lock().get(&first.client),
+        Some(&FormatNeeds::PANES)
+    );
+    assert_eq!(
+        renderer.job_needs.lock().get(&second.client),
+        Some(&FormatNeeds::PANES)
+    );
+    let uncovered = !second.context.format_universe_covers(FormatNeeds::PANES);
+    assert_eq!(renderer.uncovered_jobs.contains(&first.client), uncovered);
+    assert_eq!(renderer.uncovered_jobs.contains(&second.client), uncovered);
+    let (_, _, mut plain) = completed_request("#{session_name}");
+    plain.client = second.client;
+    renderer.render_initial(&plain);
+    let published = renderer.published.get(&second.client).cloned();
+    let completed = renderer.completed.as_ref().map(|entry| entry.client);
+    let second_jobs = renderer
+        .shell_cache
+        .iter()
+        .filter(|((client, _, _), _)| *client == second.client)
+        .map(|(key, entry)| {
+            (
+                key.clone(),
+                entry.expanded.clone(),
+                entry.output.clone(),
+                entry.output_needs,
+            )
+        })
+        .collect::<Vec<_>>();
+    renderer.forget(first.client);
+    assert!(!renderer.owned_clients.contains(&first.client));
+    assert!(renderer.owned_clients.contains(&second.client));
+    assert!(!renderer.published.contains_key(&first.client));
+    assert_eq!(renderer.published.get(&second.client).cloned(), published);
+    assert_eq!(
+        renderer.completed.as_ref().map(|entry| entry.client),
+        completed
+    );
+    assert!(!renderer.job_needs.lock().contains_key(&first.client));
+    assert_eq!(
+        renderer.job_needs.lock().get(&second.client),
+        Some(&FormatNeeds::PANES)
+    );
+    assert!(!renderer.uncovered_jobs.contains(&first.client));
+    assert_eq!(renderer.uncovered_jobs.contains(&second.client), uncovered);
+    let remaining_jobs = renderer
+        .shell_cache
+        .iter()
+        .map(|(key, entry)| {
+            (
+                key.clone(),
+                entry.expanded.clone(),
+                entry.output.clone(),
+                entry.output_needs,
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(remaining_jobs, second_jobs);
+    let renderer = forget_without_job_lock(renderer, first.client);
+    assert_eq!(renderer.published.get(&second.client).cloned(), published);
+    assert_eq!(renderer.shell_cache.len(), 1);
+    assert_eq!(
+        renderer.completed.as_ref().map(|entry| entry.client),
+        completed
+    );
+}
+
+#[test]
+fn status_forget_cleans_rendered_clients_before_publication() {
+    let request = request(9, "#(printf ready)", "");
+    let mut renderer = StatusRenderer::default();
+    let mut touched = BTreeSet::new();
+    let _ = renderer.render_request(&request, &mut touched, false, 1_700_000_000);
+    assert!(renderer.owned_clients.contains(&request.client));
+    assert!(!renderer.published.contains_key(&request.client));
+    assert_eq!(renderer.shell_cache.len(), 1);
+    renderer.forget(request.client);
+    assert!(renderer.owned_clients.is_empty());
+    assert!(renderer.shell_cache.is_empty());
+    assert!(renderer.published.is_empty());
+    assert!(renderer.completed.is_none());
+    assert!(renderer.job_needs.lock().is_empty());
+    assert!(renderer.uncovered_jobs.is_empty());
+}
+
 #[test]
 fn live_status_context_matches_model_snapshot_for_focused_missing_and_linked_targets() {
     let mut engine = MuxEngine::default();
@@ -203,12 +342,12 @@ fn completed_status_does_not_retain_oversized_sources_callbacks_or_borders() {
                     .prefix = large;
             }
             _ => {
-                request
-                    .pane_borders
-                    .push(zz_protocol::PaneBorderPresentation {
+                Arc::make_mut(&mut request.pane_borders).push(
+                    zz_protocol::PaneBorderPresentation {
                         pane: request.context.pane_id.parse().unwrap(),
                         style: large,
-                    });
+                    },
+                );
             }
         }
         let mut renderer = StatusRenderer::default();
@@ -273,12 +412,68 @@ fn completed_status_reuses_forced_output_and_ignores_unreferenced_client_fields(
         .unwrap()
         .activity = "123".to_owned();
     assert_eq!(renderer.render_forced_at(&request, 1_700_000_000), first);
-    assert_eq!(renderer.published.get(&request.client), Some(&first));
+    assert_eq!(
+        renderer.published.get(&request.client).map(Arc::as_ref),
+        Some(&first),
+    );
     assert_eq!(renderer.expansions, if cache_enabled { 1 } else { 2 });
     renderer.forget(request.client);
     assert!(renderer.completed.is_none());
     assert_eq!(renderer.render_forced_at(&request, 1_700_000_000), first);
     assert_eq!(renderer.expansions, if cache_enabled { 2 } else { 3 });
+}
+
+#[test]
+fn completed_status_shares_internal_output_and_keeps_wire_and_mode_updates_independent() {
+    let cache_enabled = zz_mux::format_cache_knob() && zz_mux::borrowed_formats_enabled();
+    let (_, _, request) = completed_request("#{session_name}");
+    let mut renderer = StatusRenderer::default();
+    let mut first = renderer.render_forced_at(&request, 1_700_000_000);
+    let retained = Arc::clone(renderer.published.get(&request.client).unwrap());
+    if cache_enabled {
+        assert!(Arc::ptr_eq(
+            &retained,
+            &renderer.completed.as_ref().unwrap().status,
+        ));
+    }
+    first.left = "wire-only change".to_owned();
+    assert_eq!(
+        renderer.render_forced_at(&request, 1_700_000_000).left,
+        "cached",
+    );
+    assert_eq!(
+        Arc::ptr_eq(&retained, renderer.published.get(&request.client).unwrap()),
+        cache_enabled,
+    );
+    assert_eq!(renderer.expansions, if cache_enabled { 1 } else { 2 });
+    let modes = vec![zz_protocol::ModePresentation {
+        pane: request.context.pane_id.parse().unwrap(),
+        view: false,
+        position: "[1/2]".to_owned(),
+        position_style: "fg=red".to_owned(),
+        selection_style: String::new(),
+        vi_keys: false,
+        match_style: String::new(),
+        current_match_style: String::new(),
+    }];
+    let updated = renderer
+        .republish_modes(request.client, modes.clone())
+        .unwrap();
+    assert_eq!(updated.modes, modes);
+    assert!(retained.modes.is_empty());
+    assert_eq!(retained.left, "cached");
+    assert!(renderer.completed.is_none());
+    assert_eq!(
+        renderer.published.get(&request.client).unwrap().modes,
+        modes,
+    );
+    assert!(renderer.republish_modes(request.client, modes).is_none());
+    assert!(
+        renderer
+            .render_forced_at(&request, 1_700_000_000)
+            .modes
+            .is_empty(),
+    );
 }
 
 #[test]

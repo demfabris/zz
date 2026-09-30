@@ -30,7 +30,7 @@ fn borders(
     client: ClientId,
     session: SessionId,
     facts: &dyn crate::status::FormatFactSource,
-) -> Vec<zz_protocol::PaneBorderPresentation> {
+) -> Arc<Vec<zz_protocol::PaneBorderPresentation>> {
     border_presentations_at(inner, client, session, facts, 1_700_000_000)
 }
 
@@ -65,6 +65,7 @@ fn border_format_cache_reuses_default_styles_at_twenty_windows() {
     facts.client.as_mut().unwrap().written = "99".to_owned();
     let second = borders(&inner, client, context.session.unwrap(), &facts);
     assert_eq!(second, first);
+    assert_eq!(Arc::ptr_eq(&first, &second), zz_mux::format_cache_knob());
     assert_eq!(
         expansions(),
         before + usize::from(!zz_mux::format_cache_knob())
@@ -107,6 +108,8 @@ fn border_format_cache_reads_fresh_mode_values_for_every_pane() {
     facts.pane_modes = Arc::new(BTreeMap::from([(first_pane, (1, "choose-tree"))]));
     let second = borders(&inner, client, context.session.unwrap(), &facts);
     assert_eq!(inner.engine.format_cache_revision(), revision);
+    assert!(!Arc::ptr_eq(&first, &second));
+    assert!(first.iter().all(|pane| pane.style == "fg=green"));
     assert_eq!(
         second
             .iter()

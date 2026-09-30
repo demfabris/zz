@@ -185,6 +185,15 @@ fn status_preparation_invalidates_config_state_options_data_environment_and_cloc
         let clock = request(&inner, client);
         assert_fresh(&environment, &clock);
         assert_eq!(clock.context.format_now, Some(1_700_000_001));
+        let same_second = request(&inner, client);
+        assert_eq!(
+            Arc::ptr_eq(&clock.context, &same_second.context),
+            reuse_enabled()
+        );
+        assert_eq!(
+            Arc::ptr_eq(&clock.facts, &same_second.facts),
+            reuse_enabled()
+        );
         assert_eq!(
             first.context.variable("pane_title").as_deref(),
             Some("first")

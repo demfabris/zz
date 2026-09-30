@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{
-        Arc, LazyLock, Mutex, OnceLock,
+        Arc, LazyLock, Mutex, OnceLock, Weak,
         atomic::{AtomicU64, Ordering},
     },
     thread,
@@ -171,7 +171,7 @@ pub(crate) type StatusJobNeeds = Arc<parking_lot::Mutex<BTreeMap<ClientId, Forma
 #[derive(Default)]
 pub(crate) struct StatusRenderer {
     shell_cache: BTreeMap<ShellCacheKey, ShellCacheEntry>,
-    published: BTreeMap<ClientId, StatusLine>,
+    published: BTreeMap<ClientId, Arc<StatusLine>>,
     tmux_shim: Option<PathBuf>,
     zz_executable: Option<PathBuf>,
     job_waker: Option<thread::Thread>,
@@ -181,6 +181,7 @@ pub(crate) struct StatusRenderer {
     completed: Option<CompletedStatus>,
     #[cfg(test)]
     expansions: usize,
+    owned_clients: BTreeSet<ClientId>,
 }
 
 #[derive(Clone)]
@@ -205,7 +206,7 @@ pub(crate) struct StatusRequest {
     pub(crate) client_scheme: Option<TerminalColorScheme>,
     pub(crate) message_styles: Arc<(String, String)>,
     pub(crate) modes: Vec<ModeRequest>,
-    pub(crate) pane_borders: Vec<zz_protocol::PaneBorderPresentation>,
+    pub(crate) pane_borders: Arc<Vec<zz_protocol::PaneBorderPresentation>>,
     pub(crate) references: Arc<BTreeSet<String>>,
 }
 
@@ -221,11 +222,12 @@ struct CompletedStatus {
     context: Arc<StatusContext<'static>>,
     client_scheme: Option<TerminalColorScheme>,
     message_styles: Arc<(String, String)>,
-    pane_borders: Vec<zz_protocol::PaneBorderPresentation>,
+    pane_borders: Arc<Vec<zz_protocol::PaneBorderPresentation>>,
     callback_names: Vec<String>,
     callbacks: Vec<Option<String>>,
     now: i64,
-    status: StatusLine,
+    status: Arc<StatusLine>,
+    fact_identity: Weak<FormatHookFacts>,
 }
 
 const COMPLETED_STATUS_MAX_BYTES: usize = 1024 * 1024;
@@ -238,7 +240,8 @@ pub(crate) fn completed_status_bytes(
 ) -> usize {
     let mut bytes = std::mem::size_of::<CompletedStatus>()
         .saturating_add(request.context.retained_bytes())
-        .saturating_add(request.option_snapshot.retained_bytes());
+        .saturating_add(request.option_snapshot.retained_bytes())
+        .saturating_add(std::mem::size_of::<FormatHookFacts>());
     for value in [
         &request.formats.left,
         &request.formats.right,
@@ -302,16 +305,23 @@ impl CompletedStatus {
                 || self.message_styles == request.message_styles)
     }
 
+    fn same_lookup_scope(&self, request: &StatusRequest) -> bool {
+        self.context.session_id == request.context.session_id
+            && self.context.window_id == request.context.window_id
+            && self.context.pane_id == request.context.pane_id
+            && self.context.has_captured_environment() == request.context.has_captured_environment()
+    }
+
     fn matches(&self, request: &StatusRequest, callbacks: &[Option<String>], now: i64) -> bool {
         self.client == request.client
             && self.now == now
-            && self.same_templates(request)
             && self.message_line == request.message_line
             && self.customized == request.customized
             && self.client_scheme == request.client_scheme
             && self.pane_borders == request.pane_borders
-            && self.callbacks == callbacks
-            && self.context.same_detached(&request.context)
+            && (std::ptr::eq(self.callbacks.as_slice(), callbacks) || self.callbacks == callbacks)
+            && (Arc::ptr_eq(&self.context, &request.context)
+                || self.context.same_detached(&request.context))
     }
 
     fn new(
@@ -319,7 +329,7 @@ impl CompletedStatus {
         callback_names: Vec<String>,
         callbacks: Vec<Option<String>>,
         now: i64,
-        status: StatusLine,
+        status: Arc<StatusLine>,
     ) -> Self {
         Self {
             client: request.client,
@@ -338,6 +348,7 @@ impl CompletedStatus {
             callbacks,
             now,
             status,
+            fact_identity: Arc::downgrade(&request.facts),
         }
     }
 }
@@ -1156,8 +1167,8 @@ impl StatusRenderer {
         {
             self.completed = None;
         }
-        published.modes = modes;
-        Some(published.clone())
+        Arc::make_mut(published).modes = modes;
+        Some(published.as_ref().clone())
     }
 
     pub(crate) fn job_summaries(&self) -> Vec<String> {
@@ -1223,8 +1234,8 @@ impl StatusRenderer {
         let mut touched = BTreeSet::new();
         let status = self.render_request(request, &mut touched, true, now);
         self.note_uncovered_jobs(request, &touched);
-        self.published.insert(request.client, status.clone());
-        status
+        self.published.insert(request.client, Arc::clone(&status));
+        status.as_ref().clone()
     }
 
     fn render_request(
@@ -1233,22 +1244,29 @@ impl StatusRenderer {
         touched: &mut BTreeSet<ShellCacheKey>,
         refresh: bool,
         now: i64,
-    ) -> StatusLine {
+    ) -> Arc<StatusLine> {
+        self.owned_clients.insert(request.client);
+        let mut callback_names = None;
         if request.modes.is_empty()
             && let Some(completed) = &self.completed
             && completed.same_templates(request)
         {
-            let callbacks = status_callback_values(request, &completed.callback_names);
-            if completed.matches(request, &callbacks, now) {
-                return completed.status.clone();
+            let fresh_callbacks = (completed.fact_identity.as_ptr() != Arc::as_ptr(&request.facts))
+                .then(|| status_callback_values(request, &completed.callback_names));
+            let callbacks = fresh_callbacks.as_deref().unwrap_or(&completed.callbacks);
+            if completed.matches(request, callbacks, now) {
+                return Arc::clone(&completed.status);
+            }
+            if completed.same_lookup_scope(request) {
+                callback_names = Some(completed.callback_names.clone());
             }
         }
-        let callback_names = status_cache_callbacks(request);
+        let callback_names = callback_names.or_else(|| status_cache_callbacks(request));
         #[cfg(test)]
         {
             self.expansions += 1;
         }
-        let status = render(
+        let status = Arc::new(render(
             &mut self.shell_cache,
             touched,
             request,
@@ -1257,12 +1275,12 @@ impl StatusRenderer {
             self.tmux_shim.as_deref(),
             self.zz_executable.as_deref(),
             self.job_waker.as_ref(),
-        );
+        ));
         self.completed = callback_names.and_then(|names| {
             let callbacks = status_callback_values(request, &names);
             (completed_status_bytes(request, &names, &callbacks, &status)
                 <= COMPLETED_STATUS_MAX_BYTES)
-                .then(|| CompletedStatus::new(request, names, callbacks, now, status.clone()))
+                .then(|| CompletedStatus::new(request, names, callbacks, now, Arc::clone(&status)))
         });
         status
     }
@@ -1299,8 +1317,8 @@ impl StatusRenderer {
             {
                 continue;
             }
-            self.published.insert(request.client, status.clone());
-            changed.push((request.client, status));
+            self.published.insert(request.client, Arc::clone(&status));
+            changed.push((request.client, status.as_ref().clone()));
         }
         changed
     }
@@ -1309,11 +1327,14 @@ impl StatusRenderer {
         let mut touched = BTreeSet::new();
         let status = self.render_request(request, &mut touched, false, format_second());
         self.note_uncovered_jobs(request, &touched);
-        self.published.insert(request.client, status.clone());
-        status
+        self.published.insert(request.client, Arc::clone(&status));
+        status.as_ref().clone()
     }
 
     pub(crate) fn forget(&mut self, client: ClientId) {
+        if !self.owned_clients.remove(&client) {
+            return;
+        }
         self.published.remove(&client);
         if self
             .completed
@@ -1559,7 +1580,7 @@ fn render(
             mode_presentation(mode, &mut hooks)
         })
         .collect::<Vec<_>>();
-    let pane_borders = request.pane_borders.clone();
+    let pane_borders = request.pane_borders.as_ref().clone();
     if !request.formats.enabled {
         return StatusLine {
             title,
@@ -2932,7 +2953,7 @@ mod tests {
             client_scheme: None,
             message_styles: Arc::new((String::new(), String::new())),
             modes: Vec::new(),
-            pane_borders: Vec::new(),
+            pane_borders: Arc::default(),
             references: MuxEngine::default().cached_format_references_for_templates([left, right]),
         }
     }
@@ -2982,7 +3003,7 @@ mod tests {
             client_scheme: None,
             message_styles: Arc::new(message_styles),
             modes: Vec::new(),
-            pane_borders: Vec::new(),
+            pane_borders: Arc::default(),
             references,
         }
     }

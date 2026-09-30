@@ -234,7 +234,7 @@ impl DirectControl {
         if probe_protocol {
             self.read_protocol(true);
         } else if !poll_empty {
-            self.read_protocol(false);
+            self.read_protocol(self.input.has_event());
         }
         if self.input.has_event() || (self.pending_protocol.is_some() && !self.prefer_stdin) {
             return Ok(self.take_ready(false));
@@ -2690,6 +2690,70 @@ mod tests {
                     if *message == *expected)
                 );
             }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cached_stdin_keeps_fresh_protocol_priority_with_open_and_closed_guards() {
+        for (buffered, block_open) in [(false, false), (false, true), (true, false), (true, true)] {
+            let (_directory, mut server, mut receiver, input) = direct_control_fixture();
+            assert!(matches!(
+                receiver.receive(None).unwrap(),
+                Some(MainEvent::Protocol(_))
+            ));
+            rustix::io::write(&input, b"first command\nsecond command\n").unwrap();
+            assert!(matches!(
+                receiver.receive(None).unwrap(),
+                Some(MainEvent::Stdin(StdinEvent::Line(line))) if line == "first command"
+            ));
+            let ControlSource::Direct(direct) = &receiver.source else {
+                unreachable!();
+            };
+            assert!(direct.input.has_event());
+            assert!(!direct.prefer_stdin);
+            let messages = [
+                ProtocolMessage::CommandResponse(CommandResponse::Success {
+                    request_id: 1,
+                    output: "ready".into(),
+                    exit_code: 0,
+                    stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
+                }),
+                ProtocolMessage::ExecExit(zz_protocol::ExecExit {
+                    server_id: 1,
+                    outcome: ExecOutcome::Ran,
+                }),
+            ];
+            server
+                .write_all(
+                    &zz_protocol::encode_protocol_message(&ProtocolMessage::Batch(
+                        zz_protocol::Batch::from_messages(2, messages.clone()).unwrap(),
+                    ))
+                    .unwrap(),
+                )
+                .unwrap();
+            let mut writer = ControlWriter::new(Vec::new(), false);
+            if block_open {
+                writer.begin_buffered_at(21, 1).unwrap();
+            }
+            let mut next = || {
+                if buffered {
+                    Some(receive_buffered_control_event(&mut receiver, &mut writer).unwrap())
+                } else {
+                    receiver.receive(None).unwrap()
+                }
+            };
+            for expected in messages {
+                assert!(
+                    matches!(next(), Some(MainEvent::Protocol(message)) if *message == expected),
+                    "buffered={buffered}, block_open={block_open}"
+                );
+            }
+            assert!(
+                matches!(next(), Some(MainEvent::Stdin(StdinEvent::Line(line)))
+                if line == "second command")
+            );
         }
     }
 

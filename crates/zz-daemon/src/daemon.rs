@@ -112295,6 +112295,11 @@ bind - split-window -v -c "#{pane_current_path}"
                 "an agent pane owns a PTY-free shadow terminal"
             );
 
+            workspace.wait_for_items("initial session", |items| {
+                items
+                    .iter()
+                    .any(|item| matches!(item.payload, AgentStreamPayload::SessionReady { .. }))
+            });
             run(&["agent-send", "-t", &target, "--submit", "review this"]).expect("submit");
             let deadline = Instant::now() + DEADLINE;
             let screen = loop {

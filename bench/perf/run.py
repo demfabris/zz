@@ -25,7 +25,7 @@ import probe
 import timing
 from ptyclient import PtyClient
 
-GROUPS = ["cli", "spawn", "cold", "config", "chatty", "idle", "mem", "attach", "echo", "throughput", "control", "statusjob"]
+GROUPS = ["cli", "spawn", "cold", "config", "chatty", "idle", "mem", "copy", "attach", "echo", "throughput", "control", "statusjob"]
 PANE = os.path.join(HERE, "pane")
 
 
@@ -360,6 +360,8 @@ def main():
     if unknown:
         sys.exit(f"unknown groups: {', '.join(unknown)} (known: {', '.join(GROUPS)})")
     groups = only or GROUPS
+    if "mem" in groups:
+        groups = [name for name in groups if name != "copy"]
 
     sha, dirty = git_sha()
     host = socket.gethostname().split(".")[0]

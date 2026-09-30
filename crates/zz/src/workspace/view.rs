@@ -6484,10 +6484,11 @@ mod tests {
         assert_eq!(sent.len(), 1);
         assert!(matches!(
             &sent[0],
-            InputMessage::ResizeTerminal {
+            InputMessage::ResizeTerminalV2 {
                 pane,
                 columns,
                 rows,
+                layout_generation: 0,
                 ..
             } if *pane == PaneId(0) && *columns == 119 && *rows == 23
         ));
@@ -6578,12 +6579,13 @@ mod tests {
             assert_eq!(sent.len(), 1);
             assert!(matches!(
                 &sent[0],
-                InputMessage::ResizeTerminal {
+                InputMessage::ResizeTerminalV2 {
                     pane,
                     columns,
                     rows,
                     cell_width_px,
                     cell_height_px,
+                    layout_generation: 0,
                 } if *pane == PaneId(0)
                     && *columns == 120
                     && *rows == 24

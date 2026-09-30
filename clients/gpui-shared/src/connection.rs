@@ -202,6 +202,8 @@ pub struct Connection {
     #[cfg(target_os = "ios")]
     retry: Option<gpui::Task<()>>,
     pub core: ClientCore,
+    #[cfg(test)]
+    input_sink: Option<std::rc::Rc<std::cell::RefCell<Vec<ProtocolMessage>>>>,
     pub status: String,
     pub connected: bool,
     pub agent_events: HashMap<PaneId, Vec<(u64, Vec<u8>)>>,
@@ -248,6 +250,8 @@ impl Connection {
             #[cfg(target_os = "ios")]
             retry: None,
             core: ClientCore::new(),
+            #[cfg(test)]
+            input_sink: None,
             status: "Connecting…".into(),
             connected: false,
             agent_events: HashMap::new(),
@@ -558,6 +562,24 @@ impl Connection {
         cx.notify();
     }
 
+    #[cfg(test)]
+    pub(crate) fn record_input_for_test(
+        &mut self,
+    ) -> std::rc::Rc<std::cell::RefCell<Vec<ProtocolMessage>>> {
+        let sink = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        self.input_sink = Some(std::rc::Rc::clone(&sink));
+        sink
+    }
+
+    #[cfg(test)]
+    pub(crate) fn handle_message_for_test(
+        &mut self,
+        message: ProtocolMessage,
+        cx: &mut Context<Self>,
+    ) {
+        self.receive(message, cx);
+    }
+
     #[allow(clippy::needless_pass_by_value)]
     pub fn send(&mut self, message: ProtocolMessage, cx: &mut Context<Self>) {
         let message = match message {
@@ -584,6 +606,11 @@ impl Connection {
             }
             message => message,
         };
+        #[cfg(test)]
+        if let Some(sink) = &self.input_sink {
+            sink.borrow_mut().push(message);
+            return;
+        }
         #[cfg(target_family = "wasm")]
         {
             if let Some(socket) = &self.socket {

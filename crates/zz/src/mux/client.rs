@@ -2352,6 +2352,11 @@ impl MuxClient {
         Arc::clone(self.core.snapshot())
     }
 
+    #[must_use]
+    pub(crate) const fn layout_generation(&self) -> u64 {
+        self.core.layout_generation()
+    }
+
     pub(crate) fn agent_attention_status(
         &self,
         pane: PaneId,

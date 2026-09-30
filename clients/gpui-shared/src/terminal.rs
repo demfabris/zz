@@ -126,7 +126,7 @@ pub struct TerminalPane {
     resize_suppressed: Rc<Cell<bool>>,
     scroll_rows: f32,
     overscroll: gpui::RubberBand,
-    geometry: Option<GridSize>,
+    geometry: Option<(GridSize, u64)>,
     cache: RowRenderCache,
     row_revisions: Vec<u64>,
     next_revision: u64,
@@ -203,6 +203,14 @@ impl TerminalPane {
                     this.geometry = None;
                     this.cursor_blink_visible = true;
                     this.cursor_blink_task = None;
+                    cx.notify();
+                }
+                CoreEvent::SnapshotChanged
+                    if this.surface == TerminalSurface::Pane
+                        && this.geometry.is_some_and(|(_, generation)| {
+                            generation != connection.read(cx).core.layout_generation()
+                        }) =>
+                {
                     cx.notify();
                 }
                 CoreEvent::CommandOutputChanged
@@ -876,9 +884,12 @@ impl TerminalPane {
             PointerCellEvent {
                 column: column.min(
                     self.geometry
-                        .map_or(0, |grid| grid.columns.saturating_sub(1)),
+                        .map_or(0, |(grid, _)| grid.columns.saturating_sub(1)),
                 ),
-                row: row.min(self.geometry.map_or(0, |grid| grid.rows.saturating_sub(1))),
+                row: row.min(
+                    self.geometry
+                        .map_or(0, |(grid, _)| grid.rows.saturating_sub(1)),
+                ),
                 click_count: count.min(3) as u8,
                 rectangle: modifiers.alt,
             },
@@ -1195,7 +1206,8 @@ impl TerminalPane {
             bounds.origin + point(Pixels::ZERO, displacement),
             bounds.size,
         );
-        let (paint, attached) = self.connection.clone().update(cx, |connection, cx| {
+        let connection = self.connection.clone();
+        let (paint, attached, layout_generation) = connection.update(cx, |connection, cx| {
             for image in connection.take_retired_terminal_images() {
                 let _ = window.drop_image(image);
             }
@@ -1252,7 +1264,11 @@ impl TerminalPane {
                 window,
                 cx,
             );
-            Some((paint, connection.core.attached_session().is_some()))
+            Some((
+                paint,
+                connection.core.attached_session().is_some(),
+                connection.core.layout_generation(),
+            ))
         })?;
         let geometry = paint.geometry;
         self.link_hover_bounds = geometry.link_hover_bounds;
@@ -1267,22 +1283,31 @@ impl TerminalPane {
             window.invalidate_character_coordinates();
         }
         let measured = geometry.grid;
+        let reported = (
+            measured,
+            if self.surface == TerminalSurface::Pane {
+                layout_generation
+            } else {
+                0
+            },
+        );
         let measurable =
             bounds.size.width >= geometry.cell_width && bounds.size.height >= geometry.line_height;
         if measurable
-            && self.geometry != Some(measured)
+            && self.geometry != Some(reported)
             && attached
             && (self.surface != TerminalSurface::Pane || !self.resize_suppressed.get())
         {
-            self.geometry = Some(measured);
+            self.geometry = Some(reported);
             match self.surface {
                 TerminalSurface::Pane => self.send(
-                    InputMessage::ResizeTerminal {
+                    InputMessage::ResizeTerminalV2 {
                         pane: self.pane,
                         columns: measured.columns,
                         rows: measured.rows,
                         cell_width_px: measured.cell_width_px,
                         cell_height_px: measured.cell_height_px,
+                        layout_generation: reported.1,
                     },
                     cx,
                 ),
@@ -2042,6 +2067,156 @@ fn accumulate_scroll(remainder: &mut f32, delta: f32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gpui::test]
+    fn shared_terminal_geometry_retries_the_same_grid_after_a_new_layout_view(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use zz_protocol::{
+            Batch, ClientView, Event, EventPayload, LayoutNode, MuxSnapshot, PaneKindSnapshot,
+            PaneSnapshot, ProtocolMessage, SessionId, SessionSnapshot, WindowId, WindowSnapshot,
+        };
+
+        cx.update(zz_ui::init);
+        let connection_slot = Rc::new(std::cell::RefCell::new(None));
+        let captured_connection = Rc::clone(&connection_slot);
+        let (terminal, cx) = cx.add_window_view(move |_, cx| {
+            let connection = cx.new(Connection::new);
+            connection.update(cx, |connection, cx| {
+                let snapshot = MuxSnapshot {
+                    generation: 1,
+                    sessions: vec![SessionSnapshot {
+                        id: SessionId(1),
+                        name: "test".into(),
+                        active_window: WindowId(1),
+                        viewers: Vec::new(),
+                        windows: vec![WindowSnapshot {
+                            id: WindowId(1),
+                            index: 0,
+                            name: "test".into(),
+                            automatic_rename: true,
+                            active_pane: PaneId(1),
+                            zoomed_pane: None,
+                            layout: LayoutNode::Pane(PaneId(1)),
+                            panes: [(
+                                PaneId(1),
+                                PaneSnapshot {
+                                    id: PaneId(1),
+                                    title: "test".into(),
+                                    kind: PaneKindSnapshot::Terminal,
+                                    synchronized_input: false,
+                                    bell: false,
+                                    dead: false,
+                                    dead_status: None,
+                                    border_colour: None,
+                                    active_border_colour: None,
+                                    border_status_text: String::new(),
+                                    mode: None,
+                                },
+                            )]
+                            .into(),
+                            layout_dump: String::new(),
+                            visible_layout_dump: String::new(),
+                            status_label: String::new(),
+                            activity: false,
+                            pane_border_status: zz_protocol::PaneBorderStatus::default(),
+                            pane_border_lines: zz_protocol::PaneBorderLines::default(),
+                            pane_border_indicators: zz_protocol::PaneBorderIndicators::default(),
+                            pane_order: vec![PaneId(1)],
+                            pane_z_order: vec![PaneId(1)],
+                        }],
+                    }],
+                    focused_window: Some(WindowId(1)),
+                };
+                let messages = [
+                    EventPayload::Snapshot(snapshot),
+                    EventPayload::ClientView(ClientView {
+                        session: Some(SessionId(1)),
+                        focused_window: Some(WindowId(1)),
+                        attachment_generation: 1,
+                        layout_generation: 1,
+                        ..Default::default()
+                    }),
+                    EventPayload::TerminalViewport {
+                        pane: PaneId(1),
+                        viewport: TerminalViewport::blank(80, 24, SessionStatus::Running),
+                    },
+                ]
+                .into_iter()
+                .enumerate()
+                .map(|(index, payload)| {
+                    ProtocolMessage::Event(Event {
+                        sequence: index as u64 + 1,
+                        payload,
+                    })
+                });
+                connection.handle_message_for_test(
+                    ProtocolMessage::Batch(Batch::from_messages(1, messages).unwrap()),
+                    cx,
+                );
+            });
+            let sent = connection.update(cx, |connection, _| connection.record_input_for_test());
+            captured_connection.replace(Some((connection.clone(), sent)));
+            TerminalPane::new(PaneId(1), connection, cx)
+        });
+        let (connection, sent) = connection_slot.borrow().clone().unwrap();
+        let reports = || {
+            sent.borrow()
+                .iter()
+                .filter_map(|message| {
+                    if let ProtocolMessage::Input(InputMessage::ResizeTerminalV2 {
+                        columns,
+                        rows,
+                        cell_width_px,
+                        cell_height_px,
+                        layout_generation,
+                        ..
+                    }) = message
+                    {
+                        Some((
+                            *columns,
+                            *rows,
+                            *cell_width_px,
+                            *cell_height_px,
+                            *layout_generation,
+                        ))
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(reports().len(), 1);
+        connection.update(cx, |connection, cx| {
+            connection.handle_message_for_test(
+                ProtocolMessage::Event(Event {
+                    sequence: 4,
+                    payload: EventPayload::ClientView(ClientView {
+                        session: Some(SessionId(1)),
+                        focused_window: Some(WindowId(1)),
+                        attachment_generation: 1,
+                        layout_generation: 2,
+                        ..Default::default()
+                    }),
+                }),
+                cx,
+            );
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let resized = reports();
+        assert_eq!(resized.len(), 2);
+        assert_eq!(resized[0].4, 1);
+        assert_eq!(resized[1].4, 2);
+        assert_eq!(resized[0].0, resized[1].0);
+        assert_eq!(resized[0].1, resized[1].1);
+        assert_eq!(resized[0].2, resized[1].2);
+        assert_eq!(resized[0].3, resized[1].3);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(reports().len(), 2);
+        drop(terminal);
+    }
 
     #[test]
     fn terminal_search_keys_preserve_direction_and_cycle_regex_and_case() {

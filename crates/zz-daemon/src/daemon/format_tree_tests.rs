@@ -193,3 +193,48 @@ fn format_tree_entries_leave_table_callbacks_ahead_of_command_values() {
         format!("alpha:{}:kept:display-message", context.pane.unwrap())
     );
 }
+
+#[test]
+fn daemon_config_files_and_mouse_callbacks_read_their_fact_variables() {
+    let (shared, client, context) = fixture();
+    let inner = shared.inner.lock();
+    let facts = borrowed(&inner, client, &context);
+    let mut values =
+        inner
+            .engine
+            .format_status_context(context.session, context.window, context.pane);
+    values.set_format_value("config_files", "/context.conf");
+    let variables = BTreeMap::from([
+        (
+            "config_files".to_owned(),
+            "/first.conf,/second.conf".to_owned(),
+        ),
+        ("mouse_pane".to_owned(), "%7".to_owned()),
+        ("mouse_x".to_owned(), "9".to_owned()),
+        ("mouse_y".to_owned(), "12".to_owned()),
+        ("mouse_word".to_owned(), "word".to_owned()),
+        ("mouse_line".to_owned(), "a line".to_owned()),
+        (
+            "mouse_hyperlink".to_owned(),
+            "https://example.test".to_owned(),
+        ),
+        ("session_name".to_owned(), "spoofed".to_owned()),
+    ]);
+    let mut hooks = DaemonFormatHooks::command_with_variables(&facts, &variables);
+    assert_eq!(
+        expand_format_values(
+            "#{config_files}|#{mouse_pane}|#{mouse_x}|#{mouse_y}|#{mouse_word}|#{mouse_line}|#{mouse_hyperlink}|#{session_name}",
+            &values,
+            &mut hooks,
+        ),
+        "/first.conf,/second.conf|%7|9|12|word|a line|https://example.test|alpha"
+    );
+    assert_eq!(
+        expand_format_values(
+            "#{config_files}|#{mouse_word}",
+            &values,
+            &mut DaemonFormatHooks::command(&facts),
+        ),
+        "/context.conf|"
+    );
+}

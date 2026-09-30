@@ -95132,7 +95132,21 @@ bind - split-window -v -c "#{pane_current_path}"
         assert_eq!(inserted.output, "/dev/pts/42|4242");
 
         let mut status_request = {
-            let inner = shared.inner.lock();
+            let mut inner = shared.inner.lock();
+            inner
+                .engine
+                .execute(
+                    &mut ExecutionContext::new(Some(session), Some(window), Some(pane)),
+                    &CommandInvocation::new(
+                        "set-option",
+                        [
+                            "-g",
+                            "status-left",
+                            "#{client_pid}:#{client_tty}:#{session_active}",
+                        ],
+                    ),
+                )
+                .expect("configure status client facts before capture");
             let option_snapshot = Arc::new(inner.engine.format_option_snapshot());
             status_request(
                 &inner,
@@ -95146,7 +95160,6 @@ bind - split-window -v -c "#{pane_current_path}"
         };
         status_request.formats.enabled = true;
         status_request.formats.lines = 1;
-        status_request.formats.left = "#{client_pid}:#{client_tty}:#{session_active}".to_owned();
         status_request.formats.left_length = u16::MAX;
         let status = StatusRenderer::default().render_initial(&status_request);
         assert!(

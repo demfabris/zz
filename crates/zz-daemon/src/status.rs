@@ -1973,8 +1973,17 @@ impl StatusHooks for DaemonFormatHooks<'_> {
             return self.copy_mode_variable(name, context);
         }
         match name {
+            "config_files" => self
+                .variables
+                .and_then(|variables| variables.get(name))
+                .cloned(),
             "mouse_pane" | "mouse_x" | "mouse_y" | "mouse_word" | "mouse_line"
-            | "mouse_hyperlink" => Some(String::new()),
+            | "mouse_hyperlink" => Some(
+                self.variables
+                    .and_then(|variables| variables.get(name))
+                    .cloned()
+                    .unwrap_or_default(),
+            ),
             "pane_in_mode" => Some(
                 (context
                     .pane_id

@@ -1041,15 +1041,10 @@ impl Connection {
                 self.send(ProtocolMessage::Hello(browser::hello(target)), cx);
             }
             inbox::SocketEvent::Frame(bytes) => match zz_protocol::decode_protocol_frame(&bytes) {
-                Ok(ProtocolMessage::Welcome(hello))
-                    if !hello
-                        .capability_strings()
-                        .iter()
-                        .any(|capability| capability == zz_protocol::PANE_FRAME_CAPABILITY) =>
-                {
+                Ok(message) if !supports_required_protocol(&message) => {
                     self.disconnected(
                         format!(
-                            "The zz daemon is an older build of protocol v{} whose terminal frames this client cannot read. Restart it with zz kill-server.",
+                            "The zz daemon is an older build of protocol v{} that lacks the terminal or control protocol this client needs. Restart it with zz kill-server.",
                             zz_protocol::PROTOCOL_VERSION
                         ),
                         cx,
@@ -1067,6 +1062,23 @@ impl Connection {
         cx.notify();
         self.socket.is_some()
     }
+}
+
+#[cfg(any(target_family = "wasm", test))]
+fn supports_required_protocol(message: &ProtocolMessage) -> bool {
+    [
+        zz_protocol::PANE_FRAME_CAPABILITY,
+        zz_protocol::CONTROL_CAPABILITY,
+    ]
+    .into_iter()
+    .all(|required| match message {
+        ProtocolMessage::Welcome(welcome) => welcome.has_capability(required),
+        ProtocolMessage::ServerHello(hello) => hello
+            .capabilities
+            .iter()
+            .any(|capability| capability == required),
+        _ => true,
+    })
 }
 
 #[cfg(any(target_family = "wasm", test))]
@@ -1379,12 +1391,45 @@ mod tests {
     };
 
     use super::{
-        AgentCursor,
+        AgentCursor, ProtocolMessage,
         inbox::{self, SocketEvent},
     };
 
     fn blob(seq: u64) -> Vec<u8> {
         format!(r#"{{"seq":{seq},"item":"promptAccepted","turn_id":1}}"#).into_bytes()
+    }
+
+    #[test]
+    fn retained_hellos_require_both_control_and_terminal_capabilities() {
+        for mask in 0..4 {
+            let capabilities = [
+                zz_protocol::PANE_FRAME_CAPABILITY,
+                zz_protocol::CONTROL_CAPABILITY,
+            ]
+            .into_iter()
+            .enumerate()
+            .filter(|(index, _)| mask & (1 << index) != 0)
+            .map(|(_, capability)| capability.to_owned())
+            .collect();
+            let hello = ProtocolMessage::ServerHello(zz_protocol::ServerHello {
+                protocol_version: zz_protocol::PROTOCOL_VERSION,
+                server_id: 1,
+                client_id: zz_protocol::ClientId(1),
+                client_instance_id: zz_protocol::ClientInstanceId(1),
+                capabilities,
+                appearance: zz_terminal::TerminalAppearance::default(),
+                appearance_provenance: zz_terminal::AppearanceProvenance::default(),
+                mux_options: zz_protocol::MuxOptions::default(),
+                status: zz_protocol::StatusLine::default(),
+                key_tables: Vec::new(),
+            });
+            let encoded = zz_protocol::encode_protocol_message(&hello).unwrap();
+            let decoded = zz_protocol::decode_protocol_frame(&encoded).unwrap();
+            assert_eq!(super::supports_required_protocol(&decoded), mask == 3);
+        }
+        assert!(super::supports_required_protocol(
+            &ProtocolMessage::TreeSync
+        ));
     }
 
     fn reset(seq: u64, restoring: bool) -> Vec<u8> {

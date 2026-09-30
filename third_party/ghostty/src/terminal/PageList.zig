@@ -1296,26 +1296,24 @@ pub fn clone(
             page_size += backing.memory.len;
             break :shared result;
         } else copied: {
+            var cap = chunk.node.capacity();
+            if (opts.cow) {
+                cap.rows = chunk.end - chunk.start;
+                cap.cols = chunk.node.cols();
+            }
             const result = try createPageExt(
                 &pool,
-                .{ .cap = chunk.node.capacity() },
+                .{ .cap = cap, .exact_size = opts.cow },
                 &page_serial,
                 &page_size,
             );
+            errdefer destroyNodeExt(&pool, result, &page_size);
             const dst_page = result.page();
             const src_page = chunk.node.page();
-            if (opts.cow and whole_page) {
-                const memory = if (result.owned == .pool)
-                    dst_page.memory.ptr[0..std_size]
-                else
-                    dst_page.memory;
-                dst_page.* = src_page.cloneBuf(memory);
-            } else {
-                dst_page.size.rows = chunk.end - chunk.start;
-                dst_page.size.cols = chunk.node.cols();
-                try dst_page.cloneFrom(src_page, chunk.start, chunk.end);
-                dst_page.dirty = src_page.dirty;
-            }
+            dst_page.size.rows = chunk.end - chunk.start;
+            dst_page.size.cols = chunk.node.cols();
+            try dst_page.cloneFrom(src_page, chunk.start, chunk.end);
+            dst_page.dirty = src_page.dirty;
             break :copied result;
         };
         page_list.append(node);
@@ -21292,6 +21290,27 @@ test "PageList memory pool fast path does not allocate" {
     try testing.expectEqual(0, counting.deallocations);
 }
 
+test "copy-on-write small active clone avoids standard-page backing" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var source = try init(alloc, .{ .cols = 180, .rows = 50 });
+    defer source.deinit();
+    source.pin(.{ .active = .{} }).?.rowAndCell().cell.* = .init('A');
+    source.pin(.{ .active = .{ .x = 179, .y = 49 } }).?.rowAndCell().cell.* = .init('Z');
+    const before = source.memoryStats();
+    var frozen = try source.clone(alloc, .{ .top = .{ .screen = .{} }, .cow = true });
+    defer frozen.deinit();
+    const captured = frozen.memoryStats();
+    try testing.expectEqual(source.total_rows, frozen.total_rows);
+    try testing.expect(captured.resident_backing_bytes <= before.resident_backing_bytes / 2);
+    source.pin(.{ .active = .{ .x = 179, .y = 49 } }).?.rowAndCell().cell.* = .init('X');
+    try testing.expectEqual(@as(u21, 'A'), frozen.pin(.{ .active = .{} }).?.rowAndCellRead().cell.codepoint());
+    try testing.expectEqual(@as(u21, 'Z'), frozen.pin(.{ .active = .{ .x = 179, .y = 49 } }).?.rowAndCellRead().cell.codepoint());
+    try frozen.resize(.{ .cols = 180, .rows = 100 });
+    try testing.expectEqual(@as(u21, 'A'), frozen.pin(.{ .screen = .{} }).?.rowAndCellRead().cell.codepoint());
+    try testing.expectEqual(@as(u21, 'Z'), frozen.pin(.{ .screen = .{ .x = 179, .y = 49 } }).?.rowAndCellRead().cell.codepoint());
+}
+
 test "copy-on-write anchored frozen resident reflow borrows shared input without detaching" {
     const testing = std.testing;
     const alloc = testing.allocator;
@@ -21411,7 +21430,7 @@ test "copy-on-write unread compressed clone teardown never allocates raw mapping
     defer if (frozen_live) frozen.deinit();
     const captured = frozen.memoryStats();
     try testing.expectEqual(before.compressed_pages, captured.compressed_pages);
-    try testing.expectEqual(before.raw_bytes, captured.raw_bytes);
+    try testing.expect(captured.raw_bytes < before.raw_bytes);
     try testing.expectEqual(before.decommitted_raw_bytes, captured.unmapped_raw_bytes);
     try testing.expectEqual(@as(usize, 0), captured.decommitted_raw_bytes);
     try testing.expectEqual(captured.resident_backing_bytes, captured.reserved_backing_bytes);

@@ -1014,7 +1014,7 @@
 
 --- a/src/terminal/c/terminal.zig
 +++ b/src/terminal/c/terminal.zig
-@@ -860,6 +860,43 @@
+@@ -860,6 +860,59 @@
          io,
          default_continuation_max_bytes,
      );
@@ -1031,15 +1031,31 @@
 +fn cloneScreen(source: *ZigTerminal) !Terminal {
 +    const alloc = lib.alloc.default(null);
 +    const io: Io = .init;
-+    const cloned = try new_(null, source.cols, source.rows);
++    const cloned = owned: {
++        const target = try alloc.create(ZigTerminal);
++        errdefer alloc.destroy(target);
++        target.* = backing: {
++            const screen = try alloc.create(Screen);
++            errdefer alloc.destroy(screen);
++            screen.* = try source.screens.active.clonePreserving(io.io(), alloc);
++            errdefer screen.deinit();
++            screen.no_scrollback = false;
++            break :backing try ZigTerminal.initWithScreenSet(
++                alloc,
++                .{ .cols = source.cols, .rows = source.rows },
++                .{
++                    .active_key = .primary,
++                    .active = screen,
++                    .all = .init(.{ .primary = screen }),
++                    .generations = .initFull(0),
++                },
++            );
++        };
++        errdefer target.deinit(alloc);
++        break :owned try wrap(alloc, target, io, default_continuation_max_bytes);
++    };
 +    errdefer free(cloned);
 +    const target = cloned.?.terminal;
-+    const target_screen = try target.screens.getInit(io.io(), alloc, .primary, .{ .cols = source.cols, .rows = source.rows });
-+    const screen = try source.screens.active.clonePreserving(io.io(), alloc);
-+    target_screen.deinit();
-+    target_screen.* = screen;
-+    target_screen.no_scrollback = false;
-+    target.screens.switchTo(.primary);
 +    target.colors.background = source.colors.background;
 +    target.colors.foreground = source.colors.foreground;
 +    target.colors.cursor = source.colors.cursor;
@@ -1058,6 +1074,48 @@
  }
 
  pub fn vt_write(
+@@ -6342,3 +6395,41 @@
+     var values = [_]?*anyopaque{@ptrCast(&cols)};
+     try testing.expectEqual(Result.invalid_value, get_multi(null, 1, null, &values, null));
+ }
++
++test "copy-on-write terminal clone preserves cursor defaults and fresh parser after source drop" {
++    var source: Terminal = null;
++    try testing.expectEqual(Result.success, new(&lib.alloc.test_allocator, &source, 12, 4));
++    defer free(source);
++    const default_style: TerminalCursorStyle = .underline;
++    const default_blink = true;
++    try testing.expectEqual(Result.success, set(source, .default_cursor_style, @ptrCast(&default_style)));
++    try testing.expectEqual(Result.success, set(source, .default_cursor_blink, @ptrCast(&default_blink)));
++    const input = "\x1b[?1049h\x1b[6 q\x1b[31mAB\x1b[";
++    vt_write(source, input, input.len);
++    try testing.expectEqual(ScreenSet.Key.alternate, source.?.terminal.screens.active_key);
++    try testing.expectEqual(Screen.CursorStyle.bar, source.?.terminal.screens.active.cursor.cursor_style);
++
++    var frozen: Terminal = null;
++    try testing.expectEqual(Result.success, clone_screen(source, &frozen));
++    defer free(frozen);
++    const target = frozen.?.terminal;
++    try testing.expectEqual(ScreenSet.Key.primary, target.screens.active_key);
++    try testing.expectEqual(Screen.CursorStyle.block, target.screens.active.cursor.cursor_style);
++    try testing.expectEqual(Screen.CursorStyle.underline, target.cursor.default_style);
++    try testing.expectEqual(@as(?bool, true), target.cursor.default_blink);
++    try testing.expect(!target.cursor.is_default);
++    try testing.expect(!target.modes.get(.cursor_blinking));
++    const written = target.screens.active.pages.pin(.{ .active = .{} }).?.rowAndCellRead().cell;
++    try testing.expectEqual(@as(u21, 'A'), written.codepoint());
++    try testing.expect(written.style_id != 0);
++
++    free(source);
++    source = null;
++    vt_write(frozen, "Z", 1);
++    const cell = target.screens.active.pages.pin(.{ .active = .{ .x = 2, .y = 0 } }).?.rowAndCellRead().cell;
++    try testing.expectEqual(@as(u21, 'Z'), cell.codepoint());
++    try testing.expectEqual(@as(u16, 0), cell.style_id);
++    vt_write(frozen, "\x1b[0 q", 5);
++    try testing.expectEqual(Screen.CursorStyle.underline, target.screens.active.cursor.cursor_style);
++    try testing.expect(target.modes.get(.cursor_blinking));
++}
 --- a/include/ghostty/vt/terminal.h
 +++ b/include/ghostty/vt/terminal.h
 @@ -2132,6 +2132,9 @@
@@ -1191,3 +1249,35 @@
          @export(&c.terminal_free, .{ .name = "ghostty_terminal_free" });
          @export(&c.terminal_reset, .{ .name = "ghostty_terminal_reset" });
          @export(&c.terminal_resize, .{ .name = "ghostty_terminal_resize" });
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -333,7 +333,19 @@
+     });
+     errdefer screen_set.deinit(alloc);
+
+-    var result: Terminal = .{
++    var result = try initWithScreenSet(alloc, opts, screen_set);
++    result.setCursorStyle(.default);
++    return result;
++}
++
++pub fn initWithScreenSet(
++    alloc: Allocator,
++    opts: Options,
++    screen_set: ScreenSet,
++) !Terminal {
++    const cols = opts.cols;
++    const rows = opts.rows;
++    return .{
+         .cols = cols,
+         .rows = rows,
+         .screens = screen_set,
+@@ -356,8 +368,6 @@
+             .default_blink = opts.default_cursor_blink,
+         },
+     };
+-    result.setCursorStyle(.default);
+-    return result;
+ }
+
+ pub fn deinit(self: *Terminal, alloc: Allocator) void {

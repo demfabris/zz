@@ -75,6 +75,7 @@ each `--baseline` is the row above, the first one's is `wave1-alienware-aaaa8195
 | # | Lane | Merge | Follow-ups | Gate JSON |
 |---|---|---|---|---|
 | 1 | HOOKS | `0acd7f2a` | `74f35b65` (foldhash in `clients/web/Cargo.lock`, or `just web-build` stops at `--locked`) | `w2-1-hooks-alienware-0acd7f2a.json` (`--strict`, full, quiet, load 0.8-1.7: 55 pass, 17 fail, 7 regressed, 1 drifted) |
+| 2 | TERM | `d7e3fc95` | `8f18e4d7` (two TERM tests that only failed under `cargo test --workspace`) | `w2-2-term-alienware-d7e3fc95.json` (`--strict`, full, NOT quiet: a Steam game used two cores, load 3.3-7.1: 52 pass, 20 fail, 52 regressed, 5 drifted; read its CPU, wall and throughput rows as noise) |
 
 Merge 1 (HOOKS): every instruction row dropped or held (`config.instr.source_1000` 139.4 -> 41.7
 Minstr, tmux 82.4; `cli.instr.display.p20` 0.248 -> 0.136, tmux 0.262; `cli.instr.chain5.p20`
@@ -87,6 +88,23 @@ in alternating A/B runs (`~/.cache/zz-perf/hooks/merge/ab*.json`); A/B medians p
 against 15.2k. Stage wave2 rules for unmerged lanes fail as expected (attach, echo wire, control
 latency and burst, `chatty.*.visible`), plus the W3 rows (spawn CPU, `mem.threads.p20`). Both
 throughput rows pass now because of the Ghostty pin (`2166bd31`), not HOOKS.
+
+Merge 2 (TERM): the wire rows moved as planned and are exact on any host: `echo.wire_bytes.idle`
+1,133 -> 33 B (rule 64, pass), `echo.wire_bytes.busy30` 3,399 -> 137 B, `attach.wire_s2c.p1` /
+`.p4` 100,064 / 100,237 -> 29,417 / 29,691 B (still over the 8 KiB rule: the rest is the 28 KB
+`ServerHello`, W2-CTRL), `attach.instr.p1` / `.p4` 10.62 / 11.08 -> 10.09 / 10.56 Minstr,
+`chatty.instr_per_s.visible` 389 -> 381 Minstr/s (tmux 149). The gate ran while a game used two
+cores (the quiet wait gave up after 10 minutes), so both muxes lost half their throughput
+(`throughput.detached.ascii` 56.5 MB/s, tmux 24.1, bare pty reader 56.1) and most CPU and wall
+rows read as regressed against w2-1; `mem.footprint.p20` 17.4 -> 19.1 MiB tripped the strict
+mem rule, but the pre-merge binary reads 19.2-20.0 MiB on the same host. Alternating runs of the
+pre-merge and merge binaries on that host (`~/.cache/zz-perf/term/merge/ab-*.json`, 3 to 7
+pairs) show no regression: `chatty.cpu_pct.visible` 11.2% -> 10.8%, `attach.cpu.p1` 3.53 -> 3.39
+ms, the other chatty, attach, echo and mem rows within noise. `chatty.instr_per_s.hidden` read
+45.7 against 43.4 Minstr/s, tracking more status redraws in the same 10 s window
+(`chatty.tty_kibps.hidden` 0.72 against 0.57 KiB/s, bimodal on both binaries, tmux 0.73); TERM
+does not touch that path, but merge 3 should watch it. **For merge 3, compare CPU, wall and
+throughput rows against w2-1 or a quiet rerun, not this JSON.**
 
 ### Numbers at the last full gate (`w1-5-exec`, macOS M4 Max, tmux 3.7c, medians)
 
@@ -192,6 +210,8 @@ Lanes in flight:
 | W1-LINUX-PAGES | fork `demfabris/ghostty` branch `zz-2026-09-29`, commit `713374af` | landed: zz side `0e590636` (memchr escape scan), fork pin `2166bd31` (detached ASCII 85 -> 120-134 MB/s, unicode 45 -> 91, actor 98% -> 30% CPU). The Darwin trim path still needs the Mac gate (checklist at the top) |
 | W1-ATTACH-PAINT | was `~/dev/zz-attach-paint`, `perf/attach-paint` | merged `aaaa8195`: `Renderer::note_frame` merged, instead of replacing, a pane's unpainted damage when a drain took a second frame; regression test in zz-tui app.rs |
 | W2-HOOKS | was `~/dev/zz-hooks`, `perf/hooks` | merged into `perf/wave2` as `0acd7f2a` (w2-1), worktree and branch removed; reports in `~/.cache/zz-perf/hooks/` (`fix-report.md`, `merge-report.md`) |
+| W2-TERM | was `~/dev/zz-term`, `perf/term` | merged into `perf/wave2` as `d7e3fc95` (w2-2) plus `8f18e4d7`, worktree and branch removed; reports in `~/.cache/zz-perf/term/` (`impl-report.md`, `fix-report.md`, `merge-report.md`). After pulling it, `kill-server` every zz daemon built before it: the wire changed inside 107 |
+| W2-CTRL | not started | can start now from `perf/wave2`: its `Batch` carries TERM's PaneFrames; the encoder entry points are `encode_terminal_viewport_event_into` and `encode_terminal_patch_event_into` (zz-protocol `terminal_codec.rs`, the patch one takes a `TerminalPatchRef` and a `PatchTail`) |
 
 ## Owner decisions (binding)
 
@@ -485,13 +505,22 @@ Rule: every wave exit gets one `--strict` gate run on the Mac, committed as
 - **Wall and CPU noise.** Parallel lanes make wall and CPU time noisy; judge on instructions, bytes, counts, footprint and threads, and run merge-of-record gates with `--strict` on a quiet host.
 - **Compat rows red on the Mac only**: `smoke/resurrect-save` (macOS `/bin/sh` runs as bash, tmux fails it too), `smoke/plugin-runtime-continuum` (gnubin `sleep` is `gsleep`), `smoke/status-background-jobs` (BSD `date` lacks `%N`), `verify_claims_test.py` under `/bin/bash` 3.2. Expect them to pass here; if not, compare with the pre-merge binary before blaming a lane.
 - **The web client has its own lockfile.** A lane that adds a dependency to a crate `clients/web` builds (zz-protocol, zz-client, zz-mux, zz-ui) must refresh `clients/web/Cargo.lock` too (`cargo metadata --offline --manifest-path clients/web/Cargo.toml`), or `just web-build` fails at `cargo metadata --locked` with a Python JSON traceback. W2-HOOKS missed it (`74f35b65`).
+- **`-p` and `--workspace` build different features.** smallvec's `union` feature is on in the
+  workspace and off for `cargo test -p zz-terminal`, so a `size_of` contract over a `SmallVec`
+  holds in one and fails in the other (W2-TERM's `TerminalPatchRowData`, fixed in `8f18e4d7`).
+  Lanes that add layout asserts should run the crate's tests both ways.
+- **A hidden view keeps its last snapshot.** `TerminalSession::latest_viewport_for` still returns
+  the frame the actor built before the daemon turned the view's stream off, until the actor's next
+  publish. The daemon never sends it (the pane is not streamed), so a test that compares a
+  client's retained frames with it must skip panes the client does not stream
+  (`daemon/pane_frame_tests.rs` `settle`).
 - **Pane-title rows under compile load.** `command-item-format` and `new-session-cwd` in `compat/run.sh` read `#{pane_title}` right after `new-session`; with a cargo build running they can see the shell's first title (zz `bash`, tmux `user@host:cwd`) and fail once. They pass alone; W2-HOOKS merge saw both clean in three quiet reruns and on the pre-merge binary.
 
 ## Known open bugs
 
 | Bug | Where | Fix idea |
 |---|---|---|
-| Stale pane geometry after unzoom under load: a client's size report can land after the layout change | daemon `InputMessage::ResizeTerminal` -> `set_pane_geometry` | tag size reports with a layout generation and drop stale ones (protocol change; W2-CTRL or its own lane) |
+| Stale pane geometry after unzoom under load: a client's size report can land after the layout change. At the W2-TERM merge, with a game loading the host, `tui-screen-diff.sh` on the release build showed 1-4 differing `unzoom` / `resized` / `restored` checkpoints in about a third of the runs on the pre-merge, lane and merge binaries alike (merge 6 of 18, pre-merge 4 of 14, lane 2 of 5) (`~/.cache/zz-perf/term/merge/sdab*.log`) | daemon `InputMessage::ResizeTerminal` -> `set_pane_geometry` | tag size reports with a layout generation and drop stale ones (protocol change; W2-CTRL or its own lane) |
 | Title race: the pane watcher can see a program's new title before `program_title_writes` moves, so a `select-pane -T` title then hides it until the next viewport publish | zz-terminal `run_terminal` publishes facts at the top of each pass, after the viewport; daemon `watch_terminal` | set facts right before `publish_active_views` |
 | `verify_claims_test.py` "unattributed: unbound variable" under bash 3.2 | `compat/tui/` | Mac-only; empty array under `set -u` |
 | `mode_keys_scope_visible_command_output_separately_from_underlying_copy_mode` takes 30.05 s alone and fails under load: the Escape never closes the output view, it closes when the window's `sleep 30` exits, just inside the test's 30 s wait (with `sleep 50` it fails at 30 s). Same on `a41b1fbf` | daemon.rs test and the command-output Escape path | find why the emacs-table Escape does not cancel the output view; then the test stops depending on the sleep |

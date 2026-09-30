@@ -2,7 +2,7 @@
 type: Design Plan
 title: Daemon performance rebuild
 description: "The campaign to bring the zz daemon to tmux cost per command, per pane and per attach while keeping the 5x output throughput lead - a permanent zz-vs-tmux gate first, then waves that remove unrequested work (one-frame Exec commands, change-driven publication, lazy formats, frames only for watchers, a compact wire under one unreleased protocol version), then one mux loop and PTY shards; the lane brief source with targets, merge order, write zones, gates and rollback switches."
-status: Approved 2026-09-28; wave 0 (gate and this plan) built; release freeze until W4 exits; wave 1 done and on main; wave 2 in progress on perf/wave2 (HOOKS merged as w2-1); continued on Linux from bench/perf/campaign/HANDOFF.md
+status: Approved 2026-09-28; wave 0 (gate and this plan) built; release freeze until W4 exits; wave 1 done and on main; wave 2 in progress on perf/wave2 (HOOKS merged as w2-1, TERM as w2-2; W2-CTRL can start); continued on Linux from bench/perf/campaign/HANDOFF.md
 resource: crates/zz-daemon/src/daemon.rs
 tags:
 - performance
@@ -19,7 +19,10 @@ timestamp: 2026-09-29T15:30:00Z
 
 2026-09-29: wave 1 (W0, all six wave-1 lanes, three folded side branches) passed its Linux exit
 and is on main (`1e0bfc6a`). Wave 2 runs on `perf/wave2`; W2-HOOKS is merge 1 (`0acd7f2a`,
-`w2-1-hooks-alienware-0acd7f2a.json`). The campaign continues on a Linux host:
+`w2-1-hooks-alienware-0acd7f2a.json`) and W2-TERM merge 2 (`d7e3fc95`,
+`w2-2-term-alienware-d7e3fc95.json`). W2-CTRL can start from there: its `Batch` carries TERM's
+PaneFrames through `encode_terminal_viewport_event_into` and `encode_terminal_patch_event_into`.
+The campaign continues on a Linux host:
 `bench/perf/campaign/HANDOFF.md` has the state, the numbers against tmux at the last gate, the
 next steps in order, the macOS-only checks and the traps; `bench/perf/campaign/attach-review.json`
 has the attach lane's reports; `bench/perf/campaign/scripts/` has the lane workflow template.
@@ -2159,6 +2162,23 @@ Handed on:
   diff and one span encoding per pane per frame.
 - W4-ROWS: the profile above is the "does row extraction show" evidence: it does, at about 60% of
   the actor's samples in visible chatty.
+
+Merged into `perf/wave2` as `d7e3fc95` (w2-2, Linux) after merging perf/wave2 into the lane
+(`ebdf8591`: the knob log lines of both lanes kept, the rollback and test tables joined), plus
+`8f18e4d7`, which fixes two tests that only failed under `cargo test --workspace`: the layout
+contract assumed smallvec without its `union` feature, which the workspace turns on
+(`TerminalPatchRowData` is 56 bytes there, 64 alone), and the two-client daemon test compared
+panes a client no longer streamed (zoom hides a pane while its actor is mid-publish; the actor
+keeps that view's last snapshot, which the daemon rightly never sends, until its next publish).
+The strict gate `w2-2-term-alienware-d7e3fc95.json` against w2-1 ran on a loaded host (a game
+used two cores, load 3.3 to 7.1), so its CPU, wall and throughput rows moved for both muxes; the
+owned byte and instruction rows are exact: `echo.wire_bytes.idle` 1,133 -> 33 B (rule 64),
+`echo.wire_bytes.busy30` 3,399 -> 137 B, `attach.wire_s2c.p1` / `.p4` 100,064 / 100,237 ->
+29,417 / 29,691 B (the rest is the `ServerHello`, W2-CTRL), `attach.instr.p1` / `.p4` 10.62 /
+11.08 -> 10.09 / 10.56 Minstr, `chatty.instr_per_s.visible` 389 -> 381 Minstr/s. Alternating
+runs against the pre-merge binary on the same host put `chatty.cpu_pct.visible` at 10.8% against
+11.2% and every other CPU row within noise; `throughput.detached.ascii` stayed at the pty ceiling
+measured in the same run (56.5 MB/s against a 56.1 MB/s bare reader, tmux 24.1).
 
 ## W2-CTRL: control plane v2 (effort XL)
 

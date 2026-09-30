@@ -1186,6 +1186,10 @@ impl InteractiveClient {
         }
     }
 
+    pub fn take_pending_message(&self) -> Option<ProtocolMessage> {
+        self.reader.lock().pending.pop_front()
+    }
+
     pub fn is_initially_attached(&self) -> bool {
         self.reader
             .lock()

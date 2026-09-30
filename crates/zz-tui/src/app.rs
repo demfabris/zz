@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet},
     io::{self, Read as _},
     mem,
     sync::{
@@ -509,16 +509,6 @@ pub(crate) fn run(
     .map_err(|error| error.to_string())?;
     let pixel_mouse = terminal.pixel_mouse();
     let key_releases = terminal.kitty_keyboard();
-    let mut model = Model::new(
-        &lock_core(&core),
-        size,
-        host_label,
-        local_host_label,
-        endpoint.clone(),
-        local_endpoint,
-        fleet_hosts,
-    );
-    model.begin_client_focus_attach();
     let mut renderer = Renderer::new();
     let mut browser = BrowserState::new(browser_provider);
     let mut kitty_probe = KittyProbe::new(
@@ -537,13 +527,43 @@ pub(crate) fn run(
     });
     let mut frames = Arc::new(FrameInbox::default());
     let mut kitty_images = Arc::new(KittyImageInbox::default());
-    spawn_signal_reader(events.clone())?;
     let mut connection_id = 1;
+    for message in initial_messages
+        .into_iter()
+        .chain(std::iter::from_fn(|| client.take_pending_message()))
+    {
+        if !forward_protocol_message(
+            &core,
+            message,
+            connection_id,
+            &events,
+            &frames,
+            &kitty_images,
+            &kitty_gate,
+            |outbound| match outbound {
+                Outbound::RequestFull(pane) => client.request_full(pane),
+                Outbound::TreeSync => client.request_tree_sync(),
+            },
+        ) {
+            return Err("main event channel disconnected".to_owned());
+        }
+    }
+    let mut model = Model::new(
+        &lock_core(&core),
+        size,
+        host_label,
+        local_host_label,
+        endpoint.clone(),
+        local_endpoint,
+        fleet_hosts,
+    );
+    model.update_snapshot(Arc::clone(lock_core(&core).snapshot()));
+    model.begin_client_focus_attach();
+    spawn_signal_reader(events.clone())?;
     let mut protocol_reader = spawn_protocol_reader(
         Arc::clone(&client),
         Arc::clone(&core),
         connection_id,
-        initial_messages,
         events.clone(),
         Arc::clone(&frames),
         Arc::clone(&kitty_images),
@@ -1313,7 +1333,6 @@ fn replace_connection(
         Arc::clone(&connected.client),
         Arc::clone(&connected.core),
         next_connection_id,
-        Vec::new(),
         events.clone(),
         Arc::clone(&next_frames),
         Arc::clone(&next_kitty_images),
@@ -1334,11 +1353,89 @@ fn replace_connection(
 /// Drives one connection's [`ClientCore`]: decoded messages in, wire requests
 /// straight back out, frames into the coalescing inbox, everything else to the
 /// main loop in stream order.
+fn forward_protocol_message(
+    core: &Mutex<ClientCore>,
+    message: ProtocolMessage,
+    connection: u64,
+    events: &mpsc::Sender<MainEvent>,
+    frames: &FrameInbox,
+    kitty_images: &KittyImageInbox,
+    kitty_gate: &AtomicU8,
+    mut send_outbound: impl FnMut(Outbound) -> Result<(), zz_daemon::DaemonError>,
+) -> bool {
+    let mut core = lock_core(core);
+    core.handle_message(message);
+    while let Some(outbound) = core.poll_outbound() {
+        if let Err(error) = send_outbound(outbound) {
+            log::warn!("failed to synchronize the terminal client: {error}");
+        }
+    }
+    while let Some(event) = core.poll_event() {
+        let event = match event {
+            CoreEvent::ViewportChanged { pane, damage } => {
+                if let Some(viewport) = core.viewport(pane) {
+                    frames.publish(pane, viewport.clone(), damage, connection, events);
+                }
+                continue;
+            }
+            CoreEvent::KittyImageBegin {
+                pane,
+                image_id,
+                generation,
+                width,
+                height,
+                total_bytes,
+            } => {
+                if kitty_gate.load(Ordering::Acquire) != KITTY_GATE_DISABLED {
+                    kitty_images.begin(pane, image_id, generation, width, height, total_bytes);
+                }
+                continue;
+            }
+            CoreEvent::KittyImageChunk {
+                pane,
+                image_id,
+                generation,
+                bytes,
+            } => {
+                if kitty_gate.load(Ordering::Acquire) != KITTY_GATE_DISABLED {
+                    kitty_images.push_chunk(pane, image_id, generation, bytes, connection, events);
+                }
+                continue;
+            }
+            CoreEvent::KittyImagesRemoved { pane, image_ids } => {
+                if kitty_gate.load(Ordering::Acquire) != KITTY_GATE_DISABLED {
+                    kitty_images.remove(pane, image_ids, connection, events);
+                }
+                continue;
+            }
+            CoreEvent::Attached { session } => {
+                frames.clear();
+                kitty_images.clear();
+                CoreEvent::Attached { session }
+            }
+            CoreEvent::PaneRemoved { pane } => {
+                kitty_images.remove_pane(pane);
+                CoreEvent::PaneRemoved { pane }
+            }
+            event => event,
+        };
+        if events
+            .send(MainEvent::Core {
+                connection,
+                event: Box::new(event),
+            })
+            .is_err()
+        {
+            return false;
+        }
+    }
+    true
+}
+
 fn spawn_protocol_reader(
     client: Arc<InteractiveClient>,
     core: Arc<Mutex<ClientCore>>,
     connection: u64,
-    initial_messages: Vec<ProtocolMessage>,
     events: mpsc::Sender<MainEvent>,
     frames: Arc<FrameInbox>,
     kitty_images: Arc<KittyImageInbox>,
@@ -1349,113 +1446,36 @@ fn spawn_protocol_reader(
     thread::Builder::new()
         .name("zz-tui-protocol".to_owned())
         .spawn(move || {
-            let mut initial_messages = VecDeque::from(initial_messages);
             'reader: loop {
-                let message = if let Some(message) = initial_messages.pop_front() {
-                    message
-                } else {
-                    match client.recv() {
-                        Ok(message) => message,
-                        Err(error) => {
-                            if !thread_cancelled.load(Ordering::Acquire) {
-                                let _ = events.send(MainEvent::Disconnected {
-                                    connection,
-                                    error: error.to_string(),
-                                });
-                            }
-                            break;
+                let message = match client.recv() {
+                    Ok(message) => message,
+                    Err(error) => {
+                        if !thread_cancelled.load(Ordering::Acquire) {
+                            let _ = events.send(MainEvent::Disconnected {
+                                connection,
+                                error: error.to_string(),
+                            });
                         }
+                        break;
                     }
                 };
                 if thread_cancelled.load(Ordering::Acquire) {
                     break;
                 }
-                let forwarded = {
-                    let mut core = lock_core(&core);
-                    core.handle_message(message);
-                    while let Some(outbound) = core.poll_outbound() {
-                        let request = match outbound {
-                            Outbound::RequestFull(pane) => client.request_full(pane),
-                            Outbound::TreeSync => client.request_tree_sync(),
-                        };
-                        if let Err(error) = request {
-                            log::warn!("failed to synchronize the terminal client: {error}");
-                        }
-                    }
-                    let mut forwarded = Vec::new();
-                    while let Some(event) = core.poll_event() {
-                        match event {
-                            CoreEvent::ViewportChanged { pane, damage } => {
-                                if let Some(viewport) = core.viewport(pane) {
-                                    frames.publish(
-                                        pane,
-                                        viewport.clone(),
-                                        damage,
-                                        connection,
-                                        &events,
-                                    );
-                                }
-                            }
-                            CoreEvent::KittyImageBegin {
-                                pane,
-                                image_id,
-                                generation,
-                                width,
-                                height,
-                                total_bytes,
-                            } => {
-                                if kitty_gate.load(Ordering::Acquire) != KITTY_GATE_DISABLED {
-                                    kitty_images.begin(
-                                        pane,
-                                        image_id,
-                                        generation,
-                                        width,
-                                        height,
-                                        total_bytes,
-                                    );
-                                }
-                            }
-                            CoreEvent::KittyImageChunk {
-                                pane,
-                                image_id,
-                                generation,
-                                bytes,
-                            } => {
-                                if kitty_gate.load(Ordering::Acquire) != KITTY_GATE_DISABLED {
-                                    kitty_images.push_chunk(
-                                        pane, image_id, generation, bytes, connection, &events,
-                                    );
-                                }
-                            }
-                            CoreEvent::KittyImagesRemoved { pane, image_ids } => {
-                                if kitty_gate.load(Ordering::Acquire) != KITTY_GATE_DISABLED {
-                                    kitty_images.remove(pane, image_ids, connection, &events);
-                                }
-                            }
-                            CoreEvent::Attached { session } => {
-                                frames.clear();
-                                kitty_images.clear();
-                                forwarded.push(CoreEvent::Attached { session });
-                            }
-                            CoreEvent::PaneRemoved { pane } => {
-                                kitty_images.remove_pane(pane);
-                                forwarded.push(CoreEvent::PaneRemoved { pane });
-                            }
-                            event => forwarded.push(event),
-                        }
-                    }
-                    forwarded
-                };
-                for event in forwarded {
-                    if events
-                        .send(MainEvent::Core {
-                            connection,
-                            event: Box::new(event),
-                        })
-                        .is_err()
-                    {
-                        break 'reader;
-                    }
+                if !forward_protocol_message(
+                    &core,
+                    message,
+                    connection,
+                    &events,
+                    &frames,
+                    &kitty_images,
+                    &kitty_gate,
+                    |outbound| match outbound {
+                        Outbound::RequestFull(pane) => client.request_full(pane),
+                        Outbound::TreeSync => client.request_tree_sync(),
+                    },
+                ) {
+                    break 'reader;
                 }
             }
         })
@@ -2332,6 +2352,259 @@ mod tests {
         }
         viewport.cells = Arc::from(cells);
         viewport
+    }
+
+    fn initial_snapshot(panes: &[PaneId]) -> zz_protocol::MuxSnapshot {
+        let (model, _) = paned_model();
+        let mut snapshot = (*model.snapshot).clone();
+        let window = &mut snapshot.sessions[0].windows[0];
+        for pane in panes {
+            window.panes.insert(
+                *pane,
+                zz_protocol::PaneSnapshot {
+                    id: *pane,
+                    title: "shell".to_owned(),
+                    kind: PaneKindSnapshot::Terminal,
+                    synchronized_input: false,
+                    bell: false,
+                    dead: false,
+                    dead_status: None,
+                    border_colour: None,
+                    active_border_colour: None,
+                    border_status_text: String::new(),
+                    mode: None,
+                },
+            );
+        }
+        let split = |id, axis, first, second| zz_protocol::LayoutNode::Split {
+            id: zz_protocol::SplitId(id),
+            axis,
+            ratio: 0.5,
+            first: Box::new(first),
+            second: Box::new(second),
+        };
+        window.layout = if panes.len() == 1 {
+            zz_protocol::LayoutNode::Pane(panes[0])
+        } else {
+            split(
+                1,
+                zz_protocol::Axis::Horizontal,
+                split(
+                    2,
+                    zz_protocol::Axis::Vertical,
+                    zz_protocol::LayoutNode::Pane(panes[0]),
+                    zz_protocol::LayoutNode::Pane(panes[1]),
+                ),
+                split(
+                    3,
+                    zz_protocol::Axis::Vertical,
+                    zz_protocol::LayoutNode::Pane(panes[2]),
+                    zz_protocol::LayoutNode::Pane(panes[3]),
+                ),
+            )
+        };
+        snapshot
+    }
+
+    fn initial_event(payload: zz_protocol::EventPayload) -> ProtocolMessage {
+        ProtocolMessage::Event(zz_protocol::Event {
+            sequence: 0,
+            payload,
+        })
+    }
+
+    fn initial_view(epoch: u64) -> ProtocolMessage {
+        initial_event(zz_protocol::EventPayload::ClientView(
+            zz_protocol::ClientView {
+                session: Some(zz_protocol::SessionId(1)),
+                focused_window: Some(zz_protocol::WindowId(1)),
+                layout_generation: 42,
+                attachment_generation: epoch,
+                ..zz_protocol::ClientView::default()
+            },
+        ))
+    }
+
+    fn initial_model(core: &ClientCore) -> Model {
+        let endpoint = Endpoint::parse("unix:///tmp/zz-app-first-paint.sock").unwrap();
+        Model::new(
+            core,
+            TerminalSize {
+                columns: 79,
+                rows: 24,
+                cell_width_px: 8,
+                cell_height_px: 16,
+            },
+            "host".to_owned(),
+            "host".to_owned(),
+            endpoint.clone(),
+            endpoint,
+            Vec::new(),
+        )
+    }
+
+    #[test]
+    fn initial_batch_has_every_marker_in_the_first_paint() {
+        for count in [1, 4] {
+            let panes = (7..7 + count).map(PaneId).collect::<Vec<_>>();
+            let snapshot = initial_snapshot(&panes);
+            let mut layout_model = initial_model(&ClientCore::new());
+            layout_model.attached_session = Some(zz_protocol::SessionId(1));
+            layout_model.update_snapshot(Arc::new(snapshot.clone()));
+            let mut messages = vec![
+                initial_event(zz_protocol::EventPayload::Snapshot(snapshot)),
+                initial_view(1),
+            ];
+            for entry in &layout_model.layout.panes {
+                let content = entry.content();
+                let viewport = with_row_text(
+                    &TerminalViewport::blank(
+                        content.width,
+                        content.height,
+                        zz_terminal::SessionStatus::Running,
+                    ),
+                    0,
+                    &format!("INITIAL-{}", entry.pane.0),
+                );
+                messages.push(initial_event(zz_protocol::EventPayload::TerminalViewport {
+                    pane: entry.pane,
+                    viewport,
+                }));
+            }
+            let core = Mutex::new(ClientCore::new());
+            let frames = FrameInbox::default();
+            let images = KittyImageInbox::default();
+            let (events, incoming) = mpsc::channel();
+            assert!(forward_protocol_message(
+                &core,
+                ProtocolMessage::Batch(zz_protocol::Batch::from_messages(1, messages).unwrap()),
+                1,
+                &events,
+                &frames,
+                &images,
+                &AtomicU8::new(KITTY_GATE_PROBING),
+                |_| panic!("initial full state must not need another wire request"),
+            ));
+            let mut model = initial_model(&lock_core(&core));
+            model.update_snapshot(Arc::clone(lock_core(&core).snapshot()));
+            assert_eq!(model.attached_session, Some(zz_protocol::SessionId(1)));
+            assert_eq!(model.layout_generation, 42);
+            let ready = incoming.try_iter().collect::<Vec<_>>();
+            assert!(ready.len() < MAX_COALESCED_EVENTS);
+            assert_eq!(
+                ready
+                    .iter()
+                    .filter(|event| matches!(event, MainEvent::Frames(1)))
+                    .count(),
+                1
+            );
+            let (written, output) = mpsc::channel();
+            let mut renderer = Renderer::with_sink(Box::new(move |bytes| {
+                written.send(bytes.to_vec()).unwrap();
+                Ok(())
+            }));
+            take_frames(&frames, &mut model, &mut renderer);
+            renderer.paint(&model, true).unwrap();
+            let first =
+                String::from_utf8(output.recv_timeout(Duration::from_secs(2)).unwrap()).unwrap();
+            for pane in panes {
+                assert!(first.contains(&format!("INITIAL-{}", pane.0)), "{first:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn initial_and_later_batches_reset_before_images_before_placing_frames() {
+        let pane = PaneId(7);
+        let core = Mutex::new(ClientCore::new());
+        let frames = FrameInbox::default();
+        let images = KittyImageInbox::default();
+        let gate = AtomicU8::new(KITTY_GATE_PROBING);
+        let (events, incoming) = mpsc::channel();
+        for epoch in [1, 2] {
+            let mut messages = vec![
+                initial_event(zz_protocol::EventPayload::Snapshot(initial_snapshot(&[
+                    pane,
+                ]))),
+                initial_view(epoch),
+            ];
+            for image_id in 1000..1300 {
+                messages.push(initial_event(zz_protocol::EventPayload::KittyImageBegin {
+                    pane,
+                    image_id,
+                    generation: epoch,
+                    width: 1,
+                    height: 1,
+                    total_bytes: 4,
+                }));
+                messages.push(initial_event(zz_protocol::EventPayload::KittyImageChunk {
+                    pane,
+                    image_id,
+                    generation: epoch,
+                    bytes: vec![1, 2, 3, 255],
+                }));
+            }
+            let mut viewport = TerminalViewport::blank(79, 23, zz_terminal::SessionStatus::Running);
+            viewport.kitty_placements = Arc::from([zz_terminal::KittyPlacement {
+                image_id: 1299,
+                image_generation: epoch,
+                layer: zz_terminal::KittyLayer::AboveText,
+                viewport_col: 0,
+                viewport_row: 0,
+                absolute_row: 0,
+                cell_offset_x: 0,
+                cell_offset_y: 0,
+                grid_cols: 1,
+                grid_rows: 1,
+                pixel_width: 1,
+                pixel_height: 1,
+                source_rect: None,
+            }]);
+            messages.push(initial_event(zz_protocol::EventPayload::TerminalViewport {
+                pane,
+                viewport,
+            }));
+            messages.push(ProtocolMessage::CommandResponse(CommandResponse::Error {
+                request_id: 99,
+                error: ServerError::InvalidCommand("tail-error".to_owned()),
+                output: zz_protocol::RawText::default(),
+            }));
+            assert!(forward_protocol_message(
+                &core,
+                ProtocolMessage::Batch(zz_protocol::Batch::from_messages(epoch, messages).unwrap()),
+                1,
+                &events,
+                &frames,
+                &images,
+                &gate,
+                |_| panic!("initial full state must not need another wire request"),
+            ));
+            let ready = incoming.try_iter().collect::<Vec<_>>();
+            let attached = ready.iter().position(|event| matches!(event, MainEvent::Core { event, .. } if matches!(**event, CoreEvent::Attached { .. }))).unwrap();
+            let delivered = ready
+                .iter()
+                .position(|event| matches!(event, MainEvent::KittyImages(1)))
+                .unwrap();
+            let placing = ready
+                .iter()
+                .position(|event| matches!(event, MainEvent::Frames(1)))
+                .unwrap();
+            let tail = ready.iter().position(|event| matches!(event, MainEvent::Core { event, .. } if matches!(**event, CoreEvent::CommandResponse(CommandResponse::Error { request_id: 99, .. })))).unwrap();
+            assert!(attached < delivered && delivered < placing && placing < tail);
+            assert!(ready.len() < MAX_COALESCED_EVENTS);
+            let state = images.0.lock().unwrap();
+            assert_eq!(state.pending.len(), 300);
+            assert!(state.pending.iter().all(
+                |image| matches!(image, KittyImageUpdate::Ready(image) if image.generation == epoch)
+            ));
+            drop(state);
+            let state = frames.0.lock().unwrap();
+            assert_eq!(state.pending.len(), 1);
+            assert_eq!(
+                state.pending[&pane].viewport.kitty_placements[0].image_generation,
+                epoch
+            );
+        }
     }
 
     #[test]

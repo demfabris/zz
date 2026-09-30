@@ -4,12 +4,15 @@ import os
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import gate
 import isolate
+from groups import copy, mem
 
 THRESHOLDS = {
     "tolerance": {
@@ -165,6 +168,28 @@ class ShippedThresholdsTest(unittest.TestCase):
                 missing.append(m["id"])
         self.assertEqual(missing, [], "add a final rule or list these under report_only")
 
+    def test_copy_entry_limits_hold_at_wave2_and_final(self):
+        for stage in ("wave2", "final"):
+            for metric_id, kind, limit in (
+                ("mem.copy_footprint.scroll180", "mem", 1.0),
+                ("mem.copy_cpu.scroll180", "cpu", 5.0),
+                ("mem.copy_wall.scroll180", "wall", 5.0),
+            ):
+                with self.subTest(stage=stage, metric=metric_id):
+                    entry = gate.find_entry(self.shipped, metric_id)
+                    self.assertEqual(gate.rule_for(entry, stage), {"abs": limit})
+                    passed = gate.evaluate(metric(metric_id, kind, limit, 0.1), self.shipped, stage)
+                    self.assertEqual(passed["verdict"], "pass")
+                    failed = gate.evaluate(metric(metric_id, kind, limit + 0.01, 0.1), self.shipped, stage)
+                    self.assertEqual(failed["verdict"], "fail")
+
+    def test_copy_entry_wall_uses_the_noise_policy(self):
+        metric_id = "mem.copy_wall.scroll180"
+        warned = gate.evaluate(metric(metric_id, "wall", 6.0, 0.1), self.shipped, "wave2", noisy=True)
+        self.assertEqual(warned["verdict"], "warn")
+        failed = gate.evaluate(metric(metric_id, "wall", 6.0, 0.1), self.shipped, "wave2", noisy=True, strict=True)
+        self.assertEqual(failed["verdict"], "fail")
+
     def test_abs_rules_keep_their_multiple_of_tmux_off_the_reference_host(self):
         scaled = dict(THRESHOLDS, reference={"host": "macbook", "scale": {"cpu": "ratio", "mem": "plus"}})
         reference = {"cli.cpu.display.p1": {"tmux": {"median": 0.1}}, "mem.footprint.p1": {"tmux": {"median": 2.7}}}
@@ -189,6 +214,55 @@ class ShippedThresholdsTest(unittest.TestCase):
         self.assertEqual(m["verdict"], "pass")
         m = gate.evaluate(metric("throughput.detached.ascii", "throughput", 120.0, 50.0), THRESHOLDS, "baseline")
         self.assertEqual(m["verdict"], "fail")
+
+
+class CopyEntryTest(unittest.TestCase):
+    def test_history_fixture_fills_the_width_and_reaches_the_history_limit(self):
+        scratch = os.path.expanduser("~/.cache/zz-perf/copy")
+        os.makedirs(scratch, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=scratch) as tmp:
+            path = os.path.join(tmp, "history.txt")
+            copy.history_file(path)
+            with open(path, encoding="ascii") as f:
+                text = f.read()
+                rows = text.splitlines()
+        self.assertFalse(text.endswith("\n"))
+        self.assertEqual(len(rows), isolate.HISTORY_LIMIT + copy.ROWS)
+        self.assertEqual({len(row) for row in rows}, {copy.COLS})
+        self.assertEqual(len(set(rows)), len(rows))
+
+    def test_copy_measurements_run_in_the_prescribed_quick_mem_group(self):
+        ctx = Mock(quick=True, muxes=[])
+        with patch.object(mem.time, "sleep"), patch.object(mem, "record"), patch.object(copy, "run") as run_copy:
+            mem.run(ctx)
+        run_copy.assert_called_once_with(ctx)
+
+    def test_entry_rejects_a_control_error_reply(self):
+        control = Mock(ends=3, errors=0, mux=SimpleNamespace(name="zz"))
+
+        def reply(*_args):
+            control.errors = 1
+            return True
+
+        control.wait_ends.side_effect = reply
+        with self.assertRaisesRegex(RuntimeError, "%error"):
+            copy.enter(control)
+
+    def test_entry_rejects_a_missing_control_reply(self):
+        control = Mock(ends=3, errors=0, mux=SimpleNamespace(name="zz"))
+        control.wait_ends.return_value = False
+        with self.assertRaisesRegex(RuntimeError, "timed out"):
+            copy.enter(control)
+
+    def test_pane_validation_rejects_partial_history_and_wrong_geometry(self):
+        mux = Mock(name="zz")
+        mux.name = "zz"
+        for facts in ("180 50 9999 0", "80 24 10000 0", "180 50 10000 1"):
+            mux.out.return_value = facts
+            with self.subTest(facts=facts), self.assertRaises(RuntimeError):
+                copy.check_pane(mux, 0)
+        mux.out.return_value = "180 50 10000 0"
+        copy.check_pane(mux, 0)
 
 
 class TmuxChoiceTest(unittest.TestCase):

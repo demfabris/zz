@@ -1,5 +1,6 @@
+use std::cell::RefCell;
 use std::sync::{
-    Arc,
+    Arc, LazyLock,
     atomic::{AtomicU64, Ordering},
 };
 
@@ -10,6 +11,10 @@ use libghostty_vt::{
     terminal::{PointCoordinate, ScrollViewport},
 };
 
+use parking_lot::Mutex;
+
+use super::copy_grid::{CopyGrid, CopyRow};
+
 use crate::{CellWidth, Color, PackedCell, PackedStyle, TerminalDictionary};
 
 use super::{
@@ -18,7 +23,8 @@ use super::{
     resolve_style_color, style_attributes, underline_style,
 };
 
-const MAX_MODE_REVISION_BYTES: usize = 128 * 1024 * 1024;
+static COPY_CLONE: LazyLock<bool> =
+    LazyLock::new(|| std::env::var_os("ZZ_PERF_COPY_CLONE").is_some_and(|value| value == "1"));
 const ROW_WRAPPED: u8 = 1 << 0;
 const ROW_WRAP_CONTINUATION: u8 = 1 << 1;
 const SEMANTIC_OUTPUT: u8 = 0;
@@ -36,7 +42,7 @@ pub(super) struct ModeRowMeta {
 }
 
 impl ModeRowMeta {
-    fn new(wrapped: bool, continuation: bool, prompt: RowSemanticPrompt) -> Self {
+    pub(super) fn new(wrapped: bool, continuation: bool, prompt: RowSemanticPrompt) -> Self {
         Self {
             flags: (u8::from(wrapped) * ROW_WRAPPED)
                 | (u8::from(continuation) * ROW_WRAP_CONTINUATION),
@@ -86,25 +92,277 @@ pub(super) struct ModeRevision {
     pub(super) rows: Vec<ModeRowMeta>,
     semantics: Vec<u8>,
     pub(super) search: Arc<HistorySearchSnapshot>,
+    grid: Option<Mutex<CopyGrid>>,
+    total: u32,
+}
+
+struct ModeReaderRow {
+    index: u32,
+    row: Arc<CopyRow>,
+    dictionary: Arc<TerminalDictionary>,
+}
+
+pub(super) struct ModeRevisionReader<'revision> {
+    revision: &'revision ModeRevision,
+    cached: RefCell<Option<ModeReaderRow>>,
+}
+
+impl ModeRevisionReader<'_> {
+    pub(super) fn columns(&self) -> u16 {
+        self.revision.columns
+    }
+
+    pub(super) fn total_rows(&self) -> u32 {
+        self.revision.total_rows()
+    }
+
+    fn with_row<T>(
+        &self,
+        row: u32,
+        read: impl FnOnce(&CopyRow, &TerminalDictionary) -> T,
+    ) -> Option<T> {
+        let grid = self.revision.grid.as_ref()?;
+        let index = row.min(self.revision.total.saturating_sub(1));
+        let mut cached = self.cached.borrow_mut();
+        if cached.as_ref().is_none_or(|cached| cached.index != index) {
+            let mut grid = grid.lock();
+            let row = grid.row(index).expect("frozen row");
+            let dictionary = grid.dictionary();
+            *cached = Some(ModeReaderRow {
+                index,
+                row,
+                dictionary,
+            });
+        }
+        let cached = cached.as_ref().expect("captured row");
+        Some(read(&cached.row, &cached.dictionary))
+    }
+
+    fn with_cell<T>(
+        &self,
+        point: PointCoordinate,
+        read: impl FnOnce(PackedCell, &TerminalDictionary) -> T,
+    ) -> T {
+        let point = self.revision.clamp_point(point);
+        if self.revision.grid.is_none() {
+            return read(self.revision.cell(point), &self.revision.dictionary);
+        }
+        self.with_row(point.y, |row, dictionary| {
+            read(row.cells[usize::from(point.x)], dictionary)
+        })
+        .expect("paged row")
+    }
+
+    pub(super) fn row_meta(&self, row: u32) -> ModeRowMeta {
+        self.with_row(row, |row, _| row.meta)
+            .unwrap_or_else(|| self.revision.row(row))
+    }
+
+    pub(super) fn cell(&self, point: PointCoordinate) -> PackedCell {
+        self.with_cell(point, |cell, _| cell)
+    }
+
+    pub(super) fn first_char(&self, point: PointCoordinate) -> Option<char> {
+        self.with_cell(point, cell_first_char)
+    }
+
+    pub(super) fn push_text(&self, point: PointCoordinate, output: &mut String) {
+        self.with_cell(point, |cell, dictionary| {
+            if let Some(text) = emitting_cell_text(cell, dictionary) {
+                text.push(output);
+            }
+        });
+    }
+
+    fn with_cells<T>(
+        &self,
+        row: u32,
+        read: impl FnOnce(&[PackedCell], ModeRowMeta, &TerminalDictionary) -> T,
+    ) -> T {
+        if self.revision.grid.is_some() {
+            return self
+                .with_row(row, |row, dictionary| {
+                    read(&row.cells, row.meta, dictionary)
+                })
+                .expect("paged row");
+        }
+        let row_index = usize::try_from(row.min(self.revision.total.saturating_sub(1)))
+            .expect("flat row index");
+        let start = row_index * usize::from(self.revision.columns);
+        let end = start + usize::from(self.revision.columns);
+        read(
+            &self.revision.cells[start..end],
+            self.revision.row(row),
+            &self.revision.dictionary,
+        )
+    }
 }
 
 impl ModeRevision {
+    pub(super) fn reader(&self) -> ModeRevisionReader<'_> {
+        ModeRevisionReader {
+            revision: self,
+            cached: RefCell::new(None),
+        }
+    }
+
     pub(super) fn capture(terminal: &mut Terminal<'_, '_>) -> Result<Arc<Self>, WorkerError> {
+        if *COPY_CLONE {
+            Self::capture_flat(terminal)
+        } else {
+            Self::capture_paged(terminal)
+        }
+    }
+
+    pub(super) fn clone_enabled() -> bool {
+        *COPY_CLONE
+    }
+
+    fn capture_paged(terminal: &Terminal<'_, '_>) -> Result<Arc<Self>, WorkerError> {
+        let snapshot = terminal.clone_screen()?;
+        Self::from_snapshot(snapshot)
+    }
+
+    fn from_snapshot(
+        snapshot: libghostty_vt::terminal::ScreenSnapshot,
+    ) -> Result<Arc<Self>, WorkerError> {
+        let screen = snapshot.active_screen()?;
+        let columns = snapshot.cols()?.max(1);
+        let viewport_rows = snapshot.rows()?.max(1);
+        let total = u32::try_from(snapshot.total_rows()?)
+            .map_err(|_| WorkerError::ViewportMetadataTooLarge)?
+            .max(1);
+        let foreground = color(
+            snapshot
+                .fg_color()?
+                .unwrap_or(libghostty_vt::style::RgbColor {
+                    r: 255,
+                    g: 255,
+                    b: 255,
+                }),
+        );
+        let background = color(
+            snapshot
+                .bg_color()?
+                .unwrap_or(libghostty_vt::style::RgbColor { r: 0, g: 0, b: 0 }),
+        );
+        let raw_palette = snapshot.color_palette()?.0;
+        let palette = Box::new(raw_palette.map(color));
+        let title = Arc::from(snapshot.title().unwrap_or("zz"));
+        let working_directory = snapshot
+            .pwd()
+            .ok()
+            .and_then(reported_working_directory)
+            .map(Arc::from);
+        let mut grid = CopyGrid::new(snapshot, foreground, background, &raw_palette, columns);
+        let dictionary = grid.dictionary();
+        let search = Arc::new(HistorySearchSnapshot {
+            columns,
+            text: String::new(),
+            rows: Vec::new(),
+            offsets: Vec::new(),
+            terminal: Some(Arc::clone(&grid.terminal)),
+            #[cfg(test)]
+            search_gate: Mutex::new(()),
+            total_rows: total,
+        });
+        Ok(Arc::new(Self {
+            id: NEXT_MODE_REVISION_ID.fetch_add(1, Ordering::Relaxed).max(1),
+            screen,
+            columns,
+            viewport_rows,
+            foreground,
+            background,
+            palette,
+            title,
+            working_directory,
+            cells: Vec::new(),
+            dictionary,
+            rows: Vec::new(),
+            semantics: Vec::new(),
+            search,
+            grid: Some(Mutex::new(grid)),
+            total,
+        }))
+    }
+
+    pub(super) fn viewport_cells(&self, offset: u32) -> Arc<[PackedCell]> {
+        if let Some(grid) = &self.grid {
+            let mut grid = grid.lock();
+            grid.begin_viewport();
+            let mut cells =
+                Vec::with_capacity(usize::from(self.columns) * usize::from(self.viewport_rows));
+            for row in offset..offset.saturating_add(u32::from(self.viewport_rows)) {
+                if row < self.total {
+                    cells.extend_from_slice(&grid.row(row).expect("frozen row").cells);
+                } else {
+                    cells.resize(cells.len() + usize::from(self.columns), PackedCell::EMPTY);
+                }
+            }
+            grid.end_viewport();
+            return cells.into();
+        }
+        let start = usize::try_from(offset)
+            .unwrap_or(usize::MAX)
+            .saturating_mul(usize::from(self.columns));
+        let len = usize::from(self.columns) * usize::from(self.viewport_rows);
+        let source = self.cells.get(start..).unwrap_or_default();
+        (0..len)
+            .map(|index| source.get(index).copied().unwrap_or(PackedCell::EMPTY))
+            .collect()
+    }
+
+    pub(super) fn dictionary_generation(&self) -> u32 {
+        self.grid
+            .as_ref()
+            .map_or(0, |grid| grid.lock().generation())
+    }
+
+    pub(super) fn shared_dictionary(&self) -> Arc<TerminalDictionary> {
+        self.grid.as_ref().map_or_else(
+            || Arc::clone(&self.dictionary),
+            |grid| grid.lock().dictionary(),
+        )
+    }
+
+    pub(super) fn with_appearance(
+        &self,
+        terminal: &mut Terminal<'_, '_>,
+    ) -> Result<Arc<Self>, WorkerError> {
+        let Some(grid) = &self.grid else {
+            return Self::capture_flat(terminal);
+        };
+        let snapshot = grid.lock().terminal.lock().clone_screen()?;
+        let mut snapshot = snapshot;
+        snapshot.set_colors_from(terminal)?;
+        Self::from_snapshot(snapshot)
+    }
+
+    pub(super) fn resized(
+        self: &Arc<Self>,
+        columns: u16,
+        rows: u16,
+        cursor: PointCoordinate,
+    ) -> Result<(Arc<Self>, PointCoordinate), WorkerError> {
+        let Some(grid) = &self.grid else {
+            return Ok((Arc::clone(self), self.clamp_point(cursor)));
+        };
+        let mut snapshot = grid.lock().terminal.lock().clone_screen()?;
+        let cursor = snapshot
+            .resize_anchored(columns, rows, self.clamp_point(cursor))?
+            .unwrap_or(cursor);
+        let revision = Self::from_snapshot(snapshot)?;
+        Ok((revision, cursor))
+    }
+
+    fn capture_flat(terminal: &mut Terminal<'_, '_>) -> Result<Arc<Self>, WorkerError> {
         let screen = terminal.active_screen()?;
         let columns = terminal.cols()?.max(1);
         let viewport_rows = terminal.rows()?.max(1);
         let total_rows = terminal.total_rows()?.max(1);
         let cell_count = total_rows
             .checked_mul(usize::from(columns))
-            .ok_or(WorkerError::ModeRevisionTooLarge)?;
-        let base_bytes = cell_count
-            .checked_mul(std::mem::size_of::<PackedCell>() + std::mem::size_of::<u8>())
-            .and_then(|bytes| bytes.checked_add(total_rows * std::mem::size_of::<ModeRowMeta>()))
-            .ok_or(WorkerError::ModeRevisionTooLarge)?;
-        if base_bytes > MAX_MODE_REVISION_BYTES {
-            return Err(WorkerError::ModeRevisionTooLarge);
-        }
-
+            .ok_or(WorkerError::ViewportMetadataTooLarge)?;
         let saved_offset = terminal.scrollbar()?.offset;
         let title: Arc<str> = Arc::from(terminal.title().unwrap_or("zz"));
         let working_directory = terminal
@@ -240,19 +498,6 @@ impl ModeRevision {
                         .map_err(|_| WorkerError::SearchSnapshotTooLarge)?,
                 });
                 captured_until = absolute_row.saturating_add(1);
-                let search_bytes = search_text
-                    .len()
-                    .saturating_add(search_offsets.len() * std::mem::size_of::<SearchCellOffset>())
-                    .saturating_add(search_rows.len() * std::mem::size_of::<HistorySearchRow>());
-                if base_bytes.saturating_add(search_bytes) > MAX_MODE_REVISION_BYTES
-                    || search_bytes > MAX_SEARCH_SNAPSHOT_BYTES
-                {
-                    terminal.scroll_viewport(ScrollViewport::Top);
-                    terminal.scroll_viewport(ScrollViewport::Delta(super::saturating_isize(
-                        i64::try_from(saved_offset).unwrap_or(i64::MAX),
-                    )));
-                    return Err(WorkerError::ModeRevisionTooLarge);
-                }
             }
             if scrollbar.offset >= maximum || captured_until >= total_rows {
                 break;
@@ -287,7 +532,13 @@ impl ModeRevision {
                 text: search_text,
                 rows: search_rows,
                 offsets: search_offsets,
+                terminal: None,
+                #[cfg(test)]
+                search_gate: Mutex::new(()),
+                total_rows: u32::try_from(total_rows).unwrap_or(u32::MAX),
             }),
+            grid: None,
+            total: u32::try_from(total_rows).unwrap_or(u32::MAX),
         }))
     }
 
@@ -304,7 +555,7 @@ impl ModeRevision {
     }
 
     pub(super) fn total_rows(&self) -> u32 {
-        u32::try_from(self.rows.len()).unwrap_or(u32::MAX).max(1)
+        self.total
     }
 
     pub(super) fn maximum_offset(&self) -> u32 {
@@ -320,6 +571,9 @@ impl ModeRevision {
 
     pub(super) fn cell(&self, point: PointCoordinate) -> PackedCell {
         let point = self.clamp_point(point);
+        if let Some(grid) = &self.grid {
+            return grid.lock().row(point.y).expect("frozen row").cells[usize::from(point.x)];
+        }
         let index = usize::try_from(point.y)
             .unwrap_or(usize::MAX)
             .saturating_mul(usize::from(self.columns))
@@ -333,9 +587,10 @@ impl ModeRevision {
             return char::from_u32(cell.glyph()).filter(|character| *character != '\0');
         }
         let index = usize::try_from(cell.glyph() & !crate::GRAPHEME_TABLE_BIT).ok()?;
-        let start = usize::try_from(*self.dictionary.grapheme_offsets.get(index)?).ok()?;
-        let end = usize::try_from(*self.dictionary.grapheme_offsets.get(index + 1)?).ok()?;
-        std::str::from_utf8(self.dictionary.grapheme_bytes.get(start..end)?)
+        let dictionary = self.shared_dictionary();
+        let start = usize::try_from(*dictionary.grapheme_offsets.get(index)?).ok()?;
+        let end = usize::try_from(*dictionary.grapheme_offsets.get(index + 1)?).ok()?;
+        std::str::from_utf8(dictionary.grapheme_bytes.get(start..end)?)
             .ok()?
             .chars()
             .next()
@@ -358,23 +613,22 @@ impl ModeRevision {
         let Ok(index) = usize::try_from(glyph & !crate::GRAPHEME_TABLE_BIT) else {
             return false;
         };
-        let Some(start) = self
-            .dictionary
+        let dictionary = self.shared_dictionary();
+        let Some(start) = dictionary
             .grapheme_offsets
             .get(index)
             .and_then(|offset| usize::try_from(*offset).ok())
         else {
             return false;
         };
-        let Some(end) = self
-            .dictionary
+        let Some(end) = dictionary
             .grapheme_offsets
             .get(index + 1)
             .and_then(|offset| usize::try_from(*offset).ok())
         else {
             return false;
         };
-        self.dictionary.grapheme_bytes.get(start..end) == Some(target.as_bytes())
+        dictionary.grapheme_bytes.get(start..end) == Some(target.as_bytes())
     }
 
     pub(super) fn push_cell_text(&self, cell: PackedCell, output: &mut String) {
@@ -391,24 +645,22 @@ impl ModeRevision {
         let Ok(index) = usize::try_from(glyph & !crate::GRAPHEME_TABLE_BIT) else {
             return;
         };
-        let Some(start) = self
-            .dictionary
+        let dictionary = self.shared_dictionary();
+        let Some(start) = dictionary
             .grapheme_offsets
             .get(index)
             .and_then(|offset| usize::try_from(*offset).ok())
         else {
             return;
         };
-        let Some(end) = self
-            .dictionary
+        let Some(end) = dictionary
             .grapheme_offsets
             .get(index + 1)
             .and_then(|offset| usize::try_from(*offset).ok())
         else {
             return;
         };
-        if let Some(text) = self
-            .dictionary
+        if let Some(text) = dictionary
             .grapheme_bytes
             .get(start..end)
             .and_then(|bytes| std::str::from_utf8(bytes).ok())
@@ -419,6 +671,9 @@ impl ModeRevision {
 
     pub(super) fn semantic(&self, point: PointCoordinate) -> u8 {
         let point = self.clamp_point(point);
+        if let Some(grid) = &self.grid {
+            return grid.lock().row(point.y).expect("frozen row").semantics[usize::from(point.x)];
+        }
         let index = usize::try_from(point.y)
             .unwrap_or(usize::MAX)
             .saturating_mul(usize::from(self.columns))
@@ -442,35 +697,18 @@ impl ModeRevision {
     }
 
     pub(super) fn row(&self, row: u32) -> ModeRowMeta {
+        if let Some(grid) = &self.grid {
+            return grid
+                .lock()
+                .row(row.min(self.total.saturating_sub(1)))
+                .expect("frozen row")
+                .meta;
+        }
         usize::try_from(row)
             .ok()
             .and_then(|row| self.rows.get(row))
             .copied()
             .unwrap_or_default()
-    }
-
-    pub(super) fn selection_row_end(&self, row: u32) -> u16 {
-        if self.row(row).wrapped() {
-            return self.columns;
-        }
-        (0..self.columns)
-            .rev()
-            .find(|column| {
-                self.first_char(PointCoordinate { x: *column, y: row })
-                    .is_some_and(|character| character != ' ')
-            })
-            .map_or(0, |column| column.saturating_add(1))
-    }
-
-    fn push_selection_cell_text(&self, cell: PackedCell, output: &mut String) {
-        if matches!(cell.width(), CellWidth::SpacerTail | CellWidth::SpacerHead) {
-            return;
-        }
-        if cell.glyph() == 0 {
-            output.push(' ');
-        } else {
-            self.push_cell_text(cell, output);
-        }
     }
 
     /// `window_copy_get_selection`: the last row is trimmed to its own length
@@ -488,58 +726,81 @@ impl ModeRevision {
         } else {
             (0, self.columns.saturating_sub(1))
         };
+        let reader = self.reader();
         for row in start.y..=end.y {
-            let row_start = if selection.rectangle {
-                left
-            } else if row == start.y {
-                start.x
-            } else {
-                0
-            };
-            let row_end = if selection.rectangle {
-                right
-            } else if row == end.y {
-                end.x
-            } else {
-                self.columns.saturating_sub(1)
-            };
-            let line_end = self.selection_row_end(row);
-            let drops_focus_cell = !mode_keys_vi
-                && if selection.rectangle {
-                    selection.anchor.x < selection.focus.x
+            reader.with_cells(row, |cells, meta, dictionary| {
+                let row_start = if selection.rectangle {
+                    left
+                } else if row == start.y {
+                    start.x
                 } else {
-                    row == end.y
+                    0
                 };
-            let selected_end = if drops_focus_cell {
-                row_end.min(line_end)
-            } else {
-                row_end.saturating_add(1).min(line_end)
-            };
-            if row_start < selected_end {
-                for column in row_start..selected_end {
-                    self.push_selection_cell_text(
-                        self.cell(PointCoordinate { x: column, y: row }),
-                        &mut output,
-                    );
+                let row_end = if selection.rectangle {
+                    right
+                } else if row == end.y {
+                    end.x
+                } else {
+                    self.columns.saturating_sub(1)
+                };
+                let line_end = if meta.wrapped() {
+                    self.columns
+                } else {
+                    cells
+                        .iter()
+                        .rposition(|cell| {
+                            cell_first_char(*cell, dictionary)
+                                .is_some_and(|character| character != ' ')
+                        })
+                        .map_or(0, |column| u16::try_from(column + 1).expect("column"))
+                };
+                let drops_focus_cell = !mode_keys_vi
+                    && if selection.rectangle {
+                        selection.anchor.x < selection.focus.x
+                    } else {
+                        row == end.y
+                    };
+                let selected_end = if drops_focus_cell {
+                    row_end.min(line_end)
+                } else {
+                    row_end.saturating_add(1).min(line_end)
+                };
+                if row_start < selected_end {
+                    for cell in &cells[usize::from(row_start)..usize::from(selected_end)] {
+                        if matches!(cell.width(), CellWidth::SpacerTail | CellWidth::SpacerHead) {
+                            continue;
+                        }
+                        if cell.glyph() == 0 {
+                            output.push(' ');
+                        } else if let Some(text) = cell_text(*cell, dictionary) {
+                            text.push(&mut output);
+                        }
+                    }
                 }
-            }
-            let has_line_break = !self.row(row).wrapped() || selected_end < line_end;
-            let keeps_final_break = mode_keys_vi && row == end.y && {
-                let line_length = super::revision_line_length(self, row);
-                let last_exclusive = if selection.rectangle {
-                    right.saturating_add(1)
-                } else {
-                    end.x.min(line_length).saturating_add(1)
+                let has_line_break = !meta.wrapped() || selected_end < line_end;
+                let keeps_final_break = mode_keys_vi && row == end.y && {
+                    let line_length = cells
+                        .iter()
+                        .rposition(|cell| {
+                            cell_first_char(*cell, dictionary)
+                                .is_some_and(|character| !character.is_whitespace())
+                        })
+                        .map_or(0, |column| u16::try_from(column + 1).expect("column"));
+                    let last_exclusive = if selection.rectangle {
+                        right.saturating_add(1)
+                    } else {
+                        end.x.min(line_length).saturating_add(1)
+                    };
+                    last_exclusive > line_length
                 };
-                last_exclusive > line_length
-            };
-            if has_line_break
-                && (row < end.y
-                    || (row == end.y
-                        && (selection.mode == SelectionMode::Line || keeps_final_break)))
-            {
-                output.push('\n');
-            }
+                if has_line_break
+                    && (row < end.y
+                        || (row == end.y
+                            && (selection.mode == SelectionMode::Line || keeps_final_break)))
+                {
+                    output.push('\n');
+                }
+            });
         }
         output
     }
@@ -556,19 +817,23 @@ impl ModeRevision {
             return self.capture_rows_vt(start, end, join_wrapped, preserve_trailing);
         }
         let mut output = String::new();
+        let reader = self.reader();
         for row in start..=end {
-            let mut line = String::new();
-            for column in 0..self.columns {
-                self.push_cell_text(self.cell(PointCoordinate { x: column, y: row }), &mut line);
-            }
-            if preserve_trailing {
-                output.push_str(&line);
-            } else {
-                output.push_str(line.trim_end());
-            }
-            if row < end && !(join_wrapped && self.row(row).wrapped()) {
-                output.push('\n');
-            }
+            reader.with_cells(row, |cells, meta, dictionary| {
+                let line_start = output.len();
+                for cell in cells {
+                    if let Some(text) = emitting_cell_text(*cell, dictionary) {
+                        text.push(&mut output);
+                    }
+                }
+                if !preserve_trailing {
+                    let trimmed_length = output[line_start..].trim_end().len();
+                    output.truncate(line_start + trimmed_length);
+                }
+                if row < end && !(join_wrapped && meta.wrapped()) {
+                    output.push('\n');
+                }
+            });
         }
         output
     }
@@ -581,49 +846,86 @@ impl ModeRevision {
         preserve_trailing: bool,
     ) -> String {
         let mut output = String::new();
+        let reader = self.reader();
         for row in start..=end {
-            let mut line = String::new();
-            let mut active_style = None;
-            let last_column = if preserve_trailing {
-                self.columns.checked_sub(1)
-            } else {
-                (0..self.columns).rev().find(|column| {
-                    self.first_char(PointCoordinate { x: *column, y: row })
-                        .is_some_and(|character| !character.is_whitespace())
-                })
-            };
-            for column in 0..=last_column.unwrap_or(0) {
-                let cell = self.cell(PointCoordinate { x: column, y: row });
-                if matches!(cell.width(), CellWidth::SpacerTail | CellWidth::SpacerHead) {
-                    continue;
-                }
-                let mut text = String::new();
-                self.push_cell_text(cell, &mut text);
-                if text.is_empty() {
-                    continue;
-                }
-                if active_style != Some(cell.style_id()) {
-                    if let Some(style) = self
-                        .dictionary
-                        .styles
-                        .get(usize::from(cell.style_id()))
-                        .copied()
-                    {
-                        push_sgr(&mut line, style);
+            reader.with_cells(row, |cells, meta, dictionary| {
+                let mut active_style = None;
+                let last_column = if preserve_trailing {
+                    cells.len().checked_sub(1)
+                } else {
+                    cells.iter().rposition(|cell| {
+                        cell_first_char(*cell, dictionary)
+                            .is_some_and(|character| !character.is_whitespace())
+                    })
+                };
+                for cell in cells.iter().take(last_column.unwrap_or(0) + 1) {
+                    let Some(text) = emitting_cell_text(*cell, dictionary) else {
+                        continue;
+                    };
+                    if active_style != Some(cell.style_id()) {
+                        if let Some(style) = dictionary.styles.get(usize::from(cell.style_id())) {
+                            push_sgr(&mut output, *style);
+                        }
+                        active_style = Some(cell.style_id());
                     }
-                    active_style = Some(cell.style_id());
+                    text.push(&mut output);
                 }
-                line.push_str(&text);
-            }
-            if active_style.is_some() {
-                line.push_str("\x1b[0m");
-            }
-            output.push_str(&line);
-            if row < end && !(join_wrapped && self.row(row).wrapped()) {
-                output.push('\n');
-            }
+                if active_style.is_some() {
+                    output.push_str("\x1b[0m");
+                }
+                if row < end && !(join_wrapped && meta.wrapped()) {
+                    output.push('\n');
+                }
+            });
         }
         output
+    }
+}
+
+enum ModeCellText<'text> {
+    Scalar(char),
+    Grapheme(&'text str),
+}
+
+impl ModeCellText<'_> {
+    fn push(self, output: &mut String) {
+        match self {
+            Self::Scalar(character) => output.push(character),
+            Self::Grapheme(text) => output.push_str(text),
+        }
+    }
+}
+
+fn cell_text(cell: PackedCell, dictionary: &TerminalDictionary) -> Option<ModeCellText<'_>> {
+    let glyph = cell.glyph();
+    if glyph == 0 {
+        return None;
+    }
+    if glyph & crate::GRAPHEME_TABLE_BIT == 0 {
+        return char::from_u32(glyph).map(ModeCellText::Scalar);
+    }
+    let index = usize::try_from(glyph & !crate::GRAPHEME_TABLE_BIT).ok()?;
+    let offsets = dictionary.grapheme_offsets.get(index..=index + 1)?;
+    let start = usize::try_from(offsets[0]).ok()?;
+    let end = usize::try_from(offsets[1]).ok()?;
+    let text = std::str::from_utf8(dictionary.grapheme_bytes.get(start..end)?).ok()?;
+    (!text.is_empty()).then_some(ModeCellText::Grapheme(text))
+}
+
+fn emitting_cell_text(
+    cell: PackedCell,
+    dictionary: &TerminalDictionary,
+) -> Option<ModeCellText<'_>> {
+    if matches!(cell.width(), CellWidth::SpacerTail | CellWidth::SpacerHead) {
+        return None;
+    }
+    cell_text(cell, dictionary)
+}
+
+fn cell_first_char(cell: PackedCell, dictionary: &TerminalDictionary) -> Option<char> {
+    match cell_text(cell, dictionary)? {
+        ModeCellText::Scalar(character) => Some(character),
+        ModeCellText::Grapheme(text) => text.chars().next(),
     }
 }
 

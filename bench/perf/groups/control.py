@@ -18,6 +18,7 @@ class Control:
         os.set_blocking(self.fd, False)
         self.pending = b""
         self.ends = 0
+        self.errors = 0
         self.total = 0
         self.tail = b""
         self.marker = None
@@ -47,6 +48,8 @@ class Control:
         for line in lines:
             if line.startswith((b"%end ", b"%error ")):
                 self.ends += 1
+            if line.startswith(b"%error "):
+                self.errors += 1
         return True
 
     def settle(self, quiet=0.3):

@@ -4,34 +4,38 @@ title: libghostty-vt embedding
 description: How zz-terminal embeds libghostty-vt over a pinned Ghostty snapshot, including line-counted scrollback, terminal color-query replies, and single-worker-thread ownership.
 resource: crates/zz-terminal/src/session.rs
 tags: [libghostty, ghostty, vt, zig, worker-thread, mode-revision, kitty-graphics]
-timestamp: 2026-09-25T23:59:00-03:00
+timestamp: 2026-09-30T12:00:00-03:00
 ---
 
 # Overview
 
 `libghostty-vt` is the VT engine inside [`zz-terminal`](/crates/zz-terminal.md). The
-workspace pins `Uzaaft/libghostty-rs` commit `359ef751c189540eafb9110b2de89ad95ce48fc3` exactly,
-fetched from the `demfabris/libghostty-rs` fork (branch `zz-2026-09-25`), with
-`default-features = false`. That is the head of the open stacked PR #99 (render hold and the
-resize scrollback pull option, over #84's Ghostty `56dbc4a` bindings and #83's Kitty PNG fixes);
-no crates.io release after v0.2.1 carries the updated C API. The `-vt` crate is a safe Rust binding
-over `libghostty-vt-sys`, and the workspace replaces that sys crate with the local snapshot documented
-in `third_party/rust/libghostty-vt-sys/UPSTREAM.md`. It statically builds Ghostty commit
-`c39414175ca2aad564b74b3f52196355f2671774` from `demfabris/ghostty` branch `zz-2026-09-30`, based on
-upstream `6301810a48aaa3426887a4316668f18833a40138` (2026-09-25). It carries three commits. The trim
-fix (2026-09-30) preserves live cell blocks after history erase. PageList
-spare-page reuse (2026-09-29) keeps the page that line-limit pruning retires resident for the next
-grow; before it, a full history refaulted a whole page per grow (on Linux about 485k faults in 0.7 s
-while printing a large file, two thirds of the pane thread in the kernel). The one-line
-`signal_stack_size = null` option removes the unused Zig signal-stack TLS allocation in C hosts; since
-upstream's TinyIo change, release builds no longer carry it, but the ReleaseSafe dev and test builds
-(any profile cargo reports as `PROFILE=debug`) still do. Rust retains ownership of thread startup and signal handling. See the [macOS measurements](/research/2026-09-23-macos-performance.md). The repository pins **Zig 0.16.0** in `.zigversion`,
+workspace consumes published `demfabris/libghostty-rs` commit
+`8e40135fb20e9ed91c37c374fe1d14570c386d06` on new branch `zz-2026-09-30`, with
+`default-features = false`. Its parent `359ef751c189540eafb9110b2de89ad95ce48fc3`
+remains on `zz-2026-09-25`. That base
+contains the stacked render-hold and resize-scrollback APIs needed by the current C ABI.
+The safe wrapper lives in its dependency fork. zz replaces only `libghostty-vt-sys` with
+the local snapshot documented in `third_party/rust/libghostty-vt-sys/UPSTREAM.md`.
+The published native pin is `7823f65dd55fc9ff420d5eb5cae761cbd1995994` on branch
+`zz-2026-09-30`, parent `c39414175ca2aad564b74b3f52196355f2671774`, upstream base
+`6301810a48aaa3426887a4316668f18833a40138`. It carries four changes: the C ABI
+signal-stack option, spare-page reuse, the history-erase trim fix and owned copy snapshots.
+The branch fast-forward retains the trim-fix parent in its history; `zz-2026-09-29`
+keeps the spare-page pin `713374af`. zz pins both published copy commits for ordinary
+fetched-source builds without source rewriting or a safe-wrapper path patch.
+Spare-page reuse keeps a pruned pool page resident for the next grow. The trim fix preserves
+live cell blocks after history erase. The signal-stack option removes unused Zig TLS storage
+from ReleaseSafe dev and test builds. Copy snapshots share immutable history backing,
+keep compressed pages encoded until first read and copy active pages with cursor pointers.
+Rust retains ownership of thread startup and signal handling. See the [macOS measurements](/research/2026-09-23-macos-performance.md). The repository pins **Zig 0.16.0** in `.zigversion`,
 `mise.toml`, and CI so every native rebuild uses the required compiler. `zz-terminal` enables the
 wrapper's `kitty-graphics` feature and leaves the other defaults off. `session.rs` uses
 `Terminal::kitty_graphics`, `Terminal::set_kitty_image_storage_limit`, `PlacementIterator`, and the
 safe `DecodePng` adapter; it contains no raw libghostty layout cast or unsafe FFI. Each VT actor
 installs the wrapper's thread-local PNG decoder before it creates terminal state.
-zz-terminal keeps every libghostty handle on a single worker thread; no libghostty binding type is
+zz-terminal keeps each live terminal on its actor thread; owned frozen snapshots can move
+to the search worker under a mutex; no libghostty binding type is
 part of the crate's public API, and the [app crate](/crates/zz.md) contains no raw libghostty handles
 or unsafe FFI.
 
@@ -92,16 +96,16 @@ test covers both the query replies and preservation of ST versus BEL terminators
 # The worker-thread ownership rule
 
 libghostty render-state dirty tracking and viewport snapshots are **stateful and single-threaded**.
-zz-terminal enforces one invariant: **all libghostty objects for a pane live on that pane's worker
-thread and are mutated only by the actor.** Consequences:
+zz-terminal keeps each live terminal and render state on its pane actor. Owned frozen snapshots
+have independent metadata and mutex-serialized access. Consequences:
 
 - `CommandSender` routes control work and PTY-writing input through separate bounded lanes. The actor
   consumes both on one thread, pauses the input lane while `PtyWriter` has a backlog, and keeps
   draining PTY output so full-duplex children can make progress. The actor serializes PTY writes,
   key/mouse encoding, resize, focus, and snapshot extraction (see
   [pty-worker](/concepts/pty-worker.md)).
-- Search runs on a separate thread but never borrows libghostty; it scans an immutable
-  `HistorySearchSnapshot` copied out on demand.
+- Search runs on a separate thread using an owned `ScreenSnapshot` through a mutex. It
+  reconstructs one wrapped logical line at a time and never borrows the live terminal.
 - `capture()` blocks only the calling client thread and is answered by the actor; terminal state never
   crosses threads.
 - The design intends each subscribed client to own a distinct `RenderState`, so a mutation is extracted
@@ -109,26 +113,24 @@ thread and are mutated only by the actor.** Consequences:
 
 # Mode revisions
 
-Copy mode and read-only view mode must stay visually stable while live PTY output continues underneath
-them. zz-terminal does this **without a second emulator**: `session/mode_revision.rs` captures a
-`ModeRevision`, an immutable, paged snapshot of the entire scrollback taken by walking
-`ScrollViewport::Top` then `Delta` pages across the whole `total_rows()` range.
+Copy mode and read-only views freeze the native active screen through
+`ModeRevision::capture` in `session/mode_revision.rs`. The owned `ScreenSnapshot` retains
+history after source output, pruning, ED3 and source destruction. `CopyGrid` converts only
+requested rows and caches at most 64, paired with a style/grapheme dictionary.
+`ModeRevisionReader` holds one row and its matching dictionary while rendering, navigating,
+capturing plain or VT output, and formatting selections. Dictionary compaction can clear the
+cache; readers and published frames retain their own immutable storage.
 
-`ModeRevision` (arc-shared, id from the `NEXT_MODE_REVISION_ID` atomic) holds:
+`HistorySearchSnapshot` retains native backing and decodes logical wrapped lines on demand.
+Search maps Unicode byte matches back to physical cells, checks cancellation between rows
+and recompresses after 512-row batches and at completion. Empty and single-scalar graphemes
+skip the general iterator. Captures append glyphs to the destination without per-cell strings.
 
-| Field | Meaning |
-| --- | --- |
-| `screen`, `columns`, `viewport_rows` | Captured `Screen` identity and geometry. |
-| `foreground`/`background`/`palette` | Resolved colors, used by `matches_terminal_appearance` to detect stale revisions. |
-| `cells` + `dictionary` | Interned `PackedCell` plane + shared style/grapheme dictionary. |
-| `rows: Vec<ModeRowMeta>` | Per-row wrapped / wrap-continuation / semantic-prompt flags (4 bytes each). |
-| `semantics: Vec<u8>` | Per-cell OSC 133 class (`Output`/`Input`/`Prompt`) for prompt jumping and command-output selection. |
-| `search: Arc<HistorySearchSnapshot>` | Revision-tagged text + cell offsets scanned by the search worker. |
-
-Capture is bounded (`MAX_MODE_REVISION_BYTES` = 128 MiB; search snapshot capped separately) and restores
-the terminal's saved scroll offset when finished. The revision exposes navigation helpers
-(`clamp_point`, `move_revision_word`, paragraph/semantic targets) and `format_selection` /
-`capture_rows` / `capture_rows_vt` for copy output (the `_vt` form re-emits SGR escapes).
+Frozen resize reflows owned backing, maps the copy cursor, clears selection and rebuilds
+search marks. Appearance updates recolor frozen content; an enabled refresh replaces it with
+a new source snapshot. Retained dead panes keep the terminal actor and frozen search state
+while releasing PTY and input resources. `ZZ_PERF_COPY_CLONE=1` selects the old flat snapshot
+and its entry-geometry limit; `ZZ_PERF_NO_COMPRESS=1` suppresses snapshot recompression.
 
 # Related
 

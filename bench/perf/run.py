@@ -25,7 +25,7 @@ import probe
 import timing
 from ptyclient import PtyClient
 
-GROUPS = ["cli", "spawn", "cold", "config", "chatty", "idle", "mem", "attach", "echo", "throughput", "control", "statusjob"]
+GROUPS = ["cli", "spawn", "cold", "config", "chatty", "idle", "mem", "copy", "attach", "echo", "throughput", "control", "statusjob"]
 PANE = os.path.join(HERE, "pane")
 
 
@@ -299,7 +299,14 @@ def targets(args):
         sys.exit("targets needs a W0 result (--w0 PATH)")
     print("| Metric id | unit | tmux | zz W0 | " + " | ".join(gate.STAGES) + " |")
     print("|---|---|---|---|" + "---|" * len(gate.STAGES))
-    for m in w0["metrics"]:
+    metrics = list(w0["metrics"])
+    seen = {m["id"] for m in metrics}
+    metrics.extend(
+        {"id": metric_id, "unit": entry["unit"]}
+        for metric_id, entry in thresholds["metrics"].items()
+        if metric_id not in seen and "unit" in entry and not any(ch in metric_id for ch in "*?[")
+    )
+    for m in metrics:
         entry = gate.find_entry(thresholds, m["id"])
         if gate.report_only(thresholds, m["id"]) or not entry:
             continue
@@ -353,6 +360,8 @@ def main():
     if unknown:
         sys.exit(f"unknown groups: {', '.join(unknown)} (known: {', '.join(GROUPS)})")
     groups = only or GROUPS
+    if "mem" in groups:
+        groups = [name for name in groups if name != "copy"]
 
     sha, dirty = git_sha()
     host = socket.gethostname().split(".")[0]

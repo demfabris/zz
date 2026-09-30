@@ -1943,7 +1943,7 @@ impl<W: Write> ControlWriter<W> {
                 }
                 DeferredOutput::Exit(reason) => exit = Some(reason),
                 DeferredOutput::DiagnosticError { time, text } => {
-                    let frame = self.allocate_frame(time, 1);
+                    let frame = self.allocate_frame(time, 1)?;
                     self.write_frame_begin(&frame)?;
                     self.write_line(&text)?;
                     self.write_frame_end(&frame, true)?;
@@ -1995,7 +1995,7 @@ impl<W: Write> ControlWriter<W> {
             });
             return Ok(());
         }
-        let frame = self.allocate_frame(time, 1);
+        let frame = self.allocate_frame(time, 1)?;
         self.write_frame_begin(&frame)?;
         self.write_line(text)?;
         self.write_frame_end(&frame, true)?;
@@ -2053,7 +2053,7 @@ impl<W: Write> ControlWriter<W> {
         error: bool,
         flags: u8,
     ) -> io::Result<()> {
-        let frame = self.allocate_frame(time, flags);
+        let frame = self.allocate_frame(time, flags)?;
         self.write_frame_begin(&frame)?;
         self.payload(output)?;
         self.write_frame_end(&frame, error)?;
@@ -2102,38 +2102,34 @@ impl<W: Write> ControlWriter<W> {
     }
 
     fn begin_buffered_at(&mut self, time: u64, flags: u8) -> io::Result<Frame> {
-        let frame = self.allocate_frame(time, flags);
+        let frame = self.allocate_frame(time, flags)?;
         self.block_open = true;
         self.open_frame = Some(frame);
         self.write_frame_begin(&frame)?;
         Ok(frame)
     }
 
-    fn allocate_frame(&mut self, time: u64, flags: u8) -> Frame {
-        let frame = Frame {
-            time,
-            number: self.next_number,
-            flags,
-        };
+    fn allocate_frame(&mut self, time: u64, flags: u8) -> io::Result<Frame> {
+        let number = self.next_number;
         self.next_number = self.next_number.saturating_add(1);
-        frame
+        let mut body = [0; 46];
+        let mut remaining = body.as_mut_slice();
+        writeln!(remaining, "{time} {number} {flags}")?;
+        let length = (46 - remaining.len()) as u8;
+        Ok(Frame { body, length })
     }
 
     fn write_frame_begin(&mut self, frame: &Frame) -> io::Result<()> {
-        writeln!(
-            self.output,
-            "%begin {} {} {}",
-            frame.time, frame.number, frame.flags
-        )
+        self.output.write_all(b"%begin ")?;
+        self.output
+            .write_all(&frame.body[..usize::from(frame.length)])
     }
 
     fn write_frame_end(&mut self, frame: &Frame, error: bool) -> io::Result<()> {
-        let marker = if error { "%error" } else { "%end" };
-        writeln!(
-            self.output,
-            "{marker} {} {} {}",
-            frame.time, frame.number, frame.flags
-        )
+        let marker: &[u8] = if error { b"%error " } else { b"%end " };
+        self.output.write_all(marker)?;
+        self.output
+            .write_all(&frame.body[..usize::from(frame.length)])
     }
 
     fn response(&mut self, frame: &Frame, response: CommandResponse) -> io::Result<u8> {
@@ -2244,9 +2240,8 @@ impl<W: Write> Drop for ControlWriter<W> {
 
 #[derive(Clone, Copy)]
 struct Frame {
-    time: u64,
-    number: u64,
-    flags: u8,
+    body: [u8; 46],
+    length: u8,
 }
 
 struct StartedCommand {
@@ -2984,6 +2979,80 @@ mod tests {
     }
 
     #[test]
+    fn native_frame_metadata_keeps_zero_max_and_raw_bytes() {
+        println!(
+            "Frame size={}, Option<Frame> size={}",
+            std::mem::size_of::<Frame>(),
+            std::mem::size_of::<Option<Frame>>()
+        );
+        for (time, number, flags, body) in [
+            (0, 0, 0, b"0 0 0\n".as_slice()),
+            (
+                u64::MAX,
+                u64::MAX,
+                u8::MAX,
+                b"18446744073709551615 18446744073709551615 255\n".as_slice(),
+            ),
+        ] {
+            for error in [false, true] {
+                let mut writer = ControlWriter::new(Vec::new(), false);
+                writer.next_number = number;
+                let frame = writer.begin_buffered_at(time, flags).unwrap();
+                writer.payload(b"a\xffb").unwrap();
+                writer.end(&frame, error).unwrap();
+                assert_eq!(writer.next_number, number.saturating_add(1));
+
+                let marker: &[u8] = if error { b"%error " } else { b"%end " };
+                let mut expected = b"%begin ".to_vec();
+                expected.extend_from_slice(body);
+                expected.extend_from_slice(b"a\xffb\n");
+                expected.extend_from_slice(marker);
+                expected.extend_from_slice(body);
+                if number == u64::MAX {
+                    writer
+                        .control_command_guard_bytes_at(time, b"c\xfe", error, flags)
+                        .unwrap();
+                    expected.extend_from_slice(b"%begin ");
+                    expected.extend_from_slice(body);
+                    expected.extend_from_slice(b"c\xfe\n");
+                    expected.extend_from_slice(marker);
+                    expected.extend_from_slice(body);
+                    assert_eq!(writer.next_number, u64::MAX);
+                }
+                assert_eq!(writer.output, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn native_frame_metadata_preserves_partial_sink_errors() {
+        let mut bytes = [0; 8];
+        let mut writer = ControlWriter::new(bytes.as_mut_slice(), false);
+        assert_eq!(
+            writer.begin_at(0, 0).err().unwrap().kind(),
+            io::ErrorKind::WriteZero
+        );
+        assert_eq!(writer.next_number, 2);
+        drop(writer);
+        assert_eq!(&bytes, b"%begin 0");
+
+        for (error, expected) in [
+            (false, b"%begin 0 1 0\n%end 0".as_slice()),
+            (true, b"%begin 0 1 0\n%error 0".as_slice()),
+        ] {
+            let mut bytes = [0; 21];
+            let mut writer = ControlWriter::new(&mut bytes[..expected.len()], false);
+            let frame = writer.begin_at(0, 0).unwrap();
+            assert_eq!(
+                writer.end(&frame, error).unwrap_err().kind(),
+                io::ErrorKind::WriteZero
+            );
+            drop(writer);
+            assert_eq!(&bytes[..expected.len()], expected);
+        }
+    }
+
+    #[test]
     fn started_response_preserves_raw_output_before_callback_guards() {
         let mut writer = ControlWriter::new(Vec::new(), false);
         let frame = writer.begin_at(17, 1).unwrap();
@@ -3254,7 +3323,7 @@ mod tests {
     fn serializer_keeps_frame_identity_payload_and_error_shapes() {
         let mut writer = ControlWriter::new(Vec::new(), false);
         let first = writer.begin_at(17, 0).unwrap();
-        assert_eq!(first.number, 1);
+        assert_eq!(&first.body[..usize::from(first.length)], b"17 1 0\n");
         writer
             .response(
                 &first,

@@ -55,7 +55,7 @@ fn status_parameters_observe_options_arrays_titles_environment_and_default_termi
     assert_eq!(changed.message_styles.0, "fg=blue");
     assert_eq!(changed.message_line, 1);
     assert_eq!(changed.default_terminal.as_str(), "xterm");
-    assert!(changed.references.contains("client_width"));
+    assert!(changed.references.contains("client_width") || changed.references.contains("*"));
     assert!(changed.environment.iter().any(|(name, value)| {
         name.as_bytes() == b"FORMAT_PARAMETER_TEST"
             && value

@@ -37855,26 +37855,34 @@ fn status_parameters(
         title_format.as_deref(),
         &message_styles,
     );
-    let references =
-        inner
-            .engine
-            .cached_format_references_for_templates(crate::status::status_line_templates(
+    let (references, client_references) = if *BORROWED_FORMAT_FACTS
+        || zz_mux::borrowed_formats_enabled()
+        || zz_mux::format_cache_knob()
+    {
+        let references = inner.engine.cached_format_references_for_templates(
+            crate::status::status_line_templates(
                 &formats,
                 &row_formats,
                 title_format.as_deref(),
                 &message_styles,
-            ));
-    let border_references = inner.engine.cached_format_references_for_templates([
-        "#{E:pane-border-style}",
-        "#{E:pane-active-border-style}",
-    ]);
-    let client_references = Arc::new(
-        references
-            .iter()
-            .chain(border_references.iter())
-            .cloned()
-            .collect(),
-    );
+            ),
+        );
+        let border_references = inner.engine.cached_format_references_for_templates([
+            "#{E:pane-border-style}",
+            "#{E:pane-active-border-style}",
+        ]);
+        let client_references = Arc::new(
+            references
+                .iter()
+                .chain(border_references.iter())
+                .cloned()
+                .collect(),
+        );
+        (references, client_references)
+    } else {
+        let references = Arc::new(BTreeSet::from(["*".to_owned()]));
+        (Arc::clone(&references), references)
+    };
     let fact_selection = StatusFactSelection::from_references(&references);
     let client_fact_selection = ClientFactSelection::from_references(&client_references);
     let parameters = Arc::new(StatusParameters {

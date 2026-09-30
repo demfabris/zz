@@ -748,11 +748,16 @@ impl FormatUniverse {
             items
                 .iter()
                 .map(|item| {
-                    let mut context = item
-                        .context
-                        .borrowed_child(Some(engine))
-                        .detach_values(specs);
-                    context.values = item.context.values.clone();
+                    let context = if tree::borrowed_formats() {
+                        let mut context = item
+                            .context
+                            .borrowed_child(Some(engine))
+                            .detach_values(specs);
+                        context.values = item.context.values.clone();
+                        context
+                    } else {
+                        item.context.detach_values(specs)
+                    };
                     FormatLoopItem {
                         context,
                         active: item.active,

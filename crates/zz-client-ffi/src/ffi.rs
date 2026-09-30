@@ -742,7 +742,9 @@ fn start_client(client: InteractiveClient) -> Result<*mut ZzClient, String> {
         .map_err(|error| error.to_string())?;
     let client = Arc::new(client);
     let core = Arc::new(Mutex::new(ClientCore::new()));
-    lock(&core).handle_message(ProtocolMessage::ServerHello(client.server_hello().clone()));
+    lock(&core).handle_message(ProtocolMessage::ServerHello(Box::new(
+        client.server_hello().clone(),
+    )));
     let queues = EventQueues::default();
     let mut queued = false;
     {

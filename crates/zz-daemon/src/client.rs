@@ -2872,7 +2872,7 @@ fn connect_stream_hello<S: TransportStream>(
     }
     let hello = match reader.recv()? {
         ProtocolMessage::Welcome(welcome) => materialize_welcome(&mut reader, welcome)?,
-        ProtocolMessage::ServerHello(hello) => hello,
+        ProtocolMessage::ServerHello(hello) => *hello,
         ProtocolMessage::CommandResponse(CommandResponse::Error { error, .. }) => {
             return Err(DaemonError::Server(error));
         }
@@ -3615,7 +3615,7 @@ mod tests {
                 ));
 
                 writer
-                    .send(&ProtocolMessage::ServerHello(ServerHello {
+                    .send(&ProtocolMessage::ServerHello(Box::new(ServerHello {
                         protocol_version: PROTOCOL_VERSION,
                         server_id: 1,
                         client_id: ClientId(1),
@@ -3626,7 +3626,7 @@ mod tests {
                         mux_options: MuxOptions::default(),
                         status: StatusLine::default(),
                         key_tables: Vec::new(),
-                    }))
+                    })))
                     .expect("send hello");
             });
             let result = connect_stream_with_startup_owner(

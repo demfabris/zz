@@ -62,7 +62,7 @@ fn test_server(tables: Vec<KeyTableSnapshot>) -> (InteractiveClient, TestServer)
         sender.send(stream.try_clone().unwrap()).unwrap();
         write_protocol_message(
             &mut stream,
-            &ProtocolMessage::ServerHello(ServerHello {
+            &ProtocolMessage::ServerHello(Box::new(ServerHello {
                 protocol_version: PROTOCOL_VERSION,
                 server_id: 1,
                 client_id: ClientId(1),
@@ -76,7 +76,7 @@ fn test_server(tables: Vec<KeyTableSnapshot>) -> (InteractiveClient, TestServer)
                 mux_options: MuxOptions::default(),
                 status: StatusLine::default(),
                 key_tables: tables,
-            }),
+            })),
         )
         .unwrap();
         while read_protocol_message(&mut stream).is_ok() {}

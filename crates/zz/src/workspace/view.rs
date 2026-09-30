@@ -4513,7 +4513,7 @@ mod tests {
             );
             write_protocol_message(
                 &mut stream,
-                &ProtocolMessage::ServerHello(zz_protocol::ServerHello {
+                &ProtocolMessage::ServerHello(Box::new(zz_protocol::ServerHello {
                     protocol_version: PROTOCOL_VERSION,
                     server_id: 1,
                     client_id: zz_protocol::ClientId(1),
@@ -4527,7 +4527,7 @@ mod tests {
                     mux_options,
                     status: zz_protocol::StatusLine::default(),
                     key_tables: zz_protocol::KeyTables::default().snapshot(),
-                }),
+                })),
             )
             .unwrap();
             while read_protocol_message(&mut stream).is_ok() {}

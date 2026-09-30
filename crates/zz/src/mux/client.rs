@@ -5536,7 +5536,7 @@ mod tests {
             ));
             write_protocol_message(
                 &mut stream,
-                &ProtocolMessage::ServerHello(test_server_hello()),
+                &ProtocolMessage::ServerHello(Box::new(test_server_hello())),
             )
             .expect("write ServerHello");
             let resync = read_protocol_message(&mut stream);
@@ -7118,7 +7118,7 @@ mod tests {
             ));
             write_protocol_message(
                 &mut stream,
-                &ProtocolMessage::ServerHello(test_server_hello()),
+                &ProtocolMessage::ServerHello(Box::new(test_server_hello())),
             )
             .expect("write ServerHello");
             assert!(matches!(
@@ -7186,7 +7186,7 @@ mod tests {
             ));
             write_protocol_message(
                 &mut stream,
-                &ProtocolMessage::ServerHello(test_server_hello()),
+                &ProtocolMessage::ServerHello(Box::new(test_server_hello())),
             )
             .expect("write reconnect ServerHello");
             assert!(matches!(

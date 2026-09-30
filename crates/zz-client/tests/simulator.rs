@@ -75,7 +75,9 @@ impl SimClient {
             })
             .expect("spawn simulator reader");
         let mut core = ClientCore::new();
-        core.handle_message(ProtocolMessage::ServerHello(client.server_hello().clone()));
+        core.handle_message(ProtocolMessage::ServerHello(Box::new(
+            client.server_hello().clone(),
+        )));
         Self {
             client,
             core,

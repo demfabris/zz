@@ -2260,6 +2260,11 @@ As built on `perf/ctrl`, 2026-09-30:
   Scoped tree children keep their shared encoded allocation through each client's
   group and collector. The Batch encoder borrows child bytes and writes each slice
   at once, with the same frame and count bounds and output as the owned encoder.
+  Quiet queries retain their response/exit children until that final encoding,
+  avoiding an intermediate Batch allocation and copy. Admission still charges the
+  exact encoded bytes and one reliable queue item; buffered execution keeps its
+  encoded path. Ordinary status publication and session-wide refreshes skip clients
+  still attaching, while the explicit final resync renders their final status.
 - Hash subscribers receive revision plus exact root/copy mouse bits. Full subscribers
   receive per-table patches. A first Full subscriber cannot consume a pending Hash
   revision. Control requests no keys because its frontend does not use them; TUI requests
@@ -2283,6 +2288,9 @@ As built on `perf/ctrl`, 2026-09-30:
   are rejected after unzoom; retained legacy ClientHello clients keep generation-zero
   resize behavior. Native and shared reports capture generation synchronously; the C
   API also accepts an explicitly captured generation.
+  Already-presized compact panes also skip identical grid and cell-pixel reports,
+  after checking the layout generation. Changed geometry and legacy reports retain
+  the normal resize path.
 - The control frontend buffers payload/end writes and joins a ready Started guard to its
   response, flushing before it waits. Hook names and effective hook bodies are borrowed
   from the existing registry and option arrays. The existing literal-format predicate
@@ -2297,9 +2305,15 @@ As built on `perf/ctrl`, 2026-09-30:
   polling retain their prior behavior. Buffered events bypass readiness polling. The decoder
   returns the same box through the ready-receive layers, avoiding repeated large enum copies.
   The initialized receiver buffer is reused for reads.
+  The retained `ServerHello` payload is boxed, reducing `ProtocolMessage` from
+  1,432 to 312 bytes on this host. Its encoded greeting is unchanged; a saved
+  pre-change frame decodes and re-encodes to the same 1,265 bytes and SHA-256.
   TUI startup reduces the connection's already-held Batch synchronously and lays out
   that complete state before the first paint. The same reducer forwards attachment
   reset, image delivery and placing frames in stream order for later attachments.
+  Image resets share the existing metadata/frame drain, so initial attachment paints
+  each pane once. The physical-output proof covers one and four panes and leaves
+  unrelated input outside that drain.
   The TUI reuses unchanged rows, borders, status and message composition, then limits narrow-cell
   incremental painting to changed columns. Full-frame and scroll damage compare retained
   rows; equal dictionary contents also retain the painted cache. Wide cells, overlays and
@@ -2315,6 +2329,10 @@ As built on `perf/ctrl`, 2026-09-30:
   Empty environment/home lookup lists return before locking. The actual parser still checks
   the whole line before mutation, and stored aliases keep their existing expansion and
   same-line freezing behavior.
+  Caller-input discovery skips the flag parser only when no argument contains `I`;
+  display-message alias discovery skips it only when neither `@` nor `{` is present.
+  Packed and escaped flags, marker false positives, errors and target precedence
+  keep the existing parser and execution paths.
 - The command worker uses the existing Crossbeam Select API to park directly instead
   of yielding through the empty receive retry. Its queue, context, cancellation and
   thread ownership stay the same. Completed groups return owned child and outer buffers

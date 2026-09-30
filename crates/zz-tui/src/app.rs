@@ -659,7 +659,7 @@ pub(crate) fn run(
             continue;
         };
         match event {
-            event @ (MainEvent::Frames(_) | MainEvent::Core { .. }) => {
+            event @ (MainEvent::Frames(_) | MainEvent::Core { .. } | MainEvent::KittyImages(_)) => {
                 let mut paint = PendingPaint::None;
                 let mut core_seen = false;
                 let mut exit = None;
@@ -671,6 +671,24 @@ pub(crate) fn run(
                             if event_connection == connection_id {
                                 take_frames(&frames, &mut model, &mut renderer);
                                 paint = paint.max(PendingPaint::Frames);
+                            }
+                        }
+                        MainEvent::KittyImages(event_connection) => {
+                            if event_connection == connection_id {
+                                let updates = kitty_images.take();
+                                let accept_images = kitty_probe.state != KittyProbeState::Disabled;
+                                if accept_images
+                                    && updates
+                                        .iter()
+                                        .any(|update| !matches!(update, KittyImageUpdate::Reset))
+                                {
+                                    start_kitty_probe(&mut kitty_probe, &mut terminal)?;
+                                }
+                                let changed = !updates.is_empty();
+                                apply_kitty_updates(&mut renderer, updates, accept_images);
+                                if changed && kitty_probe.state == KittyProbeState::Enabled {
+                                    paint = paint.max(PendingPaint::Repaint);
+                                }
                             }
                         }
                         MainEvent::Core { connection, event } => {
@@ -751,7 +769,7 @@ pub(crate) fn run(
                     if !*crate::COALESCE || handled >= MAX_COALESCED_EVENTS {
                         break;
                     }
-                    next = incoming.try_recv().ok();
+                    next = next_paint_event(&incoming, &mut deferred);
                 }
                 if let Some(reason) = exit {
                     break Ok(reason);
@@ -765,27 +783,6 @@ pub(crate) fn run(
                     });
                 }
                 paint_pending(paint, &mut model, &client, &mut browser, &mut renderer)?;
-            }
-            MainEvent::KittyImages(event_connection) => {
-                if event_connection != connection_id {
-                    continue;
-                }
-                let updates = kitty_images.take();
-                let accept_images = kitty_probe.state != KittyProbeState::Disabled;
-                if accept_images
-                    && updates
-                        .iter()
-                        .any(|update| !matches!(update, KittyImageUpdate::Reset))
-                {
-                    start_kitty_probe(&mut kitty_probe, &mut terminal)?;
-                }
-                let changed = !updates.is_empty();
-                apply_kitty_updates(&mut renderer, updates, accept_images);
-                if changed && kitty_probe.state == KittyProbeState::Enabled {
-                    renderer
-                        .paint(&model, false)
-                        .map_err(|error| error.to_string())?;
-                }
             }
             MainEvent::Terminal(Ok(event)) => {
                 let probe_update = kitty_probe.observe(&event);
@@ -1229,7 +1226,7 @@ fn prepare_connection(
 /// events keeps the reader's first drain free of handshake leftovers.
 fn seeded_core(hello: ServerHello) -> Arc<Mutex<ClientCore>> {
     let mut core = ClientCore::new();
-    core.handle_message(ProtocolMessage::ServerHello(hello));
+    core.handle_message(ProtocolMessage::ServerHello(Box::new(hello)));
     while core.poll_event().is_some() {}
     Arc::new(Mutex::new(core))
 }
@@ -2117,6 +2114,21 @@ fn receive_main_event(
     }
 }
 
+fn next_paint_event(
+    incoming: &mpsc::Receiver<MainEvent>,
+    deferred: &mut Option<MainEvent>,
+) -> Option<MainEvent> {
+    match incoming.try_recv().ok() {
+        Some(
+            event @ (MainEvent::Frames(_) | MainEvent::Core { .. } | MainEvent::KittyImages(_)),
+        ) => Some(event),
+        event => {
+            *deferred = event;
+            None
+        }
+    }
+}
+
 fn pump_browser_provider(
     browser: &mut BrowserState,
     renderer: &mut Renderer,
@@ -2550,6 +2562,132 @@ mod tests {
             for pane in panes {
                 assert!(first.contains(&format!("INITIAL-{}", pane.0)), "{first:?}");
             }
+        }
+    }
+
+    #[test]
+    fn initial_drain_paints_metadata_reset_and_frames_once() {
+        for count in [1, 4] {
+            let panes = (7..7 + count).map(PaneId).collect::<Vec<_>>();
+            let snapshot = initial_snapshot(&panes);
+            let mut layout_model = initial_model(&ClientCore::new());
+            layout_model.attached_session = Some(zz_protocol::SessionId(1));
+            layout_model.update_snapshot(Arc::new(snapshot.clone()));
+            let mut messages = vec![
+                initial_event(zz_protocol::EventPayload::Snapshot(snapshot)),
+                initial_view(1),
+                initial_event(zz_protocol::EventPayload::AppearanceChanged {
+                    appearance: Box::default(),
+                    provenance: zz_terminal::AppearanceProvenance::default(),
+                }),
+                initial_event(zz_protocol::EventPayload::StatusChanged {
+                    status: zz_protocol::StatusLine::default(),
+                }),
+            ];
+            for entry in &layout_model.layout.panes {
+                let content = entry.content();
+                messages.push(initial_event(zz_protocol::EventPayload::TerminalViewport {
+                    pane: entry.pane,
+                    viewport: with_row_text(
+                        &TerminalViewport::blank(
+                            content.width,
+                            content.height,
+                            zz_terminal::SessionStatus::Running,
+                        ),
+                        0,
+                        &format!("DRAIN-{}", entry.pane.0),
+                    ),
+                }));
+            }
+            let core = Mutex::new(ClientCore::new());
+            let frames = FrameInbox::default();
+            let images = KittyImageInbox::default();
+            let (events, incoming) = mpsc::channel();
+            assert!(forward_protocol_message(
+                &core,
+                ProtocolMessage::Batch(zz_protocol::Batch::from_messages(1, messages).unwrap()),
+                1,
+                &events,
+                &frames,
+                &images,
+                &AtomicU8::new(KITTY_GATE_PROBING),
+                |_| panic!("initial full state must not need another wire request"),
+            ));
+            events.send(MainEvent::Resize).unwrap();
+            let mut model = initial_model(&lock_core(&core));
+            model.update_snapshot(Arc::clone(lock_core(&core).snapshot()));
+            let (written, output) = mpsc::channel();
+            let mut renderer = Renderer::with_sink(Box::new(move |bytes| {
+                written.send(bytes.to_vec()).unwrap();
+                Ok(())
+            }));
+            let mut deferred = None;
+            let mut actions = Vec::new();
+            let mut paints = Vec::new();
+            while let Some(event) = deferred.take().or_else(|| incoming.try_recv().ok()) {
+                if matches!(event, MainEvent::KittyImages(1)) {
+                    apply_kitty_updates(&mut renderer, images.take(), true);
+                    actions.push("reset");
+                    continue;
+                }
+                let mut paint = PendingPaint::None;
+                let mut next = Some(event);
+                while let Some(event) = next.take() {
+                    match event {
+                        MainEvent::Core { event, .. } => match *event {
+                            CoreEvent::Attached { .. } => {
+                                model.viewports = panes
+                                    .iter()
+                                    .map(|pane| {
+                                        (*pane, lock_core(&core).viewport(*pane).unwrap().clone())
+                                    })
+                                    .collect();
+                                actions.push("attached");
+                                paint = paint.max(PendingPaint::RepaintAll);
+                            }
+                            CoreEvent::AppearanceChanged => {
+                                paint = paint.max(PendingPaint::RepaintAll);
+                            }
+                            _ => paint = paint.max(PendingPaint::Repaint),
+                        },
+                        MainEvent::KittyImages(1) => {
+                            apply_kitty_updates(&mut renderer, images.take(), true);
+                            actions.push("reset");
+                        }
+                        MainEvent::Frames(1) => {
+                            take_frames(&frames, &mut model, &mut renderer);
+                            actions.push("frames");
+                            paint = paint.max(PendingPaint::Frames);
+                        }
+                        _ => panic!("unexpected event in paint span"),
+                    }
+                    next = next_paint_event(&incoming, &mut deferred);
+                }
+                match paint {
+                    PendingPaint::RepaintAll => {
+                        renderer.invalidate();
+                        renderer.paint(&model, true).unwrap();
+                    }
+                    PendingPaint::Repaint => renderer.paint(&model, false).unwrap(),
+                    PendingPaint::Frames => renderer.paint_frames(&model).unwrap(),
+                    PendingPaint::None => {}
+                }
+                if paint != PendingPaint::None {
+                    paints.push(output.recv_timeout(Duration::from_secs(2)).unwrap());
+                }
+                if matches!(deferred, Some(MainEvent::Resize)) {
+                    break;
+                }
+            }
+            assert_eq!(paints.len(), 1, "panes={count}, actions={actions:?}");
+            let first = String::from_utf8(paints.concat()).unwrap();
+            assert_eq!(first.matches("\x1b[2J").count(), 1, "{first:?}");
+            for pane in panes {
+                assert_eq!(first.matches(&format!("DRAIN-{}", pane.0)).count(), 1);
+            }
+            assert_eq!(actions, ["attached", "reset", "frames"]);
+            assert!(matches!(deferred, Some(MainEvent::Resize)));
+            assert!(incoming.try_recv().is_err());
         }
     }
 

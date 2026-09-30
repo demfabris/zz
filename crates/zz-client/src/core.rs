@@ -302,7 +302,7 @@ impl ClientCore {
     /// [`Self::poll_event`] afterwards.
     pub fn handle_message(&mut self, message: ProtocolMessage) {
         match message {
-            ProtocolMessage::ServerHello(hello) => self.reset_connection(hello),
+            ProtocolMessage::ServerHello(hello) => self.reset_connection(*hello),
             ProtocolMessage::Welcome(welcome) => {
                 self.clear_attachment();
                 self.reset_session();
@@ -1299,7 +1299,7 @@ mod tests {
     }
 
     fn hello() -> ProtocolMessage {
-        ProtocolMessage::ServerHello(ServerHello {
+        ProtocolMessage::ServerHello(Box::new(ServerHello {
             protocol_version: PROTOCOL_VERSION,
             server_id: 1,
             client_id: ClientId(1),
@@ -1310,7 +1310,7 @@ mod tests {
             mux_options: MuxOptions::default(),
             status: StatusLine::default(),
             key_tables: Vec::new(),
-        })
+        }))
     }
 
     fn command_output_frame(pane: PaneId, output_id: u64, generation: u64) -> ProtocolMessage {
@@ -1787,7 +1787,7 @@ mod tests {
         let ProtocolMessage::ServerHello(hello) = hello() else {
             unreachable!();
         };
-        core.adopt_hello(hello);
+        core.adopt_hello(*hello);
         assert_eq!(core.command_output_id(), Some(20));
 
         core.handle_message(command_output_frame(pane, 1, 2));

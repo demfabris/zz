@@ -175,9 +175,10 @@ impl TerminalApp {
             };
             match event {
                 Event::Connected(client) => {
-                    self.core.handle_message(ProtocolMessage::ServerHello(
-                        client.server_hello().clone(),
-                    ));
+                    self.core
+                        .handle_message(ProtocolMessage::ServerHello(Box::new(
+                            client.server_hello().clone(),
+                        )));
                     self.client = Some(client);
                     self.status = "Connected".into();
 

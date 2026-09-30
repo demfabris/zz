@@ -894,7 +894,7 @@ impl Connection {
                     self.resume = true;
                     let hello = client.server_hello().clone();
                     self.client = Some(client);
-                    self.receive(ProtocolMessage::ServerHello(hello), cx);
+                    self.receive(ProtocolMessage::ServerHello(Box::new(hello)), cx);
                 }
                 crate::transport::Event::Message(message) => self.receive(*message, cx),
                 crate::transport::Event::Prompt(prompt) => {
@@ -1411,7 +1411,7 @@ mod tests {
             .filter(|(index, _)| mask & (1 << index) != 0)
             .map(|(_, capability)| capability.to_owned())
             .collect();
-            let hello = ProtocolMessage::ServerHello(zz_protocol::ServerHello {
+            let hello = ProtocolMessage::ServerHello(Box::new(zz_protocol::ServerHello {
                 protocol_version: zz_protocol::PROTOCOL_VERSION,
                 server_id: 1,
                 client_id: zz_protocol::ClientId(1),
@@ -1422,7 +1422,7 @@ mod tests {
                 mux_options: zz_protocol::MuxOptions::default(),
                 status: zz_protocol::StatusLine::default(),
                 key_tables: Vec::new(),
-            });
+            }));
             let encoded = zz_protocol::encode_protocol_message(&hello).unwrap();
             let decoded = zz_protocol::decode_protocol_frame(&encoded).unwrap();
             assert_eq!(super::supports_required_protocol(&decoded), mask == 3);

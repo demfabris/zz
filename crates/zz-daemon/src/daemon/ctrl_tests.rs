@@ -438,13 +438,11 @@ fn quiet_control_release_cannot_flush_an_attach_collector() {
         .insert(client, Arc::clone(&mailbox));
     assert!(mailbox.collect_control_query());
     assert!(mailbox.enqueue_reliable_with_wakeup(&ProtocolMessage::TreeSync, false));
-    assert!(
-        mailbox.enqueue_control_group(vec![
+    assert!(mailbox.enqueue_control_group(vec![
             zz_protocol::encode_protocol_message(&ProtocolMessage::TreeSync)
                 .expect("deferred child")
                 .into(),
-        ])
-    );
+        ]));
     assert!(matches!(
         mailbox.state.lock().reliable.back(),
         Some(OutboundFrame::DeferredGrouped { .. })
@@ -498,13 +496,11 @@ fn quiet_control_close_and_overflow_release_the_held_frames() {
     let mailbox = OutboundMailbox::new();
     assert!(mailbox.collect_control_query());
     assert!(mailbox.enqueue_reliable_with_wakeup(&ProtocolMessage::TreeSync, false));
-    assert!(
-        mailbox.enqueue_control_group(vec![
+    assert!(mailbox.enqueue_control_group(vec![
             zz_protocol::encode_protocol_message(&ProtocolMessage::TreeSync)
                 .expect("deferred child")
                 .into(),
-        ])
-    );
+        ]));
     mailbox.close_after_flush();
     let encoded = mailbox.recv().expect("closed collection drains");
     let ProtocolMessage::Batch(batch) =
@@ -520,13 +516,11 @@ fn quiet_control_close_and_overflow_release_the_held_frames() {
 
     let mailbox = OutboundMailbox::new();
     assert!(mailbox.collect_control_query());
-    assert!(
-        mailbox.enqueue_control_group(vec![
+    assert!(mailbox.enqueue_control_group(vec![
             zz_protocol::encode_protocol_message(&ProtocolMessage::TreeSync)
                 .expect("overflow child")
                 .into(),
-        ])
-    );
+        ]));
     for _ in 1..MAX_RELIABLE_MESSAGES {
         assert!(mailbox.enqueue_reliable_with_wakeup(&ProtocolMessage::TreeSync, false));
     }
@@ -1168,6 +1162,208 @@ fn compact_command(
         .expect(name);
 }
 
+#[test]
+fn initializing_status_waits_for_explicit_refresh_while_existing_clients_update() {
+    let shared = Arc::new(Shared::new(61));
+    let mut context = ExecutionContext::default();
+    {
+        let mut inner = shared.inner.lock();
+        for command in [
+            CommandInvocation::new("new-session", ["-d", "-s", "initial-status"]),
+            CommandInvocation::new(
+                "set-option",
+                ["-t", "initial-status", "status-format[0]", "FIRST"],
+            ),
+        ] {
+            inner
+                .engine
+                .execute(&mut context, &command)
+                .expect("model command");
+        }
+    }
+    let session = context.session.expect("session");
+    let existing = OutboundMailbox::new();
+    let (existing_client, _) =
+        shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&existing));
+    let hello = compact_hello(ClientKind::Interactive);
+    let (initial_client, _) = shared.register_welcome(&hello).expect("welcome");
+    let initial = OutboundMailbox::new();
+    shared.subscribe(initial_client, Arc::clone(&initial));
+    {
+        let mut inner = shared.inner.lock();
+        inner
+            .attached
+            .entry(session)
+            .or_default()
+            .extend([existing_client, initial_client]);
+        inner.client_sizes.insert(existing_client, (80, 24));
+        inner.client_sizes.insert(initial_client, (97, 31));
+    }
+    for label in ["FIRST", "SECOND"] {
+        shared
+            .inner
+            .lock()
+            .engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-t", "initial-status", "status-format[0]", label],
+                ),
+            )
+            .expect("status format");
+        shared.publish_mux_snapshots_except(true, true, None);
+        shared.refresh_status_for_sessions(Some(&BTreeSet::from([session])));
+        assert!(
+            reliable_children(&existing)
+                .iter()
+                .any(|message| matches!(message,
+            ProtocolMessage::Event(Event { payload: EventPayload::StatusChanged { status }, .. })
+                if status.rows == [label]))
+        );
+        assert!(!reliable_children(&initial).iter().any(|message| matches!(
+            message,
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::StatusChanged { .. },
+                ..
+            })
+        )));
+        assert!(
+            !shared
+                .inner
+                .lock()
+                .client_status_rows
+                .contains_key(&initial_client)
+        );
+    }
+    shared.refresh_status_filtered(None, Some(&BTreeSet::from([initial_client])));
+    let statuses = reliable_children(&initial)
+        .into_iter()
+        .filter_map(|message| match message {
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::StatusChanged { status },
+                ..
+            }) => Some(status),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(statuses.len(), 1);
+    assert_eq!(statuses[0].rows, ["SECOND"]);
+    assert!(
+        shared
+            .inner
+            .lock()
+            .client_status_rows
+            .contains_key(&initial_client)
+    );
+}
+
+#[test]
+fn caller_input_flags_keep_packed_escaped_and_false_positive_spellings() {
+    for name in ["display-message", "split-window"] {
+        for arguments in [vec!["-I"], vec!["-It%7"]] {
+            let command = CommandInvocation::new(name, arguments);
+            assert_eq!(
+                command_stdin_sink(name, &command.args),
+                Some(CommandStdinSink::PaneInput)
+            );
+        }
+        for arguments in [vec!["--", "-I"], vec!["-t", "targetI"], vec!["textI"]] {
+            let command = CommandInvocation::new(name, arguments);
+            assert_eq!(command_stdin_sink(name, &command.args), None);
+        }
+    }
+    let command = CommandInvocation::new("display-message", ["-pI"]);
+    assert_eq!(
+        command_stdin_sink(&command.name, &command.args),
+        Some(CommandStdinSink::PaneInput)
+    );
+    for line in [
+        r"display-message -\111; split-window -\111",
+        r#"display-message '-I'; split-window "-I""#,
+    ] {
+        let parsed = zz_mux::parse_config_with_expansions(
+            "<control>",
+            line,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        );
+        assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+        assert_eq!(parsed.commands.len(), 2);
+        for command in parsed.commands {
+            assert_eq!(
+                command_stdin_sink(&command.name, &command.args),
+                Some(CommandStdinSink::PaneInput)
+            );
+        }
+    }
+}
+
+#[test]
+fn display_alias_absence_preserves_packed_targets_literal_markers_and_errors() {
+    let shared = Arc::new(Shared::new(63));
+    let mut context = ExecutionContext::default();
+    shared
+        .inner
+        .lock()
+        .engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new("new-session", ["-d", "-s", "alias-absence"]),
+        )
+        .expect("model session");
+    let session = context.session.expect("session");
+    let pane = context.pane.expect("pane");
+    let (client, _) = compact_registered(&shared, zz_protocol::Subscriptions::terminal());
+    shared
+        .inner
+        .lock()
+        .attached
+        .entry(session)
+        .or_default()
+        .insert(client);
+    for target in ["@", "{active}", "{current}"] {
+        let command = CommandInvocation::new(
+            "display-message",
+            [format!("-pt{target}"), "#{pane_id}".to_owned()],
+        );
+        let route = shared
+            .display_message_client_alias(client, &command)
+            .expect("alias route");
+        assert!(route.command.is_some());
+        let output = shared
+            .execute(client, ClientKind::Interactive, &mut context, &command)
+            .expect("packed alias");
+        assert_eq!(output.output, pane.to_string());
+    }
+    for text in ["ordinary", "literal @ {active} I"] {
+        let command = CommandInvocation::new("display-message", ["-pl", text]);
+        assert!(
+            shared
+                .display_message_client_alias(client, &command)
+                .is_none()
+        );
+        assert_eq!(
+            shared
+                .execute(client, ClientKind::Interactive, &mut context, &command)
+                .expect("literal display")
+                .output,
+            text
+        );
+    }
+    for text in ["ordinary", "literal @ {active} I"] {
+        let error = shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-pZ", text]),
+            )
+            .expect_err("unknown option");
+        assert!(error.to_string().contains("unknown flag -Z"), "{error}");
+    }
+}
+
 fn compact_registered(
     shared: &Arc<Shared>,
     subscriptions: zz_protocol::Subscriptions,
@@ -1286,12 +1482,33 @@ fn assert_initial_compact_attach(commands: bool) {
         cell_height_px: 16,
     });
     hello.attach = Some(if commands {
-        zz_protocol::AttachOperation::Commands(vec![PreparedCommand {
-            invocation: CommandInvocation::new("attach-session", ["-t", "ctrl-initial"]),
-            canonical_name: Some("attach-session".to_owned()),
-            alias_matched: false,
-            result: PreparedCommandResult::Ready,
-        }])
+        zz_protocol::AttachOperation::Commands(
+            [
+                CommandInvocation::new("attach-session", ["-t", "ctrl-initial"]),
+                CommandInvocation::new("set-option", ["-t", "ctrl-initial", "status", "2"]),
+                CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-t",
+                        "ctrl-initial",
+                        "status-format[0]",
+                        "CTRL_FINAL_#{client_width}x#{client_height}:#{pane_height}",
+                    ],
+                ),
+                CommandInvocation::new(
+                    "set-option",
+                    ["-t", "ctrl-initial", "status-format[1]", "CTRL_SECOND"],
+                ),
+            ]
+            .into_iter()
+            .map(|invocation| PreparedCommand {
+                canonical_name: Some(invocation.name.clone()),
+                invocation,
+                alias_matched: false,
+                result: PreparedCommandResult::Ready,
+            })
+            .collect(),
+        )
     } else {
         zz_protocol::AttachOperation::Session("ctrl-initial".to_owned())
     });
@@ -1307,6 +1524,39 @@ fn assert_initial_compact_attach(commands: bool) {
         panic!("initial state is not a batch")
     };
     let messages = batch.messages().expect("messages");
+    let statuses = messages
+        .iter()
+        .filter_map(|message| match message {
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::StatusChanged { status },
+                ..
+            }) => Some(status),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        statuses.len(),
+        1,
+        "commands={commands}, initial status was rendered before the final command: {statuses:?}"
+    );
+    if commands {
+        let inner = shared.inner.lock();
+        let client = inner
+            .subscribers
+            .keys()
+            .next()
+            .copied()
+            .expect("attached client");
+        let pane = client_context_pane(&inner, client).expect("active pane");
+        let (_, height) = inner.engine.pane_geometry(pane).expect("active geometry");
+        assert_eq!(
+            statuses[0].rows,
+            [
+                format!("CTRL_FINAL_97x31:{height}"),
+                "CTRL_SECOND".to_owned()
+            ]
+        );
+    }
     assert_eq!(
         messages
             .iter()

@@ -997,7 +997,7 @@ mod tests {
         let mut appearance_provenance = AppearanceProvenance::default();
         appearance_provenance
             .set_source(AppearanceConfigKey::Background, AppearanceSource::Ghostty);
-        let message = ProtocolMessage::ServerHello(crate::ServerHello {
+        let message = ProtocolMessage::ServerHello(Box::new(crate::ServerHello {
             protocol_version: crate::PROTOCOL_VERSION,
             server_id: 7,
             client_id: crate::ClientId(11),
@@ -1008,7 +1008,7 @@ mod tests {
             mux_options: MuxOptions::default(),
             status: crate::StatusLine::default(),
             key_tables: Vec::new(),
-        });
+        }));
 
         let frame = encode_protocol_message(&message).expect("encode ServerHello");
         assert_eq!(frame[4], Lane::Control as u8);
@@ -1134,7 +1134,7 @@ mod tests {
             ][index % 4];
             options.set(key, format!("fixture-{index}"), source);
         }
-        let hello = ProtocolMessage::ServerHello(crate::ServerHello {
+        let hello = ProtocolMessage::ServerHello(Box::new(crate::ServerHello {
             protocol_version: PROTOCOL_VERSION,
             server_id: 7,
             client_id: crate::ClientId(11),
@@ -1145,7 +1145,7 @@ mod tests {
             mux_options: options.clone(),
             status: crate::StatusLine::default(),
             key_tables: Vec::new(),
-        });
+        }));
         let hello_frame = encode_protocol_message(&hello).expect("encode mux options in hello");
         assert_eq!(decode_protocol_frame(&hello_frame).unwrap(), hello);
 
@@ -1189,7 +1189,7 @@ mod tests {
             key_tables: Vec::new(),
         };
         assert!(matches!(
-            encode_protocol_message(&ProtocolMessage::ServerHello(oversized)),
+            encode_protocol_message(&ProtocolMessage::ServerHello(Box::new(oversized))),
             Err(ProtocolError::InvalidServerHello(_))
         ));
     }
@@ -1220,7 +1220,7 @@ mod tests {
             "x".repeat(MAX_MUX_OPTION_VALUE_BYTES + 1),
             MuxOptionSource::RuntimeCommand,
         );
-        let oversized_hello = ProtocolMessage::ServerHello(crate::ServerHello {
+        let oversized_hello = ProtocolMessage::ServerHello(Box::new(crate::ServerHello {
             protocol_version: PROTOCOL_VERSION,
             server_id: 7,
             client_id: crate::ClientId(11),
@@ -1231,7 +1231,7 @@ mod tests {
             mux_options: oversized,
             status: crate::StatusLine::default(),
             key_tables: Vec::new(),
-        });
+        }));
         assert!(matches!(
             encode_protocol_message(&oversized_hello),
             Err(ProtocolError::InvalidServerHello(_))
@@ -1251,7 +1251,7 @@ mod tests {
             font_size_points: f32::NAN,
             ..TerminalAppearance::default()
         };
-        let message = ProtocolMessage::ServerHello(crate::ServerHello {
+        let message = ProtocolMessage::ServerHello(Box::new(crate::ServerHello {
             protocol_version: crate::PROTOCOL_VERSION,
             server_id: 7,
             client_id: crate::ClientId(11),
@@ -1262,7 +1262,7 @@ mod tests {
             mux_options: MuxOptions::default(),
             status: crate::StatusLine::default(),
             key_tables: Vec::new(),
-        });
+        }));
 
         assert!(matches!(
             encode_protocol_message(&message),
@@ -1283,7 +1283,7 @@ mod tests {
             font_features: vec![zz_terminal::FontFeature::new(*b"\0bad", 1)],
             ..TerminalAppearance::default()
         };
-        let message = ProtocolMessage::ServerHello(crate::ServerHello {
+        let message = ProtocolMessage::ServerHello(Box::new(crate::ServerHello {
             protocol_version: PROTOCOL_VERSION,
             server_id: 7,
             client_id: crate::ClientId(11),
@@ -1294,7 +1294,7 @@ mod tests {
             mux_options: MuxOptions::default(),
             status: crate::StatusLine::default(),
             key_tables: Vec::new(),
-        });
+        }));
 
         assert!(matches!(
             encode_protocol_message(&message),
@@ -1311,7 +1311,7 @@ mod tests {
 
     #[test]
     fn server_hello_rejects_inner_version_mismatch() {
-        let message = ProtocolMessage::ServerHello(crate::ServerHello {
+        let message = ProtocolMessage::ServerHello(Box::new(crate::ServerHello {
             protocol_version: PROTOCOL_VERSION - 1,
             server_id: 7,
             client_id: crate::ClientId(11),
@@ -1322,7 +1322,7 @@ mod tests {
             mux_options: MuxOptions::default(),
             status: crate::StatusLine::default(),
             key_tables: Vec::new(),
-        });
+        }));
 
         assert!(matches!(
             encode_protocol_message(&message),
@@ -1359,7 +1359,7 @@ mod tests {
                 ..TerminalAppearance::default()
             },
         ] {
-            let message = ProtocolMessage::ServerHello(crate::ServerHello {
+            let message = ProtocolMessage::ServerHello(Box::new(crate::ServerHello {
                 protocol_version: PROTOCOL_VERSION,
                 server_id: 7,
                 client_id: crate::ClientId(11),
@@ -1370,7 +1370,7 @@ mod tests {
                 mux_options: MuxOptions::default(),
                 status: crate::StatusLine::default(),
                 key_tables: Vec::new(),
-            });
+            }));
             let payload = postcard::to_stdvec(&message).expect("serialize malformed fixture");
             let frame = crate::framing::encode_enveloped(Lane::Control, &payload)
                 .expect("envelope malformed fixture");
@@ -1387,7 +1387,7 @@ mod tests {
             vec![String::new(); MAX_SERVER_CAPABILITIES + 1],
             vec!["x".repeat(MAX_SERVER_CAPABILITY_BYTES + 1)],
         ] {
-            let message = ProtocolMessage::ServerHello(crate::ServerHello {
+            let message = ProtocolMessage::ServerHello(Box::new(crate::ServerHello {
                 protocol_version: PROTOCOL_VERSION,
                 server_id: 7,
                 client_id: crate::ClientId(11),
@@ -1398,7 +1398,7 @@ mod tests {
                 mux_options: MuxOptions::default(),
                 status: crate::StatusLine::default(),
                 key_tables: Vec::new(),
-            });
+            }));
             assert!(matches!(
                 encode_protocol_message(&message),
                 Err(ProtocolError::InvalidServerHello(_))
@@ -1588,7 +1588,7 @@ mod tests {
 
     #[test]
     fn truncated_server_hello_palette_is_rejected() {
-        let message = ProtocolMessage::ServerHello(crate::ServerHello {
+        let message = ProtocolMessage::ServerHello(Box::new(crate::ServerHello {
             protocol_version: PROTOCOL_VERSION,
             server_id: 7,
             client_id: crate::ClientId(11),
@@ -1599,7 +1599,7 @@ mod tests {
             mux_options: MuxOptions::default(),
             status: crate::StatusLine::default(),
             key_tables: Vec::new(),
-        });
+        }));
         let mut changed = message.clone();
         let ProtocolMessage::ServerHello(hello) = &mut changed else {
             unreachable!("fixture is a ServerHello");

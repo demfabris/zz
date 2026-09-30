@@ -5196,7 +5196,10 @@ impl Shared {
         let startup_ready = *self.startup_ready.lock();
         let requests = {
             let mut inner = self.inner.lock();
-            let targets = status_targets(&inner, sessions, clients);
+            let mut targets = status_targets(&inner, sessions, clients);
+            if clients.is_none() {
+                targets.retain(|client| !inner.ctrl_initializing.contains(client));
+            }
             if targets.is_empty() && !*timers::EAGER_PUBLISH {
                 return;
             }
@@ -7446,6 +7449,14 @@ impl Shared {
         client: ClientId,
         command: &CommandInvocation,
     ) -> Option<ClientAliasRoute> {
+        if !command.args.iter().any(|argument| {
+            argument
+                .as_bytes()
+                .iter()
+                .any(|byte| matches!(byte, b'@' | b'{'))
+        }) {
+            return None;
+        }
         let parsed = parse_buffer_command_args(
             "display-message",
             &command.args,
@@ -25513,7 +25524,9 @@ impl Shared {
             let mut targets = startup_ready
                 .map(|_| status_targets(&inner, None, None))
                 .unwrap_or_default();
-            targets.retain(|client| Some(*client) != detached);
+            targets.retain(|client| {
+                Some(*client) != detached && !inner.ctrl_initializing.contains(client)
+            });
             if inner.subscribers.is_empty() && !*timers::EAGER_PUBLISH {
                 (Vec::new(), appearance_updates, Vec::new())
             } else {
@@ -42307,9 +42320,11 @@ pub fn command_stdin_sink(canonical_name: &str, args: &[RawText]) -> Option<Comm
         } else {
             CommandStdinSink::ConfigReplay
         }),
-        "display-message" | "split-window" => {
-            command_has_flag(canonical_name, args, "-I").then_some(CommandStdinSink::PaneInput)
-        }
+        "display-message" | "split-window" => (args
+            .iter()
+            .any(|argument| argument.as_bytes().contains(&b'I'))
+            && command_has_flag(canonical_name, args, "-I"))
+        .then_some(CommandStdinSink::PaneInput),
         _ => None,
     }
 }
@@ -44778,7 +44793,7 @@ fn handle_connection_message<S: TransportStream>(
                         .any(|capability| capability == ClientHello::CLIENT_TERMINAL_CAPABILITY),
                 startup_reentry,
             )
-            .map(|(client, hello)| (client, ProtocolMessage::ServerHello(hello)))
+            .map(|(client, hello)| (client, ProtocolMessage::ServerHello(Box::new(hello))))
     };
     let Some((client, greeting)) = registration else {
         best_effort_server_stopping_reply(&mut stream);

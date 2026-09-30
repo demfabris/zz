@@ -3649,7 +3649,7 @@ impl EventPayload {
 )]
 pub enum ProtocolMessage {
     ClientHello(ClientHello),
-    ServerHello(ServerHello),
+    ServerHello(Box<ServerHello>),
     CommandRequest(CommandRequest),
     CommandResponse(CommandResponse),
     Attach {

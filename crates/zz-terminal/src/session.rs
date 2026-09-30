@@ -15150,12 +15150,13 @@ fn copy_mode_facts(
             .y
             .min(mode.revision.total_rows().saturating_sub(1)),
     };
+    let reader = mode.revision.reader();
     CopyModeFacts {
         view_mode: mode.kind == FrozenModeKind::View,
         cursor_x: u32::from(cursor.x),
         cursor_y: cursor.y.saturating_sub(mode.viewport_offset),
-        cursor_line: format_grid_line(mode.revision.as_ref(), cursor.y),
-        cursor_word: format_grid_word(mode.revision.as_ref(), cursor, word_separators),
+        cursor_line: format_grid_line(&reader, cursor.y),
+        cursor_word: format_grid_word(&reader, cursor, word_separators),
         scroll_position: mode
             .revision
             .maximum_offset()
@@ -15214,17 +15215,20 @@ fn copy_mode_search_match(
         return String::new();
     };
     let mut text = String::new();
+    let reader = mode.revision.reader();
     for row in found.row..=found.end_row {
         let Some((start, end)) = found.span(row, mode.revision.columns) else {
             continue;
         };
         for column in start..end {
             let point = PointCoordinate { x: column, y: row };
-            if revision_cell_is_padding(&mode.revision, point) {
+            if matches!(
+                reader.cell(point).width(),
+                CellWidth::SpacerTail | CellWidth::SpacerHead
+            ) {
                 continue;
             }
-            mode.revision
-                .push_cell_text(mode.revision.cell(point), &mut text);
+            reader.push_text(point, &mut text);
         }
     }
     text
@@ -15241,6 +15245,32 @@ trait FormatGrid {
     fn grid_cell_width(&self, point: PointCoordinate) -> CellWidth;
     fn grid_first_char(&self, point: PointCoordinate) -> Option<char>;
     fn grid_push_text(&self, point: PointCoordinate, output: &mut String);
+}
+
+impl FormatGrid for mode_revision::ModeRevisionReader<'_> {
+    fn grid_columns(&self) -> u16 {
+        self.columns()
+    }
+
+    fn grid_rows(&self) -> u32 {
+        self.total_rows()
+    }
+
+    fn grid_row_wrapped(&self, row: u32) -> bool {
+        self.row_meta(row).wrapped()
+    }
+
+    fn grid_cell_width(&self, point: PointCoordinate) -> CellWidth {
+        self.cell(point).width()
+    }
+
+    fn grid_first_char(&self, point: PointCoordinate) -> Option<char> {
+        self.first_char(point)
+    }
+
+    fn grid_push_text(&self, point: PointCoordinate, output: &mut String) {
+        self.push_text(point, output);
+    }
 }
 
 impl FormatGrid for ModeRevision {

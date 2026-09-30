@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::sync::{
     Arc, LazyLock,
     atomic::{AtomicU64, Ordering},
@@ -12,7 +13,7 @@ use libghostty_vt::{
 
 use parking_lot::Mutex;
 
-use super::copy_grid::CopyGrid;
+use super::copy_grid::{CopyGrid, CopyRow};
 
 use crate::{CellWidth, Color, PackedCell, PackedStyle, TerminalDictionary};
 
@@ -95,7 +96,127 @@ pub(super) struct ModeRevision {
     total: u32,
 }
 
+struct ModeReaderRow {
+    index: u32,
+    row: Arc<CopyRow>,
+    dictionary: Arc<TerminalDictionary>,
+}
+
+pub(super) struct ModeRevisionReader<'revision> {
+    revision: &'revision ModeRevision,
+    cached: RefCell<Option<ModeReaderRow>>,
+}
+
+impl ModeRevisionReader<'_> {
+    pub(super) fn columns(&self) -> u16 {
+        self.revision.columns
+    }
+
+    pub(super) fn total_rows(&self) -> u32 {
+        self.revision.total_rows()
+    }
+
+    fn with_row<T>(
+        &self,
+        row: u32,
+        read: impl FnOnce(&CopyRow, &TerminalDictionary) -> T,
+    ) -> Option<T> {
+        let grid = self.revision.grid.as_ref()?;
+        let index = row.min(self.revision.total.saturating_sub(1));
+        let mut cached = self.cached.borrow_mut();
+        if cached.as_ref().is_none_or(|cached| cached.index != index) {
+            let mut grid = grid.lock();
+            let row = grid.row(index).expect("frozen row");
+            let dictionary = grid.dictionary();
+            *cached = Some(ModeReaderRow {
+                index,
+                row,
+                dictionary,
+            });
+        }
+        let cached = cached.as_ref().expect("captured row");
+        Some(read(&cached.row, &cached.dictionary))
+    }
+
+    fn with_cell<T>(
+        &self,
+        point: PointCoordinate,
+        read: impl FnOnce(PackedCell, &TerminalDictionary) -> T,
+    ) -> T {
+        let point = self.revision.clamp_point(point);
+        if self.revision.grid.is_none() {
+            return read(self.revision.cell(point), &self.revision.dictionary);
+        }
+        self.with_row(point.y, |row, dictionary| {
+            read(row.cells[usize::from(point.x)], dictionary)
+        })
+        .expect("paged row")
+    }
+
+    pub(super) fn row_meta(&self, row: u32) -> ModeRowMeta {
+        self.with_row(row, |row, _| row.meta)
+            .unwrap_or_else(|| self.revision.row(row))
+    }
+
+    pub(super) fn cell(&self, point: PointCoordinate) -> PackedCell {
+        self.with_cell(point, |cell, _| cell)
+    }
+
+    pub(super) fn first_char(&self, point: PointCoordinate) -> Option<char> {
+        self.with_cell(point, |cell, dictionary| {
+            let glyph = cell.glyph();
+            if glyph & crate::GRAPHEME_TABLE_BIT == 0 {
+                return char::from_u32(glyph).filter(|character| *character != '\0');
+            }
+            let index = usize::try_from(glyph & !crate::GRAPHEME_TABLE_BIT).ok()?;
+            let start = usize::try_from(*dictionary.grapheme_offsets.get(index)?).ok()?;
+            let end = usize::try_from(*dictionary.grapheme_offsets.get(index + 1)?).ok()?;
+            std::str::from_utf8(dictionary.grapheme_bytes.get(start..end)?)
+                .ok()?
+                .chars()
+                .next()
+        })
+    }
+
+    pub(super) fn push_text(&self, point: PointCoordinate, output: &mut String) {
+        self.with_cell(point, |cell, dictionary| {
+            let glyph = cell.glyph();
+            if glyph == 0 || matches!(cell.width(), CellWidth::SpacerTail | CellWidth::SpacerHead) {
+                return;
+            }
+            if glyph & crate::GRAPHEME_TABLE_BIT == 0 {
+                if let Some(character) = char::from_u32(glyph) {
+                    output.push(character);
+                }
+                return;
+            }
+            let Ok(index) = usize::try_from(glyph & !crate::GRAPHEME_TABLE_BIT) else {
+                return;
+            };
+            let text = dictionary
+                .grapheme_offsets
+                .get(index..=index + 1)
+                .and_then(|offsets| {
+                    let start = usize::try_from(offsets[0]).ok()?;
+                    let end = usize::try_from(offsets[1]).ok()?;
+                    dictionary.grapheme_bytes.get(start..end)
+                })
+                .and_then(|bytes| std::str::from_utf8(bytes).ok());
+            if let Some(text) = text {
+                output.push_str(text);
+            }
+        });
+    }
+}
+
 impl ModeRevision {
+    pub(super) fn reader(&self) -> ModeRevisionReader<'_> {
+        ModeRevisionReader {
+            revision: self,
+            cached: RefCell::new(None),
+        }
+    }
+
     pub(super) fn capture(terminal: &mut Terminal<'_, '_>) -> Result<Arc<Self>, WorkerError> {
         if *COPY_CLONE {
             Self::capture_flat(terminal)

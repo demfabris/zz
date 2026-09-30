@@ -454,3 +454,89 @@ fn frozen_resize_tracks_the_wide_cell_through_a_width_round_trip() {
             .trim_end()
     );
 }
+
+#[test]
+fn row_conversion_keeps_style_links_semantics_and_mixed_unicode() {
+    let mut terminal = new_terminal(32, 4, 64).expect("terminal");
+    let cluster = format!("e{}", "\u{301}".repeat(12));
+    terminal.vt_write(
+        format!(
+            "\x1b]133;A\x1b\\\x1b[38;2;11;22;33mAA\x1b[1mBB\x1b[22mCC\x1b]8;;https://example.test\x1b\\DD\x1b]8;;\x1b\\EE\x1b[0mF🦀{cluster}界\x1b]133;B\x1b\\input\x1b]133;C\x1b\\\r\n\x1b[38;2;44;55;66mGG\x1b[0mHH"
+        )
+        .as_bytes(),
+    );
+    let revision = ModeRevision::capture(&mut terminal).expect("revision");
+    terminal.vt_write(b"\x1b[3J\x1b[2J\x1b[Hreplacement");
+    drop(terminal);
+
+    for column in [0, 1, 4, 5, 8, 9] {
+        let captured = style(&revision, point(column, 0));
+        assert_eq!(captured.foreground(), Color::rgb(11, 22, 33));
+        assert!(!captured.bold());
+        assert!(!captured.hyperlink());
+    }
+    for column in [2, 3] {
+        assert!(style(&revision, point(column, 0)).bold());
+    }
+    for column in [6, 7] {
+        let captured = style(&revision, point(column, 0));
+        assert_eq!(captured.foreground(), Color::rgb(11, 22, 33));
+        assert!(captured.hyperlink());
+    }
+    assert!(revision.row(0).prompt());
+    assert!(revision.is_prompt(point(0, 0)));
+    assert!(revision.is_input(point(16, 0)));
+    assert!(revision.is_output(point(0, 1)));
+    assert_eq!(
+        style(&revision, point(0, 1)).foreground(),
+        Color::rgb(44, 55, 66)
+    );
+    assert_eq!(revision.cell(point(10, 0)).glyph(), u32::from('F'));
+    assert_eq!(revision.cell(point(11, 0)).glyph(), u32::from('🦀'));
+    assert_eq!(revision.cell(point(11, 0)).width(), CellWidth::Wide);
+    assert_eq!(revision.cell(point(12, 0)).width(), CellWidth::SpacerTail);
+    assert!(revision.cell_matches_text(point(13, 0), &cluster));
+    assert_eq!(revision.cell(point(14, 0)).glyph(), u32::from('界'));
+    assert_eq!(revision.cell(point(15, 0)).width(), CellWidth::SpacerTail);
+    assert_eq!(
+        revision.capture_rows(0, 1, false, false, false),
+        format!("AABBCCDDEEF🦀{cluster}界input\nGGHH")
+    );
+}
+
+#[test]
+fn formatting_reader_keeps_its_row_dictionary_after_other_rows_compact() {
+    let mut terminal = new_terminal(16, 4, 5000).expect("terminal");
+    let cluster = "e\u{301}";
+    terminal.vt_write(format!("{cluster} initial\r\n").as_bytes());
+    for index in 0..4200 {
+        terminal.vt_write(
+            format!(
+                "\x1b[38;2;{};{};99mrow-{index:04}\r\n",
+                index / 256,
+                index % 256,
+            )
+            .as_bytes(),
+        );
+    }
+    let revision = ModeRevision::capture(&mut terminal).expect("revision");
+    let reader = revision.reader();
+    let original = reader.cell(point(0, 0));
+    assert_eq!(reader.first_char(point(0, 0)), Some('e'));
+    let generation = revision.dictionary_generation();
+    for row in 1..revision.total_rows() {
+        revision.cell(point(0, row));
+    }
+    if !ModeRevision::clone_enabled() {
+        assert_ne!(revision.dictionary_generation(), generation);
+    }
+    assert_eq!(reader.cell(point(0, 0)), original);
+    let mut text = String::new();
+    reader.push_text(point(0, 0), &mut text);
+    assert_eq!(text, cluster);
+    reader.push_text(point(0, 1), &mut text);
+    assert_eq!(text, format!("{cluster}r"));
+    text.clear();
+    reader.push_text(point(0, 0), &mut text);
+    assert_eq!(text, cluster);
+}

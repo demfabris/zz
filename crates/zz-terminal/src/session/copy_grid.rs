@@ -117,56 +117,78 @@ impl CopyGrid {
         let mut stack = ['\0'; 8];
         let mut extra = Vec::new();
         let mut text = String::new();
+        let mut last_style = None;
         for column in 0..self.columns {
             let reference = native_row.cell(column).expect("snapshot column");
             let cell = reference.cell()?;
-            let style = reference.style()?;
-            let mut foreground =
-                resolve_style_color(style.fg_color, &self.palette).unwrap_or(self.foreground);
-            let mut background =
-                resolve_style_color(style.bg_color, &self.palette).unwrap_or(self.background);
-            if style.inverse {
-                std::mem::swap(&mut foreground, &mut background);
-            }
+            let style_id = cell.style_id()?;
+            let hyperlink = cell.has_hyperlink()?;
+            let packed_style_id = if let Some((previous, previous_hyperlink, packed)) = last_style
+                && previous == style_id
+                && previous_hyperlink == hyperlink
+            {
+                packed
+            } else {
+                let style = reference.style()?;
+                let mut foreground =
+                    resolve_style_color(style.fg_color, &self.palette).unwrap_or(self.foreground);
+                let mut background =
+                    resolve_style_color(style.bg_color, &self.palette).unwrap_or(self.background);
+                if style.inverse {
+                    std::mem::swap(&mut foreground, &mut background);
+                }
+                let packed_style = PackedStyle::new(
+                    foreground,
+                    background,
+                    resolve_style_color(style.underline_color, &self.palette),
+                    style_attributes(
+                        &style,
+                        matches!(
+                            if style.inverse {
+                                style.bg_color
+                            } else {
+                                style.fg_color
+                            },
+                            libghostty_vt::style::StyleColor::Rgb(_)
+                        ),
+                        hyperlink,
+                    ),
+                    underline_style(style.underline),
+                );
+                let packed = self.dictionary.intern_style(packed_style);
+                last_style = Some((style_id, hyperlink, packed));
+                packed
+            };
             let width = match cell.wide()? {
                 CellWide::Narrow => CellWidth::Narrow,
                 CellWide::Wide => CellWidth::Wide,
                 CellWide::SpacerTail => CellWidth::SpacerTail,
                 CellWide::SpacerHead => CellWidth::SpacerHead,
             };
-            text.clear();
-            match reference.graphemes(&mut stack) {
-                Ok(count) => text.extend(stack[..count].iter()),
+            let glyph = match reference.graphemes(&mut stack) {
+                Ok(0) => 0,
+                Ok(1) => u32::from(stack[0]),
+                Ok(count) => {
+                    text.clear();
+                    text.extend(stack[..count].iter());
+                    self.dictionary.encode_glyph(&text)
+                }
                 Err(libghostty_vt::Error::OutOfSpace { required }) => {
                     extra.resize(required, '\0');
                     let count = reference.graphemes(&mut extra)?;
-                    text.extend(extra[..count].iter());
+                    match count {
+                        0 => 0,
+                        1 => u32::from(extra[0]),
+                        _ => {
+                            text.clear();
+                            text.extend(extra[..count].iter());
+                            self.dictionary.encode_glyph(&text)
+                        }
+                    }
                 }
                 Err(error) => return Err(error.into()),
-            }
-            let packed_style = PackedStyle::new(
-                foreground,
-                background,
-                resolve_style_color(style.underline_color, &self.palette),
-                style_attributes(
-                    &style,
-                    matches!(
-                        if style.inverse {
-                            style.bg_color
-                        } else {
-                            style.fg_color
-                        },
-                        libghostty_vt::style::StyleColor::Rgb(_)
-                    ),
-                    cell.has_hyperlink()?,
-                ),
-                underline_style(style.underline),
-            );
-            cells.push(PackedCell::new(
-                self.dictionary.encode_glyph(&text),
-                self.dictionary.intern_style(packed_style),
-                width,
-            ));
+            };
+            cells.push(PackedCell::new(glyph, packed_style_id, width));
             semantics.push(match cell.semantic_content()? {
                 CellSemanticContent::Output => 0,
                 CellSemanticContent::Input => 1,

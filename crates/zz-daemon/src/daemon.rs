@@ -37337,8 +37337,8 @@ fn status_request_with_selected_facts(
     let mut reuse_admission = false;
     if let Some(revision) = revision {
         let mut cache = inner.status_preparation_cache.lock();
-        if let Some(cached) = cache.as_ref()
-            && cached.matches(
+        let cached_matches = cache.as_ref().is_some_and(|cached| {
+            cached.matches(
                 inner,
                 client,
                 attached,
@@ -37347,6 +37347,37 @@ fn status_request_with_selected_facts(
                 &option_snapshot,
                 startup_ready,
             )
+        });
+        let context = if cached_matches {
+            None
+        } else {
+            cache.as_ref().and_then(|cached| {
+                reuse_admission = cached.matches(
+                    inner,
+                    client,
+                    attached,
+                    window,
+                    (revision.0, revision.1, revision.2, cached.revision.3),
+                    &option_snapshot,
+                    startup_ready,
+                );
+                if !reuse_admission {
+                    return None;
+                }
+                let parameters = status_parameters(inner, attached, &option_snapshot);
+                cached_live_status_context(
+                    inner,
+                    attached,
+                    window,
+                    parameters.needs,
+                    &cached.request.references,
+                )
+                .filter(|context| context.same_detached_data(&cached.request.context))
+                .map(Arc::new)
+            })
+        };
+        if let Some(cached) = cache.as_ref()
+            && (cached_matches || context.is_some())
         {
             let request = Arc::clone(&cached.request);
             let pane_borders = attached.map_or_else(
@@ -37378,29 +37409,21 @@ fn status_request_with_selected_facts(
                     })
                 },
             );
-            if Arc::ptr_eq(&request.pane_borders, &pane_borders) {
+            if context.is_none() && Arc::ptr_eq(&request.pane_borders, &pane_borders) {
                 return request;
             }
             let request = Arc::new(StatusRequest {
+                context: context.unwrap_or_else(|| Arc::clone(&request.context)),
                 pane_borders,
                 ..request.as_ref().clone()
             });
-            cache.as_mut().unwrap().request = Arc::clone(&request);
+            let cached = cache.as_mut().unwrap();
+            cached.revision = revision;
+            cached.request = Arc::clone(&request);
             if cache.as_ref().unwrap().retained_bytes() > STATUS_PREPARATION_MAX_BYTES {
                 *cache = None;
             }
             return request;
-        }
-        if let Some(cached) = cache.as_ref() {
-            reuse_admission = cached.matches(
-                inner,
-                client,
-                attached,
-                window,
-                (revision.0, revision.1, revision.2, cached.revision.3),
-                &option_snapshot,
-                startup_ready,
-            );
         }
     }
     let facts = (!*BORROWED_FORMAT_FACTS

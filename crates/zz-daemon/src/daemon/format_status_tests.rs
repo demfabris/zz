@@ -745,6 +745,102 @@ fn completed_status_option_size_memo_requires_retained_arc_identity() {
 }
 
 #[test]
+fn completed_status_context_size_memo_reuses_clock_capture_and_recounts_mutations() {
+    let cache_enabled = zz_mux::format_cache_knob() && zz_mux::borrowed_formats_enabled();
+    let (mut engine, mut execution, _) = completed_request("#{session_name}");
+    execute(
+        &mut engine,
+        &mut execution,
+        &["set-option", "-g", "status-right", "%S"],
+    );
+    engine.set_format_now(1_700_000_000);
+    let first = engine_request(1, &engine, execution.session);
+    let capacities = |context: &StatusContext| {
+        [
+            context.session_id.capacity(),
+            context.window_id.capacity(),
+            context.pane_id.capacity(),
+        ]
+    };
+    let first_bytes = first.context.retained_bytes();
+    let mut renderer = StatusRenderer::default();
+    let first_status = renderer.render_forced_at(&first, 1_700_000_000);
+    let memo = renderer.completed.as_mut().map(|entry| {
+        entry.context_bytes = entry.context_bytes.saturating_add(128);
+        entry.context_bytes
+    });
+    engine.set_format_now(1_700_000_001);
+    let fresh = fresh_clock_request(&engine, &first);
+    let next = renderer.render_forced_at(&fresh, 1_700_000_001);
+    assert_eq!(next, whole_status(&fresh, 1_700_000_001));
+    assert_ne!(next.right, first_status.right);
+    if cache_enabled {
+        assert!(!Arc::ptr_eq(&first.context, &fresh.context));
+        assert!(first.context.same_detached_data(&fresh.context));
+        assert_eq!(
+            fresh.context.retained_bytes() + capacities(&first.context).into_iter().sum::<usize>(),
+            first_bytes + capacities(&fresh.context).into_iter().sum::<usize>(),
+        );
+        assert_eq!(
+            renderer.completed.as_ref().unwrap().context_bytes,
+            if capacities(&first.context) == capacities(&fresh.context) {
+                memo.unwrap()
+            } else {
+                fresh.context.retained_bytes()
+            },
+        );
+    }
+    let memo = renderer.completed.as_mut().map(|entry| {
+        entry.context_bytes = entry.context_bytes.saturating_add(128);
+        entry.context_bytes
+    });
+    engine.set_format_now(1_700_000_002);
+    let stable = fresh_clock_request(&engine, &fresh);
+    let next = renderer.render_forced_at(&stable, 1_700_000_002);
+    assert_eq!(next, whole_status(&stable, 1_700_000_002));
+    if cache_enabled {
+        assert!(fresh.context.same_detached_data(&stable.context));
+        assert_eq!(capacities(&fresh.context), capacities(&stable.context));
+        assert_eq!(
+            renderer.completed.as_ref().unwrap().context_bytes,
+            memo.unwrap()
+        );
+    }
+    for change in ["session", "window", "pane", "value", "legacy"] {
+        let mut renderer = StatusRenderer::default();
+        renderer.render_forced_at(&fresh, 1_700_000_001);
+        assert_eq!(renderer.completed.is_some(), cache_enabled);
+        let mut changed = fresh.clone();
+        match change {
+            "session" => Arc::make_mut(&mut changed.context)
+                .session_id
+                .reserve_exact(COMPLETED_STATUS_MAX_BYTES),
+            "window" => Arc::make_mut(&mut changed.context)
+                .window_id
+                .reserve_exact(COMPLETED_STATUS_MAX_BYTES),
+            "pane" => Arc::make_mut(&mut changed.context)
+                .pane_id
+                .reserve_exact(COMPLETED_STATUS_MAX_BYTES),
+            "value" => Arc::make_mut(&mut changed.context)
+                .set_format_value("unused_extra", "x".repeat(COMPLETED_STATUS_MAX_BYTES)),
+            _ => {
+                let _: &zz_mux::StatusValues = &changed.context;
+            }
+        }
+        if cache_enabled {
+            assert_eq!(
+                fresh.context.same_detached_data(&changed.context),
+                matches!(change, "session" | "window" | "pane"),
+                "{change}",
+            );
+        }
+        let actual = renderer.render_forced_at(&changed, 1_700_000_002);
+        assert_eq!(actual, whole_status(&changed, 1_700_000_002), "{change}");
+        assert!(renderer.completed.is_none(), "{change}");
+    }
+}
+
+#[test]
 fn status_parts_preserve_malformed_escape_style_and_whole_source_strftime_order() {
     for source in [
         "start#{==:broken}tail",

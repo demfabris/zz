@@ -165,15 +165,126 @@ fn status_preparation_replaces_shared_requests_for_border_clock_and_source_chang
             reuse_enabled(),
         );
         inner.engine.set_format_now(1_700_000_001);
+        inner.pane_modes.remove(&context.pane.unwrap());
         let tick = shared_request(&inner, client);
         assert!(!Arc::ptr_eq(&changed, &tick));
         assert_eq!(changed.context.format_now, Some(1_700_000_000));
         assert_eq!(tick.context.format_now, Some(1_700_000_001));
+        assert_eq!(Arc::ptr_eq(&changed.facts, &tick.facts), reuse_enabled());
+        assert_eq!(tick.pane_borders[0].style, "fg=green");
+        assert_eq!(changed.pane_borders[0].style, "fg=red");
+        assert_eq!(
+            Arc::ptr_eq(&tick, &shared_request(&inner, client)),
+            reuse_enabled()
+        );
         inner.config_files = "/new.conf".to_owned();
         let source = shared_request(&inner, client);
         assert!(!Arc::ptr_eq(&tick, &source));
         assert_left(&source, "prepared:/new.conf");
         assert_left(&first, "prepared:");
+    });
+}
+
+#[test]
+fn status_preparation_clock_reuse_refreshes_nested_loop_times_and_preserves_facts() {
+    zz_mux::with_borrowed_formats(true, || {
+        let (mut inner, client, context) = fixture(
+            "#{client_width}:#{client_colours}:#{W:[#{window_index}:#{P:#{pane_index}=#{t/d:session_created};}]}",
+        );
+        let session = context.session.unwrap();
+        inner.engine.state.session_mut(session).unwrap().created = Some(1_700_000_000);
+        inner
+            .engine
+            .state
+            .split_pane(
+                context.pane.unwrap(),
+                zz_protocol::Axis::Horizontal,
+                zz_mux::PaneKind::Terminal,
+            )
+            .unwrap();
+        inner
+            .engine
+            .state
+            .create_window(session, None, zz_mux::PaneKind::Terminal)
+            .unwrap();
+        let first = shared_request(&inner, client);
+        assert_left(&first, "80:8:[0:0=0;1=0;][1:0=0;]");
+        inner.engine.set_format_now(1_700_000_001);
+        let tick = shared_request(&inner, client);
+        assert!(!Arc::ptr_eq(&first, &tick));
+        assert!(!Arc::ptr_eq(&first.context, &tick.context));
+        assert_eq!(Arc::ptr_eq(&first.facts, &tick.facts), reuse_enabled());
+        assert_eq!(
+            first.context.same_detached_data(&tick.context),
+            zz_mux::format_cache_knob() && zz_mux::borrowed_formats_enabled()
+        );
+        assert_left(&tick, "80:8:[0:0=1;1=1;][1:0=1;]");
+        assert_left(&first, "80:8:[0:0=0;1=0;][1:0=0;]");
+        assert_eq!(
+            Arc::ptr_eq(&tick, &shared_request(&inner, client)),
+            reuse_enabled()
+        );
+        if reuse_enabled() {
+            let cache = inner.status_preparation_cache.lock();
+            let cached = cache.as_ref().unwrap();
+            assert_eq!(
+                cached.revision,
+                inner.engine.format_cache_revision().unwrap()
+            );
+            assert!(cached.retained_bytes() <= STATUS_PREPARATION_MAX_BYTES);
+        }
+    });
+}
+
+#[test]
+fn status_preparation_clock_reuse_falls_back_after_engine_capture_eviction() {
+    zz_mux::with_borrowed_formats(true, || {
+        let (mut inner, client, context) =
+            fixture("#{session_name}:#{client_width}:#{t/d:session_created}");
+        inner
+            .engine
+            .state
+            .session_mut(context.session.unwrap())
+            .unwrap()
+            .created = Some(1_700_000_000);
+        let first = shared_request(&inner, client);
+        assert_left(&first, "prepared:80:0");
+        let unrelated = inner
+            .engine
+            .format_status_context(context.session, context.window, context.pane)
+            .detach_with_references(
+                FormatNeeds::NONE,
+                &BTreeSet::from(["session_name".to_owned()]),
+            );
+        assert_eq!(
+            unrelated.variable("session_name").as_deref(),
+            Some("prepared")
+        );
+        let parameters = status_parameters(&inner, context.session, &first.option_snapshot);
+        assert!(
+            cached_live_status_context(
+                &inner,
+                context.session,
+                context.window,
+                parameters.needs,
+                &first.references,
+            )
+            .is_none()
+        );
+        inner.engine.set_format_now(1_700_000_001);
+        let missed = shared_request(&inner, client);
+        assert_fresh(&first, &missed);
+        assert_left(&missed, "prepared:80:1");
+        assert_left(&first, "prepared:80:0");
+        inner.engine.set_format_now(1_700_000_002);
+        let warm = shared_request(&inner, client);
+        assert!(!Arc::ptr_eq(&missed.context, &warm.context));
+        assert_eq!(Arc::ptr_eq(&missed.facts, &warm.facts), reuse_enabled());
+        assert_left(&warm, "prepared:80:2");
+        assert_eq!(
+            Arc::ptr_eq(&warm, &shared_request(&inner, client)),
+            reuse_enabled()
+        );
     });
 }
 
@@ -306,8 +417,13 @@ fn status_preparation_invalidates_config_state_options_data_environment_and_cloc
         assert_left(&environment, "updated:second:33:fresh:/second.conf");
         inner.engine.set_format_now(1_700_000_001);
         let clock = request(&inner, client);
-        assert_fresh(&environment, &clock);
+        assert!(!Arc::ptr_eq(&environment.context, &clock.context));
+        assert_eq!(
+            Arc::ptr_eq(&environment.facts, &clock.facts),
+            reuse_enabled()
+        );
         assert_eq!(clock.context.format_now, Some(1_700_000_001));
+        assert_left(&clock, "updated:second:33:fresh:/second.conf");
         let same_second = request(&inner, client);
         assert_eq!(
             Arc::ptr_eq(&clock.context, &same_second.context),

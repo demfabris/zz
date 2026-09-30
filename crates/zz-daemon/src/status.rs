@@ -235,6 +235,7 @@ struct CompletedStatus {
     startup: bool,
     environment_identity: Weak<Vec<(RawText, Option<RawText>)>>,
     default_terminal_identity: Weak<String>,
+    context_bytes: usize,
 }
 
 const COMPLETED_STATUS_MAX_BYTES: usize = 1024 * 1024;
@@ -429,25 +430,27 @@ pub(crate) fn completed_status_bytes(
     callbacks: &[Option<String>],
     status: &StatusLine,
 ) -> usize {
-    completed_status_bytes_with_option_bytes(
+    completed_status_bytes_with_capture_bytes(
         request,
         names,
         callbacks,
         status,
         request.option_snapshot.retained_bytes(),
+        request.context.retained_bytes(),
     )
 }
 
-fn completed_status_bytes_with_option_bytes(
+fn completed_status_bytes_with_capture_bytes(
     request: &StatusRequest,
     names: &[String],
     callbacks: &[Option<String>],
     status: &StatusLine,
     option_bytes: usize,
+    context_bytes: usize,
 ) -> usize {
     let mut bytes = std::mem::size_of::<CompletedStatus>()
         .saturating_add(std::mem::size_of::<StatusRequest>())
-        .saturating_add(request.context.retained_bytes())
+        .saturating_add(context_bytes)
         .saturating_add(option_bytes)
         .saturating_add(std::mem::size_of::<FormatHookFacts>())
         .saturating_add(std::mem::size_of::<Vec<(RawText, Option<RawText>)>>())
@@ -571,6 +574,7 @@ impl CompletedStatus {
         identity: Option<&Arc<StatusRequest>>,
         option_bytes: usize,
         parts: Option<Arc<StatusParts>>,
+        context_bytes: usize,
     ) -> Self {
         Self {
             client: request.client,
@@ -596,6 +600,7 @@ impl CompletedStatus {
             startup: request.startup,
             environment_identity: Arc::downgrade(&request.environment),
             default_terminal_identity: Arc::downgrade(&request.default_terminal),
+            context_bytes,
         }
     }
 }
@@ -1502,11 +1507,16 @@ impl StatusRenderer {
         identity: Option<&Arc<StatusRequest>>,
         now: i64,
     ) -> StatusLine {
-        let mut touched = BTreeSet::new();
-        let status = self.render_request(request, &mut touched, true, now, identity);
-        if !touched.is_empty() {
-            self.note_uncovered_jobs(request, &touched);
-        }
+        let status = self
+            .cached_request_output(identity, now)
+            .unwrap_or_else(|| {
+                let mut touched = BTreeSet::new();
+                let status = self.render_request(request, &mut touched, true, now, identity);
+                if !touched.is_empty() {
+                    self.note_uncovered_jobs(request, &touched);
+                }
+                status
+            });
         if let Some(published) = self.published.get_mut(&request.client) {
             if !Arc::ptr_eq(published, &status) {
                 *published = Arc::clone(&status);
@@ -1517,6 +1527,20 @@ impl StatusRenderer {
         status.as_ref().clone()
     }
 
+    fn cached_request_output(
+        &self,
+        identity: Option<&Arc<StatusRequest>>,
+        now: i64,
+    ) -> Option<Arc<StatusLine>> {
+        let identity = identity?;
+        self.completed
+            .as_ref()
+            .filter(|completed| {
+                completed.now == now && completed.request_identity.as_ptr() == Arc::as_ptr(identity)
+            })
+            .map(|completed| Arc::clone(&completed.status))
+    }
+
     fn render_request(
         &mut self,
         request: &StatusRequest,
@@ -1525,12 +1549,8 @@ impl StatusRenderer {
         now: i64,
         identity: Option<&Arc<StatusRequest>>,
     ) -> Arc<StatusLine> {
-        if let Some(identity) = identity
-            && let Some(completed) = &self.completed
-            && completed.now == now
-            && completed.request_identity.as_ptr() == Arc::as_ptr(identity)
-        {
-            return Arc::clone(&completed.status);
+        if let Some(status) = self.cached_request_output(identity, now) {
+            return status;
         }
         let mut callback_names = None;
         let mut parts = None;
@@ -1593,14 +1613,32 @@ impl StatusRenderer {
             self.job_waker.as_ref(),
             parts.as_deref(),
         ));
+        let context_bytes = callback_names.as_ref().map_or(0, |_| {
+            self.completed
+                .as_ref()
+                .filter(|completed| {
+                    completed.context.same_detached_data(&request.context)
+                        && completed.context.session_id.capacity()
+                            == request.context.session_id.capacity()
+                        && completed.context.window_id.capacity()
+                            == request.context.window_id.capacity()
+                        && completed.context.pane_id.capacity()
+                            == request.context.pane_id.capacity()
+                })
+                .map_or_else(
+                    || request.context.retained_bytes(),
+                    |completed| completed.context_bytes,
+                )
+        });
         self.completed = callback_names.and_then(|names| {
             let callbacks = status_callback_values(request, &names);
-            (completed_status_bytes_with_option_bytes(
+            (completed_status_bytes_with_capture_bytes(
                 request,
                 &names,
                 &callbacks,
                 &status,
                 option_bytes,
+                context_bytes,
             )
             .saturating_add(
                 parts
@@ -1617,6 +1655,7 @@ impl StatusRenderer {
                         identity,
                         option_bytes,
                         parts,
+                        context_bytes,
                     )
                 })
         });

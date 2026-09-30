@@ -354,6 +354,29 @@ impl OutboundMailbox {
     }
 }
 
+pub(super) fn control_query_can_defer_wakeup(
+    inner: &ServerState,
+    context: &ExecutionContext,
+    command: &PreparedCommand,
+) -> bool {
+    let Some(name) = command.canonical_name.as_deref() else {
+        return false;
+    };
+    if !hook_events::command_is_read_only(name, &command.invocation.args)
+        || !inner.deferred_event_hooks.is_empty()
+    {
+        return false;
+    }
+    ["command-error", &format!("after-{name}")]
+        .into_iter()
+        .all(|hook| {
+            inner
+                .engine
+                .hook_commands(context.session, hook)
+                .is_none_or(|commands| commands.is_empty())
+        })
+}
+
 impl Shared {
     pub(super) fn register_welcome(&self, hello: &Hello) -> Option<(ClientId, Welcome)> {
         let client_hello = &hello.client;
@@ -912,19 +935,19 @@ impl Shared {
             let _park = (kind == ClientKind::Control)
                 .then(|| CommandQueueParkScope::new(client, index as u64 + 1));
             if kind == ClientKind::Control {
-                Self::send_event(
-                    outbound,
-                    EventPayload::ControlCommandStarted {
-                        request_id: index as u64 + 1,
-                        flags: u32::from(if prepared.invocation.source.is_some() {
-                            CONTROL_COMMAND_FRAME_FLAGS_CONTROL
-                        } else {
-                            CONTROL_COMMAND_FRAME_FLAGS_NONE
-                        }),
-                        canonical_name: prepared.canonical_name.clone(),
-                        guard: !MuxEngine::is_command_alias_group(&prepared.invocation),
-                    },
-                );
+                let wakeup =
+                    !control_query_can_defer_wakeup(&self.inner.lock(), context, &prepared);
+                let started = Self::event(EventPayload::ControlCommandStarted {
+                    request_id: index as u64 + 1,
+                    flags: u32::from(if prepared.invocation.source.is_some() {
+                        CONTROL_COMMAND_FRAME_FLAGS_CONTROL
+                    } else {
+                        CONTROL_COMMAND_FRAME_FLAGS_NONE
+                    }),
+                    canonical_name: prepared.canonical_name.clone(),
+                    guard: !MuxEngine::is_command_alias_group(&prepared.invocation),
+                });
+                let _ = outbound.enqueue_reliable_with_wakeup(&started, wakeup);
             }
             let response = match prepared.result {
                 PreparedCommandResult::Ready => self.execute_command_request_with_prepared(

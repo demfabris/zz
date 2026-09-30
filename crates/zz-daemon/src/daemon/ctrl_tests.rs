@@ -53,6 +53,317 @@ fn compact_callback_guard_preserves_raw_output() {
 }
 
 #[test]
+fn control_query_wakeup_excludes_hooks_and_pending_events() {
+    let shared = Shared::new(47);
+    let mut context = ExecutionContext::default();
+    let command = |name: &str, args: &[&str]| PreparedCommand {
+        invocation: CommandInvocation::new(name, args.iter().copied()),
+        canonical_name: Some(name.to_owned()),
+        alias_matched: false,
+        result: PreparedCommandResult::Ready,
+    };
+    let query = command("display-message", &["-p", "#{session_name}"]);
+    let mut inner = shared.inner.lock();
+    for name in [
+        "has-session",
+        "list-buffers",
+        "list-clients",
+        "list-commands",
+        "list-keys",
+        "list-panes",
+        "list-sessions",
+        "list-windows",
+        "show-buffer",
+        "show-environment",
+        "show-hooks",
+        "show-messages",
+        "show-options",
+        "show-prompt-history",
+        "show-window-options",
+        "start-server",
+    ] {
+        assert_eq!(
+            ctrl::control_query_can_defer_wakeup(&inner, &context, &command(name, &[])),
+            *hook_events::READONLY_SKIP,
+            "{name}"
+        );
+    }
+    assert_eq!(
+        ctrl::control_query_can_defer_wakeup(&inner, &context, &query),
+        *hook_events::READONLY_SKIP
+    );
+    assert_eq!(
+        ctrl::control_query_can_defer_wakeup(&inner, &context, &command("capture-pane", &["-p"]),),
+        *hook_events::READONLY_SKIP
+    );
+    for (name, args) in [
+        ("display-message", &["-I"][..]),
+        ("display-message", &["-d", "100", "x"][..]),
+        ("capture-pane", &[][..]),
+        ("wait-for", &["release"][..]),
+        ("run-shell", &["sleep 30"][..]),
+        ("agent-send", &["--wait", "x"][..]),
+        ("capture-browser", &[][..]),
+    ] {
+        assert!(!ctrl::control_query_can_defer_wakeup(
+            &inner,
+            &context,
+            &command(name, args),
+        ));
+    }
+    for hook in ["after-display-message", "command-error"] {
+        inner
+            .engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("set-hook", ["-g", hook, "wait-for release"]),
+            )
+            .expect("set blocking hook");
+        assert!(!ctrl::control_query_can_defer_wakeup(
+            &inner, &context, &query,
+        ));
+        inner
+            .engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("set-hook", ["-gu", hook]),
+            )
+            .expect("unset hook");
+    }
+    inner.deferred_event_hooks.push(PendingHookEvent {
+        name: "session-renamed",
+        context: context.clone(),
+        variables: BTreeMap::new(),
+        exclude_client: None,
+    });
+    assert!(!ctrl::control_query_can_defer_wakeup(
+        &inner, &context, &query,
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn control_query_started_is_visible_before_a_blocking_after_hook_releases() {
+    use std::os::unix::net::UnixStream;
+
+    let shared = Arc::new(Shared::new(48));
+    let (client, mailbox) = compact_registered(&shared, zz_protocol::Subscriptions::control());
+    shared
+        .client_writers
+        .lock()
+        .insert(client, Arc::clone(&mailbox));
+    let mut context = ExecutionContext::default();
+    shared
+        .inner
+        .lock()
+        .engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new(
+                "set-hook",
+                ["-g", "after-display-message", "wait-for ctrl-hook-release"],
+            ),
+        )
+        .expect("blocking after hook");
+    let (mut reader, mut server) = UnixStream::pair().expect("pair");
+    reader
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .expect("read deadline");
+    let writer = {
+        let mailbox = Arc::clone(&mailbox);
+        thread::spawn(move || write_outbound(&mut server, &mailbox, &Weak::new(), client))
+    };
+    let (finished, completion) = crossbeam_channel::bounded(1);
+    let worker = {
+        let shared = Arc::clone(&shared);
+        let mailbox = Arc::clone(&mailbox);
+        thread::spawn(move || {
+            shared.execute_compact_request(
+                client,
+                ClientKind::Control,
+                &mut context,
+                compact_exec_request(vec![CommandInvocation::new(
+                    "display-message",
+                    ["-p", "query result"],
+                )]),
+                &mailbox,
+            );
+            let _ = finished.send(());
+        })
+    };
+    assert!(matches!(
+        zz_protocol::read_protocol_message(&mut reader).expect("visible Started"),
+        ProtocolMessage::Event(Event {
+            payload: EventPayload::ControlCommandStarted { request_id: 1, .. },
+            ..
+        })
+    ));
+    assert!(matches!(
+        zz_protocol::read_protocol_message(&mut reader).expect("after hook parked"),
+        ProtocolMessage::CommandQueueParked { request_id: 1 }
+    ));
+    assert!(matches!(
+        completion.try_recv(),
+        Err(crossbeam_channel::TryRecvError::Empty)
+    ));
+    shared.signal_wait_channel("ctrl-hook-release");
+    completion
+        .recv_timeout(Duration::from_secs(2))
+        .expect("query completed after release");
+    worker.join().expect("query worker");
+    mailbox.close_after_flush();
+    writer.join().expect("socket writer");
+}
+
+#[test]
+fn a_late_gui_hook_wakes_quiet_started_before_its_reply() {
+    let shared = Arc::new(Shared::new(49));
+    let (client, mailbox) = compact_registered(&shared, zz_protocol::Subscriptions::control());
+    shared
+        .client_writers
+        .lock()
+        .insert(client, Arc::clone(&mailbox));
+    let gui_mailbox = OutboundMailbox::new();
+    let (gui_client, _) = shared.register_subscribed(
+        ClientKind::Interactive,
+        None,
+        None,
+        Arc::clone(&gui_mailbox),
+    );
+    let (session, pane, mut context) = {
+        let mut inner = shared.inner.lock();
+        let (session, _, pane) = inner
+            .engine
+            .state
+            .create_session("late-gui-hook")
+            .expect("model session");
+        inner.engine.state.pane_mut(pane).expect("pane").kind = PaneKind::Browser(
+            zz_protocol::BrowserDescriptor::single("about:blank".to_owned(), "default".to_owned()),
+        );
+        let context = ExecutionContext::for_pane(&inner.engine.state, pane).expect("context");
+        (session, pane, context)
+    };
+    shared.attach(gui_client, session).expect("GUI attach");
+    reliable_children(&gui_mailbox);
+    reliable_children(&mailbox);
+    let query = PreparedCommand {
+        invocation: CommandInvocation::new("display-message", ["-p", "query result"]),
+        canonical_name: Some("display-message".to_owned()),
+        alias_matched: false,
+        result: PreparedCommandResult::Ready,
+    };
+    assert!(ctrl::control_query_can_defer_wakeup(
+        &shared.inner.lock(),
+        &context,
+        &query,
+    ));
+    let (armed, waiting) = crossbeam_channel::bounded(1);
+    let (observable, visible) = crossbeam_channel::bounded(1);
+    let observer = {
+        let mailbox = Arc::clone(&mailbox);
+        thread::spawn(move || {
+            let mut state = mailbox.state.lock();
+            let _ = armed.send(());
+            let frame = if mailbox
+                .ready
+                .wait_for(&mut state, Duration::from_secs(2))
+                .timed_out()
+            {
+                None
+            } else {
+                pop_ready_frame(&mut state)
+            };
+            let _ = observable.send(frame);
+        })
+    };
+    waiting
+        .recv_timeout(Duration::from_secs(2))
+        .expect("observer waiting");
+    assert!(mailbox.enqueue_reliable_with_wakeup(
+        &Shared::event(EventPayload::ControlCommandStarted {
+            request_id: 1,
+            flags: 1,
+            canonical_name: query.canonical_name.clone(),
+            guard: true,
+        }),
+        false,
+    ));
+    let hook = format!("capture-browser -t {pane} -o /tmp/zz-ctrl-late-hook.png");
+    shared
+        .inner
+        .lock()
+        .engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new("set-hook", ["-g", "after-display-message", &hook]),
+        )
+        .expect("install hook after eligibility");
+    let worker = {
+        let shared = Arc::clone(&shared);
+        thread::spawn(move || {
+            shared.run_command_hook(
+                client,
+                ClientKind::Control,
+                &context,
+                &query.invocation,
+                "after-display-message",
+                None,
+            )
+        })
+    };
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let request_id = loop {
+        let request =
+            reliable_children(&gui_mailbox)
+                .into_iter()
+                .find_map(|message| match message {
+                    ProtocolMessage::Event(Event {
+                        payload:
+                            EventPayload::BrowserCommand {
+                                command: BrowserCommand::Screenshot { request_id, .. },
+                                ..
+                            },
+                        ..
+                    }) => Some(request_id),
+                    _ => None,
+                });
+        if request.is_some() || Instant::now() >= deadline {
+            break request;
+        }
+        thread::yield_now();
+    };
+    let started = visible.recv_timeout(Duration::from_secs(2)).ok().flatten();
+    let pending = request_id.is_some_and(|request_id| {
+        shared
+            .inner
+            .lock()
+            .pending_gui_requests
+            .contains_key(&request_id)
+    });
+    if let Some(request_id) = request_id {
+        shared.complete_gui_request(
+            gui_client,
+            GuiResponse::Success {
+                request_id,
+                output: "saved".to_owned(),
+            },
+        );
+    } else {
+        shared.fail_gui_requests_for(gui_client);
+    }
+    worker.join().expect("hook worker");
+    observer.join().expect("Started observer");
+    assert!(pending, "hook was waiting for its GUI reply");
+    assert!(matches!(
+        started.map(|frame| zz_protocol::decode_protocol_frame(&frame).expect("decode Started")),
+        Some(ProtocolMessage::Event(Event {
+            payload: EventPayload::ControlCommandStarted { request_id: 1, .. },
+            ..
+        }))
+    ));
+}
+
+#[test]
 fn legacy_resize_accepts_v2_reports_without_a_compact_generation() {
     let shared = Arc::new(Shared::new(43));
     let mailbox = OutboundMailbox::new();

@@ -2268,7 +2268,9 @@ As built on `perf/ctrl`, 2026-09-30:
   opens native parent guards before callback output; responses close them. Raw callback
   guards preserve bytes. Cancellation is checked before dispatch and between commands,
   preventing disconnected queues from acting on later clients. Hook notification order
-  is unchanged.
+  is unchanged. Synchronous read-only queries without hooks queue Started without a separate
+  wake; their response wakes and drains the same FIFO. Hook dispatch wakes the control queue
+  before it can block, including hooks installed after that eligibility check.
 - `ClientCore` reduces a whole Batch before publishing grouped events and requests one
   `TreeSync` on a base mismatch. Desktop keeps its retained-history terminal path and a
   separate tree-only mirror for inactive hosts, without a second terminal grid.
@@ -2280,14 +2282,19 @@ As built on `perf/ctrl`, 2026-09-30:
   response, flushing before it waits. The existing literal-format predicate
   skips unused facts while preserving target selection and formatted after-hooks. Read-only
   commands skip key publication and tap refresh; their mutating after-hooks still update both.
-  The final control response and ExecExit share one existing reliable queue group. TUI
+  The final control response and ExecExit share one existing reliable queue group and cross the
+  frontend channel once. Its receiver retains all remaining Batch children in order. TUI
   reuses unchanged rows, borders, status and message composition, then limits narrow-cell
   incremental painting to changed columns. Full-frame and scroll damage compare retained rows; equal dictionary contents also retain
   the painted cache. Wide cells, overlays and changed dictionaries keep full-row drawing.
+  The existing output writer returns one cleared buffer, bounded by its queue budget, to the
+  next paint instead of regrowing a buffer every frame. One cached terminal style reuses the
+  existing formatter's exact ANSI bytes instead of formatting the same RGB style on every row.
 
 `ZZ_PERF_TREE_DELTA=0` publishes full scoped trees on the new wire. The existing
 `ZZ_PERF_EAGER_FACTS=1` restores eager facts for the literal-output optimization. `ZZ_PERF_READONLY_SKIP=0` restores the
-read-only key/tap work. Full wire rollback requires reverting matching daemon and clients.
+read-only key/tap work and eager Started wakes. `ZZ_PERF_TUI_COALESCE=0` restores eager full-row paints and uncached
+border/status work. Full wire rollback requires reverting matching daemon and clients.
 
 ## W2-HOOKS: read-only skip, then change journal (effort L)
 
@@ -2687,8 +2694,8 @@ deletes most wave-1 fallback paths anyway).
 | `ZZ_PERF_WRITEV=0` | ATTACH | one write per outbound frame, a writer thread of its own per connection, the default socket send buffer, and unbuffered protocol reads in the daemon and in the client (the client reads it at start) |
 | `ZZ_PERF_TUI_COALESCE=0` | ATTACH | the TUI (read at CLI start) paints after every event, repaints everything on every snapshot and on an unchanged resize, paints before attaching and a card in a pane with no frame, writes a paint that only puts the cursor back, clears to the theme colour and erases every blank pane row, reads the two terminal options over two connections of their own, sends the kitty graphics probe on every attach, sends the client size for a cell-size reply, and places the cursor for every border cell |
 | `ZZ_PERF_ROW_PATCHES=1` | TERM | patches replace every changed row whole (from column 0, the rest of the row cleared), the pre-W2 row granularity; the frames stay PaneFrames. Fails `echo.wire_bytes.idle` (about 80 B against the 64 B rule) by design: a key echo resends its whole prompt row |
-| `ZZ_PERF_READONLY_SKIP=0` | HOOKS | read-only commands take the before/after captures |
-| `ZZ_PERF_EAGER_FACTS=1` | HOOKS | every command builds format hook facts, and a pane runtime fact change builds them with no rename due |
+| `ZZ_PERF_READONLY_SKIP=0` | HOOKS, CTRL | read-only commands take the before/after captures and perform key-table publication checks and control tap refresh |
+| `ZZ_PERF_EAGER_FACTS=1` | HOOKS, CTRL | every command builds format hook facts, literal display commands resolve format targets before execution, and a pane runtime fact change builds facts with no rename due |
 | `ZZ_PERF_HOOK_JOURNAL=0` | HOOKS | hook events come from whole-mux snapshots before and after, the command path captures every active window, active pane and bell, and the focus probe captures every window and session |
 | `ZZ_PERF_KEY_TABLE_DELTA=0` | HOOKS | Full subscribers receive every key table instead of the changed and removed tables; Hash subscribers retain their compact revision and mouse bindings |
 | `ZZ_PERF_TREE_DELTA=0` | CTRL | compact subscribers receive full scoped trees for changes instead of TreeDelta; Hello, Welcome and Batch stay on the new wire |

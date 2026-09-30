@@ -67,42 +67,85 @@ impl Drop for ControlSignal {
     }
 }
 
-fn receive_control_event(receiver: &mpsc::Receiver<MainEvent>) -> io::Result<MainEvent> {
+struct ControlReceiver {
+    events: mpsc::Receiver<MainEvent>,
+    pending: VecDeque<ProtocolMessage>,
+}
+
+impl ControlReceiver {
+    fn new(events: mpsc::Receiver<MainEvent>) -> Self {
+        Self {
+            events,
+            pending: VecDeque::new(),
+        }
+    }
+
+    fn receive(&mut self, timeout: Option<std::time::Duration>) -> io::Result<Option<MainEvent>> {
+        loop {
+            if let Some(message) = self.pending.pop_front() {
+                return Ok(Some(MainEvent::Protocol(Box::new(message))));
+            }
+            let event = if let Some(timeout) = timeout {
+                match self.events.recv_timeout(timeout) {
+                    Ok(event) => event,
+                    Err(mpsc::RecvTimeoutError::Timeout) => return Ok(None),
+                    Err(mpsc::RecvTimeoutError::Disconnected) => MainEvent::Disconnected,
+                }
+            } else {
+                match self.events.try_recv() {
+                    Ok(event) => event,
+                    Err(mpsc::TryRecvError::Empty) => return Ok(None),
+                    Err(mpsc::TryRecvError::Disconnected) => MainEvent::Disconnected,
+                }
+            };
+            match event {
+                MainEvent::Protocol(message)
+                    if matches!(message.as_ref(), ProtocolMessage::Batch(_)) =>
+                {
+                    let ProtocolMessage::Batch(batch) = *message else {
+                        unreachable!();
+                    };
+                    self.pending = batch
+                        .messages()
+                        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?
+                        .into();
+                }
+                event => return Ok(Some(event)),
+            }
+        }
+    }
+}
+
+fn receive_control_event(receiver: &mut ControlReceiver) -> io::Result<MainEvent> {
     loop {
         if TERMINATION_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
             return Err(io::Error::from(io::ErrorKind::Interrupted));
         }
-        match receiver.recv_timeout(std::time::Duration::from_millis(20)) {
-            Ok(event) => return Ok(event),
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(MainEvent::Disconnected),
+        if let Some(event) = receiver.receive(Some(std::time::Duration::from_millis(20)))? {
+            return Ok(event);
         }
     }
 }
 
 fn receive_buffered_control_event<W: Write>(
-    receiver: &mpsc::Receiver<MainEvent>,
+    receiver: &mut ControlReceiver,
     output: &mut ControlWriter<W>,
 ) -> io::Result<MainEvent> {
     if TERMINATION_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
         return Err(io::Error::from(io::ErrorKind::Interrupted));
     }
-    match receiver.try_recv() {
-        Ok(event) => {
-            if !matches!(
-                &event,
-                MainEvent::Protocol(message)
-                    if matches!(message.as_ref(), ProtocolMessage::CommandResponse(_))
-            ) {
-                output.output.flush()?;
-            }
-            Ok(event)
-        }
-        Err(mpsc::TryRecvError::Empty) => {
+    if let Some(event) = receiver.receive(None)? {
+        if !matches!(
+            &event,
+            MainEvent::Protocol(message)
+                if matches!(message.as_ref(), ProtocolMessage::CommandResponse(_))
+        ) {
             output.output.flush()?;
-            receive_control_event(receiver)
         }
-        Err(mpsc::TryRecvError::Disconnected) => Ok(MainEvent::Disconnected),
+        Ok(event)
+    } else {
+        output.output.flush()?;
+        receive_control_event(receiver)
     }
 }
 
@@ -193,6 +236,7 @@ fn drive<W: Write>(
     output: &mut ControlWriter<W>,
 ) -> io::Result<u8> {
     let (events, receiver) = mpsc::sync_channel(32);
+    let mut receiver = ControlReceiver::new(receiver);
     spawn_protocol_reader(Arc::clone(client), events.clone());
     let mut stdin_started = false;
     let mut state = ControlState::default();
@@ -200,7 +244,7 @@ fn drive<W: Write>(
     ensure_stdin_reader(&events, &mut stdin_started);
     let initial_result = execute_command_unit(
         client.as_ref(),
-        &receiver,
+        &mut receiver,
         output,
         initial,
         None,
@@ -217,7 +261,7 @@ fn drive<W: Write>(
             false,
             &events,
             &mut stdin_started,
-            &receiver,
+            &mut receiver,
             &mut pending_stdin,
         )?;
         return Ok(match initial_result.exit {
@@ -234,7 +278,7 @@ fn drive<W: Write>(
             false,
             &events,
             &mut stdin_started,
-            &receiver,
+            &mut receiver,
             &mut pending_stdin,
         )?;
         return Ok(completed_exit_code(initial_result.exit_code, &state));
@@ -248,7 +292,7 @@ fn drive<W: Write>(
             &mut state,
             &events,
             &mut stdin_started,
-            &receiver,
+            &mut receiver,
             &mut pending_stdin,
         );
     }
@@ -258,7 +302,7 @@ fn drive<W: Write>(
             state.tree_sync_required = false;
         }
         let event = pending_stdin.pop_front().map_or_else(
-            || receive_control_event(&receiver),
+            || receive_control_event(&mut receiver),
             |stdin| {
                 if let Some(pending_return) = state.pending_return.as_mut() {
                     pending_return.consume_preceding_input();
@@ -280,7 +324,7 @@ fn drive<W: Write>(
                         &mut state,
                         &events,
                         &mut stdin_started,
-                        &receiver,
+                        &mut receiver,
                         &mut pending_stdin,
                     );
                 }
@@ -289,7 +333,7 @@ fn drive<W: Write>(
                 }
                 let result = execute_command_unit(
                     client.as_ref(),
-                    &receiver,
+                    &mut receiver,
                     output,
                     Vec::new(),
                     Some(line),
@@ -306,7 +350,7 @@ fn drive<W: Write>(
                         false,
                         &events,
                         &mut stdin_started,
-                        &receiver,
+                        &mut receiver,
                         &mut pending_stdin,
                     )?;
                     return Ok(match result.exit {
@@ -323,7 +367,7 @@ fn drive<W: Write>(
                         &mut state,
                         &events,
                         &mut stdin_started,
-                        &receiver,
+                        &mut receiver,
                         &mut pending_stdin,
                     );
                 }
@@ -340,7 +384,7 @@ fn drive<W: Write>(
                     &mut state,
                     &events,
                     &mut stdin_started,
-                    &receiver,
+                    &mut receiver,
                     &mut pending_stdin,
                 );
             }
@@ -355,7 +399,7 @@ fn drive<W: Write>(
                     &mut state,
                     &events,
                     &mut stdin_started,
-                    &receiver,
+                    &mut receiver,
                     &mut pending_stdin,
                 );
             }
@@ -369,7 +413,7 @@ fn drive<W: Write>(
                         false,
                         &events,
                         &mut stdin_started,
-                        &receiver,
+                        &mut receiver,
                         &mut pending_stdin,
                     )?;
                     return Ok(match exit {
@@ -387,7 +431,7 @@ fn drive<W: Write>(
                     false,
                     &events,
                     &mut stdin_started,
-                    &receiver,
+                    &mut receiver,
                     &mut pending_stdin,
                 )?;
                 return Ok(1);
@@ -450,7 +494,7 @@ fn match_prepared_response(
 
 fn execute_command_unit<W: Write>(
     client: &InteractiveClient,
-    receiver: &mpsc::Receiver<MainEvent>,
+    receiver: &mut ControlReceiver,
     output: &mut ControlWriter<W>,
     commands: Vec<CommandInvocation>,
     raw_line: Option<String>,
@@ -1350,7 +1394,7 @@ fn finish_control_return<W: Write>(
     state: &mut ControlState,
     events: &mpsc::SyncSender<MainEvent>,
     stdin_started: &mut bool,
-    receiver: &mpsc::Receiver<MainEvent>,
+    receiver: &mut ControlReceiver,
     pending_stdin: &mut VecDeque<StdinEvent>,
 ) -> io::Result<u8> {
     if pending_return.discards_pane_output() {
@@ -1383,7 +1427,7 @@ fn finish_control_return<W: Write>(
 }
 
 fn drain_before_exit<W: Write>(
-    receiver: &mpsc::Receiver<MainEvent>,
+    receiver: &mut ControlReceiver,
     state: &mut ControlState,
     output: &mut ControlWriter<W>,
     pending_stdin: &mut VecDeque<StdinEvent>,
@@ -1396,17 +1440,17 @@ fn drain_before_exit<W: Write>(
         if TERMINATION_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
             return Err(io::Error::from(io::ErrorKind::Interrupted));
         }
-        match receiver.recv_timeout(remaining.min(std::time::Duration::from_millis(20))) {
-            Ok(MainEvent::Protocol(message)) => {
+        match receiver.receive(Some(remaining.min(std::time::Duration::from_millis(20))))? {
+            Some(MainEvent::Protocol(message)) => {
                 if handle_protocol(*message, state, output)?.is_some() {
                     return Ok(());
                 }
             }
-            Ok(MainEvent::Stdin(input)) => pending_stdin.push_back(input),
-            Ok(MainEvent::Disconnected) | Err(mpsc::RecvTimeoutError::Disconnected) => {
+            Some(MainEvent::Stdin(input)) => pending_stdin.push_back(input),
+            Some(MainEvent::Disconnected) => {
                 return Ok(());
             }
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            None => {}
         }
     }
 }
@@ -1432,17 +1476,9 @@ fn forward_protocol_message(
     message: ProtocolMessage,
     events: &mpsc::SyncSender<MainEvent>,
 ) -> Result<(), ()> {
-    if let ProtocolMessage::Batch(batch) = message {
-        for frame in batch.frames {
-            let message = zz_protocol::decode_protocol_frame(&frame).map_err(|_| ())?;
-            forward_protocol_message(message, events)?;
-        }
-        Ok(())
-    } else {
-        events
-            .send(MainEvent::Protocol(Box::new(message)))
-            .map_err(|_| ())
-    }
+    events
+        .send(MainEvent::Protocol(Box::new(message)))
+        .map_err(|_| ())
 }
 
 fn spawn_stdin_reader(events: mpsc::SyncSender<MainEvent>) {
@@ -1500,7 +1536,7 @@ fn finish_exit<W: Write>(
     input_closed: bool,
     events: &mpsc::SyncSender<MainEvent>,
     stdin_started: &mut bool,
-    receiver: &mpsc::Receiver<MainEvent>,
+    receiver: &mut ControlReceiver,
     pending_stdin: &mut VecDeque<StdinEvent>,
 ) -> io::Result<()> {
     output.emit_exit(reason)?;
@@ -1511,10 +1547,7 @@ fn finish_exit<W: Write>(
     output.finish()
 }
 
-fn wait_for_exit_input(
-    receiver: &mpsc::Receiver<MainEvent>,
-    pending_stdin: &mut VecDeque<StdinEvent>,
-) {
+fn wait_for_exit_input(receiver: &mut ControlReceiver, pending_stdin: &mut VecDeque<StdinEvent>) {
     loop {
         let event = pending_stdin
             .pop_front()
@@ -2348,7 +2381,7 @@ mod tests {
         .iter()
         .map(|message| zz_protocol::encode_protocol_message(message).unwrap())
         .collect();
-        let (events, receiver) = mpsc::sync_channel(3);
+        let (events, receiver) = mpsc::sync_channel(4);
         forward_protocol_message(
             ProtocolMessage::Batch(zz_protocol::Batch {
                 sequence: 2,
@@ -2357,13 +2390,17 @@ mod tests {
             &events,
         )
         .unwrap();
+        events
+            .send(MainEvent::Stdin(StdinEvent::Line("next".to_owned())))
+            .unwrap();
+        let mut receiver = ControlReceiver::new(receiver);
         let mut writer = ControlWriter::new(Vec::new(), false);
         let mut state = ControlState {
             attached_session: Some(SessionId(1)),
             ..ControlState::default()
         };
         for _ in 0..2 {
-            let MainEvent::Protocol(message) = receiver.recv().unwrap() else {
+            let MainEvent::Protocol(message) = receive_control_event(&mut receiver).unwrap() else {
                 panic!("expected protocol message");
             };
             handle_protocol(*message, &mut state, &mut writer).unwrap();
@@ -2375,9 +2412,143 @@ mod tests {
         assert!(lines[2].starts_with("%end "));
         assert_eq!(lines[3], "%sessions-changed");
         assert!(
-            matches!(receiver.recv().unwrap(), MainEvent::Protocol(message)
+            matches!(receive_control_event(&mut receiver).unwrap(), MainEvent::Protocol(message)
             if matches!(*message, ProtocolMessage::ExecExit(_)))
         );
+        assert!(matches!(
+            receive_control_event(&mut receiver).unwrap(),
+            MainEvent::Stdin(StdinEvent::Line(line)) if line == "next"
+        ));
+    }
+
+    #[test]
+    fn control_batch_is_one_channel_item_and_retains_children_across_returns() {
+        let started = |request_id| {
+            ProtocolMessage::Event(zz_protocol::Event {
+                sequence: request_id,
+                payload: EventPayload::ControlCommandStarted {
+                    request_id,
+                    flags: 1,
+                    canonical_name: Some("display-message".to_owned()),
+                    guard: true,
+                },
+            })
+        };
+        let response = ProtocolMessage::CommandResponse(CommandResponse::Success {
+            request_id: 1,
+            output: "ready".into(),
+            exit_code: 0,
+            stderr: String::new(),
+            stdout_claim: StdoutClaim::None,
+        });
+        let finished = ProtocolMessage::ExecExit(zz_protocol::ExecExit {
+            server_id: 9,
+            outcome: ExecOutcome::Ran,
+        });
+        let notification = ProtocolMessage::Event(zz_protocol::Event {
+            sequence: 2,
+            payload: EventPayload::HookEvent {
+                name: "session-created".to_owned(),
+                variables: BTreeMap::new(),
+            },
+        });
+        let frames = [response, finished, notification]
+            .iter()
+            .map(|message| zz_protocol::encode_protocol_message(message).unwrap())
+            .collect();
+        let (events, receiver) = mpsc::sync_channel(8);
+        forward_protocol_message(started(1), &events).unwrap();
+        forward_protocol_message(
+            ProtocolMessage::Batch(zz_protocol::Batch {
+                sequence: 2,
+                frames,
+            }),
+            &events,
+        )
+        .unwrap();
+        forward_protocol_message(started(2), &events).unwrap();
+        events.send(MainEvent::Stdin(StdinEvent::Eof)).unwrap();
+        let mut receiver = ControlReceiver::new(receiver);
+        assert!(matches!(
+            receive_control_event(&mut receiver).unwrap(),
+            MainEvent::Protocol(message) if matches!(
+                *message,
+                ProtocolMessage::Event(zz_protocol::Event {
+                    payload: EventPayload::ControlCommandStarted { request_id: 1, .. }, ..
+                })
+            )
+        ));
+        assert!(matches!(
+            receive_control_event(&mut receiver).unwrap(),
+            MainEvent::Protocol(message) if matches!(*message, ProtocolMessage::CommandResponse(_))
+        ));
+        assert_eq!(receiver.pending.len(), 2);
+        assert!(matches!(
+            receive_control_event(&mut receiver).unwrap(),
+            MainEvent::Protocol(message) if matches!(*message, ProtocolMessage::ExecExit(_))
+        ));
+        assert_eq!(receiver.pending.len(), 1);
+        assert!(matches!(
+            receive_control_event(&mut receiver).unwrap(),
+            MainEvent::Protocol(message) if matches!(
+                *message,
+                ProtocolMessage::Event(zz_protocol::Event {
+                    payload: EventPayload::HookEvent { .. }, ..
+                })
+            )
+        ));
+        assert!(matches!(
+            receive_control_event(&mut receiver).unwrap(),
+            MainEvent::Protocol(message) if matches!(
+                *message,
+                ProtocolMessage::Event(zz_protocol::Event {
+                    payload: EventPayload::ControlCommandStarted { request_id: 2, .. }, ..
+                })
+            )
+        ));
+        assert!(matches!(
+            receive_control_event(&mut receiver).unwrap(),
+            MainEvent::Stdin(StdinEvent::Eof)
+        ));
+    }
+
+    #[test]
+    fn malformed_control_batches_deliver_no_partial_guard() {
+        let guard = ProtocolMessage::Event(zz_protocol::Event {
+            sequence: 1,
+            payload: EventPayload::ControlCommandGuard {
+                output: "partial".to_owned(),
+                error: false,
+                sticky_failure: false,
+                flags: 1,
+            },
+        });
+        let nested =
+            zz_protocol::encode_protocol_message(&ProtocolMessage::Batch(zz_protocol::Batch {
+                sequence: 1,
+                frames: vec![zz_protocol::encode_protocol_message(&guard).unwrap()],
+            }))
+            .unwrap();
+        for invalid in [vec![0], nested] {
+            let (events, receiver) = mpsc::sync_channel(1);
+            forward_protocol_message(
+                ProtocolMessage::Batch(zz_protocol::Batch {
+                    sequence: 2,
+                    frames: vec![
+                        zz_protocol::encode_protocol_message(&guard).unwrap(),
+                        invalid,
+                    ],
+                }),
+                &events,
+            )
+            .unwrap();
+            let mut receiver = ControlReceiver::new(receiver);
+            let Err(error) = receiver.receive(None) else {
+                panic!("malformed batch must fail before delivering its guard");
+            };
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+            assert!(receiver.pending.is_empty());
+        }
     }
 
     #[test]
@@ -4141,27 +4312,29 @@ mod tests {
             .unwrap();
         sender.send(MainEvent::Stdin(StdinEvent::Eof)).unwrap();
         drop(sender);
+        let mut receiver = ControlReceiver::new(receiver);
         let mut pending = VecDeque::new();
         let mut state = ControlState::default();
         let mut output = ControlWriter::new(Vec::new(), false);
-        drain_before_exit(&receiver, &mut state, &mut output, &mut pending).unwrap();
+        drain_before_exit(&mut receiver, &mut state, &mut output, &mut pending).unwrap();
         assert_eq!(pending.len(), 2);
-        wait_for_exit_input(&receiver, &mut pending);
+        wait_for_exit_input(&mut receiver, &mut pending);
         assert!(matches!(pending.pop_front(), Some(StdinEvent::Eof)));
     }
 
     #[test]
     fn wait_exit_releases_on_empty_line_and_eof() {
         let (_sender, receiver) = mpsc::sync_channel(32);
+        let mut receiver = ControlReceiver::new(receiver);
         let mut pending = VecDeque::from([
             StdinEvent::Line("keep draining".to_owned()),
             StdinEvent::Line(String::new()),
         ]);
-        wait_for_exit_input(&receiver, &mut pending);
+        wait_for_exit_input(&mut receiver, &mut pending);
         assert!(pending.is_empty());
 
         let mut pending = VecDeque::from([StdinEvent::Eof]);
-        wait_for_exit_input(&receiver, &mut pending);
+        wait_for_exit_input(&mut receiver, &mut pending);
         assert!(pending.is_empty());
     }
 
@@ -4366,8 +4539,9 @@ mod tests {
                 }),
             )))
             .unwrap();
+        let mut receiver = ControlReceiver::new(receiver);
         let MainEvent::Protocol(message) =
-            receive_buffered_control_event(&receiver, &mut writer).unwrap()
+            receive_buffered_control_event(&mut receiver, &mut writer).unwrap()
         else {
             panic!("response expected");
         };
@@ -4389,7 +4563,7 @@ mod tests {
             sender.send(MainEvent::Disconnected).unwrap();
         });
         assert!(matches!(
-            receive_buffered_control_event(&receiver, &mut writer).unwrap(),
+            receive_buffered_control_event(&mut receiver, &mut writer).unwrap(),
             MainEvent::Disconnected
         ));
         producer.join().unwrap();

@@ -2354,6 +2354,11 @@ impl OutboundMailbox {
 
     #[must_use]
     fn enqueue_reliable(&self, message: &ProtocolMessage) -> bool {
+        self.enqueue_reliable_with_wakeup(message, true)
+    }
+
+    #[must_use]
+    fn enqueue_reliable_with_wakeup(&self, message: &ProtocolMessage, wakeup: bool) -> bool {
         let encoded = match self.encode_message(message) {
             Ok(encoded) => encoded,
             Err(error) => {
@@ -2364,10 +2369,15 @@ impl OutboundMailbox {
                 return false;
             }
         };
-        self.enqueue_reliable_frame(message, encoded.into())
+        self.enqueue_reliable_frame(message, encoded.into(), wakeup)
     }
 
-    fn enqueue_reliable_frame(&self, message: &ProtocolMessage, encoded: OutboundFrame) -> bool {
+    fn enqueue_reliable_frame(
+        &self,
+        message: &ProtocolMessage,
+        encoded: OutboundFrame,
+        wakeup: bool,
+    ) -> bool {
         let removed_pane = match message {
             ProtocolMessage::Event(Event {
                 payload: EventPayload::PaneRemoved(pane),
@@ -2445,7 +2455,9 @@ impl OutboundMailbox {
         state.queued_bytes += encoded.len();
         state.reliable.push_back(encoded);
         drop(state);
-        self.ready.notify_one();
+        if wakeup {
+            self.ready.notify_one();
+        }
         true
     }
 
@@ -6302,6 +6314,14 @@ impl Shared {
         admitted
     }
 
+    fn wake_control_queue(&self, client: ClientId, kind: ClientKind) {
+        if kind == ClientKind::Control
+            && let Some(writer) = self.client_writers.lock().get(&client)
+        {
+            writer.ready.notify_one();
+        }
+    }
+
     /// The wire half of `CMD_RETURN_WAIT`: the queue this thread runs is about
     /// to block on something that answers later, so tell the client once that
     /// nothing else it queued runs until this request resumes.
@@ -7470,6 +7490,7 @@ impl Shared {
         let Some(commands) = commands.filter(|commands| !commands.is_empty()) else {
             return String::new();
         };
+        self.wake_control_queue(client, kind);
         self.run_hook_commands(
             client,
             kind,
@@ -10913,6 +10934,9 @@ impl Shared {
         }
         self.nudge_status_sampler();
         pending_hook_events.extend(std::mem::take(&mut self.inner.lock().deferred_event_hooks));
+        if !pending_hook_events.is_empty() {
+            self.wake_control_queue(client, kind);
+        }
         if std::mem::take(&mut self.inner.lock().deferred_control_refresh) {
             self.refresh_control_output_taps();
         }
@@ -25808,7 +25832,7 @@ impl Shared {
             return;
         };
         for subscriber in subscribers {
-            let _ = subscriber.enqueue_reliable_frame(&message, Arc::clone(&encoded).into());
+            let _ = subscriber.enqueue_reliable_frame(&message, Arc::clone(&encoded).into(), true);
         }
     }
 
@@ -25841,7 +25865,7 @@ impl Shared {
             return;
         };
         for subscriber in subscribers {
-            let _ = subscriber.enqueue_reliable_frame(&message, Arc::clone(&encoded).into());
+            let _ = subscriber.enqueue_reliable_frame(&message, Arc::clone(&encoded).into(), true);
         }
     }
 

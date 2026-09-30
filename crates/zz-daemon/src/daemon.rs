@@ -7989,7 +7989,7 @@ impl Shared {
             {
                 facts.client = None;
             }
-            if command_name == "display-message" {
+            if command_name == "display-message" && !facts_unread {
                 let (target, target_client) = inner
                     .engine
                     .display_message_format_target(context, &command.args)?;

@@ -3574,6 +3574,12 @@ pub enum EventPayload {
         sticky_failure: bool,
         flags: u8,
     },
+    ControlCommandStarted {
+        request_id: u64,
+        flags: u32,
+        canonical_name: Option<String>,
+        guard: bool,
+    },
 }
 
 impl EventPayload {

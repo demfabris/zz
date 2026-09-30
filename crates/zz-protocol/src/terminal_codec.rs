@@ -303,6 +303,18 @@ fn decode_protocol_payload(lane: Lane, payload: &[u8]) -> Result<ProtocolMessage
 }
 
 fn validate_control_message(message: &ProtocolMessage) -> Result<(), ProtocolError> {
+    if let ProtocolMessage::Event(Event {
+        payload: EventPayload::ControlCommandStarted { canonical_name, .. },
+        ..
+    }) = message
+        && canonical_name
+            .as_ref()
+            .is_some_and(|name| name.len() > MAX_GUI_TEXT_BYTES)
+    {
+        return Err(ProtocolError::InvalidServerHello(
+            "control command name is too large".to_owned(),
+        ));
+    }
     if let ProtocolMessage::Hello(hello) = message {
         validate_control_message(&ProtocolMessage::ClientHello(hello.client.clone()))?;
         if !hello.environment.is_valid() {

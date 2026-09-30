@@ -423,7 +423,7 @@ impl CommandRoute {
 
 impl CommandClient {
     pub fn into_interactive(
-        mut self,
+        self,
         attach: zz_protocol::AttachOperation,
     ) -> Result<InteractiveClient, DaemonError> {
         let (reader, writer) = match self.link {
@@ -444,11 +444,13 @@ impl CommandClient {
             Some(attach),
         )?;
         drop(reader);
-        let mut client = InteractiveClient::from_connected(connected);
+        let client = InteractiveClient::from_connected(connected);
         #[cfg(all(any(unix, windows), not(target_os = "ios")))]
-        {
-            client.ssh_forward = self._ssh_forward.take();
-        }
+        let client = {
+            let mut client = client;
+            client.ssh_forward = self._ssh_forward;
+            client
+        };
         Ok(client)
     }
 
@@ -3343,9 +3345,10 @@ mod tests {
                     super::TransportStream::try_clone(&stream).expect("clone stream"),
                 );
                 let mut writer = ProtocolSender::new(stream);
-                let ProtocolMessage::ClientHello(hello) = reader.recv().expect("receive handshake")
-                else {
-                    panic!("expected ClientHello");
+                let hello = match reader.recv().expect("receive handshake") {
+                    ProtocolMessage::ClientHello(hello) => hello,
+                    ProtocolMessage::Hello(hello) => hello.into_client(),
+                    _ => panic!("expected client handshake"),
                 };
                 writer
                     .send(&ProtocolMessage::CommandResponse(CommandResponse::Error {
@@ -3428,10 +3431,11 @@ mod tests {
                     super::TransportStream::try_clone(&stream).expect("clone stream"),
                 );
                 let mut writer = ProtocolSender::new(stream);
-                let ProtocolMessage::ClientHello(_) = reader.recv().expect("receive handshake")
-                else {
-                    panic!("expected ClientHello");
-                };
+                assert!(matches!(
+                    reader.recv().expect("receive handshake"),
+                    ProtocolMessage::ClientHello(_) | ProtocolMessage::Hello(_)
+                ));
+
                 writer
                     .send(&ProtocolMessage::ServerHello(ServerHello {
                         protocol_version: PROTOCOL_VERSION,

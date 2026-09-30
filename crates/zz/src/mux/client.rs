@@ -5217,7 +5217,10 @@ mod tests {
             server_id: 1,
             client_id: zz_protocol::ClientId(1),
             client_instance_id: zz_protocol::ClientInstanceId(1),
-            capabilities: vec![zz_protocol::PANE_FRAME_CAPABILITY.to_owned()],
+            capabilities: vec![
+                zz_protocol::PANE_FRAME_CAPABILITY.to_owned(),
+                zz_protocol::CONTROL_CAPABILITY.to_owned(),
+            ],
             appearance: TerminalAppearance::default(),
             appearance_provenance: AppearanceProvenance::default(),
             mux_options: MuxOptions::default(),

@@ -433,7 +433,7 @@ fn execute_command_unit<W: Write>(
     pending_stdin: &mut VecDeque<StdinEvent>,
     mut deferred_return: Option<PendingReturn>,
 ) -> io::Result<CommandResult> {
-    let first_is_detach = commands
+    let mut first_is_detach = commands
         .first()
         .is_some_and(|command| zz_protocol::canonical_command(&command.name) == "detach-client");
     if !first_is_detach && state.pending_return.is_none() {
@@ -476,6 +476,7 @@ fn execute_command_unit<W: Write>(
     };
     let mut parked = false;
     let mut completed_guards = output.command_guard_frames;
+    let mut started_command: Option<StartedCommand> = None;
     loop {
         if state.tree_sync_required {
             client.request_tree_sync().map_err(io::Error::other)?;
@@ -483,10 +484,46 @@ fn execute_command_unit<W: Write>(
         }
         match receive_control_event(receiver)? {
             MainEvent::Protocol(message) => match *message {
+                ProtocolMessage::Event(zz_protocol::Event {
+                    payload:
+                        EventPayload::ControlCommandStarted {
+                            request_id,
+                            flags,
+                            canonical_name,
+                            guard,
+                        },
+                    ..
+                }) => {
+                    let flags = u8::try_from(flags).map_err(|_| {
+                        io::Error::new(io::ErrorKind::InvalidData, "invalid control command flags")
+                    })?;
+                    if request_id == 1 && canonical_name.as_deref() == Some("detach-client") {
+                        first_is_detach = true;
+                        if deferred_return.is_none() {
+                            deferred_return = state.pending_return.take();
+                        }
+                    }
+                    parked = false;
+                    started_command = Some(StartedCommand {
+                        request_id,
+                        flags,
+                        canonical_name,
+                        command_guard_frames: output.command_guard_frames,
+                        frame: if guard {
+                            Some(output.begin(flags)?)
+                        } else {
+                            None
+                        },
+                    });
+                }
                 ProtocolMessage::CommandQueueParked { .. } => {
                     parked = true;
                     if release_parked_queue_at_client_exit(state, pending_stdin) {
-                        if output.command_guard_frames == completed_guards {
+                        if let Some(frame) =
+                            started_command.as_ref().and_then(|started| started.frame)
+                        {
+                            output.end(&frame, false)?;
+                        } else if output.command_guard_frames == completed_guards {
                             output.control_command_guard("", false, flags)?;
                         }
                         output.release_exit()?;
@@ -494,10 +531,24 @@ fn execute_command_unit<W: Write>(
                     }
                 }
                 ProtocolMessage::CommandResponse(response) => {
-                    let index = response_request_id(&response).saturating_sub(1) as usize;
-                    let name = names
-                        .get(index)
-                        .map(|name| zz_protocol::canonical_command(name));
+                    let request_id = response_request_id(&response);
+                    let index = request_id.saturating_sub(1) as usize;
+                    let started = if started_command
+                        .as_ref()
+                        .is_some_and(|started| started.request_id == request_id)
+                    {
+                        started_command.take()
+                    } else {
+                        None
+                    };
+                    let name = started
+                        .as_ref()
+                        .and_then(|started| started.canonical_name.as_deref())
+                        .or_else(|| {
+                            names
+                                .get(index)
+                                .map(|name| zz_protocol::canonical_command(name))
+                        });
                     let updates_return_code = response_sets_return_code(name, &response);
                     let new_failure = updates_return_code && state.return_code == 0;
                     if updates_return_code {
@@ -516,7 +567,17 @@ fn execute_command_unit<W: Write>(
                         }
                         pending_return.refresh_code_after_preceding_input(state.return_code);
                     }
-                    result.exit_code = response_exit_code(&response);
+                    result.exit_code = if let Some(started) = started {
+                        render_command_response(
+                            output,
+                            started.frame.as_ref(),
+                            started.flags,
+                            started.command_guard_frames,
+                            response,
+                        )?
+                    } else {
+                        response_exit_code(&response)
+                    };
                     completed_guards = output.command_guard_frames;
                 }
                 ProtocolMessage::ExecExit(finished) => {
@@ -578,7 +639,10 @@ fn execute_command_unit<W: Write>(
                     output,
                 );
                 if parked && release_parked_queue_at_client_exit(state, pending_stdin) {
-                    if output.command_guard_frames == completed_guards {
+                    if let Some(frame) = started_command.as_ref().and_then(|started| started.frame)
+                    {
+                        output.end(&frame, false)?;
+                    } else if output.command_guard_frames == completed_guards {
                         output.control_command_guard("", false, flags)?;
                     }
                     output.release_exit()?;
@@ -586,6 +650,21 @@ fn execute_command_unit<W: Write>(
                 }
             }
             MainEvent::Disconnected => {
+                if let Some(started) = started_command {
+                    if result.exit == ExitSignal::Clean {
+                        if let Some(frame) = started.frame {
+                            output.end(&frame, false)?;
+                        }
+                    } else {
+                        render_command_failure(
+                            output,
+                            started.frame.as_ref(),
+                            started.flags,
+                            started.command_guard_frames,
+                            "server exited unexpectedly",
+                        )?;
+                    }
+                }
                 output.release_exit()?;
                 if !result.exit.is_some() {
                     result.exit = ExitSignal::Unexpected;
@@ -1116,7 +1195,6 @@ fn response_exit_code(response: &CommandResponse) -> u8 {
     }
 }
 
-#[cfg(test)]
 fn render_command_response<W: Write>(
     output: &mut ControlWriter<W>,
     frame: Option<&Frame>,
@@ -1138,7 +1216,6 @@ fn render_command_response<W: Write>(
     }
 }
 
-#[cfg(test)]
 fn render_command_failure<W: Write>(
     output: &mut ControlWriter<W>,
     frame: Option<&Frame>,
@@ -1760,7 +1837,6 @@ impl<W: Write> ControlWriter<W> {
         )
     }
 
-    #[cfg(test)]
     fn response(&mut self, frame: &Frame, response: CommandResponse) -> io::Result<u8> {
         match response {
             CommandResponse::Success {
@@ -1785,7 +1861,6 @@ impl<W: Write> ControlWriter<W> {
         self.end(&frame, true)
     }
 
-    #[cfg(test)]
     fn error(&mut self, frame: &Frame, error: &str) -> io::Result<()> {
         self.write_line(error)?;
         self.end(frame, true)
@@ -1873,6 +1948,14 @@ struct Frame {
     time: u64,
     number: u64,
     flags: u8,
+}
+
+struct StartedCommand {
+    request_id: u64,
+    flags: u8,
+    canonical_name: Option<String>,
+    command_guard_frames: u64,
+    frame: Option<Frame>,
 }
 
 struct CommandResult {
@@ -2179,6 +2262,31 @@ mod tests {
         assert_eq!(
             writer.output,
             b"%begin 17 1 1\n%end 17 1 1\n%begin 18 2 1\na\xffb\n%end 18 2 1\n"
+        );
+    }
+
+    #[test]
+    fn started_response_preserves_raw_output_before_callback_guards() {
+        let mut writer = ControlWriter::new(Vec::new(), false);
+        let frame = writer.begin_at(17, 1).unwrap();
+        writer
+            .control_command_guard_at(18, "child", false, 1)
+            .unwrap();
+        writer
+            .response(
+                &frame,
+                CommandResponse::Success {
+                    request_id: 1,
+                    output: RawText::from_bytes(b"a\xffb\n".to_vec()),
+                    exit_code: 0,
+                    stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            writer.output,
+            b"%begin 17 1 1\na\xffb\n%end 17 1 1\n%begin 18 2 1\nchild\n%end 18 2 1\n"
         );
     }
 

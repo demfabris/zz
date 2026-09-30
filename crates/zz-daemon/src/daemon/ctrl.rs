@@ -8,9 +8,7 @@ use zz_protocol::{
 use super::*;
 
 thread_local! {
-    pub(super) static EXEC_GUARDS: Cell<bool> = const { Cell::new(false) };
     pub(super) static HOOK_NOTIFICATIONS_ONLY: Cell<bool> = const { Cell::new(false) };
-    pub(super) static GUARDS_SENT: Cell<usize> = const { Cell::new(0) };
 }
 
 pub(super) struct HookNotificationsOnlyScope(bool);
@@ -178,10 +176,12 @@ fn client_view(
 ) -> ClientView {
     let layout_generation = layout_generation(inner, client);
     let mut overlay = Vec::new();
-    let contexts = inner.engine.format_context_snapshot(
-        client_attached_session(inner, client)
-            .map_or(FormatClient::Unattached, FormatClient::Attached),
-    );
+    let contexts = (inner.client_kinds.get(&client) != Some(&ClientKind::Control)).then(|| {
+        inner.engine.format_context_snapshot(
+            client_attached_session(inner, client)
+                .map_or(FormatClient::Unattached, FormatClient::Attached),
+        )
+    });
     let presence = snapshot_presence(inner);
     let engine = &inner.engine;
     for session in &raw.sessions {
@@ -200,6 +200,9 @@ fn client_view(
                 viewers,
             });
         }
+        let Some(contexts) = contexts.as_ref() else {
+            continue;
+        };
         for window in &session.windows {
             let formats = engine.window_status_formats(window.id);
             let format = if window.id == session.active_window {
@@ -287,6 +290,24 @@ fn client_view(
 }
 
 impl OutboundMailbox {
+    pub(super) fn enqueue_control_group(&self, frames: Vec<Vec<u8>>) -> bool {
+        let message = ProtocolMessage::Batch(Batch {
+            sequence: Shared::next_sequence(),
+            frames,
+        });
+        let encoded = match self.encode_message(&message) {
+            Ok(encoded) => encoded,
+            Err(error) => {
+                log::error!("failed to encode subscribed tree group: {error}");
+                return false;
+            }
+        };
+        let ProtocolMessage::Batch(Batch { frames, .. }) = message else {
+            unreachable!()
+        };
+        self.enqueue_encoded_reliable(OutboundFrame::Grouped { encoded, frames })
+    }
+
     pub(super) fn flush_control_batch(&self, preserve_welcome: bool) -> bool {
         let mut state = self.state.lock();
         let welcome = preserve_welcome
@@ -297,16 +318,19 @@ impl OutboundMailbox {
         state.terminals_held = false;
         let mut frames = Vec::new();
         while let Some(frame) = pop_ready_frame(&mut state) {
-            frames.push(frame.into_vec());
+            match frame {
+                OutboundFrame::Grouped {
+                    frames: children, ..
+                } => frames.extend(children),
+                frame => frames.push(frame.into_vec()),
+            }
         }
+        let message = ProtocolMessage::Batch(Batch {
+            sequence: Shared::next_sequence(),
+            frames,
+        });
         let mut encoded = Vec::new();
-        let result = encode_protocol_message_into(
-            &ProtocolMessage::Batch(Batch {
-                sequence: Shared::next_sequence(),
-                frames,
-            }),
-            &mut encoded,
-        );
+        let result = encode_protocol_message_into(&message, &mut encoded);
         if let Some(welcome) = welcome {
             state.reliable.push_back(welcome);
         }
@@ -317,7 +341,12 @@ impl OutboundMailbox {
             return false;
         }
         state.queued_bytes += encoded.len();
-        state.reliable.push_back(encoded.into());
+        let ProtocolMessage::Batch(Batch { frames, .. }) = message else {
+            unreachable!()
+        };
+        state
+            .reliable
+            .push_back(OutboundFrame::Grouped { encoded, frames });
         drop(state);
         self.ready.notify_one();
         true
@@ -424,8 +453,18 @@ impl Shared {
         outbound: &OutboundMailbox,
         force: bool,
     ) {
-        for message in self.compact_tree_messages(client, force) {
-            let _ = outbound.enqueue_reliable(&message);
+        let _order = self.snapshot_order.lock();
+        let frames = self
+            .compact_tree_messages(client, force)
+            .into_iter()
+            .map(|message| zz_protocol::encode_protocol_message(&message))
+            .collect::<Result<Vec<_>, _>>();
+        match frames {
+            Ok(frames) if !frames.is_empty() => {
+                let _ = outbound.enqueue_control_group(frames);
+            }
+            Ok(_) => {}
+            Err(error) => log::error!("failed to encode subscribed tree state: {error}"),
         }
     }
 
@@ -539,10 +578,7 @@ impl Shared {
             sends
         };
         for (_, (outbound, frames)) in sends {
-            let _ = outbound.enqueue_reliable(&ProtocolMessage::Batch(Batch {
-                sequence: Self::next_sequence(),
-                frames,
-            }));
+            let _ = outbound.enqueue_control_group(frames);
         }
     }
 
@@ -803,27 +839,6 @@ impl Shared {
         initializing || outbound.flush_control_batch(false)
     }
 
-    pub(super) fn publish_control_raw_guard(
-        &self,
-        target: Option<(ClientId, u8)>,
-        output: RawText,
-        error: bool,
-        sticky_failure: bool,
-    ) {
-        if let Some((client, flags)) = target {
-            GUARDS_SENT.with(|count| count.set(count.get().saturating_add(1)));
-            self.publish_to_client(
-                client,
-                EventPayload::ControlCommandGuardRaw {
-                    output,
-                    error,
-                    sticky_failure,
-                    flags,
-                },
-            );
-        }
-    }
-
     pub(super) fn execute_compact_request(
         self: &Arc<Self>,
         client: ClientId,
@@ -832,6 +847,9 @@ impl Shared {
         request: zz_protocol::ExecRequest,
         outbound: &Arc<OutboundMailbox>,
     ) {
+        if self.command_queue_cancelled(client) {
+            return;
+        }
         let commands = if let Some(line) = request.raw_control_line {
             let names = zz_mux::config_expansion_names("<control>", &line);
             let users = names.homes.into_iter().collect::<Vec<_>>();
@@ -877,11 +895,27 @@ impl Shared {
             return;
         }
         for (index, prepared) in prepared.into_iter().enumerate() {
+            if self.command_queue_cancelled(client) {
+                break;
+            }
             sync_context_with_attachment(&self.inner.lock(), client, context);
             let _park = (kind == ClientKind::Control)
                 .then(|| CommandQueueParkScope::new(client, index as u64 + 1));
-            GUARDS_SENT.with(|count| count.set(0));
-            EXEC_GUARDS.with(|enabled| enabled.set(kind == ClientKind::Control));
+            if kind == ClientKind::Control {
+                Self::send_event(
+                    outbound,
+                    EventPayload::ControlCommandStarted {
+                        request_id: index as u64 + 1,
+                        flags: u32::from(if prepared.invocation.source.is_some() {
+                            CONTROL_COMMAND_FRAME_FLAGS_CONTROL
+                        } else {
+                            CONTROL_COMMAND_FRAME_FLAGS_NONE
+                        }),
+                        canonical_name: prepared.canonical_name.clone(),
+                        guard: !MuxEngine::is_command_alias_group(&prepared.invocation),
+                    },
+                );
+            }
             let response = match prepared.result {
                 PreparedCommandResult::Ready => self.execute_command_request_with_prepared(
                     client,
@@ -897,31 +931,7 @@ impl Shared {
                     output: RawText::default(),
                 },
             };
-            EXEC_GUARDS.with(|enabled| enabled.set(false));
             let failed = matches!(response, CommandResponse::Error { .. });
-            if kind == ClientKind::Control && failed && GUARDS_SENT.with(Cell::get) == 0 {
-                let (output, error, sticky_failure) = match &response {
-                    CommandResponse::Success { output, .. } => (output.clone(), false, false),
-                    CommandResponse::Error { output, error, .. } => {
-                        let mut bytes = output.as_bytes().to_vec();
-                        bytes.extend_from_slice(server_error_text(error).as_bytes());
-                        (RawText::from_bytes(bytes), true, !error.is_command_parse())
-                    }
-                };
-                self.publish_control_raw_guard(
-                    Some((
-                        client,
-                        if prepared.invocation.source.is_some() {
-                            CONTROL_COMMAND_FRAME_FLAGS_CONTROL
-                        } else {
-                            CONTROL_COMMAND_FRAME_FLAGS_NONE
-                        },
-                    )),
-                    output,
-                    error,
-                    sticky_failure,
-                );
-            }
             let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(response));
             if failed {
                 break;

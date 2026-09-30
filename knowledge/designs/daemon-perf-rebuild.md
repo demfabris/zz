@@ -39,7 +39,7 @@ libghostty parse, 64 KiB reads, time-sampled frames and latest-wins mailbox that
 throughput lead. Every claim is a number from `bench/perf` measured against a release tmux in the
 same run.
 
-Today: every event does all the work for everyone, eagerly, under one global `Mutex`, on a thread
+At W0: every event does all the work for everyone, eagerly, under one global `Mutex`, on a thread
 per thing. Profiles put 80-95% of daemon CPU on each hot path in work nobody requested.
 
 # Baseline
@@ -2233,7 +2233,8 @@ agent/fanout.rs encode path; protocol docs.
 Gate vs TERM JSON: `attach.ttfc.p1` <= 1.1x tmux; `attach.conns.p4` = 1; `attach.cpu.*` <= 1.25x
 tmux; `attach.wire_s2c.p4` <= 8 KB; bind-key <= 64 B for hash subscribers; rename in an unattached
 session <= 100 B per client; `control.latency` <= 1.2x, `control.burst_cmds_per_s` >= 0.8x tmux;
-`chatty.client_cpu_pct.visible` <= 3x, `chatty.tty_kibps.visible` <= 1.5x; cli and throughput no
+`chatty.client_cpu_pct.visible` <= 3x + 1% (1% on the Mac where tmux reads zero),
+`chatty.tty_kibps.visible` <= 1.5x; cli and throughput no
 regression. Tests: zz-client simulator convergence, zz-client-ffi + C integration client, daemon
 clients and overlay tests, `cargo test -p zz`, every compat/tui fixture, control-mode fixtures
 (`%begin`/`%end`, `%layout-change`), `compat/run.sh`, `just web-build`, `just ios-gpui iPad build`.

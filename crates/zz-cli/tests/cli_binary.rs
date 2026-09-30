@@ -5027,7 +5027,10 @@ tmux set-option -g @plugin loaded
                     return;
                 }
                 if let Some(status) = child.try_wait().expect("poll control block process") {
-                    panic!("control process exited before {label}: {status}");
+                    panic!(
+                        "control process exited before {label}: {status}: {}",
+                        String::from_utf8_lossy(&output)
+                    );
                 }
                 if Instant::now() >= deadline {
                     child.kill().expect("kill stalled control block process");
@@ -5677,12 +5680,15 @@ tmux set-option -g @plugin loaded
                         .iter()
                         .any(|line| line.contains("missing-alias-source.conf"))
             }));
-            assert!(!stream.blocks.iter().any(|block| {
-                block
-                    .payload
-                    .iter()
-                    .any(|line| matches!(line.as_str(), "after-missing" | "same-line-missing"))
-            }));
+            assert!(
+                !stream.blocks.iter().any(|block| {
+                    block
+                        .payload
+                        .iter()
+                        .any(|line| matches!(line.as_str(), "after-missing" | "same-line-missing"))
+                }),
+                "{stream:?}"
+            );
 
             let configured = fixture.run(&[
                 "set-option",
@@ -6731,9 +6737,14 @@ tmux set-option -g @plugin loaded
                         }
                         ExitPath::DetachCompleted | ExitPath::DetachQueuedOpen => 0,
                     };
-                    assert_eq!(output.status.code(), Some(expected_status), "{label}");
-                    assert!(output.stderr.is_empty(), "{label}");
                     let stdout = std::fs::read(&output_path).expect("read matrix control output");
+                    assert_eq!(
+                        output.status.code(),
+                        Some(expected_status),
+                        "{label}: {}",
+                        String::from_utf8_lossy(&stdout)
+                    );
+                    assert!(output.stderr.is_empty(), "{label}");
                     let hidden = match row.name {
                         "sourced-runtime" => 1,
                         "sourced-command" => 2,

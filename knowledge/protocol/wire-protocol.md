@@ -76,7 +76,7 @@ fields in declaration order.
 |---------|--------|---------|
 | `Hello(Hello)` | `client: ClientHello`, `viewport: Option<ClientViewport>`, `subscriptions: Subscriptions`, `attach: Option<AttachOperation>`, `environment: ClientEnvironmentBlob` | Client → daemon handshake. The client names its viewport, requested tree/status/options/keys/pane stream, optional session or prepared attach chain, and NUL-separated environment in one request. `ClientHello` keeps identity and terminal facts as an in-memory model; normal interactive clients send `Hello` |
 | `Welcome(Welcome)` | `protocol_version: u16`, `server_id: u64`, `client_id: ClientId`, `client_instance_id: ClientInstanceId`, `caps: u64` | Daemon → client identity and capability mask. The daemon sends requested state in a following `Batch`; `InteractiveClient` materializes `ServerHello` for callers without transmitting its key tables, appearance, options, or status in the welcome |
-| `CommandRequest(CommandRequest)` | `request_id: u64`, `command: CommandInvocation`, `prepared: bool` | tmux-style command from any client. Control and the local CLI set `prepared` after the daemon freezes one alias layer. A prepared multi-command alias travels as one opaque `CommandInvocation`; the daemon still runs authorization and ordinary dispatch validation |
+| `CommandRequest(CommandRequest)` | `request_id: u64`, `command: CommandInvocation`, `prepared: bool` | tmux-style command from any client. A prepared multi-command alias travels as one opaque `CommandInvocation`; the daemon still runs authorization and ordinary dispatch validation. Compact Control clients submit raw lines through `ExecRequest` |
 | `CommandResponse(CommandResponse)` | `Success { request_id, output, exit_code, stderr }` / `Error { request_id, error: ServerError, output }` | Command result. A client prints either output field before it reports an error or returns the exit code. `stderr` (appended at v71) is populated for `source-file` diagnostics issued by a Command client since Wave E (2026-08-22) and stays empty for every other command; `Success` with a nonzero `exit_code` is a COMPLETED command, so `Error` stays reserved for dispatch, transport, and server failures |
 | `Attach { session: String }` | target string | Interactive attach request. An empty target lazily creates the next numeric session when the daemon has none; explicit missing targets and Command-kind attaches do not create. A session holds a set of attached clients, so a second device never collides with the first |
 | `Attached { session: SessionId, snapshot: MuxSnapshot, read_only: bool, client_flags: String }` | resolved id + full state + effective reconnect options | Attach acknowledgement. The option fields describe the state actually applied by this attachment, so a TUI changing connections does not have to infer which child of an opaque alias attached |
@@ -138,7 +138,9 @@ keep it, so they do not clear terminal state or overlays.
 Control lines travel as one `ExecRequest.raw_control_line` over the interactive connection. The
 daemon expands environment and home references, parses the line and freezes aliases once, so
 `$` and `~` do not add client round trips. The daemon answers
-with one `CommandResponse` per command and an `ExecExit`. Hook-driven `%layout-change` and window
+with `ControlCommandStarted` metadata before each command, one `CommandResponse` per command,
+and an `ExecExit`. The start metadata supplies the guard flags and resolved command name; the
+frontend opens the parent guard before callback output and closes it with the response. Hook-driven `%layout-change` and window
 notifications keep their ordering after `%end`. A CLI receiving an attach `ExecResume` upgrades
 the same connection instead of opening a second one.
 
@@ -247,6 +249,8 @@ unpaired keys.
 `OpenPathPicker { pane, start_dir }`, `KeyTablesPatched { tables, removed }`,
 `TreeDelta(TreeDelta)`, `ClientView(ClientView)`,
 `KeyTablesHashChanged { hash, mouse }`, `MuxOptionsPatched { options }`,
+`ControlCommandStarted { request_id, flags, canonical_name, guard }`,
+`ControlCommandGuardRaw { flags, output, error, sticky_failure }`,
 `Detached { session: SessionId, by: Option<String>, reason: DetachReason }`, `HistoryChunk { pane, start: u32, total: u32,
 offset: u32, columns: u16, rows: Vec<Vec<PackedCell>>, dictionary: TerminalDictionary }`,
 `KittyImageBegin { pane, image_id, generation, width, height, total_bytes }`
@@ -326,15 +330,12 @@ exact history-dependent multi-window `window-unlinked` sequence remains tracked 
 `hooks.shutdown-window-unlinked-order`; no shutdown field or version bump can reconstruct tmux's
 winlink-tree history.
 
-Direct Control config construction still runs in the client process before daemon execution, but
-since v92 its `~` lookups do not. A line containing a tilde is walked once with a recording context,
-the names it needs cross as one `HomeDirectoryRequest`, and the line is re-parsed with the answers,
-so source, startup, alias, callback, and direct Control parsing all read the same daemon-global
-`HOME` and the same daemon-host passwd database. The round trip is invisible: no guard, no frame, no
-command number. Since v99 the same round trip also names the `$NAME` variables a line needs: the
-recording context collects them beside the `~` lookups, an `EnvironmentRequest` crosses pipelined
-next to the home request, and the re-parse expands each name from the daemon's global environment
-the way `yylex_token_variable` does, with an unset name expanding to nothing.
+Compact Control clients send each raw line once through `ExecRequest.raw_control_line`. The daemon
+parses it with its own global environment and passwd database, freezes aliases, and executes the
+resulting list. This removes the client-side recording parse, `HomeDirectoryRequest`,
+`EnvironmentRequest`, preparation request, and second parse from this path. Those lookup messages
+remain available for older command construction paths. Source, startup, alias, callback, and direct
+Control parsing use the same daemon-host values, with an unset variable expanding to nothing.
 
 v76 introduced `SourcedCommandGuard { output, error, client_failure }` at `EventPayload` tail tag 47.
 It gave parser-owned source replay and synchronous foreground inserted lists one flags-1 command

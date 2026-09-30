@@ -118,6 +118,43 @@ fn compact_welcome_rejects_missing_required_capabilities_on_encode_and_decode() 
 }
 
 #[test]
+fn control_command_start_is_compact_and_bounds_the_canonical_name() {
+    for (canonical_name, guard) in [(None, false), (Some("source-file".to_owned()), true)] {
+        let message = ProtocolMessage::Event(Event {
+            sequence: 1,
+            payload: EventPayload::ControlCommandStarted {
+                request_id: u64::MAX,
+                flags: 1,
+                canonical_name,
+                guard,
+            },
+        });
+        let frame = encode_protocol_message(&message).unwrap();
+        assert!(frame.len() <= 48);
+        assert_eq!(decode_protocol_frame(&frame).unwrap(), message);
+    }
+    let message = ProtocolMessage::Event(Event {
+        sequence: 1,
+        payload: EventPayload::ControlCommandStarted {
+            request_id: 1,
+            flags: 0,
+            canonical_name: Some("x".repeat(MAX_GUI_TEXT_BYTES + 1)),
+            guard: true,
+        },
+    });
+    assert!(matches!(
+        encode_protocol_message(&message),
+        Err(ProtocolError::InvalidServerHello(_))
+    ));
+    let payload = postcard::to_stdvec(&message).unwrap();
+    let frame = crate::framing::encode_enveloped(crate::framing::Lane::Control, &payload).unwrap();
+    assert!(matches!(
+        decode_protocol_frame(&frame),
+        Err(ProtocolError::InvalidServerHello(_))
+    ));
+}
+
+#[test]
 fn hello_moves_environment_into_one_blob_and_keeps_raw_bytes() {
     let client = ClientHello {
         protocol_version: PROTOCOL_VERSION,

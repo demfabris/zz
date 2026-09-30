@@ -2027,6 +2027,10 @@ struct OutboundMailbox {
 enum OutboundFrame {
     Owned(Vec<u8>),
     Shared(Arc<[u8]>),
+    Grouped {
+        encoded: Vec<u8>,
+        frames: Vec<Vec<u8>>,
+    },
 }
 
 impl std::ops::Deref for OutboundFrame {
@@ -2036,6 +2040,7 @@ impl std::ops::Deref for OutboundFrame {
         match self {
             Self::Owned(frame) => frame,
             Self::Shared(frame) => frame,
+            Self::Grouped { encoded, .. } => encoded,
         }
     }
 }
@@ -2063,6 +2068,7 @@ impl OutboundFrame {
         match self {
             Self::Owned(frame) => frame,
             Self::Shared(frame) => frame.to_vec(),
+            Self::Grouped { encoded, .. } => encoded,
         }
     }
 }
@@ -6146,21 +6152,6 @@ impl Shared {
         let defer_notifications = kind == ClientKind::Control;
         let execution = {
             let _deferral = defer_notifications.then(|| self.defer_control_notifications());
-            let exec_guards = defer_notifications && ctrl::EXEC_GUARDS.with(Cell::get);
-            let early_guard = exec_guards
-                && (canonical_command(&command.name) == "kill-server"
-                    || canonical_command(&command.name) == "run-shell"
-                        && parse_run_shell_args(&command.args)
-                            .is_ok_and(|args| !args.command_mode));
-            if early_guard {
-                self.publish_control_raw_guard(
-                    context.control_command_target(),
-                    RawText::default(),
-                    false,
-                    false,
-                );
-            }
-            let capture = exec_guards.then(|| self.begin_control_command_event_capture(client));
             let execution = self.execute_with_mux_source_routed(
                 client,
                 kind,
@@ -6168,45 +6159,6 @@ impl Shared {
                 &command,
                 MuxOptionSource::RuntimeCommand,
             );
-            if let Some(capture) = capture {
-                let captured = capture.finish();
-                let has_guards = captured.events.iter().any(|event| {
-                    matches!(
-                        event,
-                        EventPayload::ControlCommandGuard { .. }
-                            | EventPayload::ControlCommandGuardRaw { .. }
-                    )
-                });
-                if has_guards {
-                    ctrl::GUARDS_SENT.with(|count| count.set(count.get().max(1)));
-                }
-                if !(early_guard
-                    || MuxEngine::is_command_alias_group(&command)
-                    || canonical_command(&command.name) == "source-file" && has_guards)
-                {
-                    let (output, error, sticky_failure) = match &execution {
-                        Ok(execution) => (execution.output.clone(), false, false),
-                        Err(DaemonError::CommandExit { output, .. }) => {
-                            (output.clone(), false, false)
-                        }
-                        Err(error) => {
-                            let mut output =
-                                daemon_error_output(error).cloned().unwrap_or_default();
-                            let (error, sticky_failure, message) =
-                                control_command_guard_error(error);
-                            append_inserted_output(&mut output, &message);
-                            (output, error, sticky_failure)
-                        }
-                    };
-                    self.publish_control_raw_guard(
-                        context.control_command_target(),
-                        output,
-                        error,
-                        sticky_failure,
-                    );
-                }
-                self.publish_captured_control_command_events(client, captured);
-            }
             if defer_notifications {
                 self.publish_deferred_control_notifications();
             }
@@ -13325,10 +13277,13 @@ impl Shared {
             && mode.queue_execution().deferred_shutdown.get() == DeferredShutdown::Force;
         let source_guard = source_command
             .then(|| {
-                captured_events
-                    .events
-                    .iter()
-                    .position(|event| matches!(event, EventPayload::ControlCommandGuard { .. }))
+                captured_events.events.iter().position(|event| {
+                    matches!(
+                        event,
+                        EventPayload::ControlCommandGuard { .. }
+                            | EventPayload::ControlCommandGuardRaw { .. }
+                    )
+                })
             })
             .flatten();
         if source_command
@@ -13336,7 +13291,8 @@ impl Shared {
             && !reported_failure_before
             && mode.queue_execution().reported_failures.get()
             && let Some(index) = source_guard
-            && let EventPayload::ControlCommandGuard { sticky_failure, .. } =
+            && let EventPayload::ControlCommandGuard { sticky_failure, .. }
+            | EventPayload::ControlCommandGuardRaw { sticky_failure, .. } =
                 &mut captured_events.events[index]
         {
             *sticky_failure = true;
@@ -13347,6 +13303,11 @@ impl Shared {
                 error: true,
                 ..
             } => Some(output.clone()),
+            EventPayload::ControlCommandGuardRaw {
+                output,
+                error: true,
+                ..
+            } => Some(output.to_string()),
             _ => None,
         });
         let callback_parse_depth = execution
@@ -26104,12 +26065,20 @@ impl Shared {
         callback_parse_event: Option<Arc<()>>,
     ) {
         if let Some((client, flags)) = target {
-            ctrl::GUARDS_SENT.with(|count| count.set(count.get().saturating_add(1)));
-            let payload = EventPayload::ControlCommandGuard {
-                output: String::from(output),
-                error,
-                sticky_failure,
-                flags,
+            let payload = if self.inner.lock().ctrl_subscriptions.contains_key(&client) {
+                EventPayload::ControlCommandGuardRaw {
+                    output,
+                    error,
+                    sticky_failure,
+                    flags,
+                }
+            } else {
+                EventPayload::ControlCommandGuard {
+                    output: String::from(output),
+                    error,
+                    sticky_failure,
+                    flags,
+                }
             };
             self.publish_to_client_with_callback_parse_event(client, payload, callback_parse_event);
         }
@@ -31107,6 +31076,15 @@ impl CapturedControlCommandEvents {
                 | EventPayload::ControlCommandOutput { output } => {
                     output.clear();
                     output.push_str(&diagnostic.message);
+                    qualified += 1;
+                }
+                EventPayload::ControlCommandGuardRaw {
+                    output,
+                    error: true,
+                    sticky_failure: false,
+                    ..
+                } => {
+                    *output = diagnostic.message.clone().into();
                     qualified += 1;
                 }
                 _ => {}
@@ -44839,6 +44817,9 @@ fn handle_connection_message<S: TransportStream>(
                 .spawn(move || {
                     let mut context = context;
                     while let Ok(work) = receiver.recv() {
+                        if worker_cancel.load(Ordering::Acquire) {
+                            continue;
+                        }
                         let QueuedCommand::Request(CommandRequest {
                             request_id,
                             command,
@@ -44856,9 +44837,6 @@ fn handle_connection_message<S: TransportStream>(
                             }
                             continue;
                         };
-                        if worker_cancel.load(Ordering::Acquire) {
-                            continue;
-                        }
                         if worker_kind == ClientKind::Control {
                             sync_context_with_attachment(
                                 &worker_shared.inner.lock(),
@@ -107757,8 +107735,8 @@ bind - split-window -v -c "#{pane_current_path}"
         let (messages, reader) = spawn_reader(Arc::clone(&interactive));
         let mut terminal_state = TerminalTestState::default();
         interactive.attach("status-wire").unwrap();
-        wait_for(&messages, &mut terminal_state, |message, _| {
-            matches!(message, ProtocolMessage::Attached { .. })
+        wait_for(&messages, &mut terminal_state, |_, terminal_state| {
+            terminal_state.attached
         });
 
         for args in [
@@ -107879,8 +107857,8 @@ bind - split-window -v -c "#{pane_current_path}"
         let (messages, reader) = spawn_reader(Arc::clone(&interactive));
         let mut terminal_state = TerminalTestState::default();
         interactive.attach(session_name).unwrap();
-        wait_for(&messages, &mut terminal_state, |message, _| {
-            matches!(message, ProtocolMessage::Attached { .. })
+        wait_for(&messages, &mut terminal_state, |_, terminal_state| {
+            terminal_state.attached
         });
         wait_for(&messages, &mut terminal_state, |_, terminal_state| {
             terminal_state
@@ -107983,18 +107961,13 @@ bind - split-window -v -c "#{pane_current_path}"
         commands
             .execute(CommandInvocation::new("new-window", ["-t", session_name]))
             .unwrap();
-        wait_for(&messages, &mut terminal_state, |message, _| {
-            matches!(
-                message,
-                ProtocolMessage::Event(Event {
-                    payload: EventPayload::Snapshot(snapshot),
-                    ..
-                }) if snapshot
-                    .sessions
-                    .iter()
-                    .find(|session| session.name == session_name)
-                    .is_some_and(|session| session.windows.len() == 2)
-            )
+        wait_for(&messages, &mut terminal_state, |_, terminal_state| {
+            terminal_state
+                .snapshot
+                .sessions
+                .iter()
+                .find(|session| session.name == session_name)
+                .is_some_and(|session| session.windows.len() == 2)
         });
 
         commands
@@ -108058,8 +108031,8 @@ bind - split-window -v -c "#{pane_current_path}"
 
         interactive.detach().unwrap();
         interactive.attach(session_name).unwrap();
-        wait_for(&messages, &mut terminal_state, |message, _| {
-            matches!(message, ProtocolMessage::Attached { .. })
+        wait_for(&messages, &mut terminal_state, |_, terminal_state| {
+            terminal_state.attached
         });
         let reattached = commands
             .execute(CommandInvocation::new(
@@ -108105,8 +108078,8 @@ bind - split-window -v -c "#{pane_current_path}"
         let (messages, reader) = spawn_reader(Arc::clone(&interactive));
         let mut terminal_state = TerminalTestState::default();
         interactive.attach("").unwrap();
-        wait_for(&messages, &mut terminal_state, |message, _| {
-            matches!(message, ProtocolMessage::Attached { .. })
+        wait_for(&messages, &mut terminal_state, |_, terminal_state| {
+            terminal_state.attached
         });
         interactive
             .send_input(InputMessage::ResizeTerminal {
@@ -109324,8 +109297,14 @@ bind - split-window -v -c "#{pane_current_path}"
         let (sender, receiver) = crossbeam_channel::unbounded();
         let reader = thread::spawn(move || {
             while let Ok(message) = client.recv() {
-                if sender.send(message).is_err() {
-                    break;
+                let messages = match message {
+                    ProtocolMessage::Batch(batch) => batch.messages().expect("decode event group"),
+                    message => vec![message],
+                };
+                for message in messages {
+                    if sender.send(message).is_err() {
+                        return;
+                    }
                 }
             }
         });
@@ -109335,14 +109314,40 @@ bind - split-window -v -c "#{pane_current_path}"
     #[derive(Default)]
     struct TerminalTestState {
         viewports: BTreeMap<PaneId, zz_terminal::TerminalViewport>,
+        snapshot: MuxSnapshot,
+        attachment: Option<(SessionId, u64)>,
+        attached: bool,
     }
 
     impl TerminalTestState {
         fn observe(&mut self, message: &ProtocolMessage) {
+            self.attached = false;
+            if let ProtocolMessage::Attached { session, .. } = message {
+                self.attachment = Some((*session, 0));
+                self.attached = true;
+                self.viewports.clear();
+                return;
+            }
             let ProtocolMessage::Event(Event { payload, .. }) = message else {
                 return;
             };
             match payload {
+                EventPayload::Snapshot(snapshot) => self.snapshot = snapshot.clone(),
+                EventPayload::TreeDelta(delta) => {
+                    delta
+                        .apply(&mut self.snapshot)
+                        .expect("daemon emitted an applicable tree delta");
+                }
+                EventPayload::ClientView(view) => {
+                    let attachment = view
+                        .session
+                        .map(|session| (session, view.attachment_generation));
+                    if self.attachment != attachment {
+                        self.viewports.clear();
+                        self.attached = attachment.is_some();
+                        self.attachment = attachment;
+                    }
+                }
                 EventPayload::TerminalViewport { pane, viewport } => {
                     self.viewports.insert(*pane, viewport.clone());
                 }

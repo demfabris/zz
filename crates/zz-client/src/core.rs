@@ -1094,6 +1094,7 @@ impl ClientCore {
             | EventPayload::ControlFlags { .. }
             | EventPayload::ControlCommandGuard { .. }
             | EventPayload::ControlCommandGuardRaw { .. }
+            | EventPayload::ControlCommandStarted { .. }
             | EventPayload::ControlCommandOutput { .. }
             | EventPayload::ControlConfigError { .. }
             | EventPayload::ControlSourceFile { .. }
@@ -2392,23 +2393,26 @@ mod tests {
         stamped.sessions[0].windows[0].status_label = "own label".to_owned();
         let mut view = compact_view(1, 1);
         view.overlay = zz_protocol::TreeDelta::between(&raw, &stamped).ops;
-        let mut core = ClientCore::new();
-        core.handle_message(compact_batch(vec![
-            event(EventPayload::Snapshot(raw.clone())),
-            event(EventPayload::ClientView(view)),
-        ]));
         let empty = MuxSnapshot {
             generation: 2,
             ..MuxSnapshot::default()
         };
-        core.handle_message(compact_batch(vec![
-            event(EventPayload::TreeDelta(zz_protocol::TreeDelta::between(
-                &raw, &empty,
-            ))),
-            event(EventPayload::ClientView(ClientView::default())),
-        ]));
-        assert!(core.snapshot().sessions.is_empty());
-        assert_eq!(core.poll_outbound(), None);
+        for payload in [
+            EventPayload::TreeDelta(zz_protocol::TreeDelta::between(&raw, &empty)),
+            EventPayload::Snapshot(empty),
+        ] {
+            let mut core = ClientCore::new();
+            core.handle_message(compact_batch(vec![
+                event(EventPayload::Snapshot(raw.clone())),
+                event(EventPayload::ClientView(view.clone())),
+            ]));
+            core.handle_message(compact_batch(vec![
+                event(payload),
+                event(EventPayload::ClientView(ClientView::default())),
+            ]));
+            assert!(core.snapshot().sessions.is_empty());
+            assert_eq!(core.poll_outbound(), None);
+        }
     }
 
     #[test]

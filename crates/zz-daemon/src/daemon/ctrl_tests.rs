@@ -20,6 +20,39 @@ fn fanout_keeps_one_shared_encoded_frame() {
 }
 
 #[test]
+fn compact_batch_flush_keeps_existing_groups_flat() {
+    let mailbox = OutboundMailbox::new();
+    let child = zz_protocol::encode_protocol_message(&ProtocolMessage::TreeSync).expect("encode");
+    assert!(mailbox.enqueue_control_group(vec![child]));
+    assert!(mailbox.flush_control_batch(false));
+    assert!(mailbox.flush_control_batch(false));
+    let messages = tests::take_reliable_messages(&mailbox);
+    let [ProtocolMessage::Batch(batch)] = messages.as_slice() else {
+        panic!("expected one flat batch: {messages:?}")
+    };
+    assert!(matches!(
+        batch.messages().expect("flat group").as_slice(),
+        [ProtocolMessage::TreeSync]
+    ));
+}
+
+#[test]
+fn compact_callback_guard_preserves_raw_output() {
+    let shared = Arc::new(Shared::new(38));
+    let (client, mailbox) = compact_registered(&shared, zz_protocol::Subscriptions::control());
+    shared.publish_control_command_guard(
+        Some((client, 1)),
+        RawText::from_bytes(vec![0xff, b'\n']),
+        false,
+        false,
+    );
+    let messages = reliable_children(&mailbox);
+    assert!(
+        matches!(messages.as_slice(), [ProtocolMessage::Event(Event { payload: EventPayload::ControlCommandGuardRaw { output, flags: 1, .. }, .. })] if output.as_bytes() == [0xff, b'\n'])
+    );
+}
+
+#[test]
 fn stale_layout_size_report_is_dropped_before_geometry_changes() {
     let shared = Arc::new(Shared::new(1));
     let mut context = ExecutionContext::default();
@@ -151,6 +184,30 @@ fn compact_registered(
 
 fn reliable_children(mailbox: &OutboundMailbox) -> Vec<ProtocolMessage> {
     tests::take_reliable_messages(mailbox)
+        .into_iter()
+        .flat_map(|message| match message {
+            ProtocolMessage::Batch(batch) => batch.messages().expect("children"),
+            message => vec![message],
+        })
+        .collect()
+}
+
+fn bounded_reliable_children(mailbox: &OutboundMailbox, bound: usize) -> Vec<ProtocolMessage> {
+    let envelopes = tests::take_reliable_messages(mailbox);
+    let bytes = envelopes
+        .iter()
+        .map(|message| {
+            zz_protocol::encode_protocol_message(message)
+                .expect("encode")
+                .len()
+        })
+        .sum::<usize>();
+    eprintln!("CTRL publication total_wire_bytes={bytes} bound={bound}");
+    assert!(
+        bytes <= bound,
+        "publication {bytes} bytes including every batch and view"
+    );
+    envelopes
         .into_iter()
         .flat_map(|message| match message {
             ProtocolMessage::Batch(batch) => batch.messages().expect("children"),
@@ -327,6 +384,85 @@ fn assert_initial_compact_attach(commands: bool) {
 }
 
 #[test]
+fn forced_attachment_stays_after_an_older_pending_publication() {
+    let shared = Arc::new(Shared::new(39));
+    let mut context = ExecutionContext::default();
+    compact_command(
+        &shared,
+        &mut context,
+        "new-session",
+        &["-d", "-s", "ctrl-order", "sleep 30"],
+    );
+    let session = context.session.expect("session");
+    let (client, mailbox) = compact_registered(
+        &shared,
+        zz_protocol::Subscriptions {
+            tree: zz_protocol::TreeSubscription::All,
+            ..zz_protocol::Subscriptions::control()
+        },
+    );
+    shared
+        .inner
+        .lock()
+        .client_kinds
+        .insert(client, ClientKind::Control);
+    let held = mailbox.state.lock();
+    let publisher = {
+        let shared = Arc::clone(&shared);
+        thread::spawn(move || shared.publish_snapshot_state())
+    };
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !shared.inner.lock().ctrl_views.contains_key(&client) {
+        assert!(
+            Instant::now() < deadline,
+            "older publication did not reach its queue"
+        );
+        thread::yield_now();
+    }
+    {
+        let mut inner = shared.inner.lock();
+        inner.attached.entry(session).or_default().insert(client);
+        inner.ctrl_attachments.insert(client, 1);
+    }
+    let (started, ready) = crossbeam_channel::bounded(1);
+    let force = {
+        let shared = Arc::clone(&shared);
+        let mailbox = Arc::clone(&mailbox);
+        thread::spawn(move || {
+            started.send(()).expect("start forced attachment");
+            shared.send_compact_state(client, &mailbox, true);
+        })
+    };
+    ready
+        .recv_timeout(Duration::from_secs(2))
+        .expect("forced sender started");
+    thread::sleep(Duration::from_millis(20));
+    let still_unattached = shared.inner.lock().ctrl_views[&client].session.is_none();
+    drop(held);
+    publisher.join().expect("older publication");
+    force.join().expect("forced attachment");
+    let views = reliable_children(&mailbox)
+        .into_iter()
+        .filter_map(|message| match message {
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::ClientView(view),
+                ..
+            }) => Some(view),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        still_unattached,
+        "forced attachment advanced the cursor before the older publication queued"
+    );
+    assert_eq!(views.len(), 2, "{views:?}");
+    assert!(views[0].session.is_none());
+    assert_eq!(views[1].session, Some(session));
+    assert_eq!(views[1].attachment_generation, 1);
+    compact_command(&shared, &mut context, "kill-session", &["-t", "ctrl-order"]);
+}
+
+#[test]
 fn compact_subscription_rename_is_bounded_and_empty_diff_sends_nothing() {
     let shared = Arc::new(Shared::new(32));
     let mut context = ExecutionContext::default();
@@ -359,7 +495,7 @@ fn compact_subscription_rename_is_bounded_and_empty_diff_sends_nothing() {
         &["-t", "ctrl-tree", "renamed"],
     );
     shared.publish_compact_trees();
-    let messages = reliable_children(&mailbox);
+    let messages = bounded_reliable_children(&mailbox, 100);
     let deltas = messages
         .iter()
         .filter_map(|message| match message {
@@ -380,6 +516,164 @@ fn compact_subscription_rename_is_bounded_and_empty_diff_sends_nothing() {
     shared.publish_compact_trees();
     assert!(reliable_children(&mailbox).is_empty());
     compact_command(&shared, &mut context, "kill-session", &["-t", "renamed"]);
+}
+
+#[test]
+fn all_subscriber_unattached_session_rename_is_bounded_without_a_view_update() {
+    let shared = Arc::new(Shared::new(40));
+    let mut context = ExecutionContext::default();
+    compact_command(
+        &shared,
+        &mut context,
+        "new-session",
+        &["-d", "-s", "ctrl-own", "sleep 30"],
+    );
+    compact_command(
+        &shared,
+        &mut context,
+        "new-session",
+        &["-d", "-s", "ctrl-other", "sleep 30"],
+    );
+    let (client, mailbox) = compact_registered(
+        &shared,
+        zz_protocol::Subscriptions {
+            tree: zz_protocol::TreeSubscription::All,
+            status: false,
+            options: 0,
+            keys: zz_protocol::KeySubscription::None,
+            pane_stream: false,
+        },
+    );
+    shared
+        .attach_target(client, ClientKind::Interactive, &mut context, "ctrl-own")
+        .expect("attach own session");
+    shared.send_compact_state(client, &mailbox, true);
+    reliable_children(&mailbox);
+    compact_command(
+        &shared,
+        &mut context,
+        "rename-session",
+        &["-t", "ctrl-other", "ctrl-else"],
+    );
+    shared.publish_snapshot_state();
+    let messages = bounded_reliable_children(&mailbox, 100);
+    assert!(
+        matches!(messages.as_slice(), [ProtocolMessage::Event(Event { payload: EventPayload::TreeDelta(delta), .. })] if !delta.ops.is_empty())
+    );
+    shared.publish_snapshot_state();
+    assert!(reliable_children(&mailbox).is_empty());
+    compact_command(&shared, &mut context, "kill-session", &["-t", "ctrl-else"]);
+    compact_command(&shared, &mut context, "kill-session", &["-t", "ctrl-own"]);
+}
+
+#[test]
+fn disconnected_control_exec_cannot_detach_the_next_active_client() {
+    let shared = Arc::new(Shared::new(41));
+    let mut context = ExecutionContext::default();
+    compact_command(
+        &shared,
+        &mut context,
+        "new-session",
+        &["-d", "-s", "ctrl-cancel", "sleep 30"],
+    );
+    let (old, old_mailbox) = compact_registered(&shared, zz_protocol::Subscriptions::control());
+    shared
+        .inner
+        .lock()
+        .client_kinds
+        .insert(old, ClientKind::Control);
+    shared
+        .attach_target(old, ClientKind::Control, &mut context, "ctrl-cancel")
+        .expect("attach old control");
+    let cancel = Arc::new(AtomicBool::new(false));
+    shared
+        .command_queue_cancels
+        .lock()
+        .insert(old, Arc::clone(&cancel));
+    let directory = tempfile::Builder::new()
+        .prefix("zz-ctrl-cancel-")
+        .tempdir_in("/tmp")
+        .expect("barrier directory");
+    let ready = directory.path().join("ready");
+    let release = directory.path().join("release");
+    let script = format!(
+        "touch {}; while test ! -e {}; do sleep 0.01; done",
+        ready.display(),
+        release.display()
+    );
+    let request = compact_exec_request(vec![
+        CommandInvocation::new("run-shell", [script]),
+        CommandInvocation::new("detach-client", [] as [&str; 0]),
+    ]);
+    let worker = {
+        let shared = Arc::clone(&shared);
+        let old_mailbox = Arc::clone(&old_mailbox);
+        thread::spawn(move || {
+            shared.execute_compact_request(
+                old,
+                ClientKind::Control,
+                &mut context,
+                request,
+                &old_mailbox,
+            )
+        })
+    };
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !ready.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "foreground control command did not start"
+        );
+        thread::sleep(Duration::from_millis(1));
+    }
+    cancel.store(true, Ordering::Release);
+    shared.detach(old);
+    shared.unregister(old);
+    let (next, next_mailbox) = compact_registered(&shared, zz_protocol::Subscriptions::control());
+    shared
+        .inner
+        .lock()
+        .client_kinds
+        .insert(next, ClientKind::Control);
+    let mut next_context = ExecutionContext::default();
+    let (session, _) = shared
+        .attach_target(next, ClientKind::Control, &mut next_context, "ctrl-cancel")
+        .expect("attach next control");
+    reliable_children(&next_mailbox);
+    fs::write(release, []).expect("release foreground command");
+    worker.join().expect("cancelled execution");
+    shared.execute_compact_request(
+        old,
+        ClientKind::Control,
+        &mut ExecutionContext::default(),
+        compact_exec_request(vec![CommandInvocation::new(
+            "detach-client",
+            [] as [&str; 0],
+        )]),
+        &old_mailbox,
+    );
+    assert_eq!(
+        client_attached_session(&shared.inner.lock(), next),
+        Some(session)
+    );
+    assert!(
+        !reliable_children(&next_mailbox)
+            .iter()
+            .any(|message| matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::Detached { .. },
+                    ..
+                })
+            ))
+    );
+    shared.command_queue_cancels.lock().remove(&old);
+    compact_command(
+        &shared,
+        &mut next_context,
+        "kill-session",
+        &["-t", "ctrl-cancel"],
+    );
 }
 
 #[test]
@@ -470,17 +764,17 @@ fn compact_raw_control_preflights_line_and_resolves_daemon_environment() {
         &mailbox,
     );
     let messages = reliable_children(&mailbox);
-    let guard = messages.iter().position(|message| matches!(message, ProtocolMessage::Event(Event { payload: EventPayload::ControlCommandGuardRaw { output, error: false, .. }, .. }) if output.as_bytes() == b"/server-home/server-value")).unwrap_or_else(|| panic!("raw guard missing: {messages:?}"));
+    let started = messages.iter().position(|message| matches!(message, ProtocolMessage::Event(Event { payload: EventPayload::ControlCommandStarted { request_id: 1, flags: 1, guard: true, canonical_name: Some(name) }, .. }) if name == "display-message")).unwrap_or_else(|| panic!("command start missing: {messages:?}"));
     let response = messages
         .iter()
         .position(|message| {
             matches!(
                 message,
-                ProtocolMessage::CommandResponse(CommandResponse::Success { .. })
+                ProtocolMessage::CommandResponse(CommandResponse::Success { output, .. }) if output.as_bytes() == b"/server-home/server-value"
             )
         })
         .expect("response");
-    assert!(guard < response);
+    assert!(started < response);
     assert!(matches!(
         messages.last(),
         Some(ProtocolMessage::ExecExit(_))
@@ -650,21 +944,20 @@ fn hook_body_control_notification_follows_output_guard_without_recursive_hooks()
         &mailbox,
     );
     let messages = reliable_children(&mailbox);
-    let guard = messages
+    let started = messages
         .iter()
         .position(|message| {
             matches!(
                 message,
                 ProtocolMessage::Event(Event {
-                    payload: EventPayload::ControlCommandGuardRaw { .. }
-                        | EventPayload::ControlCommandGuard { .. },
+                    payload: EventPayload::ControlCommandStarted { guard: true, .. },
                     ..
                 })
             )
         })
-        .unwrap_or_else(|| panic!("guard missing: {messages:?}"));
+        .unwrap_or_else(|| panic!("command start missing: {messages:?}"));
     let notification = messages.iter().position(|message| matches!(message, ProtocolMessage::Event(Event { payload: EventPayload::HookEvent { name, .. }, .. }) if name == "window-renamed")).unwrap_or_else(|| panic!("rename notification missing: {messages:?}"));
-    assert!(guard < notification, "{messages:?}");
+    assert!(started < notification, "{messages:?}");
     assert!(
         shared
             .inner
@@ -695,7 +988,7 @@ fn hash_subscriber_receives_bounded_mouse_hash_without_full_bindings() {
         "bind-key",
         &["-T", "root", "x", "display-message", "changed"],
     );
-    let messages = reliable_children(&mailbox);
+    let messages = bounded_reliable_children(&mailbox, 64);
     assert!(!messages.iter().any(|message| matches!(
         message,
         ProtocolMessage::Event(Event {

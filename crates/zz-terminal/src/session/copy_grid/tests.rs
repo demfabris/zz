@@ -6,8 +6,8 @@ use crate::session::mode_revision::{ModeRevision, ModeSelection};
 use crate::session::{
     CaptureBoundary, CaptureOptions, CopyModeSearch, HistorySearchSnapshot, SearchCase,
     SearchDirection, SearchMatch, SearchMode, SearchQuery, SearchWorker, SnapshotChange,
-    TerminalViewId, TerminalViewState, ViewportGenerations, capture_terminal, color,
-    copy_mode_search_match, copy_mode_snapshot, enter_copy_mode, new_terminal,
+    TerminalViewId, TerminalViewState, ViewportGenerations, append_history_row, capture_terminal,
+    color, copy_mode_search_match, copy_mode_snapshot, enter_copy_mode, new_terminal,
     run_copy_mode_search, snapshot,
 };
 use crate::{OverlayKind, OverlaySpan, SessionStatus};
@@ -539,4 +539,126 @@ fn formatting_reader_keeps_its_row_dictionary_after_other_rows_compact() {
     text.clear();
     reader.push_text(point(0, 0), &mut text);
     assert_eq!(text, cluster);
+
+    let expected = std::iter::once(format!("{cluster} initial"))
+        .chain((0..4200).map(|index| format!("row-{index:04}")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(
+        revision.capture_rows(0, 4200, false, false, false),
+        expected
+    );
+    let styled = revision.capture_rows(0, 4200, false, false, true);
+    assert_eq!(styled.lines().count(), 4201);
+    let mut styled_rows = styled.lines();
+    assert!(
+        styled_rows
+            .next()
+            .expect("initial styled row")
+            .ends_with(&format!("{cluster} initial\x1b[0m"))
+    );
+    for (index, row) in styled_rows.enumerate() {
+        assert_eq!(
+            row,
+            format!(
+                "\x1b[0;38;2;{};{};99;48;2;0;0;0mrow-{index:04}\x1b[0m",
+                index / 256,
+                index % 256,
+            )
+        );
+    }
+    assert_eq!(
+        revision.format_selection(
+            ModeSelection {
+                anchor: point(0, 0),
+                focus: point(7, 4200),
+                mode: SelectionMode::Cell,
+                rectangle: false,
+            },
+            true,
+        ),
+        expected
+    );
+}
+
+#[test]
+fn frozen_row_formatting_keeps_wrap_padding_unicode_and_style_contracts() {
+    let mut terminal = new_terminal(8, 4, 32).expect("terminal");
+    terminal
+        .set_default_fg_color(Some(RgbColor {
+            r: 255,
+            g: 255,
+            b: 255,
+        }))
+        .expect("foreground");
+    terminal
+        .set_default_bg_color(Some(RgbColor { r: 0, g: 0, b: 0 }))
+        .expect("background");
+    let cluster = format!("e{}", "\u{301}".repeat(12));
+    terminal.vt_write(
+        format!("\x1b[1;38;2;11;22;33mab界cdef{cluster} Z     \x1b[0m\r\nQ       ").as_bytes(),
+    );
+    let revision = ModeRevision::capture(&mut terminal).expect("revision");
+    terminal.vt_write(b"\x1b[3J\x1b[2J\x1b[Hreplacement");
+    drop(terminal);
+
+    assert!(revision.row(0).wrapped());
+    assert!(!revision.row(1).wrapped());
+    for (join_wrapped, separator) in [(false, "\n"), (true, "")] {
+        assert_eq!(
+            revision.capture_rows(0, 2, join_wrapped, false, false),
+            format!("ab界cdef{separator}{cluster} Z\nQ")
+        );
+        assert_eq!(
+            revision.capture_rows(0, 2, join_wrapped, true, false),
+            format!("ab界cdef{separator}{cluster} Z     \nQ       ")
+        );
+        for preserve_trailing in [false, true] {
+            let padding = if preserve_trailing { "     " } else { "" };
+            let tail = if preserve_trailing { "       " } else { "" };
+            assert_eq!(
+                revision.capture_rows(0, 2, join_wrapped, preserve_trailing, true),
+                format!(
+                    "\x1b[0;1;38;2;11;22;33;48;2;0;0;0mab界cdef\x1b[0m{separator}\x1b[0;1;38;2;11;22;33;48;2;0;0;0m{cluster} Z{padding}\x1b[0m\n\x1b[0;38;2;255;255;255;48;2;0;0;0mQ{tail}\x1b[0m"
+                )
+            );
+        }
+    }
+    for vi in [false, true] {
+        assert_eq!(
+            revision.format_selection(
+                ModeSelection {
+                    anchor: point(0, 0),
+                    focus: point(if vi { 2 } else { 3 }, 1),
+                    mode: SelectionMode::Cell,
+                    rectangle: false,
+                },
+                vi,
+            ),
+            format!("ab界cdef{cluster} Z")
+        );
+    }
+}
+
+#[test]
+fn history_row_scalar_grapheme_and_wide_offsets_use_utf8_bytes() {
+    let mut terminal = new_terminal(8, 2, 16).expect("terminal");
+    let cluster = format!("e{}", "\u{301}".repeat(12));
+    terminal.vt_write(format!("A{cluster}界Z").as_bytes());
+    let mut text = String::new();
+    let mut offsets = Vec::new();
+    let mut scratch = Vec::new();
+    assert!(
+        !append_history_row(&terminal, 0, 8, &mut text, &mut offsets, &mut scratch)
+            .expect("history row")
+    );
+    assert_eq!(text, format!("A{cluster}界Z"));
+    assert_eq!(
+        offsets
+            .iter()
+            .map(|offset| (offset.start, offset.end, offset.column, offset.width))
+            .collect::<Vec<_>>(),
+        [(0, 1, 0, 1), (1, 26, 1, 1), (26, 29, 2, 2), (29, 30, 4, 1)]
+    );
+    assert!(scratch.len() > 8);
 }

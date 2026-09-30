@@ -120,6 +120,11 @@ fn an_exited_child_answers_copy_reads_before_the_retention_decision() {
         );
         thread::sleep(Duration::from_millis(10));
     }
+    let expected_geometry = if super::super::mode_revision::ModeRevision::clone_enabled() {
+        (40, 4)
+    } else {
+        (32, 6)
+    };
     session.resize(32, 6, 8, 18);
     assert!(session.settle());
     let deadline = Instant::now() + Duration::from_secs(30);
@@ -128,7 +133,7 @@ fn an_exited_child_answers_copy_reads_before_the_retention_decision() {
         let facts = session.copy_mode_facts(view);
         if resized
             .as_ref()
-            .is_some_and(|frame| (frame.columns, frame.rows) == (32, 6))
+            .is_some_and(|frame| (frame.columns, frame.rows) == expected_geometry)
             && facts
                 .as_ref()
                 .is_some_and(|facts| facts.cursor_line.starts_with("H0040 row-0040"))
@@ -137,7 +142,7 @@ fn an_exited_child_answers_copy_reads_before_the_retention_decision() {
         }
         assert!(
             Instant::now() < deadline,
-            "retained actor resize never published 32x6 with its cursor; last geometry: {:?}; last facts: {facts:?}",
+            "retained actor resize never published {expected_geometry:?} with its cursor; last geometry: {:?}; last facts: {facts:?}",
             resized.as_ref().map(|frame| (frame.columns, frame.rows))
         );
         thread::sleep(Duration::from_millis(10));
@@ -188,6 +193,16 @@ fn gated_search_child() -> TerminalSession {
 
 #[test]
 fn a_pending_frozen_search_keeps_its_direction_when_the_child_is_retained() {
+    for direction in [SearchDirection::Forward, SearchDirection::Backward] {
+        pending_frozen_search_keeps_its_direction_when_retained(direction);
+    }
+}
+
+fn pending_frozen_search_keeps_its_direction_when_retained(direction: SearchDirection) {
+    let (expected_current, expected_row, expected_line) = match direction {
+        SearchDirection::Forward => (1, 0, "alpha needle"),
+        SearchDirection::Backward => (3, 2, "omega needle"),
+    };
     let session = gated_search_child();
     let source = session.capture_copy_source().expect("gated copy source");
     let revision = Arc::clone(&source.revision);
@@ -214,19 +229,14 @@ fn a_pending_frozen_search_keeps_its_direction_when_the_child_is_retained() {
         thread::sleep(Duration::from_millis(10));
     }
     let _ = revision.viewport_cells(0);
-    let blocked_search = revision
-        .search
-        .terminal
-        .as_ref()
-        .expect("paged search snapshot")
-        .lock();
+    let blocked_search = revision.search.search_gate.lock();
     session.view_action(
         view,
         TerminalViewAction::SearchBegin(SearchQuery {
             text: "needle".to_owned(),
             mode: SearchMode::Literal,
             case: SearchCase::Smart,
-            direction: SearchDirection::Forward,
+            direction,
         }),
     );
     let deadline = Instant::now() + Duration::from_secs(30);
@@ -271,16 +281,18 @@ fn a_pending_frozen_search_keeps_its_direction_when_the_child_is_retained() {
         if frame.as_ref().is_some_and(|frame| {
             matches!(frame.status, SessionStatus::Exited(_))
                 && frame.search.as_ref().is_some_and(|search| {
-                    !search.pending() && search.total == 3 && search.current() == 1
+                    !search.pending() && search.total == 3 && search.current() == expected_current
                 })
         }) && facts.as_ref().is_some_and(|facts| {
-            facts.cursor_line == "alpha needle" && facts.cursor_x == 6 && facts.cursor_y == 0
+            facts.cursor_line == expected_line
+                && facts.cursor_x == 6
+                && facts.cursor_y == expected_row
         }) {
             break;
         }
         assert!(
             Instant::now() < deadline,
-            "retained pending search lost its forward wrap; last search: {:?}; last facts: {facts:?}",
+            "retained pending search lost its {direction:?} direction; last search: {:?}; last facts: {facts:?}",
             frame.as_ref().and_then(|frame| frame.search.as_ref())
         );
         thread::sleep(Duration::from_millis(10));

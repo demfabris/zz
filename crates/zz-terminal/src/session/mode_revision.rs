@@ -163,49 +163,38 @@ impl ModeRevisionReader<'_> {
     }
 
     pub(super) fn first_char(&self, point: PointCoordinate) -> Option<char> {
-        self.with_cell(point, |cell, dictionary| {
-            let glyph = cell.glyph();
-            if glyph & crate::GRAPHEME_TABLE_BIT == 0 {
-                return char::from_u32(glyph).filter(|character| *character != '\0');
-            }
-            let index = usize::try_from(glyph & !crate::GRAPHEME_TABLE_BIT).ok()?;
-            let start = usize::try_from(*dictionary.grapheme_offsets.get(index)?).ok()?;
-            let end = usize::try_from(*dictionary.grapheme_offsets.get(index + 1)?).ok()?;
-            std::str::from_utf8(dictionary.grapheme_bytes.get(start..end)?)
-                .ok()?
-                .chars()
-                .next()
-        })
+        self.with_cell(point, cell_first_char)
     }
 
     pub(super) fn push_text(&self, point: PointCoordinate, output: &mut String) {
         self.with_cell(point, |cell, dictionary| {
-            let glyph = cell.glyph();
-            if glyph == 0 || matches!(cell.width(), CellWidth::SpacerTail | CellWidth::SpacerHead) {
-                return;
-            }
-            if glyph & crate::GRAPHEME_TABLE_BIT == 0 {
-                if let Some(character) = char::from_u32(glyph) {
-                    output.push(character);
-                }
-                return;
-            }
-            let Ok(index) = usize::try_from(glyph & !crate::GRAPHEME_TABLE_BIT) else {
-                return;
-            };
-            let text = dictionary
-                .grapheme_offsets
-                .get(index..=index + 1)
-                .and_then(|offsets| {
-                    let start = usize::try_from(offsets[0]).ok()?;
-                    let end = usize::try_from(offsets[1]).ok()?;
-                    dictionary.grapheme_bytes.get(start..end)
-                })
-                .and_then(|bytes| std::str::from_utf8(bytes).ok());
-            if let Some(text) = text {
-                output.push_str(text);
+            if let Some(text) = emitting_cell_text(cell, dictionary) {
+                text.push(output);
             }
         });
+    }
+
+    fn with_cells<T>(
+        &self,
+        row: u32,
+        read: impl FnOnce(&[PackedCell], ModeRowMeta, &TerminalDictionary) -> T,
+    ) -> T {
+        if self.revision.grid.is_some() {
+            return self
+                .with_row(row, |row, dictionary| {
+                    read(&row.cells, row.meta, dictionary)
+                })
+                .expect("paged row");
+        }
+        let row_index = usize::try_from(row.min(self.revision.total.saturating_sub(1)))
+            .expect("flat row index");
+        let start = row_index * usize::from(self.revision.columns);
+        let end = start + usize::from(self.revision.columns);
+        read(
+            &self.revision.cells[start..end],
+            self.revision.row(row),
+            &self.revision.dictionary,
+        )
     }
 }
 
@@ -273,6 +262,8 @@ impl ModeRevision {
             rows: Vec::new(),
             offsets: Vec::new(),
             terminal: Some(Arc::clone(&grid.terminal)),
+            #[cfg(test)]
+            search_gate: Mutex::new(()),
             total_rows: total,
         });
         Ok(Arc::new(Self {
@@ -542,6 +533,8 @@ impl ModeRevision {
                 rows: search_rows,
                 offsets: search_offsets,
                 terminal: None,
+                #[cfg(test)]
+                search_gate: Mutex::new(()),
                 total_rows: u32::try_from(total_rows).unwrap_or(u32::MAX),
             }),
             grid: None,
@@ -718,30 +711,6 @@ impl ModeRevision {
             .unwrap_or_default()
     }
 
-    pub(super) fn selection_row_end(&self, row: u32) -> u16 {
-        if self.row(row).wrapped() {
-            return self.columns;
-        }
-        (0..self.columns)
-            .rev()
-            .find(|column| {
-                self.first_char(PointCoordinate { x: *column, y: row })
-                    .is_some_and(|character| character != ' ')
-            })
-            .map_or(0, |column| column.saturating_add(1))
-    }
-
-    fn push_selection_cell_text(&self, cell: PackedCell, output: &mut String) {
-        if matches!(cell.width(), CellWidth::SpacerTail | CellWidth::SpacerHead) {
-            return;
-        }
-        if cell.glyph() == 0 {
-            output.push(' ');
-        } else {
-            self.push_cell_text(cell, output);
-        }
-    }
-
     /// `window_copy_get_selection`: the last row is trimmed to its own length
     /// and then, under emacs, stops one cell short of the bottom-right cell
     /// the cursor stands on. A dragged rectangle drops that column on every
@@ -757,58 +726,81 @@ impl ModeRevision {
         } else {
             (0, self.columns.saturating_sub(1))
         };
+        let reader = self.reader();
         for row in start.y..=end.y {
-            let row_start = if selection.rectangle {
-                left
-            } else if row == start.y {
-                start.x
-            } else {
-                0
-            };
-            let row_end = if selection.rectangle {
-                right
-            } else if row == end.y {
-                end.x
-            } else {
-                self.columns.saturating_sub(1)
-            };
-            let line_end = self.selection_row_end(row);
-            let drops_focus_cell = !mode_keys_vi
-                && if selection.rectangle {
-                    selection.anchor.x < selection.focus.x
+            reader.with_cells(row, |cells, meta, dictionary| {
+                let row_start = if selection.rectangle {
+                    left
+                } else if row == start.y {
+                    start.x
                 } else {
-                    row == end.y
+                    0
                 };
-            let selected_end = if drops_focus_cell {
-                row_end.min(line_end)
-            } else {
-                row_end.saturating_add(1).min(line_end)
-            };
-            if row_start < selected_end {
-                for column in row_start..selected_end {
-                    self.push_selection_cell_text(
-                        self.cell(PointCoordinate { x: column, y: row }),
-                        &mut output,
-                    );
+                let row_end = if selection.rectangle {
+                    right
+                } else if row == end.y {
+                    end.x
+                } else {
+                    self.columns.saturating_sub(1)
+                };
+                let line_end = if meta.wrapped() {
+                    self.columns
+                } else {
+                    cells
+                        .iter()
+                        .rposition(|cell| {
+                            cell_first_char(*cell, dictionary)
+                                .is_some_and(|character| character != ' ')
+                        })
+                        .map_or(0, |column| u16::try_from(column + 1).expect("column"))
+                };
+                let drops_focus_cell = !mode_keys_vi
+                    && if selection.rectangle {
+                        selection.anchor.x < selection.focus.x
+                    } else {
+                        row == end.y
+                    };
+                let selected_end = if drops_focus_cell {
+                    row_end.min(line_end)
+                } else {
+                    row_end.saturating_add(1).min(line_end)
+                };
+                if row_start < selected_end {
+                    for cell in &cells[usize::from(row_start)..usize::from(selected_end)] {
+                        if matches!(cell.width(), CellWidth::SpacerTail | CellWidth::SpacerHead) {
+                            continue;
+                        }
+                        if cell.glyph() == 0 {
+                            output.push(' ');
+                        } else if let Some(text) = cell_text(*cell, dictionary) {
+                            text.push(&mut output);
+                        }
+                    }
                 }
-            }
-            let has_line_break = !self.row(row).wrapped() || selected_end < line_end;
-            let keeps_final_break = mode_keys_vi && row == end.y && {
-                let line_length = super::revision_line_length(self, row);
-                let last_exclusive = if selection.rectangle {
-                    right.saturating_add(1)
-                } else {
-                    end.x.min(line_length).saturating_add(1)
+                let has_line_break = !meta.wrapped() || selected_end < line_end;
+                let keeps_final_break = mode_keys_vi && row == end.y && {
+                    let line_length = cells
+                        .iter()
+                        .rposition(|cell| {
+                            cell_first_char(*cell, dictionary)
+                                .is_some_and(|character| !character.is_whitespace())
+                        })
+                        .map_or(0, |column| u16::try_from(column + 1).expect("column"));
+                    let last_exclusive = if selection.rectangle {
+                        right.saturating_add(1)
+                    } else {
+                        end.x.min(line_length).saturating_add(1)
+                    };
+                    last_exclusive > line_length
                 };
-                last_exclusive > line_length
-            };
-            if has_line_break
-                && (row < end.y
-                    || (row == end.y
-                        && (selection.mode == SelectionMode::Line || keeps_final_break)))
-            {
-                output.push('\n');
-            }
+                if has_line_break
+                    && (row < end.y
+                        || (row == end.y
+                            && (selection.mode == SelectionMode::Line || keeps_final_break)))
+                {
+                    output.push('\n');
+                }
+            });
         }
         output
     }
@@ -825,19 +817,23 @@ impl ModeRevision {
             return self.capture_rows_vt(start, end, join_wrapped, preserve_trailing);
         }
         let mut output = String::new();
+        let reader = self.reader();
         for row in start..=end {
-            let mut line = String::new();
-            for column in 0..self.columns {
-                self.push_cell_text(self.cell(PointCoordinate { x: column, y: row }), &mut line);
-            }
-            if preserve_trailing {
-                output.push_str(&line);
-            } else {
-                output.push_str(line.trim_end());
-            }
-            if row < end && !(join_wrapped && self.row(row).wrapped()) {
-                output.push('\n');
-            }
+            reader.with_cells(row, |cells, meta, dictionary| {
+                let line_start = output.len();
+                for cell in cells {
+                    if let Some(text) = emitting_cell_text(*cell, dictionary) {
+                        text.push(&mut output);
+                    }
+                }
+                if !preserve_trailing {
+                    let trimmed_length = output[line_start..].trim_end().len();
+                    output.truncate(line_start + trimmed_length);
+                }
+                if row < end && !(join_wrapped && meta.wrapped()) {
+                    output.push('\n');
+                }
+            });
         }
         output
     }
@@ -850,49 +846,86 @@ impl ModeRevision {
         preserve_trailing: bool,
     ) -> String {
         let mut output = String::new();
+        let reader = self.reader();
         for row in start..=end {
-            let mut line = String::new();
-            let mut active_style = None;
-            let last_column = if preserve_trailing {
-                self.columns.checked_sub(1)
-            } else {
-                (0..self.columns).rev().find(|column| {
-                    self.first_char(PointCoordinate { x: *column, y: row })
-                        .is_some_and(|character| !character.is_whitespace())
-                })
-            };
-            for column in 0..=last_column.unwrap_or(0) {
-                let cell = self.cell(PointCoordinate { x: column, y: row });
-                if matches!(cell.width(), CellWidth::SpacerTail | CellWidth::SpacerHead) {
-                    continue;
-                }
-                let mut text = String::new();
-                self.push_cell_text(cell, &mut text);
-                if text.is_empty() {
-                    continue;
-                }
-                if active_style != Some(cell.style_id()) {
-                    if let Some(style) = self
-                        .shared_dictionary()
-                        .styles
-                        .get(usize::from(cell.style_id()))
-                        .copied()
-                    {
-                        push_sgr(&mut line, style);
+            reader.with_cells(row, |cells, meta, dictionary| {
+                let mut active_style = None;
+                let last_column = if preserve_trailing {
+                    cells.len().checked_sub(1)
+                } else {
+                    cells.iter().rposition(|cell| {
+                        cell_first_char(*cell, dictionary)
+                            .is_some_and(|character| !character.is_whitespace())
+                    })
+                };
+                for cell in cells.iter().take(last_column.unwrap_or(0) + 1) {
+                    let Some(text) = emitting_cell_text(*cell, dictionary) else {
+                        continue;
+                    };
+                    if active_style != Some(cell.style_id()) {
+                        if let Some(style) = dictionary.styles.get(usize::from(cell.style_id())) {
+                            push_sgr(&mut output, *style);
+                        }
+                        active_style = Some(cell.style_id());
                     }
-                    active_style = Some(cell.style_id());
+                    text.push(&mut output);
                 }
-                line.push_str(&text);
-            }
-            if active_style.is_some() {
-                line.push_str("\x1b[0m");
-            }
-            output.push_str(&line);
-            if row < end && !(join_wrapped && self.row(row).wrapped()) {
-                output.push('\n');
-            }
+                if active_style.is_some() {
+                    output.push_str("\x1b[0m");
+                }
+                if row < end && !(join_wrapped && meta.wrapped()) {
+                    output.push('\n');
+                }
+            });
         }
         output
+    }
+}
+
+enum ModeCellText<'text> {
+    Scalar(char),
+    Grapheme(&'text str),
+}
+
+impl ModeCellText<'_> {
+    fn push(self, output: &mut String) {
+        match self {
+            Self::Scalar(character) => output.push(character),
+            Self::Grapheme(text) => output.push_str(text),
+        }
+    }
+}
+
+fn cell_text(cell: PackedCell, dictionary: &TerminalDictionary) -> Option<ModeCellText<'_>> {
+    let glyph = cell.glyph();
+    if glyph == 0 {
+        return None;
+    }
+    if glyph & crate::GRAPHEME_TABLE_BIT == 0 {
+        return char::from_u32(glyph).map(ModeCellText::Scalar);
+    }
+    let index = usize::try_from(glyph & !crate::GRAPHEME_TABLE_BIT).ok()?;
+    let offsets = dictionary.grapheme_offsets.get(index..=index + 1)?;
+    let start = usize::try_from(offsets[0]).ok()?;
+    let end = usize::try_from(offsets[1]).ok()?;
+    let text = std::str::from_utf8(dictionary.grapheme_bytes.get(start..end)?).ok()?;
+    (!text.is_empty()).then_some(ModeCellText::Grapheme(text))
+}
+
+fn emitting_cell_text(
+    cell: PackedCell,
+    dictionary: &TerminalDictionary,
+) -> Option<ModeCellText<'_>> {
+    if matches!(cell.width(), CellWidth::SpacerTail | CellWidth::SpacerHead) {
+        return None;
+    }
+    cell_text(cell, dictionary)
+}
+
+fn cell_first_char(cell: PackedCell, dictionary: &TerminalDictionary) -> Option<char> {
+    match cell_text(cell, dictionary)? {
+        ModeCellText::Scalar(character) => Some(character),
+        ModeCellText::Grapheme(text) => text.chars().next(),
     }
 }
 

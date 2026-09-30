@@ -12340,6 +12340,8 @@ struct HistorySearchSnapshot {
     offsets: Vec<SearchCellOffset>,
     terminal: Option<Arc<Mutex<libghostty_vt::terminal::ScreenSnapshot>>>,
     total_rows: u32,
+    #[cfg(test)]
+    search_gate: Mutex<()>,
 }
 
 #[derive(Clone, Copy)]
@@ -12881,6 +12883,8 @@ impl HistorySearchSnapshot {
             total_rows: u32::try_from(terminal.total_rows()?)
                 .map_err(|_| WorkerError::ViewportMetadataTooLarge)?,
             terminal: Some(Arc::new(Mutex::new(terminal.clone_screen()?))),
+            #[cfg(test)]
+            search_gate: Mutex::new(()),
         })
     }
 
@@ -12938,6 +12942,8 @@ impl HistorySearchSnapshot {
             rows,
             offsets,
             terminal: None,
+            #[cfg(test)]
+            search_gate: Mutex::new(()),
             total_rows: u32::try_from(row_count).unwrap_or(u32::MAX),
         })
     }
@@ -12959,6 +12965,8 @@ impl HistorySearchSnapshot {
         match_scratch: &mut Vec<SearchMatch>,
         cancelled: impl Fn() -> bool,
     ) -> Option<SearchState> {
+        #[cfg(test)]
+        let _search_gate = self.search_gate.lock();
         match_scratch.clear();
         if cancelled() {
             return None;
@@ -13139,6 +13147,8 @@ fn append_history_row(
         let start = u32::try_from(text.len().saturating_sub(row_text_start))
             .map_err(|_| WorkerError::SearchSnapshotTooLarge)?;
         match grid_ref.graphemes(&mut stack) {
+            Ok(0) => {}
+            Ok(1) => text.push(stack[0]),
             Ok(count) => text.extend(stack[..count].iter()),
             Err(libghostty_vt::Error::OutOfSpace { required }) => {
                 if required > MAX_SEARCH_SNAPSHOT_BYTES / std::mem::size_of::<char>() {
@@ -20527,6 +20537,7 @@ mod tests {
                 rows: Vec::new(),
                 offsets: Vec::new(),
                 terminal: None,
+                search_gate: Mutex::new(()),
                 total_rows: 0,
             }),
             selection: SearchSelectionPolicy::Last,

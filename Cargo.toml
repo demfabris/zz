@@ -16,10 +16,10 @@ members = [
     "crates/zz-ui",
     "crates/zz-web",
     "crates/zz-xtask",
-    "third_party/rust/libghostty-vt",
 ]
 exclude = [
     "clients/web",
+    "third_party/rust/libghostty-vt",
     "third_party/rust/libghostty-vt-sys",
 ]
 resolver = "3"

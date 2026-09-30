@@ -5,6 +5,10 @@ This is the safe wrapper from `demfabris/libghostty-rs` at
 original git dependency to this source directory; the original pin remains in
 `Cargo.toml`. The upstream MIT and Apache-2.0 licenses are retained.
 
+The wrapper is excluded from the root workspace, like the sys crate. Its tests and
+all-feature checks run separately. This keeps workspace feature unification from
+enabling its optional dynamic link mode in zz's static C client archive.
+
 Local additions are `Terminal::clone_screen`, the owned `ScreenSnapshot`, and
 `GridRow` for resolving a row once before reading its cells. A snapshot is Send and
 has no public terminal access, callbacks or owned tracking handles. Grid references

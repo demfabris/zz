@@ -6493,6 +6493,9 @@ impl Shared {
     /// line. A name the server does not hold is `None`, which the pin expands to
     /// nothing.
     fn resolve_environment(&self, names: &[String]) -> Vec<Option<String>> {
+        if names.is_empty() {
+            return Vec::new();
+        }
         let inner = self.inner.lock();
         names
             .iter()
@@ -6501,6 +6504,9 @@ impl Shared {
     }
 
     fn resolve_home_directories(&self, users: &[String]) -> Vec<Option<String>> {
+        if users.is_empty() {
+            return Vec::new();
+        }
         let inner = self.inner.lock();
         users
             .iter()

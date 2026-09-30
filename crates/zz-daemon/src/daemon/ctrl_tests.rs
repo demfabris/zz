@@ -1295,6 +1295,28 @@ fn compact_raw_control_preflights_line_and_resolves_daemon_environment() {
             ..
         })]
     ));
+    shared.execute_compact_request(
+        client,
+        ClientKind::Control,
+        &mut context,
+        request(r"set-environment -g CTRL_MUST_NOT_RUN yes ; display-message -p \400"),
+        &mailbox,
+    );
+    assert!(matches!(
+        reliable_children(&mailbox).as_slice(),
+        [ProtocolMessage::ExecExit(zz_protocol::ExecExit {
+            outcome: zz_protocol::ExecOutcome::Rejected(ServerError::CommandParse(message)),
+            ..
+        })] if message == "invalid octal escape"
+    ));
+    assert!(
+        shared
+            .inner
+            .lock()
+            .engine
+            .global_environment_variable("CTRL_MUST_NOT_RUN")
+            .is_none()
+    );
     shared
         .inner
         .lock()
@@ -1327,6 +1349,67 @@ fn compact_raw_control_preflights_line_and_resolves_daemon_environment() {
         messages.last(),
         Some(ProtocolMessage::ExecExit(_))
     ));
+    shared
+        .inner
+        .lock()
+        .engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new(
+                "set-option",
+                [
+                    "-s",
+                    "command-alias[90]",
+                    "ctrlalias=display-message -p \"~/$CTRL_EXPANSION\"",
+                ],
+            ),
+        )
+        .expect("alias whose body needs expansion");
+    for (line, expected) in [
+        ("ctrlalias", "/server-home/server-value"),
+        (
+            "set-environment -g CTRL_EXPANSION changed ; ctrlalias",
+            "/server-home/server-value",
+        ),
+        ("ctrlalias", "/server-home/changed"),
+    ] {
+        assert!(!line.contains(['$', '~']));
+        shared.execute_compact_request(
+            client,
+            ClientKind::Control,
+            &mut context,
+            request(line),
+            &mailbox,
+        );
+        assert!(
+            reliable_children(&mailbox).iter().any(|message| matches!(
+                message,
+                ProtocolMessage::CommandResponse(CommandResponse::Success { output, .. })
+                    if output.as_bytes() == expected.as_bytes()
+            )),
+            "{line}"
+        );
+    }
+}
+
+#[test]
+fn empty_control_expansion_resolvers_complete_without_the_state_lock() {
+    let shared = Arc::new(Shared::new(52));
+    let inner = shared.inner.lock();
+    let (finished, completion) = crossbeam_channel::bounded(1);
+    let worker = {
+        let shared = Arc::clone(&shared);
+        thread::spawn(move || {
+            let values = shared.resolve_environment(&[]);
+            let homes = shared.resolve_home_directories(&[]);
+            let _ = finished.send((values, homes));
+        })
+    };
+    let result = completion.recv_timeout(Duration::from_secs(2));
+    drop(inner);
+    worker.join().expect("empty expansion worker");
+    let (values, homes) = result.expect("empty resolvers do not acquire the state lock");
+    assert!(values.is_empty() && homes.is_empty());
 }
 
 fn compact_exec_request(commands: Vec<CommandInvocation>) -> zz_protocol::ExecRequest {

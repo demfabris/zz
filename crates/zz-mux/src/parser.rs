@@ -891,6 +891,9 @@ pub(crate) fn parse_config_without_variable_expansion(
 /// parsed. The pass answers each lookup with an empty value so the walk records
 /// the whole line instead of stopping at the first unresolved name.
 pub fn config_expansion_names(source: impl Into<String>, input: &str) -> ConfigExpansionNames {
+    if !input.contains(['$', '~']) {
+        return ConfigExpansionNames::default();
+    }
     let mut context = RecordingExpansionContext {
         names: ConfigExpansionNames::default(),
     };
@@ -2001,6 +2004,51 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["BRACED", "PLAIN"]
         );
+        assert_eq!(
+            config_expansion_names("<control>", r"run-shell \~/escaped \$ESCAPED"),
+            ConfigExpansionNames::default()
+        );
+    }
+
+    #[test]
+    fn no_marker_discovery_keeps_decoded_markers_literal_and_validates_the_actual_line() {
+        let input = r"display-message -p \044LITERAL \176/folder \u0024LITERAL \u007e/folder \U00000024LITERAL \U0000007e/folder λ🦀";
+        assert!(!input.contains(['$', '~']));
+        assert_eq!(
+            config_expansion_names("<control>", input),
+            ConfigExpansionNames::default()
+        );
+        let parsed =
+            parse_config_with_expansions("<control>", input, &BTreeMap::new(), &BTreeMap::new());
+        assert!(parsed.diagnostics.is_empty());
+        assert_eq!(
+            parsed.commands[0].args,
+            [
+                "-p", "$LITERAL", "~/folder", "$LITERAL", "~/folder", "$LITERAL", "~/folder", "λ🦀"
+            ]
+        );
+        for input in [
+            r"display-message -p \400",
+            r"display-message -p \u12xz",
+            "display-message -p %pause",
+            "if-shell 1 { display-message -p unfinished",
+            "display-message -p \\",
+        ] {
+            assert!(!input.contains(['$', '~']));
+            assert_eq!(
+                config_expansion_names("<control>", input),
+                ConfigExpansionNames::default(),
+                "{input}",
+            );
+            let parsed = parse_config_with_expansions(
+                "<control>",
+                input,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            );
+            assert!(parsed.commands.is_empty(), "{input}");
+            assert!(!parsed.diagnostics.is_empty(), "{input}");
+        }
     }
 
     /// Derived from pinned tmux d77c9dc6. `yylex_token_variable` expands

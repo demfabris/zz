@@ -7370,6 +7370,9 @@ fn run_terminal(
                     false,
                 );
             }
+            for view_id in active_views.keys() {
+                search_worker.cancel(*view_id);
+            }
             return Ok(());
         }
     }

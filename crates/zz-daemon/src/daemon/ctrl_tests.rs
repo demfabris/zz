@@ -387,12 +387,15 @@ fn assert_initial_compact_attach(commands: bool) {
 fn forced_attachment_stays_after_an_older_pending_publication() {
     let shared = Arc::new(Shared::new(39));
     let mut context = ExecutionContext::default();
-    compact_command(
-        &shared,
-        &mut context,
-        "new-session",
-        &["-d", "-s", "ctrl-order", "sleep 30"],
-    );
+    shared
+        .inner
+        .lock()
+        .engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new("new-session", ["-d", "-s", "ctrl-order"]),
+        )
+        .expect("model session");
     let session = context.session.expect("session");
     let (client, mailbox) = compact_registered(
         &shared,
@@ -406,31 +409,22 @@ fn forced_attachment_stays_after_an_older_pending_publication() {
         .lock()
         .client_kinds
         .insert(client, ClientKind::Control);
-    let held = mailbox.state.lock();
-    let publisher = {
-        let shared = Arc::clone(&shared);
-        thread::spawn(move || shared.publish_snapshot_state())
-    };
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while !shared.inner.lock().ctrl_views.contains_key(&client) {
-        assert!(
-            Instant::now() < deadline,
-            "older publication did not reach its queue"
-        );
-        thread::yield_now();
-    }
+    let order = shared.snapshot_order.lock();
+    let older = shared.compact_tree_messages(client, true);
     {
         let mut inner = shared.inner.lock();
         inner.attached.entry(session).or_default().insert(client);
         inner.ctrl_attachments.insert(client, 1);
     }
     let (started, ready) = crossbeam_channel::bounded(1);
+    let (finished, completion) = crossbeam_channel::bounded(1);
     let force = {
         let shared = Arc::clone(&shared);
         let mailbox = Arc::clone(&mailbox);
         thread::spawn(move || {
             started.send(()).expect("start forced attachment");
             shared.send_compact_state(client, &mailbox, true);
+            finished.send(()).expect("finish forced attachment");
         })
     };
     ready
@@ -438,8 +432,15 @@ fn forced_attachment_stays_after_an_older_pending_publication() {
         .expect("forced sender started");
     thread::sleep(Duration::from_millis(20));
     let still_unattached = shared.inner.lock().ctrl_views[&client].session.is_none();
-    drop(held);
-    publisher.join().expect("older publication");
+    let older = older
+        .iter()
+        .map(|message| zz_protocol::encode_protocol_message(message).expect("old publication"))
+        .collect();
+    assert!(mailbox.enqueue_control_group(older));
+    drop(order);
+    completion
+        .recv_timeout(Duration::from_secs(2))
+        .expect("forced attachment completed");
     force.join().expect("forced attachment");
     let views = reliable_children(&mailbox)
         .into_iter()
@@ -457,21 +458,27 @@ fn forced_attachment_stays_after_an_older_pending_publication() {
     );
     assert_eq!(views.len(), 2, "{views:?}");
     assert!(views[0].session.is_none());
-    assert_eq!(views[1].session, Some(session));
-    assert_eq!(views[1].attachment_generation, 1);
-    compact_command(&shared, &mut context, "kill-session", &["-t", "ctrl-order"]);
+    assert!(
+        views[1..]
+            .iter()
+            .all(|view| view.session == Some(session) && view.attachment_generation == 1),
+        "{views:?}"
+    );
 }
 
 #[test]
 fn compact_subscription_rename_is_bounded_and_empty_diff_sends_nothing() {
     let shared = Arc::new(Shared::new(32));
     let mut context = ExecutionContext::default();
-    compact_command(
-        &shared,
-        &mut context,
-        "new-session",
-        &["-d", "-s", "ctrl-tree", "sleep 30"],
-    );
+    shared
+        .inner
+        .lock()
+        .engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new("new-session", ["-d", "-s", "ctrl-tree"]),
+        )
+        .expect("model session");
     let session = context.session.expect("session");
     let (client, mailbox) = compact_registered(
         &shared,
@@ -522,18 +529,24 @@ fn compact_subscription_rename_is_bounded_and_empty_diff_sends_nothing() {
 fn all_subscriber_unattached_session_rename_is_bounded_without_a_view_update() {
     let shared = Arc::new(Shared::new(40));
     let mut context = ExecutionContext::default();
-    compact_command(
-        &shared,
-        &mut context,
-        "new-session",
-        &["-d", "-s", "ctrl-own", "sleep 30"],
-    );
-    compact_command(
-        &shared,
-        &mut context,
-        "new-session",
-        &["-d", "-s", "ctrl-other", "sleep 30"],
-    );
+    shared
+        .inner
+        .lock()
+        .engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new("new-session", ["-d", "-s", "ctrl-own"]),
+        )
+        .expect("model session");
+    shared
+        .inner
+        .lock()
+        .engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new("new-session", ["-d", "-s", "ctrl-other"]),
+        )
+        .expect("model session");
     let (client, mailbox) = compact_registered(
         &shared,
         zz_protocol::Subscriptions {

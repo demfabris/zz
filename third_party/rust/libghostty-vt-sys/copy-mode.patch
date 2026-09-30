@@ -419,15 +419,17 @@
 
      // If this is non-null then cloning will attempt to remap the tracked
      // pins into the new cloned area and will keep track of the old to
-@@ -1147,7 +1227,7 @@
-     var pool: MemoryPool = try .init(
-         alloc,
-         pageAllocator(alloc),
--        page_count,
-+        if (opts.cow) 0 else page_count,
+@@ -1136,8 +1216,8 @@
      );
-     errdefer pool.deinit();
 
+     // First, count our pages so our preheat is exactly what we need.
+-    var it_copy = it;
+-    const page_count: usize = page_count: {
++    const page_count: usize = if (opts.cow) 0 else page_count: {
++        var it_copy = it;
+         var count: usize = 0;
+         while (it_copy.next()) |_| count += 1;
+         break :page_count count;
 @@ -1166,32 +1246,79 @@
      var total_rows: usize = 0;
      var page_size: usize = 0;

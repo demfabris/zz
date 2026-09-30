@@ -2408,9 +2408,10 @@ Handed on:
 - oh-my-tmux cold server CPU <= 30 ms is met since the review fixes (above). The first
   handoff note here had its measure wrong: zz's user time was 1.6-1.8x tmux, not one tick for
   both, and the polling run-shell threads were 80% of the daemon's CPU, not 44% of samples.
-- Per-command `format_hook_facts_for_client` is still 11% of `display-message` and
-  `select-pane` at 20 panes: it copies pane kinds, pane windows and user option refcounts into
-  a snapshot (W2-FMT, which also removes `withhold_facts` once facts are borrowed).
+- At the HOOKS merge, per-command `format_hook_facts_for_client` was still 11% of
+  `display-message` and `select-pane` at 20 panes: it copied pane kinds, pane windows and user
+  option refcounts into a snapshot. W2-FMT replaces that capture with borrowed providers;
+  `withhold_facts` remains a debug guard for paths that must not ask for formats.
 - A select-pane in a 20-pane window still clones that window's layout and 20 titles into the
   journal. A layout and title generation per window would let the image skip them, but only
   once `Window.layout` and pane titles are private behind journaling setters; today any
@@ -2559,14 +2560,17 @@ exit-ordering fixtures, workspace tests.
 Reinstated under the no-compromise rule. W1-FORMAT makes the universe lazy but still resolves
 through `StatusContext`, a ~100-field struct of owned strings built per item.
 
-Scope: replace it with a format tree of borrowed handles (client, session, window, pane ids plus
-`&MuxEngine` and the daemon facts), the way tmux `format_defaults` records pointers. Variable
-lookup goes options first, then a static sorted callback table (one function per variable,
-binary search or `phf`), then the per-command tree, then the environment, as `format_find` does.
-Loops (`#{S:}`, `#{W:}`, `#{P:}`) push a child tree per item. Templates are parsed once into an
-op list cached by (template string, options generation), so status, borders and list commands
-stop re-parsing. Daemon facts are borrowed, never cloned into the context. The two escape
-points W1-FORMAT found (status and mode requests) keep `detach()`, now producing only the values a compiled template references.
+Scope: resolve through a tree of borrowed engine handles and typed client, session, window and
+pane ids. Variable lookup goes options first, then the sorted static callback table, then
+per-command variables, then the environment. Loops (`#{S:}`, `#{W:}`,
+`#{P:}`) push a borrowed child tree. Parsed template operations are cached by source text;
+they hold syntax, never option values. Options generation keys the option snapshots, needs
+scan and indirect reference closure instead. Command facts borrow daemon maps and build
+derived maps only on demand. Status and mode requests leave the engine lock through
+`detach_with_templates()`, which captures referenced values and reachable loop contexts.
+Owned facts remain necessary for those requests. Unknown dynamic job output uses the full
+capture path. The old `StatusValues` object is boxed and initialized only for explicit legacy
+field access or rollback.
 
 Write zone: formats.rs (all but the time helpers), the `StatusContext` users in status.rs and
 command.rs `StatusRowVariables`, daemon.rs `format_hook_facts*`.
@@ -2634,6 +2638,10 @@ deletes most wave-1 fallback paths anyway).
 | `ZZ_PERF_RENAME_THROTTLE=0` | PUBLISH | no 500 ms automatic-rename throttle |
 | `ZZ_PERF_PEER_SCAN=always` | PUBLISH | 1 Hz Claude peer scan as today, reading every record each tick; the status sampler ticks with no client |
 | `ZZ_PERF_EAGER_UNIVERSE=1` | FORMAT | full universe per expansion (also the differential oracle) |
+| `ZZ_PERF_COMPILED_FORMATS=0` | FMT | parse and evaluate templates through the interpreter |
+| `ZZ_PERF_BORROWED_FORMATS=0` | FMT | build the full owned table values for contexts and loop items |
+| `ZZ_PERF_BORROWED_FACTS=0` | FMT | build owned command facts before engine execution |
+| `ZZ_PERF_FORMAT_CACHE=0` | FMT | rebuild option snapshots, needs and indirect reference closures |
 | `ZZ_PERF_ATTACH_DEDUP=0` | ATTACH | resync and Full enqueue as today: an attach resends the Snapshot and every overlay, frames are not held until `Attached`, no update is dropped for a generation already queued or written, and the publish after a detach renders the detaching client's status |
 | `ZZ_PERF_ATTACH_BATCH=0` | ATTACH | an attach holds only its terminal frames until `Attached`; `Attached`, the status and the other reliable messages are written as they are queued instead of as one batch after the publish that follows the attach, and the hello of a raw-terminal or browser client carries a status rendered before it attached |
 | `ZZ_PERF_ATTACH_PRESIZE=0` | ATTACH | an attaching raw-terminal client's panes keep their size until its first `ResizeTerminal` |
@@ -2672,6 +2680,7 @@ whole-state probes), and the blocking run-shell wait.
 | Timer stall | PUBLISH | alert-silence hook `run-shell 'sleep 2'` while a repeat-time key table expires on time |
 | In-place peer status | PUBLISH | rewriting `<pid>.json` in place changes `agent_state` |
 | Lazy universe at escape points | FORMAT | lazy and eager give equal output for status, border, mode, chooser, control subscription, format monitor, hook |
+| Borrowed and compiled formats | FMT | every pinned name and modifier agrees with the W1 interpreter over attached, detached, marked, zoomed, dead and null contexts; nested loops and indirect references agree after selective detach; option changes invalidate dependency and snapshot caches |
 | terminal-overrides change | FORMAT | `set -as terminal-overrides` changes the feature mask without reconnect |
 | Early prompt history | EXEC | `command-prompt` right after cold start sees history; a new entry survives |
 | Immediate child exit | PANE | `split-window 'true'` reports its status once |

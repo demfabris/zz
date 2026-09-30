@@ -271,6 +271,7 @@ impl Template {
                     };
                     Self::flush(&mut operations, &mut literal);
                     let command = &source[after_next..end];
+                    references.insert("*".to_owned());
                     references.extend(
                         Self::parse_depth(command, false, depth + 1)
                             .references
@@ -861,6 +862,18 @@ mod tests {
                     .iter()
                     .any(|reference| reference == name),
                 "{name}"
+            );
+        }
+        for source in [
+            "#(printf value)",
+            "#[fg=#(printf red)]",
+            "#{p/#(width)/:pane_id}",
+        ] {
+            assert!(
+                get(source)
+                    .references
+                    .iter()
+                    .any(|reference| reference == "*")
             );
         }
         let oversized = "x".repeat(CACHE_BYTES);

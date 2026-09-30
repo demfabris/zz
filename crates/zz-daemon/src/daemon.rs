@@ -41130,10 +41130,10 @@ impl crate::status::FormatFactSource for BorrowedFormatHookFacts<'_> {
     }
 }
 
-fn split_borrowed_format_hook_facts<'a>(
-    inner: &'a mut ServerState,
+fn split_borrowed_format_hook_facts(
+    inner: &mut ServerState,
     seed: CommandFormatSeed,
-) -> (&'a mut MuxEngine, BorrowedFormatHookFacts<'a>) {
+) -> (&mut MuxEngine, BorrowedFormatHookFacts<'_>) {
     let ServerState {
         engine,
         agent_states,

@@ -147,6 +147,25 @@ fn borrowed_command_facts_expand_without_building_an_owned_snapshot() {
         )
         .unwrap();
     assert_eq!(execution.output.to_string(), "alpha:terminal:alpha");
+    let mut inner = shared.inner.lock();
+    assert_eq!(
+        expand_buffer_path(
+            &mut inner,
+            Some(client),
+            &context,
+            None,
+            "save-buffer",
+            "#{session_name}:#{pane_kind}:#{command}",
+        ),
+        "alpha:terminal:save-buffer"
+    );
+    let rows = chooser_presentation::client_chooser_rows(
+        &inner,
+        Some("#{client_name}:#{client_session}:#{session_name}"),
+        None,
+    );
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].text, "/dev/ttys003:alpha:alpha");
     assert_eq!(OWNED_FORMAT_FACT_BUILDS.with(Cell::get), before);
 }
 

@@ -358,19 +358,19 @@ fn apply_context_value(values: &mut StatusValues, name: &str, value: &str) {
         FormatBacking::LastWindowIndex => values.last_window_index = value.parse().ok(),
         FormatBacking::NextSessionId => value.clone_into(&mut values.next_session_id),
         FormatBacking::PaneActive => {
-            values.pane_active = (!value.is_empty()).then_some(value == "1")
+            values.pane_active = (!value.is_empty()).then_some(value == "1");
         }
         FormatBacking::PaneAtBottom => {
-            values.pane_at_bottom = (!value.is_empty()).then_some(value == "1")
+            values.pane_at_bottom = (!value.is_empty()).then_some(value == "1");
         }
         FormatBacking::PaneAtLeft => {
-            values.pane_at_left = (!value.is_empty()).then_some(value == "1")
+            values.pane_at_left = (!value.is_empty()).then_some(value == "1");
         }
         FormatBacking::PaneAtRight => {
-            values.pane_at_right = (!value.is_empty()).then_some(value == "1")
+            values.pane_at_right = (!value.is_empty()).then_some(value == "1");
         }
         FormatBacking::PaneAtTop => {
-            values.pane_at_top = (!value.is_empty()).then_some(value == "1")
+            values.pane_at_top = (!value.is_empty()).then_some(value == "1");
         }
         FormatBacking::PaneBottom => values.pane_bottom = value.parse().ok(),
         FormatBacking::PaneCurrentCommand => value.clone_into(&mut values.pane_current_command),
@@ -380,13 +380,13 @@ fn apply_context_value(values: &mut StatusValues, name: &str, value: &str) {
         FormatBacking::PaneDeadStatus => values.pane_dead_status = value.parse().ok(),
         FormatBacking::PaneDeadTime => values.pane_dead_time = value.parse().ok(),
         FormatBacking::PaneInputOff => {
-            values.pane_input_off = (!value.is_empty()).then_some(value == "1")
+            values.pane_input_off = (!value.is_empty()).then_some(value == "1");
         }
         FormatBacking::PaneMarked => {
-            values.pane_marked = (!value.is_empty()).then_some(value == "1")
+            values.pane_marked = (!value.is_empty()).then_some(value == "1");
         }
         FormatBacking::PaneMarkedSet => {
-            values.pane_marked_set = (!value.is_empty()).then_some(value == "1")
+            values.pane_marked_set = (!value.is_empty()).then_some(value == "1");
         }
         FormatBacking::PanePath => value.clone_into(&mut values.pane_path),
         FormatBacking::PaneFlags => value.clone_into(&mut values.pane_flags),
@@ -399,7 +399,7 @@ fn apply_context_value(values: &mut StatusValues, name: &str, value: &str) {
         FormatBacking::PanePid => values.pane_pid = value.parse().ok(),
         FormatBacking::PaneStartCommand => value.clone_into(&mut values.pane_start_command),
         FormatBacking::PaneStartCommandList => {
-            value.clone_into(&mut values.pane_start_command_list)
+            value.clone_into(&mut values.pane_start_command_list);
         }
         FormatBacking::PaneStartPath => value.clone_into(&mut values.pane_start_path),
         FormatBacking::PaneSynchronized => values.pane_synchronized = value == "1",
@@ -416,19 +416,19 @@ fn apply_context_value(values: &mut StatusValues, name: &str, value: &str) {
         FormatBacking::SessionAlert => value.clone_into(&mut values.session_alert),
         FormatBacking::SessionAlerts => value.clone_into(&mut values.session_alerts),
         FormatBacking::SessionAttached => {
-            values.session_attached = value.parse().unwrap_or_default()
+            values.session_attached = value.parse().unwrap_or_default();
         }
         FormatBacking::SessionAttachedList => value.clone_into(&mut values.session_attached_list),
         FormatBacking::SessionBell => values.session_bell = value == "1",
         FormatBacking::SessionActivity => values.session_activity = value.parse().ok(),
         FormatBacking::SessionActive => {
-            values.session_active = (!value.is_empty()).then_some(value == "1")
+            values.session_active = (!value.is_empty()).then_some(value == "1");
         }
         FormatBacking::SessionCreated => values.session_created = value.parse().ok(),
         FormatBacking::SessionId => value.clone_into(&mut values.session_id),
         FormatBacking::SessionManyAttached => values.session_many_attached = value == "1",
         FormatBacking::SessionMarked => {
-            values.session_marked = (!value.is_empty()).then_some(value == "1")
+            values.session_marked = (!value.is_empty()).then_some(value == "1");
         }
         FormatBacking::SessionName => value.clone_into(&mut values.session_name),
         FormatBacking::SessionPath => value.clone_into(&mut values.session_path),
@@ -440,19 +440,19 @@ fn apply_context_value(values: &mut StatusValues, name: &str, value: &str) {
         FormatBacking::User => value.clone_into(&mut values.user),
         FormatBacking::Version => value.clone_into(&mut values.version),
         FormatBacking::WindowActive => {
-            values.window_active = (!value.is_empty()).then_some(value == "1")
+            values.window_active = (!value.is_empty()).then_some(value == "1");
         }
         FormatBacking::WindowActiveClients => {
-            values.window_active_clients = value.parse().unwrap_or_default()
+            values.window_active_clients = value.parse().unwrap_or_default();
         }
         FormatBacking::WindowActiveClientsList => {
-            value.clone_into(&mut values.window_active_clients_list)
+            value.clone_into(&mut values.window_active_clients_list);
         }
         FormatBacking::WindowActiveSessions => {
-            values.window_active_sessions = value.parse().unwrap_or_default()
+            values.window_active_sessions = value.parse().unwrap_or_default();
         }
         FormatBacking::WindowActiveSessionsList => {
-            value.clone_into(&mut values.window_active_sessions_list)
+            value.clone_into(&mut values.window_active_sessions_list);
         }
         FormatBacking::WindowActivity => values.window_activity = value.parse().ok(),
         FormatBacking::WindowActivityFlag => values.window_activity_alert = value == "1",
@@ -462,27 +462,27 @@ fn apply_context_value(values: &mut StatusValues, name: &str, value: &str) {
         FormatBacking::WindowId => value.clone_into(&mut values.window_id),
         FormatBacking::WindowIndex => values.window_index = value.parse().unwrap_or_default(),
         FormatBacking::WindowLast => {
-            values.window_last = (!value.is_empty()).then_some(value == "1")
+            values.window_last = (!value.is_empty()).then_some(value == "1");
         }
         FormatBacking::WindowLayout => value.clone_into(&mut values.window_layout),
         FormatBacking::WindowLinkedSessions => {
-            values.window_linked_sessions = value.parse().unwrap_or_default()
+            values.window_linked_sessions = value.parse().unwrap_or_default();
         }
         FormatBacking::WindowLinkedSessionsList => {
-            value.clone_into(&mut values.window_linked_sessions_list)
+            value.clone_into(&mut values.window_linked_sessions_list);
         }
         FormatBacking::WindowManualHeight => values.window_manual_height = value.parse().ok(),
         FormatBacking::WindowManualWidth => values.window_manual_width = value.parse().ok(),
         FormatBacking::WindowMarkedFlag => {
-            values.window_marked_flag = (!value.is_empty()).then_some(value == "1")
+            values.window_marked_flag = (!value.is_empty()).then_some(value == "1");
         }
         FormatBacking::WindowName => value.clone_into(&mut values.window_name),
         FormatBacking::WindowPanes => values.window_panes = value.parse().unwrap_or_default(),
         FormatBacking::WindowStackIndex => {
-            values.window_stack_index = value.parse().unwrap_or_default()
+            values.window_stack_index = value.parse().unwrap_or_default();
         }
         FormatBacking::WindowStart => {
-            values.window_start = (!value.is_empty()).then_some(value == "1")
+            values.window_start = (!value.is_empty()).then_some(value == "1");
         }
         FormatBacking::WindowVisibleLayout => value.clone_into(&mut values.window_visible_layout),
         FormatBacking::WindowWidth => values.window_width = value.parse().ok(),
@@ -883,12 +883,13 @@ enum FormatBacking {
     WindowZoomed,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug)]
 struct FormatVariableSpec {
     name: &'static str,
     scope: FormatScope,
     kind: FormatKind,
     backing: FormatBacking,
+    callback: for<'a, 'e> fn(&'a tree::FormatTree<'e>, FormatType) -> Cow<'a, str>,
 }
 
 macro_rules! variable {
@@ -898,6 +899,9 @@ macro_rules! variable {
             scope: FormatScope::$scope,
             kind: FormatKind::String,
             backing: FormatBacking::$backing,
+            callback: |tree, format_type| {
+                tree.resolve(FormatScope::$scope, FormatBacking::$backing, format_type)
+            },
         }
     };
     ($name:literal, $scope:ident, Time, $backing:ident) => {
@@ -906,6 +910,9 @@ macro_rules! variable {
             scope: FormatScope::$scope,
             kind: FormatKind::Time,
             backing: FormatBacking::$backing,
+            callback: |tree, format_type| {
+                tree.resolve(FormatScope::$scope, FormatBacking::$backing, format_type)
+            },
         }
     };
 }
@@ -1525,7 +1532,7 @@ impl StatusContext<'_> {
         }
         self.tree.as_ref().map_or_else(
             || (**self).resolve(spec, format_type),
-            |tree| tree.resolve(spec, format_type),
+            |tree| (spec.callback)(tree, format_type),
         )
     }
 

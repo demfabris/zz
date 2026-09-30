@@ -60,6 +60,72 @@ fn selective_detach_captures_only_referenced_table_values() {
 }
 
 #[test]
+fn selective_detach_keeps_table_values_introduced_by_shell_output() {
+    struct OutputHooks<'a> {
+        context: &'a StatusContext<'static>,
+        engine: &'a MuxEngine,
+    }
+
+    impl StatusHooks for OutputHooks<'_> {
+        fn strftime(&mut self, literal: &str) -> String {
+            literal.to_owned()
+        }
+
+        fn shell(&mut self, _command: &str, _tag: &FormatJobTag) -> String {
+            expand_format_values("#{pane_title}", self.context, &mut Hooks(self.engine))
+        }
+
+        fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+            self.engine.format_option_value(context, name)
+        }
+    }
+
+    let mut engine = MuxEngine::default();
+    let (session, window, pane) = engine.state.create_session("work").unwrap();
+    engine
+        .state
+        .update_pane_title(pane, "captured-title")
+        .unwrap();
+    engine
+        .execute(
+            &mut crate::ExecutionContext::default(),
+            &zz_protocol::CommandInvocation::new(
+                "set-option",
+                vec!["-g", "status-left", "#(later-output)"],
+            ),
+        )
+        .unwrap();
+    for (template, expected) in [
+        ("#(later-output)", "captured-title"),
+        ("#{E:status-left}", "captured-title"),
+        ("#[fg=#(later-output)]", "#[fg=captured-title]"),
+    ] {
+        engine
+            .state
+            .update_pane_title(pane, "captured-title")
+            .unwrap();
+        let needs = engine.format_needs([template]);
+        assert_eq!(needs, FormatNeeds::NONE);
+        let context = engine
+            .format_status_context(Some(session), Some(window), Some(pane))
+            .detach_with_templates(needs, [template]);
+        engine
+            .state
+            .update_pane_title(pane, "updated-title")
+            .unwrap();
+        assert_eq!(
+            context.variable("pane_title").as_deref(),
+            Some("captured-title")
+        );
+        let mut hooks = OutputHooks {
+            context: &context,
+            engine: &engine,
+        };
+        assert_eq!(expand_status(template, &context, &mut hooks), expected);
+    }
+}
+
+#[test]
 fn selective_detached_loops_and_indirection_match_w1() {
     for (fixture, engine) in fixtures() {
         for client in clients(&engine) {

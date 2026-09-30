@@ -53,7 +53,8 @@ impl std::fmt::Debug for FormatTree<'_> {
 impl FormatTree<'_> {
     pub(super) fn resolve(
         &self,
-        spec: &FormatVariableSpec,
+        scope: FormatScope,
+        backing: FormatBacking,
         format_type: FormatType,
     ) -> Cow<'_, str> {
         let engine = self.engine;
@@ -61,7 +62,7 @@ impl FormatTree<'_> {
         let session = self.session.and_then(|id| state.sessions.get(&id));
         let window = self.window.and_then(|id| state.windows.get(&id));
         let pane = window.and_then(|window| self.pane.and_then(|id| window.panes.get(&id)));
-        let available = match spec.scope {
+        let available = match scope {
             FormatScope::Server | FormatScope::Buffer | FormatScope::Client => true,
             FormatScope::Session => session.is_some(),
             FormatScope::Window => window.is_some(),
@@ -71,7 +72,7 @@ impl FormatTree<'_> {
             return Cow::Borrowed("");
         }
         let boolean = |value| Cow::Borrowed(bool_string(value));
-        match spec.backing {
+        match backing {
             FormatBacking::Empty
             | FormatBacking::StatusHook
             | FormatBacking::ConfigFiles
@@ -170,7 +171,7 @@ impl FormatTree<'_> {
                     })
                     .collect::<Vec<_>>();
                 windows.sort_unstable_by_key(|(index, ..)| *index);
-                if spec.backing == FormatBacking::SessionAlert {
+                if backing == FormatBacking::SessionAlert {
                     let mut value = String::new();
                     for (_, activity, bell, silence) in windows {
                         for (flag, present) in [('#', activity), ('!', bell), ('~', silence)] {
@@ -231,7 +232,7 @@ impl FormatTree<'_> {
                     window
                         .filter(|window| engine.window_size(window.id) == WindowSize::Manual)
                         .map(|window| {
-                            if spec.backing == FormatBacking::WindowManualWidth {
+                            if backing == FormatBacking::WindowManualWidth {
                                 window.manual_extent.0
                             } else {
                                 window.manual_extent.1
@@ -337,7 +338,7 @@ impl FormatTree<'_> {
                         flags.push(flag);
                     }
                 }
-                Cow::Owned(if spec.backing == FormatBacking::WindowFlags {
+                Cow::Owned(if backing == FormatBacking::WindowFlags {
                     flags.replace('#', "##")
                 } else {
                     flags
@@ -410,7 +411,7 @@ impl FormatTree<'_> {
                         command
                             .iter()
                             .map(|argument| {
-                                if spec.backing == FormatBacking::PaneStartCommand {
+                                if backing == FormatBacking::PaneStartCommand {
                                     quote_argument(argument)
                                 } else {
                                     quote_single(argument.as_bytes()).to_string()
@@ -429,7 +430,7 @@ impl FormatTree<'_> {
             | FormatBacking::PaneTty
             | FormatBacking::PaneDeadSignal => {
                 if let Some(facts) = self.pane.and_then(|pane| engine.pane_runtime_facts(pane)) {
-                    match spec.backing {
+                    match backing {
                         FormatBacking::PaneCurrentCommand => Cow::Borrowed(&facts.current_command),
                         FormatBacking::PaneCurrentPath => {
                             Cow::Borrowed(if pane.is_some_and(|pane| pane.dead) {
@@ -452,7 +453,7 @@ impl FormatTree<'_> {
                         _ => unreachable!(),
                     }
                 } else if matches!(
-                    spec.backing,
+                    backing,
                     FormatBacking::PaneCurrentPath | FormatBacking::PaneStartPath
                 ) {
                     match pane.map(|pane| &pane.kind) {
@@ -490,7 +491,7 @@ impl FormatTree<'_> {
                     return Cow::Borrowed("");
                 };
                 let (width, height) = window.layout.extent();
-                match spec.backing {
+                match backing {
                     FormatBacking::PaneWidth => optional_display(Some(cell.sx)),
                     FormatBacking::PaneHeight => optional_display(Some(cell.sy)),
                     FormatBacking::PaneLeft | FormatBacking::PaneX => {

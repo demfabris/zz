@@ -3947,11 +3947,13 @@ impl MuxEngine {
 
     pub fn set_default_mode_keys(&mut self, value: &str) -> Result<(), ServerError> {
         self.global_mode_keys = parse_mode_keys(Some(value), self.global_mode_keys)?;
+        self.format_options_generation = self.format_options_generation.wrapping_add(1);
         Ok(())
     }
 
     pub fn set_default_status_keys(&mut self, value: &str) -> Result<(), ServerError> {
         let keys = parse_mode_keys(Some(value), self.global_mode_keys)?;
+        self.format_options_generation = self.format_options_generation.wrapping_add(1);
         self.stored_scalars
             .global_session
             .insert("status-keys", keys.as_str().to_owned());
@@ -3959,10 +3961,12 @@ impl MuxEngine {
     }
 
     pub fn initialize_default_shell(&mut self, value: impl Into<String>) {
+        self.format_options_generation = self.format_options_generation.wrapping_add(1);
         self.global_default_shell = value.into();
     }
 
     pub fn initialize_default_editor(&mut self, value: impl Into<String>) {
+        self.format_options_generation = self.format_options_generation.wrapping_add(1);
         self.server_options.editor = value.into();
     }
 
@@ -11655,6 +11659,7 @@ impl MuxEngine {
     }
 
     fn user_options_at_target_mut(&mut self, target: TmuxOptionTarget) -> &mut UserOptions {
+        self.format_options_generation = self.format_options_generation.wrapping_add(1);
         Arc::make_mut(match target {
             TmuxOptionTarget::Server => &mut self.server_user_options,
             TmuxOptionTarget::GlobalSession => &mut self.global_session_user_options,

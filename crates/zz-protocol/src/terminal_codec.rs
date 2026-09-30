@@ -1,5 +1,6 @@
 use std::io::{Read, Write};
 
+use serde::ser::SerializeSeq;
 use zz_terminal::{TerminalPatchRef, TerminalViewport};
 
 use crate::message::{
@@ -129,6 +130,53 @@ pub fn encode_protocol_message_into(
     result
 }
 
+struct BorrowedBatchFrames<'a, T>(&'a [T]);
+
+struct BorrowedBatchFrame<'a>(&'a [u8]);
+
+impl serde::Serialize for BorrowedBatchFrame<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_bytes(self.0)
+    }
+}
+
+impl<T: AsRef<[u8]>> serde::Serialize for BorrowedBatchFrames<'_, T> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for frame in self.0 {
+            sequence.serialize_element(&BorrowedBatchFrame(frame.as_ref()))?;
+        }
+        sequence.end()
+    }
+}
+
+pub fn encode_batch_frames_into<T: AsRef<[u8]>>(
+    sequence: u64,
+    frames: &[T],
+    output: &mut Vec<u8>,
+) -> Result<(), ProtocolError> {
+    output.clear();
+    if frames.len() > crate::MAX_BATCH_FRAMES {
+        return Err(ProtocolError::InvalidServerHello(
+            "batch contains too many frames".to_owned(),
+        ));
+    }
+    encode_protocol_message_into(
+        &ProtocolMessage::Batch(crate::Batch {
+            sequence,
+            frames: Vec::new(),
+        }),
+        output,
+    )?;
+    let _ = output.pop();
+    let result = serialize_control_into(&BorrowedBatchFrames(frames), output)
+        .and_then(|()| finish_enveloped_in_place(output));
+    if result.is_err() {
+        output.clear();
+    }
+    result
+}
+
 fn encode_protocol_message_into_inner(
     message: &ProtocolMessage,
     output: &mut Vec<u8>,
@@ -191,8 +239,16 @@ fn encode_protocol_message_into_inner(
     }
 
     begin_enveloped_into(output, Lane::Control, CONTROL_PAYLOAD_RESERVE)?;
+    serialize_control_into(message, output)?;
+    finish_enveloped_in_place(output)
+}
+
+fn serialize_control_into(
+    value: &impl serde::Serialize,
+    output: &mut Vec<u8>,
+) -> Result<(), ProtocolError> {
     match postcard::serialize_with_flavor(
-        message,
+        value,
         FrameFlavor {
             output,
             limit: MAX_ENCODED_FRAME_BYTES,
@@ -206,7 +262,7 @@ fn encode_protocol_message_into_inner(
         }
         Err(error) => return Err(ProtocolError::Encode(error)),
     }
-    finish_enveloped_in_place(output)
+    Ok(())
 }
 
 /// Decode a complete protocol frame from either the control or terminal lane.
@@ -795,6 +851,80 @@ mod tests {
             Err(postcard::Error::SerializeBufferFull)
         );
         assert_eq!(output, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn borrowed_batch_encoder_matches_owned_frames_and_reuses_output() {
+        let control = encode_protocol_message(&ProtocolMessage::TreeSync).expect("control");
+        let terminal = encode_terminal_viewport_event(
+            PaneId(7),
+            128,
+            &TerminalViewport::blank(80, 24, SessionStatus::Running),
+        )
+        .expect("terminal");
+        let shared: Arc<[u8]> = Arc::from((0_u8..=255).collect::<Vec<_>>());
+        let mixed = [
+            std::borrow::Cow::Owned(control.clone()),
+            std::borrow::Cow::Borrowed(shared.as_ref()),
+            std::borrow::Cow::Owned(terminal),
+        ];
+        let mut output = Vec::with_capacity(128 * 1024);
+        let allocation = output.as_ptr();
+        for sequence in [0, 127, 128, u64::MAX] {
+            let empty = encode_protocol_message(&ProtocolMessage::Batch(crate::Batch {
+                sequence,
+                frames: Vec::new(),
+            }))
+            .expect("empty batch");
+            assert_eq!(empty.last(), Some(&0));
+            encode_batch_frames_into::<Vec<u8>>(sequence, &[], &mut output)
+                .expect("borrowed empty");
+            assert_eq!(output, empty);
+            encode_batch_frames_into(sequence, &mixed, &mut output).expect("mixed batch");
+            let owned = ProtocolMessage::Batch(crate::Batch {
+                sequence,
+                frames: mixed.iter().map(|frame| frame.as_ref().to_vec()).collect(),
+            });
+            assert_eq!(
+                output,
+                encode_protocol_message(&owned).expect("owned batch")
+            );
+            assert_eq!(decode_protocol_frame(&output).expect("decode batch"), owned);
+            for count in [1, 127, 128, crate::MAX_BATCH_FRAMES] {
+                let frames = vec![control.clone(); count];
+                encode_batch_frames_into(sequence, &frames, &mut output).expect("many frames");
+                assert_eq!(
+                    output,
+                    encode_protocol_message(&ProtocolMessage::Batch(crate::Batch {
+                        sequence,
+                        frames,
+                    }))
+                    .expect("owned many frames")
+                );
+            }
+            assert_eq!(output.as_ptr(), allocation);
+        }
+    }
+
+    #[test]
+    fn borrowed_batch_encoder_keeps_frame_and_count_bounds() {
+        let mut output = Vec::with_capacity(256);
+        output.push(42);
+        let allocation = output.as_ptr();
+        let too_many = vec![&[][..]; crate::MAX_BATCH_FRAMES + 1];
+        assert!(matches!(
+            encode_batch_frames_into(0, &too_many, &mut output),
+            Err(ProtocolError::InvalidServerHello(_))
+        ));
+        assert!(output.is_empty());
+        assert_eq!(output.as_ptr(), allocation);
+        let body = vec![0_u8; 64 * 1024];
+        let frames = vec![body.as_slice(); crate::MAX_FRAME_BYTES / body.len()];
+        assert!(matches!(
+            encode_batch_frames_into(0, &frames, &mut output),
+            Err(ProtocolError::FrameTooLarge(_))
+        ));
+        assert!(output.is_empty());
     }
 
     #[test]

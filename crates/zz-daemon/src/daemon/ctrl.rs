@@ -1,7 +1,7 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use zz_protocol::{
-    AttachOperation, Batch, ClientView, Hello, KeySubscription, MouseBindings, TreeDelta,
+    AttachOperation, ClientView, Hello, KeySubscription, MouseBindings, TreeDelta,
     TreeSubscription, Welcome,
 };
 
@@ -319,20 +319,15 @@ impl OutboundMailbox {
         }
     }
 
-    pub(super) fn enqueue_control_group(&self, frames: Vec<Vec<u8>>) -> bool {
-        let message = ProtocolMessage::Batch(Batch {
-            sequence: Shared::next_sequence(),
-            frames,
-        });
-        let encoded = match self.encode_message(&message) {
+    pub(super) fn enqueue_control_group(&self, frames: Vec<OutboundFrame>) -> bool {
+        let encoded = match self.encode_with(|encoded| {
+            zz_protocol::encode_batch_frames_into(Shared::next_sequence(), &frames, encoded)
+        }) {
             Ok(encoded) => encoded,
             Err(error) => {
                 log::error!("failed to encode subscribed tree group: {error}");
                 return false;
             }
-        };
-        let ProtocolMessage::Batch(Batch { frames, .. }) = message else {
-            unreachable!()
         };
         self.enqueue_encoded_reliable(OutboundFrame::Grouped { encoded, frames })
     }
@@ -362,15 +357,12 @@ impl OutboundMailbox {
                     recycle_outbound_frame(&mut state, encoded);
                     frames.extend(children);
                 }
-                frame => frames.push(frame.into_vec()),
+                frame => frames.push(frame),
             }
         }
-        let message = ProtocolMessage::Batch(Batch {
-            sequence: Shared::next_sequence(),
-            frames,
-        });
         let mut encoded = take_recycled_frame(&mut state);
-        let result = encode_protocol_message_into(&message, &mut encoded);
+        let result =
+            zz_protocol::encode_batch_frames_into(Shared::next_sequence(), &frames, &mut encoded);
         if let Some(welcome) = welcome {
             state.reliable.push_back(welcome);
         }
@@ -381,9 +373,6 @@ impl OutboundMailbox {
             return false;
         }
         state.queued_bytes += encoded.len();
-        let ProtocolMessage::Batch(Batch { frames, .. }) = message else {
-            unreachable!()
-        };
         state
             .reliable
             .push_back(OutboundFrame::Grouped { encoded, frames });
@@ -524,7 +513,7 @@ impl Shared {
         let frames = self
             .compact_tree_messages(client, force)
             .into_iter()
-            .map(|message| zz_protocol::encode_protocol_message(&message))
+            .map(|message| zz_protocol::encode_protocol_message(&message).map(OutboundFrame::from))
             .collect::<Result<Vec<_>, _>>();
         match frames {
             Ok(frames) if !frames.is_empty() => {
@@ -564,7 +553,7 @@ impl Shared {
                     view_only.push(client);
                 }
             }
-            let mut sends = BTreeMap::<ClientId, (Arc<OutboundMailbox>, Vec<Vec<u8>>)>::new();
+            let mut sends = BTreeMap::<ClientId, (Arc<OutboundMailbox>, Vec<OutboundFrame>)>::new();
             for (scope, clients) in groups {
                 let before = inner.ctrl_trees.get(&scope).cloned().unwrap_or_default();
                 let mut raw = shared_tree(&inner, &snapshot, scope, &facts);
@@ -605,7 +594,7 @@ impl Shared {
                                 .entry(client)
                                 .or_insert_with(|| (Arc::clone(&outbound), Vec::new()))
                                 .1
-                                .push(encoded.to_vec());
+                                .push(encoded.into());
                         }
                         inner.ctrl_tree_versions.insert(client, raw.generation);
                     }
@@ -619,7 +608,7 @@ impl Shared {
                                 .entry(client)
                                 .or_insert_with(|| (outbound, Vec::new()))
                                 .1
-                                .push(encoded);
+                                .push(encoded.into());
                         }
                     }
                 }
@@ -638,7 +627,7 @@ impl Shared {
                                 (Arc::clone(&inner.subscribers[&client]), Vec::new())
                             })
                             .1
-                            .push(encoded);
+                            .push(encoded.into());
                     }
                 }
             }
@@ -1013,8 +1002,8 @@ impl Shared {
                 ];
                 let frames = completion
                     .iter()
-                    .map(|message| outbound.encode_message(message))
-                    .collect::<Result<_, _>>();
+                    .map(|message| outbound.encode_message(message).map(OutboundFrame::from))
+                    .collect::<Result<Vec<_>, _>>();
                 if !frames.is_ok_and(|frames| outbound.enqueue_control_group(frames)) {
                     for message in &completion {
                         let _ = outbound.enqueue_reliable(message);

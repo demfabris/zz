@@ -2029,7 +2029,7 @@ enum OutboundFrame {
     Shared(Arc<[u8]>),
     Grouped {
         encoded: Vec<u8>,
-        frames: Vec<Vec<u8>>,
+        frames: Vec<OutboundFrame>,
     },
 }
 

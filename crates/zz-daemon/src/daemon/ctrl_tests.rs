@@ -20,13 +20,94 @@ fn fanout_keeps_one_shared_encoded_frame() {
 }
 
 #[test]
+fn scoped_tree_group_keeps_shared_children_through_flush_and_writer_completion() {
+    let shared = Arc::new(Shared::new(53));
+    let mut context = ExecutionContext::default();
+    shared
+        .inner
+        .lock()
+        .engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new("new-session", ["-d", "-s", "shared-tree"]),
+        )
+        .expect("model session");
+    let subscriptions = zz_protocol::Subscriptions {
+        tree: zz_protocol::TreeSubscription::All,
+        status: false,
+        options: 0,
+        keys: zz_protocol::KeySubscription::None,
+        pane_stream: false,
+    };
+    let (first_client, first) = compact_registered(&shared, subscriptions);
+    let (second_client, second) = compact_registered(&shared, subscriptions);
+    for (client, mailbox) in [(first_client, &first), (second_client, &second)] {
+        shared.send_compact_state(client, mailbox, true);
+        reliable_children(mailbox);
+    }
+    shared
+        .inner
+        .lock()
+        .engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new("rename-session", ["-t", "shared-tree", "renamed"]),
+        )
+        .expect("rename session");
+    shared.publish_compact_trees();
+    let children = [&first, &second].map(|mailbox| {
+        let state = mailbox.state.lock();
+        let Some(OutboundFrame::Grouped { frames, .. }) = state.reliable.front() else {
+            panic!("tree publication was not grouped")
+        };
+        let OutboundFrame::Shared(frame) = &frames[0] else {
+            panic!("tree child was copied")
+        };
+        Arc::clone(frame)
+    });
+    assert!(Arc::ptr_eq(&children[0], &children[1]));
+    assert!(first.flush_control_batch(false));
+    {
+        let state = first.state.lock();
+        let Some(OutboundFrame::Grouped { frames, .. }) = state.reliable.front() else {
+            panic!("tree flush was not grouped")
+        };
+        let OutboundFrame::Shared(frame) = &frames[0] else {
+            panic!("tree flush copied its child")
+        };
+        assert!(Arc::ptr_eq(frame, &children[1]));
+    }
+    let mut pending = Vec::new();
+    for mailbox in [&first, &second] {
+        assert!(mailbox.recv_batch(&mut pending, MAX_OUTBOUND_BYTES));
+        let ProtocolMessage::Batch(batch) =
+            zz_protocol::decode_protocol_frame(&pending[0]).expect("decode tree batch")
+        else {
+            panic!("missing tree batch")
+        };
+        assert!(matches!(
+            batch.messages().expect("flat tree").as_slice(),
+            [ProtocolMessage::Event(Event {
+                payload: EventPayload::TreeDelta(_) | EventPayload::Snapshot(_),
+                ..
+            })]
+        ));
+        mailbox.finish_batch(&mut pending);
+        let state = mailbox.state.lock();
+        assert_eq!(state.recycled_frames.len(), 1);
+        assert!(state.recycled_capacity <= MAX_RECYCLED_FRAME_CAPACITY);
+    }
+    assert_eq!(Arc::strong_count(&children[0]), 2);
+}
+
+#[test]
 fn compact_batch_flush_keeps_existing_groups_flat() {
     let mailbox = OutboundMailbox::new();
     let buffer = Vec::with_capacity(4096);
     let allocation = buffer.as_ptr();
     mailbox.recycle_frame(buffer);
     let child = zz_protocol::encode_protocol_message(&ProtocolMessage::TreeSync).expect("encode");
-    assert!(mailbox.enqueue_control_group(vec![child]));
+    assert!(mailbox.enqueue_control_group(vec![child.into()]));
     assert!(mailbox.flush_control_batch(false));
     assert!(mailbox.flush_control_batch(false));
     assert!(matches!(
@@ -54,7 +135,7 @@ fn completed_group_reuses_its_buffers_after_the_writer_finishes() {
         .expect("encode child");
     let allocation = child.as_ptr();
     let child_capacity = child.capacity();
-    assert!(mailbox.enqueue_control_group(vec![child]));
+    assert!(mailbox.enqueue_control_group(vec![child.into()]));
     let mut frames = Vec::new();
     assert!(mailbox.recv_batch(&mut frames, MAX_OUTBOUND_BYTES));
     let wire_bytes = frames[0].len();
@@ -106,7 +187,7 @@ fn grouped_buffer_recycling_keeps_limits_and_shared_ownership() {
             OutboundFrame::Grouped {
                 encoded: Vec::with_capacity(MAX_RECYCLED_FRAME_CAPACITY + 1),
                 frames: (0..=MAX_RECYCLED_FRAME_BUFFERS)
-                    .map(|_| Vec::with_capacity(16))
+                    .map(|_| Vec::with_capacity(16).into())
                     .collect(),
             },
         );
@@ -119,8 +200,8 @@ fn grouped_buffer_recycling_keeps_limits_and_shared_ownership() {
         OutboundFrame::Grouped {
             encoded: Vec::with_capacity(MAX_RECYCLED_FRAME_CAPACITY / 2),
             frames: vec![
-                Vec::with_capacity(MAX_RECYCLED_FRAME_CAPACITY / 2),
-                Vec::with_capacity(MAX_RECYCLED_FRAME_CAPACITY / 2),
+                Vec::with_capacity(MAX_RECYCLED_FRAME_CAPACITY / 2).into(),
+                Vec::with_capacity(MAX_RECYCLED_FRAME_CAPACITY / 2).into(),
             ],
         },
     );
@@ -132,7 +213,7 @@ fn grouped_buffer_recycling_keeps_limits_and_shared_ownership() {
         &mut state,
         OutboundFrame::Grouped {
             encoded: Vec::with_capacity(16),
-            frames: vec![Vec::with_capacity(16)],
+            frames: vec![Vec::with_capacity(16).into()],
         },
     );
     assert!(state.recycled_frames.is_empty());
@@ -206,7 +287,9 @@ fn quiet_control_release_cannot_flush_an_attach_collector() {
             mailbox.enqueue_reliable(&ProtocolMessage::TreeSync)
         } else {
             mailbox.enqueue_control_group(vec![
-                zz_protocol::encode_protocol_message(&ProtocolMessage::TreeSync).expect("encode"),
+                zz_protocol::encode_protocol_message(&ProtocolMessage::TreeSync)
+                    .expect("encode")
+                    .into(),
             ])
         };
         assert!(admitted);
@@ -1029,7 +1112,11 @@ fn forced_attachment_stays_after_an_older_pending_publication() {
     let still_unattached = shared.inner.lock().ctrl_views[&client].session.is_none();
     let older = older
         .iter()
-        .map(|message| zz_protocol::encode_protocol_message(message).expect("old publication"))
+        .map(|message| {
+            zz_protocol::encode_protocol_message(message)
+                .expect("old publication")
+                .into()
+        })
         .collect();
     assert!(mailbox.enqueue_control_group(older));
     drop(publication_lock);

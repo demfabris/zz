@@ -109,8 +109,8 @@ pub use style::{
     parse_styled_segments, parse_tmux_colour, valid_style,
 };
 pub use terminal_codec::{
-    decode_protocol_frame, encode_protocol_message, encode_protocol_message_into,
-    encode_terminal_patch_event_into, encode_terminal_viewport_event,
+    decode_protocol_frame, encode_batch_frames_into, encode_protocol_message,
+    encode_protocol_message_into, encode_terminal_patch_event_into, encode_terminal_viewport_event,
     encode_terminal_viewport_event_into, read_protocol_message, read_protocol_message_into,
     write_protocol_message,
 };

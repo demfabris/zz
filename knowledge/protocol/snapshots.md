@@ -4,14 +4,14 @@ title: Mux snapshots (snapshot.rs)
 description: The MuxSnapshot state tree (sessions, windows, recursive split layouts, pane descriptors, behavior flags, per-client focus, and viewer presence) that clients reconcile on attach and after a resync.
 resource: crates/zz-protocol/src/snapshot.rs
 tags: [protocol, snapshot, layout, state, presence]
-timestamp: 2026-08-21T12:00:00-03:00
+timestamp: 2026-09-30T00:00:00-03:00
 ---
 
 # Overview
 
 A **`MuxSnapshot`** is the complete, renderer-neutral picture of the daemon's session/window/pane/split
-tree at a point in time. Defined in `crates/zz-protocol/src/snapshot.rs`, it is what an interactive client
-receives on attachment, on ordinary mux-state changes, and during an explicit repair.
+tree at a point in time. Defined in `crates/zz-protocol/src/snapshot.rs`, it is the model an interactive client
+materializes from its initial state, tree deltas and per-client view.
 The snapshot carries *structure and metadata* (layout, titles, active/zoomed panes, pane kind). It
 deliberately does **not** carry terminal cell contents, which stream separately over the
 [packed terminal lanes](/protocol/terminal-lanes.md). A monotonically increasing `generation` counter
@@ -20,18 +20,24 @@ entities, reusing them by stable [`PaneId`](/protocol/ids.md).
 
 # When it is produced and consumed
 
-- **Attach**: the daemon replies with `ProtocolMessage::Attached { session: SessionId, snapshot }`
-  (see [wire protocol](/protocol/wire-protocol.md)). Other clients already attached to that session
-  stay attached.
-- **Event push**: also delivered as `EventPayload::Snapshot(MuxSnapshot)` inside an ordered `Event`.
-  Each subscriber gets its own copy, stamped with that client's focus and presence.
-- **Resync**: an interactive client can send `ProtocolMessage::Resync` on an error path, and the
-  daemon answers with a fresh full snapshot. Clients do not treat a sequence gap as loss because
-  the daemon can consume sequence numbers while superseding stale terminal frames. Overlays like
-  the command prompt, choose-tree, and buffer chooser survive a resync by reconciling against the
-  new snapshot.
-- Produced by [zz-daemon](/crates/zz-daemon.md) from [the mux state machine](/crates/zz-mux.md); consumed by
-  every attached client.
+The daemon sends one raw scoped snapshot in the initial attach or repair `Batch`, then sends
+`TreeDelta { base, version, ops }` on tree changes. The client retains the raw tree and applies a
+separate `ClientView` overlay to expose the same `MuxSnapshot` renderer model. Tree subscriptions
+select no tree, the attached session, or all sessions. The daemon sends no event for an empty diff.
+
+A delta applies only when its base equals the retained tree generation. On a mismatch the client
+queues `TreeSync` and keeps its current tree until the daemon supplies a fresh scoped snapshot.
+Event sequence gaps alone do not trigger repair: the daemon can supersede stale terminal frames.
+
+`ClientView` supplies the client's focus, presence and presentation fields, plus layout and
+attachment generations. A reattach increments the attachment generation even for the same
+session, clearing overlays and terminal bases once. Ordinary label or presence updates keep the
+attachment generation. Geometry reports name the layout generation the client rendered, so the
+daemon can reject a late report after zoom, unzoom or another layout change.
+
+The legacy `Attached` and `Snapshot` forms remain usable by internal fixtures. Normal control
+plane v2 clients receive grouped state and deltas. Produced by [zz-daemon](/crates/zz-daemon.md)
+from [the mux state machine](/crates/zz-mux.md), and consumed by the desktop, TUI, web and iOS clients.
 
 # Schema . the snapshot tree
 
@@ -70,7 +76,7 @@ is the strip in order (never empty in the type's contract; `url()` returns the a
 the daemon's terminal watcher; automatic Unix Bash/zsh hooks publish the working directory at a
 prompt and the full command immediately before execution, while applications may override either
 with later OSC 0/2 output. Browser document-title changes arrive through tmux-compatible
-`select-pane -T`. Either title change advances `generation` and publishes a fresh snapshot without
+`select-pane -T`. Either title change advances `generation` and publishes a tree delta without
 renaming the containing window.
 
 `layout_dump` and `visible_layout_dump` carry tmux's checksummed cell-tree strings. Protocol v69
@@ -103,8 +109,7 @@ travel through the separate Agent protocol lanes rather than the mux snapshot.
 ## Per-client stamping and presence
 
 A session holds a set of attached clients, so the tree alone cannot say which window a given device
-is looking at. The daemon stamps each copy of the snapshot for its recipient just before publishing
-it: `MuxSnapshot.focused_window` is that client's own focused window, and every
+is looking at. The daemon sends the recipient-specific fields in a `ClientView` overlay: `MuxSnapshot.focused_window` is that client's own focused window, and every
 `SessionSnapshot.viewers` entry gets `is_self` set for the receiving client. Both fields carry
 `#[serde(default)]`.
 

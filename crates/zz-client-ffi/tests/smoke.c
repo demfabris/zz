@@ -197,6 +197,10 @@ int main(int argc, char **argv) {
         fprintf(stderr, "smoke: initial hello event was not queued\n");
         return 1;
     }
+    if ((zz_client_capabilities(client) & ZZ_CAP_CONTROL_PLANE_V2) == 0) {
+        fprintf(stderr, "smoke: compact control capability missing\n");
+        return 1;
+    }
     if (!zz_client_attach(client, "smoke")) {
         fprintf(stderr, "smoke: attach request send failed\n");
         return 1;
@@ -283,12 +287,14 @@ int main(int argc, char **argv) {
             found_session = session_shape && current_windows == 1 && inactive_windows == 1;
         }
     }
+    uint64_t layout_generation = zz_snapshot_layout_generation(snapshot);
     zz_snapshot_release(snapshot);
     if (!found_session) {
         fprintf(stderr, "smoke: attached session metadata is incomplete\n");
         return 1;
     }
-    if (!zz_client_resize_terminal(client, pane, 80, 24, 8, 16)) {
+    if (!zz_client_resize_terminal_for_layout(client, pane, 80, 24, 8, 16,
+                                               layout_generation)) {
         fprintf(stderr, "smoke: resize failed\n");
         return 1;
     }
@@ -361,6 +367,17 @@ int main(int argc, char **argv) {
     uint64_t created_pane = 0;
     if (!wait_for_attached_shape(client, "smoke", session_count + 1, 1,
                                  &created_session, &created_pane)) {
+        zz_mux_snapshot *failed = zz_client_snapshot_acquire(client);
+        fprintf(stderr, "smoke: session count %zu\n", zz_snapshot_session_count(failed));
+        for (size_t index = 0; index < zz_snapshot_session_count(failed); index++) {
+            zz_bytes name = zz_snapshot_session_name(failed, index);
+            fprintf(stderr, "smoke: session %llu %.*s attached=%d panes=%zu\n",
+                    (unsigned long long)zz_snapshot_session_id(failed, index),
+                    (int)name.len, name.ptr,
+                    zz_snapshot_session_is_attached(failed, index),
+                    zz_snapshot_session_pane_count(failed, index));
+        }
+        zz_snapshot_release(failed);
         fprintf(stderr, "smoke: new session was not created and attached\n");
         return 1;
     }

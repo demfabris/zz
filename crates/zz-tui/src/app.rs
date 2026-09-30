@@ -467,16 +467,7 @@ impl TuiExit {
 }
 
 pub(crate) enum InitialAttach {
-    Request {
-        target: Option<String>,
-        detach_others: bool,
-        read_only: bool,
-        client_flags: Option<String>,
-    },
-    AlreadyAttached {
-        session: zz_protocol::SessionId,
-        messages: Vec<ProtocolMessage>,
-    },
+    Connected { messages: Vec<ProtocolMessage> },
 }
 
 pub(crate) fn run(
@@ -490,58 +481,19 @@ pub(crate) fn run(
     fleet_hosts: Vec<HostEntry>,
     browser_provider: Option<Box<dyn BrowserFrameProvider>>,
 ) -> Result<(), String> {
-    let (attach_target, attach_request, mut read_only, mut client_flags, initial_messages, attempt) =
-        match initial_attach {
-            InitialAttach::Request {
-                target,
-                detach_others,
-                read_only,
-                client_flags,
-            } => {
-                let attempt = if target.is_some() {
-                    AttachAttempt::Explicit
-                } else {
-                    AttachAttempt::Default
-                };
-                (
-                    target.unwrap_or_default(),
-                    Some(detach_others),
-                    read_only,
-                    client_flags,
-                    Vec::new(),
-                    attempt,
-                )
-            }
-            InitialAttach::AlreadyAttached { session, messages } => (
-                session.to_string(),
-                None,
-                false,
-                None,
-                messages,
-                AttachAttempt::Explicit,
-            ),
-        };
+    let InitialAttach::Connected {
+        messages: initial_messages,
+    } = initial_attach;
+    let mut read_only = false;
+    let mut client_flags = None;
+    let attempt = AttachAttempt::Explicit;
     let size = TerminalSize::detect().map_err(|error| error.to_string())?;
     let mut core = seeded_core(initial.server_hello().clone());
     let TerminalOptions {
         extended_keys,
         focus_events,
-    } = terminal_options.unwrap_or_else(|| TerminalOptions {
-        extended_keys: crate::tty::extended_keys_option(&endpoint),
-        focus_events: crate::tty::focus_events_option(&endpoint),
-    });
+    } = terminal_options.unwrap_or_default();
     let mut client = Arc::new(initial);
-    if let Some(detach_others) = attach_request {
-        client
-            .attach_session(
-                attach_target.clone(),
-                detach_others,
-                read_only,
-                client_flags.as_deref(),
-            )
-            .map_err(|error| error.to_string())?;
-    }
-
     let escape_time = Arc::new(AtomicU64::new(escape_timeout_ms(
         lock_core(&core).mux_options(),
     )));
@@ -566,9 +518,7 @@ pub(crate) fn run(
         local_endpoint,
         fleet_hosts,
     );
-    if attach_request.is_some() {
-        model.begin_client_focus_attach();
-    }
+    model.begin_client_focus_attach();
     let mut renderer = Renderer::new();
     let mut browser = BrowserState::new(browser_provider);
     let mut kitty_probe = KittyProbe::new(
@@ -864,7 +814,8 @@ pub(crate) fn run(
                         model.set_size(size);
                         if size.columns > 0 && size.rows > 0 && !same_grid {
                             client
-                                .send_input(InputMessage::ClientTerminalSize {
+                                .send_input(InputMessage::ClientTerminalSizeV2 {
+                                    layout_generation: model.layout_generation,
                                     columns: size.columns,
                                     rows: size.rows,
                                 })
@@ -1016,7 +967,8 @@ pub(crate) fn run(
                     crate::overlay::close_display_panes_on_resize(&model, &client, previous)?;
                     if size.columns > 0 && size.rows > 0 {
                         client
-                            .send_input(InputMessage::ClientTerminalSize {
+                            .send_input(InputMessage::ClientTerminalSizeV2 {
+                                layout_generation: model.layout_generation,
                                 columns: size.columns,
                                 rows: size.rows,
                             })
@@ -1190,23 +1142,34 @@ fn exec_client_command(shell: &str, _command: &str) -> String {
     format!("{shell}: detach-client -E needs a Unix client")
 }
 
-fn connect(endpoint: &Endpoint) -> Result<InteractiveClient, String> {
-    InteractiveClient::connect_endpoint_without_theme(endpoint, true)
-        .map_err(|error| error.to_string())
-}
-
 fn prepare_connection(
     endpoint: &Endpoint,
     attach_target: String,
     read_only: bool,
     client_flags: Option<&str>,
 ) -> Result<PreparedConnection, String> {
-    let client = connect(endpoint)?;
+    let mut args = Vec::new();
+    if read_only {
+        args.push("-r".to_owned());
+    }
+    if let Some(flags) = client_flags {
+        args.extend(["-f".to_owned(), flags.to_owned()]);
+    }
+    if !attach_target.is_empty() {
+        args.extend(["-t".to_owned(), attach_target]);
+    }
+    let client = InteractiveClient::connect_endpoint_with_attach(
+        endpoint,
+        zz_protocol::AttachOperation::Commands(vec![zz_protocol::PreparedCommand {
+            invocation: CommandInvocation::new("attach-session", args),
+            canonical_name: Some("attach-session".to_owned()),
+            alias_matched: false,
+            result: zz_protocol::PreparedCommandResult::Ready,
+        }]),
+    )
+    .map_err(|error| error.to_string())?;
     let core = seeded_core(client.server_hello().clone());
     let client = Arc::new(client);
-    client
-        .attach_session(attach_target, false, read_only, client_flags)
-        .map_err(|error| error.to_string())?;
     Ok(PreparedConnection { client, core })
 }
 
@@ -1252,8 +1215,8 @@ fn refresh_terminal_options(model: &mut Model, core: &Mutex<ClientCore>, escape_
     escape_time.store(escape_timeout_ms(options), Ordering::Relaxed);
     model.mouse_option = mouse_option_enabled(options);
     model.focus_follows_mouse = focus_follows_mouse_enabled(options);
-    model.mouse_bindings = mouse_binding_names(core.key_tables());
-    model.copy_mouse_bindings = copy_mouse_binding_names(core.key_tables());
+    model.mouse_bindings = core.mouse_bindings().keys().into_iter().collect();
+    model.copy_mouse_bindings = core.mouse_bindings().copy_keys().into_iter().collect();
 }
 
 /// Every mouse key name the ROOT table carries a binding for. The raw TUI only
@@ -1263,63 +1226,17 @@ fn refresh_terminal_options(model: &mut Model, core: &Mutex<ClientCore>, escape_
 /// would have been swallowed here for nothing, so the client offers exactly
 /// the names the daemon's own lookup can reach: root always, and the mode
 /// tables below when the pane the pointer landed on holds a mode.
+#[cfg(test)]
 pub(crate) fn mouse_binding_names(
     tables: &[zz_protocol::KeyTableSnapshot],
 ) -> std::collections::HashSet<String> {
-    mouse_names_in(tables, |name| name == "root")
-}
-
-/// `server_client_handle_key`: with the client on its default key table and
-/// the pane the pointer resolved to in a mode, the table a mouse key is looked
-/// up in is that mode's own, `wme->mode->key_table(wme)`. Either copy table
-/// can be the effective one - the window's `mode-keys` decides - so a name
-/// bound in either is reachable from a gesture and the client offers both.
-pub(crate) fn copy_mouse_binding_names(
-    tables: &[zz_protocol::KeyTableSnapshot],
-) -> std::collections::HashSet<String> {
-    mouse_names_in(tables, |name| matches!(name, "copy-mode" | "copy-mode-vi"))
-}
-
-fn mouse_names_in(
-    tables: &[zz_protocol::KeyTableSnapshot],
-    wanted: impl Fn(&str) -> bool,
-) -> std::collections::HashSet<String> {
-    tables
-        .iter()
-        .filter(|table| wanted(&table.name))
-        .flat_map(|table| table.bindings.iter())
-        .filter(|binding| is_mouse_key_name(&binding.key))
-        .map(|binding| binding.key.clone())
+    zz_protocol::MouseBindings::from_tables(tables)
+        .keys()
+        .into_iter()
         .collect()
 }
 
-fn is_mouse_key_name(key: &str) -> bool {
-    let base = key.rsplit_once('-').map_or(key, |(_, base)| base);
-    base.starts_with("MouseDown")
-        || base.starts_with("MouseUp")
-        || base.starts_with("MouseDrag")
-        || base.starts_with("WheelUp")
-        || base.starts_with("WheelDown")
-        || base.starts_with("SecondClick")
-        || base.starts_with("DoubleClick")
-        || base.starts_with("TripleClick")
-}
-
-/// `server_client_reset_state`: the mode starts as the overlay's screen mode
-/// when one is drawn and the active pane's otherwise, and only then does the
-/// `mouse` option speak. With the option on and no overlay the pin clears all
-/// three trackings and raises `MODE_MOUSE_ALL` for a pane that asked for it;
-/// `focus-follows-mouse` raises it too, and anything short of it settles on
-/// `MODE_MOUSE_BUTTON`. A menu carries `MODE_MOUSE_ALL` of its own only when
-/// it is not `MENU_NOMOUSE` (`menu.c` `menu_prepare` raises the two mouse
-/// modes on the overlay screen behind `~md->flags & MENU_NOMOUSE`, and
-/// `cmd-display-menu.c` sets that flag for a menu raised with neither `-M`
-/// nor an invoking mouse event, which is every menu a key binding raises).
-/// `MenuState::mouse_keys` is that flag inverted, so a `MENU_NOMOUSE` menu
-/// asks for no tracking of its own and the option decides alone. With the
-/// option off nothing is added and the overlay's or the pane's own request is
-/// what the outer terminal sees.
-pub(crate) fn desired_mouse_arming(model: &Model) -> MouseArming {
+fn desired_mouse_arming(model: &Model) -> MouseArming {
     let overlay_any = if let Some(menu) = model.menu.as_ref() {
         Some(menu.mouse_keys)
     } else {
@@ -1457,9 +1374,12 @@ fn spawn_protocol_reader(
                     let mut core = lock_core(&core);
                     core.handle_message(message);
                     while let Some(outbound) = core.poll_outbound() {
-                        let Outbound::RequestFull(pane) = outbound;
-                        if let Err(error) = client.request_full(pane) {
-                            log::warn!("failed to request a full viewport for {pane}: {error}");
+                        let request = match outbound {
+                            Outbound::RequestFull(pane) => client.request_full(pane),
+                            Outbound::TreeSync => client.request_tree_sync(),
+                        };
+                        if let Err(error) = request {
+                            log::warn!("failed to synchronize the terminal client: {error}");
                         }
                     }
                     let mut forwarded = Vec::new();
@@ -1713,6 +1633,7 @@ fn handle_core_event(
                     .collect();
                 (snapshot, viewports)
             };
+            model.layout_generation = lock_core(core).layout_generation();
             model.update_snapshot(snapshot);
             model.viewports = viewports;
             if let Some(input) = model.finish_client_focus_attach() {
@@ -1729,7 +1650,11 @@ fn handle_core_event(
         }
         CoreEvent::SnapshotChanged => {
             let before = model.paint_structure();
-            model.update_snapshot(Arc::clone(lock_core(core).snapshot()));
+            {
+                let core = lock_core(core);
+                model.layout_generation = core.layout_generation();
+                model.update_snapshot(Arc::clone(core.snapshot()));
+            }
             Ok(
                 if !*crate::COALESCE || model.paint_structure() != before {
                     ProtocolOutcome::RepaintAll
@@ -2261,12 +2186,13 @@ fn send_resizes(model: &mut Model, client: &InteractiveClient) -> Result<(), Str
             continue;
         }
         client
-            .send_input(InputMessage::ResizeTerminal {
+            .send_input(InputMessage::ResizeTerminalV2 {
                 pane,
                 columns,
                 rows,
                 cell_width_px,
                 cell_height_px,
+                layout_generation: model.layout_generation,
             })
             .map_err(|error| error.to_string())?;
         model.last_sent_geometry.insert(pane, geometry);

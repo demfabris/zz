@@ -958,6 +958,7 @@ struct HostConnection {
     reconnect_attach: Option<ReconnectAttachState>,
     in_flight_commands: RwLock<VecDeque<(u64, String)>>,
     ssh_auth_declined: bool,
+    background_core: ClientCore,
 }
 
 impl HostConnection {
@@ -985,6 +986,7 @@ impl HostConnection {
             reconnect_attach: None,
             in_flight_commands: RwLock::new(VecDeque::new()),
             ssh_auth_declined: false,
+            background_core: ClientCore::new(),
         }
     }
 
@@ -1056,6 +1058,7 @@ impl HostConnection {
             reconnect_attach: None,
             in_flight_commands: RwLock::new(VecDeque::new()),
             ssh_auth_declined: false,
+            background_core: ClientCore::new(),
         })
     }
 
@@ -1435,14 +1438,16 @@ impl MuxClient {
         self.ingest_server_hello(client.server_hello().clone(), cx);
         let client = Arc::new(client);
         crate::config::register_config_override_client(&client, false, cx);
-        match std::env::current_dir()
-            .ok()
-            .filter(|directory| directory.is_dir())
-        {
-            Some(directory) => client.attach_default_in(&directory),
-            None => client.attach(""),
+        if !client.is_initially_attached() {
+            match std::env::current_dir()
+                .ok()
+                .filter(|directory| directory.is_dir())
+            {
+                Some(directory) => client.attach_default_in(&directory),
+                None => client.attach(""),
+            }
+            .map_err(|error| error.to_string())?;
         }
-        .map_err(|error| error.to_string())?;
         let connection = HostConnection::connected(client, HostId::LOCAL, cx)
             .map_err(|error| error.to_string())?;
         self.connections.insert(HostId::LOCAL, connection);
@@ -2866,6 +2871,30 @@ impl MuxClient {
             sink.borrow_mut().push(input);
             return true;
         }
+        let input = match input {
+            InputMessage::ResizeTerminal {
+                pane,
+                columns,
+                rows,
+                cell_width_px,
+                cell_height_px,
+            } => InputMessage::ResizeTerminalV2 {
+                pane,
+                columns,
+                rows,
+                cell_width_px,
+                cell_height_px,
+                layout_generation: self.core.layout_generation(),
+            },
+            InputMessage::ClientTerminalSize { columns, rows } => {
+                InputMessage::ClientTerminalSizeV2 {
+                    columns,
+                    rows,
+                    layout_generation: self.core.layout_generation(),
+                }
+            }
+            input => input,
+        };
         let sent = if let Some(client) = &self.attached_connection().client {
             if let Err(error) = client.send_input(input) {
                 log::warn!("failed to send mux input: {error}");
@@ -3982,12 +4011,106 @@ impl MuxClient {
     }
 
     fn handle_message(&mut self, host: HostId, message: ProtocolMessage, cx: &mut Context<Self>) {
+        let message = match message {
+            ProtocolMessage::Batch(batch) => {
+                match batch.messages() {
+                    Ok(messages) => {
+                        let attached_before = self.core.attached_session();
+                        let active = host == self.attached_host;
+                        if active {
+                            self.core.begin_event_group();
+                        }
+                        if let Some(connection) = self.connections.get_mut(&host) {
+                            connection.background_core.begin_event_group();
+                        }
+                        for message in messages {
+                            self.handle_message(host, message, cx);
+                        }
+                        if let Some(connection) = self.connections.get_mut(&host) {
+                            connection.background_core.finish_event_group();
+                            connection.snapshot =
+                                Some(Arc::clone(connection.background_core.snapshot()));
+                            while let Some(outbound) = connection.background_core.poll_outbound() {
+                                if !active
+                                    && matches!(outbound, Outbound::TreeSync)
+                                    && let Some(client) = &connection.client
+                                {
+                                    let _ = client.send(&ProtocolMessage::TreeSync);
+                                }
+                            }
+                            while connection.background_core.poll_event().is_some() {}
+                        }
+                        if active {
+                            self.core.finish_event_group();
+                            while let Some(outbound) = self.core.poll_outbound() {
+                                match outbound {
+                                    Outbound::RequestFull(pane) => self.request_full_viewport(pane),
+                                    Outbound::TreeSync => {
+                                        if let Some(client) = &self.attached_connection().client {
+                                            let _ = client.send(&ProtocolMessage::TreeSync);
+                                        }
+                                    }
+                                }
+                            }
+                            let mut attaching = true;
+                            while let Some(event) = self.core.poll_event() {
+                                self.apply_core_event(
+                                    host,
+                                    event,
+                                    attached_before,
+                                    &mut attaching,
+                                    cx,
+                                );
+                            }
+                        }
+                        cx.notify();
+                    }
+                    Err(error) => {
+                        self.error = Some(Arc::from(error.to_string()));
+                        cx.notify();
+                    }
+                }
+                return;
+            }
+            message => message,
+        };
+        if host == self.attached_host
+            && let ProtocolMessage::Event(event) = &message
+            && matches!(
+                event.payload,
+                EventPayload::Snapshot(_)
+                    | EventPayload::TreeDelta(_)
+                    | EventPayload::ClientView(_)
+            )
+            && let Some(connection) = self.connections.get_mut(&host)
+        {
+            connection.background_core.handle_message(message.clone());
+            while connection.background_core.poll_event().is_some() {}
+            while connection.background_core.poll_outbound().is_some() {}
+        }
         if host != self.attached_host {
             match message {
                 ProtocolMessage::Event(event) => match event.payload {
-                    EventPayload::Snapshot(snapshot) => {
+                    payload @ (EventPayload::Snapshot(_)
+                    | EventPayload::TreeDelta(_)
+                    | EventPayload::ClientView(_)) => {
                         if let Some(connection) = self.connections.get_mut(&host) {
-                            connection.snapshot = Some(Arc::new(snapshot));
+                            connection
+                                .background_core
+                                .handle_message(ProtocolMessage::Event(Event {
+                                    sequence: event.sequence,
+                                    payload,
+                                }));
+                            connection.snapshot =
+                                Some(Arc::clone(connection.background_core.snapshot()));
+                            while let Some(outbound) = connection.background_core.poll_outbound() {
+                                if matches!(outbound, Outbound::TreeSync)
+                                    && let Some(client) = &connection.client
+                                {
+                                    let _ = client.send(&ProtocolMessage::TreeSync);
+                                }
+                            }
+                            while connection.background_core.poll_event().is_some() {}
                             cx.notify();
                         }
                     }
@@ -4078,6 +4201,11 @@ impl MuxClient {
                 while let Some(outbound) = self.core.poll_outbound() {
                     match outbound {
                         Outbound::RequestFull(pane) => self.request_full_viewport(pane),
+                        Outbound::TreeSync => {
+                            if let Some(client) = &self.attached_connection().client {
+                                let _ = client.send(&ProtocolMessage::TreeSync);
+                            }
+                        }
                     }
                 }
                 let mut attaching = false;
@@ -5337,7 +5465,7 @@ mod tests {
         description: &str,
         mut predicate: impl FnMut(&MuxClient) -> bool,
     ) {
-        const DEADLINE: Duration = Duration::from_mins(1);
+        const DEADLINE: Duration = Duration::from_secs(20);
 
         let deadline = Instant::now() + DEADLINE;
         loop {
@@ -5363,7 +5491,13 @@ mod tests {
                             )
                         })
                         .collect();
-                    format!("error={:?}; {}", mux.error, hosts.join("; "))
+                    format!(
+                        "error={:?}; attached={:?}; chooser={}; {}",
+                        mux.error,
+                        mux.core.attached_session(),
+                        mux.core.choose_tree().is_some(),
+                        hosts.join("; ")
+                    )
                 });
                 panic!("timed out waiting for {description}: {details}");
             }
@@ -5395,7 +5529,7 @@ mod tests {
             let (mut stream, _) = listener.accept().expect("accept test client");
             assert!(matches!(
                 read_protocol_message(&mut stream).expect("read ClientHello"),
-                ProtocolMessage::ClientHello(_)
+                ProtocolMessage::ClientHello(_) | ProtocolMessage::Hello(_)
             ));
             write_protocol_message(
                 &mut stream,
@@ -6977,7 +7111,7 @@ mod tests {
             let (mut stream, _) = listener.accept().expect("accept fake remote client");
             assert!(matches!(
                 read_protocol_message(&mut stream).expect("read ClientHello"),
-                ProtocolMessage::ClientHello(_)
+                ProtocolMessage::ClientHello(_) | ProtocolMessage::Hello(_)
             ));
             write_protocol_message(
                 &mut stream,
@@ -7045,7 +7179,7 @@ mod tests {
             let (mut stream, _) = listener.accept().expect("accept reconnected remote client");
             assert!(matches!(
                 read_protocol_message(&mut stream).expect("read reconnect ClientHello"),
-                ProtocolMessage::ClientHello(_)
+                ProtocolMessage::ClientHello(_) | ProtocolMessage::Hello(_)
             ));
             write_protocol_message(
                 &mut stream,
@@ -10605,6 +10739,39 @@ mod tests {
             &*fake.history_requests.borrow(),
             &[(pane, 688, 512), (pane, 688, 512)]
         );
+    }
+
+    #[gpui::test]
+    fn a_batch_keeps_terminal_patches_on_the_retained_history_path(cx: &mut TestAppContext) {
+        let pane = PaneId(78);
+        let (mux, _, initial) = cx.update(|cx| history_backfill_debounce_fixture(cx, pane));
+        let next = history_fixture_viewport(&[1_201, 1_202, 1_203], 2, 1_204, 1_201);
+        let patch = TerminalViewport::diff(&initial, &next).unwrap();
+        let batch = zz_protocol::Batch::from_messages(
+            2,
+            [
+                ProtocolMessage::Event(Event {
+                    sequence: 2,
+                    payload: EventPayload::TerminalPatch { pane, patch },
+                }),
+                ProtocolMessage::Event(Event {
+                    sequence: 3,
+                    payload: EventPayload::StatusChanged {
+                        status: StatusLine::default(),
+                    },
+                }),
+            ],
+        )
+        .unwrap();
+        cx.update(|cx| {
+            mux.update(cx, |mux, cx| {
+                mux.handle_message(HostId::LOCAL, ProtocolMessage::Batch(batch), cx);
+                let retained = mux.viewports[&pane].read();
+                assert_eq!(retained.viewport, next);
+                assert_eq!(retained_history_ids(&retained), vec![1_200]);
+                assert!(mux.core.viewport(pane).is_none());
+            });
+        });
     }
 
     #[gpui::test]

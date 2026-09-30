@@ -548,6 +548,7 @@ fn connect_interactive_client(
         color_scheme,
         &[],
         &[zz_protocol::ClientHello::CLIENT_PATH_PICKER_CAPABILITY],
+        Some(&zz_protocol::AttachOperation::Session(String::new())),
     )
 }
 #[cfg(target_os = "ios")]

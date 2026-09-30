@@ -2222,7 +2222,7 @@ Scope:
   web and iOS rebuild; `knowledge/protocol/wire-protocol.md`, `snapshots.md`.
 
 Write zone: message.rs hello/Welcome/Snapshot/KeyTablesChanged/new messages/MuxOptionKey;
-snapshot.rs TreeDelta ops; daemon.rs functions above, `handle_connection` interactive branch,
+tree_delta.rs TreeDelta ops; daemon.rs functions above, `handle_connection` interactive branch,
 `serve_exec` upgrade hand-off; client.rs `InteractiveClient`; zz-client core; zz-tui lib.rs,
 app.rs, tty.rs; zz-cli lib.rs, control_mode.rs command submission (not notification building);
 crates/zz mux/client.rs, lib.rs, config/mod.rs, workspace/which_key.rs, workspace/view.rs,
@@ -2643,12 +2643,13 @@ deletes most wave-1 fallback paths anyway).
 | `ZZ_PERF_READONLY_SKIP=0` | HOOKS | read-only commands take the before/after captures |
 | `ZZ_PERF_EAGER_FACTS=1` | HOOKS | every command builds format hook facts, and a pane runtime fact change builds them with no rename due |
 | `ZZ_PERF_HOOK_JOURNAL=0` | HOOKS | hook events come from whole-mux snapshots before and after, the command path captures every active window, active pane and bell, and the focus probe captures every window and session |
-| `ZZ_PERF_KEY_TABLE_DELTA=0` | HOOKS | every key table publication is `KeyTablesChanged` with every table, instead of `KeyTablesPatched` with the changed and removed ones |
+| `ZZ_PERF_KEY_TABLE_DELTA=0` | HOOKS | Full subscribers receive every key table instead of the changed and removed tables; Hash subscribers retain their compact revision and mouse bindings |
+| `ZZ_PERF_TREE_DELTA=0` | CTRL | compact subscribers receive full scoped trees for changes instead of TreeDelta; Hello, Welcome and Batch stay on the new wire |
 | `ZZ_PERF_COPY_CLONE=1` | COPY | flat `ModeRevision` clone |
 | `ZZ_PERF_THP=1` | FOOTPRINT (Linux) | the daemon keeps transparent huge pages as the system sets them |
 
-Wire changes (W2-TERM, W2-CTRL) and the thread model (W3, W4) have no runtime switch; rollback is a
-revert. The 8-byte-a-cell frames cannot come back behind a knob: both ends speak one format. `ZZ_PTY_SHARDS=N` is a tuning knob, not a rollback. W2-HOOKS changes that keep behaviour
+Wire changes (W2-TERM, W2-CTRL) and the thread model (W3, W4) require a revert for rollback.
+`ZZ_PERF_TREE_DELTA=0` changes tree publication within the new wire only. The 8-byte-a-cell frames cannot come back behind a knob: both ends speak one format. `ZZ_PTY_SHARDS=N` is a tuning knob, not a rollback. W2-HOOKS changes that keep behaviour
 have no knob either: the catalogue name index, the skipped lookup for empty hook arrays, the sweep
 that runs only after a removal (debug builds assert a skipped one would remove nothing), the
 focus early return and the shared change window (debug builds diff the focus candidates against

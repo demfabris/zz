@@ -491,7 +491,10 @@ fn kitty_image_chunks_precede_the_frame_that_places_them_in_one_batched_write() 
     let mut batch = Vec::new();
     assert!(mailbox.recv_batch(&mut batch, attach::MAX_BATCHED_WRITE_BYTES));
     assert_eq!(batch.len(), 3);
-    assert_eq!(batch[..2], chunks);
+    assert_eq!(
+        batch[..2].iter().map(AsRef::as_ref).collect::<Vec<_>>(),
+        chunks.iter().map(Vec::as_slice).collect::<Vec<_>>()
+    );
     assert_eq!(
         decode_protocol_frame(&batch[2]).expect("decode placing frame"),
         placing
@@ -503,7 +506,13 @@ fn kitty_image_chunks_precede_the_frame_that_places_them_in_one_batched_write() 
         calls: 0,
     };
     attach::write_frames(&mut socket, &batch).expect("batched write");
-    assert_eq!(socket.written, batch.concat());
+    assert_eq!(
+        socket.written,
+        batch
+            .iter()
+            .flat_map(|frame| frame.iter().copied())
+            .collect::<Vec<_>>()
+    );
     let mut whole = Trickle {
         written: Vec::new(),
         limit: usize::MAX,

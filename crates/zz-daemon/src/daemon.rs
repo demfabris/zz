@@ -21,6 +21,9 @@ use std::{
 use parking_lot::{Condvar, Mutex};
 
 mod chooser_presentation;
+mod ctrl;
+#[cfg(test)]
+mod ctrl_tests;
 mod exec;
 #[cfg(test)]
 mod exec_tests;
@@ -2020,9 +2023,53 @@ struct OutboundMailbox {
     ready: Condvar,
 }
 
+#[derive(Clone, Debug)]
+enum OutboundFrame {
+    Owned(Vec<u8>),
+    Shared(Arc<[u8]>),
+}
+
+impl std::ops::Deref for OutboundFrame {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        match self {
+            Self::Owned(frame) => frame,
+            Self::Shared(frame) => frame,
+        }
+    }
+}
+
+impl AsRef<[u8]> for OutboundFrame {
+    fn as_ref(&self) -> &[u8] {
+        self
+    }
+}
+
+impl From<Vec<u8>> for OutboundFrame {
+    fn from(frame: Vec<u8>) -> Self {
+        Self::Owned(frame)
+    }
+}
+
+impl From<Arc<[u8]>> for OutboundFrame {
+    fn from(frame: Arc<[u8]>) -> Self {
+        Self::Shared(frame)
+    }
+}
+
+impl OutboundFrame {
+    fn into_vec(self) -> Vec<u8> {
+        match self {
+            Self::Owned(frame) => frame,
+            Self::Shared(frame) => frame.to_vec(),
+        }
+    }
+}
+
 #[derive(Default)]
 struct OutboundState {
-    reliable: VecDeque<Vec<u8>>,
+    reliable: VecDeque<OutboundFrame>,
     command_output: Option<PendingCommandOutput>,
     agent: BTreeMap<PaneId, PendingAgent>,
     agent_order: VecDeque<PaneId>,
@@ -2043,6 +2090,7 @@ struct OutboundState {
     terminals_held: bool,
     attach_batch: bool,
     buffered: bool,
+    ctrl_collecting: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2160,7 +2208,7 @@ struct PendingCommandOutput {
 struct PendingAgent {
     /// Encoded frames, each tagged with the first sequence it carries: what a
     /// lagged client must replay from.
-    frames: VecDeque<(u64, Vec<u8>)>,
+    frames: VecDeque<(u64, OutboundFrame)>,
     bytes: usize,
 }
 
@@ -2300,6 +2348,20 @@ impl OutboundMailbox {
 
     #[must_use]
     fn enqueue_reliable(&self, message: &ProtocolMessage) -> bool {
+        let encoded = match self.encode_message(message) {
+            Ok(encoded) => encoded,
+            Err(error) => {
+                log::error!(
+                    target: "zz_daemon::diagnostics::outbound",
+                    "failed to encode outbound control message: {error}"
+                );
+                return false;
+            }
+        };
+        self.enqueue_reliable_frame(message, encoded.into())
+    }
+
+    fn enqueue_reliable_frame(&self, message: &ProtocolMessage, encoded: OutboundFrame) -> bool {
         let removed_pane = match message {
             ProtocolMessage::Event(Event {
                 payload: EventPayload::PaneRemoved(pane),
@@ -2325,16 +2387,6 @@ impl OutboundMailbox {
                 ..
             }) => Some(*output_id),
             _ => None,
-        };
-        let encoded = match self.encode_message(message) {
-            Ok(encoded) => encoded,
-            Err(error) => {
-                log::error!(
-                    target: "zz_daemon::diagnostics::outbound",
-                    "failed to encode outbound control message: {error}"
-                );
-                return false;
-            }
         };
         let mut state = self.state.lock();
         if state.closed {
@@ -2392,8 +2444,8 @@ impl OutboundMailbox {
     }
 
     #[must_use]
-    fn enqueue_encoded_reliable(&self, encoded: Vec<u8>) -> bool {
-        self.enqueue_encoded_reliable_with(encoded, |_| {})
+    fn enqueue_encoded_reliable(&self, encoded: impl Into<OutboundFrame>) -> bool {
+        self.enqueue_encoded_reliable_with(encoded.into(), |_| {})
     }
 
     #[must_use]
@@ -2408,7 +2460,7 @@ impl OutboundMailbox {
                 return false;
             }
         };
-        self.enqueue_encoded_reliable_with(encoded, |state| {
+        self.enqueue_encoded_reliable_with(encoded.into(), |state| {
             if *attach::ATTACH_DEDUP {
                 forget_delivered_terminals_state(state);
             }
@@ -2436,7 +2488,7 @@ impl OutboundMailbox {
 
     fn enqueue_encoded_reliable_with(
         &self,
-        encoded: Vec<u8>,
+        encoded: OutboundFrame,
         before_push: impl FnOnce(&mut OutboundState),
     ) -> bool {
         let mut state = self.state.lock();
@@ -2511,7 +2563,7 @@ impl OutboundMailbox {
         }
         for frame in frames {
             state.queued_bytes += frame.len();
-            state.reliable.push_back(frame.clone());
+            state.reliable.push_back(frame.clone().into());
         }
         state
             .delivered_images
@@ -2588,7 +2640,7 @@ impl OutboundMailbox {
         }
         for frame in frames {
             state.queued_bytes += frame.len();
-            state.reliable.push_back(frame.clone());
+            state.reliable.push_back(frame.clone().into());
         }
         state
             .delivered_pasted_images
@@ -2604,7 +2656,13 @@ impl OutboundMailbox {
     /// and answers with a lag marker on the reliable lane instead of closing
     /// the connection: the journal makes the stream recoverable.
     #[cfg(feature = "agent")]
-    fn enqueue_agent(&self, pane: PaneId, first_seq: u64, encoded: Vec<u8>) -> bool {
+    fn enqueue_agent(
+        &self,
+        pane: PaneId,
+        first_seq: u64,
+        encoded: impl Into<OutboundFrame>,
+    ) -> bool {
+        let encoded = encoded.into();
         let lagged_from = {
             let mut state = self.state.lock();
             if state.closed {
@@ -2649,6 +2707,17 @@ impl OutboundMailbox {
 
     #[cfg(feature = "agent")]
     fn enqueue_agent_replay(&self, pane: PaneId, frames: Vec<(u64, Vec<u8>)>) -> bool {
+        self.enqueue_shared_agent_replay(
+            pane,
+            frames
+                .into_iter()
+                .map(|(sequence, frame)| (sequence, frame.into()))
+                .collect(),
+        )
+    }
+
+    #[cfg(feature = "agent")]
+    fn enqueue_shared_agent_replay(&self, pane: PaneId, frames: Vec<(u64, OutboundFrame)>) -> bool {
         let Some(bytes) = frames
             .iter()
             .try_fold(0_usize, |total, (_, frame)| total.checked_add(frame.len()))
@@ -3060,7 +3129,7 @@ impl OutboundMailbox {
         let mut state = self.state.lock();
         loop {
             if let Some(frame) = pop_ready_frame(&mut state) {
-                return Some(frame);
+                return Some(frame.into_vec());
             }
             if state.closed {
                 return None;
@@ -3069,7 +3138,7 @@ impl OutboundMailbox {
         }
     }
 
-    fn recv_batch(&self, frames: &mut Vec<Vec<u8>>, max_bytes: usize) -> bool {
+    fn recv_batch(&self, frames: &mut Vec<OutboundFrame>, max_bytes: usize) -> bool {
         let mut state = self.state.lock();
         loop {
             let mut bytes = 0_usize;
@@ -3090,7 +3159,7 @@ impl OutboundMailbox {
         }
     }
 
-    fn finish_batch(&self, frames: &mut Vec<Vec<u8>>) {
+    fn finish_batch(&self, frames: &mut Vec<OutboundFrame>) {
         let mut state = self.state.lock();
         for frame in frames.drain(..) {
             state.written_bytes = state.written_bytes.saturating_add(frame.len() as u64);
@@ -3222,7 +3291,7 @@ impl OutboundMailbox {
         log::trace!(
             target: "zz_daemon::diagnostics::outbound",
             "snapshot reason={reason} client={client} reliable_frame_lengths={:?} command_output_capacity={:?} terminals={:#?} delivered_terminals={:#?} terminal_order={:#?} preview_refresh_order={:#?} recycled_frame_capacities={:?}",
-            state.reliable.iter().map(Vec::len).collect::<Vec<_>>(),
+            state.reliable.iter().map(|frame| frame.len()).collect::<Vec<_>>(),
             state
                 .command_output
                 .as_ref()
@@ -3236,8 +3305,8 @@ impl OutboundMailbox {
     }
 }
 
-fn pop_ready_frame(state: &mut OutboundState) -> Option<Vec<u8>> {
-    if state.attach_batch {
+fn pop_ready_frame(state: &mut OutboundState) -> Option<OutboundFrame> {
+    if state.attach_batch || state.ctrl_collecting {
         return None;
     }
     if let Some(frame) = state.reliable.pop_front() {
@@ -3246,7 +3315,7 @@ fn pop_ready_frame(state: &mut OutboundState) -> Option<Vec<u8>> {
     }
     if let Some(pending) = state.command_output.take() {
         state.queued_bytes = state.queued_bytes.saturating_sub(pending.encoded.len());
-        return Some(pending.encoded);
+        return Some(pending.encoded.into());
     }
     // One frame per pane per turn: a chatty agent never starves the
     // pane beside it, and terminals still drain behind both.
@@ -3274,7 +3343,7 @@ fn pop_ready_frame(state: &mut OutboundState) -> Option<Vec<u8>> {
         if let Some(pending) = state.terminals.remove(&pane) {
             state.queued_bytes = state.queued_bytes.saturating_sub(pending.encoded.len());
             state.delivered_terminals.insert(pane, pending.current);
-            return Some(pending.encoded);
+            return Some(pending.encoded.into());
         }
     }
     None
@@ -3288,7 +3357,10 @@ fn take_recycled_frame(state: &mut OutboundState) -> Vec<u8> {
     frame
 }
 
-fn recycle_outbound_frame(state: &mut OutboundState, mut frame: Vec<u8>) {
+fn recycle_outbound_frame(state: &mut OutboundState, frame: impl Into<OutboundFrame>) {
+    let OutboundFrame::Owned(mut frame) = frame.into() else {
+        return;
+    };
     let capacity = frame.capacity();
     if state.closed
         || capacity == 0
@@ -3305,7 +3377,8 @@ fn recycle_outbound_frame(state: &mut OutboundState, mut frame: Vec<u8>) {
     state.recycled_frames.push(frame);
 }
 
-fn discard_outbound_frame(state: &mut OutboundState, frame: Vec<u8>) {
+fn discard_outbound_frame(state: &mut OutboundState, frame: impl Into<OutboundFrame>) {
+    let frame = frame.into();
     state.discarded_bytes = state.discarded_bytes.saturating_add(frame.len() as u64);
     recycle_outbound_frame(state, frame);
 }
@@ -3405,7 +3478,7 @@ fn close_outbound_too_far_behind(state: &mut OutboundState) {
     close_outbound(state);
     if let Some(encoded) = encoded {
         state.queued_bytes = encoded.len();
-        state.reliable.push_back(encoded);
+        state.reliable.push_back(encoded.into());
     }
 }
 
@@ -5506,7 +5579,7 @@ impl Shared {
         }
     }
 
-    fn register(
+    fn register_identity(
         &self,
         kind: ClientKind,
         client_instance_id: ClientInstanceId,
@@ -5514,8 +5587,7 @@ impl Shared {
         color_scheme: Option<TerminalColorScheme>,
         client_has_terminal: bool,
         startup_reentry: bool,
-    ) -> Option<(ClientId, ServerHello)> {
-        let startup_ready = *self.startup_ready.lock();
+    ) -> Option<ClientId> {
         let mut inner = self.inner.lock();
         if self.stopping.load(Ordering::Acquire) || self.shutdown_pending.load(Ordering::Acquire) {
             return None;
@@ -5539,16 +5611,34 @@ impl Shared {
         if let Some(device_name) = device_name {
             inner.client_names.insert(client, device_name);
         }
-        // `c->theme` stays THEME_UNKNOWN until the terminal answers the theme
-        // query, and `format_cb_client_theme` returns NULL for that, so a
-        // client that reported nothing gets no recorded scheme; every reader
-        // already falls back to the server's active one.
         if kind == ClientKind::Interactive
             && let Some(color_scheme) = color_scheme
         {
             inner.client_color_schemes.insert(client, color_scheme);
             inner.active_color_scheme = color_scheme;
         }
+        Some(client)
+    }
+
+    fn register(
+        &self,
+        kind: ClientKind,
+        client_instance_id: ClientInstanceId,
+        device_name: Option<String>,
+        color_scheme: Option<TerminalColorScheme>,
+        client_has_terminal: bool,
+        startup_reentry: bool,
+    ) -> Option<(ClientId, ServerHello)> {
+        let startup_ready = *self.startup_ready.lock();
+        let client = self.register_identity(
+            kind,
+            client_instance_id,
+            device_name,
+            color_scheme,
+            client_has_terminal,
+            startup_reentry,
+        )?;
+        let mut inner = self.inner.lock();
         let mut capabilities = vec![
             "mux-v1".to_owned(),
             "terminal-viewport-v3".to_owned(),
@@ -5721,6 +5811,9 @@ impl Shared {
         session: SessionId,
         snapshot: MuxSnapshot,
     ) -> bool {
+        if self.inner.lock().ctrl_subscriptions.contains_key(&client) {
+            return self.send_compact_attached(client, outbound, session);
+        }
         let (read_only, client_flags) = {
             let flags = self.inner.lock().client_flags.get(client);
             (flags.read_only, flags.reconnect_flags())
@@ -5823,6 +5916,12 @@ impl Shared {
         let (terminals, command_output, popup_waiters, menu_waiters, confirm_waiters, shutdown) = {
             let mut inner = self.inner.lock();
             inner.subscribers.remove(&client);
+            inner.ctrl_subscriptions.remove(&client);
+            inner.ctrl_tree_versions.remove(&client);
+            inner.ctrl_views.remove(&client);
+            inner.ctrl_layouts.remove(&client);
+            inner.ctrl_initializing.remove(&client);
+            inner.ctrl_attachments.remove(&client);
             inner
                 .client_file_waiters
                 .retain(|_, waiter| waiter.client != client);
@@ -6047,6 +6146,21 @@ impl Shared {
         let defer_notifications = kind == ClientKind::Control;
         let execution = {
             let _deferral = defer_notifications.then(|| self.defer_control_notifications());
+            let exec_guards = defer_notifications && ctrl::EXEC_GUARDS.with(Cell::get);
+            let early_guard = exec_guards
+                && (canonical_command(&command.name) == "kill-server"
+                    || canonical_command(&command.name) == "run-shell"
+                        && parse_run_shell_args(&command.args)
+                            .is_ok_and(|args| !args.command_mode));
+            if early_guard {
+                self.publish_control_raw_guard(
+                    context.control_command_target(),
+                    RawText::default(),
+                    false,
+                    false,
+                );
+            }
+            let capture = exec_guards.then(|| self.begin_control_command_event_capture(client));
             let execution = self.execute_with_mux_source_routed(
                 client,
                 kind,
@@ -6054,6 +6168,45 @@ impl Shared {
                 &command,
                 MuxOptionSource::RuntimeCommand,
             );
+            if let Some(capture) = capture {
+                let captured = capture.finish();
+                let has_guards = captured.events.iter().any(|event| {
+                    matches!(
+                        event,
+                        EventPayload::ControlCommandGuard { .. }
+                            | EventPayload::ControlCommandGuardRaw { .. }
+                    )
+                });
+                if has_guards {
+                    ctrl::GUARDS_SENT.with(|count| count.set(count.get().max(1)));
+                }
+                if !(early_guard
+                    || MuxEngine::is_command_alias_group(&command)
+                    || canonical_command(&command.name) == "source-file" && has_guards)
+                {
+                    let (output, error, sticky_failure) = match &execution {
+                        Ok(execution) => (execution.output.clone(), false, false),
+                        Err(DaemonError::CommandExit { output, .. }) => {
+                            (output.clone(), false, false)
+                        }
+                        Err(error) => {
+                            let mut output =
+                                daemon_error_output(error).cloned().unwrap_or_default();
+                            let (error, sticky_failure, message) =
+                                control_command_guard_error(error);
+                            append_inserted_output(&mut output, &message);
+                            (output, error, sticky_failure)
+                        }
+                    };
+                    self.publish_control_raw_guard(
+                        context.control_command_target(),
+                        output,
+                        error,
+                        sticky_failure,
+                    );
+                }
+                self.publish_captured_control_command_events(client, captured);
+            }
             if defer_notifications {
                 self.publish_deferred_control_notifications();
             }
@@ -6139,6 +6292,7 @@ impl Shared {
             }
         };
         if kind == ClientKind::Interactive
+            && !self.inner.lock().ctrl_initializing.contains(&client)
             && !output.is_empty()
             && canonical_command(&command.name) != "new-session"
             && let Err(error) =
@@ -7675,6 +7829,9 @@ impl Shared {
                     attached_only,
                 ));
             }
+            if ctrl::HOOK_NOTIFICATIONS_ONLY.with(Cell::get) {
+                continue;
+            }
             let (context, commands) = {
                 let inner = self.inner.lock();
                 let mut context = event.context.clone();
@@ -7753,7 +7910,9 @@ impl Shared {
         queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
         let mut format_variables = context.format_variables.clone();
-        let event_hooks_enabled = !context.no_hooks;
+        let notifications_only = context.no_hooks && context.format_variables.contains_key("hook");
+        let _notifications_only = ctrl::HookNotificationsOnlyScope::new(notifications_only);
+        let event_hooks_enabled = !context.no_hooks || notifications_only;
         let command_name = canonical_command(&command.name);
         if command_name == "command-prompt" {
             self.ensure_prompt_history();
@@ -10801,7 +10960,9 @@ impl Shared {
         if std::mem::take(&mut self.inner.lock().deferred_control_refresh) {
             self.refresh_control_output_taps();
         }
-        if let Some(queue_execution) = queue_execution {
+        if notifications_only {
+            self.run_event_hooks(pending_hook_events);
+        } else if let Some(queue_execution) = queue_execution {
             queue_execution
                 .pending_event_hooks
                 .borrow_mut()
@@ -10891,12 +11052,27 @@ impl Shared {
                 None
             } else {
                 inner.key_tables_generation = generation;
-                let ServerState {
-                    engine,
-                    key_table_generations,
-                    ..
-                } = &mut *inner;
-                key_table_publication(&engine.keys, key_table_generations)
+                let full = inner.subscribers.keys().any(|client| {
+                    inner
+                        .ctrl_subscriptions
+                        .get(client)
+                        .is_none_or(|subscription| {
+                            subscription.keys == zz_protocol::KeySubscription::Full
+                        })
+                });
+                if full {
+                    let ServerState {
+                        engine,
+                        key_table_generations,
+                        ..
+                    } = &mut *inner;
+                    key_table_publication(&engine.keys, key_table_generations)
+                } else {
+                    Some(EventPayload::KeyTablesPatched {
+                        tables: Vec::new(),
+                        removed: Vec::new(),
+                    })
+                }
             };
             (publication, reset_clients)
         };
@@ -10904,7 +11080,7 @@ impl Shared {
             self.sync_key_table(client, false);
         }
         if let Some(publication) = publication {
-            self.publish(publication);
+            self.publish_key_table_changes(publication);
         }
     }
 
@@ -17983,6 +18159,9 @@ impl Shared {
         context: &mut ExecutionContext,
         input: InputMessage,
     ) -> Result<(), DaemonError> {
+        let Some(input) = ctrl::normalize_resize(&mut self.inner.lock(), client, input) else {
+            return Ok(());
+        };
         let started = diagnostic_timer();
         log::trace!(
             target: "zz_daemon::diagnostics::input",
@@ -18149,6 +18328,10 @@ impl Shared {
             (!context.no_hooks).then(|| hook_events::InputFocusScope::open(&mut self.inner.lock()));
         let result = (|| -> Result<(), DaemonError> {
             match input {
+                InputMessage::ResizeTerminalV2 { .. }
+                | InputMessage::ClientTerminalSizeV2 { .. } => {
+                    unreachable!("resize normalized at entry")
+                }
                 InputMessage::Text { pane, text } => {
                     let matched = self.match_pending_committed_text(
                         client,
@@ -23278,6 +23461,12 @@ impl Shared {
         skip_command_output: Option<u64>,
         scope: attach::ResyncScope,
     ) {
+        if self.inner.lock().ctrl_subscriptions.contains_key(&client) {
+            outbound.state.lock().ctrl_collecting = true;
+            self.send_compact_resync(client, outbound, scope.sends_everything());
+            outbound.flush_control_batch(false);
+            return;
+        }
         let everything = scope.sends_everything();
         let order = everything.then(|| self.snapshot_order.lock());
         let (
@@ -25280,6 +25469,7 @@ impl Shared {
         for (subscriber, snapshot) in snapshots {
             Self::send_event(&subscriber, EventPayload::Snapshot(snapshot));
         }
+        self.publish_compact_trees();
         drop(order);
         self.publish_status_requests(&requests);
     }
@@ -25641,8 +25831,12 @@ impl Shared {
             .values()
             .cloned()
             .collect::<Vec<_>>();
+        let Ok(encoded) = zz_protocol::encode_protocol_message(&message).map(Arc::<[u8]>::from)
+        else {
+            return;
+        };
         for subscriber in subscribers {
-            let _ = subscriber.enqueue_reliable(&message);
+            let _ = subscriber.enqueue_reliable_frame(&message, Arc::clone(&encoded).into());
         }
     }
 
@@ -25670,8 +25864,12 @@ impl Shared {
                 .map(|(_, subscriber)| Arc::clone(subscriber))
                 .collect::<Vec<_>>()
         };
+        let Ok(encoded) = zz_protocol::encode_protocol_message(&message).map(Arc::<[u8]>::from)
+        else {
+            return;
+        };
         for subscriber in subscribers {
-            let _ = subscriber.enqueue_reliable(&message);
+            let _ = subscriber.enqueue_reliable_frame(&message, Arc::clone(&encoded).into());
         }
     }
 
@@ -25710,6 +25908,7 @@ impl Shared {
         if matches!(
             &payload,
             EventPayload::ControlCommandGuard { .. }
+                | EventPayload::ControlCommandGuardRaw { .. }
                 | EventPayload::ControlSourceFile { .. }
                 | EventPayload::ControlCommandOutput { .. }
                 | EventPayload::ControlConfigError { .. }
@@ -25905,6 +26104,7 @@ impl Shared {
         callback_parse_event: Option<Arc<()>>,
     ) {
         if let Some((client, flags)) = target {
+            ctrl::GUARDS_SENT.with(|count| count.set(count.get().saturating_add(1)));
             let payload = EventPayload::ControlCommandGuard {
                 output: String::from(output),
                 error,
@@ -26456,12 +26656,12 @@ impl Shared {
                         return None;
                     }
                     inner.published_mux_options.insert(client, options.clone());
-                    Some((client, options))
+                    ctrl::options_event(&inner, client, options).map(|payload| (client, payload))
                 })
                 .collect::<Vec<_>>()
         };
-        for (client, options) in recipients {
-            self.publish_to_client(client, EventPayload::MuxOptionsChanged { options });
+        for (client, payload) in recipients {
+            self.publish_to_client(client, payload);
         }
     }
 
@@ -26482,9 +26682,9 @@ impl Shared {
         if inner.published_mux_options.get(&client) == Some(&options) {
             return outbound.is_open();
         }
-        if !outbound.enqueue_reliable(&Self::event(EventPayload::MuxOptionsChanged {
-            options: options.clone(),
-        })) {
+        if let Some(payload) = ctrl::options_event(&inner, client, options.clone())
+            && !outbound.enqueue_reliable(&Self::event(payload))
+        {
             return false;
         }
         inner.published_mux_options.insert(client, options);
@@ -29859,12 +30059,12 @@ impl AgentPublisher for Shared {
                 .filter_map(|client| inner.subscribers.get(&client).cloned())
                 .collect::<Vec<_>>()
         };
+        let Ok(encoded) = zz_protocol::encode_protocol_message(&message).map(Arc::<[u8]>::from)
+        else {
+            return;
+        };
         for subscriber in subscribers {
-            let Ok(encoded) = subscriber.encode_message(&message) else {
-                log::error!("failed to encode an agent update batch for {pane}");
-                continue;
-            };
-            subscriber.enqueue_agent(pane, first_seq, encoded);
+            subscriber.enqueue_agent(pane, first_seq, Arc::clone(&encoded));
         }
     }
 
@@ -29913,24 +30113,20 @@ impl AgentPublisher for Shared {
                 .filter_map(|client| inner.subscribers.get(&client).cloned())
                 .collect::<Vec<_>>()
         };
+        let mut encoded = Vec::with_capacity(frames.len());
+        for (first_seq, items) in frames {
+            let message = Self::event(EventPayload::AgentUpdates {
+                pane,
+                first_seq,
+                items,
+            });
+            let Ok(frame) = zz_protocol::encode_protocol_message(&message) else {
+                return;
+            };
+            encoded.push((first_seq, OutboundFrame::Shared(Arc::from(frame))));
+        }
         for subscriber in subscribers {
-            let mut encoded = Vec::with_capacity(frames.len());
-            for (first_seq, items) in &frames {
-                let message = Self::event(EventPayload::AgentUpdates {
-                    pane,
-                    first_seq: *first_seq,
-                    items: items.clone(),
-                });
-                let Ok(frame) = subscriber.encode_message(&message) else {
-                    log::error!("failed to encode an agent replay batch for {pane}");
-                    encoded.clear();
-                    break;
-                };
-                encoded.push((*first_seq, frame));
-            }
-            if !encoded.is_empty() {
-                subscriber.enqueue_agent_replay(pane, encoded);
-            }
+            subscriber.enqueue_shared_agent_replay(pane, encoded.clone());
         }
     }
 
@@ -31298,6 +31494,13 @@ struct ServerState {
     scheduled_window_rename: Option<Instant>,
     preview_watched: BTreeSet<PaneId>,
     client_cell_pixels: BTreeMap<ClientId, (u32, u32)>,
+    ctrl_subscriptions: BTreeMap<ClientId, zz_protocol::Subscriptions>,
+    ctrl_trees: BTreeMap<(u8, Option<SessionId>), MuxSnapshot>,
+    ctrl_tree_versions: BTreeMap<ClientId, u64>,
+    ctrl_views: BTreeMap<ClientId, zz_protocol::ClientView>,
+    ctrl_layouts: BTreeMap<ClientId, (u64, u64)>,
+    ctrl_initializing: BTreeSet<ClientId>,
+    ctrl_attachments: BTreeMap<ClientId, u64>,
 }
 
 struct WaitItem {
@@ -36856,7 +37059,11 @@ fn status_targets(
         .keys()
         .copied()
         .filter(|client| {
-            clients.is_none_or(|clients| clients.contains(client))
+            inner
+                .ctrl_subscriptions
+                .get(client)
+                .is_none_or(|subscription| subscription.status)
+                && clients.is_none_or(|clients| clients.contains(client))
                 && sessions.is_none_or(|sessions| {
                     client_attached_session(inner, *client)
                         .is_some_and(|session| sessions.contains(&session))
@@ -37513,6 +37720,9 @@ fn stamped_snapshot_sends(
     let mut unchanged = Vec::new();
     let mut restamp = false;
     for (client, subscriber) in &inner.subscribers {
+        if inner.ctrl_subscriptions.contains_key(client) {
+            continue;
+        }
         let mut client_snapshot = snapshot.clone();
         stamp_snapshot_for_client_with(inner, *client, &mut client_snapshot, &presence, facts);
         let digest = client_snapshot.content_digest();
@@ -40279,6 +40489,8 @@ fn read_only_blocks_input(input: &InputMessage) -> bool {
         | InputMessage::DisplayPanes { .. }
         | InputMessage::CommandPrompt { .. }
         | InputMessage::ResizeTerminal { .. }
+        | InputMessage::ResizeTerminalV2 { .. }
+        | InputMessage::ClientTerminalSizeV2 { .. }
         | InputMessage::ResizeCommandOutput { .. }
         | InputMessage::CommandOutputView { .. }
         | InputMessage::CancelPrefix { .. }
@@ -44396,11 +44608,15 @@ fn take_unreported_command_queue_park() -> Option<(ClientId, u64)> {
     COMMAND_QUEUE_PARK.with(Cell::take)
 }
 
+enum QueuedCommand {
+    Request(CommandRequest),
+    Exec(zz_protocol::ExecRequest),
+}
+
 fn handle_connection<S: TransportStream>(
     mut stream: S,
     shared: &Arc<Shared>,
 ) -> Result<(), DaemonError> {
-    let connection_started = diagnostic_timer();
     let mut inbound_frame = Vec::new();
     let first_message = match read_protocol_message_into(&mut stream, &mut inbound_frame) {
         Ok(message) => message,
@@ -44414,8 +44630,19 @@ fn handle_connection<S: TransportStream>(
         }
         Err(error) => return Err(error.into()),
     };
-    let hello = match first_message {
-        ProtocolMessage::ClientHello(hello) => hello,
+    handle_connection_message(stream, shared, first_message)
+}
+
+fn handle_connection_message<S: TransportStream>(
+    mut stream: S,
+    shared: &Arc<Shared>,
+    first_message: ProtocolMessage,
+) -> Result<(), DaemonError> {
+    let connection_started = diagnostic_timer();
+    let mut inbound_frame = Vec::new();
+    let (hello, compact_hello) = match first_message {
+        ProtocolMessage::Hello(hello) => (hello.clone().into_client(), Some(hello)),
+        ProtocolMessage::ClientHello(hello) => (hello, None),
         ProtocolMessage::Exec(request) => return exec::serve_exec(stream, shared, request),
         _ => {
             return Err(ServerError::InvalidCommand(
@@ -44445,18 +44672,27 @@ fn handle_connection<S: TransportStream>(
     }
 
     let outbound = OutboundMailbox::new();
-    let Some((client, server_hello)) = shared.register(
-        hello.kind,
-        hello.client_instance_id,
-        hello.device_name.clone(),
-        hello.color_scheme,
-        hello.kind == ClientKind::Interactive
-            && hello
-                .capabilities
-                .iter()
-                .any(|capability| capability == ClientHello::CLIENT_TERMINAL_CAPABILITY),
-        startup_reentry,
-    ) else {
+    let registration = if let Some(hello) = &compact_hello {
+        shared
+            .register_welcome(hello)
+            .map(|(client, welcome)| (client, ProtocolMessage::Welcome(welcome)))
+    } else {
+        shared
+            .register(
+                hello.kind,
+                hello.client_instance_id,
+                hello.device_name.clone(),
+                hello.color_scheme,
+                hello.kind == ClientKind::Interactive
+                    && hello
+                        .capabilities
+                        .iter()
+                        .any(|capability| capability == ClientHello::CLIENT_TERMINAL_CAPABILITY),
+                startup_reentry,
+            )
+            .map(|(client, hello)| (client, ProtocolMessage::ServerHello(hello)))
+    };
+    let Some((client, greeting)) = registration else {
         best_effort_server_stopping_reply(&mut stream);
         return Ok(());
     };
@@ -44507,6 +44743,14 @@ fn handle_connection<S: TransportStream>(
         if let Some(cell) = attach::client_cell_fact(&hello.capabilities) {
             inner.client_cell_pixels.insert(client, cell);
         }
+        if let Some(viewport) = compact_hello.as_ref().and_then(|hello| hello.viewport) {
+            inner
+                .client_sizes
+                .insert(client, (viewport.columns, viewport.rows));
+            inner
+                .client_cell_pixels
+                .insert(client, (viewport.cell_width_px, viewport.cell_height_px));
+        }
         inner.client_pids.insert(client, hello.process_id);
         if let Some(working_directory) =
             client_working_directory_fact(hello.working_directory.as_ref())
@@ -44538,7 +44782,13 @@ fn handle_connection<S: TransportStream>(
     .map_err(|error| DaemonError::Thread(error.to_string()))?;
     let mut writer_registration =
         ClientWriterRegistrationGuard::new(shared, client, Arc::clone(&outbound));
-    let _ = outbound.enqueue_reliable(&ProtocolMessage::ServerHello(server_hello));
+    if compact_hello.is_some() {
+        let mut state = outbound.state.lock();
+        state.attach_batch = true;
+        state.ctrl_collecting = true;
+        state.terminals_held = true;
+    }
+    let _ = outbound.enqueue_reliable(&greeting);
     if matches!(hello.kind, ClientKind::Interactive | ClientKind::Control) {
         shared.subscribe(client, Arc::clone(&outbound));
     }
@@ -44551,7 +44801,7 @@ fn handle_connection<S: TransportStream>(
         shared.try_deliver_startup_config_causes(client, &outbound, true);
     }
 
-    let context = {
+    let mut context = {
         let inner = shared.inner.lock();
         hello
             .origin
@@ -44568,10 +44818,13 @@ fn handle_connection<S: TransportStream>(
             })
             .unwrap_or_default()
     };
+    if let Some(hello) = &compact_hello {
+        shared.initialize_compact(client, hello, &outbound, &mut context);
+    }
     let command_queue_cancel = Arc::new(AtomicBool::new(false));
     let (command_sender, command_worker, mut context) =
         if matches!(hello.kind, ClientKind::Command | ClientKind::Control) {
-            let (sender, receiver) = crossbeam_channel::unbounded::<CommandRequest>();
+            let (sender, receiver) = crossbeam_channel::unbounded::<QueuedCommand>();
             let worker_shared = Arc::clone(shared);
             let worker_outbound = Arc::clone(&outbound);
             let worker_cancel = Arc::clone(&command_queue_cancel);
@@ -44585,12 +44838,24 @@ fn handle_connection<S: TransportStream>(
                 .name(format!("zz-client-command-{}", client.0))
                 .spawn(move || {
                     let mut context = context;
-                    while let Ok(CommandRequest {
-                        request_id,
-                        command,
-                        prepared,
-                    }) = receiver.recv()
-                    {
+                    while let Ok(work) = receiver.recv() {
+                        let QueuedCommand::Request(CommandRequest {
+                            request_id,
+                            command,
+                            prepared,
+                        }) = work
+                        else {
+                            if let QueuedCommand::Exec(request) = work {
+                                worker_shared.execute_compact_request(
+                                    client,
+                                    worker_kind,
+                                    &mut context,
+                                    request,
+                                    &worker_outbound,
+                                );
+                            }
+                            continue;
+                        };
                         if worker_cancel.load(Ordering::Acquire) {
                             continue;
                         }
@@ -44662,6 +44927,22 @@ fn handle_connection<S: TransportStream>(
             continue;
         }
         match message {
+            ProtocolMessage::Exec(request) => {
+                if let Some(sender) = &command_sender {
+                    if sender.send(QueuedCommand::Exec(request)).is_err() {
+                        break Ok(());
+                    }
+                } else if let Some(context) = context.as_mut() {
+                    shared.execute_compact_request(client, hello.kind, context, request, &outbound);
+                }
+            }
+            ProtocolMessage::TreeSync => {
+                shared.send_compact_state(client, &outbound, true);
+            }
+            ProtocolMessage::GetKeyTables => {
+                let tables = shared.inner.lock().engine.keys.snapshot();
+                Shared::send_event(&outbound, EventPayload::KeyTablesChanged { tables });
+            }
             ProtocolMessage::CommandRequest(CommandRequest {
                 request_id,
                 command,
@@ -44675,11 +44956,11 @@ fn handle_connection<S: TransportStream>(
                 }
                 if let Some(sender) = &command_sender {
                     if sender
-                        .send(CommandRequest {
+                        .send(QueuedCommand::Request(CommandRequest {
                             request_id,
                             command,
                             prepared,
-                        })
+                        }))
                         .is_err()
                     {
                         break Err(DaemonError::Thread(
@@ -45028,14 +45309,17 @@ fn write_outbound(
         let ready = if *attach::BATCHED_WRITES {
             outbound.recv_batch(&mut batch, attach::MAX_BATCHED_WRITE_BYTES)
         } else {
-            outbound.recv().map(|frame| batch.push(frame)).is_some()
+            outbound
+                .recv()
+                .map(|frame| batch.push(frame.into()))
+                .is_some()
         };
         if !ready {
             break;
         }
         let started = diagnostic_timer();
         let frames = batch.len();
-        let bytes = batch.iter().map(Vec::len).sum::<usize>();
+        let bytes = batch.iter().map(|frame| frame.len()).sum::<usize>();
         let result = attach::write_frames(stream, &batch);
         log::trace!(
             target: "zz_daemon::diagnostics::outbound",
@@ -45171,6 +45455,7 @@ fn daemon_answers_at(path: &Path) -> Option<bool> {
                 process_id: std::process::id(),
                 environment: ClientEnvironmentBlob::default(),
                 commands: Vec::new(),
+                raw_control_line: None,
             });
             let live = zz_protocol::write_protocol_message(&mut stream, &request).is_ok()
                 && matches!(
@@ -108822,7 +109107,7 @@ bind - split-window -v -c "#{pane_current_path}"
         let frames = {
             let mut state = mailbox.state.lock();
             let frames = state.reliable.drain(..).collect::<Vec<_>>();
-            let bytes = frames.iter().map(Vec::len).sum::<usize>();
+            let bytes = frames.iter().map(|frame| frame.len()).sum::<usize>();
             state.queued_bytes = state.queued_bytes.saturating_sub(bytes);
             frames
         };

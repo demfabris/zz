@@ -478,6 +478,25 @@ run_attached_cases() {
   compare_screens attach-live same
   compare_facts attach-live same
 
+  launch_both set-environment -g UPGRADE_PREFIX before '\;' \
+    attach-session -t '=live' '\;' \
+    set-environment -g UPGRADE_TAIL after '\;' \
+    set-option -g status-left UPGRADE
+  wait_for "zz attached through the command chain" side_attached zz
+  wait_for "tmux attached through the command chain" side_attached tmux
+  wait_for "zz command-chain tail" side_command zz show-environment -g UPGRADE_TAIL
+  wait_for "tmux command-chain tail" side_command tmux show-environment -g UPGRADE_TAIL
+  compare_screens attach-command-chain same
+  compare_facts attach-command-chain same
+  report attach-command-chain same prefix \
+    "$(side_command zz show-environment -g UPGRADE_PREFIX)" \
+    "$(side_command tmux show-environment -g UPGRADE_PREFIX)" ''
+  report attach-command-chain same tail \
+    "$(side_command zz show-environment -g UPGRADE_TAIL)" \
+    "$(side_command tmux show-environment -g UPGRADE_TAIL)" ''
+  side_command zz set-option -g status-left L
+  side_command tmux set-option -g status-left L
+
   # new-session with no -d: create and attach in one invocation.
   reset_pair
   launch_both new-session -s fresh -n win -x "$COLUMNS_UNDER_TEST" -y "$ROWS_UNDER_TEST"

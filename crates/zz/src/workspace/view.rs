@@ -4502,7 +4502,7 @@ mod tests {
             let (mut stream, _) = listener.accept().unwrap();
             assert!(matches!(
                 read_protocol_message(&mut stream).unwrap(),
-                ProtocolMessage::ClientHello(_)
+                ProtocolMessage::ClientHello(_) | ProtocolMessage::Hello(_)
             ));
             sender.send(stream.try_clone().unwrap()).unwrap();
             let mut mux_options = zz_protocol::MuxOptions::default();

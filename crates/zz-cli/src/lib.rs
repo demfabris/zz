@@ -949,8 +949,8 @@ fn run_command_mode(
                 None,
             ) {
                 LocalChain::Done(exit) => return Some(exit),
-                LocalChain::Resume(prepared) => {
-                    resume = Some(prepared);
+                LocalChain::Resume(prepared, client) => {
+                    resume = Some((prepared, *client));
                     None
                 }
                 LocalChain::Unanswered(error) => Some(error),
@@ -1013,8 +1013,8 @@ fn run_command_mode(
             Some(spawned_server_id),
         ) {
             LocalChain::Done(exit) => return Some(exit),
-            LocalChain::Resume(prepared) => {
-                resume = Some(prepared);
+            LocalChain::Resume(prepared, client) => {
+                resume = Some((prepared, *client));
                 None
             }
             LocalChain::Unanswered(error) => {
@@ -1031,7 +1031,7 @@ fn run_command_mode(
     }
 
     let (new_session_tui, native_attach) = match &resume {
-        Some(resume) => (
+        Some((resume, _)) => (
             resume.kind == ExecResumeKind::NewSession,
             resume.kind == ExecResumeKind::NativeAttach,
         ),
@@ -1040,12 +1040,20 @@ fn run_command_mode(
             matches!(command.as_str(), "attach" | "attach-session"),
         ),
     };
-    let prepared = resume.map(|resume| resume.commands);
+    let (prepared, connection) = match resume {
+        Some((resume, client)) => (Some(resume.commands), Some(client)),
+        None => (None, None),
+    };
     if (prepared.is_some() || start_server) && new_session_tui {
-        return Some(run_tui_chain(&routing, prepared, command_chain));
+        return Some(run_tui_chain(&routing, prepared, command_chain, connection));
     }
     if native_attach {
-        return Some(run_native_attach(&routing, prepared, command_chain));
+        return Some(run_native_attach(
+            &routing,
+            prepared,
+            command_chain,
+            connection,
+        ));
     }
 
     if let Some(error) = tmux_label_creation_error(socket_path, socket_source, start_server) {
@@ -1080,7 +1088,7 @@ struct ChainRouting<'a> {
 #[cfg(not(target_os = "ios"))]
 enum LocalChain {
     Done(ExitCode),
-    Resume(ExecResume),
+    Resume(ExecResume, Box<CommandClient>),
     Unanswered(DaemonError),
 }
 
@@ -1131,7 +1139,7 @@ fn run_local_command_chain(
     };
     match client.exec_chain(chain, emit_chain_outcome) {
         Ok(ExecChainEnd::Ran { exit_code }) => LocalChain::Done(ExitCode::from(exit_code)),
-        Ok(ExecChainEnd::Resume(resume)) => LocalChain::Resume(resume),
+        Ok(ExecChainEnd::Resume(resume)) => LocalChain::Resume(resume, Box::new(client)),
         Ok(ExecChainEnd::Rejected(error)) => {
             eprintln!("{}", server_error_message(&error));
             LocalChain::Done(exit_code_for(CliFailure::Server(&error)))
@@ -1170,10 +1178,10 @@ fn run_host_command_chain(
     command_chain: Vec<CommandInvocation>,
 ) -> ExitCode {
     if command_chain_uses_tui(&command_chain) || attach_prefix_uses_tui(routing.command) {
-        return run_tui_chain(routing, None, command_chain);
+        return run_tui_chain(routing, None, command_chain, None);
     }
     if matches!(routing.command, "attach" | "attach-session") {
-        return run_native_attach(routing, None, command_chain);
+        return run_native_attach(routing, None, command_chain, None);
     }
     if let Some(error) =
         tmux_label_creation_error(routing.socket_path, socket_source, routing.start_server)
@@ -1216,7 +1224,11 @@ fn run_host_command_chain(
 fn tui_request<'a>(
     routing: &ChainRouting<'a>,
     options: &'a zz_tui::RunOptions,
-    reconnect: &'a dyn Fn(&Path, bool) -> Result<InteractiveClient, DaemonError>,
+    reconnect: &'a dyn Fn(
+        &Path,
+        bool,
+        Option<zz_protocol::AttachOperation>,
+    ) -> Result<InteractiveClient, DaemonError>,
 ) -> zz_tui::RunRequest<'a> {
     match routing.startup_options.browser_provider {
         Some(provider) => options.with_browser_provider(provider),
@@ -1230,6 +1242,7 @@ fn run_tui_chain(
     routing: &ChainRouting<'_>,
     prepared: Option<Vec<PreparedCommand>>,
     command_chain: Vec<CommandInvocation>,
+    connection: Option<CommandClient>,
 ) -> ExitCode {
     let options = zz_tui::RunOptions {
         socket_path: routing.socket_path.to_path_buf(),
@@ -1241,18 +1254,29 @@ fn run_tui_chain(
         client_flags: None,
     };
     let mux_config_files = routing.mux_config_files;
-    let reconnect = |path: &Path, client_has_terminal| {
-        connect_terminal_surface_client_with_config(
-            path,
-            TerminalColorScheme::Dark,
-            mux_config_files,
-            client_has_terminal,
-        )
-    };
+    let reconnect =
+        |path: &Path, client_has_terminal, attach: Option<zz_protocol::AttachOperation>| {
+            connect_terminal_surface_client_with_config(
+                path,
+                TerminalColorScheme::Dark,
+                mux_config_files,
+                client_has_terminal,
+                attach.as_ref(),
+            )
+        };
     let request = tui_request(routing, &options, &reconnect);
-    let result = match prepared {
-        Some(commands) => zz_tui::run_prepared_new_session(request, commands),
-        None => zz_tui::run_new_session(request, command_chain),
+    let result = match (connection, prepared) {
+        (Some(client), Some(commands)) => {
+            match client.into_interactive(zz_protocol::AttachOperation::Commands(commands)) {
+                Ok(initial) => zz_tui::run_connected(request, initial),
+                Err(error) => {
+                    eprintln!("{}", command_error_message(&error));
+                    return exit_code_for(CliFailure::Daemon(&error));
+                }
+            }
+        }
+        (_, Some(commands)) => zz_tui::run_prepared_new_session(request, commands),
+        (_, None) => zz_tui::run_new_session(request, command_chain),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -1268,6 +1292,7 @@ fn run_native_attach(
     routing: &ChainRouting<'_>,
     prepared: Option<Vec<PreparedCommand>>,
     mut command_chain: Vec<CommandInvocation>,
+    connection: Option<CommandClient>,
 ) -> ExitCode {
     let options = match parse_native_attach_arguments(command_chain[0].args.clone()) {
         Ok(options) => options,
@@ -1284,6 +1309,8 @@ fn run_native_attach(
     let needs_command_attach = options.no_update_environment
         || options.working_directory.is_some()
         || options.detach_others_hangup;
+    let default_attach =
+        !needs_command_attach && command_chain.len() == 1 && options.session.is_none();
     let attach_command = native_attach_command(&options);
     let options = zz_tui::RunOptions {
         socket_path: routing.socket_path.to_path_buf(),
@@ -1295,16 +1322,27 @@ fn run_native_attach(
         client_flags: options.client_flags,
     };
     let mux_config_files = routing.mux_config_files;
-    let reconnect = |path: &Path, client_has_terminal| {
-        connect_terminal_surface_client_with_config(
-            path,
-            TerminalColorScheme::Dark,
-            mux_config_files,
-            client_has_terminal,
-        )
-    };
+    let reconnect =
+        |path: &Path, client_has_terminal, attach: Option<zz_protocol::AttachOperation>| {
+            connect_terminal_surface_client_with_config(
+                path,
+                TerminalColorScheme::Dark,
+                mux_config_files,
+                client_has_terminal,
+                attach.as_ref(),
+            )
+        };
     let request = tui_request(routing, &options, &reconnect);
-    let result = if command_chain.len() > 1 || needs_command_attach {
+    let result = if let (Some(client), Some(mut commands)) = (connection, prepared.clone()) {
+        commands[0].invocation = attach_command;
+        match client.into_interactive(zz_protocol::AttachOperation::Commands(commands)) {
+            Ok(initial) => zz_tui::run_connected(request, initial),
+            Err(error) => {
+                eprintln!("{}", command_error_message(&error));
+                return exit_code_for(CliFailure::Daemon(&error));
+            }
+        }
+    } else if command_chain.len() > 1 || needs_command_attach {
         if let Some(mut commands) = prepared {
             commands[0].invocation = attach_command;
             zz_tui::run_prepared_new_session(request, commands)
@@ -1318,7 +1356,11 @@ fn run_native_attach(
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("{error}");
+            if default_attach && error.to_string() == "can't find session: current session" {
+                eprintln!("no sessions");
+            } else {
+                eprintln!("{error}");
+            }
             exit_code_for(CliFailure::Runtime)
         }
     }
@@ -2463,12 +2505,22 @@ pub fn connect_interactive_client_with_config(
     color_scheme: TerminalColorScheme,
     mux_config_files: &[PathBuf],
     capabilities: &[&str],
+    attach: Option<&zz_protocol::AttachOperation>,
 ) -> Result<InteractiveClient, DaemonError> {
     connect_or_spawn_daemon(
         path,
         Some(color_scheme),
         mux_config_files,
-        |_| InteractiveClient::connect_with_capabilities(path, color_scheme, true, capabilities),
+        |_| {
+            InteractiveClient::connect_endpoint_with_prompts_and_attach(
+                &Endpoint::Local(path.to_path_buf()),
+                Some(color_scheme),
+                None,
+                capabilities,
+                attach.cloned(),
+                false,
+            )
+        },
         InteractiveClient::server_hello,
     )
 }
@@ -2500,13 +2552,23 @@ pub fn connect_terminal_surface_client_with_config(
     path: &Path,
     color_scheme: TerminalColorScheme,
     mux_config_files: &[PathBuf],
-    client_has_terminal: bool,
+    _client_has_terminal: bool,
+    attach: Option<&zz_protocol::AttachOperation>,
 ) -> Result<InteractiveClient, DaemonError> {
     connect_or_spawn_daemon(
         path,
         Some(color_scheme),
         mux_config_files,
-        |_| InteractiveClient::connect_terminal_surface(path, color_scheme, client_has_terminal),
+        |_| {
+            InteractiveClient::connect_endpoint_with_prompts_and_attach(
+                &Endpoint::Local(path.to_path_buf()),
+                None,
+                None,
+                &[],
+                attach.cloned(),
+                true,
+            )
+        },
         InteractiveClient::server_hello,
     )
 }

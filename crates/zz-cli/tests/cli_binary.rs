@@ -6490,7 +6490,7 @@ tmux set-option -g @plugin loaded
             assert_eq!(output.status.code(), Some(1));
             assert!(output.stderr.is_empty());
             let stream = parse_stream_allow_gaps(&output.stdout, false);
-            assert_eq!(stream.blocks.len(), 11);
+            assert_eq!(stream.blocks.len(), 11, "{stream:?}");
             assert_block(&stream.blocks[0], 1, 0, &[], false);
             assert_block(&stream.blocks[1], 2, 1, &[], false);
             assert_block(

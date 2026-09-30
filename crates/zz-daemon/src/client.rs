@@ -1,8 +1,8 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     ffi::OsString,
     fmt,
-    io::{self, Read, Write},
+    io::{self, IsTerminal, Read, Write},
     path::{Path, PathBuf},
     sync::{
         Arc, LazyLock, OnceLock, Weak,
@@ -377,6 +377,7 @@ impl CommandRoute {
             process_id: std::process::id(),
             environment: exec_environment(),
             commands,
+            raw_control_line: None,
         }
     }
 
@@ -421,6 +422,36 @@ impl CommandRoute {
 }
 
 impl CommandClient {
+    pub fn into_interactive(
+        mut self,
+        attach: zz_protocol::AttachOperation,
+    ) -> Result<InteractiveClient, DaemonError> {
+        let (reader, writer) = match self.link {
+            CommandLink::Exec { reader, writer, .. }
+            | CommandLink::Legacy { reader, writer, .. } => (reader, writer),
+        };
+        let connected = connect_stream_hello(
+            ClientStream::Local(writer.stream),
+            &self.route.display,
+            ClientKind::Interactive,
+            short_device_name(),
+            None,
+            std::io::stdin().is_terminal() && std::io::stdout().is_terminal(),
+            false,
+            false,
+            &[],
+            self.route.facts,
+            Some(attach),
+        )?;
+        drop(reader);
+        let mut client = InteractiveClient::from_connected(connected);
+        #[cfg(all(any(unix, windows), not(target_os = "ios")))]
+        {
+            client.ssh_forward = self._ssh_forward.take();
+        }
+        Ok(client)
+    }
+
     pub fn connect(path: &Path) -> Result<Self, DaemonError> {
         Self::connect_route(CommandRoute {
             socket: path.to_path_buf(),
@@ -1032,8 +1063,207 @@ pub struct InteractiveClient {
 }
 
 impl InteractiveClient {
+    pub fn connect_endpoint_with_attach(
+        endpoint: &Endpoint,
+        attach: zz_protocol::AttachOperation,
+    ) -> Result<Self, DaemonError> {
+        Self::connect_endpoint_with_prompts_and_attach(
+            endpoint,
+            None,
+            None,
+            &[],
+            Some(attach),
+            true,
+        )
+    }
+
+    pub fn connect_endpoint_with_prompts_and_attach(
+        endpoint: &Endpoint,
+        color_scheme: Option<TerminalColorScheme>,
+        prompts: Option<crate::askpass::SshPrompts>,
+        capabilities: &[&str],
+        attach: Option<zz_protocol::AttachOperation>,
+        terminal_surface: bool,
+    ) -> Result<Self, DaemonError> {
+        let client_has_terminal = !terminal_surface
+            || (std::io::stdin().is_terminal() && std::io::stdout().is_terminal());
+        match endpoint {
+            Endpoint::Local(path) => {
+                let stream = LocalTransport::connect(path)?;
+                let connected = connect_stream_hello(
+                    ClientStream::Local(stream),
+                    path.display(),
+                    ClientKind::Interactive,
+                    short_device_name(),
+                    color_scheme,
+                    client_has_terminal,
+                    false,
+                    false,
+                    capabilities,
+                    if terminal_surface {
+                        EndpointFactsScope::LocalHostWorkingDirectoryAndTerminal
+                    } else {
+                        EndpointFactsScope::LocalHostWorkingDirectory
+                    },
+                    attach,
+                )?;
+                Ok(Self::from_connected(connected))
+            }
+            Endpoint::Ssh(endpoint) => {
+                #[cfg(target_os = "ios")]
+                {
+                    let (forward, stream) = RusshForward::start(endpoint, prompts)?;
+                    let connected = connect_stream_hello(
+                        ClientStream::Ssh(stream),
+                        endpoint,
+                        ClientKind::Interactive,
+                        short_device_name(),
+                        color_scheme,
+                        client_has_terminal,
+                        false,
+                        false,
+                        capabilities,
+                        if terminal_surface {
+                            EndpointFactsScope::PortableTerminalSize
+                        } else {
+                            EndpointFactsScope::None
+                        },
+                        attach,
+                    )?;
+                    let mut client = Self::from_connected(connected);
+                    client.russh_forward = Some(forward);
+                    Ok(client)
+                }
+                #[cfg(all(any(unix, windows), not(target_os = "ios")))]
+                {
+                    let forward = SshForward::start(endpoint, prompts)?;
+                    let stream = LocalTransport::connect(forward.local_socket())?;
+                    let connected = connect_stream_hello(
+                        ClientStream::Local(stream),
+                        endpoint,
+                        ClientKind::Interactive,
+                        short_device_name(),
+                        color_scheme,
+                        client_has_terminal,
+                        false,
+                        false,
+                        capabilities,
+                        if terminal_surface {
+                            EndpointFactsScope::PortableTerminalSize
+                        } else {
+                            EndpointFactsScope::None
+                        },
+                        attach,
+                    )?;
+                    Ok(Self::from_connected_with_ssh(connected, forward))
+                }
+                #[cfg(not(any(unix, windows)))]
+                {
+                    let _ = (endpoint, prompts, capabilities, attach, terminal_surface);
+                    Err(crate::EndpointError::UnsupportedPlatform.into())
+                }
+            }
+        }
+    }
+
+    pub fn is_initially_attached(&self) -> bool {
+        self.reader
+            .lock()
+            .pending
+            .iter()
+            .any(|message| match message {
+                ProtocolMessage::Batch(batch) => batch.messages().is_ok_and(|messages| {
+                    messages.into_iter().any(|message| {
+                        matches!(
+                            message,
+                            ProtocolMessage::Event(zz_protocol::Event {
+                                payload: zz_protocol::EventPayload::ClientView(
+                                    zz_protocol::ClientView {
+                                        session: Some(_),
+                                        ..
+                                    }
+                                ),
+                                ..
+                            }) | ProtocolMessage::Attached { .. }
+                        )
+                    })
+                }),
+                ProtocolMessage::Attached { .. } => true,
+                _ => false,
+            })
+    }
+
+    pub fn take_initial_responses(&self) -> Vec<CommandResponse> {
+        let attached = self.is_initially_attached();
+        let mut reader = self.reader.lock();
+        let mut responses = Vec::new();
+        for message in &mut reader.pending {
+            if let ProtocolMessage::Batch(batch) = message {
+                batch.frames.retain(|frame| {
+                    if let Ok(ProtocolMessage::CommandResponse(response)) =
+                        zz_protocol::decode_protocol_frame(frame)
+                    {
+                        if attached && matches!(response, CommandResponse::Error { .. }) {
+                            return true;
+                        }
+                        responses.push(response);
+                        false
+                    } else {
+                        true
+                    }
+                });
+            }
+        }
+        responses
+    }
+
+    pub fn execute_chain(&self, commands: Vec<CommandInvocation>) -> Result<(), DaemonError> {
+        self.send(&ProtocolMessage::Exec(ExecRequest {
+            protocol_version: PROTOCOL_VERSION,
+            client_instance_id: self.hello.client_instance_id,
+            process_id: std::process::id(),
+            origin: None,
+            working_directory: None,
+            tty: None,
+            size: None,
+            features: 0,
+            environment: ClientEnvironmentBlob::default(),
+            startup_reentry: None,
+            spawned_server_id: None,
+            expect_server_id: Some(self.hello.server_id),
+            flags: ExecFlags::default(),
+            commands,
+            raw_control_line: None,
+        }))
+    }
+
+    pub fn execute_control_line(&self, line: String) -> Result<(), DaemonError> {
+        let request = ExecRequest {
+            protocol_version: PROTOCOL_VERSION,
+            client_instance_id: self.hello.client_instance_id,
+            process_id: std::process::id(),
+            origin: None,
+            working_directory: None,
+            tty: None,
+            size: None,
+            features: 0,
+            environment: ClientEnvironmentBlob::default(),
+            startup_reentry: None,
+            spawned_server_id: None,
+            expect_server_id: Some(self.hello.server_id),
+            flags: ExecFlags::default(),
+            commands: Vec::new(),
+            raw_control_line: Some(line),
+        };
+        self.send(&ProtocolMessage::Exec(request))
+    }
+
+    pub fn request_tree_sync(&self) -> Result<(), DaemonError> {
+        self.send(&ProtocolMessage::TreeSync)
+    }
+
     pub fn connect(path: &Path) -> Result<Self, DaemonError> {
-        Self::connect_endpoint(&Endpoint::Local(path.to_owned()), TerminalColorScheme::Dark)
+        Self::connect_with_color_scheme(path, TerminalColorScheme::Dark)
     }
 
     pub fn connect_control(path: &Path) -> Result<Self, DaemonError> {
@@ -1760,6 +1990,7 @@ struct ProtocolSender<S> {
 struct ProtocolReceiver<S> {
     stream: io::BufReader<S>,
     frame: Vec<u8>,
+    pending: VecDeque<ProtocolMessage>,
 }
 
 static BUFFERED_READS: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| {
@@ -1782,6 +2013,7 @@ impl<S: TransportStream> ProtocolReceiver<S> {
                 stream,
             ),
             frame: Vec::new(),
+            pending: VecDeque::new(),
         }
     }
 
@@ -1802,6 +2034,9 @@ impl<S: TransportStream> ProtocolReceiver<S> {
     }
 
     fn recv(&mut self) -> Result<ProtocolMessage, DaemonError> {
+        if let Some(message) = self.pending.pop_front() {
+            return Ok(message);
+        }
         let started = diagnostic_timer();
         let message = read_protocol_message_into(&mut self.stream, &mut self.frame)?;
         log::trace!(
@@ -2252,6 +2487,61 @@ where
     snapshot
 }
 
+fn materialize_welcome<S: TransportStream>(
+    reader: &mut ProtocolReceiver<S>,
+    welcome: zz_protocol::Welcome,
+) -> Result<ServerHello, DaemonError> {
+    let mut hello = ServerHello {
+        protocol_version: welcome.protocol_version,
+        server_id: welcome.server_id,
+        client_id: welcome.client_id,
+        client_instance_id: welcome.client_instance_id,
+        capabilities: welcome.capability_strings(),
+        appearance: zz_terminal::TerminalAppearance::default(),
+        appearance_provenance: zz_terminal::AppearanceProvenance::default(),
+        mux_options: zz_protocol::MuxOptions::default(),
+        status: zz_protocol::StatusLine::default(),
+        key_tables: Vec::new(),
+    };
+    let batch = loop {
+        let message = reader.recv()?;
+        if let ProtocolMessage::Batch(batch) = message {
+            break batch;
+        }
+        if let ProtocolMessage::CommandResponse(CommandResponse::Error { error, .. }) = message {
+            return Err(DaemonError::Server(error));
+        }
+    };
+    for message in batch.messages()? {
+        if let ProtocolMessage::Event(zz_protocol::Event { payload, .. }) = message {
+            match payload {
+                zz_protocol::EventPayload::AppearanceChanged {
+                    appearance,
+                    provenance,
+                } => {
+                    hello.appearance = *appearance;
+                    hello.appearance_provenance = provenance;
+                }
+                zz_protocol::EventPayload::MuxOptionsChanged { options } => {
+                    hello.mux_options = options;
+                }
+                zz_protocol::EventPayload::MuxOptionsPatched { options } => {
+                    for (key, value) in options.iter() {
+                        hello
+                            .mux_options
+                            .set(key, value.value.clone(), value.source);
+                    }
+                }
+                zz_protocol::EventPayload::StatusChanged { status } => hello.status = status,
+                zz_protocol::EventPayload::KeyTablesChanged { tables } => hello.key_tables = tables,
+                _ => {}
+            }
+        }
+    }
+    reader.pending.push_back(ProtocolMessage::Batch(batch));
+    Ok(hello)
+}
+
 #[expect(clippy::too_many_arguments)]
 fn connect_stream<S: TransportStream>(
     stream: S,
@@ -2289,6 +2579,35 @@ fn connect_stream_with_startup_owner<S: TransportStream>(
     startup_config_owner: bool,
     extra_capabilities: &[&str],
     client_facts: EndpointFactsScope,
+) -> Result<Connected<S>, DaemonError> {
+    connect_stream_hello(
+        stream,
+        endpoint_display,
+        kind,
+        device_name,
+        color_scheme,
+        client_has_terminal,
+        send_origin,
+        startup_config_owner,
+        extra_capabilities,
+        client_facts,
+        None,
+    )
+}
+
+#[expect(clippy::too_many_arguments)]
+fn connect_stream_hello<S: TransportStream>(
+    stream: S,
+    endpoint_display: impl fmt::Display,
+    kind: ClientKind,
+    device_name: Option<String>,
+    color_scheme: Option<TerminalColorScheme>,
+    client_has_terminal: bool,
+    send_origin: bool,
+    startup_config_owner: bool,
+    extra_capabilities: &[&str],
+    client_facts: EndpointFactsScope,
+    attach: Option<zz_protocol::AttachOperation>,
 ) -> Result<Connected<S>, DaemonError> {
     let started = diagnostic_timer();
     let mut reader = ProtocolReceiver::new(stream.try_clone()?);
@@ -2332,7 +2651,7 @@ fn connect_stream_with_startup_owner<S: TransportStream>(
         std::env::var_os("TMUX").is_some_and(|value| !value.is_empty()),
         &mut capabilities,
     );
-    writer.send(&ProtocolMessage::ClientHello(ClientHello {
+    let client_hello = ClientHello {
         protocol_version: PROTOCOL_VERSION,
         client_instance_id: client_instance_id(),
         kind,
@@ -2346,8 +2665,33 @@ fn connect_stream_with_startup_owner<S: TransportStream>(
         working_directory: client_working_directory(client_facts, logical_current_dir),
         environment: client_environment(),
         process_id: std::process::id(),
-    }))?;
+    };
+    if kind == ClientKind::Command {
+        writer.send(&ProtocolMessage::ClientHello(client_hello))?;
+    } else {
+        let mut hello = zz_protocol::Hello::from_client(client_hello);
+        hello.attach = attach;
+        if kind == ClientKind::Control {
+            hello.subscriptions.tree = zz_protocol::TreeSubscription::All;
+        } else if client_facts.includes_terminal_size() {
+            hello.subscriptions = zz_protocol::Subscriptions::terminal();
+        }
+        hello.viewport = client_facts
+            .includes_terminal_size()
+            .then(caller_terminal_size)
+            .flatten()
+            .map(
+                |(columns, rows, cell_width_px, cell_height_px)| zz_protocol::ClientViewport {
+                    columns,
+                    rows,
+                    cell_width_px,
+                    cell_height_px,
+                },
+            );
+        writer.send(&ProtocolMessage::Hello(hello))?;
+    }
     let hello = match reader.recv()? {
+        ProtocolMessage::Welcome(welcome) => materialize_welcome(&mut reader, welcome)?,
         ProtocolMessage::ServerHello(hello) => hello,
         ProtocolMessage::CommandResponse(CommandResponse::Error { error, .. }) => {
             return Err(DaemonError::Server(error));
@@ -2359,10 +2703,14 @@ fn connect_stream_with_startup_owner<S: TransportStream>(
         }
     };
     if kind == ClientKind::Interactive
-        && !hello
-            .capabilities
+        && [PANE_FRAME_CAPABILITY, zz_protocol::CONTROL_CAPABILITY]
             .iter()
-            .any(|capability| capability == PANE_FRAME_CAPABILITY)
+            .any(|required| {
+                !hello
+                    .capabilities
+                    .iter()
+                    .any(|capability| capability == required)
+            })
     {
         return Err(DaemonError::Protocol(ProtocolError::VersionMismatch {
             expected: PROTOCOL_VERSION,

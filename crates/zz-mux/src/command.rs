@@ -4402,6 +4402,8 @@ impl MuxEngine {
             MuxOptionKey::FocusFollowsMouse => {
                 tmux_flag(self.effective_focus_follows_mouse(None)).to_owned()
             }
+            MuxOptionKey::ExtendedKeys => self.extended_keys().to_owned(),
+            MuxOptionKey::FocusEvents => tmux_flag(self.focus_events()).to_owned(),
         }
     }
 

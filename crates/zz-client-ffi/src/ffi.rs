@@ -347,6 +347,7 @@ impl ZzCommandReply {
 pub struct ZzMuxSnapshot {
     snapshot: Arc<MuxSnapshot>,
     attached: Option<SessionId>,
+    layout_generation: u64,
 }
 
 pub struct ZzAgentState {
@@ -696,6 +697,9 @@ fn spawn_reader(
                         Outbound::RequestFull(pane) => {
                             let _ = client.request_full(pane);
                         }
+                        Outbound::TreeSync => {
+                            let _ = client.send(&ProtocolMessage::TreeSync);
+                        }
                     }
                 }
                 let mut queued = false;
@@ -835,7 +839,7 @@ fn connect_endpoint(
 ) -> Result<*mut ZzClient, ConnectFailure> {
     let endpoint = Endpoint::parse(endpoint)
         .map_err(|error| ConnectFailure::configuration(error.to_string()))?;
-    let client = InteractiveClient::connect_terminal_surface_endpoint_with_prompts(
+    let client = InteractiveClient::connect_endpoint_with_prompts(
         &endpoint,
         TerminalColorScheme::Dark,
         prompts,
@@ -969,7 +973,9 @@ pub unsafe extern "C" fn zz_client_connect(socket_path: *const c_char) -> *mut Z
     let Ok(path) = unsafe { CStr::from_ptr(socket_path) }.to_str() else {
         return std::ptr::null_mut();
     };
-    let Ok(client) = InteractiveClient::connect(Path::new(path)) else {
+    let Ok(client) =
+        InteractiveClient::connect_with_color_scheme(Path::new(path), TerminalColorScheme::Dark)
+    else {
         return std::ptr::null_mut();
     };
     start_client(client).unwrap_or(std::ptr::null_mut())
@@ -1324,16 +1330,51 @@ pub unsafe extern "C" fn zz_client_resize_terminal(
     let Some(client) = (unsafe { client.as_mut() }) else {
         return false;
     };
+    let generation = lock(&client.core).layout_generation();
     client
         .client
-        .send_input(InputMessage::ResizeTerminal {
+        .send_input(InputMessage::ResizeTerminalV2 {
             pane: PaneId(pane),
             columns,
             rows,
             cell_width_px,
             cell_height_px,
+            layout_generation: generation,
         })
         .is_ok()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_resize_terminal_for_layout(
+    client: *mut ZzClient,
+    pane: u64,
+    columns: u16,
+    rows: u16,
+    cell_width_px: u32,
+    cell_height_px: u32,
+    layout_generation: u64,
+) -> bool {
+    let Some(client) = (unsafe { client.as_ref() }) else {
+        return false;
+    };
+    client
+        .client
+        .send_input(InputMessage::ResizeTerminalV2 {
+            pane: PaneId(pane),
+            columns,
+            rows,
+            cell_width_px,
+            cell_height_px,
+            layout_generation,
+        })
+        .is_ok()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_capabilities(client: *const ZzClient) -> u64 {
+    unsafe { client.as_ref() }.map_or(0, |client| {
+        zz_protocol::Welcome::caps_from_strings(lock(&client.core).capabilities())
+    })
 }
 
 #[unsafe(no_mangle)]
@@ -1447,6 +1488,7 @@ pub unsafe extern "C" fn zz_client_snapshot_acquire(client: *const ZzClient) -> 
     Box::into_raw(Box::new(ZzMuxSnapshot {
         snapshot: Arc::clone(core.snapshot()),
         attached: core.attached_session(),
+        layout_generation: core.layout_generation(),
     }))
 }
 
@@ -1460,6 +1502,11 @@ pub unsafe extern "C" fn zz_snapshot_release(snapshot: *mut ZzMuxSnapshot) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn zz_snapshot_generation(snapshot: *const ZzMuxSnapshot) -> u64 {
     unsafe { snapshot.as_ref() }.map_or(0, |snapshot| snapshot.snapshot.generation)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_snapshot_layout_generation(snapshot: *const ZzMuxSnapshot) -> u64 {
+    unsafe { snapshot.as_ref() }.map_or(0, |snapshot| snapshot.layout_generation)
 }
 
 #[unsafe(no_mangle)]
@@ -2869,6 +2916,7 @@ mod tests {
                 focused_window: None,
             }),
             attached: Some(SessionId(1)),
+            layout_generation: 1,
         };
         let mut rect = ZzPaneRect::default();
 

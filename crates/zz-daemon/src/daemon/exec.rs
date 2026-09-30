@@ -437,16 +437,25 @@ fn serve_exec_ready<S: TransportStream>(
         cancel,
         registration,
         live: None,
+        resumed: false,
     };
     loop {
         let last = request.flags.contains(ExecFlags::LAST);
         connection.run(request);
-        if last {
+        if last && !connection.resumed {
             break;
         }
         match connection.next_request() {
-            Some(next) => request = next,
-            None => break,
+            Some(ProtocolMessage::Exec(next)) => request = next,
+            Some(first @ ProtocolMessage::Hello(_)) => {
+                let stream = connection.stream.lock().take();
+                connection.finish();
+                if let Some(stream) = stream {
+                    let _ = handle_connection_message(stream, shared, first);
+                }
+                return;
+            }
+            _ => break,
         }
     }
     connection.finish();
@@ -466,6 +475,7 @@ struct ExecConnection<S: TransportStream> {
     cancel: Arc<AtomicBool>,
     registration: Arc<ExecRegistration>,
     live: Option<(Arc<OutboundMailbox>, Arc<ExecLink>)>,
+    resumed: bool,
 }
 
 impl<S: TransportStream> ExecConnection<S> {
@@ -495,6 +505,7 @@ impl<S: TransportStream> ExecConnection<S> {
             let _ = mailbox.enqueue_reliable(&server_stopping_response(1));
             ExecOutcome::Ran
         };
+        self.resumed = matches!(outcome, ExecOutcome::Resume(_));
         let exit = ProtocolMessage::ExecExit(ExecExit {
             server_id: self.shared.server_id,
             outcome,
@@ -719,16 +730,18 @@ impl<S: TransportStream> ExecConnection<S> {
         })
     }
 
-    fn next_request(&mut self) -> Option<ExecRequest> {
+    fn next_request(&mut self) -> Option<ProtocolMessage> {
         if let Some((_, link)) = &self.live {
             let requests = link.live.lock().as_ref()?.requests.clone();
-            return requests.recv().ok();
+            return requests.recv().ok().map(ProtocolMessage::Exec);
         }
         let mut stream = self.stream.lock();
         let stream = stream.as_mut()?;
         loop {
             match read_protocol_message_into(stream, &mut self.frame) {
-                Ok(ProtocolMessage::Exec(request)) => return Some(request),
+                Ok(message @ (ProtocolMessage::Exec(_) | ProtocolMessage::Hello(_))) => {
+                    return Some(message);
+                }
                 Ok(ProtocolMessage::ClientFileResponse(response)) => {
                     self.shared.complete_client_file(self.client, response);
                 }

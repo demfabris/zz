@@ -337,6 +337,8 @@ int zz_client_event_fd(const zz_client *client);
 bool zz_client_next_event(zz_client *client, zz_client_event *out);
 
 bool zz_client_attach(zz_client *client, const char *session);
+uint64_t zz_client_capabilities(const zz_client *client);
+#define ZZ_CAP_CONTROL_PLANE_V2 (UINT64_C(1) << 30)
 bool zz_client_set_terminal_preview(zz_client *client, bool enabled);
 bool zz_client_send_text(zz_client *client, uint64_t pane, const char *text);
 /* Paste text into a terminal pane. The text skips the key tables, so a pasted
@@ -372,6 +374,11 @@ bool zz_client_cancel_command_output(zz_client *client);
 bool zz_client_resize_terminal(zz_client *client, uint64_t pane,
                                uint16_t columns, uint16_t rows,
                                uint32_t cell_width_px, uint32_t cell_height_px);
+bool zz_client_resize_terminal_for_layout(zz_client *client, uint64_t pane,
+                                          uint16_t columns, uint16_t rows,
+                                          uint32_t cell_width_px,
+                                          uint32_t cell_height_px,
+                                          uint64_t layout_generation);
 bool zz_client_scroll_lines(zz_client *client, uint64_t pane, int32_t lines);
 bool zz_client_terminal_selection(zz_client *client, uint64_t pane,
                                   uint32_t phase, uint16_t column,
@@ -385,6 +392,7 @@ bool zz_client_focus_terminal(zz_client *client, uint64_t pane, bool focused);
 zz_mux_snapshot *zz_client_snapshot_acquire(const zz_client *client);
 void zz_snapshot_release(zz_mux_snapshot *snapshot);
 uint64_t zz_snapshot_generation(const zz_mux_snapshot *snapshot);
+uint64_t zz_snapshot_layout_generation(const zz_mux_snapshot *snapshot);
 size_t zz_snapshot_session_count(const zz_mux_snapshot *snapshot);
 uint64_t zz_snapshot_session_id(const zz_mux_snapshot *snapshot, size_t session);
 zz_bytes zz_snapshot_session_name(const zz_mux_snapshot *snapshot, size_t session);

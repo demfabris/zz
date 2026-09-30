@@ -3,6 +3,7 @@ use std::{
     fmt::Write as _,
     io::{self, Write as _},
     rc::Rc,
+    sync::Arc,
 };
 
 use unicode_width::UnicodeWidthChar as _;
@@ -225,6 +226,7 @@ pub(crate) struct Renderer {
     sidebar_rows: Vec<PaintedSidebarRow>,
     status_rows: Vec<StyledLine>,
     status_geometry: Option<(u16, u16, u16)>,
+    status_source: Option<zz_protocol::StatusLine>,
     damage: HashMap<PaneId, FrameDamage>,
     browser_placements: HashMap<PaneId, KittyPlacement>,
     browser_painted: HashMap<PaneId, bool>,
@@ -270,6 +272,7 @@ impl Renderer {
             sidebar_rows: Vec::new(),
             status_rows: Vec::new(),
             status_geometry: None,
+            status_source: None,
             damage: HashMap::new(),
             browser_placements: HashMap::new(),
             browser_painted: HashMap::new(),
@@ -309,6 +312,7 @@ impl Renderer {
         self.sidebar_rows.clear();
         self.status_rows.clear();
         self.status_geometry = None;
+        self.status_source = None;
         self.damage.clear();
         self.browser_painted.clear();
         self.border_chrome = None;
@@ -632,15 +636,23 @@ impl Renderer {
     fn paint_workspace(&mut self, model: &Model, force: bool, cleared_to_default: bool) {
         let lines = model.pane_border_lines();
         let indicators = model.pane_border_indicators();
-        let chrome = (
-            model.pane_border_status(),
-            lines,
-            indicators,
-            model.status.pane_borders.clone(),
-            model.status.theme,
-        );
-        let force = force || self.border_chrome.as_ref() != Some(&chrome);
-        self.border_chrome = Some(chrome);
+        let border_changed = self.border_chrome.as_ref().is_none_or(|cached| {
+            cached.0 != model.pane_border_status()
+                || cached.1 != lines
+                || cached.2 != indicators
+                || cached.3 != model.status.pane_borders
+                || cached.4 != model.status.theme
+        });
+        let force = force || border_changed;
+        if border_changed {
+            self.border_chrome = Some((
+                model.pane_border_status(),
+                lines,
+                indicators,
+                model.status.pane_borders.clone(),
+                model.status.theme,
+            ));
+        }
         if force {
             let cells = divider_cells(&model.layout.dividers);
             let mut border = BTreeMap::new();
@@ -908,6 +920,21 @@ impl Renderer {
         force: bool,
         damage: Option<&FrameDamage>,
     ) {
+        if !force
+            && !matches!(damage, Some(FrameDamage::All))
+            && self.painted.get(&pane).is_some_and(|previous| {
+                previous.rect == rect
+                    && previous.viewport.columns == viewport.columns
+                    && previous.viewport.rows == viewport.rows
+                    && previous.viewport.foreground == viewport.foreground
+                    && previous.viewport.background == viewport.background
+                    && Arc::ptr_eq(&previous.viewport.cells, &viewport.cells)
+                    && Arc::ptr_eq(&previous.viewport.overlays, &viewport.overlays)
+                    && Arc::ptr_eq(&previous.viewport.dictionary, &viewport.dictionary)
+            })
+        {
+            return;
+        }
         let previous = self.painted.get(&pane).cloned();
         let structural_change = previous.as_ref().is_none_or(|previous| {
             previous.rect != rect
@@ -1766,6 +1793,15 @@ impl Renderer {
         let block = usize::from(model.status_block_rows());
         let overlay = status_overlay(model, width);
         let origin = model.status_origin_y();
+        let geometry = (x, origin, width);
+        if !force
+            && overlay.is_none()
+            && self.status_geometry == Some(geometry)
+            && self.status_source.as_ref() == Some(&model.status)
+        {
+            return;
+        }
+        self.status_source = overlay.is_none().then(|| model.status.clone());
         let mut lines = Vec::with_capacity(block);
         for index in 0..block {
             let row = model.status.rows.get(index).map_or("", String::as_str);
@@ -1784,7 +1820,6 @@ impl Renderer {
             line.resolve_theme(&model.status.theme);
             lines.push(line);
         }
-        let geometry = (x, origin, width);
         let force = force || self.status_geometry != Some(geometry);
         for (index, line) in lines.iter().enumerate() {
             let row = origin.saturating_add(u16::try_from(index).unwrap_or(u16::MAX));
@@ -2014,6 +2049,7 @@ impl Renderer {
         self.sidebar_rows.clear();
         self.status_rows.clear();
         self.status_geometry = None;
+        self.status_source = None;
     }
 
     fn place_active_cursor(&mut self, model: &Model) {
@@ -2544,19 +2580,21 @@ fn pane_prompt_row_y(model: &Model, content: Rect) -> u16 {
 }
 
 fn status_overlay(model: &Model, width: u16) -> Option<StatusOverlay> {
-    let message_style = crate::mode_view::message_style(model, false);
     let filled = model.status_block_rows() > 0;
-    let message = |text: &str| StatusOverlay {
-        front: StyledLine::from_segments(crate::mode_view::message_front(
-            if filled {
-                text.trim_end_matches(' ')
-            } else {
-                text
-            },
-            width,
-            &message_style,
-        )),
-        fill: message_style.fill,
+    let message = |text: &str| {
+        let message_style = crate::mode_view::message_style(model, false);
+        StatusOverlay {
+            front: StyledLine::from_segments(crate::mode_view::message_front(
+                if filled {
+                    text.trim_end_matches(' ')
+                } else {
+                    text
+                },
+                width,
+                &message_style,
+            )),
+            fill: message_style.fill,
+        }
     };
     if let Some(confirm) = &model.confirm {
         if model.sidebar_visible() {

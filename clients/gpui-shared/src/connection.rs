@@ -525,7 +525,18 @@ impl Connection {
             self.auth_prompt = None;
             self.core = ClientCore::new();
             if let Some(endpoint) = self.endpoint.clone() {
-                self.native = Some(crate::transport::Connection::connect(endpoint, None, true));
+                let target = self.pending_session.take().unwrap_or_else(|| {
+                    self.remembered_session.map_or_else(
+                        || std::env::var("ZZ_GPUI_SESSION").unwrap_or_default(),
+                        |id| id.to_string(),
+                    )
+                });
+                self.attaching = true;
+                self.native = Some(crate::transport::Connection::connect(
+                    endpoint,
+                    Some(target),
+                    true,
+                ));
                 self.reader = Some(cx.spawn(async move |this, cx| {
                     loop {
                         cx.background_executor()
@@ -549,6 +560,30 @@ impl Connection {
 
     #[allow(clippy::needless_pass_by_value)]
     pub fn send(&mut self, message: ProtocolMessage, cx: &mut Context<Self>) {
+        let message = match message {
+            ProtocolMessage::Input(InputMessage::ResizeTerminal {
+                pane,
+                columns,
+                rows,
+                cell_width_px,
+                cell_height_px,
+            }) => ProtocolMessage::Input(InputMessage::ResizeTerminalV2 {
+                pane,
+                columns,
+                rows,
+                cell_width_px,
+                cell_height_px,
+                layout_generation: self.core.layout_generation(),
+            }),
+            ProtocolMessage::Input(InputMessage::ClientTerminalSize { columns, rows }) => {
+                ProtocolMessage::Input(InputMessage::ClientTerminalSizeV2 {
+                    columns,
+                    rows,
+                    layout_generation: self.core.layout_generation(),
+                })
+            }
+            message => message,
+        };
         #[cfg(target_family = "wasm")]
         {
             if let Some(socket) = &self.socket {
@@ -648,8 +683,12 @@ impl Connection {
 
     fn receive(&mut self, message: ProtocolMessage, cx: &mut Context<Self>) {
         self.core.handle_message(message);
-        while let Some(Outbound::RequestFull(pane)) = self.core.poll_outbound() {
-            self.send(ProtocolMessage::RequestFull { pane }, cx);
+        while let Some(outbound) = self.core.poll_outbound() {
+            let message = match outbound {
+                Outbound::RequestFull(pane) => ProtocolMessage::RequestFull { pane },
+                Outbound::TreeSync => ProtocolMessage::TreeSync,
+            };
+            self.send(message, cx);
         }
         while let Some(event) = self.core.poll_event() {
             self.terminal_images.apply(&event);
@@ -679,7 +718,9 @@ impl Connection {
                     );
                     #[cfg(target_os = "ios")]
                     let target = self.pending_session.take().unwrap_or(target);
-                    self.attach_target(target, cx);
+                    if !self.attaching {
+                        self.attach_target(target, cx);
+                    }
                 }
                 CoreEvent::Attached { session } => {
                     self.attaching = false;
@@ -993,12 +1034,16 @@ impl Connection {
                 self.focused = web_sys::window()
                     .and_then(|window| window.document())
                     .is_some_and(|document| document.has_focus().unwrap_or(false));
-                self.send(ProtocolMessage::ClientHello(browser::hello()), cx);
+                let target = self
+                    .remembered_session
+                    .map_or_else(String::new, |id| id.to_string());
+                self.attaching = true;
+                self.send(ProtocolMessage::Hello(browser::hello(target)), cx);
             }
             inbox::SocketEvent::Frame(bytes) => match zz_protocol::decode_protocol_frame(&bytes) {
-                Ok(ProtocolMessage::ServerHello(hello))
+                Ok(ProtocolMessage::Welcome(hello))
                     if !hello
-                        .capabilities
+                        .capability_strings()
                         .iter()
                         .any(|capability| capability == zz_protocol::PANE_FRAME_CAPABILITY) =>
                 {
@@ -1144,7 +1189,8 @@ mod inbox {
 mod browser {
     use wasm_bindgen::{JsCast, closure::Closure};
     use zz_protocol::{
-        ClientHello, ClientInstanceId, ClientKind, PROTOCOL_VERSION, ProtocolMessage,
+        AttachOperation, ClientHello, ClientInstanceId, ClientKind, Hello, PROTOCOL_VERSION,
+        ProtocolMessage,
     };
 
     use super::inbox::{self, Receiver, Sender, SocketEvent};
@@ -1303,8 +1349,8 @@ mod browser {
         INSTANCE_ID.with(|id| *id)
     }
 
-    pub fn hello() -> ClientHello {
-        ClientHello {
+    pub fn hello(target: String) -> Hello {
+        let mut hello = Hello::from_client(ClientHello {
             protocol_version: PROTOCOL_VERSION,
             client_instance_id: instance_id(),
             kind: ClientKind::Interactive,
@@ -1318,7 +1364,9 @@ mod browser {
             working_directory: None,
             environment: Vec::new(),
             process_id: 0,
-        }
+        });
+        hello.attach = Some(AttachOperation::Session(target));
+        hello
     }
 }
 

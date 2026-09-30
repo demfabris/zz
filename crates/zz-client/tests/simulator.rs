@@ -116,6 +116,11 @@ impl SimClient {
                     Outbound::RequestFull(pane) => {
                         self.client.request_full(pane).expect("request full");
                     }
+                    Outbound::TreeSync => {
+                        self.client
+                            .send(&ProtocolMessage::TreeSync)
+                            .expect("sync tree");
+                    }
                 }
             }
         }
@@ -126,12 +131,13 @@ impl SimClient {
     fn resize_all_terminals(&self) {
         for pane in terminal_panes(self.core.snapshot()) {
             self.client
-                .send_input(InputMessage::ResizeTerminal {
+                .send_input(InputMessage::ResizeTerminalV2 {
                     pane,
                     columns: COLUMNS,
                     rows: ROWS,
                     cell_width_px: CELL_WIDTH_PX,
                     cell_height_px: CELL_HEIGHT_PX,
+                    layout_generation: self.core.layout_generation(),
                 })
                 .expect("resize terminal");
         }
@@ -471,4 +477,48 @@ fn seeded_convergence_seed_5eed() {
 #[test]
 fn seeded_convergence_seed_c0ffee() {
     run_simulation(0xc0f_fee);
+}
+
+#[test]
+fn tree_sync_after_a_base_mismatch_recovers_real_daemon_deltas() {
+    let mut simulation = Simulation::boot(0x5a1c);
+    let before = normalized_snapshot(simulation.clients[0].core.snapshot());
+    let generation = simulation.clients[0].core.snapshot().generation;
+    simulation.clients[0]
+        .core
+        .handle_message(ProtocolMessage::Event(Event {
+            sequence: 10,
+            payload: EventPayload::TreeDelta(zz_protocol::TreeDelta {
+                base: generation.saturating_add(10),
+                version: generation.saturating_add(11),
+                ops: Vec::new(),
+            }),
+        }));
+    assert_eq!(
+        simulation.clients[0].core.poll_outbound(),
+        Some(Outbound::TreeSync)
+    );
+    simulation.clients[0]
+        .client
+        .send(&ProtocolMessage::TreeSync)
+        .unwrap();
+    simulation.quiesce();
+    assert_eq!(
+        before,
+        normalized_snapshot(simulation.clients[0].core.snapshot())
+    );
+    connect_commands(&simulation.socket)
+        .execute(CommandInvocation::new(
+            "rename-window",
+            ["-t", "sim:0", "after-sync"],
+        ))
+        .unwrap();
+    simulation.quiesce();
+    simulation.assert_snapshots_converged();
+    assert_eq!(
+        simulation.clients[0].core.snapshot().sessions[0].windows[0].name,
+        "after-sync"
+    );
+    assert_eq!(simulation.clients[0].core.poll_outbound(), None);
+    simulation.shutdown();
 }

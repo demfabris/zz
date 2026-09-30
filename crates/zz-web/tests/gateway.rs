@@ -226,8 +226,12 @@ mod daemon {
         };
         let message = decode_protocol_frame(&frame).unwrap();
         core.handle_message(message.clone());
-        while let Some(Outbound::RequestFull(pane)) = core.poll_outbound() {
-            send(socket, &ProtocolMessage::RequestFull { pane }).await;
+        while let Some(outbound) = core.poll_outbound() {
+            let request = match outbound {
+                Outbound::RequestFull(pane) => ProtocolMessage::RequestFull { pane },
+                Outbound::TreeSync => ProtocolMessage::TreeSync,
+            };
+            send(socket, &request).await;
         }
         while core.poll_event().is_some() {}
         message
@@ -243,36 +247,40 @@ mod daemon {
             .unwrap();
         send(
             &mut socket,
-            &ProtocolMessage::ClientHello(ClientHello {
-                protocol_version: PROTOCOL_VERSION,
-                client_instance_id: ClientInstanceId(0x0062_726f_7773_6572),
-                kind: ClientKind::Interactive,
-                device_name: Some("Browser gateway test".into()),
-                capabilities: vec![
-                    ClientHello::CLIENT_TERMINAL_CAPABILITY.into(),
-                    ClientHello::CLIENT_UTF8_CAPABILITY.into(),
-                ],
-                color_scheme: Some(TerminalColorScheme::Dark),
-                origin: None,
-                working_directory: None,
-                environment: Vec::new(),
-                process_id: 0,
+            &ProtocolMessage::Hello(zz_protocol::Hello {
+                client: ClientHello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_instance_id: ClientInstanceId(0x0062_726f_7773_6572),
+                    kind: ClientKind::Interactive,
+                    device_name: Some("Browser gateway test".into()),
+                    capabilities: vec![
+                        ClientHello::CLIENT_TERMINAL_CAPABILITY.into(),
+                        ClientHello::CLIENT_UTF8_CAPABILITY.into(),
+                    ],
+                    color_scheme: Some(TerminalColorScheme::Dark),
+                    origin: None,
+                    working_directory: None,
+                    environment: Vec::new(),
+                    process_id: 0,
+                },
+                viewport: Some(zz_protocol::ClientViewport {
+                    columns: 60,
+                    rows: 12,
+                    cell_width_px: 8,
+                    cell_height_px: 16,
+                }),
+                subscriptions: zz_protocol::Subscriptions::default(),
+                attach: Some(zz_protocol::AttachOperation::Session("web-test".into())),
+                environment: zz_protocol::ClientEnvironmentBlob::default(),
             }),
         )
         .await;
         let mut core = ClientCore::new();
         assert!(matches!(
             receive(&mut socket, &mut core).await,
-            ProtocolMessage::ServerHello(_)
+            ProtocolMessage::Welcome(_)
         ));
         let deadline = std::time::Instant::now() + Duration::from_secs(30);
-        send(
-            &mut socket,
-            &ProtocolMessage::Attach {
-                session: "web-test".into(),
-            },
-        )
-        .await;
         while core.attached_session().is_none() {
             assert!(std::time::Instant::now() < deadline, "attachment timed out");
             receive(&mut socket, &mut core).await;
@@ -286,12 +294,13 @@ mod daemon {
         let pane = *session.windows[0].panes.keys().next().unwrap();
         send(
             &mut socket,
-            &ProtocolMessage::Input(InputMessage::ResizeTerminal {
+            &ProtocolMessage::Input(InputMessage::ResizeTerminalV2 {
                 pane,
                 columns: 60,
                 rows: 12,
                 cell_width_px: 8,
                 cell_height_px: 16,
+                layout_generation: core.layout_generation(),
             }),
         )
         .await;

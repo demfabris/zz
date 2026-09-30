@@ -57,7 +57,7 @@ fn test_server(tables: Vec<KeyTableSnapshot>) -> (InteractiveClient, TestServer)
         let (mut stream, _) = listener.accept().unwrap();
         assert!(matches!(
             read_protocol_message(&mut stream).unwrap(),
-            ProtocolMessage::ClientHello(_)
+            ProtocolMessage::ClientHello(_) | ProtocolMessage::Hello(_)
         ));
         sender.send(stream.try_clone().unwrap()).unwrap();
         write_protocol_message(

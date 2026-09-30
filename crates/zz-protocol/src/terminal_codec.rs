@@ -303,6 +303,45 @@ fn decode_protocol_payload(lane: Lane, payload: &[u8]) -> Result<ProtocolMessage
 }
 
 fn validate_control_message(message: &ProtocolMessage) -> Result<(), ProtocolError> {
+    if let ProtocolMessage::Hello(hello) = message {
+        validate_control_message(&ProtocolMessage::ClientHello(hello.client.clone()))?;
+        if !hello.environment.is_valid() {
+            return Err(ProtocolError::InvalidClientHello(
+                "invalid hello environment blob".to_owned(),
+            ));
+        }
+    }
+    if let ProtocolMessage::Welcome(welcome) = message {
+        if welcome.protocol_version != PROTOCOL_VERSION {
+            return Err(ProtocolError::VersionMismatch {
+                expected: PROTOCOL_VERSION,
+                received: welcome.protocol_version,
+            });
+        }
+        for capability in [crate::CONTROL_CAPABILITY, crate::PANE_FRAME_CAPABILITY] {
+            if !welcome.has_capability(capability) {
+                return Err(ProtocolError::InvalidServerHello(format!(
+                    "daemon does not support {capability}"
+                )));
+            }
+        }
+    }
+    if let ProtocolMessage::Batch(batch) = message
+        && batch.frames.len() > crate::MAX_BATCH_FRAMES
+    {
+        return Err(ProtocolError::InvalidServerHello(
+            "batch contains too many frames".to_owned(),
+        ));
+    }
+    if let ProtocolMessage::Event(Event {
+        payload: EventPayload::MuxOptionsPatched { options },
+        ..
+    }) = message
+    {
+        options
+            .validate_partial()
+            .map_err(|error| ProtocolError::InvalidServerHello(error.to_owned()))?;
+    }
     if let ProtocolMessage::Event(Event {
         payload:
             EventPayload::CommandOutput {

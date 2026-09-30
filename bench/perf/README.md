@@ -241,7 +241,7 @@ or `s20` (20 sessions).
 | config | `config.wall.source_1000`, `config.cpu.source_1000`, `config.instr.source_1000` | `source-file` of a generated 1000-line config: 40% `set -g @plugin_opt_N`, 30% `bind-key -T <table>`, 30% real options (status-left/right, styles, history-limit, window-status formats) |
 | chatty | `chatty.cpu_pct.<v>`, `chatty.instr_per_s.<v>`, `chatty.tty_kibps.<v>`, `chatty.client_cpu_pct.<v>` | 10 windows printing about 100 lines/s. `steady`: a Python printer, detached. `flip`: a shell loop typed at the prompt (`echo; sleep 0.01`, so the foreground flips between bash and sleep), detached. `hidden`: the flip load in 10 windows with a TUI attached to idle window 0. `visible`: 4 tiled panes running the flip loop in the attached window. Server CPU %, TUI tty KiB/s and TUI client CPU % over 10 s |
 | idle | `idle.cpu_pct.p20`, `idle.instr_per_s.p20`, `idle.wakeups_per_s.p20` | 20 idle shells, no client, 10 s |
-| mem | `mem.footprint.<p>`, `mem.rss.<p>`, `mem.threads.<p>` | `p1`, `p20` (idle shells), `tui20` (p20 with a TUI attached), `scroll180` and `scroll80` (20 panes with history-limit 10000 filled by `seq 1 12000`, sampled 5 s after the fill) |
+| mem | `mem.footprint.<p>`, `mem.rss.<p>`, `mem.threads.<p>` | `p1`, `p20` (idle shells), `tui20` (p20 with a TUI attached), `scroll180` and `scroll80` (20 panes with history-limit 10000 filled by `seq 1 12000`, sampled 5 s after the fill); `mem.copy_footprint.scroll180`, `mem.copy_rss.scroll180`, `mem.copy_cpu.scroll180`, `mem.copy_wall.scroll180` and `mem.copy_instr.scroll180` measure first copy-mode entry on a fresh server with 10000 dense 180-column history rows, after 5 s idle, through a persistent control client |
 | attach | `attach.ttfc.<p>`, `attach.tty_total.<p>`, `attach.tty_bytes.<p>`, `attach.cpu.<p>`, `attach.instr.<p>`, `attach.conns.<p>`, `attach.wire_s2c.<p>`, `attach.wire_frames.<p>`, `attach.wire_c2s.<p>` | TUI attach in a 180x50 pty. `p1`: a pane showing a marker; `p4`: four tiled panes with markers. Time from fork to all markers on the tty; `tty_total` is every tty byte until the output has been quiet for 200 ms (gated); `tty_bytes` is the bytes up to the last marker (info, it depends on draw order); daemon CPU per attach+detach. Through the proxy (zz only): connections, bytes and frames from spawn to 1 s after content |
 | echo | `echo.p50.<v>`, `echo.p99.<v>`, `echo.wire_bytes.<v>` | keystroke written to the outer pty until its echo comes back, through an attached TUI, with a raw-mode echo program in the pane and status off. The pane answers key N with `§` and N as three digits, and the gate looks for that token in the tty bytes with escape sequences removed, so an SGR `m` or a redraw split across a scroll cannot pass for the echo. `idle`, and `busy30` where the same pane prints a line 30 times a second. Keys are 20 to 50 ms apart. Wire bytes per keystroke through the proxy (zz only) |
 | throughput | `throughput.detached.ascii`, `throughput.detached.unicode`, `throughput.attached.ascii_ms`, `throughput.attached.tty_bytes`, `throughput.headless.ascii_ms`, `throughput.ceiling.ascii`, `throughput.ceiling.unicode`, `throughput.ceiling.ascii_ms` | `/bin/cat` of a 150 MiB seeded fixture in a detached 180x50 pane, timed inside the pane; MB/s. The attached run shows the same file in the window a TUI is looking at. The headless run (zz only, info) shows it to `perf_client`, which decodes and applies every frame with the zz-client core and renders nothing, so it measures the daemon's frames and their decoding without the TUI's painting. The ceiling rows are a bare reader of the same `cat` through a cooked 180x50 pty, once per run before the muxes (its rate sits in the `zz` column); `ascii_ms` is that rate as the time to read the file |
@@ -249,7 +249,8 @@ or `s20` (20 sessions).
 | statusjob | `statusjob.cpu_pct`, `statusjob.instr_per_s`, `statusjob.threads_per_s`, `statusjob.child_cpu_pct`, `statusjob.tty_kibps` | three `#()` jobs in status-right at status-interval 1 with a TUI attached. Threads per second counts new thread ids seen by a 2 ms sampler, a lower bound for short-lived threads |
 
 `--quick` runs: cli at 20 runs per verb, spawn at 4, cold at 4, config at 3,
-chatty `flip` and `hidden` over 4 s, idle over 5 s, mem `p1` and `p20`,
+chatty `flip` and `hidden` over 4 s, idle over 5 s, mem `p1`, `p20` and
+copy entry at 3 fresh servers (7 in a full run),
 attach at 4, echo at 100 keys, throughput ASCII detached once, control at 50
 commands, statusjob over 5 s.
 
@@ -273,6 +274,13 @@ These are known gaps, not silent omissions:
   link with real round-trip time.
 - TODO: agent pane streaming (the fixture ACP provider): daemon CPU, threads
   per agent pane, stream fanout bytes.
-- TODO: copy-mode entry memory delta on a 10k x 180 pane.
+- Built (W2-COPY): first copy-mode entry on a 10k x 180 pane runs in the
+  `mem` group, including `--quick --only mem,throughput`. Footprint grows by
+  at most 1 MiB and entry takes at most 5 ms at wave2 and final. CPU and
+  instruction deltas have tmux twins; CPU also has a 5 ms limit. Each sample
+  starts a fresh server, fills the pane, attaches a control client, waits
+  5 s for idle history compression, then sends one `copy-mode` command.
+  The wall interval ends at its control reply. The daemon footprint and CPU
+  samples bracket that command; RSS records the same interval.
 - Done (2026-09-29): the gate runs on Linux; the Linux W0 is
   `results/baseline-alienware-17e17115.json` and its quick twin.

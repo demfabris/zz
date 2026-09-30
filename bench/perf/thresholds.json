@@ -60,6 +60,9 @@
   "mem.footprint.scroll80": {"wave1": {"ratio": 1.15}, "final": {"ratio": 0.8}},
   "mem.threads.p20": {"wave1": {"abs": 51}, "final": {"abs": 12}},
   "mem.threads.*": {"final": {"abs": 12}},
+  "mem.copy_footprint.scroll180": {"unit": "MiB", "wave2": {"abs": 1.0}, "final": {"abs": 1.0}},
+  "mem.copy_cpu.scroll180": {"unit": "ms", "wave2": {"abs": 5.0}, "final": {"abs": 5.0}},
+  "mem.copy_wall.scroll180": {"unit": "ms", "wave2": {"abs": 5.0}, "final": {"abs": 5.0}},
 
   "attach.ttfc.*": {"wave1": {"abs": 14.0}, "wave2": {"ratio": 1.1}},
   "attach.tty_total.p1": {"wave1": {"abs": 8192}, "wave2": {"abs": 2048}},

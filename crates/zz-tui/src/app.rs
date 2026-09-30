@@ -2389,8 +2389,12 @@ mod tests {
         let painted = String::from_utf8(receive.recv_timeout(wait).expect("drained paint written"))
             .expect("paint is UTF-8");
         assert!(
-            painted.contains("$ printf 'MARK-%s' split"),
+            painted.contains(" printf 'MARK-%s' split"),
             "the row only the first frame changed reaches the tty: {painted:?}"
+        );
+        assert!(
+            painted.contains(&format!("\x1b[{};{}H", content.y + 2, content.x + 2)),
+            "the unchanged prompt cell is preserved: {painted:?}"
         );
         assert!(painted.contains("MARK-split"), "{painted:?}");
     }

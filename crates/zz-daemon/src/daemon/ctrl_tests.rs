@@ -716,6 +716,45 @@ fn new_full_subscriber_does_not_hide_pending_key_patch() {
 }
 
 #[test]
+fn first_full_subscriber_does_not_hide_a_pending_hash_update() {
+    let shared = Arc::new(Shared::new(42));
+    let (hash_client, hash_mailbox) = compact_registered(
+        &shared,
+        zz_protocol::Subscriptions {
+            keys: zz_protocol::KeySubscription::Hash,
+            ..zz_protocol::Subscriptions::control()
+        },
+    );
+    shared.send_compact_keys(hash_client, &hash_mailbox);
+    shared.publish_key_tables_if_changed();
+    reliable_children(&hash_mailbox);
+    let generation = {
+        let mut inner = shared.inner.lock();
+        inner
+            .engine
+            .execute(
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "bind-key",
+                    ["-T", "ctrl-hash-pending", "x", "display-message", "changed"],
+                ),
+            )
+            .expect("pending bind");
+        inner.engine.keys.generation()
+    };
+    let (full_client, full_mailbox) =
+        compact_registered(&shared, zz_protocol::Subscriptions::default());
+    shared.send_compact_keys(full_client, &full_mailbox);
+    reliable_children(&full_mailbox);
+    shared.publish_key_tables_if_changed();
+    let messages = bounded_reliable_children(&hash_mailbox, 64);
+    assert!(
+        matches!(messages.as_slice(), [ProtocolMessage::Event(Event { payload: EventPayload::KeyTablesHashChanged { hash, .. }, .. })] if *hash == generation)
+    );
+    assert!(reliable_children(&full_mailbox).is_empty());
+}
+
+#[test]
 fn compact_raw_control_preflights_line_and_resolves_daemon_environment() {
     let shared = Arc::new(Shared::new(34));
     let mut hello = compact_hello(ClientKind::Control);

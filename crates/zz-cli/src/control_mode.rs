@@ -140,7 +140,7 @@ pub(crate) fn run(
         }
     };
     let stdout = io::stdout();
-    let mut output = ControlWriter::new(stdout.lock(), level >= 2);
+    let mut output = ControlWriter::new(io::BufWriter::new(stdout.lock()), level >= 2);
     let result = output
         .start()
         .and_then(|()| drive(&client, commands, &mut output));

@@ -11018,7 +11018,14 @@ impl Shared {
                         key_table_generations,
                         ..
                     } = &mut *inner;
-                    key_table_publication(&engine.keys, key_table_generations)
+                    Some(
+                        key_table_publication(&engine.keys, key_table_generations).unwrap_or_else(
+                            || EventPayload::KeyTablesPatched {
+                                tables: Vec::new(),
+                                removed: Vec::new(),
+                            },
+                        ),
+                    )
                 } else {
                     Some(EventPayload::KeyTablesPatched {
                         tables: Vec::new(),

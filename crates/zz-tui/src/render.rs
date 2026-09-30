@@ -949,18 +949,20 @@ impl Renderer {
             }
         } else if let Some(FrameDamage::Rows(rows)) = damage {
             for row in rows.iter().copied().filter(|row| *row < rect.height) {
-                if previous.as_ref().is_none_or(|previous| {
-                    row_changed(&previous.viewport, viewport, row, rect.width)
-                }) {
-                    self.blit_row(viewport, row, rect);
+                if let Some(columns) = previous.as_ref().map_or_else(
+                    || Some(0..rect.width),
+                    |previous| changed_columns(&previous.viewport, viewport, row, rect.width),
+                ) {
+                    self.blit_columns(viewport, row, rect, columns);
                 }
             }
         } else {
             for row in 0..rect.height {
-                if previous.as_ref().is_none_or(|previous| {
-                    row_changed(&previous.viewport, viewport, row, rect.width)
-                }) {
-                    self.blit_row(viewport, row, rect);
+                if let Some(columns) = previous.as_ref().map_or_else(
+                    || Some(0..rect.width),
+                    |previous| changed_columns(&previous.viewport, viewport, row, rect.width),
+                ) {
+                    self.blit_columns(viewport, row, rect, columns);
                 }
             }
         }
@@ -986,6 +988,16 @@ impl Renderer {
     }
 
     fn blit_row(&mut self, viewport: &TerminalViewport, row: u16, rect: Rect) {
+        self.blit_columns(viewport, row, rect, 0..rect.width);
+    }
+
+    fn blit_columns(
+        &mut self,
+        viewport: &TerminalViewport,
+        row: u16,
+        rect: Rect,
+        columns: std::ops::Range<u16>,
+    ) {
         if rect.width == 0 {
             return;
         }
@@ -1037,7 +1049,7 @@ impl Renderer {
         });
         let grounded_defaults =
             self.terminal_defaults.fg.is_some() || self.terminal_defaults.bg.is_some();
-        let clear_from = if grounded_defaults {
+        let clear_from = if grounded_defaults || columns.end < rect.width {
             None
         } else {
             trailing_clear(
@@ -1048,6 +1060,7 @@ impl Renderer {
                 &self.overlay_mask,
                 &self.selection_mask,
             )
+            .map(|start| start.max(columns.start))
         };
         let ground = match default_style.background_class() {
             ColourClass::Default => None,
@@ -1059,10 +1072,14 @@ impl Renderer {
             self.selection_style = selection_style;
             return;
         }
-        write_cursor_position(&mut self.output, rect.x, rect.y.saturating_add(row));
+        write_cursor_position(
+            &mut self.output,
+            rect.x.saturating_add(columns.start),
+            rect.y.saturating_add(row),
+        );
         let mut current_style = None;
-        let mut terminal_column = 0_u16;
-        for column in 0..clear_from.unwrap_or(rect.width) {
+        let mut terminal_column = columns.start;
+        for column in columns.start..clear_from.unwrap_or(columns.end) {
             let cell = viewport.cell(row, column).unwrap_or(PackedCell::EMPTY);
             let style = viewport.style(cell).unwrap_or(default_style);
             let reverse = self.overlay_mask[usize::from(column)];
@@ -2348,20 +2365,44 @@ fn copy_cursor_overlay(viewport: &TerminalViewport) -> Option<OverlaySpan> {
         .find(|overlay| overlay.kind() == OverlayKind::CopyCursor)
 }
 
-fn row_changed(
+fn changed_columns(
     previous: &TerminalViewport,
     current: &TerminalViewport,
     row: u16,
     width: u16,
-) -> bool {
-    if viewport_row(previous, row, width) != viewport_row(current, row, width) {
-        return true;
+) -> Option<std::ops::Range<u16>> {
+    if !Arc::ptr_eq(&previous.dictionary, &current.dictionary)
+        || previous
+            .overlays
+            .iter()
+            .filter(|overlay| overlay.row == row)
+            .ne(current.overlays.iter().filter(|overlay| overlay.row == row))
+    {
+        return Some(0..width);
     }
-    previous
-        .overlays
+    let (Some(before), Some(after)) = (
+        viewport_row(previous, row, width),
+        viewport_row(current, row, width),
+    ) else {
+        return Some(0..width);
+    };
+    if before.len() != after.len() {
+        return Some(0..width);
+    }
+    let mut cells = before.iter().zip(after);
+    let start = cells.position(|(before, after)| before != after)?;
+    let end = cells
+        .rposition(|(before, after)| before != after)
+        .map_or(start + 1, |last| start + last + 2);
+    if before[start..end]
         .iter()
-        .filter(|overlay| overlay.row == row)
-        .ne(current.overlays.iter().filter(|overlay| overlay.row == row))
+        .chain(&after[start..end])
+        .any(|cell| cell.width() != CellWidth::Narrow)
+    {
+        Some(0..width)
+    } else {
+        Some(u16::try_from(start).ok()?..u16::try_from(end).ok()?)
+    }
 }
 
 fn viewport_row(viewport: &TerminalViewport, row: u16, width: u16) -> Option<&[PackedCell]> {
@@ -3943,6 +3984,65 @@ mod tests {
         renderer.paint_terminal(PaneId(1), &viewport, rect, false, None);
 
         assert!(renderer.output.is_empty());
+    }
+
+    #[test]
+    fn incremental_rows_only_repaint_changed_columns_and_clear_shorter_text() {
+        let viewport = |text: &str| {
+            let mut viewport = TerminalViewport::blank(24, 1, SessionStatus::Running);
+            let cells = Arc::make_mut(&mut viewport.cells);
+            for (column, value) in text.chars().enumerate() {
+                cells[column] = PackedCell::new(value as u32, 0, CellWidth::Narrow);
+            }
+            viewport
+        };
+        let before = viewport("line 12345 padding");
+        let mut after = before.clone();
+        Arc::make_mut(&mut after.cells)[5] = PackedCell::new('9' as u32, 0, CellWidth::Narrow);
+        let rect = Rect {
+            x: 2,
+            y: 3,
+            width: 24,
+            height: 1,
+        };
+        let mut renderer = Renderer::new();
+        renderer.paint_terminal(PaneId(1), &before, rect, true, None);
+        renderer.output.clear();
+        renderer.paint_terminal(
+            PaneId(1),
+            &after,
+            rect,
+            false,
+            Some(&FrameDamage::Rows(vec![0])),
+        );
+        let output = String::from_utf8(renderer.output.clone()).unwrap();
+        assert!(output.starts_with("\x1b[4;8H"), "{output:?}");
+        assert!(output.contains('9'), "{output:?}");
+        assert!(
+            !output.contains("line") && !output.contains("padding"),
+            "{output:?}"
+        );
+
+        let mut shorter = after.clone();
+        Arc::make_mut(&mut shorter.cells)[5..10].fill(PackedCell::EMPTY);
+        renderer.output.clear();
+        renderer.paint_terminal(PaneId(1), &shorter, rect, false, None);
+        let output = String::from_utf8(renderer.output).unwrap();
+        assert!(output.starts_with("\x1b[4;8H"), "{output:?}");
+        assert!(output.contains("     "), "{output:?}");
+        assert!(!output.contains("padding"), "{output:?}");
+    }
+
+    #[test]
+    fn changed_wide_cells_and_overlay_rows_keep_full_row_repaints() {
+        let before = styled_viewport();
+        let mut after = before.clone();
+        Arc::make_mut(&mut after.cells)[1] = PackedCell::new('界' as u32, 0, CellWidth::Wide);
+        assert_eq!(changed_columns(&before, &after, 0, 3), Some(0..3));
+
+        let mut after = before.clone();
+        after.overlays = Arc::from([OverlaySpan::new(0, 1, 2, OverlayKind::Selection)]);
+        assert_eq!(changed_columns(&before, &after, 0, 3), Some(0..3));
     }
 
     fn waiting_pane_model() -> Model {

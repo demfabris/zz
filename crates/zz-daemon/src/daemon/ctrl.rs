@@ -383,7 +383,14 @@ impl Shared {
                 .table_generations()
                 .map(|(name, generation)| (name.to_owned(), generation))
                 .collect();
-            inner.key_tables_generation = inner.engine.keys.generation();
+            if !inner.subscribers.keys().any(|client| {
+                inner
+                    .ctrl_subscriptions
+                    .get(client)
+                    .is_some_and(|subscription| subscription.keys == KeySubscription::Hash)
+            }) {
+                inner.key_tables_generation = inner.engine.keys.generation();
+            }
         }
         inner.ctrl_subscriptions.insert(client, hello.subscriptions);
         inner.ctrl_initializing.insert(client);
@@ -604,7 +611,8 @@ impl Shared {
             });
             (full, hash, hash_payload)
         };
-        for (outbounds, payload) in [(full, Some(payload)), (hash, hash_payload)] {
+        let full_payload = (!matches!(&payload, EventPayload::KeyTablesPatched { tables, removed } if tables.is_empty() && removed.is_empty())).then_some(payload);
+        for (outbounds, payload) in [(full, full_payload), (hash, hash_payload)] {
             let Some(payload) = payload else {
                 continue;
             };

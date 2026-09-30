@@ -140,10 +140,51 @@ fn facts_are_withheld_only_from_commands_that_expand_nothing() {
     assert!(!unread(&["set-option", "-g", "automatic-ren", "on"]));
     assert!(!unread(&["set-window-option", "automatic-rename"]));
     assert!(!unread(&["show-options", "-g", "#{hook}"]));
-    assert!(!unread(&["display-message", "-p", "x"]));
+    assert!(unread(&["display-message", "-p", "x"]));
+    assert!(unread(&["display-message", "-p", "-F", "literal"]));
+    assert!(unread(&["display-message", "-lp", "#{client_name}"]));
+    assert!(!unread(&["display-message", "-p"]));
+    assert!(!unread(&["display-message", "-p", "#{client_name}"]));
+    assert!(!unread(&["display-message", "-p", "-F", "#{client_name}"]));
+    assert!(!unread(&["display-message", "-p", "%c"]));
+    assert!(!unread(&[
+        "display-message",
+        "-p",
+        "-F",
+        "literal",
+        "-F",
+        "#{client_name}",
+    ]));
+    assert!(unread(&[
+        "display-message",
+        "-p",
+        "-F",
+        "#{client_name}",
+        "-F",
+        "literal",
+    ]));
+    assert!(!unread(&["display-message", "-ap", "literal"]));
+    assert!(!unread(&["display-message", "-alp", "literal"]));
+    assert!(!unread(&["display-message", "-Z", "literal"]));
     assert!(!unread(&["list-keys"]));
 
     let (shared, mut context) = pane_fixture("facts");
+    assert_eq!(
+        run(&shared, &mut context, &["display-message", "-p", "literal"])
+            .expect("literal display")
+            .output,
+        "literal"
+    );
+    assert_eq!(
+        run(
+            &shared,
+            &mut context,
+            &["display-message", "-lp", "#{client_name}"],
+        )
+        .expect("unexpanded display")
+        .output,
+        "#{client_name}"
+    );
     run(
         &shared,
         &mut context,

@@ -1300,6 +1300,17 @@ printing 41%, the memset of the reused page 22% (the kernel's page zeroing did t
 `rep stosb` would cut it by about a fifth, and a `baseline` CPU build gets 16-byte SSE2 stores),
 VT parsing and dispatch about 15%, `cursorScrollAbove` 7%.
 
+Mac check and trim fix (2026-09-30, macbook): the fork landed as `713374af` (`zz-2026-09-29`,
+pinned in `2166bd31`). Its trim picked the released cells as those past `size.rows * cols`, but
+`eraseRows` swaps row headers without moving cells, so after a partial history erase (a shell
+`clear` sends ED 3) the live rows point at the blocks the trim released: blank on Linux one idle
+second later, out of the footprint on macOS. `c3941417` (`zz-2026-09-30`) starts the trim after
+the highest block a live row references; zz-terminal's `a_cleared_screen_survives_idle_compression`
+fails on the old pin when the discard zeroes the range (as on Linux) and passes on the fix. Gate
+`wave1-macbook-2166bd31.json`: detached ASCII 243 -> 310 MB/s, unicode 104 -> 122 MB/s, scroll180
+38.7 -> 35.3 MiB, scroll80 32.8 -> 28.5 MiB (the scroll rows never erase history, so the old trim
+was right there).
+
 ## W1-EXEC: one-frame commands, fast cold start (effort L)
 
 Scope:

@@ -204,7 +204,13 @@ impl DirectControl {
         reason = "select only borrows the two owned open descriptors"
     )]
     fn receive(&mut self, timeout: Option<std::time::Duration>) -> io::Result<Option<MainEvent>> {
+        if self.prefer_stdin && self.input.has_event() {
+            return Ok(self.take_ready(false));
+        }
         self.read_protocol();
+        if self.input.has_event() || (self.pending_protocol.is_some() && !self.prefer_stdin) {
+            return Ok(self.take_ready(false));
+        }
         self.readable.fill(rustix::event::FdSetElement::default());
         if self.input.can_read() && !self.input.has_event() {
             rustix::event::fd_set_insert(&mut self.readable, self.input.fd.as_raw_fd());
@@ -241,18 +247,19 @@ impl DirectControl {
         if socket_ready {
             self.read_protocol();
         }
+        Ok(self.take_ready(true))
+    }
+
+    fn take_ready(&mut self, polled: bool) -> Option<MainEvent> {
         if self.input.has_event() && (self.prefer_stdin || self.pending_protocol.is_none()) {
             self.prefer_stdin = false;
-            return Ok(self.input.event().map(MainEvent::Stdin));
+            return self.input.event().map(MainEvent::Stdin);
         }
         if let Some(event) = self.pending_protocol.take() {
-            self.prefer_stdin = true;
-            return Ok(Some(event));
+            self.prefer_stdin = !polled;
+            return Some(event);
         }
-        if self.disconnected {
-            return Ok(Some(MainEvent::Disconnected));
-        }
-        Ok(None)
+        self.disconnected.then_some(MainEvent::Disconnected)
     }
 }
 
@@ -2591,6 +2598,48 @@ mod tests {
                 .unwrap(),
             Some(MainEvent::Stdin(StdinEvent::Eof))
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn direct_pump_polls_fresh_stdin_between_buffered_protocol_frames() {
+        let (_directory, mut server, mut receiver, input) = direct_control_fixture();
+        assert!(matches!(
+            receiver.receive(None).unwrap(),
+            Some(MainEvent::Protocol(_))
+        ));
+        rustix::io::write(&input, b"first command\n").unwrap();
+        assert!(
+            matches!(receiver.receive(None).unwrap(), Some(MainEvent::Stdin(StdinEvent::Line(line)))
+            if line == "first command")
+        );
+        let messages: Vec<_> = (0..4)
+            .map(|index| ProtocolMessage::Attach {
+                session: format!("frame{index}"),
+            })
+            .collect();
+        let bytes: Vec<_> = messages
+            .iter()
+            .flat_map(|message| zz_protocol::encode_protocol_message(message).unwrap())
+            .collect();
+        server.write_all(&bytes).unwrap();
+        let before = std::time::Instant::now();
+        assert!(
+            matches!(receiver.receive(Some(std::time::Duration::from_secs(1))).unwrap(),
+            Some(MainEvent::Protocol(message)) if *message == messages[0])
+        );
+        assert!(before.elapsed() < std::time::Duration::from_millis(500));
+        rustix::io::write(&input, b"newly ready\n").unwrap();
+        assert!(
+            matches!(receiver.receive(None).unwrap(), Some(MainEvent::Stdin(StdinEvent::Line(line)))
+            if line == "newly ready")
+        );
+        for expected in &messages[1..] {
+            assert!(
+                matches!(receiver.receive(None).unwrap(), Some(MainEvent::Protocol(message))
+                if *message == *expected)
+            );
+        }
     }
 
     #[test]

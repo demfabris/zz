@@ -6820,19 +6820,21 @@ impl Shared {
             || matches!(&result, Err(DaemonError::ReportedCommandExit { .. }))
         {
             String::new()
-        } else {
-            let (hook, mut hook_context) = match &result {
-                Ok(execution) => (
-                    format!("after-{name}"),
-                    self.command_hook_context(&name, execution, context),
-                ),
-                Err(_) => ("command-error".to_owned(), original_context),
+        } else if let Some(hook) = match &result {
+            Ok(_) => MuxEngine::after_command_hook(&name),
+            Err(_) => Some("command-error"),
+        } {
+            let mut hook_context = match &result {
+                Ok(execution) => self.command_hook_context(&name, execution, context),
+                Err(_) => original_context,
             };
             {
                 let inner = self.inner.lock();
                 inner.engine.repair_context(&mut hook_context);
             }
-            self.run_command_hook(client, kind, &hook_context, command, &hook, queue_execution)
+            self.run_command_hook(client, kind, &hook_context, command, hook, queue_execution)
+        } else {
+            String::new()
         };
         match result {
             Ok(mut execution) => {

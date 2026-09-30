@@ -2467,16 +2467,36 @@ impl Default for MuxEngine {
 
 impl MuxEngine {
     #[must_use]
+    pub fn after_command_hook(command: &str) -> Option<&'static str> {
+        HOOK_NAMES
+            .binary_search_by(|hook| {
+                hook.strip_prefix("after-")
+                    .map_or(Ordering::Greater, |name| name.cmp(command))
+            })
+            .ok()
+            .map(|index| HOOK_NAMES[index])
+    }
+
+    fn effective_hook(&self, session: Option<SessionId>, name: &str) -> Option<&HookArray> {
+        session
+            .and_then(|session| self.session_hooks.get(&session))
+            .and_then(|hooks| hooks.get(name))
+            .or_else(|| self.global_hooks.get(name))
+    }
+
+    #[must_use]
+    pub fn has_hook_commands(&self, session: Option<SessionId>, name: &str) -> bool {
+        self.effective_hook(session, name)
+            .is_some_and(|hooks| !hooks.is_empty())
+    }
+
+    #[must_use]
     pub fn hook_commands(
         &self,
         session: Option<SessionId>,
         name: &str,
     ) -> Option<Vec<Vec<CommandInvocation>>> {
-        let local = session
-            .and_then(|session| self.session_hooks.get(&session))
-            .and_then(|hooks| hooks.get(name));
-        local
-            .or_else(|| self.global_hooks.get(name))
+        self.effective_hook(session, name)
             .map(|hooks| hooks.values().cloned().collect())
     }
 
@@ -30908,6 +30928,73 @@ mod tests {
                 .output,
             "display-message -p forwarded ; new-window -d"
         );
+    }
+
+    #[test]
+    fn after_command_hook_names_reuse_the_declared_registry() {
+        let mut previous = None;
+        let mut after_hooks_ended = false;
+        for hook in HOOK_NAMES {
+            let Some(name) = hook.strip_prefix("after-") else {
+                after_hooks_ended = true;
+                continue;
+            };
+            assert!(!after_hooks_ended);
+            assert!(previous.is_none_or(|previous| previous < name));
+            assert_eq!(MuxEngine::after_command_hook(name), Some(*hook));
+            previous = Some(name);
+        }
+        for name in [
+            "",
+            "has-session",
+            "command-error",
+            "display-message-extra",
+            "zzzz",
+        ] {
+            assert_eq!(MuxEngine::after_command_hook(name), None);
+        }
+    }
+
+    #[test]
+    fn effective_hook_presence_preserves_an_empty_session_override() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-d"]))
+            .expect("model session");
+        let session = context.session;
+        assert!(!engine.has_hook_commands(session, "after-display-message"));
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-hook",
+                    &["-g", "after-display-message", "display-message global"],
+                ),
+            )
+            .expect("global hook");
+        assert!(engine.has_hook_commands(session, "after-display-message"));
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("set-hook", ["after-display-message", "{}"])
+                    .with_command_blocks([1]),
+            )
+            .expect("empty session hook");
+        assert!(!engine.has_hook_commands(session, "after-display-message"));
+        assert!(engine.has_hook_commands(None, "after-display-message"));
+        assert_eq!(
+            engine.hook_commands(session, "after-display-message"),
+            Some(Vec::new())
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("set-hook", &["-u", "after-display-message"]),
+            )
+            .expect("remove session override");
+        assert!(engine.has_hook_commands(session, "after-display-message"));
+        assert!(!engine.has_hook_commands(session, "missing-hook"));
     }
 
     #[test]

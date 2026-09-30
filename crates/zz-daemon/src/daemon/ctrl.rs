@@ -367,14 +367,11 @@ pub(super) fn control_query_can_defer_wakeup(
     {
         return false;
     }
-    ["command-error", &format!("after-{name}")]
-        .into_iter()
-        .all(|hook| {
-            inner
-                .engine
-                .hook_commands(context.session, hook)
-                .is_none_or(|commands| commands.is_empty())
-        })
+    !inner
+        .engine
+        .has_hook_commands(context.session, "command-error")
+        && MuxEngine::after_command_hook(name)
+            .is_none_or(|hook| !inner.engine.has_hook_commands(context.session, hook))
 }
 
 impl Shared {

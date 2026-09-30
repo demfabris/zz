@@ -150,6 +150,37 @@ impl<T: AsRef<[u8]>> serde::Serialize for BorrowedBatchFrames<'_, T> {
     }
 }
 
+pub fn batch_frames_encoded_len<T: AsRef<[u8]>>(
+    sequence: u64,
+    frames: &[T],
+) -> Result<usize, ProtocolError> {
+    if frames.len() > crate::MAX_BATCH_FRAMES {
+        return Err(ProtocolError::InvalidServerHello(
+            "batch contains too many frames".to_owned(),
+        ));
+    }
+    frames.iter().try_fold(0_usize, |total, frame| {
+        let total = total
+            .checked_add(frame.as_ref().len())
+            .ok_or(ProtocolError::FrameTooLarge(usize::MAX))?;
+        if total > MAX_ENCODED_FRAME_BYTES {
+            return Err(ProtocolError::FrameTooLarge(total));
+        }
+        Ok(total)
+    })?;
+    let header = postcard::experimental::serialized_size(&ProtocolMessage::Batch(crate::Batch {
+        sequence,
+        frames: Vec::new(),
+    }))
+    .map_err(ProtocolError::Encode)?;
+    let frames = postcard::experimental::serialized_size(&BorrowedBatchFrames(frames))
+        .map_err(ProtocolError::Encode)?;
+    let payload = (header - 1)
+        .checked_add(frames)
+        .ok_or(ProtocolError::FrameTooLarge(usize::MAX))?;
+    crate::framing::enveloped_capacity(payload)
+}
+
 pub fn encode_batch_frames_into<T: AsRef<[u8]>>(
     sequence: u64,
     frames: &[T],
@@ -880,7 +911,15 @@ mod tests {
             encode_batch_frames_into::<Vec<u8>>(sequence, &[], &mut output)
                 .expect("borrowed empty");
             assert_eq!(output, empty);
+            assert_eq!(
+                batch_frames_encoded_len::<Vec<u8>>(sequence, &[]).expect("empty length"),
+                output.len()
+            );
             encode_batch_frames_into(sequence, &mixed, &mut output).expect("mixed batch");
+            assert_eq!(
+                batch_frames_encoded_len(sequence, &mixed).expect("mixed length"),
+                output.len()
+            );
             let owned = ProtocolMessage::Batch(crate::Batch {
                 sequence,
                 frames: mixed.iter().map(|frame| frame.as_ref().to_vec()).collect(),
@@ -893,6 +932,10 @@ mod tests {
             for count in [1, 127, 128, crate::MAX_BATCH_FRAMES] {
                 let frames = vec![control.clone(); count];
                 encode_batch_frames_into(sequence, &frames, &mut output).expect("many frames");
+                assert_eq!(
+                    batch_frames_encoded_len(sequence, &frames).expect("many length"),
+                    output.len()
+                );
                 assert_eq!(
                     output,
                     encode_protocol_message(&ProtocolMessage::Batch(crate::Batch {
@@ -918,8 +961,21 @@ mod tests {
         ));
         assert!(output.is_empty());
         assert_eq!(output.as_ptr(), allocation);
+        assert!(matches!(
+            batch_frames_encoded_len(0, &too_many),
+            Err(ProtocolError::InvalidServerHello(_))
+        ));
         let body = vec![0_u8; 64 * 1024];
         let frames = vec![body.as_slice(); crate::MAX_FRAME_BYTES / body.len()];
+        assert!(matches!(
+            batch_frames_encoded_len(0, &frames),
+            Err(ProtocolError::FrameTooLarge(_))
+        ));
+        let repeated = vec![body.as_slice(); crate::MAX_BATCH_FRAMES];
+        assert!(matches!(
+            batch_frames_encoded_len(u64::MAX, &repeated),
+            Err(ProtocolError::FrameTooLarge(_))
+        ));
         assert!(matches!(
             encode_batch_frames_into(0, &frames, &mut output),
             Err(ProtocolError::FrameTooLarge(_))

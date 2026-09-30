@@ -112,13 +112,30 @@ pub(super) fn normalize_resize(
             cell_width_px,
             cell_height_px,
             ..
-        } => InputMessage::ResizeTerminal {
-            pane,
-            columns,
-            rows,
-            cell_width_px,
-            cell_height_px,
-        },
+        } => {
+            if *attach::ATTACH_PRESIZE
+                && inner.ctrl_subscriptions.contains_key(&client)
+                && inner
+                    .terminal_geometries
+                    .get(&pane)
+                    .and_then(|geometries| geometries.get(&client))
+                    == Some(&TerminalGeometry {
+                        columns,
+                        rows,
+                        cell_width_px,
+                        cell_height_px,
+                    })
+            {
+                return None;
+            }
+            InputMessage::ResizeTerminal {
+                pane,
+                columns,
+                rows,
+                cell_width_px,
+                cell_height_px,
+            }
+        }
         InputMessage::ClientTerminalSizeV2 { columns, rows, .. } => {
             InputMessage::ClientTerminalSize { columns, rows }
         }
@@ -320,15 +337,33 @@ impl OutboundMailbox {
     }
 
     pub(super) fn enqueue_control_group(&self, frames: Vec<OutboundFrame>) -> bool {
-        let encoded = match self.encode_with(|encoded| {
-            zz_protocol::encode_batch_frames_into(Shared::next_sequence(), &frames, encoded)
-        }) {
-            Ok(encoded) => encoded,
-            Err(error) => {
-                log::error!("failed to encode subscribed tree group: {error}");
-                return false;
-            }
-        };
+        let mut state = self.state.lock();
+        let sequence = Shared::next_sequence();
+        if state.ctrl_collecting == ControlCollection::Quiet && !state.buffered {
+            let encoded_len = match zz_protocol::batch_frames_encoded_len(sequence, &frames) {
+                Ok(encoded_len) => encoded_len,
+                Err(error) => {
+                    log::error!("failed to size subscribed tree group: {error}");
+                    return false;
+                }
+            };
+            return self.enqueue_encoded_reliable_with_locked(
+                state,
+                OutboundFrame::DeferredGrouped {
+                    sequence,
+                    encoded_len,
+                    frames,
+                },
+                |_| {},
+            );
+        }
+        let mut encoded = take_recycled_frame(&mut state);
+        drop(state);
+        if let Err(error) = zz_protocol::encode_batch_frames_into(sequence, &frames, &mut encoded) {
+            self.recycle_frame(encoded);
+            log::error!("failed to encode subscribed tree group: {error}");
+            return false;
+        }
         self.enqueue_encoded_reliable(OutboundFrame::Grouped { encoded, frames })
     }
 
@@ -357,6 +392,9 @@ impl OutboundMailbox {
                     recycle_outbound_frame(&mut state, encoded);
                     frames.extend(children);
                 }
+                OutboundFrame::DeferredGrouped {
+                    frames: children, ..
+                } => frames.extend(children),
                 frame => frames.push(frame),
             }
         }

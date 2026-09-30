@@ -2031,6 +2031,11 @@ enum OutboundFrame {
         encoded: Vec<u8>,
         frames: Vec<OutboundFrame>,
     },
+    DeferredGrouped {
+        sequence: u64,
+        encoded_len: usize,
+        frames: Vec<OutboundFrame>,
+    },
 }
 
 impl std::ops::Deref for OutboundFrame {
@@ -2041,6 +2046,7 @@ impl std::ops::Deref for OutboundFrame {
             Self::Owned(frame) => frame,
             Self::Shared(frame) => frame,
             Self::Grouped { encoded, .. } => encoded,
+            Self::DeferredGrouped { .. } => unreachable!("deferred group has not been collected"),
         }
     }
 }
@@ -2064,11 +2070,32 @@ impl From<Arc<[u8]>> for OutboundFrame {
 }
 
 impl OutboundFrame {
-    fn into_vec(self) -> Vec<u8> {
+    fn len(&self) -> usize {
         match self {
+            Self::DeferredGrouped { encoded_len, .. } => *encoded_len,
+            _ => self.as_ref().len(),
+        }
+    }
+
+    fn materialize(self) -> Self {
+        let Self::DeferredGrouped {
+            sequence, frames, ..
+        } = self
+        else {
+            return self;
+        };
+        let mut encoded = Vec::new();
+        zz_protocol::encode_batch_frames_into(sequence, &frames, &mut encoded)
+            .expect("admitted deferred group fits its encoded bounds");
+        Self::Grouped { encoded, frames }
+    }
+
+    fn into_vec(self) -> Vec<u8> {
+        match self.materialize() {
             Self::Owned(frame) => frame,
             Self::Shared(frame) => frame.to_vec(),
             Self::Grouped { encoded, .. } => encoded,
+            Self::DeferredGrouped { .. } => unreachable!("group was materialized"),
         }
     }
 }
@@ -2518,7 +2545,15 @@ impl OutboundMailbox {
         encoded: OutboundFrame,
         before_push: impl FnOnce(&mut OutboundState),
     ) -> bool {
-        let mut state = self.state.lock();
+        self.enqueue_encoded_reliable_with_locked(self.state.lock(), encoded, before_push)
+    }
+
+    fn enqueue_encoded_reliable_with_locked(
+        &self,
+        mut state: parking_lot::MutexGuard<'_, OutboundState>,
+        encoded: OutboundFrame,
+        before_push: impl FnOnce(&mut OutboundState),
+    ) -> bool {
         if state.closed {
             return false;
         }
@@ -3233,6 +3268,7 @@ impl OutboundMailbox {
         let mut state = self.state.lock();
         while let Some(frame) = state.reliable.pop_front() {
             state.queued_bytes = state.queued_bytes.saturating_sub(frame.len());
+            let frame = frame.materialize();
             output.extend_from_slice(&frame);
             recycle_outbound_frame(&mut state, frame);
         }
@@ -3325,7 +3361,7 @@ impl OutboundMailbox {
         log::trace!(
             target: "zz_daemon::diagnostics::outbound",
             "snapshot reason={reason} client={client} reliable_frame_lengths={:?} command_output_capacity={:?} terminals={:#?} delivered_terminals={:#?} terminal_order={:#?} preview_refresh_order={:#?} recycled_frame_capacities={:?}",
-            state.reliable.iter().map(|frame| frame.len()).collect::<Vec<_>>(),
+            state.reliable.iter().map(OutboundFrame::len).collect::<Vec<_>>(),
             state
                 .command_output
                 .as_ref()
@@ -3400,6 +3436,12 @@ fn recycle_outbound_frame(state: &mut OutboundState, frame: impl Into<OutboundFr
         OutboundFrame::Shared(_) => return,
         OutboundFrame::Grouped { encoded, frames } => {
             recycle_outbound_frame(state, encoded);
+            for frame in frames {
+                recycle_outbound_frame(state, frame);
+            }
+            return;
+        }
+        OutboundFrame::DeferredGrouped { frames, .. } => {
             for frame in frames {
                 recycle_outbound_frame(state, frame);
             }
@@ -45367,7 +45409,7 @@ fn write_outbound(
         }
         let started = diagnostic_timer();
         let frames = batch.len();
-        let bytes = batch.iter().map(|frame| frame.len()).sum::<usize>();
+        let bytes = batch.iter().map(OutboundFrame::len).sum::<usize>();
         let result = attach::write_frames(stream, &batch);
         log::trace!(
             target: "zz_daemon::diagnostics::outbound",
@@ -109150,13 +109192,13 @@ bind - split-window -v -c "#{pane_current_path}"
         let frames = {
             let mut state = mailbox.state.lock();
             let frames = state.reliable.drain(..).collect::<Vec<_>>();
-            let bytes = frames.iter().map(|frame| frame.len()).sum::<usize>();
+            let bytes = frames.iter().map(super::OutboundFrame::len).sum::<usize>();
             state.queued_bytes = state.queued_bytes.saturating_sub(bytes);
             frames
         };
         frames
             .into_iter()
-            .map(|frame| decode_protocol_frame(&frame).expect("decode reliable message"))
+            .map(|frame| decode_protocol_frame(&frame.into_vec()).expect("decode reliable message"))
             .collect()
     }
 

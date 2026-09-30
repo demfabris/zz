@@ -221,6 +221,171 @@ fn grouped_buffer_recycling_keeps_limits_and_shared_ownership() {
 }
 
 #[test]
+fn quiet_group_retains_its_children_without_an_intermediate_encoding() {
+    let mailbox = OutboundMailbox::new();
+    let buffer = Vec::with_capacity(4096);
+    let allocation = buffer.as_ptr();
+    mailbox.recycle_frame(buffer);
+    let child = zz_protocol::encode_protocol_message(&ProtocolMessage::TreeSync).expect("child");
+    let shared: Arc<[u8]> = Arc::from(child.clone());
+    assert!(mailbox.collect_control_query());
+    assert!(mailbox.enqueue_control_group(vec![child.into(), Arc::clone(&shared).into()]));
+    {
+        let mut state = mailbox.state.lock();
+        let Some(OutboundFrame::DeferredGrouped {
+            sequence,
+            encoded_len,
+            frames,
+        }) = state.reliable.front()
+        else {
+            panic!("quiet group was encoded before collection")
+        };
+        let mut encoded = Vec::new();
+        zz_protocol::encode_batch_frames_into(*sequence, frames, &mut encoded).expect("wire");
+        assert_eq!(*encoded_len, encoded.len());
+        assert_eq!(state.queued_bytes, encoded.len());
+        assert_eq!(state.reliable.len(), 1);
+        assert_eq!(state.recycled_frames.len(), 1);
+        let OutboundFrame::Shared(retained) = &frames[1] else {
+            panic!("shared child copied")
+        };
+        assert!(Arc::ptr_eq(retained, &shared));
+        assert!(pop_ready_frame(&mut state).is_none());
+    }
+    mailbox.release_control_query();
+    let mut pending = Vec::new();
+    assert!(mailbox.recv_batch(&mut pending, MAX_OUTBOUND_BYTES));
+    let OutboundFrame::Grouped { encoded, frames } = &pending[0] else {
+        panic!("group missing")
+    };
+    assert_eq!(encoded.as_ptr(), allocation);
+    let OutboundFrame::Shared(retained) = &frames[1] else {
+        panic!("shared child copied on flush")
+    };
+    assert!(Arc::ptr_eq(retained, &shared));
+    let ProtocolMessage::Batch(batch) = zz_protocol::decode_protocol_frame(encoded).expect("batch")
+    else {
+        panic!("batch missing")
+    };
+    assert_eq!(
+        batch.messages().expect("flat group"),
+        [ProtocolMessage::TreeSync, ProtocolMessage::TreeSync]
+    );
+    assert_eq!(Arc::strong_count(&shared), 2);
+    assert!(mailbox.state.lock().recycled_frames.is_empty());
+    mailbox.finish_batch(&mut pending);
+    assert_eq!(Arc::strong_count(&shared), 1);
+    assert_eq!(mailbox.state.lock().recycled_frames.len(), 2);
+}
+
+#[test]
+fn buffered_groups_and_direct_drains_keep_their_original_wire() {
+    let child = zz_protocol::encode_protocol_message(&ProtocolMessage::TreeSync).expect("child");
+    let mailbox = OutboundMailbox::buffered();
+    assert!(mailbox.collect_control_query());
+    assert!(mailbox.enqueue_control_group(vec![child.clone().into()]));
+    assert!(matches!(
+        mailbox.state.lock().reliable.front(),
+        Some(OutboundFrame::Grouped { .. })
+    ));
+    let mut output = Vec::new();
+    mailbox.drain_reliable_into(&mut output);
+    let ProtocolMessage::Batch(batch) =
+        zz_protocol::decode_protocol_frame(&output).expect("buffered group")
+    else {
+        panic!("batch missing")
+    };
+    assert_eq!(
+        batch.messages().expect("flat buffered group"),
+        [ProtocolMessage::TreeSync]
+    );
+
+    let mailbox = OutboundMailbox::new();
+    assert!(mailbox.collect_control_query());
+    assert!(mailbox.enqueue_control_group(vec![child.clone().into()]));
+    let sequence = match mailbox.state.lock().reliable.front() {
+        Some(OutboundFrame::DeferredGrouped { sequence, .. }) => *sequence,
+        _ => panic!("group was not deferred"),
+    };
+    let expected =
+        zz_protocol::encode_protocol_message(&ProtocolMessage::Batch(zz_protocol::Batch {
+            sequence,
+            frames: vec![child.clone()],
+        }))
+        .expect("expected drain");
+    let mut output = Vec::new();
+    mailbox.drain_reliable_into(&mut output);
+    assert_eq!(output, expected);
+    assert_eq!(mailbox.state.lock().queued_bytes, 0);
+    assert_eq!(mailbox.state.lock().recycled_frames.len(), 2);
+
+    assert!(mailbox.enqueue_control_group(vec![child.into()]));
+    let messages = tests::take_reliable_messages(&mailbox);
+    assert!(matches!(messages.as_slice(), [ProtocolMessage::Batch(_)]));
+    assert_eq!(mailbox.state.lock().queued_bytes, 0);
+}
+
+#[test]
+fn deferred_groups_keep_encoded_byte_and_message_admission_limits() {
+    let child = zz_protocol::encode_protocol_message(&ProtocolMessage::TreeSync).expect("child");
+    let encoded =
+        zz_protocol::encode_protocol_message(&ProtocolMessage::Batch(zz_protocol::Batch {
+            sequence: 128,
+            frames: vec![child.clone(), child.clone()],
+        }))
+        .expect("group");
+    for (queued_bytes, reliable_count, admitted) in [
+        (
+            MAX_OUTBOUND_BYTES - encoded.len(),
+            MAX_RELIABLE_MESSAGES - 1,
+            true,
+        ),
+        (MAX_OUTBOUND_BYTES - encoded.len() + 1, 0, false),
+        (0, MAX_RELIABLE_MESSAGES, false),
+    ] {
+        for deferred in [false, true] {
+            let mailbox = OutboundMailbox::new();
+            assert!(mailbox.collect_control_query());
+            {
+                let mut state = mailbox.state.lock();
+                state.queued_bytes = queued_bytes;
+                state
+                    .reliable
+                    .extend((0..reliable_count).map(|_| child.clone().into()));
+            }
+            let frame = if deferred {
+                OutboundFrame::DeferredGrouped {
+                    sequence: 128,
+                    encoded_len: zz_protocol::batch_frames_encoded_len(128, &[&child, &child])
+                        .expect("length"),
+                    frames: vec![child.clone().into(), child.clone().into()],
+                }
+            } else {
+                OutboundFrame::Grouped {
+                    encoded: encoded.clone(),
+                    frames: vec![child.clone().into(), child.clone().into()],
+                }
+            };
+            assert_eq!(mailbox.enqueue_encoded_reliable(frame), admitted);
+            let mut state = mailbox.state.lock();
+            if admitted {
+                assert_eq!(state.queued_bytes, queued_bytes + encoded.len());
+                assert_eq!(state.reliable.len(), reliable_count + 1);
+                assert!(!state.closed);
+            } else {
+                assert!(state.closed);
+                assert_eq!(state.reliable.len(), 1);
+                let reason = pop_ready_frame(&mut state).expect("overflow reason");
+                assert!(
+                    matches!(zz_protocol::decode_protocol_frame(&reason).expect("reason"),
+                    ProtocolMessage::Event(Event { payload: EventPayload::ControlExit { reason }, .. }) if reason == "too far behind")
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn quiet_control_query_sends_one_flat_completion_batch() {
     let shared = Arc::new(Shared::new(50));
     let (client, mailbox) = compact_registered(&shared, zz_protocol::Subscriptions::control());
@@ -273,6 +438,17 @@ fn quiet_control_release_cannot_flush_an_attach_collector() {
         .insert(client, Arc::clone(&mailbox));
     assert!(mailbox.collect_control_query());
     assert!(mailbox.enqueue_reliable_with_wakeup(&ProtocolMessage::TreeSync, false));
+    assert!(
+        mailbox.enqueue_control_group(vec![
+            zz_protocol::encode_protocol_message(&ProtocolMessage::TreeSync)
+                .expect("deferred child")
+                .into(),
+        ])
+    );
+    assert!(matches!(
+        mailbox.state.lock().reliable.back(),
+        Some(OutboundFrame::DeferredGrouped { .. })
+    ));
     mailbox.hold_terminals();
     mailbox.release_terminals();
     {
@@ -309,7 +485,7 @@ fn quiet_control_release_cannot_flush_an_attach_collector() {
         panic!("attach collection was split: {messages:?}")
     };
     let children = batch.messages().expect("flat attach collection");
-    assert_eq!(children.len(), MAX_RELIABLE_MESSAGES / 2 + 1);
+    assert_eq!(children.len(), MAX_RELIABLE_MESSAGES / 2 + 2);
     assert!(
         children
             .iter()
@@ -322,6 +498,13 @@ fn quiet_control_close_and_overflow_release_the_held_frames() {
     let mailbox = OutboundMailbox::new();
     assert!(mailbox.collect_control_query());
     assert!(mailbox.enqueue_reliable_with_wakeup(&ProtocolMessage::TreeSync, false));
+    assert!(
+        mailbox.enqueue_control_group(vec![
+            zz_protocol::encode_protocol_message(&ProtocolMessage::TreeSync)
+                .expect("deferred child")
+                .into(),
+        ])
+    );
     mailbox.close_after_flush();
     let encoded = mailbox.recv().expect("closed collection drains");
     let ProtocolMessage::Batch(batch) =
@@ -331,13 +514,20 @@ fn quiet_control_close_and_overflow_release_the_held_frames() {
     };
     assert_eq!(
         batch.messages().expect("flat group"),
-        [ProtocolMessage::TreeSync]
+        [ProtocolMessage::TreeSync, ProtocolMessage::TreeSync]
     );
     assert!(mailbox.recv().is_none());
 
     let mailbox = OutboundMailbox::new();
     assert!(mailbox.collect_control_query());
-    for _ in 0..MAX_RELIABLE_MESSAGES {
+    assert!(
+        mailbox.enqueue_control_group(vec![
+            zz_protocol::encode_protocol_message(&ProtocolMessage::TreeSync)
+                .expect("overflow child")
+                .into(),
+        ])
+    );
+    for _ in 1..MAX_RELIABLE_MESSAGES {
         assert!(mailbox.enqueue_reliable_with_wakeup(&ProtocolMessage::TreeSync, false));
     }
     assert!(!mailbox.enqueue_reliable(&ProtocolMessage::TreeSync));
@@ -686,11 +876,142 @@ fn a_late_gui_hook_wakes_quiet_started_before_its_reply() {
 }
 
 #[test]
+fn compact_resize_validates_generation_before_skipping_its_exact_report() {
+    let shared = Arc::new(Shared::new(59));
+    let (client, _) = compact_registered(&shared, zz_protocol::Subscriptions::terminal());
+    let pane = PaneId(1);
+    let geometry = TerminalGeometry {
+        columns: 97,
+        rows: 31,
+        cell_width_px: 8,
+        cell_height_px: 16,
+    };
+    let mut inner = shared.inner.lock();
+    inner
+        .terminal_geometries
+        .entry(pane)
+        .or_default()
+        .insert(client, geometry);
+    assert!(!inner.ctrl_layouts.contains_key(&client));
+    let input = InputMessage::ResizeTerminalV2 {
+        pane,
+        columns: geometry.columns,
+        rows: geometry.rows,
+        cell_width_px: geometry.cell_width_px,
+        cell_height_px: geometry.cell_height_px,
+        layout_generation: 1,
+    };
+    let normalized = ctrl::normalize_resize(&mut inner, client, input);
+    assert_eq!(inner.ctrl_layouts[&client].1, 1);
+    if *attach::ATTACH_PRESIZE {
+        assert!(normalized.is_none());
+    } else {
+        assert!(matches!(
+            normalized,
+            Some(InputMessage::ResizeTerminal { .. })
+        ));
+    }
+    assert_eq!(inner.terminal_geometries[&pane][&client], geometry);
+    assert!(matches!(
+        ctrl::normalize_resize(
+            &mut inner,
+            client,
+            InputMessage::ResizeTerminal {
+                pane,
+                columns: geometry.columns,
+                rows: geometry.rows,
+                cell_width_px: geometry.cell_width_px,
+                cell_height_px: geometry.cell_height_px,
+            },
+        ),
+        Some(InputMessage::ResizeTerminal { .. })
+    ));
+}
+
+#[test]
+fn compact_resize_forwards_each_changed_geometry_field_and_unknown_reports() {
+    let shared = Arc::new(Shared::new(61));
+    let (client, _) = compact_registered(&shared, zz_protocol::Subscriptions::terminal());
+    let pane = PaneId(1);
+    let geometry = TerminalGeometry {
+        columns: 97,
+        rows: 31,
+        cell_width_px: 8,
+        cell_height_px: 16,
+    };
+    let mut inner = shared.inner.lock();
+    inner
+        .terminal_geometries
+        .entry(pane)
+        .or_default()
+        .insert(client, geometry);
+    for (columns, rows, cell_width_px, cell_height_px) in [
+        (98, 31, 8, 16),
+        (97, 32, 8, 16),
+        (97, 31, 9, 16),
+        (97, 31, 8, 17),
+    ] {
+        assert!(matches!(
+            ctrl::normalize_resize(
+                &mut inner,
+                client,
+                InputMessage::ResizeTerminalV2 {
+                    pane,
+                    columns,
+                    rows,
+                    cell_width_px,
+                    cell_height_px,
+                    layout_generation: 1,
+                },
+            ),
+            Some(InputMessage::ResizeTerminal {
+                columns: next_columns,
+                rows: next_rows,
+                cell_width_px: next_width,
+                cell_height_px: next_height,
+                ..
+            }) if (next_columns, next_rows, next_width, next_height)
+                == (columns, rows, cell_width_px, cell_height_px)
+        ));
+        assert_eq!(inner.terminal_geometries[&pane][&client], geometry);
+    }
+    inner.terminal_geometries.remove(&pane);
+    assert!(matches!(
+        ctrl::normalize_resize(
+            &mut inner,
+            client,
+            InputMessage::ResizeTerminalV2 {
+                pane,
+                columns: geometry.columns,
+                rows: geometry.rows,
+                cell_width_px: geometry.cell_width_px,
+                cell_height_px: geometry.cell_height_px,
+                layout_generation: 1,
+            },
+        ),
+        Some(InputMessage::ResizeTerminal { .. })
+    ));
+}
+
+#[test]
 fn legacy_resize_accepts_v2_reports_without_a_compact_generation() {
     let shared = Arc::new(Shared::new(43));
     let mailbox = OutboundMailbox::new();
     let (client, _) = shared.register_subscribed(ClientKind::Interactive, None, None, mailbox);
     let mut inner = shared.inner.lock();
+    inner
+        .terminal_geometries
+        .entry(PaneId(1))
+        .or_default()
+        .insert(
+            client,
+            TerminalGeometry {
+                columns: 97,
+                rows: 31,
+                cell_width_px: 8,
+                cell_height_px: 16,
+            },
+        );
     assert!(matches!(
         ctrl::normalize_resize(
             &mut inner,

@@ -2485,15 +2485,19 @@ Compressed pages share encoded bytes when allocator identities match and allocat
 restore mapping only when read. Differing allocators receive independent encoded copies.
 Dropping unread pages never restores them. Active pages are copied because native cursor
 caches hold pointers into them. Resize reads source page metadata and rows without detaching
-pages it will replace. The native delta now lives in one local Ghostty fork commit,
-`7823f65dd55fc9ff420d5eb5cae761cbd1995994`, on parent `c3941417`. The safe wrapper's
-owned `ScreenSnapshot` and borrowed bounded `GridRow` APIs live in one libghostty-rs
-fork commit `8e40135fb20e9ed91c37c374fe1d14570c386d06`, based on `359ef75`. The lane vendors only the sys snapshot, with regenerated
+pages it will replace. The native delta lives in published Ghostty fork commit
+`7823f65dd55fc9ff420d5eb5cae761cbd1995994` on `zz-2026-09-30`, with parent
+`c39414175ca2aad564b74b3f52196355f2671774` retained in the branch's history.
+`zz-2026-09-29` keeps spare-page pin `713374af`. The safe wrapper's
+owned `ScreenSnapshot` and borrowed bounded `GridRow` APIs live in one published
+libghostty-rs fork commit `8e40135fb20e9ed91c37c374fe1d14570c386d06` on new branch
+`zz-2026-09-30`, with parent `359ef751c189540eafb9110b2de89ad95ce48fc3` still on
+`zz-2026-09-25`. The lane vendors only the sys snapshot, with regenerated
 bindings and the installed-header API check. Native source staging, patch application,
 reversal, hashing and stamps are gone, as are `copy-mode.patch` and the safe-wrapper directory.
-The final manifest and native pin carry `WRAPPER_COPY_SHA` and `GHOSTTY_COPY_SHA` for the
-orchestrator to replace after publishing both local commits. Validation uses a temporary
-wrapper path patch and fresh native source override. This implements the binding packaging
+The manifest and native pin select these published commits for fetched-source builds.
+Pre-publication validation used a temporary wrapper path patch and fresh native source
+override, removed before repinning. This implements the binding packaging
 decision of 2026-09-30; the earlier rationale about a fork push freeze no longer applies.
 
 The C clone initializes its owned terminal directly from frozen backing, skipping four blank
@@ -2626,10 +2630,9 @@ contract. The 64-row cache is bounded; search recompresses in 512-row batches. W
 remaining independent cell/grapheme metadata queries and live frame extraction on copy
 cancellation; keep the safe snapshot ownership and borrowed row bounds when adding a bulk API.
 Integrate the two retained-event daemon edits with CTRL. The native and safe-wrapper copy
-changes now live in local fork commits; the orchestrator must publish and repin them before
-ordinary fetched-source builds. The lane pushes nothing.
+changes now live in published fork commits, pinned for ordinary fetched-source builds.
 
-Review fixes (2026-09-30): the final local fork candidates are
+Review fixes (2026-09-30): the published copy fork pins are
 Ghostty `7823f65dd55fc9ff420d5eb5cae761cbd1995994` and libghostty-rs
 `8e40135fb20e9ed91c37c374fe1d14570c386d06`, each one commit on its required parent.
 The default optimized release hash is

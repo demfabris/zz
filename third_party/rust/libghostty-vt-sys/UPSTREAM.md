@@ -8,13 +8,13 @@ This directory is a source snapshot of `libghostty-vt-sys` from
 - Upstream crate version: `0.2.1` (no newer release exists; the stack is unreleased)
 - Upstream wrapper Ghostty pin: `56dbc4a768778753737a3b9cbe0a3f9b4e434553`
 - Upstream Ghostty base: `6301810a48aaa3426887a4316668f18833a40138` (main, 2026-09-25)
-- Local Ghostty candidate: `7823f65dd55fc9ff420d5eb5cae761cbd1995994` on local branch `zz-copy`, parent `c39414175ca2aad564b74b3f52196355f2671774`. The orchestrator publishes it and replaces `GHOSTTY_COPY_SHA` in `build.rs`.
-- Parent fork branch: `zz-2026-09-30`, three commits on upstream: the C ABI signal-stack option (`6fce227c`, still on `zz-2026-09-25`), the PageList spare-page reuse (`713374af`: line-limit pruning keeps the last pruned pool page resident for the next grow instead of decommitting and refaulting it; `compress` releases it and trims the last page), and the trim fix (`c3941417`: preserves live cell blocks after history erase). `zz-2026-09-29` keeps `713374af`; the previous pin `fa7986a9` stays on `codex/cabi-signal-stack`
+- Published Ghostty pin: `7823f65dd55fc9ff420d5eb5cae761cbd1995994` on `demfabris/ghostty` branch `zz-2026-09-30`, pinned in `build.rs`. The branch fast-forward retains its parent, trim fix `c39414175ca2aad564b74b3f52196355f2671774`, in its history.
+- Fork history: four commits on upstream: the C ABI signal-stack option (`6fce227c`, still on `zz-2026-09-25`), the PageList spare-page reuse (`713374af`: line-limit pruning keeps the last pruned pool page resident for the next grow instead of decommitting and refaulting it; `compress` releases it and trims the last page), the trim fix (`c3941417`: preserves live cell blocks after history erase), and owned copy snapshots (`7823f65d`). `zz-2026-09-29` keeps `713374af`; the previous pin `fa7986a9` stays on `codex/cabi-signal-stack`
 - License: MIT OR Apache-2.0; the upstream MIT license is retained here.
 - Wrapper source: [`demfabris/libghostty-rs`](https://github.com/demfabris/libghostty-rs),
-  local candidate `8e40135fb20e9ed91c37c374fe1d14570c386d06` on `zz-copy`, parent
-  `359ef751c189540eafb9110b2de89ad95ce48fc3`. The orchestrator publishes it and replaces
-  `WRAPPER_COPY_SHA` in the workspace manifest. `zz-2026-09-25` retains the parent.
+  published commit `8e40135fb20e9ed91c37c374fe1d14570c386d06` on new branch
+  `zz-2026-09-30`, pinned in the workspace manifest. Its parent
+  `359ef751c189540eafb9110b2de89ad95ce48fc3` remains on `zz-2026-09-25`.
 - Local override: the workspace patches the git-sourced sys package to this adjacent
   snapshot. The safe wrapper comes from the dependency fork, with owned copy
   snapshots and bounded row references. zz does not vendor the safe wrapper.
@@ -30,8 +30,9 @@ behind `6301810a`. The only header change in those ten commits is additive (rend
 overscan and row ids), so the wrapper at #99 builds unchanged and its 22 unit tests, 3 sys
 tests, and 20 doctests pass against `6301810a` with bindings regenerated from its headers.
 
-The wrapper commit lives on a PR branch that Uzaaft rebases, so the workspace fetches it
-from the `demfabris/libghostty-rs` fork, where branch `zz-2026-09-25` keeps it reachable.
+The base wrapper commit lives on a PR branch that Uzaaft rebases, so the workspace fetches
+the copy API from the `demfabris/libghostty-rs` fork's `zz-2026-09-30` branch.
+Branch `zz-2026-09-25` keeps the base commit reachable.
 Move back to upstream at the first libghostty-rs release that contains this stack (likely
 0.3.0), and change both the dependency URL and the `[patch]` key in `Cargo.toml`.
 
@@ -158,12 +159,12 @@ separately. It exposes no terminal or owned tracking handle that could escape wh
 snapshot moves to a search thread. Row references check the owning page dimensions before
 reading a cell, including incomplete reflow.
 
-The native extension and its regression tests live in one local Ghostty fork commit;
-the safe API and its tests live in libghostty-rs commit
-`8e40135fb20e9ed91c37c374fe1d14570c386d06`. The orchestrator
-publishes both and repins zz. The final lane uses `GHOSTTY_COPY_SHA` and `WRAPPER_COPY_SHA`
-as literal handoff placeholders. Local validation uses a fresh native source path and a
-temporary wrapper path patch, removed before the final commit. Nothing was pushed here. Full native tests pass (6490 passed, 68 skipped); the wrapper
+The native extension and its regression tests live in published Ghostty fork commit
+`7823f65dd55fc9ff420d5eb5cae761cbd1995994`; the safe API and its tests live in published
+libghostty-rs commit `8e40135fb20e9ed91c37c374fe1d14570c386d06`. Both forks expose their
+copy commits on `zz-2026-09-30`, and zz pins those commits for fetched-source builds.
+Pre-publication validation used a fresh native source path and a temporary wrapper path
+patch, removed before repinning. Full native tests pass (6490 passed, 68 skipped); the wrapper
 default suite passes (30 wrapper and 3 sys tests, 19 doctests, 3 doctests ignored).
 Native exports include all 205 `ghostty_*` symbols, and all 199 generated function
 declarations resolve in a C client that links and runs. Standalone Debug fixtures bound

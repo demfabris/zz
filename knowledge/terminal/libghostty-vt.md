@@ -10,19 +10,20 @@ timestamp: 2026-09-30T12:00:00-03:00
 # Overview
 
 `libghostty-vt` is the VT engine inside [`zz-terminal`](/crates/zz-terminal.md). The
-workspace consumes `demfabris/libghostty-rs` candidate
-`8e40135fb20e9ed91c37c374fe1d14570c386d06` on local `zz-copy`, based on
-`359ef751c189540eafb9110b2de89ad95ce48fc3`, with `default-features = false`. That base
+workspace consumes published `demfabris/libghostty-rs` commit
+`8e40135fb20e9ed91c37c374fe1d14570c386d06` on new branch `zz-2026-09-30`, with
+`default-features = false`. Its parent `359ef751c189540eafb9110b2de89ad95ce48fc3`
+remains on `zz-2026-09-25`. That base
 contains the stacked render-hold and resize-scrollback APIs needed by the current C ABI.
 The safe wrapper lives in its dependency fork. zz replaces only `libghostty-vt-sys` with
 the local snapshot documented in `third_party/rust/libghostty-vt-sys/UPSTREAM.md`.
-The native candidate is `7823f65dd55fc9ff420d5eb5cae761cbd1995994` on local branch
-`zz-copy`, parent `c39414175ca2aad564b74b3f52196355f2671774`, upstream base
+The published native pin is `7823f65dd55fc9ff420d5eb5cae761cbd1995994` on branch
+`zz-2026-09-30`, parent `c39414175ca2aad564b74b3f52196355f2671774`, upstream base
 `6301810a48aaa3426887a4316668f18833a40138`. It carries four changes: the C ABI
 signal-stack option, spare-page reuse, the history-erase trim fix and owned copy snapshots.
-The final lane holds literal `GHOSTTY_COPY_SHA` and `WRAPPER_COPY_SHA` placeholders for
-the orchestrator to replace after publishing the fork commits. Local tests use a fresh
-`GHOSTTY_SOURCE_DIR` and a temporary wrapper path patch; no source rewriting occurs.
+The branch fast-forward retains the trim-fix parent in its history; `zz-2026-09-29`
+keeps the spare-page pin `713374af`. zz pins both published copy commits for ordinary
+fetched-source builds without source rewriting or a safe-wrapper path patch.
 Spare-page reuse keeps a pruned pool page resident for the next grow. The trim fix preserves
 live cell blocks after history erase. The signal-stack option removes unused Zig TLS storage
 from ReleaseSafe dev and test builds. Copy snapshots share immutable history backing,

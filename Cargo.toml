@@ -57,7 +57,7 @@ ignore = "0.4.33"
 image = { version = "=0.25.10", default-features = false }
 libc = "0.2.189"
 interprocess = "2.4.4"
-libghostty-vt = { version = "=0.2.1", git = "https://github.com/demfabris/libghostty-rs", rev = "WRAPPER_COPY_SHA", default-features = false }
+libghostty-vt = { version = "=0.2.1", git = "https://github.com/demfabris/libghostty-rs", rev = "8e40135fb20e9ed91c37c374fe1d14570c386d06", default-features = false }
 log = "0.4.34"
 memchr = "2.8.3"
 merman = { version = "=0.6.2", features = ["render"] }

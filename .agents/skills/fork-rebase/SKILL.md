@@ -127,21 +127,31 @@ Current forks and why:
 
 ## Native Ghostty fork
 
-`libghostty-vt-sys/build.rs` fetches `demfabris/ghostty`. The copy-snapshot candidate is
-local commit `7823f65dd55fc9ff420d5eb5cae761cbd1995994` on `zz-copy`, based on published
+`libghostty-vt-sys/build.rs` fetches `demfabris/ghostty`. The published copy-snapshot pin is
+`7823f65dd55fc9ff420d5eb5cae761cbd1995994` on `zz-2026-09-30`, based on
 `c39414175ca2aad564b74b3f52196355f2671774`, upstream base
 `6301810a48aaa3426887a4316668f18833a40138`. It adds owned active-screen C ABI snapshots,
 shared resident and compressed history backing, and snapshot regression tests to the three
-existing signal-stack, spare-page and trim commits. Published dated branches retain the old pins.
-The safe wrapper's copy API lives in local `demfabris/libghostty-rs` commit
-`8e40135fb20e9ed91c37c374fe1d14570c386d06` on `zz-copy`, based on
-`359ef751c189540eafb9110b2de89ad95ce48fc3`. zz vendors only the sys snapshot, without native
+existing signal-stack, spare-page and trim commits. The fast-forward keeps the trim-fix
+parent in `zz-2026-09-30` history. The safe wrapper's copy API lives in published
+`demfabris/libghostty-rs` commit `8e40135fb20e9ed91c37c374fe1d14570c386d06` on new branch
+`zz-2026-09-30`, based on `359ef751c189540eafb9110b2de89ad95ce48fc3`.
+zz vendors only the sys snapshot, without native
 source rewriting or a safe-wrapper path patch.
 
-The orchestrator publishes the two tested fork commits and replaces the literal
-`GHOSTTY_COPY_SHA` in `build.rs` and `WRAPPER_COPY_SHA` in root `Cargo.toml`, then regenerates
-`Cargo.lock`. The lane tests use a fresh native source path and a temporary local wrapper
-path override, which must not enter the final commit. No lane pushes these candidates.
+Published branches retain these pins:
+
+| Fork | Branch | Pin |
+|---|---|---|
+| `demfabris/ghostty` | `zz-2026-09-30` | `7823f65dd55fc9ff420d5eb5cae761cbd1995994`; parent trim fix `c39414175ca2aad564b74b3f52196355f2671774` remains in its history |
+| `demfabris/ghostty` | `zz-2026-09-29` | `713374af`, spare-page reuse |
+| `demfabris/ghostty` | `zz-2026-09-25` | `6fce227c`, C ABI signal-stack option |
+| `demfabris/ghostty` | `codex/cabi-signal-stack` | `fa7986a9`, previous pin |
+| `demfabris/libghostty-rs` | `zz-2026-09-30` | `8e40135fb20e9ed91c37c374fe1d14570c386d06`, owned copy API |
+| `demfabris/libghostty-rs` | `zz-2026-09-25` | `359ef751c189540eafb9110b2de89ad95ce48fc3`, parent wrapper |
+
+zz pins the native commit in `build.rs` and the wrapper commit in root `Cargo.toml`;
+Cargo regenerates `Cargo.lock` against the published wrapper source.
 `third_party/rust/libghostty-vt-sys/UPSTREAM.md` owns the full commit IDs, rationale,
 validation, and removal conditions.
 

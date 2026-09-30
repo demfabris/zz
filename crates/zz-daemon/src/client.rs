@@ -1967,7 +1967,7 @@ impl InteractiveClient {
     }
 
     #[cfg(unix)]
-    pub fn try_recv(&self) -> Result<Option<ProtocolMessage>, DaemonError> {
+    pub fn try_recv(&self) -> Result<Option<Box<ProtocolMessage>>, DaemonError> {
         let result = self.reader.lock().try_recv_decodable()?;
         if let Some((message, skipped)) = result {
             if skipped {
@@ -2048,7 +2048,7 @@ struct ReadyFrames {
 
 #[cfg(unix)]
 impl ReadyFrames {
-    fn message(&mut self) -> Result<Option<ProtocolMessage>, ProtocolError> {
+    fn message(&mut self) -> Result<Option<Box<ProtocolMessage>>, ProtocolError> {
         let remaining = &self.bytes[self.consumed..];
         let Some(prefix) = remaining.get(..4) else {
             return Ok(None);
@@ -2065,7 +2065,7 @@ impl ReadyFrames {
         };
         let message = zz_protocol::decode_protocol_frame(frame);
         self.consumed += length + 4;
-        message.map(Some)
+        message.map(|message| Some(Box::new(message)))
     }
 
     fn read(
@@ -2127,7 +2127,7 @@ impl<S: TransportStream> ProtocolReceiver<S> {
     }
 
     #[cfg(unix)]
-    fn try_recv_decodable(&mut self) -> Result<Option<(ProtocolMessage, bool)>, DaemonError> {
+    fn try_recv_decodable(&mut self) -> Result<Option<(Box<ProtocolMessage>, bool)>, DaemonError> {
         loop {
             match self.try_recv() {
                 Err(DaemonError::Protocol(ProtocolError::Decode(error))) => {
@@ -2147,10 +2147,10 @@ impl<S: TransportStream> ProtocolReceiver<S> {
     }
 
     #[cfg(unix)]
-    fn try_recv(&mut self) -> Result<Option<ProtocolMessage>, DaemonError> {
+    fn try_recv(&mut self) -> Result<Option<Box<ProtocolMessage>>, DaemonError> {
         use std::io::BufRead as _;
         if let Some(message) = self.pending.pop_front() {
-            return Ok(Some(message));
+            return Ok(Some(Box::new(message)));
         }
         let ready = self.ready.get_or_insert_with(ReadyFrames::default);
         let buffered = self.stream.buffer();
@@ -2206,7 +2206,7 @@ impl<S: TransportStream> ProtocolReceiver<S> {
         if let Some(ready) = self.ready.as_mut() {
             loop {
                 if let Some(message) = ready.message()? {
-                    return Ok(message);
+                    return Ok(*message);
                 }
                 if ready.read(&mut self.frame, |buffer| self.stream.read(buffer))? == 0 {
                     return Err(io::Error::from(io::ErrorKind::UnexpectedEof).into());

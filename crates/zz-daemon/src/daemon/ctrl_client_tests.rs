@@ -72,12 +72,12 @@ fn readiness_drains_initial_pending_and_buffered_frames_before_eof() {
     drop(daemon);
     assert_eq!(
         receiver.try_recv_decodable().unwrap(),
-        Some((initial, false))
+        Some((Box::new(initial), false))
     );
     for message in &messages[1..] {
         assert_eq!(
             receiver.try_recv_decodable().unwrap(),
-            Some((message.clone(), false))
+            Some((Box::new(message.clone()), false))
         );
     }
     assert!(
@@ -117,7 +117,10 @@ fn readiness_preserves_decode_resync_across_an_empty_poll() {
     daemon
         .write_all(&zz_protocol::encode_protocol_message(&next).unwrap())
         .unwrap();
-    assert_eq!(receiver.try_recv_decodable().unwrap(), Some((next, true)));
+    assert_eq!(
+        receiver.try_recv_decodable().unwrap(),
+        Some((Box::new(next), true))
+    );
 }
 
 #[cfg(all(unix, feature = "daemon"))]

@@ -188,7 +188,7 @@ impl DirectControl {
         if self.pending_protocol.is_none() && !self.disconnected {
             match self.client.try_recv() {
                 Ok(Some(message)) => {
-                    self.pending_protocol = Some(MainEvent::Protocol(Box::new(message)));
+                    self.pending_protocol = Some(MainEvent::Protocol(message));
                 }
                 Ok(None) => {}
                 Err(_) => {

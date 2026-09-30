@@ -136,6 +136,18 @@ pub fn UntouchedPool(comptime Item: type, comptime alignment: Alignment) type {
             self.live -= 1;
         }
 
+        pub fn disown(self: *Self, item: ItemPtr) void {
+            _ = item;
+            assert(self.free.items.len < self.live);
+            self.live -= 1;
+        }
+
+        pub fn adopt(self: *Self, item: ItemPtr) Allocator.Error!void {
+            _ = item;
+            try self.free.ensureTotalCapacity(self.gpa, self.live + 1);
+            self.live += 1;
+        }
+
         fn allocItem(self: *Self) Allocator.Error!ItemPtr {
             assert(self.free.capacity > self.live);
             const memory = try self.allocator.alignedAlloc(

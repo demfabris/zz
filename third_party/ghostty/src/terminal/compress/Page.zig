@@ -1,4 +1,4 @@
-//! A compressed terminal page which retains its resident virtual mapping.
+//! A compressed terminal page with an optional resident virtual mapping.
 //!
 //! Terminal pages have two kinds of state: the large `Page.memory` allocation
 //! and a comparatively small `Page` value containing offsets, dimensions,
@@ -6,15 +6,15 @@
 //! the backing memory, so preserving only the memory bytes is insufficient.
 //! We preserve the complete `Page` value instead. This follows the same model
 //! as `Page.cloneBuf`: page internals use offsets, so a shallow page copy remains
-//! valid when its memory contents are restored at the same address.
+//! valid when its memory contents are restored in another mapping.
 //!
-//! The resident memory is deliberately not freed by this type. `PageList`
-//! keeps the virtual range allocated while asking the operating system to
-//! discard its physical pages. Keeping the range has two useful properties:
-//! the embedded page never contains a dangling pointer, and restoring the page
-//! does not require a fallible allocation.
+//! Live `PageList` nodes keep their virtual range allocated while asking the
+//! operating system to discard physical pages. Immutable clones store an empty
+//! memory slice and reserve a private range on first read. The saved raw length
+//! and offsets let clones restore without retaining a source address.
+//! Live restoration reuses its range and needs no allocation.
 //!
-//! The intended state transition is:
+//! The live-page state transition is:
 //!
 //! 1. Create this value while the source page is resident.
 //! 2. Ask the OS to decommit the source page's memory.
@@ -34,17 +34,20 @@
 const Page = @This();
 
 const std = @import("std");
+const builtin = @import("builtin");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const TerminalPage = @import("../page.zig").Page;
 const lz4 = @import("lz4.zig");
 
-/// Complete page metadata together with the retained resident mapping.
+/// Complete page metadata together with an optional resident mapping.
 ///
 /// The bytes in `page.memory` may have been discarded by the OS while this
 /// value is in compressed state. They must not be read until `restore` has
 /// successfully decoded the page.
 page: TerminalPage,
+raw_len: usize,
+mapping_alloc: ?Allocator = null,
 
 /// Exact raw LZ4 block for `page.memory`.
 encoded: []u8,
@@ -55,6 +58,41 @@ encoded: []u8,
 /// the allocator here lets a PageList node restore and discard its compressed
 /// state without needing a reference back to the PageList.
 alloc: Allocator,
+shared: *Shared,
+
+const Shared = struct {
+    references: std.atomic.Value(usize),
+};
+
+pub fn cloneFor(self: *const Page, alloc: Allocator, page_alloc: Allocator) Allocator.Error!Page {
+    var result = self.*;
+    result.page.memory = &.{};
+    result.mapping_alloc = page_alloc;
+    if (sameAllocator(self.alloc, alloc)) {
+        _ = self.shared.references.fetchAdd(1, .monotonic);
+        return result;
+    }
+    result.encoded = try alloc.dupe(u8, self.encoded);
+    errdefer alloc.free(result.encoded);
+    result.shared = try alloc.create(Shared);
+    result.shared.* = .{ .references = .init(1) };
+    result.alloc = alloc;
+    return result;
+}
+
+fn sameAllocator(left: Allocator, right: Allocator) bool {
+    if (left.vtable != right.vtable) return false;
+    if (comptime builtin.link_libc) {
+        if (left.vtable == std.heap.c_allocator.vtable) return true;
+    }
+    if (comptime builtin.cpu.arch.isWasm()) {
+        if (left.vtable == std.heap.wasm_allocator.vtable) return true;
+    } else if (comptime builtin.os.tag != .freestanding) {
+        if (left.vtable == &std.heap.PageAllocator.vtable or
+            left.vtable == &std.heap.SmpAllocator.vtable) return true;
+    }
+    return left.ptr == right.ptr;
+}
 
 /// Return the largest scratch buffer that can produce a useful compressed
 /// representation for `raw_len` bytes.
@@ -133,10 +171,16 @@ pub fn init(
     assert(@sizeOf(Page) + encoded_len <
         @sizeOf(TerminalPage) + source.memory.len);
 
+    const encoded = try alloc.dupe(u8, scratch[0..encoded_len]);
+    errdefer alloc.free(encoded);
+    const shared = try alloc.create(Shared);
+    shared.* = .{ .references = .init(1) };
     return .{
         .page = source.*,
-        .encoded = try alloc.dupe(u8, scratch[0..encoded_len]),
+        .raw_len = source.memory.len,
+        .encoded = encoded,
         .alloc = alloc,
+        .shared = shared,
     };
 }
 
@@ -145,7 +189,10 @@ pub fn init(
 /// This intentionally does not free `page.memory`. The PageList node which
 /// supplied the source page continues to own that pool or heap allocation.
 pub fn deinit(self: *Page) void {
-    self.alloc.free(self.encoded);
+    if (self.shared.references.fetchSub(1, .acq_rel) == 1) {
+        self.alloc.free(self.encoded);
+        self.alloc.destroy(self.shared);
+    }
     self.* = undefined;
 }
 
@@ -158,6 +205,7 @@ pub fn deinit(self: *Page) void {
 /// it does not own a new allocation.
 pub fn restore(self: *const Page) lz4.DecompressError!TerminalPage {
     const result = self.page;
+    assert(result.memory.len == self.raw_len);
     _ = try lz4.decompress(self.encoded, result.memory);
     return result;
 }
@@ -173,12 +221,12 @@ pub fn cloneBuf(
     self: *const Page,
     memory: []align(std.heap.page_size_min) u8,
 ) lz4.DecompressError!TerminalPage {
-    assert(memory.len >= self.page.memory.len);
+    assert(memory.len >= self.raw_len);
 
     // Page internals are offsets into the backing buffer, so all metadata can
     // be copied verbatim when paired with an equally laid-out mapping.
     var result = self.page;
-    result.memory = memory[0..self.page.memory.len];
+    result.memory = memory[0..self.raw_len];
     _ = try lz4.decompress(self.encoded, result.memory);
     return result;
 }
@@ -409,4 +457,73 @@ test "compressed Page can retry after malformed encoded data" {
     @memset(resident.memory, 0);
     const restored = try compressed.restore();
     try testing.expectEqualSlices(u8, expected, restored.memory);
+}
+
+test "copy-on-write compressed singleton allocators share encoding" {
+    const testing = std.testing;
+    const allocators = if (builtin.link_libc)
+        [_]Allocator{ std.heap.c_allocator, std.heap.page_allocator, std.heap.smp_allocator }
+    else
+        [_]Allocator{ std.heap.page_allocator, std.heap.smp_allocator };
+    var resident = try TerminalPage.init(.{ .cols = 12, .rows = 9 });
+    defer resident.deinit();
+    resident.getRowAndCell(2, 3).cell.* = .init('Q');
+    const scratch = try testing.allocator.alloc(u8, try requiredScratch(resident.memory.len));
+    defer testing.allocator.free(scratch);
+    const memory = try testing.allocator.alignedAlloc(
+        u8,
+        .fromByteUnits(std.heap.page_size_min),
+        resident.memory.len,
+    );
+    defer testing.allocator.free(memory);
+    var table: lz4.HashTable = undefined;
+    for (allocators) |alloc| {
+        try testing.expect(sameAllocator(alloc, alloc));
+        try testing.expect(!sameAllocator(alloc, testing.allocator));
+        var source = (try Page.init(alloc, &resident, scratch, &table)).?;
+        var frozen = try source.cloneFor(alloc, testing.allocator);
+        defer frozen.deinit();
+        try testing.expectEqual(source.encoded.ptr, frozen.encoded.ptr);
+        try testing.expectEqual(@as(usize, 2), source.shared.references.load(.monotonic));
+        source.deinit();
+        frozen.page.memory = memory;
+        const restored = try frozen.restore();
+        try testing.expectEqual(@as(u21, 'Q'), restored.getRowAndCell(2, 3).cell.codepoint());
+    }
+}
+
+test "copy-on-write compressed custom allocators preserve allocator identity" {
+    const testing = std.testing;
+    var left_buffer: [4096]u8 = undefined;
+    var right_buffer: [4096]u8 = undefined;
+    var left = std.heap.FixedBufferAllocator.init(&left_buffer);
+    var right = std.heap.FixedBufferAllocator.init(&right_buffer);
+    try testing.expect(sameAllocator(left.allocator(), left.allocator()));
+    try testing.expect(!sameAllocator(left.allocator(), right.allocator()));
+    var resident = try TerminalPage.init(.{ .cols = 12, .rows = 9 });
+    defer resident.deinit();
+    resident.getRowAndCell(4, 5).cell.* = .init('R');
+    const scratch = try testing.allocator.alloc(u8, try requiredScratch(resident.memory.len));
+    defer testing.allocator.free(scratch);
+    const memory = try testing.allocator.alignedAlloc(
+        u8,
+        .fromByteUnits(std.heap.page_size_min),
+        resident.memory.len,
+    );
+    defer testing.allocator.free(memory);
+    var table: lz4.HashTable = undefined;
+    var source = (try Page.init(left.allocator(), &resident, scratch, &table)).?;
+    defer source.deinit();
+    var shared = try source.cloneFor(left.allocator(), testing.allocator);
+    defer shared.deinit();
+    var copied = try source.cloneFor(right.allocator(), testing.allocator);
+    defer copied.deinit();
+    try testing.expectEqual(source.encoded.ptr, shared.encoded.ptr);
+    try testing.expect(source.encoded.ptr != copied.encoded.ptr);
+    try testing.expectEqualSlices(u8, source.encoded, copied.encoded);
+    try testing.expectEqual(@as(usize, 2), source.shared.references.load(.monotonic));
+    try testing.expectEqual(@as(usize, 1), copied.shared.references.load(.monotonic));
+    copied.page.memory = memory;
+    const restored = try copied.restore();
+    try testing.expectEqual(@as(u21, 'R'), restored.getRowAndCell(4, 5).cell.codepoint());
 }

@@ -2132,6 +2132,9 @@ GHOSTTY_API GhosttyResult ghostty_terminal_new(const GhosttyAllocator* allocator
                                                uint16_t cols,
                                                uint16_t rows);
 
+GHOSTTY_API GhosttyResult ghostty_terminal_clone_screen(GhosttyTerminal terminal,
+                                                      GhosttyTerminal* result);
+
 /**
  * Free a terminal instance.
  *

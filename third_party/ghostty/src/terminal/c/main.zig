@@ -181,6 +181,7 @@ pub const sys_log_stderr = sys.logStderr;
 pub const sys_set = sys.set;
 
 pub const terminal_new = terminal.new;
+pub const terminal_clone_screen = terminal.clone_screen;
 pub const terminal_free = terminal.free;
 pub const terminal_reset = terminal.reset;
 pub const terminal_resize = terminal.resize;

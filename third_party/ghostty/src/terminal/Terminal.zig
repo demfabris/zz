@@ -333,7 +333,19 @@ pub fn init(
     });
     errdefer screen_set.deinit(alloc);
 
-    var result: Terminal = .{
+    var result = try initWithScreenSet(alloc, opts, screen_set);
+    result.setCursorStyle(.default);
+    return result;
+}
+
+pub fn initWithScreenSet(
+    alloc: Allocator,
+    opts: Options,
+    screen_set: ScreenSet,
+) !Terminal {
+    const cols = opts.cols;
+    const rows = opts.rows;
+    return .{
         .cols = cols,
         .rows = rows,
         .screens = screen_set,
@@ -356,8 +368,6 @@ pub fn init(
             .default_blink = opts.default_cursor_blink,
         },
     };
-    result.setCursorStyle(.default);
-    return result;
 }
 
 pub fn deinit(self: *Terminal, alloc: Allocator) void {

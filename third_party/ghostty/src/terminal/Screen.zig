@@ -484,6 +484,25 @@ pub fn clone(
     top: point.Point,
     bot: ?point.Point,
 ) !Screen {
+    return self.cloneInner(io, alloc, top, bot, false);
+}
+
+pub fn clonePreserving(
+    self: *const Screen,
+    io: std.Io,
+    alloc: Allocator,
+) !Screen {
+    return self.cloneInner(io, alloc, .{ .screen = .{} }, null, true);
+}
+
+fn cloneInner(
+    self: *const Screen,
+    io: std.Io,
+    alloc: Allocator,
+    top: point.Point,
+    bot: ?point.Point,
+    cow: bool,
+) !Screen {
     // Create a tracked pin remapper for our selection and cursor. Note
     // that we may want to expose this generally in the future but at the
     // time of doing this we don't need to.
@@ -494,6 +513,7 @@ pub fn clone(
         .top = top,
         .bot = bot,
         .tracked_pins = &pin_remap,
+        .cow = cow,
     });
     errdefer pages.deinit();
 

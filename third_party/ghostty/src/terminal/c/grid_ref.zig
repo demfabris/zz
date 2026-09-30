@@ -32,8 +32,10 @@ pub const CGridRef = extern struct {
     }
 
     pub fn toPin(self: CGridRef) ?PageList.Pin {
+        const node = self.node orelse return null;
+        if (self.x >= node.cols() or self.y >= node.rows()) return null;
         return .{
-            .node = self.node orelse return null,
+            .node = node,
             .x = self.x,
             .y = self.y,
         };
@@ -45,7 +47,7 @@ pub fn grid_ref_cell(
     out: ?*cell_c.CCell,
 ) callconv(lib.calling_conv) Result {
     const p = ref.toPin() orelse return .invalid_value;
-    if (out) |o| o.* = @bitCast(p.rowAndCell().cell.*);
+    if (out) |o| o.* = @bitCast(p.rowAndCellRead().cell.*);
     return .success;
 }
 
@@ -54,7 +56,7 @@ pub fn grid_ref_row(
     out: ?*row_c.CRow,
 ) callconv(lib.calling_conv) Result {
     const p = ref.toPin() orelse return .invalid_value;
-    if (out) |o| o.* = @bitCast(p.rowAndCell().row.*);
+    if (out) |o| o.* = @bitCast(p.rowAndCellRead().row.*);
     return .success;
 }
 
@@ -65,7 +67,7 @@ pub fn grid_ref_graphemes(
     out_len: *usize,
 ) callconv(lib.calling_conv) Result {
     const p = ref.toPin() orelse return .invalid_value;
-    const cell = p.rowAndCell().cell;
+    const cell = p.rowAndCellRead().cell;
 
     if (!cell.hasText()) {
         out_len.* = 0;
@@ -73,7 +75,7 @@ pub fn grid_ref_graphemes(
     }
 
     const cp = cell.codepoint();
-    const extra = if (cell.hasGrapheme()) p.grapheme(cell) else null;
+    const extra = if (cell.hasGrapheme()) p.node.pageRead().lookupGrapheme(cell) else null;
     const total = 1 + if (extra) |e| e.len else 0;
 
     if (out_buf == null or buf_len < total) {
@@ -98,7 +100,7 @@ pub fn grid_ref_hyperlink_uri(
     out_len: *usize,
 ) callconv(lib.calling_conv) Result {
     const p = ref.toPin() orelse return .invalid_value;
-    const terminal_page = p.node.page();
+    const terminal_page = p.node.pageRead();
     const rac = terminal_page.getRowAndCell(p.x, p.y);
     const cell = rac.cell;
 
@@ -133,11 +135,11 @@ pub fn grid_ref_style(
 ) callconv(lib.calling_conv) Result {
     const p = ref.toPin() orelse return .invalid_value;
     if (out) |o| {
-        const cell = p.rowAndCell().cell;
+        const cell = p.rowAndCellRead().cell;
         if (cell.style_id == stylepkg.default_id) {
             o.* = .fromStyle(.{});
         } else {
-            const terminal_page = p.node.page();
+            const terminal_page = p.node.pageRead();
             o.* = .fromStyle(terminal_page.styles.get(
                 terminal_page.memory,
                 cell.style_id,
@@ -254,4 +256,28 @@ test "grid_ref_hyperlink_uri with hyperlink" {
     var buf: [256]u8 = undefined;
     try testing.expectEqual(Result.success, grid_ref_hyperlink_uri(&ref, &buf, buf.len, &len));
     try testing.expectEqualStrings("https://example.com", buf[0..len]);
+}
+
+test "copy-on-write grid references reject coordinates outside node dimensions" {
+    var list = try PageList.init(testing.allocator, .{ .cols = 10, .rows = 2 });
+    defer list.deinit();
+    list.cols = 80;
+    defer list.cols = 10;
+    var ref = CGridRef.fromPin(list.pin(.{ .screen = .{} }).?);
+    ref.x = 79;
+    try testing.expect(ref.toPin() == null);
+    try testing.expectEqual(Result.invalid_value, grid_ref_cell(&ref, null));
+    try testing.expectEqual(Result.invalid_value, grid_ref_row(&ref, null));
+    try testing.expectEqual(Result.invalid_value, grid_ref_style(&ref, null));
+    var len: usize = undefined;
+    try testing.expectEqual(Result.invalid_value, grid_ref_graphemes(&ref, null, 0, &len));
+    try testing.expectEqual(Result.invalid_value, grid_ref_hyperlink_uri(&ref, null, 0, &len));
+    ref.x = 0;
+    ref.y = 2;
+    try testing.expect(ref.toPin() == null);
+    try testing.expectEqual(Result.invalid_value, grid_ref_cell(&ref, null));
+    ref.x = 9;
+    ref.y = 1;
+    try testing.expect(ref.toPin() != null);
+    try testing.expectEqual(Result.success, grid_ref_cell(&ref, null));
 }

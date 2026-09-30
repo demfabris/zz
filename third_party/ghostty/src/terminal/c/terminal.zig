@@ -862,6 +862,59 @@ fn new_(
     );
 }
 
+pub fn clone_screen(terminal_: Terminal, result: *Terminal) callconv(lib.calling_conv) Result {
+    result.* = null;
+    const source = zigTerminal(terminal_) orelse return .invalid_value;
+    const cloned = cloneScreen(source) catch return .out_of_memory;
+    result.* = cloned;
+    return .success;
+}
+
+fn cloneScreen(source: *ZigTerminal) !Terminal {
+    const alloc = lib.alloc.default(null);
+    const io: Io = .init;
+    const cloned = owned: {
+        const target = try alloc.create(ZigTerminal);
+        errdefer alloc.destroy(target);
+        target.* = backing: {
+            const screen = try alloc.create(Screen);
+            errdefer alloc.destroy(screen);
+            screen.* = try source.screens.active.clonePreserving(io.io(), alloc);
+            errdefer screen.deinit();
+            screen.no_scrollback = false;
+            break :backing try ZigTerminal.initWithScreenSet(
+                alloc,
+                .{ .cols = source.cols, .rows = source.rows },
+                .{
+                    .active_key = .primary,
+                    .active = screen,
+                    .all = .init(.{ .primary = screen }),
+                    .generations = .initFull(0),
+                },
+            );
+        };
+        errdefer target.deinit(alloc);
+        break :owned try wrap(alloc, target, io, default_continuation_max_bytes);
+    };
+    errdefer free(cloned);
+    const target = cloned.?.terminal;
+    target.colors.background = source.colors.background;
+    target.colors.foreground = source.colors.foreground;
+    target.colors.cursor = source.colors.cursor;
+    try target.colors.palette.changeDefault(alloc, source.colors.palette.original.*);
+    target.colors.palette.current = source.colors.palette.current;
+    target.colors.palette.mask = source.colors.palette.mask;
+    target.flags = source.flags;
+    target.flags.shell_redraws_prompt = .false;
+    target.flags.resize_pull_scrollback = true;
+    target.modes = source.modes;
+    target.modes.set(.wraparound, true);
+    target.cursor = source.cursor;
+    try target.title.appendSlice(alloc, source.title.items);
+    try target.pwd.appendSlice(alloc, source.pwd.items);
+    return cloned;
+}
+
 pub fn vt_write(
     terminal_: Terminal,
     ptr: [*]const u8,
@@ -6341,4 +6394,42 @@ test "get_multi null keys returns invalid_value" {
     var cols: u16 = 0;
     var values = [_]?*anyopaque{@ptrCast(&cols)};
     try testing.expectEqual(Result.invalid_value, get_multi(null, 1, null, &values, null));
+}
+
+test "copy-on-write terminal clone preserves cursor defaults and fresh parser after source drop" {
+    var source: Terminal = null;
+    try testing.expectEqual(Result.success, new(&lib.alloc.test_allocator, &source, 12, 4));
+    defer free(source);
+    const default_style: TerminalCursorStyle = .underline;
+    const default_blink = true;
+    try testing.expectEqual(Result.success, set(source, .default_cursor_style, @ptrCast(&default_style)));
+    try testing.expectEqual(Result.success, set(source, .default_cursor_blink, @ptrCast(&default_blink)));
+    const input = "\x1b[?1049h\x1b[6 q\x1b[31mAB\x1b[";
+    vt_write(source, input, input.len);
+    try testing.expectEqual(ScreenSet.Key.alternate, source.?.terminal.screens.active_key);
+    try testing.expectEqual(Screen.CursorStyle.bar, source.?.terminal.screens.active.cursor.cursor_style);
+
+    var frozen: Terminal = null;
+    try testing.expectEqual(Result.success, clone_screen(source, &frozen));
+    defer free(frozen);
+    const target = frozen.?.terminal;
+    try testing.expectEqual(ScreenSet.Key.primary, target.screens.active_key);
+    try testing.expectEqual(Screen.CursorStyle.block, target.screens.active.cursor.cursor_style);
+    try testing.expectEqual(Screen.CursorStyle.underline, target.cursor.default_style);
+    try testing.expectEqual(@as(?bool, true), target.cursor.default_blink);
+    try testing.expect(!target.cursor.is_default);
+    try testing.expect(!target.modes.get(.cursor_blinking));
+    const written = target.screens.active.pages.pin(.{ .active = .{} }).?.rowAndCellRead().cell;
+    try testing.expectEqual(@as(u21, 'A'), written.codepoint());
+    try testing.expect(written.style_id != 0);
+
+    free(source);
+    source = null;
+    vt_write(frozen, "Z", 1);
+    const cell = target.screens.active.pages.pin(.{ .active = .{ .x = 2, .y = 0 } }).?.rowAndCellRead().cell;
+    try testing.expectEqual(@as(u21, 'Z'), cell.codepoint());
+    try testing.expectEqual(@as(u16, 0), cell.style_id);
+    vt_write(frozen, "\x1b[0 q", 5);
+    try testing.expectEqual(Screen.CursorStyle.underline, target.screens.active.cursor.cursor_style);
+    try testing.expect(target.modes.get(.cursor_blinking));
 }

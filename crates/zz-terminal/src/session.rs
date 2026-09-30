@@ -2870,6 +2870,7 @@ fn command_channel() -> (Sender<Command>, Receiver<Command>) {
 struct InputAdmission {
     commands: usize,
     bytes: usize,
+    closed: bool,
 }
 
 struct InputPermit {
@@ -2890,6 +2891,26 @@ struct QueuedInput {
     permit: InputPermit,
 }
 
+struct InputReceiver {
+    commands: Receiver<QueuedInput>,
+    admission: Arc<Mutex<InputAdmission>>,
+}
+
+impl std::ops::Deref for InputReceiver {
+    type Target = Receiver<QueuedInput>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.commands
+    }
+}
+
+impl Drop for InputReceiver {
+    fn drop(&mut self) {
+        self.admission.lock().closed = true;
+        while self.commands.try_recv().is_ok() {}
+    }
+}
+
 struct InputSender {
     commands: Sender<QueuedInput>,
     admission: Arc<Mutex<InputAdmission>>,
@@ -2902,8 +2923,11 @@ impl InputSender {
         let bytes = command
             .pty_input_bytes()
             .expect("only PTY input commands use the input queue");
-        {
+        let result = {
             let mut admission = self.admission.lock();
+            if admission.closed {
+                return Err(crossbeam_channel::TrySendError::Disconnected(command));
+            }
             if admission.commands >= self.max_commands
                 || bytes > self.max_bytes.saturating_sub(admission.bytes)
             {
@@ -2911,15 +2935,16 @@ impl InputSender {
             }
             admission.commands += 1;
             admission.bytes += bytes;
-        }
-        let queued = QueuedInput {
-            command,
-            permit: InputPermit {
-                admission: Arc::clone(&self.admission),
-                bytes,
-            },
+            let queued = QueuedInput {
+                command,
+                permit: InputPermit {
+                    admission: Arc::clone(&self.admission),
+                    bytes,
+                },
+            };
+            self.commands.try_send(queued)
         };
-        self.commands.try_send(queued).map_err(|error| match error {
+        result.map_err(|error| match error {
             crossbeam_channel::TrySendError::Full(queued) => {
                 let QueuedInput { command, permit } = queued;
                 drop(permit);
@@ -2943,24 +2968,27 @@ impl InputSender {
     }
 }
 
-fn input_channel() -> (InputSender, Receiver<QueuedInput>) {
+fn input_channel() -> (InputSender, InputReceiver) {
     input_channel_with_limits(MAX_PENDING_PTY_INPUT_COMMANDS, MAX_PENDING_PTY_INPUT_BYTES)
 }
 
 fn input_channel_with_limits(
     max_commands: usize,
     max_bytes: usize,
-) -> (InputSender, Receiver<QueuedInput>) {
+) -> (InputSender, InputReceiver) {
     let (commands, receiver) = crossbeam_channel::bounded(max_commands);
     let admission = Arc::new(Mutex::new(InputAdmission::default()));
     (
         InputSender {
             commands,
-            admission,
+            admission: Arc::clone(&admission),
             max_commands,
             max_bytes,
         },
-        receiver,
+        InputReceiver {
+            commands: receiver,
+            admission,
+        },
     )
 }
 
@@ -4714,7 +4742,7 @@ fn reliable_event_bytes(event: &TerminalEvent) -> usize {
 )]
 fn terminal_worker(
     control_rx: Receiver<Command>,
-    input_rx: Receiver<QueuedInput>,
+    input_rx: InputReceiver,
     slot: Arc<Mutex<ControlSlot>>,
     publisher: Publisher,
     max_scrollback: usize,
@@ -4725,7 +4753,7 @@ fn terminal_worker(
 ) {
     if let Err(error) = run_terminal(
         &control_rx,
-        &input_rx,
+        input_rx,
         &slot,
         &publisher,
         max_scrollback,
@@ -4965,6 +4993,7 @@ fn run_output_view(
             pending_commands: Vec::new(),
             pending_copy_source: None,
             pane_search: None,
+            search: None,
         },
         frozen,
     )
@@ -4985,6 +5014,7 @@ struct SurfaceTerminal<'a, 'b> {
     pending_commands: Vec<Command>,
     pending_copy_source: Option<Box<CapturedCopySource>>,
     pane_search: Option<CopyModeSearch>,
+    search: Option<(SearchWorker, Receiver<SearchResults>)>,
 }
 
 fn run_surface_terminal(
@@ -5009,6 +5039,7 @@ fn run_surface_terminal(
         pending_commands,
         mut pending_copy_source,
         mut pane_search,
+        search,
     } = surface;
     let (pending_sender, pending_receiver) = crossbeam_channel::unbounded();
     for command in pending_commands {
@@ -5023,7 +5054,8 @@ fn run_surface_terminal(
     let mut input_bytes = Vec::with_capacity(LINK_URI_SCRATCH_BYTES);
     let mut writer: Box<dyn Write + Send> = Box::new(std::io::sink());
     let bound_pasted_images = HashSet::new();
-    let (mut search_worker, search_results) = SearchWorker::spawn(ActorWake::none());
+    let (mut search_worker, search_results) =
+        search.unwrap_or_else(|| SearchWorker::spawn(ActorWake::none()));
     let mut compression = IdleCompression::default();
     if frozen {
         frames.force_fallback = true;
@@ -5793,7 +5825,7 @@ fn terminal_command_preserves_tmux_argv_shapes() {
 
 fn run_terminal(
     control_rx: &Receiver<Command>,
-    input_rx: &Receiver<QueuedInput>,
+    input_rx: InputReceiver,
     slot: &Mutex<ControlSlot>,
     publisher: &Publisher,
     max_scrollback: usize,
@@ -6252,9 +6284,9 @@ fn run_terminal(
         #[cfg(all(unix, not(target_os = "linux")))]
         let child_exit = exit_status.is_none().then_some(&mut child_watch);
         #[cfg(unix)]
-        let available_input = (!writer.has_pending()).then_some(input_rx);
+        let available_input = (!writer.has_pending()).then_some(&input_rx.commands);
         #[cfg(not(unix))]
-        let available_input = Some(input_rx);
+        let available_input = Some(&input_rx.commands);
         let raw_output_read_ahead = raw_output_parse_backlog_bytes
             <= RAW_OUTPUT_PARSE_BACKLOG_BYTES.saturating_sub(RAW_OUTPUT_PARSE_READ_RESERVE_BYTES);
         #[cfg(all(unix, not(target_os = "linux")))]
@@ -7210,13 +7242,19 @@ fn run_terminal(
                 } else {
                     reconcile_view_screen(&mut terminal, view, &word_separators)?;
                 }
-                search_worker.cancel(*view_id);
-                complete_view_search(&mut terminal, view)?;
+                if view.copy_mode.is_none() {
+                    search_worker.cancel(*view_id);
+                    complete_view_search(&mut terminal, view)?;
+                }
             }
             publisher.set_facts(engine_filter.facts(&terminal)?);
             if let Some(status) = engine_last_command_status.take() {
                 publisher.set_last_command_status(status.code());
             }
+            drop(writer);
+            #[cfg(unix)]
+            drop(active_input_permit);
+            drop(input_rx);
             let status = exit_status.take().expect("checked above");
             let signal = status.signal().and_then(signal_number);
             publisher.set_completion(TerminalProcessExit {
@@ -7283,9 +7321,28 @@ fn run_terminal(
                     terminal.compress(CompressionMode::Full)?;
                 }
                 publisher.set_foreground_source(None);
-                drop(writer);
                 drop(master);
-                drop(search_worker);
+                drop(raw_output_parse_buffer);
+                drop(raw_output_parse_backlog);
+                drop(passthrough);
+                drop(input_bytes);
+                drop(key_encoder);
+                drop(key_event);
+                drop(mouse_encoder);
+                drop(mouse_event);
+                #[cfg(any(target_os = "linux", not(unix)))]
+                {
+                    drop(output_rx);
+                    drop(recycle_tx);
+                    drop(exit_rx);
+                }
+                #[cfg(all(unix, not(target_os = "linux")))]
+                {
+                    drop(drain_fd);
+                    drop(read_buffer);
+                    drop(child_watch);
+                    drop(wake_rx);
+                }
                 return run_surface_terminal(
                     control_rx,
                     slot,
@@ -7308,6 +7365,7 @@ fn run_terminal(
                         pending_commands,
                         pending_copy_source,
                         pane_search,
+                        search: Some((search_worker, search_results)),
                     },
                     false,
                 );

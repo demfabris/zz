@@ -26,33 +26,69 @@ write zones, as-built notes per merged lane), `bench/perf/README.md` (the gate),
 `bench/perf/thresholds.json`. Paths under `/Users/...` and `/private/tmp/...` in a report are on the
 Mac; paths under `/home/demfabris/...` and `~/.cache/zz-perf/...` are on alienware.
 
-## Next session on the Mac: the wave-1 macOS gate (owner asked for this, 2026-09-29)
+## Mac leg (macbook, 2026-09-29 to 09-30): the wave-1 macOS gate
 
-The Linux wave-1 exit is recorded (`wave1-alienware-aaaa8195.json`). The Mac run covers what Linux
-cannot (table "macOS-only checks") and the new Ghostty pin's Darwin path. Run on a quiet Mac, nothing
-else building:
+Worktree `~/dev/zz-macgate` at `2166bd31`, release build, M4 Max, tmux 3.7c. The host was not
+quiet at the start (another project's `cargo test`, OrbStack, Spotlight indexing the new trees:
+load 18-30); the gate started once the 1-minute load fell to 4.2 and nothing compiled.
 
-1. `git -C ~/dev/zz fetch origin && git -C ~/dev/zz worktree add --detach ~/dev/zz-macgate 2166bd31`
-   (`2166bd31` is wave 1 plus the Ghostty pin and the gate's per-host rules; if `main` has moved on
-   with wave-2 merges, still run this gate at `2166bd31`, and optionally a second one at `main`).
-   Remove any stale zz Dev daemon first (`zz kill-server` against dev sockets): the wire changed
-   inside protocol 107 during wave 1.
-2. `cd ~/dev/zz-macgate && cargo build --release -p zz-cli` (fetches `demfabris/ghostty@713374af`,
-   branch `zz-2026-09-29`), then
-   `just perf-gate wave1 --strict --baseline bench/perf/results/w1-5-exec-macbook-a26b6368.json --json bench/perf/results/wave1-macbook-2166bd31.json`.
-   The Mac is the `reference` host, so absolute rules apply unscaled there. Expect W1-ATTACH's rows
-   to pass (Linux: tty 504 B, 2 connections); echo rows are no longer wave-1 rules.
-3. Darwin path of the PageList fix (never run): in a ghostty checkout at `713374af`,
-   `zig build test-lib-vt -Demit-lib-vt=true -Dtest-filter=PageList`; then check the gate's
-   `mem.footprint.scroll180` / `scroll80` against `w1-5-exec-macbook-a26b6368.json` (the fix trims
-   idle pages with `MADV_FREE_REUSABLE` and recommits with `MADV_FREE_REUSE`; a missed `untrim`
-   would under-count footprint) and `throughput.*` (should not drop below W0).
-4. `just build mac` (bundle, CEF) and `otool -L` on the `dist/` binary (CoreFoundation-free link);
-   `just ios-gpui iPad build` at `main` (W1-ATTACH's hello capabilities, W2-HOOKS' `KeyTablesPatched`
-   event and W2-TERM's PaneFrame wire all landed; none has been built for iOS). Kill every zz Dev
-   daemon older than `d7e3fc95` first.
-5. Commit `wave1-macbook-2166bd31.json` (and notes on anything red) on `main` from a clean
-   checkout, run `python3 compat/evidence-secrets.py`, and push.
+### Gate `wave1-macbook-2166bd31.json` (strict, full, `--baseline w1-5-exec-macbook-a26b6368.json`)
+
+62 pass, 5 fail, 20 regressed, 2 drifted, 373 s, load 4.2 -> 4.5 (5-minute load 8.2 -> 5.1).
+Every W1-ATTACH rule passes unscaled on the reference host: `attach.tty_total.p1` 504 B (tmux 975),
+`.p4` 1449 B (tmux 3653), `attach.conns` 2, `attach.instr.p1` 11.1 Minstr (tmux 17.4),
+`chatty.tty_kibps.hidden` 0.72 KiB/s (tmux 0.75). Throughput rose with the Ghostty pin and the
+memchr scan: `throughput.detached.ascii` 243 -> 310 MB/s (6.3x tmux), `.unicode` 104 -> 122 MB/s,
+`throughput.attached.ascii_ms` 663 -> 525 ms.
+
+The five failures, none a wave-1 regression:
+
+| Row | zz / tmux (this run) | Rule | Why |
+|---|---|---|---|
+| `attach.ttfc.p1` | 16.9 / 20.7 ms | abs 14 ms | host state: tmux itself read 11.2 ms at w1-5. Same-host A/B (below): 2166bd31 17-22 ms, a26b6368 25-29 ms, tmux 19-23. zz is ahead of tmux; W2-CTRL owns the 1.1x-tmux wave2 rule |
+| `attach.ttfc.p4` | 14.7 / 15.8 ms | abs 14 ms | same; A/B 21-22 ms vs a26b6368 40-46 ms, tmux 21-22 |
+| `spawn.cpu.split_shell` | 1.72 / 1.79 ms | abs 1.5 ms | host state: instructions held (3.29 vs 3.41 Minstr); A/B a26b6368 1.7-2.1 ms vs 1.8-1.9. W3 |
+| `spawn.cpu.split_empty_P` | 0.89 / 0.44 ms | ratio 1.6 | bimodal, see next row |
+| `spawn.instr.split_empty_P` | 2.11 / 1.17 Minstr (hard) | +5% vs baseline | bimodal on both binaries: samples sit near 0.9 or 2.1 Minstr (this run min 0.89, median 2.11); A/B a26b6368 1.74 / 2.11 / 2.13, 2166bd31 2.12 / 2.15 / 2.14. w1-5 caught the low mode (1.15). Not the macOS pty spin bridge (it arms only after a read of 1 KiB or more). The extra ~1.2 Minstr is unexplained: W3-LOOP, which owns spawn CPU, should find it |
+
+The 20 regressed rows are cpu/wall kinds (spawn, cold, config, chatty steady/visible, control
+burst) and the four echo rows, with tmux slower by the same or more in the same run
+(`spawn.wall.split_shell` tmux 5.8 -> 12.3 ms, `echo.p50.idle` tmux 0.15 -> 0.41 ms). The two
+drifted rows are `echo.p50.idle` / `.p99.idle` against W0 (tmux moved 5.6x on the same rows);
+echo rules are wave 3 since the Linux leg. Instructions, bytes, counts, footprint and threads did
+not regress, except `spawn.instr.split_empty_P` above.
+
+A/B: `bench/perf/run.py --only spawn,attach --w0 none`, three alternating pairs of the a26b6368
+and 2166bd31 binaries at load 3.6-4.6 (scratch results, not committed).
+
+### Darwin path of the PageList fix (`713374af`)
+
+- `zig build test-lib-vt -Demit-lib-vt=true -Dtest-filter=PageList` at `713374af`: 347 of 347 pass.
+  Those tests prove little about the Darwin path: `mem.zig` skips the OS under `builtin.is_test`.
+- Footprint against w1-5: `mem.footprint.scroll180` 38.7 -> 35.3 MiB (tmux 61.7), `scroll80`
+  32.8 -> 28.5 MiB (tmux 35.7), RSS flat (342.8 / 165.7 MiB). A probe on this Mac (16 KiB pages)
+  showed why a missed recommit would read as a gain: pages written after `MADV_FREE_REUSABLE`
+  without `MADV_FREE_REUSE` stay out of `phys_footprint` (64 MiB written, +64 KiB counted).
+  The scroll rows never erase history, so their drop is the real trim plus the spare release.
+- A codex review of the Darwin path found a data-loss bug on both platforms: `trimLastPage`
+  released the cells past `size.rows * cols`, but `eraseRows` swaps row headers without moving
+  cells, so after a partial history erase (a shell `clear` sends ED 3) the live rows point at
+  the blocks the trim released. Linux discards them (`MADV_DONTNEED`): a unit test that models
+  the discard reads the live rows back as zero, which should show as a blank pane one idle second
+  after `clear` (not yet reproduced on a Linux host). macOS drops them out of the footprint and can
+  lose them under memory pressure. The regression test fails at `713374af`.
+- Fix: `demfabris/ghostty@c3941417` on the new branch `zz-2026-09-30` (`zz-2026-09-29` keeps
+  `713374af`): the trim starts after the highest cell block a live row references, and test builds
+  discard the whole range (as `MADV_DONTNEED` does) instead of only the dirty prefix. Full
+  `zig build test-lib-vt -Demit-lib-vt=true` on the Mac: 6488 pass, 52 skipped, 0 fail.
+
+### macOS-only checks
+
+| Check | Result |
+|---|---|
+| CoreFoundation-free link | `just build mac` at `main` (`ae63c577`): `otool -L dist/zz/zz.app/Contents/MacOS/cli` lists only `libSystem.B.dylib`; 81 dyld images at `cli -V` (tmux 86) |
+| `just ios-gpui iPad build` at `main` | builds clean, no warnings: W1-ATTACH hello capabilities, W2-HOOKS `KeyTablesPatched` and W2-TERM PaneFrames compile for `aarch64-apple-ios-sim` |
+| Ghostty PageList on Darwin | see above |
 
 ## Where things stand
 

@@ -462,6 +462,188 @@ fn assert_cache_context_matches_w1(
 }
 
 #[test]
+fn early_capture_lookup_preserves_exact_inputs_and_resolved_targets() {
+    let mut engine = MuxEngine::default();
+    let (session, window, pane) = engine.state.create_session("work").unwrap();
+    let (linked, _, _) = engine.state.create_session("linked").unwrap();
+    engine
+        .state
+        .session_mut(linked)
+        .unwrap()
+        .windows
+        .push(window);
+    let client = FormatClient::Attached(linked);
+    let template = "#{config_files}:#{window_active}:#{session_name}:#{W:#{window_name}}";
+    let references = engine.cached_format_references_for_templates([template]);
+    let needs = engine.format_needs([template]);
+    let overrides = [("config_files", "first.conf"), ("window_active", "1")];
+    with_borrowed_formats(true, || {
+        let mut live = engine.format_status_context_with_format_client(
+            Some(linked),
+            Some(window),
+            Some(pane),
+            Some(linked),
+            client,
+        );
+        for (name, value) in overrides {
+            live.set_format_value(name, value);
+        }
+        let captured = live.detach_with_references(needs, &references);
+        for target in [
+            (Some(session), Some(window), Some(pane)),
+            (Some(linked), Some(window), None),
+            (Some(SessionId(u64::MAX)), None, Some(pane)),
+        ] {
+            let hit = engine.cached_detached_format_context(
+                target,
+                client,
+                needs,
+                &references,
+                overrides,
+            );
+            assert_eq!(hit.is_some(), format_cache_knob());
+            if let Some(hit) = hit {
+                assert!(captured.same_detached(&hit));
+                assert!(Arc::ptr_eq(&captured.variables, &hit.variables));
+                assert!(hit.values.get().is_none());
+                assert_eq!(
+                    expand_status(template, &hit, &mut Hooks(&engine)),
+                    expand_status(template, &captured, &mut Hooks(&engine))
+                );
+            }
+        }
+        let target = (Some(session), Some(window), Some(pane));
+        for changed in [
+            vec![("config_files", "second.conf"), ("window_active", "1")],
+            vec![("config_files", "first.conf")],
+            vec![
+                ("config_files", "first.conf"),
+                ("extra", "value"),
+                ("window_active", "1"),
+            ],
+            vec![("window_active", "1"), ("config_files", "first.conf")],
+        ] {
+            assert!(
+                engine
+                    .cached_detached_format_context(target, client, needs, &references, changed)
+                    .is_none()
+            );
+        }
+        for (changed_target, changed_client, changed_needs, changed_references) in [
+            ((None, None, None), client, needs, references.as_ref()),
+            (target, FormatClient::Unattached, needs, references.as_ref()),
+            (target, client, FormatNeeds::NONE, references.as_ref()),
+            (target, client, needs, &BTreeSet::new()),
+        ] {
+            assert!(
+                engine
+                    .cached_detached_format_context(
+                        changed_target,
+                        changed_client,
+                        changed_needs,
+                        changed_references,
+                        overrides,
+                    )
+                    .is_none()
+            );
+        }
+        with_borrowed_formats(false, || {
+            assert!(
+                engine
+                    .cached_detached_format_context(target, client, needs, &references, overrides)
+                    .is_none()
+            );
+        });
+    });
+}
+
+#[test]
+fn early_capture_lookup_rejects_changed_compact_ids_and_source_revisions() {
+    let mut engine = MuxEngine::default();
+    engine.set_format_now(10);
+    let (session, window, pane) = engine.state.create_session("work").unwrap();
+    let target = (Some(session), Some(window), Some(pane));
+    let references = engine.cached_format_references("#{session_name}");
+    with_borrowed_formats(true, || {
+        let mut live = engine.format_status_context(target.0, target.1, target.2);
+        live.session_id = "$00".to_owned();
+        let _ = live.detach_with_references(FormatNeeds::NONE, &references);
+        assert!(
+            engine
+                .cached_detached_format_context(
+                    target,
+                    FormatClient::NoClient,
+                    FormatNeeds::NONE,
+                    &references,
+                    [],
+                )
+                .is_none()
+        );
+    });
+    let mut previous = engine.format_cache_revision();
+    for change in 0..4 {
+        let _ = cache_context(
+            &engine,
+            FormatContext {
+                session: Some(session),
+                window: Some(window),
+                pane: Some(pane),
+                ..FormatContext::default()
+            },
+            "#{session_name}",
+        );
+        match change {
+            0 => {
+                engine
+                    .state
+                    .create_window(session, Some("fresh".to_owned()), crate::PaneKind::Terminal)
+                    .unwrap();
+            }
+            1 => {
+                engine
+                    .execute(
+                        &mut crate::ExecutionContext::default(),
+                        &zz_protocol::CommandInvocation::new(
+                            "set-option",
+                            ["-g", "default-terminal", "fresh-terminal"],
+                        ),
+                    )
+                    .unwrap();
+            }
+            2 => engine.set_format_server_identity(21, "22", "fresh-user"),
+            3 => engine.set_format_now(20),
+            _ => unreachable!(),
+        }
+        let next = engine.format_cache_revision();
+        assert_eq!(next.is_some(), format_cache_knob());
+        if let (Some(previous), Some(next)) = (previous, next) {
+            assert_ne!(previous, next);
+            match change {
+                0 => assert_ne!(previous.0, next.0),
+                1 => assert_ne!(previous.1, next.1),
+                2 => assert_ne!(previous.2, next.2),
+                3 => assert_ne!(previous.3, next.3),
+                _ => unreachable!(),
+            }
+        }
+        with_borrowed_formats(true, || {
+            assert!(
+                engine
+                    .cached_detached_format_context(
+                        target,
+                        FormatClient::NoClient,
+                        FormatNeeds::NONE,
+                        &references,
+                        [],
+                    )
+                    .is_none()
+            );
+        });
+        previous = next;
+    }
+}
+
+#[test]
 fn detached_capture_cache_reuses_selected_maps_and_preserves_exact_inputs() {
     let mut engine = MuxEngine::default();
     let (session, window, pane) = engine.state.create_session("work").unwrap();

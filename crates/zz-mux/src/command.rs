@@ -2701,6 +2701,21 @@ impl MuxEngine {
     }
 
     #[must_use]
+    pub fn status_rows_for_session(&self, session: Option<SessionId>) -> u8 {
+        session
+            .and_then(|session| self.session_status_options.get(&session))
+            .and_then(|options| options.get(&StatusOption::Enabled))
+            .map_or_else(
+                || self.status.rows(),
+                |value| match value.as_str() {
+                    "off" => 0,
+                    "on" => 1,
+                    value => value.parse().expect("stored status rows were validated"),
+                },
+            )
+    }
+
+    #[must_use]
     pub fn status_format_array_for_session(
         &self,
         session: Option<SessionId>,
@@ -3397,11 +3412,15 @@ impl MuxEngine {
 
     #[must_use]
     pub fn key_table_for_session(&self, session: SessionId) -> String {
-        let table = self.session_knobs(session).key_table;
+        let table = self
+            .session_options
+            .get(&session)
+            .and_then(|values| values.get(&SessionOption::KeyTable))
+            .unwrap_or(&self.global_session_options.key_table);
         if table.is_empty() {
             "root".to_owned()
         } else {
-            table
+            table.clone()
         }
     }
 
@@ -4546,11 +4565,11 @@ impl MuxEngine {
         self.pane_runtime_facts.get(&pane)
     }
 
-    pub(crate) fn format_host(&self) -> &str {
+    pub fn format_host(&self) -> &str {
         &self.format_host
     }
 
-    pub(crate) fn format_host_short(&self) -> &str {
+    pub fn format_host_short(&self) -> &str {
         &self.format_host_short
     }
 
@@ -9757,6 +9776,25 @@ impl MuxEngine {
         }
         let notes_only = options.has("-N");
         let format = options.value("-F").unwrap_or(DEFAULT_LIST_KEYS_FORMAT);
+        let cacheable = crate::format_cache_knob()
+            && format == DEFAULT_LIST_KEYS_FORMAT
+            && hooks.stable_option_lookups()
+            && {
+                let values = self.format_status_context_with_format_client(
+                    context.session,
+                    context.window,
+                    context.pane,
+                    context.session,
+                    context.target_format_client(),
+                );
+                !LIST_KEY_BINDING_CONTEXT_FORMATS
+                    .iter()
+                    .chain(LIST_KEY_SUMMARY_CONTEXT_FORMATS)
+                    .any(|name| hooks.option_variable(name, &values).is_some())
+            };
+        if cacheable && let Some((output, had_binding)) = self.cached_key_listing(args) {
+            return Ok(self.key_listing_execution(context, options.has("-1"), had_binding, output));
+        }
         let prepared = PreparedFormat::new(
             self,
             FormatContext {
@@ -9768,16 +9806,6 @@ impl MuxEngine {
                 format_type: FormatType::None,
             },
         );
-        let cacheable = crate::format_cache_knob()
-            && format == DEFAULT_LIST_KEYS_FORMAT
-            && hooks.stable_option_lookups()
-            && !LIST_KEY_BINDING_CONTEXT_FORMATS
-                .iter()
-                .chain(LIST_KEY_SUMMARY_CONTEXT_FORMATS)
-                .any(|name| hooks.option_variable(name, prepared.values()).is_some());
-        if cacheable && let Some((output, had_binding)) = self.cached_key_listing(args) {
-            return Ok(self.key_listing_execution(context, options.has("-1"), had_binding, output));
-        }
         let mut bindings;
         if let Some(table) = options.value("-T") {
             bindings = listed_keys(self.keys.list(Some(table)));

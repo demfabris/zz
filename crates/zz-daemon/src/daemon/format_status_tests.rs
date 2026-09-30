@@ -180,7 +180,7 @@ fn completed_status_does_not_retain_oversized_sources_callbacks_or_borders() {
         let (_, _, mut request) = completed_request("#{session_name}:#{client_prefix}");
         let large = "x".repeat(COMPLETED_STATUS_MAX_BYTES);
         match kind {
-            "source" => request.title_format = Some(large),
+            "source" => *Arc::make_mut(&mut request.title_format) = Some(large),
             "callback" => request.facts.client.as_mut().unwrap().prefix = large,
             _ => {
                 request
@@ -220,11 +220,11 @@ fn completed_request(left: &str) -> (MuxEngine, zz_mux::ExecutionContext, Status
         &["set-option", "-g", "status-left-length", "32767"],
     );
     let mut request = engine_request(1, &engine, context.session);
-    request.formats.style.clear();
-    request.formats.left_style.clear();
-    request.formats.right_style.clear();
-    request.formats.foreground = "default".to_owned();
-    request.formats.background = "default".to_owned();
+    Arc::make_mut(&mut request.formats).style.clear();
+    Arc::make_mut(&mut request.formats).left_style.clear();
+    Arc::make_mut(&mut request.formats).right_style.clear();
+    Arc::make_mut(&mut request.formats).foreground = "default".to_owned();
+    Arc::make_mut(&mut request.formats).background = "default".to_owned();
     (engine, context, request)
 }
 
@@ -265,11 +265,11 @@ fn completed_status_invalidates_referenced_client_context_option_and_time_inputs
         &["set-option", "-g", "status-interval", "20"],
     );
     let mut request = engine_request(1, &engine, context.session);
-    request.formats.style.clear();
-    request.formats.left_style.clear();
-    request.formats.right_style.clear();
-    request.formats.foreground = "default".to_owned();
-    request.formats.background = "default".to_owned();
+    Arc::make_mut(&mut request.formats).style.clear();
+    Arc::make_mut(&mut request.formats).left_style.clear();
+    Arc::make_mut(&mut request.formats).right_style.clear();
+    Arc::make_mut(&mut request.formats).foreground = "default".to_owned();
+    Arc::make_mut(&mut request.formats).background = "default".to_owned();
     let mut renderer = StatusRenderer::default();
     assert!(
         renderer
@@ -411,11 +411,11 @@ fn completed_status_invalidates_captured_global_and_session_environment_values()
     ] {
         execute(&mut engine, &mut context, &args);
         let mut request = engine_request(1, &engine, context.session);
-        request.formats.style.clear();
-        request.formats.left_style.clear();
-        request.formats.right_style.clear();
-        request.formats.foreground = "default".to_owned();
-        request.formats.background = "default".to_owned();
+        Arc::make_mut(&mut request.formats).style.clear();
+        Arc::make_mut(&mut request.formats).left_style.clear();
+        Arc::make_mut(&mut request.formats).right_style.clear();
+        Arc::make_mut(&mut request.formats).foreground = "default".to_owned();
+        Arc::make_mut(&mut request.formats).background = "default".to_owned();
         assert_eq!(
             renderer.render_forced_at(&request, 1_700_000_000).left,
             expected
@@ -440,12 +440,13 @@ fn completed_status_rejects_stale_references_after_unsafe_template_changes() {
         renderer.render_forced_at(&request, 1_700_000_000).left,
         "cached"
     );
-    request.formats.left = "#{C:#{client_name}}".to_owned();
+    Arc::make_mut(&mut request.formats).left = "#{C:#{client_name}}".to_owned();
     renderer.render_forced_at(&request, 1_700_000_000);
     assert!(renderer.completed.is_none());
     let directory = tempfile::tempdir().expect("stale references job fixture");
     let count = directory.path().join("count");
-    request.formats.left = format!("#(echo run >> '{}'; echo value)", count.display());
+    Arc::make_mut(&mut request.formats).left =
+        format!("#(echo run >> '{}'; echo value)", count.display());
     assert_eq!(settled(&mut renderer, &request).left, "value");
     let runs = std::fs::read_to_string(&count).unwrap().lines().count();
     renderer.render_forced(&request);

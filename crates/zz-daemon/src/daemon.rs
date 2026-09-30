@@ -31324,6 +31324,8 @@ struct ServerState {
     scheduled_window_rename: Option<Instant>,
     preview_watched: BTreeSet<PaneId>,
     client_cell_pixels: BTreeMap<ClientId, (u32, u32)>,
+    border_presentations_cache: Mutex<Option<CachedBorderPresentations>>,
+    status_parameters_cache: Mutex<Option<CachedStatusParameters>>,
 }
 
 struct WaitItem {
@@ -35811,6 +35813,11 @@ fn client_colour_count_from_source(
     inner: &ClientFormatSource<'_>,
     client: ClientId,
 ) -> Option<u32> {
+    if inner.client_kinds.get(&client) != Some(&ClientKind::Interactive)
+        || !inner.client_terminals.contains(&client)
+    {
+        return None;
+    }
     client_colour_count_with_from_source(
         inner,
         client,
@@ -35982,8 +35989,7 @@ fn interactive_client_window_extent_from_source(
     window: WindowId,
 ) -> Option<(u16, u16)> {
     if let Some((columns, rows)) = inner.client_sizes.get(&client).copied() {
-        let status = inner.engine.status_formats_for_session(Some(session));
-        let lines = u16::from(status.rows());
+        let lines = u16::from(inner.engine.status_rows_for_session(Some(session)));
         let status_rows = if rows <= lines { 0 } else { lines };
         return Some((columns.max(1), rows.saturating_sub(status_rows).max(1)));
     }
@@ -36156,18 +36162,81 @@ fn client_format_facts_from_source(
     client: ClientId,
     session: SessionId,
 ) -> ClientFormatFacts {
+    client_format_facts_requested(inner, client, session, |_| true)
+}
+
+#[cfg(test)]
+fn selected_client_format_facts(
+    inner: &ServerState,
+    client: ClientId,
+    session: SessionId,
+    references: &BTreeSet<String>,
+) -> ClientFormatFacts {
+    let border_references = inner.engine.cached_format_references_for_templates([
+        "#{E:pane-border-style}",
+        "#{E:pane-active-border-style}",
+    ]);
+    let references = references
+        .iter()
+        .chain(border_references.iter())
+        .cloned()
+        .collect();
+    selected_client_format_facts_with_references(inner, client, session, &references)
+}
+
+fn selected_client_format_facts_with_references(
+    inner: &ServerState,
+    client: ClientId,
+    session: SessionId,
+    references: &BTreeSet<String>,
+) -> ClientFormatFacts {
+    if references
+        .iter()
+        .any(|name| name == "*" || name.starts_with("mode_"))
+    {
+        return client_format_facts(inner, client, session);
+    }
+    client_format_facts_requested(
+        &ClientFormatSource::from_inner(inner),
+        client,
+        session,
+        |name| name == "client_width" || references.contains(name),
+    )
+}
+
+fn client_format_facts_requested(
+    inner: &ClientFormatSource<'_>,
+    client: ClientId,
+    session: SessionId,
+    requested: impl Fn(&str) -> bool,
+) -> ClientFormatFacts {
+    macro_rules! capture {
+        ($name:literal, $value:expr) => {
+            if requested($name) {
+                $value
+            } else {
+                String::new()
+            }
+        };
+    }
     let Some(session_state) = inner.engine.state.sessions.get(&session) else {
         return ClientFormatFacts::default();
     };
-    let window = client_focused_window_from_source(inner, client, session_state);
     let kind = inner.client_kinds.get(&client).copied();
     let has_terminal =
         kind == Some(ClientKind::Interactive) && inner.client_terminals.contains(&client);
+    let cell_height = requested("client_cell_height") || requested("window_cell_height");
+    let cell_width = requested("client_cell_width") || requested("window_cell_width");
+    let viewport = ["window_bigger", "window_offset_x", "window_offset_y"]
+        .into_iter()
+        .any(&requested);
+    let window = (cell_height || cell_width || viewport || kind == Some(ClientKind::Control))
+        .then(|| client_focused_window_from_source(inner, client, session_state));
     let control_geometry = (kind == Some(ClientKind::Control))
-        .then(|| control_client_geometry_from_source(inner, client, window))
+        .then(|| control_client_geometry_from_source(inner, client, window.unwrap()))
         .flatten();
-    let terminal_geometry = has_terminal
-        .then(|| client_format_geometry_from_source(inner, client, window))
+    let terminal_geometry = (has_terminal && (cell_height || cell_width))
+        .then(|| client_format_geometry_from_source(inner, client, window.unwrap()))
         .flatten();
     let retained_size = inner.client_sizes.get(&client).copied();
     let width = if kind == Some(ClientKind::Control) {
@@ -36175,83 +36244,150 @@ fn client_format_facts_from_source(
     } else {
         retained_size.map_or(80, |size| size.0)
     };
-    let height = has_terminal.then(|| retained_size.map_or(24, |size| size.1));
-    let tty = inner.client_ttys.get(&client).cloned().unwrap_or_default();
-    let pid = inner.client_pids.get(&client).copied().unwrap_or_default();
-    let name = client_format_name_from_source(inner, client);
-    let default_key_table = inner.engine.key_table_for_session(session);
-    let key_table = inner
-        .key_engines
-        .get(&client)
-        .and_then(KeyEngine::active_table)
-        .unwrap_or(default_key_table.as_str())
-        .to_owned();
-    let prefix = usize::from(key_table != default_key_table).to_string();
-    let (written, discarded) = inner
-        .subscribers
-        .get(&client)
-        .map_or((0, 0), |subscriber| subscriber.stats());
-    let colours = client_colour_count_from_source(inner, client);
+    let (key_table, prefix) = if requested("client_key_table") || requested("client_prefix") {
+        let default_key_table = inner.engine.key_table_for_session(session);
+        let key_table = inner
+            .key_engines
+            .get(&client)
+            .and_then(KeyEngine::active_table)
+            .unwrap_or(default_key_table.as_str());
+        (
+            capture!("client_key_table", key_table.to_owned()),
+            capture!(
+                "client_prefix",
+                usize::from(key_table != default_key_table).to_string()
+            ),
+        )
+    } else {
+        (String::new(), String::new())
+    };
+    let (written, discarded) = if requested("client_written") || requested("client_discarded") {
+        inner
+            .subscribers
+            .get(&client)
+            .map_or((0, 0), |subscriber| subscriber.stats())
+    } else {
+        (0, 0)
+    };
     ClientFormatFacts {
-        activity: client_format_time(inner.client_activity_times.get(&client).copied()),
-        cell_height: terminal_geometry
-            .map_or_else(
-                || has_terminal.then_some(0),
-                |geometry| Some(geometry.cell_height_px),
-            )
-            .map_or_else(String::new, |height| height.to_string()),
-        cell_width: terminal_geometry
-            .map_or_else(
-                || has_terminal.then_some(0),
-                |geometry| Some(geometry.cell_width_px),
-            )
-            .map_or_else(String::new, |width| width.to_string()),
-        colours: colours.map_or_else(String::new, |colours| colours.to_string()),
-        control_mode: usize::from(kind == Some(ClientKind::Control)).to_string(),
-        created: client_format_time(inner.client_created_times.get(&client).copied()),
-        discarded: discarded.to_string(),
-        flags: format_client_flags_from_source(inner, client),
-        height: height.map_or_else(String::new, |height| height.to_string()),
-        key_table,
-        last_session: inner
-            .last_sessions
-            .get(&client)
-            .and_then(|last| inner.engine.state.sessions.get(last))
-            .map(|session| session.name.clone())
-            .unwrap_or_default(),
-        name,
-        pid: if pid == 0 {
-            String::new()
+        activity: capture!(
+            "client_activity",
+            client_format_time(inner.client_activity_times.get(&client).copied())
+        ),
+        cell_height: if cell_height {
+            terminal_geometry
+                .map_or_else(
+                    || has_terminal.then_some(0),
+                    |geometry| Some(geometry.cell_height_px),
+                )
+                .map_or_else(String::new, |height| height.to_string())
         } else {
-            pid.to_string()
+            String::new()
         },
+        cell_width: if cell_width {
+            terminal_geometry
+                .map_or_else(
+                    || has_terminal.then_some(0),
+                    |geometry| Some(geometry.cell_width_px),
+                )
+                .map_or_else(String::new, |width| width.to_string())
+        } else {
+            String::new()
+        },
+        colours: capture!(
+            "client_colours",
+            client_colour_count_from_source(inner, client)
+                .map_or_else(String::new, |colours| colours.to_string())
+        ),
+        control_mode: capture!(
+            "client_control_mode",
+            usize::from(kind == Some(ClientKind::Control)).to_string()
+        ),
+        created: capture!(
+            "client_created",
+            client_format_time(inner.client_created_times.get(&client).copied())
+        ),
+        discarded: capture!("client_discarded", discarded.to_string()),
+        flags: capture!(
+            "client_flags",
+            format_client_flags_from_source(inner, client)
+        ),
+        height: capture!(
+            "client_height",
+            has_terminal
+                .then(|| retained_size.map_or(24, |size| size.1))
+                .map_or_else(String::new, |height| height.to_string())
+        ),
+        key_table,
+        last_session: capture!(
+            "client_last_session",
+            inner
+                .last_sessions
+                .get(&client)
+                .and_then(|last| inner.engine.state.sessions.get(last))
+                .map(|session| session.name.clone())
+                .unwrap_or_default()
+        ),
+        name: capture!("client_name", client_format_name_from_source(inner, client)),
+        pid: capture!(
+            "client_pid",
+            inner
+                .client_pids
+                .get(&client)
+                .filter(|pid| **pid != 0)
+                .map(u32::to_string)
+                .unwrap_or_default()
+        ),
         prefix,
-        readonly: usize::from(inner.client_flags.contains(client)).to_string(),
-        session: session_state.name.clone(),
-        termfeatures: client_term_features_from_source(inner, client),
-        termname: client_environment_value_from_source(inner, client, "TERM")
-            .filter(|term| !term.is_empty())
-            .unwrap_or("unknown")
-            .to_owned(),
-        termtype: inner
-            .client_terminal_types
-            .get(&client)
-            .cloned()
-            .unwrap_or_default(),
-        theme: inner
-            .client_color_schemes
-            .get(&client)
-            .map(|scheme| scheme.as_str().to_owned())
-            .unwrap_or_default(),
-        tty,
-        uid: inner.engine.format_uid().to_owned(),
-        user: inner.engine.format_user().to_owned(),
-        utf8: usize::from(client_uses_utf8_from_source(inner, client)).to_string(),
-        width: width.to_string(),
-        written: written.to_string(),
+        readonly: capture!(
+            "client_readonly",
+            usize::from(inner.client_flags.contains(client)).to_string()
+        ),
+        session: capture!("client_session", session_state.name.clone()),
+        termfeatures: capture!(
+            "client_termfeatures",
+            client_term_features_from_source(inner, client)
+        ),
+        termname: capture!(
+            "client_termname",
+            client_environment_value_from_source(inner, client, "TERM")
+                .filter(|term| !term.is_empty())
+                .unwrap_or("unknown")
+                .to_owned()
+        ),
+        termtype: capture!(
+            "client_termtype",
+            inner
+                .client_terminal_types
+                .get(&client)
+                .cloned()
+                .unwrap_or_default()
+        ),
+        theme: capture!(
+            "client_theme",
+            inner
+                .client_color_schemes
+                .get(&client)
+                .map(|scheme| scheme.as_str().to_owned())
+                .unwrap_or_default()
+        ),
+        tty: capture!(
+            "client_tty",
+            inner.client_ttys.get(&client).cloned().unwrap_or_default()
+        ),
+        uid: capture!("client_uid", inner.engine.format_uid().to_owned()),
+        user: capture!("client_user", inner.engine.format_user().to_owned()),
+        utf8: capture!(
+            "client_utf8",
+            usize::from(client_uses_utf8_from_source(inner, client)).to_string()
+        ),
+        width: capture!("client_width", width.to_string()),
+        written: capture!("client_written", written.to_string()),
         line: 0,
-        environment: inner.client_environments.get(&client).cloned(),
-        terminal: has_terminal
+        environment: requested("*")
+            .then(|| inner.client_environments.get(&client).cloned())
+            .flatten(),
+        terminal: (requested("*") && has_terminal)
             .then(|| {
                 client_terminal_facts(
                     client_environment_value_from_source(inner, client, "TERM").unwrap_or_default(),
@@ -36262,8 +36398,8 @@ fn client_format_facts_from_source(
                 )
             })
             .flatten(),
-        viewport: has_terminal
-            .then(|| client_viewport_facts_from_source(inner, client, session, window))
+        viewport: (has_terminal && viewport)
+            .then(|| client_viewport_facts_from_source(inner, client, session, window.unwrap()))
             .flatten(),
     }
 }
@@ -37135,6 +37271,180 @@ fn status_request_with(
     )
 }
 
+struct StatusParameters {
+    formats: Arc<zz_mux::StatusFormats>,
+    row_formats: Arc<BTreeMap<u32, String>>,
+    title_format: Arc<Option<String>>,
+    environment: Arc<Vec<(RawText, Option<RawText>)>>,
+    default_terminal: Arc<String>,
+    message_styles: Arc<(String, String)>,
+    message_line: u8,
+    customized: bool,
+    needs: FormatNeeds,
+    references: Arc<BTreeSet<String>>,
+    client_references: Arc<BTreeSet<String>>,
+}
+
+struct CachedStatusParameters {
+    key: (Option<SessionId>, u64, u64, u64),
+    parameters: Arc<StatusParameters>,
+    option_snapshot: Arc<zz_mux::StatusRowVariables>,
+}
+
+impl StatusParameters {
+    fn retained_bytes(&self) -> usize {
+        let strings = [
+            &self.formats.left,
+            &self.formats.right,
+            &self.formats.style,
+            &self.formats.background,
+            &self.formats.foreground,
+            &self.formats.left_style,
+            &self.formats.right_style,
+            &self.message_styles.0,
+            &self.message_styles.1,
+            self.default_terminal.as_ref(),
+        ];
+        let text = strings
+            .into_iter()
+            .chain(self.row_formats.values())
+            .chain(self.title_format.iter())
+            .chain(self.references.iter())
+            .chain(self.client_references.iter())
+            .fold(0_usize, |bytes, value| {
+                bytes.saturating_add(std::mem::size_of::<String>() + value.capacity())
+            });
+        let environment = self
+            .environment
+            .iter()
+            .fold(0_usize, |bytes, (name, value)| {
+                bytes
+                    .saturating_add(std::mem::size_of::<(RawText, Option<RawText>)>())
+                    .saturating_add(name.as_bytes().len())
+                    .saturating_add(value.as_ref().map_or(0, |value| value.as_bytes().len()))
+            });
+        text.saturating_add(environment)
+            .saturating_add(std::mem::size_of::<Self>())
+            .saturating_mul(2)
+            .saturating_add(4096)
+    }
+}
+
+#[cfg(test)]
+mod format_parameters_tests;
+
+fn status_parameters(
+    inner: &ServerState,
+    attached: Option<SessionId>,
+    option_snapshot: &Arc<zz_mux::StatusRowVariables>,
+) -> Arc<StatusParameters> {
+    let key = inner
+        .engine
+        .format_cache_revision()
+        .map(|(state, options, data, _)| (attached, state, options, data));
+    if let Some(key) = key
+        && let Some(cached) = inner.status_parameters_cache.lock().as_ref()
+        && cached.key == key
+        && Arc::ptr_eq(&cached.option_snapshot, option_snapshot)
+    {
+        return Arc::clone(&cached.parameters);
+    }
+    let formats = Arc::new(inner.engine.status_formats_for_session(attached));
+    let row_formats = Arc::new(inner.engine.status_format_array_for_session(attached));
+    let title_format = Arc::new(
+        (attached.is_some() && inner.engine.set_titles_for_session(attached))
+            .then(|| inner.engine.set_titles_string_for_session(attached)),
+    );
+    let message_styles = Arc::new(inner.engine.message_styles_for_session(attached));
+    let needs = crate::status::status_line_needs(
+        &inner.engine,
+        &formats,
+        &row_formats,
+        title_format.as_deref(),
+        &message_styles,
+    );
+    let references =
+        inner
+            .engine
+            .cached_format_references_for_templates(crate::status::status_line_templates(
+                &formats,
+                &row_formats,
+                title_format.as_deref(),
+                &message_styles,
+            ));
+    let border_references = inner.engine.cached_format_references_for_templates([
+        "#{E:pane-border-style}",
+        "#{E:pane-active-border-style}",
+    ]);
+    let client_references = Arc::new(
+        references
+            .iter()
+            .chain(border_references.iter())
+            .cloned()
+            .collect(),
+    );
+    let parameters = Arc::new(StatusParameters {
+        formats,
+        row_formats,
+        title_format,
+        environment: Arc::new(inner.engine.job_environment(None)),
+        default_terminal: Arc::new(inner.engine.default_terminal_for_spawn().to_owned()),
+        message_styles,
+        message_line: inner.engine.message_line_for_session(attached),
+        customized: inner.engine.status_customized_for_session(attached),
+        needs,
+        references,
+        client_references,
+    });
+    if let Some(key) = key {
+        *inner.status_parameters_cache.lock() = (parameters
+            .retained_bytes()
+            .saturating_add(option_snapshot.retained_bytes())
+            <= 1024 * 1024)
+            .then(|| CachedStatusParameters {
+                key,
+                parameters: Arc::clone(&parameters),
+                option_snapshot: Arc::clone(option_snapshot),
+            });
+    }
+    parameters
+}
+
+fn cached_live_status_context(
+    inner: &ServerState,
+    attached: Option<SessionId>,
+    focused_window: Option<WindowId>,
+    needs: FormatNeeds,
+    references: &BTreeSet<String>,
+) -> Option<zz_mux::StatusContext<'static>> {
+    if references.contains("window_active_clients")
+        || references.contains("window_active_clients_list")
+    {
+        return None;
+    }
+    let attached = attached.filter(|session| inner.engine.state.sessions.contains_key(session));
+    let host = inner.engine.format_host().is_empty().then(host_names);
+    let overrides = [
+        Some(("config_files", inner.config_files.as_str())),
+        host.map(|host| ("host", host.0.as_str())),
+        host.map(|host| ("host_short", host.1.as_str())),
+        attached.map(|_| ("pane_active", "1")),
+        attached.map(|_| ("session_attached", "0")),
+        attached.map(|_| ("session_attached_list", "")),
+        attached.map(|_| ("session_many_attached", "0")),
+        attached.map(|_| ("window_active", "1")),
+        attached.map(|_| ("window_active_clients", "0")),
+        attached.map(|_| ("window_active_clients_list", "")),
+    ];
+    inner.engine.cached_detached_format_context(
+        (attached, focused_window, None),
+        attached.map_or(FormatClient::NoClient, FormatClient::Attached),
+        needs,
+        references,
+        overrides.into_iter().flatten(),
+    )
+}
+
 fn status_request_with_facts(
     inner: &ServerState,
     client: ClientId,
@@ -37143,44 +37453,36 @@ fn status_request_with_facts(
     facts: Option<FormatHookFacts>,
     startup_ready: bool,
     job_needs: FormatNeeds,
-    line_needs: &mut BTreeMap<Option<SessionId>, FormatNeeds>,
+    _line_needs: &mut BTreeMap<Option<SessionId>, FormatNeeds>,
 ) -> StatusRequest {
     let attached = client_attached_session(inner, client);
     let focused_window = client_focused_window_for_attachment(inner, client);
-    let mut context = snapshot.map_or_else(
-        || live_status_context(&inner.engine, attached, focused_window),
-        |snapshot| status_context(snapshot, &inner.engine, attached, focused_window),
-    );
-    context.set_format_value("config_files", inner.config_files.clone());
-    let formats = inner.engine.status_formats_for_session(attached);
-    let row_formats = inner.engine.status_format_array_for_session(attached);
-    let title_format = (attached.is_some() && inner.engine.set_titles_for_session(attached))
-        .then(|| inner.engine.set_titles_string_for_session(attached));
-    let message_styles = inner.engine.message_styles_for_session(attached);
-    let needs = *line_needs.entry(attached).or_insert_with(|| {
-        crate::status::status_line_needs(
-            &inner.engine,
-            &formats,
-            &row_formats,
-            title_format.as_deref(),
-            &message_styles,
-        )
-    }) | job_needs;
+    let parameters = status_parameters(inner, attached, &option_snapshot);
+    let needs = parameters.needs | job_needs;
     let references = if job_needs.is_empty() {
-        inner
-            .engine
-            .cached_format_references_for_templates(crate::status::status_line_templates(
-                &formats,
-                &row_formats,
-                title_format.as_deref(),
-                &message_styles,
-            ))
+        Arc::clone(&parameters.references)
     } else {
         Arc::new(BTreeSet::from(["*".to_owned()]))
     };
     let modes = attached.map_or_else(Vec::new, |session| {
         mode_requests(inner, client, session, job_needs)
     });
+    let cached_context = snapshot
+        .is_none()
+        .then(|| cached_live_status_context(inner, attached, focused_window, needs, &references))
+        .flatten();
+    let live_context = cached_context.is_none().then(|| {
+        let mut context = snapshot.map_or_else(
+            || live_status_context(&inner.engine, attached, focused_window),
+            |snapshot| status_context(snapshot, &inner.engine, attached, focused_window),
+        );
+        context.set_format_value("config_files", inner.config_files.clone());
+        context
+    });
+    let context = cached_context
+        .as_ref()
+        .or(live_context.as_ref())
+        .expect("status context");
     let selected = facts.is_none();
     let mut facts = facts.unwrap_or_else(|| {
         let mode_references;
@@ -37200,13 +37502,26 @@ fn status_request_with_facts(
                 .collect::<BTreeSet<_>>();
             &mode_references
         };
-        selected_status_format_facts(inner, &context, fact_references)
+        selected_status_format_facts(inner, context, fact_references)
     });
     if !selected || references.contains("*") || !modes.is_empty() {
         facts.client_environment = inner.client_environments.get(&client).cloned();
     }
     if let Some(session) = attached {
-        facts.client = Some(client_format_facts(inner, client, session));
+        facts.client = Some(if selected && modes.is_empty() {
+            selected_client_format_facts_with_references(
+                inner,
+                client,
+                session,
+                if job_needs.is_empty() {
+                    &parameters.client_references
+                } else {
+                    &references
+                },
+            )
+        } else {
+            client_format_facts(inner, client, session)
+        });
     }
     let pane_borders = if selected {
         let mut borrowed = readonly_borrowed_format_hook_facts(
@@ -37226,29 +37541,302 @@ fn status_request_with_facts(
             border_presentations(inner, client, session, &facts)
         })
     };
-    let context = context.detach_with_references(needs, &references);
+    let context = cached_context.unwrap_or_else(|| {
+        live_context
+            .expect("uncached status context")
+            .detach_with_references(needs, &references)
+    });
     StatusRequest {
         client,
-        formats,
-        row_formats,
+        formats: Arc::clone(&parameters.formats),
+        row_formats: Arc::clone(&parameters.row_formats),
         option_snapshot,
-        message_line: inner.engine.message_line_for_session(attached),
-        customized: inner.engine.status_customized_for_session(attached),
-        title_format,
-        environment: inner.engine.job_environment(None),
-        default_terminal: inner.engine.default_terminal_for_spawn().to_owned(),
+        message_line: parameters.message_line,
+        customized: parameters.customized,
+        title_format: Arc::clone(&parameters.title_format),
+        environment: Arc::clone(&parameters.environment),
+        default_terminal: Arc::clone(&parameters.default_terminal),
         startup: !startup_ready,
         context,
         facts,
         client_scheme: inner.client_color_schemes.get(&client).copied(),
-        message_styles,
+        message_styles: Arc::clone(&parameters.message_styles),
         modes,
         pane_borders,
         references,
     }
 }
 
+const BORDER_FORMAT_CACHE_BYTES: usize = 1024 * 1024;
+const BORDER_FORMAT_TEMPLATES: [&str; 2] =
+    ["#{E:pane-border-style}", "#{E:pane-active-border-style}"];
+
+struct CachedBorderPresentations {
+    revision: (u64, u64, u64, u64),
+    second: u64,
+    client: ClientId,
+    session: SessionId,
+    window: WindowId,
+    option_snapshot: Arc<zz_mux::StatusRowVariables>,
+    references: Arc<BTreeSet<String>>,
+    callbacks: Vec<String>,
+    panes: Vec<CachedBorderPane>,
+}
+
+struct CachedBorderPane {
+    context: zz_mux::StatusContext<'static>,
+    callback_values: Vec<Option<String>>,
+    presentation: zz_protocol::PaneBorderPresentation,
+}
+
+impl CachedBorderPresentations {
+    fn same_callbacks(&self, facts: &dyn crate::status::FormatFactSource) -> bool {
+        let mut hooks = DaemonFormatHooks::command(facts);
+        self.panes.iter().all(|pane| {
+            self.callbacks
+                .iter()
+                .zip(&pane.callback_values)
+                .all(|(name, expected)| hooks.variable(name, &pane.context) == *expected)
+        })
+    }
+
+    fn presentations(&self) -> Vec<zz_protocol::PaneBorderPresentation> {
+        self.panes
+            .iter()
+            .map(|pane| pane.presentation.clone())
+            .collect()
+    }
+
+    fn retained_bytes(&self) -> usize {
+        let mut bytes =
+            std::mem::size_of::<Self>().saturating_add(self.option_snapshot.retained_bytes());
+        for reference in self.references.iter().chain(&self.callbacks) {
+            bytes = bytes
+                .saturating_add(std::mem::size_of::<String>())
+                .saturating_add(reference.capacity());
+        }
+        bytes = bytes.saturating_add(
+            self.panes
+                .capacity()
+                .saturating_mul(std::mem::size_of::<CachedBorderPane>()),
+        );
+        for pane in &self.panes {
+            bytes = bytes
+                .saturating_add(pane.context.retained_bytes())
+                .saturating_add(pane.presentation.style.capacity())
+                .saturating_add(
+                    pane.callback_values
+                        .capacity()
+                        .saturating_mul(std::mem::size_of::<Option<String>>()),
+                );
+            for value in pane.callback_values.iter().flatten() {
+                bytes = bytes.saturating_add(value.capacity());
+            }
+        }
+        bytes.saturating_mul(2).saturating_add(4096)
+    }
+}
+
+fn border_format_callbacks(
+    engine: &MuxEngine,
+    context: &zz_mux::StatusContext,
+    option_snapshot: &zz_mux::StatusRowVariables,
+    references: &BTreeSet<String>,
+) -> Option<Vec<String>> {
+    let needs = engine.cached_format_needs(BORDER_FORMAT_TEMPLATES);
+    if references.contains("*")
+        || [
+            FormatNeeds::SESSIONS,
+            FormatNeeds::WINDOWS,
+            FormatNeeds::PANES,
+            FormatNeeds::OPTIONS,
+        ]
+        .iter()
+        .any(|need| needs.contains(*need))
+    {
+        return None;
+    }
+    let mut callbacks = Vec::new();
+    for name in references.iter().map(String::as_str) {
+        if matches!(name, "window_active_clients" | "window_active_clients_list") {
+            return None;
+        }
+        let factual = (name.starts_with("client_")
+            && zz_mux::delegated_format_variable_names().any(|known| known == name))
+            || matches!(
+                name,
+                "pane_in_mode"
+                    | "pane_mode"
+                    | "pane_unseen_changes"
+                    | "pane_pipe"
+                    | "pane_pipe_pid"
+                    | "session_last_attached"
+                    | "session_attached"
+                    | "session_attached_list"
+                    | "session_many_attached"
+                    | "window_bigger"
+                    | "window_offset_x"
+                    | "window_offset_y"
+                    | "window_cell_height"
+                    | "window_cell_width"
+            );
+        if factual {
+            callbacks.push(name.to_owned());
+            continue;
+        }
+        let option_name = name
+            .strip_prefix("E:")
+            .or_else(|| name.strip_prefix("T:"))
+            .unwrap_or(name);
+        if name != "config_files"
+            && (zz_mux::format_variable_is_captured(name)
+                || option_snapshot
+                    .lookup(
+                        &context.session_id,
+                        &context.window_id,
+                        &context.pane_id,
+                        option_name,
+                    )
+                    .is_some()
+                || (option_name.starts_with('@')
+                    && engine
+                        .format_user_option(
+                            &context.pane_id,
+                            &context.window_id,
+                            &context.session_id,
+                            option_name,
+                        )
+                        .is_some()))
+        {
+            continue;
+        }
+        return None;
+    }
+    Some(callbacks)
+}
+
+#[cfg(test)]
+thread_local! {
+    static BORDER_FORMAT_EXPANSIONS: Cell<usize> = const { Cell::new(0) };
+}
+
+fn border_format_style(
+    format: &str,
+    context: &zz_mux::StatusContext,
+    hooks: &mut DaemonFormatHooks<'_>,
+) -> String {
+    #[cfg(test)]
+    BORDER_FORMAT_EXPANSIONS.with(|count| count.set(count.get() + 1));
+    crate::status::expand_style(format, context, hooks)
+}
+
+#[cfg(test)]
+#[path = "daemon/format_border_tests.rs"]
+mod format_border_tests;
+
 fn border_presentations(
+    inner: &ServerState,
+    client: ClientId,
+    session: SessionId,
+    facts: &dyn crate::status::FormatFactSource,
+) -> Vec<zz_protocol::PaneBorderPresentation> {
+    let second = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs());
+    border_presentations_at(inner, client, session, facts, second)
+}
+
+fn border_presentations_at(
+    inner: &ServerState,
+    client: ClientId,
+    session: SessionId,
+    facts: &dyn crate::status::FormatFactSource,
+    second: u64,
+) -> Vec<zz_protocol::PaneBorderPresentation> {
+    let Some(revision) = inner.engine.format_cache_revision() else {
+        return uncached_border_presentations(inner, client, session, facts);
+    };
+    let Some(session_state) = inner.engine.state.sessions.get(&session) else {
+        return Vec::new();
+    };
+    let window = client_focused_window(inner, client, session_state);
+    let Some(window_state) = inner.engine.state.windows.get(&window) else {
+        return Vec::new();
+    };
+    let option_snapshot = inner.engine.cached_format_option_snapshot();
+    {
+        let cache = inner.border_presentations_cache.lock();
+        if let Some(cached) = cache.as_ref()
+            && cached.revision == revision
+            && cached.second == second
+            && cached.client == client
+            && cached.session == session
+            && cached.window == window
+            && Arc::ptr_eq(&cached.option_snapshot, &option_snapshot)
+            && cached.same_callbacks(facts)
+        {
+            return cached.presentations();
+        }
+    }
+    let references = inner
+        .engine
+        .cached_format_references_for_templates(BORDER_FORMAT_TEMPLATES);
+    let contexts = inner
+        .engine
+        .format_context_snapshot(FormatClient::Attached(session));
+    let first_context =
+        contexts.status_context(Some(session), Some(window), Some(window_state.active_pane));
+    let Some(callbacks) =
+        border_format_callbacks(&inner.engine, &first_context, &option_snapshot, &references)
+    else {
+        *inner.border_presentations_cache.lock() = None;
+        return uncached_border_presentations(inner, client, session, facts);
+    };
+    let mut hooks = DaemonFormatHooks::command(facts).with_option_engine(&inner.engine);
+    let panes = window_state
+        .panes
+        .keys()
+        .take(zz_protocol::MAX_PANE_BORDER_PRESENTATIONS)
+        .map(|pane| {
+            let context = contexts.status_context(Some(session), Some(window), Some(*pane));
+            let format = BORDER_FORMAT_TEMPLATES[usize::from(*pane == window_state.active_pane)];
+            let presentation = zz_protocol::PaneBorderPresentation {
+                pane: *pane,
+                style: border_format_style(format, &context, &mut hooks),
+            };
+            let mut callback_context = zz_mux::StatusContext::default();
+            callback_context.session_id = session.to_string();
+            callback_context.window_id = window.to_string();
+            callback_context.pane_id = pane.to_string();
+            let callback_values = callbacks
+                .iter()
+                .map(|name| hooks.variable(name, &context))
+                .collect();
+            CachedBorderPane {
+                context: callback_context,
+                callback_values,
+                presentation,
+            }
+        })
+        .collect();
+    let cached = CachedBorderPresentations {
+        revision,
+        second,
+        client,
+        session,
+        window,
+        option_snapshot,
+        references,
+        callbacks,
+        panes,
+    };
+    let result = cached.presentations();
+    *inner.border_presentations_cache.lock() =
+        (cached.retained_bytes() <= BORDER_FORMAT_CACHE_BYTES).then_some(cached);
+    result
+}
+
+fn uncached_border_presentations(
     inner: &ServerState,
     client: ClientId,
     session: SessionId,
@@ -37278,7 +37866,7 @@ fn border_presentations(
             };
             zz_protocol::PaneBorderPresentation {
                 pane: *pane,
-                style: crate::status::expand_style(format, &context, &mut hooks),
+                style: border_format_style(format, &context, &mut hooks),
             }
         })
         .collect()
@@ -41501,7 +42089,7 @@ fn selected_status_format_facts(
     }
     let source = readonly_borrowed_format_hook_facts(inner, CommandFormatSeed::default());
     let has = |names: &[&str]| names.iter().any(|name| references.contains(*name));
-    let mut facts = FormatHookFacts::default();
+    let mut facts = FormatHookFacts::shared_empty();
     if has(&[
         "pane_kind",
         "browser_url",
@@ -95352,9 +95940,9 @@ bind - split-window -v -c "#{pane_current_path}"
                 FormatNeeds::NONE,
             )
         };
-        status_request.formats.enabled = true;
-        status_request.formats.lines = 1;
-        status_request.formats.left_length = u16::MAX;
+        Arc::make_mut(&mut status_request.formats).enabled = true;
+        Arc::make_mut(&mut status_request.formats).lines = 1;
+        Arc::make_mut(&mut status_request.formats).left_length = u16::MAX;
         let status = StatusRenderer::default().render_initial(&status_request);
         assert!(
             status.left.contains("4242:/dev/pts/42:1"),

@@ -10,6 +10,82 @@ fn set(engine: &mut MuxEngine, context: &mut ExecutionContext, args: &[&str]) {
 }
 
 #[test]
+fn key_table_getter_matches_scoped_inheritance_unset_and_empty_defaults() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new("new-session", ["-s", "keys"]),
+        )
+        .unwrap();
+    let session = context.session.unwrap();
+    let compare = |engine: &MuxEngine, expected: &str| {
+        assert_eq!(engine.key_table_for_session(session), expected);
+        for target in [session, SessionId(u64::MAX)] {
+            let table = engine.session_knobs(target).key_table;
+            assert_eq!(
+                engine.key_table_for_session(target),
+                if table.is_empty() { "root" } else { &table }
+            );
+        }
+    };
+    compare(&engine, "root");
+    for (args, expected) in [
+        (vec!["-g", "key-table", "global"], "global"),
+        (vec!["key-table", "local"], "local"),
+        (vec!["-g", "key-table", "next-global"], "local"),
+        (vec!["-u", "key-table"], "next-global"),
+        (vec!["key-table", ""], "root"),
+        (vec!["-u", "key-table"], "next-global"),
+        (vec!["-gu", "key-table"], "root"),
+        (vec!["-g", "key-table", ""], "root"),
+    ] {
+        set(&mut engine, &mut context, &args);
+        compare(&engine, expected);
+    }
+}
+
+#[test]
+fn status_rows_getter_matches_scoped_inheritance_unset_and_missing_sessions() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new("new-session", ["-s", "work"]),
+        )
+        .unwrap();
+    let session = context.session.unwrap();
+    let compare = |engine: &MuxEngine, expected| {
+        assert_eq!(engine.status_rows_for_session(Some(session)), expected);
+        for target in [None, Some(session), Some(SessionId(u64::MAX))] {
+            assert_eq!(
+                engine.status_rows_for_session(target),
+                engine.status_formats_for_session(target).rows()
+            );
+        }
+    };
+    compare(&engine, 1);
+    for (args, expected) in [
+        (vec!["-g", "status", "off"], 0),
+        (vec!["-g", "status", "3"], 3),
+        (vec!["status", "2"], 2),
+        (vec!["-g", "status", "off"], 2),
+        (vec!["status", "off"], 0),
+        (vec!["status", "on"], 1),
+        (vec!["-u", "status"], 0),
+        (vec!["-g", "status", "4"], 4),
+        (vec!["-gu", "status"], 1),
+        (vec!["status"], 0),
+        (vec!["status"], 1),
+    ] {
+        set(&mut engine, &mut context, &args);
+        compare(&engine, expected);
+    }
+}
+
+#[test]
 fn status_option_snapshot_reuses_unchanged_options_and_refreshes_scopes() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();

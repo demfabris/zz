@@ -336,6 +336,19 @@ fn reference_bytes(references: &BTreeSet<String>) -> usize {
     })
 }
 
+fn format_id_matches(value: &str, expected: Option<u64>, prefix: char) -> bool {
+    expected.map_or_else(
+        || value.is_empty(),
+        |expected| {
+            value.strip_prefix(prefix).is_some_and(|digits| {
+                (digits == "0" || !digits.starts_with('0'))
+                    && digits.bytes().all(|byte| byte.is_ascii_digit())
+                    && digits.parse::<u64>() == Ok(expected)
+            })
+        },
+    )
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct StatusContext<'e> {
     values: OnceLock<Box<StatusValues>>,
@@ -2391,6 +2404,60 @@ impl NeedsScan<'_> {
 }
 
 impl MuxEngine {
+    #[must_use]
+    pub fn format_cache_revision(&self) -> Option<(u64, u64, u64, u64)> {
+        format_cache_knob().then(|| {
+            let revision = FormatCaptureRevision::new(self);
+            (
+                revision.state,
+                revision.options,
+                revision.data,
+                revision.now,
+            )
+        })
+    }
+
+    #[must_use]
+    pub fn cached_detached_format_context<'a>(
+        &self,
+        target: (Option<SessionId>, Option<WindowId>, Option<PaneId>),
+        format_client: FormatClient,
+        needs: FormatNeeds,
+        references: &BTreeSet<String>,
+        sorted_overrides: impl IntoIterator<Item = (&'a str, &'a str)>,
+    ) -> Option<StatusContext<'static>> {
+        if !format_cache_knob() || !tree::borrowed_formats() {
+            return None;
+        }
+        let target_ids = self.format_target(target.0, target.1, target.2);
+        let cache = self.format_context_cache.lock();
+        let cached = cache.as_ref()?;
+        (cached.target == target_ids
+            && cached.needs == needs
+            && cached.references.as_ref() == Some(references)
+            && cached.context.capture_revision.as_deref()
+                == Some(&FormatCaptureRevision::new(self))
+            && cached.context.format_client == format_client
+            && cached.context.format_now
+                == i64::try_from(self.format_now())
+                    .ok()
+                    .filter(|now| *now != 0)
+            && format_id_matches(&cached.context.session_id, target_ids.0.map(|id| id.0), '$')
+            && format_id_matches(&cached.context.window_id, target_ids.1.map(|id| id.0), '@')
+            && format_id_matches(&cached.context.pane_id, target_ids.2.map(|id| id.0), '%')
+            && {
+                let mut overrides = sorted_overrides.into_iter();
+                cached.input_variables.iter().all(|(name, value)| {
+                    overrides
+                        .next()
+                        .is_some_and(|(expected_name, expected_value)| {
+                            name == expected_name && value == expected_value
+                        })
+                }) && overrides.next().is_none()
+            })
+        .then(|| cached.context.clone())
+    }
+
     #[must_use]
     pub fn cached_format_references(&self, template: &str) -> Arc<BTreeSet<String>> {
         let generation = self.format_options_generation();

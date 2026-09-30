@@ -185,14 +185,14 @@ pub(crate) struct StatusRenderer {
 
 pub(crate) struct StatusRequest {
     pub(crate) client: ClientId,
-    pub(crate) formats: StatusFormats,
-    pub(crate) row_formats: BTreeMap<u32, String>,
+    pub(crate) formats: Arc<StatusFormats>,
+    pub(crate) row_formats: Arc<BTreeMap<u32, String>>,
     pub(crate) option_snapshot: Arc<StatusRowVariables>,
     pub(crate) message_line: u8,
     pub(crate) customized: bool,
-    pub(crate) title_format: Option<String>,
-    pub(crate) environment: Vec<(RawText, Option<RawText>)>,
-    pub(crate) default_terminal: String,
+    pub(crate) title_format: Arc<Option<String>>,
+    pub(crate) environment: Arc<Vec<(RawText, Option<RawText>)>>,
+    pub(crate) default_terminal: Arc<String>,
     pub(crate) startup: bool,
     pub(crate) context: StatusContext<'static>,
     pub(crate) facts: FormatHookFacts,
@@ -202,7 +202,7 @@ pub(crate) struct StatusRequest {
     /// scheme only for a client that reported one, so `None` here is the pin's
     /// unknown and resolves dark.
     pub(crate) client_scheme: Option<TerminalColorScheme>,
-    pub(crate) message_styles: (String, String),
+    pub(crate) message_styles: Arc<(String, String)>,
     pub(crate) modes: Vec<ModeRequest>,
     pub(crate) pane_borders: Vec<zz_protocol::PaneBorderPresentation>,
     pub(crate) references: Arc<BTreeSet<String>>,
@@ -210,16 +210,16 @@ pub(crate) struct StatusRequest {
 
 struct CompletedStatus {
     client: ClientId,
-    formats: StatusFormats,
-    row_formats: BTreeMap<u32, String>,
+    formats: Arc<StatusFormats>,
+    row_formats: Arc<BTreeMap<u32, String>>,
     option_snapshot: Arc<StatusRowVariables>,
     references: Arc<BTreeSet<String>>,
     message_line: u8,
     customized: bool,
-    title_format: Option<String>,
+    title_format: Arc<Option<String>>,
     context: StatusContext<'static>,
     client_scheme: Option<TerminalColorScheme>,
-    message_styles: (String, String),
+    message_styles: Arc<(String, String)>,
     pane_borders: Vec<zz_protocol::PaneBorderPresentation>,
     callback_names: Vec<String>,
     callbacks: Vec<Option<String>>,
@@ -292,10 +292,13 @@ impl CompletedStatus {
         Arc::ptr_eq(&self.option_snapshot, &request.option_snapshot)
             && (Arc::ptr_eq(&self.references, &request.references)
                 || self.references == request.references)
-            && self.formats == request.formats
-            && self.row_formats == request.row_formats
-            && self.title_format == request.title_format
-            && self.message_styles == request.message_styles
+            && (Arc::ptr_eq(&self.formats, &request.formats) || self.formats == request.formats)
+            && (Arc::ptr_eq(&self.row_formats, &request.row_formats)
+                || self.row_formats == request.row_formats)
+            && (Arc::ptr_eq(&self.title_format, &request.title_format)
+                || self.title_format == request.title_format)
+            && (Arc::ptr_eq(&self.message_styles, &request.message_styles)
+                || self.message_styles == request.message_styles)
     }
 
     fn matches(&self, request: &StatusRequest, callbacks: &[Option<String>], now: i64) -> bool {
@@ -656,6 +659,13 @@ pub(crate) struct FormatHookFacts {
     /// name beside the facts, ordered by client id.
     pub(crate) copy_modes: Arc<BTreeMap<PaneId, Vec<(String, Arc<CopyModeFacts>)>>>,
     pub(crate) pane_modes: Arc<BTreeMap<PaneId, (usize, &'static str)>>,
+}
+
+impl FormatHookFacts {
+    pub(crate) fn shared_empty() -> Self {
+        static EMPTY: LazyLock<FormatHookFacts> = LazyLock::new(FormatHookFacts::default);
+        EMPTY.clone()
+    }
 }
 
 pub(crate) trait FormatFactSource {
@@ -1456,6 +1466,7 @@ fn render(
 ) -> StatusLine {
     let title = request
         .title_format
+        .as_ref()
         .as_ref()
         .map_or_else(String::new, |format| {
             let mut hooks = DaemonFormatHooks::status(
@@ -2890,7 +2901,7 @@ mod tests {
     pub(super) fn request(client: u64, left: &str, right: &str) -> StatusRequest {
         StatusRequest {
             client: ClientId(client),
-            formats: StatusFormats {
+            formats: Arc::new(StatusFormats {
                 left: left.to_owned(),
                 right: right.to_owned(),
                 style: String::new(),
@@ -2899,14 +2910,14 @@ mod tests {
                 left_length: u16::MAX,
                 right_length: u16::MAX,
                 ..StatusFormats::default()
-            },
-            row_formats: BTreeMap::new(),
+            }),
+            row_formats: Arc::new(BTreeMap::new()),
             option_snapshot: Arc::new(StatusRowVariables::default()),
             message_line: 0,
             customized: false,
-            title_format: None,
-            environment: Vec::new(),
-            default_terminal: "tmux-256color".to_owned(),
+            title_format: Arc::new(None),
+            environment: Arc::new(Vec::new()),
+            default_terminal: Arc::new("tmux-256color".to_owned()),
             startup: false,
             context: StatusContext::from(StatusValues {
                 session_name: "work".to_owned(),
@@ -2917,7 +2928,7 @@ mod tests {
                 ..FormatHookFacts::default()
             },
             client_scheme: None,
-            message_styles: (String::new(), String::new()),
+            message_styles: Arc::new((String::new(), String::new())),
             modes: Vec::new(),
             pane_borders: Vec::new(),
             references: MuxEngine::default().cached_format_references_for_templates([left, right]),
@@ -2952,14 +2963,14 @@ mod tests {
             .detach_with_references(needs, &references);
         StatusRequest {
             client: ClientId(client),
-            formats,
-            row_formats,
+            formats: Arc::new(formats),
+            row_formats: Arc::new(row_formats),
             option_snapshot: engine.cached_format_option_snapshot(),
             message_line: engine.message_line_for_session(session),
             customized: engine.status_customized_for_session(session),
-            title_format,
-            environment: engine.job_environment(None),
-            default_terminal: engine.default_terminal_for_spawn().to_owned(),
+            title_format: Arc::new(title_format),
+            environment: Arc::new(engine.job_environment(None)),
+            default_terminal: Arc::new(engine.default_terminal_for_spawn().to_owned()),
             startup: false,
             context,
             facts: FormatHookFacts {
@@ -2967,7 +2978,7 @@ mod tests {
                 ..FormatHookFacts::default()
             },
             client_scheme: None,
-            message_styles,
+            message_styles: Arc::new(message_styles),
             modes: Vec::new(),
             pane_borders: Vec::new(),
             references,
@@ -3745,15 +3756,15 @@ mod tests {
     fn base_style_applies_status_style_then_fg_bg_overrides() {
         let mut renderer = StatusRenderer::default();
         let mut styled = request(1, "", "");
-        styled.formats.style = "bg=blue,fg=white".to_owned();
-        styled.formats.foreground = "red".to_owned();
+        Arc::make_mut(&mut styled.formats).style = "bg=blue,fg=white".to_owned();
+        Arc::make_mut(&mut styled.formats).foreground = "red".to_owned();
         let status = renderer.render_initial(&styled);
         assert_eq!(status.base_style, "bg=blue,fg=white,fg=red");
         assert_eq!(status.validate(), Ok(()));
 
         let mut dynamic = request(2, "", "");
-        dynamic.formats.style = "fg=#{?window_zoomed,red,green}".to_owned();
-        dynamic.formats.background = "black".to_owned();
+        Arc::make_mut(&mut dynamic.formats).style = "fg=#{?window_zoomed,red,green}".to_owned();
+        Arc::make_mut(&mut dynamic.formats).background = "black".to_owned();
         let status = renderer.render_initial(&dynamic);
         assert_eq!(status.base_style, "fg=green,bg=black");
         assert_eq!(status.validate(), Ok(()));
@@ -3763,7 +3774,7 @@ mod tests {
     fn an_unparseable_expanded_status_style_degrades_instead_of_dropping_the_event() {
         let mut renderer = StatusRenderer::default();
         let mut broken = request(1, "LEFT", "RIGHT");
-        broken.formats.style = "bg=#{@theme_bg}".to_owned();
+        Arc::make_mut(&mut broken.formats).style = "bg=#{@theme_bg}".to_owned();
         let status = renderer.render_initial(&broken);
         assert_eq!(status.base_style, "");
         assert_eq!(status.rows.len(), 1);
@@ -3776,8 +3787,8 @@ mod tests {
         );
 
         let mut overridden = request(2, "", "");
-        overridden.formats.style = "bg=#{@theme_bg}".to_owned();
-        overridden.formats.foreground = "red".to_owned();
+        Arc::make_mut(&mut overridden.formats).style = "bg=#{@theme_bg}".to_owned();
+        Arc::make_mut(&mut overridden.formats).foreground = "red".to_owned();
         let status = renderer.render_initial(&overridden);
         assert_eq!(status.base_style, "fg=red");
         assert_eq!(status.validate(), Ok(()));
@@ -3787,14 +3798,14 @@ mod tests {
     fn message_line_clamps_against_the_published_row_count() {
         let mut renderer = StatusRenderer::default();
         let mut clamped = request(1, "", "");
-        clamped.formats.lines = 2;
+        Arc::make_mut(&mut clamped.formats).lines = 2;
         clamped.message_line = 4;
         let status = renderer.render_initial(&clamped);
         assert_eq!(status.rows.len(), 2);
         assert_eq!(status.message_line, 1);
 
         let mut disabled = request(2, "", "");
-        disabled.formats.enabled = false;
+        Arc::make_mut(&mut disabled.formats).enabled = false;
         disabled.message_line = 3;
         assert_eq!(renderer.render_initial(&disabled).message_line, 0);
     }
@@ -3829,12 +3840,12 @@ mod tests {
     #[test]
     fn status_sides_carry_base_then_side_styles() {
         let mut request = request(1, "abcdef", "uvwxyz");
-        request.formats.style = "bg=blue,fg=white".to_owned();
-        request.formats.foreground = "red".to_owned();
-        request.formats.left_style = "bold".to_owned();
-        request.formats.right_style = "italics".to_owned();
-        request.formats.left_length = 4;
-        request.formats.right_length = 3;
+        Arc::make_mut(&mut request.formats).style = "bg=blue,fg=white".to_owned();
+        Arc::make_mut(&mut request.formats).foreground = "red".to_owned();
+        Arc::make_mut(&mut request.formats).left_style = "bold".to_owned();
+        Arc::make_mut(&mut request.formats).right_style = "italics".to_owned();
+        Arc::make_mut(&mut request.formats).left_length = 4;
+        Arc::make_mut(&mut request.formats).right_length = 3;
         let status = StatusRenderer::default().render_initial(&request);
         assert_eq!(
             status.left,
@@ -3849,8 +3860,8 @@ mod tests {
     #[test]
     fn status_style_wrapping_stays_inside_the_wire_limit() {
         let mut request = request(1, &"x".repeat(MAX_STATUS_TEXT_BYTES), "");
-        request.formats.style = "bold,".repeat(800);
-        request.formats.left_style = "italics,".repeat(800);
+        Arc::make_mut(&mut request.formats).style = "bold,".repeat(800);
+        Arc::make_mut(&mut request.formats).left_style = "italics,".repeat(800);
         let status = StatusRenderer::default().render_initial(&request);
         assert_eq!(status.validate(), Ok(()));
         assert!(status.left.is_char_boundary(status.left.len()));
@@ -3863,10 +3874,11 @@ mod tests {
     fn oversized_row_title_and_base_style_stay_inside_the_wire_limit() {
         let overflow = "#{R:x,9000}";
         let mut request = request(1, overflow, overflow);
-        request.formats.lines = 2;
-        request.formats.style = format!("bold,{}", "italics,".repeat(900));
-        request.title_format = Some(overflow.to_owned());
-        request.row_formats = BTreeMap::from([(0, overflow.to_owned()), (1, overflow.to_owned())]);
+        Arc::make_mut(&mut request.formats).lines = 2;
+        Arc::make_mut(&mut request.formats).style = format!("bold,{}", "italics,".repeat(900));
+        *Arc::make_mut(&mut request.title_format) = Some(overflow.to_owned());
+        *Arc::make_mut(&mut request.row_formats) =
+            BTreeMap::from([(0, overflow.to_owned()), (1, overflow.to_owned())]);
         let status = StatusRenderer::default().render_initial(&request);
         assert_eq!(status.validate(), Ok(()));
         assert_eq!(status.title.len(), MAX_STATUS_TEXT_BYTES);
@@ -3881,7 +3893,7 @@ mod tests {
         assert!(status.left.len() <= MAX_STATUS_TEXT_BYTES);
 
         let mut markers = self::request(1, "#{R:#[bold],700}x", "");
-        markers.formats.left_length = 10;
+        Arc::make_mut(&mut markers.formats).left_length = 10;
         let status = StatusRenderer::default().render_initial(&markers);
         assert_eq!(status.validate(), Ok(()));
         assert!(status.left.len() <= MAX_STATUS_TEXT_BYTES);
@@ -3891,7 +3903,7 @@ mod tests {
     fn a_disabled_status_renders_empty() {
         let mut renderer = StatusRenderer::default();
         let mut request = request(1, "[#S]", "%H");
-        request.formats.enabled = false;
+        Arc::make_mut(&mut request.formats).enabled = false;
         let status = renderer.render_initial(&request);
         assert!(status.is_empty());
     }
@@ -4248,7 +4260,8 @@ mod tests {
             left_length: u16::MAX,
             right_length: u16::MAX,
             ..StatusFormats::default()
-        };
+        }
+        .into();
         post_startup.context.socket_path = socket.to_owned();
         let status = settled(&mut StatusRenderer::default(), &post_startup);
         assert_eq!(
@@ -4270,7 +4283,8 @@ mod tests {
             left_length: u16::MAX,
             right_length: u16::MAX,
             ..StatusFormats::default()
-        };
+        }
+        .into();
         startup.context.socket_path = socket.to_owned();
         startup.startup = true;
         let status = settled(&mut StatusRenderer::default(), &startup);

@@ -314,6 +314,16 @@ fn selected_status_default_omits_unused_fact_maps_and_matches_complete_capture()
         assert!(selected.facts.terminals.is_empty());
         assert!(selected.facts.buffer.is_none());
         assert!(selected.facts.client_environment.is_none());
+        let client_facts = selected.facts.client.as_ref().unwrap();
+        assert_eq!(client_facts.width, "80");
+        assert!(client_facts.name.is_empty());
+        assert!(client_facts.pid.is_empty());
+        assert!(client_facts.tty.is_empty());
+        assert!(client_facts.session.is_empty());
+        assert!(client_facts.written.is_empty());
+        assert!(client_facts.discarded.is_empty());
+        assert!(client_facts.environment.is_none());
+        assert!(client_facts.terminal.is_none());
     }
     let complete = complete_request(&inner, client);
     assert_eq!(complete.facts.clients.len(), 1);
@@ -321,6 +331,192 @@ fn selected_status_default_omits_unused_fact_maps_and_matches_complete_capture()
         StatusRenderer::default().render_initial(&selected),
         StatusRenderer::default().render_initial(&complete)
     );
+}
+
+#[test]
+fn selected_status_client_callbacks_match_complete_capture_for_every_field() {
+    let (shared, client, mut target) = fixture();
+    let mut inner = shared.inner.lock();
+    inner.client_terminals.insert(client);
+    inner.client_sizes.insert(client, (42, 13));
+    inner.client_created_times.insert(client, 111);
+    inner.client_activity_times.insert(client, 222);
+    inner
+        .client_terminal_types
+        .insert(client, "VT420".to_owned());
+    inner
+        .client_color_schemes
+        .insert(client, TerminalColorScheme::Light);
+    let last_session = inner
+        .engine
+        .state
+        .sessions
+        .values()
+        .find(|session| session.name == "beta")
+        .unwrap()
+        .id;
+    inner.last_sessions.insert(client, last_session);
+    inner.client_flags.apply(client, "read-only,active-pane");
+    inner
+        .key_engines
+        .entry(client)
+        .or_default()
+        .switch_table(Some("copy-mode".to_owned()));
+    inner.client_features.insert(
+        client,
+        client_features_fact(&["client-features-v1:RGB".to_owned()]),
+    );
+    inner.client_environments.insert(
+        client,
+        Arc::new(ClientEnvironmentBlob::from_map(BTreeMap::from([
+            ("TERM".into(), "xterm-256color".into()),
+            ("COLORTERM".into(), "truecolor".into()),
+            ("LANG".into(), "en_US.UTF-8".into()),
+        ]))),
+    );
+    let mailbox = OutboundMailbox::new();
+    {
+        let mut state = mailbox.state.lock();
+        state.written_bytes = 1234;
+        state.discarded_bytes = 56;
+    }
+    inner.subscribers.insert(client, mailbox);
+    inner
+        .terminal_geometries
+        .entry(target.pane.unwrap())
+        .or_default()
+        .insert(
+            client,
+            TerminalGeometry {
+                columns: 120,
+                rows: 40,
+                cell_width_px: 9,
+                cell_height_px: 19,
+            },
+        );
+    inner
+        .engine
+        .execute(
+            &mut target,
+            &CommandInvocation::new(
+                "set-option",
+                ["-s", "terminal-features", "xterm*:RGB:extkeys"],
+            ),
+        )
+        .unwrap();
+    let fields = [
+        "client_activity",
+        "client_cell_height",
+        "client_cell_width",
+        "client_colours",
+        "client_control_mode",
+        "client_created",
+        "client_discarded",
+        "client_flags",
+        "client_height",
+        "client_key_table",
+        "client_last_session",
+        "client_name",
+        "client_pid",
+        "client_prefix",
+        "client_readonly",
+        "client_session",
+        "client_termfeatures",
+        "client_termname",
+        "client_termtype",
+        "client_theme",
+        "client_tty",
+        "client_uid",
+        "client_user",
+        "client_utf8",
+        "client_width",
+        "client_written",
+        "list_clients_line",
+        "window_cell_height",
+        "window_cell_width",
+        "window_bigger",
+        "window_offset_x",
+        "window_offset_y",
+    ];
+    for kind in [
+        ClientKind::Interactive,
+        ClientKind::Control,
+        ClientKind::Command,
+    ] {
+        inner.client_kinds.insert(client, kind);
+        let values = inner
+            .engine
+            .format_status_context(target.session, target.window, target.pane);
+        let complete = FormatHookFacts {
+            client: Some(client_format_facts(&inner, client, target.session.unwrap())),
+            ..FormatHookFacts::default()
+        };
+        if kind == ClientKind::Interactive {
+            let client_facts = complete.client.as_ref().unwrap();
+            assert_eq!(client_facts.cell_height, "19");
+            assert_eq!(client_facts.cell_width, "9");
+            assert!(client_facts.viewport.is_some());
+            assert!(
+                client_facts
+                    .termfeatures
+                    .split(',')
+                    .any(|feature| feature == "RGB")
+            );
+        }
+        for name in fields {
+            let references = BTreeSet::from([name.to_owned()]);
+            let selected = FormatHookFacts {
+                client: Some(selected_client_format_facts(
+                    &inner,
+                    client,
+                    target.session.unwrap(),
+                    &references,
+                )),
+                ..FormatHookFacts::default()
+            };
+            let template = format!("#{{{name}}}");
+            assert_eq!(
+                expand_format_values(
+                    &template,
+                    &values,
+                    &mut DaemonFormatHooks::command(&selected)
+                ),
+                expand_format_values(
+                    &template,
+                    &values,
+                    &mut DaemonFormatHooks::command(&complete)
+                ),
+                "{kind:?}: {name}"
+            );
+        }
+    }
+}
+
+#[test]
+fn selected_status_client_dynamic_references_keep_terminal_and_environment_facts() {
+    let (shared, client, target) = fixture();
+    let mut inner = shared.inner.lock();
+    inner.client_kinds.insert(client, ClientKind::Interactive);
+    inner.client_terminals.insert(client);
+    inner.client_environments.insert(
+        client,
+        Arc::new(ClientEnvironmentBlob::from_map(BTreeMap::from([
+            ("TERM".into(), "xterm-256color".into()),
+            ("FROM_CLIENT".into(), "yes".into()),
+        ]))),
+    );
+    for reference in ["*", "mode_unknown"] {
+        let selected = selected_client_format_facts(
+            &inner,
+            client,
+            target.session.unwrap(),
+            &BTreeSet::from([reference.to_owned()]),
+        );
+        assert_eq!(selected.pid, "42");
+        assert_eq!(selected.tty, "/dev/ttys003");
+        assert!(selected.environment.is_some());
+        assert!(selected.terminal.is_some());
+    }
 }
 
 #[test]
@@ -395,7 +591,7 @@ fn selected_status_borders_borrow_facts_without_adding_them_to_the_request() {
                 [
                     "-g",
                     "pane-active-border-style",
-                    "fg=#{?session_attached_list,red,green}",
+                    "fg=#{?#{&&:#{session_attached_list},#{client_pid}},red,green}",
                 ],
             ),
         )
@@ -461,6 +657,16 @@ fn selected_status_modes_capture_their_own_detached_fact_dependencies() {
     let selected = selected_request(&inner, client);
     let complete = complete_request(&inner, client);
     assert_eq!(selected.modes.len(), 1);
+    assert_eq!(selected.facts.client.as_ref().unwrap().pid, "42");
+    assert!(
+        selected
+            .facts
+            .client
+            .as_ref()
+            .unwrap()
+            .environment
+            .is_some()
+    );
     assert_eq!(selected.facts.buffer.as_ref().unwrap().name, "mode-buffer");
     assert_eq!(
         StatusRenderer::default().render_initial(&selected),

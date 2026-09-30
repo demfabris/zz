@@ -274,6 +274,7 @@ fn mode_requests_render_the_same_presentation_on_a_detached_universe() {
             &inner,
             &contexts,
             needs,
+            false,
             fixture.alpha,
             fixture.alpha_pane,
             false,

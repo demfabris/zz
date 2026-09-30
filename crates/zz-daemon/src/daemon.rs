@@ -934,7 +934,7 @@ impl StatusHooks for InertFormatHooks<'_> {
         String::new()
     }
 
-    fn variable(&mut self, name: &str, context: &zz_mux::StatusContext) -> Option<String> {
+    fn option_variable(&mut self, name: &str, context: &zz_mux::StatusContext) -> Option<String> {
         self.option_engine
             .and_then(|engine| engine.format_option_value(context, name))
     }
@@ -974,7 +974,7 @@ fn server_format_context_with_format_client<'e>(
         active_session,
         format_client,
     );
-    config_files.clone_into(&mut context.config_files);
+    context.set_format_value("config_files", config_files);
     context
 }
 
@@ -1609,6 +1609,17 @@ impl Daemon {
             shared.log_diagnostic_snapshot("startup");
             if zz_mux::eager_universe_knob() {
                 log::info!("ZZ_PERF_EAGER_UNIVERSE=1: format universes are built eagerly");
+            }
+            if !zz_mux::compiled_formats_knob() {
+                log::info!("ZZ_PERF_COMPILED_FORMATS=0: format templates use the interpreter");
+            }
+            if !zz_mux::borrowed_formats_knob() {
+                log::info!("ZZ_PERF_BORROWED_FORMATS=0: format contexts build all values");
+            }
+            if !zz_mux::format_cache_knob() {
+                log::info!(
+                    "ZZ_PERF_FORMAT_CACHE=0: format option snapshots and dependencies rebuild"
+                );
             }
             log::info!("zz daemon listening at {endpoint}");
             log_pane_perf_knobs();
@@ -4639,6 +4650,7 @@ impl Shared {
             u8::from(*ROW_PATCHES),
         );
         hook_events::log_knobs();
+        log::info!(target: "zz_daemon::perf", "format facts knob: ZZ_PERF_BORROWED_FACTS={}", u8::from(*BORROWED_FORMAT_FACTS));
         self.start_timers()?;
         let mut context = ExecutionContext::default();
         *self.mux_config_selection.lock() =
@@ -5121,18 +5133,16 @@ impl Shared {
             if clients.is_empty() {
                 return;
             }
-            let base_facts = format_hook_facts(&inner);
             let mut events = Vec::new();
             for (client, session) in clients {
-                let facts = FormatHookFacts {
-                    client: Some(client_format_facts(&inner, client, session)),
-                    ..base_facts.clone()
-                };
+                let client_facts = client_format_facts(&inner, client, session);
                 let mut subscriptions = inner
                     .control_outputs
                     .get_mut(&client)
                     .map(|output| std::mem::take(&mut output.subscriptions))
                     .unwrap_or_default();
+                let mut facts = borrowed_format_hook_facts(&inner);
+                facts.set_client(Some(client_facts));
                 let contexts = inner
                     .engine
                     .format_context_snapshot(FormatClient::Attached(session));
@@ -5145,7 +5155,7 @@ impl Shared {
                             target.window,
                             target.pane,
                         );
-                        context.config_files.clone_from(&inner.config_files);
+                        context.set_format_value("config_files", inner.config_files.clone());
                         let mut hooks =
                             DaemonFormatHooks::command(&facts).with_option_engine(&inner.engine);
                         let value =
@@ -5190,7 +5200,7 @@ impl Shared {
                 return;
             }
             inner.engine.set_format_now(unix_timestamp());
-            let base_facts = format_hook_facts(&inner);
+            let base_facts = borrowed_format_hook_facts(&inner);
             let mut fires = Vec::new();
             let mut samples_by_monitor = Vec::new();
             let contexts = inner.engine.format_context_snapshot(FormatClient::NoClient);
@@ -5214,7 +5224,7 @@ impl Shared {
                 for target in control_subscription_targets(&inner, session, scope) {
                     let mut context =
                         contexts.status_context(Some(target.session), target.window, target.pane);
-                    context.config_files.clone_from(&inner.config_files);
+                    context.set_format_value("config_files", inner.config_files.clone());
                     let mut hooks =
                         DaemonFormatHooks::command(&base_facts).with_option_engine(&inner.engine);
                     let value = expand_format_values(&monitor.format, &context, &mut hooks);
@@ -5251,12 +5261,12 @@ impl Shared {
                     .engine
                     .format_monitor_hook_body(id)
                     .and_then(|body| {
-                        let facts = format_hook_facts(&inner);
+                        let facts = borrowed_format_hook_facts(&inner);
                         let mut format_context =
                             inner
                                 .engine
                                 .format_status_context(key.session, key.window, key.pane);
-                        format_context.config_files.clone_from(&inner.config_files);
+                        format_context.set_format_value("config_files", inner.config_files.clone());
                         let expanded = {
                             let mut hooks = DaemonFormatHooks::command_with_optional_variables(
                                 &facts,
@@ -7868,8 +7878,15 @@ impl Shared {
                 }
             }
             let facts_unread = hook_events::format_facts_unread(command_name, &command.args);
-            let mut built_facts =
-                (!facts_unread).then(|| format_hook_facts_for_client(&inner, client, context));
+            let borrow_facts = *BORROWED_FORMAT_FACTS && !facts_unread;
+            let mut command_seed =
+                borrow_facts.then(|| command_format_seed(&inner, client, context));
+            let mut built_facts = (!facts_unread
+                && (!borrow_facts
+                    || (command_name == "new-session"
+                        && kind != ClientKind::Control
+                        && nested_attach_refusal(&inner, client).is_some())))
+            .then(|| format_hook_facts_for_client(&inner, client, context));
             // cmd-list-windows.c, cmd-list-sessions.c and cmd-list-panes.c all
             // call `format_defaults(ft, NULL, ...)`, so a row answers null for
             // every client-scoped name even while a client is attached.
@@ -7877,6 +7894,11 @@ impl Shared {
                 && let Some(facts) = built_facts.as_mut()
             {
                 facts.client = None;
+            }
+            if CLIENTLESS_ROW_COMMANDS.contains(&command_name)
+                && let Some(seed) = command_seed.as_mut()
+            {
+                seed.client = None;
             }
             if command_name == "display-message" {
                 let (target, target_client) = inner
@@ -7897,6 +7919,11 @@ impl Shared {
                 });
                 if let Some(facts) = built_facts.as_mut() {
                     facts.client = format_client.map(|(client, client_session)| {
+                        client_format_facts(&inner, client, client_session)
+                    });
+                }
+                if let Some(seed) = command_seed.as_mut() {
+                    seed.client = format_client.map(|(client, client_session)| {
                         client_format_facts(&inner, client, client_session)
                     });
                 }
@@ -7950,12 +7977,23 @@ impl Shared {
             let previous_refuse_new_session_attach = context.refuses_new_session_attach();
             set_context_client_terminal(context, invoking_client_terminal);
             context.set_refuse_new_session_attach(nested_attach_guard.is_some());
-            let execution = inner.engine.execute_without_alias_expansion(
-                context,
-                command,
-                &mut hooks,
-                &mut |shell| shell_is_valid(Path::new(shell)),
-            );
+            let execution = if let Some(seed) = command_seed {
+                let (engine, facts) = split_borrowed_format_hook_facts(&mut inner, seed);
+                let mut hooks = DaemonFormatHooks::command_with_optional_variables(
+                    &facts,
+                    (!format_variables.is_empty()).then_some(&format_variables),
+                );
+                engine.execute_without_alias_expansion(context, command, &mut hooks, &mut |shell| {
+                    shell_is_valid(Path::new(shell))
+                })
+            } else {
+                inner.engine.execute_without_alias_expansion(
+                    context,
+                    command,
+                    &mut hooks,
+                    &mut |shell| shell_is_valid(Path::new(shell)),
+                )
+            };
             context.set_refuse_new_session_attach(previous_refuse_new_session_attach);
             set_context_client_terminal(context, previous_client_terminal);
             let mut execution = execution?;
@@ -9139,7 +9177,7 @@ impl Shared {
                             continue;
                         }
                         let attached_session = client_attached_session(&inner, client);
-                        let facts = format_hook_facts(&inner);
+                        let facts = borrowed_format_hook_facts(&inner);
                         let client_rows = if *tree_kind == ChooseTreeKind::Clients {
                             chooser_presentation::client_chooser_rows(
                                 &inner,
@@ -9185,7 +9223,7 @@ impl Shared {
                         inner.swallowed_keys.remove(&client);
                         if hold_chooser_zoom(&mut inner, client, *pane, *zoom) {
                             snapshot_changed = true;
-                            let facts = format_hook_facts(&inner);
+                            let facts = borrowed_format_hook_facts(&inner);
                             chooser.rebuild(&inner.engine, attached_session, &facts);
                         }
                         let state = chooser.rendered.clone();
@@ -9217,7 +9255,7 @@ impl Shared {
                             .into());
                         }
                         let attached_session = client_attached_session(&inner, client);
-                        let facts = format_hook_facts(&inner);
+                        let facts = borrowed_format_hook_facts(&inner);
                         let Some(mut chooser) = ChooseBufferSession::new(
                             *pane,
                             &inner.engine,
@@ -9275,7 +9313,7 @@ impl Shared {
                             )
                             .into());
                         }
-                        let display_panes_facts = format_hook_facts(&inner);
+                        let display_panes_facts = borrowed_format_hook_facts(&inner);
                         let format_client_session = client_attached_session(&inner, client)
                             .ok_or(ServerError::PaneNotAttached(*pane))?;
                         let (source_session, source_window, state) = build_display_panes_state(
@@ -9838,7 +9876,7 @@ impl Shared {
                 }
                 let target = ExecutionContext::for_pane(&inner.engine.state, pane)
                     .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
-                let facts = format_hook_facts(&inner);
+                let facts = borrowed_format_hook_facts(&inner);
                 let mut hooks = DaemonFormatHooks::command_with_optional_variables(
                     &facts,
                     (!format_variables.is_empty()).then_some(&format_variables),
@@ -10925,7 +10963,7 @@ impl Shared {
             inner.engine.set_format_now(unix_timestamp());
             let target = ExecutionContext::for_pane(&inner.engine.state, pane)
                 .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
-            let facts = format_hook_facts(&inner);
+            let facts = borrowed_format_hook_facts(&inner);
             let mut hooks = DaemonFormatHooks::command_with_optional_variables(
                 &facts,
                 context.format_variables(),
@@ -11217,7 +11255,7 @@ impl Shared {
             inner.engine.set_format_now(unix_timestamp());
             let target = ExecutionContext::for_pane(&inner.engine.state, pane)
                 .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
-            let facts = format_hook_facts(&inner);
+            let facts = borrowed_format_hook_facts(&inner);
             let mut hooks = DaemonFormatHooks::command_with_optional_variables(
                 &facts,
                 context.format_variables(),
@@ -11859,7 +11897,7 @@ impl Shared {
                 active_session,
                 format_client,
             );
-            let facts = format_hook_facts_for_client(&inner, client, &command_context);
+            let facts = borrowed_format_hook_facts_for_client(&inner, client, &command_context);
             let command = parsed.positional.first().map(|command| {
                 if parsed.command_mode {
                     if invocation.argument_is_command_block(parsed.positional_start) {
@@ -12284,7 +12322,7 @@ impl Shared {
                 active_session,
                 format_client,
             );
-            let facts = format_hook_facts_for_client(&inner, client, &command_context);
+            let facts = borrowed_format_hook_facts_for_client(&inner, client, &command_context);
             let mut hooks = DaemonFormatHooks::command_with_optional_variables(
                 &facts,
                 command_context.format_variables(),
@@ -14327,7 +14365,7 @@ impl Shared {
                 .expect("pane window");
             panes.push((inner.engine.state.windows[&window].session, window, pane));
         }
-        let facts = format_hook_facts_for_client(&inner, client, context);
+        let facts = borrowed_format_hook_facts_for_client(&inner, client, context);
         let mut hooks = DaemonFormatHooks::command_with_optional_variables(&facts, None);
         let mut rows = Vec::new();
         for (session, window, pane) in panes {
@@ -15206,11 +15244,11 @@ impl Shared {
                 None,
                 session_id,
             );
-            format_context.config_files.clone_from(&inner.config_files);
+            format_context.set_format_value("config_files", inner.config_files.clone());
             let mut client_facts = client_format_facts(&inner, client, session_id);
             client_facts.line = line;
-            let mut facts = format_hook_facts(&inner);
-            facts.client = Some(client_facts);
+            let mut facts = borrowed_format_hook_facts(&inner);
+            facts.set_client(Some(client_facts));
             let variables = context.format_variables().cloned().unwrap_or_default();
             if let Some(filter) = parsed.value('f') {
                 let mut hooks =
@@ -20160,7 +20198,7 @@ impl Shared {
             PaneModeRequest::Customize(mut mode) => {
                 let result = {
                     let inner = self.inner.lock();
-                    let facts = format_hook_facts(&inner);
+                    let facts = borrowed_format_hook_facts(&inner);
                     let mut expand = customize_expander(&inner, pane, &facts);
                     match input {
                         PaneModeInput::Key(key) => {
@@ -20274,7 +20312,7 @@ impl Shared {
                 _ => None,
             };
             if let Some(mode) = current.as_mut() {
-                let facts = format_hook_facts(&inner);
+                let facts = borrowed_format_hook_facts(&inner);
                 let mut expand = customize_expander(&inner, pane, &facts);
                 inner.engine.customize_finish(pane, mode, &mut expand);
             }
@@ -20318,7 +20356,7 @@ impl Shared {
         };
         let result = {
             let inner = self.inner.lock();
-            let facts = format_hook_facts(&inner);
+            let facts = borrowed_format_hook_facts(&inner);
             let mut expand = customize_expander(&inner, owner.pane, &facts);
             inner
                 .engine
@@ -20627,7 +20665,7 @@ impl Shared {
                 chooser.rendered.help = false;
             }
             let attached_session = client_attached_session(&inner, client);
-            let facts = format_hook_facts(&inner);
+            let facts = borrowed_format_hook_facts(&inner);
             if chooser.kind == ChooseTreeKind::Clients {
                 chooser.clients = chooser_presentation::client_chooser_rows(
                     &inner,
@@ -20960,7 +20998,7 @@ impl Shared {
                         ChooseBufferInputOutcome::Delta { search, selected }
                     }
                     ChooseBufferResult::Rebuild => {
-                        let facts = format_hook_facts(&inner);
+                        let facts = borrowed_format_hook_facts(&inner);
                         chooser.rebuild(
                             &inner.engine,
                             &inner.paste_buffers,
@@ -20977,7 +21015,7 @@ impl Shared {
                             .retain(|buffer| !names.contains(&buffer.name));
                         deleted = names;
                         chooser.selected = None;
-                        let facts = format_hook_facts(&inner);
+                        let facts = borrowed_format_hook_facts(&inner);
                         chooser.rebuild(
                             &inner.engine,
                             &inner.paste_buffers,
@@ -24641,10 +24679,9 @@ impl Shared {
                 .retain_exited_pane(pane, failed)
                 .unwrap_or(false);
             let changed = if retained {
-                let facts = format_hook_facts(&inner);
+                let (engine, facts) = split_format_hook_facts(&mut inner, true);
                 let mut hooks = DaemonFormatHooks::command(&facts);
-                inner
-                    .engine
+                engine
                     .mark_pane_dead_with_hooks(
                         pane,
                         dead_status,
@@ -25048,19 +25085,14 @@ impl Shared {
             } else {
                 let rename_due = previous.current_command != runtime.current_command
                     && inner.engine.automatic_rename_due(pane, now);
-                let built_facts = rename_due.then(|| format_hook_facts(&inner));
-                let facts = built_facts
-                    .as_ref()
-                    .unwrap_or_else(|| hook_events::unread_format_facts());
-                let mut hooks = DaemonFormatHooks::command(facts).withhold_facts(!rename_due);
-                let scope = rename_due.then(|| hook_events::HookScope::open(&mut inner.engine));
-                let generation = inner.engine.state.generation();
-                let changed = inner
-                    .engine
-                    .set_pane_runtime_facts_at(pane, runtime, &mut hooks, now);
-                let renamed = inner.engine.state.generation() != generation;
+                let (engine, facts) = split_format_hook_facts(&mut inner, rename_due);
+                let mut hooks = DaemonFormatHooks::command(&facts).withhold_facts(!rename_due);
+                let scope = rename_due.then(|| hook_events::HookScope::open(engine));
+                let generation = engine.state.generation();
+                let changed = engine.set_pane_runtime_facts_at(pane, runtime, &mut hooks, now);
+                let renamed = engine.state.generation() != generation;
                 let events = match scope {
-                    Some(scope) if renamed => scope.finish(&inner.engine, "").events,
+                    Some(scope) if renamed => scope.finish(engine, "").events,
                     _ => Vec::new(),
                 };
                 (
@@ -25305,7 +25337,7 @@ impl Shared {
                     updates.push((client, None));
                     continue;
                 }
-                let facts = format_hook_facts(&inner);
+                let facts = borrowed_format_hook_facts(&inner);
                 if chooser.kind == ChooseTreeKind::Clients {
                     chooser.clients = chooser_presentation::client_chooser_rows(
                         &inner,
@@ -25357,7 +25389,7 @@ impl Shared {
                     updates.push((client, None));
                     continue;
                 }
-                let facts = format_hook_facts(&inner);
+                let facts = borrowed_format_hook_facts(&inner);
                 chooser.rebuild(
                     &inner.engine,
                     &inner.paste_buffers,
@@ -25381,7 +25413,6 @@ impl Shared {
             let mut inner = self.inner.lock();
             let clients = inner.display_panes.keys().copied().collect::<Vec<_>>();
             let mut updates = Vec::with_capacity(clients.len());
-            let facts = (!clients.is_empty()).then(|| format_hook_facts(&inner));
             for client in clients {
                 let Some(mut overlay) = inner.display_panes.remove(&client) else {
                     continue;
@@ -25395,10 +25426,11 @@ impl Shared {
                     updates.push((client, None));
                     continue;
                 }
+                let facts = borrowed_format_hook_facts(&inner);
                 let rebuilt = build_display_panes_state(
                     &inner.engine,
                     &inner.config_files,
-                    facts.as_ref().expect("facts exist while clients do"),
+                    &facts,
                     overlay.source_pane,
                     overlay.state.duration_ms,
                     attached_session.expect("matching overlay attachment exists"),
@@ -31553,7 +31585,7 @@ fn take_display_panes(inner: &mut ServerState, client: ClientId) -> Option<Displ
 fn build_display_panes_state(
     engine: &MuxEngine,
     config_files: &str,
-    facts: &FormatHookFacts,
+    facts: &dyn crate::status::FormatFactSource,
     source_pane: PaneId,
     duration_ms: u32,
     format_client_session: SessionId,
@@ -31594,7 +31626,7 @@ fn build_display_panes_state(
                     Some(pane),
                     format_client_session,
                 );
-                config_files.clone_into(&mut context.config_files);
+                context.set_format_value("config_files", config_files);
                 let mut hooks = DaemonFormatHooks::command(facts).with_option_engine(engine);
                 truncate_pane_indicator_label(expand_format_values(&format, &context, &mut hooks))
             };
@@ -31736,7 +31768,7 @@ impl ChooseBufferSession {
         engine: &MuxEngine,
         buffers: &[PasteBuffer],
         attached_session: Option<SessionId>,
-        facts: &FormatHookFacts,
+        facts: &dyn crate::status::FormatFactSource,
         filter: Option<String>,
         format: Option<String>,
         kill_source: bool,
@@ -31787,7 +31819,7 @@ impl ChooseBufferSession {
         engine: &MuxEngine,
         buffers: &[PasteBuffer],
         attached_session: Option<SessionId>,
-        facts: &FormatHookFacts,
+        facts: &dyn crate::status::FormatFactSource,
     ) {
         self.names.clear();
         let source_context = ExecutionContext::for_pane(&engine.state, self.source_pane);
@@ -31814,11 +31846,8 @@ impl ChooseBufferSession {
                     else {
                         return true;
                     };
-                    let row_facts = FormatHookFacts {
-                        buffer: Some(buffer_format_facts(buffer)),
-                        ..facts.clone()
-                    };
-                    let mut hooks = DaemonFormatHooks::command(&row_facts);
+                    let mut hooks =
+                        DaemonFormatHooks::command(facts).with_buffer(buffer_format_facts(buffer));
                     format_true(&engine.expand_pane_format(
                         filter,
                         source_context,
@@ -31844,13 +31873,9 @@ impl ChooseBufferSession {
             let key = match (self.key_format.as_deref(), source_context.as_ref()) {
                 (None, _) => default_chooser_row_key(line),
                 (Some(format), Some(source_context)) => {
-                    let row_facts = FormatHookFacts {
-                        buffer: Some(buffer_format_facts(buffer)),
-                        ..facts.clone()
-                    };
                     let variables = chooser_row_variables(line);
-                    let mut hooks =
-                        DaemonFormatHooks::command_with_variables(&row_facts, &variables);
+                    let mut hooks = DaemonFormatHooks::command_with_variables(facts, &variables)
+                        .with_buffer(buffer_format_facts(buffer));
                     parsed_chooser_row_key(&engine.expand_pane_format(
                         format,
                         source_context,
@@ -31864,11 +31889,8 @@ impl ChooseBufferSession {
             let text = match (self.format.as_deref(), source_context.as_ref()) {
                 (None, _) | (Some(_), None) => String::new(),
                 (Some(format), Some(source_context)) => {
-                    let row_facts = FormatHookFacts {
-                        buffer: Some(buffer_format_facts(buffer)),
-                        ..facts.clone()
-                    };
-                    let mut hooks = DaemonFormatHooks::command(&row_facts);
+                    let mut hooks =
+                        DaemonFormatHooks::command(facts).with_buffer(buffer_format_facts(buffer));
                     bounded_choose_item_text(&engine.expand_pane_format(
                         format,
                         source_context,
@@ -32549,7 +32571,7 @@ impl ChooseTreeSession {
         source_pane: PaneId,
         engine: &MuxEngine,
         attached_session: Option<SessionId>,
-        facts: &FormatHookFacts,
+        facts: &dyn crate::status::FormatFactSource,
         filter: Option<String>,
         format: Option<String>,
         hide_source: bool,
@@ -32637,7 +32659,7 @@ impl ChooseTreeSession {
         &self,
         engine: &MuxEngine,
         attached_session: Option<SessionId>,
-        facts: &FormatHookFacts,
+        facts: &dyn crate::status::FormatFactSource,
         apply_filter: bool,
     ) -> Vec<(SessionId, Vec<(WindowId, Vec<PaneId>)>)> {
         let state = &engine.state;
@@ -32784,7 +32806,7 @@ impl ChooseTreeSession {
         items: &mut [ChooseTreeItem],
         engine: &MuxEngine,
         attached_session: Option<SessionId>,
-        facts: &FormatHookFacts,
+        facts: &dyn crate::status::FormatFactSource,
     ) {
         let Some(format) = self.key_format.as_deref() else {
             for (line, item) in items.iter_mut().enumerate() {
@@ -32824,7 +32846,7 @@ impl ChooseTreeSession {
         items: &mut [ChooseTreeItem],
         engine: &MuxEngine,
         attached_session: Option<SessionId>,
-        facts: &FormatHookFacts,
+        facts: &dyn crate::status::FormatFactSource,
     ) {
         let Some(format) = self.format.as_deref() else {
             return;
@@ -32886,7 +32908,7 @@ impl ChooseTreeSession {
         &mut self,
         engine: &MuxEngine,
         attached_session: Option<SessionId>,
-        facts: &FormatHookFacts,
+        facts: &dyn crate::status::FormatFactSource,
     ) {
         if self.kind == ChooseTreeKind::Clients {
             self.rebuild_clients(engine, attached_session, facts);
@@ -33037,7 +33059,7 @@ impl ChooseTreeSession {
         &mut self,
         engine: &MuxEngine,
         attached_session: Option<SessionId>,
-        facts: &FormatHookFacts,
+        facts: &dyn crate::status::FormatFactSource,
     ) {
         let mut rows = self.clients.clone();
         let filter_no_matches = self.filter.is_some() && !rows.iter().any(|row| row.matches);
@@ -33092,7 +33114,7 @@ impl ChooseTreeSession {
         fallback: Option<ChooseTreeTarget>,
         engine: &MuxEngine,
         attached_session: Option<SessionId>,
-        facts: &FormatHookFacts,
+        facts: &dyn crate::status::FormatFactSource,
     ) {
         let selected = self
             .pending_row
@@ -33151,7 +33173,7 @@ impl ChooseTreeSession {
         action: ChooseTreeAction,
         engine: &MuxEngine,
         attached_session: Option<SessionId>,
-        facts: &FormatHookFacts,
+        facts: &dyn crate::status::FormatFactSource,
     ) -> Result<ChooseTreeResult, ServerError> {
         let len = self.rendered.items.len();
         let current = usize::try_from(self.rendered.selected)
@@ -35350,6 +35372,13 @@ fn style_field_is(token: &str, field: &str) -> bool {
 }
 
 fn client_attached_session(inner: &ServerState, client: ClientId) -> Option<SessionId> {
+    client_attached_session_from_source(&ClientFormatSource::from_inner(inner), client)
+}
+
+fn client_attached_session_from_source(
+    inner: &ClientFormatSource<'_>,
+    client: ClientId,
+) -> Option<SessionId> {
     inner
         .attached
         .iter()
@@ -35689,10 +35718,15 @@ fn nested_attach_refusal(inner: &ServerState, client: ClientId) -> Option<Server
         })
 }
 
+#[cfg(test)]
 fn format_client_flags(inner: &ServerState, client: ClientId) -> String {
+    format_client_flags_from_source(&ClientFormatSource::from_inner(inner), client)
+}
+
+fn format_client_flags_from_source(inner: &ClientFormatSource<'_>, client: ClientId) -> String {
     let mut flags = Vec::new();
     let requested = inner.client_flags.get(client);
-    if client_attached_session(inner, client).is_some() {
+    if client_attached_session_from_source(inner, client).is_some() {
         flags.push("attached".to_owned());
     }
     if inner.client_focused.get(&client).copied().unwrap_or(true) {
@@ -35701,7 +35735,7 @@ fn format_client_flags(inner: &ServerState, client: ClientId) -> String {
     if inner.client_kinds.get(&client) == Some(&ClientKind::Control) {
         flags.push("control-mode".to_owned());
     }
-    if client_ignores_size(inner, client) {
+    if client_ignores_size_from_source(inner, client) {
         flags.push("ignore-size".to_owned());
     }
     if requested.no_detach_on_destroy {
@@ -35726,7 +35760,7 @@ fn format_client_flags(inner: &ServerState, client: ClientId) -> String {
     if requested.active_pane {
         flags.push("active-pane".to_owned());
     }
-    if client_uses_utf8(inner, client) {
+    if client_uses_utf8_from_source(inner, client) {
         flags.push("UTF-8".to_owned());
     }
     flags.join(",")
@@ -35737,7 +35771,16 @@ fn client_environment_value<'a>(
     client: ClientId,
     name: &str,
 ) -> Option<&'a str> {
+    client_environment_value_from_source(&ClientFormatSource::from_inner(inner), client, name)
+}
+
+fn client_environment_value_from_source<'a>(
+    inner: &ClientFormatSource<'a>,
+    client: ClientId,
+    name: &str,
+) -> Option<&'a str> {
     inner
+        .fields
         .client_environments
         .get(&client)?
         .map()
@@ -35745,17 +35788,20 @@ fn client_environment_value<'a>(
         .map(RawText::as_str)
 }
 
-fn client_uses_utf8(inner: &ServerState, client: ClientId) -> bool {
+fn client_uses_utf8_from_source(inner: &ClientFormatSource<'_>, client: ClientId) -> bool {
     if inner.utf8_clients.contains(&client) {
         return true;
     }
-    if client_environment_value(inner, client, "TMUX").is_some_and(|value| !value.is_empty()) {
+    if client_environment_value_from_source(inner, client, "TMUX")
+        .is_some_and(|value| !value.is_empty())
+    {
         return true;
     }
     ["LC_ALL", "LC_CTYPE", "LANG"]
         .into_iter()
         .find_map(|name| {
-            client_environment_value(inner, client, name).filter(|value| !value.is_empty())
+            client_environment_value_from_source(inner, client, name)
+                .filter(|value| !value.is_empty())
         })
         .is_some_and(|locale| {
             let locale = locale.to_ascii_lowercase();
@@ -35764,7 +35810,18 @@ fn client_uses_utf8(inner: &ServerState, client: ClientId) -> bool {
 }
 
 fn client_colour_count(inner: &ServerState, client: ClientId) -> Option<u32> {
-    client_colour_count_with(inner, client, client_feature_mask(inner, client))
+    client_colour_count_from_source(&ClientFormatSource::from_inner(inner), client)
+}
+
+fn client_colour_count_from_source(
+    inner: &ClientFormatSource<'_>,
+    client: ClientId,
+) -> Option<u32> {
+    client_colour_count_with_from_source(
+        inner,
+        client,
+        client_feature_mask_from_source(inner, client),
+    )
 }
 
 /// `tty_update_features`: a feature a client's terminal answered for goes on
@@ -35772,9 +35829,12 @@ fn client_colour_count(inner: &ServerState, client: ClientId) -> Option<u32> {
 /// `terminal-features` option asked for. The option array is the pin's channel
 /// for exactly that, so the learned set rides it as one more entry matching
 /// this client's own `TERM`.
-fn client_terminal_features_option(inner: &ServerState, client: ClientId) -> Vec<String> {
+fn client_terminal_features_option_from_source(
+    inner: &ClientFormatSource<'_>,
+    client: ClientId,
+) -> Vec<String> {
     let mut features = inner.engine.terminal_features_option();
-    let term = client_environment_value(inner, client, "TERM").unwrap_or_default();
+    let term = client_environment_value_from_source(inner, client, "TERM").unwrap_or_default();
     let learned = terminal_features_list(inner.client_features.get(&client).copied().unwrap_or(0));
     if !term.is_empty() && !learned.is_empty() {
         features.push(format!("{term}:{}", learned.replace(',', ":")));
@@ -35786,15 +35846,27 @@ fn client_terminal_features_option(inner: &ServerState, client: ClientId) -> Vec
 /// has since answered, folded with the set `tty_term_create` derives from the
 /// terminfo entry, the `terminal-features` array and `COLORTERM`.
 fn client_negotiated_features(inner: &ServerState, client: ClientId) -> String {
+    client_negotiated_features_from_source(&ClientFormatSource::from_inner(inner), client)
+}
+
+fn client_negotiated_features_from_source(
+    inner: &ClientFormatSource<'_>,
+    client: ClientId,
+) -> String {
     terminal_features_list(inner.client_features.get(&client).copied().unwrap_or(0))
 }
 
+#[cfg(test)]
 fn client_feature_mask(inner: &ServerState, client: ClientId) -> u32 {
+    client_feature_mask_from_source(&ClientFormatSource::from_inner(inner), client)
+}
+
+fn client_feature_mask_from_source(inner: &ClientFormatSource<'_>, client: ClientId) -> u32 {
     let mut features = inner.client_features.get(&client).copied().unwrap_or(0);
     if let Some(term) = client_terminal_facts(
-        client_environment_value(inner, client, "TERM").unwrap_or_default(),
-        client_environment_value(inner, client, "COLORTERM"),
-        &client_negotiated_features(inner, client),
+        client_environment_value_from_source(inner, client, "TERM").unwrap_or_default(),
+        client_environment_value_from_source(inner, client, "COLORTERM"),
+        &client_negotiated_features_from_source(inner, client),
         &inner.engine.terminal_features_option(),
         &inner.engine.terminal_overrides_option(),
     ) {
@@ -35803,14 +35875,19 @@ fn client_feature_mask(inner: &ServerState, client: ClientId) -> u32 {
     features
 }
 
-fn client_colour_count_with(inner: &ServerState, client: ClientId, requested: u32) -> Option<u32> {
+fn client_colour_count_with_from_source(
+    inner: &ClientFormatSource<'_>,
+    client: ClientId,
+    requested: u32,
+) -> Option<u32> {
     if inner.client_kinds.get(&client) != Some(&ClientKind::Interactive)
         || !inner.client_terminals.contains(&client)
     {
         return None;
     }
-    let term = client_environment_value(inner, client, "TERM").unwrap_or_default();
-    let colour_term = client_environment_value(inner, client, "COLORTERM").unwrap_or_default();
+    let term = client_environment_value_from_source(inner, client, "TERM").unwrap_or_default();
+    let colour_term =
+        client_environment_value_from_source(inner, client, "COLORTERM").unwrap_or_default();
     Some(terminal_colour_count(term, colour_term, requested))
 }
 
@@ -35818,15 +35895,28 @@ fn client_colour_count_with(inner: &ServerState, client: ClientId, requested: u3
 /// carries and nothing else. A terminal that takes 256 colours because its
 /// terminfo entry says so carries no `256` feature, which is why this reads the
 /// mask rather than the colour count.
+#[cfg(test)]
 fn client_term_features(inner: &ServerState, client: ClientId) -> String {
-    if client_colour_count(inner, client).is_none() {
+    client_term_features_from_source(&ClientFormatSource::from_inner(inner), client)
+}
+
+fn client_term_features_from_source(inner: &ClientFormatSource<'_>, client: ClientId) -> String {
+    if client_colour_count_from_source(inner, client).is_none() {
         return String::new();
     }
-    terminal_features_list(client_feature_mask(inner, client))
+    terminal_features_list(client_feature_mask_from_source(inner, client))
 }
 
 fn client_format_geometry(
     inner: &ServerState,
+    client: ClientId,
+    window: WindowId,
+) -> Option<TerminalGeometry> {
+    client_format_geometry_from_source(&ClientFormatSource::from_inner(inner), client, window)
+}
+
+fn client_format_geometry_from_source(
+    inner: &ClientFormatSource<'_>,
     client: ClientId,
     window: WindowId,
 ) -> Option<TerminalGeometry> {
@@ -35850,6 +35940,10 @@ fn client_format_time(time: Option<u64>) -> String {
 }
 
 fn client_ignores_size(inner: &ServerState, client: ClientId) -> bool {
+    client_ignores_size_from_source(&ClientFormatSource::from_inner(inner), client)
+}
+
+fn client_ignores_size_from_source(inner: &ClientFormatSource<'_>, client: ClientId) -> bool {
     inner.client_flags.get(client).ignore_size
 }
 
@@ -35875,6 +35969,20 @@ fn client_is_sizing_candidate(
 
 fn interactive_client_window_extent(
     inner: &ServerState,
+    client: ClientId,
+    session: SessionId,
+    window: WindowId,
+) -> Option<(u16, u16)> {
+    interactive_client_window_extent_from_source(
+        &ClientFormatSource::from_inner(inner),
+        client,
+        session,
+        window,
+    )
+}
+
+fn interactive_client_window_extent_from_source(
+    inner: &ClientFormatSource<'_>,
     client: ClientId,
     session: SessionId,
     window: WindowId,
@@ -36007,6 +36115,14 @@ fn control_client_geometry(
     client: ClientId,
     window: WindowId,
 ) -> Option<TerminalGeometry> {
+    control_client_geometry_from_source(&ClientFormatSource::from_inner(inner), client, window)
+}
+
+fn control_client_geometry_from_source(
+    inner: &ClientFormatSource<'_>,
+    client: ClientId,
+    window: WindowId,
+) -> Option<TerminalGeometry> {
     let output = inner.control_outputs.get(&client)?;
     output
         .window_geometries
@@ -36038,18 +36154,26 @@ fn client_format_facts(
     client: ClientId,
     session: SessionId,
 ) -> ClientFormatFacts {
+    client_format_facts_from_source(&ClientFormatSource::from_inner(inner), client, session)
+}
+
+fn client_format_facts_from_source(
+    inner: &ClientFormatSource<'_>,
+    client: ClientId,
+    session: SessionId,
+) -> ClientFormatFacts {
     let Some(session_state) = inner.engine.state.sessions.get(&session) else {
         return ClientFormatFacts::default();
     };
-    let window = client_focused_window(inner, client, session_state);
+    let window = client_focused_window_from_source(inner, client, session_state);
     let kind = inner.client_kinds.get(&client).copied();
     let has_terminal =
         kind == Some(ClientKind::Interactive) && inner.client_terminals.contains(&client);
     let control_geometry = (kind == Some(ClientKind::Control))
-        .then(|| control_client_geometry(inner, client, window))
+        .then(|| control_client_geometry_from_source(inner, client, window))
         .flatten();
     let terminal_geometry = has_terminal
-        .then(|| client_format_geometry(inner, client, window))
+        .then(|| client_format_geometry_from_source(inner, client, window))
         .flatten();
     let retained_size = inner.client_sizes.get(&client).copied();
     let width = if kind == Some(ClientKind::Control) {
@@ -36060,7 +36184,7 @@ fn client_format_facts(
     let height = has_terminal.then(|| retained_size.map_or(24, |size| size.1));
     let tty = inner.client_ttys.get(&client).cloned().unwrap_or_default();
     let pid = inner.client_pids.get(&client).copied().unwrap_or_default();
-    let name = client_format_name(inner, client);
+    let name = client_format_name_from_source(inner, client);
     let default_key_table = inner.engine.key_table_for_session(session);
     let key_table = inner
         .key_engines
@@ -36073,7 +36197,7 @@ fn client_format_facts(
         .subscribers
         .get(&client)
         .map_or((0, 0), |subscriber| subscriber.stats());
-    let colours = client_colour_count(inner, client);
+    let colours = client_colour_count_from_source(inner, client);
     ClientFormatFacts {
         activity: client_format_time(inner.client_activity_times.get(&client).copied()),
         cell_height: terminal_geometry
@@ -36092,7 +36216,7 @@ fn client_format_facts(
         control_mode: usize::from(kind == Some(ClientKind::Control)).to_string(),
         created: client_format_time(inner.client_created_times.get(&client).copied()),
         discarded: discarded.to_string(),
-        flags: format_client_flags(inner, client),
+        flags: format_client_flags_from_source(inner, client),
         height: height.map_or_else(String::new, |height| height.to_string()),
         key_table,
         last_session: inner
@@ -36110,8 +36234,8 @@ fn client_format_facts(
         prefix,
         readonly: usize::from(inner.client_flags.contains(client)).to_string(),
         session: session_state.name.clone(),
-        termfeatures: client_term_features(inner, client),
-        termname: client_environment_value(inner, client, "TERM")
+        termfeatures: client_term_features_from_source(inner, client),
+        termname: client_environment_value_from_source(inner, client, "TERM")
             .filter(|term| !term.is_empty())
             .unwrap_or("unknown")
             .to_owned(),
@@ -36128,7 +36252,7 @@ fn client_format_facts(
         tty,
         uid: inner.engine.format_uid().to_owned(),
         user: inner.engine.format_user().to_owned(),
-        utf8: usize::from(client_uses_utf8(inner, client)).to_string(),
+        utf8: usize::from(client_uses_utf8_from_source(inner, client)).to_string(),
         width: width.to_string(),
         written: written.to_string(),
         line: 0,
@@ -36136,16 +36260,16 @@ fn client_format_facts(
         terminal: has_terminal
             .then(|| {
                 client_terminal_facts(
-                    client_environment_value(inner, client, "TERM").unwrap_or_default(),
-                    client_environment_value(inner, client, "COLORTERM"),
-                    &client_negotiated_features(inner, client),
-                    &client_terminal_features_option(inner, client),
+                    client_environment_value_from_source(inner, client, "TERM").unwrap_or_default(),
+                    client_environment_value_from_source(inner, client, "COLORTERM"),
+                    &client_negotiated_features_from_source(inner, client),
+                    &client_terminal_features_option_from_source(inner, client),
                     &inner.engine.terminal_overrides_option(),
                 )
             })
             .flatten(),
         viewport: has_terminal
-            .then(|| client_viewport_facts(inner, client, session, window))
+            .then(|| client_viewport_facts_from_source(inner, client, session, window))
             .flatten(),
     }
 }
@@ -36246,13 +36370,14 @@ fn pointer_format_variables(probe: &PointerProbe) -> BTreeMap<String, String> {
 /// `tty_window_offset1` reads `c->session->curw->window` and
 /// `server_client_get_pane(c)`, so the comparison is the client's own current
 /// window and the pane that window is showing, never the format's window.
-fn client_viewport_facts(
-    inner: &ServerState,
+fn client_viewport_facts_from_source(
+    inner: &ClientFormatSource<'_>,
     client: ClientId,
     session: SessionId,
     window: WindowId,
 ) -> Option<ClientViewportFacts> {
-    let (columns, rows) = interactive_client_window_extent(inner, client, session, window)?;
+    let (columns, rows) =
+        interactive_client_window_extent_from_source(inner, client, session, window)?;
     let pane = inner.engine.state.windows.get(&window)?.active_pane;
     let geometry = inner
         .engine
@@ -36326,6 +36451,10 @@ fn server_log_client_name(inner: &ServerState, client: ClientId) -> String {
 }
 
 fn client_format_name(inner: &ServerState, client: ClientId) -> String {
+    client_format_name_from_source(&ClientFormatSource::from_inner(inner), client)
+}
+
+fn client_format_name_from_source(inner: &ClientFormatSource<'_>, client: ClientId) -> String {
     inner
         .client_ttys
         .get(&client)
@@ -36350,6 +36479,14 @@ fn client_format_name(inner: &ServerState, client: ClientId) -> String {
 
 fn client_focused_window(
     inner: &ServerState,
+    client: ClientId,
+    session: &zz_mux::Session,
+) -> WindowId {
+    client_focused_window_from_source(&ClientFormatSource::from_inner(inner), client, session)
+}
+
+fn client_focused_window_from_source(
+    inner: &ClientFormatSource<'_>,
     client: ClientId,
     session: &zz_mux::Session,
 ) -> WindowId {
@@ -36876,7 +37013,7 @@ fn status_requests(
     if targets.is_empty() {
         return Vec::new();
     }
-    let option_snapshot = Arc::new(inner.engine.format_option_snapshot());
+    let option_snapshot = inner.engine.cached_format_option_snapshot();
     let job_needs = job_needs.lock();
     let mut line_needs = BTreeMap::new();
     targets
@@ -36939,7 +37076,7 @@ fn status_request_with(
         attached,
         client_focused_window_for_attachment(inner, client),
     );
-    context.config_files.clone_from(&inner.config_files);
+    context.set_format_value("config_files", inner.config_files.clone());
     let pane_borders = attached.map_or_else(Vec::new, |session| {
         border_presentations(inner, client, session, &facts)
     });
@@ -36957,6 +37094,19 @@ fn status_request_with(
             &message_styles,
         )
     }) | job_needs;
+    let context = if job_needs.is_empty() {
+        context.detach_with_templates(
+            needs,
+            crate::status::status_line_templates(
+                &formats,
+                &row_formats,
+                title_format.as_deref(),
+                &message_styles,
+            ),
+        )
+    } else {
+        context.detach(needs)
+    };
     StatusRequest {
         client,
         formats,
@@ -36968,7 +37118,7 @@ fn status_request_with(
         environment: inner.engine.job_environment(None),
         default_terminal: inner.engine.default_terminal_for_spawn().to_owned(),
         startup: !startup_ready,
-        context: context.detach(needs),
+        context,
         facts,
         client_scheme: inner.client_color_schemes.get(&client).copied(),
         message_styles,
@@ -36983,7 +37133,7 @@ fn border_presentations(
     inner: &ServerState,
     client: ClientId,
     session: SessionId,
-    facts: &FormatHookFacts,
+    facts: &dyn crate::status::FormatFactSource,
 ) -> Vec<zz_protocol::PaneBorderPresentation> {
     let Some(session_state) = inner.engine.state.sessions.get(&session) else {
         return Vec::new();
@@ -37040,13 +37190,25 @@ fn mode_requests(
     if shown.peek().is_none() {
         return Vec::new();
     }
-    let needs = inner.engine.format_needs(crate::status::MODE_FORMATS) | job_needs;
+    let needs = inner
+        .engine
+        .cached_format_needs(crate::status::MODE_FORMATS)
+        | job_needs;
     let contexts = inner
         .engine
         .format_context_snapshot(FormatClient::Attached(session));
     shown
         .filter_map(|(pane, view, position)| {
-            mode_request(inner, &contexts, needs, session, pane, view, position)
+            mode_request(
+                inner,
+                &contexts,
+                needs,
+                !job_needs.is_empty(),
+                session,
+                pane,
+                view,
+                position,
+            )
         })
         .collect()
 }
@@ -37055,18 +37217,23 @@ fn mode_request(
     inner: &ServerState,
     contexts: &zz_mux::FormatContextSnapshot<'_>,
     needs: FormatNeeds,
+    dynamic_jobs: bool,
     session: SessionId,
     pane: PaneId,
     view: bool,
     (position, limit): (u32, u32),
 ) -> Option<crate::status::ModeRequest> {
     let window = inner.engine.state.window_for_pane(pane)?;
+    let context = contexts.status_context(Some(session), Some(window), Some(pane));
+    let context = if dynamic_jobs {
+        context.detach(needs)
+    } else {
+        context.detach_with_templates(needs, crate::status::MODE_FORMATS)
+    };
     Some(crate::status::ModeRequest {
         pane,
         view,
-        context: contexts
-            .status_context(Some(session), Some(window), Some(pane))
-            .detach(needs),
+        context,
         position,
         limit,
         vi_keys: inner
@@ -37703,7 +37870,7 @@ fn stamp_pane_modes(inner: &ServerState, facts: &FormatHookFacts, snapshot: &mut
 fn customize_expander<'a>(
     inner: &'a ServerState,
     pane: PaneId,
-    facts: &'a FormatHookFacts,
+    facts: &'a dyn crate::status::FormatFactSource,
 ) -> impl FnMut(&str, &BTreeMap<String, String>) -> String + 'a {
     let engine = &inner.engine;
     let window = engine.state.window_for_pane(pane);
@@ -37718,7 +37885,7 @@ fn customize_expander<'a>(
     }
 }
 
-fn clock_mode_time(facts: &FormatHookFacts, style: u8) -> String {
+fn clock_mode_time(facts: &dyn crate::status::FormatFactSource, style: u8) -> String {
     let mut hooks = DaemonFormatHooks::command(facts);
     let mut time = hooks.strftime(match style {
         0 => "%l:%M ",
@@ -37759,7 +37926,7 @@ fn stamp_pane_border_chrome(
                 }
                 let mut context =
                     contexts.status_context(Some(session.id), Some(window.id), Some(*pane));
-                config_files.clone_into(&mut context.config_files);
+                context.set_format_value("config_files", config_files);
                 let mut hooks = DaemonFormatHooks::command(facts).with_option_engine(engine);
                 pane_snapshot.border_status_text = expand_status(&format, &context, &mut hooks);
             }
@@ -37780,7 +37947,7 @@ fn stamp_pane_border_colours(
     let resolve = |value: Option<String>, session, window, pane| {
         let value = value?;
         let mut context = contexts.status_context(Some(session), Some(window), Some(pane));
-        config_files.clone_into(&mut context.config_files);
+        context.set_format_value("config_files", config_files);
         let mut hooks = DaemonFormatHooks::command(facts).with_option_engine(engine);
         let expanded = if value.contains("#{") {
             expand_format_values(&value, &context, &mut hooks)
@@ -37821,7 +37988,7 @@ fn expand_window_status_labels(
                 Some(window.id),
                 Some(window.active_pane),
             );
-            config_files.clone_into(&mut context.config_files);
+            context.set_format_value("config_files", config_files);
             let mut hooks = DaemonFormatHooks::command(facts).with_option_engine(engine);
             let style = expand_window_status_style(&formats, &context, &mut hooks);
             let label = expand_status(format, &context, &mut hooks);
@@ -37836,7 +38003,7 @@ fn expand_window_status_style(
     context: &zz_mux::StatusContext,
     hooks: &mut DaemonFormatHooks<'_>,
 ) -> String {
-    let mut style = if context.window_active == Some(true) {
+    let mut style = if context.variable("window_active").as_deref() == Some("1") {
         let current = expand_status(&formats.current_style, context, hooks);
         if current == "default" {
             expand_status(&formats.style, context, hooks)
@@ -37846,19 +38013,22 @@ fn expand_window_status_style(
     } else {
         expand_status(&formats.style, context, hooks)
     };
-    if context.window_last == Some(true) {
+    if context.variable("window_last_flag").as_deref() == Some("1") {
         let last = expand_status(&formats.last_style, context, hooks);
         append_window_status_style(&mut style, &last);
     }
     let mut bell_styled = false;
-    if context.window_bell {
+    if context.variable("window_bell_flag").as_deref() == Some("1") {
         let bell = expand_status(&formats.bell_style, context, hooks);
         if bell != "default" && !bell.is_empty() {
             append_window_status_style(&mut style, &bell);
             bell_styled = true;
         }
     }
-    if !bell_styled && (context.window_activity_alert || context.window_silence_alert) {
+    if !bell_styled
+        && (context.variable("window_activity_flag").as_deref() == Some("1")
+            || context.variable("window_silence_flag").as_deref() == Some("1"))
+    {
         let activity = expand_status(&formats.activity_style, context, hooks);
         append_window_status_style(&mut style, &activity);
     }
@@ -40641,7 +40811,568 @@ fn pane_mode_format_facts(inner: &ServerState) -> BTreeMap<PaneId, (usize, &'sta
         .collect()
 }
 
+#[cfg(test)]
+mod format_tree_tests;
+
+pub(crate) static BORROWED_FORMAT_FACTS: LazyLock<bool> =
+    LazyLock::new(|| std::env::var_os("ZZ_PERF_BORROWED_FACTS").is_none_or(|value| value != "0"));
+
+#[derive(Clone, Copy)]
+struct ClientFormatFields<'a> {
+    client_activity: &'a BTreeMap<ClientId, u64>,
+    attached: &'a BTreeMap<SessionId, BTreeSet<ClientId>>,
+    client_activity_times: &'a BTreeMap<ClientId, u64>,
+    client_color_schemes: &'a BTreeMap<ClientId, TerminalColorScheme>,
+    client_created_times: &'a BTreeMap<ClientId, u64>,
+    client_environments: &'a BTreeMap<ClientId, Arc<ClientEnvironmentBlob>>,
+    client_features: &'a BTreeMap<ClientId, u32>,
+    client_flags: &'a ClientFlags,
+    client_focused: &'a BTreeMap<ClientId, bool>,
+    client_kinds: &'a BTreeMap<ClientId, ClientKind>,
+    client_names: &'a BTreeMap<ClientId, String>,
+    client_pids: &'a BTreeMap<ClientId, u32>,
+    client_sizes: &'a BTreeMap<ClientId, (u16, u16)>,
+    client_terminal_types: &'a BTreeMap<ClientId, String>,
+    client_terminals: &'a BTreeSet<ClientId>,
+    client_ttys: &'a BTreeMap<ClientId, String>,
+    control_outputs: &'a BTreeMap<ClientId, ControlClientOutput>,
+    focused_windows: &'a BTreeMap<ClientId, WindowId>,
+    key_engines: &'a BTreeMap<ClientId, KeyEngine>,
+    last_sessions: &'a BTreeMap<ClientId, SessionId>,
+    subscribers: &'a BTreeMap<ClientId, Arc<OutboundMailbox>>,
+    terminal_geometries: &'a BTreeMap<PaneId, BTreeMap<ClientId, TerminalGeometry>>,
+    terminals: &'a Arc<BTreeMap<PaneId, Arc<TerminalSession>>>,
+    utf8_clients: &'a BTreeSet<ClientId>,
+}
+
+impl<'a> ClientFormatFields<'a> {
+    fn from_inner(inner: &'a ServerState) -> Self {
+        Self {
+            client_activity: &inner.client_activity,
+            attached: &inner.attached,
+            client_activity_times: &inner.client_activity_times,
+            client_color_schemes: &inner.client_color_schemes,
+            client_created_times: &inner.client_created_times,
+            client_environments: &inner.client_environments,
+            client_features: &inner.client_features,
+            client_flags: &inner.client_flags,
+            client_focused: &inner.client_focused,
+            client_kinds: &inner.client_kinds,
+            client_names: &inner.client_names,
+            client_pids: &inner.client_pids,
+            client_sizes: &inner.client_sizes,
+            client_terminal_types: &inner.client_terminal_types,
+            client_terminals: &inner.client_terminals,
+            client_ttys: &inner.client_ttys,
+            control_outputs: &inner.control_outputs,
+            focused_windows: &inner.focused_windows,
+            key_engines: &inner.key_engines,
+            last_sessions: &inner.last_sessions,
+            subscribers: &inner.subscribers,
+            terminal_geometries: &inner.terminal_geometries,
+            terminals: &inner.terminals,
+            utf8_clients: &inner.utf8_clients,
+        }
+    }
+}
+
+struct ClientFormatSource<'a> {
+    engine: &'a MuxEngine,
+    fields: ClientFormatFields<'a>,
+}
+
+impl<'a> ClientFormatSource<'a> {
+    fn from_inner(inner: &'a ServerState) -> Self {
+        Self {
+            engine: &inner.engine,
+            fields: ClientFormatFields::from_inner(inner),
+        }
+    }
+}
+
+impl<'a> std::ops::Deref for ClientFormatSource<'a> {
+    type Target = ClientFormatFields<'a>;
+    fn deref(&self) -> &Self::Target {
+        &self.fields
+    }
+}
+
+#[derive(Default)]
+struct CommandFormatSeed {
+    client: Option<ClientFormatFacts>,
+    invoking: Option<ClientId>,
+}
+
+#[derive(Default)]
+struct LazyDerivedFormatFacts {
+    clients: std::cell::OnceCell<Vec<zz_mux::FormatClientRow>>,
+    buffer: std::cell::OnceCell<Option<BufferFormatFacts>>,
+    pane_pipes: std::cell::OnceCell<BTreeMap<PaneId, u32>>,
+    session_attachments: std::cell::OnceCell<BTreeMap<SessionId, (usize, String)>>,
+    unseen_changes: std::cell::OnceCell<BTreeSet<PaneId>>,
+    window_clients: std::cell::OnceCell<BTreeMap<WindowId, Vec<String>>>,
+    copy_modes:
+        std::cell::OnceCell<BTreeMap<PaneId, Vec<(String, Arc<zz_terminal::CopyModeFacts>)>>>,
+    pane_modes: std::cell::OnceCell<BTreeMap<PaneId, (usize, &'static str)>>,
+}
+
+struct BorrowedFormatHookFacts<'a> {
+    client_fields: ClientFormatFields<'a>,
+    paste_buffers: &'a [PasteBuffer],
+    agent_states: &'a BTreeMap<PaneId, zz_protocol::AgentPaneWire>,
+    terminals: &'a BTreeMap<PaneId, Arc<TerminalSession>>,
+    pane_pipes: &'a BTreeMap<PaneId, PanePipe>,
+    attached: &'a BTreeMap<SessionId, BTreeSet<ClientId>>,
+    suspended_clients: &'a BTreeSet<ClientId>,
+    client_names: &'a BTreeMap<ClientId, String>,
+    client_pids: &'a BTreeMap<ClientId, u32>,
+    client_ttys: &'a BTreeMap<ClientId, String>,
+    session_last_attached: &'a BTreeMap<SessionId, u64>,
+    copy_sessions: &'a BTreeMap<ClientId, CopySession>,
+    pane_modes: &'a BTreeMap<PaneId, Vec<PaneModeRequest>>,
+    seed: CommandFormatSeed,
+    derived: LazyDerivedFormatFacts,
+}
+
+impl BorrowedFormatHookFacts<'_> {
+    fn client_name(&self, client: ClientId) -> String {
+        self.client_ttys
+            .get(&client)
+            .filter(|tty| !tty.is_empty())
+            .cloned()
+            .or_else(|| {
+                self.client_names
+                    .get(&client)
+                    .filter(|name| !name.is_empty())
+                    .cloned()
+            })
+            .unwrap_or_else(|| {
+                let pid = self.client_pids.get(&client).copied().unwrap_or_default();
+                if pid == 0 {
+                    format!("device-{}", client.0)
+                } else {
+                    format!("client-{pid}")
+                }
+            })
+    }
+}
+
+impl crate::status::FormatFactSource for BorrowedFormatHookFacts<'_> {
+    fn agent_states(&self) -> &BTreeMap<PaneId, zz_protocol::AgentPaneWire> {
+        self.agent_states
+    }
+    fn terminals(&self) -> &BTreeMap<PaneId, Arc<TerminalSession>> {
+        self.terminals
+    }
+    fn session_last_attached(&self) -> &BTreeMap<SessionId, u64> {
+        self.session_last_attached
+    }
+    fn buffer(&self) -> Option<&BufferFormatFacts> {
+        self.derived
+            .buffer
+            .get_or_init(|| {
+                self.paste_buffers
+                    .iter()
+                    .find(|buffer| buffer.automatic)
+                    .map(buffer_format_facts)
+            })
+            .as_ref()
+    }
+    fn client(&self) -> Option<&ClientFormatFacts> {
+        self.seed.client.as_ref()
+    }
+    fn clients(&self, context: &zz_mux::StatusContext) -> &[zz_mux::FormatClientRow] {
+        self.derived.clients.get_or_init(|| {
+            let Some(engine) = context.engine() else {
+                return Vec::new();
+            };
+            let source = ClientFormatSource {
+                engine,
+                fields: self.client_fields,
+            };
+            self.attached
+                .iter()
+                .filter(|(session, _)| engine.state.sessions.contains_key(session))
+                .flat_map(|(session, clients)| {
+                    clients.iter().map(move |client| (*client, *session))
+                })
+                .map(|(client, session)| {
+                    client_format_facts_from_source(&source, client, session).loop_row(
+                        self.client_fields
+                            .client_activity
+                            .get(&client)
+                            .copied()
+                            .unwrap_or_default(),
+                    )
+                })
+                .collect()
+        })
+    }
+    fn client_environment(&self) -> Option<&Arc<ClientEnvironmentBlob>> {
+        self.seed
+            .invoking
+            .and_then(|client| self.client_fields.client_environments.get(&client))
+    }
+    fn message(&self) -> Option<&crate::status::MessageFormatFacts> {
+        None
+    }
+    fn mux(&self) -> &zz_mux::FormatFacts {
+        &hook_events::unread_format_facts().mux
+    }
+
+    fn pane_pipes(&self) -> &BTreeMap<PaneId, u32> {
+        self.derived.pane_pipes.get_or_init(|| {
+            self.pane_pipes
+                .iter()
+                .map(|(pane, pipe)| (*pane, pipe.pid))
+                .collect()
+        })
+    }
+
+    fn session_attachments(&self) -> &BTreeMap<SessionId, (usize, String)> {
+        self.derived.session_attachments.get_or_init(|| {
+            self.attached
+                .iter()
+                .map(|(session, clients)| {
+                    let clients = clients
+                        .iter()
+                        .filter(|client| !self.suspended_clients.contains(client))
+                        .copied()
+                        .collect::<Vec<_>>();
+                    let names = clients
+                        .iter()
+                        .map(|client| self.client_name(*client))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    (*session, (clients.len(), names))
+                })
+                .collect()
+        })
+    }
+
+    fn unseen_changes(&self) -> &BTreeSet<PaneId> {
+        self.derived.unseen_changes.get_or_init(|| {
+            self.copy_sessions
+                .values()
+                .filter(|session| !session.exiting && session.unseen)
+                .map(|session| session.pane)
+                .collect()
+        })
+    }
+
+    fn window_clients(&self, context: &zz_mux::StatusContext) -> &BTreeMap<WindowId, Vec<String>> {
+        self.derived.window_clients.get_or_init(|| {
+            let Some(engine) = context.engine() else {
+                return BTreeMap::new();
+            };
+            let source = ClientFormatSource {
+                engine,
+                fields: self.client_fields,
+            };
+            self.attached.values().flatten().fold(
+                BTreeMap::<WindowId, Vec<String>>::new(),
+                |mut windows, client| {
+                    if let Some(session) = client_attached_session_from_source(&source, *client)
+                        .and_then(|session| engine.state.sessions.get(&session))
+                    {
+                        let window = client_focused_window_from_source(&source, *client, session);
+                        windows
+                            .entry(window)
+                            .or_default()
+                            .push(self.client_name(*client));
+                    }
+                    windows
+                },
+            )
+        })
+    }
+
+    fn copy_modes(&self) -> &BTreeMap<PaneId, Vec<(String, Arc<zz_terminal::CopyModeFacts>)>> {
+        self.derived.copy_modes.get_or_init(|| {
+            let mut panes =
+                BTreeMap::<PaneId, Vec<(String, Arc<zz_terminal::CopyModeFacts>)>>::new();
+            for (client, session) in self.copy_sessions {
+                if session.exiting {
+                    continue;
+                }
+                if let Some(facts) = self
+                    .terminals
+                    .get(&session.pane)
+                    .and_then(|terminal| terminal.copy_mode_facts(TerminalViewId(client.0)))
+                {
+                    let name = self.client_names.get(client).cloned().unwrap_or_default();
+                    panes.entry(session.pane).or_default().push((name, facts));
+                }
+            }
+            panes
+        })
+    }
+
+    fn pane_modes(&self) -> &BTreeMap<PaneId, (usize, &'static str)> {
+        self.derived.pane_modes.get_or_init(|| {
+            self.pane_modes
+                .iter()
+                .filter_map(|(pane, modes)| {
+                    Some((
+                        *pane,
+                        (
+                            modes.len(),
+                            match modes.last()? {
+                                PaneModeRequest::Clock => "clock-mode",
+                                PaneModeRequest::Customize(_) => "options-mode",
+                                PaneModeRequest::Switch(_) => "switch-mode",
+                            },
+                        ),
+                    ))
+                })
+                .collect()
+        })
+    }
+}
+
+fn split_borrowed_format_hook_facts<'a>(
+    inner: &'a mut ServerState,
+    seed: CommandFormatSeed,
+) -> (&'a mut MuxEngine, BorrowedFormatHookFacts<'a>) {
+    let ServerState {
+        engine,
+        agent_states,
+        attached,
+        client_activity,
+        client_activity_times,
+        client_color_schemes,
+        client_created_times,
+        client_environments,
+        client_features,
+        client_flags,
+        client_focused,
+        client_kinds,
+        client_names,
+        client_pids,
+        client_sizes,
+        client_terminal_types,
+        client_terminals,
+        client_ttys,
+        control_outputs,
+        copy_sessions,
+        focused_windows,
+        key_engines,
+        last_sessions,
+        pane_modes,
+        pane_pipes,
+        paste_buffers,
+        session_last_attached,
+        subscribers,
+        suspended_clients,
+        terminal_geometries,
+        terminals,
+        utf8_clients,
+        ..
+    } = inner;
+    let facts = BorrowedFormatHookFacts {
+        agent_states,
+        terminals,
+        pane_pipes,
+        attached,
+        suspended_clients,
+        client_names,
+        client_pids,
+        client_ttys,
+        session_last_attached,
+        copy_sessions,
+        pane_modes,
+        paste_buffers,
+        seed,
+        derived: LazyDerivedFormatFacts::default(),
+        client_fields: ClientFormatFields {
+            client_activity,
+            attached,
+            client_activity_times,
+            client_color_schemes,
+            client_created_times,
+            client_environments,
+            client_features,
+            client_flags,
+            client_focused,
+            client_kinds,
+            client_names,
+            client_pids,
+            client_sizes,
+            client_terminal_types,
+            client_terminals,
+            client_ttys,
+            control_outputs,
+            focused_windows,
+            key_engines,
+            last_sessions,
+            subscribers,
+            terminal_geometries,
+            terminals,
+            utf8_clients,
+        },
+    };
+    (engine, facts)
+}
+
+struct FormatHookFactsView<'a> {
+    borrowed: BorrowedFormatHookFacts<'a>,
+    owned: Option<FormatHookFacts>,
+}
+
+impl FormatHookFactsView<'_> {
+    fn source(&self) -> &dyn crate::status::FormatFactSource {
+        match &self.owned {
+            Some(facts) => facts,
+            None => &self.borrowed,
+        }
+    }
+
+    fn set_client(&mut self, client: Option<ClientFormatFacts>) {
+        match &mut self.owned {
+            Some(facts) => facts.client = client,
+            None => self.borrowed.seed.client = client,
+        }
+    }
+}
+
+impl crate::status::FormatFactSource for FormatHookFactsView<'_> {
+    fn agent_states(&self) -> &BTreeMap<PaneId, zz_protocol::AgentPaneWire> {
+        self.source().agent_states()
+    }
+    fn terminals(&self) -> &BTreeMap<PaneId, Arc<TerminalSession>> {
+        self.source().terminals()
+    }
+    fn pane_pipes(&self) -> &BTreeMap<PaneId, u32> {
+        self.source().pane_pipes()
+    }
+    fn session_attachments(&self) -> &BTreeMap<SessionId, (usize, String)> {
+        self.source().session_attachments()
+    }
+    fn session_last_attached(&self) -> &BTreeMap<SessionId, u64> {
+        self.source().session_last_attached()
+    }
+    fn unseen_changes(&self) -> &BTreeSet<PaneId> {
+        self.source().unseen_changes()
+    }
+    fn window_clients(&self, context: &zz_mux::StatusContext) -> &BTreeMap<WindowId, Vec<String>> {
+        self.source().window_clients(context)
+    }
+    fn buffer(&self) -> Option<&BufferFormatFacts> {
+        self.source().buffer()
+    }
+    fn client(&self) -> Option<&ClientFormatFacts> {
+        self.source().client()
+    }
+    fn clients(&self, context: &zz_mux::StatusContext) -> &[zz_mux::FormatClientRow] {
+        self.source().clients(context)
+    }
+    fn client_environment(&self) -> Option<&Arc<ClientEnvironmentBlob>> {
+        self.source().client_environment()
+    }
+    fn message(&self) -> Option<&MessageFormatFacts> {
+        self.source().message()
+    }
+    fn mux(&self) -> &zz_mux::FormatFacts {
+        self.source().mux()
+    }
+    fn copy_modes(&self) -> &BTreeMap<PaneId, Vec<(String, Arc<zz_terminal::CopyModeFacts>)>> {
+        self.source().copy_modes()
+    }
+    fn pane_modes(&self) -> &BTreeMap<PaneId, (usize, &'static str)> {
+        self.source().pane_modes()
+    }
+}
+
+fn readonly_borrowed_format_hook_facts(
+    inner: &ServerState,
+    seed: CommandFormatSeed,
+) -> BorrowedFormatHookFacts<'_> {
+    BorrowedFormatHookFacts {
+        client_fields: ClientFormatFields::from_inner(inner),
+        paste_buffers: &inner.paste_buffers,
+        agent_states: &inner.agent_states,
+        terminals: &inner.terminals,
+        pane_pipes: &inner.pane_pipes,
+        attached: &inner.attached,
+        suspended_clients: &inner.suspended_clients,
+        client_names: &inner.client_names,
+        client_pids: &inner.client_pids,
+        client_ttys: &inner.client_ttys,
+        session_last_attached: &inner.session_last_attached,
+        copy_sessions: &inner.copy_sessions,
+        pane_modes: &inner.pane_modes,
+        seed,
+        derived: LazyDerivedFormatFacts::default(),
+    }
+}
+
+fn borrowed_format_hook_facts(inner: &ServerState) -> FormatHookFactsView<'_> {
+    FormatHookFactsView {
+        borrowed: readonly_borrowed_format_hook_facts(inner, CommandFormatSeed::default()),
+        owned: (!*BORROWED_FORMAT_FACTS).then(|| format_hook_facts(inner)),
+    }
+}
+
+fn borrowed_format_hook_facts_for_client<'a>(
+    inner: &'a ServerState,
+    client: ClientId,
+    context: &ExecutionContext,
+) -> FormatHookFactsView<'a> {
+    let seed = if *BORROWED_FORMAT_FACTS {
+        command_format_seed(inner, client, context)
+    } else {
+        CommandFormatSeed::default()
+    };
+    FormatHookFactsView {
+        borrowed: readonly_borrowed_format_hook_facts(inner, seed),
+        owned: (!*BORROWED_FORMAT_FACTS)
+            .then(|| format_hook_facts_for_client(inner, client, context)),
+    }
+}
+
+fn split_format_hook_facts(
+    inner: &mut ServerState,
+    needed: bool,
+) -> (&mut MuxEngine, FormatHookFactsView<'_>) {
+    let owned = (!*BORROWED_FORMAT_FACTS).then(|| {
+        if needed {
+            format_hook_facts(inner)
+        } else {
+            FormatHookFacts::default()
+        }
+    });
+    let (engine, borrowed) = split_borrowed_format_hook_facts(inner, CommandFormatSeed::default());
+    (engine, FormatHookFactsView { borrowed, owned })
+}
+
+fn command_format_seed(
+    inner: &ServerState,
+    client: ClientId,
+    context: &ExecutionContext,
+) -> CommandFormatSeed {
+    let invoking = format_provenance_client(context, client);
+    let format_client = if context.has_no_client() {
+        hook_body_format_client(inner)
+    } else {
+        invoking.and_then(|client| current_format_client(inner, client))
+    };
+    CommandFormatSeed {
+        client: format_client.and_then(|client| {
+            client_attached_session(inner, client)
+                .map(|session| client_format_facts(inner, client, session))
+        }),
+        invoking,
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static OWNED_FORMAT_FACT_BUILDS: Cell<usize> = const { Cell::new(0) };
+}
+
 fn format_hook_facts(inner: &ServerState) -> FormatHookFacts {
+    #[cfg(test)]
+    OWNED_FORMAT_FACT_BUILDS.with(|count| count.set(count.get() + 1));
     FormatHookFacts {
         agent_states: Arc::clone(&inner.agent_states),
         mux: Arc::new(inner.engine.format_facts()),
@@ -40868,10 +41599,8 @@ fn expand_buffer_path(
                     .format_status_context_for_client(session, window, pane, client_session)
             },
         );
-    inner
-        .config_files
-        .clone_into(&mut format_context.config_files);
-    let facts = format_hook_facts(inner);
+    format_context.set_format_value("config_files", inner.config_files.clone());
+    let facts = borrowed_format_hook_facts(inner);
     let mut hooks =
         DaemonFormatHooks::command_with_optional_variables(&facts, context.format_variables())
             .with_option_engine(&inner.engine)
@@ -43102,10 +43831,12 @@ fn expand_command_format(
     target_client: Option<ClientId>,
     time: bool,
 ) -> String {
-    let mut facts = format_hook_facts(inner);
+    let mut facts = borrowed_format_hook_facts(inner);
     if let Some(client) = target_client {
-        facts.client = client_attached_session(inner, client)
-            .map(|session| client_format_facts(inner, client, session));
+        facts.set_client(
+            client_attached_session(inner, client)
+                .map(|session| client_format_facts(inner, client, session)),
+        );
     }
     let mut variables = target.format_variables.clone();
     variables.insert("config_files".to_owned(), inner.config_files.clone());

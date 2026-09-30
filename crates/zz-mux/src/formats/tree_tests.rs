@@ -22,17 +22,17 @@ fn engine_access_preserves_legacy_resolution_and_ends_at_detach() {
     for borrowed in [true, false] {
         with_borrowed_formats(borrowed, || {
             let mut context = engine.format_status_context(Some(session), Some(window), Some(pane));
-            assert!(std::ptr::eq(context.engine().unwrap(), &engine));
+            assert!(std::ptr::eq(context.engine().unwrap(), &raw const engine));
             assert_eq!(context.variable("session_name").as_deref(), Some("work"));
             assert_eq!(context.tree.is_some(), borrowed);
             assert_eq!(context.values.get().is_none(), borrowed);
             let child = context.borrowed_child(Some(&engine));
-            assert!(std::ptr::eq(child.engine().unwrap(), &engine));
+            assert!(std::ptr::eq(child.engine().unwrap(), &raw const engine));
             assert_eq!(child.tree.is_some(), borrowed);
             assert_eq!(child.variable("session_name").as_deref(), Some("work"));
             context.window_name = "owned-window".to_owned();
             assert!(context.tree.is_none());
-            assert!(std::ptr::eq(context.engine().unwrap(), &engine));
+            assert!(std::ptr::eq(context.engine().unwrap(), &raw const engine));
             assert_eq!(
                 context.variable("window_name").as_deref(),
                 Some("owned-window")

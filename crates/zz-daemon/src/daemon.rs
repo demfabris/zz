@@ -6668,9 +6668,10 @@ impl Shared {
                 FormatClient::NoClient
             } else {
                 provenance_client
-                    .and_then(|client| current_format_client(&inner, client))
-                    .and_then(|client| client_attached_session(&inner, client))
-                    .map_or(FormatClient::NoClient, FormatClient::Attached)
+                    .and_then(|client| current_format_client_with_session(&inner, client))
+                    .map_or(FormatClient::NoClient, |(_, session)| {
+                        FormatClient::Attached(session)
+                    })
             }
         };
         context.set_format_client(target_format_client);
@@ -37330,7 +37331,9 @@ fn status_request_with_selected_facts(
     .then(|| inner.engine.format_cache_revision())
     .flatten();
     let attached = client_attached_session(inner, client);
-    let window = client_focused_window_for_attachment(inner, client);
+    let window = attached
+        .and_then(|session| inner.engine.state.sessions.get(&session))
+        .map(|session| client_focused_window(inner, client, session));
     let mut reuse_admission = false;
     if let Some(revision) = revision {
         let mut cache = inner.status_preparation_cache.lock();
@@ -37830,7 +37833,9 @@ fn status_request_with_facts(
     _line_needs: &mut BTreeMap<Option<SessionId>, FormatNeeds>,
 ) -> StatusRequest {
     let attached = client_attached_session(inner, client);
-    let focused_window = client_focused_window_for_attachment(inner, client);
+    let focused_window = attached
+        .and_then(|session| inner.engine.state.sessions.get(&session))
+        .map(|session| client_focused_window(inner, client, session));
     let parameters = status_parameters(inner, attached, &option_snapshot);
     let needs = parameters.needs | job_needs;
     let references = if job_needs.is_empty() {
@@ -42897,6 +42902,32 @@ fn current_format_client(inner: &ServerState, invoking_client: ClientId) -> Opti
         .most_recent_context()
         .and_then(|(session, _, _)| best_client_on_session(inner, session))
         .or_else(|| best_attached_client(inner))
+}
+
+fn current_format_client_with_session(
+    inner: &ServerState,
+    invoking_client: ClientId,
+) -> Option<(ClientId, SessionId)> {
+    if let Some(session) = client_attached_session(inner, invoking_client) {
+        return Some((invoking_client, session));
+    }
+    let client = if let Some(session) = inner
+        .client_origins
+        .get(&invoking_client)
+        .and_then(|pane| inner.engine.state.window_for_pane(*pane))
+        .and_then(|window| inner.engine.state.windows.get(&window))
+        .map(|window| window.session)
+    {
+        best_client_on_session(inner, session).or_else(|| best_attached_client(inner))
+    } else {
+        inner
+            .engine
+            .state
+            .most_recent_context()
+            .and_then(|(session, _, _)| best_client_on_session(inner, session))
+            .or_else(|| best_attached_client(inner))
+    }?;
+    client_attached_session(inner, client).map(|session| (client, session))
 }
 
 fn buffer_path_client_context(

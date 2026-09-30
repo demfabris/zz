@@ -260,18 +260,19 @@ impl Replacement {
             .iter()
             .flat_map(|modifier| &modifier.args)
             .any(|argument| argument.contains(['#', '%']));
+        let infallible_dynamic_arguments = modifiers.iter().all(|modifier| {
+            matches!(
+                modifier.kind,
+                ModifierKind::Expand
+                    | ModifierKind::ExpandTime
+                    | ModifierKind::Limit
+                    | ModifierKind::Padding
+            )
+        });
         *clock_dependent |= dynamic;
-        *unconditional_clock |= dynamic || references.contains("*");
-        *split_safe &= !dynamic
-            || modifiers.iter().all(|modifier| {
-                matches!(
-                    modifier.kind,
-                    ModifierKind::Expand
-                        | ModifierKind::ExpandTime
-                        | ModifierKind::Limit
-                        | ModifierKind::Padding
-                )
-            });
+        *unconditional_clock |=
+            dynamic && !infallible_dynamic_arguments || references.contains("*");
+        *split_safe &= !dynamic || infallible_dynamic_arguments;
         let last_padding = modifiers
             .iter()
             .rposition(|modifier| modifier.kind == ModifierKind::Padding);
@@ -1361,13 +1362,13 @@ mod tests {
     }
 
     #[test]
-    fn compiled_format_parts_keep_dynamic_trimming_fresh_without_combining_window_rows() {
+    fn compiled_format_parts_keep_infallible_dynamic_arguments_conditionally_clocked() {
         let source = "#{T;=/#{status-left-length}:status-left}|#{W:#{window_name}}|#{T;=/#{status-right-length}:status-right}";
         let parts = format_parts(source);
         assert_eq!(parts.len(), 5);
-        assert!(parts[0].unconditional_clock);
+        assert!(!parts[0].unconditional_clock);
         assert!(!parts[2].unconditional_clock);
-        assert!(parts[4].unconditional_clock);
+        assert!(!parts[4].unconditional_clock);
         assert_eq!(parts[2].required_loops, FormatNeeds::WINDOWS);
         assert_eq!(&source[parts[2].range.clone()], "#{W:#{window_name}}");
         assert!(
@@ -1382,17 +1383,29 @@ mod tests {
                 .iter()
                 .any(|name| name == "status-right-length")
         );
+        assert!(
+            parts[0]
+                .references
+                .iter()
+                .any(|name| name == "T:status-left")
+        );
+        assert!(
+            parts[4]
+                .references
+                .iter()
+                .any(|name| name == "T:status-right")
+        );
         let context = StatusContext::from(StatusValues {
             session_name: "abcdefgh".to_owned(),
             ..StatusValues::default()
         });
         for enabled in [false, true] {
             with_enabled(enabled, || {
-                for width in ["1", "4", "-3", "invalid", "100000000", "x:#(not-run)"] {
+                for width in ["1", "4", "-3", "invalid", "100000000", "x:#(not-run)", "%S"] {
                     struct Width<'a>(&'a str);
                     impl StatusHooks for Width<'_> {
-                        fn strftime(&mut self, source: &str) -> String {
-                            source.to_owned()
+                        fn strftime(&mut self, _source: &str) -> String {
+                            panic!("argument data must not be interpreted as a time format")
                         }
                         fn shell(&mut self, _command: &str, _tag: &FormatJobTag) -> String {
                             panic!("expanded modifier text must not be parsed as another command")
@@ -1408,12 +1421,17 @@ mod tests {
                     for source in [
                         "before|#{=/#{WIDTH}:session_name}|after",
                         "before|#{p/#{WIDTH}/:session_name}|after",
+                        "before|#{=/4/#{WIDTH}:session_name}|after",
                     ] {
                         let parts = format_parts(source);
                         assert_eq!(parts.len(), 3);
-                        assert!(parts[1].unconditional_clock);
+                        assert!(!parts[1].unconditional_clock);
+                        assert!(parts[1].references.iter().any(|name| name == "WIDTH"));
                         let mut hooks = Width(width);
                         let whole = expand_status(source, &context, &mut hooks);
+                        if source == "before|#{=/4/#{WIDTH}:session_name}|after" && width == "%S" {
+                            assert_eq!(whole, "before|abcd%S|after");
+                        }
                         let segmented = parts
                             .iter()
                             .map(|part| {
@@ -1424,6 +1442,86 @@ mod tests {
                     }
                 }
             });
+        }
+    }
+
+    #[test]
+    fn compiled_format_parts_preserve_actual_clock_dependencies_in_dynamic_arguments() {
+        struct Clock(&'static str);
+        impl StatusHooks for Clock {
+            fn strftime(&mut self, source: &str) -> String {
+                source.replace("%S", self.0)
+            }
+            fn shell(&mut self, _command: &str, _tag: &FormatJobTag) -> String {
+                panic!("clock argument test must not invoke a shell")
+            }
+            fn option_variable(&mut self, name: &str, _context: &StatusContext) -> Option<String> {
+                (name == "@clock_width").then(|| "%S".to_owned())
+            }
+        }
+        for enabled in [false, true] {
+            with_enabled(enabled, || {
+                for (source, unconditional) in [
+                    ("before|#{p/#{T:@clock_width}/:session_name}|after", false),
+                    ("before|#{=/#{T:@clock_width}:session_name}|after", false),
+                    ("before|#{=/4/#{T:@clock_width}:session_name}|after", false),
+                    ("before|#{p/#{t/d:start_time}/:session_name}|after", true),
+                    ("before|#{p/%S/:session_name}|after", true),
+                ] {
+                    let parts = format_parts(source);
+                    assert_eq!(
+                        parts.iter().any(|part| part.unconditional_clock),
+                        unconditional,
+                        "{source}"
+                    );
+                    if !unconditional {
+                        assert!(
+                            parts.iter().any(|part| part
+                                .references
+                                .iter()
+                                .any(|name| name == "T:@clock_width")),
+                            "{source}"
+                        );
+                    }
+                    let mut results = Vec::new();
+                    for (seconds, now) in [("12", 112), ("15", 115)] {
+                        let context = StatusContext::from(StatusValues {
+                            session_name: if source.contains("#{p/") {
+                                "x"
+                            } else {
+                                "abcdefghijklmnopqrst"
+                            }
+                            .to_owned(),
+                            start_time: Some(100),
+                            format_now: Some(now),
+                            ..StatusValues::default()
+                        });
+                        let mut clock = Clock(seconds);
+                        let whole = expand_status(source, &context, &mut clock);
+                        let segmented = parts
+                            .iter()
+                            .map(|part| {
+                                expand_status(&source[part.range.clone()], &context, &mut clock)
+                            })
+                            .collect::<String>();
+                        assert_eq!(segmented, whole, "{source}: {seconds}, compiled={enabled}");
+                        results.push(whole);
+                    }
+                    assert_ne!(results[0], results[1], "{source}, compiled={enabled}");
+                }
+            });
+        }
+        for source in [
+            "#{p/#(date)/:session_name}",
+            "#{=/#{I/c:RGB}:session_name}",
+            "#{N/#{WIDTH}:name}",
+        ] {
+            assert!(
+                format_parts(source)
+                    .iter()
+                    .all(|part| part.unconditional_clock),
+                "{source}"
+            );
         }
     }
 

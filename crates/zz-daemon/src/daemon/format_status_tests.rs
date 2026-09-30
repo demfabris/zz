@@ -88,6 +88,36 @@ fn status_forget_never_rendered_clients_skips_state_and_job_lock_cleanup() {
 }
 
 #[test]
+fn status_forget_high_watermark_preserves_out_of_order_and_reused_lower_ids() {
+    let (_, _, mut request) = completed_request("#{session_name}");
+    let renderer = forget_without_job_lock(StatusRenderer::default(), ClientId(0));
+    assert!(renderer.owned_client_high_watermark.is_none());
+    let mut renderer = renderer;
+    for client in [900, 7, 800, 3] {
+        request.client = ClientId(client);
+        renderer.render_forced_at(&request, 1_700_000_000);
+        assert_eq!(renderer.owned_client_high_watermark, Some(ClientId(900)));
+    }
+    for client in [901, 1_000, 0, 899] {
+        renderer = forget_without_job_lock(renderer, ClientId(client));
+    }
+    assert_eq!(renderer.owned_clients.len(), 4);
+    for client in [900, 7, 800, 3] {
+        renderer.forget(ClientId(client));
+        assert!(!renderer.owned_clients.contains(&ClientId(client)));
+        assert!(!renderer.published.contains_key(&ClientId(client)));
+        assert_eq!(renderer.owned_client_high_watermark, Some(ClientId(900)));
+    }
+    request.client = ClientId(2);
+    renderer.render_forced_at(&request, 1_700_000_001);
+    assert!(renderer.owned_clients.contains(&request.client));
+    renderer.forget(request.client);
+    assert!(renderer.owned_clients.is_empty());
+    assert!(renderer.published.is_empty());
+    assert!(renderer.completed.is_none());
+}
+
+#[test]
 fn status_forget_cleans_rendered_clients_and_preserves_other_clients_and_jobs() {
     let (engine, context, mut first) = completed_request("#(printf '\\043{P:first}\\n')");
     first.context = Arc::new(
@@ -510,6 +540,111 @@ fn completed_status_parts_reuse_twenty_window_loop_across_fresh_clock_requests()
                 renderer.completed.as_ref().unwrap().parts.as_ref().unwrap()
             ));
         }
+    }
+}
+
+#[test]
+fn completed_status_parts_reuse_static_theme_and_recheck_palette_inputs() {
+    let (mut engine, execution, _) = completed_request("#{session_name}");
+    engine.set_format_now(1_700_000_000);
+    let first = engine_request(1, &engine, execution.session);
+    let mut renderer = StatusRenderer::default();
+    let original = renderer.render_forced_at(&first, 1_700_000_000);
+    let parts = renderer
+        .completed
+        .as_ref()
+        .and_then(|entry| entry.parts.clone());
+    if let Some(parts) = &parts {
+        assert_eq!(
+            parts.theme.as_ref().and_then(OnceLock::get),
+            Some(&original.theme)
+        );
+    }
+    engine.set_format_now(1_700_000_001);
+    let fresh = fresh_clock_request(&engine, &first);
+    let next = renderer.render_forced_at(&fresh, 1_700_000_001);
+    assert_eq!(next, whole_status(&fresh, 1_700_000_001));
+    if let Some(parts) = &parts {
+        assert!(Arc::ptr_eq(
+            parts,
+            renderer.completed.as_ref().unwrap().parts.as_ref().unwrap()
+        ));
+    }
+    for change in ["colours", "scheme", "option", "context"] {
+        let mut renderer = StatusRenderer::default();
+        renderer.render_forced_at(&first, 1_700_000_000);
+        let old = renderer
+            .completed
+            .as_ref()
+            .and_then(|entry| entry.parts.clone());
+        let mut changed = fresh.clone();
+        match change {
+            "colours" => {
+                Arc::make_mut(&mut changed.facts)
+                    .client
+                    .as_mut()
+                    .unwrap()
+                    .colours = "256".to_owned();
+            }
+            "scheme" => changed.client_scheme = Some(TerminalColorScheme::Light),
+            "option" => {
+                Arc::make_mut(&mut changed.option_snapshot)
+                    .base
+                    .insert("dark-theme-green".to_owned(), "colour124".to_owned());
+            }
+            _ => Arc::make_mut(&mut changed.context).set_format_value("session_name", "changed"),
+        }
+        let actual = renderer.render_forced_at(&changed, 1_700_000_001);
+        assert_eq!(actual, whole_status(&changed, 1_700_000_001), "{change}");
+        if change == "option" {
+            assert_eq!(actual.theme.slot(4), Some(TmuxColour::Indexed(124)));
+        }
+        if let Some(old) = old {
+            assert!(
+                renderer
+                    .completed
+                    .as_ref()
+                    .and_then(|entry| entry.parts.as_ref())
+                    .is_none_or(|parts| !Arc::ptr_eq(&old, parts)),
+                "{change}"
+            );
+        }
+    }
+}
+
+#[test]
+fn completed_status_parts_keep_timed_and_user_theme_sources_fresh() {
+    let (mut engine, mut execution, _) = completed_request("#{session_name}");
+    execute(
+        &mut engine,
+        &mut execution,
+        &["set-option", "-g", "@clock_colour", "colour%S"],
+    );
+    engine.set_format_now(1_700_000_000);
+    let initial = engine_request(1, &engine, execution.session);
+    for source in ["colour%S", "#{T:@clock_colour}", "#{E:@clock_colour}"] {
+        let mut first = initial.clone();
+        Arc::make_mut(&mut first.facts).mux = Arc::new(engine.format_facts());
+        Arc::make_mut(&mut first.option_snapshot)
+            .base
+            .insert("dark-theme-green".to_owned(), source.to_owned());
+        let mut renderer = StatusRenderer::default();
+        let first_status = renderer.render_forced_at(&first, 1_700_000_000);
+        assert_eq!(
+            first_status,
+            whole_status(&first, 1_700_000_000),
+            "{source}"
+        );
+        if let Some(parts) = renderer
+            .completed
+            .as_ref()
+            .and_then(|entry| entry.parts.as_ref())
+        {
+            assert!(parts.theme.is_none(), "{source}");
+        }
+        let next = renderer.render_forced_at(&first, 1_700_000_001);
+        assert_eq!(next, whole_status(&first, 1_700_000_001), "{source}");
+        assert_ne!(next.theme, first_status.theme, "{source}");
     }
 }
 

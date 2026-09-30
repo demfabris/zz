@@ -182,6 +182,7 @@ pub(crate) struct StatusRenderer {
     #[cfg(test)]
     expansions: usize,
     owned_clients: BTreeSet<ClientId>,
+    owned_client_high_watermark: Option<ClientId>,
 }
 
 #[derive(Clone)]
@@ -242,6 +243,7 @@ struct StatusParts {
     left: Vec<StatusPart>,
     right: Vec<StatusPart>,
     rows: BTreeMap<u32, Vec<StatusPart>>,
+    theme: Option<OnceLock<zz_protocol::ThemeColours>>,
 }
 
 struct StatusPart {
@@ -300,7 +302,16 @@ impl StatusParts {
             })
             .map(|(index, source)| (*index, split(source)))
             .collect();
-        Self { left, right, rows }
+        let theme = theme_formats()
+            .iter()
+            .all(|source| split(source).iter().all(|part| part.value.is_some()))
+            .then(OnceLock::new);
+        Self {
+            left,
+            right,
+            rows,
+            theme,
+        }
     }
 
     fn retained_bytes(&self) -> usize {
@@ -1514,7 +1525,6 @@ impl StatusRenderer {
         now: i64,
         identity: Option<&Arc<StatusRequest>>,
     ) -> Arc<StatusLine> {
-        self.owned_clients.insert(request.client);
         if let Some(identity) = identity
             && let Some(completed) = &self.completed
             && completed.now == now
@@ -1563,6 +1573,11 @@ impl StatusRenderer {
                     |completed| completed.option_bytes,
                 )
         });
+        self.owned_clients.insert(request.client);
+        self.owned_client_high_watermark = Some(
+            self.owned_client_high_watermark
+                .map_or(request.client, |highest| highest.max(request.client)),
+        );
         #[cfg(test)]
         {
             self.expansions += 1;
@@ -1655,7 +1670,11 @@ impl StatusRenderer {
     }
 
     pub(crate) fn forget(&mut self, client: ClientId) {
-        if !self.owned_clients.remove(&client) {
+        if self
+            .owned_client_high_watermark
+            .is_none_or(|highest| client > highest)
+            || !self.owned_clients.remove(&client)
+        {
             return;
         }
         self.published.remove(&client);
@@ -1851,7 +1870,11 @@ fn render(
             zz_executable,
             job_waker,
         );
-        resolve_theme_colours(request, &mut hooks)
+        if let Some(theme) = parts.and_then(|parts| parts.theme.as_ref()) {
+            *theme.get_or_init(|| resolve_theme_colours(request, &mut hooks))
+        } else {
+            resolve_theme_colours(request, &mut hooks)
+        }
     };
     let (message_style, message_command_style) = {
         let mut hooks = DaemonFormatHooks::status(

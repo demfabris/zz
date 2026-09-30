@@ -262,18 +262,17 @@ impl Batch {
                 "batch contains too many frames".to_owned(),
             ));
         }
-        self.frames
-            .iter()
-            .map(|frame| {
-                let message = crate::decode_protocol_frame(frame)?;
-                if matches!(message, ProtocolMessage::Batch(_)) {
-                    return Err(ProtocolError::InvalidServerHello(
-                        "nested batches are forbidden".to_owned(),
-                    ));
-                }
-                Ok(message)
-            })
-            .collect()
+        let mut messages = Vec::with_capacity(self.frames.len());
+        for frame in &self.frames {
+            let message = crate::decode_protocol_frame(frame)?;
+            if matches!(message, ProtocolMessage::Batch(_)) {
+                return Err(ProtocolError::InvalidServerHello(
+                    "nested batches are forbidden".to_owned(),
+                ));
+            }
+            messages.push(message);
+        }
+        Ok(messages)
     }
 }
 

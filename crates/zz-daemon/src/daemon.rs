@@ -7018,8 +7018,9 @@ impl Shared {
         queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
         let canonical = canonical_command(&command.name);
-        let argument_sink =
-            command_stdin_sink(canonical, &command.args).is_some_and(CommandStdinSink::is_argument);
+        let argument_sink = (command.stdin().is_some() || command.stdin_was_spent())
+            && command_stdin_sink(canonical, &command.args)
+                .is_some_and(CommandStdinSink::is_argument);
         if argument_sink && command.stdin_was_spent() {
             let source_client = context.replay_client().unwrap_or(client);
             let source_kind = self

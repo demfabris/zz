@@ -1413,6 +1413,119 @@ fn bounded_reliable_children(mailbox: &OutboundMailbox, bound: usize) -> Vec<Pro
 
 #[cfg(unix)]
 #[test]
+fn compact_startup_actor_follows_attachment_in_its_initial_batch() {
+    use std::os::unix::net::UnixStream;
+
+    let shared = Arc::new(Shared::new(71));
+    let mut context = ExecutionContext::default();
+    shared
+        .inner
+        .lock()
+        .engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new("new-session", ["-d", "-s", "startup-actor"]),
+        )
+        .expect("model session");
+    *shared.startup_config_causes.lock() = Some(vec![
+        "root.conf:1: INTERACTIVE_DIRECT".to_owned(),
+        "child.conf:1: INTERACTIVE_NESTED".to_owned(),
+    ]);
+    let (mut client, server) = UnixStream::pair().expect("socket pair");
+    client
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .expect("read deadline");
+    let server_shared = Arc::clone(&shared);
+    let worker = thread::spawn(move || handle_connection(server, &server_shared));
+    let mut hello = compact_hello(ClientKind::Interactive);
+    hello.subscriptions = zz_protocol::Subscriptions::terminal();
+    hello.viewport = Some(zz_protocol::ClientViewport {
+        columns: 97,
+        rows: 31,
+        cell_width_px: 8,
+        cell_height_px: 16,
+    });
+    hello.attach = Some(zz_protocol::AttachOperation::Session(
+        "startup-actor".to_owned(),
+    ));
+    zz_protocol::write_protocol_message(&mut client, &ProtocolMessage::Hello(hello))
+        .expect("compact hello");
+    let welcome = zz_protocol::read_protocol_message(&mut client).expect("welcome");
+    let initial = zz_protocol::read_protocol_message(&mut client).expect("initial batch");
+    drop(client);
+    worker
+        .join()
+        .expect("connection thread")
+        .expect("connection cleanup");
+    assert!(matches!(welcome, ProtocolMessage::Welcome(_)));
+    let ProtocolMessage::Batch(batch) = &initial else {
+        panic!("initial state must be one batch")
+    };
+    let messages = batch.messages().expect("flat initial batch");
+    let viewport = messages
+        .iter()
+        .find_map(|message| match message {
+            ProtocolMessage::Event(Event {
+                payload:
+                    EventPayload::CommandOutput {
+                        viewport: Some(viewport),
+                        ..
+                    },
+                ..
+            }) => Some(viewport),
+            _ => None,
+        })
+        .expect("initial startup actor viewport");
+    let text = viewport
+        .cells
+        .iter()
+        .map(|cell| viewport.cell_text(*cell))
+        .collect::<String>();
+    assert_eq!(text.matches("root.conf:1: INTERACTIVE_DIRECT").count(), 1);
+    assert_eq!(text.matches("child.conf:1: INTERACTIVE_NESTED").count(), 1);
+    assert!(
+        text.find("INTERACTIVE_DIRECT").expect("direct row")
+            < text.find("INTERACTIVE_NESTED").expect("nested row")
+    );
+    let attached = messages
+        .iter()
+        .position(|message| {
+            matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ClientView(zz_protocol::ClientView {
+                        session: Some(_),
+                        ..
+                    }),
+                    ..
+                })
+            )
+        })
+        .expect("attached view");
+    let output_positions = messages
+        .iter()
+        .enumerate()
+        .filter_map(|(index, message)| {
+            matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::CommandOutput {
+                        viewport: Some(_),
+                        ..
+                    },
+                    ..
+                })
+            )
+            .then_some(index)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(output_positions.len(), 1);
+    assert!(attached < output_positions[0]);
+    assert!(shared.startup_config_causes.lock().is_none());
+}
+
+#[cfg(unix)]
+#[test]
 fn compact_attach_sends_one_initial_batch_with_every_final_viewport() {
     assert_initial_compact_attach(false);
     assert_initial_compact_attach(true);

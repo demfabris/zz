@@ -24625,6 +24625,19 @@ impl Shared {
                 "startup command output subscriber changed before admission".to_owned(),
             ));
         }
+        {
+            let inner = self.inner.lock();
+            if inner.ctrl_initializing.contains(&client)
+                && current_command_output_subscriber(&inner, client, pane, terminal).is_some_and(
+                    |(current_id, current)| {
+                        current_id == output_id && Arc::ptr_eq(&current, &subscriber)
+                    },
+                )
+                && outbound.is_open()
+            {
+                return Ok(output_id);
+            }
+        }
         let message = Self::event(EventPayload::CommandOutput {
             output_id,
             pane,

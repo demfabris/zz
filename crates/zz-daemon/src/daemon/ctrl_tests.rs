@@ -22,10 +22,17 @@ fn fanout_keeps_one_shared_encoded_frame() {
 #[test]
 fn compact_batch_flush_keeps_existing_groups_flat() {
     let mailbox = OutboundMailbox::new();
+    let buffer = Vec::with_capacity(4096);
+    let allocation = buffer.as_ptr();
+    mailbox.recycle_frame(buffer);
     let child = zz_protocol::encode_protocol_message(&ProtocolMessage::TreeSync).expect("encode");
     assert!(mailbox.enqueue_control_group(vec![child]));
     assert!(mailbox.flush_control_batch(false));
     assert!(mailbox.flush_control_batch(false));
+    assert!(matches!(
+        mailbox.state.lock().reliable.front(),
+        Some(OutboundFrame::Grouped { encoded, .. }) if encoded.as_ptr() == allocation
+    ));
     let messages = tests::take_reliable_messages(&mailbox);
     let [ProtocolMessage::Batch(batch)] = messages.as_slice() else {
         panic!("expected one flat batch: {messages:?}")
@@ -34,6 +41,102 @@ fn compact_batch_flush_keeps_existing_groups_flat() {
         batch.messages().expect("flat group").as_slice(),
         [ProtocolMessage::TreeSync]
     ));
+}
+
+#[test]
+fn completed_group_reuses_its_buffers_after_the_writer_finishes() {
+    let mailbox = OutboundMailbox::new();
+    let outer = Vec::with_capacity(4096);
+    let outer_capacity = outer.capacity();
+    mailbox.recycle_frame(outer);
+    let mut child = Vec::with_capacity(512);
+    zz_protocol::encode_protocol_message_into(&ProtocolMessage::TreeSync, &mut child)
+        .expect("encode child");
+    let allocation = child.as_ptr();
+    let child_capacity = child.capacity();
+    assert!(mailbox.enqueue_control_group(vec![child]));
+    let mut frames = Vec::new();
+    assert!(mailbox.recv_batch(&mut frames, MAX_OUTBOUND_BYTES));
+    let wire_bytes = frames[0].len();
+    {
+        let state = mailbox.state.lock();
+        assert_eq!(state.queued_bytes, 0);
+        assert_eq!(state.written_bytes, 0);
+        assert!(state.recycled_frames.is_empty());
+    }
+    let ProtocolMessage::Batch(batch) =
+        zz_protocol::decode_protocol_frame(&frames[0]).expect("decode group")
+    else {
+        panic!("expected written group")
+    };
+    assert_eq!(
+        batch.messages().expect("flat group"),
+        [ProtocolMessage::TreeSync]
+    );
+    mailbox.finish_batch(&mut frames);
+    assert!(frames.is_empty());
+    {
+        let state = mailbox.state.lock();
+        assert_eq!(state.written_bytes, wire_bytes as u64);
+        assert_eq!(state.recycled_frames.len(), 2);
+        assert_eq!(state.recycled_capacity, outer_capacity + child_capacity);
+    }
+    let reused = mailbox
+        .encode_message(&ProtocolMessage::TreeSync)
+        .expect("reuse child");
+    assert_eq!(reused.as_ptr(), allocation);
+    assert_eq!(
+        zz_protocol::decode_protocol_frame(&reused).expect("decode reused"),
+        ProtocolMessage::TreeSync
+    );
+    assert_eq!(mailbox.state.lock().recycled_capacity, outer_capacity);
+}
+
+#[test]
+fn grouped_buffer_recycling_keeps_limits_and_shared_ownership() {
+    let mailbox = OutboundMailbox::new();
+    let shared: Arc<[u8]> = Arc::from([1_u8, 2]);
+    {
+        let mut state = mailbox.state.lock();
+        recycle_outbound_frame(&mut state, Arc::clone(&shared));
+        assert_eq!(Arc::strong_count(&shared), 1);
+        assert!(state.recycled_frames.is_empty());
+        recycle_outbound_frame(
+            &mut state,
+            OutboundFrame::Grouped {
+                encoded: Vec::with_capacity(MAX_RECYCLED_FRAME_CAPACITY + 1),
+                frames: (0..=MAX_RECYCLED_FRAME_BUFFERS)
+                    .map(|_| Vec::with_capacity(16))
+                    .collect(),
+            },
+        );
+        assert_eq!(state.recycled_frames.len(), MAX_RECYCLED_FRAME_BUFFERS);
+        assert_eq!(state.recycled_capacity, MAX_RECYCLED_FRAME_BUFFERS * 16);
+    }
+    let mut bounded = OutboundState::default();
+    recycle_outbound_frame(
+        &mut bounded,
+        OutboundFrame::Grouped {
+            encoded: Vec::with_capacity(MAX_RECYCLED_FRAME_CAPACITY / 2),
+            frames: vec![
+                Vec::with_capacity(MAX_RECYCLED_FRAME_CAPACITY / 2),
+                Vec::with_capacity(MAX_RECYCLED_FRAME_CAPACITY / 2),
+            ],
+        },
+    );
+    assert_eq!(bounded.recycled_frames.len(), 2);
+    assert_eq!(bounded.recycled_capacity, MAX_RECYCLED_FRAME_CAPACITY);
+    mailbox.close();
+    let mut state = mailbox.state.lock();
+    recycle_outbound_frame(
+        &mut state,
+        OutboundFrame::Grouped {
+            encoded: Vec::with_capacity(16),
+            frames: vec![Vec::with_capacity(16)],
+        },
+    );
+    assert!(state.recycled_frames.is_empty());
+    assert_eq!(state.recycled_capacity, 0);
 }
 
 #[test]

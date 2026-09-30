@@ -3392,13 +3392,22 @@ fn take_recycled_frame(state: &mut OutboundState) -> Vec<u8> {
 }
 
 fn recycle_outbound_frame(state: &mut OutboundState, frame: impl Into<OutboundFrame>) {
-    let OutboundFrame::Owned(mut frame) = frame.into() else {
+    if state.closed || state.recycled_frames.len() >= MAX_RECYCLED_FRAME_BUFFERS {
         return;
+    }
+    let mut frame = match frame.into() {
+        OutboundFrame::Owned(frame) => frame,
+        OutboundFrame::Shared(_) => return,
+        OutboundFrame::Grouped { encoded, frames } => {
+            recycle_outbound_frame(state, encoded);
+            for frame in frames {
+                recycle_outbound_frame(state, frame);
+            }
+            return;
+        }
     };
     let capacity = frame.capacity();
-    if state.closed
-        || capacity == 0
-        || state.recycled_frames.len() >= MAX_RECYCLED_FRAME_BUFFERS
+    if capacity == 0
         || state
             .recycled_capacity
             .checked_add(capacity)
@@ -44874,7 +44883,9 @@ fn handle_connection_message<S: TransportStream>(
                 .name(format!("zz-client-command-{}", client.0))
                 .spawn(move || {
                     let mut context = context;
-                    while let Ok(work) = receiver.recv() {
+                    let mut select = crossbeam_channel::Select::new();
+                    select.recv(&receiver);
+                    while let Ok(work) = select.select().recv(&receiver) {
                         if worker_cancel.load(Ordering::Acquire) {
                             continue;
                         }

@@ -356,8 +356,12 @@ impl OutboundMailbox {
         while let Some(frame) = pop_ready_frame(&mut state) {
             match frame {
                 OutboundFrame::Grouped {
-                    frames: children, ..
-                } => frames.extend(children),
+                    encoded,
+                    frames: children,
+                } => {
+                    recycle_outbound_frame(&mut state, encoded);
+                    frames.extend(children);
+                }
                 frame => frames.push(frame.into_vec()),
             }
         }
@@ -365,7 +369,7 @@ impl OutboundMailbox {
             sequence: Shared::next_sequence(),
             frames,
         });
-        let mut encoded = Vec::new();
+        let mut encoded = take_recycled_frame(&mut state);
         let result = encode_protocol_message_into(&message, &mut encoded);
         if let Some(welcome) = welcome {
             state.reliable.push_back(welcome);

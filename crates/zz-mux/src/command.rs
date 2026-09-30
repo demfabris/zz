@@ -11201,8 +11201,10 @@ impl MuxEngine {
             format_client: context.target_format_client(),
             format_type: FormatType::Pane,
         };
-        let option = expand_format_with_hooks(option, self, format_context, hooks);
-        let parsed = match parse_tmux_option(&option) {
+        let expanded_option = (!crate::formats::plain_format(option, false))
+            .then(|| expand_format_with_hooks(option, self, format_context, hooks));
+        let option = expanded_option.as_deref().unwrap_or(option.as_str());
+        let parsed = match parse_tmux_option(option) {
             Ok(parsed) => parsed,
             Err(()) if options.has("-q") => return Ok(Execution::default()),
             Err(()) => {

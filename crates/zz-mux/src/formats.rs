@@ -3903,7 +3903,7 @@ fn expand_format_inner(
     PreparedFormat::new(engine, context).expand_inner(format, hooks, time, trace)
 }
 
-fn plain_format(format: &str, time: bool) -> bool {
+pub(crate) fn plain_format(format: &str, time: bool) -> bool {
     !format.contains('#') && (!time || !format.contains('%'))
 }
 

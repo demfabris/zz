@@ -112,6 +112,19 @@ await_output() {
     return 1
 }
 
+await_mode_output() {
+    attempt=0
+    while [ "$attempt" -lt 100 ]; do
+        if main_client capture-pane -M -p -t "$pane" -S - -E 32767 2>/dev/null | grep -q "^$1$"; then
+            return 0
+        fi
+        attempt=$((attempt + 1))
+        sleep 0.05
+    done
+    record_failure "mode-output-timeout-$1"
+    return 1
+}
+
 await_size() {
     attempt=0
     while [ "$attempt" -lt 400 ]; do
@@ -206,11 +219,7 @@ history)
     main_client send-keys -t "$pane" -X refresh-on
     printf '4097\n' >&3
     await_output READY4097 || { finish; exit 0; }
-    attempt=0
-    while [ "$(value copy_cursor_line)" = "$frozen_line" ] && [ "$attempt" -lt 100 ]; do
-        attempt=$((attempt + 1))
-        sleep 0.05
-    done
+    await_mode_output READY4097 || { finish; exit 0; }
     main_client send-keys -t "$pane" -X refresh-off
     check_equal refresh-replaces-frozen-line 0 \
         "$(if [ "$(value copy_cursor_line)" = "$frozen_line" ]; then echo 1; else echo 0; fi)"

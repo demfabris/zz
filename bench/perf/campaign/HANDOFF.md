@@ -2,7 +2,24 @@
 
 Entry point for a fresh session continuing the zz daemon performance rebuild. Written 2026-09-29 on
 the macbook, continued the same day on the Linux host alienware (see "Linux leg"). Wave 0 and wave 1
-are on `main` and pushed (`origin/main` `2166bd31` and later); wave 2 runs on `perf/wave2`.
+are on `main` and pushed; wave 2 runs on `perf/wave2`, and `main` is fast-forwarded and pushed after
+every merge. State at the end of the Linux session (2026-09-29): W2-HOOKS and W2-TERM merged and
+pushed; no lane in flight, no side branch or lane worktree left; W2-CTRL, W2-FMT and W2-COPY not
+started.
+
+## Next session on Linux
+
+1. Rerun the W2-TERM merge gate on a quiet host (the recorded one ran at load 3-7 under a game):
+   `~/.cache/zz-perf/quiet-gate.sh --stage wave2 --strict --baseline bench/perf/results/w2-1-hooks-alienware-0acd7f2a.json --json bench/perf/results/w2-2-term-alienware-d7e3fc95.json`
+   from `~/dev/zz-perf-int` after `cargo build --release -p zz-cli`; commit the overwrite.
+2. W2-CTRL (after TERM; carries TERM's PaneFrame in its Batch via `encode_terminal_viewport_event_into`
+   / `encode_terminal_patch_event_into`), then W2-FMT (after HOOKS; its hand-offs are in the HOOKS
+   as-built notes), then W2-COPY. Briefs: `python3 ~/.cache/zz-perf/prompts/gen.py '<json spec>'`
+   (see the existing `*-impl.md`, `*-merge.md` there for the shape); two lanes at a time.
+3. Known red on every build here, not lane regressions: `tui-screen-diff.sh` unzoom checkpoints
+   under load (stale pane geometry after unzoom, open bug below), the three compat rows
+   `lane2-store`, `show-options-hooks`, `smoke/plugin-runtime-resurrect-restore`, and the four
+   known workspace tests.
 
 Read next, in this order: `knowledge/designs/daemon-perf-rebuild.md` (the plan: targets, lanes,
 write zones, as-built notes per merged lane), `bench/perf/README.md` (the gate),
@@ -31,8 +48,9 @@ else building:
    idle pages with `MADV_FREE_REUSABLE` and recommits with `MADV_FREE_REUSE`; a missed `untrim`
    would under-count footprint) and `throughput.*` (should not drop below W0).
 4. `just build mac` (bundle, CEF) and `otool -L` on the `dist/` binary (CoreFoundation-free link);
-   `just ios-gpui iPad build` (W1-ATTACH added hello capability constants; W2-TERM changes the
-   terminal wire if it has merged).
+   `just ios-gpui iPad build` at `main` (W1-ATTACH's hello capabilities, W2-HOOKS' `KeyTablesPatched`
+   event and W2-TERM's PaneFrame wire all landed; none has been built for iOS). Kill every zz Dev
+   daemon older than `d7e3fc95` first.
 5. Commit `wave1-macbook-2166bd31.json` (and notes on anything red) on `main` from a clean
    checkout, run `python3 compat/evidence-secrets.py`, and push.
 
@@ -40,8 +58,9 @@ else building:
 
 | Branch | Head | Contents | State |
 |---|---|---|---|
-| `main` (origin) | `1f474295` | has `17e17115` (W0 code point) | the gate and plan (`157ac6a3`) are not on origin yet |
-| `perf/wave1` | `9eb5888b` + handoff commits (`fd6f36a8`, ...) | W0 gate + plan, W1-FOOTPRINT, W1-FORMAT, W1-PUBLISH, W1-PANE, W1-EXEC, 3 side branches | all checks green on the Mac (see below); 83 commits ahead of `origin/main` at `fd6f36a8` |
+| `main` (origin) | fast-forwarded to `perf/wave2` after each merge | W0, wave 1 (merged `1e0bfc6a`), the Ghostty pin, W2-HOOKS, W2-TERM | pushed |
+| `perf/wave2` | same as `main` | integration branch in `~/dev/zz-perf-int` | lanes merge here first |
+| `perf/wave1` | deleted after merging into `main` | W0 gate + plan and all of wave 1 | history kept in `main` |
 | `perf/attach` | `9a72b53b` (was `00831246` at handoff) | W1-ATTACH | fix pass finished on Linux, merged into `perf/wave1` as `ce1b34cd` (w1-6); branch and worktree removed |
 
 Wave 1 merge log on `perf/wave1` (gate JSON per merge in `bench/perf/results/`):

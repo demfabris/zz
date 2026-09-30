@@ -87,7 +87,7 @@ pub inline fn canReclaim(comptime mode: DecommitMode) bool {
 /// successful discard invalidates all of its contents.
 ///
 /// The return value reports whether the OS accepted the reclamation request.
-/// Test builds return true after simulating reclamation by zeroing dirty bytes.
+/// Test builds return true after simulating reclamation by zeroing the mapping.
 /// In zero mode, the requested bytes are guaranteed to be zero regardless of
 /// the return value.
 pub fn decommit(
@@ -105,7 +105,7 @@ pub fn decommit(
     // so madvise is not safe. Zeroing models the only content guarantee callers
     // have after a successful discard.
     if (comptime builtin.is_test) {
-        @memset(memory[0..dirty_len], 0);
+        @memset(memory, 0);
         return true;
     }
 

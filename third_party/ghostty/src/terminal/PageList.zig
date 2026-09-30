@@ -5161,8 +5161,12 @@ fn trimLastPage(self: *PageList) void {
 
     const layout = Page.layout(cap);
     const base = @intFromPtr(page.memory.ptr);
-    const unused = base + layout.cells_start +
-        @as(usize, page.size.rows) * cap.cols * @sizeOf(pagepkg.Cell);
+    const row_bytes = @as(usize, cap.cols) * @sizeOf(pagepkg.Cell);
+    var unused = base + layout.cells_start;
+    // eraseRows can move row headers without moving their cell blocks.
+    for (page.rows.ptr(page.memory)[0..page.size.rows]) |row| {
+        unused = @max(unused, base + row.cells.offset + row_bytes);
+    }
     const start = std.mem.alignForward(usize, unused, std.heap.page_size_min);
     const end = std.mem.alignBackward(
         usize,
@@ -11914,14 +11918,14 @@ test "PageList compress trims the last page until it grows" {
     _ = s.compress(.incremental);
     try testing.expect(last.trimmed);
 
-    // Only the cells past the page size are given back, and they still
-    // read as zero.
+    // Unused rows still read as zero, wherever their cell blocks are.
     {
         const page = last.page();
-        const layout = Page.layout(page.capacity);
-        const used = @as(usize, page.size.rows) * page.capacity.cols;
-        const cells = page.cells.ptr(page.memory)[0 .. layout.cells_size / @sizeOf(pagepkg.Cell)];
-        for (cells[used..]) |cell| try testing.expectEqual(0, @as(u64, @bitCast(cell)));
+        const rows = page.rows.ptr(page.memory)[page.size.rows..page.capacity.rows];
+        for (rows) |row| {
+            const cells = row.cells.ptr(page.memory)[0..page.capacity.cols];
+            for (cells) |cell| try testing.expectEqual(0, @as(u64, @bitCast(cell)));
+        }
     }
 
     // Growing recommits them before it exposes the next row.
@@ -11934,6 +11938,74 @@ test "PageList compress trims the last page until it grows" {
     }
     _ = s.compress(.incremental);
     try testing.expect(!s.pages.last.?.trimmed);
+}
+
+test "PageList compress trim keeps cells of rows moved by eraseHistory" {
+    const testing = std.testing;
+
+    const cases = [_]struct { history: usize, swap_rows: bool }{
+        .{ .history = 100, .swap_rows = false },
+        .{ .history = 100, .swap_rows = true },
+        .{ .history = initialCapacity(80).rows - 24, .swap_rows = true },
+    };
+    for (cases) |case| {
+        var s = try init(testing.allocator, .{ .cols = 80, .rows = 24 });
+        defer s.deinit();
+        try s.growRows(case.history);
+        try testing.expect(s.pages.first == s.pages.last);
+
+        s.eraseHistory(null);
+        const last = s.pages.last.?;
+        try testing.expect(s.pages.first == last);
+        try testing.expect(last.rows() < last.capacity().rows);
+
+        const page = last.page();
+        const rows = page.rows.ptr(page.memory)[0..page.size.rows];
+        // Cover the highest live block at both ends of the row headers.
+        if (case.swap_rows) std.mem.swap(Row, &rows[0], &rows[rows.len - 1]);
+        for (rows, 0..) |*row, y| {
+            for (page.getCells(row)) |*cell| cell.* = .{
+                .content_tag = .codepoint,
+                .content = .{ .codepoint = .{ .data = @intCast('A' + y) } },
+            };
+        }
+
+        const layout = Page.layout(page.capacity);
+        const base = @intFromPtr(page.memory.ptr);
+        const highest = rows[if (case.swap_rows) 0 else rows.len - 1].cells.ptr(page.memory);
+        const start = std.mem.alignForward(
+            usize,
+            @intFromPtr(highest + page.capacity.cols),
+            std.heap.page_size_min,
+        );
+        const end = std.mem.alignBackward(
+            usize,
+            base + layout.cells_start + layout.cells_size,
+            std.heap.page_size_min,
+        );
+
+        _ = s.compress(.incremental);
+        try testing.expectEqual(start < end, last.trimmed);
+
+        for (rows, 0..) |*row, y| {
+            const cells = page.getCells(row);
+            const lo = @intFromPtr(cells.ptr);
+            const hi = lo + page.capacity.cols * @sizeOf(pagepkg.Cell);
+            try testing.expect(hi <= start or lo >= end);
+            for (cells) |cell| try testing.expectEqual('A' + y, cell.codepoint());
+        }
+
+        // Repeated idle compression preserves the same live blocks.
+        _ = s.compress(.incremental);
+        for (rows, 0..) |*row, y| {
+            for (page.getCells(row)) |cell| try testing.expectEqual('A' + y, cell.codepoint());
+        }
+        _ = try s.grow();
+        try testing.expect(!last.trimmed);
+        for (page.getCells(page.getRow(page.size.rows - 1))) |cell| {
+            try testing.expectEqual(0, @as(u64, @bitCast(cell)));
+        }
+    }
 }
 
 test "PageList grow prune scrollback" {

@@ -99,6 +99,7 @@ pub(super) fn normalize_resize(
         _ => None,
     };
     if let Some(reported) = reported
+        && inner.ctrl_subscriptions.contains_key(&client)
         && reported != layout_generation(inner, client)
     {
         return None;

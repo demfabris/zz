@@ -53,6 +53,51 @@ fn compact_callback_guard_preserves_raw_output() {
 }
 
 #[test]
+fn legacy_resize_accepts_v2_reports_without_a_compact_generation() {
+    let shared = Arc::new(Shared::new(43));
+    let mailbox = OutboundMailbox::new();
+    let (client, _) = shared.register_subscribed(ClientKind::Interactive, None, None, mailbox);
+    let mut inner = shared.inner.lock();
+    assert!(matches!(
+        ctrl::normalize_resize(
+            &mut inner,
+            client,
+            InputMessage::ClientTerminalSizeV2 {
+                columns: 97,
+                rows: 31,
+                layout_generation: 0,
+            },
+        ),
+        Some(InputMessage::ClientTerminalSize {
+            columns: 97,
+            rows: 31
+        })
+    ));
+    assert!(matches!(
+        ctrl::normalize_resize(
+            &mut inner,
+            client,
+            InputMessage::ResizeTerminalV2 {
+                pane: PaneId(1),
+                columns: 97,
+                rows: 31,
+                cell_width_px: 8,
+                cell_height_px: 16,
+                layout_generation: 0,
+            },
+        ),
+        Some(InputMessage::ResizeTerminal {
+            pane: PaneId(1),
+            columns: 97,
+            rows: 31,
+            cell_width_px: 8,
+            cell_height_px: 16,
+        })
+    ));
+    assert!(!inner.ctrl_layouts.contains_key(&client));
+}
+
+#[test]
 fn stale_layout_size_report_is_dropped_before_geometry_changes() {
     let shared = Arc::new(Shared::new(1));
     let mut context = ExecutionContext::default();

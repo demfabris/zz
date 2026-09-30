@@ -329,7 +329,17 @@ impl OutboundMailbox {
     pub(super) fn release_control_query(&self) {
         let state = self.state.lock();
         if state.ctrl_collecting == ControlCollection::Quiet {
-            self.flush_control_batch_locked(state, false);
+            self.flush_control_batch_locked(state, false, false);
+        } else {
+            drop(state);
+            self.ready.notify_one();
+        }
+    }
+
+    pub(super) fn finish_control_query(&self) {
+        let state = self.state.lock();
+        if state.ctrl_collecting == ControlCollection::Quiet {
+            self.flush_control_batch_locked(state, false, true);
         } else {
             drop(state);
             self.ready.notify_one();
@@ -368,14 +378,21 @@ impl OutboundMailbox {
     }
 
     pub(super) fn flush_control_batch(&self, preserve_welcome: bool) -> bool {
-        self.flush_control_batch_locked(self.state.lock(), preserve_welcome)
+        self.flush_control_batch_locked(self.state.lock(), preserve_welcome, false)
     }
 
     pub(super) fn flush_control_batch_locked(
         &self,
         mut state: parking_lot::MutexGuard<'_, OutboundState>,
         preserve_welcome: bool,
+        try_write: bool,
     ) -> bool {
+        let partial = state
+            .reliable
+            .front()
+            .is_some_and(OutboundFrame::is_partial)
+            .then(|| state.reliable.pop_front())
+            .flatten();
         let welcome = preserve_welcome
             .then(|| state.reliable.pop_front())
             .flatten();
@@ -418,6 +435,9 @@ impl OutboundMailbox {
         if let Some(welcome) = welcome {
             state.reliable.push_back(welcome);
         }
+        if let Some(partial) = partial {
+            state.reliable.push_front(partial);
+        }
         if result.is_err() || !reserve_outbound_bytes(&mut state, encoded.len(), 0) {
             close_outbound_too_far_behind(&mut state);
             drop(state);
@@ -428,8 +448,20 @@ impl OutboundMailbox {
         state
             .reliable
             .push_back(OutboundFrame::Grouped { encoded, frames });
+        #[cfg(unix)]
+        let written = try_write && try_write_quiet_group(&mut state);
+        #[cfg(not(unix))]
+        let written = {
+            let _ = try_write;
+            false
+        };
+        let closed = state.closed;
         drop(state);
-        self.ready.notify_one();
+        if closed {
+            self.ready.notify_all();
+        } else if !written {
+            self.ready.notify_one();
+        }
         true
     }
 }
@@ -1080,7 +1112,7 @@ impl Shared {
                     }
                 }
                 if collecting {
-                    outbound.release_control_query();
+                    outbound.finish_control_query();
                 }
                 return;
             }

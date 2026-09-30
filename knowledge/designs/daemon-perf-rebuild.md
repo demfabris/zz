@@ -2305,6 +2305,15 @@ As built on `perf/ctrl`, 2026-09-30:
   polling retain their prior behavior. Buffered events bypass readiness polling. The decoder
   returns the same box through the ready-receive layers, avoiding repeated large enum copies.
   The initialized receiver buffer is reused for reads.
+  Final quiet-query completion can send its admitted group through the existing Unix
+  socket when the queue has no other ready work and the writer owns no bytes. One
+  nonblocking send either completes or leaves the group for the existing writer.
+  A partially sent group retains its original allocation and an offset, stays ahead
+  of later traffic, and remains outside later Batch collectors. Overflow preserves
+  that remainder before ControlExit within the queue bounds, or closes the transport.
+  Writer cleanup tracks dequeued bytes through success, error and panic.
+  `ZZ_PERF_WRITEV=0` disables this completion path; hook and park releases retain
+  their ordinary writer wake.
   The retained `ServerHello` payload is boxed, reducing `ProtocolMessage` from
   1,432 to 312 bytes on this host. Its encoded greeting is unchanged; a saved
   pre-change frame decodes and re-encodes to the same 1,265 bytes and SHA-256.
@@ -2744,7 +2753,7 @@ deletes most wave-1 fallback paths anyway).
 | `ZZ_PERF_ATTACH_BATCH=0` | ATTACH | an attach holds only its terminal frames until `Attached`; `Attached`, the status and the other reliable messages are written as they are queued instead of as one batch after the publish that follows the attach, and the hello of a raw-terminal or browser client carries a status rendered before it attached |
 | `ZZ_PERF_ATTACH_PRESIZE=0` | ATTACH | an attaching raw-terminal client's panes keep their size until its first `ResizeTerminal` |
 | `ZZ_PERF_WRITEV=0` | ATTACH | one write per outbound frame, a writer thread of its own per connection, the default socket send buffer, and unbuffered protocol reads in the daemon and in the client (the client reads it at start) |
-| `ZZ_PERF_TUI_COALESCE=0` | ATTACH | the TUI (read at CLI start) paints after every event, repaints everything on every snapshot and on an unchanged resize, paints before attaching and a card in a pane with no frame, writes a paint that only puts the cursor back, clears to the theme colour and erases every blank pane row, reads the two terminal options over two connections of their own, sends the kitty graphics probe on every attach, sends the client size for a cell-size reply, and places the cursor for every border cell |
+| `ZZ_PERF_TUI_COALESCE=0` | ATTACH | the TUI (read at CLI start) disables event-paint coalescing and retained-row and narrow-column skips, repaints on every snapshot and unchanged resize, paints before draining queued events and draws a waiting card in a pane with no frame, writes cursor-only paints, clears to the theme colour and erases blank pane rows, performs uncached border/status work, sends the initial Kitty graphics probe regardless of terminal-support detection, reports client grid size for a cell-size reply, and uses absolute cursor positioning for successive vertical border cells. Terminal options come from Hello and attachment uses the same single connection |
 | `ZZ_PERF_ROW_PATCHES=1` | TERM | patches replace every changed row whole (from column 0, the rest of the row cleared), the pre-W2 row granularity; the frames stay PaneFrames. Fails `echo.wire_bytes.idle` (about 80 B against the 64 B rule) by design: a key echo resends its whole prompt row |
 | `ZZ_PERF_READONLY_SKIP=0` | HOOKS, CTRL | read-only commands take the before/after captures and perform key-table publication checks and control tap refresh |
 | `ZZ_PERF_EAGER_FACTS=1` | HOOKS, CTRL | every command builds format hook facts, literal display commands resolve format targets before execution, and a pane runtime fact change builds facts with no rename due |

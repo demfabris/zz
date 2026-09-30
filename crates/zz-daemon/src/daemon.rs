@@ -2036,6 +2036,11 @@ enum OutboundFrame {
         encoded_len: usize,
         frames: Vec<OutboundFrame>,
     },
+    #[cfg(unix)]
+    Partial {
+        frame: Box<OutboundFrame>,
+        offset: usize,
+    },
 }
 
 impl std::ops::Deref for OutboundFrame {
@@ -2047,6 +2052,8 @@ impl std::ops::Deref for OutboundFrame {
             Self::Shared(frame) => frame,
             Self::Grouped { encoded, .. } => encoded,
             Self::DeferredGrouped { .. } => unreachable!("deferred group has not been collected"),
+            #[cfg(unix)]
+            Self::Partial { frame, offset } => &frame.as_ref().as_ref()[*offset..],
         }
     }
 }
@@ -2070,6 +2077,17 @@ impl From<Arc<[u8]>> for OutboundFrame {
 }
 
 impl OutboundFrame {
+    fn is_partial(&self) -> bool {
+        #[cfg(unix)]
+        {
+            matches!(self, Self::Partial { .. })
+        }
+        #[cfg(not(unix))]
+        {
+            false
+        }
+    }
+
     fn len(&self) -> usize {
         match self {
             Self::DeferredGrouped { encoded_len, .. } => *encoded_len,
@@ -2096,6 +2114,8 @@ impl OutboundFrame {
             Self::Shared(frame) => frame.to_vec(),
             Self::Grouped { encoded, .. } => encoded,
             Self::DeferredGrouped { .. } => unreachable!("group was materialized"),
+            #[cfg(unix)]
+            Self::Partial { frame, offset } => frame.as_ref().as_ref()[offset..].to_vec(),
         }
     }
 }
@@ -2120,6 +2140,9 @@ struct OutboundState {
     discarded_bytes: u64,
     closed: bool,
     writer_finished: bool,
+    writer_inflight_bytes: usize,
+    #[cfg(unix)]
+    quiet_socket: Option<std::os::fd::OwnedFd>,
     terminals_held: bool,
     attach_batch: bool,
     buffered: bool,
@@ -2132,6 +2155,14 @@ enum ControlCollection {
     None,
     Attach,
     Quiet,
+}
+
+struct OutboundWriterGuard<'a>(&'a OutboundMailbox);
+
+impl Drop for OutboundWriterGuard<'_> {
+    fn drop(&mut self) {
+        self.0.mark_writer_finished();
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -3194,6 +3225,7 @@ impl OutboundMailbox {
         let mut state = self.state.lock();
         loop {
             if let Some(frame) = pop_ready_frame(&mut state) {
+                state.writer_inflight_bytes = frame.len();
                 return Some(frame.into_vec());
             }
             if state.closed {
@@ -3215,6 +3247,7 @@ impl OutboundMailbox {
                 frames.push(frame);
             }
             if !frames.is_empty() {
+                state.writer_inflight_bytes = bytes;
                 return true;
             }
             if state.closed {
@@ -3230,6 +3263,7 @@ impl OutboundMailbox {
             state.written_bytes = state.written_bytes.saturating_add(frame.len() as u64);
             recycle_outbound_frame(&mut state, frame);
         }
+        state.writer_inflight_bytes = 0;
     }
 
     fn close(&self) {
@@ -3242,8 +3276,10 @@ impl OutboundMailbox {
     fn close_after_flush(&self) {
         let mut state = self.state.lock();
         state.closed = true;
+        #[cfg(unix)]
+        drop(state.quiet_socket.take());
         if state.ctrl_collecting == ControlCollection::Quiet {
-            self.flush_control_batch_locked(state, false);
+            self.flush_control_batch_locked(state, false, false);
             return;
         }
         drop(state);
@@ -3276,6 +3312,15 @@ impl OutboundMailbox {
 
     fn mark_writer_finished(&self) {
         let mut state = self.state.lock();
+        if std::thread::panicking() {
+            close_outbound(&mut state);
+        }
+        #[cfg(unix)]
+        drop(state.quiet_socket.take());
+        state.discarded_bytes = state
+            .discarded_bytes
+            .saturating_add(state.writer_inflight_bytes as u64);
+        state.writer_inflight_bytes = 0;
         state.writer_finished = true;
         drop(state);
         self.ready.notify_all();
@@ -3376,7 +3421,11 @@ impl OutboundMailbox {
 }
 
 fn pop_ready_frame(state: &mut OutboundState) -> Option<OutboundFrame> {
-    if state.attach_batch || state.ctrl_collecting != ControlCollection::None {
+    let partial = state
+        .reliable
+        .front()
+        .is_some_and(OutboundFrame::is_partial);
+    if !partial && (state.attach_batch || state.ctrl_collecting != ControlCollection::None) {
         return None;
     }
     if let Some(frame) = state.reliable.pop_front() {
@@ -3445,6 +3494,11 @@ fn recycle_outbound_frame(state: &mut OutboundState, frame: impl Into<OutboundFr
             for frame in frames {
                 recycle_outbound_frame(state, frame);
             }
+            return;
+        }
+        #[cfg(unix)]
+        OutboundFrame::Partial { frame, .. } => {
+            recycle_outbound_frame(state, *frame);
             return;
         }
     };
@@ -3528,7 +3582,64 @@ fn reserve_outbound_bytes(state: &mut OutboundState, incoming: usize, replaced: 
         .is_some_and(|total| total <= MAX_OUTBOUND_BYTES)
 }
 
+#[cfg(unix)]
+fn try_write_quiet_group(state: &mut OutboundState) -> bool {
+    if !*attach::BATCHED_WRITES
+        || state.closed
+        || state.buffered
+        || state.writer_finished
+        || state.writer_inflight_bytes != 0
+        || state.reliable.len() != 1
+        || state.command_output.is_some()
+        || !state.agent.is_empty()
+        || !state.terminals.is_empty()
+        || !state.preview_refreshes.is_empty()
+    {
+        return false;
+    }
+    let Some(socket) = &state.quiet_socket else {
+        return false;
+    };
+    let Some(frame @ OutboundFrame::Grouped { .. }) = state.reliable.front() else {
+        return false;
+    };
+    if state.queued_bytes != frame.len() {
+        return false;
+    }
+    let flags = rustix::net::SendFlags::DONTWAIT;
+    #[cfg(not(any(target_vendor = "apple", target_os = "redox", target_os = "vita")))]
+    let flags = flags | rustix::net::SendFlags::NOSIGNAL;
+    let written = match rustix::net::send(socket, frame.as_ref(), flags) {
+        Ok(0) => return false,
+        Ok(written) => written,
+        Err(error) if error == rustix::io::Errno::INTR || error == rustix::io::Errno::AGAIN => {
+            return false;
+        }
+        Err(_) => {
+            close_outbound(state);
+            return false;
+        }
+    };
+    let frame = state.reliable.pop_front().expect("sole quiet group");
+    state.queued_bytes = state.queued_bytes.saturating_sub(written);
+    state.written_bytes = state.written_bytes.saturating_add(written as u64);
+    if written == frame.len() {
+        recycle_outbound_frame(state, frame);
+        true
+    } else {
+        state.reliable.push_front(OutboundFrame::Partial {
+            frame: Box::new(frame),
+            offset: written,
+        });
+        false
+    }
+}
+
 fn close_outbound(state: &mut OutboundState) {
+    #[cfg(unix)]
+    if let Some(socket) = state.quiet_socket.take() {
+        let _ = rustix::net::shutdown(&socket, rustix::net::Shutdown::Both);
+    }
     state.discarded_bytes = state
         .discarded_bytes
         .saturating_add(state.queued_bytes as u64);
@@ -3561,9 +3672,49 @@ fn close_outbound_too_far_behind(state: &mut OutboundState) {
     let encoded = encode_protocol_message_into(&message, &mut encoded)
         .is_ok()
         .then_some(encoded);
+    let partial = state
+        .reliable
+        .front()
+        .is_some_and(OutboundFrame::is_partial)
+        .then(|| state.reliable.pop_front())
+        .flatten();
+    let keep_partial = partial.as_ref().is_none_or(|partial| {
+        encoded.as_ref().is_some_and(|encoded| {
+            partial
+                .len()
+                .checked_add(encoded.len())
+                .is_some_and(|bytes| bytes <= MAX_OUTBOUND_BYTES)
+                && MAX_RELIABLE_MESSAGES >= 2
+        })
+    });
+    if keep_partial && let Some(partial) = &partial {
+        state.queued_bytes = state.queued_bytes.saturating_sub(partial.len());
+    }
+    #[cfg(unix)]
+    let socket = state.quiet_socket.take();
+    #[cfg(unix)]
+    if (!keep_partial || encoded.is_none())
+        && let Some(socket) = &socket
+    {
+        let _ = rustix::net::shutdown(socket, rustix::net::Shutdown::Both);
+    }
     close_outbound(state);
+    if !keep_partial {
+        return;
+    }
+    #[cfg(unix)]
+    if socket.is_some() {
+        state.attach_batch = false;
+        state.terminals_held = false;
+    }
+    if let Some(partial) = partial {
+        state.queued_bytes = partial.len();
+        state.reliable.push_back(partial);
+        state.attach_batch = false;
+        state.terminals_held = false;
+    }
     if let Some(encoded) = encoded {
-        state.queued_bytes = encoded.len();
+        state.queued_bytes += encoded.len();
         state.reliable.push_back(encoded.into());
     }
 }
@@ -44877,6 +45028,14 @@ fn handle_connection_message<S: TransportStream>(
     if *attach::BATCHED_WRITES {
         let _ = writer.set_send_buffer_size(attach::MAX_BATCHED_WRITE_BYTES);
     }
+    #[cfg(unix)]
+    if compact_hello.is_some() && hello.kind == ClientKind::Control && *attach::BATCHED_WRITES {
+        let socket = stream.receive_fd().ok();
+        #[cfg(target_vendor = "apple")]
+        let socket = socket
+            .filter(|socket| rustix::net::sockopt::set_socket_nosigpipe(socket, true).is_ok());
+        outbound.state.lock().quiet_socket = socket;
+    }
     let writer_mailbox = Arc::clone(&outbound);
     let writer_shared = Arc::downgrade(shared);
     let writer_thread = attach::spawn_writer(&shared.connection_threads, client, move || {
@@ -45409,6 +45568,7 @@ fn write_outbound(
     shared: &Weak<Shared>,
     client: ClientId,
 ) {
+    let _finished = OutboundWriterGuard(outbound);
     let mut batch = Vec::new();
     loop {
         let ready = if *attach::BATCHED_WRITES {
@@ -45447,7 +45607,6 @@ fn write_outbound(
         }
     }
     let _ = stream.shutdown();
-    outbound.mark_writer_finished();
 }
 
 fn validate_hello(hello: &ClientHello) -> Result<(), DaemonError> {

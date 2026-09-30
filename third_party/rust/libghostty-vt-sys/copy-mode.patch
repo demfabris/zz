@@ -21,7 +21,15 @@
              const memory = try self.allocator.alignedAlloc(
 --- a/src/terminal/compress/Page.zig
 +++ b/src/terminal/compress/Page.zig
-@@ -55,6 +55,26 @@
+@@ -34,6 +34,7 @@
+ const Page = @This();
+
+ const std = @import("std");
++const builtin = @import("builtin");
+ const assert = std.debug.assert;
+ const Allocator = std.mem.Allocator;
+ const TerminalPage = @import("../page.zig").Page;
+@@ -55,6 +56,40 @@
  /// the allocator here lets a PageList node restore and discard its compressed
  /// state without needing a reference back to the PageList.
  alloc: Allocator,
@@ -34,7 +42,7 @@
 +pub fn cloneFor(self: *const Page, alloc: Allocator, memory: []align(std.heap.page_size_min) u8) Allocator.Error!Page {
 +    var result = self.*;
 +    result.page.memory = memory[0..self.page.memory.len];
-+    if (self.alloc.ptr == alloc.ptr and self.alloc.vtable == alloc.vtable) {
++    if (sameAllocator(self.alloc, alloc)) {
 +        _ = self.shared.references.fetchAdd(1, .monotonic);
 +        return result;
 +    }
@@ -45,10 +53,24 @@
 +    result.alloc = alloc;
 +    return result;
 +}
++
++fn sameAllocator(left: Allocator, right: Allocator) bool {
++    if (left.vtable != right.vtable) return false;
++    if (comptime builtin.link_libc) {
++        if (left.vtable == std.heap.c_allocator.vtable) return true;
++    }
++    if (comptime builtin.cpu.arch.isWasm()) {
++        if (left.vtable == std.heap.wasm_allocator.vtable) return true;
++    } else if (comptime builtin.os.tag != .freestanding) {
++        if (left.vtable == &std.heap.PageAllocator.vtable or
++            left.vtable == &std.heap.SmpAllocator.vtable) return true;
++    }
++    return left.ptr == right.ptr;
++}
 
  /// Return the largest scratch buffer that can produce a useful compressed
  /// representation for `raw_len` bytes.
-@@ -133,10 +153,15 @@
+@@ -133,10 +168,15 @@
      assert(@sizeOf(Page) + encoded_len <
          @sizeOf(TerminalPage) + source.memory.len);
 
@@ -65,7 +87,7 @@
      };
  }
 
-@@ -145,7 +170,10 @@
+@@ -145,7 +185,10 @@
  /// This intentionally does not free `page.memory`. The PageList node which
  /// supplied the source page continues to own that pool or heap allocation.
  pub fn deinit(self: *Page) void {
@@ -77,6 +99,77 @@
      self.* = undefined;
  }
 
+@@ -410,3 +453,70 @@
+     const restored = try compressed.restore();
+     try testing.expectEqualSlices(u8, expected, restored.memory);
+ }
++
++test "copy-on-write compressed singleton allocators share encoding" {
++    const testing = std.testing;
++    const allocators = if (builtin.link_libc)
++        [_]Allocator{ std.heap.c_allocator, std.heap.page_allocator, std.heap.smp_allocator }
++    else
++        [_]Allocator{ std.heap.page_allocator, std.heap.smp_allocator };
++    var resident = try TerminalPage.init(.{ .cols = 12, .rows = 9 });
++    defer resident.deinit();
++    resident.getRowAndCell(2, 3).cell.* = .init('Q');
++    const scratch = try testing.allocator.alloc(u8, try requiredScratch(resident.memory.len));
++    defer testing.allocator.free(scratch);
++    const memory = try testing.allocator.alignedAlloc(
++        u8,
++        .fromByteUnits(std.heap.page_size_min),
++        resident.memory.len,
++    );
++    defer testing.allocator.free(memory);
++    var table: lz4.HashTable = undefined;
++    for (allocators) |alloc| {
++        try testing.expect(sameAllocator(alloc, alloc));
++        try testing.expect(!sameAllocator(alloc, testing.allocator));
++        var source = (try Page.init(alloc, &resident, scratch, &table)).?;
++        var frozen = try source.cloneFor(alloc, memory);
++        defer frozen.deinit();
++        try testing.expectEqual(source.encoded.ptr, frozen.encoded.ptr);
++        try testing.expectEqual(@as(usize, 2), source.shared.references.load(.monotonic));
++        source.deinit();
++        const restored = try frozen.restore();
++        try testing.expectEqual(@as(u21, 'Q'), restored.getRowAndCell(2, 3).cell.codepoint());
++    }
++}
++
++test "copy-on-write compressed custom allocators preserve allocator identity" {
++    const testing = std.testing;
++    var left_buffer: [4096]u8 = undefined;
++    var right_buffer: [4096]u8 = undefined;
++    var left = std.heap.FixedBufferAllocator.init(&left_buffer);
++    var right = std.heap.FixedBufferAllocator.init(&right_buffer);
++    try testing.expect(sameAllocator(left.allocator(), left.allocator()));
++    try testing.expect(!sameAllocator(left.allocator(), right.allocator()));
++    var resident = try TerminalPage.init(.{ .cols = 12, .rows = 9 });
++    defer resident.deinit();
++    resident.getRowAndCell(4, 5).cell.* = .init('R');
++    const scratch = try testing.allocator.alloc(u8, try requiredScratch(resident.memory.len));
++    defer testing.allocator.free(scratch);
++    const memory = try testing.allocator.alignedAlloc(
++        u8,
++        .fromByteUnits(std.heap.page_size_min),
++        resident.memory.len,
++    );
++    defer testing.allocator.free(memory);
++    var table: lz4.HashTable = undefined;
++    var source = (try Page.init(left.allocator(), &resident, scratch, &table)).?;
++    defer source.deinit();
++    var shared = try source.cloneFor(left.allocator(), memory);
++    defer shared.deinit();
++    var copied = try source.cloneFor(right.allocator(), memory);
++    defer copied.deinit();
++    try testing.expectEqual(source.encoded.ptr, shared.encoded.ptr);
++    try testing.expect(source.encoded.ptr != copied.encoded.ptr);
++    try testing.expectEqualSlices(u8, source.encoded, copied.encoded);
++    try testing.expectEqual(@as(usize, 2), source.shared.references.load(.monotonic));
++    try testing.expectEqual(@as(usize, 1), copied.shared.references.load(.monotonic));
++    const restored = try copied.restore();
++    try testing.expectEqual(@as(u21, 'R'), restored.getRowAndCell(4, 5).cell.codepoint());
++}
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
 @@ -80,6 +80,38 @@

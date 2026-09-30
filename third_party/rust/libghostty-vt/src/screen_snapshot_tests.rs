@@ -361,3 +361,52 @@ fn frozen_resize_geometry_matches_copy_backing_history_pull() {
         snapshot = next;
     }
 }
+
+#[test]
+fn frozen_dense_compressed_history_uses_default_allocator() {
+    let mut terminal = Terminal::new(180, 50).expect("terminal");
+    terminal
+        .set_scrollback_max_bytes(Some(230_400_000))
+        .expect("history bytes");
+    terminal
+        .set_scrollback_max_lines(Some(10_000))
+        .expect("history lines");
+    let stripe = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".repeat(3);
+    let mut input = Vec::with_capacity(10_050 * 182);
+    for row in 0..10_050 {
+        input.extend_from_slice(format!("{row:08} ").as_bytes());
+        input.extend_from_slice(&stripe.as_bytes()[..171]);
+        if row + 1 < 10_050 {
+            input.extend_from_slice(b"\r\n");
+        }
+    }
+    terminal.vt_write(&input);
+    let rows = terminal.total_rows().expect("source rows");
+    assert!(rows >= 10_000);
+    terminal.compress(CompressionMode::Full).expect("compress");
+    let snapshot = terminal.clone_screen().expect("compressed snapshot");
+    let nested = snapshot.clone_screen().expect("nested snapshot");
+    drop(terminal);
+    drop(snapshot);
+    assert_eq!(nested.total_rows().expect("frozen rows"), rows);
+    for row in [0, rows / 2, rows - 1] {
+        let grid_row = nested
+            .grid_row(crate::terminal::Point::Screen(PointCoordinate {
+                x: 0,
+                y: u32::try_from(row).expect("row coordinate"),
+            }))
+            .expect("frozen row");
+        for column in [0, 8, 9, 90, 179] {
+            assert_ne!(
+                grid_row
+                    .cell(column)
+                    .expect("column")
+                    .cell()
+                    .expect("cell")
+                    .codepoint()
+                    .expect("codepoint"),
+                0
+            );
+        }
+    }
+}

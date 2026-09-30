@@ -37,6 +37,136 @@ fn compact_batch_flush_keeps_existing_groups_flat() {
 }
 
 #[test]
+fn quiet_control_query_sends_one_flat_completion_batch() {
+    let shared = Arc::new(Shared::new(50));
+    let (client, mailbox) = compact_registered(&shared, zz_protocol::Subscriptions::control());
+    shared
+        .inner
+        .lock()
+        .client_kinds
+        .insert(client, ClientKind::Control);
+    shared.execute_compact_request(
+        client,
+        ClientKind::Control,
+        &mut ExecutionContext::default(),
+        compact_exec_request(vec![CommandInvocation::new(
+            "display-message",
+            ["-p", "quiet result"],
+        )]),
+        &mailbox,
+    );
+    let messages = tests::take_reliable_messages(&mailbox);
+    if !*hook_events::READONLY_SKIP {
+        assert_eq!(messages.len(), 2);
+        return;
+    }
+    let [ProtocolMessage::Batch(batch)] = messages.as_slice() else {
+        panic!("expected one completion batch: {messages:?}")
+    };
+    assert!(matches!(
+        batch.messages().expect("flat completion").as_slice(),
+        [
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::ControlCommandStarted { request_id: 1, .. },
+                ..
+            }),
+            ProtocolMessage::CommandResponse(CommandResponse::Success { output, .. }),
+            ProtocolMessage::ExecExit(zz_protocol::ExecExit {
+                outcome: zz_protocol::ExecOutcome::Ran,
+                ..
+            }),
+        ] if output.as_bytes() == b"quiet result"
+    ));
+}
+
+#[test]
+fn quiet_control_release_cannot_flush_an_attach_collector() {
+    let shared = Arc::new(Shared::new(51));
+    let (client, mailbox) = compact_registered(&shared, zz_protocol::Subscriptions::control());
+    shared
+        .client_writers
+        .lock()
+        .insert(client, Arc::clone(&mailbox));
+    assert!(mailbox.collect_control_query());
+    assert!(mailbox.enqueue_reliable_with_wakeup(&ProtocolMessage::TreeSync, false));
+    mailbox.hold_terminals();
+    mailbox.release_terminals();
+    {
+        let mut state = mailbox.state.lock();
+        assert!(state.ctrl_collecting == ControlCollection::Quiet);
+        assert!(pop_ready_frame(&mut state).is_none());
+    }
+    mailbox.collect_control_attach();
+    assert!(!mailbox.collect_control_query());
+    for index in 0..MAX_RELIABLE_MESSAGES / 2 {
+        let admitted = if index % 2 == 0 {
+            mailbox.enqueue_reliable(&ProtocolMessage::TreeSync)
+        } else {
+            mailbox.enqueue_control_group(vec![
+                zz_protocol::encode_protocol_message(&ProtocolMessage::TreeSync).expect("encode"),
+            ])
+        };
+        assert!(admitted);
+    }
+    mailbox.hold_terminals();
+    mailbox.release_terminals();
+    shared.wake_control_queue(client, ClientKind::Control);
+    mailbox.release_control_query();
+    {
+        let mut state = mailbox.state.lock();
+        assert!(state.ctrl_collecting == ControlCollection::Attach);
+        assert!(pop_ready_frame(&mut state).is_none());
+    }
+    assert!(mailbox.flush_control_batch(false));
+    let messages = tests::take_reliable_messages(&mailbox);
+    let [ProtocolMessage::Batch(batch)] = messages.as_slice() else {
+        panic!("attach collection was split: {messages:?}")
+    };
+    let children = batch.messages().expect("flat attach collection");
+    assert_eq!(children.len(), MAX_RELIABLE_MESSAGES / 2 + 1);
+    assert!(
+        children
+            .iter()
+            .all(|message| *message == ProtocolMessage::TreeSync)
+    );
+}
+
+#[test]
+fn quiet_control_close_and_overflow_release_the_held_frames() {
+    let mailbox = OutboundMailbox::new();
+    assert!(mailbox.collect_control_query());
+    assert!(mailbox.enqueue_reliable_with_wakeup(&ProtocolMessage::TreeSync, false));
+    mailbox.close_after_flush();
+    let encoded = mailbox.recv().expect("closed collection drains");
+    let ProtocolMessage::Batch(batch) =
+        zz_protocol::decode_protocol_frame(&encoded).expect("decode")
+    else {
+        panic!("expected final collection")
+    };
+    assert_eq!(
+        batch.messages().expect("flat group"),
+        [ProtocolMessage::TreeSync]
+    );
+    assert!(mailbox.recv().is_none());
+
+    let mailbox = OutboundMailbox::new();
+    assert!(mailbox.collect_control_query());
+    for _ in 0..MAX_RELIABLE_MESSAGES {
+        assert!(mailbox.enqueue_reliable_with_wakeup(&ProtocolMessage::TreeSync, false));
+    }
+    assert!(!mailbox.enqueue_reliable(&ProtocolMessage::TreeSync));
+    let encoded = mailbox.recv().expect("overflow collection drains");
+    assert!(matches!(
+        zz_protocol::decode_protocol_frame(&encoded).expect("decode"),
+        ProtocolMessage::Event(Event {
+            payload: EventPayload::ControlExit { reason },
+            ..
+        }) if reason == "too far behind"
+    ));
+    assert!(mailbox.recv().is_none());
+}
+
+#[test]
 fn compact_callback_guard_preserves_raw_output() {
     let shared = Arc::new(Shared::new(38));
     let (client, mailbox) = compact_registered(&shared, zz_protocol::Subscriptions::control());
@@ -279,6 +409,7 @@ fn a_late_gui_hook_wakes_quiet_started_before_its_reply() {
     waiting
         .recv_timeout(Duration::from_secs(2))
         .expect("observer waiting");
+    assert!(mailbox.collect_control_query());
     assert!(mailbox.enqueue_reliable_with_wakeup(
         &Shared::event(EventPayload::ControlCommandStarted {
             request_id: 1,
@@ -354,12 +485,17 @@ fn a_late_gui_hook_wakes_quiet_started_before_its_reply() {
     worker.join().expect("hook worker");
     observer.join().expect("Started observer");
     assert!(pending, "hook was waiting for its GUI reply");
+    let Some(ProtocolMessage::Batch(batch)) =
+        started.map(|frame| zz_protocol::decode_protocol_frame(&frame).expect("decode Started"))
+    else {
+        panic!("late hook did not release the quiet batch")
+    };
     assert!(matches!(
-        started.map(|frame| zz_protocol::decode_protocol_frame(&frame).expect("decode Started")),
-        Some(ProtocolMessage::Event(Event {
+        batch.messages().expect("flat Started").as_slice(),
+        [ProtocolMessage::Event(Event {
             payload: EventPayload::ControlCommandStarted { request_id: 1, .. },
             ..
-        }))
+        })]
     ));
 }
 
@@ -1173,7 +1309,7 @@ fn compact_raw_control_preflights_line_and_resolves_daemon_environment() {
     );
     assert!(matches!(
         mailbox.state.lock().reliable.back(),
-        Some(OutboundFrame::Grouped { frames, .. }) if frames.len() == 2
+        Some(OutboundFrame::Grouped { frames, .. }) if frames.len() == if *hook_events::READONLY_SKIP { 3 } else { 2 }
     ));
     let messages = reliable_children(&mailbox);
     let started = messages.iter().position(|message| matches!(message, ProtocolMessage::Event(Event { payload: EventPayload::ControlCommandStarted { request_id: 1, flags: 1, guard: true, canonical_name: Some(name) }, .. }) if name == "display-message")).unwrap_or_else(|| panic!("command start missing: {messages:?}"));

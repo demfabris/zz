@@ -291,6 +291,34 @@ fn client_view(
 }
 
 impl OutboundMailbox {
+    pub(super) fn collect_control_query(&self) -> bool {
+        let mut state = self.state.lock();
+        if state.closed
+            || state.ctrl_collecting != ControlCollection::None
+            || state.attach_batch
+            || state.terminals_held
+        {
+            return false;
+        }
+        state.ctrl_collecting = ControlCollection::Quiet;
+        true
+    }
+
+    pub(super) fn collect_control_attach(&self) {
+        let mut state = self.state.lock();
+        state.ctrl_collecting = ControlCollection::Attach;
+    }
+
+    pub(super) fn release_control_query(&self) {
+        let state = self.state.lock();
+        if state.ctrl_collecting == ControlCollection::Quiet {
+            self.flush_control_batch_locked(state, false);
+        } else {
+            drop(state);
+            self.ready.notify_one();
+        }
+    }
+
     pub(super) fn enqueue_control_group(&self, frames: Vec<Vec<u8>>) -> bool {
         let message = ProtocolMessage::Batch(Batch {
             sequence: Shared::next_sequence(),
@@ -310,12 +338,19 @@ impl OutboundMailbox {
     }
 
     pub(super) fn flush_control_batch(&self, preserve_welcome: bool) -> bool {
-        let mut state = self.state.lock();
+        self.flush_control_batch_locked(self.state.lock(), preserve_welcome)
+    }
+
+    pub(super) fn flush_control_batch_locked(
+        &self,
+        mut state: parking_lot::MutexGuard<'_, OutboundState>,
+        preserve_welcome: bool,
+    ) -> bool {
         let welcome = preserve_welcome
             .then(|| state.reliable.pop_front())
             .flatten();
         state.attach_batch = false;
-        state.ctrl_collecting = false;
+        state.ctrl_collecting = ControlCollection::None;
         state.terminals_held = false;
         let mut frames = Vec::new();
         while let Some(frame) = pop_ready_frame(&mut state) {
@@ -855,7 +890,7 @@ impl Shared {
             inner.ctrl_initializing.contains(&client)
         };
         outbound.hold_terminals();
-        outbound.state.lock().ctrl_collecting = true;
+        outbound.collect_control_attach();
         outbound.forget_delivered_terminals();
         outbound.reset_kitty_images();
         outbound.reset_pasted_images();
@@ -931,9 +966,11 @@ impl Shared {
             sync_context_with_attachment(&self.inner.lock(), client, context);
             let _park = (kind == ClientKind::Control)
                 .then(|| CommandQueueParkScope::new(client, index as u64 + 1));
+            let mut collecting = false;
             if kind == ClientKind::Control {
                 let wakeup =
                     !control_query_can_defer_wakeup(&self.inner.lock(), context, &prepared);
+                collecting = !wakeup && outbound.collect_control_query();
                 let started = Self::event(EventPayload::ControlCommandStarted {
                     request_id: index as u64 + 1,
                     flags: u32::from(if prepared.invocation.source.is_some() {
@@ -979,9 +1016,15 @@ impl Shared {
                         let _ = outbound.enqueue_reliable(message);
                     }
                 }
+                if collecting {
+                    outbound.release_control_query();
+                }
                 return;
             }
             let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(response));
+            if collecting {
+                outbound.release_control_query();
+            }
             if failed {
                 break;
             }

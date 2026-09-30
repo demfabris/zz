@@ -2096,7 +2096,15 @@ struct OutboundState {
     terminals_held: bool,
     attach_batch: bool,
     buffered: bool,
-    ctrl_collecting: bool,
+    ctrl_collecting: ControlCollection,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum ControlCollection {
+    #[default]
+    None,
+    Attach,
+    Quiet,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2454,6 +2462,7 @@ impl OutboundMailbox {
         }
         state.queued_bytes += encoded.len();
         state.reliable.push_back(encoded);
+        let wakeup = wakeup && state.ctrl_collecting == ControlCollection::None;
         drop(state);
         if wakeup {
             self.ready.notify_one();
@@ -2529,8 +2538,11 @@ impl OutboundMailbox {
         before_push(&mut state);
         state.queued_bytes += encoded.len();
         state.reliable.push_back(encoded);
+        let wakeup = state.ctrl_collecting == ControlCollection::None;
         drop(state);
-        self.ready.notify_one();
+        if wakeup {
+            self.ready.notify_one();
+        }
         true
     }
 
@@ -3195,6 +3207,10 @@ impl OutboundMailbox {
     fn close_after_flush(&self) {
         let mut state = self.state.lock();
         state.closed = true;
+        if state.ctrl_collecting == ControlCollection::Quiet {
+            self.flush_control_batch_locked(state, false);
+            return;
+        }
         drop(state);
         self.ready.notify_all();
     }
@@ -3324,7 +3340,7 @@ impl OutboundMailbox {
 }
 
 fn pop_ready_frame(state: &mut OutboundState) -> Option<OutboundFrame> {
-    if state.attach_batch || state.ctrl_collecting {
+    if state.attach_batch || state.ctrl_collecting != ControlCollection::None {
         return None;
     }
     if let Some(frame) = state.reliable.pop_front() {
@@ -3466,6 +3482,7 @@ fn close_outbound(state: &mut OutboundState) {
         .discarded_bytes
         .saturating_add(state.queued_bytes as u64);
     state.closed = true;
+    state.ctrl_collecting = ControlCollection::None;
     state.reliable.clear();
     state.command_output = None;
     state.agent.clear();
@@ -6313,9 +6330,9 @@ impl Shared {
 
     fn wake_control_queue(&self, client: ClientId, kind: ClientKind) {
         if kind == ClientKind::Control
-            && let Some(writer) = self.client_writers.lock().get(&client)
+            && let Some(writer) = self.client_writers.lock().get(&client).cloned()
         {
-            writer.ready.notify_one();
+            writer.release_control_query();
         }
     }
 
@@ -6331,6 +6348,7 @@ impl Shared {
             return;
         };
         let _ = writer.enqueue_reliable(&ProtocolMessage::CommandQueueParked { request_id });
+        writer.release_control_query();
     }
 
     /// `cmd_split_window_exec`'s `-W` tail: the item that created the pane
@@ -23457,7 +23475,7 @@ impl Shared {
         scope: attach::ResyncScope,
     ) {
         if self.inner.lock().ctrl_subscriptions.contains_key(&client) {
-            outbound.state.lock().ctrl_collecting = true;
+            outbound.collect_control_attach();
             self.send_compact_resync(client, outbound, scope.sends_everything());
             outbound.flush_control_batch(false);
             return;
@@ -44797,7 +44815,7 @@ fn handle_connection_message<S: TransportStream>(
     if compact_hello.is_some() {
         let mut state = outbound.state.lock();
         state.attach_batch = true;
-        state.ctrl_collecting = true;
+        state.ctrl_collecting = ControlCollection::Attach;
         state.terminals_held = true;
     }
     let _ = outbound.enqueue_reliable(&greeting);

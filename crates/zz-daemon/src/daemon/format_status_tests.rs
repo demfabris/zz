@@ -544,6 +544,135 @@ fn completed_status_parts_reuse_twenty_window_loop_across_fresh_clock_requests()
 }
 
 #[test]
+fn completed_status_parts_reuse_message_styles_and_recheck_facts_and_sources() {
+    let (mut engine, mut execution, _) = completed_request("#{session_name}");
+    for (name, value) in [
+        ("message-style", "fg=#{?client_colours,green,red}"),
+        ("message-command-style", "bg=#{?client_prefix,yellow,blue}"),
+    ] {
+        execute(
+            &mut engine,
+            &mut execution,
+            &["set-option", "-g", name, value],
+        );
+    }
+    engine.set_format_now(1_700_000_000);
+    let first = engine_request(1, &engine, execution.session);
+    let mut renderer = StatusRenderer::default();
+    let original = renderer.render_forced_at(&first, 1_700_000_000);
+    assert_eq!(original, whole_status(&first, 1_700_000_000));
+    let parts = renderer
+        .completed
+        .as_ref()
+        .and_then(|entry| entry.parts.clone());
+    assert_eq!(parts.is_some(), status_parts_enabled());
+    if let Some(parts) = &parts {
+        assert_eq!(
+            parts.message_styles.as_ref().and_then(OnceLock::get),
+            Some(&(
+                original.message_style.clone(),
+                original.message_command_style.clone(),
+            )),
+        );
+    }
+    engine.set_format_now(1_700_000_001);
+    let fresh = fresh_clock_request(&engine, &first);
+    let next = renderer.render_forced_at(&fresh, 1_700_000_001);
+    assert_eq!(next, whole_status(&fresh, 1_700_000_001));
+    if let Some(parts) = &parts {
+        assert!(Arc::ptr_eq(
+            parts,
+            renderer.completed.as_ref().unwrap().parts.as_ref().unwrap(),
+        ));
+    }
+    for change in ["colours", "prefix", "source"] {
+        let mut changed = fresh.clone();
+        match change {
+            "colours" => {
+                Arc::make_mut(&mut changed.facts)
+                    .client
+                    .as_mut()
+                    .unwrap()
+                    .colours = "256".to_owned();
+            }
+            "prefix" => {
+                Arc::make_mut(&mut changed.facts)
+                    .client
+                    .as_mut()
+                    .unwrap()
+                    .prefix = "1".to_owned();
+            }
+            _ => Arc::make_mut(&mut changed.message_styles).0 = "fg=blue".to_owned(),
+        }
+        let actual = renderer.render_forced_at(&changed, 1_700_000_001);
+        assert_eq!(actual, whole_status(&changed, 1_700_000_001), "{change}");
+        assert_ne!(
+            (&actual.message_style, &actual.message_command_style),
+            (&original.message_style, &original.message_command_style),
+            "{change}",
+        );
+        if let Some(parts) = &parts {
+            assert!(
+                renderer
+                    .completed
+                    .as_ref()
+                    .and_then(|entry| entry.parts.as_ref())
+                    .is_none_or(|current| !Arc::ptr_eq(parts, current))
+            );
+        }
+    }
+}
+
+#[test]
+fn completed_status_parts_keep_timed_native_and_user_message_styles_fresh() {
+    let (mut engine, mut execution, _) = completed_request("#{session_name}");
+    execute(
+        &mut engine,
+        &mut execution,
+        &["set-option", "-g", "@clock_style", "fg=colour%S"],
+    );
+    engine.set_format_now(1_700_000_000);
+    let initial = engine_request(1, &engine, execution.session);
+    for source in [
+        "fg=colour%S",
+        "#{E:window-status-style}",
+        "#{T:window-status-style}",
+        "#{E:@clock_style}",
+        "#{T:@clock_style}",
+    ] {
+        let mut request = initial.clone();
+        Arc::make_mut(&mut request.facts).mux = Arc::new(engine.format_facts());
+        *Arc::make_mut(&mut request.message_styles) = (source.to_owned(), "bg=blue".to_owned());
+        let snapshot = Arc::make_mut(&mut request.option_snapshot);
+        snapshot
+            .base
+            .insert("window-status-style".to_owned(), "fg=colour%S".to_owned());
+        for values in snapshot.windows.values_mut() {
+            values.insert("window-status-style".to_owned(), "fg=colour%S".to_owned());
+        }
+        request.references = engine.cached_format_references_for_templates(status_line_templates(
+            &request.formats,
+            &request.row_formats,
+            request.title_format.as_deref(),
+            &request.message_styles,
+        ));
+        let mut renderer = StatusRenderer::default();
+        let first = renderer.render_forced_at(&request, 1_700_000_000);
+        assert_eq!(first, whole_status(&request, 1_700_000_000), "{source}");
+        if let Some(parts) = renderer
+            .completed
+            .as_ref()
+            .and_then(|entry| entry.parts.as_ref())
+        {
+            assert!(parts.message_styles.is_none(), "{source}");
+        }
+        let next = renderer.render_forced_at(&request, 1_700_000_001);
+        assert_eq!(next, whole_status(&request, 1_700_000_001), "{source}");
+        assert_ne!(next.message_style, first.message_style, "{source}");
+    }
+}
+
+#[test]
 fn completed_status_parts_reuse_static_theme_and_recheck_palette_inputs() {
     let (mut engine, execution, _) = completed_request("#{session_name}");
     engine.set_format_now(1_700_000_000);

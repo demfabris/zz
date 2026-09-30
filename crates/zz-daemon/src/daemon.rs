@@ -15844,10 +15844,10 @@ impl Shared {
         let request = {
             let mut inner = self.inner.lock();
             inner.engine.set_format_now(unix_timestamp());
-            status_request_with_selected_facts(
+            status_request_with_selected_options(
                 &inner,
                 target,
-                inner.engine.cached_format_option_snapshot(),
+                None,
                 startup_ready,
                 self.status_job_needs(target),
             )
@@ -37322,6 +37322,22 @@ fn status_request_with_selected_facts(
     startup_ready: bool,
     job_needs: FormatNeeds,
 ) -> Arc<StatusRequest> {
+    status_request_with_selected_options(
+        inner,
+        client,
+        Some(option_snapshot),
+        startup_ready,
+        job_needs,
+    )
+}
+
+fn status_request_with_selected_options(
+    inner: &ServerState,
+    client: ClientId,
+    mut option_snapshot: Option<Arc<zz_mux::StatusRowVariables>>,
+    startup_ready: bool,
+    job_needs: FormatNeeds,
+) -> Arc<StatusRequest> {
     let revision = (*BORROWED_FORMAT_FACTS
         && zz_mux::borrowed_formats_enabled()
         && inner.client_kinds.get(&client) != Some(&ClientKind::Control)
@@ -37337,6 +37353,22 @@ fn status_request_with_selected_facts(
     let mut reuse_admission = false;
     if let Some(revision) = revision {
         let mut cache = inner.status_preparation_cache.lock();
+        let options = option_snapshot.get_or_insert_with(|| {
+            cache
+                .as_ref()
+                .filter(|cached| {
+                    cached.request.client == client
+                        && (cached.revision.0, cached.revision.1, cached.revision.2)
+                            == (revision.0, revision.1, revision.2)
+                        && inner
+                            .engine
+                            .format_cache_identity_matches(&cached.engine_identity)
+                })
+                .map_or_else(
+                    || inner.engine.cached_format_option_snapshot(),
+                    |cached| Arc::clone(&cached.request.option_snapshot),
+                )
+        });
         let cached_matches = cache.as_ref().is_some_and(|cached| {
             cached.matches(
                 inner,
@@ -37344,7 +37376,7 @@ fn status_request_with_selected_facts(
                 attached,
                 window,
                 revision,
-                &option_snapshot,
+                options,
                 startup_ready,
             )
         });
@@ -37358,13 +37390,13 @@ fn status_request_with_selected_facts(
                     attached,
                     window,
                     (revision.0, revision.1, revision.2, cached.revision.3),
-                    &option_snapshot,
+                    options,
                     startup_ready,
                 );
                 if !reuse_admission {
                     return None;
                 }
-                let parameters = status_parameters(inner, attached, &option_snapshot);
+                let parameters = status_parameters(inner, attached, options);
                 cached_live_status_context(
                     inner,
                     attached,
@@ -37383,17 +37415,11 @@ fn status_request_with_selected_facts(
             let pane_borders = attached.map_or_else(
                 || Arc::clone(&request.pane_borders),
                 |session| {
-                    cached_live_border_presentations(
-                        inner,
-                        client,
-                        session,
-                        &option_snapshot,
-                        || {
-                            SystemTime::now()
-                                .duration_since(UNIX_EPOCH)
-                                .map_or(0, |duration| duration.as_secs())
-                        },
-                    )
+                    cached_live_border_presentations(inner, client, session, options, || {
+                        SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .map_or(0, |duration| duration.as_secs())
+                    })
                     .unwrap_or_else(|| {
                         let facts = readonly_borrowed_format_hook_facts(
                             inner,
@@ -37418,14 +37444,26 @@ fn status_request_with_selected_facts(
                 ..request.as_ref().clone()
             });
             let cached = cache.as_mut().unwrap();
+            let same_storage = request.context.same_detached_data(&cached.request.context)
+                && request.context.session_id.capacity()
+                    == cached.request.context.session_id.capacity()
+                && request.context.window_id.capacity()
+                    == cached.request.context.window_id.capacity()
+                && request.context.pane_id.capacity() == cached.request.context.pane_id.capacity()
+                && Arc::ptr_eq(&request.pane_borders, &cached.request.pane_borders);
             cached.revision = revision;
             cached.request = Arc::clone(&request);
-            if cache.as_ref().unwrap().retained_bytes() > STATUS_PREPARATION_MAX_BYTES {
+            if !same_storage {
+                cached.retained_bytes = cached.retained_bytes();
+            }
+            if cached.retained_bytes > STATUS_PREPARATION_MAX_BYTES {
                 *cache = None;
             }
             return request;
         }
     }
+    let option_snapshot =
+        option_snapshot.unwrap_or_else(|| inner.engine.cached_format_option_snapshot());
     let facts = (!*BORROWED_FORMAT_FACTS
         || inner.client_kinds.get(&client) == Some(&ClientKind::Control))
     .then(|| format_hook_facts(inner));
@@ -37467,7 +37505,7 @@ fn status_request_with_selected_facts(
             CachedStatusPreparation::new(inner, attached, window, revision, request.clone())
         });
         *inner.status_preparation_cache.lock() =
-            cached.filter(|cached| cached.retained_bytes() <= STATUS_PREPARATION_MAX_BYTES);
+            cached.filter(|cached| cached.retained_bytes <= STATUS_PREPARATION_MAX_BYTES);
     }
     request
 }
@@ -37487,6 +37525,8 @@ struct CachedStatusPreparation {
     request: Arc<StatusRequest>,
     viewport_requested: bool,
     border_client: bool,
+    retained_bytes: usize,
+    engine_identity: Weak<()>,
 }
 
 impl CachedStatusPreparation {
@@ -37512,7 +37552,7 @@ impl CachedStatusPreparation {
                         "window_bigger" | "window_offset_x" | "window_offset_y"
                     )
             });
-        Self {
+        let mut cached = Self {
             revision,
             attached,
             window,
@@ -37525,7 +37565,11 @@ impl CachedStatusPreparation {
             request,
             viewport_requested,
             border_client,
-        }
+            retained_bytes: 0,
+            engine_identity: inner.engine.format_cache_identity(),
+        };
+        cached.retained_bytes = cached.retained_bytes();
+        cached
     }
 
     fn matches(
@@ -37613,6 +37657,8 @@ impl CachedStatusPreparation {
         .saturating_add(job_environment.saturating_mul(2))
         .saturating_add(self.config_files.capacity().saturating_mul(2))
         .saturating_add(self.request.default_terminal.capacity().saturating_mul(2))
+        .saturating_add(std::mem::size_of::<Self>())
+        .saturating_add(std::mem::size_of::<usize>().saturating_mul(2))
         .saturating_add(4096)
     }
 }

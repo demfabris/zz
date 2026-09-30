@@ -10,6 +10,44 @@ fn set(engine: &mut MuxEngine, context: &mut ExecutionContext, args: &[&str]) {
 }
 
 #[test]
+fn format_cache_identity_distinguishes_equal_revisions_and_survives_updates() {
+    let make_engine = |value| {
+        let mut engine = MuxEngine::default();
+        engine.state.create_session("same").unwrap();
+        set(
+            &mut engine,
+            &mut ExecutionContext::default(),
+            &["-g", "status-left", value],
+        );
+        engine.set_format_now(1_700_000_000);
+        engine
+    };
+    let first = make_engine("old");
+    let first_identity = first.format_cache_identity();
+    let mut replacement = make_engine("new");
+    assert_eq!(
+        first.format_cache_revision(),
+        replacement.format_cache_revision()
+    );
+    assert!(first.format_cache_identity_matches(&first_identity));
+    assert!(!replacement.format_cache_identity_matches(&first_identity));
+    drop(first);
+    assert!(first_identity.upgrade().is_none());
+    assert!(!replacement.format_cache_identity_matches(&first_identity));
+    let replacement_identity = replacement.format_cache_identity();
+    let _ = replacement.cached_format_option_snapshot();
+    replacement.set_format_now(1_700_000_001);
+    set(
+        &mut replacement,
+        &mut ExecutionContext::default(),
+        &["-g", "status-left", "changed"],
+    );
+    replacement.state.create_session("next").unwrap();
+    assert!(replacement.format_cache_identity_matches(&replacement_identity));
+    assert!(!replacement.format_cache_identity_matches(&first_identity));
+}
+
+#[test]
 fn key_table_getter_matches_scoped_inheritance_unset_and_empty_defaults() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();

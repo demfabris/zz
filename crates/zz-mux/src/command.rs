@@ -15,7 +15,7 @@ use std::{
     fmt::{self, Write as _},
     path::{Path, PathBuf},
     str::FromStr as _,
-    sync::{Arc, LazyLock},
+    sync::{Arc, LazyLock, Weak},
     time::{Duration, Instant},
 };
 
@@ -2256,6 +2256,7 @@ pub struct MuxEngine {
     pub(crate) format_context_cache: Mutex<Option<crate::formats::DetachedContextCache>>,
     pub(crate) format_reference_union_cache:
         Mutex<Option<crate::formats::FormatReferenceUnionCache>>,
+    format_cache_identity: Arc<()>,
 }
 
 const NAME_INTERVAL: Duration = Duration::from_millis(500);
@@ -2609,6 +2610,7 @@ impl Default for MuxEngine {
             format_data_generation: 0,
             format_context_cache: Mutex::new(None),
             format_reference_union_cache: Mutex::new(None),
+            format_cache_identity: Arc::new(()),
         }
     }
 }
@@ -2845,6 +2847,16 @@ impl MuxEngine {
     #[must_use]
     pub const fn format_options_generation(&self) -> u64 {
         self.format_options_generation
+    }
+
+    #[must_use]
+    pub fn format_cache_identity(&self) -> Weak<()> {
+        Arc::downgrade(&self.format_cache_identity)
+    }
+
+    #[must_use]
+    pub fn format_cache_identity_matches(&self, identity: &Weak<()>) -> bool {
+        identity.as_ptr() == Arc::as_ptr(&self.format_cache_identity)
     }
 
     #[must_use]

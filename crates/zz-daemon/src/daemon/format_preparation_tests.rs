@@ -237,6 +237,89 @@ fn status_preparation_clock_reuse_refreshes_nested_loop_times_and_preserves_fact
 }
 
 #[test]
+fn status_preparation_lazy_options_reject_equal_revision_engine_replacement() {
+    zz_mux::with_borrowed_formats(true, || {
+        let (mut inner, client, _) = fixture("old:#{session_name}");
+        let first =
+            status_request_with_selected_options(&inner, client, None, true, FormatNeeds::NONE);
+        assert_left(&first, "old:prepared");
+        let same =
+            status_request_with_selected_options(&inner, client, None, true, FormatNeeds::NONE);
+        assert_eq!(Arc::ptr_eq(&first, &same), reuse_enabled());
+        let (replacement, _, _) = fixture("new:#{session_name}");
+        assert_eq!(
+            inner.engine.format_cache_revision(),
+            replacement.engine.format_cache_revision()
+        );
+        inner.engine = replacement.engine;
+        let changed =
+            status_request_with_selected_options(&inner, client, None, true, FormatNeeds::NONE);
+        assert_fresh(&first, &changed);
+        assert!(!Arc::ptr_eq(
+            &first.option_snapshot,
+            &changed.option_snapshot
+        ));
+        assert_left(&changed, "new:prepared");
+        assert_left(&first, "old:prepared");
+    });
+}
+
+#[test]
+fn status_preparation_reuses_retained_size_only_for_unchanged_clock_storage() {
+    zz_mux::with_borrowed_formats(true, || {
+        let (mut inner, client, mut context) = fixture("#{session_name}:#{t/d:session_created}");
+        inner
+            .engine
+            .state
+            .session_mut(context.session.unwrap())
+            .unwrap()
+            .created = Some(1_700_000_000);
+        set_option(
+            &mut inner,
+            &mut context,
+            "pane-active-border-style",
+            "fg=#{?pane_in_mode,red,green}",
+        );
+        let first = shared_request(&inner, client);
+        assert_left(&first, "prepared:0");
+        inner.engine.set_format_now(1_700_000_001);
+        let tick = shared_request(&inner, client);
+        assert_left(&tick, "prepared:1");
+        if reuse_enabled() {
+            let mut cache = inner.status_preparation_cache.lock();
+            let cached = cache.as_mut().unwrap();
+            assert_eq!(cached.retained_bytes, cached.retained_bytes());
+            cached.retained_bytes += 128;
+        }
+        inner.engine.set_format_now(1_700_000_002);
+        let same_storage = shared_request(&inner, client);
+        assert_left(&same_storage, "prepared:2");
+        if reuse_enabled() {
+            let cache = inner.status_preparation_cache.lock();
+            let cached = cache.as_ref().unwrap();
+            assert_eq!(cached.retained_bytes, cached.retained_bytes() + 128);
+            assert!(Arc::ptr_eq(&tick.pane_borders, &same_storage.pane_borders));
+        }
+        inner
+            .pane_modes
+            .insert(context.pane.unwrap(), vec![PaneModeRequest::Clock]);
+        let borders = shared_request(&inner, client);
+        assert_eq!(borders.pane_borders[0].style, "fg=red");
+        assert_eq!(same_storage.pane_borders[0].style, "fg=green");
+        if reuse_enabled() {
+            let cache = inner.status_preparation_cache.lock();
+            let cached = cache.as_ref().unwrap();
+            assert_eq!(cached.retained_bytes, cached.retained_bytes());
+            assert!(!Arc::ptr_eq(
+                &same_storage.pane_borders,
+                &borders.pane_borders
+            ));
+        }
+        assert_left(&first, "prepared:0");
+    });
+}
+
+#[test]
 fn status_preparation_clock_reuse_falls_back_after_engine_capture_eviction() {
     zz_mux::with_borrowed_formats(true, || {
         let (mut inner, client, context) =

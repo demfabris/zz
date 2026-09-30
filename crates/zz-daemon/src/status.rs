@@ -245,6 +245,7 @@ struct StatusParts {
     right: Vec<StatusPart>,
     rows: BTreeMap<u32, Vec<StatusPart>>,
     theme: Option<OnceLock<zz_protocol::ThemeColours>>,
+    message_styles: Option<OnceLock<(String, String)>>,
 }
 
 struct StatusPart {
@@ -307,11 +308,16 @@ impl StatusParts {
             .iter()
             .all(|source| split(source).iter().all(|part| part.value.is_some()))
             .then(OnceLock::new);
+        let message_styles = [&request.message_styles.0, &request.message_styles.1]
+            .into_iter()
+            .all(|source| split(source).iter().all(|part| part.value.is_some()))
+            .then(OnceLock::new);
         Self {
             left,
             right,
             rows,
             theme,
+            message_styles,
         }
     }
 
@@ -336,6 +342,11 @@ impl StatusParts {
                         .map_or(0, String::capacity),
                 );
             }
+        }
+        if let Some((style, command_style)) = self.message_styles.as_ref().and_then(OnceLock::get) {
+            bytes = bytes
+                .saturating_add(style.capacity())
+                .saturating_add(command_style.capacity());
         }
         bytes
     }
@@ -1932,10 +1943,17 @@ fn render(
             zz_executable,
             job_waker,
         );
-        (
-            expand_style(&request.message_styles.0, &request.context, &mut hooks),
-            expand_style(&request.message_styles.1, &request.context, &mut hooks),
-        )
+        let mut expand = || {
+            (
+                expand_style(&request.message_styles.0, &request.context, &mut hooks),
+                expand_style(&request.message_styles.1, &request.context, &mut hooks),
+            )
+        };
+        if let Some(styles) = parts.and_then(|parts| parts.message_styles.as_ref()) {
+            styles.get_or_init(&mut expand).clone()
+        } else {
+            expand()
+        }
     };
     let modes = request
         .modes
@@ -2181,23 +2199,32 @@ fn wrap_status_style(formats: &StatusFormats, text: &str, side_style: &str) -> S
     let carries_base = if base.is_empty() {
         false
     } else {
-        let marker = format!("#[{base}]");
-        if marker.len() + "#[push-default]".len() <= MAX_STATUS_TEXT_BYTES {
-            output.push_str(&marker);
+        let marker_len = base.len().saturating_add(3);
+        if marker_len.saturating_add("#[push-default]".len()) <= MAX_STATUS_TEXT_BYTES {
+            output.push_str("#[");
+            output.push_str(&base);
+            output.push(']');
             true
         } else {
             false
         }
     };
     if !side_style.is_empty() {
-        let marker = format!("#[{side_style}]");
+        let marker_len = side_style.len().saturating_add(3);
         let reserved = if carries_base {
             "#[push-default]".len()
         } else {
             0
         };
-        if output.len() + marker.len() + reserved <= MAX_STATUS_TEXT_BYTES {
-            output.push_str(&marker);
+        if output
+            .len()
+            .saturating_add(marker_len)
+            .saturating_add(reserved)
+            <= MAX_STATUS_TEXT_BYTES
+        {
+            output.push_str("#[");
+            output.push_str(side_style);
+            output.push(']');
         }
     }
     if carries_base {

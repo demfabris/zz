@@ -148,13 +148,14 @@ fn feed(terminal: &TerminalSession, bytes: impl Into<Vec<u8>>) {
 }
 
 fn lines(start: usize, end: usize) -> String {
-    (start..=end)
-        .map(|number| {
-            format!(
+    (start..=end).fold(String::new(), |mut text, number| {
+            write!(
+                text,
                 "F{number:04} payload-{number:04} abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ\r\n"
             )
-        })
-        .collect()
+            .expect("fixture lines");
+        text
+    })
 }
 
 #[test]
@@ -326,4 +327,93 @@ fn retained_dead_target_keeps_source_pages_and_its_own_search_state() {
     assert_eq!(fixture.terminal.pane_search_string(), "F0100");
     assert!(fixture.capture().contains("D0180 retained"));
     assert!(!fixture.capture().contains("SOURCE-REPLACED"));
+}
+
+#[test]
+fn retained_popup_keeps_history_and_copy_source_after_the_dead_notice_deadline() {
+    let mut fixture = CopyFixture::new("copy-page-retained-popup");
+    fixture
+        .shared
+        .input(
+            fixture.client,
+            ClientKind::Interactive,
+            &mut fixture.context,
+            InputMessage::ResizeTerminal {
+                pane: fixture.pane,
+                columns: 80,
+                rows: 24,
+                cell_width_px: 8,
+                cell_height_px: 18,
+            },
+        )
+        .expect("size popup client");
+    fixture.run(&[
+        "display-popup",
+        "-w",
+        "40",
+        "-h",
+        "8",
+        "n=1; while [ $n -le 96 ]; do printf 'P%04d retained-popup\\n' $n; n=$((n + 1)); done; exit 7",
+    ]);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let terminal = loop {
+        if let Some(terminal) = {
+            let inner = fixture.shared.inner.lock();
+            inner.popups.get(&fixture.client).and_then(|popup| {
+                popup.state.dead.then(|| {
+                    assert!(!popup.state.close_on_exit);
+                    assert!(!popup.state.close_on_exit_zero);
+                    Arc::clone(&popup.terminal)
+                })
+            })
+        } {
+            break terminal;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "popup never became retained-dead"
+        );
+        thread::sleep(Duration::from_millis(10));
+    };
+    assert_eq!(terminal.completion().expect("popup completion").code, 7);
+    thread::sleep(Duration::from_millis(5100));
+
+    let options = CaptureOptions {
+        start: CaptureBoundary::HistoryStart,
+        end: CaptureBoundary::Relative(i64::MAX),
+        ..CaptureOptions::default()
+    };
+    let captured = terminal
+        .capture_frozen_frame(options)
+        .expect("retained popup full history after the notice deadline");
+    let expected = (1..=96)
+        .map(|number| format!("P{number:04} retained-popup"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        captured
+            .lines()
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>(),
+        expected
+    );
+    let source = terminal
+        .capture_copy_source()
+        .expect("retained popup copy source after the notice deadline");
+    fixture.run(&["display-popup", "-C"]);
+    assert!(fixture.shared.inner.lock().popups.is_empty());
+    drop(terminal);
+    let target =
+        TerminalSession::spawn_empty_with_appearance(32, Arc::new(TerminalAppearance::default()));
+    let view = TerminalViewId(9102);
+    target.attach_view(view);
+    target.set_pending_copy_source(Some(Box::new(source)));
+    target.view_action(view, zz_terminal::TerminalViewAction::EnterCopyMode);
+    assert!(target.settle());
+    let copied = target
+        .capture_frozen_frame(CaptureOptions {
+            mode: true,
+            ..options
+        })
+        .expect("copied popup pages after the popup closes");
+    assert_eq!(copied.trim_end(), captured.trim_end());
 }

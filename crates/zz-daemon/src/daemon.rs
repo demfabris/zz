@@ -24130,6 +24130,7 @@ impl Shared {
         match outcome {
             Some(EitherPopupFinish::Closed(popup)) => Self::retire_popup(client, popup, false),
             Some(EitherPopupFinish::Retained(state)) => {
+                terminal.write_dead_notice(Some(Arc::from("")));
                 self.publish_to_client(client, EventPayload::Popup { state: Some(state) });
             }
             None => {}
@@ -24400,6 +24401,7 @@ impl Shared {
                 let mut previous_bar_state = ProgressBarState::Hidden;
                 let mut fanout = PaneFrameFanout::new();
                 let mut mode_memo = BTreeMap::new();
+                let mut completion_handled = false;
                 while let Ok(event) = events.recv_blocking() {
                     let Some(terminal) = terminal.upgrade() else {
                         break;
@@ -24516,9 +24518,12 @@ impl Shared {
                             if !mode_clients.is_empty() {
                                 shared.status.lock().request_mode_refresh(mode_clients);
                             }
-                            if finished {
+                            if finished && !completion_handled {
                                 shared.close_exited_terminal(pane, &terminal);
-                                return;
+                                completion_handled = true;
+                                if !shared.is_current_terminal(pane, &terminal) {
+                                    return;
+                                }
                             }
                         }
                         TerminalEvent::CopyReady { view, copy } => {
@@ -34854,6 +34859,9 @@ fn retarget_context_to_attachment(
         Some(pane),
     ));
 }
+
+#[cfg(test)]
+mod copy_page_tests;
 
 fn enter_copy_session(
     inner: &mut ServerState,

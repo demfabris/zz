@@ -144,7 +144,7 @@ impl ModeRevision {
             .ok()
             .and_then(reported_working_directory)
             .map(Arc::from);
-        let mut grid = CopyGrid::new(snapshot, foreground, background, raw_palette, columns);
+        let mut grid = CopyGrid::new(snapshot, foreground, background, &raw_palette, columns);
         let dictionary = grid.dictionary();
         let search = Arc::new(HistorySearchSnapshot {
             columns,

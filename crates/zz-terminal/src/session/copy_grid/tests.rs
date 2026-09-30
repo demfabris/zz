@@ -4,9 +4,13 @@ use super::*;
 use crate::session::SelectionMode;
 use crate::session::mode_revision::{ModeRevision, ModeSelection};
 use crate::session::{
-    CaptureBoundary, CaptureOptions, HistorySearchSnapshot, SearchCase, SearchDirection,
-    SearchMode, SearchQuery, capture_terminal, color, new_terminal,
+    CaptureBoundary, CaptureOptions, CopyModeSearch, HistorySearchSnapshot, SearchCase,
+    SearchDirection, SearchMatch, SearchMode, SearchQuery, SearchWorker, SnapshotChange,
+    TerminalViewId, TerminalViewState, ViewportGenerations, capture_terminal, color,
+    copy_mode_search_match, copy_mode_snapshot, enter_copy_mode, new_terminal,
+    run_copy_mode_search, snapshot,
 };
+use crate::{OverlayKind, OverlaySpan, SessionStatus};
 
 fn point(x: u16, y: u32) -> PointCoordinate {
     PointCoordinate { x, y }
@@ -28,7 +32,7 @@ fn grid(terminal: &libghostty_vt::Terminal<'_, '_>) -> CopyGrid {
             .bg_color()
             .expect("background")
             .map_or(Color::rgb(0, 0, 0), color),
-        terminal.color_palette().expect("palette").0,
+        &terminal.color_palette().expect("palette").0,
         terminal.cols().expect("columns"),
     )
 }
@@ -188,6 +192,193 @@ fn paged_search_maps_unicode_and_cancels_between_rows_without_flat_history() {
     drop(terminal);
     let after = snapshot.search(&query, 9, || false).expect("frozen search");
     assert_eq!(after.matches.len(), 100);
+}
+
+#[test]
+fn wrapped_literal_and_regex_are_one_match_with_physical_endpoints() {
+    if ModeRevision::clone_enabled() {
+        return;
+    }
+    let mut terminal = new_terminal(12, 4, 64).expect("terminal");
+    terminal.vt_write("prefix e\u{301}界 target-12345 end\r\nbar\r\nbaz".as_bytes());
+    let snapshot = HistorySearchSnapshot::capture(&terminal).expect("snapshot");
+    let literal = SearchQuery::literal("e\u{301}界 target-12345 end");
+    let expected = SearchMatch {
+        row: 0,
+        end_row: 2,
+        start: 7,
+        end: 3,
+    };
+    let found = snapshot.search(&literal, 1, || false).expect("literal");
+    assert_eq!(found.matches, [expected]);
+    let regex = SearchQuery {
+        text: "e\u{301}界 target-\\d{5} end".to_owned(),
+        mode: SearchMode::Regex,
+        case: SearchCase::Sensitive,
+        direction: SearchDirection::Forward,
+    };
+    assert_eq!(
+        snapshot.search(&regex, 2, || false).expect("regex").matches,
+        [expected]
+    );
+    assert!(
+        snapshot
+            .search(&SearchQuery::literal("barbaz"), 3, || false)
+            .expect("hard line break")
+            .matches
+            .is_empty()
+    );
+    assert_eq!(expected.span(0, 12), Some((7, 12)));
+    assert_eq!(expected.span(1, 12), Some((0, 12)));
+    assert_eq!(expected.span(2, 12), Some((0, 3)));
+    assert!(expected.contains(point(1, 1), 12));
+    assert!(!expected.contains(point(3, 2), 12));
+    terminal.vt_write(b"\x1b[3J\x1b[2J\x1b[Hreplacement");
+    drop(terminal);
+    assert_eq!(
+        snapshot
+            .search(&literal, 4, || false)
+            .expect("frozen")
+            .matches,
+        [expected]
+    );
+    assert!(snapshot.text.is_empty());
+    assert!(snapshot.rows.is_empty());
+    assert!(snapshot.offsets.is_empty());
+}
+
+#[test]
+fn wrapped_copy_search_places_emacs_at_end_and_vi_at_start() {
+    if ModeRevision::clone_enabled() {
+        return;
+    }
+    for vi in [false, true] {
+        let mut terminal = new_terminal(12, 4, 64).expect("terminal");
+        terminal.vt_write("prefix e\u{301}界 target-12345 end".as_bytes());
+        let mut mode = None;
+        enter_copy_mode(&mut terminal, &mut None, &mut mode, false, false, None, vi)
+            .expect("copy mode");
+        mode.as_mut().expect("mode").cursor = point(0, 0);
+        let (jobs, job_rx) = crossbeam_channel::bounded(1);
+        let mut worker = SearchWorker {
+            jobs,
+            discard_jobs: job_rx,
+            latest_requests: std::collections::HashMap::new(),
+            next_request: 0,
+            match_scratch: Vec::new(),
+            idle: None,
+        };
+        let mut search = None;
+        let spec = CopyModeSearch {
+            text: "e\u{301}界 target-12345 end".to_owned(),
+            direction: SearchDirection::Forward,
+            regex: false,
+            incremental: false,
+        };
+        assert!(run_copy_mode_search(
+            TerminalViewId(1),
+            &mut mode,
+            &mut search,
+            &mut None,
+            &mut worker,
+            &spec,
+            1,
+            vi,
+            true,
+            &mut None,
+        ));
+        let mode = mode.expect("searched mode");
+        assert_eq!(mode.cursor, if vi { point(7, 0) } else { point(3, 2) });
+        assert_eq!(mode.search_count, Some((1, false)));
+        assert_eq!(
+            copy_mode_search_match(&mode, search.as_deref(), mode.cursor),
+            spec.text
+        );
+        let mut view = TerminalViewState::for_screen(libghostty_vt::screen::Screen::Primary);
+        view.search = search;
+        let mut generations = ViewportGenerations::default();
+        let mut dictionary = ViewportDictionary::default();
+        let frozen = copy_mode_snapshot(
+            &mut generations,
+            SnapshotChange::Content,
+            &mut dictionary,
+            &view,
+            &mode,
+            SessionStatus::Running,
+        );
+        let live = snapshot(
+            &terminal,
+            &mut libghostty_vt::RenderState::new().expect("render state"),
+            &mut libghostty_vt::render::RowIterator::new().expect("rows"),
+            &mut libghostty_vt::render::CellIterator::new().expect("cells"),
+            &mut generations,
+            SnapshotChange::Content,
+            &mut ViewportDictionary::default(),
+            Some(&view),
+            SessionStatus::Running,
+        )
+        .expect("live search overlays");
+        for frame in [live, frozen] {
+            let marked = frame
+                .overlays
+                .iter()
+                .copied()
+                .filter(|overlay| overlay.kind() == OverlayKind::SearchCurrent)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                marked,
+                [
+                    OverlaySpan::new(0, 7, 12, OverlayKind::SearchCurrent),
+                    OverlaySpan::new(1, 0, 12, OverlayKind::SearchCurrent),
+                    OverlaySpan::new(2, 0, 3, OverlayKind::SearchCurrent),
+                ]
+            );
+        }
+    }
+}
+
+#[test]
+fn wrapped_history_search_reuses_matches_and_cancels_without_flat_arrays() {
+    if ModeRevision::clone_enabled() {
+        return;
+    }
+    let mut terminal = new_terminal(12, 4, 4096).expect("terminal");
+    for _ in 0..600 {
+        terminal.vt_write("prefix e\u{301}界 target-12345 end\r\n".as_bytes());
+    }
+    let snapshot = HistorySearchSnapshot::capture(&terminal).expect("snapshot");
+    let query = SearchQuery::literal("e\u{301}界 target-12345 end");
+    let mut scratch = Vec::with_capacity(640);
+    let allocation = scratch.as_ptr();
+    let result = snapshot
+        .search_reusing(&query, 1, &mut scratch, || false)
+        .expect("wrapped search");
+    assert_eq!(result.matches.len(), 600);
+    assert_eq!(result.matches.as_ptr(), allocation);
+    assert!(
+        result
+            .matches
+            .iter()
+            .all(|found| { found.end_row == found.row + 2 && found.start == 7 && found.end == 3 })
+    );
+    scratch = result.matches;
+    let polls = Cell::new(0);
+    assert!(
+        snapshot
+            .search_reusing(&query, 2, &mut scratch, || {
+                polls.set(polls.get() + 1);
+                polls.get() == 600
+            })
+            .is_none()
+    );
+    assert_eq!(polls.get(), 600);
+    assert_eq!(scratch.as_ptr(), allocation);
+    assert!(!scratch.is_empty());
+    assert!(scratch.len() < 600);
+    assert!(snapshot.text.is_empty());
+    assert!(snapshot.rows.is_empty());
+    assert!(snapshot.offsets.is_empty());
+    assert_eq!(std::mem::size_of::<crate::session::SearchCellOffset>(), 12);
 }
 
 #[test]

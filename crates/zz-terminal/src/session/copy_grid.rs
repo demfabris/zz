@@ -53,13 +53,13 @@ impl CopyGrid {
         terminal: ScreenSnapshot,
         foreground: Color,
         background: Color,
-        palette: [RgbColor; 256],
+        palette: &[RgbColor; 256],
         columns: u16,
     ) -> Self {
         let mut dictionary = ViewportDictionary::default();
         dictionary.ensure_default(
             PackedStyle::new(foreground, background, None, 0, crate::UnderlineStyle::None),
-            &palette,
+            palette,
         );
         let active_start = u32::try_from(terminal.total_rows().expect("snapshot rows"))
             .unwrap_or(u32::MAX)
@@ -72,7 +72,7 @@ impl CopyGrid {
             order: VecDeque::new(),
             foreground,
             background,
-            palette,
+            palette: *palette,
             columns,
             loaded: 0,
             viewport: false,
@@ -227,3 +227,6 @@ impl CopyGrid {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod actor_tests;

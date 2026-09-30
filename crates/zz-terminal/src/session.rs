@@ -3915,8 +3915,29 @@ impl ViewportDictionary {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct SearchMatch {
     row: u32,
+    end_row: u32,
     start: u16,
     end: u16,
+}
+
+impl SearchMatch {
+    fn span(self, row: u32, columns: u16) -> Option<(u16, u16)> {
+        if row < self.row || row > self.end_row {
+            return None;
+        }
+        let start = if row == self.row { self.start } else { 0 };
+        let end = if row == self.end_row {
+            self.end
+        } else {
+            columns
+        };
+        Some((start.min(columns), end.min(columns)))
+    }
+
+    fn contains(self, point: PointCoordinate, columns: u16) -> bool {
+        self.span(point.y, columns)
+            .is_some_and(|(start, end)| (start..end).contains(&point.x))
+    }
 }
 
 #[derive(Debug, Default)]
@@ -3989,7 +4010,7 @@ impl KittyGraphicsState {
         let mut iterator = self.iterator.update(&graphics)?;
         let mut saw_stored_placement = false;
         let mut placements = Vec::new();
-        while let Some(placement) = iterator.next() {
+        while let Some(placement) = iterator.advance() {
             let image_id = placement.image_id()?;
             if placement.is_virtual()? || image_id == 0 {
                 continue;
@@ -5333,10 +5354,36 @@ fn run_surface_terminal(
                             let _ = reply.send(capture_history(&terminal, start, count, &frames.dictionary.class_hints));
                         }
                         Command::KittyImage(request) => {
-                            let _ = request.reply.send(None);
+                            let image = frames
+                                .generations
+                                .kitty
+                                .as_mut()
+                                .map_or(Ok(None), |kitty| kitty.image(&terminal, request.image_id))
+                                .unwrap_or_else(|error| {
+                                    log::warn!(
+                                        "could not export Kitty image {}: {error}",
+                                        request.image_id
+                                    );
+                                    None
+                                });
+                            let _ = request.reply.send(image);
                         }
                         Command::KittyImageGeneration(request) => {
-                            let _ = request.reply.send(None);
+                            let generation = frames
+                                .generations
+                                .kitty
+                                .as_ref()
+                                .map_or(Ok(None), |_| {
+                                    KittyGraphicsState::image_generation(&terminal, request.image_id)
+                                })
+                                .unwrap_or_else(|error| {
+                                    log::warn!(
+                                        "could not read Kitty image {} generation: {error}",
+                                        request.image_id
+                                    );
+                                    None
+                                });
+                            let _ = request.reply.send(generation);
                         }
                         Command::SetEngineKnobs(next) => mode_keys_vi = next.mode_keys_vi,
                         Command::SetPendingCopySource(source) => pending_copy_source = source,
@@ -5598,11 +5645,10 @@ fn resize_copy_modes(
                     .search
                     .search(&previous.query, request_id, || false)
                     .expect("resize search");
-                search.current = search.matches.iter().position(|found| {
-                    found.row == mode.cursor.y
-                        && found.start <= mode.cursor.x
-                        && mode.cursor.x < found.end
-                });
+                search.current = search
+                    .matches
+                    .iter()
+                    .position(|found| found.contains(mode.cursor, mode.revision.columns));
                 mode.search_count = Some((
                     u32::try_from(search.matches.len()).unwrap_or(u32::MAX),
                     false,
@@ -7196,6 +7242,7 @@ fn run_terminal(
             while let Some(remaining) = notice_deadline.checked_duration_since(Instant::now()) {
                 match control_rx.recv_timeout(remaining) {
                     Ok(Command::WriteDeadNotice(text)) => {
+                        complete_dead_notice_command(slot);
                         if let Some(text) = text {
                             retained = true;
                             write_dead_notice(&mut terminal, &text)?;
@@ -7216,7 +7263,18 @@ fn run_terminal(
                         }
                         break;
                     }
-                    Ok(command) => pending_commands.push(command),
+                    Ok(command) => {
+                        if let Some(command) = reply_before_dead_notice(
+                            &mut terminal,
+                            &frames.dictionary.class_hints,
+                            &active_views,
+                            &word_separators,
+                            slot,
+                            command,
+                        ) {
+                            pending_commands.push(command);
+                        }
+                    }
                     Err(_) => break,
                 }
             }
@@ -7256,6 +7314,70 @@ fn run_terminal(
             }
             return Ok(());
         }
+    }
+}
+
+fn reply_before_dead_notice(
+    terminal: &mut Terminal<'_, '_>,
+    class_hints: &ClassHints,
+    active_views: &ActiveTerminalViews,
+    word_separators: &WordSeparators,
+    slot: &Mutex<ControlSlot>,
+    command: Command,
+) -> Option<Command> {
+    match command {
+        Command::Capture(request) => {
+            let CaptureRequest { options, reply } = *request;
+            let mut copy_modes = active_views
+                .values()
+                .filter_map(|view| view.copy_mode.as_deref());
+            let mode = match (copy_modes.next(), copy_modes.next()) {
+                (Some(mode), None) => Some(mode),
+                _ => None,
+            };
+            let _ = reply.send(capture_terminal(terminal, mode, options));
+        }
+        Command::History(request) => {
+            let HistoryCommand {
+                start,
+                count,
+                reply,
+            } = *request;
+            let _ = reply.send(capture_history(terminal, start, count, class_hints));
+        }
+        Command::CaptureCopySource { reply } => {
+            let _ = reply.send(
+                capture_copy_source(terminal).map_err(|_| TerminalCaptureError::ActorStopped),
+            );
+        }
+        Command::SemanticCapture(request) => {
+            let _ = request.reply.send(capture_last_command(terminal));
+        }
+        Command::PointerContext(request) => {
+            let PointerContextRequest {
+                view,
+                column,
+                row,
+                reply,
+            } = *request;
+            let mode = active_views
+                .get(&view)
+                .and_then(|view| view.copy_mode.as_deref());
+            let _ = reply.send(
+                pointer_context(terminal, mode, column, row, word_separators).unwrap_or_default(),
+            );
+        }
+        command => return Some(command),
+    }
+    complete_dead_notice_command(slot);
+    None
+}
+
+fn complete_dead_notice_command(slot: &Mutex<ControlSlot>) {
+    let mut slot = slot.lock();
+    slot.in_flight = slot.in_flight.saturating_sub(1);
+    for (remaining, _) in &mut slot.deferred {
+        *remaining = remaining.saturating_sub(1);
     }
 }
 
@@ -12816,18 +12938,19 @@ impl HistorySearchSnapshot {
         let mut text = String::new();
         let mut offsets = Vec::new();
         let mut graphemes = Vec::new();
+        let mut wrapped_rows = Vec::new();
         for row in 0..self.total_rows {
             if cancelled() {
                 return None;
             }
             let (row_text, row_offsets) = if let Some(terminal) = &self.terminal {
-                text.clear();
-                offsets.clear();
                 let mut terminal = terminal.lock();
                 if !*NO_COMPRESS && row > 0 && row % 512 == 0 {
                     terminal.compress(CompressionMode::Full).ok()?;
                 }
-                append_history_row(
+                let text_start = u32::try_from(text.len()).ok()?;
+                let offset_start = offsets.len();
+                let wrapped = append_history_row(
                     &*terminal,
                     row,
                     self.columns,
@@ -12836,6 +12959,14 @@ impl HistorySearchSnapshot {
                     &mut graphemes,
                 )
                 .ok()?;
+                for offset in &mut offsets[offset_start..] {
+                    offset.start = offset.start.checked_add(text_start)?;
+                    offset.end = offset.end.checked_add(text_start)?;
+                }
+                wrapped_rows.push((row, offsets.len()));
+                if wrapped && row.saturating_add(1) < self.total_rows {
+                    continue;
+                }
                 (text.as_str(), offsets.as_slice())
             } else {
                 let captured = self.rows.get(usize::try_from(row).ok()?)?;
@@ -12854,7 +12985,25 @@ impl HistorySearchSnapshot {
                 else {
                     continue;
                 };
-                match_scratch.push(SearchMatch { row, start, end });
+                let (start_row, end_row) = if self.terminal.is_some() {
+                    let first = row_offsets.partition_point(|cell| {
+                        usize::try_from(cell.end).is_ok_and(|end| end <= found.start())
+                    });
+                    let after_last = row_offsets.partition_point(|cell| {
+                        usize::try_from(cell.start).is_ok_and(|start| start < found.end())
+                    });
+                    let start = wrapped_rows.partition_point(|(_, end)| *end <= first);
+                    let end = wrapped_rows.partition_point(|(_, end)| *end < after_last);
+                    (wrapped_rows.get(start)?.0, wrapped_rows.get(end)?.0)
+                } else {
+                    (row, row)
+                };
+                match_scratch.push(SearchMatch {
+                    row: start_row,
+                    end_row,
+                    start,
+                    end,
+                });
                 if match_scratch.len() >= MAX_SEARCH_MATCHES {
                     return Some(SearchState {
                         query: query.clone(),
@@ -12864,6 +13013,9 @@ impl HistorySearchSnapshot {
                     });
                 }
             }
+            text.clear();
+            offsets.clear();
+            wrapped_rows.clear();
         }
         Some(SearchState {
             query: query.clone(),
@@ -12912,10 +13064,11 @@ fn append_history_row(
     text: &mut String,
     offsets: &mut Vec<SearchCellOffset>,
     grapheme_scratch: &mut Vec<char>,
-) -> Result<(), WorkerError> {
+) -> Result<bool, WorkerError> {
     let row_text_start = text.len();
     let mut stack = ['\0'; 8];
     let native_row = terminal.grid_row(Point::Screen(PointCoordinate { x: 0, y: row }))?;
+    let wrapped = native_row.row()?.is_wrapped()?;
     for column in 0..columns {
         let grid_ref = native_row.cell(column).expect("history column");
         let wide = grid_ref.cell()?.wide()?;
@@ -12949,7 +13102,7 @@ fn append_history_row(
             });
         }
     }
-    Ok(())
+    Ok(wrapped)
 }
 
 fn remember_copy_mode_search(
@@ -13137,7 +13290,7 @@ fn run_copy_mode_search(
         };
         cursor = PointCoordinate {
             x: if inclusive { found.end } else { found.start },
-            y: found.row,
+            y: if inclusive { found.end_row } else { found.row },
         };
         placed = Some(index);
     }
@@ -14981,7 +15134,7 @@ fn copy_mode_search_match(
         search
             .matches
             .iter()
-            .find(|found| found.row == point.y && (found.start..found.end).contains(&point.x))
+            .find(|found| found.contains(point, mode.revision.columns))
             .copied()
     };
     let Some(found) = search.and_then(|search| {
@@ -15003,16 +15156,17 @@ fn copy_mode_search_match(
         return String::new();
     };
     let mut text = String::new();
-    for column in found.start..found.end {
-        let point = PointCoordinate {
-            x: column,
-            y: found.row,
-        };
-        if revision_cell_is_padding(&mode.revision, point) {
+    for row in found.row..=found.end_row {
+        let Some((start, end)) = found.span(row, mode.revision.columns) else {
             continue;
-        }
-        if let Some(character) = mode.revision.first_char(point) {
-            text.push(character);
+        };
+        for column in start..end {
+            let point = PointCoordinate { x: column, y: row };
+            if revision_cell_is_padding(&mode.revision, point) {
+                continue;
+            }
+            mode.revision
+                .push_cell_text(mode.revision.cell(point), &mut text);
         }
     }
     text
@@ -15624,16 +15778,19 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
     };
     if let Some(search) = search {
         for (index, found) in search.matches.iter().enumerate() {
-            let row = found.row;
-            if row < scrollbar.offset || row >= scrollbar.offset.saturating_add(scrollbar.len) {
-                continue;
-            }
-            let viewport_row = row.saturating_sub(scrollbar.offset);
-            if let Ok(viewport_row) = u16::try_from(viewport_row) {
+            let start_row = found.row.max(scrollbar.offset);
+            let end_row = found
+                .end_row
+                .saturating_add(1)
+                .min(scrollbar.offset.saturating_add(scrollbar.len));
+            for row in start_row..end_row {
+                let Some((start, end)) = found.span(row, columns) else {
+                    continue;
+                };
                 overlays.push(OverlaySpan::new(
-                    viewport_row,
-                    found.start,
-                    found.end,
+                    u16::try_from(row.saturating_sub(scrollbar.offset)).unwrap_or(u16::MAX),
+                    start,
+                    end,
                     if search.current == Some(index) {
                         OverlayKind::SearchCurrent
                     } else {
@@ -15755,19 +15912,23 @@ fn copy_mode_snapshot(
     if let Some(search) = view.search.as_ref().filter(|_| mode.search_marks) {
         let visible_end = offset.saturating_add(u32::from(revision.viewport_rows));
         for (index, found) in search.matches.iter().enumerate() {
-            if found.row < offset || found.row >= visible_end {
-                continue;
+            let start_row = found.row.max(offset);
+            let end_row = found.end_row.saturating_add(1).min(visible_end);
+            for row in start_row..end_row {
+                let Some((start, end)) = found.span(row, revision.columns) else {
+                    continue;
+                };
+                overlays.push(OverlaySpan::new(
+                    u16::try_from(row - offset).unwrap_or(u16::MAX),
+                    start,
+                    end,
+                    if search.current == Some(index) {
+                        OverlayKind::SearchCurrent
+                    } else {
+                        OverlayKind::SearchMatch
+                    },
+                ));
             }
-            overlays.push(OverlaySpan::new(
-                u16::try_from(found.row - offset).unwrap_or(u16::MAX),
-                found.start.min(revision.columns),
-                found.end.min(revision.columns),
-                if search.current == Some(index) {
-                    OverlayKind::SearchCurrent
-                } else {
-                    OverlayKind::SearchMatch
-                },
-            ));
         }
     }
     if let Some(row) = mode.cursor.y.checked_sub(offset)
@@ -16883,16 +17044,19 @@ mod tests {
         let matches = vec![
             SearchMatch {
                 row: 0,
+                end_row: 0,
                 start: 0,
                 end: 1,
             },
             SearchMatch {
                 row: 1,
+                end_row: 1,
                 start: 0,
                 end: 1,
             },
             SearchMatch {
                 row: 2,
+                end_row: 2,
                 start: 0,
                 end: 1,
             },
@@ -17291,12 +17455,10 @@ mod tests {
 
     #[test]
     fn view_action_size_limits_are_nonfatal() {
-        for error in [WorkerError::SearchSnapshotTooLarge] {
-            assert!(matches!(
-                normalize_view_action_result(Err(error)),
-                Ok(ViewActionResult::Snapshot)
-            ));
-        }
+        assert!(matches!(
+            normalize_view_action_result(Err(WorkerError::SearchSnapshotTooLarge)),
+            Ok(ViewActionResult::Snapshot)
+        ));
         assert!(matches!(
             normalize_view_action_result(Err(WorkerError::Thread("stopped".to_owned()))),
             Err(WorkerError::Thread(message)) if message == "stopped"
@@ -20152,6 +20314,7 @@ mod tests {
         let mut stale_matches = Vec::with_capacity(16);
         stale_matches.push(SearchMatch {
             row: 1,
+            end_row: 1,
             start: 2,
             end: 3,
         });
@@ -20176,6 +20339,7 @@ mod tests {
 
         let latest_match = SearchMatch {
             row: 4,
+            end_row: 4,
             start: 5,
             end: 6,
         };
@@ -20319,16 +20483,19 @@ mod tests {
         let matches = vec![
             SearchMatch {
                 row: 0,
+                end_row: 0,
                 start: 1,
                 end: 4,
             },
             SearchMatch {
                 row: 1,
+                end_row: 1,
                 start: 2,
                 end: 5,
             },
             SearchMatch {
                 row: 2,
+                end_row: 2,
                 start: 3,
                 end: 6,
             },
@@ -20487,6 +20654,7 @@ mod tests {
         let mut matches = Vec::with_capacity(16);
         matches.push(SearchMatch {
             row: 0,
+            end_row: 0,
             start: 0,
             end: 1,
         });

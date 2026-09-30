@@ -105,6 +105,14 @@ impl ControlReceiver {
     }
 
     fn receive(&mut self, timeout: Option<std::time::Duration>) -> io::Result<Option<MainEvent>> {
+        self.receive_with_probe(timeout, true)
+    }
+
+    fn receive_with_probe(
+        &mut self,
+        timeout: Option<std::time::Duration>,
+        mut probe_protocol: bool,
+    ) -> io::Result<Option<MainEvent>> {
         loop {
             if let Some(message) = self.pending.pop_front() {
                 return Ok(Some(MainEvent::Protocol(Box::new(message))));
@@ -112,6 +120,7 @@ impl ControlReceiver {
             let event = match &mut self.source {
                 #[cfg(any(not(unix), test))]
                 ControlSource::Channel(events) => {
+                    let _ = probe_protocol;
                     if let Some(timeout) = timeout {
                         match events.recv_timeout(timeout) {
                             Ok(event) => Some(event),
@@ -129,8 +138,9 @@ impl ControlReceiver {
                     }
                 }
                 #[cfg(unix)]
-                ControlSource::Direct(direct) => direct.receive(timeout)?,
+                ControlSource::Direct(direct) => direct.receive(timeout, probe_protocol)?,
             };
+            probe_protocol = true;
             match event {
                 Some(MainEvent::Protocol(message))
                     if matches!(message.as_ref(), ProtocolMessage::Batch(_)) =>
@@ -203,11 +213,17 @@ impl DirectControl {
         unsafe_code,
         reason = "select only borrows the two owned open descriptors"
     )]
-    fn receive(&mut self, timeout: Option<std::time::Duration>) -> io::Result<Option<MainEvent>> {
+    fn receive(
+        &mut self,
+        timeout: Option<std::time::Duration>,
+        probe_protocol: bool,
+    ) -> io::Result<Option<MainEvent>> {
         if self.prefer_stdin && self.input.has_event() {
             return Ok(self.take_ready(false));
         }
-        self.read_protocol();
+        if probe_protocol {
+            self.read_protocol();
+        }
         if self.input.has_event() || (self.pending_protocol.is_some() && !self.prefer_stdin) {
             return Ok(self.take_ready(false));
         }
@@ -336,13 +352,23 @@ impl ControlInput {
 }
 
 fn receive_control_event(receiver: &mut ControlReceiver) -> io::Result<MainEvent> {
+    receive_control_event_with_probe(receiver, true)
+}
+
+fn receive_control_event_with_probe(
+    receiver: &mut ControlReceiver,
+    mut probe_protocol: bool,
+) -> io::Result<MainEvent> {
     loop {
         if TERMINATION_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
             return Err(io::Error::from(io::ErrorKind::Interrupted));
         }
-        if let Some(event) = receiver.receive(Some(std::time::Duration::from_millis(20)))? {
+        if let Some(event) = receiver
+            .receive_with_probe(Some(std::time::Duration::from_millis(20)), probe_protocol)?
+        {
             return Ok(event);
         }
+        probe_protocol = true;
     }
 }
 
@@ -364,7 +390,7 @@ fn receive_buffered_control_event<W: Write>(
         Ok(event)
     } else {
         output.output.flush()?;
-        receive_control_event(receiver)
+        receive_control_event_with_probe(receiver, false)
     }
 }
 
@@ -2639,6 +2665,75 @@ mod tests {
                 matches!(receiver.receive(None).unwrap(), Some(MainEvent::Protocol(message))
                 if *message == *expected)
             );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_empty_probe_continuation_receives_stdin_and_protocol_ready_at_flush() {
+        struct FlushReady {
+            bytes: Vec<u8>,
+            flushes: usize,
+            ready: Option<Box<dyn FnOnce()>>,
+        }
+        impl Write for FlushReady {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.bytes.extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                self.flushes += 1;
+                if let Some(ready) = self.ready.take() {
+                    ready();
+                }
+                Ok(())
+            }
+        }
+
+        for stdin_ready in [false, true] {
+            let (_directory, mut server, mut receiver, input) = direct_control_fixture();
+            assert!(matches!(
+                receiver.receive(None).unwrap(),
+                Some(MainEvent::Protocol(_))
+            ));
+            assert!(receiver.receive(None).unwrap().is_none());
+            let message = ProtocolMessage::Attach {
+                session: "after-flush".to_owned(),
+            };
+            let frame = zz_protocol::encode_protocol_message(&message).unwrap();
+            let continuation = frame[2..].to_vec();
+            let mut later_server = server.try_clone().unwrap();
+            let ready_input = input.as_fd().try_clone_to_owned().unwrap();
+            let mut writer = ControlWriter::new(
+                FlushReady {
+                    bytes: Vec::new(),
+                    flushes: 0,
+                    ready: Some(Box::new(move || {
+                        if stdin_ready {
+                            server.write_all(&frame[..2]).unwrap();
+                            rustix::io::write(&ready_input, b"after empty\n").unwrap();
+                        } else {
+                            server.write_all(&frame).unwrap();
+                        }
+                    })),
+                },
+                false,
+            );
+            writer.begin_buffered_at(21, 1).unwrap();
+            let event = receive_buffered_control_event(&mut receiver, &mut writer).unwrap();
+            assert_eq!(writer.output.flushes, 1);
+            assert_eq!(writer.output.bytes, b"%begin 21 1 1\n");
+            if stdin_ready {
+                assert!(matches!(event, MainEvent::Stdin(StdinEvent::Line(line))
+                    if line == "after empty"));
+                assert!(receiver.receive(None).unwrap().is_none());
+                later_server.write_all(&continuation).unwrap();
+                assert!(matches!(receive_control_event(&mut receiver).unwrap(),
+                    MainEvent::Protocol(packet) if *packet == message));
+            } else {
+                assert!(matches!(event, MainEvent::Protocol(packet) if *packet == message));
+            }
         }
     }
 

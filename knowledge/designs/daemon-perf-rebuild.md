@@ -2305,6 +2305,8 @@ As built on `perf/ctrl`, 2026-09-30:
   polling retain their prior behavior. Buffered events bypass readiness polling. The decoder
   returns the same box through the ready-receive layers, avoiding repeated large enum copies.
   The initialized receiver buffer is reused for reads.
+  After an empty readiness probe and output flush, the next wait skips the repeated
+  socket probe once while still selecting fresh stdin and socket readiness.
   Final quiet-query completion can send its admitted group through the existing Unix
   socket when the queue has no other ready work and the writer owns no bytes. One
   nonblocking send either completes or leaves the group for the existing writer.
@@ -2317,12 +2319,17 @@ As built on `perf/ctrl`, 2026-09-30:
   The retained `ServerHello` payload is boxed, reducing `ProtocolMessage` from
   1,432 to 312 bytes on this host. Its encoded greeting is unchanged; a saved
   pre-change frame decodes and re-encodes to the same 1,265 bytes and SHA-256.
+  Batch children and RawText use bulk byte decoding with the existing owned types
+  and serialization. A saved 318-byte Batch covers every byte value, invalid UTF-8,
+  JSON sequence fallback and unchanged encoding; malformed bounds remain rejected.
   TUI startup reduces the connection's already-held Batch synchronously and lays out
   that complete state before the first paint. The same reducer forwards attachment
   reset, image delivery and placing frames in stream order for later attachments.
   Image resets share the existing metadata/frame drain, so initial attachment paints
   each pane once. The physical-output proof covers one and four panes and leaves
   unrelated input outside that drain.
+  Consumed frame maps return their capacity to the inbox. Frames published during
+  consumption retain their latest viewport, merged damage and pending wake.
   The TUI reuses unchanged rows, borders, status and message composition, then limits narrow-cell
   incremental painting to changed columns. Full-frame and scroll damage compare retained
   rows; equal dictionary contents also retain the painted cache. Wide cells, overlays and
@@ -2346,6 +2353,8 @@ As built on `perf/ctrl`, 2026-09-30:
   of yielding through the empty receive retry. Its queue, context, cancellation and
   thread ownership stay the same. Completed groups return owned child and outer buffers
   to the existing bounded pool after the writer finishes; shared children are released.
+  Completion takes its response and exit buffers under one pool lock. The final
+  collector reserves the counted children once, within the existing frame limit.
 - Broad validation exposed an existing cold-start agent projection bug: SessionReset
   dropped text queued before readiness. The projection now retains that text until its
   turn and clears it on explicit restart or reclaim. The original capture assertion and

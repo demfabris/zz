@@ -1717,19 +1717,13 @@ fn handle_core_event(
             })
         }
         CoreEvent::SnapshotChanged => {
-            let before = model.paint_structure();
-            {
+            let (snapshot, layout_generation) = {
                 let core = lock_core(core);
-                model.layout_generation = core.layout_generation();
-                model.update_snapshot(Arc::clone(core.snapshot()));
-            }
-            Ok(
-                if !*crate::COALESCE || model.paint_structure() != before {
-                    ProtocolOutcome::RepaintAll
-                } else {
-                    ProtocolOutcome::Repaint
-                },
-            )
+                (Arc::clone(core.snapshot()), core.layout_generation())
+            };
+            refresh_snapshot(model, snapshot, layout_generation, |input| {
+                client.send_input(input).map_err(|error| error.to_string())
+            })
         }
         CoreEvent::AppearanceChanged => {
             model.appearance = lock_core(core).appearance().cloned().unwrap_or_default();
@@ -2256,6 +2250,36 @@ fn send_resizes_and_sync_browser(
 }
 
 fn send_resizes(model: &mut Model, client: &InteractiveClient) -> Result<(), String> {
+    send_resizes_with(model, |input| {
+        client.send_input(input).map_err(|error| error.to_string())
+    })
+}
+
+fn refresh_snapshot(
+    model: &mut Model,
+    snapshot: Arc<zz_protocol::MuxSnapshot>,
+    layout_generation: u64,
+    send: impl FnMut(InputMessage) -> Result<(), String>,
+) -> Result<ProtocolOutcome, String> {
+    let before = model.paint_structure();
+    let generation_changed = model.layout_generation != layout_generation;
+    model.layout_generation = layout_generation;
+    model.update_snapshot(snapshot);
+    if generation_changed {
+        model.last_sent_geometry.clear();
+        send_resizes_with(model, send)?;
+    }
+    Ok(if !*crate::COALESCE || model.paint_structure() != before {
+        ProtocolOutcome::RepaintAll
+    } else {
+        ProtocolOutcome::Repaint
+    })
+}
+
+fn send_resizes_with(
+    model: &mut Model,
+    mut send: impl FnMut(InputMessage) -> Result<(), String>,
+) -> Result<(), String> {
     let geometries = model.terminal_geometries();
     let visible = geometries
         .iter()
@@ -2268,22 +2292,18 @@ fn send_resizes(model: &mut Model, client: &InteractiveClient) -> Result<(), Str
         if model.last_sent_geometry.get(&pane) == Some(&geometry) {
             continue;
         }
-        client
-            .send_input(InputMessage::ResizeTerminalV2 {
-                pane,
-                columns,
-                rows,
-                cell_width_px,
-                cell_height_px,
-                layout_generation: model.layout_generation,
-            })
-            .map_err(|error| error.to_string())?;
+        send(InputMessage::ResizeTerminalV2 {
+            pane,
+            columns,
+            rows,
+            cell_width_px,
+            cell_height_px,
+            layout_generation: model.layout_generation,
+        })?;
         model.last_sent_geometry.insert(pane, geometry);
     }
     if let Some((geometry, message)) = command_output_resize_message(model) {
-        client
-            .send_input(message)
-            .map_err(|error| error.to_string())?;
+        send(message)?;
         model.last_sent_command_output_geometry = Some(geometry);
     } else if model.command_output_geometry().is_none() {
         model.last_sent_command_output_geometry = None;
@@ -2504,6 +2524,91 @@ mod tests {
             endpoint,
             Vec::new(),
         )
+    }
+
+    #[test]
+    fn a_new_layout_generation_resends_an_unchanged_terminal_geometry() {
+        let pane = PaneId(7);
+        let mut core = ClientCore::new();
+        core.handle_message(initial_event(zz_protocol::EventPayload::Snapshot(
+            initial_snapshot(&[pane]),
+        )));
+        core.handle_message(initial_view(1));
+        let mut model = initial_model(&core);
+        model.update_snapshot(Arc::clone(core.snapshot()));
+        let geometry = model.terminal_geometries();
+        assert_eq!(geometry.len(), 1);
+        let structure = model.paint_structure();
+        let mut sent = Vec::new();
+        send_resizes_with(&mut model, |input| {
+            sent.push(input);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(sent.len(), 1);
+        while core.poll_event().is_some() {}
+        core.handle_message(initial_event(zz_protocol::EventPayload::ClientView(
+            zz_protocol::ClientView {
+                session: Some(zz_protocol::SessionId(1)),
+                focused_window: Some(zz_protocol::WindowId(1)),
+                layout_generation: 43,
+                attachment_generation: 1,
+                ..zz_protocol::ClientView::default()
+            },
+        )));
+        assert!(
+            std::iter::from_fn(|| core.poll_event())
+                .any(|event| matches!(event, CoreEvent::SnapshotChanged))
+        );
+        let outcome = refresh_snapshot(
+            &mut model,
+            Arc::clone(core.snapshot()),
+            core.layout_generation(),
+            |input| {
+                sent.push(input);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(model.terminal_geometries(), geometry);
+        assert_eq!(model.paint_structure(), structure);
+        assert!(
+            matches!(
+                outcome,
+                ProtocolOutcome::Repaint if *crate::COALESCE
+            ) || matches!(outcome, ProtocolOutcome::RepaintAll if !*crate::COALESCE)
+        );
+        assert_eq!(sent.len(), 2);
+        let (_, (columns, rows, cell_width_px, cell_height_px)) = geometry[0];
+        for (input, layout_generation) in sent.iter().zip([42, 43]) {
+            assert_eq!(
+                input,
+                &InputMessage::ResizeTerminalV2 {
+                    pane,
+                    columns,
+                    rows,
+                    cell_width_px,
+                    cell_height_px,
+                    layout_generation,
+                }
+            );
+        }
+        refresh_snapshot(
+            &mut model,
+            Arc::clone(core.snapshot()),
+            core.layout_generation(),
+            |input| {
+                sent.push(input);
+                Ok(())
+            },
+        )
+        .unwrap();
+        send_resizes_with(&mut model, |input| {
+            sent.push(input);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(sent.len(), 2);
     }
 
     #[test]

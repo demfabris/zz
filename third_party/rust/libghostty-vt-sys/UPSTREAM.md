@@ -8,8 +8,8 @@ This directory is a source snapshot of `libghostty-vt-sys` from
 - Upstream crate version: `0.2.1` (no newer release exists; the stack is unreleased)
 - Upstream wrapper Ghostty pin: `56dbc4a768778753737a3b9cbe0a3f9b4e434553`
 - Upstream Ghostty base: `6301810a48aaa3426887a4316668f18833a40138` (main, 2026-09-25)
-- Local Ghostty pin: [`demfabris/ghostty@713374af`](https://github.com/demfabris/ghostty/commit/713374afee3d4890f14733877fb51d831ffc82ee)
-- Fork branch: `zz-2026-09-29`, two commits on upstream: the C ABI signal-stack option (`6fce227c`, still on `zz-2026-09-25`) and the PageList spare-page reuse (`713374af`: line-limit pruning keeps the last pruned pool page resident for the next grow instead of decommitting and refaulting it; `compress` releases it and trims the last page). The previous pin `fa7986a9` stays on `codex/cabi-signal-stack`
+- Local Ghostty pin: [`demfabris/ghostty@c3941417`](https://github.com/demfabris/ghostty/commit/c39414175ca2aad564b74b3f52196355f2671774)
+- Fork branch: `zz-2026-09-30`, three commits on upstream: the C ABI signal-stack option (`6fce227c`, still on `zz-2026-09-25`), the PageList spare-page reuse (`713374af`: line-limit pruning keeps the last pruned pool page resident for the next grow instead of decommitting and refaulting it; `compress` releases it and trims the last page), and the trim fix (`c3941417`: preserves live cell blocks after history erase). `zz-2026-09-29` keeps `713374af`; the previous pin `fa7986a9` stays on `codex/cabi-signal-stack`
 - License: MIT OR Apache-2.0; the upstream MIT license is retained here.
 - Wrapper source: [`demfabris/libghostty-rs`](https://github.com/demfabris/libghostty-rs)
   branch `zz-2026-09-25`, a fork holding the same commit so a rebase of the PR branch

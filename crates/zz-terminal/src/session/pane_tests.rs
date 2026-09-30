@@ -264,6 +264,28 @@ fn compressed_history_reads_back_whole() {
     }
 }
 
+#[test]
+fn a_cleared_screen_survives_idle_compression() {
+    let session = shell_session(
+        "read _; i=0; while [ $i -lt 100 ]; do printf 'before clear row %03d\\n' $i; i=$((i+1)); done; printf '\\033[H\\033[2J\\033[3J'; printf 'ZZ_CLEARED\\n'; read _",
+    );
+    wait_until("the shell to start", || {
+        matches!(session.latest_viewport().status, SessionStatus::Running)
+    });
+    session.send_text("go\n");
+    wait_until("the clear", || {
+        text(&session.latest_viewport()).contains("ZZ_CLEARED")
+    });
+    thread::sleep(super::COMPRESS_IDLE + Duration::from_millis(500));
+    let capture = session
+        .capture(super::CaptureOptions::default())
+        .expect("capture the visible screen");
+    assert!(
+        capture.contains("ZZ_CLEARED"),
+        "the cleared screen survived compression: {capture:?}"
+    );
+}
+
 #[cfg(all(unix, not(target_os = "linux")))]
 #[test]
 #[allow(

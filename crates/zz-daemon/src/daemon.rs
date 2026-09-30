@@ -104,7 +104,7 @@ use crate::{
     status::{
         BufferFormatFacts, ClientFormatFacts, ClientViewportFacts, DaemonFormatHooks,
         FormatHookFacts, MessageFormatFacts, StatusRenderer, StatusRequest, client_terminal_facts,
-        host_names, status_context, warm_terminfo_entries,
+        host_names, live_status_context, status_context, warm_terminfo_entries,
     },
     terminal_features::{terminal_colour_count, terminal_feature_mask, terminal_features_list},
     transport::{AcceptWake, LocalTransport, Transport, TransportListener, TransportStream},
@@ -5054,11 +5054,9 @@ impl Shared {
                 return;
             }
             inner.engine.set_format_now(unix_timestamp());
-            let snapshot = inner.engine.state.snapshot();
             status_requests_with_selected_facts(
                 &inner,
                 targets,
-                &snapshot,
                 startup_ready,
                 &self.status_job_needs,
             )
@@ -15848,7 +15846,6 @@ impl Shared {
             status_request_with_selected_facts(
                 &inner,
                 target,
-                &inner.engine.state.snapshot(),
                 inner.engine.cached_format_option_snapshot(),
                 startup_ready,
                 self.status_job_needs(target),
@@ -37033,7 +37030,6 @@ fn status_requests(
 fn status_requests_with_selected_facts(
     inner: &ServerState,
     targets: Vec<ClientId>,
-    snapshot: &MuxSnapshot,
     startup_ready: bool,
     job_needs: &crate::status::StatusJobNeeds,
 ) -> Vec<StatusRequest> {
@@ -37041,12 +37037,16 @@ fn status_requests_with_selected_facts(
         return status_requests(
             inner,
             targets,
-            snapshot,
+            &inner.engine.state.snapshot(),
             &format_hook_facts(inner),
             startup_ready,
             job_needs,
         );
     }
+    let snapshot = targets
+        .iter()
+        .any(|client| inner.client_kinds.get(client) == Some(&ClientKind::Control))
+        .then(|| inner.engine.state.snapshot());
     let option_snapshot = inner.engine.cached_format_option_snapshot();
     let job_needs = job_needs.lock();
     let mut line_needs = BTreeMap::new();
@@ -37058,7 +37058,7 @@ fn status_requests_with_selected_facts(
             status_request_with_facts(
                 inner,
                 client,
-                snapshot,
+                facts.as_ref().and(snapshot.as_ref()),
                 option_snapshot.clone(),
                 facts,
                 startup_ready,
@@ -37072,7 +37072,6 @@ fn status_requests_with_selected_facts(
 fn status_request_with_selected_facts(
     inner: &ServerState,
     client: ClientId,
-    snapshot: &MuxSnapshot,
     option_snapshot: Arc<zz_mux::StatusRowVariables>,
     startup_ready: bool,
     job_needs: FormatNeeds,
@@ -37080,10 +37079,11 @@ fn status_request_with_selected_facts(
     let facts = (!*BORROWED_FORMAT_FACTS
         || inner.client_kinds.get(&client) == Some(&ClientKind::Control))
     .then(|| format_hook_facts(inner));
+    let snapshot = facts.is_some().then(|| inner.engine.state.snapshot());
     status_request_with_facts(
         inner,
         client,
-        snapshot,
+        snapshot.as_ref(),
         option_snapshot,
         facts,
         startup_ready,
@@ -37126,7 +37126,7 @@ fn status_request_with(
     status_request_with_facts(
         inner,
         client,
-        snapshot,
+        Some(snapshot),
         option_snapshot,
         Some(facts),
         startup_ready,
@@ -37138,7 +37138,7 @@ fn status_request_with(
 fn status_request_with_facts(
     inner: &ServerState,
     client: ClientId,
-    snapshot: &MuxSnapshot,
+    snapshot: Option<&MuxSnapshot>,
     option_snapshot: Arc<zz_mux::StatusRowVariables>,
     facts: Option<FormatHookFacts>,
     startup_ready: bool,
@@ -37146,11 +37146,10 @@ fn status_request_with_facts(
     line_needs: &mut BTreeMap<Option<SessionId>, FormatNeeds>,
 ) -> StatusRequest {
     let attached = client_attached_session(inner, client);
-    let mut context = status_context(
-        snapshot,
-        &inner.engine,
-        attached,
-        client_focused_window_for_attachment(inner, client),
+    let focused_window = client_focused_window_for_attachment(inner, client);
+    let mut context = snapshot.map_or_else(
+        || live_status_context(&inner.engine, attached, focused_window),
+        |snapshot| status_context(snapshot, &inner.engine, attached, focused_window),
     );
     context.set_format_value("config_files", inner.config_files.clone());
     let formats = inner.engine.status_formats_for_session(attached);

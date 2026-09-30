@@ -3095,27 +3095,25 @@ impl MuxEngine {
 
     #[must_use]
     pub fn message_styles_for_session(&self, session: Option<SessionId>) -> (String, String) {
-        session.map_or_else(
-            || {
-                (
-                    self.global_session_options.message_style.clone(),
-                    self.global_session_options.message_command_style.clone(),
-                )
-            },
-            |session| {
-                let knobs = self.session_knobs(session);
-                (knobs.message_style, knobs.message_command_style)
-            },
+        let overrides = session.and_then(|session| self.session_options.get(&session));
+        (
+            overrides
+                .and_then(|values| values.get(&SessionOption::MessageStyle))
+                .unwrap_or(&self.global_session_options.message_style)
+                .clone(),
+            overrides
+                .and_then(|values| values.get(&SessionOption::MessageCommandStyle))
+                .unwrap_or(&self.global_session_options.message_command_style)
+                .clone(),
         )
     }
 
     #[must_use]
     pub fn message_line_for_session(&self, session: Option<SessionId>) -> u8 {
         session
-            .map_or_else(
-                || self.global_session_options.message_line.clone(),
-                |session| self.session_knobs(session).message_line,
-            )
+            .and_then(|session| self.session_options.get(&session))
+            .and_then(|values| values.get(&SessionOption::MessageLine))
+            .unwrap_or(&self.global_session_options.message_line)
             .parse()
             .unwrap_or_default()
     }

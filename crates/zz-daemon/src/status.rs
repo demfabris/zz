@@ -1328,22 +1328,7 @@ pub(crate) fn status_context<'e>(
     attached: Option<SessionId>,
     focused_window: Option<WindowId>,
 ) -> StatusContext<'e> {
-    let mut context = attached.map_or_else(
-        || engine.format_status_context(None, focused_window, None),
-        |client_session| {
-            engine.format_status_context_for_client(
-                Some(client_session),
-                focused_window,
-                None,
-                client_session,
-            )
-        },
-    );
-    if context.variable("host").is_none_or(|host| host.is_empty()) {
-        let (host, host_short) = host_names();
-        context.set_format_value("host", host.clone());
-        context.set_format_value("host_short", host_short.clone());
-    }
+    let mut context = base_status_context(engine, attached, focused_window);
     let Some(session) = snapshot
         .sessions
         .iter()
@@ -1354,18 +1339,7 @@ pub(crate) fn status_context<'e>(
     let focused_window = focused_window
         .filter(|focused| session.windows.iter().any(|window| window.id == *focused))
         .unwrap_or(session.active_window);
-    if context
-        .variable("window_active")
-        .is_some_and(|value| !value.is_empty())
-    {
-        context.set_format_value("window_active", "1");
-    }
-    if context
-        .variable("pane_active")
-        .is_some_and(|value| !value.is_empty())
-    {
-        context.set_format_value("pane_active", "1");
-    }
+    set_status_context_active(&mut context);
     context.set_format_value("session_attached", session.viewers.len().to_string());
     context.set_format_value(
         "session_many_attached",
@@ -1395,6 +1369,62 @@ pub(crate) fn status_context<'e>(
             .join(","),
     );
     context
+}
+
+pub(crate) fn live_status_context(
+    engine: &MuxEngine,
+    attached: Option<SessionId>,
+    focused_window: Option<WindowId>,
+) -> StatusContext<'_> {
+    let mut context = base_status_context(engine, attached, focused_window);
+    if attached.is_some_and(|session| engine.state.sessions.contains_key(&session)) {
+        set_status_context_active(&mut context);
+        for (name, value) in [
+            ("session_attached", "0"),
+            ("session_many_attached", "0"),
+            ("session_attached_list", ""),
+            ("window_active_clients", "0"),
+            ("window_active_clients_list", ""),
+        ] {
+            context.set_format_value(name, value);
+        }
+    }
+    context
+}
+
+fn base_status_context(
+    engine: &MuxEngine,
+    attached: Option<SessionId>,
+    focused_window: Option<WindowId>,
+) -> StatusContext<'_> {
+    let mut context = attached.map_or_else(
+        || engine.format_status_context(None, focused_window, None),
+        |client_session| {
+            engine.format_status_context_for_client(
+                Some(client_session),
+                focused_window,
+                None,
+                client_session,
+            )
+        },
+    );
+    if context.variable("host").is_none_or(|host| host.is_empty()) {
+        let (host, host_short) = host_names();
+        context.set_format_value("host", host.clone());
+        context.set_format_value("host_short", host_short.clone());
+    }
+    context
+}
+
+fn set_status_context_active(context: &mut StatusContext<'_>) {
+    for name in ["window_active", "pane_active"] {
+        if context
+            .variable(name)
+            .is_some_and(|value| !value.is_empty())
+        {
+            context.set_format_value(name, "1");
+        }
+    }
 }
 
 pub(crate) fn host_names() -> &'static (String, String) {

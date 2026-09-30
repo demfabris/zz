@@ -1640,7 +1640,10 @@ pub(crate) struct LayoutDumps {
 impl StatusContext<'_> {
     #[must_use]
     pub fn engine(&self) -> Option<&MuxEngine> {
-        self.tree.as_ref().map(|tree| tree.engine)
+        self.tree
+            .as_ref()
+            .map(|tree| tree.engine)
+            .or(self.format_universe.engine)
     }
     #[must_use]
     pub fn variable(&self, name: &str) -> Option<Cow<'_, str>> {
@@ -1725,7 +1728,7 @@ impl StatusContext<'_> {
         needs: FormatNeeds,
         templates: impl IntoIterator<Item = &'t str>,
     ) -> StatusContext<'static> {
-        let references = if let Some(engine) = self.engine() {
+        let references = if let Some(engine) = self.tree.as_ref().map(|tree| tree.engine) {
             engine.cached_format_references_for_templates(templates)
         } else {
             Arc::new(
@@ -2001,6 +2004,7 @@ impl<'e> StatusContext<'e> {
             context.window_id.clone_from(&self.window_id);
             context.pane_id.clone_from(&self.pane_id);
             context.format_now = self.format_now;
+            context.format_universe.engine = engine;
             context
         }
     }

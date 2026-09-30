@@ -2,6 +2,97 @@ use super::tests::{engine_request, execute, request, settled};
 use super::*;
 
 #[test]
+fn live_status_context_matches_model_snapshot_for_focused_missing_and_linked_targets() {
+    let mut engine = MuxEngine::default();
+    let mut execution = zz_mux::ExecutionContext::default();
+    execute(&mut engine, &mut execution, &["new-session", "-s", "alpha"]);
+    let alpha = execution.session.unwrap();
+    let first = execution.window.unwrap();
+    execute(
+        &mut engine,
+        &mut execution,
+        &["new-window", "-n", "focused"],
+    );
+    let focused = execution.window.unwrap();
+    execute(&mut engine, &mut execution, &["new-session", "-s", "beta"]);
+    let beta = execution.session.unwrap();
+    let other = execution.window.unwrap();
+    let linked = engine.state.session_mut(beta).unwrap();
+    linked.windows.push(first);
+    linked.active_window = first;
+    assert!(engine.state.sessions[&beta].windows.contains(&first));
+    engine.set_format_now(1_700_000_000);
+    let snapshot = engine.state.snapshot();
+    let references = BTreeSet::from(["*".to_owned()]);
+    for borrowed in [true, false] {
+        zz_mux::with_borrowed_formats(borrowed, || {
+            for (attached, window) in [
+                (None, None),
+                (None, Some(first)),
+                (Some(alpha), None),
+                (Some(alpha), Some(focused)),
+                (Some(alpha), Some(other)),
+                (Some(beta), None),
+                (Some(beta), Some(first)),
+                (Some(SessionId(999)), None),
+                (Some(alpha), Some(WindowId(999))),
+                (Some(SessionId(999)), Some(WindowId(999))),
+            ] {
+                let live = live_status_context(&engine, attached, window)
+                    .detach_with_references(FormatNeeds::ALL, &references);
+                let snapshotted = status_context(&snapshot, &engine, attached, window)
+                    .detach_with_references(FormatNeeds::ALL, &references);
+                assert!(
+                    live.same_detached(&snapshotted),
+                    "borrowed={borrowed} attached={attached:?} window={window:?}"
+                );
+            }
+        });
+    }
+}
+
+#[test]
+fn snapshot_status_context_preserves_viewers_for_existing_snapshot_callers() {
+    let mut engine = MuxEngine::default();
+    let (session, window, _) = engine.state.create_session("viewers").unwrap();
+    let (other, _) = engine
+        .state
+        .create_window(
+            session,
+            Some("other".to_owned()),
+            zz_mux::PaneKind::Terminal,
+        )
+        .unwrap();
+    let mut snapshot = engine.state.snapshot();
+    snapshot.sessions[0].viewers = vec![
+        zz_protocol::SessionViewer {
+            name: "focused".to_owned(),
+            window,
+            is_self: true,
+        },
+        zz_protocol::SessionViewer {
+            name: "other".to_owned(),
+            window: other,
+            is_self: false,
+        },
+    ];
+    for borrowed in [true, false] {
+        zz_mux::with_borrowed_formats(borrowed, || {
+            let context = status_context(&snapshot, &engine, Some(session), Some(window));
+            for (name, expected) in [
+                ("session_attached", "2"),
+                ("session_many_attached", "1"),
+                ("session_attached_list", "focused,other"),
+                ("window_active_clients", "1"),
+                ("window_active_clients_list", "focused"),
+            ] {
+                assert_eq!(context.variable(name).unwrap(), expected, "{name}");
+            }
+        });
+    }
+}
+
+#[test]
 fn completed_status_reads_fresh_scoped_daemon_overrides_with_the_same_detached_context() {
     for (name, first, second) in [
         ("session_attached", "1", "2"),

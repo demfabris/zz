@@ -475,3 +475,65 @@ fn default_key_listing_does_not_cache_oversized_output() {
     assert!(output.len() > 1024 * 1024);
     assert!(engine.key_listing_cache.lock().is_none());
 }
+
+#[test]
+fn message_scalar_getters_follow_scoped_inheritance_and_unset() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new("new-session", ["-s", "message"]),
+        )
+        .unwrap();
+    let session = context.session;
+    let defaults = (
+        MESSAGE_STYLE_DEFAULT.to_owned(),
+        MESSAGE_COMMAND_STYLE_DEFAULT.to_owned(),
+    );
+    assert_eq!(engine.message_styles_for_session(session), defaults);
+    assert_eq!(engine.message_line_for_session(session), 0);
+    for args in [
+        ["-g", "message-style", "fg=blue"],
+        ["-g", "message-command-style", "bg=yellow"],
+        ["-g", "message-line", "4"],
+    ] {
+        set(&mut engine, &mut context, &args);
+    }
+    assert_eq!(
+        engine.message_styles_for_session(session),
+        ("fg=blue".to_owned(), "bg=yellow".to_owned())
+    );
+    assert_eq!(engine.message_line_for_session(session), 4);
+    set(&mut engine, &mut context, &["message-style", "fg=red"]);
+    set(&mut engine, &mut context, &["-a", "message-style", "bold"]);
+    set(
+        &mut engine,
+        &mut context,
+        &["message-command-style", "bg=green"],
+    );
+    set(&mut engine, &mut context, &["message-line", "2"]);
+    assert_eq!(
+        engine.message_styles_for_session(session),
+        ("fg=red,bold".to_owned(), "bg=green".to_owned())
+    );
+    assert_eq!(engine.message_line_for_session(session), 2);
+    assert_eq!(
+        engine.message_styles_for_session(None),
+        ("fg=blue".to_owned(), "bg=yellow".to_owned())
+    );
+    assert_eq!(engine.message_line_for_session(None), 4);
+    for name in ["message-style", "message-command-style", "message-line"] {
+        set(&mut engine, &mut context, &["-u", name]);
+    }
+    assert_eq!(
+        engine.message_styles_for_session(session),
+        engine.message_styles_for_session(None)
+    );
+    assert_eq!(engine.message_line_for_session(session), 4);
+    for name in ["message-style", "message-command-style", "message-line"] {
+        set(&mut engine, &mut context, &["-gu", name]);
+    }
+    assert_eq!(engine.message_styles_for_session(session), defaults);
+    assert_eq!(engine.message_line_for_session(session), 0);
+}

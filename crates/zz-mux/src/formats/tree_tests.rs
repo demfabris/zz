@@ -16,6 +16,43 @@ impl StatusHooks for Hooks<'_> {
 }
 
 #[test]
+fn engine_access_preserves_legacy_resolution_and_ends_at_detach() {
+    let mut engine = MuxEngine::default();
+    let (session, window, pane) = engine.state.create_session("work").unwrap();
+    for borrowed in [true, false] {
+        with_borrowed_formats(borrowed, || {
+            let mut context = engine.format_status_context(Some(session), Some(window), Some(pane));
+            assert!(std::ptr::eq(context.engine().unwrap(), &engine));
+            assert_eq!(context.variable("session_name").as_deref(), Some("work"));
+            assert_eq!(context.tree.is_some(), borrowed);
+            assert_eq!(context.values.get().is_none(), borrowed);
+            let child = context.borrowed_child(Some(&engine));
+            assert!(std::ptr::eq(child.engine().unwrap(), &engine));
+            assert_eq!(child.tree.is_some(), borrowed);
+            assert_eq!(child.variable("session_name").as_deref(), Some("work"));
+            context.window_name = "owned-window".to_owned();
+            assert!(context.tree.is_none());
+            assert!(std::ptr::eq(context.engine().unwrap(), &engine));
+            assert_eq!(
+                context.variable("window_name").as_deref(),
+                Some("owned-window")
+            );
+            let detached = context.detach_with_templates(FormatNeeds::NONE, ["#{window_name}"]);
+            assert!(detached.engine().is_none());
+            assert_eq!(
+                detached.variable("window_name").as_deref(),
+                Some("owned-window")
+            );
+        });
+    }
+    assert!(
+        StatusContext::from(StatusValues::default())
+            .engine()
+            .is_none()
+    );
+}
+
+#[test]
 fn borrowed_callbacks_match_w1_for_every_pinned_name() {
     for (fixture, engine) in fixtures() {
         for client in clients(&engine) {
@@ -48,13 +85,26 @@ fn borrowed_callbacks_match_w1_for_every_pinned_name() {
 fn selective_detach_captures_only_referenced_table_values() {
     let mut engine = MuxEngine::default();
     let (session, _, _) = engine.state.create_session("work").unwrap();
-    let context = engine
-        .format_status_context(Some(session), None, None)
-        .detach_with_templates(FormatNeeds::NONE, ["#{session_name} #{pane_index}"]);
+    let template = "#{session_name} #{pane_index}";
+    let context = with_borrowed_formats(true, || {
+        engine
+            .format_status_context(Some(session), None, None)
+            .detach_with_templates(FormatNeeds::NONE, [template])
+    });
     assert_eq!(context.variable("session_name").as_deref(), Some("work"));
     assert_eq!(context.variable("pane_index").as_deref(), Some("0"));
     assert_eq!(context.variables.len(), 2);
     assert!(context.values.get().is_none());
+    assert_cache_context_matches_w1(
+        &engine,
+        FormatContext {
+            session: Some(session),
+            active_session: Some(session),
+            ..FormatContext::default()
+        },
+        template,
+        &context,
+    );
     assert_eq!(context.pane_index, 0);
     assert!(std::mem::size_of::<StatusContext>() < 256);
 }
@@ -308,7 +358,11 @@ fn selective_detached_loops_and_indirection_match_w1() {
 #[test]
 fn indirect_references_follow_option_generations_and_scopes() {
     let mut engine = MuxEngine::default();
-    let (session, _, _) = engine.state.create_session("work").unwrap();
+    let (session, _, pane) = engine.state.create_session("work").unwrap();
+    engine
+        .state
+        .update_pane_title(pane, "captured-title")
+        .unwrap();
     let mut context = crate::ExecutionContext::default();
     engine
         .execute(
@@ -338,14 +392,30 @@ fn indirect_references_follow_option_generations_and_scopes() {
     let second = engine.cached_format_references("#{E:status-left}");
     assert!(second.contains("pane_title"));
     assert!(!second.contains("session_name"));
-    let detached = engine
-        .format_status_context(Some(session), None, None)
-        .detach_with_templates(
-            engine.format_needs(["#{E:status-left}"]),
-            ["#{E:status-left}"],
-        );
+    let detached = with_borrowed_formats(true, || {
+        engine
+            .format_status_context(Some(session), None, None)
+            .detach_with_templates(
+                engine.format_needs(["#{E:status-left}"]),
+                ["#{E:status-left}"],
+            )
+    });
     assert!(detached.variables.contains_key("pane_title"));
     assert!(!detached.variables.contains_key("session_name"));
+    assert_eq!(
+        expand_status("#{E:status-left}", &detached, &mut Hooks(&engine)),
+        "captured-title"
+    );
+    assert_cache_context_matches_w1(
+        &engine,
+        FormatContext {
+            session: Some(session),
+            active_session: Some(session),
+            ..FormatContext::default()
+        },
+        "#{E:status-left}",
+        &detached,
+    );
 }
 
 fn cache_context(

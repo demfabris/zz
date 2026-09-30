@@ -121,6 +121,42 @@ fn borrowed_and_owned_daemon_format_facts_expand_the_same_values() {
 }
 
 #[test]
+fn borrowed_facts_keep_engine_access_with_legacy_variables_and_nested_loops() {
+    let (shared, client, context) = fixture();
+    let inner = shared.inner.lock();
+    for borrowed_variables in [true, false] {
+        zz_mux::with_borrowed_formats(borrowed_variables, || {
+            let borrowed = borrowed(&inner, client, &context);
+            let owned = format_hook_facts_for_client(&inner, client, &context);
+            let values =
+                inner
+                    .engine
+                    .format_status_context(context.session, context.window, context.pane);
+            for template in [
+                "#{@kept}:#{pane_kind}:#{window_active_clients}:#{window_active_clients_list}",
+                "#{W:#{@kept}:#{pane_kind}:#{window_active_clients}:#{window_active_clients_list};}",
+                "#{S:#{session_name}[#{W:#{@kept}:#{P:#{pane_kind}}:#{window_active_clients};}]}",
+                "#{L:#{client_name}:#{client_session};}",
+            ] {
+                assert_eq!(
+                    expand_format_values(
+                        template,
+                        &values,
+                        &mut DaemonFormatHooks::command(&borrowed)
+                    ),
+                    expand_format_values(
+                        template,
+                        &values,
+                        &mut DaemonFormatHooks::command(&owned)
+                    ),
+                    "borrowed_variables={borrowed_variables} {template}"
+                );
+            }
+        });
+    }
+}
+
+#[test]
 fn borrowed_command_facts_expand_without_building_an_owned_snapshot() {
     if !*BORROWED_FORMAT_FACTS {
         return;
@@ -243,7 +279,6 @@ fn selected_request(inner: &ServerState, client: ClientId) -> StatusRequest {
     status_request_with_selected_facts(
         inner,
         client,
-        &inner.engine.state.snapshot(),
         inner.engine.cached_format_option_snapshot(),
         true,
         FormatNeeds::NONE,

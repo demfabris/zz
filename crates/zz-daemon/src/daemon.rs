@@ -17864,7 +17864,8 @@ impl Shared {
         });
         let pane_focus_before =
             event_hooks_enabled.then(|| hook_events::FocusProbeScope::open(&mut inner));
-        let client_name = client_format_name(&inner, client);
+        let client_name =
+            (event_hooks_enabled && was_attached).then(|| client_format_name(&inner, client));
         let terminals = sessions
             .iter()
             .flat_map(|session| session_terminals(&inner, *session))
@@ -17964,7 +17965,7 @@ impl Shared {
                     "client-detached",
                     context,
                     client,
-                    Some(client_name.as_str()),
+                    client_name.as_deref(),
                 ));
             }
         }

@@ -205,6 +205,7 @@ fn status_preparation_reuses_engine_capture_and_keeps_client_and_config_values_f
                 Some(window),
                 parameters(&inner, Some(session)).needs,
                 &first.references,
+                true,
             )
             .unwrap();
             assert!(first.context.same_detached(&cached));

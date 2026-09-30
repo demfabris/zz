@@ -110,6 +110,263 @@ fn assert_fresh(first: &StatusRequest, next: &StatusRequest) {
 }
 
 #[test]
+fn status_preparation_omits_large_unused_config_capture_and_reuses_requests() {
+    let (mut inner, client, context) = fixture("#{session_name}:#{client_width}");
+    inner.config_files = "a".repeat(STATUS_PREPARATION_MAX_BYTES + 1);
+    let first = shared_request(&inner, client);
+    assert_left(&first, "prepared:80");
+    assert!(!first.references.contains("*"));
+    assert!(!first.references.contains("config_files"));
+    let selective = reuse_enabled() && zz_mux::compiled_formats_knob();
+    if selective {
+        let cache = inner.status_preparation_cache.lock();
+        let cached = cache.as_ref().unwrap();
+        assert!(!cached.config_files_requested);
+        assert!(cached.config_files.is_empty());
+        assert!(cached.retained_bytes <= STATUS_PREPARATION_MAX_BYTES);
+    } else {
+        assert!(inner.status_preparation_cache.lock().is_none());
+    }
+    let revision = inner.engine.format_cache_revision();
+    inner.config_files = "b".repeat(STATUS_PREPARATION_MAX_BYTES + 2);
+    let changed = shared_request(&inner, client);
+    assert_eq!(inner.engine.format_cache_revision(), revision);
+    assert_eq!(Arc::ptr_eq(&first, &changed), selective);
+    assert_left(&changed, "prepared:80");
+    let candidate = CachedStatusPreparation::new(
+        &inner,
+        context.session,
+        context.window,
+        inner.engine.format_cache_revision().unwrap_or_default(),
+        Arc::clone(&changed),
+    );
+    assert_eq!(candidate.config_files_requested, !selective);
+    assert_eq!(
+        candidate.retained_bytes() <= STATUS_PREPARATION_MAX_BYTES,
+        selective
+    );
+    inner.engine.set_format_now(1_700_000_001);
+    let tick = shared_request(&inner, client);
+    assert_eq!(tick.context.format_now, Some(1_700_000_001));
+    assert_left(&tick, "prepared:80");
+    assert_eq!(Arc::ptr_eq(&changed.facts, &tick.facts), selective);
+}
+
+#[test]
+fn status_preparation_keeps_static_indirect_config_dependencies_fresh() {
+    for template in ["#{config_files}", "#{E:status-right}", "#{T:status-right}"] {
+        let (mut inner, client, mut context) = fixture(template);
+        set_option(&mut inner, &mut context, "status-right", "#{config_files}");
+        inner.config_files = "/first.conf".to_owned();
+        let first = shared_request(&inner, client);
+        assert!(first.references.contains("config_files"), "{template}");
+        assert_left(&first, "/first.conf");
+        if reuse_enabled() {
+            let cache = inner.status_preparation_cache.lock();
+            assert!(cache.as_ref().unwrap().config_files_requested);
+        }
+        let revision = inner.engine.format_cache_revision();
+        inner.config_files = "/next.conf".to_owned();
+        let next = shared_request(&inner, client);
+        assert_eq!(inner.engine.format_cache_revision(), revision);
+        assert_fresh(&first, &next);
+        assert_left(&next, "/next.conf");
+        assert_left(&first, "/first.conf");
+    }
+}
+
+#[test]
+fn status_preparation_keeps_nested_loop_config_dependencies_fresh() {
+    let (mut inner, client, context) = fixture("#{W:[#{window_index}:#{P:#{config_files};}]}");
+    inner
+        .engine
+        .state
+        .split_pane(
+            context.pane.unwrap(),
+            zz_protocol::Axis::Horizontal,
+            zz_mux::PaneKind::Terminal,
+        )
+        .unwrap();
+    inner.config_files = "/first.conf".to_owned();
+    let first = shared_request(&inner, client);
+    assert!(first.references.contains("config_files"));
+    assert_eq!(
+        first.context.variable("config_files").as_deref(),
+        Some("/first.conf")
+    );
+    assert_left(&first, "[0:;;]");
+    let revision = inner.engine.format_cache_revision();
+    inner.config_files = "/next.conf".to_owned();
+    let next = shared_request(&inner, client);
+    assert_eq!(inner.engine.format_cache_revision(), revision);
+    assert_fresh(&first, &next);
+    assert_eq!(
+        next.context.variable("config_files").as_deref(),
+        Some("/next.conf")
+    );
+    assert_left(&next, "[0:;;]");
+    assert_left(&first, "[0:;;]");
+    let snapshot = inner.engine.state.snapshot();
+    let owned = status_request(
+        &inner,
+        client,
+        &snapshot,
+        inner.engine.cached_format_option_snapshot(),
+        format_hook_facts(&inner),
+        true,
+        FormatNeeds::NONE,
+    );
+    assert_eq!(
+        StatusRenderer::default().render_initial(&next),
+        StatusRenderer::default().render_initial(&owned)
+    );
+}
+
+#[test]
+fn status_preparation_keeps_border_only_config_capture_and_guard() {
+    let (mut inner, client, mut context) = fixture("#{session_name}");
+    set_option(
+        &mut inner,
+        &mut context,
+        "pane-active-border-style",
+        "fg=#{?config_files,red,green}",
+    );
+    inner.config_files = "/first.conf".to_owned();
+    let first = shared_request(&inner, client);
+    assert!(!first.references.contains("config_files"));
+    let parameters = status_parameters(&inner, context.session, &first.option_snapshot);
+    assert!(parameters.client_references.contains("config_files"));
+    assert_eq!(
+        first.context.variable("config_files").as_deref(),
+        Some("/first.conf")
+    );
+    if reuse_enabled() {
+        let cache = inner.status_preparation_cache.lock();
+        assert!(cache.as_ref().unwrap().config_files_requested);
+    }
+    let revision = inner.engine.format_cache_revision();
+    inner.config_files = "/next.conf".to_owned();
+    let next = shared_request(&inner, client);
+    assert_eq!(inner.engine.format_cache_revision(), revision);
+    assert_fresh(&first, &next);
+    assert_eq!(
+        next.context.variable("config_files").as_deref(),
+        Some("/next.conf")
+    );
+    let snapshot = inner.engine.state.snapshot();
+    let owned = status_request(
+        &inner,
+        client,
+        &snapshot,
+        inner.engine.cached_format_option_snapshot(),
+        format_hook_facts(&inner),
+        true,
+        FormatNeeds::NONE,
+    );
+    assert_eq!(first.pane_borders, next.pane_borders);
+    assert_eq!(next.pane_borders, owned.pane_borders);
+    assert_left(&next, "prepared");
+}
+
+#[test]
+fn status_preparation_retains_config_for_unknown_jobs_full_providers_and_rollback() {
+    let (mut inner, client, mut context) = fixture("#{session_name}");
+    inner.config_files = "/retained.conf".to_owned();
+    let job = status_request_with_selected_facts(
+        &inner,
+        client,
+        inner.engine.cached_format_option_snapshot(),
+        true,
+        FormatNeeds::PANES,
+    );
+    assert!(job.references.contains("*"));
+    assert_eq!(
+        job.context.variable("config_files").as_deref(),
+        Some("/retained.conf")
+    );
+    let snapshot = inner.engine.state.snapshot();
+    let owned = status_request(
+        &inner,
+        client,
+        &snapshot,
+        inner.engine.cached_format_option_snapshot(),
+        format_hook_facts(&inner),
+        true,
+        FormatNeeds::NONE,
+    );
+    assert_eq!(
+        owned.context.variable("config_files").as_deref(),
+        Some("/retained.conf")
+    );
+    assert_left(&owned, "prepared");
+    let legacy = zz_mux::with_borrowed_formats(false, || shared_request(&inner, client));
+    assert_eq!(
+        legacy.context.variable("config_files").as_deref(),
+        Some("/retained.conf")
+    );
+    assert_left(&legacy, "prepared");
+    let terminal = Arc::new(TerminalSession::spawn_empty_with_appearance(
+        64,
+        Arc::new(TerminalAppearance::default()),
+    ));
+    let view = TerminalViewId(client.0);
+    terminal.attach_view(view);
+    terminal.view_action(view, zz_terminal::TerminalViewAction::EnterCopyMode);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while terminal.copy_mode_facts(view).is_none()
+        || terminal.latest_viewport_for(view).is_none_or(|viewport| {
+            !matches!(
+                viewport.mode,
+                TerminalMode::Copy {
+                    hide_position: false,
+                    ..
+                }
+            )
+        })
+    {
+        assert!(Instant::now() < deadline, "copy facts did not become ready");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    inner
+        .terminals_mut()
+        .insert(context.pane.unwrap(), terminal);
+    enter_copy_session(&mut inner, client, context.pane.unwrap()).unwrap();
+    let mode = shared_request(&inner, client);
+    assert!(!mode.modes.is_empty());
+    assert_eq!(
+        mode.context.variable("config_files").as_deref(),
+        Some("/retained.conf")
+    );
+    inner.copy_sessions.remove(&client);
+    inner.client_kinds.insert(client, ClientKind::Control);
+    let control = shared_request(&inner, client);
+    assert_eq!(
+        control.context.variable("config_files").as_deref(),
+        Some("/retained.conf")
+    );
+    inner.client_kinds.insert(client, ClientKind::Interactive);
+    if !*BORROWED_FORMAT_FACTS
+        || !zz_mux::borrowed_formats_enabled()
+        || !zz_mux::format_cache_knob()
+        || !zz_mux::compiled_formats_knob()
+    {
+        let rollback = shared_request(&inner, client);
+        assert_eq!(
+            rollback.context.variable("config_files").as_deref(),
+            Some("/retained.conf")
+        );
+        assert_left(&rollback, "prepared");
+    }
+    set_option(&mut inner, &mut context, "status-left", "#(printf dynamic)");
+    let dynamic = shared_request(&inner, client);
+    assert!(dynamic.references.contains("*"));
+    assert_eq!(
+        dynamic.context.variable("config_files").as_deref(),
+        Some("/retained.conf")
+    );
+}
+
+#[test]
 fn status_preparation_shares_the_whole_immutable_request() {
     zz_mux::with_borrowed_formats(true, || {
         let (inner, client, _) = fixture("#{session_name}:#{client_width}");
@@ -351,6 +608,7 @@ fn status_preparation_clock_reuse_falls_back_after_engine_capture_eviction() {
                 context.window,
                 parameters.needs,
                 &first.references,
+                true,
             )
             .is_none()
         );

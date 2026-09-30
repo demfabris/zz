@@ -6647,34 +6647,36 @@ impl Shared {
         let original_context = context.clone();
         let name = canonical_command(&command.name).to_owned();
         let previous_client_terminal = context_client_terminal(context);
-        let provenance_client = format_provenance_client(context, client);
-        let client_attached_context = if client_terminal == ClientTerminal::Present {
-            let inner = self.inner.lock();
-            provenance_client.and_then(|client| {
-                let session = client_attached_session(&inner, client)?;
-                let session_state = inner.engine.state.sessions.get(&session)?;
-                let window = client_focused_window(&inner, client, session_state);
-                let pane = inner.engine.state.windows.get(&window)?.active_pane;
-                Some((session, window, pane))
-            })
-        } else {
-            None
-        };
-        set_context_client_terminal(context, client_terminal);
-        context.set_attached_client_context(client_attached_context);
-        let target_format_client = {
-            let inner = self.inner.lock();
-            if context.has_no_client() {
-                FormatClient::NoClient
+        if kind != ClientKind::Command || name != "refresh-client" {
+            let provenance_client = format_provenance_client(context, client);
+            let client_attached_context = if client_terminal == ClientTerminal::Present {
+                let inner = self.inner.lock();
+                provenance_client.and_then(|client| {
+                    let session = client_attached_session(&inner, client)?;
+                    let session_state = inner.engine.state.sessions.get(&session)?;
+                    let window = client_focused_window(&inner, client, session_state);
+                    let pane = inner.engine.state.windows.get(&window)?.active_pane;
+                    Some((session, window, pane))
+                })
             } else {
-                provenance_client
-                    .and_then(|client| current_format_client_with_session(&inner, client))
-                    .map_or(FormatClient::NoClient, |(_, session)| {
-                        FormatClient::Attached(session)
-                    })
-            }
-        };
-        context.set_format_client(target_format_client);
+                None
+            };
+            set_context_client_terminal(context, client_terminal);
+            context.set_attached_client_context(client_attached_context);
+            let target_format_client = {
+                let inner = self.inner.lock();
+                if context.has_no_client() {
+                    FormatClient::NoClient
+                } else {
+                    provenance_client
+                        .and_then(|client| current_format_client_with_session(&inner, client))
+                        .map_or(FormatClient::NoClient, |(_, session)| {
+                            FormatClient::Attached(session)
+                        })
+                }
+            };
+            context.set_format_client(target_format_client);
+        }
         let result = self.execute_with_mux_source_raw(
             client,
             kind,
@@ -37403,6 +37405,7 @@ fn status_request_with_selected_options(
                     window,
                     parameters.needs,
                     &cached.request.references,
+                    cached.config_files_requested,
                 )
                 .filter(|context| context.same_detached_data(&cached.request.context))
                 .map(Arc::new)
@@ -37527,6 +37530,7 @@ struct CachedStatusPreparation {
     border_client: bool,
     retained_bytes: usize,
     engine_identity: Weak<()>,
+    config_files_requested: bool,
 }
 
 impl CachedStatusPreparation {
@@ -37541,17 +37545,25 @@ impl CachedStatusPreparation {
         let viewport_requested = status_parameters(inner, attached, &request.option_snapshot)
             .client_fact_selection
             .viewport;
-        let border_client = inner
+        let border_references = inner
             .engine
-            .cached_format_references_for_templates(BORDER_FORMAT_TEMPLATES)
-            .iter()
-            .any(|name| {
-                name.starts_with("client_")
-                    || matches!(
-                        name.as_str(),
-                        "window_bigger" | "window_offset_x" | "window_offset_y"
-                    )
-            });
+            .cached_format_references_for_templates(BORDER_FORMAT_TEMPLATES);
+        let border_client = border_references.iter().any(|name| {
+            name.starts_with("client_")
+                || matches!(
+                    name.as_str(),
+                    "window_bigger" | "window_offset_x" | "window_offset_y"
+                )
+        });
+        let config_files_requested = !*BORROWED_FORMAT_FACTS
+            || !zz_mux::borrowed_formats_enabled()
+            || !zz_mux::format_cache_knob()
+            || !zz_mux::compiled_formats_knob()
+            || !request.modes.is_empty()
+            || request.references.contains("*")
+            || request.references.contains("config_files")
+            || border_references.contains("*")
+            || border_references.contains("config_files");
         let mut cached = Self {
             revision,
             attached,
@@ -37561,12 +37573,17 @@ impl CachedStatusPreparation {
             terminal: inner.client_terminals.contains(&client),
             features: inner.client_features.get(&client).copied(),
             environment: inner.client_environments.get(&client).map(Arc::downgrade),
-            config_files: inner.config_files.clone(),
+            config_files: if config_files_requested {
+                inner.config_files.clone()
+            } else {
+                String::new()
+            },
             request,
             viewport_requested,
             border_client,
             retained_bytes: 0,
             engine_identity: inner.engine.format_cache_identity(),
+            config_files_requested,
         };
         cached.retained_bytes = cached.retained_bytes();
         cached
@@ -37593,7 +37610,7 @@ impl CachedStatusPreparation {
             && self.kind == inner.client_kinds.get(&client).copied()
             && self.terminal == inner.client_terminals.contains(&client)
             && self.features == inner.client_features.get(&client).copied()
-            && self.config_files == inner.config_files
+            && (!self.config_files_requested || self.config_files == inner.config_files)
             && (!self.viewport_requested
                 || (self.size.is_some()
                     && self
@@ -37860,6 +37877,7 @@ fn cached_live_status_context(
     focused_window: Option<WindowId>,
     needs: FormatNeeds,
     references: &Arc<BTreeSet<String>>,
+    capture_config_files: bool,
 ) -> Option<zz_mux::StatusContext<'static>> {
     if references.contains("window_active_clients")
         || references.contains("window_active_clients_list")
@@ -37869,7 +37887,7 @@ fn cached_live_status_context(
     let attached = attached.filter(|session| inner.engine.state.sessions.contains_key(session));
     let host = inner.engine.format_host().is_empty().then(host_names);
     let overrides = [
-        Some(("config_files", inner.config_files.as_str())),
+        capture_config_files.then_some(("config_files", inner.config_files.as_str())),
         host.map(|host| ("host", host.0.as_str())),
         host.map(|host| ("host_short", host.1.as_str())),
         attached.map(|_| ("pane_active", "1")),
@@ -37915,16 +37933,37 @@ fn status_request_with_facts(
     let modes = attached.map_or_else(Vec::new, |session| {
         mode_requests(inner, client, session, job_needs)
     });
+    let capture_config_files = snapshot.is_some()
+        || facts.is_some()
+        || !modes.is_empty()
+        || !job_needs.is_empty()
+        || !*BORROWED_FORMAT_FACTS
+        || !zz_mux::borrowed_formats_enabled()
+        || !zz_mux::format_cache_knob()
+        || !zz_mux::compiled_formats_knob()
+        || parameters.client_references.contains("*")
+        || parameters.client_references.contains("config_files");
     let cached_context = snapshot
         .is_none()
-        .then(|| cached_live_status_context(inner, attached, focused_window, needs, &references))
+        .then(|| {
+            cached_live_status_context(
+                inner,
+                attached,
+                focused_window,
+                needs,
+                &references,
+                capture_config_files,
+            )
+        })
         .flatten();
     let live_context = cached_context.is_none().then(|| {
         let mut context = snapshot.map_or_else(
             || live_status_context(&inner.engine, attached, focused_window),
             |snapshot| status_context(snapshot, &inner.engine, attached, focused_window),
         );
-        context.set_format_value("config_files", inner.config_files.clone());
+        if capture_config_files {
+            context.set_format_value("config_files", inner.config_files.clone());
+        }
         context
     });
     let context = cached_context
@@ -42951,6 +42990,10 @@ fn selected_deferred_client(
                 .and_then(|client| current_format_client(inner, client))
         })
 }
+
+#[cfg(test)]
+#[path = "daemon/format_refresh_tests.rs"]
+mod format_refresh_tests;
 
 fn current_format_client(inner: &ServerState, invoking_client: ClientId) -> Option<ClientId> {
     if client_attached_session(inner, invoking_client).is_some() {

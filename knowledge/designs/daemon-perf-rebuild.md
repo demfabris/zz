@@ -12,7 +12,7 @@ tags:
 - benchmark
 - campaign
 - design-plan
-timestamp: 2026-09-29T15:30:00Z
+timestamp: 2026-09-30T19:21:58Z
 ---
 
 # Campaign status
@@ -39,8 +39,8 @@ libghostty parse, 64 KiB reads, time-sampled frames and latest-wins mailbox that
 throughput lead. Every claim is a number from `bench/perf` measured against a release tmux in the
 same run.
 
-Today: every event does all the work for everyone, eagerly, under one global `Mutex`, on a thread
-per thing. Profiles put 80-95% of daemon CPU on each hot path in work nobody requested.
+At W0, each event did the work for all clients under one global `Mutex`, on a thread per thing.
+The starting profiles put 80-95% of daemon CPU on each hot path in work nobody requested.
 
 # Baseline
 
@@ -2567,7 +2567,7 @@ per-command variables, then the environment. Loops (`#{S:}`, `#{W:}`,
 they hold syntax, never option values. Options generation keys the option snapshots, needs
 scan and indirect reference closure instead. Command facts borrow daemon maps and build
 derived maps only on demand. Status and mode requests leave the engine lock through
-`detach_with_templates()`, which captures referenced values and reachable loop contexts.
+`detach_with_references()`, which captures referenced values and reachable loop contexts.
 Owned facts remain necessary for those requests. Unknown dynamic job output uses the full
 capture path. The old `StatusValues` object is boxed and initialized only for explicit legacy
 field access or rollback.
@@ -2584,9 +2584,267 @@ property test that the compiled path and the W1 lazy path agree on every pinned 
 Handed over from W1-FORMAT (see its As-built block): per-row template parsing is 25-30% of
 `list-keys` p20; `list_windows` costs about 2.2 Minstr at s20 against tmux's 2.9 for the whole
 command; the status template scan and `format_option_snapshot` run on every refresh because
-nothing tells them options changed, so the options generation this lane adds for its template
-cache should key them too; the per-command `FormatHookFacts` snapshot makes every `set @x` clone
+nothing tells them options changed, so this lane keys the option and dependency caches by an
+options generation; the per-command `FormatHookFacts` snapshot makes every `set @x` clone
 that scope's user option map.
+
+As-built on `perf/fmt`, 2026-09-30, measured source
+`4c5b0b39c6536ada322894ee4aab461bcff3ef27`. Source checks and the three profile floors pass;
+five owned listing CPU rows beat same-run tmux, and visible daemon CPU fell in the observed
+scoped runs. Compatibility preserves all 44 pre-lane final scenario tuples. The full-chatty
+command still exits 1 on client CPU. Current full strict exits 1 with 11 failed rows; paired
+regression/ownership assessment is PENDING. Complete lane/merge acceptance is not claimed.
+
+The implementation removes repeated context construction, template parsing, fact snapshots
+and stable status expansion while preserving the full formatter and its rollback interpreter:
+
+- `StatusContext` holds borrowed engine handles, typed scope ids and command variables. The
+  sorted 198-entry table has a callback per name; lookup remains options, table, command,
+  environment. Row adapters borrow strings. The legacy values/universe keep their leading
+  field order, and explicit legacy access alone initializes boxed `StatusValues`. Borrowed
+  daemon facts can reach the engine through the legacy universe when only borrowed-variable
+  mode is disabled; nested children preserve engine, scope, client, variables and clock.
+- Parsed templates hold nested operations, references and clock/loop metadata. A thread-local
+  FIFO retains at most 512 entries and 1 MiB, charging actual source/operation capacities and
+  a 64 KiB container reserve. Oversized entries bypass retention; cache-off parses fresh
+  before lookup. Syntax keys use source alone because they contain no option values, a
+  deviation from the original source-plus-options-generation plan. The container proof uses
+  the current toolchain/hashbrown layout and needs review when either changes.
+- Option snapshots use an immutable Arc keyed by options/mux revisions. Needs/reference
+  caches check exact sources, hold at most 128 entries and invalidate on relevant option
+  mutations, including arrays, hooks, user options, unset and default setters. A separate
+  format-data revision covers environment, runtime facts, identity, start-command and activity
+  writes. Only enabled status rows enter the dependency union. Static E/T follows all option
+  scopes/arrays; cycles, dynamic indirection, implicit fact modifiers and shell output request
+  conservative capture. Removing a scope may retain extra dependencies until an option write.
+- Six one-entry result caches have individual 1 MiB admission bounds: default key listing,
+  detached capture, status parameters, prepared request, border presentations and completed
+  status. Arbitrary custom listing formats remain live. Default listings require exact flags,
+  filters and key generation plus stable-option opt-in; custom collisions bypass reuse. The
+  default-false native-options contract skips probes only for proven non-option row names.
+  Cache hits defer context preparation and still create fresh `list-keys -1` effects. Literal
+  set-option names borrow through `plain_format`; formatted names retain their RawText owner.
+- Detached captures retain only referenced values and reachable loop parts. Early hits compare
+  exact target/client/needs/overrides/revisions and reference identity or equality. Clock-only
+  reuse overlays a fresh root and every S/W/P child clock; old contexts remain unchanged.
+  `same_detached_data` requires detached captures, uninitialized legacy values, identical
+  variable/universe allocations and every non-clock input. Whole output still keys the clock.
+  RawText estimates charge both lossy text and retained raw bytes.
+- Read-only fact views borrow daemon maps and derive client/buffer/mode/window maps on demand.
+  Ordinary status capture selects dependency groups and client fields, retaining operational
+  width plus referenced geometry prerequisites. Modes, jobs, unknown dependencies, Control
+  clients and rollback keep full facts. A shared empty record avoids empty-map allocation.
+  Live status contexts and direct row/key-table/message getters avoid model/option clones.
+  Config files are captured and compared only when the closed status/border union needs them;
+  dynamic/full/rollback paths retain the complete override and existing child/border answers.
+- `StatusParameters` shares raw templates, environment, option snapshot, references and fact
+  selection plans. Prepared requests share context/facts and match engine revisions, option
+  Arc, scope/focus, client kind/terminal/features, size/viewport, scheme, config and startup.
+  Weak engine/environment identity prevents replacement or address reuse from aliasing old
+  inputs. Only width/colours/viewport callbacks qualify for preparation reuse; other client
+  callbacks, live modes and jobs take the fresh path. Clock overlays still require exact
+  capture-data identity and fresh borders. Lazy option selection uses the existing mutex.
+- Border reuse retains immutable presentations and resolved owner ids for linked windows.
+  Every hit checks headers and fresh referenced values; scalar pane-mode counts read live
+  maps/terminal handles without derived maps. A miss pins one count for both style and guard.
+  Proven clock-independent styles reuse across seconds without querying system time; dynamic,
+  timed, missing or loop sources fall back. The producer passes its resolved window/revision
+  into the hit probe. Borders do not replace the engine's detached-status entry.
+- Completed/published output shares an Arc; the owned wire boundary still copies. Weak request
+  identity allows a same-second hit before touched-job allocation, with the same publication
+  tail. Job polling remains outside forced rendering. Static top-level portions reuse across
+  clocks only after exact templates/options/capture data, scope, environment, scheme, layout
+  and fresh callback guards. Whole completed output still requires the current second.
+  The renderer marks clients only after completed hits; a maximum-ever-rendered id lets
+  `forget` skip absent high ids without assuming monotonic allocation. Lower ids use ownership.
+- Portion plans follow native E/T raw sources across captured option scopes, arrays and indices
+  before strftime/nested expansion. User/data E/T remains fresh because child values are not
+  fully proven. Raw `%` stays whole; ordinary substituted `%` remains data. Timed/dynamic
+  dependencies stay fresh. Top W/P requires actual capture availability; malformed/early-stop
+  cases use whole expansion. Adjacent raw values stay together so UTF-8 fragments join before
+  conversion. Compiled/cache/borrowed-variable rollback disables segmented rendering.
+  Fixed Copy theme colours and message-style Strings reuse only under the same static proof;
+  dynamic palettes/styles remain fresh. Trimming/layout/title paths retain their behavior.
+  Style wrapping uses checked direct writes, and base style revalidates only after an append.
+- Admission counts initialized portions, capacities, Arc/Weak metadata, callbacks, options,
+  captures and output. Option-byte memoization requires the same retained strong option Arc;
+  `Arc::make_mut` invalidates it. Post-render context memoization requires exact capture data
+  and all three public id capacities; preparation's byte memo also requires border Arc identity.
+  Changed storage or legacy materialization recounts. Appended scalar/OnceLock payloads are
+  charged by struct size. These are logical allocation bounds, not measured process RSS.
+- Literal Command/Absent paths classify format needs once through private calls; rewritten
+  streamed/mouse/alternate commands discard that local result. Default list-keys/source-file
+  without `-F` withhold unused facts only after successful option parsing. Formatted variants,
+  aliases, errors and immediate/after/error hooks retain fresh context. Refresh-client skips
+  only unused executor formatter setup; its handler still resolves targets/options/facts.
+  Source cwd is read only for actual source/reload effects. Default no-F list-keys also skips
+  unused client selection; custom/formatted/malformed/eager/control paths stay fresh.
+  `finish_pane_command` returns on success before an unused attachment lookup; nonzero
+  completion routing is unchanged. Non-control clients return before an unused query.
+  Detach names are captured before removal only when attached event hooks can use them. No persistent execution-context memo was added.
+
+Rollback is independent and read once at startup:
+
+| Setting | Restores |
+|---|---|
+| `ZZ_PERF_COMPILED_FORMATS=0` | W1 interpretation; no segmented status rendering |
+| `ZZ_PERF_BORROWED_FORMATS=0` | Legacy owned values/universe with provider engine preserved |
+| `ZZ_PERF_BORROWED_FACTS=0` | Complete owned daemon fact snapshots |
+| `ZZ_PERF_FORMAT_CACHE=0` | Fresh compiled templates, options/dependencies and result captures |
+
+Current source verification, all completed exits 0:
+
+| Source/check | Result | Evidence |
+|---|---|---|
+| 4c5b nine-crate clippy, all targets/features | 22.30s, no lint errors | `/tmp/zzpc/fmt-final-unused-clippy.log` |
+| 4c5b routing / eager routing | 9 / 9 | `/tmp/zzpc/fmt-final-unused-{routing,eager-routing}-tests.log` |
+| 4c5b completion / withholding filters | Four completion cases and one withholding case | `/tmp/zzpc/fmt-final-unused-*-tests.log` |
+| 4c5b formatting, diff and independent audit | Passed; no findings | Root pipeline |
+| 4c5b nine-crate serial suite | 3,359 distinct passed, 2 ignored, 0 failed | `/tmp/zzpc/fmt-tests-final-unused-final.log` |
+| 4c5b normal/all-four format sweeps | 299 each (149 daemon, 150 mux) | `/tmp/zzpc/fmt-final-unused-{format,rollback}-tests.log` |
+| 4c5b each independent rollback switch | 127 each | `/tmp/zzpc/fmt-final-unused-ZZ_PERF_*-tests.log` |
+| 4c5b profiling CLI build and identity | 4m49s; validated | `/tmp/zzpc/fmt-profile-build-4c5b0b39.log` |
+| 4c5b debug / release CLI / release headless client | 37.23s / 3m32s / 1m16s | `/tmp/zzpc/fmt-{debug,release,headless}-build-4c5b0b39.log` |
+
+The current full-suite count excludes seven nested subprocess summaries: 47 test targets,
+9 doc targets and 3,361 identities. No individual >60s warning occurred; the whole daemon
+target took 121.84s. Exact commands/exits and earlier check history are in
+`/tmp/zzpc/fmt-final-check-ledger.md`; counts are `/tmp/zzpc/fmt-tests-4c5b0b39-final-counts.json`.
+The current arm64 profiling binary UUID is `1F3EB5ED-A962-3973-A587-AFE3EA0C1C7E`, SHA256
+`dbbb213ea1a737888efe9e707f338977f1107cfe7c27bc96ba3d594d774fc43d`, 21,043,832 bytes.
+Identity validation exited 0; actual capture authorization retains the 60/180/60-second plan.
+Current profile, scoped benchmark and compatibility results are below. The full strict
+command exited 1; only its final paired assessment remains pending. Profile and scoped quick/chatty artifacts
+are portable; measured source identity remains distinct from later documentation/results
+HEAD. The benchmark release CLI SHA256 is
+`79e77aaa61a5951ec7622399f83fcc7ba311df555b94e6bc3f0cadeffa3c76b1`.
+
+The diff adds 160 test declarations (101 daemon, 59 mux), not 160 executed/generated cases.
+Tests compare every pinned name/modifier against W1 over attached, detached, marked, zoomed,
+dead and null fixtures; selective detach and nested loops/indirection; lookup precedence;
+option/inheritance/unset invalidation; raw UTF-8/style/error parity; all bounds/rollback modes;
+clock overlays and retained old contexts; twenty-window static portions with a ticking right
+clock; timed E/T/palette fallback; fresh client/mode/terminal/viewport inputs; linked borders;
+request/fact identity, public-capacity mutation, cleanup, routing/provenance and hooks.
+
+Historical attribution counts each matching Running stack once, including formatter owners,
+preparation, predicates, copies, serialization and drop costs. Inclusive weights are not added.
+Matcher SHA256: `91a263c0c02e3e07e6e825c5e8aa9c9f4e79aa66cd8aa905421cd147fe91ab8f`.
+All 42 valid phases below are symbolicated with zero unresolved weight and passing capture/
+analysis commands. Source qualifiers matter: early captures were 5 seconds, the 251/8e/83
+captures 20 seconds, 0b/4d captures 60 seconds, and later captures 60/180/60 seconds.
+
+| Source | Keys matched/Running ms (%) | Status ms (%) | Config ms (%) | Result |
+|---|---:|---:|---:|---|
+| `e33198c3` | 483/700 (69.000000) | 432/496 (87.096774) | 53/1873 (2.829685) | Keys/status failed |
+| `4e3192dd` | 3/145 (2.068966) | 30/93 (32.258065) | 12/1714 (0.700117) | Status failed |
+| `ee71938f` | 1/136 (0.735294) | 14/68 (20.588235) | 19/1780 (1.067416) | Status failed |
+| `1fde980c` | 3/180 (1.666667) | 8/92 (8.695652) | 14/1785 (0.784314) | Status failed |
+| `25121456` | 13/610 (2.131148) | 27/299 (9.030100) | 66/6890 (0.957910) | Status failed |
+| `8eac8457` | 12/543 (2.209945) | 12/265 (4.528302) | 83/7026 (1.181327) | Status failed |
+| `83d5f420` | 10/546 (1.831502) | 12/258 (4.651163) | 69/7122 (0.968829) | Status failed |
+| `0b9b90c0` | 20/1456 (1.373626) | 24/669 (3.587444) | 168/21137 (0.794815) | Status failed |
+| `4d87bb90` | 9/1459 (0.616861) | 28/731 (3.830369) | 35/20584 (0.170035) | Status failed |
+| `020491b2` | 17/1612 (1.054591) | 108/2815 (3.836590) | 47/19605 (0.239735) | Status failed |
+| `f234e908` | 16/1433 (1.116539) | 51/2148 (2.374302) | 33/20254 (0.162931) | Floors passed; further avoidable work found |
+| `534de43e` | 15/1496 (1.002674) | 70/2408 (2.906977) | 613/21738 (2.819947) | Floors passed; duplicate classification fixed in 5d |
+| `5d6ba30e` | 17/1452 (1.170799) | 58/2198 (2.638763) | 340/21568 (1.576410) | Floors passed; two residual queries fixed in 4c5b |
+| `4c5b0b39` | 14/1479 (0.946586) | 58/2295 (2.527233) | 354/20393 (1.735890) | Profile floors/audit accepted; full strict assessment pending |
+
+Portable evidence:
+`bench/perf/results/w2-4-fmt-profiles-macbook-4c5b0b39.json`, generated and validated with
+exit 0, SHA256 `b4363a018676c31a8a4e502b9fc2ba70ee133ff283356a629b8d8447842d27d0`.
+It preserves all 42 valid phases, three unresolved baseline phases as N/A and the original
+020 infrastructure failure. Current reports/projections are
+`/tmp/zzpc/fmt-after-4c5b0b39-{profile-report,stack-projections}.json`; all export/symbol/
+analysis stages, full-stack exports and end-identity checks exited 0. Independent audit
+inspected all 79 disjoint chains and found no remaining concrete duplicate; unassigned PCs
+stay counted, without a claim of per-instruction irreducibility. Audit:
+`/tmp/zzpc/fmt-after-4c5b0b39-independent-avoidable-audit.json`. Both discarded-query chains
+are absent; config classification is outer 317 + replay 8 ms, with no inner/raw duplicate.
+Host load was elevated: status ended at 36.11, config ran from 28.05 to 28.46. These were
+not globally quiet captures. Additive matcher revisions retain all owners; hook-predicate
+reanalysis added zero weight across 33 prior phases. Increased inline visibility at 534 is
+not CPU-regression evidence; its 579 ms classification group included necessary work.
+
+Baseline quick/chatty artifacts remain under
+`bench/perf/results/w2-4-fmt-before-{quick,chatty}-macbook-d317e171.json`. Original runs were
+noisy. Supplemental `-quiet-` replays preserve harness HEAD `83d5f420` but identify the actual saved
+pre-lane `d317e171` executable through `meta.saved_binary_provenance`; quick was not noisy, chatty
+was noisy despite the filename. Their binary SHA is
+`3ab0861c73db60d18e08298f44929a380c3257a20ba12dff406d822db22a00e5`.
+Stripped baseline profile shares are N/A, not 0%. Original lane CPU values are keys p1/p20
+1.056/0.996ms; panes/windows/sessions list-all s20 0.1529/0.111/0.1338ms; config1000 2.5126ms;
+visible chatty 4.9978%. Current scoped measurements are:
+
+| Metric | Original before zz | After zz | Same-run tmux |
+|---|---:|---:|---:|
+| list-keys p1 / p20 CPU, ms | 1.056 / 0.996 | 0.1337 / 0.1230 | 2.6732 / 2.7514 |
+| panes-all / windows-all / sessions s20 CPU, ms | 0.1529 / 0.1110 / 0.1338 | 0.0881 / 0.0746 / 0.0842 | 0.3224 / 0.2307 / 1.8361 |
+| config1000 CPU, ms | 2.5126 | 2.3513 | 9.3689 |
+| config1000 instructions, millions | 39.5848 | 38.6508 | 198.545 |
+| config1000 wall, ms | 4.7133 | 4.9115 | 13.0238 |
+| visible chatty daemon CPU, % | 4.9978 | 3.4317 | 2.2967 |
+| visible chatty instructions, millions/s | 375.0454 | 390.5270 | 192.8621 |
+| visible chatty terminal output, KiB/s | 377.3640 | 393.9418 | 339.3428 |
+
+Scoped quick exited 0: 32 pass, 40 info, zero failures/errors/warnings/regressions/drift.
+Full chatty exited 1: 7 pass, 1 fail, 4 info; visible client CPU was 1.4097% against a 1% rule.
+The observed daemon CPU improvement is not a causal estimate. Instructions/KiB were nearly
+unchanged (993,856 before, 991,332 after); throughput increased. Both scoped runs were noisy:
+quick load 25.66 to 20.72, chatty 13.02 to 7.8. Supplemental baselines stay separate.
+Portable current inputs:
+`bench/perf/results/w2-4-fmt-{quick,chatty}-macbook-4c5b0b39.json`; comparator exit 0:
+`/tmp/zzpc/fmt-4c5b0b39-metric-comparison.{json,md}`.
+
+The required all-12-group full strict saved-old baseline exited 0: 149 metrics, 3 pass and
+146 info, no failures/errors/warnings/regressions/drift, 374.2s, `meta.noisy=false`, load 5.19
+to 6.16. Its portable file is
+`bench/perf/results/w2-4-fmt-before-full-strict-macbook-d317e171.json`. Captured harness HEAD
+remains 4c5b; only `meta.saved_binary_provenance` identifies the saved d317 executable.
+The intentional old-binary-mtime warning remains in metadata. Provenance receipt:
+`/tmp/zzpc/fmt-4c5b0b39-full-pair-provenance.json`. Current full strict exited 1: 63 pass, 11 fail, 75 info, 0 errors, 2 regressed, 0 drifted,
+369.6s. Raw input: `/tmp/zzpc/fmt-4c5b0b39-full-strict.json`. Final paired ownership/quiet
+metadata assessment is PENDING. Attach instructions rose from 10.4492 to 14.2440 million
+at p1 (+36.3%) and 12.3259 to 16.0091 million at p4 (+29.9%). Their mechanism/ownership is
+unresolved; the attach prefix alone does not place them outside FMT. Old/current isolated
+repeats and interval/source checks are in progress. Scoped success does not clear them.
+Both full inputs report `meta.noisy=false`. Separate full-pair owned values are config CPU
+2.5655 to 2.3598ms, instructions 39.2139 to 38.4788 million, wall 5.6306 to 4.5984ms; visible
+daemon CPU 3.1407 to 2.8369%; status-job CPU 0.1873 to 0.1801%, instructions 13.8277 to
+7.0966 million/s. These full values are not mixed with the earlier scoped/noisy results.
+
+Meaningful limitations and handoff:
+
+- Source-only syntax keys and conservative native-only E/T portion proof are deliberate.
+  Arbitrary user/data indirection keeps full fresh formatting. Allocation bounds are logical,
+  not process RSS; no client/protocol behavior is traded for them.
+- The first 020 status capture exited 1 while saving after its 180-second recording limit and
+  225-second harness deadline. Its hash-verified archive stays N/A. A 360-second completion
+  allowance kept recording at 180 seconds; the valid retry is the failed-floor row above.
+  Evidence: `/tmp/zzpc/fmt-after-020491b2-status-infrastructure-failure.json`.
+- The 0b full/solo agent-capture checks failed. Fixture commit `adb53fa7` waits for SessionReady
+  without a fixed sleep and preserves all capture assertions. Startup-queued prompt echo loss
+  remains unresolved in local/source evidence outside FMT; production incidence was not
+  measured. The fixture change does not establish a production fix. Handoff:
+  `/tmp/zzpc/fmt-agent-startup-reset-proof.md`.
+- Current Mac compatibility batch exited 1: 44 final scenarios exactly match saved pre-lane
+  tuples, FMT0, 43 clean and the unchanged `smoke/status-background-jobs` OUT1/WARN1 red.
+  All 46 attempts are retained. An initial command-item failure coincided with tmux fork/
+  Device-not-configured errors; archived first-pass logs remain, and automatic retry plus
+  explicit current/pre-lane solos were clean (0/0). Status-jobs solos remain 1/1 with the
+  same assertion signature. Coverage generator/validator exited 0:
+  `/tmp/zzpc/fmt-compat-4c5b0b39-final-coverage.json`. This accepts unchanged coverage, not
+  an all-green batch. The external attached-client fixture is NOT RUN.
+- Linux /proc, zz-pty-gather, epoll, THP and tui-output-backpressure.sh are NOT RUN here;
+  the Linux orchestrator owns them. iOS/WASM are NOT RUN; this lane changes no wire.
+  Protocol remains unreleased 107. The committed 4c5b audit records 23 Rust files/545 hunks, all 53
+  protected CTRL bodies unchanged, zero comments/forbidden edits/append exceptions. Audit:
+  `/tmp/zzpc/fmt-source-scope-audit-4c5b0b39.json` and
+  `/tmp/zzpc/fmt-4c5b0b39-final-source-audit-report.json`; bounds:
+  `/tmp/zzpc/fmt-field-bound-audit.json`, key `committed_4c5b0b39_followup`.
+  CTRL owns registration/publication/transport changes and can use cached option snapshots,
+  borrowed fact providers and live status-context construction. The worktree stays in place.
 
 ## W4-ROWS: bulk row extraction from libghostty (effort M)
 
@@ -2641,7 +2899,7 @@ deletes most wave-1 fallback paths anyway).
 | `ZZ_PERF_COMPILED_FORMATS=0` | FMT | parse and evaluate templates through the interpreter |
 | `ZZ_PERF_BORROWED_FORMATS=0` | FMT | build the full owned table values for contexts and loop items |
 | `ZZ_PERF_BORROWED_FACTS=0` | FMT | build owned command facts before engine execution |
-| `ZZ_PERF_FORMAT_CACHE=0` | FMT | rebuild option snapshots, needs and indirect reference closures |
+| `ZZ_PERF_FORMAT_CACHE=0` | FMT | rebuild compiled templates, option snapshots, needs, reference closures and unions, detached contexts, default key listings, status parameters, prepared requests, border presentations and completed status output |
 | `ZZ_PERF_ATTACH_DEDUP=0` | ATTACH | resync and Full enqueue as today: an attach resends the Snapshot and every overlay, frames are not held until `Attached`, no update is dropped for a generation already queued or written, and the publish after a detach renders the detaching client's status |
 | `ZZ_PERF_ATTACH_BATCH=0` | ATTACH | an attach holds only its terminal frames until `Attached`; `Attached`, the status and the other reliable messages are written as they are queued instead of as one batch after the publish that follows the attach, and the hello of a raw-terminal or browser client carries a status rendered before it attached |
 | `ZZ_PERF_ATTACH_PRESIZE=0` | ATTACH | an attaching raw-terminal client's panes keep their size until its first `ResizeTerminal` |
@@ -2738,7 +2996,6 @@ whole-state probes), and the blocking run-shell wait.
 | Folding the hello into a command response | a second command wire format; Exec covers it |
 | socketpair / listener-fd handoff on cold start | a readiness pipe gives the same latency with less code |
 | Separate config batch-replay mode | the per-line costs are removed at their source; a second mode duplicates hook semantics |
-| Caching the option snapshot behind a generation | removing the calls plus the option index works without invalidation risk |
 | `posix_spawn` of the pane program itself | on XNU nothing in it makes the slave the controlling tty (W1-PANE tried it: zsh, dash and exec'd programs got none), so macOS spawns the daemon binary as a launcher that claims the tty and execs; on Linux glibc's `addclosefrom_np` is newer than the headless binary's floor and fork is fine |
 | Daemon-owned layout | GUI pixel gaps unresolved; sizing before the first frame removes the TUI round trip |
 | Version preamble and slimmer envelope | ~3 B per frame does not justify changing zz-web framing |
@@ -2752,7 +3009,8 @@ whole-state probes), and the blocking run-shell wait.
 
 Reinstated on 2026-09-28 under the no-compromise rule, and no longer rejected: the borrow-based
 format resolver with a template cache (W2-FMT), bulk row extraction (W4-ROWS), and a daemon-only
-binary for RSS (W4-BINARY).
+binary for RSS (W4-BINARY). W2-FMT also caches option snapshots behind option and mux-tree
+generations, with invalidation tests for the mutation paths.
 
 # Open questions
 

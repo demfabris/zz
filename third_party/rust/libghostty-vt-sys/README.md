@@ -2,7 +2,15 @@
 
 Raw FFI bindings for libghostty-vt.
 
-This zz-maintained snapshot builds `demfabris/ghostty` commit `c39414175ca2aad564b74b3f52196355f2671774` (branch `zz-2026-09-30`) with Zig 0.16.0. The fork adds three commits on upstream `6301810a48aaa3426887a4316668f18833a40138`: a C ABI memory option, PageList spare-page reuse, and a trim fix preserving live cell blocks after history erase; see [UPSTREAM.md](UPSTREAM.md).
+This zz-maintained snapshot builds the copy-snapshot candidate in `demfabris/ghostty`,
+local commit `7823f65dd55fc9ff420d5eb5cae761cbd1995994` on `zz-copy`, with Zig 0.16.0.
+Its parent is `c39414175ca2aad564b74b3f52196355f2671774`; upstream base is
+`6301810a48aaa3426887a4316668f18833a40138`. The four carried changes cover C ABI memory,
+spare-page reuse, history-erase trimming and owned copy snapshots. The orchestrator must
+publish the candidate and replace `GHOSTTY_COPY_SHA` in `build.rs` before ordinary builds.
+The safe wrapper candidate is libghostty-rs commit
+`8e40135fb20e9ed91c37c374fe1d14570c386d06`; zz vendors only this sys snapshot.
+No build-time source rewriting remains. See [UPSTREAM.md](UPSTREAM.md).
 
 - Fetches and builds `libghostty-vt.a` from ghostty sources via Zig by default.
 - Exposes checked-in generated bindings in `src/bindings.rs`.
@@ -32,3 +40,16 @@ This zz-maintained snapshot builds `demfabris/ghostty` commit `c39414175ca2aad56
   `libghostty-vt-static` pkg-config module instead.
 - libghostty-vt is pre-1.0, so these bindings do not guarantee compatibility
   with arbitrary installed C API revisions.
+
+## C ABI check
+
+After building the native checkout, list the exports:
+
+```sh
+nm -g --defined-only <native checkout>/zig-out/lib/libghostty-vt.a
+```
+
+The copy candidate exports 205 `ghostty_*` symbols, including
+`ghostty_terminal_clone_screen`. Compare these with the generated declarations in
+`src/bindings.rs`, then link a C program that takes the address of each declared function
+against the archive and run it. This checks the archive as well as its headers.

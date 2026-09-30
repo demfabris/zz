@@ -127,18 +127,23 @@ Current forks and why:
 
 ## Native Ghostty fork
 
-`libghostty-vt-sys/build.rs` fetches `demfabris/ghostty` directly at
-`c39414175ca2aad564b74b3f52196355f2671774` (branch `zz-2026-09-30`), based on upstream
-`6301810a48aaa3426887a4316668f18833a40138`. Earlier pins stay on their own branches
-(`zz-2026-09-29` holds `713374af`, `zz-2026-09-25` holds `6fce227c`,
-`codex/cabi-signal-stack` holds `fa7986a9` on `20c3eae`).
-It carries three commits: a one-line C ABI option that removes unused Zig signal-stack TLS
-storage from ReleaseSafe builds (TinyIo already removed it from release builds),
-PageList spare-page reuse, which keeps a line-limit-pruned page resident for the next grow
-instead of decommitting and refaulting it, and a trim fix preserving live cell blocks after
-history erase. None changes terminal grid semantics.
-`third_party/rust/libghostty-vt-sys/UPSTREAM.md` owns its rationale,
-validation, and removal condition.
+`libghostty-vt-sys/build.rs` fetches `demfabris/ghostty`. The copy-snapshot candidate is
+local commit `7823f65dd55fc9ff420d5eb5cae761cbd1995994` on `zz-copy`, based on published
+`c39414175ca2aad564b74b3f52196355f2671774`, upstream base
+`6301810a48aaa3426887a4316668f18833a40138`. It adds owned active-screen C ABI snapshots,
+shared resident and compressed history backing, and snapshot regression tests to the three
+existing signal-stack, spare-page and trim commits. Published dated branches retain the old pins.
+The safe wrapper's copy API lives in local `demfabris/libghostty-rs` commit
+`8e40135fb20e9ed91c37c374fe1d14570c386d06` on `zz-copy`, based on
+`359ef751c189540eafb9110b2de89ad95ce48fc3`. zz vendors only the sys snapshot, without native
+source rewriting or a safe-wrapper path patch.
+
+The orchestrator publishes the two tested fork commits and replaces the literal
+`GHOSTTY_COPY_SHA` in `build.rs` and `WRAPPER_COPY_SHA` in root `Cargo.toml`, then regenerates
+`Cargo.lock`. The lane tests use a fresh native source path and a temporary local wrapper
+path override, which must not enter the final commit. No lane pushes these candidates.
+`third_party/rust/libghostty-vt-sys/UPSTREAM.md` owns the full commit IDs, rationale,
+validation, and removal conditions.
 
 `just forks`, `forks.conf`, and `fork-sync.sh` only handle Cargo forks. Do not
 add this native dependency to that manifest or use its Cargo rebase command.

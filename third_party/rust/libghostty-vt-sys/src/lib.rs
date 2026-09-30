@@ -4,8 +4,6 @@
 #![allow(clippy::all)]
 #![allow(rustdoc::all)]
 
-const _: Option<&str> = option_env!("LIBGHOSTTY_VT_SYS_COPY_MODE_PATCH_HASH");
-
 mod bindings;
 
 use std::ops::Deref;

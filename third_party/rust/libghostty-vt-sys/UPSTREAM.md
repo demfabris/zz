@@ -8,15 +8,16 @@ This directory is a source snapshot of `libghostty-vt-sys` from
 - Upstream crate version: `0.2.1` (no newer release exists; the stack is unreleased)
 - Upstream wrapper Ghostty pin: `56dbc4a768778753737a3b9cbe0a3f9b4e434553`
 - Upstream Ghostty base: `6301810a48aaa3426887a4316668f18833a40138` (main, 2026-09-25)
-- Local Ghostty pin: [`demfabris/ghostty@c3941417`](https://github.com/demfabris/ghostty/commit/c39414175ca2aad564b74b3f52196355f2671774)
-- Fork branch: `zz-2026-09-30`, three commits on upstream: the C ABI signal-stack option (`6fce227c`, still on `zz-2026-09-25`), the PageList spare-page reuse (`713374af`: line-limit pruning keeps the last pruned pool page resident for the next grow instead of decommitting and refaulting it; `compress` releases it and trims the last page), and the trim fix (`c3941417`: preserves live cell blocks after history erase). `zz-2026-09-29` keeps `713374af`; the previous pin `fa7986a9` stays on `codex/cabi-signal-stack`
+- Local Ghostty candidate: `7823f65dd55fc9ff420d5eb5cae761cbd1995994` on local branch `zz-copy`, parent `c39414175ca2aad564b74b3f52196355f2671774`. The orchestrator publishes it and replaces `GHOSTTY_COPY_SHA` in `build.rs`.
+- Parent fork branch: `zz-2026-09-30`, three commits on upstream: the C ABI signal-stack option (`6fce227c`, still on `zz-2026-09-25`), the PageList spare-page reuse (`713374af`: line-limit pruning keeps the last pruned pool page resident for the next grow instead of decommitting and refaulting it; `compress` releases it and trims the last page), and the trim fix (`c3941417`: preserves live cell blocks after history erase). `zz-2026-09-29` keeps `713374af`; the previous pin `fa7986a9` stays on `codex/cabi-signal-stack`
 - License: MIT OR Apache-2.0; the upstream MIT license is retained here.
-- Wrapper source: [`demfabris/libghostty-rs`](https://github.com/demfabris/libghostty-rs)
-  branch `zz-2026-09-25`, a fork holding the same commit so a rebase of the PR branch
-  cannot make it unfetchable.
+- Wrapper source: [`demfabris/libghostty-rs`](https://github.com/demfabris/libghostty-rs),
+  local candidate `8e40135fb20e9ed91c37c374fe1d14570c386d06` on `zz-copy`, parent
+  `359ef751c189540eafb9110b2de89ad95ce48fc3`. The orchestrator publishes it and replaces
+  `WRAPPER_COPY_SHA` in the workspace manifest. `zz-2026-09-25` retains the parent.
 - Local override: the workspace patches the git-sourced sys package to this adjacent
-  snapshot. The safe wrapper is vendored in `../libghostty-vt` from the same
-  commit, with the copy snapshot and bounded row-reference APIs added locally.
+  snapshot. The safe wrapper comes from the dependency fork, with owned copy
+  snapshots and bounded row references. zz does not vendor the safe wrapper.
 
 ## Why an unreleased wrapper
 
@@ -48,8 +49,7 @@ Move back to upstream at the first libghostty-rs release that contains this stac
   engine. `LIBGHOSTTY_VT_SYS_OPTIMIZE=Debug` still selects `Debug`.
 - The upstream Windows DLL CRT source patch and its build-time `git apply` are dropped.
   zz links the static archive on every platform, where that patch does nothing, and this
-  Windows patch is not applied. The separate copy-mode patch below is applied
-  to the private build source.
+  Windows patch is not applied. zz does not rewrite native sources at build time.
 
 Upstream now covers two earlier zz deltas on its own: the default `-Dcpu=baseline`
 (overridable with `LIBGHOSTTY_VT_SYS_CPU`; keep it, since the Linux x86_64 v0.6.0 release
@@ -59,14 +59,18 @@ mapping with an xcframework build for `aarch64-apple-ios` and `aarch64-apple-ios
 iOS target links libghostty today (the GPUI iOS client renders daemon frames), so the flat
 mapping and its `x86_64-apple-ios` entry were not kept.
 
-`src/lib.rs` consumes the optional copy patch stamp in a constant so Rust dependency
-metadata tracks native-only changes, while native-free docs/Miri builds can omit it.
+`src/lib.rs` retains the base snapshot without patch stamps. `build.rs` uses a source
+override directly and contains no source staging, patch application, reversal or hashing.
 `tools/gen_bindings.rs` borrows the prefix array with `iter()` instead of `into_iter()` so
-all-feature strict lint checks pass. `src/bindings.rs` was
-regenerated from the fork commit's headers with the upstream tool, with the additive
-`ghostty_terminal_clone_screen` declaration from `copy-mode.patch` retained locally. The
-upstream generation command, run from a checkout of the wrapper commit, is: `GHOSTTY_SOURCE_DIR=<fork checkout> cargo run -p libghostty-vt-sys
---features bindgen-tool --bin gen-bindings`.
+all-feature strict lint checks pass. `src/bindings.rs` comes from the native fork headers,
+including `ghostty_terminal_clone_screen`, generated with the snapshot's tool:
+
+```sh
+GHOSTTY_SOURCE_DIR=<native fork checkout> cargo run --manifest-path third_party/rust/libghostty-vt-sys/Cargo.toml --features bindgen-tool --bin gen-bindings
+```
+
+The optional pkg-config path checks that the installed header declares the snapshot API
+before emitting link metadata. A compatible installed archive must export it as well.
 
 The Kitty temporary-file medium API is fixed in this wrapper
 (`set_kitty_image_temp_file_dir`); `zz-terminal` still does not call it.
@@ -105,11 +109,9 @@ Validation for this pin: the wrapper's own tests against the fork source,
 `cargo test -p zz-terminal`, and the real macOS bundle build. Ghostty's Debug
 test suite supplies its own `std_options`, so it does not exercise this option.
 
-The normal build fetches this immutable fork commit and applies `copy-mode.patch`
-in Cargo's private build directory. `GHOSTTY_SOURCE_DIR` is copied into that directory
-before patching, so the source override stays unchanged. An enabled `pkg-config`
-feature can select an installed library; that library must also export the local
-`ghostty_terminal_clone_screen` extension.
+The normal build fetches the pinned native fork commit without rewriting source.
+`GHOSTTY_SOURCE_DIR` selects a local checkout directly. An enabled `pkg-config` feature
+can select an installed library with `ghostty_terminal_clone_screen`.
 When comparing overrides, use distinct source paths or rebuild the sys package:
 Cargo tracks the override environment value, not edits inside that directory.
 
@@ -123,7 +125,7 @@ build. No binding or safe-wrapper change is needed for this option.
 
 ## Copy snapshots
 
-`copy-mode.patch` adds a C ABI clone of the active screen. Copy-on-write cloning skips the
+Native fork commit `7823f65dd55fc9ff420d5eb5cae761cbd1995994` adds a C ABI clone of the active screen. Copy-on-write cloning skips the
 page-count pass used to preheat eager clone storage. Compressed history shares atomic
 reference-counted encoded buffers when allocator identities match; other allocators receive
 independent encoded copies. Each cloned compressed page starts without a private raw mapping;
@@ -147,7 +149,7 @@ for allocators that define them. This is exercised by a dense 10k x 180 default-
 ReleaseFast regression, in addition to custom-allocator isolation checks.
 
 The clone retains no source callbacks and lifts its own pruning limits so a frozen resize
-preserves all reflowed history. The live pane keeps its original limits. The vendored safe
+preserves all reflowed history. The live pane keeps its original limits. The dependency-fork safe
 wrapper exposes `ScreenSnapshot` with owned metadata and borrowed grid references, plus
 controlled scroll, color, compression and anchored resize operations. Frozen resize uses
 primary backing with wrapping and history pulling enabled, even when the source was in the
@@ -156,14 +158,16 @@ separately. It exposes no terminal or owned tracking handle that could escape wh
 snapshot moves to a search thread. Row references check the owning page dimensions before
 reading a cell, including incomplete reflow.
 
-The patch is kept here because this campaign forbids pushes. Fold it into the native fork
-before the next upstream rebase, retaining the snapshot regression tests. Its build stamp
-reverses an older local copy of the patch before applying a changed one.
-
-The build script emits the patch-content hash as a compiler environment input: replacing a
-static archive at the same path alone can leave dependent executables linked to old code. A
-patch-byte append/restore check with tests and lint before each CLI build verifies that
-ordinary incremental builds relink.
+The native extension and its regression tests live in one local Ghostty fork commit;
+the safe API and its tests live in libghostty-rs commit
+`8e40135fb20e9ed91c37c374fe1d14570c386d06`. The orchestrator
+publishes both and repins zz. The final lane uses `GHOSTTY_COPY_SHA` and `WRAPPER_COPY_SHA`
+as literal handoff placeholders. Local validation uses a fresh native source path and a
+temporary wrapper path patch, removed before the final commit. Nothing was pushed here. Full native tests pass (6490 passed, 68 skipped); the wrapper
+default suite passes (30 wrapper and 3 sys tests, 19 doctests, 3 doctests ignored).
+Native exports include all 205 `ghostty_*` symbols, and all 199 generated function
+declarations resolve in a C client that links and runs. Standalone Debug fixtures bound
+rich metadata and mutation work; separate 1000-row and 10k ownership regressions remain.
 
 ## Earlier grid patches
 
@@ -172,8 +176,8 @@ capture decisions remain in `knowledge/designs/tui-parity.md`. The `provenance.p
 that retained explicit indexed foreground/background flags in spare style bits,
 the ICH hunk that kept the pin's stale cells after a wide insert, the build
 machinery that applied them, and the safe wrapper vendored to read those fields
-are all gone. The copy snapshot extension restores safe-wrapper vendoring for ownership and row
-access, without restoring those capture-provenance patches.
+are all gone. The copy snapshot extension adds ownership and row access in the dependency forks.
+It does not restore the removed capture-provenance patches or safe-wrapper vendoring.
 
 Tabs carry no provenance. The pin prints a literal tab for every cell a tab
 produced, and fabrico decided on 2026-09-18 that zz captures the spaces on

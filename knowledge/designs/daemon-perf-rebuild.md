@@ -2474,7 +2474,8 @@ Throughput must remain unchanged. Tests: tmux differentials for copy mode under 
 output past history-limit and resize in copy mode; `compat/tui-copy-mode.sh`, `compat/run.sh`
 copy-mode rows, `tracker.py check`, terminal copy/search tests and daemon copy-session tests.
 
-As built (branch `perf/copy`, 2026-09-30, lane base `fecaaa43`, Linux only):
+As built (branch `perf/copy`, 2026-09-30, lane base `fecaaa43`, Linux only; review-fix
+checkpoints `1540b318` and `62e7dbfd`):
 
 `ModeRevision::capture` freezes the native active screen instead of flattening its whole
 history. Copy-on-write cloning skips the eager clone preheat-count pass, confirmed as
@@ -2484,13 +2485,16 @@ Compressed pages share encoded bytes when allocator identities match and allocat
 restore mapping only when read. Differing allocators receive independent encoded copies.
 Dropping unread pages never restores them. Active pages are copied because native cursor
 caches hold pointers into them. Resize reads source page metadata and rows without detaching
-pages it will replace. The local native delta is
-`third_party/rust/libghostty-vt-sys/copy-mode.patch`; the fork pin stays unchanged and nothing
-was pushed. The build script emits a patch hash consumed by the sys crate so native-only changes
-relink dependent executables. An append/restore check with terminal tests and workspace lint
-before each ordinary CLI build verifies this. The
-vendored safe wrapper exposes owned `ScreenSnapshot` and borrowed, bounded
-`GridRow` references, without mutable-terminal or owned-tracking escapes.
+pages it will replace. The native delta now lives in one local Ghostty fork commit,
+`7823f65dd55fc9ff420d5eb5cae761cbd1995994`, on parent `c3941417`. The safe wrapper's
+owned `ScreenSnapshot` and borrowed bounded `GridRow` APIs live in one libghostty-rs
+fork commit `8e40135fb20e9ed91c37c374fe1d14570c386d06`, based on `359ef75`. The lane vendors only the sys snapshot, with regenerated
+bindings and the installed-header API check. Native source staging, patch application,
+reversal, hashing and stamps are gone, as are `copy-mode.patch` and the safe-wrapper directory.
+The final manifest and native pin carry `WRAPPER_COPY_SHA` and `GHOSTTY_COPY_SHA` for the
+orchestrator to replace after publishing both local commits. Validation uses a temporary
+wrapper path patch and fresh native source override. This implements the binding packaging
+decision of 2026-09-30; the earlier rationale about a fork push freeze no longer applies.
 
 The C clone initializes its owned terminal directly from frozen backing, skipping four blank
 page mappings and their pool/pin bookkeeping. Ordinary terminal initialization retains its
@@ -2503,17 +2507,23 @@ Visible cells resolve one native row reference per row. Consecutive cells with t
 page-local style id and hyperlink state reuse one converted style. Single-scalar glyphs skip
 UTF-8 encoding and decoding. `ModeRevisionReader` pairs a cached row with its dictionary so
 cursor line, word and search-match facts avoid repeated cell-cache locks and remain valid
-through dictionary compaction. `HistorySearchSnapshot` stores native backing rather than
+through dictionary compaction. Plain capture, VT capture and selection formatting now also
+hold one row and its matching dictionary for their row loop; they append glyphs to the
+destination without per-cell strings or repeated style-dictionary fetches. `HistorySearchSnapshot` stores native backing rather than
 whole-history text and offsets. Search reuses buffers for one logical wrapped line, maps
 Unicode matches to physical start/end rows, checks cancellation between rows, and recompresses
-after 512-row batches and at completion. The existing match-count limit remains.
+after 512-row batches and at completion. Empty and single-scalar glyphs skip the general
+iterator; longer graphemes retain the scratch path. The existing match-count limit remains.
 
 Frozen backing survives source output, pruning, ED3 and source destruction. It uses primary
 backing with unlimited snapshot pruning, wrapping and history pulling enabled, and shell
 prompt redraw disabled; source screen identity stays separate. Resize maps the logical cursor,
 clears selection and rebuilds search marks. Appearance changes recolor frozen content, while
 an enabled refresh captures the current source. `ZZ_PERF_COPY_CLONE=1` restores flat
-mode/search snapshots; retained actor behavior applies with either choice.
+mode/search snapshots and their original entry-geometry limit; retained actor behavior applies
+with either choice. A test-only search gate now covers pending retained search direction in
+both backends without unwrapping absent native state. Resize tests assert the supported
+backend geometry while still checking the live terminal resize.
 `ZZ_PERF_NO_COMPRESS=1` also suppresses copy/search recompression.
 
 Retained dead panes keep their compressed terminal actor instead of `FrozenHistory`. The actor
@@ -2540,7 +2550,7 @@ before any defined custom context; the dense default-allocator regression failed
 fix and passed afterward. Failed attempts are preserved as diagnostics and contribute no COPY
 measurements.
 
-Final release at `827ec2ab`, SHA-256
+Pre-review release at `827ec2ab`, SHA-256
 `304746910e6a78d4818ae748cb8539cd60102cc69a82445939434f9201944c75`:
 
 | Metric | Base zz | Final zz | Final tmux | Rollback zz |
@@ -2585,9 +2595,9 @@ These are cycle shares for both entry and cancellation, rather than isolated ent
 Final independent native grapheme and grid-cell getters account for 6.52% and 5.65%; live
 row-cell extraction accounts for 8.55%. Native clone is 0.38%, page map 0.01%, and no blank
 constructor leaf appears. Source and optimized DWARF confirm that the direct constructor and
-early COW branch remove the dummy pages and eager counting. No further repeated COPY
-row-cache/style/scalar work is evident; independent cell/grapheme reads and live cancel
-extraction go to W4-ROWS. Artifacts are `entry-final.perf.data`, `entry-final.profile.json`,
+early COW branch remove the dummy pages and eager counting. The later independent review found repeated COPY row-cache access in capture and a general
+scalar iterator in search, outside this entry/cancel profile. The review fixes remove both
+caller costs; independent cell/grapheme reads and live cancel extraction go to W4-ROWS. Artifacts are `entry-final.perf.data`, `entry-final.profile.json`,
 `entry-final.perf-report.txt` and the supplemental flat report under the lane cache. Cleanup
 reports daemon exit zero and no strays.
 
@@ -2615,9 +2625,70 @@ policy, classified input close/drain, released PTY scratch, and immediate EOF re
 contract. The 64-row cache is bounded; search recompresses in 512-row batches. W4-ROWS owns
 remaining independent cell/grapheme metadata queries and live frame extraction on copy
 cancellation; keep the safe snapshot ownership and borrowed row bounds when adding a bulk API.
-Integrate the two retained-event daemon edits with CTRL rather than reverting them. Fold
-`copy-mode.patch` into the native fork before a later fork rebase; this lane does not repin or
-push it.
+Integrate the two retained-event daemon edits with CTRL. The native and safe-wrapper copy
+changes now live in local fork commits; the orchestrator must publish and repin them before
+ordinary fetched-source builds. The lane pushes nothing.
+
+Review fixes (2026-09-30): the final local fork candidates are
+Ghostty `7823f65dd55fc9ff420d5eb5cae761cbd1995994` and libghostty-rs
+`8e40135fb20e9ed91c37c374fe1d14570c386d06`, each one commit on its required parent.
+The default optimized release hash is
+`c03d88d26c893b19446282177818e0fe099056454c0f32c31c268c5bde49247b`.
+`/home/demfabris/.cache/zz-perf/copy/fixed.json` records the prescribed quick
+`mem,throughput` run: 0.5859 MiB entry footprint, 1.2130 ms CPU, 1.2426 ms reply wall,
+4.3228 Minstr, 129.5623 MB/s detached ASCII and 130.6971 MB/s cooked-PTY ceiling.
+All entry samples meet the floors (max CPU 2.4375 ms, wall 2.8486 ms). The run exits 1
+with six passes, one unchanged `mem.threads.p20` failure at 66 threads and seven
+informational rows. It has no errors, regressions, strays or killed orphans.
+`--only copy` now selects entry measurements alone; selecting it with `mem` avoids
+repeating entry. Scratch follows `TMPDIR`, while sockets remain directly under `/tmp`.
+The standalone copy run exits 0 with three passes and two informational rows:
+0.5859 MiB footprint, 1.1842 ms CPU, 1.2065 ms wall and 4.3227 Minstr. Its evidence is
+`fixed-copy.json`, with no errors, strays or orphans.
+
+Four-request operation medians, same dense frozen backing:
+
+| Operation | Review lane Minstr | Fixed Minstr | Reduction |
+|---|---:|---:|---:|
+| search | 545.309 | 487.421 | 10.62% |
+| capture | 1322.107 | 915.366 | 30.76% |
+| capture_vt | 1718.592 | 988.553 | 42.48% |
+
+Output byte counts remain unchanged. Search still decodes native rows on each query;
+captures still decode rows with bounded storage. Their deferred read cost remains above
+the flat base; the fixes remove repeated row-cache access and the scalar iterator without
+restoring whole-history arrays. The instruction evidence is in `fixed-ops.profile.json`.
+
+The ordinary release strips symbols. A supplemental optimized build with
+`CARGO_PROFILE_RELEASE_STRIP=none` exits 0 and retains symbols for attribution. Its text
+section differs by 2112 bytes (0.0123%); repeated operation instructions differ by less
+than 0.002%, with the same output byte counts. The default stripped binary remains the
+gate artifact. Five-second search and capture profiles record 4917 and 4599 samples,
+with no losses and clean daemon exits. `String::extend<&char>`, `ModeRevision::cell` and
+per-cell hash construction no longer appear above the 0.5% reporting threshold. Search
+spends 28.87% in native grapheme reads and 21.72% in grid-cell reads; capture spends
+20.63% and 11.95% respectively, plus 15.88% in bounded row conversion. The independent
+getter and page-cooling work remains assigned to W4. Reports are
+`fixed-search-symbols.perf-report.txt`, `fixed-capture-symbols.perf-report.txt` and
+`fixed-perf-validation.json` under the lane cache.
+
+Validation after review: full native suite 6490 passed/68 skipped, wrapper default suite
+30 wrapper and three sys tests plus 19 doctests passed/three doctests ignored, terminal
+332 passed/one ignored with both default and flat rollback storage, and 36 daemon copy
+filter tests passed. All five lane daemon tests pass with rollback and with compression
+suppressed. Full daemon runs retain the known PATH endpoint failure; four different load
+failures pass alone. All 35 daemon integration tests pass, with one ignored. Strict
+all-target/all-feature clippy passes on touched crates and the wrapper; fmt and OKF
+validation pass. Native exports number 205, all 199 generated function declarations
+resolve, and the strict C ABI client links and runs.
+
+The final compat suite passes 27 scenarios/252 steps with zero divergences or retries.
+Lane and recorded base TUI copy fixtures each pass 141/147 and their logs match byte for
+byte, including the earlier base transcript. Tracker validation and cleanup pass. The
+wrapper's costly standalone Debug fixtures bound rich metadata and mutation work while
+separate 1000-row and 10k ownership cases retain shared-page coverage. Fork checkouts stay
+clean and unpublished; the orchestrator must publish both commits, replace both literal
+pin placeholders and regenerate `Cargo.lock` before ordinary builds.
 
 The six copy TUI fresh-entry prompt Escape/cancel failures are byte-identical to the baseline.
 Their first divergence is that pinned tmux retains the prompt after Escape while zz closes it;

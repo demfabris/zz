@@ -3075,6 +3075,10 @@ unsafe extern "C" {
     ) -> Result::Type;
 }
 unsafe extern "C" {
+    pub fn ghostty_terminal_clone_screen(terminal: Terminal, result: *mut Terminal)
+    -> Result::Type;
+}
+unsafe extern "C" {
     #[doc = " Free a terminal instance.\n\n Releases all resources associated with the terminal. After this call,\n the terminal handle becomes invalid and must not be used.\n\n"]
     pub fn ghostty_terminal_free(terminal: Terminal);
 }
@@ -5093,9 +5097,4 @@ unsafe extern "C" {
 unsafe extern "C" {
     #[doc = " Measures the terminal display width of the first grapheme cluster in a\n sequence of Unicode codepoints.\n\n This uses the exact same grapheme segmentation and cluster width rules\n the terminal itself uses when printing text with grapheme clustering\n enabled (mode 2027), so callers can predict column layout (e.g. IME\n preedit overlays) that exactly matches what the terminal will do when\n the text is actually written to it. Unlike\n ghostty_unicode_codepoint_width(), this accounts for cluster-level\n rules: emoji variation selectors, ZWJ sequences, combining marks, and\n skin tone modifiers.\n\n Reads codepoints from cps until the terminal would consider the\n grapheme cluster complete, stores the cluster's total width in cells\n (0, 1, or 2) into width (which may be NULL if only segmentation is\n desired), and returns the number of codepoints consumed. Returns 0 if\n and only if len is 0; otherwise consumes at least one codepoint. Measure\n a whole string by calling in a loop:\n\n size_t total = 0;\n for (size_t i = 0; i < len;) {\n   uint8_t width;\n   i += ghostty_unicode_grapheme_width(cps + i, len - i, &width);\n   total += width;\n }\n\n This is not a streaming API. The provided sequence must contain a\n complete first grapheme cluster, or the logical end of the string. If\n input arrives in chunks, keep buffering while this function consumes all\n available codepoints (return value == len) and the stream may still\n continue; a later codepoint could still extend the cluster and change\n its width.\n\n Width semantics, matching the terminal with mode 2027 enabled:\n - The cluster starts at the width of its first codepoint, as returned by\n   ghostty_unicode_codepoint_width().\n - VS16 (U+FE0F) forces the cluster wide (2) and VS15 (U+FE0E) forces it\n   narrow (1), but only when the immediately preceding codepoint in the\n   cluster is a valid emoji variation sequence base (per Unicode\n   emoji-variation-sequences.txt). Invalid variation selectors are\n   ignored entirely.\n - Any other continuation codepoint that contributes to grapheme width\n   forces the cluster wide (2). Note this means cluster width is NOT the\n   maximum of per-codepoint widths: some continuation marks have narrow\n   codepoint width yet still widen the cluster.\n\n Mode dependence: this models mode 2027 (grapheme clustering) enabled,\n which is Ghostty's recommended configuration. When mode 2027 is\n disabled, clusters never combine and variation selectors never change\n width; predict layout in that case by summing\n ghostty_unicode_codepoint_width() over each codepoint instead.\n\n Edge cases:\n - Codepoints beyond U+10FFFF consume one codepoint, have width 1, and\n   are always cluster boundaries. This function is total; it never fails.\n - Control characters (C0/C1, CR, LF) are never printed through the\n   terminal's text path; passing them here returns an unspecified (but\n   stable and bounded) result.\n - A cluster whose first codepoint is zero-width (e.g. a lone combining\n   mark) is malformed at a cell start; the terminal may attach it to\n   earlier screen content. This function reports the fold result for the\n   sequence in isolation (typically 0).\n\n This function is pure, allocates nothing, and is thread-safe.\n"]
     pub fn ghostty_unicode_grapheme_width(cps: *const u32, len: usize, width: *mut u8) -> usize;
-}
-
-unsafe extern "C" {
-    pub fn ghostty_terminal_clone_screen(terminal: Terminal, result: *mut Terminal)
-    -> Result::Type;
 }

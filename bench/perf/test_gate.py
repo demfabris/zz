@@ -224,7 +224,9 @@ class CopyEntryTest(unittest.TestCase):
             path = os.path.join(tmp, "history.txt")
             copy.history_file(path)
             with open(path, encoding="ascii") as f:
-                rows = f.read().splitlines()
+                text = f.read()
+                rows = text.splitlines()
+        self.assertFalse(text.endswith("\n"))
         self.assertEqual(len(rows), isolate.HISTORY_LIMIT + copy.ROWS)
         self.assertEqual({len(row) for row in rows}, {copy.COLS})
         self.assertEqual(len(set(rows)), len(rows))

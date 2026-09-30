@@ -15,7 +15,8 @@ def history_file(path):
         for row in range(isolate.HISTORY_LIMIT + ROWS):
             prefix = f"{row:08d} "
             text = (stripe * ((COLS + len(stripe) - 1) // len(stripe)))[:COLS - len(prefix)]
-            f.write(prefix + text + "\n")
+            ending = "\n" if row + 1 < isolate.HISTORY_LIMIT + ROWS else ""
+            f.write(prefix + text + ending)
 
 
 def pane_facts(mux):

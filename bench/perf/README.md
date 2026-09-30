@@ -275,8 +275,8 @@ These are known gaps, not silent omissions:
 - TODO: agent pane streaming (the fixture ACP provider): daemon CPU, threads
   per agent pane, stream fanout bytes.
 - Built (W2-COPY): first copy-mode entry on a 10k x 180 pane runs in the
-  `mem` group, including `--quick --only mem,throughput`. Footprint grows by
-  at most 1 MiB and entry takes at most 5 ms at wave2 and final. CPU and
+  `mem` group, including `--quick --only mem,throughput`. The wave2 and final
+  rules allow at most 1 MiB of footprint growth and 5 ms of entry time. CPU and
   instruction deltas have tmux twins; CPU also has a 5 ms limit. Each sample
   starts a fresh server, fills the pane, attaches a control client, waits
   5 s for idle history compression, then sends one `copy-mode` command.

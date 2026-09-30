@@ -5425,10 +5425,7 @@ impl Shared {
                         let inner = shared.inner.lock();
                         let tick_needed = Self::status_tick_needed(&inner);
                         let peer_scan = Self::peer_scan_armed(&inner);
-                        let intervals = inner
-                            .subscribers
-                            .keys()
-                            .filter_map(|client| client_attached_session(&inner, *client))
+                        let intervals = Self::status_sampler_sessions(&inner)
                             .map(|session| {
                                 (
                                     session,

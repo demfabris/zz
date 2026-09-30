@@ -37786,7 +37786,7 @@ fn cached_live_status_context(
     attached: Option<SessionId>,
     focused_window: Option<WindowId>,
     needs: FormatNeeds,
-    references: &BTreeSet<String>,
+    references: &Arc<BTreeSet<String>>,
 ) -> Option<zz_mux::StatusContext<'static>> {
     if references.contains("window_active_clients")
         || references.contains("window_active_clients_list")
@@ -37807,13 +37807,15 @@ fn cached_live_status_context(
         attached.map(|_| ("window_active_clients", "0")),
         attached.map(|_| ("window_active_clients_list", "")),
     ];
-    inner.engine.cached_detached_format_context(
-        (attached, focused_window, None),
-        attached.map_or(FormatClient::NoClient, FormatClient::Attached),
-        needs,
-        references,
-        overrides.into_iter().flatten(),
-    )
+    inner
+        .engine
+        .cached_detached_format_context_with_shared_references(
+            (attached, focused_window, None),
+            attached.map_or(FormatClient::NoClient, FormatClient::Attached),
+            needs,
+            references,
+            overrides.into_iter().flatten(),
+        )
 }
 
 fn status_request_with_facts(
@@ -37920,7 +37922,7 @@ fn status_request_with_facts(
     let context = cached_context.unwrap_or_else(|| {
         live_context
             .expect("uncached status context")
-            .detach_with_references(needs, &references)
+            .detach_with_shared_references(needs, &references)
     });
     StatusRequest {
         client,

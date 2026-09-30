@@ -82,6 +82,8 @@ pub(super) struct Template {
     pub(super) references: Arc<[String]>,
     bytes: usize,
     pub(super) clock_dependent: bool,
+    unconditional_clock: bool,
+    pub(super) format_parts: Arc<[FormatPart]>,
 }
 
 pub(super) enum Operation {
@@ -147,6 +149,8 @@ impl Replacement {
         body: &str,
         references: &mut BTreeSet<String>,
         clock_dependent: &mut bool,
+        unconditional_clock: &mut bool,
+        (split_safe, required_loops): (&mut bool, &mut FormatNeeds),
         depth: usize,
     ) -> Self {
         let mut arguments = Vec::new();
@@ -154,12 +158,28 @@ impl Replacement {
             arguments.push(argument.to_owned());
             argument.to_owned()
         });
+        let parsed_modifiers = parsed.is_some();
         let (modifiers, copy, discarded) = match parsed {
             Some((modifiers, offset)) => (modifiers, &body[offset..], Vec::new()),
             None => (Vec::new(), body, arguments),
         };
         let flags = ModifierFlags::from_modifiers(&modifiers);
         *clock_dependent |= flags.time.enabled || flags.expand_time;
+        *unconditional_clock |= flags.time.enabled;
+        *split_safe &= !modifiers
+            .iter()
+            .any(|modifier| modifier.kind == ModifierKind::NameExists)
+            && !flags.repeat
+            && (flags.comparison.is_none() || split_once_top(copy, ',').1.is_some())
+            && (parsed_modifiers
+                || copy.starts_with('?')
+                || !body.contains(':') && discarded.is_empty());
+        if flags.loop_windows {
+            *required_loops |= FormatNeeds::WINDOWS;
+        }
+        if flags.loop_panes {
+            *required_loops |= FormatNeeds::PANES;
+        }
         for argument in modifiers
             .iter()
             .flat_map(|modifier| &modifier.args)
@@ -167,6 +187,7 @@ impl Replacement {
         {
             let template = Template::parse_depth(argument, false, depth + 1);
             *clock_dependent |= template.clock_dependent;
+            *unconditional_clock |= template.unconditional_clock;
             references.extend(template.references.iter().cloned());
         }
         let dynamic_fact_flags = |kind| {
@@ -204,6 +225,7 @@ impl Replacement {
                 }
                 let template = Template::parse_depth(part, false, depth + 1);
                 *clock_dependent |= template.clock_dependent;
+                *unconditional_clock |= template.unconditional_clock;
                 references.extend(template.references.iter().cloned());
             }
         } else if !flags.literal {
@@ -228,6 +250,7 @@ impl Replacement {
             {
                 let template = Template::parse_depth(copy, false, depth + 1);
                 *clock_dependent |= template.clock_dependent;
+                *unconditional_clock |= template.unconditional_clock;
                 references.extend(template.references.iter().cloned());
             } else {
                 references.insert(copy.to_owned());
@@ -238,6 +261,17 @@ impl Replacement {
             .flat_map(|modifier| &modifier.args)
             .any(|argument| argument.contains(['#', '%']));
         *clock_dependent |= dynamic;
+        *unconditional_clock |= dynamic || references.contains("*");
+        *split_safe &= !dynamic
+            || modifiers.iter().all(|modifier| {
+                matches!(
+                    modifier.kind,
+                    ModifierKind::Expand
+                        | ModifierKind::ExpandTime
+                        | ModifierKind::Limit
+                        | ModifierKind::Padding
+                )
+            });
         let last_padding = modifiers
             .iter()
             .rposition(|modifier| modifier.kind == ModifierKind::Padding);
@@ -297,6 +331,13 @@ impl Template {
                 references: Arc::from(["*".to_owned()]),
                 bytes: 0,
                 clock_dependent: true,
+                unconditional_clock: true,
+                format_parts: Arc::from([FormatPart {
+                    range: 0..source.len(),
+                    unconditional_clock: true,
+                    references: Arc::from(["*".to_owned()]),
+                    required_loops: FormatNeeds::default(),
+                }]),
             };
             template.bytes = template
                 .allocation_bytes()
@@ -307,6 +348,11 @@ impl Template {
         let mut operations = Vec::new();
         let mut references = BTreeSet::new();
         let mut clock_dependent = source.contains('%');
+        let mut unconditional_clock = clock_dependent;
+        let mut format_parts = Vec::new();
+        let mut part_start = 0;
+        let mut previous_raw = false;
+        let mut split_safe = true;
         let mut literal = String::new();
         let mut index = 0;
         while index < source.len() {
@@ -322,11 +368,22 @@ impl Template {
                 .map_or(source.len(), |offset| index + offset);
             if !style && source.as_bytes().get(hashes_end) == Some(&b'[') {
                 let Some(end) = find_style_end(source, hashes_end + 1) else {
+                    split_safe = false;
                     break;
                 };
                 Self::flush(&mut operations, &mut literal);
                 let body = Self::parse_depth(&source[hashes_end + 1..end], true, depth + 1);
                 clock_dependent |= body.clock_dependent;
+                unconditional_clock |= body.unconditional_clock;
+                Self::push_part(
+                    &mut format_parts,
+                    &mut part_start,
+                    &mut previous_raw,
+                    index..end + 1,
+                    body.unconditional_clock,
+                    (body.references.clone(), FormatNeeds::default()),
+                    false,
+                );
                 references.extend(body.references.iter().cloned());
                 operations.push(Operation::Style(source[index..=hashes_end].into(), body));
                 index = end + 1;
@@ -334,6 +391,7 @@ impl Template {
             }
             let next_index = index + 1;
             let Some(next) = source[next_index..].chars().next() else {
+                split_safe = false;
                 break;
             };
             let after_next = next_index + next.len_utf8();
@@ -341,6 +399,7 @@ impl Template {
                 '#' | '}' | ',' => literal.push(next),
                 '(' => {
                     let Some(end) = find_plain_group_end(source, after_next, '(', ')') else {
+                        split_safe = false;
                         break;
                     };
                     Self::flush(&mut operations, &mut literal);
@@ -348,21 +407,57 @@ impl Template {
                     references.insert("*".to_owned());
                     let template = Self::parse_depth(command, false, depth + 1);
                     clock_dependent |= template.clock_dependent;
+                    unconditional_clock = true;
                     references.extend(template.references.iter().cloned());
+                    Self::push_part(
+                        &mut format_parts,
+                        &mut part_start,
+                        &mut previous_raw,
+                        index..end + 1,
+                        true,
+                        (
+                            std::iter::once("*".to_owned())
+                                .chain(template.references.iter().cloned())
+                                .collect::<BTreeSet<_>>()
+                                .into_iter()
+                                .collect(),
+                            FormatNeeds::default(),
+                        ),
+                        true,
+                    );
                     operations.push(Operation::Shell(command.into()));
                     index = end + 1;
                     continue;
                 }
                 '{' => {
                     let Some(end) = find_format_end(source, index) else {
+                        split_safe = false;
                         break;
                     };
                     Self::flush(&mut operations, &mut literal);
+                    let mut part_references = BTreeSet::new();
+                    let mut part_clock = false;
+                    let mut part_unconditional_clock = false;
+                    let mut required_loops = FormatNeeds::default();
                     let replacement = Replacement::parse(
                         &source[after_next..end],
-                        &mut references,
-                        &mut clock_dependent,
+                        &mut part_references,
+                        &mut part_clock,
+                        &mut part_unconditional_clock,
+                        (&mut split_safe, &mut required_loops),
                         depth,
+                    );
+                    references.extend(part_references.iter().cloned());
+                    clock_dependent |= part_clock;
+                    unconditional_clock |= part_unconditional_clock;
+                    Self::push_part(
+                        &mut format_parts,
+                        &mut part_start,
+                        &mut previous_raw,
+                        index..end + 1,
+                        part_unconditional_clock,
+                        (part_references.into_iter().collect(), required_loops),
+                        true,
                     );
                     if !replacement.modifiers.is_empty()
                         && replacement
@@ -382,6 +477,15 @@ impl Template {
                         Self::flush(&mut operations, &mut literal);
                         references.insert(name.to_owned());
                         operations.push(Operation::Variable(name));
+                        Self::push_part(
+                            &mut format_parts,
+                            &mut part_start,
+                            &mut previous_raw,
+                            index..after_next,
+                            false,
+                            (Arc::from([name.to_owned()]), FormatNeeds::default()),
+                            true,
+                        );
                     } else {
                         literal.push('#');
                         literal.push(next);
@@ -391,6 +495,26 @@ impl Template {
             index = after_next;
         }
         Self::flush(&mut operations, &mut literal);
+        if part_start < source.len() {
+            format_parts.push(FormatPart {
+                range: part_start..source.len(),
+                unconditional_clock: false,
+                references: Arc::from([]),
+                required_loops: FormatNeeds::default(),
+            });
+        }
+        if source.contains('%') || !split_safe {
+            let mut part_references = references.clone();
+            if !split_safe {
+                part_references.insert("*".to_owned());
+            }
+            format_parts = vec![FormatPart {
+                range: 0..source.len(),
+                unconditional_clock: true,
+                references: part_references.into_iter().collect(),
+                required_loops: FormatNeeds::default(),
+            }];
+        }
         let mut parts = Vec::new();
         let mut offset = 0;
         for part in split_top(source, ',') {
@@ -406,6 +530,8 @@ impl Template {
             references: references.into_iter().collect(),
             bytes: 0,
             clock_dependent,
+            unconditional_clock,
+            format_parts: format_parts.into(),
         };
         template.bytes = template
             .allocation_bytes()
@@ -430,6 +556,25 @@ impl Template {
                     .saturating_mul(std::mem::size_of::<String>()),
             )
             .saturating_add(std::mem::size_of::<usize>().saturating_mul(4));
+        bytes = bytes
+            .saturating_add(
+                self.format_parts
+                    .len()
+                    .saturating_mul(std::mem::size_of::<FormatPart>()),
+            )
+            .saturating_add(std::mem::size_of::<usize>().saturating_mul(2));
+        for part in self.format_parts.iter() {
+            bytes = bytes
+                .saturating_add(
+                    part.references
+                        .len()
+                        .saturating_mul(std::mem::size_of::<String>()),
+                )
+                .saturating_add(std::mem::size_of::<usize>().saturating_mul(2));
+            for reference in part.references.iter() {
+                bytes = bytes.saturating_add(reference.capacity());
+            }
+        }
         for operation in &self.operations {
             bytes = bytes.saturating_add(match operation {
                 Operation::Text(value) | Operation::Shell(value) => value.len(),
@@ -451,6 +596,50 @@ impl Template {
         if !literal.is_empty() {
             operations.push(Operation::Text(std::mem::take(literal).into()));
         }
+    }
+
+    fn push_part(
+        parts: &mut Vec<FormatPart>,
+        start: &mut usize,
+        previous_raw: &mut bool,
+        range: Range<usize>,
+        unconditional_clock: bool,
+        (references, required_loops): (Arc<[String]>, FormatNeeds),
+        raw: bool,
+    ) {
+        let adjacent = *start == range.start;
+        if !adjacent {
+            parts.push(FormatPart {
+                range: *start..range.start,
+                unconditional_clock: false,
+                references: Arc::from([]),
+                required_loops: FormatNeeds::default(),
+            });
+        }
+        *start = range.end;
+        if raw && *previous_raw && adjacent {
+            let previous = parts.last_mut().unwrap();
+            previous.range.end = range.end;
+            previous.unconditional_clock |= unconditional_clock;
+            previous.required_loops |= required_loops;
+            let mut combined = previous
+                .references
+                .iter()
+                .chain(references.iter())
+                .cloned()
+                .collect::<Vec<_>>();
+            combined.sort_unstable();
+            combined.dedup();
+            previous.references = combined.into();
+        } else {
+            parts.push(FormatPart {
+                range,
+                unconditional_clock,
+                references,
+                required_loops,
+            });
+        }
+        *previous_raw = raw;
     }
 }
 
@@ -833,6 +1022,8 @@ mod tests {
             "#{E:@fmt}",
             "#{T:@dynamic}",
             "#{p/#{@padding}/:pane_id}",
+            "#{T;=/#{status-left-length}:status-left}",
+            "#{T;=/#{status-right-length}:status-right}",
             "#{p/#{@padding}/;p3:pane_id}",
             "#{p12;p/#{@padding}/:pane_id}",
             "#{p/#(first)/;p3:pane_id}",
@@ -1001,6 +1192,289 @@ mod tests {
     }
 
     #[test]
+    fn compiled_format_parts_preserve_ranges_and_conditional_time_dependencies() {
+        let source = "界#S|#{T:status-right}|#[fg=#{?pane_active,red,green}]🌻";
+        let parts = format_parts(source);
+        assert_eq!(parts.first().unwrap().range.start, 0);
+        assert_eq!(parts.last().unwrap().range.end, source.len());
+        assert!(
+            parts
+                .windows(2)
+                .all(|pair| pair[0].range.end == pair[1].range.start)
+        );
+        assert_eq!(
+            parts
+                .iter()
+                .map(|part| &source[part.range.clone()])
+                .collect::<String>(),
+            source
+        );
+        let time = parts
+            .iter()
+            .find(|part| part.references.iter().any(|name| name == "T:status-right"))
+            .unwrap();
+        assert!(!time.unconditional_clock);
+        assert!(format_clock_dependent(source));
+        assert!(parts.iter().all(|part| !part.unconditional_clock));
+        for source in [
+            "#{?pane_active,#{T:status-right},#{E:@static}}",
+            "#[fg=#{T:@colour}]",
+            "##{t/r:start_time}",
+            "#{l:#{t/r:start_time}}",
+        ] {
+            assert!(
+                format_parts(source)
+                    .iter()
+                    .all(|part| !part.unconditional_clock),
+                "{source}"
+            );
+        }
+        for source in [
+            "#{t:start_time}",
+            "#{t/r:start_time}",
+            "#{t/d:start_time}",
+            "#{?pane_active,#{t/r:start_time},plain}",
+            "#[fg=#{?pane_active,#{t/d:start_time},green}]",
+            "#(printf constant)",
+            "#{E:#{@format}}",
+            "#{I/c:RGB}",
+        ] {
+            assert!(
+                format_parts(source)
+                    .iter()
+                    .any(|part| part.unconditional_clock),
+                "{source}"
+            );
+        }
+        for source in ["a%Sb#{pane_title}", "##{t/f/%Y:start_time}"] {
+            let parts = format_parts(source);
+            assert_eq!(parts.len(), 1);
+            assert_eq!(parts[0].range, 0..source.len());
+            assert!(parts[0].unconditional_clock);
+        }
+        let source = "#{W:#{window_name}}|#{P:#{pane_id}}";
+        let parts = format_parts(source);
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[0].required_loops, FormatNeeds::WINDOWS);
+        assert_eq!(parts[2].required_loops, FormatNeeds::PANES);
+        assert!(parts.iter().all(|part| !part.unconditional_clock));
+        assert_eq!(
+            format_parts("#{?pane_active,#{W:#{window_name}},plain}")[0].required_loops,
+            FormatNeeds::default()
+        );
+    }
+
+    #[test]
+    fn compiled_format_parts_match_whole_expansion_and_early_stops() {
+        let (engine, context) = scene();
+        let atoms = [
+            "arbitrary literal",
+            "界#S🌻",
+            "##S",
+            "###",
+            "#}",
+            "#,",
+            "#{",
+            "#(",
+            "#[",
+            "#{pane_id}#{pane_title}",
+            "#{E:@fmt}",
+            "#{T:@dynamic}",
+            "#{p/#{@padding}/:pane_id}",
+            "#{l:literal-##-#,-#{pane_id}}",
+            "#{s/#(first)/x/;bad:pane_id}",
+            "#{?pane_id,#{W:#{P:#{pane_id}}},none}",
+            "#{?missing,a,pane_id,b,c}",
+            "#{||:0,#{pane_id},#(unused)}",
+            "#{==:#{window_index},2}",
+            "#{==:missing}",
+            "#{R:ab,3}",
+            "#{R:missing}",
+            "#{N:work}",
+            "#{W:#{window_name}}",
+            "#{P:#{pane_id}}",
+            "#{e|+|f|3:2.5,#{@padding}}",
+            "###[fg=#{?pane_id,red,blue}]#(job)",
+            "%H:%M#{pane_id}",
+        ];
+        let compare_parts = |source: &str| {
+            let parts = format_parts(source);
+            assert_eq!(parts.first().unwrap().range.start, 0, "{source}");
+            assert_eq!(parts.last().unwrap().range.end, source.len(), "{source}");
+            assert!(
+                parts
+                    .windows(2)
+                    .all(|pair| pair[0].range.end == pair[1].range.start),
+                "{source}"
+            );
+            for enabled in [false, true] {
+                with_enabled(enabled, || {
+                    let mut whole_hooks = Hooks::default();
+                    let whole =
+                        expand_format_time_with_hooks(source, &engine, context, &mut whole_hooks);
+                    let mut part_hooks = Hooks::default();
+                    let segmented = parts
+                        .iter()
+                        .map(|part| {
+                            expand_format_time_with_hooks(
+                                &source[part.range.clone()],
+                                &engine,
+                                context,
+                                &mut part_hooks,
+                            )
+                            .to_string()
+                        })
+                        .collect::<String>();
+                    assert_eq!(segmented, whole.to_string(), "{source}, compiled={enabled}");
+                    assert_eq!(part_hooks.calls, whole_hooks.calls, "{source}");
+                });
+            }
+        };
+        for atom in atoms {
+            compare_parts(&format!("before|{atom}|after"));
+        }
+        for source in [
+            "before|#{==:missing}|after",
+            "before|#{R:missing}|after",
+            "before|#{N:work}|after",
+            "before|#{N/#{@scope}:work}|after",
+            "before|#{s/foo/bar/;bad:pane_title}|after",
+            "before|#{unterminated",
+        ] {
+            let parts = format_parts(source);
+            assert_eq!(parts.len(), 1, "{source}");
+            assert_eq!(parts[0].range, 0..source.len());
+            assert!(parts[0].unconditional_clock, "{source}");
+        }
+        let mut state = 0x9e37_79b9u64;
+        for _ in 0..256 {
+            let mut source = String::new();
+            for _ in 0..4 {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                source.push_str(atoms[state as usize % atoms.len()]);
+            }
+            compare_parts(&source);
+        }
+        assert!(format_parts("").is_empty());
+    }
+
+    #[test]
+    fn compiled_format_parts_keep_dynamic_trimming_fresh_without_combining_window_rows() {
+        let source = "#{T;=/#{status-left-length}:status-left}|#{W:#{window_name}}|#{T;=/#{status-right-length}:status-right}";
+        let parts = format_parts(source);
+        assert_eq!(parts.len(), 5);
+        assert!(parts[0].unconditional_clock);
+        assert!(!parts[2].unconditional_clock);
+        assert!(parts[4].unconditional_clock);
+        assert_eq!(parts[2].required_loops, FormatNeeds::WINDOWS);
+        assert_eq!(&source[parts[2].range.clone()], "#{W:#{window_name}}");
+        assert!(
+            parts[0]
+                .references
+                .iter()
+                .any(|name| name == "status-left-length")
+        );
+        assert!(
+            parts[4]
+                .references
+                .iter()
+                .any(|name| name == "status-right-length")
+        );
+        let context = StatusContext::from(StatusValues {
+            session_name: "abcdefgh".to_owned(),
+            ..StatusValues::default()
+        });
+        for enabled in [false, true] {
+            with_enabled(enabled, || {
+                for width in ["1", "4", "-3", "invalid", "100000000", "x:#(not-run)"] {
+                    struct Width<'a>(&'a str);
+                    impl StatusHooks for Width<'_> {
+                        fn strftime(&mut self, source: &str) -> String {
+                            source.to_owned()
+                        }
+                        fn shell(&mut self, _command: &str, _tag: &FormatJobTag) -> String {
+                            panic!("expanded modifier text must not be parsed as another command")
+                        }
+                        fn variable(
+                            &mut self,
+                            name: &str,
+                            _context: &StatusContext,
+                        ) -> Option<String> {
+                            (name == "WIDTH").then(|| self.0.to_owned())
+                        }
+                    }
+                    for source in [
+                        "before|#{=/#{WIDTH}:session_name}|after",
+                        "before|#{p/#{WIDTH}/:session_name}|after",
+                    ] {
+                        let parts = format_parts(source);
+                        assert_eq!(parts.len(), 3);
+                        assert!(parts[1].unconditional_clock);
+                        let mut hooks = Width(width);
+                        let whole = expand_status(source, &context, &mut hooks);
+                        let segmented = parts
+                            .iter()
+                            .map(|part| {
+                                expand_status(&source[part.range.clone()], &context, &mut hooks)
+                            })
+                            .collect::<String>();
+                        assert_eq!(segmented, whole, "{source}: {width}, compiled={enabled}");
+                    }
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn compiled_format_parts_keep_adjacent_raw_values_in_one_expansion() {
+        let context = StatusContext {
+            format_universe: FormatUniverseRef {
+                parts: Arc::new(FormatUniverse::with_global_environment(vec![
+                    FormatEnvironRow {
+                        name: "FIRST".to_owned(),
+                        value: RawText::from_bytes(vec![0xc3]),
+                        ..FormatEnvironRow::default()
+                    },
+                    FormatEnvironRow {
+                        name: "SECOND".to_owned(),
+                        value: RawText::from_bytes(vec![0xa9]),
+                        ..FormatEnvironRow::default()
+                    },
+                ])),
+                engine: None,
+            },
+            ..StatusContext::default()
+        };
+        for enabled in [false, true] {
+            with_enabled(enabled, || {
+                for source in [
+                    "#{FIRST}#{SECOND}",
+                    "#{FIRST}#{l:}#{SECOND}",
+                    "#{FIRST}#{?missing,,}#{SECOND}",
+                    "x#{FIRST}#{SECOND}|#[#{FIRST}#{SECOND}]",
+                ] {
+                    let parts = format_parts(source);
+                    let mut hooks = Hooks::default();
+                    let whole = expand_status(source, &context, &mut hooks);
+                    let segmented = parts
+                        .iter()
+                        .map(|part| {
+                            expand_status(&source[part.range.clone()], &context, &mut hooks)
+                        })
+                        .collect::<String>();
+                    assert_eq!(segmented, whole, "{source}");
+                    assert!(parts.iter().any(|part| {
+                        let source = &source[part.range.clone()];
+                        source.contains("#{FIRST}") && source.contains("#{SECOND}")
+                    }));
+                }
+            });
+        }
+    }
+
+    #[test]
     fn compiled_cache_retention_respects_format_cache_rollback() {
         CACHE.with_borrow_mut(|cache| *cache = Cache::default());
         let before =
@@ -1008,6 +1482,10 @@ mod tests {
         let first = get("clock-retention:#{t/d:start_time}");
         let second = get("clock-retention:#{t/d:start_time}");
         assert_eq!(Arc::ptr_eq(&first, &second), format_cache_knob());
+        assert_eq!(
+            Arc::ptr_eq(&first.format_parts, &second.format_parts),
+            format_cache_knob()
+        );
         assert!(first.clock_dependent);
         assert_eq!(first.references, second.references);
         CACHE.with_borrow(|cache| {

@@ -378,7 +378,7 @@ fn completed_status_twenty_windows_fit_the_bound_and_reuse_fresh_requests() {
 
 #[test]
 fn completed_status_does_not_retain_oversized_sources_callbacks_or_borders() {
-    for kind in ["source", "callback", "border"] {
+    for kind in ["source", "callback", "border", "environment", "terminal"] {
         let (_, _, mut request) = completed_request("#{session_name}:#{client_prefix}");
         let large = "x".repeat(COMPLETED_STATUS_MAX_BYTES);
         match kind {
@@ -390,6 +390,10 @@ fn completed_status_does_not_retain_oversized_sources_callbacks_or_borders() {
                     .unwrap()
                     .prefix = large;
             }
+            "environment" => {
+                request.environment = Arc::new(vec![("LARGE".into(), Some(large.into()))]);
+            }
+            "terminal" => request.default_terminal = Arc::new(large),
             _ => {
                 Arc::make_mut(&mut request.pane_borders).push(
                     zz_protocol::PaneBorderPresentation {
@@ -434,6 +438,304 @@ fn completed_request(left: &str) -> (MuxEngine, zz_mux::ExecutionContext, Status
     Arc::make_mut(&mut request.formats).foreground = "default".to_owned();
     Arc::make_mut(&mut request.formats).background = "default".to_owned();
     (engine, context, request)
+}
+
+fn fresh_clock_request(engine: &MuxEngine, previous: &StatusRequest) -> StatusRequest {
+    let mut request = engine_request(
+        previous.client.0,
+        engine,
+        previous.context.session_id.parse().ok(),
+    );
+    if request.environment == previous.environment {
+        request.environment = Arc::clone(&previous.environment);
+    }
+    if request.default_terminal == previous.default_terminal {
+        request.default_terminal = Arc::clone(&previous.default_terminal);
+    }
+    request
+}
+
+fn whole_status(request: &StatusRequest, now: i64) -> StatusLine {
+    render(
+        &mut BTreeMap::new(),
+        &mut BTreeSet::new(),
+        request,
+        false,
+        now,
+        None,
+        None,
+        None,
+        None,
+    )
+}
+
+#[test]
+fn completed_status_parts_reuse_twenty_window_loop_across_fresh_clock_requests() {
+    let mut engine = MuxEngine::default();
+    let mut execution = zz_mux::ExecutionContext::default();
+    engine.set_format_now(1_700_000_000);
+    execute(&mut engine, &mut execution, &["new-session", "-s", "parts"]);
+    for _ in 1..20 {
+        execute(&mut engine, &mut execution, &["new-window"]);
+    }
+    let mut request = engine_request(1, &engine, execution.session);
+    let mut renderer = StatusRenderer::default();
+    let first = renderer.render_forced_at(&request, 1_700_000_000);
+    assert_eq!(first, whole_status(&request, 1_700_000_000));
+    let parts = renderer
+        .completed
+        .as_ref()
+        .and_then(|entry| entry.parts.clone());
+    assert_eq!(parts.is_some(), status_parts_enabled());
+    if let Some(parts) = &parts {
+        assert!(parts.rows[&0].iter().any(|part| {
+            part.value
+                .as_ref()
+                .and_then(OnceLock::get)
+                .is_some_and(|value| {
+                    value.contains("range=window|") && value.matches("range=window|").count() == 20
+                })
+        }));
+    }
+    for now in [1_700_000_060, 1_700_000_120] {
+        engine.set_format_now(now);
+        request = fresh_clock_request(&engine, &request);
+        let next = renderer.render_forced_at(&request, i64::try_from(now).unwrap());
+        assert_eq!(next.left, first.left);
+        assert_ne!(next.right, first.right);
+        assert_eq!(next, whole_status(&request, i64::try_from(now).unwrap()));
+        if let Some(parts) = &parts {
+            assert!(Arc::ptr_eq(
+                parts,
+                renderer.completed.as_ref().unwrap().parts.as_ref().unwrap()
+            ));
+        }
+    }
+}
+
+#[test]
+fn completed_status_parts_keep_nested_timed_options_and_data_percent_text_fresh() {
+    for value in ["fg=colour%S", "#{t/d:session_created}", "#{E:@timed}"] {
+        let (mut engine, mut execution, _) = completed_request("#{session_name}");
+        engine.set_format_now(1_700_000_000);
+        engine
+            .state
+            .session_mut(execution.session.unwrap())
+            .unwrap()
+            .created = Some(1_700_000_000);
+        execute(
+            &mut engine,
+            &mut execution,
+            &["set-option", "-g", "@timed", "%S"],
+        );
+        execute(
+            &mut engine,
+            &mut execution,
+            &["set-option", "-g", "window-status-format", value],
+        );
+        execute(
+            &mut engine,
+            &mut execution,
+            &["set-option", "-g", "window-status-current-format", value],
+        );
+        let mut request = engine_request(1, &engine, execution.session);
+        let mut renderer = StatusRenderer::default();
+        renderer.render_forced_at(&request, 1_700_000_000);
+        engine.set_format_now(1_700_000_001);
+        request = fresh_clock_request(&engine, &request);
+        let next = renderer.render_forced_at(&request, 1_700_000_001);
+        assert_eq!(next, whole_status(&request, 1_700_000_001), "{value}");
+        if let Some(parts) = renderer
+            .completed
+            .as_ref()
+            .and_then(|entry| entry.parts.as_ref())
+        {
+            assert!(
+                parts.rows[&0]
+                    .iter()
+                    .filter(|part| { request.row_formats[&0][part.range.clone()].contains("#{W:") })
+                    .all(|part| part.value.is_none()),
+                "{value}"
+            );
+        }
+    }
+    let (mut engine, mut execution, _) = completed_request("#{session_name}");
+    execute(&mut engine, &mut execution, &["rename-session", "%S"]);
+    engine.set_format_now(1_700_000_000);
+    let first = engine_request(1, &engine, execution.session);
+    let mut renderer = StatusRenderer::default();
+    assert!(
+        renderer
+            .render_forced_at(&first, 1_700_000_000)
+            .left
+            .contains("%S")
+    );
+    engine.set_format_now(1_700_000_001);
+    let next = fresh_clock_request(&engine, &first);
+    assert!(
+        renderer
+            .render_forced_at(&next, 1_700_000_001)
+            .left
+            .contains("%S")
+    );
+}
+
+#[test]
+fn completed_status_option_size_memo_requires_retained_arc_identity() {
+    let (mut engine, _, request) = completed_request("#{session_name}");
+    engine.set_format_now(1_700_000_000);
+    let mut renderer = StatusRenderer::default();
+    renderer.render_forced_at(&request, 1_700_000_000);
+    let memo = renderer.completed.as_mut().map(|entry| {
+        entry.option_bytes = entry.option_bytes.saturating_add(128);
+        entry.option_bytes
+    });
+    renderer.render_forced_at(&request, 1_700_000_001);
+    if let Some(memo) = memo {
+        assert_eq!(renderer.completed.as_ref().unwrap().option_bytes, memo);
+    }
+    let mut changed = request.clone();
+    Arc::make_mut(&mut changed.option_snapshot).base.insert(
+        "@giant-unused".to_owned(),
+        "x".repeat(COMPLETED_STATUS_MAX_BYTES),
+    );
+    assert!(!Arc::ptr_eq(
+        &request.option_snapshot,
+        &changed.option_snapshot
+    ));
+    let next = renderer.render_forced_at(&changed, 1_700_000_002);
+    assert!(renderer.completed.is_none());
+    let mut oracle = StatusRenderer::default();
+    assert_eq!(next, oracle.render_forced_at(&changed, 1_700_000_002));
+}
+
+#[test]
+fn status_parts_preserve_malformed_escape_style_and_whole_source_strftime_order() {
+    for source in [
+        "start#{==:broken}tail",
+        "start#{?session_name}tail",
+        "before#{R:broken}after",
+        "before#{W:#{session_name}}after",
+        "##{session_name}#{session_name}",
+        "#[fg=#{?session_name,red,green}]#{session_name}",
+        "#{t/f/%S:session_created}suffix",
+    ] {
+        let (_, _, request) = completed_request(source);
+        let parts = StatusParts::new(&request);
+        let mut hooks = DaemonFormatHooks::command(request.facts.as_ref());
+        hooks.option_snapshot = Some(&request.option_snapshot);
+        hooks.now = 1_700_000_000;
+        let original = expand_status(source, &request.context, &mut hooks);
+        let split = expand_status_parts(source, &request.context, &mut hooks, Some(&parts.left));
+        assert_eq!(split, original, "{source}");
+    }
+}
+
+#[test]
+fn status_parts_keep_missing_loop_context_and_adjacent_raw_environment_whole() {
+    for source in [
+        "before#{W:#{session_name}}after",
+        "before#{P:#{pane_id}}after",
+    ] {
+        let mut request = request(1, source, "");
+        request.context = Arc::new(StatusContext::default());
+        let parts = StatusParts::new(&request);
+        assert_eq!(parts.left.len(), 1);
+        assert!(parts.left[0].value.is_none());
+        let mut hooks = DaemonFormatHooks::command(request.facts.as_ref());
+        let expected = expand_status(source, &request.context, &mut hooks);
+        assert_eq!(
+            expand_status_parts(source, &request.context, &mut hooks, Some(&parts.left)),
+            expected,
+        );
+    }
+    let (mut engine, execution, _) = completed_request("x#{FIRST}#{SECOND}|#[#{FIRST}#{SECOND}]");
+    engine.seed_global_environment([
+        ("FIRST", RawText::from_bytes(vec![0xc3])),
+        ("SECOND", RawText::from_bytes(vec![0xa9])),
+    ]);
+    let raw_request = engine_request(1, &engine, execution.session);
+    let mut renderer = StatusRenderer::default();
+    let actual = renderer.render_forced_at(&raw_request, 1_700_000_000);
+    assert_eq!(actual, whole_status(&raw_request, 1_700_000_000));
+    assert!(actual.left.contains("xé"));
+    let large_source = format!("{}#{{session_name}}", "x".repeat(8192));
+    let request = request(1, &large_source, "");
+    let parts = StatusParts::new(&request);
+    assert_eq!(parts.left.len(), 1);
+    assert!(parts.left[0].value.is_none());
+}
+
+#[test]
+fn completed_status_parts_recheck_facts_layout_targets_modes_and_sources() {
+    let (mut engine, execution, _) =
+        completed_request("#{session_name}:#{client_prefix}:#{client_width}");
+    engine.set_format_now(1_700_000_000);
+    let initial = engine_request(1, &engine, execution.session);
+    engine.set_format_now(1_700_000_001);
+    let fresh = fresh_clock_request(&engine, &initial);
+    for change in [
+        "facts",
+        "length",
+        "target",
+        "mode",
+        "environment",
+        "terminal",
+        "template",
+        "message",
+        "client",
+        "border",
+    ] {
+        let mut renderer = StatusRenderer::default();
+        renderer.render_forced_at(&initial, 1_700_000_000);
+        let previous = renderer
+            .completed
+            .as_ref()
+            .and_then(|entry| entry.parts.clone());
+        let mut next = fresh.clone();
+        match change {
+            "facts" => {
+                Arc::make_mut(&mut next.facts)
+                    .client
+                    .as_mut()
+                    .unwrap()
+                    .prefix = "1".to_owned();
+            }
+            "length" => Arc::make_mut(&mut next.formats).left_length = 2,
+            "target" => {
+                Arc::make_mut(&mut next.context).set_format_value("session_name", "changed");
+            }
+            "mode" => next.modes.push(ModeRequest {
+                pane: next.context.pane_id.parse().unwrap(),
+                view: false,
+                context: next.context.as_ref().clone(),
+                position: 0,
+                limit: 0,
+                vi_keys: false,
+            }),
+            "environment" => next.environment = Arc::new(next.environment.as_ref().clone()),
+            "terminal" => next.default_terminal = Arc::new(next.default_terminal.as_ref().clone()),
+            "template" => Arc::make_mut(&mut next.formats).left.push('!'),
+            "message" => next.message_line = next.message_line.saturating_add(1),
+            "client" => next.client = ClientId(2),
+            _ => Arc::make_mut(&mut next.pane_borders).push(zz_protocol::PaneBorderPresentation {
+                pane: next.context.pane_id.parse().unwrap(),
+                style: "fg=red".to_owned(),
+            }),
+        }
+        let actual = renderer.render_forced_at(&next, 1_700_000_001);
+        assert_eq!(actual, whole_status(&next, 1_700_000_001), "{change}");
+        if let Some(previous) = previous {
+            assert!(
+                renderer
+                    .completed
+                    .as_ref()
+                    .and_then(|entry| entry.parts.as_ref())
+                    .is_none_or(|parts| !Arc::ptr_eq(&previous, parts)),
+                "{change}"
+            );
+        }
+    }
 }
 
 #[test]

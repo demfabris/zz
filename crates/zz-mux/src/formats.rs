@@ -5,7 +5,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     fmt::Write as _,
     sync::{
-        Arc, LazyLock, OnceLock,
+        Arc, LazyLock, OnceLock, Weak,
         atomic::{AtomicU8, Ordering as AtomicOrdering},
     },
 };
@@ -39,6 +39,19 @@ mod compiled;
 #[must_use]
 pub fn format_references(format: &str) -> Arc<[String]> {
     compiled::get(format).references.clone()
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FormatPart {
+    pub range: std::ops::Range<usize>,
+    pub unconditional_clock: bool,
+    pub references: Arc<[String]>,
+    pub required_loops: FormatNeeds,
+}
+
+#[must_use]
+pub fn format_parts(format: &str) -> Arc<[FormatPart]> {
+    compiled::get(format).format_parts.clone()
 }
 
 #[must_use]
@@ -333,6 +346,32 @@ pub(crate) struct DetachedContextCache {
     needs: FormatNeeds,
     references: Option<BTreeSet<String>>,
     context: StatusContext<'static>,
+    reference_identity: Option<Weak<BTreeSet<String>>>,
+}
+
+impl DetachedContextCache {
+    fn matches_references(
+        &self,
+        references: Option<&BTreeSet<String>>,
+        shared: Option<&Arc<BTreeSet<String>>>,
+    ) -> bool {
+        self.reference_identity
+            .as_ref()
+            .zip(shared)
+            .is_some_and(|(cached, current)| cached.as_ptr() == Arc::as_ptr(current))
+            || self.references.as_ref() == references
+    }
+
+    fn adopt_reference_identity(&mut self, shared: Option<&Arc<BTreeSet<String>>>) {
+        if let Some(shared) = shared
+            && self
+                .reference_identity
+                .as_ref()
+                .is_none_or(|cached| cached.as_ptr() != Arc::as_ptr(shared))
+        {
+            self.reference_identity = Some(Arc::downgrade(shared));
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -1752,10 +1791,10 @@ impl StatusContext<'_> {
 
     #[must_use]
     pub fn detach(self, needs: FormatNeeds) -> StatusContext<'static> {
-        if let Some(context) = self.cached_detached(needs, None) {
+        if let Some(context) = self.cached_detached(needs, None, None) {
             return context;
         }
-        self.detach_selected(needs, None, None)
+        self.detach_selected(needs, None, None, None)
     }
 
     #[must_use]
@@ -1774,7 +1813,7 @@ impl StatusContext<'_> {
                     .collect::<BTreeSet<_>>(),
             )
         };
-        self.detach_with_references(needs, &references)
+        self.detach_with_shared_references(needs, &references)
     }
 
     #[must_use]
@@ -1783,12 +1822,30 @@ impl StatusContext<'_> {
         needs: FormatNeeds,
         references: &BTreeSet<String>,
     ) -> StatusContext<'static> {
-        if let Some(context) = self.cached_detached(needs, Some(references)) {
+        if let Some(context) = self.cached_detached(needs, Some(references), None) {
             return context;
         }
         self.detach_selected(
             needs,
             (!references.contains("*")).then_some(references),
+            Some(references),
+            None,
+        )
+    }
+
+    #[must_use]
+    pub fn detach_with_shared_references(
+        self,
+        needs: FormatNeeds,
+        references: &Arc<BTreeSet<String>>,
+    ) -> StatusContext<'static> {
+        if let Some(context) = self.cached_detached(needs, Some(references), Some(references)) {
+            return context;
+        }
+        self.detach_selected(
+            needs,
+            (!references.contains("*")).then_some(references),
+            Some(references),
             Some(references),
         )
     }
@@ -1797,16 +1854,17 @@ impl StatusContext<'_> {
         &self,
         needs: FormatNeeds,
         references: Option<&BTreeSet<String>>,
+        shared: Option<&Arc<BTreeSet<String>>>,
     ) -> Option<StatusContext<'static>> {
         let tree = self.tree.as_ref()?;
         if !format_cache_knob() || !tree::borrowed_formats() || self.values.get().is_some() {
             return None;
         }
-        let cache = tree.engine.format_context_cache.lock();
-        let cached = cache.as_ref()?;
+        let mut cache = tree.engine.format_context_cache.lock();
+        let cached = cache.as_mut()?;
         let revision = FormatCaptureRevision::new(tree.engine);
         (cached.needs == needs
-            && cached.references.as_ref() == references
+            && cached.matches_references(references, shared)
             && cached.target == (tree.session, tree.window, tree.pane)
             && cached.input_variables == self.variables
             && cached
@@ -1818,7 +1876,10 @@ impl StatusContext<'_> {
             && cached.context.session_id == self.session_id
             && cached.context.window_id == self.window_id
             && cached.context.pane_id == self.pane_id)
-            .then(|| cached.context.with_capture_clock(revision, self.format_now))
+            .then(|| {
+                cached.adopt_reference_identity(shared);
+                cached.context.with_capture_clock(revision, self.format_now)
+            })
     }
 
     fn with_capture_clock(&self, revision: FormatCaptureRevision, now: Option<i64>) -> Self {
@@ -1858,6 +1919,7 @@ impl StatusContext<'_> {
         needs: FormatNeeds,
         references: Option<&BTreeSet<String>>,
         cache_references: Option<&BTreeSet<String>>,
+        shared: Option<&Arc<BTreeSet<String>>>,
     ) -> StatusContext<'static> {
         let engine = self.tree.as_ref().map(|tree| tree.engine);
         let revision = engine.map(|engine| Arc::new(FormatCaptureRevision::new(engine)));
@@ -1911,7 +1973,12 @@ impl StatusContext<'_> {
             let bytes = context
                 .retained_bytes()
                 .saturating_add(variable_bytes(&input_variables))
-                .saturating_add(cache_references.map_or(0, reference_bytes));
+                .saturating_add(cache_references.map_or(0, reference_bytes))
+                .saturating_add(std::mem::size_of::<Option<Weak<BTreeSet<String>>>>())
+                .saturating_add(
+                    std::mem::size_of::<BTreeSet<String>>()
+                        .saturating_add(std::mem::size_of::<usize>().saturating_mul(2)),
+                );
             let mut cache = engine.format_context_cache.lock();
             *cache = (bytes <= FORMAT_CAPTURE_CACHE_BYTES).then(|| DetachedContextCache {
                 target,
@@ -1919,6 +1986,7 @@ impl StatusContext<'_> {
                 needs,
                 references: cache_references.cloned(),
                 context: context.clone(),
+                reference_identity: shared.map(Arc::downgrade),
             });
         }
         context
@@ -1984,6 +2052,27 @@ impl StatusContext<'_> {
     }
 
     #[must_use]
+    pub fn same_detached_data(&self, other: &StatusContext<'_>) -> bool {
+        self.tree.is_none()
+            && other.tree.is_none()
+            && self.format_universe.engine.is_none()
+            && other.format_universe.engine.is_none()
+            && self.values.get().is_none()
+            && other.values.get().is_none()
+            && self
+                .capture_revision
+                .as_deref()
+                .zip(other.capture_revision.as_deref())
+                .is_some_and(|(left, right)| left.same_data(right))
+            && self.format_client == other.format_client
+            && self.session_id == other.session_id
+            && self.window_id == other.window_id
+            && self.pane_id == other.pane_id
+            && Arc::ptr_eq(&self.variables, &other.variables)
+            && Arc::ptr_eq(&self.format_universe.parts, &other.format_universe.parts)
+    }
+
+    #[must_use]
     pub fn retained_bytes(&self) -> usize {
         if self.values.get().is_some() {
             return FORMAT_CAPTURE_CACHE_BYTES + 1;
@@ -1999,6 +2088,41 @@ impl StatusContext<'_> {
     #[must_use]
     pub fn format_universe_covers(&self, needs: FormatNeeds) -> bool {
         self.format_universe.engine.is_some() || self.format_universe.parts.built().contains(needs)
+    }
+
+    #[must_use]
+    pub fn format_loops_available(&self, needs: FormatNeeds) -> bool {
+        let windows = needs.contains(FormatNeeds::WINDOWS);
+        let panes = needs.contains(FormatNeeds::PANES);
+        if windows && !self.format_universe_covers(FormatNeeds::WINDOWS)
+            || panes && !self.format_universe_covers(FormatNeeds::PANES)
+        {
+            return false;
+        }
+        if self.format_universe.engine.is_none()
+            && (windows
+                && parse_session(&self.session_id).is_none_or(|session| {
+                    !self
+                        .format_universe
+                        .parts
+                        .windows
+                        .lock()
+                        .contains_key(&session)
+                })
+                || panes
+                    && parse_window(&self.window_id).is_none_or(|window| {
+                        !self
+                            .format_universe
+                            .parts
+                            .panes
+                            .lock()
+                            .contains_key(&window)
+                    }))
+        {
+            return false;
+        }
+        (!windows || self.format_universe.windows(&self.session_id).is_some())
+            && (!panes || self.format_universe.panes(&self.window_id).is_some())
     }
 }
 
@@ -2464,16 +2588,54 @@ impl MuxEngine {
         references: &BTreeSet<String>,
         sorted_overrides: impl IntoIterator<Item = (&'a str, &'a str)>,
     ) -> Option<StatusContext<'static>> {
+        self.cached_detached_format_context_inner(
+            target,
+            format_client,
+            needs,
+            references,
+            None,
+            sorted_overrides,
+        )
+    }
+
+    #[must_use]
+    pub fn cached_detached_format_context_with_shared_references<'a>(
+        &self,
+        target: (Option<SessionId>, Option<WindowId>, Option<PaneId>),
+        format_client: FormatClient,
+        needs: FormatNeeds,
+        references: &Arc<BTreeSet<String>>,
+        sorted_overrides: impl IntoIterator<Item = (&'a str, &'a str)>,
+    ) -> Option<StatusContext<'static>> {
+        self.cached_detached_format_context_inner(
+            target,
+            format_client,
+            needs,
+            references,
+            Some(references),
+            sorted_overrides,
+        )
+    }
+
+    fn cached_detached_format_context_inner<'a>(
+        &self,
+        target: (Option<SessionId>, Option<WindowId>, Option<PaneId>),
+        format_client: FormatClient,
+        needs: FormatNeeds,
+        references: &BTreeSet<String>,
+        shared: Option<&Arc<BTreeSet<String>>>,
+        sorted_overrides: impl IntoIterator<Item = (&'a str, &'a str)>,
+    ) -> Option<StatusContext<'static>> {
         if !format_cache_knob() || !tree::borrowed_formats() {
             return None;
         }
         let target_ids = self.format_target(target.0, target.1, target.2);
-        let cache = self.format_context_cache.lock();
-        let cached = cache.as_ref()?;
+        let mut cache = self.format_context_cache.lock();
+        let cached = cache.as_mut()?;
         let revision = FormatCaptureRevision::new(self);
         (cached.target == target_ids
             && cached.needs == needs
-            && cached.references.as_ref() == Some(references)
+            && cached.matches_references(Some(references), shared)
             && cached
                 .context
                 .capture_revision
@@ -2494,6 +2656,7 @@ impl MuxEngine {
                 }) && overrides.next().is_none()
             })
         .then(|| {
+            cached.adopt_reference_identity(shared);
             cached.context.with_capture_clock(
                 revision,
                 i64::try_from(revision.now).ok().filter(|now| *now != 0),

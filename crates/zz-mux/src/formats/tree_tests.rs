@@ -53,6 +53,94 @@ fn engine_access_preserves_legacy_resolution_and_ends_at_detach() {
 }
 
 #[test]
+fn loop_availability_checks_capture_coverage_and_exact_current_scope_presence() {
+    let mut context = StatusContext {
+        session_id: "$1".to_owned(),
+        window_id: "@2".to_owned(),
+        format_universe: FormatUniverseRef {
+            parts: Arc::new(FormatUniverse::with_built(
+                FormatClient::NoClient,
+                FormatNeeds::NONE,
+            )),
+            engine: None,
+        },
+        ..StatusContext::default()
+    };
+    let both = FormatNeeds::WINDOWS | FormatNeeds::PANES;
+    assert!(context.format_loops_available(FormatNeeds::NONE));
+    assert!(!context.format_loops_available(FormatNeeds::WINDOWS));
+    assert!(!context.format_loops_available(FormatNeeds::PANES));
+    assert!(!context.format_loops_available(both));
+    assert!(context.format_universe.parts.windows.lock().is_empty());
+    assert!(context.format_universe.parts.panes.lock().is_empty());
+    context
+        .format_universe
+        .parts
+        .mark_built(FormatNeeds::WINDOWS);
+    assert!(!context.format_loops_available(FormatNeeds::WINDOWS));
+    context
+        .format_universe
+        .parts
+        .windows
+        .lock()
+        .insert(SessionId(1), Some(LoopItems::default()));
+    assert!(context.format_loops_available(FormatNeeds::WINDOWS));
+    assert!(!context.format_loops_available(both));
+    context.format_universe.parts.mark_built(FormatNeeds::PANES);
+    assert!(!context.format_loops_available(FormatNeeds::PANES));
+    context
+        .format_universe
+        .parts
+        .panes
+        .lock()
+        .insert(WindowId(2), None);
+    assert!(!context.format_loops_available(FormatNeeds::PANES));
+    context
+        .format_universe
+        .parts
+        .panes
+        .lock()
+        .insert(WindowId(2), Some(LoopItems::default()));
+    assert!(context.format_loops_available(both));
+    context.session_id = "$3".to_owned();
+    assert!(!context.format_loops_available(FormatNeeds::WINDOWS));
+    assert!(context.format_loops_available(FormatNeeds::PANES));
+    context.window_id.clear();
+    assert!(!context.format_loops_available(FormatNeeds::PANES));
+    assert!(context.values.get().is_none());
+}
+
+#[test]
+fn loop_availability_preserves_lazy_values_in_real_detached_captures() {
+    let mut engine = MuxEngine::default();
+    let (session, window, pane) = engine.state.create_session("work").unwrap();
+    let template = "#{W:#{P:#{pane_id}}}";
+    let needs = FormatNeeds::WINDOWS | FormatNeeds::PANES;
+    with_borrowed_formats(true, || {
+        let context = engine
+            .format_status_context(Some(session), Some(window), Some(pane))
+            .detach_with_templates(needs, [template]);
+        assert!(context.format_loops_available(needs));
+        assert_eq!(
+            expand_status(template, &context, &mut Hooks(&engine)),
+            pane.to_string()
+        );
+        assert!(context.values.get().is_none());
+        for items in context
+            .format_universe
+            .parts
+            .windows
+            .lock()
+            .values()
+            .chain(context.format_universe.parts.panes.lock().values())
+            .flatten()
+        {
+            assert!(items.iter().all(|item| item.context.values.get().is_none()));
+        }
+    });
+}
+
+#[test]
 fn borrowed_callbacks_match_w1_for_every_pinned_name() {
     for (fixture, engine) in fixtures() {
         for client in clients(&engine) {
@@ -459,6 +547,183 @@ fn assert_cache_context_matches_w1(
         expected
     );
     assert!(captured.values.get().is_none());
+}
+
+#[test]
+fn shared_reference_capture_reuses_identity_and_adopts_equal_reference_arcs() {
+    let mut engine = MuxEngine::default();
+    let target = engine.state.create_session("work").unwrap();
+    let target = (Some(target.0), Some(target.1), Some(target.2));
+    let references = Arc::new(BTreeSet::from([
+        "pane_id".to_owned(),
+        "session_name".to_owned(),
+    ]));
+    with_borrowed_formats(true, || {
+        let captured = engine
+            .format_status_context(target.0, target.1, target.2)
+            .detach_with_shared_references(FormatNeeds::NONE, &references);
+        let lookup = |references: &Arc<BTreeSet<String>>| {
+            engine.cached_detached_format_context_with_shared_references(
+                target,
+                FormatClient::NoClient,
+                FormatNeeds::NONE,
+                references,
+                [],
+            )
+        };
+        let hit = lookup(&references);
+        assert_eq!(hit.is_some(), format_cache_knob());
+        if let Some(hit) = hit {
+            assert!(captured.same_detached(&hit));
+            assert!(Arc::ptr_eq(&captured.variables, &hit.variables));
+            assert_eq!(
+                expand_status("#{session_name}:#{pane_id}", &hit, &mut Hooks(&engine)),
+                expand_status("#{session_name}:#{pane_id}", &captured, &mut Hooks(&engine))
+            );
+            let equal = Arc::new(references.as_ref().clone());
+            assert!(!Arc::ptr_eq(&references, &equal));
+            let fallback = lookup(&equal).unwrap();
+            assert!(Arc::ptr_eq(&captured.variables, &fallback.variables));
+            assert_eq!(
+                engine
+                    .format_context_cache
+                    .lock()
+                    .as_ref()
+                    .unwrap()
+                    .reference_identity
+                    .as_ref()
+                    .unwrap()
+                    .as_ptr(),
+                Arc::as_ptr(&equal)
+            );
+            let generic = engine
+                .cached_detached_format_context(
+                    target,
+                    FormatClient::NoClient,
+                    FormatNeeds::NONE,
+                    equal.as_ref(),
+                    [],
+                )
+                .unwrap();
+            assert!(captured.same_detached(&generic));
+        }
+        assert_eq!(captured.variable("session_name").as_deref(), Some("work"));
+    });
+}
+
+#[test]
+fn shared_reference_capture_rejects_mutation_and_weak_identity_releases_payload() {
+    let mut engine = MuxEngine::default();
+    let target = engine.state.create_session("work").unwrap();
+    let target = (Some(target.0), Some(target.1), Some(target.2));
+    let mut references = Arc::new(BTreeSet::from(["session_name".to_owned()]));
+    with_borrowed_formats(true, || {
+        let captured = engine
+            .format_status_context(target.0, target.1, target.2)
+            .detach_with_shared_references(FormatNeeds::NONE, &references);
+        assert_eq!(captured.variable("session_name").as_deref(), Some("work"));
+        let old = Arc::downgrade(&references);
+        let revision = engine.format_cache_revision();
+        assert!(Arc::get_mut(&mut references).is_none());
+        Arc::make_mut(&mut references).insert("pane_title".to_owned());
+        assert_ne!(old.as_ptr(), Arc::as_ptr(&references));
+        assert!(old.upgrade().is_none());
+        assert_eq!(revision, engine.format_cache_revision());
+        assert!(
+            engine
+                .cached_detached_format_context_with_shared_references(
+                    target,
+                    FormatClient::NoClient,
+                    FormatNeeds::NONE,
+                    &references,
+                    [],
+                )
+                .is_none()
+        );
+        let fresh = engine
+            .format_status_context(target.0, target.1, target.2)
+            .detach_with_shared_references(FormatNeeds::NONE, &references);
+        assert!(fresh.variables.contains_key("pane_title"));
+        if format_cache_knob() {
+            let retained = engine
+                .format_context_cache
+                .lock()
+                .as_ref()
+                .unwrap()
+                .reference_identity
+                .as_ref()
+                .unwrap()
+                .clone();
+            drop(references);
+            assert!(retained.upgrade().is_none());
+            assert_eq!(
+                engine
+                    .format_context_cache
+                    .lock()
+                    .as_ref()
+                    .unwrap()
+                    .references
+                    .as_ref(),
+                Some(&BTreeSet::from([
+                    "pane_title".to_owned(),
+                    "session_name".to_owned(),
+                ]))
+            );
+        }
+    });
+}
+
+#[test]
+fn detached_data_identity_ignores_only_clock_and_rejects_new_capture_sources() {
+    let mut engine = MuxEngine::default();
+    engine.set_format_now(10);
+    let target = engine.state.create_session("work").unwrap();
+    let target = (Some(target.0), Some(target.1), Some(target.2));
+    let template = "#{host}:#{S:#{session_name}[#{W:#{window_name}(#{P:#{pane_id}})}]}";
+    let references = engine.cached_format_references_for_templates([template]);
+    let needs = engine.format_needs([template]);
+    with_borrowed_formats(true, || {
+        let capture = |engine: &MuxEngine, references: &Arc<BTreeSet<String>>| {
+            engine
+                .format_status_context(target.0, target.1, target.2)
+                .detach_with_shared_references(needs, references)
+        };
+        let first = capture(&engine, &references);
+        engine.set_format_now(20);
+        let second = capture(&engine, &references);
+        assert!(!first.same_detached(&second));
+        assert_eq!(first.same_detached_data(&second), format_cache_knob());
+        assert_eq!(
+            expand_status(template, &first, &mut Hooks(&engine)),
+            expand_status(template, &second, &mut Hooks(&engine))
+        );
+        let mut overridden = second.clone();
+        overridden.set_format_value("pane_title", "overridden");
+        assert!(!second.same_detached_data(&overridden));
+        let live = engine.format_status_context(target.0, target.1, target.2);
+        assert!(!second.same_detached_data(&live));
+        assert!(!second.same_detached_data(&StatusContext::default()));
+        let legacy = StatusContext::from(StatusValues {
+            session_id: second.session_id.clone(),
+            window_id: second.window_id.clone(),
+            pane_id: second.pane_id.clone(),
+            format_now: second.format_now,
+            ..StatusValues::default()
+        });
+        assert!(!second.same_detached_data(&legacy));
+        let changed_references = Arc::new(
+            references
+                .iter()
+                .cloned()
+                .chain(std::iter::once("pane_title".to_owned()))
+                .collect(),
+        );
+        let different = capture(&engine, &changed_references);
+        assert!(!second.same_detached_data(&different));
+        engine.set_format_server_context("changed.example", "changed", "/tmp/zz-fmt-test", 20);
+        let changed_source = capture(&engine, &changed_references);
+        assert!(!different.same_detached_data(&changed_source));
+    });
 }
 
 #[test]

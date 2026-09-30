@@ -229,9 +229,188 @@ struct CompletedStatus {
     status: Arc<StatusLine>,
     fact_identity: Weak<FormatHookFacts>,
     request_identity: Weak<StatusRequest>,
+    option_bytes: usize,
+    parts: Option<Arc<StatusParts>>,
+    startup: bool,
+    environment_identity: Weak<Vec<(RawText, Option<RawText>)>>,
+    default_terminal_identity: Weak<String>,
 }
 
 const COMPLETED_STATUS_MAX_BYTES: usize = 1024 * 1024;
+
+struct StatusParts {
+    left: Vec<StatusPart>,
+    right: Vec<StatusPart>,
+    rows: BTreeMap<u32, Vec<StatusPart>>,
+}
+
+struct StatusPart {
+    range: std::ops::Range<usize>,
+    value: Option<OnceLock<String>>,
+}
+
+impl StatusParts {
+    fn new(request: &StatusRequest) -> Self {
+        let mut options = BTreeMap::new();
+        let mut split = |source: &str| {
+            let parts = zz_mux::format_parts(source);
+            if source.len() >= 8192
+                || parts
+                    .iter()
+                    .any(|part| !request.context.format_loops_available(part.required_loops))
+            {
+                return vec![StatusPart {
+                    range: 0..source.len(),
+                    value: None,
+                }];
+            }
+            parts
+                .iter()
+                .map(|part| StatusPart {
+                    range: part.range.clone(),
+                    value: (!part.unconditional_clock
+                        && !part.references.iter().any(|name| {
+                            name == "*"
+                                || name
+                                    .strip_prefix("E:")
+                                    .or_else(|| name.strip_prefix("T:"))
+                                    .is_some_and(|name| {
+                                        status_option_clock_dependent(
+                                            request,
+                                            name,
+                                            &mut options,
+                                            &mut BTreeSet::new(),
+                                        )
+                                    })
+                        }))
+                    .then(OnceLock::new),
+                })
+                .collect::<Vec<_>>()
+        };
+        let left = split(&request.formats.left);
+        let right = split(&request.formats.right);
+        let rows = request
+            .row_formats
+            .iter()
+            .filter(|(index, _)| {
+                usize::try_from(**index).is_ok_and(|index| {
+                    request.formats.enabled
+                        && index < usize::from(request.formats.lines).min(MAX_STATUS_ROWS)
+                })
+            })
+            .map(|(index, source)| (*index, split(source)))
+            .collect();
+        Self { left, right, rows }
+    }
+
+    fn retained_bytes(&self) -> usize {
+        let mut bytes = std::mem::size_of::<Self>()
+            .saturating_add(std::mem::size_of::<usize>().saturating_mul(2))
+            .saturating_add(self.rows.len().saturating_mul(128));
+        for parts in [&self.left, &self.right]
+            .into_iter()
+            .chain(self.rows.values())
+        {
+            bytes = bytes.saturating_add(
+                parts
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<StatusPart>()),
+            );
+            for part in parts {
+                bytes = bytes.saturating_add(
+                    part.value
+                        .as_ref()
+                        .and_then(OnceLock::get)
+                        .map_or(0, String::capacity),
+                );
+            }
+        }
+        bytes
+    }
+}
+
+fn status_option_clock_dependent(
+    request: &StatusRequest,
+    name: &str,
+    known: &mut BTreeMap<String, bool>,
+    visiting: &mut BTreeSet<String>,
+) -> bool {
+    if let Some(dependent) = known.get(name) {
+        return *dependent;
+    }
+    if visiting.len() >= 64 || !visiting.insert(name.to_owned()) {
+        return true;
+    }
+    let context = &request.context;
+    let options = &request.option_snapshot;
+    let scopes = [
+        (
+            context.session_id.as_str(),
+            context.window_id.as_str(),
+            context.pane_id.as_str(),
+        ),
+        ("", "", ""),
+    ]
+    .into_iter()
+    .chain(options.sessions.keys().map(|id| (id.as_str(), "", "")))
+    .chain(options.windows.keys().map(|id| ("", id.as_str(), "")))
+    .chain(options.panes.keys().map(|id| ("", "", id.as_str())));
+    let mut sources = BTreeSet::new();
+    let mut dependent = scopes.into_iter().any(|(session, window, pane)| {
+        options
+            .lookup(session, window, pane, name)
+            .is_none_or(|source| {
+                sources.insert(source);
+                false
+            })
+    });
+    if !dependent {
+        dependent = sources.iter().any(|source| {
+            zz_mux::format_parts(source).iter().any(|part| {
+                part.unconditional_clock
+                    || part.references.iter().any(|name| {
+                        name == "*"
+                            || name
+                                .strip_prefix("E:")
+                                .or_else(|| name.strip_prefix("T:"))
+                                .is_some_and(|name| {
+                                    status_option_clock_dependent(request, name, known, visiting)
+                                })
+                    })
+            })
+        });
+    }
+    visiting.remove(name);
+    known.insert(name.to_owned(), dependent);
+    dependent
+}
+
+fn expand_status_parts(
+    source: &str,
+    context: &StatusContext,
+    hooks: &mut DaemonFormatHooks<'_>,
+    parts: Option<&[StatusPart]>,
+) -> String {
+    let Some(parts) = parts.filter(|_| status_parts_enabled()) else {
+        return expand_status(source, context, hooks);
+    };
+    let mut output = String::new();
+    for part in parts {
+        let source = &source[part.range.clone()];
+        if let Some(value) = &part.value {
+            output.push_str(value.get_or_init(|| expand_status(source, context, hooks)));
+        } else {
+            output.push_str(&expand_status(source, context, hooks));
+        }
+    }
+    output
+}
+
+fn status_parts_enabled() -> bool {
+    zz_mux::format_cache_knob()
+        && zz_mux::compiled_formats_knob()
+        && zz_mux::borrowed_formats_enabled()
+}
 
 pub(crate) fn completed_status_bytes(
     request: &StatusRequest,
@@ -239,11 +418,42 @@ pub(crate) fn completed_status_bytes(
     callbacks: &[Option<String>],
     status: &StatusLine,
 ) -> usize {
+    completed_status_bytes_with_option_bytes(
+        request,
+        names,
+        callbacks,
+        status,
+        request.option_snapshot.retained_bytes(),
+    )
+}
+
+fn completed_status_bytes_with_option_bytes(
+    request: &StatusRequest,
+    names: &[String],
+    callbacks: &[Option<String>],
+    status: &StatusLine,
+    option_bytes: usize,
+) -> usize {
     let mut bytes = std::mem::size_of::<CompletedStatus>()
         .saturating_add(std::mem::size_of::<StatusRequest>())
         .saturating_add(request.context.retained_bytes())
-        .saturating_add(request.option_snapshot.retained_bytes())
-        .saturating_add(std::mem::size_of::<FormatHookFacts>());
+        .saturating_add(option_bytes)
+        .saturating_add(std::mem::size_of::<FormatHookFacts>())
+        .saturating_add(std::mem::size_of::<Vec<(RawText, Option<RawText>)>>())
+        .saturating_add(
+            request
+                .environment
+                .capacity()
+                .saturating_mul(std::mem::size_of::<(RawText, Option<RawText>)>()),
+        )
+        .saturating_add(std::mem::size_of::<String>())
+        .saturating_add(request.default_terminal.capacity())
+        .saturating_add(std::mem::size_of::<usize>().saturating_mul(4));
+    for (name, value) in request.environment.iter() {
+        bytes = bytes
+            .saturating_add(zz_mux::cloned_raw_text_bytes(name))
+            .saturating_add(value.as_ref().map_or(0, zz_mux::cloned_raw_text_bytes));
+    }
     for value in [
         &request.formats.left,
         &request.formats.right,
@@ -314,16 +524,31 @@ impl CompletedStatus {
             && self.context.has_captured_environment() == request.context.has_captured_environment()
     }
 
-    fn matches(&self, request: &StatusRequest, callbacks: &[Option<String>], now: i64) -> bool {
+    fn matches(
+        &self,
+        request: &StatusRequest,
+        callbacks: &[Option<String>],
+        now: i64,
+        clock: bool,
+    ) -> bool {
         self.client == request.client
-            && self.now == now
+            && (!clock || self.now == now)
             && self.message_line == request.message_line
             && self.customized == request.customized
             && self.client_scheme == request.client_scheme
             && self.pane_borders == request.pane_borders
             && (std::ptr::eq(self.callbacks.as_slice(), callbacks) || self.callbacks == callbacks)
-            && (Arc::ptr_eq(&self.context, &request.context)
-                || self.context.same_detached(&request.context))
+            && if clock {
+                Arc::ptr_eq(&self.context, &request.context)
+                    || self.context.same_detached(&request.context)
+            } else {
+                self.context.same_detached_data(&request.context)
+                    && self.same_lookup_scope(request)
+                    && self.startup == request.startup
+                    && self.environment_identity.as_ptr() == Arc::as_ptr(&request.environment)
+                    && self.default_terminal_identity.as_ptr()
+                        == Arc::as_ptr(&request.default_terminal)
+            }
     }
 
     fn new(
@@ -333,6 +558,8 @@ impl CompletedStatus {
         now: i64,
         status: Arc<StatusLine>,
         identity: Option<&Arc<StatusRequest>>,
+        option_bytes: usize,
+        parts: Option<Arc<StatusParts>>,
     ) -> Self {
         Self {
             client: request.client,
@@ -353,6 +580,11 @@ impl CompletedStatus {
             status,
             fact_identity: Arc::downgrade(&request.facts),
             request_identity: identity.map_or_else(Weak::new, Arc::downgrade),
+            option_bytes,
+            parts,
+            startup: request.startup,
+            environment_identity: Arc::downgrade(&request.environment),
+            default_terminal_identity: Arc::downgrade(&request.default_terminal),
         }
     }
 }
@@ -1291,6 +1523,7 @@ impl StatusRenderer {
             return Arc::clone(&completed.status);
         }
         let mut callback_names = None;
+        let mut parts = None;
         if request.modes.is_empty()
             && let Some(completed) = &mut self.completed
             && completed.same_templates(request)
@@ -1298,17 +1531,38 @@ impl StatusRenderer {
             let fresh_callbacks = (completed.fact_identity.as_ptr() != Arc::as_ptr(&request.facts))
                 .then(|| status_callback_values(request, &completed.callback_names));
             let callbacks = fresh_callbacks.as_deref().unwrap_or(&completed.callbacks);
-            if completed.matches(request, callbacks, now) {
+            if completed.matches(request, callbacks, now, true) {
                 if let Some(identity) = identity {
                     completed.request_identity = Arc::downgrade(identity);
                 }
                 return Arc::clone(&completed.status);
+            }
+            if status_parts_enabled() && completed.matches(request, callbacks, now, false) {
+                parts.clone_from(&completed.parts);
             }
             if completed.same_lookup_scope(request) {
                 callback_names = Some(completed.callback_names.clone());
             }
         }
         let callback_names = callback_names.or_else(|| status_cache_callbacks(request));
+        if status_parts_enabled()
+            && parts.is_none()
+            && callback_names.is_some()
+            && request.context.same_detached_data(&request.context)
+        {
+            parts = Some(Arc::new(StatusParts::new(request)));
+        }
+        let option_bytes = callback_names.as_ref().map_or(0, |_| {
+            self.completed
+                .as_ref()
+                .filter(|completed| {
+                    Arc::ptr_eq(&completed.option_snapshot, &request.option_snapshot)
+                })
+                .map_or_else(
+                    || request.option_snapshot.retained_bytes(),
+                    |completed| completed.option_bytes,
+                )
+        });
         #[cfg(test)]
         {
             self.expansions += 1;
@@ -1322,11 +1576,22 @@ impl StatusRenderer {
             self.tmux_shim.as_deref(),
             self.zz_executable.as_deref(),
             self.job_waker.as_ref(),
+            parts.as_deref(),
         ));
         self.completed = callback_names.and_then(|names| {
             let callbacks = status_callback_values(request, &names);
-            (completed_status_bytes(request, &names, &callbacks, &status)
-                <= COMPLETED_STATUS_MAX_BYTES)
+            (completed_status_bytes_with_option_bytes(
+                request,
+                &names,
+                &callbacks,
+                &status,
+                option_bytes,
+            )
+            .saturating_add(
+                parts
+                    .as_ref()
+                    .map_or(0, |parts| parts.retained_bytes().saturating_mul(2)),
+            ) <= COMPLETED_STATUS_MAX_BYTES)
                 .then(|| {
                     CompletedStatus::new(
                         request,
@@ -1335,6 +1600,8 @@ impl StatusRenderer {
                         now,
                         Arc::clone(&status),
                         identity,
+                        option_bytes,
+                        parts,
                     )
                 })
         });
@@ -1542,6 +1809,7 @@ fn render(
     tmux_shim: Option<&std::path::Path>,
     zz_executable: Option<&std::path::Path>,
     job_waker: Option<&thread::Thread>,
+    parts: Option<&StatusParts>,
 ) -> StatusLine {
     let title = request
         .title_format
@@ -1668,8 +1936,18 @@ fn render(
             job_waker,
         );
         (
-            expand_status(&request.formats.left, &request.context, &mut hooks),
-            expand_status(&request.formats.right, &request.context, &mut hooks),
+            expand_status_parts(
+                &request.formats.left,
+                &request.context,
+                &mut hooks,
+                parts.map(|parts| parts.left.as_slice()),
+            ),
+            expand_status_parts(
+                &request.formats.right,
+                &request.context,
+                &mut hooks,
+                parts.map(|parts| parts.right.as_slice()),
+            ),
         )
     };
     let mut hooks = DaemonFormatHooks::status(
@@ -1697,7 +1975,14 @@ fn render(
                 .row_formats
                 .get(&index)
                 .map_or_else(String::new, |format| {
-                    clamp_status_text(expand_status(format, &request.context, &mut hooks))
+                    clamp_status_text(expand_status_parts(
+                        format,
+                        &request.context,
+                        &mut hooks,
+                        parts
+                            .and_then(|parts| parts.rows.get(&index))
+                            .map(Vec::as_slice),
+                    ))
                 })
         })
         .collect::<Vec<_>>();

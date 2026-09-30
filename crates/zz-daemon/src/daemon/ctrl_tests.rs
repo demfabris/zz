@@ -1128,6 +1128,198 @@ fn stale_layout_size_report_is_dropped_before_geometry_changes() {
         .expect("cleanup");
 }
 
+fn resize_application_fixture() -> (Arc<Shared>, ClientId, PaneId, ExecutionContext, u64) {
+    let shared = Arc::new(Shared::new(62));
+    let (client, _) = compact_registered(&shared, zz_protocol::Subscriptions::terminal());
+    let mut context = ExecutionContext::default();
+    let session = {
+        let mut inner = shared.inner.lock();
+        for command in [
+            CommandInvocation::new("new-session", ["-d", "-s", "resize-admission"]),
+            CommandInvocation::new("split-window", ["-h"]),
+        ] {
+            inner
+                .engine
+                .execute(&mut context, &command)
+                .expect("model layout");
+        }
+        let pane = context.pane.expect("active pane");
+        inner.terminals_mut().insert(
+            pane,
+            Arc::new(TerminalSession::spawn_output_view(
+                "resize admission".to_owned(),
+                String::new(),
+            )),
+        );
+        context.session.expect("session")
+    };
+    shared
+        .attach(client, session)
+        .expect("attach model terminal");
+    let pane = context.pane.expect("pane");
+    {
+        let mut inner = shared.inner.lock();
+        let (columns, rows) = inner.engine.pane_geometry(pane).expect("pane geometry");
+        inner.terminal_geometries.entry(pane).or_default().insert(
+            client,
+            TerminalGeometry {
+                columns,
+                rows,
+                cell_width_px: 8,
+                cell_height_px: 16,
+            },
+        );
+        inner.client_sizes.insert(client, (80, 24));
+    }
+    context.no_hooks = true;
+    shared.compact_tree_messages(client, true);
+    let generation = shared.inner.lock().ctrl_layouts[&client].1;
+    (shared, client, pane, context, generation)
+}
+
+#[test]
+fn terminal_resize_is_revalidated_after_initial_admission() {
+    let (shared, client, pane, _, generation) = resize_application_fixture();
+    let report = TerminalGeometry {
+        columns: 1,
+        rows: 1,
+        cell_width_px: 9,
+        cell_height_px: 17,
+    };
+    let (stored, laid_out, terminal, viewport) = {
+        let mut inner = shared.inner.lock();
+        assert!(
+            ctrl::normalize_resize(
+                &mut inner,
+                client,
+                InputMessage::ResizeTerminalV2 {
+                    pane,
+                    columns: report.columns,
+                    rows: report.rows,
+                    cell_width_px: report.cell_width_px,
+                    cell_height_px: report.cell_height_px,
+                    layout_generation: generation,
+                },
+            )
+            .is_some()
+        );
+        inner
+            .engine
+            .state
+            .toggle_zoom(pane)
+            .expect("layout changed after admission");
+        let terminal = Arc::clone(&inner.terminals[&pane]);
+        (
+            inner.terminal_geometries[&pane][&client],
+            inner.engine.pane_geometry(pane),
+            Arc::clone(&terminal),
+            terminal.fresh_viewport(),
+        )
+    };
+    assert!(
+        !shared
+            .apply_terminal_size_report(client, pane, report, Some(generation))
+            .expect("stale application")
+    );
+    {
+        let inner = shared.inner.lock();
+        assert_eq!(inner.terminal_geometries[&pane][&client], stored);
+        assert_eq!(inner.engine.pane_geometry(pane), laid_out);
+    }
+    let current = terminal.fresh_viewport();
+    assert_eq!(
+        (current.columns, current.rows),
+        (viewport.columns, viewport.rows)
+    );
+    let generation = shared.inner.lock().ctrl_layouts[&client].1;
+    let current = TerminalGeometry {
+        columns: 82,
+        rows: 26,
+        ..report
+    };
+    assert!(
+        shared
+            .apply_terminal_size_report(client, pane, current, Some(generation))
+            .expect("current application")
+    );
+    assert_eq!(
+        shared.inner.lock().terminal_geometries[&pane][&client],
+        current
+    );
+    shared.inner.lock().ctrl_subscriptions.remove(&client);
+    assert!(
+        shared
+            .apply_terminal_size_report(client, pane, report, Some(0))
+            .expect("legacy application")
+    );
+    assert_eq!(
+        shared.inner.lock().terminal_geometries[&pane][&client],
+        report
+    );
+}
+
+#[test]
+fn client_resize_is_revalidated_after_initial_admission() {
+    let (shared, client, pane, context, generation) = resize_application_fixture();
+    let (stored, laid_out) = {
+        let mut inner = shared.inner.lock();
+        assert!(
+            ctrl::normalize_resize(
+                &mut inner,
+                client,
+                InputMessage::ClientTerminalSizeV2 {
+                    columns: 1,
+                    rows: 1,
+                    layout_generation: generation,
+                },
+            )
+            .is_some()
+        );
+        inner
+            .engine
+            .state
+            .toggle_zoom(pane)
+            .expect("layout changed after admission");
+        (
+            inner.client_sizes[&client],
+            inner.engine.pane_geometry(pane),
+        )
+    };
+    assert!(!shared.apply_client_size_report(
+        client,
+        ClientKind::Interactive,
+        &context,
+        1,
+        1,
+        Some(generation),
+    ));
+    {
+        let inner = shared.inner.lock();
+        assert_eq!(inner.client_sizes[&client], stored);
+        assert_eq!(inner.engine.pane_geometry(pane), laid_out);
+    }
+    let generation = shared.inner.lock().ctrl_layouts[&client].1;
+    assert!(shared.apply_client_size_report(
+        client,
+        ClientKind::Interactive,
+        &context,
+        81,
+        25,
+        Some(generation),
+    ));
+    assert_eq!(shared.inner.lock().client_sizes[&client], (81, 25));
+    shared.inner.lock().ctrl_subscriptions.remove(&client);
+    assert!(shared.apply_client_size_report(
+        client,
+        ClientKind::Interactive,
+        &context,
+        1,
+        1,
+        Some(0)
+    ));
+    assert_eq!(shared.inner.lock().client_sizes[&client], (1, 1));
+}
+
 fn compact_hello(kind: ClientKind) -> zz_protocol::Hello {
     zz_protocol::Hello::from_client(ClientHello {
         protocol_version: PROTOCOL_VERSION,

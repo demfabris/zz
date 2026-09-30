@@ -18392,6 +18392,15 @@ impl Shared {
         context: &mut ExecutionContext,
         input: InputMessage,
     ) -> Result<(), DaemonError> {
+        let layout_generation = match &input {
+            InputMessage::ResizeTerminalV2 {
+                layout_generation, ..
+            }
+            | InputMessage::ClientTerminalSizeV2 {
+                layout_generation, ..
+            } => Some(*layout_generation),
+            _ => None,
+        };
         let Some(input) = ctrl::normalize_resize(&mut self.inner.lock(), client, input) else {
             return Ok(());
         };
@@ -18559,6 +18568,7 @@ impl Shared {
             });
         let pane_focus_before =
             (!context.no_hooks).then(|| hook_events::InputFocusScope::open(&mut self.inner.lock()));
+        let mut resize_report_applied = true;
         let result = (|| -> Result<(), DaemonError> {
             match input {
                 InputMessage::ResizeTerminalV2 { .. }
@@ -18668,52 +18678,17 @@ impl Shared {
                     cell_width_px,
                     cell_height_px,
                 } => {
-                    let resize = {
-                        let mut inner = self.inner.lock();
-                        if !inner.terminals.contains_key(&pane) {
-                            return Err(ServerError::PaneExited(pane).into());
-                        }
-                        if !client_is_attached_to_pane(&inner, client, pane) {
-                            return Err(ServerError::PaneNotAttached(pane).into());
-                        }
-                        if inner
-                            .streamed_terminals
-                            .get(&client)
-                            .and_then(|streamed| streamed.get(&pane))
-                            == Some(&TerminalStreamKind::Preview)
-                        {
-                            return Ok(());
-                        }
-                        inner.terminal_geometries.entry(pane).or_default().insert(
-                            client,
-                            TerminalGeometry {
-                                columns,
-                                rows,
-                                cell_width_px,
-                                cell_height_px,
-                            },
-                        );
-                        if let Some(cell) = inner.client_cell_pixels.get_mut(&client) {
-                            *cell = (cell_width_px, cell_height_px);
-                        }
-                        if let Some(reported) =
-                            pane_geometry_from(&inner, pane, GeometrySource::ClientReport)
-                        {
-                            inner
-                                .engine
-                                .set_pane_geometry(pane, reported.columns, reported.rows);
-                        }
-                        terminal_resize_for_pane(&inner, pane)
-                    };
-                    if let Some((terminal, geometry)) = resize {
-                        terminal.resize(
-                            geometry.columns,
-                            geometry.rows,
-                            geometry.cell_width_px,
-                            geometry.cell_height_px,
-                        );
-                    }
-                    self.refit_client_overlays(client);
+                    resize_report_applied = self.apply_terminal_size_report(
+                        client,
+                        pane,
+                        TerminalGeometry {
+                            columns,
+                            rows,
+                            cell_width_px,
+                            cell_height_px,
+                        },
+                        layout_generation,
+                    )?;
                 }
                 InputMessage::TerminalView {
                     pane,
@@ -18879,33 +18854,22 @@ impl Shared {
                 }
                 InputMessage::ClientTerminalSize { columns, rows } => {
                     if columns > 0 && rows > 0 {
-                        let hook_events = {
-                            let mut inner = self.inner.lock();
-                            inner.client_sizes.insert(client, (columns, rows));
-                            let mut hook_events = Vec::new();
-                            if kind == ClientKind::Interactive {
-                                if let Some(event) = set_current_window_latest_client(
-                                    &mut inner,
-                                    client,
-                                    !context.no_hooks,
-                                ) {
-                                    hook_events.push(event);
-                                }
-                                if !context.no_hooks
-                                    && let Some(event) =
-                                        client_hook_event(&inner, "client-resized", client)
-                                {
-                                    hook_events.push(event);
-                                }
-                            }
-                            hook_events
-                        };
-                        self.run_event_hooks(hook_events);
+                        resize_report_applied = self.apply_client_size_report(
+                            client,
+                            kind,
+                            context,
+                            columns,
+                            rows,
+                            layout_generation,
+                        );
                     }
                 }
             }
             Ok(())
         })();
+        if !resize_report_applied {
+            return result;
+        }
         let publish_snapshot = {
             let mut inner = self.inner.lock();
             let current = inner.engine.state.generation();
@@ -18954,6 +18918,118 @@ impl Shared {
             diagnostic_elapsed_us(started),
         );
         result
+    }
+
+    fn apply_terminal_size_report(
+        self: &Arc<Self>,
+        client: ClientId,
+        pane: PaneId,
+        geometry: TerminalGeometry,
+        layout_generation: Option<u64>,
+    ) -> Result<bool, DaemonError> {
+        let resize = {
+            let mut inner = self.inner.lock();
+            if let Some(layout_generation) = layout_generation
+                && ctrl::normalize_resize(
+                    &mut inner,
+                    client,
+                    InputMessage::ResizeTerminalV2 {
+                        pane,
+                        columns: geometry.columns,
+                        rows: geometry.rows,
+                        cell_width_px: geometry.cell_width_px,
+                        cell_height_px: geometry.cell_height_px,
+                        layout_generation,
+                    },
+                )
+                .is_none()
+            {
+                return Ok(false);
+            }
+            if !inner.terminals.contains_key(&pane) {
+                return Err(ServerError::PaneExited(pane).into());
+            }
+            if !client_is_attached_to_pane(&inner, client, pane) {
+                return Err(ServerError::PaneNotAttached(pane).into());
+            }
+            if inner
+                .streamed_terminals
+                .get(&client)
+                .and_then(|streamed| streamed.get(&pane))
+                == Some(&TerminalStreamKind::Preview)
+            {
+                return Ok(true);
+            }
+            inner
+                .terminal_geometries
+                .entry(pane)
+                .or_default()
+                .insert(client, geometry);
+            if let Some(cell) = inner.client_cell_pixels.get_mut(&client) {
+                *cell = (geometry.cell_width_px, geometry.cell_height_px);
+            }
+            if let Some(reported) = pane_geometry_from(&inner, pane, GeometrySource::ClientReport) {
+                inner
+                    .engine
+                    .set_pane_geometry(pane, reported.columns, reported.rows);
+            }
+            terminal_resize_for_pane(&inner, pane)
+        };
+        if let Some((terminal, geometry)) = resize {
+            terminal.resize(
+                geometry.columns,
+                geometry.rows,
+                geometry.cell_width_px,
+                geometry.cell_height_px,
+            );
+        }
+        self.refit_client_overlays(client);
+        Ok(true)
+    }
+
+    fn apply_client_size_report(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &ExecutionContext,
+        columns: u16,
+        rows: u16,
+        layout_generation: Option<u64>,
+    ) -> bool {
+        let hook_events = {
+            let mut inner = self.inner.lock();
+            if let Some(layout_generation) = layout_generation
+                && ctrl::normalize_resize(
+                    &mut inner,
+                    client,
+                    InputMessage::ClientTerminalSizeV2 {
+                        columns,
+                        rows,
+                        layout_generation,
+                    },
+                )
+                .is_none()
+            {
+                return false;
+            }
+            inner.client_sizes.insert(client, (columns, rows));
+            let mut hook_events = Vec::new();
+            if kind == ClientKind::Interactive {
+                if let Some(event) =
+                    set_current_window_latest_client(&mut inner, client, !context.no_hooks)
+                {
+                    hook_events.push(event);
+                }
+                if !context.no_hooks
+                    && let Some(event) = client_hook_event(&inner, "client-resized", client)
+                {
+                    hook_events.push(event);
+                }
+            }
+            hook_events
+        };
+        self.run_event_hooks(hook_events);
+        true
     }
 
     fn input_popup(&self, client: ClientId, action: PopupAction) {

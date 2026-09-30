@@ -254,6 +254,7 @@ impl FrameInbox {
 }
 
 enum KittyImageUpdate {
+    Reset,
     Ready(KittyImageData),
     Removed { pane: PaneId, image_ids: Vec<u32> },
 }
@@ -347,6 +348,7 @@ impl KittyImageInbox {
         let mut state = self.0.lock().expect("Kitty image inbox poisoned");
         state.assembler.remove_pane(pane);
         state.pending.retain(|update| match update {
+            KittyImageUpdate::Reset => true,
             KittyImageUpdate::Ready(image) => image.pane != pane,
             KittyImageUpdate::Removed { pane: target, .. } => *target != pane,
         });
@@ -363,6 +365,41 @@ impl KittyImageInbox {
         state.assembler.clear();
         state.pending.clear();
         state.wake_pending = false;
+    }
+
+    fn reset_attachment(&self, connection: u64, events: &mpsc::Sender<MainEvent>) {
+        let should_wake = {
+            let mut state = self.0.lock().expect("Kitty image inbox poisoned");
+            state.assembler.clear();
+            state.pending.clear();
+            state.pending.push(KittyImageUpdate::Reset);
+            if state.wake_pending {
+                false
+            } else {
+                state.wake_pending = true;
+                true
+            }
+        };
+        if should_wake {
+            let _ = events.send(MainEvent::KittyImages(connection));
+        }
+    }
+}
+
+fn apply_kitty_updates(
+    renderer: &mut Renderer,
+    updates: Vec<KittyImageUpdate>,
+    accept_images: bool,
+) {
+    for update in updates {
+        match update {
+            KittyImageUpdate::Reset => renderer.reset_kitty_images(),
+            KittyImageUpdate::Ready(image) if accept_images => renderer.install_kitty_image(image),
+            KittyImageUpdate::Removed { pane, image_ids } if accept_images => {
+                renderer.remove_kitty_images(pane, &image_ids);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -647,7 +684,6 @@ pub(crate) fn run(
                                             .then(|| core.attached_client_flags().to_owned());
                                     }
                                     browser.reset_connection();
-                                    renderer.reset_kitty_images();
                                     reconnect_available = true;
                                 }
                                 if matches!(
@@ -735,21 +771,16 @@ pub(crate) fn run(
                     continue;
                 }
                 let updates = kitty_images.take();
-                if kitty_probe.state == KittyProbeState::Disabled {
-                    continue;
-                }
-                if !updates.is_empty() {
+                let accept_images = kitty_probe.state != KittyProbeState::Disabled;
+                if accept_images
+                    && updates
+                        .iter()
+                        .any(|update| !matches!(update, KittyImageUpdate::Reset))
+                {
                     start_kitty_probe(&mut kitty_probe, &mut terminal)?;
                 }
                 let changed = !updates.is_empty();
-                for update in updates {
-                    match update {
-                        KittyImageUpdate::Ready(image) => renderer.install_kitty_image(image),
-                        KittyImageUpdate::Removed { pane, image_ids } => {
-                            renderer.remove_kitty_images(pane, &image_ids);
-                        }
-                    }
-                }
+                apply_kitty_updates(&mut renderer, updates, accept_images);
                 if changed && kitty_probe.state == KittyProbeState::Enabled {
                     renderer
                         .paint(&model, false)
@@ -1410,8 +1441,17 @@ fn forward_protocol_message(
             }
             CoreEvent::Attached { session } => {
                 frames.clear();
-                kitty_images.clear();
-                CoreEvent::Attached { session }
+                if events
+                    .send(MainEvent::Core {
+                        connection,
+                        event: Box::new(CoreEvent::Attached { session }),
+                    })
+                    .is_err()
+                {
+                    return false;
+                }
+                kitty_images.reset_attachment(connection, events);
+                continue;
             }
             CoreEvent::PaneRemoved { pane } => {
                 kitty_images.remove_pane(pane);
@@ -2513,6 +2553,26 @@ mod tests {
         }
     }
 
+    fn placing_viewport(generation: u64) -> TerminalViewport {
+        let mut viewport = TerminalViewport::blank(79, 23, zz_terminal::SessionStatus::Running);
+        viewport.kitty_placements = Arc::from([zz_terminal::KittyPlacement {
+            image_id: 1299,
+            image_generation: generation,
+            layer: zz_terminal::KittyLayer::AboveText,
+            viewport_col: 0,
+            viewport_row: 0,
+            absolute_row: 0,
+            cell_offset_x: 0,
+            cell_offset_y: 0,
+            grid_cols: 1,
+            grid_rows: 1,
+            pixel_width: 1,
+            pixel_height: 1,
+            source_rect: None,
+        }]);
+        viewport
+    }
+
     #[test]
     fn initial_and_later_batches_reset_before_images_before_placing_frames() {
         let pane = PaneId(7);
@@ -2544,22 +2604,7 @@ mod tests {
                     bytes: vec![1, 2, 3, 255],
                 }));
             }
-            let mut viewport = TerminalViewport::blank(79, 23, zz_terminal::SessionStatus::Running);
-            viewport.kitty_placements = Arc::from([zz_terminal::KittyPlacement {
-                image_id: 1299,
-                image_generation: epoch,
-                layer: zz_terminal::KittyLayer::AboveText,
-                viewport_col: 0,
-                viewport_row: 0,
-                absolute_row: 0,
-                cell_offset_x: 0,
-                cell_offset_y: 0,
-                grid_cols: 1,
-                grid_rows: 1,
-                pixel_width: 1,
-                pixel_height: 1,
-                source_rect: None,
-            }]);
+            let viewport = placing_viewport(epoch);
             messages.push(initial_event(zz_protocol::EventPayload::TerminalViewport {
                 pane,
                 viewport,
@@ -2593,9 +2638,9 @@ mod tests {
             assert!(attached < delivered && delivered < placing && placing < tail);
             assert!(ready.len() < MAX_COALESCED_EVENTS);
             let state = images.0.lock().unwrap();
-            assert_eq!(state.pending.len(), 300);
+            assert_eq!(state.pending.len(), 301);
             assert!(state.pending.iter().all(
-                |image| matches!(image, KittyImageUpdate::Ready(image) if image.generation == epoch)
+                |image| matches!(image, KittyImageUpdate::Reset) || matches!(image, KittyImageUpdate::Ready(image) if image.generation == epoch)
             ));
             drop(state);
             let state = frames.0.lock().unwrap();
@@ -2604,6 +2649,194 @@ mod tests {
                 state.pending[&pane].viewport.kitty_placements[0].image_generation,
                 epoch
             );
+            drop(state);
+            images.take();
+            frames.take();
+        }
+    }
+
+    fn delayed_main_reattach_keeps_the_latest_image(legacy: bool) {
+        let pane = PaneId(7);
+        let core = Mutex::new(ClientCore::new());
+        let frames = FrameInbox::default();
+        let images = KittyImageInbox::default();
+        let gate = AtomicU8::new(KITTY_GATE_ENABLED);
+        let (events, incoming) = mpsc::channel();
+        for epoch in [1, 2] {
+            let snapshot = initial_snapshot(&[pane]);
+            let mut messages = if legacy {
+                vec![ProtocolMessage::Attached {
+                    session: zz_protocol::SessionId(1),
+                    snapshot,
+                    read_only: false,
+                    client_flags: String::new(),
+                }]
+            } else {
+                vec![
+                    initial_event(zz_protocol::EventPayload::Snapshot(snapshot)),
+                    initial_view(epoch),
+                ]
+            };
+            messages.extend([
+                initial_event(zz_protocol::EventPayload::KittyImageBegin {
+                    pane,
+                    image_id: 1299,
+                    generation: epoch,
+                    width: 1,
+                    height: 1,
+                    total_bytes: 4,
+                }),
+                initial_event(zz_protocol::EventPayload::KittyImageChunk {
+                    pane,
+                    image_id: 1299,
+                    generation: epoch,
+                    bytes: vec![1, 2, 3, 255],
+                }),
+                initial_event(zz_protocol::EventPayload::TerminalViewport {
+                    pane,
+                    viewport: placing_viewport(epoch),
+                }),
+            ]);
+            if !legacy {
+                messages = vec![ProtocolMessage::Batch(
+                    zz_protocol::Batch::from_messages(epoch, messages).unwrap(),
+                )];
+            }
+            for message in messages {
+                assert!(forward_protocol_message(
+                    &core,
+                    message,
+                    1,
+                    &events,
+                    &frames,
+                    &images,
+                    &gate,
+                    |_| panic!("retained full state must not need another wire request"),
+                ));
+            }
+        }
+        let mut model = initial_model(&lock_core(&core));
+        model.update_snapshot(Arc::clone(lock_core(&core).snapshot()));
+        let (written, output) = mpsc::channel();
+        let mut renderer = Renderer::with_sink(Box::new(move |bytes| {
+            written.send(bytes.to_vec()).unwrap();
+            Ok(())
+        }));
+        renderer.enable_kitty_graphics();
+        let mut final_paint = String::new();
+        for event in incoming.try_iter() {
+            match event {
+                MainEvent::Core { event, .. } if matches!(*event, CoreEvent::Attached { .. }) => {
+                    model.update_snapshot(Arc::clone(lock_core(&core).snapshot()));
+                    renderer.invalidate();
+                }
+                MainEvent::KittyImages(1) => {
+                    apply_kitty_updates(&mut renderer, images.take(), true);
+                }
+                MainEvent::Frames(1) => {
+                    take_frames(&frames, &mut model, &mut renderer);
+                    renderer.paint(&model, true).unwrap();
+                    final_paint =
+                        String::from_utf8(output.recv_timeout(Duration::from_secs(2)).unwrap())
+                            .unwrap();
+                }
+                _ => {}
+            }
+        }
+        assert!(
+            final_paint.contains("\x1b_Ga=p"),
+            "legacy={legacy} latest placement lost: {final_paint:?}"
+        );
+    }
+
+    #[test]
+    fn delayed_main_compact_reattach_keeps_the_latest_image() {
+        delayed_main_reattach_keeps_the_latest_image(false);
+    }
+
+    #[test]
+    fn delayed_main_legacy_reattach_keeps_the_latest_image() {
+        delayed_main_reattach_keeps_the_latest_image(true);
+    }
+
+    #[test]
+    fn image_free_attachments_deliver_reset_even_when_graphics_are_rejected() {
+        let pane = PaneId(7);
+        for legacy in [false, true] {
+            let snapshot = initial_snapshot(&[pane]);
+            let (mut model, _) = paned_model();
+            model.update_snapshot(Arc::new(snapshot.clone()));
+            model.viewports.insert(pane, placing_viewport(1));
+            let (written, output) = mpsc::channel();
+            let mut renderer = Renderer::with_sink(Box::new(move |bytes| {
+                written.send(bytes.to_vec()).unwrap();
+                Ok(())
+            }));
+            renderer.enable_kitty_graphics();
+            renderer.install_kitty_image(KittyImageData {
+                pane,
+                image_id: 1299,
+                generation: 1,
+                width: 1,
+                height: 1,
+                bytes: vec![1, 2, 3, 255],
+            });
+            renderer.paint(&model, true).unwrap();
+            let previous =
+                String::from_utf8(output.recv_timeout(Duration::from_secs(2)).unwrap()).unwrap();
+            assert!(previous.contains("\x1b_Ga=p"));
+            let core = Mutex::new(ClientCore::new());
+            let frames = FrameInbox::default();
+            let images = KittyImageInbox::default();
+            let (events, incoming) = mpsc::channel();
+            let message = if legacy {
+                ProtocolMessage::Attached {
+                    session: zz_protocol::SessionId(1),
+                    snapshot,
+                    read_only: false,
+                    client_flags: String::new(),
+                }
+            } else {
+                ProtocolMessage::Batch(
+                    zz_protocol::Batch::from_messages(
+                        1,
+                        vec![
+                            initial_event(zz_protocol::EventPayload::Snapshot(snapshot)),
+                            initial_view(1),
+                        ],
+                    )
+                    .unwrap(),
+                )
+            };
+            assert!(forward_protocol_message(
+                &core,
+                message,
+                1,
+                &events,
+                &frames,
+                &images,
+                &AtomicU8::new(KITTY_GATE_DISABLED),
+                |_| panic!("attach must not need another wire request"),
+            ));
+            let ready = incoming.try_iter().collect::<Vec<_>>();
+            let attached = ready.iter().position(|event| matches!(event, MainEvent::Core { event, .. } if matches!(**event, CoreEvent::Attached { .. }))).unwrap();
+            let delivered = ready
+                .iter()
+                .position(|event| matches!(event, MainEvent::KittyImages(1)))
+                .unwrap();
+            assert!(attached < delivered);
+            let updates = images.take();
+            assert!(matches!(updates.as_slice(), [KittyImageUpdate::Reset]));
+            apply_kitty_updates(&mut renderer, updates, false);
+            renderer.invalidate();
+            renderer.paint(&model, true).unwrap();
+            let reset =
+                String::from_utf8(output.recv_timeout(Duration::from_secs(2)).unwrap()).unwrap();
+            assert!(
+                reset.contains("\x1b_Ga=d,d=I"),
+                "legacy={legacy}: {reset:?}"
+            );
+            assert!(!reset.contains("\x1b_Ga=p"), "legacy={legacy}: {reset:?}");
         }
     }
 

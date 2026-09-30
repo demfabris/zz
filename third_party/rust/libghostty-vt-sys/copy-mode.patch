@@ -21,7 +21,36 @@
              const memory = try self.allocator.alignedAlloc(
 --- a/src/terminal/compress/Page.zig
 +++ b/src/terminal/compress/Page.zig
-@@ -34,6 +34,7 @@
+@@ -1,4 +1,4 @@
+-//! A compressed terminal page which retains its resident virtual mapping.
++//! A compressed terminal page with an optional resident virtual mapping.
+ //!
+ //! Terminal pages have two kinds of state: the large `Page.memory` allocation
+ //! and a comparatively small `Page` value containing offsets, dimensions,
+@@ -6,15 +6,15 @@
+ //! the backing memory, so preserving only the memory bytes is insufficient.
+ //! We preserve the complete `Page` value instead. This follows the same model
+ //! as `Page.cloneBuf`: page internals use offsets, so a shallow page copy remains
+-//! valid when its memory contents are restored at the same address.
++//! valid when its memory contents are restored in another mapping.
+ //!
+-//! The resident memory is deliberately not freed by this type. `PageList`
+-//! keeps the virtual range allocated while asking the operating system to
+-//! discard its physical pages. Keeping the range has two useful properties:
+-//! the embedded page never contains a dangling pointer, and restoring the page
+-//! does not require a fallible allocation.
++//! Live `PageList` nodes keep their virtual range allocated while asking the
++//! operating system to discard physical pages. Immutable clones store an empty
++//! memory slice and reserve a private range on first read. The saved raw length
++//! and offsets let clones restore without retaining a source address.
++//! Live restoration reuses its range and needs no allocation.
+ //!
+-//! The intended state transition is:
++//! The live-page state transition is:
+ //!
+ //! 1. Create this value while the source page is resident.
+ //! 2. Ask the OS to decommit the source page's memory.
+@@ -34,17 +34,20 @@
  const Page = @This();
 
  const std = @import("std");
@@ -29,7 +58,21 @@
  const assert = std.debug.assert;
  const Allocator = std.mem.Allocator;
  const TerminalPage = @import("../page.zig").Page;
-@@ -55,6 +56,40 @@
+ const lz4 = @import("lz4.zig");
+
+-/// Complete page metadata together with the retained resident mapping.
++/// Complete page metadata together with an optional resident mapping.
+ ///
+ /// The bytes in `page.memory` may have been discarded by the OS while this
+ /// value is in compressed state. They must not be read until `restore` has
+ /// successfully decoded the page.
+ page: TerminalPage,
++raw_len: usize,
++mapping_alloc: ?Allocator = null,
+
+ /// Exact raw LZ4 block for `page.memory`.
+ encoded: []u8,
+@@ -55,6 +58,41 @@
  /// the allocator here lets a PageList node restore and discard its compressed
  /// state without needing a reference back to the PageList.
  alloc: Allocator,
@@ -39,9 +82,10 @@
 +    references: std.atomic.Value(usize),
 +};
 +
-+pub fn cloneFor(self: *const Page, alloc: Allocator, memory: []align(std.heap.page_size_min) u8) Allocator.Error!Page {
++pub fn cloneFor(self: *const Page, alloc: Allocator, page_alloc: Allocator) Allocator.Error!Page {
 +    var result = self.*;
-+    result.page.memory = memory[0..self.page.memory.len];
++    result.page.memory = &.{};
++    result.mapping_alloc = page_alloc;
 +    if (sameAllocator(self.alloc, alloc)) {
 +        _ = self.shared.references.fetchAdd(1, .monotonic);
 +        return result;
@@ -70,7 +114,7 @@
 
  /// Return the largest scratch buffer that can produce a useful compressed
  /// representation for `raw_len` bytes.
-@@ -133,10 +168,15 @@
+@@ -133,10 +171,16 @@
      assert(@sizeOf(Page) + encoded_len <
          @sizeOf(TerminalPage) + source.memory.len);
 
@@ -81,13 +125,14 @@
      return .{
          .page = source.*,
 -        .encoded = try alloc.dupe(u8, scratch[0..encoded_len]),
++        .raw_len = source.memory.len,
 +        .encoded = encoded,
          .alloc = alloc,
 +        .shared = shared,
      };
  }
 
-@@ -145,7 +185,10 @@
+@@ -145,7 +189,10 @@
  /// This intentionally does not free `page.memory`. The PageList node which
  /// supplied the source page continues to own that pool or heap allocation.
  pub fn deinit(self: *Page) void {
@@ -99,7 +144,30 @@
      self.* = undefined;
  }
 
-@@ -410,3 +453,70 @@
+@@ -158,6 +205,7 @@
+ /// it does not own a new allocation.
+ pub fn restore(self: *const Page) lz4.DecompressError!TerminalPage {
+     const result = self.page;
++    assert(result.memory.len == self.raw_len);
+     _ = try lz4.decompress(self.encoded, result.memory);
+     return result;
+ }
+@@ -173,12 +221,12 @@
+     self: *const Page,
+     memory: []align(std.heap.page_size_min) u8,
+ ) lz4.DecompressError!TerminalPage {
+-    assert(memory.len >= self.page.memory.len);
++    assert(memory.len >= self.raw_len);
+
+     // Page internals are offsets into the backing buffer, so all metadata can
+     // be copied verbatim when paired with an equally laid-out mapping.
+     var result = self.page;
+-    result.memory = memory[0..self.page.memory.len];
++    result.memory = memory[0..self.raw_len];
+     _ = try lz4.decompress(self.encoded, result.memory);
+     return result;
+ }
+@@ -410,3 +458,72 @@
      const restored = try compressed.restore();
      try testing.expectEqualSlices(u8, expected, restored.memory);
  }
@@ -126,11 +194,12 @@
 +        try testing.expect(sameAllocator(alloc, alloc));
 +        try testing.expect(!sameAllocator(alloc, testing.allocator));
 +        var source = (try Page.init(alloc, &resident, scratch, &table)).?;
-+        var frozen = try source.cloneFor(alloc, memory);
++        var frozen = try source.cloneFor(alloc, testing.allocator);
 +        defer frozen.deinit();
 +        try testing.expectEqual(source.encoded.ptr, frozen.encoded.ptr);
 +        try testing.expectEqual(@as(usize, 2), source.shared.references.load(.monotonic));
 +        source.deinit();
++        frozen.page.memory = memory;
 +        const restored = try frozen.restore();
 +        try testing.expectEqual(@as(u21, 'Q'), restored.getRowAndCell(2, 3).cell.codepoint());
 +    }
@@ -158,21 +227,22 @@
 +    var table: lz4.HashTable = undefined;
 +    var source = (try Page.init(left.allocator(), &resident, scratch, &table)).?;
 +    defer source.deinit();
-+    var shared = try source.cloneFor(left.allocator(), memory);
++    var shared = try source.cloneFor(left.allocator(), testing.allocator);
 +    defer shared.deinit();
-+    var copied = try source.cloneFor(right.allocator(), memory);
++    var copied = try source.cloneFor(right.allocator(), testing.allocator);
 +    defer copied.deinit();
 +    try testing.expectEqual(source.encoded.ptr, shared.encoded.ptr);
 +    try testing.expect(source.encoded.ptr != copied.encoded.ptr);
 +    try testing.expectEqualSlices(u8, source.encoded, copied.encoded);
 +    try testing.expectEqual(@as(usize, 2), source.shared.references.load(.monotonic));
 +    try testing.expectEqual(@as(usize, 1), copied.shared.references.load(.monotonic));
++    copied.page.memory = memory;
 +    const restored = try copied.restore();
 +    try testing.expectEqual(@as(u21, 'R'), restored.getRowAndCell(4, 5).cell.codepoint());
 +}
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
-@@ -80,6 +80,38 @@
+@@ -80,16 +80,48 @@
      /// unused rows. They must be recommitted (see untrim) before anything
      /// writes past the page's current size.
      trimmed: bool = false,
@@ -211,6 +281,22 @@
 
      /// The physical representation of the page contents.
      ///
+-    /// Both states retain the same `Page.memory` virtual mapping and the same
+-    /// `Page` metadata. A resident page can access the mapping directly since
+-    /// it is, well, resident.
++    /// Live compressed pages retain their raw mapping and `Page` metadata.
++    /// Immutable clones keep metadata and encoded bytes with an empty raw
++    /// memory slice until first access. Resident pages access their private
++    /// or copy-on-write mapping directly.
+     ///
+-    /// A compressed page owns an encoded copy while the physical memory
+-    /// behind the raw mapping is discarded. HOWEVER, we retain the
+-    /// virtual allocation so that restoration is infallible.
++    /// Live compressed pages retain the virtual allocation while discarding
++    /// physical memory, so their restoration needs no allocation.
+     const Data = union(enum) {
+         resident: Page,
+         compressed: compression.Page,
 @@ -105,7 +137,15 @@
      /// WARNING: This will DECOMPRESS compressed pages! Only use this if
      /// you need access to the underlying memory. If you only need access to
@@ -235,6 +321,15 @@
          return switch (self.data) {
              .resident => |*page_| page_,
              .compressed => null,
+@@ -180,7 +221,7 @@
+                 const memory = try alloc.alignedAlloc(
+                     u8,
+                     .fromByteUnits(std.heap.page_size_min),
+-                    compressed.page.memory.len,
++                    compressed.raw_len,
+                 );
+
+                 const page_ = compressed.cloneBuf(memory) catch |err| {
 @@ -223,6 +264,7 @@
      /// the page is resident. Prefer `page` unless the caller can establish
      /// that invariant independently.
@@ -243,7 +338,64 @@
          return &self.data.resident;
      }
 
-@@ -954,6 +996,11 @@
+@@ -239,6 +281,25 @@
+     /// Return the page capacity without accessing page memory.
+     pub inline fn capacity(self: *const Node) Capacity {
+         return self.metadata().capacity;
++    }
++
++    inline fn rawLen(self: *const Node) usize {
++        return switch (self.data) {
++            .resident => |*page_| page_.memory.len,
++            .compressed => |*page_| page_.raw_len,
++        };
++    }
++
++    fn discardUnmapped(self: *Node) ?usize {
++        const compressed = switch (self.data) {
++            .resident => return null,
++            .compressed => |*page_| page_,
++        };
++        if (compressed.page.memory.len != 0) return null;
++        assert(self.owned == .heap);
++        const raw_len = compressed.raw_len;
++        compressed.deinit();
++        return raw_len;
+     }
+
+     /// Return the embedded Page metadata without restoring its memory.
+@@ -262,7 +323,7 @@
+     ///
+     /// Preserve mode reconstructs the page contents and is used by `page`.
+     /// Discard mode skips decoding for callers which will overwrite or destroy
+-    /// the page. Both modes recommit the retained mapping, free the encoded
++    /// the page. Both modes prepare a private mapping, free the encoded
+     /// allocation, and leave the node in a valid resident state.
+     noinline fn restore(self: *Node, comptime mode: RestoreMode) *Page {
+         const compressed = switch (self.data) {
+@@ -270,9 +331,18 @@
+             .compressed => |*page_| page_,
+         };
+
+-        // Decommit only discarded the physical pages. Recommit prepares the
+-        // still-reserved mapping for decoding or reuse by the caller.
+-        terminal_mem.recommit(compressed.page.memory);
++        // A lazy clone needs a private mapping; live compressed pages reuse
++        // their retained range for decoding or overwriting by the caller.
++        if (compressed.page.memory.len == 0) {
++            const page_alloc = compressed.mapping_alloc orelse unreachable;
++            compressed.page.memory = page_alloc.alignedAlloc(
++                u8,
++                .fromByteUnits(std.heap.page_size_min),
++                compressed.raw_len,
++            ) catch @panic("terminal copy-on-write allocation failed");
++        } else {
++            terminal_mem.recommit(compressed.page.memory);
++        }
+
+         const restored = switch (mode) {
+             .preserve => compressed.restore() catch |err| {
+@@ -954,6 +1024,15 @@
      var it = list.first;
      while (it) |node| {
          it = node.next;
@@ -252,10 +404,14 @@
 +            pool.nodes.destroy(node);
 +            continue;
 +        }
++        if (node.discardUnmapped() != null) {
++            pool.nodes.destroy(node);
++            continue;
++        }
          const page = node.restore(.discard);
          switch (node.owned) {
              .pool => releasePoolPage(pool, page),
-@@ -1104,6 +1151,7 @@
+@@ -1104,6 +1183,7 @@
      /// The x coordinate is ignored; the full row is always cloned.
      top: point.Point,
      bot: ?point.Point = null,
@@ -263,7 +419,7 @@
 
      // If this is non-null then cloning will attempt to remap the tracked
      // pins into the new cloned area and will keep track of the old to
-@@ -1147,7 +1195,7 @@
+@@ -1147,7 +1227,7 @@
      var pool: MemoryPool = try .init(
          alloc,
          pageAllocator(alloc),
@@ -272,7 +428,7 @@
      );
      errdefer pool.deinit();
 
-@@ -1166,32 +1214,86 @@
+@@ -1166,32 +1246,79 @@
      var total_rows: usize = 0;
      var page_size: usize = 0;
      while (it.next()) |chunk| {
@@ -291,22 +447,15 @@
 +        const active_offset = self.total_rows - self.rows;
 +        const history_page = total_rows + chunk.node.rows() <= active_offset;
 +        const node = if (opts.cow and whole_page and chunk.node.isCompressed()) compressed: {
-+            const metadata = chunk.node.data.compressed.page;
-+            const memory = try pool.pages.allocator.alignedAlloc(
-+                u8,
-+                .fromByteUnits(std.heap.page_size_min),
-+                metadata.memory.len,
-+            );
-+            errdefer pool.pages.allocator.free(memory);
 +            const result = try pool.nodes.create();
 +            errdefer pool.nodes.destroy(result);
 +            result.* = .{
-+                .data = .{ .compressed = try chunk.node.data.compressed.cloneFor(alloc, memory) },
++                .data = .{ .compressed = try chunk.node.data.compressed.cloneFor(alloc, pool.pages.allocator) },
 +                .serial = page_serial,
 +                .owned = .heap,
 +            };
 +            page_serial += 1;
-+            page_size += memory.len;
++            page_size += result.rawLen();
 +            break :compressed result;
 +        } else if (opts.cow and whole_page and history_page and !native_freestanding and !wasm_page_pool) shared: {
 +            const source = chunk.node;
@@ -384,7 +533,7 @@
 
          total_rows += node.rows();
 
-@@ -1224,7 +1326,7 @@
+@@ -1224,7 +1351,7 @@
          .page_serial = page_serial,
          .page_serial_epoch = 0,
          .page_size = page_size,
@@ -393,7 +542,61 @@
          .cols = self.cols,
          .rows = self.rows,
          .total_rows = total_rows,
-@@ -5192,9 +5294,23 @@
+@@ -1436,7 +1563,7 @@
+
+             var row_it = p.rowIterator(.left_up, active_pin);
+             while (row_it.next()) |next| {
+-                const row = next.rowAndCell().row;
++                const row = next.rowAndCellRead().row;
+                 if (row.wrap_continuation) wrapped += 1;
+             }
+
+@@ -1462,20 +1589,20 @@
+
+     // Create the first node that contains our reflow.
+     const first_rewritten_node = node: {
+-        const page = self.pages.first.?.page();
+-        const cap = page.capacity.adjust(
++        const first = self.pages.first.?;
++        const cap = first.capacity().adjust(
+             .{ .cols = cols },
+         ) catch |err| err: {
+             comptime assert(@TypeOf(err) == error{OutOfMemory});
+
+             // We verify all maxed out page layouts work.
+-            var cap = page.capacity;
++            var cap = first.capacity();
+             cap.cols = cols;
+
+             // We're growing columns so we can only get less rows so use
+             // the lesser of our capacity and size so we minimize wasted
+             // rows.
+-            cap.rows = @min(page.size.rows, cap.rows);
++            cap.rows = @min(first.rows(), cap.rows);
+             break :err cap;
+         };
+
+@@ -1602,7 +1729,7 @@
+
+             var row_it = c.tracked_pin.rowIterator(.left_up, active_pin);
+             while (row_it.next()) |next| {
+-                const row = next.rowAndCell().row;
++                const row = next.rowAndCellRead().row;
+                 if (row.wrap_continuation) wrapped += 1;
+             }
+
+@@ -1698,8 +1825,8 @@
+         row: Pin,
+         cursor_pin: ?*Pin,
+     ) Allocator.Error!void {
+-        const src_page: *Page = row.node.page();
+-        const src_row = row.rowAndCell().row;
++        const src_page: *const Page = row.node.pageRead();
++        const src_row = row.rowAndCellRead().row;
+         const src_y = row.y;
+         const cells = src_row.cells.ptr(src_page.memory)[0..src_page.size.cols];
+
+@@ -5192,9 +5319,23 @@
  /// it. A compressed node is destroyed: its memory is already decommitted,
  /// so keeping it would save nothing.
  fn retireNode(self: *PageList, node: *List.Node) void {
@@ -418,7 +621,7 @@
      {
          self.destroyNode(node);
          return;
-@@ -5212,6 +5328,12 @@
+@@ -5212,6 +5353,17 @@
      node: *List.Node,
      total_size: ?*usize,
  ) void {
@@ -428,13 +631,95 @@
 +        pool.nodes.destroy(node);
 +        return;
 +    }
++    if (node.discardUnmapped()) |raw_len| {
++        if (total_size) |v| v.* -= raw_len;
++        pool.nodes.destroy(node);
++        return;
++    }
      const page = node.restore(.discard);
 
      // Update our accounting for page size. This must mirror what was
-@@ -7288,6 +7410,14 @@
+@@ -6965,21 +7117,21 @@
+
+ /// Snapshot of the storage used by page nodes in this list.
+ ///
+-/// The raw byte counts describe page backing mappings only. They exclude
++/// The raw byte counts describe logical page backing sizes. They exclude
+ /// nodes, allocator metadata, unused preheated pool items, the spare page
+ /// (see spare_node), and the small representation values stored in each
+-/// node. A compressed page retains its
+-/// raw mapping as virtual address space, but its bytes are counted as
+-/// decommitted because strict reclamation succeeded before the state was
+-/// published.
++/// node. Live compressed pages retain raw mappings as virtual address space.
++/// Their bytes count as decommitted after strict reclamation succeeds.
++/// Immutable compressed clones count their saved raw length as unmapped
++/// until first access allocates a private range.
+ pub const MemoryStats = struct {
+     /// Pages whose raw backing mappings are resident.
+     resident_pages: usize = 0,
+
+-    /// Pages represented by encoded storage and a decommitted raw mapping.
++    /// Pages represented by encoded storage, with optional raw mappings.
+     compressed_pages: usize = 0,
+
+-    /// Logical bytes in every raw page mapping.
++    /// Logical raw bytes across resident and compressed pages.
+     raw_bytes: usize = 0,
+
+     /// Raw mapping bytes which remain resident.
+@@ -6987,6 +7139,8 @@
+
+     /// Raw mapping bytes discarded for compressed pages.
+     decommitted_raw_bytes: usize = 0,
++    unmapped_raw_bytes: usize = 0,
++    reserved_backing_bytes: usize = 0,
+
+     /// Raw allocation bytes which remain physically resident.
+     ///
+@@ -7005,7 +7159,7 @@
+
+     /// Estimate physical bytes avoided by compressed page backing storage.
+     pub fn estimatedSavings(self: MemoryStats) usize {
+-        return self.decommitted_raw_bytes -| self.encoded_bytes;
++        return (self.decommitted_raw_bytes + self.unmapped_raw_bytes) -| self.encoded_bytes;
+     }
+ };
+
+@@ -7017,7 +7171,7 @@
+     var result: MemoryStats = .{};
+     var current = self.pages.first;
+     while (current) |node| : (current = node.next) {
+-        const raw_len = node.metadata().memory.len;
++        const raw_len = node.rawLen();
+         const backing_len = switch (node.owned) {
+             .pool => PagePool.item_size,
+             .heap => raw_len,
+@@ -7029,12 +7183,18 @@
+             .resident => {
+                 result.resident_pages += 1;
+                 result.resident_raw_bytes += raw_len;
++                result.reserved_backing_bytes += backing_len;
+                 result.resident_backing_bytes += backing_len;
+             },
+
+             .compressed => |compressed| {
+                 result.compressed_pages += 1;
+-                result.decommitted_raw_bytes += raw_len;
++                if (compressed.page.memory.len == 0) {
++                    result.unmapped_raw_bytes += raw_len;
++                } else {
++                    result.decommitted_raw_bytes += raw_len;
++                    result.reserved_backing_bytes += backing_len;
++                }
+                 // Strict reclamation covers only Page.memory. A standard pool
+                 // item can have an unused tail which remains resident.
+                 result.resident_backing_bytes += backing_len - raw_len;
+@@ -7287,6 +7447,14 @@
+     /// pin could use this data and make their own determination of
      /// semantics.
      garbage: bool = false,
-
++
 +    pub inline fn rowAndCellRead(self: Pin) struct {
 +        row: *const pagepkg.Row,
 +        cell: *const pagepkg.Cell,
@@ -442,14 +727,76 @@
 +        const rac = self.node.pageRead().getRowAndCell(self.x, self.y);
 +        return .{ .row = rac.row, .cell = rac.cell };
 +    }
-+
+
      pub inline fn rowAndCell(self: Pin) struct {
          row: *pagepkg.Row,
-         cell: *pagepkg.Cell,
-@@ -21123,3 +21253,42 @@
+@@ -21123,3 +21291,243 @@
      try testing.expectEqual(extra.len, counting.allocations);
      try testing.expectEqual(0, counting.deallocations);
  }
++
++test "copy-on-write anchored frozen resident reflow borrows shared input without detaching" {
++    const testing = std.testing;
++    const alloc = testing.allocator;
++    var rejecting = std.testing.FailingAllocator.init(alloc, .{ .fail_index = 0 });
++    var source = try init(alloc, .{ .cols = 180, .rows = 24, .max_lines = 2000 });
++    defer source.deinit();
++    for (0..1000) |_| _ = try source.grow();
++    source.pin(.{ .screen = .{} }).?.rowAndCell().cell.* = .init('A');
++    source.pin(.{ .screen = .{ .x = 90 } }).?.rowAndCell().cell.* = .init('B');
++    source.pin(.{ .screen = .{ .x = 179 } }).?.rowAndCell().cell.* = .init('Z');
++    source.pin(.{ .active = .{ .y = 23 } }).?.rowAndCell().cell.* = .init('C');
++    const source_total = source.total_rows;
++    const source_first = source.pages.first.?;
++    const source_memory = source_first.metadata().memory.ptr;
++    var frozen = try source.clone(alloc, .{ .top = .{ .screen = .{} }, .cow = true });
++    defer frozen.deinit();
++    const anchor = try frozen.trackPin(frozen.pin(.{ .active = .{ .y = 23 } }).?);
++    defer frozen.untrackPin(anchor);
++    const grown_rows: size.CellCountInt = @intCast(frozen.total_rows - frozen.pages.first.?.rows());
++    const future_active_top = frozen.pin(.{ .screen = .{ .y = @intCast(frozen.total_rows - grown_rows) } }).?;
++    try testing.expect(future_active_top.node.shared != null);
++    var shared_pages: usize = 0;
++    var node_it = source.pages.first;
++    while (node_it) |node| : (node_it = node.next) {
++        if (node.shared) |shared| {
++            try testing.expectEqual(@as(usize, 2), shared.references.load(.acquire));
++            shared.page_alloc = rejecting.allocator();
++            shared_pages += 1;
++        }
++    }
++    try testing.expect(shared_pages > 1);
++    try frozen.resize(.{
++        .cols = 90,
++        .rows = grown_rows,
++        .cursor = .{ .x = 0, .y = 23, .pin = anchor },
++        .pull_scrollback = true,
++    });
++    try testing.expectEqual(@as(usize, 0), rejecting.allocations);
++    try testing.expect(!rejecting.has_induced_failure);
++    try testing.expectEqual(@as(size.CellCountInt, 180), source.cols);
++    try testing.expectEqual(source_total, source.total_rows);
++    try testing.expectEqual(source_first, source.pages.first.?);
++    try testing.expectEqual(source_memory, source_first.metadata().memory.ptr);
++    try testing.expectEqual(@as(u21, 'A'), frozen.pin(.{ .screen = .{} }).?.rowAndCellRead().cell.codepoint());
++    try testing.expectEqual(@as(u21, 'B'), frozen.pin(.{ .screen = .{ .y = 1 } }).?.rowAndCellRead().cell.codepoint());
++    try testing.expectEqual(@as(u21, 'Z'), frozen.pin(.{ .screen = .{ .x = 89, .y = 1 } }).?.rowAndCellRead().cell.codepoint());
++    try testing.expectEqual(@as(u21, 'C'), anchor.rowAndCellRead().cell.codepoint());
++    try testing.expectEqual(@as(u32, @intCast(source_total)), frozen.pointFromPin(.screen, anchor.*).?.screen.y);
++    node_it = source.pages.first;
++    while (node_it) |node| : (node_it = node.next) {
++        if (node.shared) |shared| {
++            try testing.expectEqual(@as(usize, 1), shared.references.load(.acquire));
++            shared.page_alloc = source.pool.pages.allocator;
++        }
++    }
++    source.pin(.{ .screen = .{} }).?.rowAndCell().cell.* = .init('X');
++    try testing.expectEqual(@as(u21, 'X'), source.pin(.{ .screen = .{} }).?.rowAndCellRead().cell.codepoint());
++    source.eraseHistory(null);
++    try testing.expectEqual(@as(u21, 'C'), anchor.rowAndCellRead().cell.codepoint());
++    try testing.expectEqual(@as(u21, 'A'), frozen.pin(.{ .screen = .{} }).?.rowAndCellRead().cell.codepoint());
++    try testing.expectEqual(@as(u21, 'Z'), frozen.pin(.{ .screen = .{ .x = 89, .y = 1 } }).?.rowAndCellRead().cell.codepoint());
++}
 +
 +test "copy-on-write resident page clone survives reflow and clear-history" {
 +    const testing = std.testing;
@@ -470,7 +817,7 @@
 +    try testing.expectEqual(@as(u21, 'A'), frozen.pin(.{ .screen = .{} }).?.rowAndCell().cell.codepoint());
 +}
 +
-+test "copy-on-write compressed clones share encoding and keep private mappings" {
++test "copy-on-write compressed clones share encoding and map on first read" {
 +    const testing = std.testing;
 +    const alloc = testing.allocator;
 +    var source = try init(alloc, .{ .cols = 180, .rows = 24, .max_lines = 2000 });
@@ -485,9 +832,147 @@
 +    const left = &source.pages.first.?.data.compressed;
 +    const right = &frozen.pages.first.?.data.compressed;
 +    try testing.expectEqual(left.encoded.ptr, right.encoded.ptr);
-+    try testing.expect(left.page.memory.ptr != right.page.memory.ptr);
++    try testing.expectEqual(@as(usize, 0), right.page.memory.len);
++    try testing.expectEqual(left.raw_len, right.raw_len);
 +    source.eraseHistory(null);
 +    try testing.expectEqual(@as(u21, 'A'), frozen.pin(.{ .screen = .{} }).?.rowAndCell().cell.codepoint());
++}
++
++test "copy-on-write unread compressed clone teardown never allocates raw mappings" {
++    const testing = std.testing;
++    const alloc = testing.allocator;
++    var source = try init(alloc, .{ .cols = 180, .rows = 24, .max_lines = 2000 });
++    defer source.deinit();
++    for (0..1000) |_| _ = try source.grow();
++    source.pin(.{ .screen = .{} }).?.rowAndCell().cell.* = .init('A');
++    _ = source.compress(.full);
++    const before = source.memoryStats();
++    try testing.expect(before.compressed_pages > 1);
++    const pool_live = source.pool.pages.live;
++    var frozen = try source.clone(alloc, .{ .top = .{ .screen = .{} }, .cow = true });
++    var frozen_live = true;
++    defer if (frozen_live) frozen.deinit();
++    const captured = frozen.memoryStats();
++    try testing.expectEqual(before.compressed_pages, captured.compressed_pages);
++    try testing.expectEqual(before.raw_bytes, captured.raw_bytes);
++    try testing.expectEqual(before.decommitted_raw_bytes, captured.unmapped_raw_bytes);
++    try testing.expectEqual(@as(usize, 0), captured.decommitted_raw_bytes);
++    try testing.expectEqual(captured.resident_backing_bytes, captured.reserved_backing_bytes);
++    try testing.expectEqual(frozen.page_size, captured.reserved_backing_bytes + captured.unmapped_raw_bytes);
++    var rejecting = std.testing.FailingAllocator.init(alloc, .{ .fail_index = 0 });
++    frozen.pool.pages.allocator = rejecting.allocator();
++    var node_it = frozen.pages.first;
++    while (node_it) |node| : (node_it = node.next) {
++        if (node.data == .compressed) {
++            try testing.expectEqual(@as(usize, 0), node.data.compressed.page.memory.len);
++            try testing.expect(node.data.compressed.raw_len > 0);
++            node.data.compressed.mapping_alloc = rejecting.allocator();
++        }
++    }
++    @memset(frozen.pages.first.?.data.compressed.encoded, 0xFF);
++    frozen.deinit();
++    frozen_live = false;
++    try testing.expectEqual(@as(usize, 0), rejecting.allocations);
++    try testing.expect(!rejecting.has_induced_failure);
++    try testing.expectEqual(pool_live, source.pool.pages.live);
++    try testing.expectEqual(before, source.memoryStats());
++    try testing.expectEqual(Node.Owned.pool, source.pages.first.?.owned);
++}
++
++test "copy-on-write nested compressed clones preserve metadata and allocate only read pages" {
++    const testing = std.testing;
++    const alloc = testing.allocator;
++    var source = try init(alloc, .{ .cols = 180, .rows = 24, .max_lines = 2000 });
++    var source_live = true;
++    defer if (source_live) source.deinit();
++    for (0..1000) |_| _ = try source.grow();
++    source.pin(.{ .screen = .{} }).?.rowAndCell().cell.* = .init('A');
++    _ = source.compress(.full);
++    var frozen = try source.clone(alloc, .{ .top = .{ .screen = .{} }, .cow = true });
++    defer frozen.deinit();
++    var nested = try frozen.clone(alloc, .{ .top = .{ .screen = .{} }, .cow = true });
++    defer nested.deinit();
++    const frozen_node = frozen.pages.first.?;
++    const nested_node = nested.pages.first.?;
++    const raw_len = frozen_node.rawLen();
++    const encoded = frozen_node.data.compressed.encoded.ptr;
++    try testing.expectEqual(encoded, nested_node.data.compressed.encoded.ptr);
++    try testing.expectEqual(@as(usize, 3), frozen_node.data.compressed.shared.references.load(.acquire));
++    try testing.expectEqual(@as(usize, 0), frozen_node.data.compressed.page.memory.len);
++    try testing.expectEqual(@as(usize, 0), nested_node.data.compressed.page.memory.len);
++    try testing.expectEqual(source.pages.first.?.rows(), frozen_node.rows());
++    try testing.expectEqual(source.pages.first.?.cols(), frozen_node.cols());
++    try testing.expectEqual(source.pages.first.?.capacity(), frozen_node.capacity());
++    const before = frozen.memoryStats();
++    try testing.expectEqual(before, nested.memoryStats());
++    var expected_page_size: usize = 0;
++    var node_it = frozen.pages.first;
++    while (node_it) |node| : (node_it = node.next) {
++        expected_page_size += switch (node.owned) {
++            .pool => PagePool.item_size,
++            .heap => node.rawLen(),
++        };
++    }
++    try testing.expectEqual(expected_page_size, frozen.page_size);
++    source.deinit();
++    source_live = false;
++    try testing.expectEqual(@as(usize, 2), frozen_node.data.compressed.shared.references.load(.acquire));
++    var preserved = try frozen_node.pagePreservingState(alloc);
++    defer preserved.deinit();
++    try testing.expectEqual(@as(u21, 'A'), preserved.page().getRowAndCell(0, 0).cell.codepoint());
++    try testing.expectEqual(@as(usize, 0), frozen_node.data.compressed.page.memory.len);
++    try testing.expectEqual(before, frozen.memoryStats());
++    var counted = std.testing.FailingAllocator.init(alloc, .{});
++    frozen_node.data.compressed.mapping_alloc = counted.allocator();
++    const cell = frozen.pin(.{ .screen = .{} }).?.rowAndCell().cell;
++    try testing.expectEqual(@as(u21, 'A'), cell.codepoint());
++    try testing.expectEqual(@as(usize, 1), counted.allocations);
++    try testing.expectEqual(raw_len, counted.allocated_bytes);
++    const restored = frozen.memoryStats();
++    try testing.expectEqual(before.raw_bytes, restored.raw_bytes);
++    try testing.expectEqual(before.unmapped_raw_bytes - raw_len, restored.unmapped_raw_bytes);
++    try testing.expectEqual(before.resident_raw_bytes + raw_len, restored.resident_raw_bytes);
++    try testing.expectEqual(before.reserved_backing_bytes + raw_len, restored.reserved_backing_bytes);
++    try testing.expectEqual(frozen.page_size, restored.reserved_backing_bytes + restored.unmapped_raw_bytes);
++    try testing.expectEqual(before.resident_pages + 1, restored.resident_pages);
++    try testing.expectEqual(before.compressed_pages - 1, restored.compressed_pages);
++    try testing.expectEqual(before, nested.memoryStats());
++    cell.* = .init('X');
++    try testing.expectEqual(@as(u21, 'A'), nested.pin(.{ .screen = .{} }).?.rowAndCell().cell.codepoint());
++    try testing.expectEqual(@as(u21, 'X'), frozen.pin(.{ .screen = .{} }).?.rowAndCell().cell.codepoint());
++}
++
++test "copy-on-write destroying unmapped compressed nodes preserves logical page accounting" {
++    const testing = std.testing;
++    const alloc = testing.allocator;
++    var source = try init(alloc, .{ .cols = 180, .rows = 24, .max_lines = 2000 });
++    defer source.deinit();
++    for (0..1000) |_| _ = try source.grow();
++    _ = source.compress(.full);
++    var frozen = try source.clone(alloc, .{ .top = .{ .screen = .{} }, .cow = true });
++    defer frozen.deinit();
++    var rejecting = std.testing.FailingAllocator.init(alloc, .{ .fail_index = 0 });
++    var node_it = frozen.pages.first;
++    var removed: usize = 0;
++    var removed_rows: usize = 0;
++    const before_size = frozen.page_size;
++    while (node_it) |node| {
++        node_it = node.next;
++        if (node.data != .compressed) continue;
++        try testing.expectEqual(@as(usize, 0), node.data.compressed.page.memory.len);
++        node.data.compressed.mapping_alloc = rejecting.allocator();
++        removed += node.rawLen();
++        removed_rows += node.rows();
++        frozen.pages.remove(node);
++        frozen.destroyNode(node);
++    }
++    frozen.total_rows -= removed_rows;
++    frozen.viewport_pin.* = .{ .node = frozen.pages.first.? };
++    try testing.expect(removed > 0);
++    try testing.expectEqual(before_size - removed, frozen.page_size);
++    try testing.expectEqual(@as(usize, 0), frozen.memoryStats().unmapped_raw_bytes);
++    try testing.expectEqual(@as(usize, 0), rejecting.allocations);
++    try testing.expect(!rejecting.has_induced_failure);
 +}
 --- a/src/terminal/Screen.zig
 +++ b/src/terminal/Screen.zig

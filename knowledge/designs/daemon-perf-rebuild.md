@@ -2202,7 +2202,7 @@ Scope:
   `GetKeyTables`; in-place upgrade after `ExecExit{resume: Attach}`.
 - **Key subscriptions**: GUI, iOS and web subscribe `keys=Full` and receive per-table deltas
   (bind-key touches one table); they read `prefix_bindings` on every input route. Hash-only (+
-  mouse bitset) is for TUI, CLI and control clients.
+  mouse bitset) is for TUI. Command-only and control clients request no key state.
 - **Control mode**: `%layout-change` and window notifications stay hook-driven (W2-HOOKS owns the
   source; `DEFERRED_CONTROL_NOTIFICATIONS` ordering after `%end` preserved). New: control lines go
   as one `ExecRequest` body over the interactive connection, answered by `CommandResponse` frames
@@ -2242,6 +2242,52 @@ clients and overlay tests, `cargo test -p zz`, every compat/tui fixture, control
 Expected: attach ~10 round trips -> 1; hello 28.3 KB -> ~40 B + subscribed state;
 KeyTablesChanged 26 KB -> ~20 B for hash subscribers; tree change 20-60 B, encoded once;
 attach CPU 26 -> <= 5 ms.
+
+As built on `perf/ctrl`, 2026-09-30:
+
+- `Hello` carries viewport, subscriptions, an optional session or command attach, and the
+  raw NUL-separated environment once. `Welcome` carries identities and capability bits.
+  Both `pane-frame-v1` and `control-plane-v2` are required inside unreleased protocol 107.
+- `send_attached` and `send_resync_inner` collect one flat `Batch` containing the scoped
+  tree, `ClientView`, requested status/options/keys, image chunks, and each visible pane's
+  Full at final size. Typed queued groups expand into the collector without decoding or
+  copying TERM bodies. Image chunks remain ahead of their placement frame.
+- `publish_compact_trees` retains raw trees per scope, publishes small `TreeDelta`
+  operations, and emits nothing for an empty diff. Per-client overlays stay in
+  `ClientView`; attachment epochs reset frame state once, and forced state shares the
+  same publication lock and atomic tree/view group as ordinary publication.
+- Hash subscribers receive revision plus exact root/copy mouse bits. Full subscribers
+  receive per-table patches. A first Full subscriber cannot consume a pending Hash
+  revision. Control requests no keys because its frontend does not use them; TUI requests
+  Hash, and desktop, web, iOS, and FFI request Full.
+- `InteractiveClient` attaches with Hello; `CommandClient::into_interactive` retains its
+  existing transport after `ExecResume`. TUI no longer opens option/preflight clients.
+  Options include `ExtendedKeys` and `FocusEvents`, bringing the shared catalog to 20.
+- Control sends each raw line through one `ExecRequest`. Parsing, daemon-host variable
+  expansion, and alias freezing happen once in the daemon. `ControlCommandStarted`
+  opens native parent guards before callback output; responses close them. Raw callback
+  guards preserve bytes. Cancellation is checked before dispatch and between commands,
+  preventing disconnected queues from acting on later clients. Hook notification order
+  is unchanged.
+- `ClientCore` reduces a whole Batch before publishing grouped events and requests one
+  `TreeSync` on a base mismatch. Desktop keeps its retained-history terminal path and a
+  separate tree-only mirror for inactive hosts, without a second terminal grid.
+- V2 size reports carry the rendered layout generation. Compact clients' stale reports
+  are rejected after unzoom; retained legacy ClientHello clients keep generation-zero
+  resize behavior. Native and shared reports capture generation synchronously; the C
+  API also accepts an explicitly captured generation.
+- The control frontend buffers payload/end writes and joins a ready Started guard to its
+  response, flushing before it waits. The existing literal-format predicate
+  skips unused facts while preserving target selection and formatted after-hooks. Read-only
+  commands skip key publication and tap refresh; their mutating after-hooks still update both.
+  The final control response and ExecExit share one existing reliable queue group. TUI
+  reuses unchanged rows, borders, status and message composition, then limits narrow-cell
+  incremental painting to changed columns. Full-frame and scroll damage compare retained rows; equal dictionary contents also retain
+  the painted cache. Wide cells, overlays and changed dictionaries keep full-row drawing.
+
+`ZZ_PERF_TREE_DELTA=0` publishes full scoped trees on the new wire. The existing
+`ZZ_PERF_EAGER_FACTS=1` restores eager facts for the literal-output optimization. `ZZ_PERF_READONLY_SKIP=0` restores the
+read-only key/tap work. Full wire rollback requires reverting matching daemon and clients.
 
 ## W2-HOOKS: read-only skip, then change journal (effort L)
 

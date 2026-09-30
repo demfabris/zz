@@ -860,6 +860,10 @@ fn compact_raw_control_preflights_line_and_resolves_daemon_environment() {
         request("display-message -p ~/$CTRL_EXPANSION"),
         &mailbox,
     );
+    assert!(matches!(
+        mailbox.state.lock().reliable.back(),
+        Some(OutboundFrame::Grouped { frames, .. }) if frames.len() == 2
+    ));
     let messages = reliable_children(&mailbox);
     let started = messages.iter().position(|message| matches!(message, ProtocolMessage::Event(Event { payload: EventPayload::ControlCommandStarted { request_id: 1, flags: 1, guard: true, canonical_name: Some(name) }, .. }) if name == "display-message")).unwrap_or_else(|| panic!("command start missing: {messages:?}"));
     let response = messages

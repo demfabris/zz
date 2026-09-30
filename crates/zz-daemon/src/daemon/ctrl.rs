@@ -903,6 +903,7 @@ impl Shared {
             }));
             return;
         }
+        let command_count = prepared.len();
         for (index, prepared) in prepared.into_iter().enumerate() {
             if self.command_queue_cancelled(client) {
                 break;
@@ -941,6 +942,25 @@ impl Shared {
                 },
             };
             let failed = matches!(response, CommandResponse::Error { .. });
+            if kind == ClientKind::Control && (failed || index + 1 == command_count) {
+                let completion = [
+                    ProtocolMessage::CommandResponse(response),
+                    ProtocolMessage::ExecExit(zz_protocol::ExecExit {
+                        server_id: self.server_id,
+                        outcome: zz_protocol::ExecOutcome::Ran,
+                    }),
+                ];
+                let frames = completion
+                    .iter()
+                    .map(|message| outbound.encode_message(message))
+                    .collect::<Result<_, _>>();
+                if !frames.is_ok_and(|frames| outbound.enqueue_control_group(frames)) {
+                    for message in &completion {
+                        let _ = outbound.enqueue_reliable(message);
+                    }
+                }
+                return;
+            }
             let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(response));
             if failed {
                 break;

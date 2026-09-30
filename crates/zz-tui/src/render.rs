@@ -921,7 +921,6 @@ impl Renderer {
         damage: Option<&FrameDamage>,
     ) {
         if !force
-            && !matches!(damage, Some(FrameDamage::All))
             && self.painted.get(&pane).is_some_and(|previous| {
                 previous.rect == rect
                     && previous.viewport.columns == viewport.columns
@@ -943,7 +942,7 @@ impl Renderer {
                 || previous.viewport.foreground != viewport.foreground
                 || previous.viewport.background != viewport.background
         });
-        if force || structural_change || matches!(damage, Some(FrameDamage::All)) {
+        if force || structural_change {
             for row in 0..rect.height {
                 self.blit_row(viewport, row, rect);
             }
@@ -2371,7 +2370,8 @@ fn changed_columns(
     row: u16,
     width: u16,
 ) -> Option<std::ops::Range<u16>> {
-    if !Arc::ptr_eq(&previous.dictionary, &current.dictionary)
+    if (!Arc::ptr_eq(&previous.dictionary, &current.dictionary)
+        && previous.dictionary.as_ref() != current.dictionary.as_ref())
         || previous
             .overlays
             .iter()
@@ -3998,6 +3998,7 @@ mod tests {
         };
         let before = viewport("line 12345 padding");
         let mut after = before.clone();
+        after.dictionary = Arc::new((*after.dictionary).clone());
         Arc::make_mut(&mut after.cells)[5] = PackedCell::new('9' as u32, 0, CellWidth::Narrow);
         let rect = Rect {
             x: 2,
@@ -4031,6 +4032,31 @@ mod tests {
         assert!(output.starts_with("\x1b[4;8H"), "{output:?}");
         assert!(output.contains("     "), "{output:?}");
         assert!(!output.contains("padding"), "{output:?}");
+    }
+
+    #[test]
+    fn full_frame_damage_compares_replaced_rows_with_the_retained_screen() {
+        let before = styled_viewport();
+        let mut after = before.clone();
+        after.dictionary = Arc::new((*after.dictionary).clone());
+        Arc::make_mut(&mut after.cells)[1] = PackedCell::new('z' as u32, 0, CellWidth::Narrow);
+        let rect = Rect {
+            x: 0,
+            y: 0,
+            width: 3,
+            height: 1,
+        };
+        let mut renderer = Renderer::new();
+        renderer.paint_terminal(PaneId(1), &before, rect, true, None);
+        renderer.output.clear();
+        renderer.paint_terminal(PaneId(1), &after, rect, false, Some(&FrameDamage::All));
+        let output = String::from_utf8(renderer.output.clone()).unwrap();
+        assert!(output.starts_with("\x1b[1;2H"), "{output:?}");
+        assert!(output.contains('z'), "{output:?}");
+        assert!(!output.contains('a') && !output.contains('c'), "{output:?}");
+        renderer.output.clear();
+        renderer.paint_terminal(PaneId(1), &after, rect, false, Some(&FrameDamage::All));
+        assert!(renderer.output.is_empty());
     }
 
     #[test]

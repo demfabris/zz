@@ -70,6 +70,43 @@ fn read_only_commands_still_fire_their_after_hooks() {
 }
 
 #[test]
+fn read_only_after_hook_still_publishes_keys_and_retires_control_taps() {
+    let (shared, mut context) = pane_fixture("readonly-hook-effects");
+    let session = context.session.expect("session");
+    let pane = context.pane.expect("pane");
+    let mailbox = OutboundMailbox::new();
+    let (client, _) =
+        shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+    shared.attach(client, session).expect("control attach");
+    assert!(shared.inner.lock().control_output_taps.contains_key(&pane));
+    let name = client_format_name(&shared.inner.lock(), client);
+    let commands =
+        format!("bind-key -T readonly-after x display-message changed ; detach-client -t {name}");
+    run(
+        &shared,
+        &mut context,
+        &["set-hook", "-g", "after-display-message", &commands],
+    )
+    .expect("hook");
+    take_reliable_messages(&mailbox);
+    shared
+        .execute(
+            client,
+            ClientKind::Control,
+            &mut context,
+            &CommandInvocation::new("display-message", ["-p", "literal"]),
+        )
+        .expect("read-only command with hook");
+    let inner = shared.inner.lock();
+    assert!(!inner.control_output_taps.contains_key(&pane));
+    assert!(client_attached_session(&inner, client).is_none());
+    drop(inner);
+    assert!(take_reliable_messages(&mailbox).iter().any(|message| {
+        matches!(message, ProtocolMessage::Event(Event { payload: EventPayload::KeyTablesPatched { tables, .. }, .. }) if tables.iter().any(|table| table.name == "readonly-after"))
+    }));
+}
+
+#[test]
 fn read_only_commands_leave_the_structure_and_its_hooks_alone() {
     let (shared, mut context) = pane_fixture("quiet");
     run(&shared, &mut context, &["split-window", "-d"]).expect("split");

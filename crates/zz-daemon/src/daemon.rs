@@ -10105,7 +10105,9 @@ impl Shared {
         for (pane, token, terminal, output) in pipe_taps_to_rearm {
             self.rearm_pane_pipe(pane, token, &terminal, output);
         }
-        self.refresh_control_output_taps();
+        if !read_only {
+            self.refresh_control_output_taps();
+        }
 
         let mut copy_mode_terminals: Vec<Arc<TerminalSession>> = Vec::new();
         for command in deferred_terminal_commands {
@@ -10906,7 +10908,9 @@ impl Shared {
         {
             source_file_error = Some(error);
         }
-        self.publish_key_tables_if_changed();
+        if !read_only {
+            self.publish_key_tables_if_changed();
+        }
         self.nudge_status_sampler();
         pending_hook_events.extend(std::mem::take(&mut self.inner.lock().deferred_event_hooks));
         if std::mem::take(&mut self.inner.lock().deferred_control_refresh) {

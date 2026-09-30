@@ -80,6 +80,32 @@ fn receive_control_event(receiver: &mpsc::Receiver<MainEvent>) -> io::Result<Mai
     }
 }
 
+fn receive_buffered_control_event<W: Write>(
+    receiver: &mpsc::Receiver<MainEvent>,
+    output: &mut ControlWriter<W>,
+) -> io::Result<MainEvent> {
+    if TERMINATION_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err(io::Error::from(io::ErrorKind::Interrupted));
+    }
+    match receiver.try_recv() {
+        Ok(event) => {
+            if !matches!(
+                &event,
+                MainEvent::Protocol(message)
+                    if matches!(message.as_ref(), ProtocolMessage::CommandResponse(_))
+            ) {
+                output.output.flush()?;
+            }
+            Ok(event)
+        }
+        Err(mpsc::TryRecvError::Empty) => {
+            output.output.flush()?;
+            receive_control_event(receiver)
+        }
+        Err(mpsc::TryRecvError::Disconnected) => Ok(MainEvent::Disconnected),
+    }
+}
+
 pub(crate) fn run(
     socket_path: &Path,
     socket_source: SocketSelectionSource,
@@ -482,7 +508,7 @@ fn execute_command_unit<W: Write>(
             client.request_tree_sync().map_err(io::Error::other)?;
             state.tree_sync_required = false;
         }
-        match receive_control_event(receiver)? {
+        match receive_buffered_control_event(receiver, output)? {
             MainEvent::Protocol(message) => match *message {
                 ProtocolMessage::Event(zz_protocol::Event {
                     payload:
@@ -510,7 +536,7 @@ fn execute_command_unit<W: Write>(
                         canonical_name,
                         command_guard_frames: output.command_guard_frames,
                         frame: if guard {
-                            Some(output.begin(flags)?)
+                            Some(output.begin_buffered_at(unix_timestamp(), flags)?)
                         } else {
                             None
                         },
@@ -1802,11 +1828,16 @@ impl<W: Write> ControlWriter<W> {
     }
 
     fn begin_at(&mut self, time: u64, flags: u8) -> io::Result<Frame> {
+        let frame = self.begin_buffered_at(time, flags)?;
+        self.output.flush()?;
+        Ok(frame)
+    }
+
+    fn begin_buffered_at(&mut self, time: u64, flags: u8) -> io::Result<Frame> {
         let frame = self.allocate_frame(time, flags);
         self.block_open = true;
         self.open_frame = Some(frame);
         self.write_frame_begin(&frame)?;
-        self.output.flush()?;
         Ok(frame)
     }
 
@@ -4292,6 +4323,78 @@ mod tests {
         ] {
             assert!(!is_source_error_message(text), "{text}");
         }
+    }
+
+    #[test]
+    fn ready_control_response_shares_a_flush_and_waiting_exposes_begin() {
+        struct Recorded {
+            bytes: Vec<u8>,
+            flushes: usize,
+            flushed: Option<mpsc::Sender<()>>,
+        }
+        impl Write for Recorded {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.bytes.extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                self.flushes += 1;
+                if let Some(flushed) = self.flushed.take() {
+                    flushed.send(()).unwrap();
+                }
+                Ok(())
+            }
+        }
+        let mut writer = ControlWriter::new(
+            Recorded {
+                bytes: Vec::new(),
+                flushes: 0,
+                flushed: None,
+            },
+            false,
+        );
+        let frame = writer.begin_buffered_at(21, 1).unwrap();
+        let (sender, receiver) = mpsc::channel();
+        sender
+            .send(MainEvent::Protocol(Box::new(
+                ProtocolMessage::CommandResponse(CommandResponse::Success {
+                    request_id: 1,
+                    output: RawText::from("body"),
+                    exit_code: 0,
+                    stderr: String::new(),
+                    stdout_claim: StdoutClaim::None,
+                }),
+            )))
+            .unwrap();
+        let MainEvent::Protocol(message) =
+            receive_buffered_control_event(&receiver, &mut writer).unwrap()
+        else {
+            panic!("response expected");
+        };
+        let ProtocolMessage::CommandResponse(response) = *message else {
+            panic!("response expected");
+        };
+        assert_eq!(writer.output.flushes, 0);
+        writer.response(&frame, response).unwrap();
+        assert_eq!(writer.output.flushes, 1);
+        assert_eq!(writer.output.bytes, b"%begin 21 1 1\nbody\n%end 21 1 1\n");
+
+        let (flushed, flush_receiver) = mpsc::channel();
+        writer.output.flushed = Some(flushed);
+        writer.begin_buffered_at(22, 1).unwrap();
+        let producer = thread::spawn(move || {
+            flush_receiver
+                .recv_timeout(std::time::Duration::from_secs(1))
+                .unwrap();
+            sender.send(MainEvent::Disconnected).unwrap();
+        });
+        assert!(matches!(
+            receive_buffered_control_event(&receiver, &mut writer).unwrap(),
+            MainEvent::Disconnected
+        ));
+        producer.join().unwrap();
+        assert_eq!(writer.output.flushes, 2);
+        assert!(writer.output.bytes.ends_with(b"%begin 22 2 1\n"));
     }
 
     #[test]

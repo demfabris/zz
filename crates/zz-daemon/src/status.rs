@@ -178,6 +178,9 @@ pub(crate) struct StatusRenderer {
     pending_modes: BTreeSet<ClientId>,
     job_needs: StatusJobNeeds,
     uncovered_jobs: BTreeSet<ClientId>,
+    completed: Option<CompletedStatus>,
+    #[cfg(test)]
+    expansions: usize,
 }
 
 pub(crate) struct StatusRequest {
@@ -202,6 +205,236 @@ pub(crate) struct StatusRequest {
     pub(crate) message_styles: (String, String),
     pub(crate) modes: Vec<ModeRequest>,
     pub(crate) pane_borders: Vec<zz_protocol::PaneBorderPresentation>,
+    pub(crate) references: Arc<BTreeSet<String>>,
+}
+
+struct CompletedStatus {
+    client: ClientId,
+    formats: StatusFormats,
+    row_formats: BTreeMap<u32, String>,
+    option_snapshot: Arc<StatusRowVariables>,
+    references: Arc<BTreeSet<String>>,
+    message_line: u8,
+    customized: bool,
+    title_format: Option<String>,
+    context: StatusContext<'static>,
+    client_scheme: Option<TerminalColorScheme>,
+    message_styles: (String, String),
+    pane_borders: Vec<zz_protocol::PaneBorderPresentation>,
+    callback_names: Vec<String>,
+    callbacks: Vec<Option<String>>,
+    now: i64,
+    status: StatusLine,
+}
+
+const COMPLETED_STATUS_MAX_BYTES: usize = 1024 * 1024;
+
+fn completed_status_bytes(
+    request: &StatusRequest,
+    names: &[String],
+    callbacks: &[Option<String>],
+    status: &StatusLine,
+) -> usize {
+    let mut bytes = std::mem::size_of::<CompletedStatus>()
+        .saturating_add(request.context.retained_bytes())
+        .saturating_add(request.option_snapshot.retained_bytes());
+    for value in [
+        &request.formats.left,
+        &request.formats.right,
+        &request.formats.style,
+        &request.formats.background,
+        &request.formats.foreground,
+        &request.formats.left_style,
+        &request.formats.right_style,
+        &request.message_styles.0,
+        &request.message_styles.1,
+        &status.left,
+        &status.right,
+        &status.title,
+        &status.base_style,
+        &status.message_style,
+        &status.message_command_style,
+    ]
+    .into_iter()
+    .chain(request.title_format.iter())
+    .chain(names)
+    .chain(callbacks.iter().flatten())
+    .chain(status.rows.iter())
+    {
+        bytes = bytes
+            .saturating_add(std::mem::size_of::<String>())
+            .saturating_add(value.capacity());
+    }
+    for value in request.row_formats.values() {
+        bytes = bytes
+            .saturating_add(std::mem::size_of::<(u32, String)>())
+            .saturating_add(value.capacity());
+    }
+    for value in request.references.iter() {
+        bytes = bytes
+            .saturating_add(std::mem::size_of::<String>())
+            .saturating_add(value.capacity());
+    }
+    for border in request.pane_borders.iter().chain(&status.pane_borders) {
+        bytes = bytes
+            .saturating_add(std::mem::size_of::<zz_protocol::PaneBorderPresentation>())
+            .saturating_add(border.style.capacity());
+    }
+    bytes.saturating_mul(2).saturating_add(4096)
+}
+
+#[cfg(test)]
+#[path = "daemon/format_status_tests.rs"]
+mod format_status_tests;
+
+impl CompletedStatus {
+    fn same_templates(&self, request: &StatusRequest) -> bool {
+        Arc::ptr_eq(&self.option_snapshot, &request.option_snapshot)
+            && (Arc::ptr_eq(&self.references, &request.references)
+                || self.references == request.references)
+            && self.formats == request.formats
+            && self.row_formats == request.row_formats
+            && self.title_format == request.title_format
+            && self.message_styles == request.message_styles
+    }
+
+    fn matches(&self, request: &StatusRequest, callbacks: &[Option<String>], now: i64) -> bool {
+        self.client == request.client
+            && self.now == now
+            && self.same_templates(request)
+            && self.message_line == request.message_line
+            && self.customized == request.customized
+            && self.client_scheme == request.client_scheme
+            && self.pane_borders == request.pane_borders
+            && self.callbacks == callbacks
+            && self.context.same_detached(&request.context)
+    }
+
+    fn new(
+        request: &StatusRequest,
+        callback_names: Vec<String>,
+        callbacks: Vec<Option<String>>,
+        now: i64,
+        status: StatusLine,
+    ) -> Self {
+        Self {
+            client: request.client,
+            formats: request.formats.clone(),
+            row_formats: request.row_formats.clone(),
+            option_snapshot: Arc::clone(&request.option_snapshot),
+            references: Arc::clone(&request.references),
+            message_line: request.message_line,
+            customized: request.customized,
+            title_format: request.title_format.clone(),
+            context: request.context.clone(),
+            client_scheme: request.client_scheme,
+            message_styles: request.message_styles.clone(),
+            pane_borders: request.pane_borders.clone(),
+            callback_names,
+            callbacks,
+            now,
+            status,
+        }
+    }
+}
+
+fn status_cache_callbacks(request: &StatusRequest) -> Option<Vec<String>> {
+    if !zz_mux::format_cache_knob()
+        || !request.modes.is_empty()
+        || request.references.contains("*")
+        || status_line_templates(
+            &request.formats,
+            &request.row_formats,
+            request.title_format.as_deref(),
+            &request.message_styles,
+        )
+        .any(|template| {
+            zz_mux::format_references(template)
+                .iter()
+                .any(|name| !request.references.contains(name))
+        })
+    {
+        return None;
+    }
+    let mut callbacks = Vec::new();
+    for name in request.references.iter().map(String::as_str) {
+        if matches!(
+            name,
+            "session_attached"
+                | "session_attached_list"
+                | "session_many_attached"
+                | "window_active_clients"
+                | "window_active_clients_list"
+        ) {
+            return None;
+        }
+        let option_name = name
+            .strip_prefix("E:")
+            .or_else(|| name.strip_prefix("T:"))
+            .unwrap_or(name);
+        if zz_mux::format_variable_is_captured(name)
+            || matches!(name, "loop_index" | "loop_last_flag")
+            || request
+                .option_snapshot
+                .lookup(
+                    &request.context.session_id,
+                    &request.context.window_id,
+                    &request.context.pane_id,
+                    option_name,
+                )
+                .is_some()
+        {
+            continue;
+        }
+        if (name.starts_with("client_")
+            && zz_mux::delegated_format_variable_names().any(|known| known == name))
+            || matches!(
+                name,
+                "window_bigger"
+                    | "window_offset_x"
+                    | "window_offset_y"
+                    | "window_cell_height"
+                    | "window_cell_width"
+            )
+        {
+            callbacks.push(name.to_owned());
+        } else if zz_mux::format_variable_is_known(name)
+            || matches!(
+                name,
+                "pane_kind"
+                    | "agent_state"
+                    | "agent_pending_permission"
+                    | "browser_url"
+                    | "pane_last_command_status"
+            )
+            || COPY_MODE_CONTEXT_FORMATS.contains(&name)
+            || LIST_CLIENTS_CONTEXT_FORMATS.contains(&name)
+            || SHOW_MESSAGES_CONTEXT_FORMATS.contains(&name)
+            || name.starts_with("E:")
+            || name.starts_with("T:")
+            || !request.context.has_captured_environment()
+        {
+            return None;
+        }
+    }
+    Some(callbacks)
+}
+
+fn status_callback_values(request: &StatusRequest, names: &[String]) -> Vec<Option<String>> {
+    let mut hooks = DaemonFormatHooks::command(&request.facts);
+    names
+        .iter()
+        .map(|name| {
+            if matches!(name.as_str(), "window_cell_height" | "window_cell_width") {
+                Some(window_cell_pixels(
+                    request.facts.client.as_ref(),
+                    name == "window_cell_width",
+                ))
+            } else {
+                hooks.variable(name, &request.context)
+            }
+        })
+        .collect()
 }
 
 pub(crate) struct ModeRequest {
@@ -327,6 +560,12 @@ pub(crate) fn status_line_templates<'a>(
     title_format: Option<&'a str>,
     message_styles: &'a (String, String),
 ) -> impl Iterator<Item = &'a str> {
+    let lines = if formats.enabled {
+        usize::from(formats.lines).min(MAX_STATUS_ROWS)
+    } else {
+        0
+    };
+    let end = u32::try_from(lines).expect("status row count fits u32");
     [
         formats.left.as_str(),
         formats.right.as_str(),
@@ -335,7 +574,7 @@ pub(crate) fn status_line_templates<'a>(
         message_styles.1.as_str(),
     ]
     .into_iter()
-    .chain(row_formats.values().map(String::as_str))
+    .chain(row_formats.range(..end).map(|(_, format)| format.as_str()))
     .chain(title_format)
     .chain(["#{socket_path}:#{session_path}:#{pane_current_path}"])
     .chain(theme_formats().iter().map(String::as_str))
@@ -898,6 +1137,13 @@ impl StatusRenderer {
         if published.modes == modes {
             return None;
         }
+        if self
+            .completed
+            .as_ref()
+            .is_some_and(|entry| entry.client == client)
+        {
+            self.completed = None;
+        }
         published.modes = modes;
         Some(published.clone())
     }
@@ -958,18 +1204,54 @@ impl StatusRenderer {
     }
 
     pub(crate) fn render_forced(&mut self, request: &StatusRequest) -> StatusLine {
+        self.render_forced_at(request, format_second())
+    }
+
+    fn render_forced_at(&mut self, request: &StatusRequest, now: i64) -> StatusLine {
         let mut touched = BTreeSet::new();
+        let status = self.render_request(request, &mut touched, true, now);
+        self.note_uncovered_jobs(request, &touched);
+        self.published.insert(request.client, status.clone());
+        status
+    }
+
+    fn render_request(
+        &mut self,
+        request: &StatusRequest,
+        touched: &mut BTreeSet<ShellCacheKey>,
+        refresh: bool,
+        now: i64,
+    ) -> StatusLine {
+        if request.modes.is_empty()
+            && let Some(completed) = &self.completed
+            && completed.same_templates(request)
+        {
+            let callbacks = status_callback_values(request, &completed.callback_names);
+            if completed.matches(request, &callbacks, now) {
+                return completed.status.clone();
+            }
+        }
+        let callback_names = status_cache_callbacks(request);
+        #[cfg(test)]
+        {
+            self.expansions += 1;
+        }
         let status = render(
             &mut self.shell_cache,
-            &mut touched,
+            touched,
             request,
-            true,
+            refresh,
+            now,
             self.tmux_shim.as_deref(),
             self.zz_executable.as_deref(),
             self.job_waker.as_ref(),
         );
-        self.note_uncovered_jobs(request, &touched);
-        self.published.insert(request.client, status.clone());
+        self.completed = callback_names.and_then(|names| {
+            let callbacks = status_callback_values(request, &names);
+            (completed_status_bytes(request, &names, &callbacks, &status)
+                <= COMPLETED_STATUS_MAX_BYTES)
+                .then(|| CompletedStatus::new(request, names, callbacks, now, status.clone()))
+        });
         status
     }
 
@@ -999,15 +1281,7 @@ impl StatusRenderer {
         let mut touched = BTreeSet::new();
         let mut changed = Vec::new();
         for request in requests {
-            let status = render(
-                &mut self.shell_cache,
-                &mut touched,
-                request,
-                false,
-                self.tmux_shim.as_deref(),
-                self.zz_executable.as_deref(),
-                self.job_waker.as_ref(),
-            );
+            let status = self.render_request(request, &mut touched, false, format_second());
             if self.note_uncovered_jobs(request, &touched)
                 || self.published.get(&request.client) == Some(&status)
             {
@@ -1021,15 +1295,7 @@ impl StatusRenderer {
 
     pub(crate) fn render_initial(&mut self, request: &StatusRequest) -> StatusLine {
         let mut touched = BTreeSet::new();
-        let status = render(
-            &mut self.shell_cache,
-            &mut touched,
-            request,
-            false,
-            self.tmux_shim.as_deref(),
-            self.zz_executable.as_deref(),
-            self.job_waker.as_ref(),
-        );
+        let status = self.render_request(request, &mut touched, false, format_second());
         self.note_uncovered_jobs(request, &touched);
         self.published.insert(request.client, status.clone());
         status
@@ -1037,6 +1303,13 @@ impl StatusRenderer {
 
     pub(crate) fn forget(&mut self, client: ClientId) {
         self.published.remove(&client);
+        if self
+            .completed
+            .as_ref()
+            .is_some_and(|entry| entry.client == client)
+        {
+            self.completed = None;
+        }
         self.shell_cache
             .retain(|(cached, _, _), _| *cached != client);
         self.job_needs.lock().remove(&client);
@@ -1146,11 +1419,11 @@ fn render(
     touched: &mut BTreeSet<ShellCacheKey>,
     request: &StatusRequest,
     refresh: bool,
+    now: i64,
     tmux_shim: Option<&std::path::Path>,
     zz_executable: Option<&std::path::Path>,
     job_waker: Option<&thread::Thread>,
 ) -> StatusLine {
-    let now = format_second();
     let title = request
         .title_format
         .as_ref()
@@ -1771,6 +2044,10 @@ impl DaemonFormatHooks<'_> {
 }
 
 impl StatusHooks for DaemonFormatHooks<'_> {
+    fn stable_option_lookups(&self) -> bool {
+        true
+    }
+
     /// Byte parity with the pin requires the PLATFORM's strftime: tmux's
     /// `format_strftime` is plain libc strftime, and libcs disagree about
     /// unknown `%` sequences (glibc passes them through, BSD eats them), so a
@@ -2565,7 +2842,7 @@ mod tests {
     use zz_protocol::Axis;
     use zz_terminal::{SessionStatus, TerminalViewId};
 
-    fn settled(renderer: &mut StatusRenderer, request: &StatusRequest) -> StatusLine {
+    pub(super) fn settled(renderer: &mut StatusRenderer, request: &StatusRequest) -> StatusLine {
         renderer.render_initial(request);
         let deadline = Instant::now() + Duration::from_secs(5);
         while renderer
@@ -2580,7 +2857,7 @@ mod tests {
         renderer.render_initial(request)
     }
 
-    fn request(client: u64, left: &str, right: &str) -> StatusRequest {
+    pub(super) fn request(client: u64, left: &str, right: &str) -> StatusRequest {
         StatusRequest {
             client: ClientId(client),
             formats: StatusFormats {
@@ -2613,10 +2890,11 @@ mod tests {
             message_styles: (String::new(), String::new()),
             modes: Vec::new(),
             pane_borders: Vec::new(),
+            references: MuxEngine::default().cached_format_references_for_templates([left, right]),
         }
     }
 
-    fn engine_request(
+    pub(super) fn engine_request(
         client: u64,
         engine: &MuxEngine,
         session: Option<SessionId>,
@@ -2634,6 +2912,14 @@ mod tests {
             title_format.as_deref(),
             &message_styles,
         );
+        let references = engine.cached_format_references_for_templates(status_line_templates(
+            &formats,
+            &row_formats,
+            title_format.as_deref(),
+            &message_styles,
+        ));
+        let context = status_context(&snapshot, engine, session, None)
+            .detach_with_references(needs, &references);
         StatusRequest {
             client: ClientId(client),
             formats,
@@ -2645,7 +2931,7 @@ mod tests {
             environment: engine.job_environment(None),
             default_terminal: engine.default_terminal_for_spawn().to_owned(),
             startup: false,
-            context: status_context(&snapshot, engine, session, None).detach(needs),
+            context,
             facts: FormatHookFacts {
                 client: session.map(|_| ClientFormatFacts::default()),
                 ..FormatHookFacts::default()
@@ -2654,10 +2940,15 @@ mod tests {
             message_styles,
             modes: Vec::new(),
             pane_borders: Vec::new(),
+            references,
         }
     }
 
-    fn execute(engine: &mut MuxEngine, context: &mut zz_mux::ExecutionContext, args: &[&str]) {
+    pub(super) fn execute(
+        engine: &mut MuxEngine,
+        context: &mut zz_mux::ExecutionContext,
+        args: &[&str],
+    ) {
         engine
             .execute(
                 context,
@@ -2999,11 +3290,21 @@ mod tests {
             ],
         );
 
-        let mut request = engine_request(1, &engine, Some(attached));
-        request.formats.left =
-            "OPTCHAIN:#{mouse}:#{S:#{mouse}}:#{W:#{automatic-rename}}:#{P:#{allow-set-title}}"
-                .to_owned();
-        request.formats.left_length = u16::MAX;
+        execute(
+            &mut engine,
+            &mut context,
+            &[
+                "set-option",
+                "status-left",
+                "OPTCHAIN:#{mouse}:#{S:#{mouse}}:#{W:#{automatic-rename}}:#{P:#{allow-set-title}}",
+            ],
+        );
+        execute(
+            &mut engine,
+            &mut context,
+            &["set-option", "status-left-length", "100"],
+        );
+        let request = engine_request(1, &engine, Some(attached));
         assert!(
             request
                 .option_snapshot

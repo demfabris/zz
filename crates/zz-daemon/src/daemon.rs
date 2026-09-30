@@ -5055,12 +5055,10 @@ impl Shared {
             }
             inner.engine.set_format_now(unix_timestamp());
             let snapshot = inner.engine.state.snapshot();
-            let facts = format_hook_facts(&inner);
-            status_requests(
+            status_requests_with_selected_facts(
                 &inner,
                 targets,
                 &snapshot,
-                &facts,
                 startup_ready,
                 &self.status_job_needs,
             )
@@ -15847,12 +15845,11 @@ impl Shared {
         let request = {
             let mut inner = self.inner.lock();
             inner.engine.set_format_now(unix_timestamp());
-            status_request(
+            status_request_with_selected_facts(
                 &inner,
                 target,
                 &inner.engine.state.snapshot(),
                 inner.engine.cached_format_option_snapshot(),
-                format_hook_facts(&inner),
                 startup_ready,
                 self.status_job_needs(target),
             )
@@ -25040,7 +25037,7 @@ impl Shared {
                         session.unseen = true;
                     }
                 }
-                inner.engine.state.touch_window_activity_for_pane(pane);
+                inner.engine.touch_window_activity_for_pane(pane);
                 if let Some(window) = inner.engine.state.window_for_pane(pane) {
                     silence_schedule = schedule_window_silence(&mut inner, window);
                     if inner.engine.monitor_activity_for_window(window) {
@@ -37033,6 +37030,68 @@ fn status_requests(
         .collect()
 }
 
+fn status_requests_with_selected_facts(
+    inner: &ServerState,
+    targets: Vec<ClientId>,
+    snapshot: &MuxSnapshot,
+    startup_ready: bool,
+    job_needs: &crate::status::StatusJobNeeds,
+) -> Vec<StatusRequest> {
+    if !*BORROWED_FORMAT_FACTS {
+        return status_requests(
+            inner,
+            targets,
+            snapshot,
+            &format_hook_facts(inner),
+            startup_ready,
+            job_needs,
+        );
+    }
+    let option_snapshot = inner.engine.cached_format_option_snapshot();
+    let job_needs = job_needs.lock();
+    let mut line_needs = BTreeMap::new();
+    targets
+        .into_iter()
+        .map(|client| {
+            let facts = (inner.client_kinds.get(&client) == Some(&ClientKind::Control))
+                .then(|| format_hook_facts(inner));
+            status_request_with_facts(
+                inner,
+                client,
+                snapshot,
+                option_snapshot.clone(),
+                facts,
+                startup_ready,
+                job_needs.get(&client).copied().unwrap_or_default(),
+                &mut line_needs,
+            )
+        })
+        .collect()
+}
+
+fn status_request_with_selected_facts(
+    inner: &ServerState,
+    client: ClientId,
+    snapshot: &MuxSnapshot,
+    option_snapshot: Arc<zz_mux::StatusRowVariables>,
+    startup_ready: bool,
+    job_needs: FormatNeeds,
+) -> StatusRequest {
+    let facts = (!*BORROWED_FORMAT_FACTS
+        || inner.client_kinds.get(&client) == Some(&ClientKind::Control))
+    .then(|| format_hook_facts(inner));
+    status_request_with_facts(
+        inner,
+        client,
+        snapshot,
+        option_snapshot,
+        facts,
+        startup_ready,
+        job_needs,
+        &mut BTreeMap::new(),
+    )
+}
+
 fn status_request(
     inner: &ServerState,
     client: ClientId,
@@ -37064,12 +37123,29 @@ fn status_request_with(
     job_needs: FormatNeeds,
     line_needs: &mut BTreeMap<Option<SessionId>, FormatNeeds>,
 ) -> StatusRequest {
+    status_request_with_facts(
+        inner,
+        client,
+        snapshot,
+        option_snapshot,
+        Some(facts),
+        startup_ready,
+        job_needs,
+        line_needs,
+    )
+}
+
+fn status_request_with_facts(
+    inner: &ServerState,
+    client: ClientId,
+    snapshot: &MuxSnapshot,
+    option_snapshot: Arc<zz_mux::StatusRowVariables>,
+    facts: Option<FormatHookFacts>,
+    startup_ready: bool,
+    job_needs: FormatNeeds,
+    line_needs: &mut BTreeMap<Option<SessionId>, FormatNeeds>,
+) -> StatusRequest {
     let attached = client_attached_session(inner, client);
-    let mut facts = facts;
-    facts.client_environment = inner.client_environments.get(&client).cloned();
-    if let Some(session) = attached {
-        facts.client = Some(client_format_facts(inner, client, session));
-    }
     let mut context = status_context(
         snapshot,
         &inner.engine,
@@ -37077,9 +37153,6 @@ fn status_request_with(
         client_focused_window_for_attachment(inner, client),
     );
     context.set_format_value("config_files", inner.config_files.clone());
-    let pane_borders = attached.map_or_else(Vec::new, |session| {
-        border_presentations(inner, client, session, &facts)
-    });
     let formats = inner.engine.status_formats_for_session(attached);
     let row_formats = inner.engine.status_format_array_for_session(attached);
     let title_format = (attached.is_some() && inner.engine.set_titles_for_session(attached))
@@ -37094,19 +37167,67 @@ fn status_request_with(
             &message_styles,
         )
     }) | job_needs;
-    let context = if job_needs.is_empty() {
-        context.detach_with_templates(
-            needs,
-            crate::status::status_line_templates(
+    let references = if job_needs.is_empty() {
+        inner
+            .engine
+            .cached_format_references_for_templates(crate::status::status_line_templates(
                 &formats,
                 &row_formats,
                 title_format.as_deref(),
                 &message_styles,
-            ),
-        )
+            ))
     } else {
-        context.detach(needs)
+        Arc::new(BTreeSet::from(["*".to_owned()]))
     };
+    let modes = attached.map_or_else(Vec::new, |session| {
+        mode_requests(inner, client, session, job_needs)
+    });
+    let selected = facts.is_none();
+    let mut facts = facts.unwrap_or_else(|| {
+        let mode_references;
+        let fact_references = if modes.is_empty() {
+            references.as_ref()
+        } else {
+            mode_references = references
+                .iter()
+                .cloned()
+                .chain(
+                    inner
+                        .engine
+                        .cached_format_references_for_templates(crate::status::MODE_FORMATS)
+                        .iter()
+                        .cloned(),
+                )
+                .collect::<BTreeSet<_>>();
+            &mode_references
+        };
+        selected_status_format_facts(inner, &context, fact_references)
+    });
+    if !selected || references.contains("*") || !modes.is_empty() {
+        facts.client_environment = inner.client_environments.get(&client).cloned();
+    }
+    if let Some(session) = attached {
+        facts.client = Some(client_format_facts(inner, client, session));
+    }
+    let pane_borders = if selected {
+        let mut borrowed = readonly_borrowed_format_hook_facts(
+            inner,
+            CommandFormatSeed {
+                client: facts.client.take(),
+                invoking: Some(client),
+            },
+        );
+        let borders = attached.map_or_else(Vec::new, |session| {
+            border_presentations(inner, client, session, &borrowed)
+        });
+        facts.client = borrowed.seed.client.take();
+        borders
+    } else {
+        attached.map_or_else(Vec::new, |session| {
+            border_presentations(inner, client, session, &facts)
+        })
+    };
+    let context = context.detach_with_references(needs, &references);
     StatusRequest {
         client,
         formats,
@@ -37122,10 +37243,9 @@ fn status_request_with(
         facts,
         client_scheme: inner.client_color_schemes.get(&client).copied(),
         message_styles,
-        modes: attached.map_or_else(Vec::new, |session| {
-            mode_requests(inner, client, session, job_needs)
-        }),
+        modes,
         pane_borders,
+        references,
     }
 }
 
@@ -41368,6 +41488,81 @@ fn command_format_seed(
 #[cfg(test)]
 thread_local! {
     static OWNED_FORMAT_FACT_BUILDS: Cell<usize> = const { Cell::new(0) };
+}
+
+fn selected_status_format_facts(
+    inner: &ServerState,
+    context: &zz_mux::StatusContext,
+    references: &BTreeSet<String>,
+) -> FormatHookFacts {
+    use crate::status::FormatFactSource;
+
+    if references.contains("*") || references.iter().any(|name| name.starts_with("mode_")) {
+        return format_hook_facts(inner);
+    }
+    let source = readonly_borrowed_format_hook_facts(inner, CommandFormatSeed::default());
+    let has = |names: &[&str]| names.iter().any(|name| references.contains(*name));
+    let mut facts = FormatHookFacts::default();
+    if has(&[
+        "pane_kind",
+        "browser_url",
+        "agent_state",
+        "agent_pending_permission",
+    ]) || references.iter().any(|name| name.starts_with('@'))
+    {
+        facts.mux = Arc::new(inner.engine.format_facts());
+    }
+    if has(&["agent_state", "agent_pending_permission"]) {
+        facts.agent_states = Arc::clone(&inner.agent_states);
+    }
+    if has(&[
+        "pane_search_string",
+        "history_size",
+        "cursor_x",
+        "cursor_y",
+        "alternate_on",
+        "mouse_any_flag",
+        "pane_last_command_status",
+        "pane_pb_progress",
+        "pane_pb_state",
+    ]) {
+        facts.terminals = Arc::clone(&inner.terminals);
+    }
+    if has(&["pane_pipe", "pane_pipe_pid"]) {
+        facts.pane_pipes = Arc::new(source.pane_pipes().clone());
+    }
+    if has(&[
+        "session_attached",
+        "session_attached_list",
+        "session_many_attached",
+    ]) {
+        facts.session_attachments = Arc::new(source.session_attachments().clone());
+    }
+    if references.contains("session_last_attached") {
+        facts.session_last_attached = Arc::new(inner.session_last_attached.clone());
+    }
+    if has(&["window_active_clients", "window_active_clients_list"]) {
+        facts.window_clients = Arc::new(source.window_clients(context).clone());
+    }
+    if references.contains("pane_unseen_changes") {
+        facts.unseen_changes = Arc::new(source.unseen_changes().clone());
+    }
+    if has(&[
+        "buffer_created",
+        "buffer_full",
+        "buffer_name",
+        "buffer_sample",
+        "buffer_size",
+    ]) {
+        facts.buffer = source.buffer().cloned();
+    }
+    if has(&crate::status::COPY_MODE_CONTEXT_FORMATS) || has(&["pane_in_mode", "pane_mode"]) {
+        facts.copy_modes = Arc::new(source.copy_modes().clone());
+    }
+    if has(&["pane_in_mode", "pane_mode"]) {
+        facts.pane_modes = Arc::new(source.pane_modes().clone());
+    }
+    facts
 }
 
 fn format_hook_facts(inner: &ServerState) -> FormatHookFacts {

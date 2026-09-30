@@ -238,3 +238,197 @@ fn daemon_config_files_and_mouse_callbacks_read_their_fact_variables() {
         "/context.conf|"
     );
 }
+
+fn selected_request(inner: &ServerState, client: ClientId) -> StatusRequest {
+    status_request_with_selected_facts(
+        inner,
+        client,
+        &inner.engine.state.snapshot(),
+        inner.engine.cached_format_option_snapshot(),
+        true,
+        FormatNeeds::NONE,
+    )
+}
+
+fn complete_request(inner: &ServerState, client: ClientId) -> StatusRequest {
+    status_request(
+        inner,
+        client,
+        &inner.engine.state.snapshot(),
+        inner.engine.cached_format_option_snapshot(),
+        format_hook_facts(inner),
+        true,
+        FormatNeeds::NONE,
+    )
+}
+
+#[test]
+fn selected_status_default_omits_unused_fact_maps_and_matches_complete_capture() {
+    let (shared, client, _) = fixture();
+    let inner = shared.inner.lock();
+    let before = OWNED_FORMAT_FACT_BUILDS.with(Cell::get);
+    let selected = selected_request(&inner, client);
+    if *BORROWED_FORMAT_FACTS {
+        assert_eq!(OWNED_FORMAT_FACT_BUILDS.with(Cell::get), before);
+        assert!(selected.facts.clients.is_empty());
+        assert!(selected.facts.session_attachments.is_empty());
+        assert!(selected.facts.session_last_attached.is_empty());
+        assert!(selected.facts.window_clients.is_empty());
+        assert!(selected.facts.copy_modes.is_empty());
+        assert!(selected.facts.pane_modes.is_empty());
+        assert!(selected.facts.terminals.is_empty());
+        assert!(selected.facts.buffer.is_none());
+        assert!(selected.facts.client_environment.is_none());
+    }
+    let complete = complete_request(&inner, client);
+    assert_eq!(complete.facts.clients.len(), 1);
+    assert_eq!(
+        StatusRenderer::default().render_initial(&selected),
+        StatusRenderer::default().render_initial(&complete)
+    );
+}
+
+#[test]
+fn selected_status_explicit_fact_groups_match_complete_capture() {
+    let (shared, client, mut target) = fixture();
+    let mut inner = shared.inner.lock();
+    inner.paste_buffers.push(PasteBuffer {
+        name: "kept-buffer".to_owned(),
+        data: Arc::from(b"buffer data".as_slice()),
+        created: UNIX_EPOCH + Duration::from_secs(17),
+        automatic: true,
+        utf8: true,
+    });
+    inner
+        .pane_modes
+        .insert(target.pane.unwrap(), vec![PaneModeRequest::Clock]);
+    let template = "#{session_attached}:#{session_attached_list}:#{session_many_attached}:#{session_last_attached}:#{window_active_clients}:#{window_active_clients_list}:#{pane_in_mode}:#{pane_mode}:#{pane_unseen_changes}:#{buffer_created}:#{buffer_full}:#{buffer_name}:#{buffer_sample}:#{buffer_size}:#{pane_kind}:#{browser_url}:#{agent_state}:#{agent_pending_permission}:#{pane_pipe}:#{pane_pipe_pid}:#{history_size}:#{cursor_x}:#{cursor_y}:#{alternate_on}:#{mouse_any_flag}:#{pane_last_command_status}:#{pane_search_string}:#{pane_pb_progress}:#{pane_pb_state}:#{@kept}:#{client_name}:#{client_width}";
+    inner
+        .engine
+        .execute(
+            &mut target,
+            &CommandInvocation::new("set-option", ["-g", "status-left", template]),
+        )
+        .unwrap();
+    let selected = selected_request(&inner, client);
+    let complete = complete_request(&inner, client);
+    assert_eq!(
+        expand_format_values(
+            template,
+            &selected.context,
+            &mut DaemonFormatHooks::command(&selected.facts)
+        ),
+        expand_format_values(
+            template,
+            &complete.context,
+            &mut DaemonFormatHooks::command(&complete.facts)
+        )
+    );
+    assert_eq!(selected.facts.buffer.as_ref().unwrap().name, "kept-buffer");
+    assert_eq!(selected.facts.session_attachments.len(), 1);
+    assert_eq!(selected.facts.pane_modes.len(), 1);
+}
+
+#[test]
+fn selected_status_dynamic_facts_and_control_clients_keep_complete_capture() {
+    let (shared, client, _) = fixture();
+    let mut inner = shared.inner.lock();
+    let context = inner.engine.format_status_context(None, None, None);
+    for reference in ["*", "mode_unknown"] {
+        let selected =
+            selected_status_format_facts(&inner, &context, &BTreeSet::from([reference.to_owned()]));
+        assert_eq!(selected.clients.len(), 1);
+        assert_eq!(selected.session_attachments.len(), 1);
+    }
+    drop(context);
+    inner.client_kinds.insert(client, ClientKind::Control);
+    let request = selected_request(&inner, client);
+    assert_eq!(request.facts.clients.len(), 1);
+    assert!(request.facts.client_environment.is_some());
+}
+
+#[test]
+fn selected_status_borders_borrow_facts_without_adding_them_to_the_request() {
+    let (shared, client, mut target) = fixture();
+    let mut inner = shared.inner.lock();
+    inner
+        .engine
+        .execute(
+            &mut target,
+            &CommandInvocation::new(
+                "set-option",
+                [
+                    "-g",
+                    "pane-active-border-style",
+                    "fg=#{?session_attached_list,red,green}",
+                ],
+            ),
+        )
+        .unwrap();
+    let selected = selected_request(&inner, client);
+    let complete = complete_request(&inner, client);
+    assert_eq!(selected.pane_borders, complete.pane_borders);
+    assert!(!selected.pane_borders.is_empty());
+    if *BORROWED_FORMAT_FACTS {
+        assert!(selected.facts.session_attachments.is_empty());
+    }
+}
+
+#[test]
+fn selected_status_modes_capture_their_own_detached_fact_dependencies() {
+    let (shared, client, mut target) = fixture();
+    let terminal = Arc::new(TerminalSession::spawn_empty_with_appearance(
+        64,
+        Arc::new(TerminalAppearance::default()),
+    ));
+    let view = TerminalViewId(client.0);
+    terminal.attach_view(view);
+    terminal.view_action(view, zz_terminal::TerminalViewAction::EnterCopyMode);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while terminal.copy_mode_facts(view).is_none()
+        || terminal.latest_viewport_for(view).is_none_or(|viewport| {
+            !matches!(
+                viewport.mode,
+                TerminalMode::Copy {
+                    hide_position: false,
+                    ..
+                }
+            )
+        })
+    {
+        assert!(Instant::now() < deadline, "copy facts did not become ready");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let mut inner = shared.inner.lock();
+    inner.terminals_mut().insert(target.pane.unwrap(), terminal);
+    enter_copy_session(&mut inner, client, target.pane.unwrap()).unwrap();
+    inner.paste_buffers.push(PasteBuffer {
+        name: "mode-buffer".to_owned(),
+        data: Arc::from(b"mode data".as_slice()),
+        created: UNIX_EPOCH,
+        automatic: true,
+        utf8: true,
+    });
+    inner
+        .engine
+        .execute(
+            &mut target,
+            &CommandInvocation::new(
+                "set-option",
+                [
+                    "-g",
+                    "copy-mode-position-format",
+                    "#{buffer_name}:#{pane_mode}:#{cursor_x}:#{copy_position}",
+                ],
+            ),
+        )
+        .unwrap();
+    let selected = selected_request(&inner, client);
+    let complete = complete_request(&inner, client);
+    assert_eq!(selected.modes.len(), 1);
+    assert_eq!(selected.facts.buffer.as_ref().unwrap().name, "mode-buffer");
+    assert_eq!(
+        StatusRenderer::default().render_initial(&selected),
+        StatusRenderer::default().render_initial(&complete)
+    );
+}

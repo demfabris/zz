@@ -342,13 +342,13 @@ pub struct StatusContext<'e> {
     tree: Option<FormatTree<'e>>,
     variables: Arc<BTreeMap<String, String>>,
     format_client: FormatClient,
-    capture_revision: Option<Arc<FormatCaptureRevision>>,
     pub session_id: String,
     pub window_id: String,
     pub pane_id: String,
     pub format_now: Option<i64>,
     #[doc(hidden)]
     pub format_universe: FormatUniverseRef<'e>,
+    capture_revision: Option<Arc<FormatCaptureRevision>>,
 }
 
 impl std::ops::Deref for StatusContext<'_> {

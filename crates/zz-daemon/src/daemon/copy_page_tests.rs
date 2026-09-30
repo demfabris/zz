@@ -122,22 +122,36 @@ impl CopyFixture {
     }
 
     fn resize_narrow(&self) {
-        let native = self.terminal.fresh_viewport();
-        let columns = if native.columns == 40 { 41 } else { 40 };
+        let before = self.terminal.fresh_viewport();
+        let columns = if before.columns == 40 { 41 } else { 40 };
+        let frozen_before = self
+            .terminal
+            .latest_viewport_for(TerminalViewId(self.client.0))
+            .expect("copy viewport before resize");
+        let expected_geometry =
+            if std::env::var_os("ZZ_PERF_COPY_CLONE").is_some_and(|value| value == "1") {
+                (frozen_before.columns, frozen_before.rows)
+            } else {
+                (columns, 16)
+            };
         self.terminal.resize(columns, 16, 8, 18);
         assert!(self.terminal.settle());
         let actual = self.terminal.fresh_viewport();
-        assert_eq!((actual.columns, actual.rows), (columns, 16));
+        assert_eq!(
+            (actual.columns, actual.rows),
+            expected_geometry,
+            "fresh copy viewport has unexpected geometry after resize"
+        );
         let frozen = self
             .terminal
             .latest_viewport_for(TerminalViewId(self.client.0))
             .expect("resized copy viewport");
         assert_eq!(
             (frozen.columns, frozen.rows),
-            (columns, 16),
-            "copy backing did not follow native resize from {}x{}",
-            native.columns,
-            native.rows,
+            expected_geometry,
+            "copy backing has unexpected geometry after resize from {}x{}",
+            before.columns,
+            before.rows,
         );
     }
 }

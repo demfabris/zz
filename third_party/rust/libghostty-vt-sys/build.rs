@@ -95,6 +95,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=PROFILE");
     println!("cargo:rerun-if-env-changed=OPT_LEVEL");
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=copy-mode.patch");
 
     // An explicit source override should stay authoritative even when the
     // pkg-config feature is enabled, so local Ghostty checkouts remain easy to
@@ -130,10 +131,17 @@ fn build_vendored(link_mode: LinkMode, target: &str) {
                 "GHOSTTY_SOURCE_DIR does not contain build.zig: {}",
                 p.display()
             );
-            p
+            let staged = out_dir.join("ghostty-override");
+            if staged.exists() {
+                std::fs::remove_dir_all(&staged).expect("replace staged Ghostty source");
+            }
+            copy_ghostty_source(&p, &staged);
+            staged
         }
         Err(_) => fetch_ghostty(&out_dir),
     };
+
+    apply_copy_mode_patch(&ghostty_dir);
 
     // Build libghostty-vt via zig.
     let install_prefix = out_dir.join("ghostty-install");
@@ -407,6 +415,52 @@ fn zig_optimize_mode() -> &'static str {
         Ok("s") | Ok("z") => "ReleaseSmall",
         _ => "ReleaseFast",
     }
+}
+
+fn copy_ghostty_source(source: &Path, destination: &Path) {
+    std::fs::create_dir_all(destination).expect("create staged Ghostty directory");
+    for entry in std::fs::read_dir(source).expect("read Ghostty source directory") {
+        let entry = entry.expect("read Ghostty source entry");
+        let name = entry.file_name();
+        if [".zig-cache", "zig-cache", "zig-out", ".zz-copy-mode.patch"]
+            .iter()
+            .any(|ignored| name == *ignored)
+        {
+            continue;
+        }
+        let target = destination.join(&name);
+        if entry
+            .file_type()
+            .expect("read Ghostty source type")
+            .is_dir()
+        {
+            copy_ghostty_source(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).expect("stage Ghostty source file");
+        }
+    }
+}
+
+fn apply_copy_mode_patch(source: &Path) {
+    let patch = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"))
+        .join("copy-mode.patch");
+    let applied = source.join(".zz-copy-mode.patch");
+    let requested = std::fs::read(&patch).expect("read terminal copy-mode patch");
+    if std::fs::read(&applied).ok().as_deref() == Some(requested.as_slice()) {
+        return;
+    }
+    if applied.exists() {
+        let mut reverse = Command::new("git");
+        reverse
+            .args(["apply", "--reverse"])
+            .arg(&applied)
+            .current_dir(source);
+        run(reverse, "reverse previous terminal copy-mode patch");
+    }
+    let mut apply = Command::new("git");
+    apply.arg("apply").arg(&patch).current_dir(source);
+    run(apply, "apply terminal copy-mode patch");
+    std::fs::write(applied, requested).expect("record terminal copy-mode patch");
 }
 
 /// Clone ghostty at the pinned commit into OUT_DIR/ghostty-src.

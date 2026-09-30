@@ -16,6 +16,7 @@ members = [
     "crates/zz-ui",
     "crates/zz-web",
     "crates/zz-xtask",
+    "third_party/rust/libghostty-vt",
 ]
 exclude = [
     "clients/web",
@@ -102,6 +103,7 @@ zeroize = "=1.9.0"
 cef-dll-sys = { path = "third_party/rust/cef-dll-sys" }
 
 [patch."https://github.com/demfabris/libghostty-rs"]
+libghostty-vt = { path = "third_party/rust/libghostty-vt" }
 libghostty-vt-sys = { path = "third_party/rust/libghostty-vt-sys" }
 
 [patch."https://github.com/zed-industries/zed"]

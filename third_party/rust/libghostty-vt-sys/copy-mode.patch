@@ -1,0 +1,570 @@
+--- a/src/datastruct/untouched_pool.zig
++++ b/src/datastruct/untouched_pool.zig
+@@ -136,6 +136,18 @@
+             self.live -= 1;
+         }
+ 
++        pub fn disown(self: *Self, item: ItemPtr) void {
++            _ = item;
++            assert(self.free.items.len < self.live);
++            self.live -= 1;
++        }
++
++        pub fn adopt(self: *Self, item: ItemPtr) Allocator.Error!void {
++            _ = item;
++            try self.free.ensureTotalCapacity(self.gpa, self.live + 1);
++            self.live += 1;
++        }
++
+         fn allocItem(self: *Self) Allocator.Error!ItemPtr {
+             assert(self.free.capacity > self.live);
+             const memory = try self.allocator.alignedAlloc(
+--- a/src/terminal/compress/Page.zig
++++ b/src/terminal/compress/Page.zig
+@@ -55,6 +55,26 @@
+ /// the allocator here lets a PageList node restore and discard its compressed
+ /// state without needing a reference back to the PageList.
+ alloc: Allocator,
++shared: *Shared,
++
++const Shared = struct {
++    references: std.atomic.Value(usize),
++};
++
++pub fn cloneFor(self: *const Page, alloc: Allocator, memory: []align(std.heap.page_size_min) u8) Allocator.Error!Page {
++    var result = self.*;
++    result.page.memory = memory[0..self.page.memory.len];
++    if (self.alloc.ptr == alloc.ptr and self.alloc.vtable == alloc.vtable) {
++        _ = self.shared.references.fetchAdd(1, .monotonic);
++        return result;
++    }
++    result.encoded = try alloc.dupe(u8, self.encoded);
++    errdefer alloc.free(result.encoded);
++    result.shared = try alloc.create(Shared);
++    result.shared.* = .{ .references = .init(1) };
++    result.alloc = alloc;
++    return result;
++}
+ 
+ /// Return the largest scratch buffer that can produce a useful compressed
+ /// representation for `raw_len` bytes.
+@@ -133,10 +153,15 @@
+     assert(@sizeOf(Page) + encoded_len <
+         @sizeOf(TerminalPage) + source.memory.len);
+ 
++    const encoded = try alloc.dupe(u8, scratch[0..encoded_len]);
++    errdefer alloc.free(encoded);
++    const shared = try alloc.create(Shared);
++    shared.* = .{ .references = .init(1) };
+     return .{
+         .page = source.*,
+-        .encoded = try alloc.dupe(u8, scratch[0..encoded_len]),
++        .encoded = encoded,
+         .alloc = alloc,
++        .shared = shared,
+     };
+ }
+ 
+@@ -145,7 +170,10 @@
+ /// This intentionally does not free `page.memory`. The PageList node which
+ /// supplied the source page continues to own that pool or heap allocation.
+ pub fn deinit(self: *Page) void {
+-    self.alloc.free(self.encoded);
++    if (self.shared.references.fetchSub(1, .acq_rel) == 1) {
++        self.alloc.free(self.encoded);
++        self.alloc.destroy(self.shared);
++    }
+     self.* = undefined;
+ }
+ 
+--- a/src/terminal/PageList.zig
++++ b/src/terminal/PageList.zig
+@@ -80,6 +80,38 @@
+     /// unused rows. They must be recommitted (see untrim) before anything
+     /// writes past the page's current size.
+     trimmed: bool = false,
++    shared: ?*SharedResident = null,
++    pool_backing: bool = false,
++
++    const SharedResident = struct {
++        references: std.atomic.Value(usize),
++        memory: []align(std.heap.page_size_min) u8,
++        alloc: Allocator,
++        page_alloc: Allocator,
++
++        fn release(self: *SharedResident) void {
++            if (self.references.fetchSub(1, .acq_rel) != 1) return;
++            self.page_alloc.free(self.memory);
++            self.alloc.destroy(self);
++        }
++    };
++
++    fn detach(self: *Node) void {
++        const shared = self.shared orelse return;
++        if (shared.references.load(.acquire) == 1) {
++            self.shared = null;
++            shared.alloc.destroy(shared);
++            return;
++        }
++        const memory = shared.page_alloc.alignedAlloc(
++            u8,
++            .fromByteUnits(std.heap.page_size_min),
++            shared.memory.len,
++        ) catch @panic("terminal copy-on-write allocation failed");
++        self.data.resident = self.data.resident.cloneBuf(memory);
++        self.shared = null;
++        shared.release();
++    }
+ 
+     /// The physical representation of the page contents.
+     ///
+@@ -105,7 +137,15 @@
+     /// WARNING: This will DECOMPRESS compressed pages! Only use this if
+     /// you need access to the underlying memory. If you only need access to
+     /// metadata (row, col counts etc) then use the other metadata functions.
++    pub inline fn pageRead(self: *Node) *const Page {
++        return switch (self.data) {
++            .resident => |*page_| page_,
++            .compressed => self.restore(.preserve),
++        };
++    }
++
+     pub inline fn page(self: *Node) *Page {
++        self.detach();
+         return switch (self.data) {
+             .resident => |*page_| page_,
+             .compressed => self.restore(.preserve),
+@@ -119,6 +159,7 @@
+     /// discarded mapping, but may inspect page contents when they are already
+     /// available.
+     pub inline fn pageIfResident(self: *Node) ?*Page {
++        self.detach();
+         return switch (self.data) {
+             .resident => |*page_| page_,
+             .compressed => null,
+@@ -223,6 +264,7 @@
+     /// the page is resident. Prefer `page` unless the caller can establish
+     /// that invariant independently.
+     pub inline fn pageAssumeResident(self: *Node) *Page {
++        self.detach();
+         return &self.data.resident;
+     }
+ 
+@@ -954,6 +996,11 @@
+     var it = list.first;
+     while (it) |node| {
+         it = node.next;
++        if (node.shared) |shared| {
++            shared.release();
++            pool.nodes.destroy(node);
++            continue;
++        }
+         const page = node.restore(.discard);
+         switch (node.owned) {
+             .pool => releasePoolPage(pool, page),
+@@ -1104,6 +1151,7 @@
+     /// The x coordinate is ignored; the full row is always cloned.
+     top: point.Point,
+     bot: ?point.Point = null,
++    cow: bool = false,
+ 
+     // If this is non-null then cloning will attempt to remap the tracked
+     // pins into the new cloned area and will keep track of the old to
+@@ -1147,7 +1195,7 @@
+     var pool: MemoryPool = try .init(
+         alloc,
+         pageAllocator(alloc),
+-        page_count,
++        if (opts.cow) 0 else page_count,
+     );
+     errdefer pool.deinit();
+ 
+@@ -1166,32 +1214,86 @@
+     var total_rows: usize = 0;
+     var page_size: usize = 0;
+     while (it.next()) |chunk| {
+-        // Clone the page. We have to use createPageExt here because
+-        // we don't know if the source page has a standard size.
+-        const node = try createPageExt(
+-            &pool,
+-            .{ .cap = chunk.node.capacity() },
+-            &page_serial,
+-            &page_size,
+-        );
+-
+-        // Add the page to the list immediately so that the errdefer
+-        // above releases it if cloning fails.
++        const whole_page = chunk.start == 0 and chunk.end == chunk.node.rows();
++        const active_offset = self.total_rows - self.rows;
++        const history_page = total_rows + chunk.node.rows() <= active_offset;
++        const node = if (opts.cow and whole_page and chunk.node.isCompressed()) compressed: {
++            const metadata = chunk.node.data.compressed.page;
++            const memory = try pool.pages.allocator.alignedAlloc(
++                u8,
++                .fromByteUnits(std.heap.page_size_min),
++                metadata.memory.len,
++            );
++            errdefer pool.pages.allocator.free(memory);
++            const result = try pool.nodes.create();
++            errdefer pool.nodes.destroy(result);
++            result.* = .{
++                .data = .{ .compressed = try chunk.node.data.compressed.cloneFor(alloc, memory) },
++                .serial = page_serial,
++                .owned = .heap,
++            };
++            page_serial += 1;
++            page_size += memory.len;
++            break :compressed result;
++        } else if (opts.cow and whole_page and history_page and !native_freestanding and !wasm_page_pool) shared: {
++            const source = chunk.node;
++            const backing = source.shared orelse backing: {
++                const backing = try alloc.create(Node.SharedResident);
++                const memory = switch (source.owned) {
++                    .pool => source.data.resident.memory.ptr[0..std_size],
++                    .heap => source.data.resident.memory,
++                };
++                backing.* = .{
++                    .references = .init(1),
++                    .memory = memory,
++                    .alloc = alloc,
++                    .page_alloc = self.pool.pages.allocator,
++                };
++                if (source.owned == .pool) {
++                    const item: *align(std.heap.page_size_min) [std_size]u8 = @ptrCast(memory.ptr);
++                    @constCast(self).pool.pages.disown(item);
++                    source.owned = .heap;
++                    source.pool_backing = true;
++                    source.data.resident.memory = memory;
++                }
++                source.shared = backing;
++                break :backing backing;
++            };
++            const result = try pool.nodes.create();
++            _ = backing.references.fetchAdd(1, .monotonic);
++            result.* = .{
++                .data = .{ .resident = source.data.resident },
++                .serial = page_serial,
++                .owned = .heap,
++                .shared = backing,
++            };
++            page_serial += 1;
++            page_size += backing.memory.len;
++            break :shared result;
++        } else copied: {
++            const result = try createPageExt(
++                &pool,
++                .{ .cap = chunk.node.capacity() },
++                &page_serial,
++                &page_size,
++            );
++            const dst_page = result.page();
++            const src_page = chunk.node.page();
++            if (opts.cow and whole_page) {
++                const memory = if (result.owned == .pool)
++                    dst_page.memory.ptr[0..std_size]
++                else
++                    dst_page.memory;
++                dst_page.* = src_page.cloneBuf(memory);
++            } else {
++                dst_page.size.rows = chunk.end - chunk.start;
++                dst_page.size.cols = chunk.node.cols();
++                try dst_page.cloneFrom(src_page, chunk.start, chunk.end);
++                dst_page.dirty = src_page.dirty;
++            }
++            break :copied result;
++        };
+         page_list.append(node);
+-
+-        const dst_page = node.page();
+-        const src_page = chunk.node.page();
+-        assert(node.capacity().rows >= chunk.end - chunk.start);
+-        defer dst_page.assertIntegrity();
+-        dst_page.size.rows = chunk.end - chunk.start;
+-        dst_page.size.cols = chunk.node.cols();
+-        try dst_page.cloneFrom(
+-            src_page,
+-            chunk.start,
+-            chunk.end,
+-        );
+-
+-        dst_page.dirty = src_page.dirty;
+ 
+         total_rows += node.rows();
+ 
+@@ -1224,7 +1326,7 @@
+         .page_serial = page_serial,
+         .page_serial_epoch = 0,
+         .page_size = page_size,
+-        .limits = self.limits,
++        .limits = if (opts.cow) Limits.init(self.cols, self.rows) else self.limits,
+         .cols = self.cols,
+         .rows = self.rows,
+         .total_rows = total_rows,
+@@ -5192,9 +5294,23 @@
+ /// it. A compressed node is destroyed: its memory is already decommitted,
+ /// so keeping it would save nothing.
+ fn retireNode(self: *PageList, node: *List.Node) void {
++    if (self.spare_node == null and node.pool_backing and node.data == .resident) {
++        if (node.shared) |shared| {
++            if (shared.references.load(.acquire) != 1) {
++                self.destroyNode(node);
++                return;
++            }
++            node.shared = null;
++            shared.alloc.destroy(shared);
++        }
++        const item: *align(std.heap.page_size_min) [std_size]u8 = @ptrCast(node.data.resident.memory.ptr);
++        self.pool.pages.adopt(item) catch @panic("terminal page pool transfer failed");
++        node.pool_backing = false;
++        node.owned = .pool;
++    }
+     if (self.spare_node != null or
+         node.owned != .pool or
+-        node.data != .resident)
++        node.data != .resident or node.shared != null)
+     {
+         self.destroyNode(node);
+         return;
+@@ -5212,6 +5328,12 @@
+     node: *List.Node,
+     total_size: ?*usize,
+ ) void {
++    if (node.shared) |shared| {
++        if (total_size) |v| v.* -= shared.memory.len;
++        shared.release();
++        pool.nodes.destroy(node);
++        return;
++    }
+     const page = node.restore(.discard);
+ 
+     // Update our accounting for page size. This must mirror what was
+@@ -7288,6 +7410,14 @@
+     /// semantics.
+     garbage: bool = false,
+ 
++    pub inline fn rowAndCellRead(self: Pin) struct {
++        row: *const pagepkg.Row,
++        cell: *const pagepkg.Cell,
++    } {
++        const rac = self.node.pageRead().getRowAndCell(self.x, self.y);
++        return .{ .row = rac.row, .cell = rac.cell };
++    }
++
+     pub inline fn rowAndCell(self: Pin) struct {
+         row: *pagepkg.Row,
+         cell: *pagepkg.Cell,
+@@ -21123,3 +21253,42 @@
+     try testing.expectEqual(extra.len, counting.allocations);
+     try testing.expectEqual(0, counting.deallocations);
+ }
++
++test "copy-on-write resident page clone survives reflow and clear-history" {
++    const testing = std.testing;
++    const alloc = testing.allocator;
++    var source = try init(alloc, .{ .cols = 180, .rows = 24, .max_lines = 2000 });
++    defer source.deinit();
++    for (0..1000) |_| _ = try source.grow();
++    const first = source.pin(.{ .screen = .{} }).?.rowAndCell();
++    first.cell.* = .init('A');
++    var frozen = try source.clone(alloc, .{ .top = .{ .screen = .{} }, .cow = true });
++    defer frozen.deinit();
++    try testing.expect(source.pages.first.?.shared != null);
++    try testing.expectEqual(source.pages.first.?.shared, frozen.pages.first.?.shared);
++    const total = frozen.total_rows;
++    try source.resize(.{ .cols = 90, .rows = 12 });
++    source.eraseHistory(null);
++    try testing.expectEqual(total, frozen.total_rows);
++    try testing.expectEqual(@as(u21, 'A'), frozen.pin(.{ .screen = .{} }).?.rowAndCell().cell.codepoint());
++}
++
++test "copy-on-write compressed clones share encoding and keep private mappings" {
++    const testing = std.testing;
++    const alloc = testing.allocator;
++    var source = try init(alloc, .{ .cols = 180, .rows = 24, .max_lines = 2000 });
++    defer source.deinit();
++    for (0..1000) |_| _ = try source.grow();
++    const first = source.pin(.{ .screen = .{} }).?.rowAndCell();
++    first.cell.* = .init('A');
++    _ = source.compress(.full);
++    try testing.expect(source.pages.first.?.isCompressed());
++    var frozen = try source.clone(alloc, .{ .top = .{ .screen = .{} }, .cow = true });
++    defer frozen.deinit();
++    const left = &source.pages.first.?.data.compressed;
++    const right = &frozen.pages.first.?.data.compressed;
++    try testing.expectEqual(left.encoded.ptr, right.encoded.ptr);
++    try testing.expect(left.page.memory.ptr != right.page.memory.ptr);
++    source.eraseHistory(null);
++    try testing.expectEqual(@as(u21, 'A'), frozen.pin(.{ .screen = .{} }).?.rowAndCell().cell.codepoint());
++}
+--- a/src/terminal/Screen.zig
++++ b/src/terminal/Screen.zig
+@@ -484,6 +484,25 @@
+     top: point.Point,
+     bot: ?point.Point,
+ ) !Screen {
++    return self.cloneInner(io, alloc, top, bot, false);
++}
++
++pub fn clonePreserving(
++    self: *const Screen,
++    io: std.Io,
++    alloc: Allocator,
++) !Screen {
++    return self.cloneInner(io, alloc, .{ .screen = .{} }, null, true);
++}
++
++fn cloneInner(
++    self: *const Screen,
++    io: std.Io,
++    alloc: Allocator,
++    top: point.Point,
++    bot: ?point.Point,
++    cow: bool,
++) !Screen {
+     // Create a tracked pin remapper for our selection and cursor. Note
+     // that we may want to expose this generally in the future but at the
+     // time of doing this we don't need to.
+@@ -494,6 +513,7 @@
+         .top = top,
+         .bot = bot,
+         .tracked_pins = &pin_remap,
++        .cow = cow,
+     });
+     errdefer pages.deinit();
+ 
+--- a/src/terminal/c/terminal.zig
++++ b/src/terminal/c/terminal.zig
+@@ -860,6 +860,40 @@
+         io,
+         default_continuation_max_bytes,
+     );
++}
++
++pub fn clone_screen(terminal_: Terminal, result: *Terminal) callconv(lib.calling_conv) Result {
++    result.* = null;
++    const source = zigTerminal(terminal_) orelse return .invalid_value;
++    const cloned = cloneScreen(source) catch return .out_of_memory;
++    result.* = cloned;
++    return .success;
++}
++
++fn cloneScreen(source: *ZigTerminal) !Terminal {
++    const alloc = lib.alloc.default(null);
++    const io: Io = .init;
++    const cloned = try new_(null, source.cols, source.rows);
++    errdefer free(cloned);
++    const target = cloned.?.terminal;
++    const active = source.screens.active_key;
++    const target_screen = try target.screens.getInit(io.io(), alloc, active, .{ .cols = source.cols, .rows = source.rows });
++    const screen = try source.screens.active.clonePreserving(io.io(), alloc);
++    target_screen.deinit();
++    target_screen.* = screen;
++    target.screens.switchTo(active);
++    target.colors.background = source.colors.background;
++    target.colors.foreground = source.colors.foreground;
++    target.colors.cursor = source.colors.cursor;
++    try target.colors.palette.changeDefault(alloc, source.colors.palette.original.*);
++    target.colors.palette.current = source.colors.palette.current;
++    target.colors.palette.mask = source.colors.palette.mask;
++    target.flags = source.flags;
++    target.modes = source.modes;
++    target.cursor = source.cursor;
++    try target.title.appendSlice(alloc, source.title.items);
++    try target.pwd.appendSlice(alloc, source.pwd.items);
++    return cloned;
+ }
+ 
+ pub fn vt_write(
+--- a/include/ghostty/vt/terminal.h
++++ b/include/ghostty/vt/terminal.h
+@@ -2132,6 +2132,9 @@
+                                                uint16_t cols,
+                                                uint16_t rows);
+ 
++GHOSTTY_API GhosttyResult ghostty_terminal_clone_screen(GhosttyTerminal terminal,
++                                                      GhosttyTerminal* result);
++
+ /**
+  * Free a terminal instance.
+  *
+--- a/src/terminal/c/grid_ref.zig
++++ b/src/terminal/c/grid_ref.zig
+@@ -45,7 +45,7 @@
+     out: ?*cell_c.CCell,
+ ) callconv(lib.calling_conv) Result {
+     const p = ref.toPin() orelse return .invalid_value;
+-    if (out) |o| o.* = @bitCast(p.rowAndCell().cell.*);
++    if (out) |o| o.* = @bitCast(p.rowAndCellRead().cell.*);
+     return .success;
+ }
+ 
+@@ -54,7 +54,7 @@
+     out: ?*row_c.CRow,
+ ) callconv(lib.calling_conv) Result {
+     const p = ref.toPin() orelse return .invalid_value;
+-    if (out) |o| o.* = @bitCast(p.rowAndCell().row.*);
++    if (out) |o| o.* = @bitCast(p.rowAndCellRead().row.*);
+     return .success;
+ }
+ 
+@@ -65,7 +65,7 @@
+     out_len: *usize,
+ ) callconv(lib.calling_conv) Result {
+     const p = ref.toPin() orelse return .invalid_value;
+-    const cell = p.rowAndCell().cell;
++    const cell = p.rowAndCellRead().cell;
+ 
+     if (!cell.hasText()) {
+         out_len.* = 0;
+@@ -73,7 +73,7 @@
+     }
+ 
+     const cp = cell.codepoint();
+-    const extra = if (cell.hasGrapheme()) p.grapheme(cell) else null;
++    const extra = if (cell.hasGrapheme()) p.node.pageRead().lookupGrapheme(cell) else null;
+     const total = 1 + if (extra) |e| e.len else 0;
+ 
+     if (out_buf == null or buf_len < total) {
+@@ -98,7 +98,7 @@
+     out_len: *usize,
+ ) callconv(lib.calling_conv) Result {
+     const p = ref.toPin() orelse return .invalid_value;
+-    const terminal_page = p.node.page();
++    const terminal_page = p.node.pageRead();
+     const rac = terminal_page.getRowAndCell(p.x, p.y);
+     const cell = rac.cell;
+ 
+@@ -133,11 +133,11 @@
+ ) callconv(lib.calling_conv) Result {
+     const p = ref.toPin() orelse return .invalid_value;
+     if (out) |o| {
+-        const cell = p.rowAndCell().cell;
++        const cell = p.rowAndCellRead().cell;
+         if (cell.style_id == stylepkg.default_id) {
+             o.* = .fromStyle(.{});
+         } else {
+-            const terminal_page = p.node.page();
++            const terminal_page = p.node.pageRead();
+             o.* = .fromStyle(terminal_page.styles.get(
+                 terminal_page.memory,
+                 cell.style_id,
+--- a/src/terminal/c/main.zig
++++ b/src/terminal/c/main.zig
+@@ -181,6 +181,7 @@
+ pub const sys_set = sys.set;
+ 
+ pub const terminal_new = terminal.new;
++pub const terminal_clone_screen = terminal.clone_screen;
+ pub const terminal_free = terminal.free;
+ pub const terminal_reset = terminal.reset;
+ pub const terminal_resize = terminal.resize;
+--- a/src/lib_vt.zig
++++ b/src/lib_vt.zig
+@@ -315,6 +315,7 @@
+             @export(&c.render_state_free, .{ .name = "ghostty_render_state_free" });
+         }
+         @export(&c.terminal_new, .{ .name = "ghostty_terminal_new" });
++        @export(&c.terminal_clone_screen, .{ .name = "ghostty_terminal_clone_screen" });
+         @export(&c.terminal_free, .{ .name = "ghostty_terminal_free" });
+         @export(&c.terminal_reset, .{ .name = "ghostty_terminal_reset" });
+         @export(&c.terminal_resize, .{ .name = "ghostty_terminal_resize" });

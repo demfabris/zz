@@ -1375,7 +1375,9 @@ impl<'de> Deserialize<'de> for RawText {
     where
         D: Deserializer<'de>,
     {
-        Ok(Self::from_bytes(Vec::<u8>::deserialize(deserializer)?))
+        Ok(Self::from_bytes(
+            serde_bytes::ByteBuf::deserialize(deserializer)?.into_vec(),
+        ))
     }
 }
 

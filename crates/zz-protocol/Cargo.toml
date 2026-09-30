@@ -13,6 +13,7 @@ foldhash.workspace = true
 serde_json.workspace = true
 postcard.workspace = true
 serde.workspace = true
+serde_bytes = "0.11.19"
 smallvec.workspace = true
 thiserror.workspace = true
 unicode-width = "0.2.2"

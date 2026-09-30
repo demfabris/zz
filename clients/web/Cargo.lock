@@ -8589,6 +8589,7 @@ dependencies = [
  "foldhash",
  "postcard",
  "serde",
+ "serde_bytes",
  "serde_json",
  "smallvec",
  "thiserror 2.0.20",

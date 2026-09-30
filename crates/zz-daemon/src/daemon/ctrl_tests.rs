@@ -454,7 +454,7 @@ fn forced_attachment_stays_after_an_older_pending_publication() {
         .lock()
         .client_kinds
         .insert(client, ClientKind::Control);
-    let order = shared.snapshot_order.lock();
+    let publication_lock = shared.snapshot_order.lock();
     let older = shared.compact_tree_messages(client, true);
     {
         let mut inner = shared.inner.lock();
@@ -482,7 +482,7 @@ fn forced_attachment_stays_after_an_older_pending_publication() {
         .map(|message| zz_protocol::encode_protocol_message(message).expect("old publication"))
         .collect();
     assert!(mailbox.enqueue_control_group(older));
-    drop(order);
+    drop(publication_lock);
     completion
         .recv_timeout(Duration::from_secs(2))
         .expect("forced attachment completed");
@@ -673,7 +673,7 @@ fn disconnected_control_exec_cannot_detach_the_next_active_client() {
                 &mut context,
                 request,
                 &old_mailbox,
-            )
+            );
         })
     };
     let deadline = Instant::now() + Duration::from_secs(2);

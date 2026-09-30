@@ -666,3 +666,142 @@ fn literal_routing_keeps_formatted_setters_sources_and_listings_on_client_fact_p
         format!("beta|alpha-high|{}", source.display())
     );
 }
+
+#[test]
+fn default_key_listing_routes_aliases_and_keeps_hook_facts_and_attachment_fresh() {
+    let fixture = fixture();
+    fixture
+        .shared
+        .inner
+        .lock()
+        .client_origins
+        .insert(fixture.invoking, fixture.targets[0].context.pane.unwrap());
+    engine_command(
+        &fixture.shared,
+        &[
+            "bind-key",
+            "-T",
+            "route-default",
+            "-N",
+            "listed-note",
+            "x",
+            "display-message",
+            "listed-command",
+        ],
+    );
+    engine_command(
+        &fixture.shared,
+        &[
+            "set-option",
+            "-s",
+            "command-alias[92]",
+            "defaultkeys=list-keys",
+        ],
+    );
+    for (hook, option) in [
+        ("after-list-keys", "@listing-after"),
+        ("command-error", "@listing-error"),
+    ] {
+        engine_command(
+            &fixture.shared,
+            &[
+                "set-hook",
+                "-g",
+                hook,
+                &format!(
+                    "set-option -gF {option} '#{{hook}}|#{{session_name}}|#{{client_name}}|#{{client_width}}|#{{@flavour}}|#{{status-position}}'"
+                ),
+            ],
+        );
+    }
+    let mut context = fixture.targets[2].context.clone();
+    context.set_format_client(FormatClient::NoClient);
+    let before = context.clone();
+    for name in ["list-keys", "lsk", "defaultkeys"] {
+        let listed = execute(&fixture, &mut context, &[name, "-T", "route-default"]).unwrap();
+        assert!(listed.output.contains("route-default"), "{}", listed.output);
+        assert!(
+            listed.output.contains("listed-command"),
+            "{}",
+            listed.output
+        );
+        assert_attachment_restored(&context, &before);
+        assert_eq!(
+            engine_command(&fixture.shared, &["show-options", "-gqv", "@listing-after"])
+                .output
+                .trim(),
+            "after-list-keys|beta|alpha-high|100|B|bottom"
+        );
+    }
+    let notes = execute(
+        &fixture,
+        &mut context,
+        &["lsk", "-N", "-P", "seen:", "-T", "route-default"],
+    )
+    .unwrap();
+    assert_eq!(notes.output, "seen: x listed-note");
+    assert_attachment_restored(&context, &before);
+    let single = execute(
+        &fixture,
+        &mut context,
+        &["defaultkeys", "-1", "-T", "route-default", "x"],
+    )
+    .unwrap();
+    assert!(single.output.is_empty());
+    assert!(
+        fixture
+            .shared
+            .inner
+            .lock()
+            .message_log
+            .iter()
+            .any(|message| message.text.contains("route-default"))
+    );
+    assert_attachment_restored(&context, &before);
+    fixture
+        .shared
+        .inner
+        .lock()
+        .client_activity
+        .insert(fixture.targets[0].client, 40);
+    engine_command(
+        &fixture.shared,
+        &["set-option", "-t", "beta", "@flavour", "B2"],
+    );
+    let fields = "#{session_name}|#{client_name}|#{client_width}|#{@flavour}|#{status-position}";
+    assert_eq!(
+        execute(
+            &fixture,
+            &mut context,
+            &["lsk", "-T", "route-default", "-F", fields]
+        )
+        .unwrap()
+        .output,
+        "beta|alpha-low|80|B2|bottom"
+    );
+    assert_attachment_restored(&context, &before);
+    for args in [
+        &["list-keys", "-Z"][..],
+        &["lsk", "-F"][..],
+        &["defaultkeys", "-T", "missing-route-table"][..],
+    ] {
+        assert!(execute(&fixture, &mut context, args).is_err());
+        assert_attachment_restored(&context, &before);
+        assert_eq!(
+            engine_command(&fixture.shared, &["show-options", "-gqv", "@listing-error"])
+                .output
+                .trim(),
+            "command-error|beta|alpha-low|80|B2|bottom"
+        );
+    }
+    context.set_replay_client(Some(fixture.targets[2].client));
+    let before_present = context.clone();
+    execute(&fixture, &mut context, &["lsk", "-T", "route-default"]).unwrap();
+    assert_attachment_restored(&context, &before_present);
+    assert_eq!(
+        engine_command(&fixture.shared, &["show-options", "-gqv", "@listing-after"])
+            .output
+            .trim(),
+        "after-list-keys|beta|beta-viewer|120|B2|bottom"
+    );
+}

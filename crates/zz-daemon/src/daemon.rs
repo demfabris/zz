@@ -6284,11 +6284,14 @@ impl Shared {
         execution: Execution,
         exit_code: u8,
     ) -> Result<Execution, DaemonError> {
+        if exit_code == 0 {
+            return Ok(execution);
+        }
         let attached = {
             let inner = self.inner.lock();
             client_attached_session(&inner, client).is_some()
         };
-        if exit_code == 0 || attached {
+        if attached {
             Ok(execution)
         } else {
             Err(DaemonError::CommandExit {
@@ -6651,7 +6654,7 @@ impl Shared {
             && client_terminal == ClientTerminal::Absent
             && matches!(
                 name.as_str(),
-                "bind-key" | "set-option" | "set-window-option"
+                "bind-key" | "set-option" | "set-window-option" | "list-keys"
             ))
         .then(|| hook_events::format_facts_unread(&name, &command.args));
         if kind != ClientKind::Command || name != "refresh-client" {

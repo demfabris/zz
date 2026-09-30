@@ -10,16 +10,20 @@ W2-CTRL, W2-FMT and W2-COPY not started.
 
 ## Next session on Linux
 
-1. Pull `main` (Ghostty pin `c3941417`) and check the trim fix where it matters: on Linux the old
-   pin blanks a pane one idle second after `clear`. `cargo test -p zz-terminal
-   a_cleared_screen_survives_idle_compression` must pass; for proof it has teeth, run it once with
-   `GHOSTTY_SOURCE_DIR` at a checkout of `713374af` (a fresh path each time, Cargo does not see edits
-   inside one) and watch it fail. Then a quick gate `--only throughput,mem` against
-   `w2-2-term-alienware-d7e3fc95.json`: the fix only runs in `compress`, so neither row should move.
-2. Rerun the W2-TERM merge gate on a quiet host (the recorded one ran at load 3-7 under a game):
-   `~/.cache/zz-perf/quiet-gate.sh --stage wave2 --strict --baseline bench/perf/results/w2-1-hooks-alienware-0acd7f2a.json --json bench/perf/results/w2-2-term-alienware-d7e3fc95.json`
-   from `~/dev/zz-perf-int` after `cargo build --release -p zz-cli`; commit the overwrite. It now
-   builds the new pin; say so in the commit.
+1. Done 2026-09-30 (from the Mac over ssh): the trim fix holds on Linux. At `d317e171`,
+   `a_cleared_screen_survives_idle_compression` passes; with `GHOSTTY_SOURCE_DIR` at a `713374af`
+   checkout it fails with the pane captured as seven blank lines, the bug seen for real. Three
+   alternating quick pairs (`~/.cache/zz-perf/fixcheck/`): `throughput.detached.ascii` 128-130 MB/s
+   old vs 128-131 new (tmux 56.7), `mem.footprint.p1` 2.78 vs 2.78-2.80 MiB, `p20` 16.9-17.5 vs
+   16.9-17.7 MiB.
+2. Done 2026-09-30: `w2-2-term-alienware-d7e3fc95.json` is now the quiet rerun (load 0.02 -> 1.2,
+   built at `d317e171`, so with Ghostty `c3941417`; the name keeps the TERM merge). 56 pass, 16
+   fail, 11 regressed against w2-1. The laptop was in its slow power state: tmux itself moved
+   `spawn.cpu.split_shell` 0.80 -> 2.12 ms and `config.wall.source_1000` 7.7 -> 25.9 ms. Every
+   regressed row is cpu or wall; instructions and bytes match the noisy record or w2-1
+   (`attach.instr.p1` 10.08 vs 10.09 Minstr in the noisy record, `config.instr.source_1000` 41.6 vs
+   41.7, `chatty.instr_per_s.visible` 384 vs 392), so `attach.cpu.*` 3.3 -> 4.7 ms at flat tmux is
+   kernel and clock time, not TERM. Judge the next Linux merge on instructions and bytes.
 3. W2-CTRL (after TERM; carries TERM's PaneFrame in its Batch via `encode_terminal_viewport_event_into`
    / `encode_terminal_patch_event_into`), then W2-FMT (after HOOKS; its hand-offs are in the HOOKS
    as-built notes), then W2-COPY. Briefs: `python3 ~/.cache/zz-perf/prompts/gen.py '<json spec>'`

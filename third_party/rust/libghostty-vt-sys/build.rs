@@ -1,4 +1,6 @@
+use std::collections::hash_map::DefaultHasher;
 use std::env;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -96,6 +98,14 @@ fn main() {
     println!("cargo:rerun-if-env-changed=OPT_LEVEL");
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=copy-mode.patch");
+
+    let patch = std::fs::read("copy-mode.patch").expect("read copy-mode.patch");
+    let mut patch_hash = DefaultHasher::new();
+    patch.hash(&mut patch_hash);
+    println!(
+        "cargo:rustc-env=LIBGHOSTTY_VT_SYS_COPY_MODE_PATCH_HASH={:016x}",
+        patch_hash.finish()
+    );
 
     // An explicit source override should stay authoritative even when the
     // pkg-config feature is enabled, so local Ghostty checkouts remain easy to

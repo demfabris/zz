@@ -15,8 +15,8 @@ This directory is a source snapshot of `libghostty-vt-sys` from
   branch `zz-2026-09-25`, a fork holding the same commit so a rebase of the PR branch
   cannot make it unfetchable.
 - Local override: the workspace patches the git-sourced sys package to this adjacent
-  snapshot. The safe wrapper is not vendored: `libghostty-vt` resolves to the fork
-  at the same commit.
+  snapshot. The safe wrapper is vendored in `../libghostty-vt` from the same
+  commit, with the copy snapshot and bounded row-reference APIs added locally.
 
 ## Why an unreleased wrapper
 
@@ -48,7 +48,8 @@ Move back to upstream at the first libghostty-rs release that contains this stac
   engine. `LIBGHOSTTY_VT_SYS_OPTIMIZE=Debug` still selects `Debug`.
 - The upstream Windows DLL CRT source patch and its build-time `git apply` are dropped.
   zz links the static archive on every platform, where that patch does nothing, and this
-  snapshot does not rewrite fetched sources.
+  Windows patch is not applied. The separate copy-mode patch below is applied
+  to the private build source.
 
 Upstream now covers two earlier zz deltas on its own: the default `-Dcpu=baseline`
 (overridable with `LIBGHOSTTY_VT_SYS_CPU`; keep it, since the Linux x86_64 v0.6.0 release
@@ -58,9 +59,13 @@ mapping with an xcframework build for `aarch64-apple-ios` and `aarch64-apple-ios
 iOS target links libghostty today (the GPUI iOS client renders daemon frames), so the flat
 mapping and its `x86_64-apple-ios` entry were not kept.
 
-`src/lib.rs` and `tools/gen_bindings.rs` are the upstream files. `src/bindings.rs` was
-regenerated from the fork commit's headers with the upstream tool, run from a checkout of
-the wrapper commit: `GHOSTTY_SOURCE_DIR=<fork checkout> cargo run -p libghostty-vt-sys
+`src/lib.rs` consumes the optional copy patch stamp in a constant so Rust dependency
+metadata tracks native-only changes, while native-free docs/Miri builds can omit it.
+`tools/gen_bindings.rs` borrows the prefix array with `iter()` instead of `into_iter()` so
+all-feature strict lint checks pass. `src/bindings.rs` was
+regenerated from the fork commit's headers with the upstream tool, with the additive
+`ghostty_terminal_clone_screen` declaration from `copy-mode.patch` retained locally. The
+upstream generation command, run from a checkout of the wrapper commit, is: `GHOSTTY_SOURCE_DIR=<fork checkout> cargo run -p libghostty-vt-sys
 --features bindgen-tool --bin gen-bindings`.
 
 The Kitty temporary-file medium API is fixed in this wrapper
@@ -100,19 +105,65 @@ Validation for this pin: the wrapper's own tests against the fork source,
 `cargo test -p zz-terminal`, and the real macOS bundle build. Ghostty's Debug
 test suite supplies its own `std_options`, so it does not exercise this option.
 
-The normal build fetches this immutable fork commit directly. No build-time
-source rewriting is used. `GHOSTTY_SOURCE_DIR` remains authoritative, and an
-enabled `pkg-config` feature can select an installed library without this fix.
+The normal build fetches this immutable fork commit and applies `copy-mode.patch`
+in Cargo's private build directory. `GHOSTTY_SOURCE_DIR` is copied into that directory
+before patching, so the source override stays unchanged. An enabled `pkg-config`
+feature can select an installed library; that library must also export the local
+`ghostty_terminal_clone_screen` extension.
 When comparing overrides, use distinct source paths or rebuild the sys package:
 Cargo tracks the override environment value, not edits inside that directory.
 
 This is a native dependency, outside the Cargo-only `scripts/forks.conf` and
 `just forks` workflow. Maintain it using the native Ghostty section in
 `.agents/skills/fork-rebase/SKILL.md`. Preserve published commits through a
-retained branch or tag before rebasing. Drop the patch when upstream provides
+retained branch or tag before rebasing. Drop the signal-stack change when upstream provides
 the same allocation behavior in ReleaseSafe, or when zz stops building
 ReleaseSafe, then repin and rerun the terminal suite plus the real macOS bundle
 build. No binding or safe-wrapper change is needed for this option.
+
+## Copy snapshots
+
+`copy-mode.patch` adds a C ABI clone of the active screen. Copy-on-write cloning skips the
+page-count pass used to preheat eager clone storage. Compressed history shares atomic
+reference-counted encoded buffers when allocator identities match; other allocators receive
+independent encoded copies. Each cloned compressed page starts without a private raw mapping;
+first read maps it, and dropping it unread releases encoded ownership without restoring it.
+Each screen owns its page metadata and cursor pins. Resident history uses software
+copy-on-write; active pages are copied eagerly so cached cursor pointers stay valid. Read-only
+grid getters preserve sharing. Resize reads source metadata and rows without detaching pages
+that it will replace with reflowed output. The original pane can recover pooled mappings when
+a shared history page becomes exclusive again, keeping spare-page reuse after leaving copy
+mode.
+
+The C clone constructor initializes its owned terminal directly from the frozen ScreenSet.
+It skips the four raw page mappings and pool/pin bookkeeping of a blank terminal that would
+otherwise be discarded immediately. Ordinary terminal initialization keeps its existing
+default-cursor setup; clone initialization keeps existing screen-clone cursor/SGR semantics,
+copies the configured terminal cursor defaults, and creates fresh parser state.
+
+The clone uses the default allocator. Compressed ownership compares allocator function tables
+first, recognizes Zig allocators with undefined context pointers, and compares contexts only
+for allocators that define them. This is exercised by a dense 10k x 180 default-allocator
+ReleaseFast regression, in addition to custom-allocator isolation checks.
+
+The clone retains no source callbacks and lifts its own pruning limits so a frozen resize
+preserves all reflowed history. The live pane keeps its original limits. The vendored safe
+wrapper exposes `ScreenSnapshot` with owned metadata and borrowed grid references, plus
+controlled scroll, color, compression and anchored resize operations. Frozen resize uses
+primary backing with wrapping and history pulling enabled, even when the source was in the
+alternate screen or had wrapping disabled. The wrapper retains the source screen identity
+separately. It exposes no terminal or owned tracking handle that could escape while the
+snapshot moves to a search thread. Row references check the owning page dimensions before
+reading a cell, including incomplete reflow.
+
+The patch is kept here because this campaign forbids pushes. Fold it into the native fork
+before the next upstream rebase, retaining the snapshot regression tests. Its build stamp
+reverses an older local copy of the patch before applying a changed one.
+
+The build script emits the patch-content hash as a compiler environment input: replacing a
+static archive at the same path alone can leave dependent executables linked to old code. A
+patch-byte append/restore check with tests and lint before each CLI build verifies that
+ordinary incremental builds relink.
 
 ## Earlier grid patches
 
@@ -121,8 +172,8 @@ capture decisions remain in `knowledge/designs/tui-parity.md`. The `provenance.p
 that retained explicit indexed foreground/background flags in spare style bits,
 the ICH hunk that kept the pin's stale cells after a wide insert, the build
 machinery that applied them, and the safe wrapper vendored to read those fields
-are all gone. The native memory option above does not restore that machinery or
-change the grid's capture semantics.
+are all gone. The copy snapshot extension restores safe-wrapper vendoring for ownership and row
+access, without restoring those capture-provenance patches.
 
 Tabs carry no provenance. The pin prints a literal tab for every cell a tab
 produced, and fabrico decided on 2026-09-18 that zz captures the spaces on

@@ -382,7 +382,21 @@ impl OutboundMailbox {
         state.attach_batch = false;
         state.ctrl_collecting = ControlCollection::None;
         state.terminals_held = false;
-        let mut frames = Vec::new();
+        let capacity = state
+            .reliable
+            .iter()
+            .map(|frame| match frame {
+                OutboundFrame::Grouped { frames, .. }
+                | OutboundFrame::DeferredGrouped { frames, .. } => frames.len(),
+                _ => 1,
+            })
+            .chain(state.agent.values().map(|pending| pending.frames.len()))
+            .fold(
+                usize::from(state.command_output.is_some()).saturating_add(state.terminals.len()),
+                usize::saturating_add,
+            )
+            .min(zz_protocol::MAX_BATCH_FRAMES);
+        let mut frames = Vec::with_capacity(capacity);
         while let Some(frame) = pop_ready_frame(&mut state) {
             match frame {
                 OutboundFrame::Grouped {
@@ -1038,10 +1052,28 @@ impl Shared {
                         outcome: zz_protocol::ExecOutcome::Ran,
                     }),
                 ];
-                let frames = completion
-                    .iter()
-                    .map(|message| outbound.encode_message(message).map(OutboundFrame::from))
-                    .collect::<Result<Vec<_>, _>>();
+                let [mut response_frame, mut exit_frame] = {
+                    let mut state = outbound.state.lock();
+                    [
+                        take_recycled_frame(&mut state),
+                        take_recycled_frame(&mut state),
+                    ]
+                };
+                let frames = if let Err(error) =
+                    encode_protocol_message_into(&completion[0], &mut response_frame)
+                {
+                    outbound.recycle_frame(response_frame);
+                    outbound.recycle_frame(exit_frame);
+                    Err(error)
+                } else if let Err(error) =
+                    encode_protocol_message_into(&completion[1], &mut exit_frame)
+                {
+                    drop(response_frame);
+                    outbound.recycle_frame(exit_frame);
+                    Err(error)
+                } else {
+                    Ok(vec![response_frame.into(), exit_frame.into()])
+                };
                 if !frames.is_ok_and(|frames| outbound.enqueue_control_group(frames)) {
                     for message in &completion {
                         let _ = outbound.enqueue_reliable(message);

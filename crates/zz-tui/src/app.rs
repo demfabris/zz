@@ -2577,6 +2577,120 @@ mod tests {
     }
 
     #[test]
+    fn held_startup_output_precedes_the_base_frame_in_the_first_physical_paint() {
+        let pane = PaneId(7);
+        let snapshot = initial_snapshot(&[pane]);
+        let mut layout_model = initial_model(&ClientCore::new());
+        layout_model.attached_session = Some(zz_protocol::SessionId(1));
+        layout_model.update_snapshot(Arc::new(snapshot.clone()));
+        let content = layout_model.pane_rect(pane).unwrap().content();
+        let blank = TerminalViewport::blank(
+            content.width,
+            content.height,
+            zz_terminal::SessionStatus::Running,
+        );
+        let direct = "/tmp/root.conf:1: INTERACTIVE_DIRECT";
+        let nested = "/tmp/child.conf:1: INTERACTIVE_NESTED";
+        let mut actor = with_row_text(&with_row_text(&blank, 0, direct), 1, nested);
+        actor.mode = zz_terminal::TerminalMode::View {
+            position: 1,
+            total: 2,
+        };
+        let messages = vec![
+            initial_event(zz_protocol::EventPayload::Snapshot(snapshot)),
+            initial_view(1),
+            initial_event(zz_protocol::EventPayload::CommandOutput {
+                pane,
+                output_id: 9,
+                viewport: Some(actor),
+            }),
+            initial_event(zz_protocol::EventPayload::TerminalViewport {
+                pane,
+                viewport: with_row_text(&blank, 0, "BASE-SHELL"),
+            }),
+        ];
+        let core = Mutex::new(ClientCore::new());
+        let frames = FrameInbox::default();
+        let images = KittyImageInbox::default();
+        let (events, incoming) = mpsc::channel();
+        assert!(forward_protocol_message(
+            &core,
+            ProtocolMessage::Batch(zz_protocol::Batch::from_messages(1, messages).unwrap()),
+            1,
+            &events,
+            &frames,
+            &images,
+            &AtomicU8::new(KITTY_GATE_PROBING),
+            |_| panic!("held startup state must not need another wire request"),
+        ));
+        events.send(MainEvent::Resize).unwrap();
+        let mut model = initial_model(&lock_core(&core));
+        model.update_snapshot(Arc::clone(lock_core(&core).snapshot()));
+        assert!(model.command_output.is_none());
+        let (written, output) = mpsc::channel();
+        let mut renderer = Renderer::with_sink(Box::new(move |bytes| {
+            written.send(bytes.to_vec()).unwrap();
+            Ok(())
+        }));
+        let mut deferred = None;
+        let mut next = incoming.try_recv().ok();
+        let mut paint = PendingPaint::None;
+        let mut actions = Vec::new();
+        while let Some(event) = next.take() {
+            match event {
+                MainEvent::Core { event, .. } => match *event {
+                    CoreEvent::Attached { .. } => {
+                        model.set_command_output(None, None);
+                        model.viewports =
+                            [(pane, lock_core(&core).viewport(pane).unwrap().clone())]
+                                .into_iter()
+                                .collect();
+                        actions.push("attached");
+                        paint = paint.max(PendingPaint::RepaintAll);
+                    }
+                    CoreEvent::CommandOutputChanged => {
+                        let core = lock_core(&core);
+                        model.set_command_output(
+                            core.command_output_id(),
+                            core.command_output()
+                                .map(|(pane, frame)| (pane, frame.clone())),
+                        );
+                        actions.push("output");
+                        paint = paint.max(PendingPaint::RepaintAll);
+                    }
+                    _ => paint = paint.max(PendingPaint::Repaint),
+                },
+                MainEvent::KittyImages(1) => {
+                    apply_kitty_updates(&mut renderer, images.take(), true);
+                    actions.push("reset");
+                }
+                MainEvent::Frames(1) => {
+                    take_frames(&frames, &mut model, &mut renderer);
+                    actions.push("frames");
+                    paint = paint.max(PendingPaint::Frames);
+                }
+                _ => panic!("unexpected event in startup paint span"),
+            }
+            next = next_paint_event(&incoming, &mut deferred);
+        }
+        assert_eq!(actions, ["attached", "reset", "output", "frames"]);
+        assert_eq!(paint, PendingPaint::RepaintAll);
+        assert!(matches!(deferred, Some(MainEvent::Resize)));
+        assert!(incoming.try_recv().is_err());
+        assert_eq!(model.command_output_focus(), Some(pane));
+        renderer.invalidate();
+        renderer.paint(&model, true).unwrap();
+        let first =
+            String::from_utf8(output.recv_timeout(Duration::from_secs(2)).unwrap()).unwrap();
+        assert_eq!(first.matches("\x1b[2J").count(), 1, "{first:?}");
+        assert_eq!(first.matches(direct).count(), 1, "{first:?}");
+        assert_eq!(first.matches(nested).count(), 1, "{first:?}");
+        assert!(first.find(direct).unwrap() < first.find(nested).unwrap());
+        assert!(!first.contains("BASE-SHELL"), "{first:?}");
+        assert!(output.try_recv().is_err());
+    }
+
+    #[test]
     fn initial_drain_paints_metadata_reset_and_frames_once() {
         for count in [1, 4] {
             let panes = (7..7 + count).map(PaneId).collect::<Vec<_>>();

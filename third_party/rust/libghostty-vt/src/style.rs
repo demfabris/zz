@@ -251,6 +251,7 @@ impl Default for Palette {
 
 impl Palette {
     /// Get the color at the given palette index.
+    #[must_use]
     pub fn get(&self, index: PaletteIndex) -> RgbColor {
         self.0[index.0 as usize]
     }
@@ -493,6 +494,7 @@ impl X11ColorNames {
     }
 
     /// Iterate over the X11 color name table.
+    #[must_use]
     pub fn iter(self) -> X11ColorNamesIter {
         X11ColorNamesIter {
             entries: self.entries.iter(),

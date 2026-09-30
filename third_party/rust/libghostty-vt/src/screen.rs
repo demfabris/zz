@@ -41,20 +41,26 @@ pub enum Screen {
 /// This API is not meant to be used as the core of render loop.
 /// It isn't built to sustain the framerates needed for rendering large screens.
 /// Use the render state API for that.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct GridRef<'t> {
     pub(crate) inner: ffi::GridRef,
     pub(crate) _phan: PhantomData<&'t ffi::Terminal>,
 }
 
-#[expect(missing_docs, reason = "local snapshot API has no upstream documentation")]
-#[derive(Clone, Debug)]
+#[expect(
+    missing_docs,
+    reason = "local snapshot API has no upstream documentation"
+)]
+#[derive(Clone, Copy, Debug)]
 pub struct GridRow<'t> {
     first: GridRef<'t>,
     columns: u16,
 }
 
-#[expect(missing_docs, reason = "local snapshot API has no upstream documentation")]
+#[expect(
+    missing_docs,
+    reason = "local snapshot API has no upstream documentation"
+)]
 impl<'t> GridRow<'t> {
     pub(crate) fn new(first: GridRef<'t>, columns: u16) -> Result<Self> {
         if first.inner.x != 0 || columns == 0 {
@@ -63,11 +69,12 @@ impl<'t> GridRow<'t> {
         Ok(Self { first, columns })
     }
 
+    #[must_use]
     pub fn cell(&self, column: u16) -> Option<GridRef<'t>> {
         if column >= self.columns {
             return None;
         }
-        let mut reference = self.first.clone();
+        let mut reference = self.first;
         reference.inner.x = column;
         Some(reference)
     }
@@ -207,6 +214,7 @@ impl TrackedGridRef {
     ///
     /// If the terminal that created the tracked reference has been dropped,
     /// this returns false.
+    #[must_use]
     pub fn has_value(&self) -> bool {
         unsafe { ffi::ghostty_tracked_grid_ref_has_value(self.inner.as_ptr()) }
     }

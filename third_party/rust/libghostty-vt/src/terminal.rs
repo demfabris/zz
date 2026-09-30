@@ -228,7 +228,10 @@ pub struct Terminal<'alloc: 'cb, 'cb> {
     vtable: Box<VTable<'alloc, 'cb>>,
 }
 
-#[expect(missing_docs, reason = "local snapshot API has no upstream documentation")]
+#[expect(
+    missing_docs,
+    reason = "local snapshot API has no upstream documentation"
+)]
 #[derive(Debug)]
 pub struct ScreenSnapshot {
     terminal: Terminal<'static, 'static>,
@@ -237,7 +240,10 @@ pub struct ScreenSnapshot {
 
 unsafe impl Send for ScreenSnapshot {}
 
-#[expect(missing_docs, reason = "local snapshot API has no upstream documentation")]
+#[expect(
+    missing_docs,
+    reason = "local snapshot API has no upstream documentation"
+)]
 pub trait GridRead {
     fn grid_ref(&self, point: Point) -> Result<GridRef<'_>>;
     fn grid_row(&self, point: Point) -> Result<GridRow<'_>>;
@@ -263,7 +269,10 @@ impl GridRead for ScreenSnapshot {
     }
 }
 
-#[expect(missing_docs, reason = "local snapshot API has no upstream documentation")]
+#[expect(
+    missing_docs,
+    reason = "local snapshot API has no upstream documentation"
+)]
 impl ScreenSnapshot {
     pub fn clone_screen(&self) -> Result<Self> {
         let mut snapshot = self.terminal.clone_screen()?;
@@ -427,7 +436,10 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         unsafe { Self::from_raw(raw) }
     }
 
-    #[expect(missing_docs, reason = "local snapshot API has no upstream documentation")]
+    #[expect(
+        missing_docs,
+        reason = "local snapshot API has no upstream documentation"
+    )]
     pub fn clone_screen(&self) -> Result<ScreenSnapshot> {
         let source_screen = self.active_screen()?;
         let mut raw: ffi::Terminal = std::ptr::null_mut();
@@ -538,7 +550,10 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         Ok(unsafe { GridRef::from_raw(grid_ref) })
     }
 
-    #[expect(missing_docs, reason = "local snapshot API has no upstream documentation")]
+    #[expect(
+        missing_docs,
+        reason = "local snapshot API has no upstream documentation"
+    )]
     pub fn grid_row(&self, point: Point) -> Result<GridRow<'_>> {
         GridRow::new(self.grid_ref(point)?, self.cols()?)
     }
@@ -613,7 +628,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
             ffi::ghostty_terminal_get(
                 self.inner.as_raw(),
                 Data::MODE,
-                &raw mut mode as *mut std::ffi::c_void,
+                (&raw mut mode).cast::<std::ffi::c_void>(),
             )
         };
         from_result(result)?;
@@ -633,7 +648,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
             ffi::ghostty_terminal_set(
                 self.inner.as_raw(),
                 Opt::MODE,
-                &raw const mode as *const std::ffi::c_void,
+                (&raw const mode).cast::<std::ffi::c_void>(),
             )
         };
         from_result(result)?;
@@ -658,7 +673,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
             ffi::ghostty_terminal_set(
                 self.inner.as_raw(),
                 Opt::MODE_DEFAULT,
-                &raw const mode as *const std::ffi::c_void,
+                (&raw const mode).cast::<std::ffi::c_void>(),
             )
         };
         from_result(result)?;
@@ -785,7 +800,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     ) -> Result<Option<Bytes<'a>>> {
         let mut out = std::ptr::null_mut();
         let mut out_len = 0usize;
-        let alloc = alloc.map_or(std::ptr::null(), |v| v.to_raw());
+        let alloc = alloc.map_or(std::ptr::null(), super::alloc::Allocator::to_raw);
 
         let result = unsafe {
             ffi::ghostty_terminal_continuation_alloc(
@@ -1161,7 +1176,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// Set this to false when the pty keeps its own screen buffer without
     /// scrollback, since it cannot pull rows back and will otherwise disagree
     /// with the terminal about the screen contents after a resize. Windows
-    /// ConPTY is the motivating case.
+    /// `ConPTY` is the motivating case.
     ///
     /// This is preserved across a full reset (RIS).
     ///
@@ -1183,7 +1198,10 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     }
     /// Set the default 256-color palette.
     pub fn set_default_color_palette(&mut self, v: Option<Palette>) -> Result<&mut Self> {
-        self.set_optional::<RawPalette>(Opt::COLOR_PALETTE, v.map(|v| v.into()).as_ref())?;
+        self.set_optional::<RawPalette>(
+            Opt::COLOR_PALETTE,
+            v.map(std::convert::Into::into).as_ref(),
+        )?;
         Ok(self)
     }
 
@@ -1789,6 +1807,7 @@ impl<'t> ClipboardWrite<'t> {
     }
 
     /// Get the clipboard's destination.
+    #[must_use]
     pub fn location(&self) -> ClipboardLocation {
         // SAFETY: We trust libghostty to give us a valid pointer
         // within the lifetime of the callback.
@@ -1802,6 +1821,7 @@ impl<'t> ClipboardWrite<'t> {
     /// The iterator is empty for a write carrying no representations, which
     /// requests that the destination be cleared (e.g. OSC 52 with an empty
     /// payload).
+    #[must_use]
     pub fn contents(&self) -> ClipboardContents<'t> {
         // SAFETY: We trust libghostty to give us a valid pointer
         // within the lifetime of the callback.
@@ -1858,7 +1878,7 @@ pub struct ClipboardContent<'t> {
     /// Decoded, binary-safe representation data.
     pub data: &'t [u8],
 }
-impl<'t> ClipboardContent<'t> {
+impl ClipboardContent<'_> {
     /// # Safety
     ///
     /// Caller must guarantee that the given raw value is valid within
@@ -1930,12 +1950,14 @@ impl<'t> DesktopNotification<'t> {
     }
 
     /// Get the notification title, or an empty string when the protocol omits it.
+    #[must_use]
     pub fn title(self) -> &'t str {
         // SAFETY: We trust libghostty to give us a valid underlying ptr
         // AND that the title contains to a valid UTF-8 string.
         unsafe { (*self.ptr).title.to_str() }
     }
     /// Notification body.
+    #[must_use]
     pub fn body(self) -> &'t str {
         // SAFETY: We trust libghostty to give us a valid underlying ptr
         // AND that the title contains to a valid UTF-8 string.
@@ -1950,7 +1972,7 @@ pub struct ProgressReport<'t> {
     _phan: PhantomData<&'t ()>,
 }
 
-impl<'t> ProgressReport<'t> {
+impl ProgressReport<'_> {
     unsafe fn from_raw(raw: *const ffi::TerminalProgressReport) -> Self {
         Self {
             ptr: raw,
@@ -1968,11 +1990,12 @@ impl<'t> ProgressReport<'t> {
     }
 
     /// Progress percentage from 0 through 100, or `None` when omitted.
+    #[must_use]
     pub fn progress(self) -> Option<u8> {
         // SAFETY: We trust libghostty to give us a valid underlying ptr
         match unsafe { *self.ptr }.progress {
             ..=-1 => None,
-            v => Some(v as u8),
+            v => Some(v.cast_unsigned()),
         }
     }
 }
@@ -2180,7 +2203,7 @@ handlers! {
         // uphold all lifetime invariants (e.g. no `vt_write` calls
         // during this callback, which is guaranteed via the mutable reference).
         let data = unsafe { std::slice::from_raw_parts(ptr, len) };
-        func(&term, data);
+        func(term, data);
     }
 
     /// Call the given function when the terminal receives
@@ -2191,7 +2214,7 @@ handlers! {
         from = TerminalBellFn(),
         to = BellFn(),
     ) |term, func| {
-        func(&term);
+        func(term);
     }
 
     /// Call the given function when the running program asks the terminal to
@@ -2309,7 +2332,7 @@ handlers! {
         from = TerminalEnquiryFn() -> ffi::String,
         to = <'t>EnquiryFn() -> Option<&'t str>,
     ) |term, func| {
-        func(&term).unwrap_or("").into()
+        func(term).unwrap_or("").into()
     }
 
     /// Call the given function when the terminal receives an XTVERSION
@@ -2321,7 +2344,7 @@ handlers! {
         from = TerminalXtversionFn() -> ffi::String,
         to = <'t>XtversionFn() -> Option<&'t str>,
     ) |term, func| {
-        func(&term).unwrap_or("").into()
+        func(term).unwrap_or("").into()
     }
 
     /// Call the given function when the terminal title changes
@@ -2335,7 +2358,7 @@ handlers! {
         from = TerminalTitleChangedFn(),
         to = TitleChangedFn(),
     ) |term, func| {
-        func(&term);
+        func(term);
     }
 
     /// Call the given function when the terminal current working directory
@@ -2349,7 +2372,7 @@ handlers! {
         from = TerminalPwdChangedFn(),
         to = PwdChangedFn(),
     ) |term, func| {
-        func(&term);
+        func(term);
     }
 
     /// Call the given function in response to XTWINOPS size queries
@@ -2360,7 +2383,7 @@ handlers! {
         from = TerminalSizeFn(out: *mut ffi::SizeReportSize) -> bool,
         to = SizeFn() -> Option<SizeReportSize>,
     ) |term, func| {
-        if let Some(size) = func(&term) {
+        if let Some(size) = func(term) {
             // SAFETY: Out pointer is assumed to be valid.
             unsafe { *out = size };
             true
@@ -2380,7 +2403,7 @@ handlers! {
         from = TerminalColorSchemeFn(out: *mut ffi::ColorScheme::Type) -> bool,
         to = ColorSchemeFn() -> Option<ColorScheme>,
     ) |term, func| {
-        if let Some(size) = func(&term) {
+        if let Some(size) = func(term) {
             // SAFETY: Out pointer is assumed to be valid.
             unsafe { *out = size.into() };
             true
@@ -2400,7 +2423,7 @@ handlers! {
         from = TerminalDeviceAttributesFn(out: *mut ffi::DeviceAttributes) -> bool,
         to = DeviceAttributesFn() -> Option<DeviceAttributes>,
     ) |term, func| {
-        if let Some(size) = func(&term) {
+        if let Some(size) = func(term) {
             // SAFETY: Out pointer is assumed to be valid.
             unsafe { *out = size.into() };
             true
@@ -2451,7 +2474,7 @@ handlers! {
         ),
         to = <'t>DesktopNotificationFn(DesktopNotification<'t>),
     ) |term, func| {
-        func(&term, unsafe { DesktopNotification::from_raw(notif) });
+        func(term, unsafe { DesktopNotification::from_raw(notif) });
     }
 
     /// Call the given function when the running program reports progress
@@ -2464,7 +2487,7 @@ handlers! {
         ),
         to = <'t>ProgressReportFn(ProgressReport<'t>),
     ) |term, func| {
-        func(&term, unsafe { ProgressReport::from_raw(progress) });
+        func(term, unsafe { ProgressReport::from_raw(progress) });
     }
 }
 
@@ -2528,7 +2551,7 @@ mod tests {
     }
 
     #[inline(never)]
-    fn build_terminal<'cb>(callback_count: &'cb RefCell<usize>) -> Terminal<'static, 'cb> {
+    fn build_terminal(callback_count: &RefCell<usize>) -> Terminal<'static, '_> {
         let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
 
         terminal
@@ -2691,7 +2714,7 @@ mod tests {
     }
 
     /// Explicitly relocate the Terminal into distinct storage, then verify the
-    /// callback still fires through the stable VTable userdata pointer.
+    /// callback still fires through the stable `VTable` userdata pointer.
     #[test]
     fn callbacks_survive_explicit_relocation() {
         let callback_count = RefCell::new(0usize);

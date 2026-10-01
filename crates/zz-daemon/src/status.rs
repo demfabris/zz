@@ -2855,8 +2855,7 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                     .to_owned(),
             ),
             "buffer_created" => Some(
-                self.facts
-                    .buffer()?
+                self.buffer()?
                     .created
                     .duration_since(UNIX_EPOCH)
                     .ok()?

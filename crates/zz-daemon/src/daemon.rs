@@ -37241,6 +37241,9 @@ fn client_input_pane(
 #[cfg(test)]
 mod format_universe_tests;
 
+#[cfg(test)]
+mod format_buffer_tests;
+
 fn status_targets(
     inner: &ServerState,
     sessions: Option<&BTreeSet<SessionId>>,

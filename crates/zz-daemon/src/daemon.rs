@@ -5980,7 +5980,7 @@ impl Shared {
     }
 
     fn subscribe(&self, client: ClientId, outbound: Arc<OutboundMailbox>) {
-        {
+        let attached = {
             let mut inner = self.inner.lock();
             inner.client_entry(client).subscriber.replace(outbound);
             if inner.client(client).and_then(|c| c.kind) == Some(ClientKind::Control) {
@@ -5989,8 +5989,11 @@ impl Shared {
                     .control_output
                     .get_or_insert_default();
             }
+            client_attached_session(&inner, client).is_some()
+        };
+        if attached {
+            self.nudge_client_timers();
         }
-        self.nudge_client_timers();
     }
 
     fn try_deliver_startup_config_causes(
@@ -6192,12 +6195,6 @@ impl Shared {
                 .client_file_waiters
                 .retain(|_, waiter| waiter.client != client);
             let mut removed_client = inner.clients.remove(&client);
-            if removed_client
-                .as_ref()
-                .is_some_and(|state| state.subscriber.is_some())
-            {
-                self.nudge_client_timers();
-            }
             let control = removed_client.as_ref().and_then(|c| c.kind) == Some(ClientKind::Control);
             inner.client_flags.clear(client);
             inner
@@ -8270,6 +8267,7 @@ impl Shared {
         let mut agent_options_changed = false;
         let mut status_formats_changed = false;
         let mut status_refresh_sessions = BTreeSet::new();
+        let client_timers_changed;
         let mut mode_styles_changed = false;
         let mut force_shutdown_requested = false;
         let mut immediate_hooks = Vec::new();
@@ -8281,6 +8279,7 @@ impl Shared {
             let captures = !read_only || cfg!(debug_assertions);
             let journal = *hook_events::HOOK_JOURNAL;
             let generation_before = inner.engine.state.generation();
+            let monitors_before = inner.engine.has_format_monitors();
             let hook_scope = (captures && (event_hooks_enabled || journal))
                 .then(|| hook_events::HookScope::open(&mut inner.engine));
             let pane_focus_before = (event_hooks_enabled && captures).then(|| {
@@ -10482,6 +10481,7 @@ impl Shared {
                 !read_only || pending_hook_events.len() == hook_events_before,
                 "read-only {command_name} raised hook events"
             );
+            client_timers_changed = monitors_before != inner.engine.has_format_monitors();
             (execution, mux_options_changed, recheck_shutdown_requested)
         };
 
@@ -11388,6 +11388,8 @@ impl Shared {
         }
         if !read_only {
             self.publish_key_tables_if_changed();
+        }
+        if client_timers_changed || status_formats_changed || !status_refresh_sessions.is_empty() {
             self.nudge_client_timers();
         }
         pending_hook_events.extend(std::mem::take(&mut self.inner.lock().deferred_event_hooks));

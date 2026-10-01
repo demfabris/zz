@@ -3758,3 +3758,11 @@ generations, with invalidation tests for the mutation paths.
 - Attached footprint with a GUI-like client awaits its W0 TODO group. Headless throughput has
   an informational frame-sink row but still needs a reference baseline. Copy-mode entry has
   footprint and time gates from W2-COPY.
+
+
+### W3-LOOP b6fix as built (2026-10-01)
+
+- Client timers now follow status option effects, monitor presence, attachment changes, and control subscriptions. Unattached subscription changes and unregister after detach no longer send redundant timer messages. The mux loop skips timer dispatch while no input, completion, or deadline needs work.
+- Three alternating quick pairs against `/tmp/zzpc/w3/loop-b5fix-cli`: 18 of 21 CLI/chatty instruction medians meet 1.02x. Remaining misses: `cli.instr.has_session.p20` 1.0218x, `cli.instr.select_pane.p20` 1.0702x, `chatty.instr_per_s.hidden` 1.0553x. Thread counts stay 4 to 3 at p1 and 42 to 41 at p20. Status-job instructions fall 2.7%.
+- Checks: 1382 daemon unit tests and 35 integration tests pass, one ignored; 17 timer tests pass after the clippy fix; fmt, clippy, and all four requested compat scenarios pass. The final quick W0 gate has 37 pass, 1 fail, and 42 info rows, with no harness errors or regressions. The failure is the pre-existing status-job thread rate near 3/s against a 0.5/s limit.
+- Handed on: the three instruction misses above; idle wakeups remain unmeasured because the permitted commands omit `idle`. Linux `/proc`, PTY gather, epoll, THP, and `tui-output-backpressure.sh` checks did not run on this Mac. Scratch results stay in `/tmp/zzpc/b6fix-{b5fix,b6fix}-{1,2,3}.json` and `/tmp/zzpc/loop-b6fix.json`. This step does not meet its done criterion.

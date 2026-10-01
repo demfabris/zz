@@ -334,6 +334,27 @@ impl LoopTimers {
         shared: &Arc<Shared>,
         waker: &Arc<mio::Waker>,
     ) -> Result<(), DaemonError> {
+        if self.completed.is_empty()
+            && self
+                .inputs
+                .as_ref()
+                .is_none_or(crossbeam_channel::Receiver::is_empty)
+            && (self.pending.is_empty() || self.worker_running)
+            && self
+                .deadlines
+                .next()
+                .is_none_or(|deadline| deadline > Instant::now())
+        {
+            return Ok(());
+        }
+        self.turn_ready(shared, waker)
+    }
+
+    fn turn_ready(
+        &mut self,
+        shared: &Arc<Shared>,
+        waker: &Arc<mio::Waker>,
+    ) -> Result<(), DaemonError> {
         let mut changed = false;
         for completion in self.completed.try_iter() {
             match completion {
@@ -1013,3 +1034,7 @@ mod loop_tests;
 #[cfg(all(test, unix))]
 #[path = "status_loop_tests.rs"]
 mod client_tests;
+
+#[cfg(all(test, unix))]
+#[path = "status_loop_b6fix_tests.rs"]
+mod b6fix_tests;

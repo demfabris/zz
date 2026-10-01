@@ -1766,7 +1766,10 @@ impl PaneActor {
         Ok(())
     }
 
-    fn on_parse_deadline(&mut self) {
+    pub(super) fn on_parse_deadline(&mut self) {
+        if self.raw_output_parse_backlog.is_empty() {
+            return;
+        }
         let started = diagnostic_timer();
         let parsed = drain_raw_output_parse_backlog(
             &mut self.terminal,

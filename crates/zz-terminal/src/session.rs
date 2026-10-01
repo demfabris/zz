@@ -1701,7 +1701,7 @@ impl TerminalSession {
                 let wake_rx = None;
                 #[cfg(any(target_os = "linux", not(unix)))]
                 let wake_rx = ();
-                (shard.wake.clone(), wake_rx)
+                (shard.wake.for_actor(), wake_rx)
             }
             _ => actor_wake(),
         };
@@ -1713,8 +1713,8 @@ impl TerminalSession {
                 input: Some(input_tx),
                 liveness,
                 slot: Arc::clone(&slot),
+                wake: wake.clone(),
             }),
-            wake: wake.clone(),
         };
         let event_state = Arc::new(EventQueueState::new());
         let (event_tx, events) = terminal_event_channel(&event_state);
@@ -1748,6 +1748,7 @@ impl TerminalSession {
                     appearance,
                     spawn,
                     alive,
+                    wake,
                 }) {
                     publisher.fail(&error);
                 }
@@ -1863,8 +1864,8 @@ impl TerminalSession {
                 input: None,
                 liveness,
                 slot: Arc::clone(&slot),
+                wake: ActorWake::none(),
             }),
-            wake: ActorWake::none(),
         };
         let event_state = Arc::new(EventQueueState::new());
         event_state.resolve_identity();
@@ -3036,8 +3037,11 @@ fn input_channel_with_limits(
 
 #[derive(Clone)]
 struct ActorWake {
+    ready: Option<Arc<AtomicBool>>,
     #[cfg(unix)]
     pipe: Option<Arc<std::os::fd::OwnedFd>>,
+    #[cfg(unix)]
+    pending: Option<Arc<AtomicBool>>,
     #[cfg(not(unix))]
     channel: Option<Sender<()>>,
 }
@@ -3045,20 +3049,40 @@ struct ActorWake {
 impl ActorWake {
     const fn none() -> Self {
         Self {
+            ready: None,
             #[cfg(unix)]
             pipe: None,
+            #[cfg(unix)]
+            pending: None,
             #[cfg(not(unix))]
             channel: None,
         }
     }
 
+    fn for_actor(&self) -> Self {
+        Self {
+            ready: Some(Arc::new(AtomicBool::new(true))),
+            ..self.clone()
+        }
+    }
+
     fn notify(&self) {
+        if let Some(ready) = &self.ready {
+            ready.store(true, Ordering::Release);
+        }
         #[cfg(not(unix))]
         if let Some(channel) = &self.channel {
             let _ = channel.try_send(());
         }
         #[cfg(unix)]
         if let Some(pipe) = &self.pipe {
+            if self
+                .pending
+                .as_ref()
+                .is_some_and(|pending| pending.swap(true, Ordering::AcqRel))
+            {
+                return;
+            }
             match write_actor_wake(|| rustix::io::write(&**pipe, &[1_u8])) {
                 Ok(()) | Err(rustix::io::Errno::PIPE) => {}
                 Err(error) => log::error!("failed to wake terminal actor: {error}"),
@@ -3102,7 +3126,9 @@ fn actor_wake() -> (ActorWake, WakeReceiver) {
         match configured_actor_wake_pipe() {
             Ok((read, write)) => (
                 ActorWake {
+                    ready: None,
                     pipe: Some(Arc::new(write)),
+                    pending: None,
                 },
                 Some(Ok(read)),
             ),
@@ -3118,11 +3144,11 @@ struct CommandQueues {
     input: Option<InputSender>,
     liveness: Receiver<Infallible>,
     slot: Arc<Mutex<ControlSlot>>,
+    wake: ActorWake,
 }
 
 struct CommandSender {
     queues: Box<CommandQueues>,
-    wake: ActorWake,
 }
 
 impl CommandSender {
@@ -3186,7 +3212,7 @@ impl CommandSender {
             result
         };
         if result.is_ok() {
-            self.wake.notify();
+            self.queues.wake.notify();
         }
         result
     }
@@ -3216,7 +3242,7 @@ impl CommandSender {
             result
         };
         if result.is_ok() {
-            self.wake.notify();
+            self.queues.wake.notify();
         }
         result
     }
@@ -3265,7 +3291,7 @@ impl CommandSender {
             result
         };
         if result.is_ok() {
-            self.wake.notify();
+            self.queues.wake.notify();
         }
         result
     }
@@ -15930,8 +15956,8 @@ mod tests {
                 input: None,
                 liveness,
                 slot: Arc::default(),
+                wake: ActorWake::none(),
             }),
-            wake: ActorWake::none(),
         };
         drop(alive);
 
@@ -15957,8 +15983,8 @@ mod tests {
                 input: Some(input),
                 liveness: crossbeam_channel::never(),
                 slot: Arc::default(),
+                wake: ActorWake::none(),
             }),
-            wake: ActorWake::none(),
         };
         commands
             .send(Command::PendingPasteOpened { token: 7 })

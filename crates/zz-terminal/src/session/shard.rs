@@ -1,11 +1,9 @@
 use super::*;
-use std::{cmp::Reverse, collections::BinaryHeap};
+use std::sync::OnceLock;
 
-static SHARDS: LazyLock<Result<Vec<ShardHandle>, String>> = LazyLock::new(|| {
+static SHARDS: LazyLock<Vec<OnceLock<Result<ShardHandle, String>>>> = LazyLock::new(|| {
     let count = shard_count(std::env::var("ZZ_PTY_SHARDS").ok().as_deref());
-    (0..count)
-        .map(|index| ShardHandle::start(index).map_err(|error| error.to_string()))
-        .collect()
+    (0..count).map(|_| OnceLock::new()).collect()
 });
 static NEXT_SHARD: AtomicUsize = AtomicUsize::new(0);
 
@@ -20,14 +18,17 @@ fn shard_count(value: Option<&str>) -> usize {
 }
 
 pub(super) fn choose() -> Result<Option<ShardHandle>, WorkerError> {
-    let shards = SHARDS
-        .as_ref()
-        .map_err(|error| WorkerError::Thread(error.clone()))?;
+    let shards = &*SHARDS;
     if shards.is_empty() {
         return Ok(None);
     }
     let index = NEXT_SHARD.fetch_add(1, Ordering::Relaxed) % shards.len();
-    Ok(Some(shards[index].clone()))
+    shards[index]
+        .get_or_init(|| ShardHandle::start(index).map_err(|error| error.to_string()))
+        .as_ref()
+        .cloned()
+        .map(Some)
+        .map_err(|error| WorkerError::Thread(error.clone()))
 }
 
 #[derive(Clone)]
@@ -45,6 +46,7 @@ pub(super) struct PaneLaunch {
     pub(super) appearance: Arc<TerminalAppearance>,
     pub(super) spawn: TerminalSpawn,
     pub(super) alive: Sender<Infallible>,
+    pub(super) wake: ActorWake,
 }
 
 impl ShardHandle {
@@ -57,7 +59,9 @@ impl ShardHandle {
             (
                 read,
                 ActorWake {
+                    ready: None,
                     pipe: Some(Arc::new(write)),
+                    pending: Some(Arc::new(AtomicBool::new(false))),
                 },
             )
         };
@@ -67,20 +71,22 @@ impl ShardHandle {
             (
                 receive,
                 ActorWake {
+                    ready: None,
                     channel: Some(send),
                 },
             )
         };
+        #[cfg(unix)]
         let worker_wake = wake.clone();
         thread::Builder::new()
             .name(format!("zz-pty-shard-{index}"))
             .spawn(move || {
                 let mut shard = Shard {
                     incoming,
+                    #[cfg(unix)]
                     wake: worker_wake,
                     wake_rx,
                     actors: HashMap::new(),
-                    deadlines: BinaryHeap::new(),
                     next_id: 0,
                     cursor: 0,
                 };
@@ -141,9 +147,7 @@ impl Actor {
                 if !actor.on_deadline()? {
                     return Ok(None);
                 }
-                if !actor.on_wake(Wake::Deadline)? {
-                    return Ok(None);
-                }
+                actor.on_parse_deadline();
             }
             Self::Dead(actor) => {
                 if !actor.on_wake(Wake::Deadline)? {
@@ -195,25 +199,28 @@ struct Entry {
     actor: Actor,
     publisher: Publisher,
     _alive: Sender<Infallible>,
-    generation: u64,
+    deadline: Instant,
+    pending: Arc<AtomicBool>,
 }
 
 struct Shard {
     incoming: Receiver<PaneLaunch>,
+    #[cfg(unix)]
     wake: ActorWake,
     #[cfg(unix)]
     wake_rx: std::os::fd::OwnedFd,
     #[cfg(not(unix))]
     wake_rx: Receiver<()>,
     actors: HashMap<usize, Entry>,
-    deadlines: BinaryHeap<Reverse<(Instant, usize, u64)>>,
     next_id: usize,
     cursor: usize,
 }
 
 impl Shard {
     fn run(&mut self) -> Result<(), WorkerError> {
+        let mut ready = Vec::new();
         loop {
+            ready.clear();
             while let Ok(launch) = self.incoming.try_recv() {
                 let publisher = launch.publisher.clone();
                 #[cfg(all(unix, not(target_os = "linux")))]
@@ -228,20 +235,28 @@ impl Shard {
                     launch.max_scrollback,
                     &launch.appearance,
                     &launch.spawn,
-                    &self.wake,
+                    &launch.wake,
                     wake_rx,
                     true,
                 ) {
                     Ok(actor) => {
                         let id = self.next_id;
                         self.next_id += 1;
+                        let deadline = actor.next_deadline();
                         self.actors.insert(
                             id,
                             Entry {
                                 actor: Actor::Live(Box::new(actor)),
                                 publisher,
                                 _alive: launch.alive,
-                                generation: 0,
+                                deadline,
+                                pending: Arc::clone(
+                                    launch
+                                        .wake
+                                        .ready
+                                        .as_ref()
+                                        .expect("pane wake tracks readiness"),
+                                ),
                             },
                         );
                         self.dispatch(id, None);
@@ -249,8 +264,6 @@ impl Shard {
                     Err(error) => report_worker_error(&publisher, &error),
                 }
             }
-            self.expire_deadlines();
-            let mut ready = Vec::new();
             self.collect_channels(&mut ready);
             let timeout = if ready.is_empty() {
                 self.poll_timeout()
@@ -262,14 +275,17 @@ impl Shard {
             #[cfg(not(unix))]
             self.poll(timeout, &mut ready);
             self.collect_channels(&mut ready);
+            self.collect_deadlines(&mut ready);
             ready.sort_unstable_by_key(|(id, _, _, _)| (*id < self.cursor, *id));
+            #[cfg(all(unix, not(target_os = "linux")))]
             let only_ready = ready.first().is_some_and(|(only_id, _, _, _)| {
                 ready.iter().all(|(id, _, _, _)| id == only_id)
-                    && self.actors.iter().all(|(id, entry)| {
-                        id == only_id || entry.actor.next_deadline() > Instant::now()
-                    })
+                    && self
+                        .actors
+                        .iter()
+                        .all(|(id, entry)| id == only_id || entry.deadline > Instant::now())
             });
-            for (id, wake, pty, child) in ready {
+            for (id, wake, pty, child) in ready.drain(..) {
                 if let Some(mut entry) = self.actors.remove(&id) {
                     let result = (|| {
                         #[cfg(unix)]
@@ -283,7 +299,7 @@ impl Shard {
                             }
                         }
                         #[cfg(any(target_os = "linux", not(unix)))]
-                        let _ = (pty, only_ready);
+                        let _ = pty;
                         #[cfg(not(unix))]
                         let _ = child;
                         let actor = if let Some(wake) = wake {
@@ -297,7 +313,7 @@ impl Shard {
                             Ok(None)
                         }
                     })();
-                    self.store_result(id, entry.publisher, entry._alive, entry.generation, result);
+                    self.store_result(id, entry.publisher, entry._alive, entry.pending, result);
                     self.cursor = id + 1;
                 }
             }
@@ -314,8 +330,14 @@ impl Shard {
             {
                 continue;
             }
+            if !entry.pending.load(Ordering::Acquire)
+                || !entry.pending.swap(false, Ordering::AcqRel)
+            {
+                continue;
+            }
             match entry.actor.try_wake() {
                 Ok(Some(wake)) => {
+                    entry.pending.store(true, Ordering::Release);
                     if let Some((_, pending_wake, _, _)) = pending {
                         *pending_wake = Some(wake);
                     } else {
@@ -338,7 +360,7 @@ impl Shard {
             } else {
                 entry.actor.on_deadline()
             };
-            self.store_result(id, entry.publisher, entry._alive, entry.generation, result);
+            self.store_result(id, entry.publisher, entry._alive, entry.pending, result);
         }
     }
 
@@ -347,21 +369,21 @@ impl Shard {
         id: usize,
         publisher: Publisher,
         alive: Sender<Infallible>,
-        generation: u64,
+        pending: Arc<AtomicBool>,
         result: Result<Option<Actor>, WorkerError>,
     ) {
         match result {
             Ok(Some(actor)) => {
-                let generation = generation.wrapping_add(1);
-                self.deadlines
-                    .push(Reverse((actor.next_deadline(), id, generation)));
+                let deadline = actor.next_deadline();
+                pending.store(true, Ordering::Release);
                 self.actors.insert(
                     id,
                     Entry {
                         actor,
                         publisher,
                         _alive: alive,
-                        generation,
+                        deadline,
+                        pending,
                     },
                 );
             }
@@ -370,13 +392,6 @@ impl Shard {
                 report_worker_error(&publisher, &error);
                 publisher.set_foreground_source(None);
             }
-        }
-        if self.deadlines.len() > self.actors.len() * 4 + 64 {
-            self.deadlines = self
-                .actors
-                .iter()
-                .map(|(&id, entry)| Reverse((entry.actor.next_deadline(), id, entry.generation)))
-                .collect();
         }
     }
 
@@ -387,39 +402,21 @@ impl Shard {
         }
     }
 
-    fn discard_stale_deadlines(&mut self) {
-        while let Some(Reverse((_, id, generation))) = self.deadlines.peek() {
-            if self
-                .actors
-                .get(id)
-                .is_some_and(|entry| entry.generation == *generation)
-            {
-                break;
-            }
-            self.deadlines.pop();
-        }
-    }
-
-    fn expire_deadlines(&mut self) {
+    fn collect_deadlines(&self, ready: &mut Vec<(usize, Option<Wake>, bool, bool)>) {
         let now = Instant::now();
-        for _ in 0..self.actors.len() {
-            self.discard_stale_deadlines();
-            let Some(Reverse((due, id, _))) = self.deadlines.peek().copied() else {
-                return;
-            };
-            if due > now {
-                return;
+        for (&id, entry) in &self.actors {
+            if entry.deadline <= now && !ready.iter().any(|(ready_id, _, _, _)| *ready_id == id) {
+                ready.push((id, None, false, false));
             }
-            self.deadlines.pop();
-            self.dispatch(id, None);
         }
     }
 
-    fn poll_timeout(&mut self) -> Duration {
-        self.discard_stale_deadlines();
-        self.deadlines
-            .peek()
-            .map_or(IDLE_SLEEP, |Reverse((due, _, _))| {
+    fn poll_timeout(&self) -> Duration {
+        self.actors
+            .values()
+            .map(|entry| entry.deadline)
+            .min()
+            .map_or(IDLE_SLEEP, |due| {
                 due.saturating_duration_since(Instant::now())
             })
     }
@@ -431,8 +428,9 @@ impl Shard {
         ready: &mut Vec<(usize, Option<Wake>, bool, bool)>,
     ) -> Result<(), WorkerError> {
         use rustix::event::{PollFd, PollFlags};
-        let mut fds = vec![PollFd::new(&self.wake_rx, PollFlags::IN)];
-        let mut sources = Vec::new();
+        let mut fds = SmallVec::<[PollFd<'_>; 9]>::new();
+        fds.push(PollFd::new(&self.wake_rx, PollFlags::IN));
+        let mut sources = SmallVec::<[(usize, bool); 8]>::new();
         for (&id, entry) in &self.actors {
             if let Actor::Live(actor) = &entry.actor {
                 #[cfg(target_os = "linux")]
@@ -463,6 +461,9 @@ impl Shard {
         }
         if !fds[0].revents().is_empty() {
             drain_wake_pipe(&self.wake_rx)?;
+            if let Some(pending) = &self.wake.pending {
+                pending.store(false, Ordering::Release);
+            }
         }
         for ((id, pty), fd) in sources.into_iter().zip(fds.iter().skip(1)) {
             if !fd.revents().is_empty() {

@@ -75,3 +75,74 @@ fn shutdown_of_a_signal_ignoring_child_does_not_block_other_panes() {
     wait(|| captured(&live, "other pane"));
     wait(|| events.receiver.is_closed());
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn shards_start_on_assignment_and_survive_the_last_pane() {
+    const CHILD: &str = "ZZ_SHARD_START_TEST";
+    if std::env::var_os(CHILD).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().expect("test binary"))
+            .args([
+                "--exact",
+                "session::shard::tests::shards_start_on_assignment_and_survive_the_last_pane",
+            ])
+            .env(CHILD, "1")
+            .env("ZZ_PTY_SHARDS", "4")
+            .output()
+            .expect("isolated shard test");
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    let threads = || {
+        std::fs::read_dir("/proc/self/task")
+            .expect("process threads")
+            .filter_map(Result::ok)
+            .filter_map(|entry| std::fs::read_to_string(entry.path().join("comm")).ok())
+            .filter(|name| name.starts_with("zz-pty-shard-"))
+            .count()
+    };
+    assert_eq!(threads(), 0);
+    let first = choose().expect("choose shard").expect("enabled shards");
+    let pane = session(&first, "printf 'ready\\r\\n'; exec cat");
+    wait(|| captured(&pane, "ready"));
+    assert_eq!(threads(), 1);
+    drop(pane);
+    for expected in 2..=4 {
+        let _ = choose().expect("choose shard").expect("enabled shards");
+        wait(|| threads() == expected);
+    }
+    let _ = choose().expect("reuse shard").expect("enabled shards");
+    assert_eq!(threads(), 4);
+}
+
+#[test]
+fn coalesced_wakes_service_concurrent_view_and_input_bursts() {
+    let shard = ShardHandle::start(103).expect("shard");
+    let panes = (0..4)
+        .map(|_| session(&shard, "stty -echo; printf 'ready\\r\\n'; exec cat"))
+        .collect::<Vec<_>>();
+    for pane in &panes {
+        wait(|| captured(pane, "ready"));
+    }
+    thread::scope(|scope| {
+        for (index, pane) in panes.iter().enumerate() {
+            scope.spawn(move || {
+                let view = TerminalViewId(index as u64);
+                for burst in 0..32 {
+                    pane.attach_view(view);
+                    pane.set_view_stream(view, ViewStream::Foreground);
+                    pane.send_text(format!("burst {burst}\n"));
+                    pane.set_view_stream(view, ViewStream::Off);
+                    pane.detach_view(view);
+                }
+                pane.send_text("last burst\n");
+                wait(|| captured(pane, "last burst"));
+            });
+        }
+    });
+}

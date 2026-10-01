@@ -9009,6 +9009,7 @@ impl Shared {
                                 terminal.retire();
                             }
                             inner.last_output.remove(pane);
+                            inner.control_activity_pending.remove(pane);
                             #[cfg(all(feature = "agent", unix))]
                             inner.claude_peer_states.remove(pane);
                             inner.terminal_spawns.remove(pane);
@@ -12020,6 +12021,9 @@ impl Shared {
     }
 
     fn publish_control_output_for_pane(&self, pane: PaneId, bytes: &Arc<[u8]>) {
+        if !bytes.is_empty() {
+            self.note_control_output_activity(pane);
+        }
         self.publish_pipe_output_for_pane(pane, bytes);
 
         loop {
@@ -26232,6 +26236,11 @@ impl Shared {
         exclude: Option<ClientId>,
         attached_only: bool,
     ) {
+        let layout_hook = matches!(&payload, EventPayload::HookEvent { name, .. } if name == "window-layout-changed");
+        let _order = layout_hook.then(|| self.snapshot_order.lock());
+        if layout_hook {
+            self.publish_compact_trees();
+        }
         let message = Self::event(payload);
         let subscribers = {
             let inner = self.inner.lock();
@@ -27530,13 +27539,14 @@ impl Shared {
     fn raise_window_activity(self: &Arc<Self>, window: WindowId, pane: PaneId) {
         let (snapshot_changed, hook, notifications) = {
             let mut inner = self.inner.lock();
+            let pending = inner.control_activity_pending.remove(&pane);
             if !inner.engine.monitor_activity_for_window(window) {
                 return;
             }
             let Some(window_state) = inner.engine.state.windows.get(&window) else {
                 return;
             };
-            if window_state.activity_flag {
+            if window_state.activity_flag && !pending {
                 return;
             }
             let session = window_state.session;
@@ -27550,7 +27560,7 @@ impl Shared {
                 .get(&session)
                 .is_some_and(|clients| !clients.is_empty());
             let suppressed = current && attached;
-            let snapshot_changed = if suppressed {
+            let snapshot_changed = if suppressed || pending {
                 false
             } else {
                 inner.engine.state.set_window_activity_flag(window, true)
@@ -31812,6 +31822,7 @@ struct ServerState {
     deferred_control_refresh: bool,
     terminals: Arc<BTreeMap<PaneId, Arc<TerminalSession>>>,
     last_output: BTreeMap<PaneId, Instant>,
+    control_activity_pending: BTreeSet<PaneId>,
     #[cfg(all(feature = "agent", unix))]
     claude_peer_states: BTreeMap<PaneId, String>,
     terminal_spawns: BTreeMap<PaneId, TerminalSpawn>,

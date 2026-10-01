@@ -56,6 +56,7 @@ pub enum TreeOp {
         index: u32,
         automatic_rename: bool,
         activity: bool,
+        silence: bool,
     },
     WindowPresentation {
         session: SessionId,
@@ -269,6 +270,7 @@ fn window_diff(
     if old.index != next.index
         || old.automatic_rename != next.automatic_rename
         || old.activity != next.activity
+        || old.silence != next.silence
     {
         ops.push(TreeOp::WindowFlags {
             session,
@@ -276,6 +278,7 @@ fn window_diff(
             index: next.index,
             automatic_rename: next.automatic_rename,
             activity: next.activity,
+            silence: next.silence,
         });
     }
     if old.status_label != next.status_label
@@ -461,11 +464,13 @@ fn apply_op(snapshot: &mut MuxSnapshot, op: &TreeOp) -> Result<(), TreeDeltaErro
             index,
             automatic_rename,
             activity,
+            silence,
         } => {
             let window = window_mut(snapshot, *session, *window)?;
             window.index = *index;
             window.automatic_rename = *automatic_rename;
             window.activity = *activity;
+            window.silence = *silence;
         }
         TreeOp::WindowPresentation {
             session,

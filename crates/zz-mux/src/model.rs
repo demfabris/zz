@@ -3944,6 +3944,7 @@ impl MuxState {
             visible_layout_dump,
             status_label: String::new(),
             activity: window.activity_flag,
+            silence: window.silence_flag,
             pane_border_status: PaneBorderStatus::Off,
             pane_border_lines: PaneBorderLines::Single,
             pane_border_indicators: PaneBorderIndicators::Colour,

@@ -486,7 +486,40 @@ pub(super) fn control_query_can_defer_wakeup(
             .is_none_or(|hook| !inner.engine.has_hook_commands(context.session, hook))
 }
 
+#[cfg(test)]
+#[path = "ctrl_flags_tests.rs"]
+mod flags_tests;
+
 impl Shared {
+    pub(super) fn note_control_output_activity(&self, pane: PaneId) {
+        let changed = {
+            let mut inner = self.inner.lock();
+            let Some(window) = inner.engine.state.window_for_pane(pane) else {
+                return;
+            };
+            if !inner.engine.monitor_activity_for_window(window) {
+                return;
+            }
+            let session = inner.engine.state.windows[&window].session;
+            let current = inner.engine.state.sessions[&session].active_window == window;
+            let attached = inner
+                .attached
+                .get(&session)
+                .is_some_and(|clients| !clients.is_empty());
+            if current && attached {
+                return;
+            }
+            let changed = inner.engine.state.set_window_activity_flag(window, true);
+            if changed {
+                inner.control_activity_pending.insert(pane);
+            }
+            changed
+        };
+        if changed {
+            self.publish_snapshot_state();
+        }
+    }
+
     pub(super) fn register_welcome(&self, hello: &Hello) -> Option<(ClientId, Welcome)> {
         let client_hello = &hello.client;
         let client = self.register_identity(

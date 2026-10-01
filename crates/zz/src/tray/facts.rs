@@ -221,6 +221,7 @@ mod tests {
             visible_layout_dump: String::new(),
             status_label: String::new(),
             activity: false,
+            silence: false,
             pane_border_status: PaneBorderStatus::default(),
             pane_border_lines: PaneBorderLines::default(),
             pane_border_indicators: PaneBorderIndicators::default(),

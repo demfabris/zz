@@ -41,6 +41,7 @@ fn snapshot() -> MuxSnapshot {
                 visible_layout_dump: String::new(),
                 status_label: String::new(),
                 activity: false,
+                silence: false,
                 pane_border_status: PaneBorderStatus::Off,
                 pane_border_lines: PaneBorderLines::Single,
                 pane_border_indicators: PaneBorderIndicators::Colour,
@@ -189,7 +190,7 @@ fn hello_moves_environment_into_one_blob_and_keeps_raw_bytes() {
 #[test]
 fn small_tree_edits_stay_small_and_apply_without_replacing_windows() {
     let before = snapshot();
-    for change in 0..4 {
+    for change in 0..6 {
         let mut after = before.clone();
         after.generation += 1;
         match change {
@@ -202,7 +203,9 @@ fn small_tree_edits_stay_small_and_apply_without_replacing_windows() {
                     .unwrap()
                     .title = "renamed".to_owned();
             }
-            _ => after.sessions[0].windows[0].status_label = "own label".to_owned(),
+            3 => after.sessions[0].windows[0].status_label = "own label".to_owned(),
+            4 => after.sessions[0].windows[0].activity = true,
+            _ => after.sessions[0].windows[0].silence = true,
         }
         let delta = TreeDelta::between(&before, &after);
         assert_eq!(delta.ops.len(), 1);

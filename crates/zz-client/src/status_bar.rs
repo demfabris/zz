@@ -212,6 +212,7 @@ mod tests {
             visible_layout_dump: String::new(),
             status_label: String::new(),
             activity,
+            silence: false,
             pane_border_status: zz_protocol::PaneBorderStatus::Off,
             pane_border_lines: zz_protocol::PaneBorderLines::Single,
             pane_border_indicators: zz_protocol::PaneBorderIndicators::Colour,

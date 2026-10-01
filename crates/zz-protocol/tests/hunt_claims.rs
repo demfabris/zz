@@ -212,6 +212,7 @@ fn control_events_and_window_layout_fields_keep_the_frozen_wire_tail() {
         visible_layout_dump: "V".to_owned(),
         status_label: "S".to_owned(),
         activity: true,
+        silence: false,
         pane_border_status: zz_protocol::PaneBorderStatus::Bottom,
         pane_border_lines: zz_protocol::PaneBorderLines::Heavy,
         pane_border_indicators: zz_protocol::PaneBorderIndicators::Both,
@@ -221,7 +222,7 @@ fn control_events_and_window_layout_fields_keep_the_frozen_wire_tail() {
     assert_eq!(
         postcard::to_stdvec(&window).expect("encode window"),
         [
-            1, 2, 1, b'w', 1, 3, 0, 0, 3, 0, 1, b'L', 1, b'V', 1, b'S', 1, 2, 2, 3, 1, 3, 1, 3
+            1, 2, 1, b'w', 1, 3, 0, 0, 3, 0, 1, b'L', 1, b'V', 1, b'S', 1, 0, 2, 2, 3, 1, 3, 1, 3
         ]
     );
 }

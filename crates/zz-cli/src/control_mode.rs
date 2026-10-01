@@ -1126,6 +1126,9 @@ impl ControlState {
         if window.zoomed_pane.is_some() {
             flags.push('Z');
         }
+        if window.silence {
+            flags.push('~');
+        }
         flags
     }
 }
@@ -5091,6 +5094,7 @@ mod tests {
             visible_layout_dump: "ef01,80x24,0,0,5".to_owned(),
             status_label: String::new(),
             activity: false,
+            silence: false,
             pane_border_status: zz_protocol::PaneBorderStatus::Off,
             pane_border_lines: zz_protocol::PaneBorderLines::Single,
             pane_border_indicators: zz_protocol::PaneBorderIndicators::Colour,
@@ -5128,6 +5132,72 @@ mod tests {
             render_hook(&state, "window-layout-changed", &variables).as_deref(),
             Some("%layout-change @3 abcd,80x24,0,0,5 ef01,80x24,0,0,5 !*-Z")
         );
+    }
+
+    #[test]
+    fn layout_notifications_reduce_each_compact_flag_change() {
+        for (kind, expected) in [
+            ("activity", "#"),
+            ("bell", "!"),
+            ("silence", "~"),
+            ("zoom", "Z"),
+            ("last", "-"),
+            ("current", "*"),
+        ] {
+            let mut state = layout_notification_state();
+            let mut before = state.tree.clone();
+            let session = &mut before.sessions[0];
+            session.active_window = if kind == "last" {
+                WindowId(3)
+            } else {
+                WindowId(7)
+            };
+            let window = &mut session.windows[0];
+            window.activity = false;
+            window.silence = false;
+            window.zoomed_pane = None;
+            window.panes.get_mut(&zz_protocol::PaneId(5)).unwrap().bell = false;
+            state.last_windows.clear();
+            state.attach(SessionId(1), before.clone());
+            state.last_windows.clear();
+            let mut after = before.clone();
+            after.generation += 1;
+            let session = &mut after.sessions[0];
+            let window = &mut session.windows[0];
+            match kind {
+                "activity" => window.activity = true,
+                "bell" => window.panes.get_mut(&zz_protocol::PaneId(5)).unwrap().bell = true,
+                "silence" => window.silence = true,
+                "zoom" => window.zoomed_pane = Some(zz_protocol::PaneId(5)),
+                "last" => session.active_window = WindowId(7),
+                "current" => session.active_window = WindowId(3),
+                _ => unreachable!(),
+            }
+            let delta = zz_protocol::TreeDelta::between(&before, &after);
+            let mut output = ControlWriter::new(Vec::new(), false);
+            for payload in [
+                EventPayload::TreeDelta(delta),
+                EventPayload::HookEvent {
+                    name: "window-layout-changed".to_owned(),
+                    variables: BTreeMap::from([("hook_window".to_owned(), "@3".to_owned())]),
+                },
+            ] {
+                let encoded = zz_protocol::encode_protocol_message(&ProtocolMessage::Event(
+                    zz_protocol::Event {
+                        sequence: 1,
+                        payload,
+                    },
+                ))
+                .unwrap();
+                let message = zz_protocol::decode_protocol_frame(&encoded).unwrap();
+                handle_protocol(message, &mut state, &mut output).unwrap();
+            }
+            assert_eq!(
+                std::str::from_utf8(&output.output).unwrap(),
+                format!("%layout-change @3 abcd,80x24,0,0,5 ef01,80x24,0,0,5 {expected}\n"),
+                "{kind}",
+            );
+        }
     }
 
     #[test]

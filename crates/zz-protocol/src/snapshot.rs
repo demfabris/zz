@@ -527,6 +527,8 @@ pub struct WindowSnapshot {
     pub status_label: String,
     pub activity: bool,
     #[serde(default)]
+    pub silence: bool,
+    #[serde(default)]
     pub pane_border_status: PaneBorderStatus,
     #[serde(default)]
     pub pane_border_lines: PaneBorderLines,
@@ -654,6 +656,7 @@ mod tests {
             visible_layout_dump: String::new(),
             status_label: String::new(),
             activity: false,
+            silence: false,
             pane_border_status: PaneBorderStatus::Off,
             pane_border_lines: PaneBorderLines::Single,
             pane_border_indicators: PaneBorderIndicators::Colour,
@@ -705,6 +708,7 @@ mod tests {
             visible_layout_dump: String::new(),
             status_label,
             activity: false,
+            silence: false,
             pane_border_status: PaneBorderStatus::Off,
             pane_border_lines: PaneBorderLines::Single,
             pane_border_indicators: PaneBorderIndicators::Colour,

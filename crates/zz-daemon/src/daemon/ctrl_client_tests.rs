@@ -183,3 +183,79 @@ fn readiness_buffered_decode_leaves_kernel_data_and_eof_for_the_readiness_read()
         if error.kind() == std::io::ErrorKind::UnexpectedEof)
     );
 }
+#[test]
+fn legacy_command_attach_reconnects_with_the_original_route() {
+    use crate::transport::{LocalTransport, Transport, TransportListener, TransportStream};
+    use zz_protocol::{AttachOperation, ClientKind, ProtocolMessage};
+
+    let (directory, daemon, client) = readiness_pair();
+    let socket = directory.path().with_extension("sock");
+    let listener = LocalTransport::bind(&socket).unwrap();
+    let attach = AttachOperation::Session("rollback".to_owned());
+    let expected_attach = attach.clone();
+    let worker = std::thread::spawn(move || {
+        let mut legacy = super::ProtocolReceiver::new(daemon);
+        assert!(matches!(legacy.recv(), Err(crate::DaemonError::Protocol(
+            zz_protocol::ProtocolError::Io(error)))
+            if error.kind() == std::io::ErrorKind::UnexpectedEof));
+        let stream = listener.accept().unwrap();
+        stream
+            .set_timeout(Some(std::time::Duration::from_secs(2)))
+            .unwrap();
+        let mut reader = super::ProtocolReceiver::new(stream.try_clone().unwrap());
+        let mut writer = super::ProtocolSender::new(stream);
+        let ProtocolMessage::Hello(hello) = reader.recv().unwrap() else {
+            panic!("interactive attachment must use Hello")
+        };
+        assert_eq!(hello.client.kind, ClientKind::Interactive);
+        assert_eq!(hello.attach, Some(expected_attach));
+        assert!(hello.client.working_directory.is_none());
+        assert!(hello.client.origin.is_none());
+        writer
+            .send(&ProtocolMessage::ServerHello(Box::new(
+                zz_protocol::ServerHello {
+                    protocol_version: zz_protocol::PROTOCOL_VERSION,
+                    server_id: 37,
+                    client_id: zz_protocol::ClientId(19),
+                    client_instance_id: hello.client.client_instance_id,
+                    capabilities: vec![
+                        zz_protocol::PANE_FRAME_CAPABILITY.to_owned(),
+                        zz_protocol::CONTROL_CAPABILITY.to_owned(),
+                    ],
+                    appearance: Default::default(),
+                    appearance_provenance: Default::default(),
+                    mux_options: Default::default(),
+                    status: Default::default(),
+                    key_tables: Vec::new(),
+                },
+            )))
+            .unwrap();
+    });
+    let command = super::CommandClient {
+        stdin_enabled: false,
+        stdin_spent: false,
+        stderr_handler: None,
+        stdout_handler: None,
+        link: super::CommandLink::Legacy {
+            reader: super::ProtocolReceiver::new(client.try_clone().unwrap()),
+            writer: super::ProtocolSender::new(client),
+            server_id: 37,
+        },
+        route: super::CommandRoute {
+            socket: socket.clone(),
+            display: "ssh://rollback-host".to_owned(),
+            facts: super::EndpointFactsScope::PortableTerminalSize,
+            send_origin: true,
+        },
+        server_id: Some(37),
+        _ssh_forward: None,
+    };
+    let result = command.into_interactive(attach);
+    worker.join().unwrap();
+    let interactive = result.unwrap();
+    assert_eq!(interactive.server_hello().server_id, 37);
+    assert_eq!(
+        interactive.server_hello().client_id,
+        zz_protocol::ClientId(19)
+    );
+}

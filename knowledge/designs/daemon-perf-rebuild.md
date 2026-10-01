@@ -2271,7 +2271,12 @@ As built on `perf/ctrl`, 2026-09-30:
   revision. Control requests no keys because its frontend does not use them; TUI requests
   Hash, and desktop, web, iOS, and FFI request Full.
 - `InteractiveClient` attaches with Hello; `CommandClient::into_interactive` retains its
-  existing transport after `ExecResume`. TUI no longer opens option/preflight clients.
+  existing transport after `ExecResume`. With `ZZ_PERF_LEGACY_COMMAND=1`, it closes the
+  command transport and reconnects through the saved route before sending interactive
+  Hello. It preserves endpoint facts and transfers the existing SSH forward to the
+  interactive client. The rollback test checks the old connection closes, the new
+  connection receives the requested attachment, and remote routes omit local cwd/origin.
+  TUI no longer opens option/preflight clients.
   Options include `ExtendedKeys` and `FocusEvents`, bringing the shared catalog to 20.
 - Control sends each raw line through one `ExecRequest`. Parsing, daemon-host variable
   expansion, and alias freezing happen once in the daemon. `ControlCommandStarted`
@@ -2408,6 +2413,15 @@ As built on `perf/ctrl`, 2026-09-30:
 `ZZ_PERF_TUI_COALESCE=0` restores eager full-row paints and uncached border/status work.
 Full wire rollback requires reverting matching daemon and clients.
 
+
+Review corrections, 2026-09-30:
+
+- Fixed the legacy command attachment hang by reconnecting only legacy command links;
+  Exec resume still upgrades its existing connection.
+- The standalone iOS terminal example now caches `(GridSize, layout_generation)` and
+  reports unchanged geometry again after the generation changes, matching shared clients.
+- Validation and the W2-COPY/W2-FMT merge are in progress. The orchestrator runs the
+  merged performance A/B; the measurements below describe the earlier frozen source.
 
 Mac measurements on frozen source `8c49034f1b19b023d85008cf0e0b2d4809533d06`:
 

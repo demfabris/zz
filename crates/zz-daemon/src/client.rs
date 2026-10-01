@@ -444,12 +444,19 @@ impl CommandClient {
         self,
         attach: zz_protocol::AttachOperation,
     ) -> Result<InteractiveClient, DaemonError> {
-        let (reader, writer) = match self.link {
-            CommandLink::Exec { reader, writer, .. }
-            | CommandLink::Legacy { reader, writer, .. } => (reader, writer),
+        let stream = match self.link {
+            CommandLink::Exec { reader, writer, .. } => {
+                drop(reader);
+                writer.stream
+            }
+            CommandLink::Legacy { reader, writer, .. } => {
+                drop(reader);
+                drop(writer);
+                LocalTransport::connect(&self.route.socket)?
+            }
         };
         let connected = connect_stream_hello(
-            ClientStream::Local(writer.stream),
+            ClientStream::Local(stream),
             &self.route.display,
             ClientKind::Interactive,
             short_device_name(),
@@ -461,7 +468,6 @@ impl CommandClient {
             self.route.facts,
             Some(attach),
         )?;
-        drop(reader);
         let client = InteractiveClient::from_connected(connected);
         #[cfg(all(any(unix, windows), not(target_os = "ios")))]
         let client = {

@@ -37,7 +37,7 @@ pub struct TerminalApp {
     cache: RowRenderCache,
     images: zz_ui::terminal_images::TerminalImages,
     revision: u64,
-    grid: Option<GridSize>,
+    grid: Option<(GridSize, u64)>,
     geometry: Option<TerminalGeometry>,
     forwarded: HashSet<String>,
     chrome: ChromeKeymap,
@@ -540,9 +540,10 @@ impl TerminalApp {
             cx,
         );
         let grid = paint.geometry.grid;
+        let layout_generation = self.core.layout_generation();
         self.geometry = Some(paint.geometry);
-        if self.grid != Some(grid) && grid.columns > 0 && grid.rows > 0 {
-            self.grid = Some(grid);
+        if self.grid != Some((grid, layout_generation)) && grid.columns > 0 && grid.rows > 0 {
+            self.grid = Some((grid, layout_generation));
             self.send(
                 InputMessage::ResizeTerminalV2 {
                     pane,
@@ -550,7 +551,7 @@ impl TerminalApp {
                     rows: grid.rows,
                     cell_width_px: grid.cell_width_px,
                     cell_height_px: grid.cell_height_px,
-                    layout_generation: self.core.layout_generation(),
+                    layout_generation,
                 },
                 cx,
             );

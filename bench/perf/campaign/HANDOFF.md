@@ -11,21 +11,25 @@ read "Lane brief rules" before launching anything.
 
 ## Next session: wave 3
 
-1. Start on both hosts: `git -C ~/dev/zz-perf-int checkout -b perf/wave3 main` (the integration
-   worktree sits on `perf/wave2` = `main`). alienware's own `~/dev/zz` checkout is still at
-   `fecaaa43`: `git -C ~/dev/zz pull --ff-only` there before using it.
+1. Started 2026-10-01: `perf/wave3` on both hosts, lanes `~/dev/zz-loop` (Mac) and
+   `~/dev/zz-shards` (alienware) from `dcf05102`. Create wave and lane branches from
+   `origin/main` after a fetch, never from a local `main`: alienware's clone had a stale local
+   `main` (`fecaaa43`), the first SHARDS slice started on pre-wave-2 code, and its watchdog killed
+   it for touching every wave-2 file.
 2. Lanes and hosts: W3-SHARDS on alienware (the Linux gather fold, epoll and pidfd paths and Linux
    `bench/run.sh` live there), W3-LOOP on the Mac. Write zones do not overlap (LOOP owns daemon.rs
    production code, SHARDS owns zz-terminal session code). Merge order SHARDS, then LOOP (LOOP's
    gate is against the SHARDS JSON). Lane worktrees `~/dev/zz-shards`, `~/dev/zz-loop` from
    `perf/wave3`.
 3. Slices, one commit each (see "Lane brief rules"). LOOP: e0, a, b, c, d, e as in its plan
-   section. SHARDS: s1 shard threads and wake fd owning the PTY fds (K = min(parallelism, 4),
-   `ZZ_PTY_SHARDS`); s2 the per-pane state machine (`on_readable`, `on_command`, `on_deadline`,
-   keeping 64 KiB reads, turn caps, 16 ms frames and the echo fast path); s3 terminal process
+   section. SHARDS: s1 the per-pane state machine (`PaneActor` with `on_readable`, `on_command`,
+   `on_deadline`, keeping 64 KiB reads, turn caps, 16 ms frames and the echo fast path); s2 shard
+   threads and wake fd owning the PTY fds (K = min(parallelism, 4), `ZZ_PTY_SHARDS`); s3 terminal process
    spawn without allocation in the child; s4 one lazy search thread; s5 one live frame per pane
    per publish; s6 the Linux gather fold, only if `bench/run.sh` on Linux matches; s7 the ConPTY
-   reader feeding shards (`cargo check` for Windows). Per slice: map, `lane-briefs.py '<spec>'
+   reader feeding shards (`cargo check` for Windows). The state machine goes first (s1, same
+   thread, no behaviour change), the shard threads second: a pane cannot move onto a shared
+   thread while its loop blocks. Per slice: map, `lane-briefs.py '<spec>'
    slice`, `lane-run.sh <wt> <brief> <out> high 90 60 <base> <zone-globs>`, rerun its gates, merge
    into the lane branch, then the next brief. An ultra parity review (source-only) after s2, s3,
    LOOP b and LOOP d, the risky ones.
@@ -739,7 +743,9 @@ summary in `<out>.cost.json`, `<out>.failed` when no valid answer), `lane-watchd
    full fix list. Never `--resume`.
 4. Watchdog per lane (`lane-run.sh` starts it; every 5 min) kills the codex tree and every process
    whose cwd is inside the worktree when: the wall budget is spent; no new commit for the idle
-   limit (60 min impl, 30 min fix/focus); a helper agent appears (a subagent rollout in
+   limit (60 min impl, 30 min fix/focus, 45 min for a fix whose done criterion includes perf
+   runs; briefs say to commit a checkpoint before each measurement series, because the first
+   SHARDS s2 fix was stopped mid-series with all its work uncommitted); a helper agent appears (a subagent rollout in
    `~/.codex/sessions` for that cwd; `features.multi_agent=false` does not remove the tools in
    codex 0.159, so the brief also forbids them); a file changes outside the write-zone globs (plus
    the design doc); a file is added under `third_party/` or a vendored crate; more than 50 or 100

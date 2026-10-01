@@ -10433,15 +10433,25 @@ struct SearchWorker {
     latest_requests: HashMap<TerminalViewId, Arc<AtomicU64>>,
     next_request: u64,
     match_scratch: Vec<SearchMatch>,
-    idle: Option<SearchThread>,
+    mailbox: Arc<SearchMailbox>,
 }
 
-struct SearchThread {
+struct SearchMailbox {
+    queued: AtomicBool,
     jobs: Receiver<SearchJobs>,
     results: Sender<SearchResults>,
     discard_results: Receiver<SearchResults>,
     wake: ActorWake,
 }
+
+static SEARCH_SCHEDULER: LazyLock<Sender<Arc<SearchMailbox>>> = LazyLock::new(|| {
+    let (ready, mailboxes) = crossbeam_channel::unbounded();
+    thread::Builder::new()
+        .name("zz-terminal-search".into())
+        .spawn(move || search_worker(&mailboxes))
+        .expect("could not start the terminal search thread");
+    ready
+});
 
 impl SearchWorker {
     fn spawn(wake: ActorWake) -> (Self, Receiver<SearchResults>) {
@@ -10456,7 +10466,8 @@ impl SearchWorker {
                 latest_requests: HashMap::new(),
                 next_request: 0,
                 match_scratch: Vec::new(),
-                idle: Some(SearchThread {
+                mailbox: Arc::new(SearchMailbox {
+                    queued: AtomicBool::new(false),
                     jobs: job_rx,
                     results: result_tx,
                     discard_results,
@@ -10465,20 +10476,6 @@ impl SearchWorker {
             },
             results,
         )
-    }
-
-    fn start(&mut self) {
-        let Some(idle) = self.idle.take() else {
-            return;
-        };
-        if let Err(error) = thread::Builder::new()
-            .name("zz-terminal-search".into())
-            .spawn(move || {
-                search_worker(&idle.jobs, &idle.results, &idle.discard_results, &idle.wake);
-            })
-        {
-            log::error!("could not start the terminal search thread: {error}");
-        }
     }
 
     fn next_request(&mut self, view_id: TerminalViewId) -> (u64, Arc<AtomicU64>) {
@@ -10497,8 +10494,8 @@ impl SearchWorker {
             if let Some(mut discarded) = pending.by_view.remove(&view_id) {
                 keep_larger_match_scratch(&mut self.match_scratch, &mut discarded.match_scratch);
             }
-            if !pending.by_view.is_empty() {
-                let _ = self.jobs.try_send(pending);
+            if !pending.by_view.is_empty() && self.jobs.try_send(pending).is_ok() {
+                self.schedule();
             }
         }
         request_id
@@ -10519,13 +10516,22 @@ impl SearchWorker {
         keep_larger_match_scratch(&mut self.match_scratch, matches);
     }
 
+    fn schedule(&self) {
+        if !self.mailbox.queued.swap(true, Ordering::AcqRel) {
+            let _ = SEARCH_SCHEDULER.send(Arc::clone(&self.mailbox));
+        }
+    }
+
     fn submit(&mut self, job: SearchJob) {
-        self.start();
         let mut pending = SearchJobs::default();
         pending.by_view.insert(job.view_id, job);
         loop {
             match self.jobs.try_send(pending) {
-                Ok(()) | Err(crossbeam_channel::TrySendError::Disconnected(_)) => return,
+                Ok(()) => {
+                    self.schedule();
+                    return;
+                }
+                Err(crossbeam_channel::TrySendError::Disconnected(_)) => return,
                 Err(crossbeam_channel::TrySendError::Full(returned)) => {
                     pending = returned;
                     if let Ok(older) = self.discard_jobs.try_recv() {
@@ -10547,32 +10553,23 @@ fn merge_older_search_jobs(newer: &mut SearchJobs, older: SearchJobs) {
     }
 }
 
-fn merge_newer_search_jobs(
-    current: &mut SearchJobs,
-    newer: SearchJobs,
-    match_scratch: &mut Vec<SearchMatch>,
-) {
-    for (view_id, job) in newer.by_view {
-        if let Some(mut discarded) = current.by_view.insert(view_id, job) {
-            keep_larger_match_scratch(match_scratch, &mut discarded.match_scratch);
+impl Drop for SearchWorker {
+    fn drop(&mut self) {
+        for latest in self.latest_requests.values() {
+            latest.store(0, Ordering::Release);
         }
     }
 }
 
-fn search_worker(
-    jobs: &Receiver<SearchJobs>,
-    results: &Sender<SearchResults>,
-    discard_results: &Receiver<SearchResults>,
-    wake: &ActorWake,
-) {
+fn search_worker(mailboxes: &Receiver<Arc<SearchMailbox>>) {
     let mut match_scratch = Vec::new();
-    while let Ok(mut pending) = jobs.recv() {
-        while let Ok(newer) = jobs.try_recv() {
-            merge_newer_search_jobs(&mut pending, newer, &mut match_scratch);
-        }
+    while let Ok(mailbox) = mailboxes.recv() {
+        mailbox.queued.store(false, Ordering::Release);
+        let Ok(pending) = mailbox.jobs.try_recv() else {
+            continue;
+        };
         let mut pending = pending.by_view.into_values().collect::<Vec<_>>();
         pending.sort_by_key(|job| job.view_id.0);
-        let mut completed = SearchResults::default();
         for mut job in pending {
             keep_larger_match_scratch(&mut match_scratch, &mut job.match_scratch);
             if job.latest_request.load(Ordering::Acquire) != job.request_id {
@@ -10591,6 +10588,7 @@ fn search_worker(
                 keep_larger_match_scratch(&mut match_scratch, &mut state.matches);
                 continue;
             }
+            let mut completed = SearchResults::default();
             completed.by_view.insert(
                 job.view_id,
                 SearchResult {
@@ -10600,16 +10598,20 @@ fn search_worker(
                     state,
                 },
             );
+            if send_latest_search_results(
+                &mailbox.results,
+                &mailbox.discard_results,
+                completed,
+                &mut match_scratch,
+            ) {
+                mailbox.wake.notify();
+            }
         }
-        if completed.by_view.is_empty() {
-            continue;
-        }
-        if !send_latest_search_results(results, discard_results, completed, &mut match_scratch) {
-            return;
-        }
-        wake.notify();
     }
 }
+
+#[cfg(test)]
+mod search_worker_tests;
 
 fn send_latest_search_results(
     results: &Sender<SearchResults>,
@@ -18664,21 +18666,13 @@ mod tests {
 
     #[test]
     fn cancelling_queued_search_retains_its_match_storage() {
-        let (jobs, job_rx) = crossbeam_channel::bounded::<SearchJobs>(1);
-        let mut worker = SearchWorker {
-            jobs,
-            discard_jobs: job_rx,
-            latest_requests: HashMap::new(),
-            next_request: 0,
-            match_scratch: Vec::new(),
-            idle: None,
-        };
+        let (mut worker, _results) = SearchWorker::spawn(ActorWake::none());
         let matches = Vec::with_capacity(16);
         let allocation = matches.as_ptr();
         let capacity = matches.capacity();
         let view = TerminalViewId(1);
         let (request_id, latest_request) = worker.next_request(view);
-        worker.submit(SearchJob {
+        let job = SearchJob {
             request_id,
             view_id: view,
             screen: Screen::Primary,
@@ -18695,7 +18689,13 @@ mod tests {
             selection: SearchSelectionPolicy::Last,
             match_scratch: matches,
             latest_request,
-        });
+        };
+        worker
+            .jobs
+            .try_send(SearchJobs {
+                by_view: HashMap::from([(view, job)]),
+            })
+            .expect("queued search");
 
         assert!(worker.cancel(view) > request_id);
         assert_eq!(worker.match_scratch.as_ptr(), allocation);
@@ -18822,15 +18822,11 @@ mod tests {
         );
         let mut active = ActiveTerminalViews::from([(view_id, Box::new(view))]);
         let mut inactive = InactiveTerminalViews::new();
-        let (jobs, job_rx) = crossbeam_channel::bounded::<SearchJobs>(1);
-        let mut worker = SearchWorker {
-            jobs,
-            discard_jobs: job_rx,
-            latest_requests: HashMap::from([(view_id, Arc::new(AtomicU64::new(2)))]),
-            next_request: 2,
-            match_scratch: Vec::new(),
-            idle: None,
-        };
+        let (mut worker, _results) = SearchWorker::spawn(ActorWake::none());
+        worker
+            .latest_requests
+            .insert(view_id, Arc::new(AtomicU64::new(2)));
+        worker.next_request = 2;
 
         let stale = snapshot.search(&query, 1, || false).expect("stale result");
         let stale_allocation = stale.matches.as_ptr();
@@ -18896,15 +18892,11 @@ mod tests {
         let mut active = ActiveTerminalViews::new();
         let mut inactive = InactiveTerminalViews::new();
         let view_id = TerminalViewId(99);
-        let (jobs, job_rx) = crossbeam_channel::bounded::<SearchJobs>(1);
-        let mut worker = SearchWorker {
-            jobs,
-            discard_jobs: job_rx,
-            latest_requests: HashMap::from([(view_id, Arc::new(AtomicU64::new(1)))]),
-            next_request: 1,
-            match_scratch: Vec::new(),
-            idle: None,
-        };
+        let (mut worker, _results) = SearchWorker::spawn(ActorWake::none());
+        worker
+            .latest_requests
+            .insert(view_id, Arc::new(AtomicU64::new(1)));
+        worker.next_request = 1;
         let mut matches = Vec::with_capacity(16);
         matches.push(SearchMatch {
             row: 0,

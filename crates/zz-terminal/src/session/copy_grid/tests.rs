@@ -259,15 +259,7 @@ fn wrapped_copy_search_places_emacs_at_end_and_vi_at_start() {
         enter_copy_mode(&mut terminal, &mut None, &mut mode, false, false, None, vi)
             .expect("copy mode");
         mode.as_mut().expect("mode").cursor = point(0, 0);
-        let (jobs, job_rx) = crossbeam_channel::bounded(1);
-        let mut worker = SearchWorker {
-            jobs,
-            discard_jobs: job_rx,
-            latest_requests: std::collections::HashMap::new(),
-            next_request: 0,
-            match_scratch: Vec::new(),
-            idle: None,
-        };
+        let (mut worker, _results) = SearchWorker::spawn(crate::session::ActorWake::none());
         let mut search = None;
         let spec = CopyModeSearch {
             text: "e\u{301}界 target-12345 end".to_owned(),

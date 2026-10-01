@@ -3083,6 +3083,13 @@ The normal dependency trees contain no `portable-pty` on Linux or macOS; Windows
 Linux checks: clippy passed, both terminal modes passed 337 tests with one ignored, and seven compatibility rows passed. The known daemon endpoint test stayed red; four load failures passed alone, and 35 integration tests passed with one ignored.
 Windows builds, Mac runtime checks and the perf gate were not run for this slice.
 
+As built (slice s4, 2026-10-01): `session.rs` `SEARCH_SCHEDULER` starts one process-wide `zz-terminal-search` thread on the first submitted search.
+Each actor keeps its own coalescing job and result mailbox, view cancellation tokens, and wake; dropped actors cancel their outstanding jobs.
+The shared worker preserves view ordering, wrap selection and match scratch, drops stale jobs, and sends each completed view result to its actor.
+Linux tests count one named search thread across three panes and cover overlapping view IDs, stale requests, actor wakes and output-pane results.
+Clippy passed; both terminal modes passed 350 tests with one ignored; five compatibility rows passed; 35 daemon integration tests passed with one ignored.
+The known daemon endpoint test stayed red; four load failures passed alone. Mac checks and the perf gate were not run for this slice.
+
 
 ## W3-LOOP: single-owner mux loop (effort XL)
 

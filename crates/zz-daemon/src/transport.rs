@@ -88,6 +88,11 @@ pub(crate) trait TransportStream: Read + Write + Send + Sized + 'static {
         Err(io::Error::from(io::ErrorKind::Unsupported))
     }
 
+    #[cfg(all(unix, feature = "daemon"))]
+    fn take_buffered_input(&mut self) -> Vec<u8> {
+        Vec::new()
+    }
+
     #[cfg(unix)]
     fn read_ready(&self, _buffer: &mut [u8]) -> io::Result<usize> {
         Err(io::Error::from(io::ErrorKind::Unsupported))
@@ -288,6 +293,23 @@ impl Write for LocalStream {
 
     fn flush(&mut self) -> io::Result<()> {
         self.0.flush()
+    }
+}
+
+#[cfg(all(unix, feature = "daemon"))]
+impl TransportStream for std::os::unix::net::UnixStream {
+    fn try_clone(&self) -> io::Result<Self> {
+        Self::try_clone(self)
+    }
+    fn receive_fd(&self) -> io::Result<std::os::fd::OwnedFd> {
+        use std::os::fd::AsFd;
+        self.as_fd().try_clone_to_owned()
+    }
+    fn shutdown(&self) -> io::Result<()> {
+        self.shutdown(std::net::Shutdown::Both)
+    }
+    fn set_send_buffer_size(&self, bytes: usize) -> io::Result<()> {
+        rustix::net::sockopt::set_socket_send_buffer_size(self, bytes).map_err(io::Error::from)
     }
 }
 

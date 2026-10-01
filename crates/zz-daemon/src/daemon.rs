@@ -21,6 +21,8 @@ use std::{
 use parking_lot::{Condvar, Mutex};
 
 mod chooser_presentation;
+#[cfg(unix)]
+mod connection;
 mod ctrl;
 #[cfg(test)]
 mod ctrl_tests;
@@ -1702,10 +1704,16 @@ impl Daemon {
             }
             (ready_guard, startup_result.and(accept_result), listener)
         };
-        shared.request_shutdown_after_blockers();
-        shared.freeze_response_admissions_and_wait(SHUTDOWN_RESPONSE_TIMEOUT);
-        shared.announce_shutdown();
-        shared.drain_client_writers_for_shutdown(SHUTDOWN_WRITER_TIMEOUT);
+        #[cfg(unix)]
+        let writers_drained = event_loop.shutdown_completed();
+        #[cfg(windows)]
+        let writers_drained = false;
+        if !writers_drained {
+            shared.request_shutdown_after_blockers();
+            shared.freeze_response_admissions_and_wait(SHUTDOWN_RESPONSE_TIMEOUT);
+            shared.announce_shutdown();
+            shared.drain_client_writers_for_shutdown(SHUTDOWN_WRITER_TIMEOUT);
+        }
         socket_guard.release();
         drop(socket_guard);
         drop(listener);
@@ -2080,6 +2088,8 @@ fn prune_paste_uploads(directory: &Path, keep: usize) {
 struct OutboundMailbox {
     state: Mutex<OutboundState>,
     ready: Condvar,
+    #[cfg(unix)]
+    loop_waker: Mutex<Option<Arc<mio::Waker>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -2200,6 +2210,8 @@ struct OutboundState {
     closed: bool,
     writer_finished: bool,
     writer_inflight_bytes: usize,
+    writer_inflight_messages: usize,
+    writer_batch_reliable: usize,
     #[cfg(unix)]
     quiet_socket: Option<std::os::fd::OwnedFd>,
     terminals_held: bool,
@@ -2441,10 +2453,28 @@ fn terminal_transition(pane: PaneId, message: &ProtocolMessage) -> Option<Termin
 }
 
 impl OutboundMailbox {
+    fn notify_one(&self) {
+        self.ready.notify_one();
+        #[cfg(unix)]
+        if let Some(waker) = self.loop_waker.lock().as_ref() {
+            let _ = waker.wake();
+        }
+    }
+
+    fn notify_all(&self) {
+        self.ready.notify_all();
+        #[cfg(unix)]
+        if let Some(waker) = self.loop_waker.lock().as_ref() {
+            let _ = waker.wake();
+        }
+    }
+
     fn new() -> Arc<Self> {
         Arc::new(Self {
             state: Mutex::new(OutboundState::default()),
             ready: Condvar::new(),
+            #[cfg(unix)]
+            loop_waker: Mutex::new(None),
         })
     }
 
@@ -2570,11 +2600,16 @@ impl OutboundMailbox {
         if !reserve_outbound_bytes(&mut state, encoded.len(), 0) {
             shed_preview_terminals(&mut state);
         }
-        if (!state.buffered && state.reliable.len() >= MAX_RELIABLE_MESSAGES)
+        if (!state.buffered
+            && state
+                .reliable
+                .len()
+                .saturating_add(state.writer_inflight_messages)
+                >= MAX_RELIABLE_MESSAGES)
             || !reserve_outbound_bytes(&mut state, encoded.len(), 0)
         {
             close_outbound_too_far_behind(&mut state);
-            self.ready.notify_all();
+            self.notify_all();
             return false;
         }
         state.queued_bytes += encoded.len();
@@ -2582,7 +2617,7 @@ impl OutboundMailbox {
         let wakeup = wakeup && state.ctrl_collecting == ControlCollection::None;
         drop(state);
         if wakeup {
-            self.ready.notify_one();
+            self.notify_one();
         }
         true
     }
@@ -2627,7 +2662,7 @@ impl OutboundMailbox {
             return;
         }
         drop(state);
-        self.ready.notify_one();
+        self.notify_one();
     }
 
     fn enqueue_encoded_reliable_with(
@@ -2653,11 +2688,16 @@ impl OutboundMailbox {
         if !reserve_outbound_bytes(&mut state, encoded.len(), 0) {
             shed_preview_terminals(&mut state);
         }
-        if (!state.buffered && state.reliable.len() >= MAX_RELIABLE_MESSAGES)
+        if (!state.buffered
+            && state
+                .reliable
+                .len()
+                .saturating_add(state.writer_inflight_messages)
+                >= MAX_RELIABLE_MESSAGES)
             || !reserve_outbound_bytes(&mut state, encoded.len(), 0)
         {
             close_outbound_too_far_behind(&mut state);
-            self.ready.notify_all();
+            self.notify_all();
             return false;
         }
         before_push(&mut state);
@@ -2666,7 +2706,7 @@ impl OutboundMailbox {
         let wakeup = state.ctrl_collecting == ControlCollection::None;
         drop(state);
         if wakeup {
-            self.ready.notify_one();
+            self.notify_one();
         }
         true
     }
@@ -2703,7 +2743,7 @@ impl OutboundMailbox {
             .try_fold(0_usize, |total, frame| total.checked_add(frame.len()))
         else {
             close_outbound(&mut state);
-            self.ready.notify_all();
+            self.notify_all();
             return KittyImageEnqueue::Closed;
         };
         if !reserve_outbound_bytes(&mut state, frame_bytes, 0) {
@@ -2713,7 +2753,7 @@ impl OutboundMailbox {
             || !reserve_outbound_bytes(&mut state, frame_bytes, 0)
         {
             close_outbound(&mut state);
-            self.ready.notify_all();
+            self.notify_all();
             return KittyImageEnqueue::Closed;
         }
         for frame in frames {
@@ -2726,7 +2766,7 @@ impl OutboundMailbox {
             .or_default()
             .insert(image_id, generation);
         drop(state);
-        self.ready.notify_one();
+        self.notify_one();
         KittyImageEnqueue::Queued
     }
 
@@ -2780,7 +2820,7 @@ impl OutboundMailbox {
             .try_fold(0_usize, |total, frame| total.checked_add(frame.len()))
         else {
             close_outbound(&mut state);
-            self.ready.notify_all();
+            self.notify_all();
             return PastedImageEnqueue::Closed;
         };
         if !reserve_outbound_bytes(&mut state, frame_bytes, 0) {
@@ -2790,7 +2830,7 @@ impl OutboundMailbox {
             || !reserve_outbound_bytes(&mut state, frame_bytes, 0)
         {
             close_outbound(&mut state);
-            self.ready.notify_all();
+            self.notify_all();
             return PastedImageEnqueue::Closed;
         }
         for frame in frames {
@@ -2803,7 +2843,7 @@ impl OutboundMailbox {
             .or_default()
             .insert(number, token);
         drop(state);
-        self.ready.notify_one();
+        self.notify_one();
         PastedImageEnqueue::Queued
     }
 
@@ -2850,7 +2890,7 @@ impl OutboundMailbox {
             }
         };
         let Some(next_seq) = lagged_from else {
-            self.ready.notify_one();
+            self.notify_one();
             return true;
         };
         log::warn!(
@@ -2894,7 +2934,7 @@ impl OutboundMailbox {
         {
             close_outbound(&mut state);
             drop(state);
-            self.ready.notify_all();
+            self.notify_all();
             return false;
         }
         clear_pending_agent(&mut state, pane);
@@ -2907,7 +2947,7 @@ impl OutboundMailbox {
         queued.frames.extend(frames);
         state.agent_order.push_back(pane);
         drop(state);
-        self.ready.notify_one();
+        self.notify_one();
         true
     }
 
@@ -3083,7 +3123,7 @@ impl OutboundMailbox {
                     || !reserve_outbound_bytes(&mut state, encoded.len(), 0)
                 {
                     close_outbound(&mut state);
-                    self.ready.notify_all();
+                    self.notify_all();
                     return TerminalEnqueue::Closed;
                 }
             }
@@ -3119,7 +3159,7 @@ impl OutboundMailbox {
         );
         state.terminal_order.push_back(pane);
         drop(state);
-        self.ready.notify_one();
+        self.notify_one();
         TerminalEnqueue::Queued
     }
 
@@ -3194,7 +3234,7 @@ impl OutboundMailbox {
             || !reserve_outbound_bytes(&mut state, encoded.len(), replaced_len)
         {
             close_outbound(&mut state);
-            self.ready.notify_all();
+            self.notify_all();
             return false;
         }
         state.queued_bytes = state
@@ -3216,7 +3256,7 @@ impl OutboundMailbox {
             state.terminal_order.push_back(pane);
         }
         drop(state);
-        self.ready.notify_one();
+        self.notify_one();
         true
     }
 
@@ -3262,7 +3302,7 @@ impl OutboundMailbox {
         }
         if !reserve_outbound_bytes(&mut state, encoded.len(), replaced_len) {
             close_outbound(&mut state);
-            self.ready.notify_all();
+            self.notify_all();
             return false;
         }
         state.queued_bytes = state
@@ -3276,7 +3316,7 @@ impl OutboundMailbox {
             discard_outbound_frame(&mut state, replaced.encoded);
         }
         drop(state);
-        self.ready.notify_one();
+        self.notify_one();
         true
     }
 
@@ -3292,6 +3332,52 @@ impl OutboundMailbox {
             }
             self.ready.wait(&mut state);
         }
+    }
+
+    #[cfg(unix)]
+    fn try_recv_batch(&self, frames: &mut Vec<OutboundFrame>, max_bytes: usize) {
+        let mut state = self.state.lock();
+        let mut bytes = 0;
+        let mut messages = 0;
+        while bytes < max_bytes {
+            let reliable = !state.reliable.is_empty();
+            let Some(frame) = pop_ready_frame(&mut state) else {
+                break;
+            };
+            messages += usize::from(reliable);
+            let frame = frame.materialize();
+            bytes += frame.len();
+            frames.push(frame);
+        }
+        state.writer_inflight_bytes = bytes;
+        state.writer_inflight_messages = messages;
+        state.writer_batch_reliable = messages;
+    }
+
+    #[cfg(unix)]
+    fn record_write(&self, bytes: usize) {
+        let mut state = self.state.lock();
+        state.writer_inflight_bytes = state.writer_inflight_bytes.saturating_sub(bytes);
+        state.written_bytes = state.written_bytes.saturating_add(bytes as u64);
+    }
+
+    #[cfg(unix)]
+    fn complete_inflight_frame(&self, index: usize) {
+        let mut state = self.state.lock();
+        if index < state.writer_batch_reliable {
+            state.writer_inflight_messages = state.writer_inflight_messages.saturating_sub(1);
+        }
+    }
+
+    #[cfg(unix)]
+    fn recycle_written_batch(&self, frames: &mut Vec<OutboundFrame>) {
+        let mut state = self.state.lock();
+        for frame in frames.drain(..) {
+            recycle_outbound_frame(&mut state, frame);
+        }
+        state.writer_inflight_bytes = 0;
+        state.writer_inflight_messages = 0;
+        state.writer_batch_reliable = 0;
     }
 
     fn recv_batch(&self, frames: &mut Vec<OutboundFrame>, max_bytes: usize) -> bool {
@@ -3323,13 +3409,14 @@ impl OutboundMailbox {
             recycle_outbound_frame(&mut state, frame);
         }
         state.writer_inflight_bytes = 0;
+        state.writer_inflight_messages = 0;
     }
 
     fn close(&self) {
         let mut state = self.state.lock();
         close_outbound(&mut state);
         drop(state);
-        self.ready.notify_all();
+        self.notify_all();
     }
 
     fn close_after_flush(&self) {
@@ -3342,7 +3429,7 @@ impl OutboundMailbox {
             return;
         }
         drop(state);
-        self.ready.notify_all();
+        self.notify_all();
     }
 
     fn buffered() -> Arc<Self> {
@@ -3352,6 +3439,8 @@ impl OutboundMailbox {
                 ..OutboundState::default()
             }),
             ready: Condvar::new(),
+            #[cfg(unix)]
+            loop_waker: Mutex::new(None),
         })
     }
 
@@ -3380,9 +3469,10 @@ impl OutboundMailbox {
             .discarded_bytes
             .saturating_add(state.writer_inflight_bytes as u64);
         state.writer_inflight_bytes = 0;
+        state.writer_inflight_messages = 0;
         state.writer_finished = true;
         drop(state);
-        self.ready.notify_all();
+        self.notify_all();
     }
 
     fn wait_writer_finished(&self, deadline: Instant) -> bool {
@@ -3408,7 +3498,7 @@ impl OutboundMailbox {
         let mut state = self.state.lock();
         close_outbound_too_far_behind(&mut state);
         drop(state);
-        self.ready.notify_all();
+        self.notify_all();
     }
 
     fn take_preview_refresh(&self) -> Option<PaneId> {
@@ -3636,6 +3726,7 @@ fn shed_preview_terminals(state: &mut OutboundState) {
 fn reserve_outbound_bytes(state: &mut OutboundState, incoming: usize, replaced: usize) -> bool {
     state
         .queued_bytes
+        .saturating_add(state.writer_inflight_bytes)
         .saturating_sub(replaced)
         .checked_add(incoming)
         .is_some_and(|total| total <= MAX_OUTBOUND_BYTES)
@@ -3703,6 +3794,8 @@ fn close_outbound(state: &mut OutboundState) {
         .discarded_bytes
         .saturating_add(state.queued_bytes as u64);
     state.closed = true;
+    state.attach_batch = false;
+    state.terminals_held = false;
     state.ctrl_collecting = ControlCollection::None;
     state.reliable.clear();
     state.command_output = None;
@@ -4088,6 +4181,8 @@ struct SharedServer {
     prompt_history_source: Mutex<Option<(PathBuf, usize)>>,
     prompt_history_settled: AtomicBool,
     connection_threads: Arc<exec::ConnectionThreads>,
+    #[cfg(unix)]
+    loop_handoffs: Mutex<Option<mpsc::Sender<event_loop::Handoff>>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -4998,6 +5093,8 @@ impl Shared {
             prompt_history_source: Mutex::new(None),
             prompt_history_settled: AtomicBool::new(true),
             connection_threads: Arc::default(),
+            #[cfg(unix)]
+            loop_handoffs: Mutex::new(None),
         };
         Self {
             server: Arc::new(server),
@@ -48239,11 +48336,21 @@ impl Drop for DeferredControlNotificationScope {
 #[cfg(test)]
 mod command_item_tests;
 
+#[cfg(windows)]
 enum QueuedCommand {
     Request(CommandRequest),
     Exec(zz_protocol::ExecRequest),
 }
 
+#[cfg(all(unix, test))]
+fn handle_connection<S: TransportStream>(
+    stream: S,
+    shared: &Arc<Shared>,
+) -> Result<(), DaemonError> {
+    event_loop::serve_single(stream, shared)
+}
+
+#[cfg(windows)]
 fn handle_connection<S: TransportStream>(
     mut stream: S,
     shared: &Arc<Shared>,
@@ -48264,6 +48371,31 @@ fn handle_connection<S: TransportStream>(
     handle_connection_message(stream, shared, first_message)
 }
 
+#[cfg(unix)]
+fn handle_connection_message<S: TransportStream>(
+    mut stream: S,
+    shared: &Arc<Shared>,
+    first: ProtocolMessage,
+) -> Result<(), DaemonError> {
+    let handoff = event_loop::Handoff {
+        descriptor: stream.receive_fd()?,
+        buffered: stream.take_buffered_input(),
+        first,
+    };
+    if let Some(sender) = shared.loop_handoffs.lock().as_ref() {
+        sender
+            .send(handoff)
+            .map_err(|_| DaemonError::Thread("mux loop stopped".to_owned()))?;
+        shared.accept_wake.wake();
+        return Ok(());
+    }
+    #[cfg(test)]
+    return event_loop::serve_handoff(handoff, shared);
+    #[cfg(not(test))]
+    Err(DaemonError::Thread("mux loop not running".to_owned()))
+}
+
+#[cfg(windows)]
 fn handle_connection_message<S: TransportStream>(
     mut stream: S,
     shared: &Arc<Shared>,
@@ -48916,6 +49048,17 @@ fn best_effort_server_stopping_reply(stream: &mut impl Write) {
     }
 }
 
+#[cfg(all(unix, test))]
+fn write_outbound(
+    stream: &mut impl TransportStream,
+    outbound: &OutboundMailbox,
+    shared: &Weak<Shared>,
+    client: ClientId,
+) {
+    event_loop::write_fixture(stream, outbound, shared, client);
+}
+
+#[cfg(not(all(unix, test)))]
 fn write_outbound(
     stream: &mut impl TransportStream,
     outbound: &OutboundMailbox,
@@ -49935,17 +50078,6 @@ mod tests {
                         && keys == &[zz_protocol::KeyToken::Literal("x".to_owned())]
                 ))
         );
-    }
-
-    #[cfg(unix)]
-    impl TransportStream for std::os::unix::net::UnixStream {
-        fn try_clone(&self) -> std::io::Result<Self> {
-            std::os::unix::net::UnixStream::try_clone(self)
-        }
-
-        fn shutdown(&self) -> std::io::Result<()> {
-            std::os::unix::net::UnixStream::shutdown(self, std::net::Shutdown::Both)
-        }
     }
 
     fn register_wait_clients(shared: &Shared, clients: impl IntoIterator<Item = u64>) {

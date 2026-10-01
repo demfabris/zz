@@ -351,7 +351,7 @@ impl OutboundMailbox {
             self.flush_control_batch_locked(state, false, false);
         } else {
             drop(state);
-            self.ready.notify_one();
+            self.notify_one();
         }
     }
 
@@ -361,7 +361,7 @@ impl OutboundMailbox {
             self.flush_control_batch_locked(state, false, true);
         } else {
             drop(state);
-            self.ready.notify_one();
+            self.notify_one();
         }
     }
 
@@ -460,7 +460,7 @@ impl OutboundMailbox {
         if result.is_err() || !reserve_outbound_bytes(&mut state, encoded.len(), 0) {
             close_outbound_too_far_behind(&mut state);
             drop(state);
-            self.ready.notify_all();
+            self.notify_all();
             return false;
         }
         state.queued_bytes += encoded.len();
@@ -477,9 +477,9 @@ impl OutboundMailbox {
         let closed = state.closed;
         drop(state);
         if closed {
-            self.ready.notify_all();
+            self.notify_all();
         } else if !written {
-            self.ready.notify_one();
+            self.notify_one();
         }
         true
     }

@@ -3409,7 +3409,7 @@ mod quiet_socket {
     }
 
     #[test]
-    fn compact_control_installs_the_actual_local_stream_socket() {
+    fn compact_control_keeps_socket_writes_on_the_loop() {
         let directory = tempfile::Builder::new()
             .prefix("zzqf.")
             .tempdir_in("/tmp")
@@ -3450,21 +3450,8 @@ mod quiet_socket {
             .get(&welcome.client_id)
             .cloned()
             .expect("registered local writer");
-        assert_eq!(
-            mailbox.state.lock().quiet_socket.is_some(),
-            *attach::BATCHED_WRITES
-        );
-        #[cfg(target_vendor = "apple")]
-        if *attach::BATCHED_WRITES {
-            let state = mailbox.state.lock();
-            let socket = state.quiet_socket.as_ref().expect("installed Apple socket");
-            assert!(rustix::net::sockopt::socket_nosigpipe(socket).expect("SIGPIPE option"));
-            assert!(
-                !rustix::fs::fcntl_getfl(socket)
-                    .expect("installed blocking flags")
-                    .contains(rustix::fs::OFlags::NONBLOCK)
-            );
-        }
+        assert!(mailbox.state.lock().quiet_socket.is_none());
+        assert!(mailbox.loop_waker.lock().is_some());
         zz_protocol::write_protocol_message(
             &mut client,
             &ProtocolMessage::Exec(compact_exec_request(vec![CommandInvocation::new(

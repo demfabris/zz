@@ -19,8 +19,10 @@ pub(super) static BATCHED_WRITES: LazyLock<bool> =
 
 pub(super) const MAX_BATCHED_WRITE_BYTES: usize = 256 * 1024;
 
+#[cfg(windows)]
 const INBOUND_BUFFER_BYTES: usize = 8 * 1024;
 
+#[cfg(windows)]
 pub(super) fn inbound_reader<S: io::Read>(stream: S) -> io::BufReader<S> {
     io::BufReader::with_capacity(
         if *BATCHED_WRITES {
@@ -208,14 +210,17 @@ impl Drop for AttachHold {
     }
 }
 
+#[cfg(windows)]
 pub(super) struct WriterThread(crossbeam_channel::Receiver<()>);
 
+#[cfg(windows)]
 impl WriterThread {
     pub(super) fn join(self) -> Result<(), ()> {
         self.0.recv().map_err(drop)
     }
 }
 
+#[cfg(windows)]
 pub(super) fn spawn_writer(
     threads: &Arc<exec::ConnectionThreads>,
     client: ClientId,

@@ -33,7 +33,10 @@ Event sequence gaps alone do not trigger repair: the daemon can supersede stale 
 attachment generations. A reattach increments the attachment generation even for the same
 session, clearing overlays and terminal bases once. Ordinary label or presence updates keep the
 attachment generation. Geometry reports name the layout generation the client rendered, so the
-daemon can reject a late report after zoom, unzoom or another layout change.
+daemon can reject a late report after zoom, unzoom or another layout change. Generation
+validation and geometry application share one model lock. A new layout generation requires
+a fresh tagged report even if the measured grid and cell pixels are unchanged; same-connection
+attachment follows that rule too. Ordinary presentation changes retain the geometry tag.
 
 The legacy `Attached` and `Snapshot` forms remain usable by internal fixtures. Normal control
 plane v2 clients receive grouped state and deltas. Produced by [zz-daemon](/crates/zz-daemon.md)

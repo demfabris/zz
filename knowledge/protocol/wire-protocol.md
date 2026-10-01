@@ -146,7 +146,13 @@ the same connection instead of opening a second one.
 
 Size reports use `ResizeTerminalV2` and `ClientTerminalSizeV2`, each carrying the layout generation
 the client rendered. The daemon drops a report from an older layout, including one that arrives
-after unzoom. A presentation-only tree change does not invalidate geometry.
+after unzoom. It checks the generation under the same model lock that applies the report;
+rejection skips geometry storage, actor resizing and the input publication/hook tail.
+Clients retry their measured geometry when the layout generation changes, including when
+grid and cell pixels stay equal. Desktop and shared web/iOS caches retain the generation
+alongside their measured grid and send that captured tag; TUI attachment refreshes clear its
+existing sent-geometry cache before assigning the new generation. A presentation-only tree
+change does not invalidate geometry. Retained legacy clients keep generation-zero reports.
 
 `CommandInvocation` is `{ name: String, args: Vec<String>, source: Option<SourceSpan>,
 command_blocks: Vec<u32>, expanded_alias_group: bool }`. Protocol v84 appends `command_blocks`: sorted, unique, zero-based

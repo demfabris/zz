@@ -2089,7 +2089,7 @@ struct OutboundMailbox {
     state: Mutex<OutboundState>,
     ready: Condvar,
     #[cfg(unix)]
-    loop_waker: Mutex<Option<Arc<mio::Waker>>>,
+    loop_waker: Mutex<Option<(Arc<mio::Waker>, thread::ThreadId)>>,
 }
 
 #[derive(Clone, Debug)]
@@ -2454,17 +2454,22 @@ fn terminal_transition(pane: PaneId, message: &ProtocolMessage) -> Option<Termin
 
 impl OutboundMailbox {
     fn notify_one(&self) {
-        self.ready.notify_one();
         #[cfg(unix)]
-        if let Some(waker) = self.loop_waker.lock().as_ref() {
-            let _ = waker.wake();
+        if let Some((waker, owner)) = self.loop_waker.lock().as_ref() {
+            if *owner != thread::current().id() {
+                let _ = waker.wake();
+            }
+            return;
         }
+        self.ready.notify_one();
     }
 
     fn notify_all(&self) {
         self.ready.notify_all();
         #[cfg(unix)]
-        if let Some(waker) = self.loop_waker.lock().as_ref() {
+        if let Some((waker, owner)) = self.loop_waker.lock().as_ref()
+            && *owner != thread::current().id()
+        {
             let _ = waker.wake();
         }
     }
@@ -2749,7 +2754,12 @@ impl OutboundMailbox {
         if !reserve_outbound_bytes(&mut state, frame_bytes, 0) {
             shed_preview_terminals(&mut state);
         }
-        if state.reliable.len().saturating_add(frames.len()) > MAX_RELIABLE_MESSAGES
+        if state
+            .reliable
+            .len()
+            .saturating_add(state.writer_inflight_messages)
+            .saturating_add(frames.len())
+            > MAX_RELIABLE_MESSAGES
             || !reserve_outbound_bytes(&mut state, frame_bytes, 0)
         {
             close_outbound(&mut state);
@@ -2826,7 +2836,12 @@ impl OutboundMailbox {
         if !reserve_outbound_bytes(&mut state, frame_bytes, 0) {
             shed_preview_terminals(&mut state);
         }
-        if state.reliable.len().saturating_add(frames.len()) > MAX_RELIABLE_MESSAGES
+        if state
+            .reliable
+            .len()
+            .saturating_add(state.writer_inflight_messages)
+            .saturating_add(frames.len())
+            > MAX_RELIABLE_MESSAGES
             || !reserve_outbound_bytes(&mut state, frame_bytes, 0)
         {
             close_outbound(&mut state);
@@ -3424,7 +3439,10 @@ impl OutboundMailbox {
         state.closed = true;
         #[cfg(unix)]
         drop(state.quiet_socket.take());
-        if state.ctrl_collecting == ControlCollection::Quiet {
+        if matches!(
+            state.ctrl_collecting,
+            ControlCollection::Quiet | ControlCollection::Attach
+        ) {
             self.flush_control_batch_locked(state, false, false);
             return;
         }
@@ -3487,7 +3505,15 @@ impl OutboundMailbox {
 
     fn queued_reliable(&self) -> Option<(usize, usize)> {
         let state = self.state.lock();
-        (!state.closed).then_some((state.queued_bytes, state.reliable.len()))
+        (!state.closed).then_some((
+            state
+                .queued_bytes
+                .saturating_add(state.writer_inflight_bytes),
+            state
+                .reliable
+                .len()
+                .saturating_add(state.writer_inflight_messages),
+        ))
     }
 
     fn is_open(&self) -> bool {
@@ -12317,19 +12343,39 @@ impl Shared {
         };
         let stop = Arc::new(AtomicBool::new(false));
         let weak = Arc::downgrade(&self.server_owner());
-        let worker_stop = Arc::clone(&stop);
-        let Ok(worker) = thread::Builder::new()
-            .name(format!("zz-control-output-{}", pane.0))
-            .spawn(move || run_control_output_tap(&weak, pane, &worker_stop, &receiver))
-        else {
-            let _ = terminal.disarm_raw_output_tap(token);
-            return;
+        #[cfg(unix)]
+        let on_loop = self.loop_handoffs.lock().is_some();
+        #[cfg(not(unix))]
+        let on_loop = false;
+        let (worker, receiver) = if on_loop {
+            (None, Some(receiver))
+        } else {
+            let worker_stop = Arc::clone(&stop);
+            let owner = weak.clone();
+            let Ok(worker) = thread::Builder::new()
+                .name(format!("zz-control-output-{}", pane.0))
+                .spawn(move || run_control_output_tap(&owner, pane, &worker_stop, &receiver))
+            else {
+                let _ = terminal.disarm_raw_output_tap(token);
+                return;
+            };
+            (Some(worker), None)
         };
+        #[cfg(not(unix))]
+        let _ = receiver;
         let mut tap = Some(ControlOutputTap {
+            #[cfg(unix)]
+            receiver,
+            #[cfg(unix)]
+            pending: None,
+            #[cfg(unix)]
+            owner: weak,
+            #[cfg(unix)]
+            pane,
             token,
             terminal: Arc::clone(terminal),
             stop,
-            thread: Some(worker),
+            thread: worker,
         });
         let valid = {
             let mut inner = self.inner.lock();
@@ -12421,6 +12467,62 @@ impl Shared {
             }
             thread::sleep(Duration::from_millis(1));
         }
+    }
+
+    #[cfg(unix)]
+    fn start_ready_control_output_readers(&self) -> bool {
+        if self.inner.lock().control_output_taps.is_empty() {
+            return false;
+        }
+        let _serial = self.pipe_effects.lock();
+        let mut inner = self.inner.lock();
+        let mut pending = false;
+        for (pane, tap) in &mut inner.control_output_taps {
+            let Some(receiver) = tap.receiver.as_ref() else {
+                continue;
+            };
+            if tap.pending.is_none() {
+                match receiver.try_recv() {
+                    Ok(bytes) => tap.pending = Some(bytes),
+                    Err(crossbeam_channel::TryRecvError::Empty) => {
+                        pending = true;
+                        continue;
+                    }
+                    Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                        tap.receiver = None;
+                        continue;
+                    }
+                }
+            }
+            let first = tap.pending.clone().expect("ready output is retained");
+            let receiver = receiver.clone();
+            let owner = tap.owner.clone();
+            let stop = Arc::clone(&tap.stop);
+            let pane = *pane;
+            match thread::Builder::new()
+                .name(format!("zz-control-output-{}", pane.0))
+                .spawn(move || {
+                    if let Some(shared) = owner.upgrade() {
+                        if stop.load(Ordering::Acquire) {
+                            shared.publish_pipe_output_for_pane(pane, &first);
+                        } else {
+                            shared.publish_control_output_for_pane(pane, &first);
+                        }
+                    }
+                    run_control_output_tap(&owner, pane, &stop, &receiver);
+                }) {
+                Ok(worker) => {
+                    tap.pending = None;
+                    tap.receiver = None;
+                    tap.thread = Some(worker);
+                }
+                Err(error) => {
+                    log::warn!("could not start control output reader: {error}");
+                    pending = true;
+                }
+            }
+        }
+        pending
     }
 
     fn publish_pipe_output_for_pane(&self, pane: PaneId, bytes: &Arc<[u8]>) {
@@ -25682,6 +25784,17 @@ impl Shared {
                     }
                     match event {
                         TerminalEvent::ViewportReady { output_activity } => {
+                            #[cfg(unix)]
+                            if output_activity
+                                && shared
+                                    .inner
+                                    .lock()
+                                    .control_output_taps
+                                    .get(&pane)
+                                    .is_some_and(|tap| tap.receiver.is_some())
+                            {
+                                shared.accept_wake.wake();
+                            }
                             let current = terminal.latest_view_frames();
                             let runtime_viewport = terminal.latest_viewport();
                             let referenced_images = current
@@ -32804,6 +32917,14 @@ struct PanePipe {
 }
 
 struct ControlOutputTap {
+    #[cfg(unix)]
+    receiver: Option<crossbeam_channel::Receiver<Arc<[u8]>>>,
+    #[cfg(unix)]
+    pending: Option<Arc<[u8]>>,
+    #[cfg(unix)]
+    owner: Weak<Shared>,
+    #[cfg(unix)]
+    pane: PaneId,
     token: u64,
     terminal: Arc<TerminalSession>,
     stop: Arc<AtomicBool>,
@@ -42358,6 +42479,15 @@ fn drain_control_pane_output(
 fn stop_control_output_tap(mut tap: ControlOutputTap) {
     let _round_trips = zz_terminal::allow_actor_round_trips();
     tap.stop.store(true, Ordering::Release);
+    #[cfg(unix)]
+    if let Some(receiver) = tap.receiver.take() {
+        if let Some(owner) = tap.owner.upgrade() {
+            for bytes in tap.pending.take().into_iter().chain(receiver.try_iter()) {
+                owner.publish_pipe_output_for_pane(tap.pane, &bytes);
+            }
+        }
+        drop(receiver);
+    }
     let _ = tap.terminal.disarm_raw_output_tap(tap.token);
     if let Some(worker) = tap.thread.take()
         && worker.join().is_err()

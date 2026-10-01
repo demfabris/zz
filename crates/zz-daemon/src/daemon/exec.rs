@@ -24,6 +24,8 @@ static SPAWN_PER_CONNECTION: LazyLock<bool> = LazyLock::new(|| {
 #[derive(Default)]
 pub(super) struct ConnectionThreads {
     idle: Mutex<Vec<crossbeam_channel::Sender<ExecJob>>>,
+    #[cfg(test)]
+    pub(super) fail_next: AtomicBool,
 }
 
 impl ConnectionThreads {
@@ -34,6 +36,10 @@ impl ConnectionThreads {
     }
 
     pub(super) fn run(self: &Arc<Self>, job: ExecJob) -> std::io::Result<()> {
+        #[cfg(test)]
+        if self.fail_next.swap(false, Ordering::AcqRel) {
+            return Err(std::io::Error::other("injected worker start failure"));
+        }
         let mut job = job;
         loop {
             let Some(worker) = self.idle.lock().pop() else {

@@ -3450,7 +3450,7 @@ mod quiet_socket {
             .get(&welcome.client_id)
             .cloned()
             .expect("registered local writer");
-        assert!(mailbox.state.lock().quiet_socket.is_none());
+        assert!(mailbox.state.lock().quiet_socket.is_some());
         assert!(mailbox.loop_waker.lock().is_some());
         zz_protocol::write_protocol_message(
             &mut client,

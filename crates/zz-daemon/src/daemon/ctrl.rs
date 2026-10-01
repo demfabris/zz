@@ -468,7 +468,13 @@ impl OutboundMailbox {
             .reliable
             .push_back(OutboundFrame::Grouped { encoded, frames });
         #[cfg(unix)]
-        let written = try_write && try_write_quiet_group(&mut state);
+        let written = try_write
+            && self
+                .loop_waker
+                .lock()
+                .as_ref()
+                .is_none_or(|(_, owner)| *owner == thread::current().id())
+            && try_write_quiet_group(&mut state);
         #[cfg(not(unix))]
         let written = {
             let _ = try_write;
@@ -1139,6 +1145,17 @@ impl Shared {
             }));
             return;
         }
+        self.execute_prepared_compact_request(client, kind, context, prepared, outbound);
+    }
+
+    pub(super) fn execute_prepared_compact_request(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        prepared: Vec<PreparedCommand>,
+        outbound: &Arc<OutboundMailbox>,
+    ) {
         let command_count = prepared.len();
         for (index, prepared) in prepared.into_iter().enumerate() {
             if self.command_queue_cancelled(client) {
@@ -1241,6 +1258,9 @@ impl Shared {
         outbound: &Arc<OutboundMailbox>,
         context: &mut ExecutionContext,
     ) {
+        if self.command_queue_cancelled(client) || self.inner.lock().client(client).is_none() {
+            return;
+        }
         let mut pending_errors = Vec::new();
         match &hello.attach {
             Some(AttachOperation::Session(target)) => {
@@ -1297,6 +1317,11 @@ impl Shared {
                     ));
                 }
                 for (index, prepared) in commands.iter().enumerate().filter(|_| !reject) {
+                    if self.command_queue_cancelled(client)
+                        || self.inner.lock().client(client).is_none()
+                    {
+                        return;
+                    }
                     if let PreparedCommandResult::Error(error) = &prepared.result {
                         let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(
                             CommandResponse::Error {
@@ -1328,6 +1353,9 @@ impl Shared {
                 }
             }
             None => {}
+        }
+        if self.command_queue_cancelled(client) || self.inner.lock().client(client).is_none() {
+            return;
         }
         if client_attached_session(&self.inner.lock(), client).is_some() {
             self.sync_key_table(client, false);

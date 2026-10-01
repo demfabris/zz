@@ -11,6 +11,9 @@ use super::*;
 
 const LISTENER: Token = Token(0);
 const WAKE: Token = Token(1);
+const ACCEPT_BURST: usize = 32;
+const MAX_PENDING_MESSAGES: usize = 4096;
+const MAX_PENDING_BYTES: usize = 16 * 1024 * 1024;
 
 pub(super) struct EventLoop {
     poll: Poll,
@@ -22,6 +25,8 @@ pub(super) struct EventLoop {
     completed: mpsc::Receiver<Completion>,
     completion_sender: mpsc::Sender<Completion>,
     next_token: usize,
+    accept_again: bool,
+    control_output_poll: bool,
     handoffs: mpsc::Receiver<Handoff>,
     exec_workers: Arc<std::sync::atomic::AtomicUsize>,
     shutdown_started: bool,
@@ -100,7 +105,11 @@ struct Connection {
     read_again: bool,
     session: Option<connection::Session>,
     client: Option<ClientId>,
-    pending: VecDeque<ProtocolMessage>,
+    pending: VecDeque<(ProtocolMessage, usize)>,
+    pending_bytes: usize,
+    kind: Option<ClientKind>,
+    drain_input: bool,
+    initializing: bool,
     busy: bool,
     initialized: bool,
     cancel: Arc<AtomicBool>,
@@ -138,6 +147,8 @@ impl EventLoop {
             completed,
             completion_sender,
             next_token: 2,
+            accept_again: false,
+            control_output_poll: false,
             handoffs,
             exec_workers: Arc::default(),
             shutdown_started: false,
@@ -179,7 +190,7 @@ impl EventLoop {
             Interest::READABLE,
         )?;
         let outbound = OutboundMailbox::new();
-        *outbound.loop_waker.lock() = Some(Arc::clone(&self.waker));
+        *outbound.loop_waker.lock() = Some((Arc::clone(&self.waker), thread::current().id()));
         self.connections.insert(
             token,
             Connection {
@@ -195,6 +206,10 @@ impl EventLoop {
                 session: None,
                 client: None,
                 pending: VecDeque::new(),
+                pending_bytes: 0,
+                kind: None,
+                drain_input: false,
+                initializing: false,
                 busy: false,
                 initialized: false,
                 cancel: Arc::new(AtomicBool::new(false)),
@@ -229,6 +244,9 @@ impl EventLoop {
                 }
             }
             self.turn(shared)?;
+            if std::mem::take(&mut self.accept_again) && !self.shutdown_started {
+                self.accept_ready::<T>(listener, shared)?;
+            }
             self.poll_ready()?;
             let events = self
                 .events
@@ -244,7 +262,7 @@ impl EventLoop {
             for (token, readable, writable) in events {
                 if token == LISTENER {
                     if !self.shutdown_started {
-                        self.accept_ready::<T>(listener)?;
+                        self.accept_ready::<T>(listener, shared)?;
                     }
                 } else if self.connections.contains_key(&token) {
                     if readable {
@@ -288,63 +306,79 @@ impl EventLoop {
     }
 
     fn poll_ready(&mut self) -> Result<(), DaemonError> {
-        match self.poll.poll(&mut self.events, None) {
+        match self.poll.poll(
+            &mut self.events,
+            self.control_output_poll.then_some(COPY_PIPE_POLL_INTERVAL),
+        ) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == ErrorKind::Interrupted => Ok(()),
             Err(error) => Err(error.into()),
         }
     }
 
-    fn accept_ready<T: Transport>(&mut self, listener: &T::Listener) -> Result<(), DaemonError> {
-        loop {
+    fn accept_ready<T: Transport>(
+        &mut self,
+        listener: &T::Listener,
+        shared: &Arc<Shared>,
+    ) -> Result<(), DaemonError> {
+        for _ in 0..ACCEPT_BURST {
+            if shared.stopping.load(Ordering::Acquire) {
+                self.accept_again = false;
+                return Ok(());
+            }
             match listener.accept() {
-                Ok(stream) => {
-                    self.insert(stream.receive_fd()?)?;
+                Ok(mut stream) => {
+                    let shared = Arc::clone(shared);
+                    let threads = Arc::clone(&shared.connection_threads);
+                    if let Err(error) = threads.run(Box::new(move || {
+                        let mut frame = Vec::new();
+                        match read_protocol_message_into(&mut stream, &mut frame) {
+                            Ok(ProtocolMessage::Exec(request)) => {
+                                if let Err(error) = exec::serve_exec(stream, &shared, request) {
+                                    log::debug!("exec disconnected: {error}");
+                                }
+                            }
+                            Ok(first) => {
+                                if let Err(error) =
+                                    handle_connection_message(stream, &shared, first)
+                                {
+                                    log::debug!("client handoff failed: {error}");
+                                }
+                            }
+                            Err(ProtocolError::VersionMismatch { received, .. }) => {
+                                best_effort_protocol_mismatch_reply(&mut stream, received);
+                            }
+                            Err(error) => log::debug!("first client frame rejected: {error}"),
+                        }
+                    })) {
+                        log::warn!("could not start client routing: {error}");
+                    }
                 }
-                Err(error) if error.kind() == ErrorKind::WouldBlock => return Ok(()),
+                Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                    self.accept_again = false;
+                    return Ok(());
+                }
                 Err(error) if error.kind() == ErrorKind::Interrupted => {}
                 Err(error) => return Err(error.into()),
             }
         }
+        self.accept_again = true;
+        self.waker.wake()?;
+        Ok(())
     }
 
     fn read_ready(&mut self, token: Token, shared: &Arc<Shared>) {
         let mut scratch = [0; 8192];
         let mut received = 0;
         loop {
-            let Some(connection) = self.connections.get_mut(&token) else {
-                return;
-            };
-            if connection.read_closed {
-                return;
-            }
-            let read = connection.stream.read(&mut scratch);
-            match read {
-                Ok(0) => {
-                    if let Err(error) = connection.inbound.eof() {
-                        log::debug!("truncated client input: {error}");
-                    }
-                    connection.read_closed = true;
-                    self.disconnect(token, shared);
-                    return;
-                }
-                Ok(read) => {
-                    received += read;
-                    connection.inbound.bytes.extend_from_slice(&scratch[..read]);
-                }
-                Err(error) if error.kind() == ErrorKind::Interrupted => continue,
-                Err(error) if error.kind() == ErrorKind::WouldBlock => return,
-                Err(error) => {
-                    log::debug!("client read failed: {error}");
-                    self.remove(token, shared);
-                    return;
-                }
-            }
             loop {
-                let message = self.connections.get_mut(&token).unwrap().inbound.next();
+                let inbound = &mut self.connections.get_mut(&token).unwrap().inbound;
+                let offset = inbound.offset;
+                let message = inbound.next();
+                let bytes = inbound.offset - offset;
                 match message {
                     Ok(Some(message)) => {
-                        if !self.dispatch(token, shared, message) {
+                        if !self.dispatch(token, shared, message, bytes) {
                             return;
                         }
                     }
@@ -375,6 +409,40 @@ impl EventLoop {
                 }
             }
             self.connections.get_mut(&token).unwrap().inbound.compact();
+
+            let Some(connection) = self.connections.get_mut(&token) else {
+                return;
+            };
+            if connection.read_closed {
+                return;
+            }
+            let read = connection.stream.read(&mut scratch);
+            match read {
+                Ok(0) => {
+                    let clean = connection.inbound.eof().is_ok();
+                    connection.read_closed = true;
+                    connection.drain_input = clean
+                        && connection.kind == Some(ClientKind::Interactive)
+                        && connection.initialized
+                        && !connection.initializing;
+                    if !connection.drain_input {
+                        self.disconnect(token, shared);
+                    }
+                    return;
+                }
+                Ok(read) => {
+                    received += read;
+                    connection.inbound.bytes.extend_from_slice(&scratch[..read]);
+                }
+                Err(error) if error.kind() == ErrorKind::Interrupted => continue,
+                Err(error) if error.kind() == ErrorKind::WouldBlock => return,
+                Err(error) => {
+                    log::debug!("client read failed: {error}");
+                    self.remove(token, shared);
+                    return;
+                }
+            }
+            self.connections.get_mut(&token).unwrap().inbound.compact();
             if received >= attach::MAX_BATCHED_WRITE_BYTES {
                 self.connections.get_mut(&token).unwrap().read_again = true;
                 let _ = self.waker.wake();
@@ -383,7 +451,13 @@ impl EventLoop {
         }
     }
 
-    fn dispatch(&mut self, token: Token, shared: &Arc<Shared>, message: ProtocolMessage) -> bool {
+    fn dispatch(
+        &mut self,
+        token: Token,
+        shared: &Arc<Shared>,
+        message: ProtocolMessage,
+        bytes: usize,
+    ) -> bool {
         let connection = self.connections.get_mut(&token).unwrap();
         if connection.client.is_none() && !connection.busy {
             if let ProtocolMessage::Exec(request) = message {
@@ -397,23 +471,18 @@ impl EventLoop {
                     stream: connection.stream,
                     buffered: Arc::new(Mutex::new(io::Cursor::new(connection.inbound.bytes))),
                 };
-                let shared = Arc::clone(shared);
-                let threads = Arc::clone(&shared.connection_threads);
                 let _ = stream.stream.set_nonblocking(false);
-                self.exec_workers.fetch_add(1, Ordering::AcqRel);
-                let finished = ExecNotifier {
-                    workers: Arc::clone(&self.exec_workers),
-                    waker: Arc::clone(&self.waker),
-                };
-                if let Err(error) = threads.run(Box::new(move || {
-                    let _finished = finished;
-                    if let Err(error) = exec::serve_exec(stream, &shared, request) {
-                        log::debug!("exec disconnected: {error}");
-                    }
-                })) {
-                    log::warn!("could not start exec worker: {error}");
-                }
+                self.execute_exec(stream, shared, request);
                 return false;
+            }
+            if matches!(&message, ProtocolMessage::Hello(hello) if hello.client.kind == ClientKind::Control)
+            {
+                let socket = connection.stream.receive_fd().ok();
+                #[cfg(target_vendor = "apple")]
+                let socket = socket.filter(|socket| {
+                    rustix::net::sockopt::set_socket_nosigpipe(socket, true).is_ok()
+                });
+                connection.outbound.state.lock().quiet_socket = socket;
             }
             connection.busy = true;
             let outbound = Arc::clone(&connection.outbound);
@@ -424,24 +493,79 @@ impl EventLoop {
         } else if let Some(client) = connection.client {
             match message {
                 ProtocolMessage::GuiResponse(response) => {
-                    let shared = Arc::clone(shared);
-                    let threads = Arc::clone(&shared.connection_threads);
-                    let _ = threads.run(Box::new(move || {
-                        shared.complete_gui_request(client, response);
-                    }));
+                    shared.complete_gui_request(client, response);
                 }
                 ProtocolMessage::ClientFileResponse(response) => {
-                    let shared = Arc::clone(shared);
-                    let threads = Arc::clone(&shared.connection_threads);
-                    let _ = threads.run(Box::new(move || {
-                        shared.complete_client_file(client, response);
-                    }));
+                    shared.complete_client_file(client, response);
                 }
-                message => connection.pending.push_back(message),
+                message => {
+                    if connection.initialized
+                        && !connection.busy
+                        && connection.pending.is_empty()
+                        && let Some(mut session) = connection.session.take()
+                    {
+                        let message =
+                            session.try_inline_message(shared, &connection.outbound, message);
+                        connection.session = Some(session);
+                        let Some(message) = message else {
+                            return true;
+                        };
+                        return self.enqueue_pending(token, shared, message, bytes);
+                    }
+                    return self.enqueue_pending(token, shared, message, bytes);
+                }
             }
         } else {
-            connection.pending.push_back(message);
+            return self.enqueue_pending(token, shared, message, bytes);
         }
+        true
+    }
+
+    fn execute_exec(
+        &self,
+        stream: impl TransportStream,
+        shared: &Arc<Shared>,
+        request: zz_protocol::ExecRequest,
+    ) {
+        let shared = Arc::clone(shared);
+        let threads = Arc::clone(&shared.connection_threads);
+        self.exec_workers.fetch_add(1, Ordering::AcqRel);
+        let finished = ExecNotifier {
+            workers: Arc::clone(&self.exec_workers),
+            waker: Arc::clone(&self.waker),
+        };
+        if let Err(error) = threads.run(Box::new(move || {
+            let _finished = finished;
+            if let Err(error) = exec::serve_exec(stream, &shared, request) {
+                log::debug!("exec disconnected: {error}");
+            }
+        })) {
+            log::warn!("could not start exec worker: {error}");
+        }
+    }
+
+    fn enqueue_pending(
+        &mut self,
+        token: Token,
+        shared: &Arc<Shared>,
+        message: ProtocolMessage,
+        bytes: usize,
+    ) -> bool {
+        let connection = self.connections.get_mut(&token).unwrap();
+        if connection.pending.len() >= MAX_PENDING_MESSAGES
+            || bytes > MAX_PENDING_BYTES.saturating_sub(connection.pending_bytes)
+        {
+            log::debug!(
+                "client pending admission exceeded: token={token:?} messages={} bytes={} incoming={bytes}",
+                connection.pending.len(),
+                connection.pending_bytes,
+            );
+            connection.outbound.close();
+            self.remove(token, shared);
+            return false;
+        }
+        connection.pending_bytes += bytes;
+        connection.pending.push_back((message, bytes));
         true
     }
 
@@ -466,10 +590,16 @@ impl EventLoop {
             let _ = waker.wake();
         })) {
             log::error!("could not start client execution: {error}");
+            let _ = self.completion_sender.send(Completion {
+                token,
+                result: Err(error.into()),
+            });
+            let _ = self.waker.wake();
         }
     }
 
     fn turn(&mut self, shared: &Arc<Shared>) -> Result<(), DaemonError> {
+        self.control_output_poll = shared.start_ready_control_output_readers();
         while let Ok(handoff) = self.handoffs.try_recv() {
             if let Err(error) = self.handoff(handoff, shared) {
                 log::debug!("client handoff failed: {error}");
@@ -487,6 +617,8 @@ impl EventLoop {
                 Ok(Some(session)) => {
                     connection.busy = false;
                     connection.client = Some(session.client);
+                    connection.kind = Some(session.hello.kind);
+                    connection.initializing = false;
                     connection.released = Some(Arc::clone(&session.released));
                     if connection.cleanup_started {
                         let threads = Arc::clone(&shared.connection_threads);
@@ -494,7 +626,7 @@ impl EventLoop {
                     } else {
                         connection.session = Some(session);
                     }
-                    if connection.read_closed {
+                    if connection.read_closed && !connection.drain_input {
                         self.disconnect(completion.token, shared);
                     }
                 }
@@ -523,32 +655,55 @@ impl EventLoop {
             };
             if connection.client.is_some() && !connection.initialized {
                 let mut pending = std::mem::take(&mut connection.pending);
-                while let Some(message) = pending.pop_front() {
-                    self.dispatch(token, shared, message);
+                connection.pending_bytes = 0;
+                while let Some((message, bytes)) = pending.pop_front() {
+                    if !self.dispatch(token, shared, message, bytes) {
+                        break;
+                    }
                 }
             }
-            let connection = self.connections.get_mut(&token).unwrap();
-            if !connection.read_closed
+            let Some(connection) = self.connections.get_mut(&token) else {
+                continue;
+            };
+            if (!connection.read_closed || connection.drain_input)
                 && !connection.busy
                 && let Some(mut session) = connection.session.take()
             {
                 let outbound = Arc::clone(&connection.outbound);
                 if !connection.initialized {
                     connection.initialized = true;
+                    connection.initializing = true;
                     connection.busy = true;
                     self.execute(token, shared, move |shared| {
                         session.initialize(shared, &outbound);
                         Ok(Some(session))
                     });
-                } else if let Some(message) = connection.pending.pop_front() {
-                    connection.busy = true;
-                    self.execute(token, shared, move |shared| {
-                        session.message(shared, &outbound, message);
-                        Ok(Some(session))
-                    });
+                } else if let Some((message, bytes)) = connection.pending.pop_front() {
+                    connection.pending_bytes -= bytes;
+                    if let Some(message) = session.try_inline_message(shared, &outbound, message) {
+                        connection.busy = true;
+                        self.execute(token, shared, move |shared| {
+                            session.message(shared, &outbound, message);
+                            Ok(Some(session))
+                        });
+                    } else {
+                        connection.session = Some(session);
+                        if !connection.pending.is_empty() {
+                            connection.read_again = true;
+                            let _ = self.waker.wake();
+                        }
+                    }
                 } else {
                     connection.session = Some(session);
                 }
+            }
+            let connection = self.connections.get_mut(&token).unwrap();
+            if connection.read_closed
+                && connection.drain_input
+                && !connection.busy
+                && connection.pending.is_empty()
+            {
+                self.disconnect(token, shared);
             }
             let connection = self.connections.get_mut(&token).unwrap();
             if let Err(error) = connection.write_ready() {
@@ -594,11 +749,17 @@ impl EventLoop {
     fn handoff(&mut self, handoff: Handoff, shared: &Arc<Shared>) -> Result<(), DaemonError> {
         let token = self.insert(handoff.descriptor)?;
         self.connections.get_mut(&token).unwrap().inbound.bytes = handoff.buffered;
-        self.dispatch(token, shared, handoff.first);
+        self.dispatch(token, shared, handoff.first, 0);
         loop {
-            match self.connections.get_mut(&token).unwrap().inbound.next() {
+            let inbound = &mut self.connections.get_mut(&token).unwrap().inbound;
+            let offset = inbound.offset;
+            let message = inbound.next();
+            let bytes = inbound.offset - offset;
+            match message {
                 Ok(Some(message)) => {
-                    self.dispatch(token, shared, message);
+                    if !self.dispatch(token, shared, message, bytes) {
+                        return Ok(());
+                    }
                 }
                 Ok(None) => break,
                 Err(error) => {
@@ -618,6 +779,10 @@ impl EventLoop {
         connection.read_closed = true;
         connection.cancel.store(true, Ordering::Release);
         connection.pending.clear();
+        connection.pending_bytes = 0;
+        if connection.outbound.state.lock().ctrl_collecting == ControlCollection::Attach {
+            connection.outbound.close();
+        }
         if connection.cleanup_started {
             return;
         }
@@ -727,12 +892,12 @@ impl Drop for ExecNotifier {
     }
 }
 
-struct BufferedStream {
-    stream: UnixStream,
+struct BufferedStream<S> {
+    stream: S,
     buffered: Arc<Mutex<io::Cursor<Vec<u8>>>>,
 }
 
-impl Read for BufferedStream {
+impl<S: TransportStream> Read for BufferedStream<S> {
     fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
         let read = self.buffered.lock().read(bytes)?;
         if read != 0 {
@@ -743,7 +908,7 @@ impl Read for BufferedStream {
     }
 }
 
-impl Write for BufferedStream {
+impl<S: TransportStream> Write for BufferedStream<S> {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         self.stream.write(bytes)
     }
@@ -755,7 +920,7 @@ impl Write for BufferedStream {
     }
 }
 
-impl TransportStream for BufferedStream {
+impl<S: TransportStream> TransportStream for BufferedStream<S> {
     fn try_clone(&self) -> io::Result<Self> {
         Ok(Self {
             stream: self.stream.try_clone()?,
@@ -777,12 +942,10 @@ impl TransportStream for BufferedStream {
         if read != 0 {
             return Ok(read);
         }
-        rustix::net::recv(&self.stream, bytes, rustix::net::RecvFlags::DONTWAIT)
-            .map(|(read, _)| read)
-            .map_err(io::Error::from)
+        self.stream.read_ready(bytes)
     }
     fn shutdown(&self) -> io::Result<()> {
-        self.stream.shutdown(std::net::Shutdown::Both)
+        self.stream.shutdown()
     }
     fn set_send_buffer_size(&self, bytes: usize) -> io::Result<()> {
         self.stream.set_send_buffer_size(bytes)
@@ -851,7 +1014,7 @@ pub(super) fn write_fixture(
     let _ = rustix::net::sockopt::set_socket_nosigpipe(&socket, true);
     let mut poll = Poll::new().expect("fixture poll");
     let waker = Arc::new(Waker::new(poll.registry(), WAKE).expect("fixture waker"));
-    *outbound.loop_waker.lock() = Some(waker);
+    *outbound.loop_waker.lock() = Some((waker, thread::current().id()));
     let mut events = Events::with_capacity(8);
     let mut frames = Vec::new();
     let mut frame_index = 0;
@@ -945,3 +1108,7 @@ pub(super) fn write_fixture(
 #[cfg(test)]
 #[path = "event_loop_io_tests.rs"]
 mod io_tests;
+
+#[cfg(test)]
+#[path = "event_loop_b2fix_tests.rs"]
+mod b2fix_tests;

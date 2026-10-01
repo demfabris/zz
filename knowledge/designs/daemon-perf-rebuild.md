@@ -3063,6 +3063,32 @@ tests, daemon exit / remain-on-exit / respawn / job control (Ctrl-Z, SIGWINCH, f
 
 ## W3-LOOP: single-owner mux loop (effort XL)
 
+### b2 fixes as built (2026-10-01)
+
+- Initialization checks cancellation before work and between attach commands. Clean Interactive EOF
+  runs admitted input and drains replies; aborted compact Hello releases held Attach output.
+- Pending input is limited to 4096 messages and 16 MiB; the count allows pasted-input bursts. GUI and client-file responses bypass a
+  parked command. Acceptance yields after 32 connections, schedules continuation, and checks shutdown.
+  Failed worker starts post completion. Bulk image limits include reliable messages held by the writer.
+- Read-only queries without pending or command hooks run on the loop, in request order. Actor-backed
+  `capture-pane`, prepared legacy requests, and control lines requiring expansion stay on workers.
+  Direct quiet writes require the loop owner. Loop-owned replies skip self-wakes and writer
+  condition-variable notifications. Raw output readers
+  start when bytes arrive, retaining the existing streaming path.
+- Three alternating quick `control,cli` runs against b1 `dd97bbd3`: control instructions median
+  0.0724 -> 0.0684 Minstr (0.9448x); all 19 CLI instruction medians <=1.0108x (limits 1.05x/1.10x).
+  Raw output median 138.5609 -> 141.2872 MB/s. `control.latency` and
+  `control.burst_cmds_per_s` thresholds against tmux were red on both binaries; no errors.
+- Validation: 1347 daemon unit tests and 35 integration tests passed, one existing test ignored;
+  clippy, formatting, all seven requested compat rows, and the full attached-client fixture passed.
+  Quick W0 `control,cli`: 29 pass, one pre-existing latency failure, 34 informational rows,
+  no regressions or errors. Perf `attach` was omitted under the brief's explicit group restriction.
+- Handed on: first-frame routing and Exec connections still use the existing worker pool;
+  registration, initialization, parkable commands, cleanup, preview work, and active raw output
+  still use workers. Mutex removal and park-point continuations remain later W3 work. Linux `/proc`,
+  PTY gather, epoll, THP, and TUI output backpressure were not run on this Mac.
+
+
 Commits that each keep tests green:
 - (e0) Move the per-request thread_locals into a per-cmdq-item context:
   `CLIENT_KEY_INJECTION_DEPTH`, `DEFERRED_CONTROL_NOTIFICATIONS`, `COMMAND_QUEUE_PARK`. List every

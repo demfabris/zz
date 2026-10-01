@@ -1,7 +1,7 @@
 use super::*;
 use zz_protocol::encode_protocol_message;
 
-fn hello() -> ProtocolMessage {
+pub(super) fn hello() -> ProtocolMessage {
     ProtocolMessage::ClientHello(ClientHello {
         protocol_version: PROTOCOL_VERSION,
         client_instance_id: ClientInstanceId(21),
@@ -16,7 +16,7 @@ fn hello() -> ProtocolMessage {
     })
 }
 
-fn command(request_id: u64, output: &str) -> ProtocolMessage {
+pub(super) fn command(request_id: u64, output: &str) -> ProtocolMessage {
     ProtocolMessage::CommandRequest(CommandRequest {
         request_id,
         command: CommandInvocation::new("display-message", ["-p", output]),
@@ -31,7 +31,7 @@ fn pair(event_loop: &mut EventLoop) -> (Token, UnixStream) {
     (token, peer)
 }
 
-fn messages(peer: &mut UnixStream, input: &mut Inbound) -> Vec<ProtocolMessage> {
+pub(super) fn messages(peer: &mut UnixStream, input: &mut Inbound) -> Vec<ProtocolMessage> {
     let mut scratch = [0; 8192];
     loop {
         match peer.read(&mut scratch) {

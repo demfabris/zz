@@ -3,7 +3,8 @@ use zz_protocol::Hello;
 
 pub(super) struct Session {
     pub(super) client: ClientId,
-    hello: ClientHello,
+    pub(super) hello: ClientHello,
+    cancel: Arc<AtomicBool>,
     compact_hello: Option<Hello>,
     context: Option<ExecutionContext>,
     path_list: Option<(u64, Arc<AtomicBool>)>,
@@ -174,6 +175,7 @@ impl Session {
         Ok(Some(Self {
             client,
             hello,
+            cancel: Arc::clone(cancel),
             compact_hello,
             context: Some(context),
             path_list: None,
@@ -185,6 +187,9 @@ impl Session {
     }
 
     pub(super) fn initialize(&mut self, shared: &Arc<Shared>, outbound: &Arc<OutboundMailbox>) {
+        if self.cancel.load(Ordering::Acquire) || self.released.load(Ordering::Acquire) {
+            return;
+        }
         if let Some(hello) = &self.compact_hello {
             shared.initialize_compact(
                 self.client,
@@ -192,6 +197,82 @@ impl Session {
                 outbound,
                 self.context.as_mut().expect("client context"),
             );
+        }
+    }
+
+    pub(super) fn try_inline_message(
+        &mut self,
+        shared: &Arc<Shared>,
+        outbound: &Arc<OutboundMailbox>,
+        message: ProtocolMessage,
+    ) -> Option<ProtocolMessage> {
+        let context = self.context.as_mut().expect("client context");
+        match message {
+            ProtocolMessage::Exec(mut request) => {
+                if let Some(line) = &request.raw_control_line {
+                    let names = zz_mux::config_expansion_names("<control>", line);
+                    if !names.homes.is_empty() || !names.variables.is_empty() {
+                        return Some(ProtocolMessage::Exec(request));
+                    }
+                    let parsed = zz_mux::parse_config_with_expansions(
+                        "<control>",
+                        line,
+                        &BTreeMap::new(),
+                        &BTreeMap::new(),
+                    );
+                    if !parsed.diagnostics.is_empty() {
+                        return Some(ProtocolMessage::Exec(request));
+                    }
+                    request.commands = parsed.commands;
+                    request.raw_control_line = None;
+                }
+                let prepared = {
+                    let inner = shared.inner.lock();
+                    Shared::prepare_command_list_with_engine(
+                        &inner.engine,
+                        request.commands.clone(),
+                        self.hello.kind == ClientKind::Command,
+                    )
+                };
+                sync_context_with_attachment(&shared.inner.lock(), self.client, context);
+                if !prepared
+                    .iter()
+                    .all(|command| inline_query(shared, context, command))
+                {
+                    return Some(ProtocolMessage::Exec(request));
+                }
+                shared.execute_prepared_compact_request(
+                    self.client,
+                    self.hello.kind,
+                    context,
+                    prepared,
+                    outbound,
+                );
+                None
+            }
+            ProtocolMessage::CommandRequest(request) => {
+                if request.prepared {
+                    return Some(ProtocolMessage::CommandRequest(request));
+                }
+                let prepared = {
+                    let inner = shared.inner.lock();
+                    Shared::prepare_command_list_with_engine(
+                        &inner.engine,
+                        vec![request.command.clone()],
+                        self.hello.kind == ClientKind::Command,
+                    )
+                };
+                sync_context_with_attachment(&shared.inner.lock(), self.client, context);
+                if !prepared
+                    .iter()
+                    .all(|command| inline_query(shared, context, command))
+                {
+                    return Some(ProtocolMessage::CommandRequest(request));
+                }
+                self.message(shared, outbound, ProtocolMessage::CommandRequest(request));
+                None
+            }
+            message => Some(message),
         }
     }
 
@@ -518,4 +599,10 @@ impl Drop for Session {
             .lock()
             .remove(&self.client);
     }
+}
+
+fn inline_query(shared: &Shared, context: &ExecutionContext, command: &PreparedCommand) -> bool {
+    command.result == PreparedCommandResult::Ready
+        && command.canonical_name.as_deref() != Some("capture-pane")
+        && ctrl::control_query_can_defer_wakeup(&shared.inner.lock(), context, command)
 }

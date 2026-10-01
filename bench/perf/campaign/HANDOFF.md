@@ -41,6 +41,23 @@ rules" before launching anything.
    -45..49%, `statusjob.instr_per_s` -54..63%, `chain5.p20` -40..48%. `attach.instr.p1/p4` +4.3% /
    +3.4% on Linux (within 3% on the Mac): the first attach compiles status templates cold; CTRL
    rewrites that path next. No strict gate JSON for this merge (wave-exit rule).
+   W2-CTRL merged 2026-09-30 as merge 5 (`87eb47c1`) after a 25 min parity review (one major:
+   `ZZ_PERF_LEGACY_COMMAND=1` attach hung on a second `Hello`; one minor: the iOS example cached
+   grid without layout generation) and a 15 min fix (`870b2b1e`). Merge checks on both hosts:
+   workspace 4765-4771 pass with only known or solo-passing failures, attached-client, TUI screen
+   diff (needs a UTF-8 locale), web and iPad builds, iOS simulator check (tree, split, live output,
+   key-table patch), 33-35 of 35 control/attach/resize compat rows. A/B against the FMT binary,
+   both hosts: attach connections 2 -> 1, server bytes 29.4 KB -> 2.3-2.9 KB, wire frames 6/9 -> 3,
+   attach instructions -6..-11%, control instructions per command -26..-54%, latency -57..-62%,
+   burst +200..470%. Linux `smoke/control-notify` then caught `%layout-change` losing the activity
+   flag (`-` for `#-`, 7 of 8 runs; the Mac never showed it): `f6a25887` notes activity on the
+   control output tap before raw output is published, publishes compact trees before layout
+   hooks, and carries the missing silence flag (`WindowSnapshot.silence`, a wire change inside
+   107). Its loop is 0 of 8 twice; `ctrl_flags_tests.rs` fails 5 tests with the fix disabled; the
+   follow-up A/B leaves instructions flat on both hosts (Linux burst wall 32.6k -> 29.6k cmd/s at
+   flat tmux and flat instructions: judge at the wave-exit gate). Known misses carried to W4:
+   `control.latency` about 1.4-1.7x tmux (a stdio handoff design in CTRL's as-built notes),
+   `attach.cpu`/`attach.ttfc` on Linux.
    Earlier plan text, kept for CTRL and FMT: W2-CTRL (after TERM; carries TERM's PaneFrame in its Batch via `encode_terminal_viewport_event_into`
    / `encode_terminal_patch_event_into`), then W2-FMT (after HOOKS; its hand-offs are in the HOOKS
    as-built notes), then W2-COPY. Briefs: `python3 ~/.cache/zz-perf/prompts/gen.py '<json spec>'`
@@ -699,6 +716,16 @@ The first wave-2 impl runs (W2-CTRL, W2-FMT) ran 13.5 h each and never finished 
 - `scripts/wave1-resume.js` is the run that resumed wave 1 after the usage-limit cut, kept as the example of RESUME notes per lane (paths moved into constants, logic unchanged; its `execDone` line uses `&&` on a promise, so EXEC did not actually wait for PANE).
 
 ## Traps
+
+- Waiting on a remote agent with `ssh host 'pgrep -f <brief>'` never ends: the pattern matches the
+  ssh shell's own command line. Wait on the report file, or write the pattern as `[c]odex`.
+  This cost a night (2026-09-30 23:38 to 10-01 08:57).
+- `compat/tui-screen-diff.sh` and the attached checks need a UTF-8 locale: without `LANG`/`LC_ALL`
+  the pinned tmux draws ACS borders and the run reports diffs and an unsettled wide-glyph screen.
+- `compat/attached-client.sh` can fail on the tmux side ("tmux command-output view did not show
+  one ordered replay transcript") on a loaded Mac; it passed 1 of 2 reruns at `f6a25887`.
+- The Mac lane worktrees left an orphaned `run-tui-fixtures.py` from a killed codex run alive for
+  6 h 40 min; after killing a lane, sweep `ps` for its `/tmp/zzpc` runners too.
 
 - `just compat-check` on the Mac fails `verify_claims_test.py` (unbound `unattributed`) when
   `/bin/bash` 3.2 comes first in PATH, on main too: run it with `/opt/homebrew/bin` first.

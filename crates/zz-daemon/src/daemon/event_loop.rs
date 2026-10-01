@@ -1489,3 +1489,7 @@ mod b4_tests;
 #[cfg(test)]
 #[path = "event_loop_b5_tests.rs"]
 mod b5_tests;
+
+#[cfg(test)]
+#[path = "event_loop_b5fix_tests.rs"]
+mod b5fix_tests;

@@ -4782,7 +4782,7 @@ impl ResponseAdmissionGuard {
             .active
             .checked_sub(1)
             .expect("response admission underflow");
-        let notify = state.active == 0;
+        let notify = state.active == 0 && state.frozen;
         drop(state);
         if notify {
             self.shared.response_admissions_changed.notify_all();

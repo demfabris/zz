@@ -3196,6 +3196,18 @@ the known macOS CLI fallback test stays red alone, and the process-info large-ar
 alone after failing under load. All 35 integration tests pass, with one soak ignored and no doc
 tests. The orchestrator owns macOS checks; this step runs no perf gate.
 
+### b5 command-cost fix (2026-10-01)
+
+`ResponseAdmissionGuard::finish` notifies response waiters and the mux loop only after
+admissions freeze. The existing admission mutex protects the count and freeze together.
+Three alternating quick `cli,mem` runs against b4 measured instruction median ratios of
+0.9836..1.0167 across all 19 CLI rows, below the 1.02 limit. Thread counts stay 6 -> 4 at p1
+and 44 -> 42 at p20. The poll-wake test covers normal completion, frozen admissions, and
+the final outstanding response. Final fmt, clippy with warnings denied, the serial daemon
+suite, all four requested compatibility scenarios, and the quick W0 gate passed. The W0
+gate reports 32 pass, 0 fail, and 37 info rows. Later loop slices retain the b5 signal and
+drain phases; the orchestrator runs Linux-only checks on its Linux host.
+
 ## W4-DELIVER: frames straight from shards (effort L)
 
 Scope: the loop pushes per-pane subscriber sinks (queue handle, stream kind, delivered base,

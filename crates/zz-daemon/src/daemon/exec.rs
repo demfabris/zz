@@ -6,6 +6,7 @@ use zz_protocol::{
     ExecResumeKind,
 };
 
+#[cfg(windows)]
 thread_local! {
     static EXEC_CLIENT: Cell<Option<ClientId>> = const { Cell::new(None) };
 }
@@ -13,7 +14,9 @@ thread_local! {
 type ExecJob = Box<dyn FnOnce() + Send>;
 
 const IDLE_CONNECTION_THREADS: usize = 2;
+#[cfg(windows)]
 const EXEC_FLUSH_FRAMES: usize = 64;
+#[cfg(windows)]
 const EXEC_FLUSH_BYTES: usize = 64 * 1024;
 const CONNECTION_THREAD_IDLE: Duration = Duration::from_secs(1);
 
@@ -26,6 +29,8 @@ pub(super) struct ConnectionThreads {
     idle: Mutex<Vec<crossbeam_channel::Sender<ExecJob>>>,
     #[cfg(test)]
     pub(super) fail_next: AtomicBool,
+    #[cfg(test)]
+    live_workers: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl ConnectionThreads {
@@ -51,15 +56,26 @@ impl ConnectionThreads {
             }
         }
         let threads = Arc::downgrade(self);
+        #[cfg(test)]
+        let lifetime = WorkerLifetime::new(Arc::clone(&self.live_workers));
         thread::Builder::new()
             .name("zz-client".to_owned())
-            .spawn(move || connection_worker(&threads, job))
+            .spawn(move || {
+                #[cfg(test)]
+                let _lifetime = lifetime;
+                connection_worker(&threads, job);
+            })
             .map(drop)
     }
 
     #[cfg(test)]
     pub(super) fn idle_count(&self) -> usize {
         self.idle.lock().len()
+    }
+
+    #[cfg(test)]
+    pub(super) fn worker_count(&self) -> usize {
+        self.live_workers.load(Ordering::Acquire)
     }
 
     fn park(&self, worker: &crossbeam_channel::Sender<ExecJob>) -> bool {
@@ -78,6 +94,24 @@ impl ConnectionThreads {
         };
         idle.swap_remove(index);
         true
+    }
+}
+
+#[cfg(test)]
+struct WorkerLifetime(Arc<std::sync::atomic::AtomicUsize>);
+
+#[cfg(test)]
+impl WorkerLifetime {
+    fn new(workers: Arc<std::sync::atomic::AtomicUsize>) -> Self {
+        workers.fetch_add(1, Ordering::AcqRel);
+        Self(workers)
+    }
+}
+
+#[cfg(test)]
+impl Drop for WorkerLifetime {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
@@ -112,19 +146,23 @@ fn connection_worker(threads: &Weak<ConnectionThreads>, first: ExecJob) {
     }
 }
 
+#[cfg(windows)]
 pub(super) struct ExecLink {
     starter: Mutex<Option<ExecStarter>>,
     live: Mutex<Option<ExecLive>>,
 }
 
+#[cfg(windows)]
 struct ExecLive {
     writer: thread::JoinHandle<()>,
     reader: thread::JoinHandle<()>,
     requests: crossbeam_channel::Receiver<ExecRequest>,
 }
 
+#[cfg(windows)]
 type ExecStarter = Box<dyn FnOnce() -> Option<ExecLive> + Send>;
 
+#[cfg(windows)]
 impl ExecLink {
     fn go_live(&self) {
         let mut starter = self.starter.lock();
@@ -149,7 +187,7 @@ impl ExecLink {
 struct ExecRegistration {
     shared: Arc<Shared>,
     client: ClientId,
-    released: AtomicBool,
+    released: Arc<AtomicBool>,
 }
 
 impl ExecRegistration {
@@ -164,8 +202,10 @@ impl ExecRegistration {
     }
 }
 
+#[cfg(windows)]
 struct ExecClientScope;
 
+#[cfg(windows)]
 impl ExecClientScope {
     fn new(client: ClientId) -> Self {
         EXEC_CLIENT.with(|current| current.set(Some(client)));
@@ -173,6 +213,7 @@ impl ExecClientScope {
     }
 }
 
+#[cfg(windows)]
 impl Drop for ExecClientScope {
     fn drop(&mut self) {
         EXEC_CLIENT.with(|current| current.set(None));
@@ -236,6 +277,7 @@ fn prepared_command_any(
 }
 
 impl Shared {
+    #[cfg(windows)]
     pub(super) fn go_live_exec(&self, client: ClientId) {
         let link = self.exec_links.lock().get(&client).cloned();
         if let Some(link) = link {
@@ -243,12 +285,14 @@ impl Shared {
         }
     }
 
+    #[cfg(windows)]
     pub(super) fn go_live_current_exec(&self) {
         if let Some(client) = EXEC_CLIENT.with(Cell::get) {
             self.go_live_exec(client);
         }
     }
 
+    #[cfg(windows)]
     fn defer_exec_until_startup(&self, job: ExecJob) -> Option<ExecJob> {
         let ready = self.startup_ready.lock();
         if *ready || self.stopping.load(Ordering::Acquire) {
@@ -260,6 +304,7 @@ impl Shared {
     }
 
     pub(super) fn resume_pending_execs(&self) {
+        self.accept_wake.wake();
         let pending = std::mem::take(&mut *self.pending_execs.lock());
         for job in pending {
             if let Err(error) = self.connection_threads.run(job) {
@@ -272,7 +317,7 @@ impl Shared {
         drop(std::mem::take(&mut *self.pending_execs.lock()));
     }
 
-    fn register_exec(
+    pub(super) fn register_exec(
         &self,
         request: &ExecRequest,
         environment: ClientEnvironmentBlob,
@@ -331,6 +376,7 @@ impl Shared {
     }
 }
 
+#[cfg(windows)]
 pub(super) fn serve_exec<S: TransportStream>(
     mut stream: S,
     shared: &Arc<Shared>,
@@ -394,6 +440,7 @@ pub(super) fn serve_exec<S: TransportStream>(
     Ok(())
 }
 
+#[cfg(windows)]
 fn serve_exec_ready<S: TransportStream>(
     mut stream: S,
     shared: &Arc<Shared>,
@@ -417,7 +464,7 @@ fn serve_exec_ready<S: TransportStream>(
     let registration = Arc::new(ExecRegistration {
         shared: Arc::clone(shared),
         client,
-        released: AtomicBool::new(false),
+        released: Arc::new(AtomicBool::new(false)),
     });
     let mut connection = ExecConnection {
         shared: Arc::clone(shared),
@@ -457,6 +504,7 @@ fn serve_exec_ready<S: TransportStream>(
     );
 }
 
+#[cfg(windows)]
 struct ExecConnection<S: TransportStream> {
     shared: Arc<Shared>,
     stream: Arc<Mutex<Option<S>>>,
@@ -469,6 +517,7 @@ struct ExecConnection<S: TransportStream> {
     resumed: bool,
 }
 
+#[cfg(windows)]
 impl<S: TransportStream> ExecConnection<S> {
     fn run(&mut self, request: ExecRequest) {
         let (mailbox, link) = if let Some((mailbox, link)) = &self.live {
@@ -772,5 +821,204 @@ impl<S: TransportStream> ExecConnection<S> {
         {
             writers.remove(&self.client);
         }
+    }
+}
+
+#[cfg(unix)]
+pub(super) struct LoopExec {
+    shared: Arc<Shared>,
+    pub(super) client: ClientId,
+    context: ExecutionContext,
+    cancel: Arc<AtomicBool>,
+    registration: ExecRegistration,
+    mailbox: Arc<OutboundMailbox>,
+}
+
+#[cfg(unix)]
+impl LoopExec {
+    pub(super) fn register(
+        shared: &Arc<Shared>,
+        request: &mut ExecRequest,
+        mailbox: &Arc<OutboundMailbox>,
+        cancel: &Arc<AtomicBool>,
+    ) -> Option<Self> {
+        let environment = std::mem::take(&mut request.environment);
+        let (client, context) = shared.register_exec(request, environment)?;
+        shared
+            .command_queue_cancels
+            .lock()
+            .insert(client, Arc::clone(cancel));
+        shared
+            .client_writers
+            .lock()
+            .insert(client, Arc::clone(mailbox));
+        Some(Self {
+            shared: Arc::clone(shared),
+            client,
+            context,
+            cancel: Arc::clone(cancel),
+            registration: ExecRegistration {
+                shared: Arc::clone(shared),
+                client,
+                released: Arc::new(AtomicBool::new(false)),
+            },
+            mailbox: Arc::clone(mailbox),
+        })
+    }
+
+    pub(super) fn released(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.registration.released)
+    }
+
+    pub(super) fn run(&mut self, request: ExecRequest) -> bool {
+        let mailbox = Arc::clone(&self.mailbox);
+        let admission = ResponseAdmissionGuard::new(&self.shared);
+        let outcome = if admission.is_some() {
+            self.execute(&mailbox, request)
+        } else {
+            let _ = mailbox.enqueue_reliable(&server_stopping_response(1));
+            ExecOutcome::Ran
+        };
+        let resumed = matches!(outcome, ExecOutcome::Resume(_));
+        if !self.cancel.load(Ordering::Acquire) {
+            let _ = mailbox.enqueue_reliable_with_wakeup(
+                &ProtocolMessage::ExecExit(ExecExit {
+                    server_id: self.shared.server_id,
+                    outcome,
+                }),
+                false,
+            );
+        }
+        drop(admission);
+        resumed
+    }
+
+    fn execute(&mut self, mailbox: &Arc<OutboundMailbox>, request: ExecRequest) -> ExecOutcome {
+        let shared = Arc::clone(&self.shared);
+        if request
+            .expect_server_id
+            .is_some_and(|expected| expected != shared.server_id)
+        {
+            return ExecOutcome::ServerMismatch;
+        }
+        if request.commands.is_empty() {
+            return ExecOutcome::Ran;
+        }
+        let stdin_available = request.flags.contains(ExecFlags::STDIN_AVAILABLE);
+        if request.flags.contains(ExecFlags::PREPARED) {
+            self.run_commands(mailbox, request.commands, stdin_available);
+            return ExecOutcome::Ran;
+        }
+        let resume = request.flags.contains(ExecFlags::RESUME);
+        let typed = resume.then(|| {
+            request
+                .commands
+                .iter()
+                .map(|command| CommandInvocation::new(command.name.clone(), Vec::<String>::new()))
+                .collect::<Vec<_>>()
+        });
+        let prepared = {
+            let mut inner = shared.inner.lock();
+            let prepared =
+                Shared::prepare_command_list_with_engine(&inner.engine, request.commands, true);
+            if request.spawned_server_id == Some(shared.server_id) {
+                let failed = prepared
+                    .iter()
+                    .any(|command| matches!(command.result, PreparedCommandResult::Error(_)));
+                inner.cold_bootstrap.prepare(self.client, failed);
+            }
+            prepared
+        };
+        if let Some(error) = prepared.iter().find_map(|command| match &command.result {
+            PreparedCommandResult::Ready => None,
+            PreparedCommandResult::Error(error) => Some(error.clone()),
+        }) {
+            return ExecOutcome::Rejected(error);
+        }
+        if let Some(typed) = typed
+            && let Some(kind) = exec_resume_kind(&typed, &prepared)
+        {
+            return ExecOutcome::Resume(ExecResume {
+                kind,
+                commands: prepared,
+            });
+        }
+        self.run_commands(
+            mailbox,
+            prepared.into_iter().map(|command| command.invocation),
+            stdin_available,
+        );
+        ExecOutcome::Ran
+    }
+
+    fn run_commands(
+        &mut self,
+        mailbox: &Arc<OutboundMailbox>,
+        commands: impl IntoIterator<Item = CommandInvocation>,
+        stdin_available: bool,
+    ) {
+        let shared = Arc::clone(&self.shared);
+        for (index, mut invocation) in commands.into_iter().enumerate() {
+            let request_id = u64::try_from(index).unwrap_or(u64::MAX).saturating_add(1);
+            if self.cancel.load(Ordering::Acquire) {
+                break;
+            }
+            if shared.shutdown_pending.load(Ordering::Acquire) {
+                let _ = mailbox.enqueue_reliable(&server_stopping_response(request_id));
+                break;
+            }
+            invocation.set_stdin_available(stdin_available);
+            let item = shared.command_item(None);
+            item.command_item
+                .as_ref()
+                .expect("Exec command item")
+                .lock()
+                .exec_writer = Some(Arc::downgrade(mailbox));
+            let (response, client_exit) = item.execute_command_request_with_streams(
+                self.client,
+                ClientKind::Command,
+                &mut self.context,
+                request_id,
+                &invocation,
+                true,
+            );
+            let failed = matches!(response, CommandResponse::Error { .. });
+            let admitted = mailbox
+                .enqueue_reliable_with_wakeup(&ProtocolMessage::CommandResponse(response), false);
+            if failed || client_exit || !admitted {
+                break;
+            }
+            self.wait_for_output(mailbox);
+        }
+    }
+
+    fn wait_for_output(&self, mailbox: &OutboundMailbox) {
+        let mut state = mailbox.state.lock();
+        while !state.closed
+            && !self.cancel.load(Ordering::Acquire)
+            && (state
+                .queued_bytes
+                .saturating_add(state.writer_inflight_bytes)
+                >= 64 * 1024
+                || state
+                    .reliable
+                    .len()
+                    .saturating_add(state.writer_inflight_messages)
+                    >= 64)
+        {
+            mailbox.notify_one();
+            mailbox.ready.wait(&mut state);
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for LoopExec {
+    fn drop(&mut self) {
+        self.registration.release();
+        self.shared
+            .command_queue_cancels
+            .lock()
+            .remove(&self.client);
     }
 }

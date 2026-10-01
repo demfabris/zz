@@ -24,11 +24,10 @@ pub(super) struct EventLoop {
     connections: BTreeMap<Token, Connection>,
     completed: mpsc::Receiver<Completion>,
     completion_sender: mpsc::Sender<Completion>,
+    turn_tokens: Vec<Token>,
     next_token: usize,
     accept_again: bool,
     control_output_poll: bool,
-    handoffs: mpsc::Receiver<Handoff>,
-    exec_workers: Arc<std::sync::atomic::AtomicUsize>,
     shutdown_started: bool,
     shutdown_complete: Arc<AtomicBool>,
     #[cfg(test)]
@@ -101,9 +100,12 @@ struct Connection {
     frame_index: usize,
     write_offset: usize,
     writable: bool,
+    send_buffer_ready: bool,
     read_closed: bool,
     read_again: bool,
-    session: Option<connection::Session>,
+    session: Option<Box<connection::Session>>,
+    exec_mode: bool,
+    exec: Option<Box<exec::LoopExec>>,
     client: Option<ClientId>,
     pending: VecDeque<(ProtocolMessage, usize)>,
     pending_bytes: usize,
@@ -117,15 +119,14 @@ struct Connection {
     released: Option<Arc<AtomicBool>>,
 }
 
-pub(super) struct Handoff {
-    pub(super) descriptor: OwnedFd,
-    pub(super) first: ProtocolMessage,
-    pub(super) buffered: Vec<u8>,
-}
-
 struct Completion {
     token: Token,
-    result: Result<Option<connection::Session>, DaemonError>,
+    result: Result<Completed, DaemonError>,
+}
+
+enum Completed {
+    Client(Option<Box<connection::Session>>),
+    Exec(Option<Box<exec::LoopExec>>),
 }
 
 impl EventLoop {
@@ -135,8 +136,7 @@ impl EventLoop {
         shared.accept_wake.install(Arc::clone(&waker));
         let (startup_sender, startup_finished) = mpsc::channel();
         let (completion_sender, completed) = mpsc::channel();
-        let (handoff_sender, handoffs) = mpsc::channel();
-        *shared.loop_handoffs.lock() = Some(handoff_sender);
+        shared.loop_active.store(true, Ordering::Release);
         Ok(Self {
             poll,
             events: Events::with_capacity(128),
@@ -146,11 +146,10 @@ impl EventLoop {
             connections: BTreeMap::new(),
             completed,
             completion_sender,
+            turn_tokens: Vec::new(),
             next_token: 2,
             accept_again: false,
             control_output_poll: false,
-            handoffs,
-            exec_workers: Arc::default(),
             shutdown_started: false,
             shutdown_complete: Arc::default(),
             #[cfg(test)]
@@ -181,7 +180,6 @@ impl EventLoop {
     fn insert(&mut self, descriptor: OwnedFd) -> Result<Token, DaemonError> {
         let stream = UnixStream::from(descriptor);
         stream.set_nonblocking(true)?;
-        let _ = stream.set_send_buffer_size(attach::MAX_BATCHED_WRITE_BYTES);
         let token = Token(self.next_token);
         self.next_token += 1;
         self.poll.registry().register(
@@ -201,9 +199,12 @@ impl EventLoop {
                 frame_index: 0,
                 write_offset: 0,
                 writable: false,
+                send_buffer_ready: false,
                 read_closed: false,
                 read_again: false,
                 session: None,
+                exec_mode: false,
+                exec: None,
                 client: None,
                 pending: VecDeque::new(),
                 pending_bytes: 0,
@@ -227,6 +228,7 @@ impl EventLoop {
         initialized: impl FnOnce(),
     ) -> Result<(), DaemonError> {
         let mut initialized = Some(initialized);
+        let mut ready = Vec::new();
         loop {
             while self.startup_finished.try_recv().is_ok() {
                 if let Some(initialized) = initialized.take() {
@@ -248,18 +250,15 @@ impl EventLoop {
                 self.accept_ready::<T>(listener, shared)?;
             }
             self.poll_ready()?;
-            let events = self
-                .events
-                .iter()
-                .map(|event| {
-                    (
-                        event.token(),
-                        event.is_readable() || event.is_read_closed(),
-                        event.is_writable() || event.is_write_closed(),
-                    )
-                })
-                .collect::<Vec<_>>();
-            for (token, readable, writable) in events {
+            ready.clear();
+            ready.extend(self.events.iter().map(|event| {
+                (
+                    event.token(),
+                    event.is_readable() || event.is_read_closed(),
+                    event.is_writable() || event.is_write_closed(),
+                )
+            }));
+            for &(token, readable, writable) in &ready {
                 if token == LISTENER {
                     if !self.shutdown_started {
                         self.accept_ready::<T>(listener, shared)?;
@@ -326,33 +325,10 @@ impl EventLoop {
                 self.accept_again = false;
                 return Ok(());
             }
-            match listener.accept() {
-                Ok(mut stream) => {
-                    let shared = Arc::clone(shared);
-                    let threads = Arc::clone(&shared.connection_threads);
-                    if let Err(error) = threads.run(Box::new(move || {
-                        let mut frame = Vec::new();
-                        match read_protocol_message_into(&mut stream, &mut frame) {
-                            Ok(ProtocolMessage::Exec(request)) => {
-                                if let Err(error) = exec::serve_exec(stream, &shared, request) {
-                                    log::debug!("exec disconnected: {error}");
-                                }
-                            }
-                            Ok(first) => {
-                                if let Err(error) =
-                                    handle_connection_message(stream, &shared, first)
-                                {
-                                    log::debug!("client handoff failed: {error}");
-                                }
-                            }
-                            Err(ProtocolError::VersionMismatch { received, .. }) => {
-                                best_effort_protocol_mismatch_reply(&mut stream, received);
-                            }
-                            Err(error) => log::debug!("first client frame rejected: {error}"),
-                        }
-                    })) {
-                        log::warn!("could not start client routing: {error}");
-                    }
+            match listener.accept_fd() {
+                Ok(descriptor) => {
+                    let token = self.insert(descriptor)?;
+                    self.read_ready(token, shared);
                 }
                 Err(error) if error.kind() == ErrorKind::WouldBlock => {
                     self.accept_again = false;
@@ -459,36 +435,29 @@ impl EventLoop {
         bytes: usize,
     ) -> bool {
         let connection = self.connections.get_mut(&token).unwrap();
+        if connection.exec_mode {
+            return match message {
+                ProtocolMessage::ClientFileResponse(response) => {
+                    if let Some(client) = connection.client {
+                        shared.complete_client_file(client, response);
+                    }
+                    true
+                }
+                message => self.enqueue_pending(token, shared, message, bytes),
+            };
+        }
         if connection.client.is_none() && !connection.busy {
-            if let ProtocolMessage::Exec(request) = message {
-                let mut connection = self.connections.remove(&token).unwrap();
-                let _ = self
-                    .poll
-                    .registry()
-                    .deregister(&mut SourceFd(&connection.stream.as_raw_fd()));
-                connection.inbound.compact();
-                let stream = BufferedStream {
-                    stream: connection.stream,
-                    buffered: Arc::new(Mutex::new(io::Cursor::new(connection.inbound.bytes))),
-                };
-                let _ = stream.stream.set_nonblocking(false);
-                self.execute_exec(stream, shared, request);
-                return false;
+            if matches!(message, ProtocolMessage::Exec(_)) {
+                connection.exec_mode = true;
+                return self.enqueue_pending(token, shared, message, bytes);
             }
-            if matches!(&message, ProtocolMessage::Hello(hello) if hello.client.kind == ClientKind::Control)
-            {
-                let socket = connection.stream.receive_fd().ok();
-                #[cfg(target_vendor = "apple")]
-                let socket = socket.filter(|socket| {
-                    rustix::net::sockopt::set_socket_nosigpipe(socket, true).is_ok()
-                });
-                connection.outbound.state.lock().quiet_socket = socket;
-            }
+            connection.prepare_hello(&message);
             connection.busy = true;
             let outbound = Arc::clone(&connection.outbound);
             let cancel = Arc::clone(&connection.cancel);
             self.execute(token, shared, move |shared| {
                 connection::Session::register(shared, message, &outbound, &cancel)
+                    .map(|session| session.map(Box::new))
             });
         } else if let Some(client) = connection.client {
             match message {
@@ -521,27 +490,137 @@ impl EventLoop {
         true
     }
 
-    fn execute_exec(
-        &self,
-        stream: impl TransportStream,
-        shared: &Arc<Shared>,
-        request: zz_protocol::ExecRequest,
-    ) {
-        let shared = Arc::clone(shared);
-        let threads = Arc::clone(&shared.connection_threads);
-        self.exec_workers.fetch_add(1, Ordering::AcqRel);
-        let finished = ExecNotifier {
-            workers: Arc::clone(&self.exec_workers),
-            waker: Arc::clone(&self.waker),
-        };
-        if let Err(error) = threads.run(Box::new(move || {
-            let _finished = finished;
-            if let Err(error) = exec::serve_exec(stream, &shared, request) {
-                log::debug!("exec disconnected: {error}");
-            }
-        })) {
-            log::warn!("could not start exec worker: {error}");
+    fn advance_exec(&mut self, token: Token, shared: &Arc<Shared>) {
+        let connection = self.connections.get_mut(&token).unwrap();
+        if !connection.exec_mode || connection.busy || connection.read_closed {
+            return;
         }
+        let Some((message, bytes)) = connection.pending.front() else {
+            return;
+        };
+        if let ProtocolMessage::Exec(request) = message
+            && connection.client.is_none()
+            && !request.commands.is_empty()
+            && request.startup_reentry != Some(shared.server_id)
+            && !*shared.startup_ready.lock()
+            && !shared.stopping.load(Ordering::Acquire)
+        {
+            return;
+        }
+        if matches!(
+            message,
+            ProtocolMessage::Hello(_) | ProtocolMessage::ClientHello(_)
+        ) {
+            let state = connection.outbound.state.lock();
+            if state.queued_bytes != 0 || state.writer_inflight_bytes != 0 {
+                return;
+            }
+        }
+        let bytes = *bytes;
+        let (message, _) = connection.pending.pop_front().unwrap();
+        connection.pending_bytes -= bytes;
+        match message {
+            ProtocolMessage::Exec(request) => self.run_exec(token, shared, request),
+            first @ (ProtocolMessage::Hello(_) | ProtocolMessage::ClientHello(_)) => {
+                connection.prepare_hello(&first);
+                let execution = connection.exec.take();
+                let exec_client = connection.client;
+                connection.exec_mode = false;
+                connection.client = None;
+                connection.kind = None;
+                connection.released = None;
+                connection.initialized = false;
+                connection.cancel = Arc::new(AtomicBool::new(false));
+                connection.busy = true;
+                let outbound = Arc::clone(&connection.outbound);
+                let cancel = Arc::clone(&connection.cancel);
+                self.execute(token, shared, move |shared| {
+                    drop(execution);
+                    if let Some(client) = exec_client {
+                        shared.client_writers.lock().remove(&client);
+                    }
+                    connection::Session::register(shared, first, &outbound, &cancel)
+                        .map(|session| session.map(Box::new))
+                });
+            }
+            _ => {
+                if !connection.pending.is_empty() {
+                    let _ = self.waker.wake();
+                }
+            }
+        }
+    }
+
+    fn run_exec(
+        &mut self,
+        token: Token,
+        shared: &Arc<Shared>,
+        mut request: zz_protocol::ExecRequest,
+    ) {
+        let connection = self.connections.get_mut(&token).unwrap();
+        if shared.stopping.load(Ordering::Acquire)
+            || shared.shutdown_pending.load(Ordering::Acquire)
+        {
+            if *shared.startup_ready.lock() {
+                let _ = connection
+                    .outbound
+                    .enqueue_reliable(&server_stopping_response(0));
+            }
+            self.disconnect(token, shared);
+            return;
+        }
+        let last = request.flags.contains(zz_protocol::ExecFlags::LAST);
+        if connection.exec.is_none() && request.commands.is_empty() {
+            let outcome = if request
+                .expect_server_id
+                .is_some_and(|id| id != shared.server_id)
+            {
+                zz_protocol::ExecOutcome::ServerMismatch
+            } else {
+                zz_protocol::ExecOutcome::Ran
+            };
+            let _ = connection
+                .outbound
+                .enqueue_reliable(&ProtocolMessage::ExecExit(zz_protocol::ExecExit {
+                    server_id: shared.server_id,
+                    outcome,
+                }));
+            if last {
+                self.disconnect(token, shared);
+            } else if !connection.pending.is_empty() {
+                let _ = self.waker.wake();
+            }
+            return;
+        }
+        let execution = connection.exec.take().or_else(|| {
+            exec::LoopExec::register(
+                shared,
+                &mut request,
+                &connection.outbound,
+                &connection.cancel,
+            )
+            .map(Box::new)
+        });
+        let Some(mut execution) = execution else {
+            let _ = connection
+                .outbound
+                .enqueue_reliable(&server_stopping_response(0));
+            self.disconnect(token, shared);
+            return;
+        };
+        connection.client = Some(execution.client);
+        connection.kind = Some(ClientKind::Command);
+        connection.released = Some(execution.released());
+        connection.busy = true;
+        self.execute_work(token, shared, move |_| {
+            let resumed = execution.run(request);
+            if last && !resumed {
+                drop(execution);
+                Ok(Completed::Exec(None))
+            } else {
+                Ok(Completed::Exec(Some(execution)))
+            }
+        });
     }
 
     fn enqueue_pending(
@@ -564,8 +643,33 @@ impl EventLoop {
             self.remove(token, shared);
             return false;
         }
+        if connection.exec_mode
+            && !connection.busy
+            && !connection.read_closed
+            && connection.pending.is_empty()
+            && matches!(&message, ProtocolMessage::Exec(request) if connection.client.is_some()
+                || request.commands.is_empty()
+                || request.startup_reentry == Some(shared.server_id)
+                || *shared.startup_ready.lock()
+                || shared.stopping.load(Ordering::Acquire))
+        {
+            let ProtocolMessage::Exec(request) = message else {
+                unreachable!();
+            };
+            self.run_exec(token, shared, request);
+            return self
+                .connections
+                .get(&token)
+                .is_some_and(|connection| !connection.read_closed);
+        }
         connection.pending_bytes += bytes;
+        if connection.pending.capacity() == 0 {
+            connection.pending.reserve_exact(1);
+        }
         connection.pending.push_back((message, bytes));
+        if connection.exec_mode && !connection.busy {
+            self.advance_exec(token, shared);
+        }
         true
     }
 
@@ -573,9 +677,20 @@ impl EventLoop {
         &self,
         token: Token,
         shared: &Arc<Shared>,
-        work: impl FnOnce(&Arc<Shared>) -> Result<Option<connection::Session>, DaemonError>
+        work: impl FnOnce(&Arc<Shared>) -> Result<Option<Box<connection::Session>>, DaemonError>
         + Send
         + 'static,
+    ) {
+        self.execute_work(token, shared, move |shared| {
+            work(shared).map(Completed::Client)
+        });
+    }
+
+    fn execute_work(
+        &self,
+        token: Token,
+        shared: &Arc<Shared>,
+        work: impl FnOnce(&Arc<Shared>) -> Result<Completed, DaemonError> + Send + 'static,
     ) {
         let shared = Arc::clone(shared);
         let sender = self.completion_sender.clone();
@@ -600,21 +715,19 @@ impl EventLoop {
 
     fn turn(&mut self, shared: &Arc<Shared>) -> Result<(), DaemonError> {
         self.control_output_poll = shared.start_ready_control_output_readers();
-        while let Ok(handoff) = self.handoffs.try_recv() {
-            if let Err(error) = self.handoff(handoff, shared) {
-                log::debug!("client handoff failed: {error}");
-            }
-        }
         while let Ok(completion) = self.completed.try_recv() {
             let Some(connection) = self.connections.get_mut(&completion.token) else {
-                if let Ok(Some(session)) = completion.result {
+                if matches!(
+                    &completion.result,
+                    Ok(Completed::Client(Some(_)) | Completed::Exec(Some(_)))
+                ) {
                     let threads = Arc::clone(&shared.connection_threads);
-                    let _ = threads.run(Box::new(move || drop(session)));
+                    let _ = threads.run(Box::new(move || drop(completion.result)));
                 }
                 continue;
             };
             match completion.result {
-                Ok(Some(session)) => {
+                Ok(Completed::Client(Some(session))) => {
                     connection.busy = false;
                     connection.client = Some(session.client);
                     connection.kind = Some(session.hello.kind);
@@ -628,6 +741,22 @@ impl EventLoop {
                     }
                     if connection.read_closed && !connection.drain_input {
                         self.disconnect(completion.token, shared);
+                    }
+                }
+                Ok(Completed::Exec(execution)) => {
+                    connection.busy = false;
+                    if let Some(execution) = execution {
+                        connection.exec = Some(execution);
+                        if connection.cleanup_started || connection.read_closed {
+                            self.disconnect(completion.token, shared);
+                        }
+                    } else {
+                        connection.cancel.store(true, Ordering::Release);
+                        connection.read_closed = true;
+                        connection.cleanup_started = true;
+                        connection.pending.clear();
+                        connection.pending_bytes = 0;
+                        connection.outbound.close_after_flush();
                     }
                 }
                 result => {
@@ -644,8 +773,10 @@ impl EventLoop {
                 }
             }
         }
-        let tokens = self.connections.keys().copied().collect::<Vec<_>>();
-        for token in tokens {
+        let mut tokens = std::mem::take(&mut self.turn_tokens);
+        tokens.clear();
+        tokens.extend(self.connections.keys().copied());
+        for &token in &tokens {
             let connection = self.connections.get_mut(&token).unwrap();
             if std::mem::take(&mut connection.read_again) {
                 self.read_ready(token, shared);
@@ -653,7 +784,13 @@ impl EventLoop {
             let Some(connection) = self.connections.get_mut(&token) else {
                 continue;
             };
-            if connection.client.is_some() && !connection.initialized {
+            if connection.exec_mode {
+                self.advance_exec(token, shared);
+            }
+            let Some(connection) = self.connections.get_mut(&token) else {
+                continue;
+            };
+            if !connection.exec_mode && connection.client.is_some() && !connection.initialized {
                 let mut pending = std::mem::take(&mut connection.pending);
                 connection.pending_bytes = 0;
                 while let Some((message, bytes)) = pending.pop_front() {
@@ -722,6 +859,18 @@ impl EventLoop {
                 }
             }
             let writing = !connection.frames.is_empty();
+            if connection.exec_mode
+                && !connection.busy
+                && !connection.pending.is_empty()
+                && !writing
+            {
+                let startup_wait = connection.client.is_none()
+                    && !*shared.startup_ready.lock()
+                    && matches!(connection.pending.front(), Some((ProtocolMessage::Exec(request), _)) if !request.commands.is_empty() && request.startup_reentry != Some(shared.server_id));
+                if !startup_wait {
+                    let _ = self.waker.wake();
+                }
+            }
             if connection.writable != writing {
                 let interest = if writing {
                     Interest::READABLE | Interest::WRITABLE
@@ -743,32 +892,7 @@ impl EventLoop {
                 self.remove(token, shared);
             }
         }
-        Ok(())
-    }
-
-    fn handoff(&mut self, handoff: Handoff, shared: &Arc<Shared>) -> Result<(), DaemonError> {
-        let token = self.insert(handoff.descriptor)?;
-        self.connections.get_mut(&token).unwrap().inbound.bytes = handoff.buffered;
-        self.dispatch(token, shared, handoff.first, 0);
-        loop {
-            let inbound = &mut self.connections.get_mut(&token).unwrap().inbound;
-            let offset = inbound.offset;
-            let message = inbound.next();
-            let bytes = inbound.offset - offset;
-            match message {
-                Ok(Some(message)) => {
-                    if !self.dispatch(token, shared, message, bytes) {
-                        return Ok(());
-                    }
-                }
-                Ok(None) => break,
-                Err(error) => {
-                    self.disconnect(token, shared);
-                    return Err(error.into());
-                }
-            }
-        }
-        self.connections.get_mut(&token).unwrap().inbound.compact();
+        self.turn_tokens = tokens;
         Ok(())
     }
 
@@ -784,6 +908,14 @@ impl EventLoop {
             connection.outbound.close();
         }
         if connection.cleanup_started {
+            if let Some(execution) = connection.exec.take() {
+                let threads = Arc::clone(&shared.connection_threads);
+                let outbound = Arc::clone(&connection.outbound);
+                let _ = threads.run(Box::new(move || {
+                    drop(execution);
+                    outbound.close_after_flush();
+                }));
+            }
             return;
         }
         let Some(client) = connection.client else {
@@ -798,16 +930,21 @@ impl EventLoop {
         let threads = Arc::clone(&shared.connection_threads);
         let waker = Arc::clone(&self.waker);
         let session = connection.session.take();
+        let execution = connection.exec.take();
+        let exec_mode = connection.exec_mode;
         let released = Arc::clone(connection.released.as_ref().expect("registered cleanup"));
         let _ = threads.run(Box::new(move || {
             if !released.swap(true, Ordering::AcqRel) {
-                shared.detach(client);
+                if !exec_mode || !detach_is_inert(&shared.inner.lock(), client) {
+                    shared.detach(client);
+                }
                 shared.unregister(client);
-                shared.client_writers.lock().remove(&client);
+                if !exec_mode {
+                    shared.client_writers.lock().remove(&client);
+                }
             }
-            if let Some(session) = session {
-                drop(session);
-            }
+            drop(session);
+            drop(execution);
             outbound.close_after_flush();
             let _ = waker.wake();
         }));
@@ -820,8 +957,18 @@ impl EventLoop {
                 .poll
                 .registry()
                 .deregister(&mut SourceFd(&connection.stream.as_raw_fd()));
-            let _ = connection.stream.shutdown(std::net::Shutdown::Both);
             connection.outbound.mark_writer_finished();
+            if connection.exec_mode
+                && let Some(client) = connection.client
+            {
+                let mut writers = shared.client_writers.lock();
+                if writers
+                    .get(&client)
+                    .is_some_and(|writer| Arc::ptr_eq(writer, &connection.outbound))
+                {
+                    writers.remove(&client);
+                }
+            }
             if let Some(session) = connection.session.take() {
                 let threads = Arc::clone(&shared.connection_threads);
                 let _ = threads.run(Box::new(move || drop(session)));
@@ -831,6 +978,21 @@ impl EventLoop {
 }
 
 impl Connection {
+    fn prepare_hello(&mut self, message: &ProtocolMessage) {
+        let _ = self
+            .stream
+            .set_send_buffer_size(attach::MAX_BATCHED_WRITE_BYTES);
+        self.send_buffer_ready = true;
+        if matches!(message, ProtocolMessage::Hello(hello) if hello.client.kind == ClientKind::Control)
+        {
+            let socket = self.stream.receive_fd().ok();
+            #[cfg(target_vendor = "apple")]
+            let socket = socket
+                .filter(|socket| rustix::net::sockopt::set_socket_nosigpipe(socket, true).is_ok());
+            self.outbound.state.lock().quiet_socket = socket;
+        }
+    }
+
     fn write_ready(&mut self) -> io::Result<()> {
         let mut sent = 0;
         loop {
@@ -841,6 +1003,14 @@ impl Connection {
                 self.write_offset = 0;
                 if self.frames.is_empty() {
                     return Ok(());
+                }
+                if !self.send_buffer_ready
+                    && self.frames.iter().map(OutboundFrame::len).sum::<usize>() >= 16 * 1024
+                {
+                    let _ = self
+                        .stream
+                        .set_send_buffer_size(attach::MAX_BATCHED_WRITE_BYTES);
+                    self.send_buffer_ready = true;
                 }
             }
             let mut slices = self.frames[self.frame_index..]
@@ -866,6 +1036,9 @@ impl Connection {
                     }
                     if self.frame_index == self.frames.len() {
                         self.outbound.recycle_written_batch(&mut self.frames);
+                        if self.exec_mode {
+                            self.outbound.ready.notify_all();
+                        }
                     }
                     if sent >= attach::MAX_BATCHED_WRITE_BYTES {
                         self.outbound.notify_one();
@@ -877,78 +1050,6 @@ impl Connection {
                 Err(error) => return Err(error),
             }
         }
-    }
-}
-
-struct ExecNotifier {
-    workers: Arc<std::sync::atomic::AtomicUsize>,
-    waker: Arc<Waker>,
-}
-
-impl Drop for ExecNotifier {
-    fn drop(&mut self) {
-        self.workers.fetch_sub(1, Ordering::AcqRel);
-        let _ = self.waker.wake();
-    }
-}
-
-struct BufferedStream<S> {
-    stream: S,
-    buffered: Arc<Mutex<io::Cursor<Vec<u8>>>>,
-}
-
-impl<S: TransportStream> Read for BufferedStream<S> {
-    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
-        let read = self.buffered.lock().read(bytes)?;
-        if read != 0 {
-            Ok(read)
-        } else {
-            self.stream.read(bytes)
-        }
-    }
-}
-
-impl<S: TransportStream> Write for BufferedStream<S> {
-    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        self.stream.write(bytes)
-    }
-    fn write_vectored(&mut self, bytes: &[io::IoSlice<'_>]) -> io::Result<usize> {
-        self.stream.write_vectored(bytes)
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        self.stream.flush()
-    }
-}
-
-impl<S: TransportStream> TransportStream for BufferedStream<S> {
-    fn try_clone(&self) -> io::Result<Self> {
-        Ok(Self {
-            stream: self.stream.try_clone()?,
-            buffered: Arc::clone(&self.buffered),
-        })
-    }
-    fn receive_fd(&self) -> io::Result<OwnedFd> {
-        self.stream.receive_fd()
-    }
-    fn take_buffered_input(&mut self) -> Vec<u8> {
-        let mut buffered = self.buffered.lock();
-        let position = buffered.position() as usize;
-        let bytes = std::mem::take(buffered.get_mut());
-        buffered.set_position(0);
-        bytes[position..].to_vec()
-    }
-    fn read_ready(&self, bytes: &mut [u8]) -> io::Result<usize> {
-        let read = self.buffered.lock().read(bytes)?;
-        if read != 0 {
-            return Ok(read);
-        }
-        self.stream.read_ready(bytes)
-    }
-    fn shutdown(&self) -> io::Result<()> {
-        self.stream.shutdown()
-    }
-    fn set_send_buffer_size(&self, bytes: usize) -> io::Result<()> {
-        self.stream.set_send_buffer_size(bytes)
     }
 }
 
@@ -964,18 +1065,10 @@ pub(super) fn serve_single(
 }
 
 #[cfg(test)]
-pub(super) fn serve_handoff(handoff: Handoff, shared: &Arc<Shared>) -> Result<(), DaemonError> {
-    let mut event_loop = EventLoop::empty(shared)?;
-    event_loop.handoff(handoff, shared)?;
-    serve_test_loop(&mut event_loop, shared)
-}
-
-#[cfg(test)]
 fn serve_test_loop(event_loop: &mut EventLoop, shared: &Arc<Shared>) -> Result<(), DaemonError> {
     loop {
         event_loop.turn(shared)?;
-        if event_loop.connections.is_empty() && event_loop.exec_workers.load(Ordering::Acquire) == 0
-        {
+        if event_loop.connections.is_empty() {
             break;
         }
         event_loop.poll_ready()?;
@@ -1112,3 +1205,7 @@ mod io_tests;
 #[cfg(test)]
 #[path = "event_loop_b2fix_tests.rs"]
 mod b2fix_tests;
+
+#[cfg(test)]
+#[path = "event_loop_b3_tests.rs"]
+mod b3_tests;

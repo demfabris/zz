@@ -43,6 +43,11 @@ pub(crate) trait TransportListener {
     #[cfg(unix)]
     fn raw_fd(&self) -> std::os::fd::RawFd;
 
+    #[cfg(unix)]
+    fn accept_fd(&self) -> io::Result<std::os::fd::OwnedFd> {
+        self.accept()?.receive_fd()
+    }
+
     #[cfg(windows)]
     fn wait_for_incoming(&self, timeout: Duration, _wake: &AcceptWake) -> io::Result<()> {
         std::thread::sleep(timeout);
@@ -88,17 +93,12 @@ pub(crate) trait TransportStream: Read + Write + Send + Sized + 'static {
         Err(io::Error::from(io::ErrorKind::Unsupported))
     }
 
-    #[cfg(all(unix, feature = "daemon"))]
-    fn take_buffered_input(&mut self) -> Vec<u8> {
-        Vec::new()
-    }
-
     #[cfg(unix)]
     fn read_ready(&self, _buffer: &mut [u8]) -> io::Result<usize> {
         Err(io::Error::from(io::ErrorKind::Unsupported))
     }
 
-    #[cfg(feature = "daemon")]
+    #[cfg(all(feature = "daemon", any(windows, test)))]
     fn shutdown(&self) -> io::Result<()> {
         Ok(())
     }
@@ -197,6 +197,12 @@ impl TransportListener for LocalListener {
         let LocalSocketListener::UdSocket(listener) = &self.0;
         listener.as_fd().as_raw_fd()
     }
+
+    #[cfg(unix)]
+    fn accept_fd(&self) -> io::Result<std::os::fd::OwnedFd> {
+        let LocalSocketStream::UdSocket(stream) = self.0.accept()?;
+        Ok(stream.into())
+    }
 }
 
 pub(crate) struct LocalStream(LocalSocketStream);
@@ -260,7 +266,7 @@ impl TransportStream for LocalStream {
         }
     }
 
-    #[cfg(all(feature = "daemon", unix))]
+    #[cfg(all(feature = "daemon", unix, test))]
     fn shutdown(&self) -> io::Result<()> {
         LocalStream::shutdown(self)
     }
@@ -305,6 +311,7 @@ impl TransportStream for std::os::unix::net::UnixStream {
         use std::os::fd::AsFd;
         self.as_fd().try_clone_to_owned()
     }
+    #[cfg(test)]
     fn shutdown(&self) -> io::Result<()> {
         self.shutdown(std::net::Shutdown::Both)
     }

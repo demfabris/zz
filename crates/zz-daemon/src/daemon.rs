@@ -49,6 +49,8 @@ use zz_mux::{
     if_shell_truthy, parse_tmux_colour, sanitize_client_output, send_keys_is_read_only_safe,
     send_keys_target_client, validate_static_command_chain,
 };
+#[cfg(windows)]
+use zz_protocol::read_protocol_message_into;
 use zz_protocol::{
     AgentCommand, BrowserCommand, COMMAND_ARGS_PARSE_BEHAVES, ChooseBufferAction, ChooseBufferItem,
     ChooseBufferSearchState, ChooseBufferState, ChooseTreeAction, ChooseTreeItem, ChooseTreeKind,
@@ -72,7 +74,7 @@ use zz_protocol::{
     ServerError, ServerHello, SessionId, SessionViewer, SourceSpan, SplitId, StatusLine,
     StdoutClaim, WindowId, canonical_key, encode_protocol_message_into,
     encode_terminal_patch_event_into, encode_terminal_viewport_event_into, is_key_name,
-    layout_menu_row, menu_row_cells, menu_row_width, read_protocol_message_into, resolve_command,
+    layout_menu_row, menu_row_cells, menu_row_width, resolve_command,
 };
 use zz_terminal::{
     AppearanceColor, AppearanceConfigDisposition, AppearanceLoad, AppearanceProvenance,
@@ -2177,6 +2179,7 @@ impl OutboundFrame {
         Self::Grouped { encoded, frames }
     }
 
+    #[cfg(any(windows, test))]
     fn into_vec(self) -> Vec<u8> {
         match self.materialize() {
             Self::Owned(frame) => frame,
@@ -2228,8 +2231,10 @@ enum ControlCollection {
     Quiet,
 }
 
+#[cfg(any(windows, test))]
 struct OutboundWriterGuard<'a>(&'a OutboundMailbox);
 
+#[cfg(any(windows, test))]
 impl Drop for OutboundWriterGuard<'_> {
     fn drop(&mut self) {
         self.0.mark_writer_finished();
@@ -3335,6 +3340,7 @@ impl OutboundMailbox {
         true
     }
 
+    #[cfg(any(windows, test))]
     fn recv(&self) -> Option<Vec<u8>> {
         let mut state = self.state.lock();
         loop {
@@ -3395,6 +3401,7 @@ impl OutboundMailbox {
         state.writer_batch_reliable = 0;
     }
 
+    #[cfg(any(windows, test))]
     fn recv_batch(&self, frames: &mut Vec<OutboundFrame>, max_bytes: usize) -> bool {
         let mut state = self.state.lock();
         loop {
@@ -3417,6 +3424,7 @@ impl OutboundMailbox {
         }
     }
 
+    #[cfg(any(windows, test))]
     fn finish_batch(&self, frames: &mut Vec<OutboundFrame>) {
         let mut state = self.state.lock();
         for frame in frames.drain(..) {
@@ -3450,6 +3458,7 @@ impl OutboundMailbox {
         self.notify_all();
     }
 
+    #[cfg(any(windows, test))]
     fn buffered() -> Arc<Self> {
         Arc::new(Self {
             state: Mutex::new(OutboundState {
@@ -3462,10 +3471,12 @@ impl OutboundMailbox {
         })
     }
 
+    #[cfg(windows)]
     fn stop_buffering(&self) {
         self.state.lock().buffered = false;
     }
 
+    #[cfg(any(windows, test))]
     fn drain_reliable_into(&self, output: &mut Vec<u8>) {
         let mut state = self.state.lock();
         while let Some(frame) = state.reliable.pop_front() {
@@ -4203,12 +4214,13 @@ struct SharedServer {
     #[cfg(all(feature = "agent", unix))]
     peer_registry: Mutex<crate::agent::claude_peers::RegistryCache>,
     pending_execs: Mutex<Vec<Box<dyn FnOnce() + Send>>>,
+    #[cfg(windows)]
     exec_links: Mutex<BTreeMap<ClientId, Arc<exec::ExecLink>>>,
     prompt_history_source: Mutex<Option<(PathBuf, usize)>>,
     prompt_history_settled: AtomicBool,
     connection_threads: Arc<exec::ConnectionThreads>,
     #[cfg(unix)]
-    loop_handoffs: Mutex<Option<mpsc::Sender<event_loop::Handoff>>>,
+    loop_active: AtomicBool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -5115,12 +5127,13 @@ impl Shared {
             #[cfg(all(feature = "agent", unix))]
             peer_registry: Mutex::new(crate::agent::claude_peers::RegistryCache::default()),
             pending_execs: Mutex::new(Vec::new()),
+            #[cfg(windows)]
             exec_links: Mutex::new(BTreeMap::new()),
             prompt_history_source: Mutex::new(None),
             prompt_history_settled: AtomicBool::new(true),
             connection_threads: Arc::default(),
             #[cfg(unix)]
-            loop_handoffs: Mutex::new(None),
+            loop_active: AtomicBool::new(false),
         };
         Self {
             server: Arc::new(server),
@@ -6771,7 +6784,17 @@ impl Shared {
     /// to block on something that answers later, so tell the client once that
     /// nothing else it queued runs until this request resumes.
     fn report_command_queue_park(&self) {
+        #[cfg(windows)]
         self.go_live_current_exec();
+        #[cfg(unix)]
+        if let Some(writer) = self
+            .command_item
+            .as_ref()
+            .and_then(|item| item.lock().exec_writer.take())
+            .and_then(|writer| writer.upgrade())
+        {
+            writer.notify_one();
+        }
         let Some((client, request_id)) = self
             .command_item
             .as_ref()
@@ -12344,7 +12367,7 @@ impl Shared {
         let stop = Arc::new(AtomicBool::new(false));
         let weak = Arc::downgrade(&self.server_owner());
         #[cfg(unix)]
-        let on_loop = self.loop_handoffs.lock().is_some();
+        let on_loop = self.loop_active.load(Ordering::Acquire);
         #[cfg(not(unix))]
         let on_loop = false;
         let (worker, receiver) = if on_loop {
@@ -17255,6 +17278,7 @@ impl Shared {
         if self.read_client(client, |c| c.and_then(|c| c.kind)) != Some(ClientKind::Command) {
             return None;
         }
+        #[cfg(windows)]
         self.go_live_exec(client);
         let writer = self.client_writers.lock().get(&client).cloned()?;
         let (request_id, wait) = {
@@ -48441,6 +48465,8 @@ struct CommandItemContext {
     client_key_injection_depth: u32,
     deferred_control_notifications: Option<Vec<DeferredControlNotification>>,
     park: Option<(ClientId, u64)>,
+    #[cfg(unix)]
+    exec_writer: Option<Weak<OutboundMailbox>>,
 }
 
 struct DeferredControlNotification {
@@ -48499,30 +48525,6 @@ fn handle_connection<S: TransportStream>(
         Err(error) => return Err(error.into()),
     };
     handle_connection_message(stream, shared, first_message)
-}
-
-#[cfg(unix)]
-fn handle_connection_message<S: TransportStream>(
-    mut stream: S,
-    shared: &Arc<Shared>,
-    first: ProtocolMessage,
-) -> Result<(), DaemonError> {
-    let handoff = event_loop::Handoff {
-        descriptor: stream.receive_fd()?,
-        buffered: stream.take_buffered_input(),
-        first,
-    };
-    if let Some(sender) = shared.loop_handoffs.lock().as_ref() {
-        sender
-            .send(handoff)
-            .map_err(|_| DaemonError::Thread("mux loop stopped".to_owned()))?;
-        shared.accept_wake.wake();
-        return Ok(());
-    }
-    #[cfg(test)]
-    return event_loop::serve_handoff(handoff, shared);
-    #[cfg(not(test))]
-    Err(DaemonError::Thread("mux loop not running".to_owned()))
 }
 
 #[cfg(windows)]
@@ -49148,6 +49150,7 @@ fn handle_agent_message(
     ))
 }
 
+#[cfg(windows)]
 fn best_effort_protocol_mismatch_reply(stream: &mut impl Write, client: u16) {
     let message = ProtocolMessage::CommandResponse(CommandResponse::Error {
         request_id: 0,
@@ -49171,6 +49174,7 @@ fn server_stopping_response(request_id: u64) -> ProtocolMessage {
     })
 }
 
+#[cfg(windows)]
 fn best_effort_server_stopping_reply(stream: &mut impl Write) {
     let mut frame = Vec::new();
     if encode_protocol_message_into(&server_stopping_response(0), &mut frame).is_ok() {
@@ -49188,7 +49192,7 @@ fn write_outbound(
     event_loop::write_fixture(stream, outbound, shared, client);
 }
 
-#[cfg(not(all(unix, test)))]
+#[cfg(windows)]
 fn write_outbound(
     stream: &mut impl TransportStream,
     outbound: &OutboundMailbox,

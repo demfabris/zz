@@ -1,7 +1,7 @@
-use std::{
-    io::{self, IoSlice, Write},
-    sync::LazyLock,
-};
+use std::sync::LazyLock;
+
+#[cfg(any(windows, test))]
+use std::io::{self, IoSlice, Write};
 
 use super::*;
 
@@ -156,6 +156,7 @@ pub(super) fn attach_frame_superseded(
     })
 }
 
+#[cfg(any(windows, test))]
 pub(super) fn write_frames(stream: &mut impl Write, frames: &[impl AsRef<[u8]>]) -> io::Result<()> {
     let mut slices = frames
         .iter()

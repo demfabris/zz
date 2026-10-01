@@ -68,6 +68,8 @@ mod mode_revision;
 mod pane_actor;
 #[cfg(test)]
 mod pane_tests;
+#[cfg(test)]
+mod reader_tests;
 mod shard;
 mod surface_actor;
 #[cfg(unix)]
@@ -155,11 +157,9 @@ const RAW_OUTPUT_PARSE_TURN_BYTES: usize = 16 * 1024;
 const PTY_BUFFER_POOL_SIZE: usize = 4;
 #[cfg(all(not(target_os = "linux"), any(not(unix), test)))]
 const PTY_BUFFER_POOL_SIZE: usize = 8;
-#[cfg(unix)]
 const PTY_DRAIN_TURN_BYTES: usize = 256 * 1024;
 /// Wall-time bound on a single drain turn so the actor lane stays responsive even when the
 /// parser runs far below the byte bound's assumed rate (e.g. an unoptimized VT build).
-#[cfg(unix)]
 const PTY_DRAIN_TURN_TIME: Duration = Duration::from_millis(1);
 #[cfg(unix)]
 const PTY_BRIDGE_THRESHOLD_BYTES: usize = 1024;
@@ -11916,6 +11916,7 @@ fn wait_for_wake(
     Ok(Wake::Deadline)
 }
 
+#[cfg(unix)]
 const PANE_ENVIRONMENT_KEYS: [&str; 5] = [
     "TERM",
     "COLORTERM",
@@ -12528,13 +12529,25 @@ fn drain_pty_output_burst(
     output: &Receiver<ReaderMessage>,
     first_buffer: Vec<u8>,
     first_length: usize,
+    limit_turn: bool,
     mut consume: impl FnMut(Vec<u8>, usize),
 ) -> bool {
+    let started = limit_turn.then(Instant::now);
+    let mut bytes = first_length;
     consume(first_buffer, first_length);
 
     for _ in 1..PTY_BUFFER_POOL_SIZE {
+        if limit_turn
+            && (bytes >= PTY_DRAIN_TURN_BYTES
+                || started.is_some_and(|started| started.elapsed() >= PTY_DRAIN_TURN_TIME))
+        {
+            break;
+        }
         match output.try_recv() {
-            Ok(ReaderMessage::Data { buffer, length }) => consume(buffer, length),
+            Ok(ReaderMessage::Data { buffer, length }) => {
+                bytes += length;
+                consume(buffer, length);
+            }
             Ok(ReaderMessage::Eof) => return true,
             Err(_) => break,
         }
@@ -12557,6 +12570,7 @@ fn drain_effects(effects: &RefCell<PtyEffects>, writer: &mut dyn Write) -> Resul
     Ok(())
 }
 
+#[cfg(unix)]
 fn pty_effects_pending(effects: &RefCell<PtyEffects>) -> bool {
     let effects = effects.borrow();
     !effects.bytes.is_empty() || effects.overflowed
@@ -20705,9 +20719,10 @@ mod tests {
         }
 
         let mut consumed = Vec::new();
-        let reached_eof = drain_pty_output_burst(&output_rx, vec![0], 1, |buffer, length| {
-            consumed.extend_from_slice(&buffer[..length]);
-        });
+        let reached_eof =
+            drain_pty_output_burst(&output_rx, vec![0], 1, false, |buffer, length| {
+                consumed.extend_from_slice(&buffer[..length]);
+            });
 
         let burst_limit = u8::try_from(PTY_BUFFER_POOL_SIZE).expect("burst limit fits in a byte");
         assert!(!reached_eof);

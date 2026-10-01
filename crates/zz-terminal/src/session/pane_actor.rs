@@ -7,6 +7,7 @@ pub(super) struct PaneActor {
     publisher: Publisher,
     max_scrollback: usize,
     geometry: Geometry,
+    #[cfg(unix)]
     shell_process_id: Option<u32>,
     #[cfg(unix)]
     writer: PtyWriter,
@@ -411,6 +412,7 @@ impl PaneActor {
             publisher,
             max_scrollback,
             geometry,
+            #[cfg(unix)]
             shell_process_id,
             #[cfg(unix)]
             writer,
@@ -1850,8 +1852,12 @@ impl PaneActor {
             ReaderMessage::Data { buffer, length } => {
                 let mut closed_tap = None;
                 let mut consumed_output = false;
-                self.reader_eof |=
-                    drain_pty_output_burst(&self.output_rx, buffer, length, |buffer, length| {
+                self.reader_eof |= drain_pty_output_burst(
+                    &self.output_rx,
+                    buffer,
+                    length,
+                    cfg!(not(unix)) && self.sharded,
+                    |buffer, length| {
                         if self.raw_output_tap.is_some()
                             || !self.raw_output_parse_backlog.is_empty()
                         {
@@ -1890,7 +1896,8 @@ impl PaneActor {
                             self.vt_diagnostics.record(parsed, started);
                             consumed_output |= parsed > 0;
                         }
-                    });
+                    },
+                );
                 if let Some(token) = closed_tap {
                     self.publisher.raw_output_tap_closed(token)?;
                 }

@@ -305,7 +305,9 @@ impl Shard {
                         .all(|(id, entry)| id == only_id || entry.deadline > Instant::now())
             });
             for (id, wake, pty, child) in ready.drain(..) {
-                if let Some(mut entry) = self.actors.remove(&id) {
+                if let Some(entry) = self.actors.remove(&id) {
+                    #[cfg(unix)]
+                    let mut entry = entry;
                     let result = (|| {
                         #[cfg(unix)]
                         if let Actor::Live(actor) = &mut entry.actor {

@@ -736,7 +736,7 @@ impl Shared {
         }
         let (expanded, previous) =
             self.record_requested_path_list_root(client, request_id, dir.as_deref());
-        let shared = Arc::clone(self);
+        let shared = self.server_owner();
         let walker_outbound = Arc::clone(outbound);
         let walker_cancel = Arc::clone(cancel);
         let walker_turn = Arc::clone(turn);

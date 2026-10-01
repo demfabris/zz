@@ -1077,8 +1077,6 @@ impl Shared {
                 break;
             }
             sync_context_with_attachment(&self.inner.lock(), client, context);
-            let _park = (kind == ClientKind::Control)
-                .then(|| CommandQueueParkScope::new(client, index as u64 + 1));
             let mut collecting = false;
             if kind == ClientKind::Control {
                 let wakeup =
@@ -1096,8 +1094,10 @@ impl Shared {
                 });
                 let _ = outbound.enqueue_reliable_with_wakeup(&started, wakeup);
             }
+            let item = self
+                .command_item((kind == ClientKind::Control).then_some((client, index as u64 + 1)));
             let response = match prepared.result {
-                PreparedCommandResult::Ready => self.execute_command_request_with_prepared(
+                PreparedCommandResult::Ready => item.execute_command_request_with_prepared(
                     client,
                     kind,
                     context,

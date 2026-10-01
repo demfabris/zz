@@ -123,16 +123,6 @@ const DIAGNOSTIC_STATE_INTERVAL: Duration = Duration::from_secs(5);
 /// binding loops on its command queue there and would overflow the stack here.
 const MAX_CLIENT_KEY_INJECTION_DEPTH: u32 = 16;
 const CONTROL_SUBSCRIPTION_INTERVAL: Duration = Duration::from_secs(1);
-thread_local! {
-    static CLIENT_KEY_INJECTION_DEPTH: Cell<u32> = const { Cell::new(0) };
-    /// Structural control notifications raised while the calling thread runs
-    /// one direct Control command, held until that command's `after-` hook has
-    /// finished. On the pin a notification is a `notify_add` command-queue item
-    /// and drains only when the queue goes idle, so the hook block that
-    /// `cmdq_insert_hook` queued behind the command always precedes it.
-    static DEFERRED_CONTROL_NOTIFICATIONS: RefCell<Option<Vec<DeferredControlNotification>>> =
-        const { RefCell::new(None) };
-}
 const CONTROL_CELL_WIDTH_PX: u32 = 8;
 const CONTROL_CELL_HEIGHT_PX: u32 = 18;
 const CONTROL_SIZE_MINIMUM: u16 = 1;
@@ -3937,6 +3927,20 @@ struct BackgroundInsertions {
 }
 
 struct Shared {
+    server: Arc<SharedServer>,
+    command_item: Option<Mutex<CommandItemContext>>,
+    owner: Option<Arc<Shared>>,
+}
+
+impl std::ops::Deref for Shared {
+    type Target = SharedServer;
+
+    fn deref(&self) -> &Self::Target {
+        &self.server
+    }
+}
+
+struct SharedServer {
     inner: Mutex<ServerState>,
     accept_wake: AcceptWake,
     client_writers: Mutex<BTreeMap<ClientId, Arc<OutboundMailbox>>>,
@@ -3964,7 +3968,7 @@ struct Shared {
     #[cfg(all(feature = "agent", unix))]
     agent_peers: Mutex<BTreeMap<PaneId, crate::agent::claude_peers::PeerInbox>>,
     #[cfg(feature = "agent")]
-    agent_peer_owner: Mutex<Weak<Self>>,
+    agent_peer_owner: Mutex<Weak<Shared>>,
     #[cfg(all(feature = "agent", unix))]
     peer_wait_inbox: Mutex<Option<crate::agent::claude_peers::PeerInbox>>,
     #[cfg(all(feature = "agent", unix))]
@@ -4694,6 +4698,29 @@ fn prepare_config_command(
 }
 
 impl Shared {
+    fn server_owner(self: &Arc<Self>) -> Arc<Self> {
+        Arc::clone(self.owner.as_ref().unwrap_or(self))
+    }
+
+    fn command_item(self: &Arc<Self>, park: Option<(ClientId, u64)>) -> Arc<Self> {
+        Arc::new(Self {
+            server: Arc::clone(&self.server),
+            command_item: Some(Mutex::new(CommandItemContext {
+                park,
+                ..CommandItemContext::default()
+            })),
+            owner: Some(self.server_owner()),
+        })
+    }
+
+    fn execution_item(self: &Arc<Self>) -> Arc<Self> {
+        if self.command_item.is_some() {
+            Arc::clone(self)
+        } else {
+            self.command_item(None)
+        }
+    }
+
     #[cfg(unix)]
     fn install_tmux_shim(&self) -> Result<(), DaemonError> {
         let shim = match std::env::var_os(crate::TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE) {
@@ -4825,7 +4852,7 @@ impl Shared {
         let status = StatusRenderer::default();
         let status_job_needs = status.job_needs();
         let (timer_tx, timer_rx) = crossbeam_channel::unbounded();
-        Self {
+        let server = SharedServer {
             accept_wake: AcceptWake::new(),
             inner: Mutex::new(state),
             client_writers: Mutex::new(BTreeMap::new()),
@@ -4908,6 +4935,11 @@ impl Shared {
             prompt_history_source: Mutex::new(None),
             prompt_history_settled: AtomicBool::new(true),
             connection_threads: Arc::default(),
+        };
+        Self {
+            server: Arc::new(server),
+            command_item: None,
+            owner: None,
         }
     }
 
@@ -5086,7 +5118,7 @@ impl Shared {
             return;
         }
         let deadline = Instant::now() + grace;
-        let shared = Arc::clone(self);
+        let shared = self.server_owner();
         if let Err(error) = thread::Builder::new()
             .name("zz-daemon-shutdown-grace".to_owned())
             .spawn(move || {
@@ -5611,7 +5643,7 @@ impl Shared {
     }
 
     fn start_status_sampler(self: &Arc<Self>) -> Result<(), DaemonError> {
-        let shared = Arc::downgrade(self);
+        let shared = Arc::downgrade(&self.server_owner());
         let sampler = thread::Builder::new()
             .name("zz-daemon-status".to_owned())
             .spawn(move || {
@@ -5718,7 +5750,7 @@ impl Shared {
         if !log::log_enabled!(target: "zz_daemon::diagnostics::state", log::Level::Trace) {
             return Ok(());
         }
-        let shared = Arc::downgrade(self);
+        let shared = Arc::downgrade(&self.server_owner());
         thread::Builder::new()
             .name("zz-daemon-diagnostics".to_owned())
             .spawn(move || {
@@ -6335,6 +6367,21 @@ impl Shared {
         command: &CommandInvocation,
         prepared: bool,
     ) -> (CommandResponse, bool) {
+        self.execution_item()
+            .execute_command_request_with_streams_in_item(
+                client, kind, context, request_id, command, prepared,
+            )
+    }
+
+    fn execute_command_request_with_streams_in_item(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        request_id: u64,
+        command: &CommandInvocation,
+        prepared: bool,
+    ) -> (CommandResponse, bool) {
         let stdin_available = kind == ClientKind::Command && command.stdin_available();
         let (command, client_name) = {
             let mut inner = self.inner.lock();
@@ -6552,7 +6599,11 @@ impl Shared {
     /// nothing else it queued runs until this request resumes.
     fn report_command_queue_park(&self) {
         self.go_live_current_exec();
-        let Some((client, request_id)) = take_unreported_command_queue_park() else {
+        let Some((client, request_id)) = self
+            .command_item
+            .as_ref()
+            .and_then(|item| item.lock().park.take())
+        else {
             return;
         };
         let Some(writer) = self.client_writers.lock().get(&client).cloned() else {
@@ -6926,6 +6977,28 @@ impl Shared {
     }
 
     fn execute_with_mux_source_routed_for_terminal_in_queue(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        command: &CommandInvocation,
+        mux_source: MuxOptionSource,
+        client_terminal: ClientTerminal,
+        queue_execution: Option<&CommandQueueExecution>,
+    ) -> Result<Execution, DaemonError> {
+        self.execution_item()
+            .execute_with_mux_source_routed_for_terminal_in_queue_in_item(
+                client,
+                kind,
+                context,
+                command,
+                mux_source,
+                client_terminal,
+                queue_execution,
+            )
+    }
+
+    fn execute_with_mux_source_routed_for_terminal_in_queue_in_item(
         self: &Arc<Self>,
         client: ClientId,
         kind: ClientKind,
@@ -8030,6 +8103,15 @@ impl Shared {
         events: Vec<PendingHookEvent>,
         publish_control: bool,
     ) {
+        self.execution_item()
+            .run_event_hooks_with_control_in_item(events, publish_control);
+    }
+
+    fn run_event_hooks_with_control_in_item(
+        self: &Arc<Self>,
+        events: Vec<PendingHookEvent>,
+        publish_control: bool,
+    ) {
         let shutdown_already_blocked = self.active_shutdown_blockers() != 0;
         let mut control_notifications = Vec::new();
         for event in events {
@@ -8100,18 +8182,16 @@ impl Shared {
                 break;
             }
         }
-        if DEFERRED_CONTROL_NOTIFICATIONS.with(|slot| {
-            slot.borrow_mut().as_mut().is_some_and(|held| {
-                held.extend(control_notifications.iter().cloned().map(
-                    |(payload, exclude_client, attached_only)| DeferredControlNotification {
-                        payload,
-                        exclude_client,
-                        attached_only,
-                    },
-                ));
-                true
-            })
-        }) {
+        if let Some(item) = &self.command_item
+            && let Some(held) = item.lock().deferred_control_notifications.as_mut()
+        {
+            held.extend(control_notifications.into_iter().map(
+                |(payload, exclude_client, attached_only)| DeferredControlNotification {
+                    payload,
+                    exclude_client,
+                    attached_only,
+                },
+            ));
             return;
         }
         for (payload, exclude_client, attached_only) in control_notifications {
@@ -8119,16 +8199,24 @@ impl Shared {
         }
     }
 
-    /// Hold every structural notification this thread raises until the scope
-    /// ends, which is after the command's `after-` hook has run.
     fn defer_control_notifications(self: &Arc<Self>) -> DeferredControlNotificationScope {
-        DEFERRED_CONTROL_NOTIFICATIONS.with(|slot| *slot.borrow_mut() = Some(Vec::new()));
-        DeferredControlNotificationScope
+        self.command_item
+            .as_ref()
+            .expect("command item")
+            .lock()
+            .deferred_control_notifications = Some(Vec::new());
+        DeferredControlNotificationScope(Arc::clone(self))
     }
 
     fn publish_deferred_control_notifications(self: &Arc<Self>) {
-        let held = DEFERRED_CONTROL_NOTIFICATIONS
-            .with(|slot| slot.borrow_mut().take().unwrap_or_default());
+        let held = self
+            .command_item
+            .as_ref()
+            .expect("command item")
+            .lock()
+            .deferred_control_notifications
+            .take()
+            .unwrap_or_default();
         for notification in held {
             self.publish_to_control_clients(
                 notification.payload,
@@ -11742,7 +11830,7 @@ impl Shared {
         let worker_process = Arc::clone(&process);
         let worker_stop = Arc::clone(&stop);
         let worker_terminal = Arc::clone(&terminal_target);
-        let weak = Arc::downgrade(self);
+        let weak = Arc::downgrade(&self.server_owner());
         let worker = thread::Builder::new()
             .name(format!("zz-pipe-{}", pane.0))
             .spawn(move || {
@@ -11984,7 +12072,7 @@ impl Shared {
             }
         };
         let stop = Arc::new(AtomicBool::new(false));
-        let weak = Arc::downgrade(self);
+        let weak = Arc::downgrade(&self.server_owner());
         let worker_stop = Arc::clone(&stop);
         let Ok(worker) = thread::Builder::new()
             .name(format!("zz-control-output-{}", pane.0))
@@ -12435,7 +12523,7 @@ impl Shared {
                             .expect("draining command queue")
                             .yield_queue();
                     }
-                    let shared = Arc::clone(self);
+                    let shared = self.server_owner();
                     let mut command_context = command_context;
                     let control_target = command_context
                         .control_command_target()
@@ -12444,7 +12532,7 @@ impl Shared {
                         selected_deferred_client(&self.inner.lock(), &command_context, client);
                     command_context.set_replay_client(replay_client);
                     command_context.set_control_command_target(control_target);
-                    let detached_callback_blocker = if parsed.background && delay.is_zero() {
+                    let mut detached_callback_blocker = if parsed.background && delay.is_zero() {
                         Some(
                             queue_execution
                                 .and_then(|execution| execution.fork_shutdown_blocker(true))
@@ -12456,6 +12544,9 @@ impl Shared {
                     } else {
                         None
                     };
+                    if let Some(blocker) = &mut detached_callback_blocker {
+                        blocker.shared = blocker.shared.server_owner();
+                    }
                     self.spawn_delay(delay, move || {
                         if !parsed.background && shared.stopping.load(Ordering::Acquire) {
                             return;
@@ -12548,7 +12639,7 @@ impl Shared {
                             .expect("draining command queue")
                             .yield_queue();
                     }
-                    let shared = Arc::clone(self);
+                    let shared = self.server_owner();
                     let ticket = self.background_insertion_ticket();
                     let background_command = command.clone();
                     let worker_context = command_context.clone();
@@ -12799,7 +12890,7 @@ impl Shared {
                     .expect("draining command queue")
                     .yield_queue();
             }
-            let shared = Arc::clone(self);
+            let shared = self.server_owner();
             let ticket = self.background_insertion_ticket();
             let condition_for_error = condition.clone();
             let mut command_context = command_context;
@@ -13058,6 +13149,32 @@ impl Shared {
     }
 
     fn execute_inserted_commands_with_control_target_in_queue(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        source: &InsertedCommandSource,
+        label: &str,
+        control_target: Option<(ClientId, u8)>,
+        parent_queue: Option<&CommandQueueExecution>,
+        detached: bool,
+        shutdown_blocker: Option<ShutdownBlocker>,
+    ) -> Result<InsertedCommandResult, DaemonError> {
+        self.execution_item()
+            .execute_inserted_commands_with_control_target_in_queue_in_item(
+                client,
+                kind,
+                context,
+                source,
+                label,
+                control_target,
+                parent_queue,
+                detached,
+                shutdown_blocker,
+            )
+    }
+
+    fn execute_inserted_commands_with_control_target_in_queue_in_item(
         self: &Arc<Self>,
         client: ClientId,
         kind: ClientKind,
@@ -14021,13 +14138,17 @@ impl Shared {
         } else {
             None
         };
-        let permit = ShellJobPermit::acquire(
+        let mut permit = ShellJobPermit::acquire(
             self,
             policy.detached,
             policy.shutdown_blocking,
             inherited_blocker,
         )
         .ok_or_else(|| ServerError::InvalidCommand(format!("failed to run command: {command}")))?;
+        permit.shared = permit.shared.server_owner();
+        if let Some(blocker) = &mut permit.shutdown_blocker {
+            blocker.shared = blocker.shared.server_owner();
+        }
         let failed_command = command.clone();
         let zz_socket = self.socket_path.clone();
         let startup_reentry =
@@ -14695,7 +14816,7 @@ impl Shared {
                 }
             }
             let config = self.agent_spawn_config();
-            let shared = Arc::clone(self);
+            let shared = self.server_owner();
             let worker_result = result.clone();
             if let Err(error) = thread::Builder::new()
                 .name("zz-agent-catalog".into())
@@ -18458,6 +18579,17 @@ impl Shared {
         context: &mut ExecutionContext,
         input: InputMessage,
     ) -> Result<(), DaemonError> {
+        self.execution_item()
+            .input_in_item(client, kind, context, input)
+    }
+
+    fn input_in_item(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        input: InputMessage,
+    ) -> Result<(), DaemonError> {
         let layout_generation = match &input {
             InputMessage::ResizeTerminalV2 {
                 layout_generation, ..
@@ -22053,7 +22185,7 @@ impl Shared {
         if self.copy_refresh_running.swap(true, Ordering::AcqRel) {
             return;
         }
-        let shared = Arc::downgrade(self);
+        let shared = Arc::downgrade(&self.server_owner());
         if let Err(error) = thread::Builder::new()
             .name("zz-copy-refresh".to_owned())
             .spawn(move || {
@@ -22102,7 +22234,7 @@ impl Shared {
         if self.clock_refresh_running.swap(true, Ordering::AcqRel) {
             return;
         }
-        let shared = Arc::downgrade(self);
+        let shared = Arc::downgrade(&self.server_owner());
         if let Err(error) = thread::Builder::new()
             .name("zz-clock-mode".to_owned())
             .spawn(move || {
@@ -22175,13 +22307,6 @@ impl Shared {
         self.execute_overlay_source_with_error_case(client, context, &command, title, true);
     }
 
-    /// Replay `send-keys -K` on the target client. `server_client_handle_key`
-    /// runs the client's own key table, so the key either fires a binding or
-    /// reaches the pane that client is looking at, whatever `-t` named. The
-    /// pin queues each injected key behind the command that sent it; zz calls
-    /// the handler directly from the post-lock tail, so a binding that injects
-    /// its own key recurses here where the pin would loop on its queue, and
-    /// `CLIENT_KEY_INJECTION_DEPTH` stops it.
     fn inject_client_keys(
         self: &Arc<Self>,
         target: ClientId,
@@ -22192,13 +22317,14 @@ impl Shared {
         if inputs.is_empty() {
             return;
         }
-        let entered = CLIENT_KEY_INJECTION_DEPTH.with(|depth| {
-            let entered = depth.get();
+        let entered = {
+            let mut item = self.command_item.as_ref().expect("command item").lock();
+            let entered = item.client_key_injection_depth;
             if entered < MAX_CLIENT_KEY_INJECTION_DEPTH {
-                depth.set(entered + 1);
+                item.client_key_injection_depth += 1;
             }
             entered
-        });
+        };
         if entered >= MAX_CLIENT_KEY_INJECTION_DEPTH {
             log::warn!(
                 target: "zz_daemon::diagnostics::input",
@@ -22236,7 +22362,8 @@ impl Shared {
                 }
             }
         }
-        CLIENT_KEY_INJECTION_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
+        let mut item = self.command_item.as_ref().expect("command item").lock();
+        item.client_key_injection_depth = item.client_key_injection_depth.saturating_sub(1);
     }
 
     fn inject_pane_mode_keys(
@@ -22309,13 +22436,14 @@ impl Shared {
         if inputs.is_empty() {
             return;
         }
-        let entered = CLIENT_KEY_INJECTION_DEPTH.with(|depth| {
-            let entered = depth.get();
+        let entered = {
+            let mut item = self.command_item.as_ref().expect("command item").lock();
+            let entered = item.client_key_injection_depth;
             if entered < MAX_CLIENT_KEY_INJECTION_DEPTH {
-                depth.set(entered + 1);
+                item.client_key_injection_depth += 1;
             }
             entered
-        });
+        };
         if entered >= MAX_CLIENT_KEY_INJECTION_DEPTH {
             log::warn!(
                 target: "zz_daemon::diagnostics::input",
@@ -22370,10 +22498,30 @@ impl Shared {
                 }
             }
         }
-        CLIENT_KEY_INJECTION_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
+        let mut item = self.command_item.as_ref().expect("command item").lock();
+        item.client_key_injection_depth = item.client_key_injection_depth.saturating_sub(1);
     }
 
     fn execute_key_commands(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        pane: PaneId,
+        commands: &[CommandInvocation],
+        repeat_binding: bool,
+    ) -> Result<(), DaemonError> {
+        self.execution_item().execute_key_commands_in_item(
+            client,
+            kind,
+            context,
+            pane,
+            commands,
+            repeat_binding,
+        )
+    }
+
+    fn execute_key_commands_in_item(
         self: &Arc<Self>,
         client: ClientId,
         kind: ClientKind,
@@ -24405,7 +24553,7 @@ impl Shared {
         mut admitted_generation: Option<TerminalGeneration>,
         start: Option<mpsc::Receiver<()>>,
     ) -> Result<(), DaemonError> {
-        let shared = Arc::clone(self);
+        let shared = self.server_owner();
         thread::Builder::new()
             .name(format!("zz-output-{}", client.0))
             .spawn(move || {
@@ -24508,7 +24656,7 @@ impl Shared {
     ) -> Result<(), DaemonError> {
         let events = terminal.events();
         let terminal = Arc::downgrade(terminal);
-        let shared = Arc::clone(self);
+        let shared = self.server_owner();
         thread::Builder::new()
             .name(format!("zz-popup-{}", client.0))
             .spawn(move || {
@@ -24962,7 +25110,7 @@ impl Shared {
     ) -> Result<(), DaemonError> {
         let events = terminal.events();
         let terminal = Arc::downgrade(terminal);
-        let shared = Arc::clone(self);
+        let shared = self.server_owner();
         thread::Builder::new()
             .name(format!("zz-pane-{}", pane.0))
             .spawn(move || {
@@ -27911,10 +28059,10 @@ impl Shared {
             return;
         }
 
-        let shared = Arc::clone(self);
+        let shared = self.server_owner();
         let worker_subscriber = subscriber.clone();
         let permit = CopyPipePermit {
-            shared: Arc::clone(self),
+            shared: self.server_owner(),
         };
         if let Err(error) = thread::Builder::new()
             .name("zz-copy-pipe".to_owned())
@@ -28820,6 +28968,35 @@ impl Shared {
         deferred_control_config_warnings: &mut Vec<DeferredControlConfigWarning>,
         queue_execution: &CommandQueueExecution,
     ) -> Result<(), DaemonError> {
+        self.execution_item().replay_config_file_in_queue_in_item(
+            path,
+            parsed,
+            context,
+            depth,
+            report,
+            client_terminal,
+            source_client_base,
+            source_invocations,
+            options,
+            deferred_control_config_warnings,
+            queue_execution,
+        )
+    }
+
+    fn replay_config_file_in_queue_in_item(
+        self: &Arc<Self>,
+        path: &Path,
+        parsed: PreparedConfig,
+        context: &mut ExecutionContext,
+        depth: usize,
+        report: &mut ConfigLoadReport,
+        client_terminal: ClientTerminal,
+        source_client_base: Option<&Path>,
+        source_invocations: &mut SourceInvocationAccounting,
+        options: SourceFileLoadOptions,
+        deferred_control_config_warnings: &mut Vec<DeferredControlConfigWarning>,
+        queue_execution: &CommandQueueExecution,
+    ) -> Result<(), DaemonError> {
         let _key_table_hold = timers::KeyTablePublishHold::enter();
         // cfg.c adds `current_file` to the state every command parsed out of this
         // file inherits. A nested source replays through its own cloned context,
@@ -29598,8 +29775,8 @@ impl Shared {
         if let Some(runtime) = slot.as_ref() {
             return Some(Arc::clone(runtime));
         }
-        *self.agent_peer_owner.lock() = Arc::downgrade(self);
-        let publisher: Arc<dyn AgentPublisher> = Arc::<Self>::clone(self);
+        *self.agent_peer_owner.lock() = Arc::downgrade(&self.server_owner());
+        let publisher: Arc<dyn AgentPublisher> = self.server_owner();
         let runtime = Arc::new(AgentRuntime::new(&publisher, config, journal));
         runtime.prewarm();
         #[cfg(test)]
@@ -29956,7 +30133,7 @@ impl Shared {
             }
             return;
         }
-        let owner = Arc::downgrade(self);
+        let owner = Arc::downgrade(&self.server_owner());
         match PeerInbox::register(metadata, move |event| {
             if let PeerEvent::Message { content, .. } = event
                 && let Some(shared) = owner.upgrade()
@@ -47203,51 +47380,35 @@ fn ensure_browser_attached(inner: &ServerState, pane: PaneId) -> Result<(), Serv
 /// was freed while its pane is still alive.
 const PANE_WAIT_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
-thread_local! {
-    /// The request the calling thread is running for a Control client, until
-    /// its first park is reported. `cmdq_next` stops the whole queue on a
-    /// waiting item, so one report per request is the whole fact.
-    static COMMAND_QUEUE_PARK: Cell<Option<(ClientId, u64)>> = const { Cell::new(None) };
+#[derive(Default)]
+struct CommandItemContext {
+    client_key_injection_depth: u32,
+    deferred_control_notifications: Option<Vec<DeferredControlNotification>>,
+    park: Option<(ClientId, u64)>,
 }
 
-/// One held structural notification and the audience it was raised for.
 struct DeferredControlNotification {
     payload: EventPayload,
     exclude_client: Option<ClientId>,
     attached_only: bool,
 }
 
-/// Clears the hold if the command unwinds before its scope ends, so a panic or
-/// an early return cannot leave the next command on this thread deferring into
-/// a stale list.
-struct DeferredControlNotificationScope;
+struct DeferredControlNotificationScope(Arc<Shared>);
 
 impl Drop for DeferredControlNotificationScope {
     fn drop(&mut self) {
-        DEFERRED_CONTROL_NOTIFICATIONS.with(|slot| {
-            slot.borrow_mut().take();
-        });
+        self.0
+            .command_item
+            .as_ref()
+            .expect("command item")
+            .lock()
+            .deferred_control_notifications
+            .take();
     }
 }
 
-struct CommandQueueParkScope;
-
-impl CommandQueueParkScope {
-    fn new(client: ClientId, request_id: u64) -> Self {
-        COMMAND_QUEUE_PARK.with(|park| park.set(Some((client, request_id))));
-        Self
-    }
-}
-
-impl Drop for CommandQueueParkScope {
-    fn drop(&mut self) {
-        COMMAND_QUEUE_PARK.with(|park| park.set(None));
-    }
-}
-
-fn take_unreported_command_queue_park() -> Option<(ClientId, u64)> {
-    COMMAND_QUEUE_PARK.with(Cell::take)
-}
+#[cfg(test)]
+mod command_item_tests;
 
 enum QueuedCommand {
     Request(CommandRequest),
@@ -47517,9 +47678,10 @@ fn handle_connection_message<S: TransportStream>(
                                 &mut context,
                             );
                         }
-                        let _park = (worker_kind == ClientKind::Control)
-                            .then(|| CommandQueueParkScope::new(client, request_id));
-                        let _ = worker_shared.execute_command_request_with_prepared_into(
+                        let item = worker_shared.command_item(
+                            (worker_kind == ClientKind::Control).then_some((client, request_id)),
+                        );
+                        let _ = item.execute_command_request_with_prepared_into(
                             &worker_outbound,
                             client,
                             worker_kind,
@@ -70105,7 +70267,7 @@ set-option -g @alias-mixed-next yes
             let waiting = Arc::clone(&shared);
             let wait_target = target.clone();
             let waiter = thread::spawn(move || {
-                let _scope = CommandQueueParkScope::new(client, 1);
+                let waiting = waiting.command_item(Some((client, 1)));
                 waiting.execute(
                     client,
                     ClientKind::Command,
@@ -70393,7 +70555,7 @@ set-option -g @alias-mixed-next yes
             let waiting = Arc::clone(&shared);
             let wait_target = target.clone();
             let waiter = thread::spawn(move || {
-                let _scope = CommandQueueParkScope::new(client, 1);
+                let waiting = waiting.command_item(Some((client, 1)));
                 waiting.execute(
                     client,
                     ClientKind::Command,
@@ -83593,7 +83755,7 @@ set-option -g @alias-mixed-next yes
         name: &str,
     ) -> (Arc<Shared>, Arc<OutboundMailbox>, ClientId, PaneId) {
         let mut shared = Shared::new(1);
-        shared.paste_directory = directory.to_path_buf();
+        Arc::get_mut(&mut shared.server).unwrap().paste_directory = directory.to_path_buf();
         let shared = Arc::new(shared);
         let mailbox = OutboundMailbox::new();
         let (client, _) =

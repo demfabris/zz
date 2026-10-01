@@ -3097,6 +3097,38 @@ history delay another pane's echo p99 no more than tmux does. Tests: workspace (
 re-run alone), `compat/run.sh`, compat/tui, control-mode fixtures, `cargo check` Windows, full bench
 at `wave3`.
 
+### e0 as built (2026-10-01)
+
+Each queue item now owns one `CommandItemContext` on its `Shared` execution handle; nested commands, hooks and injected keys keep that handle.
+Independent workers and agent publishers keep the server owner. `SharedServer` holds the existing server fields and sampler cleanup; this slice adds no threads, dependencies or wire fields.
+Checks passed: formatting, daemon clippy, 1,327 unit tests and 35 integration tests (one existing soak ignored), plus all eight required compat rows. Two parallel-suite failures passed alone and the full suite passed with `RUST_TEST_THREADS=1`; child compat scripts needed Homebrew Bash first in `PATH`.
+The table records the waits that step (e) must replace with command-item continuations; e0 keeps their current behavior.
+Functions live in `crates/zz-daemon/src/daemon.rs` unless a row names another file; terminal actor methods live in `crates/zz-terminal/src/session.rs`.
+
+| Function | What it waits for | Continuation in step (e) |
+| --- | --- | --- |
+| `execute_with_mux_source_inner` -> `wait_for_terminal_identity` | Spawned pane publishes its PID and TTY, or the two-second identity deadline expires | Identity reply or timer; rebuild spawn-format facts and resume |
+| `execute_with_mux_source_inner` (copy-mode tail) | `terminal.settle()` acknowledges prior copy-mode actions, including synchronous copy search | Settled reply; finish the command and its after hook |
+| `run_copy_mode_search` (`zz-terminal/src/session.rs`) | History scan on the actor delays the caller's settle reply | Search result; apply cursor and selection updates before completing the settle continuation |
+| `capture_pane` | `terminal.capture()` returns live or retained-pane content | Capture reply; print output or store the paste buffer |
+| `capture_screen` (`wait_pane`, `run_pane`, `paste_and_submit`) | Capture replies for pattern, command-output and paste-echo polling | Capture reply; match content, then resume or park on pane output and the deadline |
+| `capture_last_command_for` (`send_last_output`, `show_last_output`) | `terminal.capture_last_command()` returns shell-integration marks and output | Semantic-capture reply; deliver or display the result |
+| `send_compact_resync` (`daemon/ctrl.rs`) | `terminal.fresh_viewport()` publishes a fresh frame | Viewport reply; send the resync frame |
+| `pipe_pane` | Raw-output tap arm acknowledgement; replacement also calls `stop_pane_pipe` while pipe serialization is held | Tap reply and old-pipe cleanup; finish installing the pipe |
+| `rearm_pane_pipe` | Raw-output tap arm acknowledgement after pane replacement | Tap reply; retain the pipe or stop it on failure |
+| `start_control_output_tap` | Raw-output tap arm acknowledgement, with one retry on timeout | Tap reply or retry timer; install the control reader |
+| `stop_pane_pipe` | Raw-output tap disarm acknowledgement after child and reader cleanup | Tap-disarmed reply plus child/reader completion; finish pipe cleanup |
+| `stop_control_output_tap` | Raw-output tap disarm acknowledgement followed by reader join | Tap-disarmed reply and reader completion; finish control-tap cleanup |
+| `kitty_image_frames` | `terminal.kitty_image()` returns image pixels and generation | Image reply; build and cache the outbound image frames |
+| `evict_absent_kitty_images` | `terminal.kitty_image_generation()` answers once per cached candidate | Generation reply; advance the candidate cursor and evict stale frames |
+| `pointer_format_variables` | `terminal.pointer_context()` returns the word, line and hyperlink under a cell | Pointer-context reply; expand mouse formats and dispatch the command |
+| `DeferredTerminalCommand::run` (`ArmCopySource`) | `source.capture_copy_source()` clones the source screen on its actor | Copy-source reply; set the target's pending source before entering copy mode |
+| `TerminalSession::capture_frozen_frame` (`zz-terminal/src/session.rs`) | Live capture request before falling back to the cached viewport when the actor has stopped | Capture reply or stopped-actor fallback; resume the retained-pane capture |
+| `send_history` (input path) | `terminal.history()` returns history rows and their dictionary | History reply; enqueue `HistoryChunk` |
+
+Native `SearchBegin`/`SearchUpdate` already use asynchronous search results; `DaemonFormatHooks::pane_search` in `status.rs` scans a cached viewport under command-format callers and has no actor round trip.
+
+
 ## W4-DELIVER: frames straight from shards (effort L)
 
 Scope: the loop pushes per-pane subscriber sinks (queue handle, stream kind, delivered base,

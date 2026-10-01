@@ -180,7 +180,7 @@ impl Shared {
         else {
             return Ok(());
         };
-        let shared = Arc::downgrade(self);
+        let shared = Arc::downgrade(&self.server_owner());
         let (ready_tx, ready_rx) = crossbeam_channel::bounded(1);
         thread::Builder::new()
             .name("zz-daemon-timers".to_owned())
@@ -510,7 +510,7 @@ impl Shared {
         }
         worker.running = true;
         drop(worker);
-        let shared = Arc::clone(self);
+        let shared = self.server_owner();
         let spawned = thread::Builder::new()
             .name("zz-daemon-hooks".to_owned())
             .spawn(move || {
@@ -660,7 +660,7 @@ impl Shared {
     }
 }
 
-impl Drop for Shared {
+impl Drop for SharedServer {
     fn drop(&mut self) {
         if let Some(sampler) = self.status_sampler.get_mut().take() {
             sampler.unpark();

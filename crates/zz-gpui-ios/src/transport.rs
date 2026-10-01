@@ -78,14 +78,16 @@ impl Connection {
                         }
                     }
                 });
-                let connect = if native_ui {
-                    InteractiveClient::connect_endpoint_with_prompts
-                } else {
-                    InteractiveClient::connect_terminal_surface_endpoint_with_prompts
-                };
                 let connected = Arc::new(
-                    connect(&endpoint, TerminalColorScheme::Dark, Some(prompts))
-                        .map_err(|error| failure_reason(&error))?,
+                    InteractiveClient::connect_endpoint_with_prompts_and_attach(
+                        &endpoint,
+                        Some(TerminalColorScheme::Dark),
+                        Some(prompts),
+                        &[],
+                        session.map(zz_protocol::AttachOperation::Session),
+                        !native_ui,
+                    )
+                    .map_err(|error| failure_reason(&error))?,
                 );
                 {
                     let mut slot = shared_client.lock().unwrap();
@@ -94,11 +96,6 @@ impl Connection {
                         return Ok(());
                     }
                     *slot = Some(connected.clone());
-                }
-                if let Some(session) = &session {
-                    connected
-                        .attach(session.clone())
-                        .map_err(|error| error.to_string())?;
                 }
                 if tx.send(Event::Connected(connected.clone())).is_err() {
                     return Ok(());

@@ -4,7 +4,7 @@ title: zz wire protocol (v107)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
-timestamp: 2026-09-27T00:00:00-03:00
+timestamp: 2026-09-30T00:00:00-03:00
 ---
 
 # Overview
@@ -74,9 +74,9 @@ fields in declaration order.
 
 | Variant | Fields | Purpose |
 |---------|--------|---------|
-| `ClientHello(ClientHello)` | `protocol_version: u16`, `client_instance_id: ClientInstanceId`, `kind: ClientKind`, `device_name: Option<String>` (≤256 B), `capabilities: Vec<String>`, `color_scheme: Option<TerminalColorScheme>`, `origin: Option<PaneId>`, `working_directory: Option<PathBuf>` (≤16 KiB), `environment: Vec<String>` (≤4,096 entries, ≤16,367 B each, ≤4 MiB total), `process_id: u32` | Client → daemon handshake. The process-stable instance ID owns recoverable Agent drafts across reconnects; `device_name` labels this device in presence and eviction notices; `$ZZ_PANE` supplies `origin`, so an untargeted CLI command resolves against its invoking pane; eligible local endpoints publish an absolute UTF-8 cwd while SSH, unrepresentable, and oversized paths omit it. Local and SSH-forwarded connections publish a sorted and deduplicated UTF-8 process-environment snapshot; unrepresentable Unix names or values are omitted without substitution. Entries require a nonempty name and `=` separator, forbid NUL, and allow empty values or additional `=` bytes. `process_id` supplies `#{client_pid}` and uses zero when a caller cannot report one. Additive capability strings carry terminal identity and nested intent without changing this struct |
-| `ServerHello(ServerHello)` | `protocol_version: u16`, `server_id: u64`, `client_id: ClientId`, `client_instance_id: ClientInstanceId`, `capabilities: Vec<String>` (≤64 entries, ≤256 B each), `appearance: TerminalAppearance`, `appearance_provenance: AppearanceProvenance`, `mux_options: MuxOptions`, `status: StatusLine`, `key_tables: Vec<KeyTableSnapshot>` | Daemon → client handshake reply; echoes the accepted process identity, while every key table (root, prefix, copy-mode, copy-mode-vi, custom) lets clients label key hints and render binding help and capabilities describe optional behavior |
-| `CommandRequest(CommandRequest)` | `request_id: u64`, `command: CommandInvocation`, `prepared: bool` | tmux-style command from any client. Control and the local CLI set `prepared` after the daemon freezes one alias layer. A prepared multi-command alias travels as one opaque `CommandInvocation`; the daemon still runs authorization and ordinary dispatch validation |
+| `Hello(Hello)` | `client: ClientHello`, `viewport: Option<ClientViewport>`, `subscriptions: Subscriptions`, `attach: Option<AttachOperation>`, `environment: ClientEnvironmentBlob` | Client → daemon handshake. The client names its viewport, requested tree/status/options/keys/pane stream, optional session or prepared attach chain, and NUL-separated environment in one request. `ClientHello` keeps identity and terminal facts as an in-memory model; normal interactive clients send `Hello` |
+| `Welcome(Welcome)` | `protocol_version: u16`, `server_id: u64`, `client_id: ClientId`, `client_instance_id: ClientInstanceId`, `caps: u64` | Daemon → client identity and capability mask. The daemon sends requested state in a following `Batch`; `InteractiveClient` materializes `ServerHello` for callers without transmitting its key tables, appearance, options, or status in the welcome |
+| `CommandRequest(CommandRequest)` | `request_id: u64`, `command: CommandInvocation`, `prepared: bool` | tmux-style command from any client. A prepared multi-command alias travels as one opaque `CommandInvocation`; the daemon still runs authorization and ordinary dispatch validation. Compact Control clients submit raw lines through `ExecRequest` |
 | `CommandResponse(CommandResponse)` | `Success { request_id, output, exit_code, stderr }` / `Error { request_id, error: ServerError, output }` | Command result. A client prints either output field before it reports an error or returns the exit code. `stderr` (appended at v71) is populated for `source-file` diagnostics issued by a Command client since Wave E (2026-08-22) and stays empty for every other command; `Success` with a nonzero `exit_code` is a COMPLETED command, so `Error` stays reserved for dispatch, transport, and server failures |
 | `Attach { session: String }` | target string | Interactive attach request. An empty target lazily creates the next numeric session when the daemon has none; explicit missing targets and Command-kind attaches do not create. A session holds a set of attached clients, so a second device never collides with the first |
 | `Attached { session: SessionId, snapshot: MuxSnapshot, read_only: bool, client_flags: String }` | resolved id + full state + effective reconnect options | Attach acknowledgement. The option fields describe the state actually applied by this attachment, so a TUI changing connections does not have to infer which child of an opaque alias attached |
@@ -108,6 +108,51 @@ fields in declaration order.
 | `PrepareCommandList { request_id, commands }` | request identity plus `Vec<CommandInvocation>` | Client → daemon: freeze one live alias layer for a complete command unit under one mux lock. Preparation performs no command effects, target or format resolution, hook emission, message publication, or authorization |
 | `PreparedCommandList { request_id, commands }` | request identity plus one `PreparedCommand` per input | Daemon → client: return the immutable invocation, optional canonical identity, `alias_matched`, and `Ready` or a typed `ServerError`. Multi-command and empty aliases return their opaque invocation with `canonical_name: None`, `alias_matched: true`, and `Ready`. The echoed request ID lets a client ignore stale replies while notifications share the stream |
 | `SetTerminalPreview { enabled }` | `enabled: bool` | An attached Interactive client enables or disables passive terminal delivery for every window in its attached session. Foreground visibility, input, history, and PTY geometry remain unchanged |
+
+## Subscribed control state in v107
+
+The campaign keeps v107 unreleased. After a wire-changing merge, rebuild clients and restart old
+dev daemons. `crates/zz-protocol/src/control.rs` defines the compact handshake and state grouping;
+`tree_delta.rs` defines the tree changes.
+
+`Subscriptions` selects `tree: None | Attached | All`, `status: bool`, an options bitset,
+`keys: None | Hash | Full`, and `pane_stream: bool`. Desktop, iOS and web request Full keys for
+input routing and binding help. The TUI requests a key-table hash and root and copy-mode mouse bindings. The
+option map includes `ExtendedKeys` and `FocusEvents`, so the TUI arms its terminal without option
+commands on separate connections. `GetKeyTables` requests the full table set when needed.
+
+`Batch { sequence, frames }` carries encoded complete protocol frames, including PaneFrames from
+the Terminal lane. Clients validate the group and reduce its children in order before painting.
+Nested batches are forbidden. The initial group carries one scoped tree, a `ClientView`, and the
+requested appearance, options, keys, status and terminal state. Later tree changes use
+`TreeDelta { base, version, ops }`; an unusable base queues `TreeSync` for a fresh scoped tree.
+An empty tree diff sends nothing. A full snapshot remains the client's materialized model.
+`ZZ_PERF_TREE_DELTA=0` sends full scoped trees on changes while retaining Hello, Welcome and Batch.
+
+`ClientView` carries the attachment, read-only state, client flags, focused window, layout
+and attachment generations, and tree operations for recipient-specific labels, borders and
+presence. Clients apply those operations over the shared raw tree. The attachment generation
+changes on attach, including a repeat attach to the same session; ordinary presentation changes
+keep it, so they do not clear terminal state or overlays.
+
+Control lines travel as one `ExecRequest.raw_control_line` over the interactive connection. The
+daemon expands environment and home references, parses the line and freezes aliases once, so
+`$` and `~` do not add client round trips. The daemon answers
+with `ControlCommandStarted` metadata before each command, one `CommandResponse` per command,
+and an `ExecExit`. The start metadata supplies the guard flags and resolved command name; the
+frontend opens the parent guard before callback output and closes it with the response. Hook-driven `%layout-change` and window
+notifications keep their ordering after `%end`. A CLI receiving an attach `ExecResume` upgrades
+the same connection instead of opening a second one.
+
+Size reports use `ResizeTerminalV2` and `ClientTerminalSizeV2`, each carrying the layout generation
+the client rendered. The daemon drops a report from an older layout, including one that arrives
+after unzoom. It checks the generation under the same model lock that applies the report;
+rejection skips geometry storage, actor resizing and the input publication/hook tail.
+Clients retry their measured geometry when the layout generation changes, including when
+grid and cell pixels stay equal. Desktop and shared web/iOS caches retain the generation
+alongside their measured grid and send that captured tag; TUI attachment refreshes clear its
+existing sent-geometry cache before assigning the new generation. A presentation-only tree
+change does not invalidate geometry. Retained legacy clients keep generation-zero reports.
 
 `CommandInvocation` is `{ name: String, args: Vec<String>, source: Option<SourceSpan>,
 command_blocks: Vec<u32>, expanded_alias_group: bool }`. Protocol v84 appends `command_blocks`: sorted, unique, zero-based
@@ -149,7 +194,7 @@ introduced in v17): `Info | Success | Warning | Error`.
 | `Key` | `pane: PaneId`, `input: KeyInput`, `text_follows: bool` |
 | `BrowserSurfaceText` | `pane: PaneId`, `text: String` |
 | `BrowserSurfaceKey` | `pane: PaneId`, `input: KeyInput`, `text_follows: bool` |
-| `ResizeTerminal` | `pane`, `columns: u16`, `rows: u16`, `cell_width_px: u32`, `cell_height_px: u32` |
+| `ResizeTerminalV2` | `pane`, `columns: u16`, `rows: u16`, `cell_width_px: u32`, `cell_height_px: u32`, `layout_generation: u64` |
 | `TerminalView` | `pane`, `action: TerminalViewAction` |
 | `ResizeCommandOutput` | `columns`, `rows`, `cell_width_px`, `cell_height_px` |
 | `CommandOutputView` | `action: TerminalViewAction` |
@@ -160,7 +205,7 @@ introduced in v17): `Info | Success | Warning | Error`.
 | `Popup` | `action: PopupAction::{Text(String), Key { input, text_follows }, TerminalView(TerminalViewAction), Close, Pointer { pointer: PopupPointer, view: Option<TerminalViewAction> }}`; input, pointer and view control for the client's open `display-popup` |
 | `Menu` | `action: MenuAction::{Choose(u32), Cancel}`; drives the client's open `display-menu` |
 | `Confirm` | `action: ConfirmAction::Reply(bool)`; answers the client's open `confirm-before` prompt |
-| `ClientTerminalSize` | `columns: u16`, `rows: u16`; current producer is the TUI terminal surface, which reports later outer-terminal resizes |
+| `ClientTerminalSizeV2` | `columns: u16`, `rows: u16`, `layout_generation: u64`; the TUI reports outer-terminal resizes against its rendered layout |
 | `ClientFocus` | `focused: bool`; reports client-window focus independently from pane/application focus |
 | `ClientSuspendState` | `suspended: bool`; reports terminal suspension and resumption |
 
@@ -208,6 +253,10 @@ unpaired keys.
 `PrefixCancelled { request_id }`, `Bell { pane }`,
 `KeyTablesChanged { tables }`, `KeyTableActive { table, repeat }`,
 `OpenPathPicker { pane, start_dir }`, `KeyTablesPatched { tables, removed }`,
+`TreeDelta(TreeDelta)`, `ClientView(ClientView)`,
+`KeyTablesHashChanged { hash, mouse }`, `MuxOptionsPatched { options }`,
+`ControlCommandStarted { request_id, flags, canonical_name, guard }`,
+`ControlCommandGuardRaw { flags, output, error, sticky_failure }`,
 `Detached { session: SessionId, by: Option<String>, reason: DetachReason }`, `HistoryChunk { pane, start: u32, total: u32,
 offset: u32, columns: u16, rows: Vec<Vec<PackedCell>>, dictionary: TerminalDictionary }`,
 `KittyImageBegin { pane, image_id, generation, width, height, total_bytes }`
@@ -287,15 +336,12 @@ exact history-dependent multi-window `window-unlinked` sequence remains tracked 
 `hooks.shutdown-window-unlinked-order`; no shutdown field or version bump can reconstruct tmux's
 winlink-tree history.
 
-Direct Control config construction still runs in the client process before daemon execution, but
-since v92 its `~` lookups do not. A line containing a tilde is walked once with a recording context,
-the names it needs cross as one `HomeDirectoryRequest`, and the line is re-parsed with the answers,
-so source, startup, alias, callback, and direct Control parsing all read the same daemon-global
-`HOME` and the same daemon-host passwd database. The round trip is invisible: no guard, no frame, no
-command number. Since v99 the same round trip also names the `$NAME` variables a line needs: the
-recording context collects them beside the `~` lookups, an `EnvironmentRequest` crosses pipelined
-next to the home request, and the re-parse expands each name from the daemon's global environment
-the way `yylex_token_variable` does, with an unset name expanding to nothing.
+Compact Control clients send each raw line once through `ExecRequest.raw_control_line`. The daemon
+parses it with its own global environment and passwd database, freezes aliases, and executes the
+resulting list. This removes the client-side recording parse, `HomeDirectoryRequest`,
+`EnvironmentRequest`, preparation request, and second parse from this path. Those lookup messages
+remain available for older command construction paths. Source, startup, alias, callback, and direct
+Control parsing use the same daemon-host values, with an unset variable expanding to nothing.
 
 v76 introduced `SourcedCommandGuard { output, error, client_failure }` at `EventPayload` tail tag 47.
 It gave parser-owned source replay and synchronous foreground inserted lists one flags-1 command
@@ -580,19 +626,21 @@ the client; the daemon dispatches them through its existing global
 `AppearanceSource` of four: `Default`, `ThemeFile`, `Ghostty`, or `Override`. `theme` is a live key
 resolved *before* the rest of a set . the selected theme file becomes the base the remaining entries
 paint over . and any key that file supplied reports `ThemeFile`. `Palette` is one provenance key
-rather than 256 entries. Both `ServerHello.appearance_provenance` and `AppearanceChanged.provenance`
+rather than 256 entries. The initial `AppearanceChanged.provenance` in the attach Batch and later appearance events
 carry the map, so the settings UI can explain the current value without inferring it from colors.
 Missing keys are rejected during control-message validation.
 
-`MuxOptions` is a `BTreeMap<MuxOptionKey, MuxOptionValue>` over the 17 keys of `MuxOptionKey::ALL`, in
+`MuxOptions` is a `BTreeMap<MuxOptionKey, MuxOptionValue>` over the 20 keys of `MuxOptionKey::ALL`, in
 declaration order: `prefix`, `mode-keys`, `history-limit`, `word-separators`, `copy-command`,
 `set-clipboard`, `buffer-limit`, `synchronize-panes`, `experimental-agent-pane`,
 `experimental-editor-pane`, `history-trickle` (default `2000`), `agent-command`,
 `agent-claude-code-command`, `agent-auto-approve`, and the v71 tail `mouse` (default `on`),
-`escape-time` (default `10`), and `prefix2` (default `None`). `postcard` encodes the key as its variant
+`escape-time` (default `10`), and `prefix2` (default `None`), followed by `focus-follows-mouse` (default `off`) and the v107 `extended-keys` (default `off`) and
+`focus-events` (default `off`). `postcard` encodes the key as its variant
 index, so a new key is appended. Every entry contains an effective display string plus `MuxOptionSource`:
-`Default`, `TmuxConfig`, `Override`, or `RuntimeCommand`. `ServerHello.mux_options` supplies initial
-state and `MuxOptionsChanged` replaces it whenever a successful writer changes a value or source.
+`Default`, `TmuxConfig`, `Override`, or `RuntimeCommand`. The initial Batch supplies the subscribed
+options, and `MuxOptionsPatched` merges changed values and sources. `MuxOptionsChanged` remains
+the full replacement model used by internal fixtures.
 Since v71 the replacement map is **per recipient** for session-effective values: `mouse` carries the
 receiving client's attached session's effective value, so the daemon publishes the effective map after
 attach and client switch, recomputes every attached client on a global mouse write, and refreshes only
@@ -603,13 +651,13 @@ already holds sends nothing. `escape-time` and `prefix2` publish the global valu
 (the escape fold timeout); since Wave C run 2 the same day, `prefix2` feeds the shared key tables
 (either prefix arms) and the GPUI client's local prefix claim. `from_config_key` maps all three —
 `zz/config` can write them with the standard reload-reapply semantics.
-Validation requires exactly those 17 keys and bounds every string to 64 KiB on encode and during
-deserialization.
+Full-map validation requires those 20 keys; subscribed patches contain only requested keys.
+Every string is bounded to 64 KiB on encode and during deserialization.
 
 `StatusLine` is the daemon-rendered [tmux status line](/tmux/status-line.md): finished
 text, never formats, because `#()` commands run once per `status-interval` on the daemon's host. It is
-**per client** (a format names the receiving client's own view), so it rides `ServerHello` on connect
-and `publish_to_client` afterwards, and only when the text changed. v70 carried `{ left, right }`;
+**per client** (a format names the receiving client's own view), so it rides the initial Batch on connect
+and later status events afterwards, and only when the text changed. v70 carried `{ left, right }`;
 v71 appends `title`, `base_style`, `rows: Vec<String>`, `position: StatusPosition` (`Top`/`Bottom`,
 default `Bottom` on wire tag 1), `message_line: u8`, and `customized: bool`. Since Wave B1 `rows`
 is the authoritative personalized status block, and since the 2026-08-21 title slice `title` carries
@@ -747,7 +795,7 @@ tags.
 # Versioning & compatibility
 
 - **`PROTOCOL_VERSION: u16 = 107`** is stamped into every frame's envelope and re-checked inside
-  `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
+  `Hello` and `Welcome` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
 - v107 requires updated clients and daemon together, including the daemon on every ssh host.
 - v106 requires updated clients and daemon together. A v105 daemon retains the old

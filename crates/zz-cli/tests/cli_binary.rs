@@ -5027,7 +5027,10 @@ tmux set-option -g @plugin loaded
                     return;
                 }
                 if let Some(status) = child.try_wait().expect("poll control block process") {
-                    panic!("control process exited before {label}: {status}");
+                    panic!(
+                        "control process exited before {label}: {status}: {}",
+                        String::from_utf8_lossy(&output)
+                    );
                 }
                 if Instant::now() >= deadline {
                     child.kill().expect("kill stalled control block process");
@@ -5155,6 +5158,37 @@ tmux set-option -g @plugin loaded
             };
             drop(stdin);
             let output = child.wait_with_output().expect("collect control output");
+            assert_eq!(output.status, status, "{label}");
+            output
+        }
+
+        fn terminate_control_process(mut child: Child, stdin: ChildStdin, label: &str) -> Output {
+            let pid = i32::try_from(child.id())
+                .ok()
+                .and_then(rustix::process::Pid::from_raw)
+                .expect("control process PID");
+            let started = Instant::now();
+            if let Err(error) = rustix::process::kill_process(pid, rustix::process::Signal::TERM) {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("send SIGTERM for {label}: {error}");
+            }
+            let status = loop {
+                if let Some(status) = child.try_wait().expect("poll signalled control process") {
+                    break status;
+                }
+                if started.elapsed() >= Duration::from_secs(2) {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    panic!("control process did not exit promptly after SIGTERM for {label}");
+                }
+                thread::sleep(Duration::from_millis(10));
+            };
+            assert!(started.elapsed() < Duration::from_secs(2), "{label}");
+            drop(stdin);
+            let output = child
+                .wait_with_output()
+                .expect("collect signalled control output");
             assert_eq!(output.status, status, "{label}");
             output
         }
@@ -5677,12 +5711,15 @@ tmux set-option -g @plugin loaded
                         .iter()
                         .any(|line| line.contains("missing-alias-source.conf"))
             }));
-            assert!(!stream.blocks.iter().any(|block| {
-                block
-                    .payload
-                    .iter()
-                    .any(|line| matches!(line.as_str(), "after-missing" | "same-line-missing"))
-            }));
+            assert!(
+                !stream.blocks.iter().any(|block| {
+                    block
+                        .payload
+                        .iter()
+                        .any(|line| matches!(line.as_str(), "after-missing" | "same-line-missing"))
+                }),
+                "{stream:?}"
+            );
 
             let configured = fixture.run(&[
                 "set-option",
@@ -6016,6 +6053,151 @@ tmux set-option -g @plugin loaded
             assert_eq!(stream.blocks.len(), 1);
             assert_block(&stream.blocks[0], 1, 0, &[], false);
             assert_eq!(stream.outside, ["%exit"]);
+        }
+
+        #[test]
+        fn control_sigterm_exits_promptly_while_attached_and_idle() {
+            for double in [false, true] {
+                let fixture = Fixture::new();
+                if !local_socket_bind_available(&fixture.socket) {
+                    return;
+                }
+                let session = "sigterm-idle";
+                assert!(
+                    fixture
+                        .run(&["new-session", "-d", "-s", session, "exec /bin/cat"])
+                        .status
+                        .success()
+                );
+                let output_path = fixture._directory.path().join("sigterm-idle.output");
+                let (mut child, mut stdin) = spawn_control_to_file(
+                    &fixture,
+                    &[
+                        if double { "-CC" } else { "-C" },
+                        "attach-session",
+                        "-t",
+                        session,
+                    ],
+                    &output_path,
+                );
+                writeln!(stdin, "display-message -p SIGTERM_IDLE_READY")
+                    .expect("write idle signal readiness command");
+                stdin.flush().expect("flush idle signal readiness command");
+                wait_for_control_output_marker(
+                    &output_path,
+                    "SIGTERM_IDLE_READY",
+                    &mut child,
+                    "idle SIGTERM readiness",
+                );
+                let output = terminate_control_process(child, stdin, "idle attached control");
+                assert_eq!(output.status.code(), Some(0));
+                assert!(output.stderr.is_empty());
+                let stdout = std::fs::read(output_path).expect("read idle SIGTERM output");
+                let stream = parse_stream(&stdout, double);
+                assert_eq!(stream.blocks.len(), 2, "{stream:?}");
+                assert_block(&stream.blocks[0], 1, 0, &[], false);
+                assert_block(&stream.blocks[1], 2, 1, &["SIGTERM_IDLE_READY"], false);
+                assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
+                assert_eq!(
+                    stream
+                        .outside
+                        .iter()
+                        .filter(|line| *line == "%exit")
+                        .count(),
+                    1
+                );
+            }
+        }
+
+        #[test]
+        fn control_sigterm_closes_an_open_guard_while_waiting() {
+            for double in [false, true] {
+                let fixture = Fixture::new();
+                if !local_socket_bind_available(&fixture.socket) {
+                    return;
+                }
+                let session = "sigterm-waiting";
+                assert!(
+                    fixture
+                        .run(&["new-session", "-d", "-s", session, "exec /bin/cat"])
+                        .status
+                        .success()
+                );
+                let output_path = fixture._directory.path().join("sigterm-waiting.output");
+                let (mut child, mut stdin) = spawn_control_to_file(
+                    &fixture,
+                    &[
+                        if double { "-CC" } else { "-C" },
+                        "attach-session",
+                        "-t",
+                        session,
+                    ],
+                    &output_path,
+                );
+                writeln!(stdin, "display-message -p SIGTERM_WAITING_READY")
+                    .expect("write waiting signal readiness command");
+                stdin
+                    .flush()
+                    .expect("flush waiting signal readiness command");
+                wait_for_control_output_marker(
+                    &output_path,
+                    "SIGTERM_WAITING_READY",
+                    &mut child,
+                    "waiting SIGTERM readiness",
+                );
+                writeln!(stdin, "wait-for SIGTERM_GUARD_HOLD").expect("write waiting command");
+                stdin.flush().expect("flush waiting command");
+                let deadline = Instant::now() + Duration::from_secs(10);
+                loop {
+                    let stdout = std::fs::read(&output_path).expect("read waiting control output");
+                    let text = String::from_utf8_lossy(&stdout);
+                    let started = text.lines().any(|line| {
+                        marker(line, "%begin")
+                            .is_some_and(|(_, number, flags)| number == 3 && flags == 1)
+                    });
+                    if started {
+                        if text.lines().any(|line| {
+                            marker(line, "%end")
+                                .or_else(|| marker(line, "%error"))
+                                .is_some_and(|(_, number, _)| number == 3)
+                        }) {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            panic!("waiting guard was already closed: {text}");
+                        }
+                        break;
+                    }
+                    if Instant::now() >= deadline
+                        || child
+                            .try_wait()
+                            .expect("poll waiting control process")
+                            .is_some()
+                    {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        panic!("waiting command did not expose its open guard: {text}");
+                    }
+                    thread::sleep(Duration::from_millis(10));
+                }
+                let output = terminate_control_process(child, stdin, "open waiting control guard");
+                assert_eq!(output.status.code(), Some(0));
+                assert!(output.stderr.is_empty());
+                let stdout = std::fs::read(output_path).expect("read waiting SIGTERM output");
+                let stream = parse_stream(&stdout, double);
+                assert_eq!(stream.blocks.len(), 3, "{stream:?}");
+                assert_block(&stream.blocks[0], 1, 0, &[], false);
+                assert_block(&stream.blocks[1], 2, 1, &["SIGTERM_WAITING_READY"], false);
+                assert_block(&stream.blocks[2], 3, 1, &[], false);
+                assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
+                assert_eq!(
+                    stream
+                        .outside
+                        .iter()
+                        .filter(|line| *line == "%exit")
+                        .count(),
+                    1
+                );
+            }
         }
 
         #[test]
@@ -6490,7 +6672,7 @@ tmux set-option -g @plugin loaded
             assert_eq!(output.status.code(), Some(1));
             assert!(output.stderr.is_empty());
             let stream = parse_stream_allow_gaps(&output.stdout, false);
-            assert_eq!(stream.blocks.len(), 11);
+            assert_eq!(stream.blocks.len(), 11, "{stream:?}");
             assert_block(&stream.blocks[0], 1, 0, &[], false);
             assert_block(&stream.blocks[1], 2, 1, &[], false);
             assert_block(
@@ -6731,9 +6913,14 @@ tmux set-option -g @plugin loaded
                         }
                         ExitPath::DetachCompleted | ExitPath::DetachQueuedOpen => 0,
                     };
-                    assert_eq!(output.status.code(), Some(expected_status), "{label}");
-                    assert!(output.stderr.is_empty(), "{label}");
                     let stdout = std::fs::read(&output_path).expect("read matrix control output");
+                    assert_eq!(
+                        output.status.code(),
+                        Some(expected_status),
+                        "{label}: {}",
+                        String::from_utf8_lossy(&stdout)
+                    );
+                    assert!(output.stderr.is_empty(), "{label}");
                     let hidden = match row.name {
                         "sourced-runtime" => 1,
                         "sourced-command" => 2,

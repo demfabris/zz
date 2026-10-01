@@ -35,6 +35,37 @@ pub(super) fn format_facts_unread(command: &str, args: &[RawText]) -> bool {
 pub(super) fn expands_no_format(command: &str, args: &[RawText]) -> bool {
     match command {
         "bind-key" | "unbind-key" | "has-session" => true,
+        "display-message" => zz_protocol::catalog_command_spec(command)
+            .and_then(|spec| zz_protocol::parse_tmux_options(spec, args).ok())
+            .is_some_and(|parsed| {
+                if parsed
+                    .options
+                    .contains(&zz_protocol::TmuxOption::Flag("-a"))
+                {
+                    return false;
+                }
+                if parsed
+                    .options
+                    .contains(&zz_protocol::TmuxOption::Flag("-l"))
+                {
+                    return true;
+                }
+                if !parsed.positionals.is_empty() {
+                    return parsed
+                        .positionals
+                        .iter()
+                        .all(|value| !value.contains(['#', '%']));
+                }
+                parsed
+                    .options
+                    .iter()
+                    .rev()
+                    .find_map(|option| match option {
+                        zz_protocol::TmuxOption::Value("-F", value) => Some(value),
+                        _ => None,
+                    })
+                    .is_some_and(|value| !value.contains(['#', '%']))
+            }),
         "list-keys" | "source-file" => zz_protocol::catalog_command_spec(command)
             .and_then(|spec| zz_protocol::parse_tmux_options(spec, args).ok())
             .is_some_and(|parsed| {

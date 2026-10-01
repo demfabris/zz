@@ -528,6 +528,7 @@ mod raw {
             process_id: std::process::id(),
             environment: ClientEnvironmentBlob::from_bytes(b"TERM=xterm\0".to_vec()),
             commands,
+            raw_control_line: None,
         }
     }
 

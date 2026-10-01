@@ -23,6 +23,7 @@ impl ExecFlags {
     pub const RESUME: Self = Self(1 << 3);
     pub const PREPARED: Self = Self(1 << 4);
     pub const LAST: Self = Self(1 << 5);
+    pub const CONTROL: Self = Self(1 << 6);
 
     #[must_use]
     pub const fn contains(self, other: Self) -> bool {
@@ -231,6 +232,7 @@ pub struct ExecRequest {
     pub process_id: u32,
     pub environment: ClientEnvironmentBlob,
     pub commands: Vec<CommandInvocation>,
+    pub raw_control_line: Option<String>,
 }
 
 impl ExecRequest {
@@ -244,6 +246,10 @@ impl ExecRequest {
                 .as_ref()
                 .is_none_or(|tty| tty.len() <= MAX_EXEC_TTY_BYTES)
             && self.environment.is_valid()
+            && self
+                .raw_control_line
+                .as_ref()
+                .is_none_or(|line| line.len() <= crate::MAX_GUI_TEXT_BYTES)
     }
 }
 
@@ -264,6 +270,7 @@ impl fmt::Debug for ExecRequest {
             .field("process_id", &self.process_id)
             .field("environment", &self.environment)
             .field("commands", &self.commands)
+            .field("raw_control_line", &self.raw_control_line)
             .finish_non_exhaustive()
     }
 }
@@ -324,6 +331,7 @@ mod tests {
                 CommandInvocation::new("display-message", ["-p", "#{pane_id}"]),
                 CommandInvocation::new("list-sessions", Vec::<String>::new()),
             ],
+            raw_control_line: None,
         }
     }
 
@@ -332,6 +340,19 @@ mod tests {
         let message = ProtocolMessage::Exec(request(b"TERM=xterm\0HOME=/home/u\0"));
         let frame = encode_protocol_message(&message).expect("encode exec");
         assert_eq!(decode_protocol_frame(&frame).expect("decode exec"), message);
+    }
+
+    #[test]
+    fn control_exec_line_round_trips_without_a_parsed_command_body() {
+        let mut request = request(b"HOME=/client\0");
+        request.commands.clear();
+        request.raw_control_line = Some("display-message -p ~/$HOST".to_owned());
+        let message = ProtocolMessage::Exec(request);
+        let frame = encode_protocol_message(&message).expect("encode control line");
+        assert_eq!(
+            decode_protocol_frame(&frame).expect("decode control line"),
+            message
+        );
     }
 
     #[test]

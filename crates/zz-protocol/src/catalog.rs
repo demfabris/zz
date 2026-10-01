@@ -191,6 +191,9 @@ impl CommandSpec {
             })
         };
         match self.name {
+            "display-message" if matches!(args, [print, payload] if print == "-p" && !payload.starts_with('-')) => {
+                false
+            }
             "display-message" => flagged(&["-I", "-d"]).unwrap_or(true),
             "capture-pane" => !flagged(&["-p"]).unwrap_or(false),
             name => !READ_ONLY_COMMAND_NAMES.contains(&name),
@@ -2891,6 +2894,48 @@ mod tests {
             ("bind-key", &["x", "display-message", "x"][..]),
         ] {
             assert!(mutates(name, args), "{name} {args:?} mutates");
+        }
+        let mut display_cases = [
+            &[][..],
+            &["-p"][..],
+            &["-p", "x"][..],
+            &["-p", ""][..],
+            &["-p", "#{pane_id} @ { $ ~"][..],
+            &["-p", "quoted \"text\" and \\escaped -I -d"][..],
+            &["-p", "-"][..],
+            &["-p", "--"][..],
+            &["-p", "-I"][..],
+            &["-p", "-d100"][..],
+            &["-p", "-Z"][..],
+            &["-p", "x", "-I"][..],
+            &["-pI", "x"][..],
+            &["-pd100", "x"][..],
+            &["-p?", "x"][..],
+            &["--", "-I"][..],
+        ]
+        .into_iter()
+        .map(|args| {
+            args.iter()
+                .map(|arg| RawText::from(*arg))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+        display_cases.push(vec![RawText::from("-p"), RawText::from_bytes(b"\xff-I")]);
+        display_cases.push(vec![RawText::from("-p"), RawText::from_bytes(b"-\xff")]);
+        display_cases.push(vec![RawText::from_bytes(b"-p\xff"), RawText::from("x")]);
+        for name in ["display-message", "display"] {
+            let spec = catalog_command_spec(name).expect("catalogued display command");
+            for args in &display_cases {
+                let expected = parse_tmux_options(spec, args).map_or(true, |parsed| {
+                    parsed.options.iter().any(|option| {
+                        matches!(
+                            option,
+                            TmuxOption::Flag("-I" | "-d") | TmuxOption::Value("-I" | "-d", _)
+                        )
+                    })
+                });
+                assert_eq!(spec.mutates(args), expected, "{name} {args:?}");
+            }
         }
     }
 

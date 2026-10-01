@@ -2,7 +2,7 @@
 type: Design Plan
 title: Daemon performance rebuild
 description: "The campaign to bring the zz daemon to tmux cost per command, per pane and per attach while keeping the 5x output throughput lead - a permanent zz-vs-tmux gate first, then waves that remove unrequested work (one-frame Exec commands, change-driven publication, lazy formats, frames only for watchers, a compact wire under one unreleased protocol version), then one mux loop and PTY shards; the lane brief source with targets, merge order, write zones, gates and rollback switches."
-status: Approved 2026-09-28; wave 0 built; release freeze until W4 exits; wave 1 on main; wave 2 in progress (HOOKS and TERM merged; COPY built on perf/copy, awaiting integration; CTRL and FMT in parallel); continued on Linux from bench/perf/campaign/HANDOFF.md
+status: Approved 2026-09-28; wave 0 built; release freeze until W4 exits; wave 1 on main; wave 2 in progress (HOOKS, TERM, COPY and FMT merged on perf/wave2; CTRL review fixes committed on perf/ctrl, COPY/FMT integration checks passed except baseline alias differences, serial latency floor open and merged performance A/B pending); continued on Linux from bench/perf/campaign/HANDOFF.md
 resource: crates/zz-daemon/src/daemon.rs
 tags:
 - performance
@@ -12,7 +12,7 @@ tags:
 - benchmark
 - campaign
 - design-plan
-timestamp: 2026-09-30T21:30:00Z
+timestamp: 2026-10-01T00:54:00Z
 ---
 
 # Campaign status
@@ -20,17 +20,19 @@ timestamp: 2026-09-30T21:30:00Z
 2026-09-29: wave 1 (W0, all six wave-1 lanes, three folded side branches) passed its Linux exit
 and is on main (`1e0bfc6a`). Wave 2 runs on `perf/wave2`; W2-HOOKS is merge 1 (`0acd7f2a`,
 `w2-1-hooks-alienware-0acd7f2a.json`) and W2-TERM merge 2 (`d7e3fc95`,
-`w2-2-term-alienware-d7e3fc95.json`). W2-CTRL can start from there: its `Batch` carries TERM's
+`w2-2-term-alienware-d7e3fc95.json`). W2-CTRL is built on `perf/ctrl`, with final Mac validation
+ongoing and the serial control latency floor still open. Its `Batch` carries TERM's
 PaneFrames through `encode_terminal_viewport_event_into` and `encode_terminal_patch_event_into`.
 The campaign continues on a Linux host:
 `bench/perf/campaign/HANDOFF.md` has the state, the numbers against tmux at the last gate, the
 next steps in order, the macOS-only checks and the traps; `bench/perf/campaign/attach-review.json`
 has the attach lane's reports; `bench/perf/campaign/scripts/` has the lane workflow template.
 
-2026-09-30: W2-COPY is built on `perf/copy` from lane base `fecaaa43`, awaiting integration.
-Its as-built section below records Linux gate, parity and profile evidence. CTRL and FMT are
-being built in parallel; COPY extends the daemon write zone only for retained watcher events
-and popup ownership. The release freeze remains until W4 exits.
+2026-09-30: W2-COPY merged as `2cedf6ee` and W2-FMT as `8fa427dd` on `perf/wave2`.
+Their as-built sections below record gate, parity and profile evidence. CTRL review fixes
+are committed on `perf/ctrl`; integration validation now includes both lanes. COPY extends
+the daemon write zone for retained watcher events and popup ownership. The release freeze
+remains until W4 exits.
 
 Wave 1 merged FORMAT before PUBLISH (merges 2 and 3), against the order below: a usage-limit cut
 left PUBLISH's fix pass unfinished while FORMAT was ready. Merges 1-5 ran the gate without
@@ -2211,7 +2213,7 @@ Scope:
   `GetKeyTables`; in-place upgrade after `ExecExit{resume: Attach}`.
 - **Key subscriptions**: GUI, iOS and web subscribe `keys=Full` and receive per-table deltas
   (bind-key touches one table); they read `prefix_bindings` on every input route. Hash-only (+
-  mouse bitset) is for TUI, CLI and control clients.
+  mouse bitset) is for TUI. Command-only and control clients request no key state.
 - **Control mode**: `%layout-change` and window notifications stay hook-driven (W2-HOOKS owns the
   source; `DEFERRED_CONTROL_NOTIFICATIONS` ordering after `%end` preserved). New: control lines go
   as one `ExecRequest` body over the interactive connection, answered by `CommandResponse` frames
@@ -2231,7 +2233,7 @@ Scope:
   web and iOS rebuild; `knowledge/protocol/wire-protocol.md`, `snapshots.md`.
 
 Write zone: message.rs hello/Welcome/Snapshot/KeyTablesChanged/new messages/MuxOptionKey;
-snapshot.rs TreeDelta ops; daemon.rs functions above, `handle_connection` interactive branch,
+tree_delta.rs TreeDelta ops; daemon.rs functions above, `handle_connection` interactive branch,
 `serve_exec` upgrade hand-off; client.rs `InteractiveClient`; zz-client core; zz-tui lib.rs,
 app.rs, tty.rs; zz-cli lib.rs, control_mode.rs command submission (not notification building);
 crates/zz mux/client.rs, lib.rs, config/mod.rs, workspace/which_key.rs, workspace/view.rs,
@@ -2242,7 +2244,8 @@ agent/fanout.rs encode path; protocol docs.
 Gate vs TERM JSON: `attach.ttfc.p1` <= 1.1x tmux; `attach.conns.p4` = 1; `attach.cpu.*` <= 1.25x
 tmux; `attach.wire_s2c.p4` <= 8 KB; bind-key <= 64 B for hash subscribers; rename in an unattached
 session <= 100 B per client; `control.latency` <= 1.2x, `control.burst_cmds_per_s` >= 0.8x tmux;
-`chatty.client_cpu_pct.visible` <= 3x, `chatty.tty_kibps.visible` <= 1.5x; cli and throughput no
+`chatty.client_cpu_pct.visible` <= 3x + 1% (1% on the Mac where tmux reads zero),
+`chatty.tty_kibps.visible` <= 1.5x; cli and throughput no
 regression. Tests: zz-client simulator convergence, zz-client-ffi + C integration client, daemon
 clients and overlay tests, `cargo test -p zz`, every compat/tui fixture, control-mode fixtures
 (`%begin`/`%end`, `%layout-change`), `compat/run.sh`, `just web-build`, `just ios-gpui iPad build`.
@@ -2250,6 +2253,317 @@ clients and overlay tests, `cargo test -p zz`, every compat/tui fixture, control
 Expected: attach ~10 round trips -> 1; hello 28.3 KB -> ~40 B + subscribed state;
 KeyTablesChanged 26 KB -> ~20 B for hash subscribers; tree change 20-60 B, encoded once;
 attach CPU 26 -> <= 5 ms.
+
+As built on `perf/ctrl`, 2026-09-30:
+
+- `Hello` carries viewport, subscriptions, an optional session or command attach, and the
+  raw NUL-separated environment once. `Welcome` carries identities and capability bits.
+  Both `pane-frame-v1` and `control-plane-v2` are required inside unreleased protocol 107.
+- `send_attached` and `send_resync_inner` collect one flat `Batch` containing the scoped
+  tree, `ClientView`, requested status/options/keys, image chunks, and each visible pane's
+  Full at final size. Typed queued groups expand into the collector without decoding
+  TERM bodies or copying them into intermediate child buffers. Image chunks remain
+  ahead of their placement frame.
+- `publish_compact_trees` retains raw trees per scope, publishes small `TreeDelta`
+  operations, and emits nothing for an empty diff. Per-client overlays stay in
+  `ClientView`; attachment epochs reset frame state once, and forced state shares the
+  same publication lock and atomic tree/view group as ordinary publication.
+  Scoped tree children keep their shared encoded allocation through each client's
+  group and collector. The Batch encoder borrows child bytes and writes each slice
+  at once, with the same frame and count bounds and output as the owned encoder.
+  Quiet queries retain their response/exit children until that final encoding,
+  avoiding an intermediate Batch allocation and copy. Admission still charges the
+  exact encoded bytes and one reliable queue item; buffered execution keeps its
+  encoded path. Ordinary status publication and session-wide refreshes skip clients
+  still attaching, while the explicit final resync renders their final status.
+- Hash subscribers receive revision plus exact root/copy mouse bits. Full subscribers
+  receive per-table patches. A first Full subscriber cannot consume a pending Hash
+  revision. Control requests no keys because its frontend does not use them; TUI requests
+  Hash, and desktop, web, iOS, and FFI request Full.
+- `InteractiveClient` attaches with Hello; `CommandClient::into_interactive` retains its
+  existing transport after `ExecResume`. With `ZZ_PERF_LEGACY_COMMAND=1`, it closes the
+  command transport and reconnects through the saved route before sending interactive
+  Hello. It preserves endpoint facts and transfers the existing SSH forward to the
+  interactive client. The rollback test checks the old connection closes, the new
+  connection receives the requested attachment, and remote routes omit local cwd/origin.
+  TUI no longer opens option/preflight clients.
+  Options include `ExtendedKeys` and `FocusEvents`, bringing the shared catalog to 20.
+- Control sends each raw line through one `ExecRequest`. Parsing, daemon-host variable
+  expansion, and alias freezing happen once in the daemon. `ControlCommandStarted`
+  opens native parent guards before callback output; responses close them. Raw callback
+  guards preserve bytes. Cancellation is checked before dispatch and between commands,
+  preventing disconnected queues from acting on later clients. Hook notification order
+  is unchanged. Synchronous read-only queries without hooks collect Started, Response and
+  ExecExit in one flat Batch. The existing collector field records Attach or Quiet ownership,
+  so a query cannot release a newer resync collector. Hook dispatch and parking release the
+  quiet collection before blocking, including hooks installed after the eligibility check.
+- `ClientCore` reduces a whole Batch before publishing grouped events and requests one
+  `TreeSync` on a base mismatch. Desktop keeps its retained-history terminal path and a
+  separate tree-only mirror for inactive hosts, without a second terminal grid.
+- V2 size reports carry the rendered layout generation. Compact clients' stale reports
+  are rejected after unzoom; retained legacy ClientHello clients keep generation-zero
+  resize behavior. Native and shared reports capture generation synchronously; the C
+  API also accepts an explicitly captured generation.
+  Already-presized compact panes also skip identical grid and cell-pixel reports,
+  after checking the layout generation. Changed geometry and legacy reports retain
+  the normal resize path.
+  Pane and client-grid reports keep their supplied generation through normalization
+  and revalidate under the same lock that applies geometry. A rejected report also
+  skips the input publication/hook tail. Two-phase proofs admit a report, change
+  the zoom layout, and reject its application without changing stored or actor size.
+  The TUI clears its sent-geometry cache on a new layout generation and immediately
+  reports the newly projected grid, including when its dimensions are unchanged.
+  Same-connection attachment refreshes clear that cache before assigning the new
+  generation and retain their existing first-paint sequence. Desktop and shared
+  web/iOS caches include the generation alongside the measured grid. A new view
+  notifies those panes; their next real prepaint sends the exact captured V2 tag.
+  Generation-only notifications retain shared mouse bounds until the next measure.
+  Real-window proofs keep grid and pixels fixed, change `ClientView`, require a
+  second tagged report, and then verify deduplication at that generation.
+- The control frontend buffers payload/end writes and joins a ready Started guard to its
+  response, flushing before it waits. Hook names and effective hook bodies are borrowed
+  from the existing registry and option arrays. The existing literal-format predicate
+  skips unused facts while preserving target selection and formatted after-hooks. Read-only
+  commands skip key publication and tap refresh; their mutating after-hooks still update both.
+  The final control response and ExecExit share one existing reliable queue group; quiet
+  queries also join Started through the existing collector. The receiver retains all remaining
+  Batch children in order. On Unix, `DirectControl` selects stdin and the existing socket on
+  the control thread, removing both forwarding threads. `ProtocolReceiver::try_recv` keeps
+  incomplete frames, initial pending messages and buffered bytes; per-call `DONTWAIT` reads
+  leave blocking clients' descriptor flags intact. Split UTF-8 lines, EOF tails and signal
+  polling retain their prior behavior. Buffered events bypass readiness polling. The decoder
+  returns the same box through the ready-receive layers, avoiding repeated large enum copies.
+  The initialized receiver buffer is reused for reads.
+  After an empty readiness probe and output flush, the next wait skips the repeated
+  socket probe once while still selecting fresh stdin and socket readiness.
+  The private buffered probe also defers an empty zero-time poll to that timed
+  select. Pending protocol with fresh-stdin priority still polls immediately;
+  ordinary receive calls keep their existing polling behavior.
+  Between completed guards with no cached input line, that private probe decodes
+  only messages already held by the receiver before waiting for readiness.
+  Cached input keeps the socket peek on the protocol's turn, so a ready reply
+  still precedes another buffered line. An open guard keeps that peek so a
+  ready response can join its buffered start in one physical write.
+  Partial bytes, decode-repair state and EOF retain their ordinary readiness path.
+  A native guard formats its time, command number and flags once into a fixed
+  46-byte body. Begin and end or error reuse that body, including the newline.
+  Zero, maximum values, saturating numbers, raw bytes and partial sink errors
+  retain the existing output. This increases the private copied Frame from
+  24 to 47 bytes and avoids formatting the same metadata at completion.
+  Final quiet-query completion can send its admitted group through the existing Unix
+  socket when the queue has no other ready work and the writer owns no bytes. One
+  nonblocking send either completes or leaves the group for the existing writer.
+  A partially sent group retains its original allocation and an offset, stays ahead
+  of later traffic, and remains outside later Batch collectors. Overflow preserves
+  that remainder before ControlExit within the queue bounds, or closes the transport.
+  Writer cleanup tracks dequeued bytes through success, error and panic.
+  `ZZ_PERF_WRITEV=0` disables this completion path; hook and park releases retain
+  their ordinary writer wake.
+  The retained `ServerHello` payload is boxed, reducing `ProtocolMessage` from
+  1,432 to 312 bytes on this host. Its encoded greeting is unchanged; a saved
+  pre-change frame decodes and re-encodes to the same 1,265 bytes and SHA-256.
+  Batch children and RawText use bulk byte decoding with the existing owned types
+  and serialization. A saved 318-byte Batch covers every byte value, invalid UTF-8,
+  JSON sequence fallback and unchanged encoding; malformed bounds remain rejected.
+  TUI startup reduces the connection's already-held Batch synchronously and lays out
+  that complete state before the first paint. The same reducer forwards attachment
+  reset, image delivery and placing frames in stream order for later attachments.
+  Image resets share the existing metadata/frame drain, so initial attachment paints
+  each pane once. The physical-output proof covers one and four panes and leaves
+  unrelated input outside that drain.
+  A compact startup command-output actor is installed without an early reliable
+  viewport. Final resync emits its populated viewport after the attachment
+  `ClientView`, preserving the core's output-ID watermark across attachment resets.
+  The real initial wire Batch contains the located direct and nested startup rows
+  once, and the TUI forwarding/drain proof paints that actor over the base pane
+  in the first physical paint. Legacy startup admission keeps its existing path.
+  Consumed frame maps return their capacity to the inbox. Frames published during
+  consumption retain their latest viewport, merged damage and pending wake.
+  The TUI reuses unchanged rows, borders, status and message composition, then limits narrow-cell
+  incremental painting to changed columns. Full-frame and scroll damage compare retained
+  rows; equal dictionary contents also retain the painted cache. Wide cells, overlays and
+  changed dictionaries keep full-row drawing.
+  Repainting takes the previous cached viewport by ownership and restores the current
+  viewport after drawing, avoiding a temporary clone of its fixed Arc handles.
+  The unchanged fast path retains its cache without taking that entry.
+  The existing output writer returns one cleared buffer, bounded by its queue budget, to the
+  next paint instead of regrowing a buffer every frame. One cached terminal style reuses the
+  existing formatter's exact ANSI bytes instead of formatting the same RGB style on every row.
+- `status_sampler_sessions` filters compact clients that request no status. Legacy clients
+  retain their default status subscription. Format monitors, control subscriptions, peer
+  checks and rename deadlines keep their independent timers; repeated read-only queries
+  leave an idle sampler parked when none of that work exists.
+- `config_expansion_names` skips discovery when raw input contains neither `$` nor `~`.
+  Empty environment/home lookup lists return before locking. The actual parser still checks
+  the whole line before mutation, and stored aliases keep their existing expansion and
+  same-line freezing behavior.
+  Caller-input discovery skips the flag parser only when no argument contains `I`;
+  display-message alias discovery skips it only when neither `@` nor `{` is present.
+  Packed and escaped flags, marker false positives, errors and target precedence
+  keep the existing parser and execution paths.
+  Read-only classification recognizes the exact two-argument `display-message -p`
+  form when its payload does not begin with a dash. Other forms retain the option
+  parser. Quiet admission and execution still classify their own current invocation,
+  so stdin, mouse and client-route rewrites cannot reuse an earlier classification.
+  The command's actual validation and after-hook checks remain separate.
+- The command worker uses the existing Crossbeam Select API to park directly instead
+  of yielding through the empty receive retry. Its queue, context, cancellation and
+  thread ownership stay the same. Completed groups return owned child and outer buffers
+  to the existing bounded pool after the writer finishes; shared children are released.
+  Completion takes its response and exit buffers under one pool lock. The final
+  collector reserves the counted children once, within the existing frame limit.
+- Broad validation exposed an existing cold-start agent projection bug: SessionReset
+  dropped text queued before readiness. The projection now retains that text until its
+  turn and clears it on explicit restart or reclaim. The original capture assertion and
+  new cold/reset/reclaim/restart proofs pass.
+
+`ZZ_PERF_TREE_DELTA=0` publishes full scoped trees on the new wire. The existing
+`ZZ_PERF_EAGER_FACTS=1` restores eager facts for the literal-output optimization.
+`ZZ_PERF_READONLY_SKIP=0` restores read-only key/tap work and eager Started wakes.
+`ZZ_PERF_TUI_COALESCE=0` restores eager full-row paints and uncached border/status work.
+Full wire rollback requires reverting matching daemon and clients.
+
+
+Review corrections, 2026-09-30:
+
+- Fixed the legacy command attachment hang by reconnecting only legacy command links;
+  Exec resume still upgrades its existing connection.
+- The standalone iOS terminal example now caches `(GridSize, layout_generation)` and
+  reports unchanged geometry again after the generation changes, matching shared clients.
+- Fixes are checkpoint `870b2b1e`; `a7e5d62a` names explicit defaults in their test.
+  Integration brings `perf/wave2` at `8fa427dd` into `perf/ctrl`, including COPY and FMT.
+  Conflict resolution retains CTRL's literal display-message fact skip and compact
+  subscription/tree/view state, FMT's clientless borrowed row seeds and presentation
+  caches, and both classifiers and test sets for display-message/list-keys/source-file.
+- The eight-crate serial all-feature suite exits 0: 3,454 top-level tests passed,
+  two existing tests ignored, and the documented headless attach test filtered.
+  Nested subprocess test summaries do not count toward that total. The 60-second test
+  guard did not trigger. Host all-target/all-feature lint for daemon, mux, terminal,
+  client, TUI, protocol, CLI and iOS exits 0 with `-D warnings`.
+- The rebuilt CLI's normal and legacy attachments both report the expected terminal
+  error without a PTY and paint `LEGACY_ATTACH_READY` inside a PTY. PRE does the same.
+  The new route test checks old-connection EOF, a fresh interactive Hello with the
+  requested attachment, and omission of local cwd/origin for remote route facts.
+  Existing SSH-forward ownership transfers in source; live SSH is not tested here.
+- The standalone iOS terminal example simulator build and its simulator-target lint
+  exit 0. These establish compilation, not a physical device resize observation.
+- Fourteen of the 15 selected compat rows pass. `smoke/control-alias-prepare` exits 1
+  with two output differences; both reproduce on PRE, including the isolated retry.
+  Attached-client parity exits 0. Normal TUI screen parity exits 0 with 147 asserted
+  checkpoints and six recorded cursor-style observations that the fixture does not
+  assert. The TUI rollback screen run also exits 0 with the same checkpoint counts.
+- Formatting exits 0. OKF validation exits 0 with three existing warnings outside
+  this lane. Initial test-only type/EOF/socket-cleanup assumptions caused three
+  focused-test exits 101 before correction; the final focused test exits 0. The first
+  lint exited 101 for implicit default constructors; the corrected lint exits 0.
+  Two scratch compat setup attempts exited 1 before scenarios ran because the copied
+  harness lacked its expected directory layout and evidence references.
+- The performance gate is SKIPPED by the integration instruction. The orchestrator
+  runs the merged A/B; the measurements below still describe the earlier frozen source.
+  Linux `/proc`, PTY gathering, epoll, THP and `tui-output-backpressure.sh`, Windows,
+  live SSH, physical devices, the packaged launcher and production behavior are NOT RUN.
+  Full-workspace/corpus, web/shared/FFI/native rebuilds and the supplied baseline-red
+  resurrect-save/plugin-runtime-continuum/status-background-jobs rows are SKIPPED.
+
+Exact review/integration commands, exits and captured output stay in scratch JSONs:
+
+| Check | Command | Exit | Scratch JSON |
+| --- | --- | ---: | --- |
+
+| Focused rollback attachment | `timeout 1800 cargo test -p zz-daemon legacy_command_attach_reconnects_with_the_original_route -- --test-threads=1` | 0 | `/tmp/zzpc/ctrl-fix-legacy-unit-passed.json` |
+| Merged formatting | `cargo fmt --all -- --check` | 0 | `/tmp/zzpc/ctrl-fix-merge-fmt.json` |
+| Merged lint | `timeout 1800 cargo clippy -p zz-daemon -p zz-mux -p zz-terminal -p zz-client -p zz-tui -p zz-protocol -p zz-cli -p zz-gpui-ios --all-targets --all-features -- -D warnings` | 0 | `/tmp/zzpc/ctrl-fix-merge-lint.json` |
+| Merged serial suite | `timeout 1800 cargo test -p zz-daemon -p zz-client -p zz-tui -p zz-protocol -p zz-mux -p zz-terminal -p zz-gpui-ios -p zz-cli --all-features -- --test-threads=1 --skip concurrent_default_interactive_attaches_atomically_share_session_zero` | 0 | `/tmp/zzpc/ctrl-fix-merge-tests.json` |
+| CLI build | `timeout 1800 cargo build -p zz-cli --bin zz_cli` | 0 | `/tmp/zzpc/ctrl-fix-cli-build.json` |
+| Non-TTY attachment pair | `timeout 1800 python3 /tmp/zzpc/ctrl-fix-legacy-probe.py` | 0 | `/tmp/zzpc/ctrl-fix-legacy-probe-built.json` |
+| PTY attachment pair | `timeout 1800 python3 /tmp/zzpc/ctrl-fix-legacy-pty-probe.py` | 0 | `/tmp/zzpc/ctrl-fix-legacy-pty-probe-built.json` |
+| iOS example build | `timeout 1800 env ZZ_GPUI_DEMO=terminal just ios-gpui iPad build` | 0 | `/tmp/zzpc/ctrl-fix-ios-terminal-build.json` |
+| iOS example lint | `timeout 1800 env IPHONEOS_DEPLOYMENT_TARGET=26.0 cargo clippy -p zz-gpui-ios --target aarch64-apple-ios-sim --example terminal -- -D warnings` | 0 | `/tmp/zzpc/ctrl-fix-ios-terminal-lint.json` |
+| Selected compat rows | `timeout 1800 env PATH=/opt/homebrew/opt/coreutils/libexec/gnubin:/opt/homebrew/opt/gnu-sed/libexec/gnubin:/opt/homebrew/opt/grep/libexec/gnubin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin ZZ_COMPAT_TMUX=/Users/demfabris/dev/zz/compat/.cache/tmux-src/tmux ZZ_COMPAT_ZZ=/Users/demfabris/dev/zz-ctrl/target/debug/zz_cli /opt/homebrew/bin/bash /tmp/zzpc/ctrl-fix-harness/compat/run.sh smoke/control-notify smoke/control-eof-drain smoke/control-hard-loss smoke/control-alias-prepare smoke/control-tilde-environment smoke/source-file-control smoke/send-keys-control smoke/hooks-pane-focus smoke/hooks-pane-focus-clients smoke/format-monitor-hooks smoke/refresh-status smoke/copy-mode-refresh smoke/copy-mode-formats smoke/copy-mode-mode-keys-tail smoke/pane-border-status` | 1 | `/tmp/zzpc/ctrl-fix-compat-risk-final.json` |
+| PRE alias comparison | `timeout 1800 env PATH=/opt/homebrew/opt/coreutils/libexec/gnubin:/opt/homebrew/opt/gnu-sed/libexec/gnubin:/opt/homebrew/opt/grep/libexec/gnubin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin ZZ_COMPAT_TMUX=/Users/demfabris/dev/zz/compat/.cache/tmux-src/tmux ZZ_COMPAT_ZZ=/tmp/zzpc/ctrl-base/zz_cli /opt/homebrew/bin/bash /tmp/zzpc/ctrl-fix-harness/compat/run.sh smoke/control-alias-prepare` | 1 | `/tmp/zzpc/ctrl-fix-compat-alias-pre.json` |
+| Attached-client parity | `timeout 1800 env PATH=/opt/homebrew/opt/coreutils/libexec/gnubin:/opt/homebrew/opt/gnu-sed/libexec/gnubin:/opt/homebrew/opt/grep/libexec/gnubin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin /opt/homebrew/bin/bash /tmp/zzpc/ctrl-fix-harness/compat/attached-client.sh /Users/demfabris/dev/zz-ctrl/target/debug/zz_cli /Users/demfabris/dev/zz/compat/.cache/tmux-src/tmux` | 0 | `/tmp/zzpc/ctrl-fix-attached-client.json` |
+| TUI screen parity | `timeout 1800 env PATH=/opt/homebrew/opt/coreutils/libexec/gnubin:/opt/homebrew/opt/gnu-sed/libexec/gnubin:/opt/homebrew/opt/grep/libexec/gnubin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin /opt/homebrew/bin/bash /tmp/zzpc/ctrl-fix-harness/compat/tui-screen-diff.sh /Users/demfabris/dev/zz-ctrl/target/debug/zz_cli /Users/demfabris/dev/zz/compat/.cache/tmux-src/tmux` | 0 | `/tmp/zzpc/ctrl-fix-tui-screen.json` |
+| TUI screen rollback | `timeout 1800 env ZZ_PERF_TUI_COALESCE=0 PATH=/opt/homebrew/opt/coreutils/libexec/gnubin:/opt/homebrew/opt/gnu-sed/libexec/gnubin:/opt/homebrew/opt/grep/libexec/gnubin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin /opt/homebrew/bin/bash /tmp/zzpc/ctrl-fix-harness/compat/tui-screen-diff.sh /Users/demfabris/dev/zz-ctrl/target/debug/zz_cli /Users/demfabris/dev/zz/compat/.cache/tmux-src/tmux` | 0 | `/tmp/zzpc/ctrl-fix-tui-screen-rollback.json` |
+| Knowledge validation | `python3 .agents/skills/okf/scripts/okf.py validate` | 0 | `/tmp/zzpc/ctrl-fix-final-okf.json` |
+| Initial focused test: type correction | `timeout 1800 cargo test -p zz-daemon legacy_command_attach_reconnects_with_the_original_route -- --test-threads=1` | 101 | `/tmp/zzpc/ctrl-fix-legacy-unit.json` |
+| Initial focused test: EOF correction | `timeout 1800 cargo test -p zz-daemon legacy_command_attach_reconnects_with_the_original_route -- --test-threads=1` | 101 | `/tmp/zzpc/ctrl-fix-legacy-unit-rerun.json` |
+| Initial focused test: socket cleanup correction | `timeout 1800 cargo test -p zz-daemon legacy_command_attach_reconnects_with_the_original_route -- --test-threads=1` | 101 | `/tmp/zzpc/ctrl-fix-legacy-unit-final.json` |
+| Initial lint: explicit defaults needed | `timeout 1800 cargo clippy -p zz-daemon -p zz-gpui-ios --all-targets --all-features -- -D warnings` | 101 | `/tmp/zzpc/ctrl-fix-lint.json` |
+| Corrected premerge lint | `timeout 1800 cargo clippy -p zz-daemon -p zz-gpui-ios --all-targets --all-features -- -D warnings` | 0 | `/tmp/zzpc/ctrl-fix-lint-final.json` |
+| Initial scratch compat setup | `timeout 1800 env PATH=/opt/homebrew/opt/coreutils/libexec/gnubin:/opt/homebrew/opt/gnu-sed/libexec/gnubin:/opt/homebrew/opt/grep/libexec/gnubin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin ZZ_COMPAT_TMUX=/Users/demfabris/dev/zz/compat/.cache/tmux-src/tmux ZZ_COMPAT_ZZ=/Users/demfabris/dev/zz-ctrl/target/debug/zz_cli /opt/homebrew/bin/bash /tmp/zzpc/ctrl-fix-compat/run.sh smoke/control-notify smoke/control-eof-drain smoke/control-hard-loss smoke/control-alias-prepare smoke/control-tilde-environment smoke/source-file-control smoke/send-keys-control smoke/hooks-pane-focus smoke/hooks-pane-focus-clients smoke/format-monitor-hooks smoke/refresh-status smoke/copy-mode-refresh smoke/copy-mode-formats smoke/copy-mode-mode-keys-tail smoke/pane-border-status` | 1 | `/tmp/zzpc/ctrl-fix-compat-risk.json` |
+| Second scratch compat setup | `timeout 1800 env PATH=/opt/homebrew/opt/coreutils/libexec/gnubin:/opt/homebrew/opt/gnu-sed/libexec/gnubin:/opt/homebrew/opt/grep/libexec/gnubin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin ZZ_COMPAT_TMUX=/Users/demfabris/dev/zz/compat/.cache/tmux-src/tmux ZZ_COMPAT_ZZ=/Users/demfabris/dev/zz-ctrl/target/debug/zz_cli /opt/homebrew/bin/bash /tmp/zzpc/ctrl-fix-harness/compat/run.sh smoke/control-notify smoke/control-eof-drain smoke/control-hard-loss smoke/control-alias-prepare smoke/control-tilde-environment smoke/source-file-control smoke/send-keys-control smoke/hooks-pane-focus smoke/hooks-pane-focus-clients smoke/format-monitor-hooks smoke/refresh-status smoke/copy-mode-refresh smoke/copy-mode-formats smoke/copy-mode-mode-keys-tail smoke/pane-border-status` | 1 | `/tmp/zzpc/ctrl-fix-compat-risk-rerun.json` |
+
+Mac measurements on frozen source `8c49034f1b19b023d85008cf0e0b2d4809533d06`:
+
+| Row | Pre-lane quick | Previous TERM full | CTRL full | CTRL / same-run tmux |
+| --- | ---: | ---: | ---: | ---: |
+| Attach connections p1 / p4 | 2 / 2 | 2 / 2 | 1 / 1 | fixed count |
+| Attach server bytes p1 / p4 | 29,391 / 29,667 B | 29,391 / 29,666 B | 2,328 / 2,847 B | fixed byte bound |
+| Attach first paint p1 / p4 | 7.5802 / 7.2905 ms | 19.4232 / 20.4470 ms | 7.6291 / 7.9861 ms | 0.880 / 0.877 |
+| Attach daemon CPU p1 / p4 | 1.3849 / 2.5286 ms | 3.3401 / 4.9842 ms | 1.3401 / 2.2943 ms | 0.878 / 1.221 |
+| Serial control latency | 0.0629 ms | 0.0781 ms | 0.0269 ms | **1.439, fails 1.2 limit** |
+| Control daemon CPU / command | 0.0379 ms | 0.0452 ms | 0.0124 ms | 0.954 |
+| Control instructions / command | 0.2236 M | 0.2209 M | 0.0729 M | 0.457 |
+| Burst commands / second | 18,603.8 | 11,500.8 | 275,909.6 | 1.572 |
+| Control output | 124.5421 MB/s | 131.5761 MB/s | 131.6183 MB/s | 3.302 |
+| Visible TUI CPU | 1.5187% (separate full) | 1.6735% | 0.9334% | passes 1% limit |
+| Visible TTY output | 393.5864 KiB/s (separate full) | 384.4557 KiB/s | 244.0791 KiB/s | 0.737 |
+
+Quick and full use different sample counts; the historical columns provide context,
+not paired timing estimates. The exact required quick gate exits 1 with 43 passes
+and two failures: p4 attach CPU 1.327 times tmux and serial latency 1.487 times.
+The full attach/control gate exits 1 with 13 passes and one failure, serial latency;
+all its attach floors pass. The separate clean full chatty gate exits 0 with eight
+passes. A profiled visible run measured 1.1724% and remains separate informational
+evidence. The passing clean run does not erase that outcome.
+
+The clean full throughput run exits 0: ASCII 300.4309 MB/s, Unicode 122.5457 MB/s,
+and attached ASCII 498.192 ms, all three inherited floors passing. ASCII is about
+13% below the previous TERM full result of 345.1791 MB/s. A later same-harness
+pre-lane/final pair is red for both attached W0 rows: 893.6 versus 766.1 ms. ASCII
+is 293.2 versus 279.8 MB/s and Unicode 121.3 versus 119.1 MB/s. The final headless
+information row rises from 554.8 to 4,535.6 ms. Host load moves from 7.1 to 36.11
+in PRE and 29.28 to 28.70 in final; these conditions do not establish a cause.
+Throughput stability and the headless change remain unresolved, rather than
+being waived by the earlier passing result. Both full raw outcomes are retained
+under `bench/perf/results/w2-3-ctrl-*-macbook-8c49034f.json` and the pre-lane
+results identify their preserved binary separately from the harness git revision.
+
+Final five-second daemon, control frontend and visible TUI samples retain identities
+and raw stacks. The simple display classifier no longer enters the generic option
+parser in either daemon control sample. Actual command validation, hook predicates,
+worker dispatch and socket/stdio operations remain. Native guard formatting occurs
+once at allocation; the old begin/end formatting branches are absent. The visible
+sample contains no recurring frame-map growth, output-buffer growth or repeated RGB
+formatting. Sparse samples do not prove those costs absent in every workload.
+
+A separate 1,000-command process assay records client and daemon CPU/instructions
+with 100 warmup commands, alternating zz and tmux. zz uses 9.706292 microseconds of
+frontend CPU plus 11.778 daemon CPU per command; tmux uses zero measured client delta
+plus 12.857542 daemon CPU. Both complete all guards. Median latency is 0.0274 versus
+0.0192 ms. This supports investigation of the frontend relay, without predicting
+savings from moving its formatter or proving the latency floor.
+
+Final source validation: the 16-package serial test command exits 0 with 4,573
+passed, five existing ignored and the single documented headless test filtered.
+The preceding eight-thread command stopped at the daemon with 24 failures; all
+24 unchanged solo reruns pass in 0.01 to 1.06 seconds. The failed run remains
+recorded, and the solos and serial pass do not establish its cause. The 16-package
+all-target/all-feature lint exits 0. Shared host capability runs one actual test,
+its full library passes 58, and its lint exits 0. The linked C rollback integration
+passes with `ZZ_PERF_TREE_DELTA=0`; one Rust test launches both C clients. Web and
+iPad build recipes exit 0. Those builds establish compilation rather than physical
+iPad or packaged desktop behavior. Detailed commands and exits are retained in
+`bench/perf/results/w2-3-ctrl-validation-macbook-8c49034f.md` and its raw JSON.
+
+The serial floor remains open. A local Unix stdin/stdout descriptor handoff could
+retain the existing worker/FIFO and remove the command-data relay, but changes the
+negotiated transport and native stdout owner beyond this lane's compact message
+model. It needs a separate design decision and actual bounded-output, cancellation,
+callback and ordering proofs. Reader-side execution instead requires an explicit
+execution-context ownership transition; queue emptiness is not an idle claim.
+No such ownership change is implemented here. Linux readiness, PTY gathering,
+THP and output-backpressure remain coordinator checks on a Linux host.
 
 ## W2-HOOKS: read-only skip, then change journal (effort L)
 
@@ -3198,17 +3512,18 @@ deletes most wave-1 fallback paths anyway).
 | `ZZ_PERF_ATTACH_BATCH=0` | ATTACH | an attach holds only its terminal frames until `Attached`; `Attached`, the status and the other reliable messages are written as they are queued instead of as one batch after the publish that follows the attach, and the hello of a raw-terminal or browser client carries a status rendered before it attached |
 | `ZZ_PERF_ATTACH_PRESIZE=0` | ATTACH | an attaching raw-terminal client's panes keep their size until its first `ResizeTerminal` |
 | `ZZ_PERF_WRITEV=0` | ATTACH | one write per outbound frame, a writer thread of its own per connection, the default socket send buffer, and unbuffered protocol reads in the daemon and in the client (the client reads it at start) |
-| `ZZ_PERF_TUI_COALESCE=0` | ATTACH | the TUI (read at CLI start) paints after every event, repaints everything on every snapshot and on an unchanged resize, paints before attaching and a card in a pane with no frame, writes a paint that only puts the cursor back, clears to the theme colour and erases every blank pane row, reads the two terminal options over two connections of their own, sends the kitty graphics probe on every attach, sends the client size for a cell-size reply, and places the cursor for every border cell |
+| `ZZ_PERF_TUI_COALESCE=0` | ATTACH | the TUI (read at CLI start) disables event-paint coalescing and retained-row and narrow-column skips, repaints on every snapshot and unchanged resize, paints before draining queued events and draws a waiting card in a pane with no frame, writes cursor-only paints, clears to the theme colour and erases blank pane rows, performs uncached border/status work, sends the initial Kitty graphics probe regardless of terminal-support detection, reports client grid size for a cell-size reply, and uses absolute cursor positioning for successive vertical border cells. Terminal options come from Hello and attachment uses the same single connection |
 | `ZZ_PERF_ROW_PATCHES=1` | TERM | patches replace every changed row whole (from column 0, the rest of the row cleared), the pre-W2 row granularity; the frames stay PaneFrames. Fails `echo.wire_bytes.idle` (about 80 B against the 64 B rule) by design: a key echo resends its whole prompt row |
-| `ZZ_PERF_READONLY_SKIP=0` | HOOKS | read-only commands take the before/after captures |
-| `ZZ_PERF_EAGER_FACTS=1` | HOOKS | every command builds format hook facts, and a pane runtime fact change builds them with no rename due |
+| `ZZ_PERF_READONLY_SKIP=0` | HOOKS, CTRL | read-only commands take the before/after captures and perform key-table publication checks and control tap refresh |
+| `ZZ_PERF_EAGER_FACTS=1` | HOOKS, CTRL | every command builds format hook facts, literal display commands resolve format targets before execution, and a pane runtime fact change builds facts with no rename due |
 | `ZZ_PERF_HOOK_JOURNAL=0` | HOOKS | hook events come from whole-mux snapshots before and after, the command path captures every active window, active pane and bell, and the focus probe captures every window and session |
-| `ZZ_PERF_KEY_TABLE_DELTA=0` | HOOKS | every key table publication is `KeyTablesChanged` with every table, instead of `KeyTablesPatched` with the changed and removed ones |
+| `ZZ_PERF_KEY_TABLE_DELTA=0` | HOOKS | Full subscribers receive every key table instead of the changed and removed tables; Hash subscribers retain their compact revision and mouse bindings |
+| `ZZ_PERF_TREE_DELTA=0` | CTRL | compact subscribers receive full scoped trees for changes instead of TreeDelta; Hello, Welcome and Batch stay on the new wire |
 | `ZZ_PERF_COPY_CLONE=1` | COPY | flat `ModeRevision` clone |
 | `ZZ_PERF_THP=1` | FOOTPRINT (Linux) | the daemon keeps transparent huge pages as the system sets them |
 
-Wire changes (W2-TERM, W2-CTRL) and the thread model (W3, W4) have no runtime switch; rollback is a
-revert. The 8-byte-a-cell frames cannot come back behind a knob: both ends speak one format. `ZZ_PTY_SHARDS=N` is a tuning knob, not a rollback. W2-HOOKS changes that keep behaviour
+Wire changes (W2-TERM, W2-CTRL) and the thread model (W3, W4) require a revert for rollback.
+`ZZ_PERF_TREE_DELTA=0` changes tree publication within the new wire only. The 8-byte-a-cell frames cannot come back behind a knob: both ends speak one format. `ZZ_PTY_SHARDS=N` is a tuning knob, not a rollback. W2-HOOKS changes that keep behaviour
 have no knob either: the catalogue name index, the skipped lookup for empty hook arrays, the sweep
 that runs only after a removal (debug builds assert a skipped one would remove nothing), the
 focus early return and the shared change window (debug builds diff the focus candidates against

@@ -565,7 +565,7 @@ pub(crate) struct TerminalView {
     forwarded_keys: HashSet<String>,
     text_input_key: Option<KeyDownEvent>,
     terminal_resize_suppressed: Rc<Cell<bool>>,
-    last_grid_size: Option<GridSize>,
+    last_grid_size: Option<(GridSize, u64)>,
     hit_grid: Option<HitGrid>,
     pointer_position: Option<Point<Pixels>>,
     pointer_global: Option<Point<Pixels>>,
@@ -1140,6 +1140,14 @@ impl TerminalView {
                 .then(|| mux.kitty_images(pane))
                 .flatten();
             let mut changed = false;
+            if !view.command_output
+                && !view.popup
+                && view
+                    .last_grid_size
+                    .is_some_and(|(_, generation)| generation != mux.layout_generation())
+            {
+                changed = true;
+            }
             if !Arc::ptr_eq(&view.render_appearance.source, &appearance)
                 && view.render_appearance.source.as_ref() != appearance.as_ref()
             {
@@ -1756,8 +1764,16 @@ impl TerminalView {
     ) {
         let started = diagnostics::timer(DIAGNOSTIC_TARGET);
         let previous = self.last_grid_size;
+        let reported = (
+            grid_size,
+            if self.command_output || self.popup {
+                0
+            } else {
+                self.mux.read(cx).layout_generation()
+            },
+        );
         if !self.popup
-            && self.last_grid_size != Some(grid_size)
+            && self.last_grid_size != Some(reported)
             && (self.command_output || !self.terminal_resize_suppressed.get())
         {
             self.mux.read(cx).send_input(if self.command_output {
@@ -1768,15 +1784,16 @@ impl TerminalView {
                     cell_height_px: grid_size.cell_height_px,
                 }
             } else {
-                InputMessage::ResizeTerminal {
+                InputMessage::ResizeTerminalV2 {
                     pane: self.pane,
                     columns: grid_size.columns,
                     rows: grid_size.rows,
                     cell_width_px: grid_size.cell_width_px,
                     cell_height_px: grid_size.cell_height_px,
+                    layout_generation: reported.1,
                 }
             });
-            self.last_grid_size = Some(grid_size);
+            self.last_grid_size = Some(reported);
         }
         self.hit_grid = Some(HitGrid {
             bounds,
@@ -1796,7 +1813,7 @@ impl TerminalView {
             "update_geometry pane={} command_output={} previous={previous:?} next={grid_size:?} changed={} bounds={bounds:?} surface_bounds={surface_bounds:?} cell_width={} line_height={} cursor_bounds={:?} elapsed_us={}",
             self.pane,
             self.command_output,
-            previous != Some(grid_size),
+            previous != Some(reported),
             f32::from(cell_width),
             f32::from(line_height),
             self.cursor_bounds,
@@ -3977,6 +3994,71 @@ mod tests {
             terminal_background(live, 0.5),
             appearance_hsla(AppearanceColor::rgba(0x12, 0x34, 0x56, 128))
         );
+    }
+
+    #[gpui::test]
+    fn terminal_geometry_retries_the_same_grid_after_a_new_layout_view(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        cx.update(zz_ui::init);
+        let mux_slot = Rc::new(RefCell::new(None));
+        let captured_mux = Rc::clone(&mux_slot);
+        let (terminal, cx) = cx.add_window_view(move |window, cx| {
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            let sent = mux.update(cx, |mux, _| mux.record_input_for_test());
+            captured_mux.replace(Some((mux.clone(), sent)));
+            TerminalView::new(PaneId(0), mux, Rc::new(Cell::new(false)), window, cx)
+        });
+        let (mux, sent) = mux_slot.borrow().clone().expect("captured mux");
+        let reports = || {
+            sent.borrow()
+                .iter()
+                .filter_map(|message| match message {
+                    InputMessage::ResizeTerminalV2 {
+                        columns,
+                        rows,
+                        cell_width_px,
+                        cell_height_px,
+                        layout_generation,
+                        ..
+                    } => Some((
+                        (*columns, *rows, *cell_width_px, *cell_height_px),
+                        *layout_generation,
+                    )),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(reports().len(), 1);
+        mux.update(cx, |mux, cx| {
+            mux.handle_message_for_test(
+                zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 1,
+                    payload: zz_protocol::EventPayload::ClientView(zz_protocol::ClientView {
+                        layout_generation: 1,
+                        ..Default::default()
+                    }),
+                }),
+                cx,
+            );
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let resized = reports();
+        assert_eq!(resized.len(), 2);
+        assert_eq!(resized[0].0, resized[1].0);
+        assert_eq!(resized[0].1, 0);
+        assert_eq!(resized[1].1, 1);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(reports().len(), 2);
+        drop(terminal);
     }
 
     #[gpui::test]

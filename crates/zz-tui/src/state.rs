@@ -106,6 +106,7 @@ pub(crate) struct Model {
     pub host_label: String,
     pub current_endpoint: Endpoint,
     pub snapshot: Arc<MuxSnapshot>,
+    pub layout_generation: u64,
     pub attached_session: Option<SessionId>,
     pub viewports: HashMap<PaneId, TerminalViewport>,
     pub appearance: TerminalAppearance,
@@ -222,6 +223,7 @@ impl Model {
             host_label,
             current_endpoint,
             snapshot: Arc::clone(core.snapshot()),
+            layout_generation: core.layout_generation(),
             attached_session: core.attached_session(),
             viewports: core
                 .popup()
@@ -267,8 +269,8 @@ impl Model {
             last_sent_geometry: HashMap::new(),
             last_sent_command_output_geometry: None,
             mouse_option: crate::app::mouse_option_enabled(core.mux_options()),
-            mouse_bindings: crate::app::mouse_binding_names(core.key_tables()),
-            copy_mouse_bindings: crate::app::copy_mouse_binding_names(core.key_tables()),
+            mouse_bindings: core.mouse_bindings().keys().into_iter().collect(),
+            copy_mouse_bindings: core.mouse_bindings().copy_keys().into_iter().collect(),
             mouse_drag: None,
             click: None,
             focus_follows_mouse: crate::app::focus_follows_mouse_enabled(core.mux_options()),

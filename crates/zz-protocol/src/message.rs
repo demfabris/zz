@@ -225,10 +225,12 @@ pub enum MuxOptionKey {
     EscapeTime,
     Prefix2,
     FocusFollowsMouse,
+    ExtendedKeys,
+    FocusEvents,
 }
 
 impl MuxOptionKey {
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 20] = [
         Self::Prefix,
         Self::ModeKeys,
         Self::HistoryLimit,
@@ -247,6 +249,8 @@ impl MuxOptionKey {
         Self::EscapeTime,
         Self::Prefix2,
         Self::FocusFollowsMouse,
+        Self::ExtendedKeys,
+        Self::FocusEvents,
     ];
 
     #[must_use]
@@ -270,6 +274,8 @@ impl MuxOptionKey {
             Self::EscapeTime => "escape-time",
             Self::Prefix2 => "prefix2",
             Self::FocusFollowsMouse => "focus-follows-mouse",
+            Self::ExtendedKeys => "extended-keys",
+            Self::FocusEvents => "focus-events",
         }
     }
 
@@ -294,6 +300,8 @@ impl MuxOptionKey {
             "escape-time" => Some(Self::EscapeTime),
             "prefix2" => Some(Self::Prefix2),
             "focus-follows-mouse" => Some(Self::FocusFollowsMouse),
+            "extended-keys" => Some(Self::ExtendedKeys),
+            "focus-events" => Some(Self::FocusEvents),
             _ => None,
         }
     }
@@ -310,7 +318,9 @@ impl MuxOptionKey {
             Self::SynchronizePanes
             | Self::ExperimentalAgentPane
             | Self::ExperimentalEditorPane
-            | Self::FocusFollowsMouse => "off".to_owned(),
+            | Self::FocusFollowsMouse
+            | Self::ExtendedKeys
+            | Self::FocusEvents => "off".to_owned(),
             Self::HistoryTrickle => "2000".to_owned(),
             Self::Mouse => "on".to_owned(),
             Self::EscapeTime => "10".to_owned(),
@@ -394,6 +404,21 @@ impl MuxOptions {
 
     pub fn iter(&self) -> impl Iterator<Item = (MuxOptionKey, &MuxOptionValue)> {
         self.0.iter().map(|(key, value)| (*key, value))
+    }
+
+    pub fn merge(&mut self, patch: Self) {
+        self.0.extend(patch.0);
+    }
+
+    pub fn validate_partial(&self) -> Result<(), &'static str> {
+        if self
+            .0
+            .values()
+            .any(|value| value.value.len() > MAX_MUX_OPTION_VALUE_BYTES)
+        {
+            return Err("mux option values exceed the wire byte limit");
+        }
+        Ok(())
     }
 
     /// Ensure a wire payload contains exactly one bounded value for every supported key.
@@ -1350,7 +1375,9 @@ impl<'de> Deserialize<'de> for RawText {
     where
         D: Deserializer<'de>,
     {
-        Ok(Self::from_bytes(Vec::<u8>::deserialize(deserializer)?))
+        Ok(Self::from_bytes(
+            serde_bytes::ByteBuf::deserialize(deserializer)?.into_vec(),
+        ))
     }
 }
 
@@ -2194,6 +2221,19 @@ pub enum InputMessage {
     },
     ClientSuspendState {
         suspended: bool,
+    },
+    ResizeTerminalV2 {
+        pane: PaneId,
+        columns: u16,
+        rows: u16,
+        cell_width_px: u32,
+        cell_height_px: u32,
+        layout_generation: u64,
+    },
+    ClientTerminalSizeV2 {
+        columns: u16,
+        rows: u16,
+        layout_generation: u64,
     },
 }
 
@@ -3521,6 +3561,27 @@ pub enum EventPayload {
         tables: Vec<KeyTableSnapshot>,
         removed: Vec<String>,
     },
+    TreeDelta(crate::TreeDelta),
+    ClientView(crate::ClientView),
+    KeyTablesHashChanged {
+        hash: u64,
+        mouse: crate::MouseBindings,
+    },
+    MuxOptionsPatched {
+        options: MuxOptions,
+    },
+    ControlCommandGuardRaw {
+        output: RawText,
+        error: bool,
+        sticky_failure: bool,
+        flags: u8,
+    },
+    ControlCommandStarted {
+        request_id: u64,
+        flags: u32,
+        canonical_name: Option<String>,
+        guard: bool,
+    },
 }
 
 impl EventPayload {
@@ -3590,7 +3651,7 @@ impl EventPayload {
 )]
 pub enum ProtocolMessage {
     ClientHello(ClientHello),
-    ServerHello(ServerHello),
+    ServerHello(Box<ServerHello>),
     CommandRequest(CommandRequest),
     CommandResponse(CommandResponse),
     Attach {
@@ -3820,6 +3881,11 @@ pub enum ProtocolMessage {
     },
     Exec(crate::ExecRequest),
     ExecExit(crate::ExecExit),
+    Hello(crate::Hello),
+    Welcome(crate::Welcome),
+    Batch(crate::Batch),
+    TreeSync,
+    GetKeyTables,
 }
 
 fn deserialize_client_terminal_type<'de, D>(deserializer: D) -> Result<String, D::Error>

@@ -26,14 +26,23 @@ raw="$HOME/control-alias-prepare.raw"
 errors="$HOME/control-alias-prepare.err"
 {
     printf '%s\n' "set-option -s command-alias[40] 'live=display-message -p new' ; live"
+    printf '%s\n' 'live'
+    printf '%s\n' 'set-environment -g CONTROL_NEXT visible'
+    printf '%s\n' 'display-message -p $CONTROL_NEXT'
     printf '%s\n' 'set-environment -g CONTROL_BEFORE bad ; frobnicate ; set-environment -g CONTROL_AFTER bad'
     printf '%s\n' 'detach-client'
 } | control_client >"$raw" 2>"$errors"
 
-if grep -qx old "$raw" && [ "$(main_client live)" = new ]; then
+if grep -qx old "$raw" && grep -qx new "$raw" && [ "$(main_client live)" = new ]; then
     main_client set-environment -g CONTROL_ALIAS_SNAPSHOT frozen
 else
     main_client set-environment -g CONTROL_ALIAS_SNAPSHOT broken
+fi
+
+if grep -qx visible "$raw"; then
+    main_client set-environment -g CONTROL_EXPANSION_ORDER sequential
+else
+    main_client set-environment -g CONTROL_EXPANSION_ORDER broken
 fi
 
 if ! main_client show-environment -g CONTROL_BEFORE >/dev/null 2>&1 && \

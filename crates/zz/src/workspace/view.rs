@@ -4502,7 +4502,7 @@ mod tests {
             let (mut stream, _) = listener.accept().unwrap();
             assert!(matches!(
                 read_protocol_message(&mut stream).unwrap(),
-                ProtocolMessage::ClientHello(_)
+                ProtocolMessage::ClientHello(_) | ProtocolMessage::Hello(_)
             ));
             sender.send(stream.try_clone().unwrap()).unwrap();
             let mut mux_options = zz_protocol::MuxOptions::default();
@@ -4513,18 +4513,21 @@ mod tests {
             );
             write_protocol_message(
                 &mut stream,
-                &ProtocolMessage::ServerHello(zz_protocol::ServerHello {
+                &ProtocolMessage::ServerHello(Box::new(zz_protocol::ServerHello {
                     protocol_version: PROTOCOL_VERSION,
                     server_id: 1,
                     client_id: zz_protocol::ClientId(1),
                     client_instance_id: zz_protocol::ClientInstanceId(1),
-                    capabilities: vec![zz_protocol::PANE_FRAME_CAPABILITY.to_owned()],
+                    capabilities: vec![
+                        zz_protocol::PANE_FRAME_CAPABILITY.to_owned(),
+                        zz_protocol::CONTROL_CAPABILITY.to_owned(),
+                    ],
                     appearance: zz_terminal::TerminalAppearance::default(),
                     appearance_provenance: zz_terminal::AppearanceProvenance::default(),
                     mux_options,
                     status: zz_protocol::StatusLine::default(),
                     key_tables: zz_protocol::KeyTables::default().snapshot(),
-                }),
+                })),
             )
             .unwrap();
             while read_protocol_message(&mut stream).is_ok() {}
@@ -6481,10 +6484,11 @@ mod tests {
         assert_eq!(sent.len(), 1);
         assert!(matches!(
             &sent[0],
-            InputMessage::ResizeTerminal {
+            InputMessage::ResizeTerminalV2 {
                 pane,
                 columns,
                 rows,
+                layout_generation: 0,
                 ..
             } if *pane == PaneId(0) && *columns == 119 && *rows == 23
         ));
@@ -6575,12 +6579,13 @@ mod tests {
             assert_eq!(sent.len(), 1);
             assert!(matches!(
                 &sent[0],
-                InputMessage::ResizeTerminal {
+                InputMessage::ResizeTerminalV2 {
                     pane,
                     columns,
                     rows,
                     cell_width_px,
                     cell_height_px,
+                    layout_generation: 0,
                 } if *pane == PaneId(0)
                     && *columns == 120
                     && *rows == 24

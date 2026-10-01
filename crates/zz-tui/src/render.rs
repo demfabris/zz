@@ -3,6 +3,7 @@ use std::{
     fmt::Write as _,
     io::{self, Write as _},
     rc::Rc,
+    sync::Arc,
 };
 
 use unicode_width::UnicodeWidthChar as _;
@@ -209,6 +210,14 @@ const PAINT_BEGIN: &[u8] = b"\x1b[?2026h\x1b[?25l";
 const PAINT_END: &[u8] = b"\x1b[?2026l";
 const PAINT_TAIL_BYTES: usize = 64;
 
+type TerminalStyleKey = (
+    PackedStyle,
+    bool,
+    [Color; 2],
+    [Option<TmuxColour>; 2],
+    Option<u32>,
+);
+
 pub(crate) struct Renderer {
     output: Vec<u8>,
     queued_control: Vec<u8>,
@@ -225,6 +234,7 @@ pub(crate) struct Renderer {
     sidebar_rows: Vec<PaintedSidebarRow>,
     status_rows: Vec<StyledLine>,
     status_geometry: Option<(u16, u16, u16)>,
+    status_source: Option<zz_protocol::StatusLine>,
     damage: HashMap<PaneId, FrameDamage>,
     browser_placements: HashMap<PaneId, KittyPlacement>,
     browser_painted: HashMap<PaneId, bool>,
@@ -244,6 +254,7 @@ pub(crate) struct Renderer {
     paint_tail: Vec<u8>,
     terminal_colours: Option<u32>,
     terminal_defaults: TmuxStyle,
+    terminal_sgr: Option<(TerminalStyleKey, Vec<u8>)>,
     blank_is_default: bool,
     default_blank: HashMap<PaneId, Rect>,
 }
@@ -270,6 +281,7 @@ impl Renderer {
             sidebar_rows: Vec::new(),
             status_rows: Vec::new(),
             status_geometry: None,
+            status_source: None,
             damage: HashMap::new(),
             browser_placements: HashMap::new(),
             browser_painted: HashMap::new(),
@@ -283,6 +295,7 @@ impl Renderer {
             paint_tail: Vec::new(),
             terminal_colours: crate::tty::terminal_colours(),
             terminal_defaults: TmuxStyle::default(),
+            terminal_sgr: None,
             blank_is_default: false,
             default_blank: HashMap::new(),
         }
@@ -300,6 +313,7 @@ impl Renderer {
     }
 
     pub fn invalidate(&mut self) {
+        self.terminal_sgr = None;
         self.paint_tail.clear();
         self.painted.clear();
         self.default_blank.clear();
@@ -309,6 +323,7 @@ impl Renderer {
         self.sidebar_rows.clear();
         self.status_rows.clear();
         self.status_geometry = None;
+        self.status_source = None;
         self.damage.clear();
         self.browser_painted.clear();
         self.border_chrome = None;
@@ -569,7 +584,7 @@ impl Renderer {
             let tail = body.len().saturating_sub(PAINT_TAIL_BYTES);
             self.paint_tail.extend_from_slice(&body[tail..]);
         }
-        match self.writer.submit(std::mem::take(&mut self.output))? {
+        match self.writer.submit(&mut self.output)? {
             Submission::Queued => Ok(()),
             Submission::Dropped => {
                 if !control.is_empty() {
@@ -632,15 +647,24 @@ impl Renderer {
     fn paint_workspace(&mut self, model: &Model, force: bool, cleared_to_default: bool) {
         let lines = model.pane_border_lines();
         let indicators = model.pane_border_indicators();
-        let chrome = (
-            model.pane_border_status(),
-            lines,
-            indicators,
-            model.status.pane_borders.clone(),
-            model.status.theme,
-        );
-        let force = force || self.border_chrome.as_ref() != Some(&chrome);
-        self.border_chrome = Some(chrome);
+        let border_changed = !*crate::COALESCE
+            || self.border_chrome.as_ref().is_none_or(|cached| {
+                cached.0 != model.pane_border_status()
+                    || cached.1 != lines
+                    || cached.2 != indicators
+                    || cached.3 != model.status.pane_borders
+                    || cached.4 != model.status.theme
+            });
+        let force = force || border_changed;
+        if border_changed {
+            self.border_chrome = Some((
+                model.pane_border_status(),
+                lines,
+                indicators,
+                model.status.pane_borders.clone(),
+                model.status.theme,
+            ));
+        }
         if force {
             let cells = divider_cells(&model.layout.dividers);
             let mut border = BTreeMap::new();
@@ -908,7 +932,23 @@ impl Renderer {
         force: bool,
         damage: Option<&FrameDamage>,
     ) {
-        let previous = self.painted.get(&pane).cloned();
+        let coalesce = *crate::COALESCE;
+        if coalesce
+            && !force
+            && self.painted.get(&pane).is_some_and(|previous| {
+                previous.rect == rect
+                    && previous.viewport.columns == viewport.columns
+                    && previous.viewport.rows == viewport.rows
+                    && previous.viewport.foreground == viewport.foreground
+                    && previous.viewport.background == viewport.background
+                    && Arc::ptr_eq(&previous.viewport.cells, &viewport.cells)
+                    && Arc::ptr_eq(&previous.viewport.overlays, &viewport.overlays)
+                    && Arc::ptr_eq(&previous.viewport.dictionary, &viewport.dictionary)
+            })
+        {
+            return;
+        }
+        let previous = self.painted.remove(&pane);
         let structural_change = previous.as_ref().is_none_or(|previous| {
             previous.rect != rect
                 || previous.viewport.columns != viewport.columns
@@ -916,24 +956,30 @@ impl Renderer {
                 || previous.viewport.foreground != viewport.foreground
                 || previous.viewport.background != viewport.background
         });
-        if force || structural_change || matches!(damage, Some(FrameDamage::All)) {
+        if force || structural_change || !coalesce && matches!(damage, Some(FrameDamage::All)) {
             for row in 0..rect.height {
                 self.blit_row(viewport, row, rect);
             }
         } else if let Some(FrameDamage::Rows(rows)) = damage {
             for row in rows.iter().copied().filter(|row| *row < rect.height) {
-                if previous.as_ref().is_none_or(|previous| {
-                    row_changed(&previous.viewport, viewport, row, rect.width)
-                }) {
-                    self.blit_row(viewport, row, rect);
+                if let Some(columns) = previous.as_ref().map_or_else(
+                    || Some(0..rect.width),
+                    |previous| {
+                        changed_columns(&previous.viewport, viewport, row, rect.width, coalesce)
+                    },
+                ) {
+                    self.blit_columns(viewport, row, rect, columns);
                 }
             }
         } else {
             for row in 0..rect.height {
-                if previous.as_ref().is_none_or(|previous| {
-                    row_changed(&previous.viewport, viewport, row, rect.width)
-                }) {
-                    self.blit_row(viewport, row, rect);
+                if let Some(columns) = previous.as_ref().map_or_else(
+                    || Some(0..rect.width),
+                    |previous| {
+                        changed_columns(&previous.viewport, viewport, row, rect.width, coalesce)
+                    },
+                ) {
+                    self.blit_columns(viewport, row, rect, columns);
                 }
             }
         }
@@ -958,7 +1004,57 @@ impl Renderer {
         write_selection_sgr(&mut self.output, style);
     }
 
+    fn write_terminal_sgr(
+        &mut self,
+        style: PackedStyle,
+        reverse: bool,
+        viewport: &TerminalViewport,
+    ) {
+        let key = (
+            style,
+            reverse,
+            [viewport.foreground, viewport.background],
+            [self.terminal_defaults.fg, self.terminal_defaults.bg],
+            crate::tty::terminal_colours(),
+        );
+        if self
+            .terminal_sgr
+            .as_ref()
+            .is_none_or(|(cached, _)| *cached != key)
+        {
+            let mut bytes = self
+                .terminal_sgr
+                .take()
+                .map_or_else(Vec::new, |(_, mut bytes)| {
+                    bytes.clear();
+                    bytes
+                });
+            write_sgr(
+                &mut bytes,
+                style,
+                reverse,
+                viewport.foreground,
+                viewport.background,
+                &self.terminal_defaults,
+            );
+            self.terminal_sgr = Some((key, bytes));
+        }
+        if let Some((_, bytes)) = &self.terminal_sgr {
+            self.output.extend_from_slice(bytes);
+        }
+    }
+
     fn blit_row(&mut self, viewport: &TerminalViewport, row: u16, rect: Rect) {
+        self.blit_columns(viewport, row, rect, 0..rect.width);
+    }
+
+    fn blit_columns(
+        &mut self,
+        viewport: &TerminalViewport,
+        row: u16,
+        rect: Rect,
+        columns: std::ops::Range<u16>,
+    ) {
         if rect.width == 0 {
             return;
         }
@@ -1010,7 +1106,7 @@ impl Renderer {
         });
         let grounded_defaults =
             self.terminal_defaults.fg.is_some() || self.terminal_defaults.bg.is_some();
-        let clear_from = if grounded_defaults {
+        let clear_from = if grounded_defaults || columns.end < rect.width {
             None
         } else {
             trailing_clear(
@@ -1021,6 +1117,7 @@ impl Renderer {
                 &self.overlay_mask,
                 &self.selection_mask,
             )
+            .map(|start| start.max(columns.start))
         };
         let ground = match default_style.background_class() {
             ColourClass::Default => None,
@@ -1032,10 +1129,14 @@ impl Renderer {
             self.selection_style = selection_style;
             return;
         }
-        write_cursor_position(&mut self.output, rect.x, rect.y.saturating_add(row));
+        write_cursor_position(
+            &mut self.output,
+            rect.x.saturating_add(columns.start),
+            rect.y.saturating_add(row),
+        );
         let mut current_style = None;
-        let mut terminal_column = 0_u16;
-        for column in 0..clear_from.unwrap_or(rect.width) {
+        let mut terminal_column = columns.start;
+        for column in columns.start..clear_from.unwrap_or(columns.end) {
             let cell = viewport.cell(row, column).unwrap_or(PackedCell::EMPTY);
             let style = viewport.style(cell).unwrap_or(default_style);
             let reverse = self.overlay_mask[usize::from(column)];
@@ -1051,14 +1152,7 @@ impl Renderer {
                         );
                     }
                     if current_style != Some((style, reverse, selected, matched)) {
-                        write_sgr(
-                            &mut self.output,
-                            style,
-                            reverse,
-                            viewport.foreground,
-                            viewport.background,
-                            &self.terminal_defaults,
-                        );
+                        self.write_terminal_sgr(style, reverse, viewport);
                         self.write_match_sgr(matched);
                         if selected && let Some(selection) = &selection_style {
                             write_selection_sgr(&mut self.output, selection);
@@ -1078,14 +1172,7 @@ impl Renderer {
                 );
             }
             if current_style != Some((style, reverse, selected, matched)) {
-                write_sgr(
-                    &mut self.output,
-                    style,
-                    reverse,
-                    viewport.foreground,
-                    viewport.background,
-                    &self.terminal_defaults,
-                );
+                self.write_terminal_sgr(style, reverse, viewport);
                 self.write_match_sgr(matched);
                 if selected && let Some(selection) = &selection_style {
                     write_selection_sgr(&mut self.output, selection);
@@ -1766,6 +1853,16 @@ impl Renderer {
         let block = usize::from(model.status_block_rows());
         let overlay = status_overlay(model, width);
         let origin = model.status_origin_y();
+        let geometry = (x, origin, width);
+        if *crate::COALESCE
+            && !force
+            && overlay.is_none()
+            && self.status_geometry == Some(geometry)
+            && self.status_source.as_ref() == Some(&model.status)
+        {
+            return;
+        }
+        self.status_source = overlay.is_none().then(|| model.status.clone());
         let mut lines = Vec::with_capacity(block);
         for index in 0..block {
             let row = model.status.rows.get(index).map_or("", String::as_str);
@@ -1784,7 +1881,6 @@ impl Renderer {
             line.resolve_theme(&model.status.theme);
             lines.push(line);
         }
-        let geometry = (x, origin, width);
         let force = force || self.status_geometry != Some(geometry);
         for (index, line) in lines.iter().enumerate() {
             let row = origin.saturating_add(u16::try_from(index).unwrap_or(u16::MAX));
@@ -2014,6 +2110,7 @@ impl Renderer {
         self.sidebar_rows.clear();
         self.status_rows.clear();
         self.status_geometry = None;
+        self.status_source = None;
     }
 
     fn place_active_cursor(&mut self, model: &Model) {
@@ -2312,20 +2409,47 @@ fn copy_cursor_overlay(viewport: &TerminalViewport) -> Option<OverlaySpan> {
         .find(|overlay| overlay.kind() == OverlayKind::CopyCursor)
 }
 
-fn row_changed(
+fn changed_columns(
     previous: &TerminalViewport,
     current: &TerminalViewport,
     row: u16,
     width: u16,
-) -> bool {
-    if viewport_row(previous, row, width) != viewport_row(current, row, width) {
-        return true;
+    incremental: bool,
+) -> Option<std::ops::Range<u16>> {
+    if (!Arc::ptr_eq(&previous.dictionary, &current.dictionary)
+        && (!incremental || previous.dictionary.as_ref() != current.dictionary.as_ref()))
+        || previous
+            .overlays
+            .iter()
+            .filter(|overlay| overlay.row == row)
+            .ne(current.overlays.iter().filter(|overlay| overlay.row == row))
+    {
+        return Some(0..width);
     }
-    previous
-        .overlays
-        .iter()
-        .filter(|overlay| overlay.row == row)
-        .ne(current.overlays.iter().filter(|overlay| overlay.row == row))
+    let (Some(before), Some(after)) = (
+        viewport_row(previous, row, width),
+        viewport_row(current, row, width),
+    ) else {
+        return Some(0..width);
+    };
+    if before.len() != after.len() {
+        return Some(0..width);
+    }
+    let mut cells = before.iter().zip(after);
+    let start = cells.position(|(before, after)| before != after)?;
+    let end = cells
+        .rposition(|(before, after)| before != after)
+        .map_or(start + 1, |last| start + last + 2);
+    if !incremental
+        || before[start..end]
+            .iter()
+            .chain(&after[start..end])
+            .any(|cell| cell.width() != CellWidth::Narrow)
+    {
+        Some(0..width)
+    } else {
+        Some(u16::try_from(start).ok()?..u16::try_from(end).ok()?)
+    }
 }
 
 fn viewport_row(viewport: &TerminalViewport, row: u16, width: u16) -> Option<&[PackedCell]> {
@@ -2544,19 +2668,21 @@ fn pane_prompt_row_y(model: &Model, content: Rect) -> u16 {
 }
 
 fn status_overlay(model: &Model, width: u16) -> Option<StatusOverlay> {
-    let message_style = crate::mode_view::message_style(model, false);
     let filled = model.status_block_rows() > 0;
-    let message = |text: &str| StatusOverlay {
-        front: StyledLine::from_segments(crate::mode_view::message_front(
-            if filled {
-                text.trim_end_matches(' ')
-            } else {
-                text
-            },
-            width,
-            &message_style,
-        )),
-        fill: message_style.fill,
+    let message = |text: &str| {
+        let message_style = crate::mode_view::message_style(model, false);
+        StatusOverlay {
+            front: StyledLine::from_segments(crate::mode_view::message_front(
+                if filled {
+                    text.trim_end_matches(' ')
+                } else {
+                    text
+                },
+                width,
+                &message_style,
+            )),
+            fill: message_style.fill,
+        }
     };
     if let Some(confirm) = &model.confirm {
         if model.sidebar_visible() {
@@ -3889,6 +4015,62 @@ mod tests {
     }
 
     #[test]
+    fn cached_terminal_styles_keep_ansi_when_style_defaults_or_reverse_change() {
+        let foreground = Color::rgb(120, 90, 40);
+        let background = Color::rgb(20, 30, 40);
+        let base = PackedStyle::new(foreground, background, None, 0, UnderlineStyle::None);
+        let bold = PackedStyle::new(
+            foreground,
+            background,
+            Some(Color::rgb(1, 2, 3)),
+            zz_terminal::ATTR_BOLD,
+            UnderlineStyle::Curly,
+        );
+        let mut viewport = styled_viewport();
+        let mut renderer = Renderer::new();
+        for (style, reverse, colours, defaults) in [
+            (base, false, [foreground, background], [None, None]),
+            (base, false, [foreground, background], [None, None]),
+            (base, true, [foreground, background], [None, None]),
+            (bold, false, [foreground, background], [None, None]),
+            (base, false, [Color::rgb(1, 1, 1), background], [None, None]),
+            (base, false, [foreground, Color::rgb(2, 2, 2)], [None, None]),
+            (
+                base,
+                false,
+                [foreground, background],
+                [Some(TmuxColour::Indexed(33)), None],
+            ),
+            (
+                base,
+                false,
+                [foreground, background],
+                [None, Some(TmuxColour::Basic(3))],
+            ),
+        ] {
+            viewport.foreground = colours[0];
+            viewport.background = colours[1];
+            renderer.terminal_defaults.fg = defaults[0];
+            renderer.terminal_defaults.bg = defaults[1];
+            let mut expected = Vec::new();
+            write_sgr(
+                &mut expected,
+                style,
+                reverse,
+                viewport.foreground,
+                viewport.background,
+                &renderer.terminal_defaults,
+            );
+            renderer.output.clear();
+            renderer.write_terminal_sgr(style, reverse, &viewport);
+            assert_eq!(renderer.output, expected);
+        }
+        assert!(renderer.terminal_sgr.is_some());
+        renderer.invalidate();
+        assert!(renderer.terminal_sgr.is_none());
+    }
+
+    #[test]
     fn unchanged_grid_emits_no_row_output() {
         let viewport = styled_viewport();
         let rect = Rect {
@@ -3905,6 +4087,123 @@ mod tests {
         renderer.paint_terminal(PaneId(1), &viewport, rect, false, None);
 
         assert!(renderer.output.is_empty());
+    }
+
+    #[test]
+    fn incremental_rows_only_repaint_changed_columns_and_clear_shorter_text() {
+        let viewport = |text: &str| {
+            let mut viewport = TerminalViewport::blank(24, 1, SessionStatus::Running);
+            let cells = Arc::make_mut(&mut viewport.cells);
+            for (column, value) in text.chars().enumerate() {
+                cells[column] = PackedCell::new(value as u32, 0, CellWidth::Narrow);
+            }
+            viewport
+        };
+        let before = viewport("line 12345 padding");
+        let mut after = before.clone();
+        after.dictionary = Arc::new((*after.dictionary).clone());
+        Arc::make_mut(&mut after.cells)[5] = PackedCell::new('9' as u32, 0, CellWidth::Narrow);
+        let rect = Rect {
+            x: 2,
+            y: 3,
+            width: 24,
+            height: 1,
+        };
+        let mut renderer = Renderer::new();
+        renderer.paint_terminal(PaneId(1), &before, rect, true, None);
+        renderer.output.clear();
+        renderer.paint_terminal(
+            PaneId(1),
+            &after,
+            rect,
+            false,
+            Some(&FrameDamage::Rows(vec![0])),
+        );
+        let output = String::from_utf8(renderer.output.clone()).unwrap();
+        assert!(output.starts_with("\x1b[4;8H"), "{output:?}");
+        assert!(output.contains('9'), "{output:?}");
+        assert!(
+            !output.contains("line") && !output.contains("padding"),
+            "{output:?}"
+        );
+
+        let mut shorter = after.clone();
+        Arc::make_mut(&mut shorter.cells)[5..10].fill(PackedCell::EMPTY);
+        renderer.output.clear();
+        renderer.paint_terminal(PaneId(1), &shorter, rect, false, None);
+        let output = String::from_utf8(renderer.output).unwrap();
+        assert!(output.starts_with("\x1b[4;8H"), "{output:?}");
+        assert!(output.contains("     "), "{output:?}");
+        assert!(!output.contains("padding"), "{output:?}");
+    }
+
+    #[test]
+    fn full_frame_damage_compares_replaced_rows_with_the_retained_screen() {
+        let before = styled_viewport();
+        let mut after = before.clone();
+        after.dictionary = Arc::new((*after.dictionary).clone());
+        Arc::make_mut(&mut after.cells)[1] = PackedCell::new('z' as u32, 0, CellWidth::Narrow);
+        let rect = Rect {
+            x: 0,
+            y: 0,
+            width: 3,
+            height: 1,
+        };
+        let mut renderer = Renderer::new();
+        renderer.paint_terminal(PaneId(1), &before, rect, true, None);
+        renderer.output.clear();
+        renderer.paint_terminal(PaneId(1), &after, rect, false, Some(&FrameDamage::All));
+        let output = String::from_utf8(renderer.output.clone()).unwrap();
+        assert!(output.starts_with("\x1b[1;2H"), "{output:?}");
+        assert!(output.contains('z'), "{output:?}");
+        assert!(!output.contains('a') && !output.contains('c'), "{output:?}");
+        renderer.output.clear();
+        renderer.paint_terminal(PaneId(1), &after, rect, false, Some(&FrameDamage::All));
+        assert!(renderer.output.is_empty());
+    }
+
+    #[test]
+    fn disabled_coalescing_repaints_full_rows_after_frame_updates() {
+        if *crate::COALESCE {
+            return;
+        }
+        let before = styled_viewport();
+        let mut after = before.clone();
+        Arc::make_mut(&mut after.cells)[1] = PackedCell::new('z' as u32, 0, CellWidth::Narrow);
+        let rect = Rect {
+            x: 0,
+            y: 0,
+            width: 3,
+            height: 1,
+        };
+        let mut renderer = Renderer::new();
+        renderer.paint_terminal(PaneId(1), &before, rect, true, None);
+        renderer.output.clear();
+        renderer.paint_terminal(
+            PaneId(1),
+            &after,
+            rect,
+            false,
+            Some(&FrameDamage::Rows(vec![0])),
+        );
+        let output = String::from_utf8(renderer.output.clone()).unwrap();
+        assert!(output.starts_with("\x1b[1;1H"), "{output:?}");
+        assert!(output.contains("az") && output.contains('c'), "{output:?}");
+        renderer.output.clear();
+        renderer.paint_terminal(PaneId(1), &after, rect, false, Some(&FrameDamage::All));
+        assert!(!renderer.output.is_empty());
+    }
+
+    #[test]
+    fn changed_wide_cells_and_overlay_rows_keep_full_row_repaints() {
+        let before = styled_viewport();
+        let mut after = before.clone();
+        Arc::make_mut(&mut after.cells)[1] = PackedCell::new('界' as u32, 0, CellWidth::Wide);
+        assert_eq!(changed_columns(&before, &after, 0, 3, true), Some(0..3));
+
+        let mut after = before.clone();
+        after.overlays = Arc::from([OverlaySpan::new(0, 1, 2, OverlayKind::Selection)]);
+        assert_eq!(changed_columns(&before, &after, 0, 3, true), Some(0..3));
     }
 
     fn waiting_pane_model() -> Model {

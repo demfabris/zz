@@ -3,6 +3,7 @@
 pub mod agent_stream;
 pub mod app_identity;
 mod catalog;
+mod control;
 mod exec;
 mod framing;
 mod id;
@@ -15,6 +16,12 @@ mod path_list;
 mod snapshot;
 mod style;
 mod terminal_codec;
+mod tree_delta;
+
+#[cfg(test)]
+mod control_tests;
+
+pub use tree_delta::{TreeDelta, TreeDeltaError, TreeOp};
 
 pub use catalog::{
     COMMAND_ARGS_PARSE_BEHAVES, COMMAND_ARGS_PARSE_SPECS, COMMAND_SPECS, CommandArgsParseRule,
@@ -23,6 +30,11 @@ pub use catalog::{
     TmuxOption, TmuxOptionParse, canonical_command, catalog_command_spec, command_spec,
     command_specs, parse_tmux_command_options, parse_tmux_options, resolve_command,
     unimplemented_tmux_command_spec,
+};
+pub use control::{
+    AttachOperation, Batch, CAPABILITY_NAMES, CONTROL_CAPABILITY, ClientView, ClientViewport,
+    Hello, KeySubscription, MAX_BATCH_FRAMES, MouseBindings, Subscriptions, TreeSubscription,
+    Welcome, key_tables_hash,
 };
 pub use exec::{
     ClientEnvironmentBlob, EXEC_CAPABILITY, ExecExit, ExecFlags, ExecOutcome, ExecRequest,
@@ -97,8 +109,8 @@ pub use style::{
     parse_styled_segments, parse_tmux_colour, valid_style,
 };
 pub use terminal_codec::{
-    decode_protocol_frame, encode_protocol_message, encode_protocol_message_into,
-    encode_terminal_patch_event_into, encode_terminal_viewport_event,
-    encode_terminal_viewport_event_into, read_protocol_message, read_protocol_message_into,
-    write_protocol_message,
+    batch_frames_encoded_len, decode_protocol_frame, encode_batch_frames_into,
+    encode_protocol_message, encode_protocol_message_into, encode_terminal_patch_event_into,
+    encode_terminal_viewport_event, encode_terminal_viewport_event_into, read_protocol_message,
+    read_protocol_message_into, write_protocol_message,
 };

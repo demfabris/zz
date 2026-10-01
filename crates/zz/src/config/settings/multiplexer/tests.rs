@@ -57,23 +57,26 @@ fn test_server(tables: Vec<KeyTableSnapshot>) -> (InteractiveClient, TestServer)
         let (mut stream, _) = listener.accept().unwrap();
         assert!(matches!(
             read_protocol_message(&mut stream).unwrap(),
-            ProtocolMessage::ClientHello(_)
+            ProtocolMessage::ClientHello(_) | ProtocolMessage::Hello(_)
         ));
         sender.send(stream.try_clone().unwrap()).unwrap();
         write_protocol_message(
             &mut stream,
-            &ProtocolMessage::ServerHello(ServerHello {
+            &ProtocolMessage::ServerHello(Box::new(ServerHello {
                 protocol_version: PROTOCOL_VERSION,
                 server_id: 1,
                 client_id: ClientId(1),
                 client_instance_id: ClientInstanceId(1),
-                capabilities: vec![zz_protocol::PANE_FRAME_CAPABILITY.to_owned()],
+                capabilities: vec![
+                    zz_protocol::PANE_FRAME_CAPABILITY.to_owned(),
+                    zz_protocol::CONTROL_CAPABILITY.to_owned(),
+                ],
                 appearance: TerminalAppearance::default(),
                 appearance_provenance: AppearanceProvenance::default(),
                 mux_options: MuxOptions::default(),
                 status: StatusLine::default(),
                 key_tables: tables,
-            }),
+            })),
         )
         .unwrap();
         while read_protocol_message(&mut stream).is_ok() {}

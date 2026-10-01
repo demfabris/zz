@@ -154,10 +154,10 @@ pub(super) fn attach_frame_superseded(
     })
 }
 
-pub(super) fn write_frames(stream: &mut impl Write, frames: &[Vec<u8>]) -> io::Result<()> {
+pub(super) fn write_frames(stream: &mut impl Write, frames: &[impl AsRef<[u8]>]) -> io::Result<()> {
     let mut slices = frames
         .iter()
-        .map(|frame| IoSlice::new(frame))
+        .map(|frame| IoSlice::new(frame.as_ref()))
         .collect::<Vec<_>>();
     let mut remaining = &mut slices[..];
     while !remaining.is_empty() {

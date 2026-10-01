@@ -559,19 +559,30 @@ impl Shared {
             || Self::peer_scan_armed(inner)
     }
 
+    pub(super) fn status_sampler_sessions(
+        inner: &ServerState,
+    ) -> impl Iterator<Item = SessionId> + '_ {
+        inner
+            .subscribers
+            .keys()
+            .filter(|client| {
+                inner
+                    .ctrl_subscriptions
+                    .get(*client)
+                    .is_none_or(|subscription| subscription.status)
+            })
+            .filter_map(|client| client_attached_session(inner, *client))
+    }
+
     pub(super) fn status_sampler_has_work(inner: &ServerState) -> bool {
         Self::status_tick_needed(inner)
-            || inner
-                .subscribers
-                .keys()
-                .filter_map(|client| client_attached_session(inner, *client))
-                .any(|session| {
-                    !inner
-                        .engine
-                        .status_formats_for_session(Some(session))
-                        .interval
-                        .is_zero()
-                })
+            || Self::status_sampler_sessions(inner).any(|session| {
+                !inner
+                    .engine
+                    .status_formats_for_session(Some(session))
+                    .interval
+                    .is_zero()
+            })
     }
 
     #[cfg(all(feature = "agent", unix))]

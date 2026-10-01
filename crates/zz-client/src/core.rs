@@ -6,10 +6,10 @@ use std::{
 use zz_protocol::{
     AgentCommand, AgentPaneWire, BrowserCommand, ChooseBufferSearchState, ChooseBufferState,
     ChooseTreeSearchState, ChooseTreeState, ChooserPresentation, ClientExitAction,
-    ClientMessageKind, ClipboardProducer, CommandPromptState, CommandResponse, ConfirmState,
-    DisplayPanesState, Event, EventPayload, KeyBindingSnapshot, KeyTableSnapshot, MenuState,
-    MuxOptions, MuxSnapshot, PaneId, PopupState, ProtocolMessage, ServerHello, SessionId,
-    StatusLine, TerminalUiCommand,
+    ClientMessageKind, ClientView, ClipboardProducer, CommandPromptState, CommandResponse,
+    ConfirmState, DisplayPanesState, Event, EventPayload, KeyBindingSnapshot, KeyTableSnapshot,
+    MenuState, MouseBindings, MuxOptions, MuxSnapshot, PaneId, PopupState, ProtocolMessage,
+    ServerHello, SessionId, StatusLine, TerminalUiCommand, Welcome, key_tables_hash,
 };
 use zz_terminal::{
     AppearanceProvenance, ClipboardTarget, PackedCell, TerminalAppearance, TerminalDictionary,
@@ -35,6 +35,7 @@ pub enum ViewportDamage {
 pub enum Outbound {
     /// A patch could not apply; ask the daemon for a full viewport.
     RequestFull(PaneId),
+    TreeSync,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -258,8 +259,16 @@ pub struct ClientCore {
     appearance_provenance: AppearanceProvenance,
     mux_options: MuxOptions,
     key_tables: Vec<KeyTableSnapshot>,
+    key_tables_hash: u64,
+    mouse_bindings: MouseBindings,
     status: StatusLine,
     snapshot: Arc<MuxSnapshot>,
+    tree: MuxSnapshot,
+    client_view: ClientView,
+    tree_sync_pending: bool,
+    batch_reducing: bool,
+    event_group_start: usize,
+    tree_dirty: bool,
     attached_session: Option<SessionId>,
     attached_read_only: bool,
     attached_client_flags: String,
@@ -293,7 +302,30 @@ impl ClientCore {
     /// [`Self::poll_event`] afterwards.
     pub fn handle_message(&mut self, message: ProtocolMessage) {
         match message {
-            ProtocolMessage::ServerHello(hello) => self.reset_connection(hello),
+            ProtocolMessage::ServerHello(hello) => self.reset_connection(*hello),
+            ProtocolMessage::Welcome(welcome) => {
+                self.clear_attachment();
+                self.reset_session();
+                self.appearance = None;
+                self.mux_options = MuxOptions::default();
+                self.key_tables.clear();
+                self.key_tables_hash = 0;
+                self.mouse_bindings = MouseBindings::default();
+                self.status = StatusLine::default();
+                self.adopt_welcome(welcome);
+                self.events.push_back(CoreEvent::HelloReceived);
+            }
+            ProtocolMessage::Batch(batch) => {
+                let Ok(messages) = batch.messages() else {
+                    self.request_tree_sync();
+                    return;
+                };
+                self.begin_event_group();
+                for message in messages {
+                    self.handle_message(message);
+                }
+                self.finish_event_group();
+            }
             ProtocolMessage::Attached {
                 session,
                 snapshot,
@@ -303,7 +335,10 @@ impl ClientCore {
                 self.attached_session = Some(session);
                 self.attached_read_only = read_only;
                 self.attached_client_flags = client_flags;
+                self.tree = snapshot.clone();
                 self.snapshot = Arc::new(snapshot);
+                self.client_view = ClientView::default();
+                self.tree_sync_pending = false;
                 self.viewports.clear();
                 self.full_pending.clear();
                 let prefix_changed = self.prefix_armed;
@@ -374,6 +409,36 @@ impl ClientCore {
         self.events.pop_front()
     }
 
+    pub fn begin_event_group(&mut self) {
+        self.batch_reducing = true;
+        self.event_group_start = self.events.len();
+    }
+
+    pub fn finish_event_group(&mut self) {
+        self.batch_reducing = false;
+        if self.tree_dirty {
+            self.materialize_tree();
+        }
+        let mut pending = self
+            .events
+            .split_off(self.event_group_start.min(self.events.len()));
+        let mut grouped = VecDeque::new();
+        while let Some(event) = pending.pop_front() {
+            if matches!(
+                event,
+                CoreEvent::SnapshotChanged
+                    | CoreEvent::StatusChanged
+                    | CoreEvent::MuxOptionsChanged
+                    | CoreEvent::KeyTablesChanged
+            ) && grouped.contains(&event)
+            {
+                continue;
+            }
+            grouped.push_back(event);
+        }
+        self.events.append(&mut grouped);
+    }
+
     #[must_use]
     pub const fn hello_received(&self) -> bool {
         self.hello_received
@@ -402,6 +467,27 @@ impl ClientCore {
     #[must_use]
     pub fn key_tables(&self) -> &[KeyTableSnapshot] {
         &self.key_tables
+    }
+
+    #[must_use]
+    pub const fn key_tables_hash(&self) -> u64 {
+        self.key_tables_hash
+    }
+
+    #[must_use]
+    pub const fn mouse_bindings(&self) -> &MouseBindings {
+        &self.mouse_bindings
+    }
+
+    #[must_use]
+    pub const fn layout_generation(&self) -> u64 {
+        self.client_view.layout_generation
+    }
+
+    pub fn adopt_welcome(&mut self, welcome: Welcome) {
+        self.hello_received = true;
+        self.capabilities = welcome.capability_strings();
+        self.command_output_watermark = 0;
     }
 
     /// The published prefix table's bindings, or empty before the hello.
@@ -585,6 +671,7 @@ impl ClientCore {
         self.appearance_provenance = appearance_provenance;
         self.mux_options = mux_options;
         self.key_tables = key_tables;
+        self.refresh_key_tables_metadata();
         self.status = status;
     }
 
@@ -622,6 +709,9 @@ impl ClientCore {
         self.attached_client_flags.clear();
         self.last_detach_reason = None;
         self.snapshot = Arc::new(MuxSnapshot::default());
+        self.tree = MuxSnapshot::default();
+        self.client_view = ClientView::default();
+        self.tree_sync_pending = false;
         self.viewports.clear();
         self.agent_states.clear();
         self.full_pending.clear();
@@ -637,10 +727,39 @@ impl ClientCore {
     fn handle_payload(&mut self, payload: EventPayload) {
         match payload {
             EventPayload::Snapshot(snapshot) => {
-                self.snapshot = Arc::new(snapshot);
+                if self.client_view.attachment_generation == 0 {
+                    self.client_view.focused_window = snapshot.focused_window;
+                }
+                self.tree = snapshot;
+                self.tree_sync_pending = false;
                 self.full_pending.clear();
-                self.retain_snapshot_panes();
-                self.events.push_back(CoreEvent::SnapshotChanged);
+                self.materialize_tree();
+            }
+            EventPayload::TreeDelta(delta) => {
+                if self.tree_sync_pending || delta.apply(&mut self.tree).is_err() {
+                    self.request_tree_sync();
+                } else {
+                    self.materialize_tree();
+                }
+            }
+            EventPayload::ClientView(view) => {
+                let changed_attachment = view.session != self.attached_session
+                    || view.attachment_generation != self.client_view.attachment_generation;
+                self.client_view = view;
+                self.attached_session = self.client_view.session;
+                self.attached_read_only = self.client_view.read_only;
+                self.attached_client_flags
+                    .clone_from(&self.client_view.client_flags);
+                if changed_attachment {
+                    let reset_events = self.reset_session_events();
+                    self.viewports.clear();
+                    self.full_pending.clear();
+                    if let Some(session) = self.attached_session {
+                        self.events.push_back(CoreEvent::Attached { session });
+                    }
+                    self.events.extend(reset_events);
+                }
+                self.materialize_tree();
             }
             EventPayload::AppearanceChanged {
                 appearance,
@@ -654,12 +773,17 @@ impl ClientCore {
                 self.mux_options = options;
                 self.events.push_back(CoreEvent::MuxOptionsChanged);
             }
+            EventPayload::MuxOptionsPatched { options } => {
+                self.mux_options.merge(options);
+                self.events.push_back(CoreEvent::MuxOptionsChanged);
+            }
             EventPayload::StatusChanged { status } => {
                 self.status = status;
                 self.events.push_back(CoreEvent::StatusChanged);
             }
             EventPayload::KeyTablesChanged { tables } => {
                 self.key_tables = tables;
+                self.refresh_key_tables_metadata();
                 self.events.push_back(CoreEvent::KeyTablesChanged);
             }
             EventPayload::KeyTablesPatched { tables, removed } => {
@@ -679,6 +803,12 @@ impl ClientCore {
                         self.key_tables.insert(at, table);
                     }
                 }
+                self.refresh_key_tables_metadata();
+                self.events.push_back(CoreEvent::KeyTablesChanged);
+            }
+            EventPayload::KeyTablesHashChanged { hash, mouse } => {
+                self.key_tables_hash = hash;
+                self.mouse_bindings = mouse;
                 self.events.push_back(CoreEvent::KeyTablesChanged);
             }
             EventPayload::TerminalViewport { pane, viewport } => {
@@ -963,6 +1093,8 @@ impl ClientCore {
             | EventPayload::PaneOutputAged { .. }
             | EventPayload::ControlFlags { .. }
             | EventPayload::ControlCommandGuard { .. }
+            | EventPayload::ControlCommandGuardRaw { .. }
+            | EventPayload::ControlCommandStarted { .. }
             | EventPayload::ControlCommandOutput { .. }
             | EventPayload::ControlConfigError { .. }
             | EventPayload::ControlSourceFile { .. }
@@ -971,6 +1103,59 @@ impl ClientCore {
             | EventPayload::CommandClientExit
             | EventPayload::SubscriptionChanged { .. } => {}
         }
+    }
+
+    fn reset_session_events(&mut self) -> Vec<CoreEvent> {
+        let events = [
+            (self.prefix_armed, CoreEvent::PrefixArmed { armed: false }),
+            (self.key_table.is_some(), CoreEvent::KeyTableChanged),
+            (
+                self.command_prompt.is_some(),
+                CoreEvent::CommandPromptChanged,
+            ),
+            (
+                self.command_output.is_some(),
+                CoreEvent::CommandOutputChanged,
+            ),
+            (self.choose_tree.is_some(), CoreEvent::ChooseTreeChanged),
+            (self.choose_buffer.is_some(), CoreEvent::ChooseBufferChanged),
+            (self.display_panes.is_some(), CoreEvent::DisplayPanesChanged),
+            (self.popup.is_some(), CoreEvent::PopupChanged),
+            (self.menu.is_some(), CoreEvent::MenuChanged),
+            (self.confirm.is_some(), CoreEvent::ConfirmChanged),
+        ]
+        .into_iter()
+        .filter_map(|(changed, event)| changed.then_some(event))
+        .collect();
+        self.reset_session();
+        events
+    }
+
+    fn request_tree_sync(&mut self) {
+        if !self.tree_sync_pending {
+            self.tree_sync_pending = true;
+            self.outbound.push_back(Outbound::TreeSync);
+        }
+    }
+
+    fn materialize_tree(&mut self) {
+        self.tree_dirty = true;
+        if self.batch_reducing {
+            return;
+        }
+        let Ok(snapshot) = self.client_view.apply_owned(self.tree.clone()) else {
+            self.request_tree_sync();
+            return;
+        };
+        self.tree_dirty = false;
+        self.snapshot = Arc::new(snapshot);
+        self.retain_snapshot_panes();
+        self.events.push_back(CoreEvent::SnapshotChanged);
+    }
+
+    fn refresh_key_tables_metadata(&mut self) {
+        self.key_tables_hash = key_tables_hash(&self.key_tables);
+        self.mouse_bindings = MouseBindings::from_tables(&self.key_tables);
     }
 
     fn apply_patch(&mut self, pane: PaneId, patch: TerminalViewportPatch) {
@@ -1114,7 +1299,7 @@ mod tests {
     }
 
     fn hello() -> ProtocolMessage {
-        ProtocolMessage::ServerHello(ServerHello {
+        ProtocolMessage::ServerHello(Box::new(ServerHello {
             protocol_version: PROTOCOL_VERSION,
             server_id: 1,
             client_id: ClientId(1),
@@ -1125,7 +1310,7 @@ mod tests {
             mux_options: MuxOptions::default(),
             status: StatusLine::default(),
             key_tables: Vec::new(),
-        })
+        }))
     }
 
     fn command_output_frame(pane: PaneId, output_id: u64, generation: u64) -> ProtocolMessage {
@@ -1602,7 +1787,7 @@ mod tests {
         let ProtocolMessage::ServerHello(hello) = hello() else {
             unreachable!();
         };
-        core.adopt_hello(hello);
+        core.adopt_hello(*hello);
         assert_eq!(core.command_output_id(), Some(20));
 
         core.handle_message(command_output_frame(pane, 1, 2));
@@ -2074,5 +2259,202 @@ mod tests {
         assert!(!core.claims_prefix_input(&input(' ', false, true)));
         set(&mut core, zz_protocol::MuxOptionKey::Prefix, "None");
         assert!(!core.claims_prefix_input(&input('a', true, false)));
+    }
+
+    fn compact_batch(messages: Vec<ProtocolMessage>) -> ProtocolMessage {
+        ProtocolMessage::Batch(zz_protocol::Batch::from_messages(1, messages).unwrap())
+    }
+
+    fn compact_view(epoch: u64, generation: u64) -> ClientView {
+        ClientView {
+            session: Some(SessionId(0)),
+            focused_window: Some(WindowId(0)),
+            layout_generation: generation,
+            attachment_generation: epoch,
+            ..ClientView::default()
+        }
+    }
+
+    #[test]
+    fn compact_batch_reattach_resets_once_and_ordinary_view_keeps_frames() {
+        let pane = PaneId(4);
+        let frame = || {
+            event(EventPayload::TerminalViewport {
+                pane,
+                viewport: TerminalViewport::blank(80, 24, zz_terminal::SessionStatus::Running),
+            })
+        };
+        let mut core = ClientCore::new();
+        core.handle_message(compact_batch(vec![
+            event(EventPayload::Snapshot(snapshot_with(&[pane]))),
+            event(EventPayload::ClientView(compact_view(1, 10))),
+            frame(),
+        ]));
+        assert_eq!(core.layout_generation(), 10);
+        assert!(core.viewport(pane).is_some());
+        let events = drain(&mut core);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, CoreEvent::SnapshotChanged))
+                .count(),
+            1
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, CoreEvent::Attached { .. }))
+                .count(),
+            1
+        );
+        core.handle_message(event(EventPayload::ClientView(compact_view(1, 11))));
+        assert!(core.viewport(pane).is_some());
+        assert!(
+            !drain(&mut core)
+                .iter()
+                .any(|event| matches!(event, CoreEvent::Attached { .. }))
+        );
+        core.handle_message(event(EventPayload::PrefixArmed { armed: true }));
+        drain(&mut core);
+        core.handle_message(event(EventPayload::ClientView(compact_view(2, 12))));
+        assert!(core.viewport(pane).is_none());
+        let events = drain(&mut core);
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, CoreEvent::Attached { .. }))
+        );
+        assert!(events.contains(&CoreEvent::PrefixArmed { armed: false }));
+    }
+
+    #[test]
+    fn tree_base_mismatch_requests_one_sync_and_full_snapshot_recovers() {
+        let original = snapshot_with(&[PaneId(4)]);
+        let mut next = original.clone();
+        next.generation += 1;
+        next.sessions[0].name = "after".to_owned();
+        let mut core = ClientCore::new();
+        core.handle_message(event(EventPayload::Snapshot(original.clone())));
+        let mut delta = zz_protocol::TreeDelta::between(&original, &next);
+        delta.base += 20;
+        core.handle_message(event(EventPayload::TreeDelta(delta.clone())));
+        core.handle_message(event(EventPayload::TreeDelta(delta)));
+        assert_eq!(core.snapshot().as_ref(), &original);
+        assert_eq!(core.poll_outbound(), Some(Outbound::TreeSync));
+        assert_eq!(core.poll_outbound(), None);
+        core.handle_message(event(EventPayload::Snapshot(next.clone())));
+        let mut latest = next.clone();
+        latest.generation += 1;
+        latest.sessions[0].name = "latest".to_owned();
+        core.handle_message(event(EventPayload::TreeDelta(
+            zz_protocol::TreeDelta::between(&next, &latest),
+        )));
+        assert_eq!(core.snapshot().as_ref(), &latest);
+    }
+
+    #[test]
+    fn shared_tree_deltas_reapply_personalized_overlay_without_drift() {
+        let mut raw = snapshot_with(&[PaneId(4)]);
+        let mut stamped = raw.clone();
+        stamped.sessions[0].windows[0].status_label = "own label".to_owned();
+        stamped.sessions[0].windows[0]
+            .panes
+            .get_mut(&PaneId(4))
+            .unwrap()
+            .border_status_text = "own border".to_owned();
+        let mut view = compact_view(1, 1);
+        view.overlay = zz_protocol::TreeDelta::between(&raw, &stamped).ops;
+        let mut core = ClientCore::new();
+        core.handle_message(compact_batch(vec![
+            event(EventPayload::Snapshot(raw.clone())),
+            event(EventPayload::ClientView(view.clone())),
+        ]));
+        for version in 2..42 {
+            let before = raw.clone();
+            raw.generation = version;
+            raw.sessions[0].windows[0].name = format!("window-{version}");
+            core.handle_message(compact_batch(vec![
+                event(EventPayload::TreeDelta(zz_protocol::TreeDelta::between(
+                    &before, &raw,
+                ))),
+                event(EventPayload::ClientView(view.clone())),
+            ]));
+            let mut expected = raw.clone();
+            view.apply(&mut expected).unwrap();
+            assert_eq!(core.snapshot().as_ref(), &expected);
+            assert_eq!(core.poll_outbound(), None);
+        }
+    }
+
+    #[test]
+    fn batch_removal_replaces_obsolete_overlay_before_materializing() {
+        let raw = snapshot_with(&[PaneId(4)]);
+        let mut stamped = raw.clone();
+        stamped.sessions[0].windows[0].status_label = "own label".to_owned();
+        let mut view = compact_view(1, 1);
+        view.overlay = zz_protocol::TreeDelta::between(&raw, &stamped).ops;
+        let empty = MuxSnapshot {
+            generation: 2,
+            ..MuxSnapshot::default()
+        };
+        for payload in [
+            EventPayload::TreeDelta(zz_protocol::TreeDelta::between(&raw, &empty)),
+            EventPayload::Snapshot(empty),
+        ] {
+            let mut core = ClientCore::new();
+            core.handle_message(compact_batch(vec![
+                event(EventPayload::Snapshot(raw.clone())),
+                event(EventPayload::ClientView(view.clone())),
+            ]));
+            core.handle_message(compact_batch(vec![
+                event(payload),
+                event(EventPayload::ClientView(ClientView::default())),
+            ]));
+            assert!(core.snapshot().sessions.is_empty());
+            assert_eq!(core.poll_outbound(), None);
+        }
+    }
+
+    #[test]
+    fn malformed_batch_does_not_partially_reduce() {
+        let mut core = ClientCore::new();
+        let valid =
+            zz_protocol::encode_protocol_message(&event(EventPayload::Snapshot(snapshot_with(&[
+                PaneId(4),
+            ]))))
+            .unwrap();
+        core.handle_message(ProtocolMessage::Batch(zz_protocol::Batch {
+            sequence: 1,
+            frames: vec![valid, vec![0, 1]],
+        }));
+        assert!(core.snapshot().sessions.is_empty());
+        assert_eq!(core.poll_outbound(), Some(Outbound::TreeSync));
+    }
+
+    #[test]
+    fn selected_option_patch_preserves_options_outside_subscription() {
+        let mut core = ClientCore::new();
+        let patch = MuxOptions::from_entries([(
+            zz_protocol::MuxOptionKey::ExtendedKeys,
+            zz_protocol::MuxOptionValue {
+                value: "always".to_owned(),
+                source: zz_protocol::MuxOptionSource::RuntimeCommand,
+            },
+        )]);
+        core.handle_message(event(EventPayload::MuxOptionsPatched { options: patch }));
+        assert_eq!(
+            core.mux_options()
+                .get(zz_protocol::MuxOptionKey::ExtendedKeys)
+                .unwrap()
+                .value,
+            "always"
+        );
+        assert_eq!(
+            core.mux_options()
+                .get(zz_protocol::MuxOptionKey::Prefix)
+                .unwrap()
+                .value,
+            "C-b"
+        );
     }
 }

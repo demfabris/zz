@@ -70,6 +70,43 @@ fn read_only_commands_still_fire_their_after_hooks() {
 }
 
 #[test]
+fn read_only_after_hook_still_publishes_keys_and_retires_control_taps() {
+    let (shared, mut context) = pane_fixture("readonly-hook-effects");
+    let session = context.session.expect("session");
+    let pane = context.pane.expect("pane");
+    let mailbox = OutboundMailbox::new();
+    let (client, _) =
+        shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+    shared.attach(client, session).expect("control attach");
+    assert!(shared.inner.lock().control_output_taps.contains_key(&pane));
+    let name = client_format_name(&shared.inner.lock(), client);
+    let commands =
+        format!("bind-key -T readonly-after x display-message changed ; detach-client -t {name}");
+    run(
+        &shared,
+        &mut context,
+        &["set-hook", "-g", "after-display-message", &commands],
+    )
+    .expect("hook");
+    take_reliable_messages(&mailbox);
+    shared
+        .execute(
+            client,
+            ClientKind::Control,
+            &mut context,
+            &CommandInvocation::new("display-message", ["-p", "literal"]),
+        )
+        .expect("read-only command with hook");
+    let inner = shared.inner.lock();
+    assert!(!inner.control_output_taps.contains_key(&pane));
+    assert!(client_attached_session(&inner, client).is_none());
+    drop(inner);
+    assert!(take_reliable_messages(&mailbox).iter().any(|message| {
+        matches!(message, ProtocolMessage::Event(Event { payload: EventPayload::KeyTablesPatched { tables, .. }, .. }) if tables.iter().any(|table| table.name == "readonly-after"))
+    }));
+}
+
+#[test]
 fn read_only_commands_leave_the_structure_and_its_hooks_alone() {
     let (shared, mut context) = pane_fixture("quiet");
     run(&shared, &mut context, &["split-window", "-d"]).expect("split");
@@ -140,7 +177,32 @@ fn facts_are_withheld_only_from_commands_that_expand_nothing() {
     assert!(!unread(&["set-option", "-g", "automatic-ren", "on"]));
     assert!(!unread(&["set-window-option", "automatic-rename"]));
     assert!(!unread(&["show-options", "-g", "#{hook}"]));
-    assert!(!unread(&["display-message", "-p", "x"]));
+    assert!(unread(&["display-message", "-p", "x"]));
+    assert!(unread(&["display-message", "-p", "-F", "literal"]));
+    assert!(unread(&["display-message", "-lp", "#{client_name}"]));
+    assert!(!unread(&["display-message", "-p"]));
+    assert!(!unread(&["display-message", "-p", "#{client_name}"]));
+    assert!(!unread(&["display-message", "-p", "-F", "#{client_name}"]));
+    assert!(!unread(&["display-message", "-p", "%c"]));
+    assert!(!unread(&[
+        "display-message",
+        "-p",
+        "-F",
+        "literal",
+        "-F",
+        "#{client_name}",
+    ]));
+    assert!(unread(&[
+        "display-message",
+        "-p",
+        "-F",
+        "#{client_name}",
+        "-F",
+        "literal",
+    ]));
+    assert!(!unread(&["display-message", "-ap", "literal"]));
+    assert!(!unread(&["display-message", "-alp", "literal"]));
+    assert!(!unread(&["display-message", "-Z", "literal"]));
     for args in [
         &["list-keys"][..],
         &["list-keys", "-1Nr", "-Troot", "-Oname"][..],
@@ -170,6 +232,22 @@ fn facts_are_withheld_only_from_commands_that_expand_nothing() {
     }
 
     let (shared, mut context) = pane_fixture("facts");
+    assert_eq!(
+        run(&shared, &mut context, &["display-message", "-p", "literal"])
+            .expect("literal display")
+            .output,
+        "literal"
+    );
+    assert_eq!(
+        run(
+            &shared,
+            &mut context,
+            &["display-message", "-lp", "#{client_name}"],
+        )
+        .expect("unexpanded display")
+        .output,
+        "#{client_name}"
+    );
     run(
         &shared,
         &mut context,
@@ -219,6 +297,139 @@ fn facts_are_withheld_only_from_commands_that_expand_nothing() {
     assert_eq!(shown.output, "value|facts:value|#{session_name}");
     let listed = run(&shared, &mut context, &["list-keys", "-T", "hooks-table"]).expect("keys");
     assert!(listed.output.contains("hooks-table x"), "{}", listed.output);
+}
+
+#[test]
+fn literal_display_keeps_client_routing_and_restores_facts_before_hooks() {
+    let (shared, mut context) = pane_fixture("caller-session");
+    let caller_session = context.session.expect("caller session");
+    let (target_session, target_pane, _) =
+        output_view_session_fixture(&shared, "target-session", "target text");
+    let caller_mailbox = OutboundMailbox::new();
+    let target_mailbox = OutboundMailbox::new();
+    let (caller, _) = shared.register_subscribed(
+        ClientKind::Interactive,
+        Some("caller-client".to_owned()),
+        None,
+        Arc::clone(&caller_mailbox),
+    );
+    let (target, _) = shared.register_subscribed(
+        ClientKind::Interactive,
+        Some("target-client".to_owned()),
+        None,
+        Arc::clone(&target_mailbox),
+    );
+    shared
+        .attach(caller, caller_session)
+        .expect("caller attach");
+    shared
+        .attach(target, target_session)
+        .expect("target attach");
+    run(
+        &shared,
+        &mut context,
+        &[
+            "set-hook",
+            "-g",
+            "after-display-message",
+            "display-message 'hook #{client_name}|#{client_session}|#{session_name}'",
+        ],
+    )
+    .expect("after hook");
+    take_reliable_messages(&caller_mailbox);
+    take_reliable_messages(&target_mailbox);
+    let original_client = context.target_format_client();
+    shared
+        .execute(
+            caller,
+            ClientKind::Interactive,
+            &mut context,
+            &CommandInvocation::new(
+                "display-message",
+                [
+                    "-c",
+                    "target-client",
+                    "-t",
+                    &target_pane.to_string(),
+                    "literal",
+                ],
+            ),
+        )
+        .expect("literal routed display");
+    assert_eq!(context.target_format_client(), original_client);
+    let timed_messages = |mailbox: &OutboundMailbox| {
+        take_reliable_messages(mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::TimedClientMessage { text, .. },
+                    ..
+                }) => Some(text),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(timed_messages(&target_mailbox), ["literal"]);
+    assert_eq!(
+        timed_messages(&caller_mailbox),
+        ["hook caller-client|caller-session|caller-session"]
+    );
+    let output = shared
+        .execute(
+            caller,
+            ClientKind::Interactive,
+            &mut context,
+            &CommandInvocation::new(
+                "display-message",
+                ["-p", "#{client_name}|#{client_session}|#{session_name}"],
+            ),
+        )
+        .expect("formatted display after literal");
+    assert_eq!(output.output, "caller-client|caller-session|caller-session");
+}
+
+#[test]
+fn literal_display_keeps_target_conflict_and_delay_error_precedence() {
+    let (shared, mut context) = pane_fixture("literal-errors");
+    let error = run(
+        &shared,
+        &mut context,
+        &[
+            "display-message",
+            "-l",
+            "-t",
+            "missing",
+            "-d",
+            "bad",
+            "-F",
+            "x",
+            "y",
+        ],
+    )
+    .expect_err("format conflict precedes delay validation");
+    assert!(matches!(
+        error,
+        DaemonError::Server(ServerError::CommandParse(message))
+            if message == "only one of -F or argument must be given"
+    ));
+    let error = run(
+        &shared,
+        &mut context,
+        &[
+            "display-message",
+            "-l",
+            "-c",
+            "missing-client",
+            "-d",
+            "bad",
+            "x",
+        ],
+    )
+    .expect_err("delay is validated before a missing client stays quiet");
+    assert!(matches!(
+        error,
+        DaemonError::Server(ServerError::InvalidCommand(message)) if message == "delay invalid"
+    ));
 }
 
 #[cfg(debug_assertions)]

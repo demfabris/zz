@@ -29,8 +29,8 @@ use zz_daemon::{
     default_socket_path, short_device_name, terminate_incompatible_daemon,
 };
 use zz_protocol::{
-    CommandInvocation, CommandResponse, PreparedCommand, PreparedCommandResult, ProtocolMessage,
-    ServerError,
+    AttachOperation, CommandInvocation, CommandResponse, PreparedCommand, PreparedCommandResult,
+    ProtocolMessage,
 };
 
 use crate::browser::BrowserFrameProvider;
@@ -69,7 +69,9 @@ impl Default for RunOptions {
 pub struct RunRequest<'a> {
     options: &'a RunOptions,
     browser_provider: Option<fn() -> Option<Box<dyn BrowserFrameProvider>>>,
-    local_reconnect: Option<&'a dyn Fn(&Path, bool) -> Result<InteractiveClient, DaemonError>>,
+    local_reconnect: Option<
+        &'a dyn Fn(&Path, bool, Option<AttachOperation>) -> Result<InteractiveClient, DaemonError>,
+    >,
 }
 
 impl RunOptions {
@@ -102,7 +104,11 @@ impl<'a> RunRequest<'a> {
     #[must_use]
     pub fn with_local_reconnect(
         mut self,
-        reconnect: &'a dyn Fn(&Path, bool) -> Result<InteractiveClient, DaemonError>,
+        reconnect: &'a dyn Fn(
+            &Path,
+            bool,
+            Option<AttachOperation>,
+        ) -> Result<InteractiveClient, DaemonError>,
     ) -> Self {
         self.local_reconnect = Some(reconnect);
         self
@@ -143,35 +149,15 @@ pub fn run<'a>(request: impl Into<RunRequest<'a>>) -> Result<(), Error> {
         interactive,
         options.restart_daemon,
         request.local_reconnect,
+        Some(attach_operation(options)),
     )?;
-    resolve_attach_target(&initial, options.session.as_deref())?;
-    let terminal_options = COALESCE
-        .then(|| tty::TerminalOptions::from_hello(initial.server_hello()))
-        .flatten();
-    if !interactive {
-        if options.client_flags.is_some() {
-            return request_headless_attach(&initial, options);
+    run_connected(request, initial).map_err(|error| {
+        if options.session.is_none() && error.0 == "can't find session: current session" {
+            Error::message("no sessions")
+        } else {
+            error
         }
-        return Err(Error::message("open terminal failed: not a terminal"));
-    }
-    let browser_provider = request.browser_provider.and_then(|provider| provider());
-    app::run(
-        initial,
-        resolved.endpoint,
-        resolved.local_endpoint,
-        app::InitialAttach::Request {
-            target: options.session.clone(),
-            detach_others: options.detach_others,
-            read_only: options.read_only,
-            client_flags: options.client_flags.clone(),
-        },
-        terminal_options,
-        resolved.host_label,
-        resolved.local_host_label,
-        resolved.fleet_hosts,
-        browser_provider,
-    )
-    .map_err(Error::message)
+    })
 }
 
 pub fn run_new_session<'a>(
@@ -199,35 +185,27 @@ fn run_new_session_commands<'a>(
     let options = request.options;
     let resolved = resolve_run(options)?;
     let interactive = io::stdin().is_terminal() && io::stdout().is_terminal();
+    let commands = commands
+        .into_iter()
+        .map(|command| match command {
+            NewSessionCommand::Raw(invocation) => PreparedCommand {
+                invocation,
+                canonical_name: None,
+                alias_matched: false,
+                result: PreparedCommandResult::Ready,
+            },
+            NewSessionCommand::Prepared(command) => command,
+        })
+        .collect();
     let initial = initial_connection(
         &resolved.endpoint,
         &options.socket_path,
         interactive,
         options.restart_daemon,
         request.local_reconnect,
+        Some(AttachOperation::Commands(commands)),
     )?;
-    let commands = commands.into_iter().collect::<Vec<_>>();
-    let terminal_options = (*COALESCE && commands.len() == 1)
-        .then(|| tty::TerminalOptions::from_hello(initial.server_hello()))
-        .flatten();
-    match execute_new_session(&initial, commands)? {
-        NewSessionOutcome::Detached => Ok(()),
-        NewSessionOutcome::Attached { session, messages } => {
-            let browser_provider = request.browser_provider.and_then(|provider| provider());
-            app::run(
-                initial,
-                resolved.endpoint,
-                resolved.local_endpoint,
-                app::InitialAttach::AlreadyAttached { session, messages },
-                terminal_options,
-                resolved.host_label,
-                resolved.local_host_label,
-                resolved.fleet_hosts,
-                browser_provider,
-            )
-            .map_err(Error::message)
-        }
-    }
+    run_connected(request, initial)
 }
 
 struct ResolvedRun {
@@ -257,96 +235,9 @@ fn resolve_run(options: &RunOptions) -> Result<ResolvedRun, Error> {
     })
 }
 
-enum NewSessionOutcome {
-    Detached,
-    Attached {
-        session: zz_protocol::SessionId,
-        messages: Vec<ProtocolMessage>,
-    },
-}
-
 enum NewSessionCommand {
     Raw(CommandInvocation),
     Prepared(PreparedCommand),
-}
-
-fn execute_new_session(
-    client: &InteractiveClient,
-    commands: impl IntoIterator<Item = NewSessionCommand>,
-) -> Result<NewSessionOutcome, Error> {
-    let mut attached_session = None;
-    let mut messages = Vec::new();
-    'commands: for command in commands {
-        let request = match command {
-            NewSessionCommand::Raw(invocation) => client.execute(invocation),
-            NewSessionCommand::Prepared(PreparedCommand {
-                invocation,
-                result: PreparedCommandResult::Ready,
-                ..
-            }) => client.execute_prepared(invocation),
-            NewSessionCommand::Prepared(PreparedCommand {
-                result: PreparedCommandResult::Error(error),
-                ..
-            }) => {
-                if attached_session.is_none() {
-                    return Err(Error::message(error.tmux_message()));
-                }
-                messages.push(ProtocolMessage::CommandResponse(CommandResponse::Error {
-                    request_id: u64::MAX,
-                    error,
-                    output: zz_protocol::RawText::default(),
-                }));
-                break 'commands;
-            }
-        };
-        let request_id = request.map_err(|error| Error::message(error.to_string()))?;
-        loop {
-            let message = client
-                .recv()
-                .map_err(|error| Error::message(error.to_string()))?;
-            match message {
-                ProtocolMessage::CommandResponse(CommandResponse::Success {
-                    request_id: response_id,
-                    output,
-                    exit_code,
-                    ..
-                }) if response_id == request_id => {
-                    print_command_output(output.as_bytes())?;
-                    if exit_code != 0 {
-                        return Err(Error::message(format!(
-                            "command exited with status {exit_code}"
-                        )));
-                    }
-                    break;
-                }
-                ProtocolMessage::CommandResponse(CommandResponse::Error {
-                    request_id: response_id,
-                    error,
-                    output,
-                }) if response_id == request_id => {
-                    print_command_output(output.as_bytes())?;
-                    if attached_session.is_none() {
-                        return Err(Error::message(error.tmux_message()));
-                    }
-                    messages.push(ProtocolMessage::CommandResponse(CommandResponse::Error {
-                        request_id: response_id,
-                        error,
-                        output,
-                    }));
-                    break 'commands;
-                }
-                message @ ProtocolMessage::Attached { session, .. } => {
-                    attached_session = Some(session);
-                    messages.push(message);
-                }
-                message => messages.push(message),
-            }
-        }
-    }
-    Ok(match attached_session {
-        Some(session) => NewSessionOutcome::Attached { session, messages },
-        None => NewSessionOutcome::Detached,
-    })
 }
 
 fn print_command_output(output: &[u8]) -> Result<(), Error> {
@@ -372,9 +263,17 @@ fn initial_connection(
     local_socket: &Path,
     interactive: bool,
     restart_daemon: bool,
-    reconnect: Option<&dyn Fn(&Path, bool) -> Result<InteractiveClient, DaemonError>>,
+    reconnect: Option<
+        &dyn Fn(&Path, bool, Option<AttachOperation>) -> Result<InteractiveClient, DaemonError>,
+    >,
+    attach: Option<AttachOperation>,
 ) -> Result<InteractiveClient, Error> {
-    match InteractiveClient::connect_endpoint_without_theme(endpoint, interactive) {
+    let connection = if let Some(attach) = attach.as_ref() {
+        InteractiveClient::connect_endpoint_with_attach(endpoint, attach.clone())
+    } else {
+        InteractiveClient::connect_endpoint_without_theme(endpoint, interactive)
+    };
+    match connection {
         Ok(client) => Ok(client),
         Err(error) if matches!(endpoint, Endpoint::Local(_)) => {
             let error = classify_local_connect_error(local_socket, error);
@@ -391,6 +290,7 @@ fn initial_connection(
                 return reconnect.ok_or_else(|| Error::message(error.to_string()))?(
                     local_socket,
                     interactive,
+                    attach,
                 )
                 .map_err(|restart| Error::message(format!("daemon start failed: {restart}")));
             }
@@ -417,6 +317,7 @@ fn initial_connection(
             reconnect.ok_or_else(|| Error::message("no daemon launcher is available"))?(
                 local_socket,
                 interactive,
+                attach,
             )
             .map_err(|restart| Error::message(format!("daemon restart failed: {restart}")))
         }
@@ -424,77 +325,77 @@ fn initial_connection(
     }
 }
 
-fn resolve_attach_target(client: &InteractiveClient, target: Option<&str>) -> Result<(), Error> {
-    let arguments = attach_preflight_arguments(target);
-    let request_id = client
-        .execute(CommandInvocation::new("has-session", arguments))
-        .map_err(|error| Error::message(error.to_string()))?;
-    loop {
-        match client
-            .recv()
-            .map_err(|error| Error::message(error.to_string()))?
-        {
-            ProtocolMessage::CommandResponse(CommandResponse::Success {
-                request_id: response_id,
-                exit_code: 0,
-                ..
-            }) if response_id == request_id => return Ok(()),
-            ProtocolMessage::CommandResponse(CommandResponse::Success {
-                request_id: response_id,
-                exit_code,
-                ..
-            }) if response_id == request_id => {
-                return Err(Error::message(format!(
-                    "command exited with status {exit_code}"
-                )));
-            }
-            ProtocolMessage::CommandResponse(CommandResponse::Error {
-                request_id: response_id,
-                error,
-                ..
-            }) if response_id == request_id => {
-                if target.is_none() && matches!(error, ServerError::SessionNotFound(_)) {
-                    return Err(Error::message("no sessions"));
+fn attach_operation(options: &RunOptions) -> AttachOperation {
+    let mut args = Vec::new();
+    if options.detach_others {
+        args.push("-d".to_owned());
+    }
+    if options.read_only {
+        args.push("-r".to_owned());
+    }
+    if let Some(flags) = &options.client_flags {
+        args.extend(["-f".to_owned(), flags.clone()]);
+    }
+    if let Some(session) = &options.session {
+        args.extend(["-t".to_owned(), session.clone()]);
+    }
+    AttachOperation::Commands(vec![PreparedCommand {
+        invocation: CommandInvocation::new("attach-session", args),
+        canonical_name: Some("attach-session".to_owned()),
+        alias_matched: false,
+        result: PreparedCommandResult::Ready,
+    }])
+}
+
+pub fn run_connected<'a>(
+    request: impl Into<RunRequest<'a>>,
+    initial: InteractiveClient,
+) -> Result<(), Error> {
+    let request = request.into();
+    let resolved = resolve_run(request.options)?;
+    let attached = initial.is_initially_attached();
+    let mut messages = Vec::new();
+    for response in initial.take_initial_responses() {
+        match response {
+            CommandResponse::Success {
+                output, exit_code, ..
+            } => {
+                print_command_output(output.as_bytes())?;
+                if exit_code != 0 {
+                    return Err(Error::message(format!(
+                        "command exited with status {exit_code}"
+                    )));
                 }
-                return Err(Error::message(error.to_string()));
             }
-            _ => {}
+            response @ CommandResponse::Error { .. } if attached => {
+                messages.push(ProtocolMessage::CommandResponse(response));
+            }
+            CommandResponse::Error { output, error, .. } => {
+                print_command_output(output.as_bytes())?;
+                return Err(Error::message(error.tmux_message()));
+            }
         }
     }
-}
-
-fn request_headless_attach(client: &InteractiveClient, options: &RunOptions) -> Result<(), Error> {
-    let request_id = client
-        .request_attach_session(
-            options.session.clone().unwrap_or_default(),
-            options.detach_others,
-            options.read_only,
-            options.client_flags.as_deref(),
-        )
-        .map_err(|error| Error::message(error.to_string()))?;
-    loop {
-        match client
-            .recv()
-            .map_err(|error| Error::message(error.to_string()))?
-        {
-            ProtocolMessage::CommandResponse(CommandResponse::Success {
-                request_id: response_id,
-                ..
-            }) if response_id == request_id => {
-                return Err(Error::message("open terminal failed: not a terminal"));
-            }
-            ProtocolMessage::CommandResponse(CommandResponse::Error {
-                request_id: response_id,
-                error,
-                ..
-            }) if response_id == request_id => return Err(Error::message(error.to_string())),
-            _ => {}
-        }
+    if !attached {
+        return Ok(());
     }
-}
-
-fn attach_preflight_arguments(target: Option<&str>) -> Vec<String> {
-    target.map_or_else(Vec::new, |target| vec!["-t".to_owned(), target.to_owned()])
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        return Err(Error::message("open terminal failed: not a terminal"));
+    }
+    let terminal_options = tty::TerminalOptions::from_hello(initial.server_hello());
+    let browser_provider = request.browser_provider.and_then(|provider| provider());
+    app::run(
+        initial,
+        resolved.endpoint,
+        resolved.local_endpoint,
+        app::InitialAttach::Connected { messages },
+        terminal_options,
+        resolved.host_label,
+        resolved.local_host_label,
+        resolved.fleet_hosts,
+        browser_provider,
+    )
+    .map_err(Error::message)
 }
 
 fn resolve_endpoint(
@@ -543,11 +444,23 @@ mod tests {
     }
 
     #[test]
-    fn targetless_attach_preflights_the_current_session() {
-        assert_eq!(attach_preflight_arguments(None), Vec::<String>::new());
+    fn hello_attach_keeps_target_flags_and_read_only() {
+        let operation = attach_operation(&RunOptions {
+            session: Some("work".to_owned()),
+            detach_others: true,
+            read_only: true,
+            client_flags: Some("ignore-size".to_owned()),
+            ..RunOptions::default()
+        });
+        let AttachOperation::Commands(commands) = operation else {
+            panic!("expected prepared attach");
+        };
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].invocation.name, "attach-session");
         assert_eq!(
-            attach_preflight_arguments(Some("work")),
-            vec!["-t".to_owned(), "work".to_owned()]
+            commands[0].invocation.args,
+            ["-d", "-r", "-f", "ignore-size", "-t", "work"]
         );
+        assert_eq!(commands[0].result, PreparedCommandResult::Ready);
     }
 }

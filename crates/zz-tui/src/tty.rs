@@ -13,8 +13,8 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 #[cfg(unix)]
 use rustix::termios::{OptionalActions, Termios};
 
-use zz_daemon::{CommandClient, Endpoint, terminal_default_features, terminal_feature_mask};
-use zz_protocol::{CommandInvocation, SERVER_OPTION_CAPABILITY_PREFIX, ServerHello};
+use zz_daemon::{terminal_default_features, terminal_feature_mask};
+use zz_protocol::{MuxOptionKey, ServerHello};
 
 use crate::kitty::{FILE_PROBE_IMAGE_ID, PROBE_IMAGE_ID, cleanup_frame_slot_files};
 
@@ -210,58 +210,17 @@ pub(crate) struct TerminalOptions {
 
 impl TerminalOptions {
     pub fn from_hello(hello: &ServerHello) -> Option<Self> {
-        let mut extended_keys = None;
-        let mut focus_events = None;
-        for capability in &hello.capabilities {
-            match capability
-                .strip_prefix(SERVER_OPTION_CAPABILITY_PREFIX)
-                .and_then(|option| option.split_once('='))
-            {
-                Some(("extended-keys", value)) => extended_keys = Some(extended_keys_armed(value)),
-                Some(("focus-events", value)) => focus_events = Some(value.trim() == "on"),
-                _ => {}
-            }
-        }
         Some(Self {
-            extended_keys: extended_keys?,
-            focus_events: focus_events?,
+            extended_keys: extended_keys_armed(
+                &hello.mux_options.get(MuxOptionKey::ExtendedKeys)?.value,
+            ),
+            focus_events: hello.mux_options.get(MuxOptionKey::FocusEvents)?.value == "on",
         })
     }
 }
 
-pub(crate) fn extended_keys_option(endpoint: &Endpoint) -> bool {
-    let Endpoint::Local(path) = endpoint else {
-        return false;
-    };
-    CommandClient::connect(path)
-        .and_then(|mut client| {
-            client.execute(CommandInvocation::new(
-                "show-options",
-                ["-sv", "extended-keys"],
-            ))
-        })
-        .is_ok_and(|value| extended_keys_armed(&value))
-}
-
 fn extended_keys_armed(value: &str) -> bool {
     !matches!(value.trim(), "" | "off")
-}
-
-/// `tty_start_tty` writes `Enfcs` only while the server option is on, and its
-/// default is off (options-table.c). The option is read once, where the pin
-/// reads it, because the pin arms once too.
-pub(crate) fn focus_events_option(endpoint: &Endpoint) -> bool {
-    let Endpoint::Local(path) = endpoint else {
-        return false;
-    };
-    CommandClient::connect(path)
-        .and_then(|mut client| {
-            client.execute(CommandInvocation::new(
-                "show-options",
-                ["-sv", "focus-events"],
-            ))
-        })
-        .is_ok_and(|value| value.trim() == "on")
 }
 
 /// `tty_update_mode`: which of the pin's three mouse trackings the outer
@@ -488,13 +447,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_hello_arms_the_terminal_only_when_it_names_both_options() {
-        let hello = |capabilities: &[&str]| ServerHello {
+    fn the_hello_arms_the_terminal_from_subscribed_options() {
+        let mut hello = ServerHello {
             protocol_version: zz_protocol::PROTOCOL_VERSION,
             server_id: 1,
             client_id: zz_protocol::ClientId(1),
             client_instance_id: zz_protocol::ClientInstanceId::default(),
-            capabilities: capabilities.iter().map(|&value| value.to_owned()).collect(),
+            capabilities: Vec::new(),
             appearance: zz_terminal::TerminalAppearance::default(),
             appearance_provenance: zz_terminal::AppearanceProvenance::default(),
             mux_options: zz_protocol::MuxOptions::default(),
@@ -502,26 +461,25 @@ mod tests {
             key_tables: Vec::new(),
         };
         assert_eq!(
-            TerminalOptions::from_hello(&hello(&[
-                "mux-v1",
-                "server-option-v1:extended-keys=always",
-                "server-option-v1:focus-events=on",
-            ])),
+            TerminalOptions::from_hello(&hello),
+            Some(TerminalOptions::default())
+        );
+        hello.mux_options.set(
+            MuxOptionKey::ExtendedKeys,
+            "always",
+            zz_protocol::MuxOptionSource::RuntimeCommand,
+        );
+        hello.mux_options.set(
+            MuxOptionKey::FocusEvents,
+            "on",
+            zz_protocol::MuxOptionSource::RuntimeCommand,
+        );
+        assert_eq!(
+            TerminalOptions::from_hello(&hello),
             Some(TerminalOptions {
                 extended_keys: true,
                 focus_events: true,
             })
-        );
-        assert_eq!(
-            TerminalOptions::from_hello(&hello(&[
-                "server-option-v1:extended-keys=off",
-                "server-option-v1:focus-events=off",
-            ])),
-            Some(TerminalOptions::default())
-        );
-        assert_eq!(
-            TerminalOptions::from_hello(&hello(&["server-option-v1:focus-events=on"])),
-            None
         );
     }
 

@@ -70,6 +70,7 @@ struct Shared {
 
 struct State {
     queue: VecDeque<Vec<u8>>,
+    recycled: Vec<u8>,
     queued: usize,
     failure: Option<(io::ErrorKind, String)>,
     closed: bool,
@@ -99,6 +100,7 @@ impl TerminalWriter {
             sink: Mutex::new(sink),
             state: Mutex::new(State {
                 queue: VecDeque::new(),
+                recycled: Vec::new(),
                 queued: 0,
                 failure: None,
                 closed: false,
@@ -134,9 +136,10 @@ impl TerminalWriter {
 
     /// Queues a paint, or drops it, and reports whichever write failed since
     /// the last call.
-    pub fn submit(&self, bytes: Vec<u8>) -> io::Result<Submission> {
+    pub fn submit(&self, bytes: &mut Vec<u8>) -> io::Result<Submission> {
         if !self.threaded {
-            self.shared.write_now(&bytes)?;
+            self.shared.write_now(bytes)?;
+            bytes.clear();
             return Ok(Submission::Queued);
         }
         let mut state = self
@@ -149,6 +152,7 @@ impl TerminalWriter {
         }
         if state.blocked {
             state.discarded += bytes.len();
+            bytes.clear();
             return Ok(Submission::Dropped);
         }
         // A queue with nothing in it takes the paint whatever it weighs: there
@@ -159,12 +163,14 @@ impl TerminalWriter {
             state.queue.clear();
             state.queued = 0;
             state.blocked = true;
+            bytes.clear();
             drop(state);
             self.start_block_timer();
             return Ok(Submission::Dropped);
         }
         state.queued += bytes.len();
-        state.queue.push_back(bytes);
+        let recycled = std::mem::take(&mut state.recycled);
+        state.queue.push_back(std::mem::replace(bytes, recycled));
         self.shared.work.notify_one();
         Ok(Submission::Queued)
     }
@@ -247,10 +253,13 @@ impl TerminalWriter {
 
 impl Shared {
     fn pump(&self) {
-        while let Some(chunk) = self.take() {
+        let mut completed = Vec::new();
+        while let Some(mut chunk) = self.take(completed) {
             if let Err(error) = self.write_now(&chunk) {
                 self.record(&error);
             }
+            chunk.clear();
+            completed = chunk;
         }
     }
 
@@ -267,8 +276,14 @@ impl Shared {
         sink(bytes)
     }
 
-    fn take(&self) -> Option<Vec<u8>> {
+    fn take(&self, completed: Vec<u8>) -> Option<Vec<u8>> {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        if completed.capacity() <= QUEUE_BUDGET && completed.capacity() > state.recycled.capacity()
+        {
+            state.recycled = completed;
+        } else {
+            drop(completed);
+        }
         loop {
             if let Some(chunk) = state.queue.pop_front() {
                 state.queued -= chunk.len();
@@ -342,6 +357,52 @@ mod tests {
     use super::*;
 
     #[test]
+    fn completed_output_returns_one_empty_bounded_buffer_to_the_next_paint() {
+        let (wrote, written) = mpsc::channel();
+        let writer = TerminalWriter::spawn(Box::new(move |bytes| {
+            wrote.send(bytes.to_vec()).unwrap();
+            Ok(())
+        }));
+        let mut first = Vec::with_capacity(4096);
+        first.extend_from_slice(b"first");
+        assert_eq!(writer.submit(&mut first).unwrap(), Submission::Queued);
+        assert!(first.is_empty());
+        assert_eq!(
+            written.recv_timeout(Duration::from_secs(2)).unwrap(),
+            b"first"
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let recycled = loop {
+            let state = writer.shared.state.lock().unwrap();
+            if state.recycled.capacity() >= 4096 {
+                assert!(state.recycled.is_empty());
+                break state.recycled.as_ptr();
+            }
+            drop(state);
+            assert!(std::time::Instant::now() < deadline);
+            thread::yield_now();
+        };
+        let mut second = b"second".to_vec();
+        assert_eq!(writer.submit(&mut second).unwrap(), Submission::Queued);
+        assert!(second.is_empty());
+        assert_eq!(second.as_ptr(), recycled);
+        assert!(second.capacity() >= 4096);
+        assert_eq!(
+            written.recv_timeout(Duration::from_secs(2)).unwrap(),
+            b"second"
+        );
+
+        writer.abandon();
+        assert!(
+            writer
+                .shared
+                .take(Vec::with_capacity(QUEUE_BUDGET + 1))
+                .is_none()
+        );
+        assert!(writer.shared.state.lock().unwrap().recycled.capacity() <= QUEUE_BUDGET);
+    }
+
+    #[test]
     fn a_terminal_that_never_reads_does_not_stall_the_paint_that_feeds_it() {
         let (release, blocked) = mpsc::channel::<()>();
         let (wrote, written) = mpsc::channel::<usize>();
@@ -352,7 +413,7 @@ mod tests {
         }));
 
         for _ in 0..64 {
-            writer.submit(vec![b'x'; 1024]).expect("queued");
+            writer.submit(&mut vec![b'x'; 1024]).expect("queued");
         }
         assert!(written.try_recv().is_err());
 
@@ -380,13 +441,15 @@ mod tests {
             ))
         }));
 
-        writer.submit(vec![b'x'; 8]).expect("first paint queues");
+        writer
+            .submit(&mut vec![b'x'; 8])
+            .expect("first paint queues");
         written
             .recv_timeout(Duration::from_secs(5))
             .expect("sink ran");
         let mut reported = None;
         for _ in 0..200 {
-            match writer.submit(vec![b'x'; 8]) {
+            match writer.submit(&mut vec![b'x'; 8]) {
                 Ok(_) => std::thread::sleep(Duration::from_millis(10)),
                 Err(error) => {
                     reported = Some(error);
@@ -407,10 +470,10 @@ mod tests {
             Ok(())
         }));
         writer.pause(true);
-        writer.submit(b"stale".to_vec()).unwrap();
+        writer.submit(&mut b"stale".to_vec()).unwrap();
         assert!(written.recv_timeout(Duration::from_millis(100)).is_err());
         writer.pause(false);
-        writer.submit(b"fresh".to_vec()).unwrap();
+        writer.submit(&mut b"fresh".to_vec()).unwrap();
         assert_eq!(
             written.recv_timeout(Duration::from_secs(2)).unwrap(),
             b"fresh"
@@ -428,7 +491,7 @@ mod tests {
         }));
 
         writer
-            .submit(vec![b'x'; 1])
+            .submit(&mut vec![b'x'; 1])
             .expect("the first paint queues");
         assert_eq!(
             written
@@ -438,7 +501,7 @@ mod tests {
         );
         for _ in 0..8 {
             writer
-                .submit(vec![b'x'; 4096])
+                .submit(&mut vec![b'x'; 4096])
                 .expect("the stale paints queue");
         }
 
@@ -467,7 +530,7 @@ mod tests {
         let mut dropped = None;
         let started = std::time::Instant::now();
         for attempt in 0..64 {
-            match writer.submit(vec![b'x'; chunk]).expect("submitted") {
+            match writer.submit(&mut vec![b'x'; chunk]).expect("submitted") {
                 Submission::Queued => {}
                 Submission::Dropped => {
                     dropped = Some(attempt);
@@ -488,7 +551,7 @@ mod tests {
         // long as the block lasts.
         for _ in 0..4 {
             assert_eq!(
-                writer.submit(vec![b'x'; chunk]).expect("submitted"),
+                writer.submit(&mut vec![b'x'; chunk]).expect("submitted"),
                 Submission::Dropped
             );
         }
@@ -515,7 +578,7 @@ mod tests {
         let chunk = QUEUE_BUDGET / 8;
         let mut dropped = false;
         for _ in 0..64 {
-            if writer.submit(vec![b'x'; chunk]).expect("submitted") == Submission::Dropped {
+            if writer.submit(&mut vec![b'x'; chunk]).expect("submitted") == Submission::Dropped {
                 dropped = true;
                 break;
             }
@@ -532,7 +595,7 @@ mod tests {
         assert!(writer.take_unblocked(), "the repaint request is readable");
         assert!(!writer.take_unblocked(), "the repaint request is one-shot");
         assert_eq!(
-            writer.submit(vec![b'x'; 8]).expect("submitted"),
+            writer.submit(&mut vec![b'x'; 8]).expect("submitted"),
             Submission::Queued,
             "a cleared block queues again"
         );

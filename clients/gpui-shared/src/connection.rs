@@ -202,6 +202,8 @@ pub struct Connection {
     #[cfg(target_os = "ios")]
     retry: Option<gpui::Task<()>>,
     pub core: ClientCore,
+    #[cfg(test)]
+    input_sink: Option<std::rc::Rc<std::cell::RefCell<Vec<ProtocolMessage>>>>,
     pub status: String,
     pub connected: bool,
     pub agent_events: HashMap<PaneId, Vec<(u64, Vec<u8>)>>,
@@ -248,6 +250,8 @@ impl Connection {
             #[cfg(target_os = "ios")]
             retry: None,
             core: ClientCore::new(),
+            #[cfg(test)]
+            input_sink: None,
             status: "Connecting…".into(),
             connected: false,
             agent_events: HashMap::new(),
@@ -525,7 +529,18 @@ impl Connection {
             self.auth_prompt = None;
             self.core = ClientCore::new();
             if let Some(endpoint) = self.endpoint.clone() {
-                self.native = Some(crate::transport::Connection::connect(endpoint, None, true));
+                let target = self.pending_session.take().unwrap_or_else(|| {
+                    self.remembered_session.map_or_else(
+                        || std::env::var("ZZ_GPUI_SESSION").unwrap_or_default(),
+                        |id| id.to_string(),
+                    )
+                });
+                self.attaching = true;
+                self.native = Some(crate::transport::Connection::connect(
+                    endpoint,
+                    Some(target),
+                    true,
+                ));
                 self.reader = Some(cx.spawn(async move |this, cx| {
                     loop {
                         cx.background_executor()
@@ -547,8 +562,55 @@ impl Connection {
         cx.notify();
     }
 
+    #[cfg(test)]
+    pub(crate) fn record_input_for_test(
+        &mut self,
+    ) -> std::rc::Rc<std::cell::RefCell<Vec<ProtocolMessage>>> {
+        let sink = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        self.input_sink = Some(std::rc::Rc::clone(&sink));
+        sink
+    }
+
+    #[cfg(test)]
+    pub(crate) fn handle_message_for_test(
+        &mut self,
+        message: ProtocolMessage,
+        cx: &mut Context<Self>,
+    ) {
+        self.receive(message, cx);
+    }
+
     #[allow(clippy::needless_pass_by_value)]
     pub fn send(&mut self, message: ProtocolMessage, cx: &mut Context<Self>) {
+        let message = match message {
+            ProtocolMessage::Input(InputMessage::ResizeTerminal {
+                pane,
+                columns,
+                rows,
+                cell_width_px,
+                cell_height_px,
+            }) => ProtocolMessage::Input(InputMessage::ResizeTerminalV2 {
+                pane,
+                columns,
+                rows,
+                cell_width_px,
+                cell_height_px,
+                layout_generation: self.core.layout_generation(),
+            }),
+            ProtocolMessage::Input(InputMessage::ClientTerminalSize { columns, rows }) => {
+                ProtocolMessage::Input(InputMessage::ClientTerminalSizeV2 {
+                    columns,
+                    rows,
+                    layout_generation: self.core.layout_generation(),
+                })
+            }
+            message => message,
+        };
+        #[cfg(test)]
+        if let Some(sink) = &self.input_sink {
+            sink.borrow_mut().push(message);
+            return;
+        }
         #[cfg(target_family = "wasm")]
         {
             if let Some(socket) = &self.socket {
@@ -648,8 +710,12 @@ impl Connection {
 
     fn receive(&mut self, message: ProtocolMessage, cx: &mut Context<Self>) {
         self.core.handle_message(message);
-        while let Some(Outbound::RequestFull(pane)) = self.core.poll_outbound() {
-            self.send(ProtocolMessage::RequestFull { pane }, cx);
+        while let Some(outbound) = self.core.poll_outbound() {
+            let message = match outbound {
+                Outbound::RequestFull(pane) => ProtocolMessage::RequestFull { pane },
+                Outbound::TreeSync => ProtocolMessage::TreeSync,
+            };
+            self.send(message, cx);
         }
         while let Some(event) = self.core.poll_event() {
             self.terminal_images.apply(&event);
@@ -679,7 +745,9 @@ impl Connection {
                     );
                     #[cfg(target_os = "ios")]
                     let target = self.pending_session.take().unwrap_or(target);
-                    self.attach_target(target, cx);
+                    if !self.attaching {
+                        self.attach_target(target, cx);
+                    }
                 }
                 CoreEvent::Attached { session } => {
                     self.attaching = false;
@@ -853,7 +921,7 @@ impl Connection {
                     self.resume = true;
                     let hello = client.server_hello().clone();
                     self.client = Some(client);
-                    self.receive(ProtocolMessage::ServerHello(hello), cx);
+                    self.receive(ProtocolMessage::ServerHello(Box::new(hello)), cx);
                 }
                 crate::transport::Event::Message(message) => self.receive(*message, cx),
                 crate::transport::Event::Prompt(prompt) => {
@@ -993,18 +1061,17 @@ impl Connection {
                 self.focused = web_sys::window()
                     .and_then(|window| window.document())
                     .is_some_and(|document| document.has_focus().unwrap_or(false));
-                self.send(ProtocolMessage::ClientHello(browser::hello()), cx);
+                let target = self
+                    .remembered_session
+                    .map_or_else(String::new, |id| id.to_string());
+                self.attaching = true;
+                self.send(ProtocolMessage::Hello(browser::hello(target)), cx);
             }
             inbox::SocketEvent::Frame(bytes) => match zz_protocol::decode_protocol_frame(&bytes) {
-                Ok(ProtocolMessage::ServerHello(hello))
-                    if !hello
-                        .capabilities
-                        .iter()
-                        .any(|capability| capability == zz_protocol::PANE_FRAME_CAPABILITY) =>
-                {
+                Ok(message) if !supports_required_protocol(&message) => {
                     self.disconnected(
                         format!(
-                            "The zz daemon is an older build of protocol v{} whose terminal frames this client cannot read. Restart it with zz kill-server.",
+                            "The zz daemon is an older build of protocol v{} that lacks the terminal or control protocol this client needs. Restart it with zz kill-server.",
                             zz_protocol::PROTOCOL_VERSION
                         ),
                         cx,
@@ -1022,6 +1089,23 @@ impl Connection {
         cx.notify();
         self.socket.is_some()
     }
+}
+
+#[cfg(any(target_family = "wasm", test))]
+fn supports_required_protocol(message: &ProtocolMessage) -> bool {
+    [
+        zz_protocol::PANE_FRAME_CAPABILITY,
+        zz_protocol::CONTROL_CAPABILITY,
+    ]
+    .into_iter()
+    .all(|required| match message {
+        ProtocolMessage::Welcome(welcome) => welcome.has_capability(required),
+        ProtocolMessage::ServerHello(hello) => hello
+            .capabilities
+            .iter()
+            .any(|capability| capability == required),
+        _ => true,
+    })
 }
 
 #[cfg(any(target_family = "wasm", test))]
@@ -1144,7 +1228,8 @@ mod inbox {
 mod browser {
     use wasm_bindgen::{JsCast, closure::Closure};
     use zz_protocol::{
-        ClientHello, ClientInstanceId, ClientKind, PROTOCOL_VERSION, ProtocolMessage,
+        AttachOperation, ClientHello, ClientInstanceId, ClientKind, Hello, PROTOCOL_VERSION,
+        ProtocolMessage,
     };
 
     use super::inbox::{self, Receiver, Sender, SocketEvent};
@@ -1303,8 +1388,8 @@ mod browser {
         INSTANCE_ID.with(|id| *id)
     }
 
-    pub fn hello() -> ClientHello {
-        ClientHello {
+    pub fn hello(target: String) -> Hello {
+        let mut hello = Hello::from_client(ClientHello {
             protocol_version: PROTOCOL_VERSION,
             client_instance_id: instance_id(),
             kind: ClientKind::Interactive,
@@ -1318,7 +1403,9 @@ mod browser {
             working_directory: None,
             environment: Vec::new(),
             process_id: 0,
-        }
+        });
+        hello.attach = Some(AttachOperation::Session(target));
+        hello
     }
 }
 
@@ -1331,12 +1418,45 @@ mod tests {
     };
 
     use super::{
-        AgentCursor,
+        AgentCursor, ProtocolMessage,
         inbox::{self, SocketEvent},
     };
 
     fn blob(seq: u64) -> Vec<u8> {
         format!(r#"{{"seq":{seq},"item":"promptAccepted","turn_id":1}}"#).into_bytes()
+    }
+
+    #[test]
+    fn retained_hellos_require_both_control_and_terminal_capabilities() {
+        for mask in 0..4 {
+            let capabilities = [
+                zz_protocol::PANE_FRAME_CAPABILITY,
+                zz_protocol::CONTROL_CAPABILITY,
+            ]
+            .into_iter()
+            .enumerate()
+            .filter(|(index, _)| mask & (1 << index) != 0)
+            .map(|(_, capability)| capability.to_owned())
+            .collect();
+            let hello = ProtocolMessage::ServerHello(Box::new(zz_protocol::ServerHello {
+                protocol_version: zz_protocol::PROTOCOL_VERSION,
+                server_id: 1,
+                client_id: zz_protocol::ClientId(1),
+                client_instance_id: zz_protocol::ClientInstanceId(1),
+                capabilities,
+                appearance: zz_terminal::TerminalAppearance::default(),
+                appearance_provenance: zz_terminal::AppearanceProvenance::default(),
+                mux_options: zz_protocol::MuxOptions::default(),
+                status: zz_protocol::StatusLine::default(),
+                key_tables: Vec::new(),
+            }));
+            let encoded = zz_protocol::encode_protocol_message(&hello).unwrap();
+            let decoded = zz_protocol::decode_protocol_frame(&encoded).unwrap();
+            assert_eq!(super::supports_required_protocol(&decoded), mask == 3);
+        }
+        assert!(super::supports_required_protocol(
+            &ProtocolMessage::TreeSync
+        ));
     }
 
     fn reset(seq: u64, restoring: bool) -> Vec<u8> {

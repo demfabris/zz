@@ -85,6 +85,16 @@ impl AcceptWake {
 pub(crate) trait TransportStream: Read + Write + Send + Sized + 'static {
     fn try_clone(&self) -> io::Result<Self>;
 
+    #[cfg(unix)]
+    fn receive_fd(&self) -> io::Result<std::os::fd::OwnedFd> {
+        Err(io::Error::from(io::ErrorKind::Unsupported))
+    }
+
+    #[cfg(unix)]
+    fn read_ready(&self, _buffer: &mut [u8]) -> io::Result<usize> {
+        Err(io::Error::from(io::ErrorKind::Unsupported))
+    }
+
     #[cfg(feature = "daemon")]
     fn shutdown(&self) -> io::Result<()> {
         Ok(())
@@ -247,6 +257,25 @@ impl LocalStream {
 impl TransportStream for LocalStream {
     fn try_clone(&self) -> io::Result<Self> {
         self.0.try_clone().map(Self)
+    }
+
+    #[cfg(unix)]
+    fn receive_fd(&self) -> io::Result<std::os::fd::OwnedFd> {
+        use std::os::fd::AsFd as _;
+        match &self.0 {
+            LocalSocketStream::UdSocket(stream) => stream.inner().as_fd().try_clone_to_owned(),
+        }
+    }
+
+    #[cfg(unix)]
+    fn read_ready(&self, buffer: &mut [u8]) -> io::Result<usize> {
+        match &self.0 {
+            LocalSocketStream::UdSocket(stream) => {
+                rustix::net::recv(stream.inner(), buffer, rustix::net::RecvFlags::DONTWAIT)
+                    .map(|(read, _)| read)
+                    .map_err(io::Error::from)
+            }
+        }
     }
 
     #[cfg(all(feature = "daemon", unix))]

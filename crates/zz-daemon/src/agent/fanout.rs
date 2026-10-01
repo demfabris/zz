@@ -353,6 +353,10 @@ fn push_projected_text(bytes: &mut Vec<u8>, text: &str) {
     }
 }
 
+#[cfg(test)]
+#[path = "../daemon/ctrl_agent_tests.rs"]
+mod ctrl_tests;
+
 impl PaneLane {
     /// The transcript as terminal bytes: the prompt between OSC 133 `A`/`B`
     /// and `C` marks, the reply as output, `D` plus a BEL when the turn ends,
@@ -398,7 +402,6 @@ impl PaneLane {
                     }
                 }
             }
-            AgentStreamPayload::SessionReset { .. } => self.pending_prompts.clear(),
             _ => {}
         }
         bytes
@@ -526,6 +529,7 @@ impl PaneLane {
             self.titled = false;
         }
         self.generation = generation;
+        self.pending_prompts.clear();
         self.provider = provider;
         self.session_id = session_id;
         self.modes.clear();

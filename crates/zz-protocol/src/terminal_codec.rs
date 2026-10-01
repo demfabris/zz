@@ -1,5 +1,6 @@
 use std::io::{Read, Write};
 
+use serde::ser::SerializeSeq;
 use zz_terminal::{TerminalPatchRef, TerminalViewport};
 
 use crate::message::{
@@ -129,6 +130,84 @@ pub fn encode_protocol_message_into(
     result
 }
 
+struct BorrowedBatchFrames<'a, T>(&'a [T]);
+
+struct BorrowedBatchFrame<'a>(&'a [u8]);
+
+impl serde::Serialize for BorrowedBatchFrame<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_bytes(self.0)
+    }
+}
+
+impl<T: AsRef<[u8]>> serde::Serialize for BorrowedBatchFrames<'_, T> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for frame in self.0 {
+            sequence.serialize_element(&BorrowedBatchFrame(frame.as_ref()))?;
+        }
+        sequence.end()
+    }
+}
+
+pub fn batch_frames_encoded_len<T: AsRef<[u8]>>(
+    sequence: u64,
+    frames: &[T],
+) -> Result<usize, ProtocolError> {
+    if frames.len() > crate::MAX_BATCH_FRAMES {
+        return Err(ProtocolError::InvalidServerHello(
+            "batch contains too many frames".to_owned(),
+        ));
+    }
+    frames.iter().try_fold(0_usize, |total, frame| {
+        let total = total
+            .checked_add(frame.as_ref().len())
+            .ok_or(ProtocolError::FrameTooLarge(usize::MAX))?;
+        if total > MAX_ENCODED_FRAME_BYTES {
+            return Err(ProtocolError::FrameTooLarge(total));
+        }
+        Ok(total)
+    })?;
+    let header = postcard::experimental::serialized_size(&ProtocolMessage::Batch(crate::Batch {
+        sequence,
+        frames: Vec::new(),
+    }))
+    .map_err(ProtocolError::Encode)?;
+    let frames = postcard::experimental::serialized_size(&BorrowedBatchFrames(frames))
+        .map_err(ProtocolError::Encode)?;
+    let payload = (header - 1)
+        .checked_add(frames)
+        .ok_or(ProtocolError::FrameTooLarge(usize::MAX))?;
+    crate::framing::enveloped_capacity(payload)
+}
+
+pub fn encode_batch_frames_into<T: AsRef<[u8]>>(
+    sequence: u64,
+    frames: &[T],
+    output: &mut Vec<u8>,
+) -> Result<(), ProtocolError> {
+    output.clear();
+    if frames.len() > crate::MAX_BATCH_FRAMES {
+        return Err(ProtocolError::InvalidServerHello(
+            "batch contains too many frames".to_owned(),
+        ));
+    }
+    encode_protocol_message_into(
+        &ProtocolMessage::Batch(crate::Batch {
+            sequence,
+            frames: Vec::new(),
+        }),
+        output,
+    )?;
+    let _ = output.pop();
+    let result = serialize_control_into(&BorrowedBatchFrames(frames), output)
+        .and_then(|()| finish_enveloped_in_place(output));
+    if result.is_err() {
+        output.clear();
+    }
+    result
+}
+
 fn encode_protocol_message_into_inner(
     message: &ProtocolMessage,
     output: &mut Vec<u8>,
@@ -191,8 +270,16 @@ fn encode_protocol_message_into_inner(
     }
 
     begin_enveloped_into(output, Lane::Control, CONTROL_PAYLOAD_RESERVE)?;
+    serialize_control_into(message, output)?;
+    finish_enveloped_in_place(output)
+}
+
+fn serialize_control_into(
+    value: &impl serde::Serialize,
+    output: &mut Vec<u8>,
+) -> Result<(), ProtocolError> {
     match postcard::serialize_with_flavor(
-        message,
+        value,
         FrameFlavor {
             output,
             limit: MAX_ENCODED_FRAME_BYTES,
@@ -206,7 +293,7 @@ fn encode_protocol_message_into_inner(
         }
         Err(error) => return Err(ProtocolError::Encode(error)),
     }
-    finish_enveloped_in_place(output)
+    Ok(())
 }
 
 /// Decode a complete protocol frame from either the control or terminal lane.
@@ -303,6 +390,57 @@ fn decode_protocol_payload(lane: Lane, payload: &[u8]) -> Result<ProtocolMessage
 }
 
 fn validate_control_message(message: &ProtocolMessage) -> Result<(), ProtocolError> {
+    if let ProtocolMessage::Event(Event {
+        payload: EventPayload::ControlCommandStarted { canonical_name, .. },
+        ..
+    }) = message
+        && canonical_name
+            .as_ref()
+            .is_some_and(|name| name.len() > MAX_GUI_TEXT_BYTES)
+    {
+        return Err(ProtocolError::InvalidServerHello(
+            "control command name is too large".to_owned(),
+        ));
+    }
+    if let ProtocolMessage::Hello(hello) = message {
+        validate_control_message(&ProtocolMessage::ClientHello(hello.client.clone()))?;
+        if !hello.environment.is_valid() {
+            return Err(ProtocolError::InvalidClientHello(
+                "invalid hello environment blob".to_owned(),
+            ));
+        }
+    }
+    if let ProtocolMessage::Welcome(welcome) = message {
+        if welcome.protocol_version != PROTOCOL_VERSION {
+            return Err(ProtocolError::VersionMismatch {
+                expected: PROTOCOL_VERSION,
+                received: welcome.protocol_version,
+            });
+        }
+        for capability in [crate::CONTROL_CAPABILITY, crate::PANE_FRAME_CAPABILITY] {
+            if !welcome.has_capability(capability) {
+                return Err(ProtocolError::InvalidServerHello(format!(
+                    "daemon does not support {capability}"
+                )));
+            }
+        }
+    }
+    if let ProtocolMessage::Batch(batch) = message
+        && batch.frames.len() > crate::MAX_BATCH_FRAMES
+    {
+        return Err(ProtocolError::InvalidServerHello(
+            "batch contains too many frames".to_owned(),
+        ));
+    }
+    if let ProtocolMessage::Event(Event {
+        payload: EventPayload::MuxOptionsPatched { options },
+        ..
+    }) = message
+    {
+        options
+            .validate_partial()
+            .map_err(|error| ProtocolError::InvalidServerHello(error.to_owned()))?;
+    }
     if let ProtocolMessage::Event(Event {
         payload:
             EventPayload::CommandOutput {
@@ -747,6 +885,105 @@ mod tests {
     }
 
     #[test]
+    fn borrowed_batch_encoder_matches_owned_frames_and_reuses_output() {
+        let control = encode_protocol_message(&ProtocolMessage::TreeSync).expect("control");
+        let terminal = encode_terminal_viewport_event(
+            PaneId(7),
+            128,
+            &TerminalViewport::blank(80, 24, SessionStatus::Running),
+        )
+        .expect("terminal");
+        let shared: Arc<[u8]> = Arc::from((0_u8..=255).collect::<Vec<_>>());
+        let mixed = [
+            std::borrow::Cow::Owned(control.clone()),
+            std::borrow::Cow::Borrowed(shared.as_ref()),
+            std::borrow::Cow::Owned(terminal),
+        ];
+        let mut output = Vec::with_capacity(128 * 1024);
+        let allocation = output.as_ptr();
+        for sequence in [0, 127, 128, u64::MAX] {
+            let empty = encode_protocol_message(&ProtocolMessage::Batch(crate::Batch {
+                sequence,
+                frames: Vec::new(),
+            }))
+            .expect("empty batch");
+            assert_eq!(empty.last(), Some(&0));
+            encode_batch_frames_into::<Vec<u8>>(sequence, &[], &mut output)
+                .expect("borrowed empty");
+            assert_eq!(output, empty);
+            assert_eq!(
+                batch_frames_encoded_len::<Vec<u8>>(sequence, &[]).expect("empty length"),
+                output.len()
+            );
+            encode_batch_frames_into(sequence, &mixed, &mut output).expect("mixed batch");
+            assert_eq!(
+                batch_frames_encoded_len(sequence, &mixed).expect("mixed length"),
+                output.len()
+            );
+            let owned = ProtocolMessage::Batch(crate::Batch {
+                sequence,
+                frames: mixed.iter().map(|frame| frame.as_ref().to_vec()).collect(),
+            });
+            assert_eq!(
+                output,
+                encode_protocol_message(&owned).expect("owned batch")
+            );
+            assert_eq!(decode_protocol_frame(&output).expect("decode batch"), owned);
+            for count in [1, 127, 128, crate::MAX_BATCH_FRAMES] {
+                let frames = vec![control.clone(); count];
+                encode_batch_frames_into(sequence, &frames, &mut output).expect("many frames");
+                assert_eq!(
+                    batch_frames_encoded_len(sequence, &frames).expect("many length"),
+                    output.len()
+                );
+                assert_eq!(
+                    output,
+                    encode_protocol_message(&ProtocolMessage::Batch(crate::Batch {
+                        sequence,
+                        frames,
+                    }))
+                    .expect("owned many frames")
+                );
+            }
+            assert_eq!(output.as_ptr(), allocation);
+        }
+    }
+
+    #[test]
+    fn borrowed_batch_encoder_keeps_frame_and_count_bounds() {
+        let mut output = Vec::with_capacity(256);
+        output.push(42);
+        let allocation = output.as_ptr();
+        let too_many = vec![&[][..]; crate::MAX_BATCH_FRAMES + 1];
+        assert!(matches!(
+            encode_batch_frames_into(0, &too_many, &mut output),
+            Err(ProtocolError::InvalidServerHello(_))
+        ));
+        assert!(output.is_empty());
+        assert_eq!(output.as_ptr(), allocation);
+        assert!(matches!(
+            batch_frames_encoded_len(0, &too_many),
+            Err(ProtocolError::InvalidServerHello(_))
+        ));
+        let body = vec![0_u8; 64 * 1024];
+        let frames = vec![body.as_slice(); crate::MAX_FRAME_BYTES / body.len()];
+        assert!(matches!(
+            batch_frames_encoded_len(0, &frames),
+            Err(ProtocolError::FrameTooLarge(_))
+        ));
+        let repeated = vec![body.as_slice(); crate::MAX_BATCH_FRAMES];
+        assert!(matches!(
+            batch_frames_encoded_len(u64::MAX, &repeated),
+            Err(ProtocolError::FrameTooLarge(_))
+        ));
+        assert!(matches!(
+            encode_batch_frames_into(0, &frames, &mut output),
+            Err(ProtocolError::FrameTooLarge(_))
+        ));
+        assert!(output.is_empty());
+    }
+
+    #[test]
     fn server_hello_round_trips_the_validated_terminal_appearance() {
         let mut appearance = TerminalAppearance {
             font_families: vec!["Fixture Mono".to_owned(), "Fixture Emoji".to_owned()],
@@ -760,7 +997,7 @@ mod tests {
         let mut appearance_provenance = AppearanceProvenance::default();
         appearance_provenance
             .set_source(AppearanceConfigKey::Background, AppearanceSource::Ghostty);
-        let message = ProtocolMessage::ServerHello(crate::ServerHello {
+        let message = ProtocolMessage::ServerHello(Box::new(crate::ServerHello {
             protocol_version: crate::PROTOCOL_VERSION,
             server_id: 7,
             client_id: crate::ClientId(11),
@@ -771,7 +1008,7 @@ mod tests {
             mux_options: MuxOptions::default(),
             status: crate::StatusLine::default(),
             key_tables: Vec::new(),
-        });
+        }));
 
         let frame = encode_protocol_message(&message).expect("encode ServerHello");
         assert_eq!(frame[4], Lane::Control as u8);
@@ -897,7 +1134,7 @@ mod tests {
             ][index % 4];
             options.set(key, format!("fixture-{index}"), source);
         }
-        let hello = ProtocolMessage::ServerHello(crate::ServerHello {
+        let hello = ProtocolMessage::ServerHello(Box::new(crate::ServerHello {
             protocol_version: PROTOCOL_VERSION,
             server_id: 7,
             client_id: crate::ClientId(11),
@@ -908,7 +1145,7 @@ mod tests {
             mux_options: options.clone(),
             status: crate::StatusLine::default(),
             key_tables: Vec::new(),
-        });
+        }));
         let hello_frame = encode_protocol_message(&hello).expect("encode mux options in hello");
         assert_eq!(decode_protocol_frame(&hello_frame).unwrap(), hello);
 
@@ -952,7 +1189,7 @@ mod tests {
             key_tables: Vec::new(),
         };
         assert!(matches!(
-            encode_protocol_message(&ProtocolMessage::ServerHello(oversized)),
+            encode_protocol_message(&ProtocolMessage::ServerHello(Box::new(oversized))),
             Err(ProtocolError::InvalidServerHello(_))
         ));
     }
@@ -983,7 +1220,7 @@ mod tests {
             "x".repeat(MAX_MUX_OPTION_VALUE_BYTES + 1),
             MuxOptionSource::RuntimeCommand,
         );
-        let oversized_hello = ProtocolMessage::ServerHello(crate::ServerHello {
+        let oversized_hello = ProtocolMessage::ServerHello(Box::new(crate::ServerHello {
             protocol_version: PROTOCOL_VERSION,
             server_id: 7,
             client_id: crate::ClientId(11),
@@ -994,7 +1231,7 @@ mod tests {
             mux_options: oversized,
             status: crate::StatusLine::default(),
             key_tables: Vec::new(),
-        });
+        }));
         assert!(matches!(
             encode_protocol_message(&oversized_hello),
             Err(ProtocolError::InvalidServerHello(_))
@@ -1014,7 +1251,7 @@ mod tests {
             font_size_points: f32::NAN,
             ..TerminalAppearance::default()
         };
-        let message = ProtocolMessage::ServerHello(crate::ServerHello {
+        let message = ProtocolMessage::ServerHello(Box::new(crate::ServerHello {
             protocol_version: crate::PROTOCOL_VERSION,
             server_id: 7,
             client_id: crate::ClientId(11),
@@ -1025,7 +1262,7 @@ mod tests {
             mux_options: MuxOptions::default(),
             status: crate::StatusLine::default(),
             key_tables: Vec::new(),
-        });
+        }));
 
         assert!(matches!(
             encode_protocol_message(&message),
@@ -1046,7 +1283,7 @@ mod tests {
             font_features: vec![zz_terminal::FontFeature::new(*b"\0bad", 1)],
             ..TerminalAppearance::default()
         };
-        let message = ProtocolMessage::ServerHello(crate::ServerHello {
+        let message = ProtocolMessage::ServerHello(Box::new(crate::ServerHello {
             protocol_version: PROTOCOL_VERSION,
             server_id: 7,
             client_id: crate::ClientId(11),
@@ -1057,7 +1294,7 @@ mod tests {
             mux_options: MuxOptions::default(),
             status: crate::StatusLine::default(),
             key_tables: Vec::new(),
-        });
+        }));
 
         assert!(matches!(
             encode_protocol_message(&message),
@@ -1074,7 +1311,7 @@ mod tests {
 
     #[test]
     fn server_hello_rejects_inner_version_mismatch() {
-        let message = ProtocolMessage::ServerHello(crate::ServerHello {
+        let message = ProtocolMessage::ServerHello(Box::new(crate::ServerHello {
             protocol_version: PROTOCOL_VERSION - 1,
             server_id: 7,
             client_id: crate::ClientId(11),
@@ -1085,7 +1322,7 @@ mod tests {
             mux_options: MuxOptions::default(),
             status: crate::StatusLine::default(),
             key_tables: Vec::new(),
-        });
+        }));
 
         assert!(matches!(
             encode_protocol_message(&message),
@@ -1122,7 +1359,7 @@ mod tests {
                 ..TerminalAppearance::default()
             },
         ] {
-            let message = ProtocolMessage::ServerHello(crate::ServerHello {
+            let message = ProtocolMessage::ServerHello(Box::new(crate::ServerHello {
                 protocol_version: PROTOCOL_VERSION,
                 server_id: 7,
                 client_id: crate::ClientId(11),
@@ -1133,7 +1370,7 @@ mod tests {
                 mux_options: MuxOptions::default(),
                 status: crate::StatusLine::default(),
                 key_tables: Vec::new(),
-            });
+            }));
             let payload = postcard::to_stdvec(&message).expect("serialize malformed fixture");
             let frame = crate::framing::encode_enveloped(Lane::Control, &payload)
                 .expect("envelope malformed fixture");
@@ -1150,7 +1387,7 @@ mod tests {
             vec![String::new(); MAX_SERVER_CAPABILITIES + 1],
             vec!["x".repeat(MAX_SERVER_CAPABILITY_BYTES + 1)],
         ] {
-            let message = ProtocolMessage::ServerHello(crate::ServerHello {
+            let message = ProtocolMessage::ServerHello(Box::new(crate::ServerHello {
                 protocol_version: PROTOCOL_VERSION,
                 server_id: 7,
                 client_id: crate::ClientId(11),
@@ -1161,7 +1398,7 @@ mod tests {
                 mux_options: MuxOptions::default(),
                 status: crate::StatusLine::default(),
                 key_tables: Vec::new(),
-            });
+            }));
             assert!(matches!(
                 encode_protocol_message(&message),
                 Err(ProtocolError::InvalidServerHello(_))
@@ -1351,7 +1588,7 @@ mod tests {
 
     #[test]
     fn truncated_server_hello_palette_is_rejected() {
-        let message = ProtocolMessage::ServerHello(crate::ServerHello {
+        let message = ProtocolMessage::ServerHello(Box::new(crate::ServerHello {
             protocol_version: PROTOCOL_VERSION,
             server_id: 7,
             client_id: crate::ClientId(11),
@@ -1362,7 +1599,7 @@ mod tests {
             mux_options: MuxOptions::default(),
             status: crate::StatusLine::default(),
             key_tables: Vec::new(),
-        });
+        }));
         let mut changed = message.clone();
         let ProtocolMessage::ServerHello(hello) = &mut changed else {
             unreachable!("fixture is a ServerHello");

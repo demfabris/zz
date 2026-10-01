@@ -1,13 +1,14 @@
 //! Turning the `status-*` options into the text clients render.
 
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, BTreeSet},
     fmt::Write as _,
     io::Read as _,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{
-        Arc, LazyLock, Mutex, OnceLock,
+        Arc, LazyLock, Mutex, OnceLock, Weak,
         atomic::{AtomicU64, Ordering},
     },
     thread,
@@ -170,39 +171,551 @@ pub(crate) type StatusJobNeeds = Arc<parking_lot::Mutex<BTreeMap<ClientId, Forma
 #[derive(Default)]
 pub(crate) struct StatusRenderer {
     shell_cache: BTreeMap<ShellCacheKey, ShellCacheEntry>,
-    published: BTreeMap<ClientId, StatusLine>,
+    published: BTreeMap<ClientId, Arc<StatusLine>>,
     tmux_shim: Option<PathBuf>,
     zz_executable: Option<PathBuf>,
     job_waker: Option<thread::Thread>,
     pending_modes: BTreeSet<ClientId>,
     job_needs: StatusJobNeeds,
     uncovered_jobs: BTreeSet<ClientId>,
+    completed: Option<CompletedStatus>,
+    #[cfg(test)]
+    expansions: usize,
+    owned_clients: BTreeSet<ClientId>,
+    owned_client_high_watermark: Option<ClientId>,
 }
 
+#[derive(Clone)]
 pub(crate) struct StatusRequest {
     pub(crate) client: ClientId,
-    pub(crate) formats: StatusFormats,
-    pub(crate) row_formats: BTreeMap<u32, String>,
+    pub(crate) formats: Arc<StatusFormats>,
+    pub(crate) row_formats: Arc<BTreeMap<u32, String>>,
     pub(crate) option_snapshot: Arc<StatusRowVariables>,
     pub(crate) message_line: u8,
     pub(crate) customized: bool,
-    pub(crate) title_format: Option<String>,
-    pub(crate) environment: Vec<(RawText, Option<RawText>)>,
-    pub(crate) default_terminal: String,
+    pub(crate) title_format: Arc<Option<String>>,
+    pub(crate) environment: Arc<Vec<(RawText, Option<RawText>)>>,
+    pub(crate) default_terminal: Arc<String>,
     pub(crate) startup: bool,
-    pub(crate) context: StatusContext<'static>,
-    pub(crate) facts: FormatHookFacts,
+    pub(crate) context: Arc<StatusContext<'static>>,
+    pub(crate) facts: Arc<FormatHookFacts>,
     /// What this client's terminal reported, for the `theme detect` arm. The
     /// pin keeps `c->theme` `THEME_UNKNOWN` until the terminal answers its theme
     /// query and falls back to the background it can see; the daemon records a
     /// scheme only for a client that reported one, so `None` here is the pin's
     /// unknown and resolves dark.
     pub(crate) client_scheme: Option<TerminalColorScheme>,
-    pub(crate) message_styles: (String, String),
+    pub(crate) message_styles: Arc<(String, String)>,
     pub(crate) modes: Vec<ModeRequest>,
-    pub(crate) pane_borders: Vec<zz_protocol::PaneBorderPresentation>,
+    pub(crate) pane_borders: Arc<Vec<zz_protocol::PaneBorderPresentation>>,
+    pub(crate) references: Arc<BTreeSet<String>>,
 }
 
+struct CompletedStatus {
+    client: ClientId,
+    formats: Arc<StatusFormats>,
+    row_formats: Arc<BTreeMap<u32, String>>,
+    option_snapshot: Arc<StatusRowVariables>,
+    references: Arc<BTreeSet<String>>,
+    message_line: u8,
+    customized: bool,
+    title_format: Arc<Option<String>>,
+    context: Arc<StatusContext<'static>>,
+    client_scheme: Option<TerminalColorScheme>,
+    message_styles: Arc<(String, String)>,
+    pane_borders: Arc<Vec<zz_protocol::PaneBorderPresentation>>,
+    callback_names: Vec<String>,
+    callbacks: Vec<Option<String>>,
+    now: i64,
+    status: Arc<StatusLine>,
+    fact_identity: Weak<FormatHookFacts>,
+    request_identity: Weak<StatusRequest>,
+    option_bytes: usize,
+    parts: Option<Arc<StatusParts>>,
+    startup: bool,
+    environment_identity: Weak<Vec<(RawText, Option<RawText>)>>,
+    default_terminal_identity: Weak<String>,
+    context_bytes: usize,
+}
+
+const COMPLETED_STATUS_MAX_BYTES: usize = 1024 * 1024;
+
+struct StatusParts {
+    left: Vec<StatusPart>,
+    right: Vec<StatusPart>,
+    rows: BTreeMap<u32, Vec<StatusPart>>,
+    theme: Option<OnceLock<zz_protocol::ThemeColours>>,
+    message_styles: Option<OnceLock<(String, String)>>,
+}
+
+struct StatusPart {
+    range: std::ops::Range<usize>,
+    value: Option<OnceLock<String>>,
+}
+
+impl StatusParts {
+    fn new(request: &StatusRequest) -> Self {
+        let mut options = BTreeMap::new();
+        let mut split = |source: &str| {
+            let parts = zz_mux::format_parts(source);
+            if source.len() >= 8192
+                || parts
+                    .iter()
+                    .any(|part| !request.context.format_loops_available(part.required_loops))
+            {
+                return vec![StatusPart {
+                    range: 0..source.len(),
+                    value: None,
+                }];
+            }
+            parts
+                .iter()
+                .map(|part| StatusPart {
+                    range: part.range.clone(),
+                    value: (!part.unconditional_clock
+                        && !part.references.iter().any(|name| {
+                            name == "*"
+                                || name
+                                    .strip_prefix("E:")
+                                    .or_else(|| name.strip_prefix("T:"))
+                                    .is_some_and(|name| {
+                                        status_option_clock_dependent(
+                                            request,
+                                            name,
+                                            &mut options,
+                                            &mut BTreeSet::new(),
+                                        )
+                                    })
+                        }))
+                    .then(OnceLock::new),
+                })
+                .collect::<Vec<_>>()
+        };
+        let left = split(&request.formats.left);
+        let right = split(&request.formats.right);
+        let rows = request
+            .row_formats
+            .iter()
+            .filter(|(index, _)| {
+                usize::try_from(**index).is_ok_and(|index| {
+                    request.formats.enabled
+                        && index < usize::from(request.formats.lines).min(MAX_STATUS_ROWS)
+                })
+            })
+            .map(|(index, source)| (*index, split(source)))
+            .collect();
+        let theme = theme_formats()
+            .iter()
+            .all(|source| split(source).iter().all(|part| part.value.is_some()))
+            .then(OnceLock::new);
+        let message_styles = [&request.message_styles.0, &request.message_styles.1]
+            .into_iter()
+            .all(|source| split(source).iter().all(|part| part.value.is_some()))
+            .then(OnceLock::new);
+        Self {
+            left,
+            right,
+            rows,
+            theme,
+            message_styles,
+        }
+    }
+
+    fn retained_bytes(&self) -> usize {
+        let mut bytes = std::mem::size_of::<Self>()
+            .saturating_add(std::mem::size_of::<usize>().saturating_mul(2))
+            .saturating_add(self.rows.len().saturating_mul(128));
+        for parts in [&self.left, &self.right]
+            .into_iter()
+            .chain(self.rows.values())
+        {
+            bytes = bytes.saturating_add(
+                parts
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<StatusPart>()),
+            );
+            for part in parts {
+                bytes = bytes.saturating_add(
+                    part.value
+                        .as_ref()
+                        .and_then(OnceLock::get)
+                        .map_or(0, String::capacity),
+                );
+            }
+        }
+        if let Some((style, command_style)) = self.message_styles.as_ref().and_then(OnceLock::get) {
+            bytes = bytes
+                .saturating_add(style.capacity())
+                .saturating_add(command_style.capacity());
+        }
+        bytes
+    }
+}
+
+fn status_option_clock_dependent(
+    request: &StatusRequest,
+    name: &str,
+    known: &mut BTreeMap<String, bool>,
+    visiting: &mut BTreeSet<String>,
+) -> bool {
+    if let Some(dependent) = known.get(name) {
+        return *dependent;
+    }
+    if visiting.len() >= 64 || !visiting.insert(name.to_owned()) {
+        return true;
+    }
+    let context = &request.context;
+    let options = &request.option_snapshot;
+    let scopes = [
+        (
+            context.session_id.as_str(),
+            context.window_id.as_str(),
+            context.pane_id.as_str(),
+        ),
+        ("", "", ""),
+    ]
+    .into_iter()
+    .chain(options.sessions.keys().map(|id| (id.as_str(), "", "")))
+    .chain(options.windows.keys().map(|id| ("", id.as_str(), "")))
+    .chain(options.panes.keys().map(|id| ("", "", id.as_str())));
+    let mut sources = BTreeSet::new();
+    let mut dependent = scopes.into_iter().any(|(session, window, pane)| {
+        options
+            .lookup(session, window, pane, name)
+            .is_none_or(|source| {
+                sources.insert(source);
+                false
+            })
+    });
+    if !dependent {
+        dependent = sources.iter().any(|source| {
+            zz_mux::format_parts(source).iter().any(|part| {
+                part.unconditional_clock
+                    || part.references.iter().any(|name| {
+                        name == "*"
+                            || name
+                                .strip_prefix("E:")
+                                .or_else(|| name.strip_prefix("T:"))
+                                .is_some_and(|name| {
+                                    status_option_clock_dependent(request, name, known, visiting)
+                                })
+                    })
+            })
+        });
+    }
+    visiting.remove(name);
+    known.insert(name.to_owned(), dependent);
+    dependent
+}
+
+fn expand_status_parts(
+    source: &str,
+    context: &StatusContext,
+    hooks: &mut DaemonFormatHooks<'_>,
+    parts: Option<&[StatusPart]>,
+) -> String {
+    let Some(parts) = parts.filter(|_| status_parts_enabled()) else {
+        return expand_status(source, context, hooks);
+    };
+    let mut output = String::new();
+    for part in parts {
+        let source = &source[part.range.clone()];
+        if let Some(value) = &part.value {
+            output.push_str(value.get_or_init(|| expand_status(source, context, hooks)));
+        } else {
+            output.push_str(&expand_status(source, context, hooks));
+        }
+    }
+    output
+}
+
+fn status_parts_enabled() -> bool {
+    zz_mux::format_cache_knob()
+        && zz_mux::compiled_formats_knob()
+        && zz_mux::borrowed_formats_enabled()
+}
+
+pub(crate) fn completed_status_bytes(
+    request: &StatusRequest,
+    names: &[String],
+    callbacks: &[Option<String>],
+    status: &StatusLine,
+) -> usize {
+    completed_status_bytes_with_capture_bytes(
+        request,
+        names,
+        callbacks,
+        status,
+        request.option_snapshot.retained_bytes(),
+        request.context.retained_bytes(),
+    )
+}
+
+fn completed_status_bytes_with_capture_bytes(
+    request: &StatusRequest,
+    names: &[String],
+    callbacks: &[Option<String>],
+    status: &StatusLine,
+    option_bytes: usize,
+    context_bytes: usize,
+) -> usize {
+    let mut bytes = std::mem::size_of::<CompletedStatus>()
+        .saturating_add(std::mem::size_of::<StatusRequest>())
+        .saturating_add(context_bytes)
+        .saturating_add(option_bytes)
+        .saturating_add(std::mem::size_of::<FormatHookFacts>())
+        .saturating_add(std::mem::size_of::<Vec<(RawText, Option<RawText>)>>())
+        .saturating_add(
+            request
+                .environment
+                .capacity()
+                .saturating_mul(std::mem::size_of::<(RawText, Option<RawText>)>()),
+        )
+        .saturating_add(std::mem::size_of::<String>())
+        .saturating_add(request.default_terminal.capacity())
+        .saturating_add(std::mem::size_of::<usize>().saturating_mul(4));
+    for (name, value) in request.environment.iter() {
+        bytes = bytes
+            .saturating_add(zz_mux::cloned_raw_text_bytes(name))
+            .saturating_add(value.as_ref().map_or(0, zz_mux::cloned_raw_text_bytes));
+    }
+    for value in [
+        &request.formats.left,
+        &request.formats.right,
+        &request.formats.style,
+        &request.formats.background,
+        &request.formats.foreground,
+        &request.formats.left_style,
+        &request.formats.right_style,
+        &request.message_styles.0,
+        &request.message_styles.1,
+        &status.left,
+        &status.right,
+        &status.title,
+        &status.base_style,
+        &status.message_style,
+        &status.message_command_style,
+    ]
+    .into_iter()
+    .chain(request.title_format.iter())
+    .chain(names)
+    .chain(callbacks.iter().flatten())
+    .chain(status.rows.iter())
+    {
+        bytes = bytes
+            .saturating_add(std::mem::size_of::<String>())
+            .saturating_add(value.capacity());
+    }
+    for value in request.row_formats.values() {
+        bytes = bytes
+            .saturating_add(std::mem::size_of::<(u32, String)>())
+            .saturating_add(value.capacity());
+    }
+    for value in request.references.iter() {
+        bytes = bytes
+            .saturating_add(std::mem::size_of::<String>())
+            .saturating_add(value.capacity());
+    }
+    for border in request.pane_borders.iter().chain(&status.pane_borders) {
+        bytes = bytes
+            .saturating_add(std::mem::size_of::<zz_protocol::PaneBorderPresentation>())
+            .saturating_add(border.style.capacity());
+    }
+    bytes.saturating_mul(2).saturating_add(4096)
+}
+
+#[cfg(test)]
+#[path = "daemon/format_status_tests.rs"]
+mod format_status_tests;
+
+impl CompletedStatus {
+    fn same_templates(&self, request: &StatusRequest) -> bool {
+        Arc::ptr_eq(&self.option_snapshot, &request.option_snapshot)
+            && (Arc::ptr_eq(&self.references, &request.references)
+                || self.references == request.references)
+            && (Arc::ptr_eq(&self.formats, &request.formats) || self.formats == request.formats)
+            && (Arc::ptr_eq(&self.row_formats, &request.row_formats)
+                || self.row_formats == request.row_formats)
+            && (Arc::ptr_eq(&self.title_format, &request.title_format)
+                || self.title_format == request.title_format)
+            && (Arc::ptr_eq(&self.message_styles, &request.message_styles)
+                || self.message_styles == request.message_styles)
+    }
+
+    fn same_lookup_scope(&self, request: &StatusRequest) -> bool {
+        self.context.session_id == request.context.session_id
+            && self.context.window_id == request.context.window_id
+            && self.context.pane_id == request.context.pane_id
+            && self.context.has_captured_environment() == request.context.has_captured_environment()
+    }
+
+    fn matches(
+        &self,
+        request: &StatusRequest,
+        callbacks: &[Option<String>],
+        now: i64,
+        clock: bool,
+    ) -> bool {
+        self.client == request.client
+            && (!clock || self.now == now)
+            && self.message_line == request.message_line
+            && self.customized == request.customized
+            && self.client_scheme == request.client_scheme
+            && self.pane_borders == request.pane_borders
+            && (std::ptr::eq(self.callbacks.as_slice(), callbacks) || self.callbacks == callbacks)
+            && if clock {
+                Arc::ptr_eq(&self.context, &request.context)
+                    || self.context.same_detached(&request.context)
+            } else {
+                self.context.same_detached_data(&request.context)
+                    && self.same_lookup_scope(request)
+                    && self.startup == request.startup
+                    && self.environment_identity.as_ptr() == Arc::as_ptr(&request.environment)
+                    && self.default_terminal_identity.as_ptr()
+                        == Arc::as_ptr(&request.default_terminal)
+            }
+    }
+
+    fn new(
+        request: &StatusRequest,
+        callback_names: Vec<String>,
+        callbacks: Vec<Option<String>>,
+        now: i64,
+        status: Arc<StatusLine>,
+        identity: Option<&Arc<StatusRequest>>,
+        option_bytes: usize,
+        parts: Option<Arc<StatusParts>>,
+        context_bytes: usize,
+    ) -> Self {
+        Self {
+            client: request.client,
+            formats: request.formats.clone(),
+            row_formats: request.row_formats.clone(),
+            option_snapshot: Arc::clone(&request.option_snapshot),
+            references: Arc::clone(&request.references),
+            message_line: request.message_line,
+            customized: request.customized,
+            title_format: request.title_format.clone(),
+            context: request.context.clone(),
+            client_scheme: request.client_scheme,
+            message_styles: request.message_styles.clone(),
+            pane_borders: request.pane_borders.clone(),
+            callback_names,
+            callbacks,
+            now,
+            status,
+            fact_identity: Arc::downgrade(&request.facts),
+            request_identity: identity.map_or_else(Weak::new, Arc::downgrade),
+            option_bytes,
+            parts,
+            startup: request.startup,
+            environment_identity: Arc::downgrade(&request.environment),
+            default_terminal_identity: Arc::downgrade(&request.default_terminal),
+            context_bytes,
+        }
+    }
+}
+
+pub(crate) fn status_cache_callbacks(request: &StatusRequest) -> Option<Vec<String>> {
+    if !zz_mux::format_cache_knob()
+        || !request.modes.is_empty()
+        || request.references.contains("*")
+        || status_line_templates(
+            &request.formats,
+            &request.row_formats,
+            request.title_format.as_deref(),
+            &request.message_styles,
+        )
+        .any(|template| {
+            zz_mux::format_references(template)
+                .iter()
+                .any(|name| !request.references.contains(name))
+        })
+    {
+        return None;
+    }
+    let mut callbacks = Vec::new();
+    for name in request.references.iter().map(String::as_str) {
+        if matches!(
+            name,
+            "session_attached"
+                | "session_attached_list"
+                | "session_many_attached"
+                | "window_active_clients"
+                | "window_active_clients_list"
+        ) {
+            return None;
+        }
+        let option_name = name
+            .strip_prefix("E:")
+            .or_else(|| name.strip_prefix("T:"))
+            .unwrap_or(name);
+        if zz_mux::format_variable_is_captured(name)
+            || matches!(name, "loop_index" | "loop_last_flag")
+            || request
+                .option_snapshot
+                .lookup(
+                    &request.context.session_id,
+                    &request.context.window_id,
+                    &request.context.pane_id,
+                    option_name,
+                )
+                .is_some()
+        {
+            continue;
+        }
+        if (name.starts_with("client_")
+            && zz_mux::delegated_format_variable_names().any(|known| known == name))
+            || matches!(
+                name,
+                "window_bigger"
+                    | "window_offset_x"
+                    | "window_offset_y"
+                    | "window_cell_height"
+                    | "window_cell_width"
+            )
+        {
+            callbacks.push(name.to_owned());
+        } else if zz_mux::format_variable_is_known(name)
+            || matches!(
+                name,
+                "pane_kind"
+                    | "agent_state"
+                    | "agent_pending_permission"
+                    | "browser_url"
+                    | "pane_last_command_status"
+            )
+            || COPY_MODE_CONTEXT_FORMATS.contains(&name)
+            || LIST_CLIENTS_CONTEXT_FORMATS.contains(&name)
+            || SHOW_MESSAGES_CONTEXT_FORMATS.contains(&name)
+            || name.starts_with("E:")
+            || name.starts_with("T:")
+            || !request.context.has_captured_environment()
+        {
+            return None;
+        }
+    }
+    Some(callbacks)
+}
+
+fn status_callback_values(request: &StatusRequest, names: &[String]) -> Vec<Option<String>> {
+    let mut hooks = DaemonFormatHooks::command(request.facts.as_ref());
+    names
+        .iter()
+        .map(|name| {
+            if matches!(name.as_str(), "window_cell_height" | "window_cell_width") {
+                Some(window_cell_pixels(
+                    request.facts.client.as_ref(),
+                    name == "window_cell_width",
+                ))
+            } else {
+                hooks.variable(name, &request.context)
+            }
+        })
+        .collect()
+}
+
+#[derive(Clone)]
 pub(crate) struct ModeRequest {
     pub(crate) pane: PaneId,
     pub(crate) view: bool,
@@ -312,19 +825,38 @@ pub(crate) fn status_line_needs(
     title_format: Option<&str>,
     message_styles: &(String, String),
 ) -> FormatNeeds {
-    engine.format_needs(
-        [
-            formats.left.as_str(),
-            formats.right.as_str(),
-            formats.style.as_str(),
-            message_styles.0.as_str(),
-            message_styles.1.as_str(),
-        ]
-        .into_iter()
-        .chain(row_formats.values().map(String::as_str))
-        .chain(title_format)
-        .chain(theme_formats().iter().map(String::as_str)),
-    )
+    engine.cached_format_needs(status_line_templates(
+        formats,
+        row_formats,
+        title_format,
+        message_styles,
+    ))
+}
+
+pub(crate) fn status_line_templates<'a>(
+    formats: &'a StatusFormats,
+    row_formats: &'a BTreeMap<u32, String>,
+    title_format: Option<&'a str>,
+    message_styles: &'a (String, String),
+) -> impl Iterator<Item = &'a str> {
+    let lines = if formats.enabled {
+        usize::from(formats.lines).min(MAX_STATUS_ROWS)
+    } else {
+        0
+    };
+    let end = u32::try_from(lines).expect("status row count fits u32");
+    [
+        formats.left.as_str(),
+        formats.right.as_str(),
+        formats.style.as_str(),
+        message_styles.0.as_str(),
+        message_styles.1.as_str(),
+    ]
+    .into_iter()
+    .chain(row_formats.range(..end).map(|(_, format)| format.as_str()))
+    .chain(title_format)
+    .chain(["#{socket_path}:#{session_path}:#{pane_current_path}"])
+    .chain(theme_formats().iter().map(String::as_str))
 }
 
 /// `server_client_update_theme_colours` (server-client.c:1173), per client and
@@ -405,6 +937,98 @@ pub(crate) struct FormatHookFacts {
     pub(crate) pane_modes: Arc<BTreeMap<PaneId, (usize, &'static str)>>,
 }
 
+impl FormatHookFacts {
+    pub(crate) fn shared_empty() -> Self {
+        static EMPTY: LazyLock<FormatHookFacts> = LazyLock::new(FormatHookFacts::default);
+        EMPTY.clone()
+    }
+}
+
+pub(crate) trait FormatFactSource {
+    fn agent_states(&self) -> &BTreeMap<PaneId, zz_protocol::AgentPaneWire>;
+    fn terminals(&self) -> &BTreeMap<PaneId, Arc<TerminalSession>>;
+    fn pane_pipes(&self) -> &BTreeMap<PaneId, u32>;
+    fn session_attachments(&self) -> &BTreeMap<SessionId, (usize, String)>;
+    fn session_last_attached(&self) -> &BTreeMap<SessionId, u64>;
+    fn unseen_changes(&self) -> &BTreeSet<PaneId>;
+    fn window_clients(&self, _context: &StatusContext) -> &BTreeMap<WindowId, Vec<String>>;
+    fn buffer(&self) -> Option<&BufferFormatFacts>;
+    fn client(&self) -> Option<&ClientFormatFacts>;
+    fn clients(&self, _context: &StatusContext) -> &[FormatClientRow];
+    fn client_environment(&self) -> Option<&Arc<ClientEnvironmentBlob>>;
+    fn message(&self) -> Option<&MessageFormatFacts>;
+    fn mux(&self) -> &zz_mux::FormatFacts;
+    fn copy_modes(&self) -> &BTreeMap<PaneId, Vec<(String, Arc<CopyModeFacts>)>>;
+    fn pane_modes(&self) -> &BTreeMap<PaneId, (usize, &'static str)>;
+
+    fn pane_in_mode_count(&self, pane: PaneId) -> usize {
+        self.pane_modes().get(&pane).map_or(0, |(count, _)| *count)
+            + usize::from(self.copy_modes().contains_key(&pane))
+    }
+}
+
+impl FormatFactSource for FormatHookFacts {
+    fn agent_states(&self) -> &BTreeMap<PaneId, zz_protocol::AgentPaneWire> {
+        &self.agent_states
+    }
+
+    fn terminals(&self) -> &BTreeMap<PaneId, Arc<TerminalSession>> {
+        &self.terminals
+    }
+
+    fn pane_pipes(&self) -> &BTreeMap<PaneId, u32> {
+        &self.pane_pipes
+    }
+
+    fn session_attachments(&self) -> &BTreeMap<SessionId, (usize, String)> {
+        &self.session_attachments
+    }
+
+    fn session_last_attached(&self) -> &BTreeMap<SessionId, u64> {
+        &self.session_last_attached
+    }
+
+    fn unseen_changes(&self) -> &BTreeSet<PaneId> {
+        &self.unseen_changes
+    }
+
+    fn window_clients(&self, _context: &StatusContext) -> &BTreeMap<WindowId, Vec<String>> {
+        &self.window_clients
+    }
+
+    fn buffer(&self) -> Option<&BufferFormatFacts> {
+        self.buffer.as_ref()
+    }
+
+    fn client(&self) -> Option<&ClientFormatFacts> {
+        self.client.as_ref()
+    }
+
+    fn clients(&self, _context: &StatusContext) -> &[FormatClientRow] {
+        &self.clients
+    }
+
+    fn client_environment(&self) -> Option<&Arc<ClientEnvironmentBlob>> {
+        self.client_environment.as_ref()
+    }
+
+    fn message(&self) -> Option<&MessageFormatFacts> {
+        self.message.as_ref()
+    }
+
+    fn mux(&self) -> &zz_mux::FormatFacts {
+        &self.mux
+    }
+
+    fn copy_modes(&self) -> &BTreeMap<PaneId, Vec<(String, Arc<CopyModeFacts>)>> {
+        &self.copy_modes
+    }
+
+    fn pane_modes(&self) -> &BTreeMap<PaneId, (usize, &'static str)> {
+        &self.pane_modes
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct BufferFormatFacts {
     pub(crate) name: String,
@@ -465,13 +1089,13 @@ pub(crate) struct ClientViewportFacts {
 }
 
 impl ClientViewportFacts {
-    fn bigger(self) -> bool {
+    pub(crate) fn bigger(self) -> bool {
         self.columns < self.window_width || self.rows < self.window_height
     }
 
     /// The `else` half of `tty_window_offset1`, which zz reaches with no pan
     /// window because `refresh-client -U/-D/-L/-R` is not implemented here.
-    fn offsets(self) -> Option<(u16, u16)> {
+    pub(crate) fn offsets(self) -> Option<(u16, u16)> {
         if !self.bigger() {
             return None;
         }
@@ -804,8 +1428,15 @@ impl StatusRenderer {
         if published.modes == modes {
             return None;
         }
-        published.modes = modes;
-        Some(published.clone())
+        if self
+            .completed
+            .as_ref()
+            .is_some_and(|entry| entry.client == client)
+        {
+            self.completed = None;
+        }
+        Arc::make_mut(published).modes = modes;
+        Some(published.as_ref().clone())
     }
 
     pub(crate) fn job_summaries(&self) -> Vec<String> {
@@ -863,19 +1494,182 @@ impl StatusRenderer {
         changed
     }
 
+    #[cfg(test)]
     pub(crate) fn render_forced(&mut self, request: &StatusRequest) -> StatusLine {
-        let mut touched = BTreeSet::new();
-        let status = render(
+        self.render_forced_at(request, format_second())
+    }
+
+    pub(crate) fn render_forced_shared(&mut self, request: &Arc<StatusRequest>) -> StatusLine {
+        self.render_forced_shared_at(request, format_second())
+    }
+
+    fn render_forced_shared_at(&mut self, request: &Arc<StatusRequest>, now: i64) -> StatusLine {
+        self.render_forced_with_identity(request, Some(request), now)
+    }
+
+    #[cfg(test)]
+    fn render_forced_at(&mut self, request: &StatusRequest, now: i64) -> StatusLine {
+        self.render_forced_with_identity(request, None, now)
+    }
+
+    fn render_forced_with_identity(
+        &mut self,
+        request: &StatusRequest,
+        identity: Option<&Arc<StatusRequest>>,
+        now: i64,
+    ) -> StatusLine {
+        let status = self
+            .cached_request_output(identity, now)
+            .unwrap_or_else(|| {
+                let mut touched = BTreeSet::new();
+                let status = self.render_request(request, &mut touched, true, now, identity);
+                if !touched.is_empty() {
+                    self.note_uncovered_jobs(request, &touched);
+                }
+                status
+            });
+        if let Some(published) = self.published.get_mut(&request.client) {
+            if !Arc::ptr_eq(published, &status) {
+                *published = Arc::clone(&status);
+            }
+        } else {
+            self.published.insert(request.client, Arc::clone(&status));
+        }
+        status.as_ref().clone()
+    }
+
+    fn cached_request_output(
+        &self,
+        identity: Option<&Arc<StatusRequest>>,
+        now: i64,
+    ) -> Option<Arc<StatusLine>> {
+        let identity = identity?;
+        self.completed
+            .as_ref()
+            .filter(|completed| {
+                completed.now == now && completed.request_identity.as_ptr() == Arc::as_ptr(identity)
+            })
+            .map(|completed| Arc::clone(&completed.status))
+    }
+
+    fn render_request(
+        &mut self,
+        request: &StatusRequest,
+        touched: &mut BTreeSet<ShellCacheKey>,
+        refresh: bool,
+        now: i64,
+        identity: Option<&Arc<StatusRequest>>,
+    ) -> Arc<StatusLine> {
+        if let Some(status) = self.cached_request_output(identity, now) {
+            return status;
+        }
+        let mut callback_names = None;
+        let mut parts = None;
+        if request.modes.is_empty()
+            && let Some(completed) = &mut self.completed
+            && completed.same_templates(request)
+        {
+            let fresh_callbacks = (completed.fact_identity.as_ptr() != Arc::as_ptr(&request.facts))
+                .then(|| status_callback_values(request, &completed.callback_names));
+            let callbacks = fresh_callbacks.as_deref().unwrap_or(&completed.callbacks);
+            if completed.matches(request, callbacks, now, true) {
+                if let Some(identity) = identity {
+                    completed.request_identity = Arc::downgrade(identity);
+                }
+                return Arc::clone(&completed.status);
+            }
+            if status_parts_enabled() && completed.matches(request, callbacks, now, false) {
+                parts.clone_from(&completed.parts);
+            }
+            if completed.same_lookup_scope(request) {
+                callback_names = Some(completed.callback_names.clone());
+            }
+        }
+        let callback_names = callback_names.or_else(|| status_cache_callbacks(request));
+        if status_parts_enabled()
+            && parts.is_none()
+            && callback_names.is_some()
+            && request.context.same_detached_data(&request.context)
+        {
+            parts = Some(Arc::new(StatusParts::new(request)));
+        }
+        let option_bytes = callback_names.as_ref().map_or(0, |_| {
+            self.completed
+                .as_ref()
+                .filter(|completed| {
+                    Arc::ptr_eq(&completed.option_snapshot, &request.option_snapshot)
+                })
+                .map_or_else(
+                    || request.option_snapshot.retained_bytes(),
+                    |completed| completed.option_bytes,
+                )
+        });
+        self.owned_clients.insert(request.client);
+        self.owned_client_high_watermark = Some(
+            self.owned_client_high_watermark
+                .map_or(request.client, |highest| highest.max(request.client)),
+        );
+        #[cfg(test)]
+        {
+            self.expansions += 1;
+        }
+        let status = Arc::new(render(
             &mut self.shell_cache,
-            &mut touched,
+            touched,
             request,
-            true,
+            refresh,
+            now,
             self.tmux_shim.as_deref(),
             self.zz_executable.as_deref(),
             self.job_waker.as_ref(),
-        );
-        self.note_uncovered_jobs(request, &touched);
-        self.published.insert(request.client, status.clone());
+            parts.as_deref(),
+        ));
+        let context_bytes = callback_names.as_ref().map_or(0, |_| {
+            self.completed
+                .as_ref()
+                .filter(|completed| {
+                    completed.context.same_detached_data(&request.context)
+                        && completed.context.session_id.capacity()
+                            == request.context.session_id.capacity()
+                        && completed.context.window_id.capacity()
+                            == request.context.window_id.capacity()
+                        && completed.context.pane_id.capacity()
+                            == request.context.pane_id.capacity()
+                })
+                .map_or_else(
+                    || request.context.retained_bytes(),
+                    |completed| completed.context_bytes,
+                )
+        });
+        self.completed = callback_names.and_then(|names| {
+            let callbacks = status_callback_values(request, &names);
+            (completed_status_bytes_with_capture_bytes(
+                request,
+                &names,
+                &callbacks,
+                &status,
+                option_bytes,
+                context_bytes,
+            )
+            .saturating_add(
+                parts
+                    .as_ref()
+                    .map_or(0, |parts| parts.retained_bytes().saturating_mul(2)),
+            ) <= COMPLETED_STATUS_MAX_BYTES)
+                .then(|| {
+                    CompletedStatus::new(
+                        request,
+                        names,
+                        callbacks,
+                        now,
+                        Arc::clone(&status),
+                        identity,
+                        option_bytes,
+                        parts,
+                        context_bytes,
+                    )
+                })
+        });
         status
     }
 
@@ -905,44 +1699,42 @@ impl StatusRenderer {
         let mut touched = BTreeSet::new();
         let mut changed = Vec::new();
         for request in requests {
-            let status = render(
-                &mut self.shell_cache,
-                &mut touched,
-                request,
-                false,
-                self.tmux_shim.as_deref(),
-                self.zz_executable.as_deref(),
-                self.job_waker.as_ref(),
-            );
+            let status = self.render_request(request, &mut touched, false, format_second(), None);
             if self.note_uncovered_jobs(request, &touched)
                 || self.published.get(&request.client) == Some(&status)
             {
                 continue;
             }
-            self.published.insert(request.client, status.clone());
-            changed.push((request.client, status));
+            self.published.insert(request.client, Arc::clone(&status));
+            changed.push((request.client, status.as_ref().clone()));
         }
         changed
     }
 
     pub(crate) fn render_initial(&mut self, request: &StatusRequest) -> StatusLine {
         let mut touched = BTreeSet::new();
-        let status = render(
-            &mut self.shell_cache,
-            &mut touched,
-            request,
-            false,
-            self.tmux_shim.as_deref(),
-            self.zz_executable.as_deref(),
-            self.job_waker.as_ref(),
-        );
+        let status = self.render_request(request, &mut touched, false, format_second(), None);
         self.note_uncovered_jobs(request, &touched);
-        self.published.insert(request.client, status.clone());
-        status
+        self.published.insert(request.client, Arc::clone(&status));
+        status.as_ref().clone()
     }
 
     pub(crate) fn forget(&mut self, client: ClientId) {
+        if self
+            .owned_client_high_watermark
+            .is_none_or(|highest| client > highest)
+            || !self.owned_clients.remove(&client)
+        {
+            return;
+        }
         self.published.remove(&client);
+        if self
+            .completed
+            .as_ref()
+            .is_some_and(|entry| entry.client == client)
+        {
+            self.completed = None;
+        }
         self.shell_cache
             .retain(|(cached, _, _), _| *cached != client);
         self.job_needs.lock().remove(&client);
@@ -961,6 +1753,75 @@ pub(crate) fn status_context<'e>(
     attached: Option<SessionId>,
     focused_window: Option<WindowId>,
 ) -> StatusContext<'e> {
+    let mut context = base_status_context(engine, attached, focused_window);
+    let Some(session) = snapshot
+        .sessions
+        .iter()
+        .find(|session| Some(session.id) == attached)
+    else {
+        return context;
+    };
+    let focused_window = focused_window
+        .filter(|focused| session.windows.iter().any(|window| window.id == *focused))
+        .unwrap_or(session.active_window);
+    set_status_context_active(&mut context);
+    context.set_format_value("session_attached", session.viewers.len().to_string());
+    context.set_format_value(
+        "session_many_attached",
+        if session.viewers.len() > 1 { "1" } else { "0" },
+    );
+    context.set_format_value(
+        "session_attached_list",
+        session
+            .viewers
+            .iter()
+            .map(|viewer| viewer.name.as_str())
+            .collect::<Vec<_>>()
+            .join(","),
+    );
+    let active_viewers = session
+        .viewers
+        .iter()
+        .filter(|viewer| viewer.window == focused_window)
+        .collect::<Vec<_>>();
+    context.set_format_value("window_active_clients", active_viewers.len().to_string());
+    context.set_format_value(
+        "window_active_clients_list",
+        active_viewers
+            .iter()
+            .map(|viewer| viewer.name.as_str())
+            .collect::<Vec<_>>()
+            .join(","),
+    );
+    context
+}
+
+pub(crate) fn live_status_context(
+    engine: &MuxEngine,
+    attached: Option<SessionId>,
+    focused_window: Option<WindowId>,
+) -> StatusContext<'_> {
+    let mut context = base_status_context(engine, attached, focused_window);
+    if attached.is_some_and(|session| engine.state.sessions.contains_key(&session)) {
+        set_status_context_active(&mut context);
+        for (name, value) in [
+            ("session_attached", "0"),
+            ("session_many_attached", "0"),
+            ("session_attached_list", ""),
+            ("window_active_clients", "0"),
+            ("window_active_clients_list", ""),
+        ] {
+            context.set_format_value(name, value);
+        }
+    }
+    context
+}
+
+fn base_status_context(
+    engine: &MuxEngine,
+    attached: Option<SessionId>,
+    focused_window: Option<WindowId>,
+) -> StatusContext<'_> {
     let mut context = attached.map_or_else(
         || engine.format_status_context(None, focused_window, None),
         |client_session| {
@@ -972,47 +1833,23 @@ pub(crate) fn status_context<'e>(
             )
         },
     );
-    if context.host.is_empty() {
+    if context.variable("host").is_none_or(|host| host.is_empty()) {
         let (host, host_short) = host_names();
-        context.host.clone_from(host);
-        context.host_short.clone_from(host_short);
+        context.set_format_value("host", host.clone());
+        context.set_format_value("host_short", host_short.clone());
     }
-    let Some(session) = snapshot
-        .sessions
-        .iter()
-        .find(|session| Some(session.id) == attached)
-    else {
-        return context;
-    };
-    let focused_window = focused_window
-        .filter(|focused| session.windows.iter().any(|window| window.id == *focused))
-        .unwrap_or(session.active_window);
-    if context.window_active.is_some() {
-        context.window_active = Some(true);
-    }
-    if context.pane_active.is_some() {
-        context.pane_active = Some(true);
-    }
-    context.session_attached = session.viewers.len();
-    context.session_many_attached = session.viewers.len() > 1;
-    context.session_attached_list = session
-        .viewers
-        .iter()
-        .map(|viewer| viewer.name.as_str())
-        .collect::<Vec<_>>()
-        .join(",");
-    let active_viewers = session
-        .viewers
-        .iter()
-        .filter(|viewer| viewer.window == focused_window)
-        .collect::<Vec<_>>();
-    context.window_active_clients = active_viewers.len();
-    context.window_active_clients_list = active_viewers
-        .iter()
-        .map(|viewer| viewer.name.as_str())
-        .collect::<Vec<_>>()
-        .join(",");
     context
+}
+
+fn set_status_context_active(context: &mut StatusContext<'_>) {
+    for name in ["window_active", "pane_active"] {
+        if context
+            .variable(name)
+            .is_some_and(|value| !value.is_empty())
+        {
+            context.set_format_value(name, "1");
+        }
+    }
 }
 
 pub(crate) fn host_names() -> &'static (String, String) {
@@ -1037,18 +1874,20 @@ fn render(
     touched: &mut BTreeSet<ShellCacheKey>,
     request: &StatusRequest,
     refresh: bool,
+    now: i64,
     tmux_shim: Option<&std::path::Path>,
     zz_executable: Option<&std::path::Path>,
     job_waker: Option<&thread::Thread>,
+    parts: Option<&StatusParts>,
 ) -> StatusLine {
-    let now = format_second();
     let title = request
         .title_format
+        .as_ref()
         .as_ref()
         .map_or_else(String::new, |format| {
             let mut hooks = DaemonFormatHooks::status(
                 request.client,
-                &request.facts,
+                request.facts.as_ref(),
                 &request.context,
                 Some(&request.option_snapshot),
                 cache,
@@ -1067,7 +1906,7 @@ fn render(
     let theme = {
         let mut hooks = DaemonFormatHooks::status(
             request.client,
-            &request.facts,
+            request.facts.as_ref(),
             &request.context,
             Some(&request.option_snapshot),
             cache,
@@ -1081,12 +1920,16 @@ fn render(
             zz_executable,
             job_waker,
         );
-        resolve_theme_colours(request, &mut hooks)
+        if let Some(theme) = parts.and_then(|parts| parts.theme.as_ref()) {
+            *theme.get_or_init(|| resolve_theme_colours(request, &mut hooks))
+        } else {
+            resolve_theme_colours(request, &mut hooks)
+        }
     };
     let (message_style, message_command_style) = {
         let mut hooks = DaemonFormatHooks::status(
             request.client,
-            &request.facts,
+            request.facts.as_ref(),
             &request.context,
             Some(&request.option_snapshot),
             cache,
@@ -1100,10 +1943,17 @@ fn render(
             zz_executable,
             job_waker,
         );
-        (
-            expand_style(&request.message_styles.0, &request.context, &mut hooks),
-            expand_style(&request.message_styles.1, &request.context, &mut hooks),
-        )
+        let mut expand = || {
+            (
+                expand_style(&request.message_styles.0, &request.context, &mut hooks),
+                expand_style(&request.message_styles.1, &request.context, &mut hooks),
+            )
+        };
+        if let Some(styles) = parts.and_then(|parts| parts.message_styles.as_ref()) {
+            styles.get_or_init(&mut expand).clone()
+        } else {
+            expand()
+        }
     };
     let modes = request
         .modes
@@ -1116,7 +1966,7 @@ fn render(
             ]);
             let mut hooks = DaemonFormatHooks::status(
                 request.client,
-                &request.facts,
+                request.facts.as_ref(),
                 &mode.context,
                 Some(&request.option_snapshot),
                 cache,
@@ -1134,7 +1984,7 @@ fn render(
             mode_presentation(mode, &mut hooks)
         })
         .collect::<Vec<_>>();
-    let pane_borders = request.pane_borders.clone();
+    let pane_borders = request.pane_borders.as_ref().clone();
     if !request.formats.enabled {
         return StatusLine {
             title,
@@ -1151,7 +2001,7 @@ fn render(
     let (left, right) = {
         let mut hooks = DaemonFormatHooks::status(
             request.client,
-            &request.facts,
+            request.facts.as_ref(),
             &request.context,
             Some(&request.option_snapshot),
             cache,
@@ -1166,13 +2016,23 @@ fn render(
             job_waker,
         );
         (
-            expand_status(&request.formats.left, &request.context, &mut hooks),
-            expand_status(&request.formats.right, &request.context, &mut hooks),
+            expand_status_parts(
+                &request.formats.left,
+                &request.context,
+                &mut hooks,
+                parts.map(|parts| parts.left.as_slice()),
+            ),
+            expand_status_parts(
+                &request.formats.right,
+                &request.context,
+                &mut hooks,
+                parts.map(|parts| parts.right.as_slice()),
+            ),
         )
     };
     let mut hooks = DaemonFormatHooks::status(
         request.client,
-        &request.facts,
+        request.facts.as_ref(),
         &request.context,
         Some(&request.option_snapshot),
         cache,
@@ -1195,7 +2055,14 @@ fn render(
                 .row_formats
                 .get(&index)
                 .map_or_else(String::new, |format| {
-                    clamp_status_text(expand_status(format, &request.context, &mut hooks))
+                    clamp_status_text(expand_status_parts(
+                        format,
+                        &request.context,
+                        &mut hooks,
+                        parts
+                            .and_then(|parts| parts.rows.get(&index))
+                            .map(Vec::as_slice),
+                    ))
                 })
         })
         .collect::<Vec<_>>();
@@ -1237,8 +2104,12 @@ fn render(
 /// its height twin answer null unless a window is in the format's context.
 fn window_scoped(context: &StatusContext) -> bool {
     !context.window_id.is_empty()
-        || !context.window_name.is_empty()
-        || context.window_width.is_some()
+        || context
+            .variable("window_name")
+            .is_some_and(|value| !value.is_empty())
+        || context
+            .variable("window_width")
+            .is_some_and(|value| !value.is_empty())
 }
 
 fn window_cell_pixels(client: Option<&ClientFormatFacts>, width: bool) -> String {
@@ -1285,16 +2156,18 @@ fn expand_base_status_style(
     if zz_protocol::parse_style(&style).is_none() {
         style = String::new();
     }
+    let mut appended = false;
     for (key, value) in [("fg", &formats.foreground), ("bg", &formats.background)] {
         if value.as_str() != "default" {
             let separator = if style.is_empty() { "" } else { "," };
             let addition = format!("{separator}{key}={value}");
             if style.len() + addition.len() <= MAX_STATUS_TEXT_BYTES {
                 style.push_str(&addition);
+                appended = true;
             }
         }
     }
-    if zz_protocol::parse_style(&style).is_none() {
+    if appended && zz_protocol::parse_style(&style).is_none() {
         return String::new();
     }
     style
@@ -1328,23 +2201,32 @@ fn wrap_status_style(formats: &StatusFormats, text: &str, side_style: &str) -> S
     let carries_base = if base.is_empty() {
         false
     } else {
-        let marker = format!("#[{base}]");
-        if marker.len() + "#[push-default]".len() <= MAX_STATUS_TEXT_BYTES {
-            output.push_str(&marker);
+        let marker_len = base.len().saturating_add(3);
+        if marker_len.saturating_add("#[push-default]".len()) <= MAX_STATUS_TEXT_BYTES {
+            output.push_str("#[");
+            output.push_str(&base);
+            output.push(']');
             true
         } else {
             false
         }
     };
     if !side_style.is_empty() {
-        let marker = format!("#[{side_style}]");
+        let marker_len = side_style.len().saturating_add(3);
         let reserved = if carries_base {
             "#[push-default]".len()
         } else {
             0
         };
-        if output.len() + marker.len() + reserved <= MAX_STATUS_TEXT_BYTES {
-            output.push_str(&marker);
+        if output
+            .len()
+            .saturating_add(marker_len)
+            .saturating_add(reserved)
+            <= MAX_STATUS_TEXT_BYTES
+        {
+            output.push_str("#[");
+            output.push_str(side_style);
+            output.push(']');
         }
     }
     if carries_base {
@@ -1435,7 +2317,7 @@ fn status_style_end(value: &str, start: usize) -> Option<usize> {
 
 pub(crate) struct DaemonFormatHooks<'a> {
     status_client: Option<ClientId>,
-    facts: &'a FormatHookFacts,
+    facts: &'a dyn FormatFactSource,
     option_engine: Option<&'a MuxEngine>,
     status_context: Option<&'a StatusContext<'a>>,
     variables: Option<&'a BTreeMap<String, String>>,
@@ -1452,20 +2334,23 @@ pub(crate) struct DaemonFormatHooks<'a> {
     zz_executable: Option<&'a std::path::Path>,
     job_waker: Option<&'a thread::Thread>,
     facts_withheld: bool,
+    buffer_override: Option<BufferFormatFacts>,
+    pane_in_mode_override: Option<(PaneId, usize)>,
 }
 
 impl<'a> DaemonFormatHooks<'a> {
-    pub(crate) fn command(facts: &'a FormatHookFacts) -> Self {
+    pub(crate) fn command(facts: &'a dyn FormatFactSource) -> Self {
         Self::command_with_optional_variables(facts, None)
     }
 
     pub(crate) fn command_with_optional_variables(
-        facts: &'a FormatHookFacts,
+        facts: &'a dyn FormatFactSource,
         variables: Option<&'a BTreeMap<String, String>>,
     ) -> Self {
         Self {
             status_client: None,
             facts,
+            buffer_override: None,
             option_engine: None,
             status_context: None,
             variables,
@@ -1482,14 +2367,30 @@ impl<'a> DaemonFormatHooks<'a> {
             zz_executable: None,
             job_waker: None,
             facts_withheld: false,
+            pane_in_mode_override: None,
         }
     }
 
     pub(crate) fn command_with_variables(
-        facts: &'a FormatHookFacts,
+        facts: &'a dyn FormatFactSource,
         variables: &'a BTreeMap<String, String>,
     ) -> Self {
         Self::command_with_optional_variables(facts, Some(variables))
+    }
+
+    pub(crate) fn with_buffer(mut self, buffer: BufferFormatFacts) -> Self {
+        self.buffer_override = Some(buffer);
+        self
+    }
+
+    pub(crate) fn set_pane_in_mode_count(&mut self, pane: PaneId, count: usize) {
+        self.pane_in_mode_override = Some((pane, count));
+    }
+
+    fn buffer(&self) -> Option<&BufferFormatFacts> {
+        self.buffer_override
+            .as_ref()
+            .or_else(|| self.facts.buffer())
     }
 
     pub(crate) fn with_option_engine(mut self, engine: &'a MuxEngine) -> Self {
@@ -1509,7 +2410,7 @@ impl<'a> DaemonFormatHooks<'a> {
 
     fn status(
         client: ClientId,
-        facts: &'a FormatHookFacts,
+        facts: &'a dyn FormatFactSource,
         context: &'a StatusContext<'a>,
         option_snapshot: Option<&'a StatusRowVariables>,
         cache: &'a mut BTreeMap<ShellCacheKey, ShellCacheEntry>,
@@ -1526,6 +2427,7 @@ impl<'a> DaemonFormatHooks<'a> {
         Self {
             status_client: Some(client),
             facts,
+            buffer_override: None,
             option_engine: None,
             status_context: Some(context),
             variables: None,
@@ -1542,6 +2444,7 @@ impl<'a> DaemonFormatHooks<'a> {
             zz_executable,
             job_waker,
             facts_withheld: false,
+            pane_in_mode_override: None,
         }
     }
 
@@ -1565,7 +2468,7 @@ impl DaemonFormatHooks<'_> {
         &self,
         context: &StatusContext,
     ) -> Option<&Vec<(String, Arc<CopyModeFacts>)>> {
-        self.facts.copy_modes.get(&context.pane_id.parse().ok()?)
+        self.facts.copy_modes().get(&context.pane_id.parse().ok()?)
     }
 
     /// tmux reads `window_copy_formats` off the pane's single mode entry. zz
@@ -1574,11 +2477,7 @@ impl DaemonFormatHooks<'_> {
     /// this pane, and from the earliest client in the mode otherwise.
     fn copy_mode_view(&self, context: &StatusContext) -> Option<&CopyModeFacts> {
         let rows = self.copy_mode_rows(context)?;
-        let client = self
-            .facts
-            .client
-            .as_ref()
-            .map(|client| client.name.as_str());
+        let client = self.facts.client().map(|client| client.name.as_str());
         client
             .and_then(|client| rows.iter().find(|(name, _)| name == client))
             .or_else(|| rows.first())
@@ -1587,7 +2486,7 @@ impl DaemonFormatHooks<'_> {
 
     fn pane_mode_name(&self, context: &StatusContext) -> Option<&'static str> {
         self.facts
-            .pane_modes
+            .pane_modes()
             .get(&context.pane_id.parse().ok()?)
             .map(|(_, name)| *name)
     }
@@ -1648,6 +2547,14 @@ impl DaemonFormatHooks<'_> {
 }
 
 impl StatusHooks for DaemonFormatHooks<'_> {
+    fn stable_option_lookups(&self) -> bool {
+        true
+    }
+
+    fn only_tmux_options(&self) -> bool {
+        true
+    }
+
     /// Byte parity with the pin requires the PLATFORM's strftime: tmux's
     /// `format_strftime` is plain libc strftime, and libcs disagree about
     /// unknown `%` sequences (glibc passes them through, BSD eats them), so a
@@ -1694,7 +2601,7 @@ impl StatusHooks for DaemonFormatHooks<'_> {
     }
 
     fn shell(&mut self, command: &str, tag: &FormatJobTag) -> String {
-        let (Some(context), Some(_)) = (self.status_context, self.facts.client.as_ref()) else {
+        let (Some(context), Some(_)) = (self.status_context, self.facts.client()) else {
             return String::new();
         };
         let mut expansion = DaemonFormatHooks::command(self.facts);
@@ -1748,27 +2655,26 @@ impl StatusHooks for DaemonFormatHooks<'_> {
         )
     }
 
-    fn client_loop_rows(&mut self) -> Vec<FormatClientRow> {
+    fn client_loop_rows(&mut self, context: &StatusContext) -> Vec<FormatClientRow> {
         self.expect_facts();
-        self.facts.clients.as_ref().clone()
+        self.facts.clients(context).to_vec()
     }
 
     fn client_environment_rows(&mut self) -> Vec<FormatEnvironRow> {
         self.expect_facts();
-        client_environment_rows(self.facts.client_environment.as_ref())
+        client_environment_rows(self.facts.client_environment())
     }
 
     fn client_tty_term(&mut self) -> Option<Arc<TtyTerm>> {
         self.expect_facts();
-        self.facts.client.as_ref()?.terminal.clone()
+        self.facts.client()?.terminal.clone()
     }
 
     fn client_terminal_environment(&mut self) -> Vec<FormatEnvironRow> {
         self.expect_facts();
         client_environment_rows(
             self.facts
-                .client
-                .as_ref()
+                .client()
                 .and_then(|client| client.environment.as_ref()),
         )
     }
@@ -1790,66 +2696,95 @@ impl StatusHooks for DaemonFormatHooks<'_> {
         entries
     }
 
+    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+        self.expect_facts();
+        self.option_engine
+            .and_then(|engine| engine.format_option_value(context, name))
+            .or_else(|| {
+                self.option_snapshot.and_then(|options| {
+                    options.lookup(
+                        &context.session_id,
+                        &context.window_id,
+                        &context.pane_id,
+                        name,
+                    )
+                })
+            })
+            .or_else(|| {
+                name.starts_with('@')
+                    .then(|| {
+                        context
+                            .engine()
+                            .and_then(|engine| {
+                                engine.format_user_option(
+                                    &context.pane_id,
+                                    &context.window_id,
+                                    &context.session_id,
+                                    name,
+                                )
+                            })
+                            .or_else(|| {
+                                self.facts.mux().user_option(
+                                    &context.pane_id,
+                                    &context.window_id,
+                                    &context.session_id,
+                                    name,
+                                )
+                            })
+                            .map(str::to_owned)
+                    })
+                    .flatten()
+            })
+    }
+
+    fn tree_variable(&mut self, name: &str, _context: &StatusContext) -> Option<Cow<'_, str>> {
+        self.expect_facts();
+        self.variables
+            .and_then(|variables| variables.get(name))
+            .map(|value| Cow::Borrowed(value.as_str()))
+            .or_else(|| {
+                (name == "command")
+                    .then(|| self.command_item.map(Cow::Borrowed))
+                    .flatten()
+            })
+    }
+
     fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
         self.expect_facts();
-        if let Some(value) = self
-            .option_engine
-            .and_then(|engine| engine.format_option_value(context, name))
-        {
-            return Some(value);
-        }
-        if let Some(value) = self.option_snapshot.and_then(|options| {
-            options.lookup(
-                &context.session_id,
-                &context.window_id,
-                &context.pane_id,
-                name,
-            )
-        }) {
-            return Some(value);
-        }
-        if let Some(value) = self.variables.and_then(|variables| variables.get(name)) {
-            return Some(value.clone());
-        }
-        if name == "command" {
-            return self.command_item.map(str::to_owned);
-        }
-        if name.starts_with('@') {
-            return self
-                .facts
-                .mux
-                .user_option(
-                    &context.pane_id,
-                    &context.window_id,
-                    &context.session_id,
-                    name,
-                )
-                .map(str::to_owned);
-        }
         let [list_clients_line] = LIST_CLIENTS_CONTEXT_FORMATS;
         let [message_number, message_text, message_time] = SHOW_MESSAGES_CONTEXT_FORMATS;
         if COPY_MODE_CONTEXT_FORMATS.contains(&name) {
             return self.copy_mode_variable(name, context);
         }
         match name {
+            "config_files" => self
+                .variables
+                .and_then(|variables| variables.get(name))
+                .cloned(),
             "mouse_pane" | "mouse_x" | "mouse_y" | "mouse_word" | "mouse_line"
-            | "mouse_hyperlink" => Some(String::new()),
+            | "mouse_hyperlink" => Some(
+                self.variables
+                    .and_then(|variables| variables.get(name))
+                    .cloned()
+                    .unwrap_or_default(),
+            ),
             "pane_in_mode" => Some(
-                (context
+                context
                     .pane_id
                     .parse()
                     .ok()
-                    .and_then(|pane| self.facts.pane_modes.get(&pane))
-                    .map_or(0, |(count, _)| *count)
-                    + usize::from(self.copy_mode_rows(context).is_some()))
-                .to_string(),
+                    .map_or(0, |pane| match self.pane_in_mode_override {
+                        Some((target, count)) if target == pane => count,
+                        _ => self.facts.pane_in_mode_count(pane),
+                    })
+                    .to_string(),
             ),
             "pane_search_string" => Some(
                 context
                     .pane_id
                     .parse::<PaneId>()
                     .ok()
-                    .and_then(|pane| self.facts.terminals.get(&pane))
+                    .and_then(|pane| self.facts.terminals().get(&pane))
                     .map(|terminal| terminal.pane_search_string())
                     .unwrap_or_default(),
             ),
@@ -1861,17 +2796,30 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                 "copy-mode".to_owned()
             }),
             "agent_state" | "agent_pending_permission" => {
-                let pane_kind = self.facts.mux.pane_kind(&context.pane_id);
+                let pane_kind = context
+                    .engine()
+                    .and_then(|engine| engine.format_pane_kind(&context.pane_id))
+                    .or_else(|| self.facts.mux().pane_kind(&context.pane_id));
                 if name == "agent_state" && pane_kind == Some("terminal") {
                     return Some(
-                        self.facts
-                            .mux
-                            .user_option(
-                                &context.pane_id,
-                                &context.window_id,
-                                &context.session_id,
-                                "@agent_state",
-                            )
+                        context
+                            .engine()
+                            .and_then(|engine| {
+                                engine.format_user_option(
+                                    &context.pane_id,
+                                    &context.window_id,
+                                    &context.session_id,
+                                    "@agent_state",
+                                )
+                            })
+                            .or_else(|| {
+                                self.facts.mux().user_option(
+                                    &context.pane_id,
+                                    &context.window_id,
+                                    &context.session_id,
+                                    "@agent_state",
+                                )
+                            })
                             .unwrap_or_default()
                             .to_owned(),
                     );
@@ -1883,7 +2831,7 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                     .pane_id
                     .parse()
                     .ok()
-                    .and_then(|pane| self.facts.agent_states.get(&pane));
+                    .and_then(|pane| self.facts.agent_states().get(&pane));
                 Some(if name == "agent_state" {
                     state
                         .map_or("starting", |state| agent_state_name(&state.phase))
@@ -1893,103 +2841,86 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                         .to_string()
                 })
             }
-            "pane_kind" => self
-                .facts
-                .mux
-                .pane_kind(&context.pane_id)
+            "pane_kind" => context
+                .engine()
+                .and_then(|engine| engine.format_pane_kind(&context.pane_id))
+                .or_else(|| self.facts.mux().pane_kind(&context.pane_id))
                 .map(str::to_owned),
             "browser_url" => Some(
-                self.facts
-                    .mux
-                    .browser_url(&context.pane_id)
+                context
+                    .engine()
+                    .and_then(|engine| engine.format_browser_url(&context.pane_id))
+                    .or_else(|| self.facts.mux().browser_url(&context.pane_id))
                     .unwrap_or_default()
                     .to_owned(),
             ),
             "buffer_created" => Some(
-                self.facts
-                    .buffer
-                    .as_ref()?
+                self.buffer()?
                     .created
                     .duration_since(UNIX_EPOCH)
                     .ok()?
                     .as_secs()
                     .to_string(),
             ),
-            "buffer_full" => Some(buffer_full(&self.facts.buffer.as_ref()?.data)),
-            "buffer_name" => Some(self.facts.buffer.as_ref()?.name.clone()),
-            "buffer_sample" => Some(buffer_sample(&self.facts.buffer.as_ref()?.data)),
-            "buffer_size" => Some(self.facts.buffer.as_ref()?.data.len().to_string()),
-            "client_activity" => Some(self.facts.client.as_ref()?.activity.clone()),
-            "client_cell_height" => Some(self.facts.client.as_ref()?.cell_height.clone()),
-            "client_cell_width" => Some(self.facts.client.as_ref()?.cell_width.clone()),
-            "client_colours" => Some(self.facts.client.as_ref()?.colours.clone()),
-            "client_control_mode" => Some(self.facts.client.as_ref()?.control_mode.clone()),
-            "client_created" => Some(self.facts.client.as_ref()?.created.clone()),
-            "client_discarded" => Some(self.facts.client.as_ref()?.discarded.clone()),
-            "client_flags" => Some(self.facts.client.as_ref()?.flags.clone()),
-            "client_height" => Some(self.facts.client.as_ref()?.height.clone()),
-            "client_key_table" => Some(self.facts.client.as_ref()?.key_table.clone()),
+            "buffer_full" => Some(buffer_full(&self.buffer()?.data)),
+            "buffer_name" => Some(self.buffer()?.name.clone()),
+            "buffer_sample" => Some(buffer_sample(&self.buffer()?.data)),
+            "buffer_size" => Some(self.buffer()?.data.len().to_string()),
+            "client_activity" => Some(self.facts.client()?.activity.clone()),
+            "client_cell_height" => Some(self.facts.client()?.cell_height.clone()),
+            "client_cell_width" => Some(self.facts.client()?.cell_width.clone()),
+            "client_colours" => Some(self.facts.client()?.colours.clone()),
+            "client_control_mode" => Some(self.facts.client()?.control_mode.clone()),
+            "client_created" => Some(self.facts.client()?.created.clone()),
+            "client_discarded" => Some(self.facts.client()?.discarded.clone()),
+            "client_flags" => Some(self.facts.client()?.flags.clone()),
+            "client_height" => Some(self.facts.client()?.height.clone()),
+            "client_key_table" => Some(self.facts.client()?.key_table.clone()),
             // format_cb_client_last_session declines unless the client has a
             // last session that is still alive.
-            "client_last_session" => Some(self.facts.client.as_ref()?.last_session.clone())
+            "client_last_session" => Some(self.facts.client()?.last_session.clone())
                 .filter(|session| !session.is_empty()),
-            "client_name" => Some(self.facts.client.as_ref()?.name.clone()),
-            "client_pid" => Some(self.facts.client.as_ref()?.pid.clone()),
-            "client_prefix" => Some(self.facts.client.as_ref()?.prefix.clone()),
-            "client_readonly" => Some(self.facts.client.as_ref()?.readonly.clone()),
-            "client_session" => Some(self.facts.client.as_ref()?.session.clone()),
-            "client_termfeatures" => Some(self.facts.client.as_ref()?.termfeatures.clone()),
-            "client_termname" => Some(self.facts.client.as_ref()?.termname.clone()),
-            "client_termtype" => Some(self.facts.client.as_ref()?.termtype.clone()),
+            "client_name" => Some(self.facts.client()?.name.clone()),
+            "client_pid" => Some(self.facts.client()?.pid.clone()),
+            "client_prefix" => Some(self.facts.client()?.prefix.clone()),
+            "client_readonly" => Some(self.facts.client()?.readonly.clone()),
+            "client_session" => Some(self.facts.client()?.session.clone()),
+            "client_termfeatures" => Some(self.facts.client()?.termfeatures.clone()),
+            "client_termname" => Some(self.facts.client()?.termname.clone()),
+            "client_termtype" => Some(self.facts.client()?.termtype.clone()),
             // THEME_UNKNOWN is a NULL in format_cb_client_theme: the pin waits
             // for the terminal to report, and so does the daemon.
             "client_theme" => {
-                Some(self.facts.client.as_ref()?.theme.clone()).filter(|theme| !theme.is_empty())
+                Some(self.facts.client()?.theme.clone()).filter(|theme| !theme.is_empty())
             }
-            "client_tty" => Some(self.facts.client.as_ref()?.tty.clone()),
-            "client_uid" => Some(self.facts.client.as_ref()?.uid.clone()),
-            "client_user" => Some(self.facts.client.as_ref()?.user.clone()),
-            "client_utf8" => Some(self.facts.client.as_ref()?.utf8.clone()),
-            "client_width" => Some(self.facts.client.as_ref()?.width.clone()),
-            "client_written" => Some(self.facts.client.as_ref()?.written.clone()),
+            "client_tty" => Some(self.facts.client()?.tty.clone()),
+            "client_uid" => Some(self.facts.client()?.uid.clone()),
+            "client_user" => Some(self.facts.client()?.user.clone()),
+            "client_utf8" => Some(self.facts.client()?.utf8.clone()),
+            "client_width" => Some(self.facts.client()?.width.clone()),
+            "client_written" => Some(self.facts.client()?.written.clone()),
             "window_bigger" => Some(
-                if self.facts.client.as_ref()?.viewport?.bigger() {
+                if self.facts.client()?.viewport?.bigger() {
                     "1"
                 } else {
                     "0"
                 }
                 .to_owned(),
             ),
-            "window_offset_x" => Some(
-                self.facts
-                    .client
-                    .as_ref()?
-                    .viewport?
-                    .offsets()?
-                    .0
-                    .to_string(),
-            ),
-            "window_offset_y" => Some(
-                self.facts
-                    .client
-                    .as_ref()?
-                    .viewport?
-                    .offsets()?
-                    .1
-                    .to_string(),
-            ),
-            "window_cell_height" => window_scoped(context)
-                .then(|| window_cell_pixels(self.facts.client.as_ref(), false)),
-            "window_cell_width" => {
-                window_scoped(context).then(|| window_cell_pixels(self.facts.client.as_ref(), true))
+            "window_offset_x" => Some(self.facts.client()?.viewport?.offsets()?.0.to_string()),
+            "window_offset_y" => Some(self.facts.client()?.viewport?.offsets()?.1.to_string()),
+            "window_cell_height" => {
+                window_scoped(context).then(|| window_cell_pixels(self.facts.client(), false))
             }
-            _ if name == list_clients_line => Some(self.facts.client.as_ref()?.line.to_string()),
-            _ if name == message_number => Some(self.facts.message.as_ref()?.number.to_string()),
-            _ if name == message_text => Some(self.facts.message.as_ref()?.text.clone()),
+            "window_cell_width" => {
+                window_scoped(context).then(|| window_cell_pixels(self.facts.client(), true))
+            }
+            _ if name == list_clients_line => Some(self.facts.client()?.line.to_string()),
+            _ if name == message_number => Some(self.facts.message()?.number.to_string()),
+            _ if name == message_text => Some(self.facts.message()?.text.clone()),
             _ if name == message_time => Some(
                 self.facts
-                    .message
-                    .as_ref()?
+                    .message()?
                     .time
                     .duration_since(UNIX_EPOCH)
                     .ok()?
@@ -1999,7 +2930,7 @@ impl StatusHooks for DaemonFormatHooks<'_> {
             "pane_pipe" => Some(
                 if self
                     .facts
-                    .pane_pipes
+                    .pane_pipes()
                     .contains_key(&context.pane_id.parse().ok()?)
                 {
                     "1"
@@ -2011,7 +2942,7 @@ impl StatusHooks for DaemonFormatHooks<'_> {
             "pane_unseen_changes" => Some(
                 if self
                     .facts
-                    .unseen_changes
+                    .unseen_changes()
                     .contains(&context.pane_id.parse().ok()?)
                 {
                     "1"
@@ -2022,14 +2953,14 @@ impl StatusHooks for DaemonFormatHooks<'_> {
             ),
             "pane_pipe_pid" => self
                 .facts
-                .pane_pipes
+                .pane_pipes()
                 .get(&context.pane_id.parse().ok()?)
                 .map(u32::to_string),
             "history_size" | "cursor_x" | "cursor_y" | "alternate_on" | "mouse_any_flag" => {
                 let pane = context.pane_id.parse().ok()?;
                 let facts = self
                     .facts
-                    .terminals
+                    .terminals()
                     .get(&pane)
                     .map(|terminal| terminal.facts())
                     .unwrap_or_default();
@@ -2046,7 +2977,7 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                     .pane_id
                     .parse()
                     .ok()
-                    .and_then(|pane| self.facts.terminals.get(&pane))
+                    .and_then(|pane| self.facts.terminals().get(&pane))
                     .and_then(|terminal| terminal.last_command_status())
                     .map_or_else(String::new, |status| status.to_string()),
             ),
@@ -2063,34 +2994,34 @@ impl StatusHooks for DaemonFormatHooks<'_> {
             ),
             "window_active_clients" => Some(
                 self.facts
-                    .window_clients
+                    .window_clients(context)
                     .get(&context.window_id.parse().ok()?)
                     .map_or(0, Vec::len)
                     .to_string(),
             ),
             "window_active_clients_list" => Some(
                 self.facts
-                    .window_clients
+                    .window_clients(context)
                     .get(&context.window_id.parse().ok()?)
                     .map_or_else(String::new, |names| names.join(",")),
             ),
             "session_attached" => Some(
                 self.facts
-                    .session_attachments
+                    .session_attachments()
                     .get(&context.session_id.parse().ok()?)
                     .map_or(0, |(count, _)| *count)
                     .to_string(),
             ),
             "session_attached_list" => Some(
                 self.facts
-                    .session_attachments
+                    .session_attachments()
                     .get(&context.session_id.parse().ok()?)
                     .map_or_else(String::new, |(_, names)| names.clone()),
             ),
             "session_many_attached" => Some(
                 if self
                     .facts
-                    .session_attachments
+                    .session_attachments()
                     .get(&context.session_id.parse().ok()?)
                     .is_some_and(|(count, _)| *count > 1)
                 {
@@ -2102,7 +3033,7 @@ impl StatusHooks for DaemonFormatHooks<'_> {
             ),
             "session_last_attached" => self
                 .facts
-                .session_last_attached
+                .session_last_attached()
                 .get(&context.session_id.parse().ok()?)
                 .copied()
                 .filter(|time| *time != 0)
@@ -2120,7 +3051,7 @@ impl StatusHooks for DaemonFormatHooks<'_> {
     ) -> usize {
         self.expect_facts();
         let Some(viewport) = pane
-            .and_then(|pane| self.facts.terminals.get(&pane))
+            .and_then(|pane| self.facts.terminals().get(&pane))
             .map(|terminal| terminal.latest_viewport())
         else {
             return 0;
@@ -2132,11 +3063,11 @@ impl StatusHooks for DaemonFormatHooks<'_> {
 /// `wp->base.progress_bar`, which lives on the pane's own screen: a pane with
 /// no terminal worker has seen no OSC 9;4 and answers the defaults a fresh
 /// screen carries.
-fn pane_progress_bar(facts: &FormatHookFacts, pane: &str) -> Option<ProgressBar> {
+fn pane_progress_bar(facts: &dyn FormatFactSource, pane: &str) -> Option<ProgressBar> {
     let pane = pane.parse().ok()?;
     Some(
         facts
-            .terminals
+            .terminals()
             .get(&pane)
             .map(|terminal| terminal.progress_bar())
             .unwrap_or_default(),
@@ -2276,14 +3207,15 @@ fn run_shell(
     job_waker: Option<thread::Thread>,
 ) -> Option<ShellJob> {
     let mut process = shell_process(command);
-    let tmux = format!("{},{},-1", context.socket_path, std::process::id());
+    let socket_path = context.variable("socket_path").unwrap_or_default();
+    let tmux = format!("{},{},-1", socket_path, std::process::id());
     configure_shell_job_environment(
         &mut process,
         environment,
         default_terminal,
         startup,
         &tmux,
-        std::ffi::OsStr::new(&context.socket_path),
+        std::ffi::OsStr::new(socket_path.as_ref()),
         tmux_shim,
         zz_executable,
     );
@@ -2378,7 +3310,8 @@ fn run_shell(
 }
 
 fn status_working_directory(context: &StatusContext) -> PathBuf {
-    let requested = Path::new(&context.session_path);
+    let session_path = context.variable("session_path").unwrap_or_default();
+    let requested = Path::new(session_path.as_ref());
     if requested.is_dir() {
         requested.to_path_buf()
     } else {
@@ -2416,7 +3349,7 @@ mod tests {
     use zz_protocol::Axis;
     use zz_terminal::{SessionStatus, TerminalViewId};
 
-    fn settled(renderer: &mut StatusRenderer, request: &StatusRequest) -> StatusLine {
+    pub(super) fn settled(renderer: &mut StatusRenderer, request: &StatusRequest) -> StatusLine {
         renderer.render_initial(request);
         let deadline = Instant::now() + Duration::from_secs(5);
         while renderer
@@ -2431,10 +3364,10 @@ mod tests {
         renderer.render_initial(request)
     }
 
-    fn request(client: u64, left: &str, right: &str) -> StatusRequest {
+    pub(super) fn request(client: u64, left: &str, right: &str) -> StatusRequest {
         StatusRequest {
             client: ClientId(client),
-            formats: StatusFormats {
+            formats: Arc::new(StatusFormats {
                 left: left.to_owned(),
                 right: right.to_owned(),
                 style: String::new(),
@@ -2443,31 +3376,32 @@ mod tests {
                 left_length: u16::MAX,
                 right_length: u16::MAX,
                 ..StatusFormats::default()
-            },
-            row_formats: BTreeMap::new(),
+            }),
+            row_formats: Arc::new(BTreeMap::new()),
             option_snapshot: Arc::new(StatusRowVariables::default()),
             message_line: 0,
             customized: false,
-            title_format: None,
-            environment: Vec::new(),
-            default_terminal: "tmux-256color".to_owned(),
+            title_format: Arc::new(None),
+            environment: Arc::new(Vec::new()),
+            default_terminal: Arc::new("tmux-256color".to_owned()),
             startup: false,
-            context: StatusContext::from(StatusValues {
+            context: Arc::new(StatusContext::from(StatusValues {
                 session_name: "work".to_owned(),
                 ..StatusValues::default()
-            }),
-            facts: FormatHookFacts {
+            })),
+            facts: Arc::new(FormatHookFacts {
                 client: Some(ClientFormatFacts::default()),
                 ..FormatHookFacts::default()
-            },
+            }),
             client_scheme: None,
-            message_styles: (String::new(), String::new()),
+            message_styles: Arc::new((String::new(), String::new())),
             modes: Vec::new(),
-            pane_borders: Vec::new(),
+            pane_borders: Arc::default(),
+            references: MuxEngine::default().cached_format_references_for_templates([left, right]),
         }
     }
 
-    fn engine_request(
+    pub(super) fn engine_request(
         client: u64,
         engine: &MuxEngine,
         session: Option<SessionId>,
@@ -2485,30 +3419,43 @@ mod tests {
             title_format.as_deref(),
             &message_styles,
         );
+        let references = engine.cached_format_references_for_templates(status_line_templates(
+            &formats,
+            &row_formats,
+            title_format.as_deref(),
+            &message_styles,
+        ));
+        let context = status_context(&snapshot, engine, session, None)
+            .detach_with_references(needs, &references);
         StatusRequest {
             client: ClientId(client),
-            formats,
-            row_formats,
-            option_snapshot: Arc::new(engine.format_option_snapshot()),
+            formats: Arc::new(formats),
+            row_formats: Arc::new(row_formats),
+            option_snapshot: engine.cached_format_option_snapshot(),
             message_line: engine.message_line_for_session(session),
             customized: engine.status_customized_for_session(session),
-            title_format,
-            environment: engine.job_environment(None),
-            default_terminal: engine.default_terminal_for_spawn().to_owned(),
+            title_format: Arc::new(title_format),
+            environment: Arc::new(engine.job_environment(None)),
+            default_terminal: Arc::new(engine.default_terminal_for_spawn().to_owned()),
             startup: false,
-            context: status_context(&snapshot, engine, session, None).detach(needs),
-            facts: FormatHookFacts {
+            context: Arc::new(context),
+            facts: Arc::new(FormatHookFacts {
                 client: session.map(|_| ClientFormatFacts::default()),
                 ..FormatHookFacts::default()
-            },
+            }),
             client_scheme: None,
-            message_styles,
+            message_styles: Arc::new(message_styles),
             modes: Vec::new(),
-            pane_borders: Vec::new(),
+            pane_borders: Arc::default(),
+            references,
         }
     }
 
-    fn execute(engine: &mut MuxEngine, context: &mut zz_mux::ExecutionContext, args: &[&str]) {
+    pub(super) fn execute(
+        engine: &mut MuxEngine,
+        context: &mut zz_mux::ExecutionContext,
+        args: &[&str],
+    ) {
         engine
             .execute(
                 context,
@@ -2537,14 +3484,14 @@ mod tests {
             )
             .unwrap();
         let mut request = request(1, "url=#{browser_url}", "");
-        request.facts.mux = Arc::new(engine.format_facts());
+        Arc::make_mut(&mut request.facts).mux = Arc::new(engine.format_facts());
         let mut renderer = StatusRenderer::default();
-        request.context.pane_id = browser.to_string();
+        Arc::make_mut(&mut request.context).pane_id = browser.to_string();
         assert_eq!(
             renderer.render_initial(&request).left,
             "url=https://example.com/active"
         );
-        request.context.pane_id = terminal.to_string();
+        Arc::make_mut(&mut request.context).pane_id = terminal.to_string();
         assert_eq!(renderer.render_initial(&request).left, "url=");
     }
 
@@ -2850,11 +3797,21 @@ mod tests {
             ],
         );
 
-        let mut request = engine_request(1, &engine, Some(attached));
-        request.formats.left =
-            "OPTCHAIN:#{mouse}:#{S:#{mouse}}:#{W:#{automatic-rename}}:#{P:#{allow-set-title}}"
-                .to_owned();
-        request.formats.left_length = u16::MAX;
+        execute(
+            &mut engine,
+            &mut context,
+            &[
+                "set-option",
+                "status-left",
+                "OPTCHAIN:#{mouse}:#{S:#{mouse}}:#{W:#{automatic-rename}}:#{P:#{allow-set-title}}",
+            ],
+        );
+        execute(
+            &mut engine,
+            &mut context,
+            &["set-option", "status-left-length", "100"],
+        );
+        let request = engine_request(1, &engine, Some(attached));
         assert!(
             request
                 .option_snapshot
@@ -3265,15 +4222,15 @@ mod tests {
     fn base_style_applies_status_style_then_fg_bg_overrides() {
         let mut renderer = StatusRenderer::default();
         let mut styled = request(1, "", "");
-        styled.formats.style = "bg=blue,fg=white".to_owned();
-        styled.formats.foreground = "red".to_owned();
+        Arc::make_mut(&mut styled.formats).style = "bg=blue,fg=white".to_owned();
+        Arc::make_mut(&mut styled.formats).foreground = "red".to_owned();
         let status = renderer.render_initial(&styled);
         assert_eq!(status.base_style, "bg=blue,fg=white,fg=red");
         assert_eq!(status.validate(), Ok(()));
 
         let mut dynamic = request(2, "", "");
-        dynamic.formats.style = "fg=#{?window_zoomed,red,green}".to_owned();
-        dynamic.formats.background = "black".to_owned();
+        Arc::make_mut(&mut dynamic.formats).style = "fg=#{?window_zoomed,red,green}".to_owned();
+        Arc::make_mut(&mut dynamic.formats).background = "black".to_owned();
         let status = renderer.render_initial(&dynamic);
         assert_eq!(status.base_style, "fg=green,bg=black");
         assert_eq!(status.validate(), Ok(()));
@@ -3283,7 +4240,7 @@ mod tests {
     fn an_unparseable_expanded_status_style_degrades_instead_of_dropping_the_event() {
         let mut renderer = StatusRenderer::default();
         let mut broken = request(1, "LEFT", "RIGHT");
-        broken.formats.style = "bg=#{@theme_bg}".to_owned();
+        Arc::make_mut(&mut broken.formats).style = "bg=#{@theme_bg}".to_owned();
         let status = renderer.render_initial(&broken);
         assert_eq!(status.base_style, "");
         assert_eq!(status.rows.len(), 1);
@@ -3296,8 +4253,8 @@ mod tests {
         );
 
         let mut overridden = request(2, "", "");
-        overridden.formats.style = "bg=#{@theme_bg}".to_owned();
-        overridden.formats.foreground = "red".to_owned();
+        Arc::make_mut(&mut overridden.formats).style = "bg=#{@theme_bg}".to_owned();
+        Arc::make_mut(&mut overridden.formats).foreground = "red".to_owned();
         let status = renderer.render_initial(&overridden);
         assert_eq!(status.base_style, "fg=red");
         assert_eq!(status.validate(), Ok(()));
@@ -3307,14 +4264,14 @@ mod tests {
     fn message_line_clamps_against_the_published_row_count() {
         let mut renderer = StatusRenderer::default();
         let mut clamped = request(1, "", "");
-        clamped.formats.lines = 2;
+        Arc::make_mut(&mut clamped.formats).lines = 2;
         clamped.message_line = 4;
         let status = renderer.render_initial(&clamped);
         assert_eq!(status.rows.len(), 2);
         assert_eq!(status.message_line, 1);
 
         let mut disabled = request(2, "", "");
-        disabled.formats.enabled = false;
+        Arc::make_mut(&mut disabled.formats).enabled = false;
         disabled.message_line = 3;
         assert_eq!(renderer.render_initial(&disabled).message_line, 0);
     }
@@ -3331,7 +4288,7 @@ mod tests {
 
         let renamed = [request(1, "[#S]", ""), {
             let mut request = request(2, "[#S]", "");
-            request.context.session_name = "infra".to_owned();
+            Arc::make_mut(&mut request.context).session_name = "infra".to_owned();
             request
         }];
         let second = renderer.render_changed(&renamed);
@@ -3349,12 +4306,12 @@ mod tests {
     #[test]
     fn status_sides_carry_base_then_side_styles() {
         let mut request = request(1, "abcdef", "uvwxyz");
-        request.formats.style = "bg=blue,fg=white".to_owned();
-        request.formats.foreground = "red".to_owned();
-        request.formats.left_style = "bold".to_owned();
-        request.formats.right_style = "italics".to_owned();
-        request.formats.left_length = 4;
-        request.formats.right_length = 3;
+        Arc::make_mut(&mut request.formats).style = "bg=blue,fg=white".to_owned();
+        Arc::make_mut(&mut request.formats).foreground = "red".to_owned();
+        Arc::make_mut(&mut request.formats).left_style = "bold".to_owned();
+        Arc::make_mut(&mut request.formats).right_style = "italics".to_owned();
+        Arc::make_mut(&mut request.formats).left_length = 4;
+        Arc::make_mut(&mut request.formats).right_length = 3;
         let status = StatusRenderer::default().render_initial(&request);
         assert_eq!(
             status.left,
@@ -3369,8 +4326,8 @@ mod tests {
     #[test]
     fn status_style_wrapping_stays_inside_the_wire_limit() {
         let mut request = request(1, &"x".repeat(MAX_STATUS_TEXT_BYTES), "");
-        request.formats.style = "bold,".repeat(800);
-        request.formats.left_style = "italics,".repeat(800);
+        Arc::make_mut(&mut request.formats).style = "bold,".repeat(800);
+        Arc::make_mut(&mut request.formats).left_style = "italics,".repeat(800);
         let status = StatusRenderer::default().render_initial(&request);
         assert_eq!(status.validate(), Ok(()));
         assert!(status.left.is_char_boundary(status.left.len()));
@@ -3383,10 +4340,11 @@ mod tests {
     fn oversized_row_title_and_base_style_stay_inside_the_wire_limit() {
         let overflow = "#{R:x,9000}";
         let mut request = request(1, overflow, overflow);
-        request.formats.lines = 2;
-        request.formats.style = format!("bold,{}", "italics,".repeat(900));
-        request.title_format = Some(overflow.to_owned());
-        request.row_formats = BTreeMap::from([(0, overflow.to_owned()), (1, overflow.to_owned())]);
+        Arc::make_mut(&mut request.formats).lines = 2;
+        Arc::make_mut(&mut request.formats).style = format!("bold,{}", "italics,".repeat(900));
+        *Arc::make_mut(&mut request.title_format) = Some(overflow.to_owned());
+        *Arc::make_mut(&mut request.row_formats) =
+            BTreeMap::from([(0, overflow.to_owned()), (1, overflow.to_owned())]);
         let status = StatusRenderer::default().render_initial(&request);
         assert_eq!(status.validate(), Ok(()));
         assert_eq!(status.title.len(), MAX_STATUS_TEXT_BYTES);
@@ -3401,7 +4359,7 @@ mod tests {
         assert!(status.left.len() <= MAX_STATUS_TEXT_BYTES);
 
         let mut markers = self::request(1, "#{R:#[bold],700}x", "");
-        markers.formats.left_length = 10;
+        Arc::make_mut(&mut markers.formats).left_length = 10;
         let status = StatusRenderer::default().render_initial(&markers);
         assert_eq!(status.validate(), Ok(()));
         assert!(status.left.len() <= MAX_STATUS_TEXT_BYTES);
@@ -3411,7 +4369,7 @@ mod tests {
     fn a_disabled_status_renders_empty() {
         let mut renderer = StatusRenderer::default();
         let mut request = request(1, "[#S]", "%H");
-        request.formats.enabled = false;
+        Arc::make_mut(&mut request.formats).enabled = false;
         let status = renderer.render_initial(&request);
         assert!(status.is_empty());
     }
@@ -3596,11 +4554,11 @@ mod tests {
         let first_cwd = std::fs::canonicalize(first_cwd).expect("first cwd resolves");
         let second_cwd = std::fs::canonicalize(second_cwd).expect("second cwd resolves");
         let mut first = request(1, "#(pwd -P)", "");
-        first.context.session_path = first_cwd.to_string_lossy().into_owned();
-        first.facts.client = Some(ClientFormatFacts::default());
+        Arc::make_mut(&mut first.context).session_path = first_cwd.to_string_lossy().into_owned();
+        Arc::make_mut(&mut first.facts).client = Some(ClientFormatFacts::default());
         let mut second = request(2, "#(pwd -P)", "");
-        second.context.session_path = second_cwd.to_string_lossy().into_owned();
-        second.facts.client = Some(ClientFormatFacts::default());
+        Arc::make_mut(&mut second.context).session_path = second_cwd.to_string_lossy().into_owned();
+        Arc::make_mut(&mut second.facts).client = Some(ClientFormatFacts::default());
 
         let mut renderer = StatusRenderer::default();
         let statuses = [
@@ -3622,10 +4580,10 @@ mod tests {
         let format = format!("#(cat '{}')", source.display());
         let cwd = std::fs::canonicalize(directory.path()).expect("working directory resolves");
         let mut attached = request(1, &format, "");
-        attached.context.session_path = cwd.to_string_lossy().into_owned();
+        Arc::make_mut(&mut attached.context).session_path = cwd.to_string_lossy().into_owned();
         let mut clientless = request(2, &format, "");
-        clientless.context.session_path = cwd.to_string_lossy().into_owned();
-        clientless.facts.client = None;
+        Arc::make_mut(&mut clientless.context).session_path = cwd.to_string_lossy().into_owned();
+        Arc::make_mut(&mut clientless.facts).client = None;
         let mut renderer = StatusRenderer::default();
 
         assert_eq!(settled(&mut renderer, &attached).left, "first");
@@ -3648,15 +4606,15 @@ mod tests {
         let format = format!("#(cat '{}')", source.display());
         let cwd = std::fs::canonicalize(directory.path()).expect("working directory resolves");
         let mut first = request(1, &format, "");
-        first.context.session_path = cwd.to_string_lossy().into_owned();
-        first.facts.client = Some(ClientFormatFacts::default());
+        Arc::make_mut(&mut first.context).session_path = cwd.to_string_lossy().into_owned();
+        Arc::make_mut(&mut first.facts).client = Some(ClientFormatFacts::default());
         let mut renderer = StatusRenderer::default();
 
         assert_eq!(settled(&mut renderer, &first).left, "first");
         std::fs::write(&source, "second\n").expect("the second value is written");
         let mut second = request(2, &format, "");
-        second.context.session_path = cwd.to_string_lossy().into_owned();
-        second.facts.client = Some(ClientFormatFacts::default());
+        Arc::make_mut(&mut second.context).session_path = cwd.to_string_lossy().into_owned();
+        Arc::make_mut(&mut second.facts).client = Some(ClientFormatFacts::default());
 
         assert_eq!(settled(&mut renderer, &second).left, "second");
         assert_eq!(renderer.shell_cache.len(), 2);
@@ -3681,14 +4639,14 @@ mod tests {
             "#(echo \"$TMUX|$ZZ_SOCKET|$PWD|${TMUX_PANE-unset}\")",
             "",
         );
-        status_request.context.socket_path = socket.to_owned();
-        status_request.context.session_path = directory
+        Arc::make_mut(&mut status_request.context).socket_path = socket.to_owned();
+        Arc::make_mut(&mut status_request.context).session_path = directory
             .path()
             .canonicalize()
             .expect("the working directory resolves")
             .to_string_lossy()
             .into_owned();
-        status_request.context.pane_current_path = pane_directory
+        Arc::make_mut(&mut status_request.context).pane_current_path = pane_directory
             .path()
             .canonicalize()
             .expect("the pane working directory resolves")
@@ -3768,8 +4726,9 @@ mod tests {
             left_length: u16::MAX,
             right_length: u16::MAX,
             ..StatusFormats::default()
-        };
-        post_startup.context.socket_path = socket.to_owned();
+        }
+        .into();
+        Arc::make_mut(&mut post_startup.context).socket_path = socket.to_owned();
         let status = settled(&mut StatusRenderer::default(), &post_startup);
         assert_eq!(
             status.left,
@@ -3790,8 +4749,9 @@ mod tests {
             left_length: u16::MAX,
             right_length: u16::MAX,
             ..StatusFormats::default()
-        };
-        startup.context.socket_path = socket.to_owned();
+        }
+        .into();
+        Arc::make_mut(&mut startup.context).socket_path = socket.to_owned();
         startup.startup = true;
         let status = settled(&mut StatusRenderer::default(), &startup);
         assert_eq!(
@@ -3831,7 +4791,7 @@ mod tests {
 
         let socket = "/tmp/zz-status-shim.sock";
         let mut status_request = request(1, "#(tmux status)", "");
-        status_request.context.socket_path = socket.to_owned();
+        Arc::make_mut(&mut status_request.context).socket_path = socket.to_owned();
         let mut renderer = StatusRenderer::default();
         renderer.set_tmux_shim(shim, executable);
 
@@ -3922,7 +4882,7 @@ mod tests {
             release.display()
         );
         let mut request = request(1, &format, "");
-        request.facts.client = Some(ClientFormatFacts::default());
+        Arc::make_mut(&mut request.facts).client = Some(ClientFormatFacts::default());
         let mut renderer = StatusRenderer::default();
         let started = Instant::now();
         assert!(renderer.render_initial(&request).left.is_empty());

@@ -8,15 +8,16 @@ This directory is a source snapshot of `libghostty-vt-sys` from
 - Upstream crate version: `0.2.1` (no newer release exists; the stack is unreleased)
 - Upstream wrapper Ghostty pin: `56dbc4a768778753737a3b9cbe0a3f9b4e434553`
 - Upstream Ghostty base: `6301810a48aaa3426887a4316668f18833a40138` (main, 2026-09-25)
-- Local Ghostty pin: [`demfabris/ghostty@c3941417`](https://github.com/demfabris/ghostty/commit/c39414175ca2aad564b74b3f52196355f2671774)
-- Fork branch: `zz-2026-09-30`, three commits on upstream: the C ABI signal-stack option (`6fce227c`, still on `zz-2026-09-25`), the PageList spare-page reuse (`713374af`: line-limit pruning keeps the last pruned pool page resident for the next grow instead of decommitting and refaulting it; `compress` releases it and trims the last page), and the trim fix (`c3941417`: preserves live cell blocks after history erase). `zz-2026-09-29` keeps `713374af`; the previous pin `fa7986a9` stays on `codex/cabi-signal-stack`
+- Published Ghostty pin: `67351380b6dc30124938d809809ac0aa42813283` on `demfabris/ghostty` branch `zz-2026-09-30`, pinned in `build.rs`. The branch fast-forwards retain copy snapshots `7823f65dd55fc9ff420d5eb5cae761cbd1995994` and trim fix `c39414175ca2aad564b74b3f52196355f2671774` in its history.
+- Fork history: five commits on upstream: the C ABI signal-stack option (`6fce227c`, still on `zz-2026-09-25`), the PageList spare-page reuse (`713374af`: line-limit pruning keeps the last pruned pool page resident for the next grow instead of decommitting and refaulting it; `compress` releases it and trims the last page), the trim fix (`c3941417`: preserves live cell blocks after history erase), owned copy snapshots (`7823f65d`), and copied active pages at their used size (`67351380`). `zz-2026-09-29` keeps `713374af`; the previous pin `fa7986a9` stays on `codex/cabi-signal-stack`
 - License: MIT OR Apache-2.0; the upstream MIT license is retained here.
-- Wrapper source: [`demfabris/libghostty-rs`](https://github.com/demfabris/libghostty-rs)
-  branch `zz-2026-09-25`, a fork holding the same commit so a rebase of the PR branch
-  cannot make it unfetchable.
+- Wrapper source: [`demfabris/libghostty-rs`](https://github.com/demfabris/libghostty-rs),
+  published commit `8e40135fb20e9ed91c37c374fe1d14570c386d06` on new branch
+  `zz-2026-09-30`, pinned in the workspace manifest. Its parent
+  `359ef751c189540eafb9110b2de89ad95ce48fc3` remains on `zz-2026-09-25`.
 - Local override: the workspace patches the git-sourced sys package to this adjacent
-  snapshot. The safe wrapper is not vendored: `libghostty-vt` resolves to the fork
-  at the same commit.
+  snapshot. The safe wrapper comes from the dependency fork, with owned copy
+  snapshots and bounded row references. zz does not vendor the safe wrapper.
 
 ## Why an unreleased wrapper
 
@@ -29,8 +30,9 @@ behind `6301810a`. The only header change in those ten commits is additive (rend
 overscan and row ids), so the wrapper at #99 builds unchanged and its 22 unit tests, 3 sys
 tests, and 20 doctests pass against `6301810a` with bindings regenerated from its headers.
 
-The wrapper commit lives on a PR branch that Uzaaft rebases, so the workspace fetches it
-from the `demfabris/libghostty-rs` fork, where branch `zz-2026-09-25` keeps it reachable.
+The base wrapper commit lives on a PR branch that Uzaaft rebases, so the workspace fetches
+the copy API from the `demfabris/libghostty-rs` fork's `zz-2026-09-30` branch.
+Branch `zz-2026-09-25` keeps the base commit reachable.
 Move back to upstream at the first libghostty-rs release that contains this stack (likely
 0.3.0), and change both the dependency URL and the `[patch]` key in `Cargo.toml`.
 
@@ -48,7 +50,7 @@ Move back to upstream at the first libghostty-rs release that contains this stac
   engine. `LIBGHOSTTY_VT_SYS_OPTIMIZE=Debug` still selects `Debug`.
 - The upstream Windows DLL CRT source patch and its build-time `git apply` are dropped.
   zz links the static archive on every platform, where that patch does nothing, and this
-  snapshot does not rewrite fetched sources.
+  Windows patch is not applied. zz does not rewrite native sources at build time.
 
 Upstream now covers two earlier zz deltas on its own: the default `-Dcpu=baseline`
 (overridable with `LIBGHOSTTY_VT_SYS_CPU`; keep it, since the Linux x86_64 v0.6.0 release
@@ -58,10 +60,18 @@ mapping with an xcframework build for `aarch64-apple-ios` and `aarch64-apple-ios
 iOS target links libghostty today (the GPUI iOS client renders daemon frames), so the flat
 mapping and its `x86_64-apple-ios` entry were not kept.
 
-`src/lib.rs` and `tools/gen_bindings.rs` are the upstream files. `src/bindings.rs` was
-regenerated from the fork commit's headers with the upstream tool, run from a checkout of
-the wrapper commit: `GHOSTTY_SOURCE_DIR=<fork checkout> cargo run -p libghostty-vt-sys
---features bindgen-tool --bin gen-bindings`.
+`src/lib.rs` retains the base snapshot without patch stamps. `build.rs` uses a source
+override directly and contains no source staging, patch application, reversal or hashing.
+`tools/gen_bindings.rs` borrows the prefix array with `iter()` instead of `into_iter()` so
+all-feature strict lint checks pass. `src/bindings.rs` comes from the native fork headers,
+including `ghostty_terminal_clone_screen`, generated with the snapshot's tool:
+
+```sh
+GHOSTTY_SOURCE_DIR=<native fork checkout> cargo run --manifest-path third_party/rust/libghostty-vt-sys/Cargo.toml --features bindgen-tool --bin gen-bindings
+```
+
+The optional pkg-config path checks that the installed header declares the snapshot API
+before emitting link metadata. A compatible installed archive must export it as well.
 
 The Kitty temporary-file medium API is fixed in this wrapper
 (`set_kitty_image_temp_file_dir`); `zz-terminal` still does not call it.
@@ -100,19 +110,72 @@ Validation for this pin: the wrapper's own tests against the fork source,
 `cargo test -p zz-terminal`, and the real macOS bundle build. Ghostty's Debug
 test suite supplies its own `std_options`, so it does not exercise this option.
 
-The normal build fetches this immutable fork commit directly. No build-time
-source rewriting is used. `GHOSTTY_SOURCE_DIR` remains authoritative, and an
-enabled `pkg-config` feature can select an installed library without this fix.
+The normal build fetches the pinned native fork commit without rewriting source.
+`GHOSTTY_SOURCE_DIR` selects a local checkout directly. An enabled `pkg-config` feature
+can select an installed library with `ghostty_terminal_clone_screen`.
 When comparing overrides, use distinct source paths or rebuild the sys package:
 Cargo tracks the override environment value, not edits inside that directory.
 
 This is a native dependency, outside the Cargo-only `scripts/forks.conf` and
 `just forks` workflow. Maintain it using the native Ghostty section in
 `.agents/skills/fork-rebase/SKILL.md`. Preserve published commits through a
-retained branch or tag before rebasing. Drop the patch when upstream provides
+retained branch or tag before rebasing. Drop the signal-stack change when upstream provides
 the same allocation behavior in ReleaseSafe, or when zz stops building
 ReleaseSafe, then repin and rerun the terminal suite plus the real macOS bundle
 build. No binding or safe-wrapper change is needed for this option.
+
+## Copy snapshots
+
+Native fork commit `7823f65dd55fc9ff420d5eb5cae761cbd1995994` adds a C ABI clone of the active screen. Copy-on-write cloning skips the
+page-count pass used to preheat eager clone storage. Compressed history shares atomic
+reference-counted encoded buffers when allocator identities match; other allocators receive
+independent encoded copies. Each cloned compressed page starts without a private raw mapping;
+first read maps it, and dropping it unread releases encoded ownership without restoring it.
+Each screen owns its page metadata and cursor pins. Resident history uses software
+copy-on-write; active pages are copied eagerly so cached cursor pointers stay valid. Read-only
+grid getters preserve sharing. Resize reads source metadata and rows without detaching pages
+that it will replace with reflowed output. The original pane can recover pooled mappings when
+a shared history page becomes exclusive again, keeping spare-page reuse after leaving copy
+mode.
+
+Fork commit `67351380b6dc30124938d809809ac0aa42813283` sizes the eager copy of each active page to
+its used rows when cloning copy-on-write, and always copies through `cloneFrom`. Before it, a
+snapshot of a small active area allocated standard pages and read their unused tails, which
+macOS charged to the footprint: copy entry on the Mac fell from 1.41 to 0.58 MiB (Linux was
+already 0.59). Its regression test is "copy-on-write small active clone avoids standard-page
+backing"; the full native suite passes (6508 passed, 52 skipped).
+
+The C clone constructor initializes its owned terminal directly from the frozen ScreenSet.
+It skips the four raw page mappings and pool/pin bookkeeping of a blank terminal that would
+otherwise be discarded immediately. Ordinary terminal initialization keeps its existing
+default-cursor setup; clone initialization keeps existing screen-clone cursor/SGR semantics,
+copies the configured terminal cursor defaults, and creates fresh parser state.
+
+The clone uses the default allocator. Compressed ownership compares allocator function tables
+first, recognizes Zig allocators with undefined context pointers, and compares contexts only
+for allocators that define them. This is exercised by a dense 10k x 180 default-allocator
+ReleaseFast regression, in addition to custom-allocator isolation checks.
+
+The clone retains no source callbacks and lifts its own pruning limits so a frozen resize
+preserves all reflowed history. The live pane keeps its original limits. The dependency-fork safe
+wrapper exposes `ScreenSnapshot` with owned metadata and borrowed grid references, plus
+controlled scroll, color, compression and anchored resize operations. Frozen resize uses
+primary backing with wrapping and history pulling enabled, even when the source was in the
+alternate screen or had wrapping disabled. The wrapper retains the source screen identity
+separately. It exposes no terminal or owned tracking handle that could escape while the
+snapshot moves to a search thread. Row references check the owning page dimensions before
+reading a cell, including incomplete reflow.
+
+The native extension and its regression tests live in published Ghostty fork commits
+`7823f65dd55fc9ff420d5eb5cae761cbd1995994` and `67351380b6dc30124938d809809ac0aa42813283`; the safe API and its tests live in published
+libghostty-rs commit `8e40135fb20e9ed91c37c374fe1d14570c386d06`. Both forks expose their
+copy commits on `zz-2026-09-30`, and zz pins those commits for fetched-source builds.
+Pre-publication validation used a fresh native source path and a temporary wrapper path
+patch, removed before repinning. Full native tests pass (6490 passed, 68 skipped); the wrapper
+default suite passes (30 wrapper and 3 sys tests, 19 doctests, 3 doctests ignored).
+Native exports include all 205 `ghostty_*` symbols, and all 199 generated function
+declarations resolve in a C client that links and runs. Standalone Debug fixtures bound
+rich metadata and mutation work; separate 1000-row and 10k ownership regressions remain.
 
 ## Earlier grid patches
 
@@ -121,8 +184,8 @@ capture decisions remain in `knowledge/designs/tui-parity.md`. The `provenance.p
 that retained explicit indexed foreground/background flags in spare style bits,
 the ICH hunk that kept the pin's stale cells after a wide insert, the build
 machinery that applied them, and the safe wrapper vendored to read those fields
-are all gone. The native memory option above does not restore that machinery or
-change the grid's capture semantics.
+are all gone. The copy snapshot extension adds ownership and row access in the dependency forks.
+It does not restore the removed capture-provenance patches or safe-wrapper vendoring.
 
 Tabs carry no provenance. The pin prints a literal tab for every cell a tab
 produced, and fabrico decided on 2026-09-18 that zz captures the spaces on

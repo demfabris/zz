@@ -4,7 +4,7 @@ use std::process::Command;
 
 /// Pinned ghostty commit. Update this to pull a newer version.
 const GHOSTTY_REPO: &str = "https://github.com/demfabris/ghostty.git";
-const GHOSTTY_COMMIT: &str = "c39414175ca2aad564b74b3f52196355f2671774";
+const GHOSTTY_COMMIT: &str = "67351380b6dc30124938d809809ac0aa42813283";
 
 /// File name of the static archive on Windows. Ghostty installs it under this
 /// name for every Windows ABI so it does not collide with `ghostty-vt.lib`,
@@ -313,27 +313,28 @@ fn warn_unused_xcframework(lib_dir: &Path) {
 #[cfg(feature = "pkg-config")]
 fn try_pkg_config(link_mode: LinkMode, target: &str) -> bool {
     let mut config = pkg_config::Config::new();
-    let lib = match link_mode {
-        LinkMode::Dynamic => config.probe(link_mode.pkg_config_name()),
-        LinkMode::Static => config
-            .statik(true)
-            .cargo_metadata(false)
-            .probe(link_mode.pkg_config_name()),
-    };
+    let lib = config
+        .statik(matches!(link_mode, LinkMode::Static))
+        .cargo_metadata(false)
+        .probe(link_mode.pkg_config_name());
     let lib = match lib {
         Ok(lib) => lib,
         Err(_) => return false,
     };
-
-    if let LinkMode::Static = link_mode {
-        emit_static_pkg_config_metadata(&lib, target);
+    if !lib.include_paths.iter().any(|path| {
+        std::fs::read_to_string(path.join("ghostty/vt/terminal.h"))
+            .is_ok_and(|header| header.contains("ghostty_terminal_clone_screen("))
+    }) {
+        return false;
     }
+
+    emit_pkg_config_metadata(&lib, link_mode, target);
     emit_include_metadata(&lib.include_paths);
     true
 }
 
 #[cfg(feature = "pkg-config")]
-fn emit_static_pkg_config_metadata(lib: &pkg_config::Library, target: &str) {
+fn emit_pkg_config_metadata(lib: &pkg_config::Library, link_mode: LinkMode, target: &str) {
     for path in &lib.link_paths {
         println!("cargo:rustc-link-search=native={}", path.display());
     }
@@ -349,7 +350,10 @@ fn emit_static_pkg_config_metadata(lib: &pkg_config::Library, target: &str) {
         println!("cargo:rustc-link-lib=framework={framework}");
     }
 
-    emit_static_link_lib(target);
+    match link_mode {
+        LinkMode::Dynamic => println!("cargo:rustc-link-lib=ghostty-vt"),
+        LinkMode::Static => emit_static_link_lib(target),
+    }
     for library in &lib.libs {
         if library != "ghostty-vt" {
             println!("cargo:rustc-link-lib={library}");

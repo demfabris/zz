@@ -52,10 +52,13 @@ pub use copy_actions::{
 };
 pub use formats::{
     FormatClient, FormatClientRow, FormatContextSnapshot, FormatEnvironRow, FormatNeeds,
-    FormatUniverseRef, PaneFormatGeometry, StatusValues, TmuxColour,
-    delegated_format_variable_names, display_width, eager_universe_knob,
-    format_needs_without_engine, format_true, fuzzy_match_columns, indexed_colour_rgb,
-    parse_tmux_colour, sanitize_client_output, utf8_sanitize, with_eager_universe,
+    FormatPart, FormatUniverseRef, PaneFormatGeometry, StatusValues, TmuxColour,
+    borrowed_formats_enabled, borrowed_formats_knob, cloned_raw_text_bytes, compiled_formats_knob,
+    delegated_format_variable_names, display_width, eager_universe_knob, format_cache_knob,
+    format_clock_dependent, format_needs_without_engine, format_parts, format_references,
+    format_true, format_variable_is_captured, format_variable_is_known, fuzzy_match_columns,
+    indexed_colour_rgb, parse_tmux_colour, sanitize_client_output, utf8_sanitize,
+    with_borrowed_formats, with_eager_universe,
 };
 pub use honest_knobs::{BellAction, PresetOptions, VisualBell, WindowSize};
 pub use journal::{ChangeWindow, JournalChanges, PaneImage, SessionImage, Tracked, WindowImage};

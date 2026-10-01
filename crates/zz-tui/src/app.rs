@@ -1,13 +1,11 @@
 use std::{
     collections::{HashMap, HashSet},
-    io::{self, Read as _},
     mem,
     sync::{
         Arc, Mutex, MutexGuard,
-        atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
+        atomic::{AtomicU8, AtomicU64, Ordering},
         mpsc,
     },
-    thread,
     time::{Duration, Instant},
 };
 
@@ -32,6 +30,11 @@ use crate::{
     terminal_event::{Event as TerminalEvent, EventParser},
     tty::{MouseArming, TerminalGuard, TerminalOptions, TerminalSize},
 };
+
+#[cfg(unix)]
+mod event_loop;
+#[cfg(unix)]
+use event_loop::EventLoop;
 
 enum MainEvent {
     Core {
@@ -412,17 +415,6 @@ fn apply_kitty_updates(
     }
 }
 
-struct ProtocolReader {
-    cancelled: Arc<AtomicBool>,
-}
-
-impl ProtocolReader {
-    fn cancel(&self, client: &InteractiveClient) {
-        self.cancelled.store(true, Ordering::Release);
-        let _ = client.request_resync();
-    }
-}
-
 struct PreparedConnection {
     client: Arc<InteractiveClient>,
     core: Arc<Mutex<ClientCore>>,
@@ -516,6 +508,7 @@ pub(crate) enum InitialAttach {
     Connected { messages: Vec<ProtocolMessage> },
 }
 
+#[cfg(unix)]
 pub(crate) fn run(
     initial: InteractiveClient,
     mut endpoint: Endpoint,
@@ -555,7 +548,8 @@ pub(crate) fn run(
     .map_err(|error| error.to_string())?;
     let pixel_mouse = terminal.pixel_mouse();
     let key_releases = terminal.kitty_keyboard();
-    let mut renderer = Renderer::new();
+    let output = terminal.writer();
+    let mut renderer = Renderer::with_writer(std::rc::Rc::clone(&output));
     let mut browser = BrowserState::new(browser_provider);
     let mut kitty_probe = KittyProbe::new(
         configured_frame_transport_override(),
@@ -565,12 +559,6 @@ pub(crate) fn run(
     browser.set_transport(kitty_probe.transport(), Instant::now());
     let kitty_gate = Arc::new(AtomicU8::new(KITTY_GATE_PROBING));
     let (events, incoming) = mpsc::channel();
-    renderer.set_repaint_notifier({
-        let events = events.clone();
-        Box::new(move || {
-            let _ = events.send(MainEvent::Repaint);
-        })
-    });
     let mut frames = Arc::new(FrameInbox::default());
     let mut kitty_images = Arc::new(KittyImageInbox::default());
     let mut connection_id = 1;
@@ -605,17 +593,7 @@ pub(crate) fn run(
     );
     model.update_snapshot(Arc::clone(lock_core(&core).snapshot()));
     model.begin_client_focus_attach();
-    spawn_signal_reader(events.clone())?;
-    let mut protocol_reader = spawn_protocol_reader(
-        Arc::clone(&client),
-        Arc::clone(&core),
-        connection_id,
-        events.clone(),
-        Arc::clone(&frames),
-        Arc::clone(&kitty_images),
-        Arc::clone(&kitty_gate),
-    )?;
-    spawn_terminal_reader(events.clone(), Arc::clone(&escape_time))?;
+    let mut event_loop = EventLoop::new(&client).map_err(|error| error.to_string())?;
 
     let mut attempt = attempt;
     let mut creating_default = false;
@@ -644,9 +622,18 @@ pub(crate) fn run(
         } else if browser.should_pump(now) {
             None
         } else {
-            receive_main_event(
-                &incoming,
+            event_loop.receive(
                 click_wait(&model, message_wait(&model, browser.wait(now), now), now),
+                &incoming,
+                &events,
+                &client,
+                &core,
+                connection_id,
+                &frames,
+                &kitty_images,
+                &kitty_gate,
+                &escape_time,
+                &output,
             )?
         };
         let Some(event) = event else {
@@ -918,7 +905,7 @@ pub(crate) fn run(
                                 let replacement = replace_connection(
                                     &mut client,
                                     &mut core,
-                                    &mut protocol_reader,
+                                    &mut event_loop,
                                     &mut connection_id,
                                     connected,
                                     &events,
@@ -991,7 +978,7 @@ pub(crate) fn run(
                 if replace_connection(
                     &mut client,
                     &mut core,
-                    &mut protocol_reader,
+                    &mut event_loop,
                     &mut connection_id,
                     replacement,
                     &events,
@@ -1073,16 +1060,11 @@ pub(crate) fn run(
                 let _ = events.send(MainEvent::Resize);
             }
             MainEvent::Signal => break Ok(TuiExit::Detached(attached_session_name(&model))),
-            // tty_timer_callback's CLIENT_ALLREDRAWFLAGS: the terminal is
-            // reading again after output was dropped, so the screen is redrawn
-            // from the model rather than from what the renderer last painted.
             MainEvent::Repaint => {
-                if renderer.take_repaint_request() {
-                    renderer.invalidate();
-                    renderer
-                        .paint(&model, true)
-                        .map_err(|error| error.to_string())?;
-                }
+                renderer.invalidate();
+                renderer
+                    .paint(&model, true)
+                    .map_err(|error| error.to_string())?;
             }
         }
         remembered_session = model.attached_session.or(remembered_session);
@@ -1091,6 +1073,14 @@ pub(crate) fn run(
     browser.close_all();
     renderer.discard_queued_paints();
     drop(terminal);
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while output.borrow().pending_fd().is_some() && Instant::now() < deadline {
+        output
+            .borrow_mut()
+            .flush()
+            .map_err(|error| error.to_string())?;
+        std::thread::yield_now();
+    }
     match outcome {
         Ok(TuiExit::Exec { command, shell }) => {
             // The pin execs before it would have printed any exit notice, so the
@@ -1111,6 +1101,21 @@ pub(crate) fn run(
         }
         Err(error) => Err(error),
     }
+}
+
+#[cfg(not(unix))]
+pub(crate) fn run(
+    _initial: InteractiveClient,
+    _endpoint: Endpoint,
+    _local_endpoint: Endpoint,
+    _initial_attach: InitialAttach,
+    _terminal_options: Option<TerminalOptions>,
+    _host_label: String,
+    _local_host_label: String,
+    _fleet_hosts: Vec<HostEntry>,
+    _browser_provider: Option<Box<dyn BrowserFrameProvider>>,
+) -> Result<(), String> {
+    Err("zz-tui currently requires a Unix terminal".to_owned())
 }
 
 /// `kill(getppid(), SIGHUP)` guarded the way client.c guards it, so a reparented
@@ -1354,38 +1359,27 @@ fn prepare_host_switch<T>(
     Ok(HostSwitchDecision::Switch { host, connected })
 }
 
+#[cfg(unix)]
 fn replace_connection(
     client: &mut Arc<InteractiveClient>,
     core: &mut Arc<Mutex<ClientCore>>,
-    protocol_reader: &mut ProtocolReader,
+    event_loop: &mut EventLoop,
     connection_id: &mut u64,
     connected: PreparedConnection,
-    events: &mpsc::Sender<MainEvent>,
+    _events: &mpsc::Sender<MainEvent>,
     frames: &mut Arc<FrameInbox>,
     kitty_images: &mut Arc<KittyImageInbox>,
-    kitty_gate: &Arc<AtomicU8>,
+    _kitty_gate: &Arc<AtomicU8>,
 ) -> Result<(), String> {
-    let next_connection_id = connection_id.wrapping_add(1).max(1);
-    let next_frames = Arc::new(FrameInbox::default());
-    let next_kitty_images = Arc::new(KittyImageInbox::default());
-    let next_reader = spawn_protocol_reader(
-        Arc::clone(&connected.client),
-        Arc::clone(&connected.core),
-        next_connection_id,
-        events.clone(),
-        Arc::clone(&next_frames),
-        Arc::clone(&next_kitty_images),
-        Arc::clone(kitty_gate),
-    )?;
-
-    protocol_reader.cancel(client);
+    event_loop
+        .replace(&connected.client)
+        .map_err(|error| error.to_string())?;
     kitty_images.clear();
     *client = connected.client;
     *core = connected.core;
-    *protocol_reader = next_reader;
-    *connection_id = next_connection_id;
-    *frames = next_frames;
-    *kitty_images = next_kitty_images;
+    *connection_id = connection_id.wrapping_add(1).max(1);
+    *frames = Arc::new(FrameInbox::default());
+    *kitty_images = Arc::new(KittyImageInbox::default());
     Ok(())
 }
 
@@ -1478,192 +1472,6 @@ fn forward_protocol_message(
         }
     }
     true
-}
-
-fn spawn_protocol_reader(
-    client: Arc<InteractiveClient>,
-    core: Arc<Mutex<ClientCore>>,
-    connection: u64,
-    events: mpsc::Sender<MainEvent>,
-    frames: Arc<FrameInbox>,
-    kitty_images: Arc<KittyImageInbox>,
-    kitty_gate: Arc<AtomicU8>,
-) -> Result<ProtocolReader, String> {
-    let cancelled = Arc::new(AtomicBool::new(false));
-    let thread_cancelled = Arc::clone(&cancelled);
-    thread::Builder::new()
-        .name("zz-tui-protocol".to_owned())
-        .spawn(move || {
-            'reader: loop {
-                let message = match client.recv() {
-                    Ok(message) => message,
-                    Err(error) => {
-                        if !thread_cancelled.load(Ordering::Acquire) {
-                            let _ = events.send(MainEvent::Disconnected {
-                                connection,
-                                error: error.to_string(),
-                            });
-                        }
-                        break;
-                    }
-                };
-                if thread_cancelled.load(Ordering::Acquire) {
-                    break;
-                }
-                if !forward_protocol_message(
-                    &core,
-                    message,
-                    connection,
-                    &events,
-                    &frames,
-                    &kitty_images,
-                    &kitty_gate,
-                    |outbound| match outbound {
-                        Outbound::RequestFull(pane) => client.request_full(pane),
-                        Outbound::TreeSync => client.request_tree_sync(),
-                    },
-                ) {
-                    break 'reader;
-                }
-            }
-        })
-        .map_err(|error| format!("failed to start protocol reader: {error}"))?;
-    Ok(ProtocolReader { cancelled })
-}
-
-fn spawn_terminal_reader(
-    events: mpsc::Sender<MainEvent>,
-    escape_time: Arc<AtomicU64>,
-) -> Result<(), String> {
-    let (bytes_sender, bytes_receiver) = mpsc::sync_channel::<Result<Vec<u8>, String>>(16);
-    thread::Builder::new()
-        .name("zz-tui-stdin".to_owned())
-        .spawn(move || {
-            let mut stdin = io::stdin().lock();
-            let mut buffer = [0_u8; 4096];
-            loop {
-                match stdin.read(&mut buffer) {
-                    Ok(0) => {
-                        let _ = bytes_sender.send(Err("terminal input closed".to_owned()));
-                        break;
-                    }
-                    Ok(length) => {
-                        if bytes_sender.send(Ok(buffer[..length].to_vec())).is_err() {
-                            break;
-                        }
-                    }
-                    Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-                    Err(error) => {
-                        let _ = bytes_sender.send(Err(error.to_string()));
-                        break;
-                    }
-                }
-            }
-        })
-        .map_err(|error| format!("failed to start terminal input reader: {error}"))?;
-
-    thread::Builder::new()
-        .name("zz-tui-input-parser".to_owned())
-        .spawn(move || {
-            let mut parser = EventParser::default();
-            loop {
-                let received = if parser.has_pending_escape() {
-                    let timeout = Duration::from_millis(escape_time.load(Ordering::Relaxed));
-                    match bytes_receiver.recv_timeout(timeout) {
-                        Ok(bytes) => Ok(bytes),
-                        Err(mpsc::RecvTimeoutError::Timeout) => {
-                            let mut decoded = Vec::new();
-                            parser.flush_escape(&mut decoded);
-                            if send_terminal_events(&events, decoded).is_err() {
-                                break;
-                            }
-                            continue;
-                        }
-                        Err(mpsc::RecvTimeoutError::Disconnected) => Err(mpsc::RecvError),
-                    }
-                } else {
-                    bytes_receiver.recv()
-                };
-                match received {
-                    Ok(Ok(bytes)) => {
-                        let mut decoded = Vec::new();
-                        parser.push(&bytes, &mut decoded);
-                        if send_terminal_events(&events, decoded).is_err() {
-                            break;
-                        }
-                    }
-                    Ok(Err(error)) => {
-                        let _ = events.send(MainEvent::Terminal(Err(error)));
-                        break;
-                    }
-                    Err(_) => break,
-                }
-            }
-        })
-        .map(drop)
-        .map_err(|error| format!("failed to start terminal reader: {error}"))
-}
-
-fn send_terminal_events(
-    events: &mpsc::Sender<MainEvent>,
-    decoded: Vec<TerminalEvent>,
-) -> Result<(), ()> {
-    for event in decoded {
-        events.send(MainEvent::Terminal(Ok(event))).map_err(drop)?;
-    }
-    Ok(())
-}
-
-fn spawn_signal_reader(events: mpsc::Sender<MainEvent>) -> Result<(), String> {
-    use async_signal::{Signal, Signals};
-
-    let mut signals = Signals::new([
-        Signal::Hup,
-        Signal::Int,
-        Signal::Term,
-        Signal::Winch,
-        Signal::Tstp,
-        Signal::Cont,
-    ])
-    .map_err(|error| error.to_string())?;
-    thread::Builder::new()
-        .name("zz-tui-signals".to_owned())
-        .spawn(move || {
-            use futures_lite::StreamExt as _;
-
-            futures_lite::future::block_on(async {
-                while let Some(signal) = signals.next().await {
-                    match signal {
-                        Ok(Signal::Winch) => {
-                            if events.send(MainEvent::Resize).is_err() {
-                                break;
-                            }
-                        }
-                        Ok(Signal::Tstp) => {
-                            if events.send(MainEvent::Suspend).is_err() {
-                                break;
-                            }
-                        }
-                        Ok(Signal::Cont) => {
-                            if events.send(MainEvent::Resume).is_err() {
-                                break;
-                            }
-                        }
-                        Ok(Signal::Hup | Signal::Int | Signal::Term) => {
-                            let _ = events.send(MainEvent::Signal);
-                            break;
-                        }
-                        Ok(_) => {}
-                        Err(error) => {
-                            let _ = events.send(MainEvent::Terminal(Err(error.to_string())));
-                            break;
-                        }
-                    }
-                }
-            });
-        })
-        .map_err(|error| format!("failed to start signal reader: {error}"))?;
-    Ok(())
 }
 
 /// Refreshes the [`Model`] caches the event touched and decides how much of the
@@ -2099,22 +1907,6 @@ fn click_wait(model: &Model, wait: BrowserWait, now: Instant) -> BrowserWait {
     match wait {
         BrowserWait::Blocking => BrowserWait::Timeout(remaining),
         BrowserWait::Timeout(timeout) => BrowserWait::Timeout(timeout.min(remaining)),
-    }
-}
-
-fn receive_main_event(
-    incoming: &mpsc::Receiver<MainEvent>,
-    wait: BrowserWait,
-) -> Result<Option<MainEvent>, String> {
-    match wait {
-        BrowserWait::Blocking => incoming.recv().map(Some).map_err(|error| error.to_string()),
-        BrowserWait::Timeout(timeout) => match incoming.recv_timeout(timeout) {
-            Ok(event) => Ok(Some(event)),
-            Err(mpsc::RecvTimeoutError::Timeout) => Ok(None),
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                Err("main event channel disconnected".to_owned())
-            }
-        },
     }
 }
 
@@ -3367,17 +3159,19 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    fn signal_reader_delivers_suspend_and_resume() {
+    fn event_loop_delivers_suspend_and_resume() {
         let (events, incoming) = mpsc::channel();
-        spawn_signal_reader(events).unwrap();
+        let signals = event_loop::SignalInbox::new().unwrap();
         rustix::process::kill_process(rustix::process::getpid(), rustix::process::Signal::TSTP)
             .unwrap();
+        signals.wait_for_signal(&events).unwrap();
         assert!(matches!(
             incoming.recv_timeout(Duration::from_secs(2)).unwrap(),
             MainEvent::Suspend
         ));
         rustix::process::kill_process(rustix::process::getpid(), rustix::process::Signal::CONT)
             .unwrap();
+        signals.wait_for_signal(&events).unwrap();
         assert!(matches!(
             incoming.recv_timeout(Duration::from_secs(2)).unwrap(),
             MainEvent::Resume

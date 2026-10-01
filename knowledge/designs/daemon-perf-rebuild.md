@@ -3698,3 +3698,28 @@ generations, with invalidation tests for the mutation paths.
 - Attached footprint with a GUI-like client awaits its W0 TODO group. Headless throughput has
   an informational frame-sink row but still needs a reference baseline. Copy-mode entry has
   footprint and time gates from W2-COPY.
+
+## W3-SHARDS TUI attach follow-up, 2026-10-01
+
+As built: `crates/zz-tui/src/app/event_loop.rs` `EventLoop::receive` reads tty keys,
+daemon frames and signal notifications on the attach thread. `TerminalWriter::flush`
+uses nonblocking tty writes, partial-write offsets and the existing 100 ms output
+recovery. The CLI already calls the TUI on its calling thread. Linux thread snapshots
+show seven attach threads on the base and one, `zz_cli`, on this build.
+
+Five alternating untraced runs against `w3/base-cli` gave idle p50 medians
+1.9660 -> 1.7255 ms and busy p50 2.0500 -> 1.7925 ms, with no missed echoes.
+The 240.5 us idle reduction misses the 250 us target by 9.5 us; busy improves
+257.5 us. tmux idle medians were 0.8935 -> 0.9300 ms and busy 0.9115 -> 0.9180 ms.
+The quick chatty/attach comparison gave attach instruction ratios 1.0034x for
+both sizes. Hidden-client CPU was 0.0000 -> 0.0080%, so the literal 1.05x bound
+against zero does not pass. These limits keep the TUI step open. The base already
+fails attach time and daemon CPU rows for both sizes. Mac checks stay with the
+orchestrator; Linux validation follows below.
+
+Linux validation: clippy passed and 524 crate tests passed. The attached-client
+fixture passed, screen-diff matched 147 asserted checkpoints, output backpressure
+passed nine assertions, and all four requested smoke scenarios had zero divergences.
+The final quick W0 gate had 14 passes, five failures and zero regressions: the four
+echo timing rows and `attach.cpu.p4` remain red, as on the base. No extra perf runs
+followed the required series. Mac runtime checks, iOS and Windows builds were not run.

@@ -46,6 +46,27 @@ read "Lane brief rules" before launching anything.
    1.4-1.7x tmux goes to W4-DELIVER or the stdio handoff in CTRL's as-built notes.
 6. Release freeze until wave 4; protocol stays 107.
 
+## Wave 3 merge log (from 2026-10-01)
+
+- W3-SHARDS merged 2026-10-01 as merge 1 (`99aef76b`), slices s1 `edd445fc` (PaneActor state
+  machine), s2 `7ff4e681`+`c42a605e`+`3736bf67` (K shard threads, lazy start, coalesced wakes),
+  s3 `00314f96` (portable-pty off Unix; the allocation-free spawn already existed), s6
+  `3ef90061` (direct shard reads, opt-in `ZZ_PTY_GATHER=0`: they lose Linux Unicode throughput
+  ~10%, so gather stays the default per the plan), macOS readiness fix `6c7e10f0`, s5 `2f8d787e`
+  (one snapshot per distinct live view state), s4 `024d811f` (one lazy search thread), s7
+  `2321297c` (Windows ConPTY readers feed shards; Windows `cargo check` only). Linux gate
+  `w3-1-shards-alienware-99aef76b.json`: 65 pass, 16 fail, all owned elsewhere (LOOP: spawn x4,
+  statusjob threads, control latency; W4: chatty visible, attach) or the open echo target; its 2
+  regressed rows are timing at flat instructions. Merge A/B against the wave-2 binary: threads
+  at 20 panes 66 -> 50 (Linux) and 46 -> 30 (Mac), footprint -40% / -33%, RSS -20%, chatty flip
+  instructions -6.8% on the Mac. Open: echo latency. Linux echo is unchanged since wave 2 (p50
+  2.0 ms vs tmux 0.9) and the wave-3 rule (<= 1.5x tmux) starts here; on the Mac busy-pane echo
+  p50 rose about 15-25% with shards (a flooding pane shares a shard with the idle one). Owner:
+  a shard fairness brief (echo-ready panes ahead of a busy pane's turn), then a cross-lane echo
+  breakdown (input path, actor, delivery). Six Windows-only dead-code warnings in zz-daemon
+  (daemon.rs `BootstrapReady`/`start_lock`, timers.rs `PeerProbe`, status.rs `set_tmux_shim`,
+  user_data.rs `fs`) are handed to LOOP. Mac strict view at wave exit.
+
 ## Wave 2 merge log (2026-09-30 to 10-01)
 
 1. Done 2026-09-30 (from the Mac over ssh): the trim fix holds on Linux. At `d317e171`,

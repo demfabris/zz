@@ -1236,6 +1236,113 @@ mod daemon_autostart {
     }
 
     #[test]
+    fn control_config_initial_source_finishes_shell_waits_and_replays_later_commands() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        assert!(
+            fixture
+                .run(&["new-session", "-d", "-s", "config"])
+                .status
+                .success()
+        );
+        let directory = source_directory(&fixture, "control-config");
+        let bad = write_source(&directory, "bad.conf", "wibble\n");
+        let config = write_source(
+            &directory,
+            "entry.conf",
+            &format!(
+                "run-shell 'sleep 0.1'\n\
+                 source-file '{bad}'\n\
+                 bind-key -n F12 display-message -p loaded\n\
+                 set-environment -g CONTROL_CONFIG_DONE yes\n"
+            ),
+        );
+        let output = fixture
+            .command()
+            .args(["-C", "source-file", &config])
+            .stdin(Stdio::null())
+            .output()
+            .expect("control source with closed stdin");
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stderr.is_empty());
+        let stdout = String::from_utf8(output.stdout).expect("control transcript");
+        assert!(
+            stdout.contains(&format!("%config-error {bad}:1: unknown command: wibble")),
+            "{stdout}"
+        );
+        let binding = fixture.run(&["list-keys", "-T", "root", "-F", "#{key_command}", "F12"]);
+        assert!(binding.status.success());
+        assert_eq!(binding.stdout, b"display-message -p loaded\n");
+        let after = fixture.run(&["show-environment", "-g", "CONTROL_CONFIG_DONE"]);
+        assert!(after.status.success());
+        assert_eq!(after.stdout, b"CONTROL_CONFIG_DONE=yes\n");
+    }
+
+    #[test]
+    fn control_config_typed_argument_rejection_keeps_parse_prefix_and_next_line() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        assert!(
+            fixture
+                .run(&["new-session", "-d", "-s", "typed"])
+                .status
+                .success()
+        );
+        let mut child = fixture
+            .command()
+            .args(["-C", "attach-session", "-t", "typed"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("typed control client");
+        child
+            .stdin
+            .take()
+            .expect("control stdin")
+            .write_all(
+                b"bind-key -T { set-environment -g CONTROL_FORBIDDEN yes } F11 display-message\n\
+              bind-key -T control-test F12 { display-message -p accepted }\n\
+              detach-client\n",
+            )
+            .expect("typed control lines");
+        let output = child.wait_with_output().expect("control result");
+        assert!(output.status.success());
+        assert!(output.stderr.is_empty());
+        let stdout = String::from_utf8(output.stdout).expect("typed control transcript");
+        assert!(
+            stdout.contains("parse error: command bind-key: -T argument must be a string\n"),
+            "{stdout}"
+        );
+        assert!(
+            stdout
+                .lines()
+                .any(|line| line.starts_with("%error ") && line.ends_with(" 1")),
+            "{stdout}"
+        );
+        let binding = fixture.run(&[
+            "list-keys",
+            "-T",
+            "control-test",
+            "-F",
+            "#{key_command}",
+            "F12",
+        ]);
+        assert!(binding.status.success());
+        assert_eq!(binding.stdout, b"display-message -p accepted\n");
+        assert!(
+            !fixture
+                .run(&["show-environment", "-g", "CONTROL_FORBIDDEN"])
+                .status
+                .success()
+        );
+    }
+
+    #[test]
     fn source_file_diagnostics_split_stdout_stderr_and_the_exit_code() {
         let fixture = Fixture::new();
         if !local_socket_bind_available(&fixture.socket) {

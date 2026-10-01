@@ -177,7 +177,9 @@ struct DirectControl {
 #[cfg(unix)]
 impl DirectControl {
     fn new(client: Arc<InteractiveClient>) -> io::Result<Self> {
-        Self::with_input(client, io::stdin().as_fd().try_clone_to_owned()?)
+        let mut direct = Self::with_input(client, io::stdin().as_fd().try_clone_to_owned()?)?;
+        direct.input.enabled = false;
+        Ok(direct)
     }
 
     fn with_input(client: Arc<InteractiveClient>, input: OwnedFd) -> io::Result<Self> {
@@ -296,6 +298,7 @@ impl DirectControl {
 
 #[cfg(unix)]
 struct ControlInput {
+    enabled: bool,
     fd: OwnedFd,
     bytes: Vec<u8>,
     closed: bool,
@@ -307,6 +310,7 @@ struct ControlInput {
 impl ControlInput {
     fn new(fd: OwnedFd) -> Self {
         Self {
+            enabled: true,
             fd,
             bytes: Vec::new(),
             closed: false,
@@ -316,10 +320,13 @@ impl ControlInput {
     }
 
     fn can_read(&self) -> bool {
-        !self.closed
+        self.enabled && !self.closed
     }
 
     fn has_event(&self) -> bool {
+        if !self.enabled {
+            return false;
+        }
         self.error.is_some() || (self.closed && !self.eof_sent) || self.bytes.contains(&b'\n')
     }
 
@@ -500,12 +507,11 @@ fn drive<W: Write>(
     #[cfg(unix)]
     let mut receiver = ControlReceiver::direct(Arc::clone(client))?;
     #[cfg(not(unix))]
-    let mut receiver = {
-        let (events, receiver) = mpsc::sync_channel(32);
-        spawn_protocol_reader(Arc::clone(client), events.clone());
-        spawn_stdin_reader(events);
-        ControlReceiver::new(receiver)
-    };
+    let (events, channel) = mpsc::sync_channel(32);
+    #[cfg(not(unix))]
+    spawn_protocol_reader(Arc::clone(client), events.clone());
+    #[cfg(not(unix))]
+    let mut receiver = ControlReceiver::new(channel);
     let mut state = ControlState::default();
     let mut pending_stdin = VecDeque::new();
     let initial_result = execute_command_unit(
@@ -519,6 +525,17 @@ fn drive<W: Write>(
         &mut pending_stdin,
         None,
     )?;
+    #[cfg(unix)]
+    {
+        match &mut receiver.source {
+            ControlSource::Direct(direct) => direct.input.enabled = true,
+            #[cfg(test)]
+            ControlSource::Channel(_) => unreachable!(),
+        }
+    }
+    #[cfg(not(unix))]
+    spawn_stdin_reader(events);
+
     if initial_result.exit.is_some() {
         finish_exit(
             output,
@@ -904,7 +921,7 @@ fn execute_command_unit<W: Write>(
                                 output.write_line(&error.tmux_message())?;
                             } else {
                                 let message = error.tmux_message();
-                                output.parse_error(&if message.starts_with("command ") {
+                                output.parse_error(&if message.starts_with("parse error: ") {
                                     message
                                 } else {
                                     format!("parse error: {message}")

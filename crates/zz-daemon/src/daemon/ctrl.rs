@@ -1056,8 +1056,11 @@ impl Shared {
         } else {
             request.commands
         };
-        let prepared =
-            Self::prepare_command_list_with_engine(&self.inner.lock().engine, commands, true);
+        let prepared = Self::prepare_command_list_with_engine(
+            &self.inner.lock().engine,
+            commands,
+            kind == ClientKind::Command,
+        );
         if let Some(error) = prepared.iter().find_map(|prepared| match &prepared.result {
             PreparedCommandResult::Error(error) => Some(error.clone()),
             PreparedCommandResult::Ready => None,
@@ -1270,3 +1273,7 @@ impl Shared {
         outbound.flush_control_batch(true);
     }
 }
+
+#[cfg(test)]
+#[path = "ctrl_config_tests.rs"]
+mod config_tests;

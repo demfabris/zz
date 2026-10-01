@@ -3183,6 +3183,18 @@ The two macOS memory runs measured settled threads against `b47ffeae`: p1 fell f
 Checks passed: formatting, daemon clippy, 1,330 unit tests and 35 integration tests (one existing soak ignored), and all seven required compat scenarios with 175 steps and zero divergences.
 Windows named pipes retain the blocking transport. The Windows target check was unavailable here; Linux-only checks remain for the orchestrator.
 
+### As-built: writer shutdown follow-up (2026-10-01, Linux)
+
+In `crates/zz-daemon/src/daemon/event_loop.rs`, `disconnect` retains client writer registrations
+through partial-output drain. `remove` drops the matching registration before signaling writer
+completion; disconnect workers release session state. Response admission still precedes writer
+shutdown, with the same deadlines.
+At `8129cf07`, the original kill-server test passed 0/1 and two deterministic regressions passed
+0/2. With this fix, they pass 20/20 and 2/2. Formatting and daemon clippy pass; all four selected
+control/client-exit compat scenarios report zero divergences. The daemon suite passes 1362/1364:
+the known macOS CLI fallback test stays red alone, and the process-info large-argv test passes
+alone after failing under load. All 35 integration tests pass, with one soak ignored and no doc
+tests. The orchestrator owns macOS checks; this step runs no perf gate.
 
 ## W4-DELIVER: frames straight from shards (effort L)
 

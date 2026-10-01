@@ -973,9 +973,6 @@ impl EventLoop {
                     shared.detach(client);
                 }
                 shared.unregister(client);
-                if !exec_mode {
-                    shared.client_writers.lock().remove(&client);
-                }
             }
             drop(session);
             drop(execution);
@@ -991,10 +988,7 @@ impl EventLoop {
                 .poll
                 .registry()
                 .deregister(&mut SourceFd(&connection.stream.as_raw_fd()));
-            connection.outbound.mark_writer_finished();
-            if connection.exec_mode
-                && let Some(client) = connection.client
-            {
+            if let Some(client) = connection.client {
                 let mut writers = shared.client_writers.lock();
                 if writers
                     .get(&client)
@@ -1003,6 +997,7 @@ impl EventLoop {
                     writers.remove(&client);
                 }
             }
+            connection.outbound.mark_writer_finished();
             if let Some(session) = connection.session.take() {
                 let threads = Arc::clone(&shared.connection_threads);
                 let _ = threads.run(Box::new(move || drop(session)));
@@ -1247,3 +1242,7 @@ mod b3_tests;
 #[cfg(test)]
 #[path = "event_loop_b3fix_tests.rs"]
 mod b3fix_tests;
+
+#[cfg(test)]
+#[path = "event_loop_shutdown_tests.rs"]
+mod shutdown_tests;

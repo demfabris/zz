@@ -1615,8 +1615,6 @@ impl Daemon {
             }
         };
         let complete_startup = || {
-            shared.start_diagnostic_sampler()?;
-            shared.start_status_sampler()?;
             shared.log_diagnostic_snapshot("startup");
             if zz_mux::eager_universe_knob() {
                 log::info!("ZZ_PERF_EAGER_UNIVERSE=1: format universes are built eagerly");
@@ -4144,8 +4142,6 @@ struct SharedServer {
     timer_rx: Mutex<Option<crossbeam_channel::Receiver<timers::TimerInput>>>,
     publish_flush: Mutex<timers::PublishFlush>,
     hook_worker: Mutex<timers::HookWorker>,
-    status_sampler: Mutex<Option<thread::Thread>>,
-    status_sampler_idle: AtomicBool,
     snapshot_order: Mutex<()>,
     #[cfg(all(feature = "agent", unix))]
     peer_probe: AtomicBool,
@@ -4979,9 +4975,11 @@ impl Shared {
                 .mux_option_underlay
                 .set(option, value, MuxOptionSource::Default);
         }
-        let status = StatusRenderer::default();
-        let status_job_needs = status.job_needs();
         let (timer_tx, timer_rx) = crossbeam_channel::unbounded();
+        let timer_tx = timers::TimerSender::new(timer_tx);
+        let mut status = StatusRenderer::default();
+        status.set_job_waker(std::task::Waker::from(Arc::new(timer_tx.clone())));
+        let status_job_needs = status.job_needs();
         let server = SharedServer {
             accept_wake: AcceptWake::new(),
             inner: Mutex::new(state),
@@ -5043,12 +5041,10 @@ impl Shared {
             #[cfg(unix)]
             tmux_shim: Mutex::new(None),
             status_job_needs,
-            timer_tx: timers::TimerSender::new(timer_tx),
+            timer_tx,
             timer_rx: Mutex::new(Some(timer_rx)),
             publish_flush: Mutex::new(timers::PublishFlush::default()),
             hook_worker: Mutex::new(timers::HookWorker::default()),
-            status_sampler: Mutex::new(None),
-            status_sampler_idle: AtomicBool::new(false),
             snapshot_order: Mutex::new(()),
             #[cfg(all(feature = "agent", unix))]
             peer_probe: AtomicBool::new(false),
@@ -5759,133 +5755,6 @@ impl Shared {
         }
     }
 
-    fn start_status_sampler(self: &Arc<Self>) -> Result<(), DaemonError> {
-        let shared = Arc::downgrade(&self.server_owner());
-        let sampler = thread::Builder::new()
-            .name("zz-daemon-status".to_owned())
-            .spawn(move || {
-                let mut due: BTreeMap<SessionId, (Instant, Duration)> = BTreeMap::new();
-                let mut next_tick = Some(Instant::now() + CONTROL_SUBSCRIPTION_INTERVAL);
-                let mut probe = timers::PeerProbe::default();
-                let mut probe_at = None;
-                loop {
-                    let next_wake = due
-                        .values()
-                        .map(|(deadline, _)| *deadline)
-                        .chain(next_tick)
-                        .chain(probe_at)
-                        .min();
-                    if let Some(next_wake) = next_wake {
-                        thread::park_timeout(next_wake.saturating_duration_since(Instant::now()));
-                    } else if shared.upgrade().is_some_and(|shared| {
-                        shared.status_sampler_idle.store(true, Ordering::SeqCst);
-                        !Self::status_sampler_has_work(&shared.inner.lock())
-                    }) {
-                        thread::park();
-                    }
-                    let Some(shared) = shared.upgrade() else {
-                        break;
-                    };
-                    shared.status_sampler_idle.store(false, Ordering::SeqCst);
-                    if shared.stopping.load(Ordering::Acquire) {
-                        break;
-                    }
-                    let modes_changed = shared.status.lock().take_pending_modes();
-                    if !modes_changed.is_empty() {
-                        shared.refresh_modes(&modes_changed);
-                    }
-                    let jobs_changed = shared.status.lock().poll_jobs();
-                    if !jobs_changed.is_empty() {
-                        shared.refresh_status_filtered(None, Some(&jobs_changed));
-                    }
-                    let (tick_needed, peer_scan, intervals) = {
-                        let inner = shared.inner.lock();
-                        let tick_needed = Self::status_tick_needed(&inner);
-                        let peer_scan = Self::peer_scan_armed(&inner);
-                        let intervals = Self::status_sampler_sessions(&inner)
-                            .map(|session| {
-                                (
-                                    session,
-                                    inner
-                                        .engine
-                                        .status_formats_for_session(Some(session))
-                                        .interval,
-                                )
-                            })
-                            .collect::<BTreeMap<_, _>>();
-                        (tick_needed, peer_scan, intervals)
-                    };
-                    if !tick_needed {
-                        next_tick = None;
-                    } else if next_tick.is_none_or(|tick| Instant::now() >= tick) {
-                        next_tick = Some(Instant::now() + CONTROL_SUBSCRIPTION_INTERVAL);
-                        shared.refresh_control_subscriptions();
-                        shared.run_format_monitors();
-                        #[cfg(all(feature = "agent", unix))]
-                        if peer_scan {
-                            shared.sync_claude_peer_states();
-                        }
-                    }
-                    probe_at = shared.run_peer_probe(peer_scan, &mut probe);
-                    due.retain(|session, _| intervals.contains_key(session));
-                    let now = Instant::now();
-                    let sessions = intervals
-                        .into_iter()
-                        .filter_map(|(session, interval)| {
-                            if interval.is_zero() {
-                                due.remove(&session);
-                                return None;
-                            }
-                            let (deadline, previous_interval) =
-                                due.entry(session).or_insert((now, interval));
-                            if *previous_interval != interval {
-                                *deadline = now + interval;
-                                *previous_interval = interval;
-                            }
-                            if now < *deadline {
-                                return None;
-                            }
-                            *deadline = now + interval;
-                            Some(session)
-                        })
-                        .collect::<BTreeSet<_>>();
-                    if !sessions.is_empty() {
-                        shared.refresh_status_for_sessions(Some(&sessions));
-                        if shared.inner.lock().engine.window_labels_follow_the_clock() {
-                            shared.publish_mux_labels();
-                        }
-                    }
-                }
-            })
-            .map_err(|error| DaemonError::Thread(error.to_string()))?;
-        self.status.lock().set_job_waker(sampler.thread().clone());
-        *self.status_sampler.lock() = Some(sampler.thread().clone());
-        Ok(())
-    }
-
-    fn start_diagnostic_sampler(self: &Arc<Self>) -> Result<(), DaemonError> {
-        if !log::log_enabled!(target: "zz_daemon::diagnostics::state", log::Level::Trace) {
-            return Ok(());
-        }
-        let shared = Arc::downgrade(&self.server_owner());
-        thread::Builder::new()
-            .name("zz-daemon-diagnostics".to_owned())
-            .spawn(move || {
-                loop {
-                    thread::sleep(DIAGNOSTIC_STATE_INTERVAL);
-                    let Some(shared) = shared.upgrade() else {
-                        break;
-                    };
-                    shared.log_diagnostic_snapshot("periodic");
-                    if shared.stopping.load(Ordering::Acquire) {
-                        break;
-                    }
-                }
-            })
-            .map_err(|error| DaemonError::Thread(error.to_string()))?;
-        Ok(())
-    }
-
     fn log_diagnostic_snapshot(&self, reason: &str) {
         if !log::log_enabled!(target: "zz_daemon::diagnostics::state", log::Level::Trace) {
             return;
@@ -6121,7 +5990,7 @@ impl Shared {
                     .get_or_insert_default();
             }
         }
-        self.nudge_status_sampler();
+        self.nudge_client_timers();
     }
 
     fn try_deliver_startup_config_causes(
@@ -6323,6 +6192,12 @@ impl Shared {
                 .client_file_waiters
                 .retain(|_, waiter| waiter.client != client);
             let mut removed_client = inner.clients.remove(&client);
+            if removed_client
+                .as_ref()
+                .is_some_and(|state| state.subscriber.is_some())
+            {
+                self.nudge_client_timers();
+            }
             let control = removed_client.as_ref().and_then(|c| c.kind) == Some(ClientKind::Control);
             inner.client_flags.clear(client);
             inner
@@ -11513,8 +11388,8 @@ impl Shared {
         }
         if !read_only {
             self.publish_key_tables_if_changed();
+            self.nudge_client_timers();
         }
-        self.nudge_status_sampler();
         pending_hook_events.extend(std::mem::take(&mut self.inner.lock().deferred_event_hooks));
         if !pending_hook_events.is_empty() {
             self.wake_control_queue(client, kind);
@@ -16661,6 +16536,8 @@ impl Shared {
                 );
             }
         }
+        drop(inner);
+        self.nudge_client_timers();
     }
 
     fn refresh_client(
@@ -18558,6 +18435,7 @@ impl Shared {
         for terminal in terminals {
             terminal.attach_view(view);
         }
+        self.nudge_client_timers();
         Ok((snapshot, hook_events))
     }
 
@@ -18947,6 +18825,9 @@ impl Shared {
             }
         }
         drop(inner);
+        if was_attached {
+            self.nudge_client_timers();
+        }
         if let Some(subscriber) = subscriber {
             for pane in streamed {
                 subscriber.suspend_terminal(pane);

@@ -93,6 +93,12 @@ enum TimerKey {
     ClientMessage(ClientId),
     Rename,
     PublishFlush,
+    Status(SessionId),
+    Subscriptions,
+    Monitors,
+    Labels,
+    PeerProbe,
+    Diagnostics,
     #[cfg(unix)]
     Shutdown,
 }
@@ -105,6 +111,12 @@ enum Expiry {
     ClientMessage(ClientMessageDeadline),
     Rename,
     PublishFlush,
+    Status(SessionId),
+    Subscriptions,
+    Monitors,
+    Labels,
+    PeerProbe,
+    Diagnostics,
     #[cfg(unix)]
     Shutdown,
 }
@@ -115,6 +127,8 @@ pub(super) enum TimerInput {
     Silence(SilenceDeadlineCommand),
     ClientMessage(ClientMessageDeadlineCommand),
     Timer(TimerCommand),
+    ClientTimersChanged,
+    StatusJobs,
 }
 
 #[derive(Clone)]
@@ -149,6 +163,107 @@ impl TimerSender {
     }
 }
 
+impl std::task::Wake for TimerSender {
+    fn wake(self: Arc<Self>) {
+        self.wake_by_ref();
+    }
+
+    fn wake_by_ref(self: &Arc<Self>) {
+        let _ = self.send(TimerInput::StatusJobs);
+    }
+}
+
+#[derive(Default)]
+struct ClientTimers {
+    intervals: BTreeMap<SessionId, Duration>,
+    probe: PeerProbe,
+    monitor_running: bool,
+    peer_running: bool,
+}
+
+impl ClientTimers {
+    fn sync(&mut self, shared: &Shared, deadlines: &mut Deadlines, now: Instant) {
+        let inner = shared.inner.lock();
+        let intervals = Shared::status_timer_sessions(&inner)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .filter_map(|session| {
+                let formats = inner.engine.status_formats_for_session(Some(session));
+                (formats.enabled && !formats.interval.is_zero())
+                    .then_some((session, formats.interval))
+            })
+            .collect::<BTreeMap<_, _>>();
+        for session in self.intervals.keys() {
+            if !intervals.contains_key(session) {
+                deadlines.remove(TimerKey::Status(*session));
+            }
+        }
+        for (&session, &interval) in &intervals {
+            if self.intervals.get(&session) != Some(&interval)
+                || deadlines.get(TimerKey::Status(session)).is_none()
+            {
+                deadlines.insert(
+                    TimerKey::Status(session),
+                    now + interval,
+                    Expiry::Status(session),
+                );
+            }
+        }
+        self.intervals = intervals;
+        for (key, expiry, needed, interval) in [
+            (
+                TimerKey::Subscriptions,
+                Expiry::Subscriptions,
+                Shared::control_subscriptions_needed(&inner),
+                CONTROL_SUBSCRIPTION_INTERVAL,
+            ),
+            (
+                TimerKey::Monitors,
+                Expiry::Monitors,
+                inner.engine.has_format_monitors() && !self.monitor_running,
+                CONTROL_SUBSCRIPTION_INTERVAL,
+            ),
+            (
+                TimerKey::Labels,
+                Expiry::Labels,
+                Shared::clock_labels_needed(&inner),
+                CONTROL_SUBSCRIPTION_INTERVAL,
+            ),
+            (
+                TimerKey::Diagnostics,
+                Expiry::Diagnostics,
+                log::log_enabled!(target: "zz_daemon::diagnostics::state", log::Level::Trace),
+                DIAGNOSTIC_STATE_INTERVAL,
+            ),
+        ] {
+            if !needed {
+                deadlines.remove(key);
+            } else if deadlines.get(key).is_none() {
+                deadlines.insert(key, now + interval, expiry);
+            }
+        }
+        let armed = Shared::peer_scan_armed(&inner);
+        drop(inner);
+        let requested = shared.peer_probe_requested();
+        if !self.peer_running && (armed || requested || self.probe.follow_up) {
+            let next = self
+                .probe
+                .last
+                .map_or(now, |last| (last + PEER_PROBE_INTERVAL).max(now));
+            deadlines.insert_earliest(TimerKey::PeerProbe, next, Expiry::PeerProbe);
+        } else {
+            deadlines.remove(TimerKey::PeerProbe);
+        }
+    }
+}
+
+#[cfg(unix)]
+enum TimerCompletion {
+    Expiries,
+    Monitor,
+    Peer,
+}
+
 #[cfg(unix)]
 pub(super) const TIMER_INPUT_BURST: usize = 64;
 #[cfg(unix)]
@@ -160,8 +275,9 @@ pub(super) struct LoopTimers {
     deadlines: Deadlines,
     pending: VecDeque<(Expiry, Instant)>,
     worker_running: bool,
-    completed: crossbeam_channel::Receiver<()>,
-    completion_sender: crossbeam_channel::Sender<()>,
+    completed: crossbeam_channel::Receiver<TimerCompletion>,
+    completion_sender: crossbeam_channel::Sender<TimerCompletion>,
+    clients: ClientTimers,
     shutdown_due: bool,
 }
 
@@ -173,14 +289,18 @@ impl LoopTimers {
             shared.timer_tx.wake.install(Arc::clone(waker));
         }
         let (completion_sender, completed) = crossbeam_channel::unbounded();
+        let mut deadlines = Deadlines::default();
+        let mut clients = ClientTimers::default();
+        clients.sync(shared, &mut deadlines, Instant::now());
         Self {
             inputs,
-            deadlines: Deadlines::default(),
+            deadlines,
             pending: VecDeque::new(),
             worker_running: false,
             completed,
             completion_sender,
             shutdown_due: false,
+            clients,
         }
     }
 
@@ -214,26 +334,103 @@ impl LoopTimers {
         shared: &Arc<Shared>,
         waker: &Arc<mio::Waker>,
     ) -> Result<(), DaemonError> {
-        if self.completed.try_recv().is_ok() {
-            self.worker_running = false;
-        }
-        if let Some(inputs) = &self.inputs {
-            for input in inputs.try_iter().take(TIMER_INPUT_BURST) {
-                shared.schedule_timer(&mut self.deadlines, &input);
+        let mut changed = false;
+        for completion in self.completed.try_iter() {
+            match completion {
+                TimerCompletion::Expiries => self.worker_running = false,
+                TimerCompletion::Monitor => {
+                    self.clients.monitor_running = false;
+                    changed = true;
+                }
+                TimerCompletion::Peer => {
+                    self.clients.peer_running = false;
+                    changed = true;
+                }
             }
         }
+        let mut status_jobs = false;
+        if let Some(inputs) = &self.inputs {
+            for input in inputs.try_iter().take(TIMER_INPUT_BURST) {
+                match input {
+                    TimerInput::ClientTimersChanged => changed = true,
+                    TimerInput::StatusJobs => status_jobs = true,
+                    _ => shared.schedule_timer(&mut self.deadlines, &input),
+                }
+            }
+        }
+        if status_jobs {
+            shared.refresh_status_notifications();
+        }
+        if changed {
+            self.clients
+                .sync(shared, &mut self.deadlines, Instant::now());
+        }
         let now = Instant::now();
+        let mut status_sessions = BTreeSet::new();
+        let mut recurring_due = false;
         for _ in 0..TIMER_EXPIRY_BURST {
             let Some(expiry) = self.deadlines.pop_due(now) else {
                 break;
             };
             match expiry {
                 Expiry::Shutdown => self.shutdown_due = true,
+                Expiry::Status(session) => {
+                    recurring_due = true;
+                    status_sessions.insert(session);
+                }
+                Expiry::Subscriptions => {
+                    recurring_due = true;
+                    shared.refresh_control_subscriptions();
+                }
+                Expiry::Labels => {
+                    recurring_due = true;
+                    shared.publish_mux_labels();
+                }
+                Expiry::Diagnostics => {
+                    recurring_due = true;
+                    shared.log_diagnostic_snapshot("periodic");
+                }
+                Expiry::Monitors | Expiry::PeerProbe => {
+                    recurring_due = true;
+                    let peer = matches!(expiry, Expiry::PeerProbe);
+                    if peer {
+                        self.clients.peer_running = true;
+                        shared.prepare_peer_probe(&mut self.clients.probe, now);
+                    } else {
+                        self.clients.monitor_running = true;
+                    }
+                    let owner = shared.server_owner();
+                    let completed = self.completion_sender.clone();
+                    let wake = Arc::clone(waker);
+                    let job: Box<dyn FnOnce() + Send> = Box::new(move || {
+                        owner.run_timer_expiry(expiry, now);
+                        let _ = completed.send(if peer {
+                            TimerCompletion::Peer
+                        } else {
+                            TimerCompletion::Monitor
+                        });
+                        let _ = wake.wake();
+                    });
+                    if peer {
+                        thread::Builder::new()
+                            .name("zz-peer-probe".to_owned())
+                            .spawn(job)?;
+                    } else {
+                        shared.connection_threads.run(job)?;
+                    }
+                }
                 Expiry::DisplayPanes(_) | Expiry::KeyTable(_) => {
                     shared.run_timer_expiry(expiry, now);
                 }
                 _ => self.pending.push_back((expiry, now)),
             }
+        }
+        if !status_sessions.is_empty() {
+            shared.refresh_status_for_sessions(Some(&status_sessions));
+        }
+        if recurring_due {
+            self.clients
+                .sync(shared, &mut self.deadlines, Instant::now());
         }
         if !self.worker_running && !self.pending.is_empty() {
             let expiries = self
@@ -248,7 +445,7 @@ impl LoopTimers {
                 for (expiry, now) in expiries {
                     shared.run_timer_expiry(expiry, now);
                 }
-                let _ = completed.send(());
+                let _ = completed.send(TimerCompletion::Expiries);
                 let _ = waker.wake();
             }))?;
             self.worker_running = true;
@@ -324,13 +521,21 @@ impl Shared {
             .name("zz-deadlines".to_owned())
             .spawn(move || {
                 let mut deadlines = Deadlines::default();
+                let mut clients = ClientTimers::default();
+                if let Some(shared) = shared.upgrade() {
+                    clients.sync(&shared, &mut deadlines, Instant::now());
+                }
                 loop {
                     let now = Instant::now();
                     while let Some(expiry) = deadlines.pop_due(now) {
                         let Some(shared) = shared.upgrade() else {
                             return;
                         };
+                        if matches!(expiry, Expiry::PeerProbe) {
+                            shared.prepare_peer_probe(&mut clients.probe, now);
+                        }
                         shared.run_timer_expiry(expiry, now);
+                        clients.sync(&shared, &mut deadlines, Instant::now());
                     }
                     let input = match deadlines.next() {
                         Some(deadline) => match inputs.recv_deadline(deadline) {
@@ -347,6 +552,9 @@ impl Shared {
                         return;
                     };
                     shared.schedule_timer(&mut deadlines, &input);
+                    if matches!(input, TimerInput::ClientTimersChanged) {
+                        clients.sync(&shared, &mut deadlines, Instant::now());
+                    }
                 }
             })
             .map(drop)
@@ -355,6 +563,8 @@ impl Shared {
 
     fn schedule_timer(&self, deadlines: &mut Deadlines, input: &TimerInput) {
         match *input {
+            TimerInput::ClientTimersChanged => {}
+            TimerInput::StatusJobs => self.refresh_status_notifications(),
             TimerInput::DisplayPanes(DisplayPanesDeadlineCommand::Schedule(deadline)) => {
                 if self.read_client(deadline.client, |c| {
                     c.and_then(|c| c.display_panes.as_ref())
@@ -469,6 +679,17 @@ impl Shared {
             Expiry::ClientMessage(deadline) => self.expire_client_message(deadline, now),
             Expiry::Rename => self.apply_due_window_renames(now),
             Expiry::PublishFlush => self.flush_publish(),
+            Expiry::Status(session) => {
+                self.refresh_status_for_sessions(Some(&BTreeSet::from([session])));
+            }
+            Expiry::Subscriptions => self.refresh_control_subscriptions(),
+            Expiry::Monitors => self.run_format_monitors(),
+            Expiry::Labels => self.publish_mux_labels(),
+            Expiry::Diagnostics => self.log_diagnostic_snapshot("periodic"),
+            Expiry::PeerProbe => {
+                #[cfg(all(feature = "agent", unix))]
+                self.sync_claude_peer_states();
+            }
             #[cfg(unix)]
             Expiry::Shutdown => unreachable!(),
         }
@@ -670,40 +891,54 @@ impl Shared {
         })
     }
 
-    pub(super) fn status_tick_needed(inner: &ServerState) -> bool {
-        inner
-            .clients
-            .values()
-            .filter_map(|c| c.control_output.as_ref())
-            .any(|output| !output.subscriptions.is_empty())
-            || inner.engine.has_format_monitors()
-            || Self::peer_scan_armed(inner)
+    pub(super) fn control_subscriptions_needed(inner: &ServerState) -> bool {
+        inner.clients.iter().any(|(client, state)| {
+            client_attached_session(inner, *client).is_some()
+                && state
+                    .control_output
+                    .as_ref()
+                    .is_some_and(|output| !output.subscriptions.is_empty())
+        })
     }
 
-    pub(super) fn status_sampler_sessions(
+    pub(super) fn clock_labels_needed(inner: &ServerState) -> bool {
+        inner.clients.iter().any(|(client, state)| {
+            state.subscriber.is_some()
+                && client_attached_session(inner, *client).is_some()
+                && state
+                    .ctrl_subscriptions
+                    .as_ref()
+                    .is_none_or(|subscriptions| {
+                        subscriptions.tree != zz_protocol::TreeSubscription::None
+                    })
+        }) && inner.engine.window_labels_follow_the_clock()
+    }
+
+    pub(super) fn status_timer_sessions(
         inner: &ServerState,
     ) -> impl Iterator<Item = SessionId> + '_ {
         inner
             .clients
             .iter()
-            .filter_map(|(id, client)| client.subscriber.as_ref().map(|_| id))
-            .filter(|client| {
-                inner
-                    .client(**client)
-                    .and_then(|c| c.ctrl_subscriptions.as_ref())
-                    .is_none_or(|subscription| subscription.status)
+            .filter(|(_, client)| {
+                client.subscriber.is_some()
+                    && client
+                        .ctrl_subscriptions
+                        .as_ref()
+                        .is_none_or(|subscription| subscription.status)
             })
-            .filter_map(|client| client_attached_session(inner, *client))
+            .filter_map(|(client, _)| client_attached_session(inner, *client))
     }
 
-    pub(super) fn status_sampler_has_work(inner: &ServerState) -> bool {
-        Self::status_tick_needed(inner)
-            || Self::status_sampler_sessions(inner).any(|session| {
-                !inner
-                    .engine
-                    .status_formats_for_session(Some(session))
-                    .interval
-                    .is_zero()
+    #[cfg(test)]
+    pub(super) fn client_timers_have_work(inner: &ServerState) -> bool {
+        Self::control_subscriptions_needed(inner)
+            || inner.engine.has_format_monitors()
+            || Self::clock_labels_needed(inner)
+            || Self::peer_scan_armed(inner)
+            || Self::status_timer_sessions(inner).any(|session| {
+                let formats = inner.engine.status_formats_for_session(Some(session));
+                formats.enabled && !formats.interval.is_zero()
             })
     }
 
@@ -722,75 +957,59 @@ impl Shared {
         if self.peer_probe.load(Ordering::Relaxed) || self.peer_probe.swap(true, Ordering::AcqRel) {
             return;
         }
-        if let Some(sampler) = self.status_sampler.lock().as_ref() {
-            sampler.unpark();
-        }
+        self.nudge_client_timers();
     }
 
     #[cfg(not(all(feature = "agent", unix)))]
     pub(super) fn request_peer_probe(&self) {}
 
-    #[cfg(all(feature = "agent", unix))]
-    pub(super) fn run_peer_probe(
-        self: &Arc<Self>,
-        armed: bool,
-        probe: &mut PeerProbe,
-    ) -> Option<Instant> {
-        if armed {
-            return None;
-        }
-        let requested = self.peer_probe.load(Ordering::Acquire);
-        if !requested && !probe.follow_up {
-            return None;
-        }
-        let now = Instant::now();
-        if let Some(next) = probe
-            .last
-            .map(|last| last + PEER_PROBE_INTERVAL)
-            .filter(|next| now < *next)
+    fn peer_probe_requested(&self) -> bool {
+        #[cfg(all(feature = "agent", unix))]
         {
-            return Some(next);
+            self.peer_probe.load(Ordering::Acquire)
         }
-        if requested {
-            self.peer_probe.store(false, Ordering::Release);
+        #[cfg(not(all(feature = "agent", unix)))]
+        {
+            false
         }
-        probe.follow_up = requested;
+    }
+
+    fn prepare_peer_probe(&self, probe: &mut PeerProbe, now: Instant) {
+        #[cfg(all(feature = "agent", unix))]
+        {
+            probe.follow_up = self.peer_probe.swap(false, Ordering::AcqRel);
+        }
         probe.last = Some(now);
-        self.sync_claude_peer_states();
-        probe.follow_up.then(|| now + PEER_PROBE_INTERVAL)
     }
 
-    #[cfg(not(all(feature = "agent", unix)))]
-    pub(super) fn run_peer_probe(
-        self: &Arc<Self>,
-        _armed: bool,
-        _probe: &mut PeerProbe,
-    ) -> Option<Instant> {
-        None
+    fn refresh_status_notifications(&self) {
+        let (modes, jobs) = {
+            let mut status = self.status.lock();
+            (status.take_pending_modes(), status.poll_jobs())
+        };
+        if !modes.is_empty() {
+            self.refresh_modes(&modes);
+        }
+        if !jobs.is_empty() {
+            self.refresh_status_filtered(None, Some(&jobs));
+        }
     }
 
-    pub(super) fn nudge_status_sampler(&self) {
-        if !self.status_sampler_idle.load(Ordering::SeqCst) {
-            return;
-        }
-        if !Self::status_sampler_has_work(&self.inner.lock()) {
-            return;
-        }
-        if let Some(sampler) = self.status_sampler.lock().as_ref() {
-            sampler.unpark();
-        }
+    pub(super) fn nudge_client_timers(&self) {
+        let _ = self.timer_tx.send(TimerInput::ClientTimersChanged);
     }
 }
 
 impl Drop for SharedServer {
     fn drop(&mut self) {
         self.timer_tx.wake.wake();
-        if let Some(sampler) = self.status_sampler.get_mut().take() {
-            sampler.unpark();
-        }
     }
 }
 
 #[cfg(all(test, unix))]
 #[path = "timer_loop_tests.rs"]
 mod loop_tests;
+
+#[cfg(all(test, unix))]
+#[path = "status_loop_tests.rs"]
+mod client_tests;

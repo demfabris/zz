@@ -174,7 +174,7 @@ pub(crate) struct StatusRenderer {
     published: BTreeMap<ClientId, Arc<StatusLine>>,
     tmux_shim: Option<PathBuf>,
     zz_executable: Option<PathBuf>,
-    job_waker: Option<thread::Thread>,
+    job_waker: Option<std::task::Waker>,
     pending_modes: BTreeSet<ClientId>,
     job_needs: StatusJobNeeds,
     uncovered_jobs: BTreeSet<ClientId>,
@@ -1404,14 +1404,14 @@ pub(crate) struct MessageFormatFacts {
 }
 
 impl StatusRenderer {
-    pub(crate) fn set_job_waker(&mut self, waker: thread::Thread) {
+    pub(crate) fn set_job_waker(&mut self, waker: std::task::Waker) {
         self.job_waker = Some(waker);
     }
 
     pub(crate) fn request_mode_refresh(&mut self, clients: BTreeSet<ClientId>) {
         self.pending_modes.extend(clients);
         if let Some(waker) = &self.job_waker {
-            waker.unpark();
+            waker.wake_by_ref();
         }
     }
 
@@ -1686,7 +1686,7 @@ impl StatusRenderer {
         if uncovered {
             self.uncovered_jobs.insert(request.client);
             if let Some(waker) = &self.job_waker {
-                waker.unpark();
+                waker.wake_by_ref();
             }
         }
         uncovered
@@ -1877,7 +1877,7 @@ fn render(
     now: i64,
     tmux_shim: Option<&std::path::Path>,
     zz_executable: Option<&std::path::Path>,
-    job_waker: Option<&thread::Thread>,
+    job_waker: Option<&std::task::Waker>,
     parts: Option<&StatusParts>,
 ) -> StatusLine {
     let title = request
@@ -2332,7 +2332,7 @@ pub(crate) struct DaemonFormatHooks<'a> {
     startup: bool,
     tmux_shim: Option<&'a std::path::Path>,
     zz_executable: Option<&'a std::path::Path>,
-    job_waker: Option<&'a thread::Thread>,
+    job_waker: Option<&'a std::task::Waker>,
     facts_withheld: bool,
     buffer_override: Option<BufferFormatFacts>,
     pane_in_mode_override: Option<(PaneId, usize)>,
@@ -2422,7 +2422,7 @@ impl<'a> DaemonFormatHooks<'a> {
         startup: bool,
         tmux_shim: Option<&'a std::path::Path>,
         zz_executable: Option<&'a std::path::Path>,
-        job_waker: Option<&'a thread::Thread>,
+        job_waker: Option<&'a std::task::Waker>,
     ) -> Self {
         Self {
             status_client: Some(client),
@@ -3204,7 +3204,7 @@ fn run_shell(
     startup: bool,
     tmux_shim: Option<&std::path::Path>,
     zz_executable: Option<&std::path::Path>,
-    job_waker: Option<thread::Thread>,
+    job_waker: Option<std::task::Waker>,
 ) -> Option<ShellJob> {
     let mut process = shell_process(command);
     let socket_path = context.variable("socket_path").unwrap_or_default();
@@ -3270,7 +3270,7 @@ fn run_shell(
                                     output.latest = Some(line);
                                     output.streamed = true;
                                     if let Some(waker) = &job_waker {
-                                        waker.unpark();
+                                        waker.wake_by_ref();
                                     }
                                     pending.clear();
                                     updated = true;
@@ -3291,7 +3291,7 @@ fn run_shell(
                 }
                 output.complete = true;
                 if let Some(waker) = &job_waker {
-                    waker.unpark();
+                    waker.wake_by_ref();
                 }
             });
         if reader.is_ok() {
@@ -4814,14 +4814,23 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn status_job_output_wakes_the_renderer_before_the_sampler_tick() {
+    fn status_job_output_wakes_the_renderer_without_a_periodic_deadline() {
         let mut renderer = StatusRenderer::default();
-        renderer.set_job_waker(thread::current());
+        struct JobWake(std::sync::mpsc::Sender<()>);
+        impl std::task::Wake for JobWake {
+            fn wake(self: Arc<Self>) {
+                let _ = self.0.send(());
+            }
+        }
+        let (sender, updates) = std::sync::mpsc::channel();
+        renderer.set_job_waker(std::task::Waker::from(Arc::new(JobWake(sender))));
         let request = request(1, "#(printf ready)", "");
         assert!(renderer.render_initial(&request).left.is_empty());
         let deadline = Instant::now() + Duration::from_millis(750);
         loop {
-            thread::park_timeout(deadline.saturating_duration_since(Instant::now()));
+            updates
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .expect("job notification");
             renderer.poll_jobs();
             if renderer
                 .shell_cache
@@ -4837,7 +4846,7 @@ mod tests {
         }
         assert!(
             Instant::now() < deadline,
-            "shell output waited for the sampler tick"
+            "shell output did not arrive promptly"
         );
     }
 

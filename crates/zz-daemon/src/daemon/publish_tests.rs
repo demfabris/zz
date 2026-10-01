@@ -413,26 +413,26 @@ fn status_interval_work_respects_subscriptions_and_keeps_independent_timers() {
         .client_entry(client)
         .ctrl_subscriptions
         .replace(zz_protocol::Subscriptions::control());
-    assert_eq!(Shared::status_sampler_sessions(&inner).count(), 0);
-    assert!(!Shared::status_sampler_has_work(&inner));
+    assert_eq!(Shared::status_timer_sessions(&inner).count(), 0);
+    assert!(!Shared::client_timers_have_work(&inner));
     inner
         .client_mut(client)
         .and_then(|c| c.ctrl_subscriptions.as_mut())
         .expect("compact client")
         .status = true;
     assert_eq!(
-        Shared::status_sampler_sessions(&inner).collect::<Vec<_>>(),
+        Shared::status_timer_sessions(&inner).collect::<Vec<_>>(),
         [session]
     );
-    assert!(Shared::status_sampler_has_work(&inner));
+    assert!(Shared::client_timers_have_work(&inner));
     inner
         .client_mut(client)
         .and_then(|c| c.ctrl_subscriptions.take());
     assert_eq!(
-        Shared::status_sampler_sessions(&inner).collect::<Vec<_>>(),
+        Shared::status_timer_sessions(&inner).collect::<Vec<_>>(),
         [session]
     );
-    assert!(Shared::status_sampler_has_work(&inner));
+    assert!(Shared::client_timers_have_work(&inner));
     inner
         .client_entry(client)
         .ctrl_subscriptions
@@ -450,7 +450,7 @@ fn status_interval_work_respects_subscriptions_and_keeps_independent_timers() {
                 previous: BTreeMap::new(),
             },
         );
-    assert!(Shared::status_sampler_has_work(&inner));
+    assert!(Shared::client_timers_have_work(&inner));
     inner
         .client_mut(client)
         .and_then(|c| c.control_output.as_mut())
@@ -467,7 +467,7 @@ fn status_interval_work_respects_subscriptions_and_keeps_independent_timers() {
             ),
         )
         .expect("format monitor");
-    assert!(Shared::status_sampler_has_work(&inner));
+    assert!(Shared::client_timers_have_work(&inner));
     inner
         .engine
         .execute(
@@ -475,13 +475,13 @@ fn status_interval_work_respects_subscriptions_and_keeps_independent_timers() {
             &CommandInvocation::new("set-hook", ["-u", "-B", "@zzsampler"]),
         )
         .expect("remove format monitor");
-    assert!(!Shared::status_sampler_has_work(&inner));
+    assert!(!Shared::client_timers_have_work(&inner));
     #[cfg(all(feature = "agent", unix))]
     {
         inner.claude_peer_states.insert(pane, "Ready".to_owned());
-        assert!(Shared::status_sampler_has_work(&inner));
+        assert!(Shared::client_timers_have_work(&inner));
         inner.claude_peer_states.clear();
-        assert!(!Shared::status_sampler_has_work(&inner));
+        assert!(!Shared::client_timers_have_work(&inner));
     }
     inner.engine.set_automatic_rename_throttle(true);
     for command in ["first", "second"] {
@@ -498,128 +498,12 @@ fn status_interval_work_respects_subscriptions_and_keeps_independent_timers() {
         .next_window_rename_deadline()
         .expect("pending rename");
     shared.schedule_window_renames(&mut inner);
-    assert!(!Shared::status_sampler_has_work(&inner));
+    assert!(!Shared::client_timers_have_work(&inner));
     drop(inner);
     assert!(matches!(
         shared.timer_rx.lock().as_ref().expect("timers").try_recv(),
         Ok(timers::TimerInput::Timer(timers::TimerCommand::Rename(queued))) if queued == deadline
     ));
-}
-
-#[test]
-fn read_only_control_does_not_unpark_an_idle_unsubscribed_status_sampler() {
-    let shared = Arc::new(Shared::new(1));
-    let mut context = ExecutionContext::default();
-    let (client, _) =
-        shared.register_subscribed(ClientKind::Control, None, None, OutboundMailbox::new());
-    {
-        let mut inner = shared.inner.lock();
-        inner
-            .engine
-            .execute(&mut context, &CommandInvocation::new("new-session", ["-d"]))
-            .expect("model session");
-        inner
-            .attached
-            .entry(context.session.expect("session"))
-            .or_default()
-            .insert(client);
-        inner
-            .client_entry(client)
-            .ctrl_subscriptions
-            .replace(zz_protocol::Subscriptions::control());
-    }
-    let (started, ready) = crossbeam_channel::bounded(1);
-    let (awake, observed) = crossbeam_channel::bounded(1);
-    let sampler = thread::spawn(move || {
-        started.send(thread::current()).expect("sampler ready");
-        thread::park_timeout(Duration::from_secs(5));
-        let _ = awake.send(());
-    });
-    let sampler_thread = ready
-        .recv_timeout(Duration::from_secs(2))
-        .expect("sampler thread");
-    *shared.status_sampler.lock() = Some(sampler_thread.clone());
-    shared.status_sampler_idle.store(true, Ordering::SeqCst);
-    for _ in 0..20 {
-        shared
-            .execute(
-                client,
-                ClientKind::Control,
-                &mut context,
-                &CommandInvocation::new("display-message", ["-p", "query"]),
-            )
-            .expect("read-only query");
-    }
-    let stayed_idle = observed.recv_timeout(Duration::from_millis(50)).is_err();
-    shared
-        .inner
-        .lock()
-        .engine
-        .execute(
-            &mut context,
-            &CommandInvocation::new(
-                "set-hook",
-                ["-B", "@zzwake:@*:#{window_name}", "set -g @fired yes"],
-            ),
-        )
-        .expect("format monitor");
-    shared.nudge_status_sampler();
-    let woke_for_work = observed.recv_timeout(Duration::from_secs(2)).is_ok();
-    sampler_thread.unpark();
-    sampler.join().expect("sampler observer");
-    assert!(stayed_idle, "a read-only query woke an unrequested sampler");
-    assert!(woke_for_work, "the idle sampler missed independent work");
-}
-
-#[test]
-fn the_status_sampler_parks_until_its_tick_has_work() {
-    let shared = Arc::new(Shared::new(1));
-    shared.start_status_sampler().expect("start sampler");
-    let wait_for = |idle: bool| {
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while shared.status_sampler_idle.load(Ordering::SeqCst) != idle {
-            assert!(
-                Instant::now() < deadline,
-                "sampler never became idle={idle}"
-            );
-            thread::sleep(Duration::from_millis(5));
-        }
-    };
-    let mut context = ExecutionContext::default();
-    shared
-        .inner
-        .lock()
-        .engine
-        .execute(
-            &mut context,
-            &CommandInvocation::new("new-session", ["-d", "-s", "sampler"]),
-        )
-        .expect("mux-only session");
-    let mut run = |args: &[&str]| {
-        shared
-            .execute(
-                ClientId(1),
-                ClientKind::Command,
-                &mut context,
-                &CommandInvocation::new(args[0], args[1..].iter().copied()),
-            )
-            .expect("command");
-    };
-    wait_for(true);
-    let mailbox = OutboundMailbox::new();
-    shared.register_subscribed(ClientKind::Interactive, None, None, mailbox);
-    thread::sleep(Duration::from_millis(50));
-    assert!(shared.status_sampler_idle.load(Ordering::SeqCst));
-    run(&[
-        "set-hook",
-        "-B",
-        "@zzpub:@*:#{window_name}",
-        "set -g @fired yes",
-    ]);
-    wait_for(false);
-    run(&["set-hook", "-u", "-B", "@zzpub"]);
-    wait_for(true);
-    shared.request_shutdown();
 }
 
 #[cfg(unix)]
@@ -922,7 +806,7 @@ fn a_pane_whose_root_process_is_the_agent_gets_its_peer_state() {
     }
     let directory = PathBuf::from(std::env::var_os("CLAUDE_CONFIG_DIR").expect("peer config"));
     let shared = Arc::new(Shared::new(1));
-    shared.start_status_sampler().expect("start sampler");
+    shared.start_timers().expect("start timers");
     let mut context = ExecutionContext::default();
     shared
         .execute(

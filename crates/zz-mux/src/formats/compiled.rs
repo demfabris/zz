@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, ops::Range};
+use std::{collections::HashMap, ops::Range};
 
 use super::*;
 
@@ -9,8 +9,9 @@ const CACHE_CONTAINER_BYTES: usize = 64 * 1024;
 static COMPILED_FORMATS: LazyLock<bool> =
     LazyLock::new(|| std::env::var("ZZ_PERF_COMPILED_FORMATS").as_deref() != Ok("0"));
 
+static CACHE: LazyLock<Mutex<Cache>> = LazyLock::new(Mutex::default);
+
 thread_local! {
-    static CACHE: RefCell<Cache> = RefCell::new(Cache::default());
     #[cfg(test)]
     static ENABLED: Cell<Option<bool>> = const { Cell::new(None) };
 }
@@ -46,34 +47,41 @@ pub(super) fn get(source: &str) -> Arc<Template> {
     if !format_cache_knob() {
         return Arc::new(Template::parse(source, false));
     }
-    if let Some(template) = CACHE.with_borrow(|cache| cache.entries.get(source).cloned()) {
+    if let Some(template) = CACHE.lock().entries.get(source).cloned() {
         return template;
     }
     let template = Arc::new(Template::parse(source, false));
-    let bytes = template
-        .bytes
-        .saturating_add(source.len().saturating_mul(2));
-    if bytes > CACHE_BYTES - CACHE_CONTAINER_BYTES {
-        return template;
-    }
-    CACHE.with_borrow_mut(|cache| {
-        while cache.entries.len() >= CACHE_ENTRIES
-            || cache.bytes.saturating_add(bytes) > CACHE_BYTES - CACHE_CONTAINER_BYTES
+    CACHE.lock().insert(source, template)
+}
+
+impl Cache {
+    fn insert(&mut self, source: &str, template: Arc<Template>) -> Arc<Template> {
+        if let Some(cached) = self.entries.get(source) {
+            return Arc::clone(cached);
+        }
+        let bytes = template
+            .bytes
+            .saturating_add(source.len().saturating_mul(2));
+        if bytes > CACHE_BYTES - CACHE_CONTAINER_BYTES {
+            return template;
+        }
+        while self.entries.len() >= CACHE_ENTRIES
+            || self.bytes.saturating_add(bytes) > CACHE_BYTES - CACHE_CONTAINER_BYTES
         {
-            let Some(oldest) = cache.order.pop_front() else {
+            let Some(oldest) = self.order.pop_front() else {
                 break;
             };
-            if let Some(removed) = cache.entries.remove(oldest.as_ref()) {
-                cache.bytes = cache
+            if let Some(removed) = self.entries.remove(oldest.as_ref()) {
+                self.bytes = self
                     .bytes
                     .saturating_sub(removed.bytes.saturating_add(oldest.len().saturating_mul(2)));
             }
         }
-        cache.bytes = cache.bytes.saturating_add(bytes);
-        cache.order.push_back(source.into());
-        cache.entries.insert(source.into(), template.clone());
-    });
-    template
+        self.bytes = self.bytes.saturating_add(bytes);
+        self.order.push_back(source.into());
+        self.entries.insert(source.into(), Arc::clone(&template));
+        template
+    }
 }
 
 pub(super) struct Template {
@@ -1574,11 +1582,9 @@ mod tests {
 
     #[test]
     fn compiled_cache_retention_respects_format_cache_rollback() {
-        CACHE.with_borrow_mut(|cache| *cache = Cache::default());
-        let before =
-            CACHE.with_borrow(|cache| (cache.entries.len(), cache.order.len(), cache.bytes));
-        let first = get("clock-retention:#{t/d:start_time}");
-        let second = get("clock-retention:#{t/d:start_time}");
+        let source = "clock-retention:#{t/d:start_time}";
+        let first = get(source);
+        let second = get(source);
         assert_eq!(Arc::ptr_eq(&first, &second), format_cache_knob());
         assert_eq!(
             Arc::ptr_eq(&first.format_parts, &second.format_parts),
@@ -1586,17 +1592,16 @@ mod tests {
         );
         assert!(first.clock_dependent);
         assert_eq!(first.references, second.references);
-        CACHE.with_borrow(|cache| {
-            if format_cache_knob() {
-                assert_eq!(cache.entries.len(), before.0 + 1);
-                assert_eq!(cache.order.len(), before.1 + 1);
-            } else {
-                assert_eq!(
-                    (cache.entries.len(), cache.order.len(), cache.bytes),
-                    before
-                );
-            }
-        });
+        let cache = CACHE.lock();
+        assert_eq!(cache.entries.contains_key(source), format_cache_knob());
+        assert_eq!(
+            cache
+                .order
+                .iter()
+                .filter(|entry| entry.as_ref() == source)
+                .count(),
+            usize::from(format_cache_knob()),
+        );
     }
 
     #[test]
@@ -1683,8 +1688,16 @@ mod tests {
     }
 
     #[test]
+    fn compiled_templates_reuse_syntax_across_connection_threads() {
+        let source = "shared-connection-syntax:#{pane_id}";
+        let first = std::thread::spawn(move || get(source)).join().unwrap();
+        let second = std::thread::spawn(move || get(source)).join().unwrap();
+        assert_eq!(Arc::ptr_eq(&first, &second), format_cache_knob());
+    }
+
+    #[test]
     fn compiled_cache_rejects_templates_with_oversized_spare_operation_capacity() {
-        CACHE.with_borrow_mut(|cache| *cache = Cache::default());
+        let mut cache = Cache::default();
         let count = (CACHE_BYTES / (std::mem::size_of::<Operation>() * 2)).next_power_of_two() + 1;
         let source = "#S".repeat(count);
         let template = Template::parse(&source, false);
@@ -1699,20 +1712,19 @@ mod tests {
             .saturating_mul(std::mem::size_of::<Operation>());
         assert!(bytes > CACHE_BYTES - CACHE_CONTAINER_BYTES);
         assert!(bytes.saturating_sub(spare) <= CACHE_BYTES - CACHE_CONTAINER_BYTES);
-        get(&source);
-        CACHE.with_borrow(|cache| {
-            assert!(!cache.entries.contains_key(source.as_str()));
-            assert_eq!(cache.bytes, 0);
-        });
+        cache.insert(&source, Arc::new(template));
+        assert!(!cache.entries.contains_key(source.as_str()));
+        assert_eq!(cache.bytes, 0);
     }
 
     #[test]
     fn compiled_cache_bounds_and_references_follow_operations() {
-        CACHE.with_borrow_mut(|cache| *cache = Cache::default());
+        let mut cache = Cache::default();
         for index in 0..CACHE_ENTRIES * 2 {
-            get(&format!("{index}:#{{pane_id}}"));
+            let source = format!("{index}:#{{pane_id}}");
+            cache.insert(&source, Arc::new(Template::parse(&source, false)));
         }
-        CACHE.with_borrow(|cache| {
+        {
             assert!(cache.entries.len() <= CACHE_ENTRIES);
             assert!(cache.bytes.saturating_add(CACHE_CONTAINER_BYTES) <= CACHE_BYTES);
             assert_eq!(
@@ -1728,12 +1740,7 @@ mod tests {
                         )
                     }),
             );
-            if !format_cache_knob() {
-                assert!(cache.entries.is_empty());
-                assert!(cache.order.is_empty());
-                assert_eq!(cache.bytes, 0);
-            }
-        });
+        }
         let template = get("#S #{?pane_active,#{p/#{@width}/:pane_id},#{E:status-left}}");
         for name in [
             "session_name",
@@ -1764,7 +1771,7 @@ mod tests {
             );
         }
         let oversized = "x".repeat(CACHE_BYTES);
-        get(&oversized);
-        CACHE.with_borrow(|cache| assert!(!cache.entries.contains_key(oversized.as_str())));
+        cache.insert(&oversized, Arc::new(Template::parse(&oversized, false)));
+        assert!(!cache.entries.contains_key(oversized.as_str()));
     }
 }

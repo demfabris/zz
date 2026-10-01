@@ -141,7 +141,33 @@ fn facts_are_withheld_only_from_commands_that_expand_nothing() {
     assert!(!unread(&["set-window-option", "automatic-rename"]));
     assert!(!unread(&["show-options", "-g", "#{hook}"]));
     assert!(!unread(&["display-message", "-p", "x"]));
-    assert!(!unread(&["list-keys"]));
+    for args in [
+        &["list-keys"][..],
+        &["list-keys", "-1Nr", "-Troot", "-Oname"][..],
+        &["list-keys", "-N", "-P", "-F"][..],
+        &["list-keys", "-T", "root", "--", "-F"][..],
+        &["source-file", "config.conf"][..],
+        &["source-file", "-nqv", "-t", "s:0", "config.conf"][..],
+        &["source-file", "-t", "-F", "config.conf"][..],
+        &["source-file", "--", "-F"][..],
+        &["source-file", "literal-#{session_name}.conf"][..],
+    ] {
+        assert!(unread(args), "{args:?}");
+    }
+    for args in [
+        &["list-keys", "-F", "#{client_name}"][..],
+        &["list-keys", "-F", "literal"][..],
+        &["list-keys", "-NF#{client_name}"][..],
+        &["list-keys", "-F"][..],
+        &["list-keys", "-T"][..],
+        &["list-keys", "-Z"][..],
+        &["source-file", "-F", "#{session_name}.conf"][..],
+        &["source-file", "-qF", "literal.conf"][..],
+        &["source-file", "-t"][..],
+        &["source-file", "-Z", "config.conf"][..],
+    ] {
+        assert!(!unread(args), "{args:?}");
+    }
 
     let (shared, mut context) = pane_fixture("facts");
     run(

@@ -10,7 +10,7 @@ use crate::{
     tmux_options::STATUS_FORMAT_DEFAULTS,
 };
 
-const FORMATS: &[&str] = &[
+pub(crate) const FORMATS: &[&str] = &[
     "#{session_name}:#{window_index}.#{pane_index} #{pane_flags}#{window_flags}",
     "#{S:#{session_name}=#{session_active}#{session_windows}#{session_alerts}|}",
     "#{S/n:#{session_name},[#{session_name}]}",
@@ -226,7 +226,7 @@ fn several_sessions() -> MuxEngine {
     engine
 }
 
-fn fixtures() -> [(&'static str, MuxEngine); 3] {
+pub(crate) fn fixtures() -> [(&'static str, MuxEngine); 3] {
     [
         ("one pane", one_pane()),
         ("twenty panes", twenty_panes()),
@@ -236,7 +236,7 @@ fn fixtures() -> [(&'static str, MuxEngine); 3] {
 
 type Target = (Option<SessionId>, Option<WindowId>, Option<PaneId>);
 
-fn targets(engine: &MuxEngine) -> Vec<Target> {
+pub(crate) fn targets(engine: &MuxEngine) -> Vec<Target> {
     let mut targets = vec![(None, None, None)];
     for session in engine.state.sessions.values() {
         targets.push((Some(session.id), None, None));
@@ -250,7 +250,7 @@ fn targets(engine: &MuxEngine) -> Vec<Target> {
     targets
 }
 
-fn clients(engine: &MuxEngine) -> Vec<FormatClient> {
+pub(crate) fn clients(engine: &MuxEngine) -> Vec<FormatClient> {
     let mut clients = vec![FormatClient::NoClient, FormatClient::Unattached];
     clients.extend(
         engine

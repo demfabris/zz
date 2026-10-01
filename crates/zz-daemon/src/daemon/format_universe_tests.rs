@@ -274,6 +274,7 @@ fn mode_requests_render_the_same_presentation_on_a_detached_universe() {
             &inner,
             &contexts,
             needs,
+            false,
             fixture.alpha,
             fixture.alpha_pane,
             false,
@@ -301,8 +302,8 @@ fn border_presentations_expand_the_same_styles_on_one_shared_universe() {
             fixture.alpha,
             &format_hook_facts(&inner),
         )
-        .into_iter()
-        .map(|border| (border.pane, border.style))
+        .iter()
+        .map(|border| (border.pane, border.style.clone()))
         .collect::<Vec<_>>()
     });
 }

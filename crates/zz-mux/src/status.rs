@@ -328,19 +328,26 @@ impl WindowStatusFormats {
         }
     }
 
+    pub(crate) fn parse_value(option: WindowStatusOption, value: &str) -> Result<String, String> {
+        if option.is_style() {
+            parse_style_option(value)
+        } else {
+            parse_format(value)
+        }
+    }
+
     pub fn set(&mut self, option: WindowStatusOption, value: Option<&str>) -> Result<bool, String> {
-        let defaults = Self::default();
-        let next = value.map_or_else(
-            || Ok(defaults.value(option).to_owned()),
-            |value| {
-                if option.is_style() {
-                    parse_style_option(value)
-                } else if value.len() > MAX_STATUS_FORMAT_BYTES {
-                    Err("status format exceeds the supported length".to_owned())
-                } else {
-                    Ok(value.to_owned())
+        let next = Self::parse_value(
+            option,
+            value.unwrap_or(match option {
+                WindowStatusOption::Format | WindowStatusOption::CurrentFormat => {
+                    DEFAULT_WINDOW_STATUS_FORMAT
                 }
-            },
+                WindowStatusOption::Separator => " ",
+                WindowStatusOption::Style | WindowStatusOption::LastStyle => "default",
+                WindowStatusOption::CurrentStyle => "underscore",
+                WindowStatusOption::BellStyle | WindowStatusOption::ActivityStyle => "reverse",
+            }),
         )?;
         let slot = match option {
             WindowStatusOption::Format => &mut self.format,
@@ -352,7 +359,9 @@ impl WindowStatusFormats {
             WindowStatusOption::BellStyle => &mut self.bell_style,
             WindowStatusOption::ActivityStyle => &mut self.activity_style,
         };
-        Ok(std::mem::replace(slot, next.clone()) != next)
+        let changed = *slot != next;
+        *slot = next;
+        Ok(changed)
     }
 }
 
@@ -559,6 +568,158 @@ mod tests {
         assert_eq!(formats.last_style, "default");
         assert_eq!(formats.bell_style, "reverse");
         assert_eq!(formats.activity_style, "reverse");
+    }
+
+    #[test]
+    fn window_status_updates_and_resets_change_only_the_selected_field() {
+        let options = [
+            WindowStatusOption::Format,
+            WindowStatusOption::CurrentFormat,
+            WindowStatusOption::Separator,
+            WindowStatusOption::Style,
+            WindowStatusOption::CurrentStyle,
+            WindowStatusOption::LastStyle,
+            WindowStatusOption::BellStyle,
+            WindowStatusOption::ActivityStyle,
+        ];
+        let defaults = WindowStatusFormats::default();
+        let oversized = "x".repeat(MAX_STATUS_FORMAT_BYTES + 1);
+        for option in options {
+            let mut formats = WindowStatusFormats {
+                format: "other-format".to_owned(),
+                current_format: "other-current".to_owned(),
+                separator: "|".to_owned(),
+                style: "bold".to_owned(),
+                current_style: "italics".to_owned(),
+                last_style: "fg=green".to_owned(),
+                bell_style: "fg=blue".to_owned(),
+                activity_style: "fg=yellow".to_owned(),
+            };
+            let before = formats.clone();
+            let value = if option.is_style() {
+                "fg=red"
+            } else {
+                "changed"
+            };
+            assert_eq!(formats.set(option, Some(value)), Ok(true));
+            assert_eq!(formats.set(option, Some(value)), Ok(false));
+            assert_eq!(formats.value(option), value);
+            let valid = formats.clone();
+            let invalid = if option.is_style() {
+                "fg=nope"
+            } else {
+                &oversized
+            };
+            assert!(formats.set(option, Some(invalid)).is_err());
+            assert_eq!(formats, valid);
+            assert_eq!(formats.set(option, None), Ok(true));
+            assert_eq!(formats.set(option, None), Ok(false));
+            assert_eq!(formats.value(option), defaults.value(option));
+            for other in options.into_iter().filter(|other| *other != option) {
+                assert_eq!(formats.value(other), before.value(other));
+            }
+        }
+    }
+
+    #[test]
+    fn window_status_command_keeps_equal_overrides_append_and_unset_semantics() {
+        let mut engine = crate::MuxEngine::default();
+        let (session, window, pane) = engine.state.create_session("status-set").unwrap();
+        let mut context = crate::ExecutionContext::new(Some(session), Some(window), Some(pane));
+        let set = |engine: &mut crate::MuxEngine,
+                   context: &mut crate::ExecutionContext,
+                   args: &[&str]| {
+            engine.execute(
+                context,
+                &zz_protocol::CommandInvocation::new("set-window-option", args.iter().copied()),
+            )
+        };
+        set(
+            &mut engine,
+            &mut context,
+            &["-g", "window-status-format", "global"],
+        )
+        .unwrap();
+        let generation = engine.state.generation();
+        let options_generation = engine.format_options_generation();
+        assert!(
+            set(
+                &mut engine,
+                &mut context,
+                &["window-status-format", "global"]
+            )
+            .unwrap()
+            .effects
+            .is_empty()
+        );
+        assert_eq!(engine.state.generation(), generation);
+        assert_ne!(engine.format_options_generation(), options_generation);
+        set(
+            &mut engine,
+            &mut context,
+            &["-g", "window-status-format", "changed-global"],
+        )
+        .unwrap();
+        assert_eq!(engine.window_status_formats(window).format, "global");
+        assert!(
+            set(&mut engine, &mut context, &["-u", "window-status-format"])
+                .unwrap()
+                .effects
+                .contains(&crate::MuxEffect::SnapshotChanged)
+        );
+        assert_eq!(
+            engine.window_status_formats(window).format,
+            "changed-global"
+        );
+        assert!(
+            set(&mut engine, &mut context, &["-u", "window-status-format"])
+                .unwrap()
+                .effects
+                .is_empty()
+        );
+        set(
+            &mut engine,
+            &mut context,
+            &["-g", "window-status-separator", "-"],
+        )
+        .unwrap();
+        set(
+            &mut engine,
+            &mut context,
+            &["-a", "window-status-separator", ">"],
+        )
+        .unwrap();
+        assert_eq!(engine.window_status_formats(window).separator, "->");
+        set(
+            &mut engine,
+            &mut context,
+            &["-g", "window-status-style", "bold"],
+        )
+        .unwrap();
+        set(
+            &mut engine,
+            &mut context,
+            &["-a", "window-status-style", "fg=red"],
+        )
+        .unwrap();
+        assert_eq!(engine.window_status_formats(window).style, "bold,fg=red");
+        let before = engine.window_status_formats(window);
+        let generation = engine.state.generation();
+        assert!(
+            set(
+                &mut engine,
+                &mut context,
+                &["-a", "window-status-style", "fg=nope"]
+            )
+            .is_err()
+        );
+        assert_eq!(engine.window_status_formats(window), before);
+        assert_eq!(engine.state.generation(), generation);
+        set(&mut engine, &mut context, &["-gu", "window-status-format"]).unwrap();
+        assert_eq!(
+            engine.window_status_formats(window).format,
+            DEFAULT_WINDOW_STATUS_FORMAT
+        );
     }
 
     #[test]

@@ -216,7 +216,7 @@ fn expand_row(
     context: &ExecutionContext,
     variables: &BTreeMap<String, String>,
     attached_session: Option<SessionId>,
-    facts: &FormatHookFacts,
+    facts: &dyn crate::status::FormatFactSource,
 ) -> String {
     let mut hooks =
         DaemonFormatHooks::command_with_variables(facts, variables).with_option_engine(engine);
@@ -250,7 +250,7 @@ pub(super) fn client_chooser_rows(
         })
         .collect::<Vec<_>>();
     clients.sort_by_key(|(client, _)| client.0);
-    let base = format_hook_facts(inner);
+    let mut facts = borrowed_format_hook_facts(inner);
     let mut rows = Vec::with_capacity(clients.len());
     let mut universes = BTreeMap::new();
     for (line, (client, session_id)) in clients.into_iter().enumerate() {
@@ -272,10 +272,7 @@ pub(super) fn client_chooser_rows(
         let name = client_facts.name.clone();
         let width = client_facts.width.parse::<u16>().unwrap_or_default();
         let height = client_facts.height.parse::<u16>().unwrap_or_default();
-        let facts = FormatHookFacts {
-            client: Some(client_facts),
-            ..base.clone()
-        };
+        facts.set_client(Some(client_facts));
         let mut hooks = DaemonFormatHooks::command(&facts).with_option_engine(&inner.engine);
         let text = expand_format_values(format, &context, &mut hooks);
         let matches = filter.is_none_or(|filter| {
@@ -327,10 +324,8 @@ fn client_info_lines(inner: &ServerState, client: ClientId) -> Vec<String> {
     );
     context.config_files.clone_from(&inner.config_files);
     context.format_now = i64::try_from(unix_timestamp()).ok().filter(|now| *now != 0);
-    let facts = FormatHookFacts {
-        client: Some(client_format_facts(inner, client, session_id)),
-        ..format_hook_facts(inner)
-    };
+    let mut facts = borrowed_format_hook_facts(inner);
+    facts.set_client(Some(client_format_facts(inner, client, session_id)));
     WINDOW_CLIENT_INFO_LINES
         .iter()
         .map(|line| {
@@ -346,7 +341,7 @@ pub(super) fn tree_rows(
     items: &[ChooseTreeItem],
     formatted: bool,
     attached_session: Option<SessionId>,
-    facts: &FormatHookFacts,
+    facts: &dyn crate::status::FormatFactSource,
 ) -> Vec<ChooserRow> {
     let state = &engine.state;
     items
@@ -419,7 +414,7 @@ pub(super) fn buffer_rows(
     formatted: bool,
     source: Option<&ExecutionContext>,
     attached_session: Option<SessionId>,
-    facts: &FormatHookFacts,
+    facts: &dyn crate::status::FormatFactSource,
 ) -> Vec<ChooserRow> {
     let variables = scope_variables(false, false, true);
     items
@@ -434,17 +429,16 @@ pub(super) fn buffer_rows(
             } else {
                 match (buffer, source) {
                     (Some(buffer), Some(source)) => {
-                        let facts = FormatHookFacts {
-                            buffer: Some(buffer_format_facts(buffer)),
-                            ..facts.clone()
-                        };
-                        expand_row(
-                            engine,
+                        let mut hooks =
+                            DaemonFormatHooks::command_with_variables(facts, &variables)
+                                .with_option_engine(engine)
+                                .with_buffer(buffer_format_facts(buffer));
+                        engine.expand_pane_format(
                             WINDOW_BUFFER_DEFAULT_FORMAT,
                             source,
-                            &variables,
                             attached_session,
-                            &facts,
+                            FormatClient::NoClient,
+                            &mut hooks,
                         )
                     }
                     _ => String::new(),
@@ -481,11 +475,12 @@ impl StatusHooks for ScopedHooks<'_> {
         String::new()
     }
 
-    fn variable(&mut self, name: &str, context: &zz_mux::StatusContext) -> Option<String> {
-        self.variables
-            .get(name)
-            .cloned()
-            .or_else(|| self.engine.format_option_value(context, name))
+    fn option_variable(&mut self, name: &str, context: &zz_mux::StatusContext) -> Option<String> {
+        self.engine.format_option_value(context, name)
+    }
+
+    fn variable(&mut self, name: &str, _context: &zz_mux::StatusContext) -> Option<String> {
+        self.variables.get(name).cloned()
     }
 }
 
@@ -576,7 +571,7 @@ pub(super) fn switch_matches(
         .as_deref()
         .unwrap_or(WINDOW_SWITCH_DEFAULT_FORMAT);
     let engine = &inner.engine;
-    let facts = format_hook_facts(inner);
+    let facts = borrowed_format_hook_facts(inner);
     let entries = if mode.windows {
         let mut windows = engine
             .state

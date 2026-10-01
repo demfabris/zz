@@ -11,9 +11,88 @@ use super::*;
 
 const LISTENER: Token = Token(0);
 const WAKE: Token = Token(1);
+const SHUTDOWN_SIGNAL: Token = Token(2);
+const CHILD_SIGNAL: Token = Token(3);
 const ACCEPT_BURST: usize = 32;
 const MAX_PENDING_MESSAGES: usize = 4096;
 const MAX_PENDING_BYTES: usize = 16 * 1024 * 1024;
+
+struct SignalPipes {
+    shutdown: UnixStream,
+    child: UnixStream,
+    registrations: Vec<signal_hook::SigId>,
+}
+
+impl SignalPipes {
+    fn new(poll: &Poll) -> io::Result<Self> {
+        let (shutdown, shutdown_write) = UnixStream::pair()?;
+        let (child, child_write) = UnixStream::pair()?;
+        shutdown.set_nonblocking(true)?;
+        child.set_nonblocking(true)?;
+        let mut pipes = Self {
+            shutdown,
+            child,
+            registrations: Vec::new(),
+        };
+        for signal in [libc::SIGTERM, libc::SIGINT] {
+            pipes
+                .registrations
+                .push(signal_hook::low_level::pipe::register(
+                    signal,
+                    shutdown_write.try_clone()?,
+                )?);
+        }
+        pipes
+            .registrations
+            .push(signal_hook::low_level::pipe::register(
+                libc::SIGCHLD,
+                child_write,
+            )?);
+        for (stream, token) in [
+            (&pipes.shutdown, SHUTDOWN_SIGNAL),
+            (&pipes.child, CHILD_SIGNAL),
+        ] {
+            poll.registry().register(
+                &mut SourceFd(&stream.as_raw_fd()),
+                token,
+                Interest::READABLE,
+            )?;
+        }
+        Ok(pipes)
+    }
+
+    fn drain(stream: &mut UnixStream) -> io::Result<usize> {
+        let mut count = 0;
+        let mut buffer = [0; 256];
+        loop {
+            match stream.read(&mut buffer) {
+                Ok(0) => return Ok(count),
+                Ok(read) => count += read,
+                Err(error) if error.kind() == ErrorKind::Interrupted => {}
+                Err(error) if error.kind() == ErrorKind::WouldBlock => return Ok(count),
+                Err(error) => return Err(error),
+            }
+        }
+    }
+}
+
+impl Drop for SignalPipes {
+    fn drop(&mut self) {
+        for registration in self.registrations.drain(..) {
+            signal_hook::low_level::unregister(registration);
+        }
+    }
+}
+
+#[derive(Default)]
+enum ShutdownPhase {
+    #[default]
+    Running,
+    Admissions,
+    Announcing,
+    Writers(Vec<Arc<OutboundMailbox>>),
+    Done,
+}
 
 pub(super) struct EventLoop {
     poll: Poll,
@@ -30,7 +109,12 @@ pub(super) struct EventLoop {
     accept_again: bool,
     control_output_poll: bool,
     shutdown_started: bool,
-    shutdown_complete: Arc<AtomicBool>,
+    shutdown_phase: ShutdownPhase,
+    shutdown_completed: mpsc::Receiver<()>,
+    shutdown_sender: mpsc::Sender<()>,
+    signal_requested: bool,
+    force_requested: bool,
+    signals: Option<SignalPipes>,
     #[cfg(test)]
     failure: Option<DaemonError>,
 }
@@ -138,6 +222,7 @@ impl EventLoop {
         let (startup_sender, startup_finished) = mpsc::channel();
         let (completion_sender, completed) = mpsc::channel();
         let timers = timers::LoopTimers::new(shared, &waker);
+        let (shutdown_sender, shutdown_completed) = mpsc::channel();
         shared.loop_active.store(true, Ordering::Release);
         Ok(Self {
             poll,
@@ -150,11 +235,16 @@ impl EventLoop {
             completed,
             completion_sender,
             turn_tokens: Vec::new(),
-            next_token: 2,
+            next_token: 4,
             accept_again: false,
             control_output_poll: false,
             shutdown_started: false,
-            shutdown_complete: Arc::default(),
+            shutdown_phase: ShutdownPhase::Running,
+            shutdown_completed,
+            shutdown_sender,
+            signal_requested: false,
+            force_requested: false,
+            signals: None,
             #[cfg(test)]
             failure: None,
         })
@@ -164,7 +254,8 @@ impl EventLoop {
         listener: &T::Listener,
         shared: &Shared,
     ) -> Result<Self, DaemonError> {
-        let event_loop = Self::empty(shared)?;
+        let mut event_loop = Self::empty(shared)?;
+        event_loop.signals = Some(SignalPipes::new(&event_loop.poll)?);
         event_loop.poll.registry().register(
             &mut SourceFd(&listener.raw_fd()),
             LISTENER,
@@ -238,17 +329,14 @@ impl EventLoop {
                     initialized();
                 }
             }
-            if shared.stopping.load(Ordering::Acquire) {
-                self.start_shutdown(shared)?;
-                if self.shutdown_completed() {
-                    let tokens = self.connections.keys().copied().collect::<Vec<_>>();
-                    for token in tokens {
-                        self.remove(token, shared);
-                    }
-                    return Ok(());
-                }
-            }
             self.turn(shared)?;
+            if self.shutdown_completed() {
+                let tokens = self.connections.keys().copied().collect::<Vec<_>>();
+                for token in tokens {
+                    self.remove(token, shared);
+                }
+                return Ok(());
+            }
             if std::mem::take(&mut self.accept_again) && !self.shutdown_started {
                 self.accept_ready::<T>(listener, shared)?;
             }
@@ -266,6 +354,13 @@ impl EventLoop {
                     if !self.shutdown_started {
                         self.accept_ready::<T>(listener, shared)?;
                     }
+                } else if token == SHUTDOWN_SIGNAL {
+                    let count = SignalPipes::drain(&mut self.signals.as_mut().unwrap().shutdown)?;
+                    for _ in 0..count {
+                        self.request_signal_shutdown(shared, SIGNAL_SHUTDOWN_GRACE)?;
+                    }
+                } else if token == CHILD_SIGNAL {
+                    SignalPipes::drain(&mut self.signals.as_mut().unwrap().child)?;
                 } else if self.connections.contains_key(&token) {
                     if readable {
                         self.read_ready(token, shared);
@@ -284,26 +379,122 @@ impl EventLoop {
     }
 
     pub(super) fn shutdown_completed(&self) -> bool {
-        self.shutdown_complete.load(Ordering::Acquire)
+        matches!(self.shutdown_phase, ShutdownPhase::Done)
     }
 
-    fn start_shutdown(&mut self, shared: &Arc<Shared>) -> Result<(), DaemonError> {
-        if self.shutdown_started {
-            return Ok(());
+    pub(super) fn request_signal_shutdown(
+        &mut self,
+        shared: &Arc<Shared>,
+        grace: Duration,
+    ) -> Result<(), DaemonError> {
+        if self.signal_requested {
+            return self.force_shutdown(shared);
         }
-        self.shutdown_started = true;
+        self.signal_requested = true;
+        shared.shutdown_pending.store(true, Ordering::Release);
+        self.timers.shutdown_deadline(Some(Instant::now() + grace));
         let shared = Arc::clone(shared);
         let threads = Arc::clone(&shared.connection_threads);
-        let complete = Arc::clone(&self.shutdown_complete);
         let waker = Arc::clone(&self.waker);
         threads.run(Box::new(move || {
-            shared.request_shutdown_after_blockers();
-            shared.freeze_response_admissions_and_wait(SHUTDOWN_RESPONSE_TIMEOUT);
-            shared.announce_shutdown();
-            shared.drain_client_writers_for_shutdown(SHUTDOWN_WRITER_TIMEOUT);
-            complete.store(true, Ordering::Release);
+            shared.request_shutdown();
             let _ = waker.wake();
         }))?;
+        Ok(())
+    }
+
+    fn force_shutdown(&mut self, shared: &Arc<Shared>) -> Result<(), DaemonError> {
+        if self.force_requested || self.shutdown_started {
+            return Ok(());
+        }
+        self.force_requested = true;
+        self.timers.shutdown_deadline(None);
+        let shared = Arc::clone(shared);
+        let threads = Arc::clone(&shared.connection_threads);
+        let waker = Arc::clone(&self.waker);
+        threads.run(Box::new(move || {
+            shared.force_shutdown();
+            let _ = waker.wake();
+        }))?;
+        Ok(())
+    }
+
+    fn start_shutdown(&mut self, shared: &Arc<Shared>) {
+        self.shutdown_started = true;
+        shared.response_admissions.lock().frozen = true;
+        self.shutdown_phase = ShutdownPhase::Admissions;
+        self.timers
+            .shutdown_deadline(Some(Instant::now() + SHUTDOWN_RESPONSE_TIMEOUT));
+    }
+
+    fn advance_shutdown(&mut self, shared: &Arc<Shared>) -> Result<(), DaemonError> {
+        let mut due = self.timers.take_shutdown_due();
+        if !self.shutdown_started {
+            if shared.shutdown_cleanup_complete.load(Ordering::Acquire) {
+                self.start_shutdown(shared);
+                due = false;
+            } else if due {
+                self.force_shutdown(shared)?;
+            }
+        }
+        match &self.shutdown_phase {
+            ShutdownPhase::Admissions => {
+                let active = shared.response_admissions.lock().active;
+                if active == 0 || due {
+                    if active != 0 {
+                        log::warn!(
+                            "shutdown proceeding before {active} command responses were admitted"
+                        );
+                    }
+                    self.timers.shutdown_deadline(None);
+                    self.shutdown_phase = ShutdownPhase::Announcing;
+                    let shared = Arc::clone(shared);
+                    let threads = Arc::clone(&shared.connection_threads);
+                    let sender = self.shutdown_sender.clone();
+                    let waker = Arc::clone(&self.waker);
+                    threads.run(Box::new(move || {
+                        shared.announce_shutdown();
+                        let _ = sender.send(());
+                        let _ = waker.wake();
+                    }))?;
+                }
+            }
+            ShutdownPhase::Announcing => {
+                if self.shutdown_completed.try_recv().is_ok() {
+                    let mut mailboxes = shared
+                        .client_writers
+                        .lock()
+                        .values()
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    mailboxes.extend(
+                        self.connections
+                            .values()
+                            .map(|connection| Arc::clone(&connection.outbound)),
+                    );
+                    for mailbox in &mailboxes {
+                        mailbox.close_after_flush();
+                    }
+                    self.shutdown_phase = ShutdownPhase::Writers(mailboxes);
+                    self.waker.wake()?;
+                    self.timers
+                        .shutdown_deadline(Some(Instant::now() + SHUTDOWN_WRITER_TIMEOUT));
+                }
+            }
+            ShutdownPhase::Writers(mailboxes) => {
+                let drained = mailboxes
+                    .iter()
+                    .all(|mailbox| mailbox.state.lock().writer_finished);
+                if drained || due {
+                    if !drained {
+                        log::warn!("shutdown proceeding before a client writer drained");
+                    }
+                    self.timers.shutdown_deadline(None);
+                    self.shutdown_phase = ShutdownPhase::Done;
+                }
+            }
+            ShutdownPhase::Running | ShutdownPhase::Done => {}
+        }
         Ok(())
     }
 
@@ -941,6 +1132,7 @@ impl EventLoop {
             }
         }
         self.turn_tokens = tokens;
+        self.advance_shutdown(shared)?;
         Ok(())
     }
 
@@ -1293,3 +1485,7 @@ mod shutdown_tests;
 #[cfg(test)]
 #[path = "event_loop_b4_tests.rs"]
 mod b4_tests;
+
+#[cfg(test)]
+#[path = "event_loop_b5_tests.rs"]
+mod b5_tests;

@@ -195,7 +195,7 @@ fn blocked_output_retains_offsets_while_another_client_responds() {
     event_loop.turn(&shared).unwrap();
     assert!(!event_loop.connections[&responsive].frames.is_empty());
     shared.request_shutdown();
-    event_loop.start_shutdown(&shared).unwrap();
+    event_loop.start_shutdown(&shared);
     let mut final_messages = Vec::new();
     until(&mut event_loop, &shared, |event_loop| {
         final_messages.extend(messages(&mut fast, &mut input));

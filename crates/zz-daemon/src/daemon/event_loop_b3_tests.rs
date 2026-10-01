@@ -298,14 +298,16 @@ fn last_exec_flushes_blocked_output_and_exit_during_shutdown() {
     until(&mut event_loop, &shared, || {
         outbound.state.lock().writer_inflight_bytes != 0
     });
-    event_loop.start_shutdown(&shared).unwrap();
-    let completed = Arc::clone(&event_loop.shutdown_complete);
+    event_loop.start_shutdown(&shared);
     let mut input = Inbound::default();
     let mut received = Vec::new();
-    until(&mut event_loop, &shared, || {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !event_loop.shutdown_completed() {
+        assert!(Instant::now() < deadline);
         received.extend(io_tests::messages(&mut peer, &mut input));
-        completed.load(Ordering::Acquire)
-    });
+        event_loop.turn(&shared).unwrap();
+        thread::sleep(Duration::from_millis(2));
+    }
     received.extend(io_tests::messages(&mut peer, &mut input));
     assert!(
         matches!(received.as_slice(), [ProtocolMessage::CommandResponse(CommandResponse::Success { output: actual, .. }), ProtocolMessage::ExecExit(zz_protocol::ExecExit { outcome: zz_protocol::ExecOutcome::Ran, .. })] if actual.as_bytes() == output.as_bytes())

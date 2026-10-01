@@ -93,6 +93,8 @@ enum TimerKey {
     ClientMessage(ClientId),
     Rename,
     PublishFlush,
+    #[cfg(unix)]
+    Shutdown,
 }
 
 #[derive(Clone, Copy)]
@@ -103,6 +105,8 @@ enum Expiry {
     ClientMessage(ClientMessageDeadline),
     Rename,
     PublishFlush,
+    #[cfg(unix)]
+    Shutdown,
 }
 
 pub(super) enum TimerInput {
@@ -158,6 +162,7 @@ pub(super) struct LoopTimers {
     worker_running: bool,
     completed: crossbeam_channel::Receiver<()>,
     completion_sender: crossbeam_channel::Sender<()>,
+    shutdown_due: bool,
 }
 
 #[cfg(unix)]
@@ -175,7 +180,21 @@ impl LoopTimers {
             worker_running: false,
             completed,
             completion_sender,
+            shutdown_due: false,
         }
+    }
+
+    pub(super) fn shutdown_deadline(&mut self, deadline: Option<Instant>) {
+        self.shutdown_due = false;
+        self.deadlines.remove(TimerKey::Shutdown);
+        if let Some(deadline) = deadline {
+            self.deadlines
+                .insert(TimerKey::Shutdown, deadline, Expiry::Shutdown);
+        }
+    }
+
+    pub(super) fn take_shutdown_due(&mut self) -> bool {
+        std::mem::take(&mut self.shutdown_due)
     }
 
     pub(super) fn next(&self, now: Instant) -> Option<Instant> {
@@ -209,6 +228,7 @@ impl LoopTimers {
                 break;
             };
             match expiry {
+                Expiry::Shutdown => self.shutdown_due = true,
                 Expiry::DisplayPanes(_) | Expiry::KeyTable(_) => {
                     shared.run_timer_expiry(expiry, now);
                 }
@@ -449,6 +469,8 @@ impl Shared {
             Expiry::ClientMessage(deadline) => self.expire_client_message(deadline, now),
             Expiry::Rename => self.apply_due_window_renames(now),
             Expiry::PublishFlush => self.flush_publish(),
+            #[cfg(unix)]
+            Expiry::Shutdown => unreachable!(),
         }
     }
 

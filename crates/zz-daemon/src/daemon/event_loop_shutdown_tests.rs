@@ -1,6 +1,6 @@
 use super::*;
 
-fn registered(
+pub(super) fn registered(
     event_loop: &mut EventLoop,
     shared: &Arc<Shared>,
     kind: ClientKind,

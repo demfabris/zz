@@ -119,9 +119,26 @@ Done criterion: {l["done"]}
 
 Checks before the final commit: `cargo fmt --all`; clippy -D warnings on the touched crates; their tests under `timeout 1800`; the compat scenarios at risk; {quick(l)}. Update the lane's as-built notes in {DOC} (keep them short: what changed, numbers against the base, what is handed on). Commit on perf/{l["slug"]}.'''
 
+def slice_(l):
+    wt=f'{ROOT}/zz-{l["slug"]}'
+    return f'''# Lane {l["id"]}: one slice
+
+{RULES}
+
+Worktree: {wt} (branch perf/{l["slug"]}, from {INT_BRANCH}). Its target/ is warm; build only there. Work only in the worktree; prefix every command with `cd {wt} &&`. Scratch files go in {SCRATCH}. Budget: {l.get("budget",90)} minutes from your start.
+
+{context(l)}
+
+Task: {l["task"]}
+
+Done criterion: {l["done"]}
+
+When the done criterion holds: add two to six lines of as-built notes for this slice at the end of the lane section of {DOC} (the one exception to not opening it: find the section with `rg -n "^## {l["id"]}" {DOC}` and edit only there), commit on perf/{l["slug"]} with a plain message, and answer.'''
+
 if __name__=='__main__':
     spec=json.loads(sys.argv[1]); kind=sys.argv[2]
-    if kind in ('impl','slice'): print(impl(spec))
+    if kind=='impl': print(impl(spec))
+    elif kind=='slice': print(slice_(spec))
     elif kind in ('parity','perf'): print(review(spec, kind, open(sys.argv[3]).read()))
     elif kind=='focus': print(focus(spec))
     elif kind=='fix': print(fix(spec, open(sys.argv[3]).read(), '\n\n'.join(open(p).read() for p in sys.argv[4:])))

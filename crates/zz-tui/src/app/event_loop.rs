@@ -13,14 +13,24 @@ pub(super) struct SignalInbox {
     registrations: Vec<signal_hook_registry::SigId>,
 }
 
+fn nonblocking_pipe() -> io::Result<(OwnedFd, OwnedFd)> {
+    let (read, write) = rustix::pipe::pipe()?;
+    for fd in [&read, &write] {
+        rustix::io::fcntl_setfd(fd, rustix::io::FdFlags::CLOEXEC)?;
+        let flags = rustix::fs::fcntl_getfl(fd)?;
+        rustix::fs::fcntl_setfl(fd, flags | rustix::fs::OFlags::NONBLOCK)?;
+    }
+    Ok((read, write))
+}
+
 impl SignalInbox {
     #[allow(
         unsafe_code,
         reason = "registered handlers only write one byte to a nonblocking pipe"
     )]
     pub fn new() -> io::Result<Self> {
-        use rustix::{pipe::PipeFlags, process::Signal};
-        let (fd, writer) = rustix::pipe::pipe_with(PipeFlags::NONBLOCK | PipeFlags::CLOEXEC)?;
+        use rustix::process::Signal;
+        let (fd, writer) = nonblocking_pipe()?;
         let writer = Arc::new(writer);
         let mut inbox = Self {
             fd,
@@ -381,15 +391,9 @@ mod tests {
     use super::*;
 
     fn pipe_loop() -> (EventLoop, OwnedFd, UnixStream, OwnedFd) {
-        let (stdin, input) = rustix::pipe::pipe_with(
-            rustix::pipe::PipeFlags::NONBLOCK | rustix::pipe::PipeFlags::CLOEXEC,
-        )
-        .unwrap();
+        let (stdin, input) = nonblocking_pipe().unwrap();
         let (socket, peer) = UnixStream::pair().unwrap();
-        let (signal_fd, signal_writer) = rustix::pipe::pipe_with(
-            rustix::pipe::PipeFlags::NONBLOCK | rustix::pipe::PipeFlags::CLOEXEC,
-        )
-        .unwrap();
+        let (signal_fd, signal_writer) = nonblocking_pipe().unwrap();
         (
             EventLoop {
                 socket: socket.into(),

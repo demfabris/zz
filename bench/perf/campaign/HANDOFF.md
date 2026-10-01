@@ -748,7 +748,9 @@ summary in `<out>.cost.json`, `<out>.failed` when no valid answer), `lane-watchd
    SHARDS s2 fix was stopped mid-series with all its work uncommitted); a helper agent appears (a subagent rollout in
    `~/.codex/sessions` for that cwd; `features.multi_agent=false` does not remove the tools in
    codex 0.159, so the brief also forbids them); a file changes outside the write-zone globs (plus
-   the design doc); a file is added under `third_party/` or a vendored crate; more than 50 or 100
+   the design doc; add `bench/results/*` when a brief runs `bench/run.sh`, which writes there,
+   or the watchdog stops the run, as it stopped SHARDS s6 at 130 min); a file is added under
+   `third_party/` or a vendored crate; more than 50 or 100
    MB of untracked files. It writes the reason to `<out>.watchdog`. Launch `lane-run.sh` from
    outside the worktree.
 5. Cheaper iteration: briefs say `cargo check -p <crate>` and focused tests while iterating,

@@ -1,4 +1,4 @@
-#[cfg(any(feature = "daemon", windows))]
+#[cfg(windows)]
 use std::time::Duration;
 use std::{
     ffi::OsString,
@@ -40,6 +40,10 @@ pub(crate) trait TransportListener {
     fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()>;
     fn accept(&self) -> io::Result<Self::Stream>;
 
+    #[cfg(unix)]
+    fn raw_fd(&self) -> std::os::fd::RawFd;
+
+    #[cfg(windows)]
     fn wait_for_incoming(&self, timeout: Duration, _wake: &AcceptWake) -> io::Result<()> {
         std::thread::sleep(timeout);
         Ok(())
@@ -48,36 +52,30 @@ pub(crate) trait TransportListener {
 
 #[cfg(any(feature = "daemon", windows))]
 pub(crate) struct AcceptWake {
-    #[cfg(unix)]
-    pair: Option<(
-        std::os::unix::net::UnixStream,
-        std::os::unix::net::UnixStream,
-    )>,
+    #[cfg(all(unix, feature = "daemon"))]
+    waker: parking_lot::Mutex<Option<std::sync::Arc<mio::Waker>>>,
 }
 
 #[cfg(any(feature = "daemon", windows))]
 impl AcceptWake {
     pub(crate) fn new() -> Self {
-        #[cfg(unix)]
-        {
-            let pair = std::os::unix::net::UnixStream::pair().and_then(|(reader, writer)| {
-                reader.set_nonblocking(true)?;
-                writer.set_nonblocking(true)?;
-                Ok((reader, writer))
-            });
-            if let Err(error) = &pair {
-                log::warn!("could not create the accept wake pair: {error}");
-            }
-            Self { pair: pair.ok() }
+        Self {
+            #[cfg(all(unix, feature = "daemon"))]
+            waker: parking_lot::Mutex::new(None),
         }
-        #[cfg(not(unix))]
-        Self {}
+    }
+
+    #[cfg(all(unix, feature = "daemon"))]
+    pub(crate) fn install(&self, waker: std::sync::Arc<mio::Waker>) {
+        *self.waker.lock() = Some(waker);
     }
 
     pub(crate) fn wake(&self) {
-        #[cfg(unix)]
-        if let Some((_, writer)) = &self.pair {
-            let _ = (&*writer).write(&[1]);
+        #[cfg(all(unix, feature = "daemon"))]
+        if let Some(waker) = self.waker.lock().as_ref()
+            && let Err(error) = waker.wake()
+        {
+            log::warn!("could not wake the mux loop: {error}");
         }
     }
 }
@@ -189,31 +187,10 @@ impl TransportListener for LocalListener {
     }
 
     #[cfg(unix)]
-    fn wait_for_incoming(&self, timeout: Duration, wake: &AcceptWake) -> io::Result<()> {
+    fn raw_fd(&self) -> std::os::fd::RawFd {
+        use std::os::fd::{AsFd as _, AsRawFd as _};
         let LocalSocketListener::UdSocket(listener) = &self.0;
-        let timeout = rustix::event::Timespec::try_from(timeout).map_err(|_| {
-            io::Error::new(io::ErrorKind::InvalidInput, "poll timeout is too large")
-        })?;
-        let listener = rustix::event::PollFd::new(listener, rustix::event::PollFlags::IN);
-        let result = match &wake.pair {
-            Some((reader, _)) => {
-                let mut fds = [
-                    listener,
-                    rustix::event::PollFd::new(reader, rustix::event::PollFlags::IN),
-                ];
-                let result = rustix::event::poll(&mut fds, Some(&timeout));
-                if !fds[1].revents().is_empty() {
-                    let mut buffer = [0; 64];
-                    while matches!((&*reader).read(&mut buffer), Ok(read) if read > 0) {}
-                }
-                result
-            }
-            None => rustix::event::poll(&mut [listener], Some(&timeout)),
-        };
-        match result {
-            Ok(_) | Err(rustix::io::Errno::INTR) => Ok(()),
-            Err(error) => Err(error.into()),
-        }
+        listener.as_fd().as_raw_fd()
     }
 }
 
@@ -339,27 +316,5 @@ mod tests {
             platform_default_socket_path(),
             std::env::temp_dir().join(format!("{directory}-{user}/default.sock"))
         );
-    }
-
-    #[cfg(all(unix, feature = "daemon"))]
-    #[test]
-    fn accept_wake_ends_an_idle_wait_before_its_timeout() {
-        let directory = tempfile::Builder::new()
-            .prefix("zzw.")
-            .tempdir_in("/tmp")
-            .expect("socket directory");
-        let listener = LocalTransport::bind(&directory.path().join("s")).expect("listener");
-        let wake = AcceptWake::new();
-        wake.wake();
-        let started = std::time::Instant::now();
-        listener
-            .wait_for_incoming(Duration::from_secs(5), &wake)
-            .expect("woken wait");
-        assert!(started.elapsed() < Duration::from_secs(1));
-        let started = std::time::Instant::now();
-        listener
-            .wait_for_incoming(Duration::from_millis(50), &wake)
-            .expect("drained wait");
-        assert!(started.elapsed() >= Duration::from_millis(40));
     }
 }

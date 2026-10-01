@@ -11686,6 +11686,7 @@ dependencies = [
  "interprocess",
  "libc",
  "log",
+ "mio",
  "parking_lot",
  "regex",
  "russh",

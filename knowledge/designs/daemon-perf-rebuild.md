@@ -3145,6 +3145,12 @@ The lane's a3 measurement put CLI instructions within 1.4% of a1.
 After `cargo fmt --all`, `daemon.rs` has 116,416 lines, 2,575 fewer than a3, with no formatting skips, new macros or behavior changes.
 Checks passed: daemon clippy, 1,327 unit tests and 35 integration tests (one existing soak ignored), and all six required compat groups with zero divergences. The perf gate was not run.
 
+**b1 as built (2026-10-01):** `crates/zz-daemon/src/daemon/event_loop.rs` `EventLoop::run` accepts Unix sockets on the foreground mio loop; connection workers and their mutex access remain.
+Startup replay runs on a temporary worker. Its channel and Waker return completion to the foreground thread, which joins the worker and invokes readiness; shutdown wakes the same loop.
+The two macOS memory runs measured settled threads against `b47ffeae`: p1 fell from 9 to 8 and p20 from 46 to 45. Native thread inspection found no `zz-daemon-accept` or startup worker.
+Checks passed: formatting, daemon clippy, 1,330 unit tests and 35 integration tests (one existing soak ignored), and all seven required compat scenarios with 175 steps and zero divergences.
+Windows named pipes retain the blocking transport. The Windows target check was unavailable here; Linux-only checks remain for the orchestrator.
+
 
 ## W4-DELIVER: frames straight from shards (effort L)
 

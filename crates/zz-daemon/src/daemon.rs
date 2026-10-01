@@ -24,6 +24,10 @@ mod chooser_presentation;
 mod ctrl;
 #[cfg(test)]
 mod ctrl_tests;
+#[cfg(unix)]
+mod event_loop;
+#[cfg(all(test, unix))]
+mod event_loop_tests;
 mod exec;
 #[cfg(test)]
 mod exec_tests;
@@ -113,8 +117,6 @@ use crate::{
     transport::{AcceptWake, LocalTransport, Transport, TransportListener, TransportStream},
 };
 
-#[cfg(unix)]
-const ACCEPT_WAIT_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(windows)]
 const ACCEPT_WAIT_TIMEOUT: Duration = Duration::from_millis(20);
 const DIAGNOSTIC_STATE_INTERVAL: Duration = Duration::from_secs(5);
@@ -1590,7 +1592,11 @@ impl Daemon {
         shared.begin_startup();
         #[cfg(unix)]
         let _signal_guard = DaemonSignalGuard::install(&shared)?;
+        #[cfg(unix)]
+        let mut event_loop = event_loop::EventLoop::new::<T>(&listener, &shared)?;
+        #[cfg(windows)]
         let accept_shared = Arc::clone(&shared);
+        #[cfg(windows)]
         let accept_thread = match thread::Builder::new()
             .name("zz-daemon-accept".to_owned())
             .spawn(move || {
@@ -1606,12 +1612,7 @@ impl Daemon {
                 return Err(DaemonError::Thread(error.to_string()));
             }
         };
-        let startup_result = (|| {
-            shared.initialize_with_mux_config_files(
-                self.load_user_config,
-                self.mux_config_files.as_deref(),
-                self.initial_client_working_directory.as_deref(),
-            )?;
+        let complete_startup = || {
             shared.start_diagnostic_sampler()?;
             shared.start_status_sampler()?;
             shared.log_diagnostic_snapshot("startup");
@@ -1631,30 +1632,76 @@ impl Daemon {
             }
             log::info!("zz daemon listening at {endpoint}");
             log_pane_perf_knobs();
-            Ok::<(), DaemonError>(())
-        })();
-        let _ready_guard = if startup_result.is_ok() {
             shared.finish_startup();
             let ready_guard = ready(shared.server_id);
             #[cfg(all(feature = "agent", unix))]
             if let Err(error) = crate::agent::claude_peers::sweep_stale_records() {
                 log::warn!(target: "zz::agent", "could not sweep Claude peers: {error}");
             }
-            Some(ready_guard)
-        } else {
-            shared.request_shutdown();
-            None
+            Ok::<R, DaemonError>(ready_guard)
         };
-        let Ok((accept_result, listener)) = accept_thread.join() else {
-            socket_guard.disarm();
-            return Err(DaemonError::Thread(
-                "daemon accept thread panicked".to_owned(),
-            ));
+        #[cfg(unix)]
+        let (_ready_guard, shutdown_result) = {
+            let startup_shared = Arc::clone(&shared);
+            let daemon = self.clone();
+            let notifier = event_loop.startup_notifier();
+            let mut startup_thread = Some(
+                thread::Builder::new()
+                    .name("zz-daemon-startup".to_owned())
+                    .spawn(move || {
+                        let _notifier = notifier;
+                        startup_shared.initialize_with_mux_config_files(
+                            daemon.load_user_config,
+                            daemon.mux_config_files.as_deref(),
+                            daemon.initial_client_working_directory.as_deref(),
+                        )
+                    })
+                    .map_err(|error| DaemonError::Thread(error.to_string()))?,
+            );
+            let mut ready_guard = None;
+            let mut startup_result = Ok(());
+            let loop_result = event_loop.run::<T>(&listener, &shared, || {
+                startup_result = event_loop::join_startup(startup_thread.take().unwrap())
+                    .and_then(|()| complete_startup().map(|guard| ready_guard = Some(guard)));
+                if startup_result.is_err() {
+                    shared.request_shutdown();
+                }
+            });
+            if loop_result.is_err() {
+                shared.request_shutdown();
+            }
+            if let Some(startup_thread) = startup_thread {
+                startup_result = event_loop::join_startup(startup_thread);
+            }
+            (ready_guard, startup_result.and(loop_result))
         };
-        if accept_result.is_err() {
-            shared.request_shutdown();
-        }
-        let shutdown_result = startup_result.and(accept_result);
+        #[cfg(windows)]
+        let (_ready_guard, shutdown_result, listener) = {
+            let startup_result = shared
+                .initialize_with_mux_config_files(
+                    self.load_user_config,
+                    self.mux_config_files.as_deref(),
+                    self.initial_client_working_directory.as_deref(),
+                )
+                .and_then(|()| complete_startup());
+            let (ready_guard, startup_result) = match startup_result {
+                Ok(guard) => (Some(guard), Ok(())),
+                Err(error) => {
+                    shared.request_shutdown();
+                    (None, Err(error))
+                }
+            };
+            let Ok((accept_result, listener)) = accept_thread.join() else {
+                socket_guard.disarm();
+                return Err(DaemonError::Thread(
+                    "daemon accept thread panicked".to_owned(),
+                ));
+            };
+            if accept_result.is_err() {
+                shared.request_shutdown();
+            }
+            (ready_guard, startup_result.and(accept_result), listener)
+        };
         shared.request_shutdown_after_blockers();
         shared.freeze_response_admissions_and_wait(SHUTDOWN_RESPONSE_TIMEOUT);
         shared.announce_shutdown();
@@ -1725,6 +1772,7 @@ impl Drop for DaemonSignalGuard {
     }
 }
 
+#[cfg(windows)]
 fn accept_connections<T: Transport>(
     listener: &T::Listener,
     shared: &Arc<Shared>,
@@ -1781,11 +1829,6 @@ impl SocketGuard {
 
     #[cfg(windows)]
     fn release(&mut self) {}
-
-    #[cfg(unix)]
-    fn disarm(&mut self) {
-        self.armed = false;
-    }
 
     #[cfg(windows)]
     fn disarm(&mut self) {}

@@ -71,6 +71,7 @@ pub(crate) struct TerminalGuard {
     file_probe: Option<PathBuf>,
     #[cfg(unix)]
     original: Termios,
+    writer: std::rc::Rc<std::cell::RefCell<crate::writer::TerminalWriter>>,
 }
 
 const MOUSE_CLEAR_SEQUENCE: &[u8] = b"\x1b[?1016l\x1b[?1006l\x1b[?1000l\x1b[?1002l\x1b[?1003l";
@@ -178,9 +179,11 @@ fn arm_extended_keys() {
     if EXTENDED_KEYS_ARMED.swap(true, Ordering::Relaxed) {
         return;
     }
-    let mut output = io::stdout().lock();
-    let _ = output.write_all(EXTENDED_KEYS_ENABLE);
-    let _ = output.flush();
+    ACTIVE_OUTPUT.with(|output| {
+        if let Some(writer) = output.borrow().as_ref() {
+            let _ = writer.borrow_mut().control(EXTENDED_KEYS_ENABLE.to_vec());
+        }
+    });
 }
 
 fn terminal_carries_extended_keys() -> bool {
@@ -249,13 +252,24 @@ pub(crate) fn mouse_mode_sequence(arming: MouseArming, pixel_mouse: bool) -> Vec
     sequence
 }
 
+thread_local! {
+    static ACTIVE_OUTPUT: std::cell::RefCell<Option<std::rc::Rc<std::cell::RefCell<crate::writer::TerminalWriter>>>> = const { std::cell::RefCell::new(None) };
+}
+
 impl TerminalGuard {
+    pub fn writer(&self) -> std::rc::Rc<std::cell::RefCell<crate::writer::TerminalWriter>> {
+        std::rc::Rc::clone(&self.writer)
+    }
+
     #[cfg(unix)]
     pub fn enter(mouse: MouseArming, extended_keys: bool, focus_events: bool) -> io::Result<Self> {
         let original = rustix::termios::tcgetattr(io::stdin())?;
         let file_probe = (!*crate::COALESCE || supports_kitty_graphics())
             .then(create_probe_file)
             .transpose()?;
+        let writer = std::rc::Rc::new(std::cell::RefCell::new(
+            crate::writer::TerminalWriter::terminal()?,
+        ));
         let mut guard = Self {
             active: false,
             pixel_mouse: supports_pixel_mouse(),
@@ -263,7 +277,9 @@ impl TerminalGuard {
             kitty_graphics: false,
             file_probe,
             original,
+            writer: std::rc::Rc::clone(&writer),
         };
+        ACTIVE_OUTPUT.with(|output| *output.borrow_mut() = Some(writer));
         guard.resume(mouse, extended_keys, focus_events)?;
         Ok(guard)
     }
@@ -284,7 +300,7 @@ impl TerminalGuard {
         self.active = true;
         EXTENDED_KEYS_OPTION.store(extended_keys, Ordering::Relaxed);
         TERMINAL_COLOURS.store(zz_daemon::client_terminal_colour_count(), Ordering::Relaxed);
-        let mut output = io::stdout().lock();
+        let mut output = Vec::new();
         output.write_all(b"\x1b[?1049h\x1b[?25l")?;
         if focus_events {
             output.write_all(FOCUS_EVENTS_ENABLE)?;
@@ -301,8 +317,7 @@ impl TerminalGuard {
         output.write_all(TERMINAL_REQUESTS)?;
         output.write_all(THEME_SUBSCRIBE)?;
         output.write_all(b"\x1b[16t\x1b[2J")?;
-        output.flush()?;
-        drop(output);
+        self.writer.borrow_mut().control(output)?;
         arm_extended_keys();
         Ok(())
     }
@@ -336,10 +351,10 @@ impl TerminalGuard {
             return Ok(());
         }
         let file_probe = create_probe_file()?;
-        let mut output = io::stdout().lock();
+        let mut output = Vec::new();
         write_kitty_probe(&mut output, &file_probe)?;
         output.write_all(DEVICE_ATTRIBUTES_REQUEST)?;
-        output.flush()?;
+        self.writer.borrow_mut().control(output)?;
         self.file_probe = Some(file_probe);
         Ok(())
     }
@@ -362,7 +377,7 @@ impl TerminalGuard {
         }
         self.active = false;
         cleanup_frame_slot_files();
-        let mut output = io::stdout().lock();
+        let mut output = Vec::new();
         let _ = output.write_all(b"\x1b[?2026l\x1b[0m\x1b]112\x07");
         if self.kitty_graphics {
             let _ = output.write_all(b"\x1b_Ga=d,d=A,q=2\x1b\\");
@@ -378,7 +393,7 @@ impl TerminalGuard {
         let _ = output.write_all(
             b"\x1b[?2004l\x1b[?1016l\x1b[?1006l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1004l\x1b[?25h\x1b[?1049l",
         );
-        let _ = output.flush();
+        let _ = self.writer.borrow_mut().control(output);
         #[cfg(unix)]
         let _ = rustix::termios::tcsetattr(io::stdin(), OptionalActions::Now, &self.original);
     }
@@ -388,6 +403,7 @@ impl Drop for TerminalGuard {
     fn drop(&mut self) {
         self.finish_file_probe();
         self.suspend();
+        ACTIVE_OUTPUT.with(|output| output.borrow_mut().take());
     }
 }
 

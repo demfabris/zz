@@ -3,24 +3,34 @@
 Entry point for a fresh session continuing the zz daemon performance rebuild. Written 2026-09-29 on
 the macbook, continued the same day on the Linux host alienware (see "Linux leg"). Wave 0 and wave 1
 are on `main` and pushed; wave 2 runs on `perf/wave2`, and `main` is fast-forwarded and pushed after
-every merge. State at the end of the Mac leg (2026-09-30): W2-HOOKS and W2-TERM merged and
-pushed; the wave-1 macOS gate is recorded; the Ghostty fork pin moved to `c3941417` (a data-loss fix
-the Mac review found, see "Mac leg"); no lane in flight, no side branch or lane worktree left;
-W2-CTRL, W2-FMT and W2-COPY not started.
+every merge. State on 2026-09-30 evening: W2-HOOKS, W2-TERM and W2-COPY merged and pushed;
+the wave-1 macOS gate is recorded; the Ghostty fork pin is `67351380` (trim fix `c3941417` the Mac
+review found, copy snapshots `7823f65d`, used-size active page copies). W2-CTRL (`~/dev/zz-ctrl`)
+and W2-FMT (`~/dev/zz-fmt`) are past implementation and in review/fix on the Mac; see "Lane brief
+rules" before launching anything.
 
 ## Next session on Linux
 
-1. Pull `main` (Ghostty pin `c3941417`) and check the trim fix where it matters: on Linux the old
-   pin blanks a pane one idle second after `clear`. `cargo test -p zz-terminal
-   a_cleared_screen_survives_idle_compression` must pass; for proof it has teeth, run it once with
-   `GHOSTTY_SOURCE_DIR` at a checkout of `713374af` (a fresh path each time, Cargo does not see edits
-   inside one) and watch it fail. Then a quick gate `--only throughput,mem` against
-   `w2-2-term-alienware-d7e3fc95.json`: the fix only runs in `compress`, so neither row should move.
-2. Rerun the W2-TERM merge gate on a quiet host (the recorded one ran at load 3-7 under a game):
-   `~/.cache/zz-perf/quiet-gate.sh --stage wave2 --strict --baseline bench/perf/results/w2-1-hooks-alienware-0acd7f2a.json --json bench/perf/results/w2-2-term-alienware-d7e3fc95.json`
-   from `~/dev/zz-perf-int` after `cargo build --release -p zz-cli`; commit the overwrite. It now
-   builds the new pin; say so in the commit.
-3. W2-CTRL (after TERM; carries TERM's PaneFrame in its Batch via `encode_terminal_viewport_event_into`
+1. Done 2026-09-30 (from the Mac over ssh): the trim fix holds on Linux. At `d317e171`,
+   `a_cleared_screen_survives_idle_compression` passes; with `GHOSTTY_SOURCE_DIR` at a `713374af`
+   checkout it fails with the pane captured as seven blank lines, the bug seen for real. Three
+   alternating quick pairs (`~/.cache/zz-perf/fixcheck/`): `throughput.detached.ascii` 128-130 MB/s
+   old vs 128-131 new (tmux 56.7), `mem.footprint.p1` 2.78 vs 2.78-2.80 MiB, `p20` 16.9-17.5 vs
+   16.9-17.7 MiB.
+2. Done 2026-09-30: `w2-2-term-alienware-d7e3fc95.json` is now the quiet rerun (load 0.02 -> 1.2,
+   built at `d317e171`, so with Ghostty `c3941417`; the name keeps the TERM merge). 56 pass, 16
+   fail, 11 regressed against w2-1. The laptop was in its slow power state: tmux itself moved
+   `spawn.cpu.split_shell` 0.80 -> 2.12 ms and `config.wall.source_1000` 7.7 -> 25.9 ms. Every
+   regressed row is cpu or wall; instructions and bytes match the noisy record or w2-1
+   (`attach.instr.p1` 10.08 vs 10.09 Minstr in the noisy record, `config.instr.source_1000` 41.6 vs
+   41.7, `chatty.instr_per_s.visible` 384 vs 392), so `attach.cpu.*` 3.3 -> 4.7 ms at flat tmux is
+   kernel and clock time, not TERM. Judge the next Linux merge on instructions and bytes.
+3. W2-COPY merged on Linux 2026-09-30 as merge 3 (`2cedf6ee`, gate `w2-3-copy-alienware-2cedf6ee.json`:
+   59 pass, 16 fail, the same 16 as the base but one, `cli.wall.list_panes_a.s20`, which three
+   alternating A/B pairs show is timing: 1.2541 Minstr on both binaries). Linux copy entry 52.70 ->
+   0.55 MiB, 104.8 -> 1.02 ms. The full `compat/run.sh` hit its 1800 s timeout after 243 rows; the
+   rest ran per scenario (256/256 files covered). Raise that timeout for the wave-exit run.
+   Earlier plan text, kept for CTRL and FMT: W2-CTRL (after TERM; carries TERM's PaneFrame in its Batch via `encode_terminal_viewport_event_into`
    / `encode_terminal_patch_event_into`), then W2-FMT (after HOOKS; its hand-offs are in the HOOKS
    as-built notes), then W2-COPY. Briefs: `python3 ~/.cache/zz-perf/prompts/gen.py '<json spec>'`
    (see the existing `*-impl.md`, `*-merge.md` there for the shape); two lanes at a time. W2-CTRL
@@ -365,6 +375,26 @@ Lanes in flight:
   the Mac wave-1 JSON as its baseline.
 - **No echo A/B.** Echo rules are wave 3 since the Linux leg, and tmux moved as much in both runs.
 
+- **W2-COPY merged before W2-CTRL and W2-FMT** (plan order CTRL, FMT, COPY): COPY finished its
+  fix pass first while the other two were still implementing; it shares no write zone with them
+  except two retained-event daemon edits handed to CTRL in its as-built notes.
+- **COPY's packaging overruled.** The lane vendored the safe wrapper (~12k lines) and added a
+  build-time `copy-mode.patch`; owner rules say no build-time source rewriting and no vendored
+  wrapper. Its native delta became Ghostty `7823f65d`, its wrapper delta libghostty-rs `8e40135f`
+  (new branch `zz-2026-09-30`), both published by me after review; the lane went from 53 files
+  +16.4k to 28 files +3.8k.
+- **COW review limits accepted as minor.** Codex's copy-on-write lifetime review of `7823f65d` was
+  cut by the cyber filter after clearing the main paths (88/88 COW tests, concurrent read probe);
+  two Zig-API-only cases (a later-row clone sharing an active page; the ownership record in the
+  snapshot allocator) cannot be reached from the C entry (default allocator, full-screen clone).
+- **Mac copy entry fixed after the merge.** 1.41 MiB on the Mac against the 1.0 rule (Linux 0.59):
+  Ghostty `67351380` copies active pages at their used size and `ModeRevision` builds viewport
+  cells straight into the `Arc`; Mac 0.58 MiB. The Linux gate is COPY's merge of record; the Mac
+  strict view waits for wave-2 exit (the Mac was compiling two lanes).
+- **CTRL and FMT implementation stopped by the orchestrator** after 13.5 h (at their next commit or
+  21:15): see "Lane brief rules". FMT's own rows pass; its one real regression,
+  `attach.instr.p1/p4` 10.44 -> 14.34 / 12.33 -> 16.22 Minstr, went to a focused fix brief.
+
 ## Owner decisions (binding)
 
 - Performance before features: no plugins or other features until the daemon is at least as lean as tmux.
@@ -617,6 +647,21 @@ Rule: every wave exit gets one `--strict` gate run on the Mac, committed as
 `<stage>-macbook-<sha8>.json`, next to the Linux one.
 
 ## Orchestration that worked
+
+### Lane brief rules (from 2026-09-30 evening)
+
+The first wave-2 impl runs (W2-CTRL, W2-FMT) ran 13.5 h each and never finished on their own. Codex session timestamps: 87-92% of the wall was model time (1,580-1,800 steps per main thread, median 10 s, p90 55-70 s, about 105k input tokens re-read per step, 12-18 compactions, the design doc re-read 64-70 times); each lane's codex forked 3 helper agents into the same worktree and target/ (10-28 cargo lock waits per helper, 34 dirty files at stop); the lanes wrote about 3,000 receipt/audit/provenance files (4 GB); FMT spent its last 1.5 h on rows that belong to W2-CTRL. The brief generator (`gen.py`, kinds impl, parity, perf, fix, focus) now says:
+
+- Done criterion and wall budget in every brief (impl 3 h, review 60 min, fix/focus 90 min). When done holds, stop. When the budget is spent, commit the piece in hand and answer. The orchestrator also runs `stop-at-commit-or-deadline.sh`.
+- Work alone: no spawn_agent. `-c features.multi_agent=false` and `agents.max_threads` do not remove the collaboration tools in codex 0.159, so the rule lives in the brief. One agent per worktree: a review runs in a detached worktree at the reviewed sha with a cloned target (`/bin/cp -c -R`).
+- Rows outside the lane's groups or already red on the base are listed, not chased.
+- Evidence: one scratch JSON per cited gate run; nothing written to bench/perf/results by lanes.
+- State file `/tmp/zzpc/<slug>-<kind>-state.md` (under 60 lines) is what a compacted agent rereads, with its lane section, instead of the whole doc.
+- Effort: ultra for parity/perf reviews, high for impl, fix and focus.
+- A lane that stops without a final answer gets its report written by the orchestrator from git log, the as-built block and the gate JSON; a single concrete regression goes to a `focus` brief with a numeric done criterion rather than a full fix pass.
+- Merge checks per lane: workspace fmt/clippy/tests, `just compat-check`, the lane's compat rows, a quick gate on both hosts. The full compat corpus and strict gates on both hosts run at wave exit (release freeze makes a few hours of exposure on main acceptable).
+- One compiling lane per host.
+
 
 - Linux leg: lanes run as Agent-tool subagents from brief files generated by
   `~/.cache/zz-perf/prompts/gen.py` (impl, parity and perf reviews, fix, merge); reports go to

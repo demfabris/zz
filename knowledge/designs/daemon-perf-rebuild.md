@@ -2,7 +2,7 @@
 type: Design Plan
 title: Daemon performance rebuild
 description: "The campaign to bring the zz daemon to tmux cost per command, per pane and per attach while keeping the 5x output throughput lead - a permanent zz-vs-tmux gate first, then waves that remove unrequested work (one-frame Exec commands, change-driven publication, lazy formats, frames only for watchers, a compact wire under one unreleased protocol version), then one mux loop and PTY shards; the lane brief source with targets, merge order, write zones, gates and rollback switches."
-status: Approved 2026-09-28; wave 0 (gate and this plan) built; release freeze until W4 exits; wave 1 done and on main; wave 2 in progress on perf/wave2 (HOOKS merged as w2-1, TERM as w2-2; W2-CTRL can start); continued on Linux from bench/perf/campaign/HANDOFF.md
+status: Approved 2026-09-28; wave 0 built; release freeze until W4 exits; wave 1 on main; wave 2 in progress (HOOKS and TERM merged; COPY built on perf/copy, awaiting integration; CTRL and FMT in parallel); continued on Linux from bench/perf/campaign/HANDOFF.md
 resource: crates/zz-daemon/src/daemon.rs
 tags:
 - performance
@@ -12,7 +12,7 @@ tags:
 - benchmark
 - campaign
 - design-plan
-timestamp: 2026-09-30T19:21:58Z
+timestamp: 2026-09-30T21:30:00Z
 ---
 
 # Campaign status
@@ -26,6 +26,11 @@ The campaign continues on a Linux host:
 `bench/perf/campaign/HANDOFF.md` has the state, the numbers against tmux at the last gate, the
 next steps in order, the macOS-only checks and the traps; `bench/perf/campaign/attach-review.json`
 has the attach lane's reports; `bench/perf/campaign/scripts/` has the lane workflow template.
+
+2026-09-30: W2-COPY is built on `perf/copy` from lane base `fecaaa43`, awaiting integration.
+Its as-built section below records Linux gate, parity and profile evidence. CTRL and FMT are
+being built in parallel; COPY extends the daemon write zone only for retained watcher events
+and popup ownership. The release freeze remains until W4 exits.
 
 Wave 1 merged FORMAT before PUBLISH (merges 2 and 3), against the order below: a usage-limit cut
 left PUBLISH's fix pass unfinished while FORMAT was ready. Merges 1-5 ran the gate without
@@ -308,9 +313,11 @@ Notes on the rules:
 - `cold.infocmp_forks`: zz forks `infocmp -x -1 $TERM` on the first client hello of each TERM
   (`warm_terminfo_entries`); if it costs over 1 ms, parse terminfo in process or warm it after
   readiness.
-- Not gated yet, waiting for the W0 TODO groups: copy-mode entry memory (<= 1 MB, <= 5 ms after
-  W2-COPY), attached footprint with a GUI-like client, headless-client throughput (>= 0.85x
-  W0), `remote.*` with injected RTT and `agent.*`.
+- Copy-mode entry is gated in `mem` after W2-COPY: at most 1 MiB incremental footprint and
+  5 ms daemon CPU and control reply wall time on a 10k x 180 pane. W2-TERM built the frame-sink
+  client and `throughput.headless.ascii_ms`; that row is informational because W0 has no
+  headless reference. Attached footprint with a GUI-like client, injected-RTT `remote.*` and
+  `agent.*` remain ungated.
 
 # Architecture
 
@@ -457,14 +464,14 @@ noise policy; this section records what the lanes rely on.
   servers and every descendant killed after each group and on exit; zz and tmux runs alternate.
 - Probes: CPU (macOS `RUSAGE_INFO_V4` user+system x timebase; Linux `clock_getcpuclockid` in ns,
   falling back to `/proc/<pid>/task/*/schedstat`), instructions (macOS `ri_instructions`, for every
-  CPU metric; none on Linux), footprint (`ri_phys_footprint`; Linux
+  CPU metric; Linux user-space `perf_event_open` counters when available), footprint (`ri_phys_footprint`; Linux
   `Pss_Anon + Pss_Shmem + SwapPss`) and RSS as info, threads (`PROC_PIDTASKINFO`; `/proc` Threads), thread spawns (`PROC_PIDLISTTHREADIDS` sampled
   every ~2 ms; Linux task ids), wakeups (`ri_interrupt_wkups + ri_pkg_idle_wkups`; ctxt switches).
 - `sockproxy.py`: Unix-socket relay counting bytes, u32-prefixed frames and connections (zz only;
   tmux passes the tty fd).
 - Groups: `cli` (verbs at p1 and p20, list verbs at 20 sessions), `spawn`, `cold` (+ infocmp
   forks), `config`, `chatty` (steady, flip, hidden, visible with TUI CPU and tty bytes), `idle`,
-  `mem` (p1, p20, tui20, scroll180, scroll80), `attach` (ttfc, total tty bytes until quiet, CPU,
+  `mem` (p1, p20, tui20, scroll180, scroll80 and first copy-mode entry at 10k x 180), `attach` (ttfc, total tty bytes until quiet, CPU,
   wire), `echo` (latency idle and busy30, wire bytes), `throughput` (detached ASCII and unicode,
   attached), `control` (latency, burst rate, %output), `statusjob` (`#()` jobs).
 - Thresholds per metric per stage in `thresholds.json`, the single source of the Targets table
@@ -480,19 +487,21 @@ noise policy; this section records what the lanes rely on.
 
 Not built yet (TODO, also listed in `bench/perf/README.md`):
 
-- TODO: `crates/zz-client/examples/perf_client.rs`, a headless client on the zz-client core with
-  a GUI-like mode (all-sessions tree, history backfill, 8 visible panes) and a frame-sink mode
-  (decode, no render), with its `gui` group and headless-client throughput.
-- TODO: copy-mode entry memory on a 10k x 180 pane; attached footprint with a GUI-like client.
+- TODO: the GUI-like mode of `crates/zz-client/examples/perf_client.rs`: all sessions, history
+  backfill and 8 visible panes, with its `gui` group and attached footprint. W2-TERM built the
+  frame-sink client and `throughput.headless.ascii_ms`; the latter needs a reference baseline.
+- Built in W2-COPY: first copy-mode entry on a 10k x 180 pane, included in `mem` with tmux twins
+  and wave2/final footprint, CPU and wall limits.
 - TODO: injected RTT in `sockproxy.py` and the report-only `remote` group; the report-only `agent`
   group (fixture ACP provider).
-- TODO: a first run on Linux.
+- Done on 2026-09-29: the gate runs on Linux. Its W0 is
+  `bench/perf/results/baseline-alienware-17e17115.json` and its quick twin.
 
 Gate (met at 17e17115 on macOS, see Baseline): `--stage baseline` passes; `--stage wave1` and
 `--stage final` fail on today's binary; full run <= 12 min (about 7), `--quick` <= 3 min (about 2.5); the
 committed W0 JSONs are the Baseline table below; `test_gate.py` covers threshold evaluation, the
 noise policy, the regression rules, the tmux choice and that every gated metric has a final rule.
-Open: the same run on Linux.
+Linux baselines and the wave-1 exit are recorded in `bench/perf/campaign/HANDOFF.md`.
 
 ## W1-FOOTPRINT: process facts, local time, allocator (effort M)
 
@@ -2444,25 +2453,260 @@ to W3-SHARDS above. No instruction, byte, footprint or thread row regressed.
 ## W2-COPY: copy mode without flat clones (effort L)
 
 Scope: replace `ModeRevision`'s flat clone (PackedCell + semantics + search text + 12 B offsets
-per cell, 128 MiB cap) while **keeping tmux clone semantics**: tmux clones the screen at entry and
-on refresh (`window_copy_clone_screen` in window-copy.c), so pruning, reflow and clear-history do
-not move content under the cursor. Either clone the covered pages copy-on-write (compressed pages
-stay compressed) or hold a pin that blocks pruning and reflow of the pinned range while in copy
-mode. Render only visible rows per frame. `HistorySearchSnapshot` becomes page-wise search over the
-PageList (libghostty `src/terminal/search`) or a lazy per-page text index. The copy-mode refresh
-stops recapturing. Retained dead panes keep their compressed `Terminal` instead of
-`FrozenHistory` (`publish_frozen_history`, the `run_terminal` retained-pane tail). Remove the
-`ModeRevisionTooLarge` ceiling.
+per cell, 128 MiB cap) while keeping tmux clone semantics. tmux clones backing at entry and on
+an enabled refresh (`window_copy_clone_screen` in window-copy.c). Source pruning and ED3 do not
+change frozen content. Resize reflows the frozen backing, maps the logical cursor, clears
+selection and recalculates existing search marks. The `clear-history` command exits copy mode;
+ED3 leaves it open. Clone covered pages copy-on-write, keeping compressed pages compressed, and
+render only visible rows per frame. `HistorySearchSnapshot` searches frozen rows lazily, joining
+physical wraps into logical lines. An enabled refresh takes another page snapshot only when
+there is unseen output and no selection; it retains tmux's follow and suppression rules.
+Retained dead panes keep their compressed `Terminal` instead of flat `FrozenHistory`
+(`publish_frozen_history`, the `run_terminal` retained-pane tail). Remove `ModeRevisionTooLarge`.
 
-Write zone: `session/mode_revision.rs`; session.rs `FrozenHistory`, `publish_frozen_history`,
-`run_terminal` retained-pane tail, copy-mode refresh fn, `HistorySearchSnapshot` and impls,
-`copy_mode_snapshot`.
+Write zone: `session/mode_revision.rs`, `session/copy_grid.rs`; session.rs `FrozenHistory`,
+`publish_frozen_history`, `run_terminal` retained-pane tail, copy-mode refresh,
+`HistorySearchSnapshot` and `copy_mode_snapshot`; the native page snapshot and safe row APIs.
+The retained copy completion path also needs `Shared::watch_terminal`; see the as-built notes.
 
-Gate vs HOOKS JSON: copy-mode entry (TODO in W0) <= 1 MB and <= 5 ms on a 10k x 180 pane; throughput
-unchanged. Tests: tmux differential fixtures for copy mode under continuous output past
-history-limit and for resize in copy mode; `compat/tui-copy-mode.sh`, `compat/run.sh` copy-mode
-rows, `tracker.py check` copy-mode obligations, zz-terminal copy-mode and search tests, daemon
-copy-session tests (re-run alone; known reconcile race).
+Gate against lane base `fecaaa43`: first copy-mode entry on a 10k x 180 pane is included in `mem`,
+with bounds of 1 MiB incremental footprint and 5 ms daemon CPU and control reply wall time.
+Throughput must remain unchanged. Tests: tmux differentials for copy mode under continuous
+output past history-limit and resize in copy mode; `compat/tui-copy-mode.sh`, `compat/run.sh`
+copy-mode rows, `tracker.py check`, terminal copy/search tests and daemon copy-session tests.
+
+As built (branch `perf/copy`, 2026-09-30, lane base `fecaaa43`, Linux only; review-fix
+checkpoints `1540b318` and `62e7dbfd`):
+
+`ModeRevision::capture` freezes the native active screen instead of flattening its whole
+history. Copy-on-write cloning skips the eager clone preheat-count pass, confirmed as
+surviving in optimized assembly; eager clones retain that preheating. Complete resident
+history pages share immutable storage with atomic ownership; writes detach a shared page.
+Compressed pages share encoded bytes when allocator identities match and allocate a private
+restore mapping only when read. Differing allocators receive independent encoded copies.
+Dropping unread pages never restores them. Active pages are copied because native cursor
+caches hold pointers into them. Resize reads source page metadata and rows without detaching
+pages it will replace. The native delta lives in published Ghostty fork commit
+`7823f65dd55fc9ff420d5eb5cae761cbd1995994` on `zz-2026-09-30`, with parent
+`c39414175ca2aad564b74b3f52196355f2671774` retained in the branch's history.
+`zz-2026-09-29` keeps spare-page pin `713374af`. The safe wrapper's
+owned `ScreenSnapshot` and borrowed bounded `GridRow` APIs live in one published
+libghostty-rs fork commit `8e40135fb20e9ed91c37c374fe1d14570c386d06` on new branch
+`zz-2026-09-30`, with parent `359ef751c189540eafb9110b2de89ad95ce48fc3` still on
+`zz-2026-09-25`. The lane vendors only the sys snapshot, with regenerated
+bindings and the installed-header API check. Native source staging, patch application,
+reversal, hashing and stamps are gone, as are `copy-mode.patch` and the safe-wrapper directory.
+The manifest and native pin select these published commits for fetched-source builds.
+Pre-publication validation used a temporary wrapper path patch and fresh native source
+override, removed before repinning. This implements the binding packaging
+decision of 2026-09-30; the earlier rationale about a fork push freeze no longer applies.
+
+The C clone initializes its owned terminal directly from frozen backing, skipping four blank
+page mappings and their pool/pin bookkeeping. Ordinary terminal initialization retains its
+default-cursor setup; existing cloned cursor/SGR semantics, configured terminal cursor defaults
+and fresh parser state remain intact.
+
+`CopyGrid` converts requested rows and retains at most 64. Its compacting style/grapheme
+dictionary clears cached rows when ids change; published frames keep their own storage.
+Visible cells resolve one native row reference per row. Consecutive cells with the same
+page-local style id and hyperlink state reuse one converted style. Single-scalar glyphs skip
+UTF-8 encoding and decoding. `ModeRevisionReader` pairs a cached row with its dictionary so
+cursor line, word and search-match facts avoid repeated cell-cache locks and remain valid
+through dictionary compaction. Plain capture, VT capture and selection formatting now also
+hold one row and its matching dictionary for their row loop; they append glyphs to the
+destination without per-cell strings or repeated style-dictionary fetches. `HistorySearchSnapshot` stores native backing rather than
+whole-history text and offsets. Search reuses buffers for one logical wrapped line, maps
+Unicode matches to physical start/end rows, checks cancellation between rows, and recompresses
+after 512-row batches and at completion. Empty and single-scalar glyphs skip the general
+iterator; longer graphemes retain the scratch path. The existing match-count limit remains.
+
+Frozen backing survives source output, pruning, ED3 and source destruction. It uses primary
+backing with unlimited snapshot pruning, wrapping and history pulling enabled, and shell
+prompt redraw disabled; source screen identity stays separate. Resize maps the logical cursor,
+clears selection and rebuilds search marks. Appearance changes recolor frozen content, while
+an enabled refresh captures the current source. `ZZ_PERF_COPY_CLONE=1` restores flat
+mode/search snapshots and their original entry-geometry limit; retained actor behavior applies
+with either choice. A test-only search gate now covers pending retained search direction in
+both backends without unwrapping absent native state. Resize tests assert the supported
+backend geometry while still checking the live terminal resize.
+`ZZ_PERF_NO_COMPRESS=1` also suppresses copy/search recompression.
+
+Retained dead panes keep their compressed terminal actor instead of `FrozenHistory`. The actor
+answers copy reads immediately during the five-second retention decision and completes their
+in-flight/deferred bookkeeping. It carries the original search worker/results into its
+retained surface loop, preserving pending search policies and completed cursor placement.
+Exited panes that are discarded cancel their active frozen searches. Classified PTY input is
+closed and drained before completion publication; queued payloads and permits are released
+even while the sender survives. PTY handles and parsing/input scratch are dropped before the
+retained loop. Linux exercises this transition; the macOS duplicate drain descriptor cleanup
+was checked in source but cannot be run here. `Shared::watch_terminal` handles completion once
+and continues delivering retained copy events. `finish_popup` sends the retained-popup
+decision. Those two functions are the forced daemon write-zone extensions; CTRL/FMT register,
+attach, publication, format, client and protocol code were not changed. Protocol remains
+unreleased 107.
+
+The gate is in `mem`: each fresh server gets exactly 10000 dense history rows in a 180x50
+pane, five seconds to idle, and one entry through a persistent control client. It gates
+incremental footprint at 1 MiB and daemon CPU/control wall time at 5 ms, with Linux
+instruction counts and a tmux twin. RSS remains informational. `before.json` was measured at
+gate-only `116483ae`, with production code unchanged from `fecaaa43`. The first release
+attempt exposed an undefined Zig builtin allocator-context read, fixed by comparing vtables
+before any defined custom context; the dense default-allocator regression failed before the
+fix and passed afterward. Failed attempts are preserved as diagnostics and contribute no COPY
+measurements.
+
+Pre-review release at `827ec2ab`, SHA-256
+`304746910e6a78d4818ae748cb8539cd60102cc69a82445939434f9201944c75`:
+
+| Metric | Base zz | Final zz | Final tmux | Rollback zz |
+|---|---:|---:|---:|---:|
+| Copy footprint (MiB) | 52.6875 | 0.5898 | 9.168 | 52.7695 |
+| Copy RSS (MiB, informational) | 52.75 | 0.6523 | 9.168 | 52.832 |
+| Copy daemon CPU (ms) | 101.7425 | 1.2123 | 7.0696 | 100.3023 |
+| Copy reply wall (ms) | 101.819 | 1.3061 | 7.1979 | 100.4032 |
+| Copy instructions (Minstr) | 1535.0302 | 4.3218 | 10.1793 | 1527.7527 |
+| Detached ASCII (MB/s) | 133.7675 | 132.0379 | 39.0785 | n/a |
+| Cooked PTY ceiling (MB/s) | 130.7389 | 133.3491 | n/a | n/a |
+| Headless ASCII (ms, informational) | 1194.765 | 1203.954 | n/a | n/a |
+
+The three COPY floors pass, including every sample below their bounds. The prescribed
+`wave2 --quick --only mem,throughput` run has six passes, one known failure and seven
+informational rows, with no errors, strays or killed orphans. The failure is unchanged
+`mem.threads.p20`: 66 against 51, owned by W3-SHARDS. Detached throughput is 0.987x the lane
+base and passes the Linux cooked-PTY/W0 bounds. Final load was `[0.28, 1.03, 0.93]` before and
+`[0.58, 1.01, 0.93]` after. Rollback explicitly records `ZZ_PERF_COPY_CLONE=1` and intentionally
+fails the three COPY floors; retained actor fixes remain active. Artifacts are
+`/home/demfabris/.cache/zz-perf/copy/{before,after,rollback-copy-clone}.json` and matching logs.
+The final gate records dirty documentation only; the measured production code is committed.
+
+Final profiling attaches only to the daemon: `perf record -e cycles:u -F 999 -g -p
+700400 -- sleep 5`, then `perf report --stdio --no-children`. The capture has 5507 samples,
+zero lost, and 4926 repeated entry/cancel cycles over 4.955375 seconds. Both record and main
+report exit successfully. The persistent control client and producer stay outside the sampled
+process. Warm entry median is 0.4560715 ms; the separate unprofiled diagnostic first entry is
+0.5859375 MiB, 0.914623 ms CPU and 0.844651 ms wall. Fresh-server gate medians above remain
+the entry result.
+
+| Daemon self-cost leaf during entry/cancel | First valid profile | Final profile |
+|---|---:|---:|
+| `CopyGrid::row` | 17.30% | 6.38% |
+| `ghostty_grid_ref_style` | 2.27% | 0.03% |
+| `ModeRevision::cell` / `ModeRevisionReader::cell` | 2.81% | 0.18% |
+| `ViewportDictionary::encode_glyph` | 3.12% | 2.23% |
+| `ViewportDictionary::intern_style` | 4.48% | 3.79% |
+| Live `build_snapshot` on cancel | 17.93% | 19.99% |
+
+These are cycle shares for both entry and cancellation, rather than isolated entry timings.
+Final independent native grapheme and grid-cell getters account for 6.52% and 5.65%; live
+row-cell extraction accounts for 8.55%. Native clone is 0.38%, page map 0.01%, and no blank
+constructor leaf appears. Source and optimized DWARF confirm that the direct constructor and
+early COW branch remove the dummy pages and eager counting. The later independent review found repeated COPY row-cache access in capture and a general
+scalar iterator in search, outside this entry/cancel profile. The review fixes remove both
+caller costs; independent cell/grapheme reads and live cancel extraction go to W4-ROWS. Artifacts are `entry-final.perf.data`, `entry-final.profile.json`,
+`entry-final.perf-report.txt` and the supplemental flat report under the lane cache. Cleanup
+reports daemon exit zero and no strays.
+
+Final linked parity at `827ec2ab`: 27 scenarios and 300 steps pass with zero divergences or
+retries. Copy TUI passes 141/147 with its full transcript byte-identical to the baseline; tracker
+and binary hash guards pass, and cleanup finds no fixture processes or sockets. An intermediate
+run exposed a refresh-fixture race: live output and an earlier cursor change could precede the
+next frozen refresh. The fixture now waits for the producer marker in frozen backing before
+disabling refresh and keeps the independent final cursor/content assertion.
+
+Validation on this host: the Python gate has 31 passing tests. Final `zz-terminal` has 330
+passing tests and one ignored. Native clone/constructor tests pass 116/116 in both
+ReleaseSafe and ReleaseFast; the excluded safe wrapper passes 34 unit and 20 doc tests with
+three doc tests ignored, and sys passes three tests. The five adjacent daemon COPY tests pass.
+Root workspace and both excluded manifests pass strict all-target/all-feature clippy. Rust/Zig
+formatting and both static C integration clients pass. The all-feature workspace test run
+finishes without hangs. Its known endpoint test fails because this host has zz on PATH, and
+the known UI caps test fails. The daemon large-argument and same-image-exec tests fail under
+workspace load and pass when rerun alone. Three new input fixtures initially used
+control-channel `RawInput`; they now use classified PTY input and the whole terminal package
+passes. This changes the fixture, not RawInput routing.
+
+W3-SHARDS must preserve the retained native actor, its search worker/results and pending
+policy, classified input close/drain, released PTY scratch, and immediate EOF read/accounting
+contract. The 64-row cache is bounded; search recompresses in 512-row batches. W4-ROWS owns
+remaining independent cell/grapheme metadata queries and live frame extraction on copy
+cancellation; keep the safe snapshot ownership and borrowed row bounds when adding a bulk API.
+Integrate the two retained-event daemon edits with CTRL. The native and safe-wrapper copy
+changes now live in published fork commits, pinned for ordinary fetched-source builds.
+
+Review fixes (2026-09-30): the published copy fork pins are
+Ghostty `7823f65dd55fc9ff420d5eb5cae761cbd1995994` and libghostty-rs
+`8e40135fb20e9ed91c37c374fe1d14570c386d06`, each one commit on its required parent.
+The default optimized release hash is
+`c03d88d26c893b19446282177818e0fe099056454c0f32c31c268c5bde49247b`.
+`/home/demfabris/.cache/zz-perf/copy/fixed.json` records the prescribed quick
+`mem,throughput` run: 0.5859 MiB entry footprint, 1.2130 ms CPU, 1.2426 ms reply wall,
+4.3228 Minstr, 129.5623 MB/s detached ASCII and 130.6971 MB/s cooked-PTY ceiling.
+All entry samples meet the floors (max CPU 2.4375 ms, wall 2.8486 ms). The run exits 1
+with six passes, one unchanged `mem.threads.p20` failure at 66 threads and seven
+informational rows. It has no errors, regressions, strays or killed orphans.
+`--only copy` now selects entry measurements alone; selecting it with `mem` avoids
+repeating entry. Scratch follows `TMPDIR`, while sockets remain directly under `/tmp`.
+The standalone copy run exits 0 with three passes and two informational rows:
+0.5859 MiB footprint, 1.1842 ms CPU, 1.2065 ms wall and 4.3227 Minstr. Its evidence is
+`fixed-copy.json`, with no errors, strays or orphans.
+
+Four-request operation medians, same dense frozen backing:
+
+| Operation | Review lane Minstr | Fixed Minstr | Reduction |
+|---|---:|---:|---:|
+| search | 545.309 | 487.421 | 10.62% |
+| capture | 1322.107 | 915.366 | 30.76% |
+| capture_vt | 1718.592 | 988.553 | 42.48% |
+
+Output byte counts remain unchanged. Search still decodes native rows on each query;
+captures still decode rows with bounded storage. Their deferred read cost remains above
+the flat base; the fixes remove repeated row-cache access and the scalar iterator without
+restoring whole-history arrays. The instruction evidence is in `fixed-ops.profile.json`.
+
+The ordinary release strips symbols. A supplemental optimized build with
+`CARGO_PROFILE_RELEASE_STRIP=none` exits 0 and retains symbols for attribution. Its text
+section differs by 2112 bytes (0.0123%); repeated operation instructions differ by less
+than 0.002%, with the same output byte counts. The default stripped binary remains the
+gate artifact. Five-second search and capture profiles record 4917 and 4599 samples,
+with no losses and clean daemon exits. `String::extend<&char>`, `ModeRevision::cell` and
+per-cell hash construction no longer appear above the 0.5% reporting threshold. Search
+spends 28.87% in native grapheme reads and 21.72% in grid-cell reads; capture spends
+20.63% and 11.95% respectively, plus 15.88% in bounded row conversion. The independent
+getter and page-cooling work remains assigned to W4. Reports are
+`fixed-search-symbols.perf-report.txt`, `fixed-capture-symbols.perf-report.txt` and
+`fixed-perf-validation.json` under the lane cache.
+
+Validation after review: full native suite 6490 passed/68 skipped, wrapper default suite
+30 wrapper and three sys tests plus 19 doctests passed/three doctests ignored, terminal
+332 passed/one ignored with both default and flat rollback storage, and 36 daemon copy
+filter tests passed. All five lane daemon tests pass with rollback and with compression
+suppressed. Full daemon runs retain the known PATH endpoint failure; four different load
+failures pass alone. All 35 daemon integration tests pass, with one ignored. Strict
+all-target/all-feature clippy passes on touched crates and the wrapper; fmt and OKF
+validation pass. Native exports number 205, all 199 generated function declarations
+resolve, and the strict C ABI client links and runs.
+
+The final compat suite passes 27 scenarios/252 steps with zero divergences or retries.
+Lane and recorded base TUI copy fixtures each pass 141/147 and their logs match byte for
+byte, including the earlier base transcript. Tracker validation and cleanup pass. The
+wrapper's costly standalone Debug fixtures bound rich metadata and mutation work while
+separate 1000-row and 10k ownership cases retain shared-page coverage. Fork checkouts stay
+clean and unpublished; the orchestrator must publish both commits, replace both literal
+pin placeholders and regenerate `Cargo.lock` before ordinary builds.
+
+The six copy TUI fresh-entry prompt Escape/cancel failures are byte-identical to the baseline.
+Their first divergence is that pinned tmux retains the prompt after Escape while zz closes it;
+then tmux consumes `q` in that prompt while zz cancels copy mode. The relevant daemon
+functions are `command_prompt_key`, `prompt_translate_key` and `command_prompt_edit_key`,
+outside the COPY write zone. The cause remains unproven. macOS launch, clonefile, kqueue, PTY
+bridge, ri_instructions, GUI profiling and iOS builds cannot be checked on this Linux host.
+
+Merged 2026-09-30 (`2cedf6ee`, Linux gate `w2-3-copy-alienware-2cedf6ee.json`): both fork
+commits are published and pinned, entry 52.70 to 0.55 MiB and 104.8 to 1.02 ms on Linux. The
+Mac entry read 1.41 MiB against the 1.0 MiB rule because a copy-on-write snapshot of a small
+active area allocated standard pages and read their unused tails. Ghostty `67351380` copies
+active pages at their used size and `ModeRevision` builds viewport cells directly into the
+`Arc` (no temporary vector): Mac entry 0.58 MiB, 5.58 to 5.00 Minstr.
 
 ## W3-SHARDS: PTY shard threads inside zz-terminal (effort XL)
 
@@ -3072,5 +3316,6 @@ generations, with invalidation tests for the mutation paths.
 - Can system libmalloc replace mimalloc after W3-SHARDS without losing the 245 MB/s?
 - Which zz hooks (`@option-changed`, wait-for signals) must still flush mid-file during config
   load, once publication is deferred?
-- Goals for the attached footprint with a GUI-like client, copy-mode entry memory and
-  headless-client throughput wait for the W0 TODO groups that measure them.
+- Attached footprint with a GUI-like client awaits its W0 TODO group. Headless throughput has
+  an informational frame-sink row but still needs a reference baseline. Copy-mode entry has
+  footprint and time gates from W2-COPY.

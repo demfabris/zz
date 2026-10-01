@@ -1,5 +1,7 @@
 import time
 
+from groups import copy
+
 MIB = 1 << 20
 
 
@@ -44,6 +46,7 @@ def run(ctx):
     time.sleep(3.0)
     record(ctx, "p20", ctx.samples())
     if ctx.quick:
+        copy.run(ctx)
         return
     clients = [ctx.attach(mux, "m") for mux in ctx.muxes]
     ctx.drain(clients, 3.0)
@@ -52,3 +55,4 @@ def run(ctx):
         client.detach(mux.detach_keys)
     scroll(ctx, 180, 50)
     scroll(ctx, 80, 24)
+    copy.run(ctx)

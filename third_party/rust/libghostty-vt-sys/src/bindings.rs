@@ -3075,6 +3075,10 @@ unsafe extern "C" {
     ) -> Result::Type;
 }
 unsafe extern "C" {
+    pub fn ghostty_terminal_clone_screen(terminal: Terminal, result: *mut Terminal)
+    -> Result::Type;
+}
+unsafe extern "C" {
     #[doc = " Free a terminal instance.\n\n Releases all resources associated with the terminal. After this call,\n the terminal handle becomes invalid and must not be used.\n\n"]
     pub fn ghostty_terminal_free(terminal: Terminal);
 }
@@ -4404,7 +4408,7 @@ pub mod Key {
 unsafe extern "C" {
     #[doc = " Create a new key event instance.\n\n Creates a new key event with default values. The event must be freed using\n ghostty_key_event_free() when no longer needed.\n\n"]
     pub fn ghostty_key_event_new(allocator: *const Allocator, event: *mut KeyEvent)
-        -> Result::Type;
+    -> Result::Type;
 }
 unsafe extern "C" {
     #[doc = " Free a key event instance.\n\n Releases all resources associated with the key event. After this call,\n the event handle becomes invalid and must not be used.\n\n"]
@@ -4929,7 +4933,7 @@ unsafe extern "C" {
 unsafe extern "C" {
     #[doc = " Make a bounded amount of search progress.\n\n This only works on data the search has already copied and never\n reads the terminal, so it is safe to call while another thread\n modifies the terminal. Call it in a loop while the status is\n GHOSTTY_SEARCH_STATUS_RUNNING. When the status becomes\n GHOSTTY_SEARCH_STATUS_FEED_REQUIRED, call ghostty_search_feed() to\n unblock it.\n\n         search is NULL\n"]
     pub fn ghostty_search_tick(search: Search, out_status: *mut SearchStatus::Type)
-        -> Result::Type;
+    -> Result::Type;
 }
 unsafe extern "C" {
     #[doc = " Read the terminal to update the search.\n\n Each feed catches the search up with the terminal: it reconciles\n the tracked screens against the live ones, re-scans the active\n area, refreshes the viewport match list, gives the scrollback\n searcher its next chunk of data, and prunes results that scrollback\n eviction invalidated. Feeding is also the only way the search\n learns about terminal changes, so keep feeding periodically while\n the search is in use, even after it reports complete.\n\n This reads the terminal, so the caller must serialize it with all\n other access to the same terminal. Each call does a bounded amount\n of work so that any caller-held terminal lock is held only briefly.\n\n         search is NULL or the terminal was freed\n"]

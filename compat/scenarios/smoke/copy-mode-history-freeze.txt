@@ -1,0 +1,6 @@
+corpus: none
+stage: fixtures/copy-mode-revision.sh ~/copy-mode-revision.sh
+stage: fixtures/send-keys-attach.py ~/send-keys-attach.py
+out: set-environment -gu COPY_MODE_HISTORY_FREEZE
+run-shell 'sh ~/copy-mode-revision.sh history'
+out: show-environment -g COPY_MODE_HISTORY_FREEZE

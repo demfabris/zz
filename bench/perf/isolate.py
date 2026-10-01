@@ -17,7 +17,7 @@ KEEP = ("PATH", "USER", "LOGNAME", "LANG", "LC_ALL", "LC_CTYPE")
 class Env:
     def __init__(self, keep=False):
         self.tag = f"zzpf-{os.getpid()}"
-        self.root = tempfile.mkdtemp(prefix=f"{self.tag}-", dir="/tmp")
+        self.root = tempfile.mkdtemp(prefix=f"{self.tag}-")
         self.keep = keep
         self.zz_socket = f"/tmp/{self.tag}.sock"
         home = os.path.join(self.root, "home")

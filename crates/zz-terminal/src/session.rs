@@ -15,6 +15,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(unix)]
+use crate::pty_types::{CommandBuilder, ExitStatus, PtySize};
 use crossbeam_channel::{Receiver, Sender};
 use libghostty_vt::{
     RenderState, Terminal,
@@ -40,6 +42,7 @@ use libghostty_vt::{
 use parking_lot::{Mutex, RwLock};
 #[cfg(not(unix))]
 use portable_pty::native_pty_system;
+#[cfg(windows)]
 use portable_pty::{CommandBuilder, ExitStatus, PtySize};
 use regex::RegexBuilder;
 use smallvec::SmallVec;

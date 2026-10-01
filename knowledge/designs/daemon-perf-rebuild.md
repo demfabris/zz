@@ -3066,6 +3066,12 @@ The handlers retain the read and parse turn caps, frame sampling, echo fast path
 Linux checks: 332 terminal tests passed; terminal clippy and six compatibility scenarios passed. The known daemon endpoint test stayed red; three daemon load failures passed alone, and 35 integration tests passed.
 The orchestrator owns the perf A/B and Mac checks.
 
+As built (slice s3, 2026-10-01): Unix uses crate-local command, exit-status and PTY-size types in `crates/zz-terminal/src/pty_types.rs`; the existing spawn path stays unchanged.
+The normal dependency trees contain no `portable-pty` on Linux or macOS; Windows keeps it as a target dependency.
+Linux checks: clippy passed, both terminal modes passed 337 tests with one ignored, and seven compatibility rows passed. The known daemon endpoint test stayed red; four load failures passed alone, and 35 integration tests passed with one ignored.
+Windows builds, Mac runtime checks and the perf gate were not run for this slice.
+
+
 ## W3-LOOP: single-owner mux loop (effort XL)
 
 Commits that each keep tests green:

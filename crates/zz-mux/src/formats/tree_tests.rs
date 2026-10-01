@@ -141,6 +141,30 @@ fn loop_availability_preserves_lazy_values_in_real_detached_captures() {
 }
 
 #[test]
+fn rollback_detach_reuses_owned_loop_values_and_keeps_them_frozen() {
+    let mut engine = MuxEngine::default();
+    let (session, window, pane) = engine.state.create_session("work").unwrap();
+    let template = "#{W:#{window_name}:#{P:#{pane_id};}}";
+    let needs = FormatNeeds::WINDOWS | FormatNeeds::PANES;
+    let detached = with_borrowed_formats(false, || {
+        let context = engine.format_status_context(Some(session), Some(window), Some(pane));
+        let parts = Arc::clone(&context.format_universe.parts);
+        let detached = context.detach_with_templates(needs, [template]);
+        assert!(Arc::ptr_eq(&parts, &detached.format_universe.parts));
+        assert!(detached.format_universe.engine.is_none());
+        assert!(detached.values.get().is_some());
+        detached
+    });
+    let before = expand_status(template, &detached, &mut Hooks(&engine));
+    assert!(before.contains(&pane.to_string()));
+    engine.state.rename_window(window, "changed").unwrap();
+    assert_eq!(
+        expand_status(template, &detached, &mut Hooks(&engine)),
+        before
+    );
+}
+
+#[test]
 fn borrowed_callbacks_match_w1_for_every_pinned_name() {
     for (fixture, engine) in fixtures() {
         for client in clients(&engine) {

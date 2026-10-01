@@ -2219,10 +2219,13 @@ impl<'e> FormatUniverseRef<'e> {
             self.fill(needs, session, window, pane);
         }
         FormatUniverseRef {
-            parts: self.engine.map_or_else(
-                || Arc::clone(&self.parts),
-                |engine| Arc::new(self.parts.detached(engine, specs)),
-            ),
+            parts: self
+                .engine
+                .filter(|_| tree::borrowed_formats())
+                .map_or_else(
+                    || Arc::clone(&self.parts),
+                    |engine| Arc::new(self.parts.detached(engine, specs)),
+                ),
             engine: None,
         }
     }

@@ -2588,7 +2588,7 @@ nothing tells them options changed, so this lane keys the option and dependency 
 options generation; the per-command `FormatHookFacts` snapshot makes every `set @x` clone
 that scope's user option map.
 
-As-built on `perf/fmt`, 2026-09-30, measured source
+Original as-built on `perf/fmt`, 2026-09-30, measured source
 `4c5b0b39c6536ada322894ee4aab461bcff3ef27`. Source checks and the three profile floors pass;
 five owned listing CPU rows beat same-run tmux, and visible daemon CPU fell in the observed
 scoped runs. Compatibility preserves all 44 pre-lane final scenario tuples. The full-chatty
@@ -2604,7 +2604,7 @@ and stable status expansion while preserving the full formatter and its rollback
   field order, and explicit legacy access alone initializes boxed `StatusValues`. Borrowed
   daemon facts can reach the engine through the legacy universe when only borrowed-variable
   mode is disabled; nested children preserve engine, scope, client, variables and clock.
-- Parsed templates hold nested operations, references and clock/loop metadata. A thread-local
+- Parsed templates hold nested operations, references and clock/loop metadata. A process-wide
   FIFO retains at most 512 entries and 1 MiB, charging actual source/operation capacities and
   a 64 KiB container reserve. Oversized entries bypass retention; cache-off parses fresh
   before lookup. Syntax keys use source alone because they contain no option values, a
@@ -2807,8 +2807,8 @@ The intentional old-binary-mtime warning remains in metadata. Provenance receipt
 369.6s. Raw input: `/tmp/zzpc/fmt-4c5b0b39-full-strict.json`. Final paired ownership/quiet
 metadata assessment is PENDING. Attach instructions rose from 10.4492 to 14.2440 million
 at p1 (+36.3%) and 12.3259 to 16.0091 million at p4 (+29.9%). Their mechanism/ownership is
-unresolved; the attach prefix alone does not place them outside FMT. Old/current isolated
-repeats and interval/source checks are in progress. Scoped success does not clear them.
+resolved by the attach follow-up below: connection threads repeated syntax compilation.
+The original full strict result remains historical; the follow-up uses scoped quick runs.
 Both full inputs report `meta.noisy=false`. Separate full-pair owned values are config CPU
 2.5655 to 2.3598ms, instructions 39.2139 to 38.4788 million, wall 5.6306 to 4.5984ms; visible
 daemon CPU 3.1407 to 2.8369%; status-job CPU 0.1873 to 0.1801%, instructions 13.8277 to
@@ -2845,6 +2845,56 @@ Meaningful limitations and handoff:
   `/tmp/zzpc/fmt-field-bound-audit.json`, key `committed_4c5b0b39_followup`.
   CTRL owns registration/publication/transport changes and can use cached option snapshots,
   borrowed fact providers and live status-context construction. The worktree stays in place.
+
+### Attach follow-up, 2026-09-30
+
+Measured source `5279acf7` includes `5e9996d4`. Bisect repeats put the attach regression
+in the compiled-template path: `824f7c03` 15.0/17.3, `81b1ebef` 13.0/15.2 and
+`3475ce1e` 12.0/14.2 Minstr at p1/p4. The 824f measurement needed a temporary trait-signature
+correction, removed after that run. Connection threads repeated syntax compilation.
+`formats/compiled.rs` `get` now shares the bounded syntax FIFO between threads, parses misses
+outside its mutex and rechecks insertion. Bounds and cache-off interpretation stay unchanged.
+`formats.rs` `FormatUniverseRef::detach` now reuses the owned loop records when borrowed
+formats are disabled. The new tests prove cross-thread syntax reuse and frozen rollback loops.
+
+Three alternating saved `d317e171` / final-binary quick attach pairs:
+
+| Pair | Base p1 | Final p1 | Change | Base p4 | Final p4 | Change |
+|---|---:|---:|---:|---:|---:|---:|
+| 1 | 10.5351 | 10.6379 | +0.98% | 12.4930 | 12.6177 | +1.00% |
+| 2 | 10.6654 | 10.7960 | +1.22% | 12.6701 | 12.8305 | +1.27% |
+| 3 | 10.5423 | 10.6403 | +0.93% | 12.6508 | 12.7301 | +0.63% |
+
+All values are Minstr. The supplied 4c5b repeat was 14.3362/16.2205. All-four rollback now
+measures 10.4007/12.2589 against the supplied base 10.4432/12.3313. Scratch inputs are
+`/tmp/zzpc/fmt-focus-final-{base,lane}-{1,2,3}.json` and `fmt-focus-rollback-owned.json`.
+
+Fresh saved 4c5b / final owned-group runs both exit 0, with 32 passing gates:
+
+| Instructions | Saved 4c5b | Final |
+|---|---:|---:|
+| CLI list-keys p1 / p20, Minstr | 0.7468 / 0.7556 | 0.7459 / 0.7514 |
+| Config source1000, Minstr | 38.6450 | 38.7055 |
+| Chatty flip / hidden, Minstr/s | 67.1377 / 83.9632 | 67.2269 / 79.4812 |
+| Status jobs, Minstr/s | 6.9030 | 6.8969 |
+
+The instruction gains remain within repeat variation. Raw CPU varies on this loaded host;
+config CPU is 2.4873/2.5105ms, and chatty flip's same-run tmux ratio is 0.886/0.887.
+Inputs: `/tmp/zzpc/fmt-focus-final-{reference,owned}.json`. The required combined quick gate
+against quick W0 exits 1: 36 pass, 5 fail, 1 wall warning, no regression/drift/error, input
+`/tmp/zzpc/fmt-focus-final-verified.json`. Four connection/byte failures and the intermittent
+p4 CPU failure also occur on the base. The full wave-2 adbc5407 file remains a separate view.
+
+Final checks: fmt and mux all-target/all-feature clippy exit 0; the full mux suite passes
+651 unit tests plus integrations, the all-four format sweep passes 152 plus 4, and the normal
+daemon format sweep passes 149 plus 6, all under timeout 1800 and exit 0. At the shared-cache
+checkpoint, 36 at-risk compat scenarios have FMT0, 35 clean and the known Mac status-job
+OUT1/WARN1 (exit 1), also
+reproduced on the saved base. The client-loop first-pass tty-order failure passes its solo
+retry. Four all-four rollback format/option-loop compat scenarios exit 0. Four all-four daemon
+preparation metadata assertions fail identically at starting `b0c7a22f` and remain handed on.
+Linux /proc, zz-pty-gather, epoll, THP and tui-output-backpressure.sh are NOT RUN on this Mac;
+iOS/WASM and the external attached-client fixture are NOT RUN. Protocol stays at 107.
 
 ## W4-ROWS: bulk row extraction from libghostty (effort M)
 

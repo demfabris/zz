@@ -5,6 +5,8 @@ mod input;
 mod interaction;
 mod model;
 mod paste;
+#[cfg(all(feature = "session", unix))]
+mod pty_types;
 #[cfg(feature = "session")]
 mod session;
 #[cfg(feature = "session")]

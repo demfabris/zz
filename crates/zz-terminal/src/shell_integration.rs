@@ -1,3 +1,6 @@
+#[cfg(unix)]
+use crate::pty_types::CommandBuilder;
+#[cfg(windows)]
 use portable_pty::CommandBuilder;
 
 #[cfg(any(unix, windows))]

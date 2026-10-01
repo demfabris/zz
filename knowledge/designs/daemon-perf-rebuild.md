@@ -3037,6 +3037,18 @@ active pages at their used size and `ModeRevision` builds viewport cells directl
 
 ## W3-SHARDS: PTY shard threads inside zz-terminal (effort XL)
 
+macOS chatty follow-up, 2026-10-01: `session/shard.rs` `Shard::poll` now retains
+PTY, wake-pipe and child PID watches in one kqueue per shard. Level-triggered
+PTY reads keep the turn caps; real notifications and newly writable queued input
+trigger channel checks. Parse scratch allocates on first use. Three alternating
+quick runs against `shards-s1-mac-cli` gave flip medians 67.7897 -> 62.2157 Minstr/s
+(0.918x) and hidden 79.2885 -> 77.7577 (0.981x). The p20 footprint median was
+17.4224 MiB, below the lane base's roughly 17.7 MiB, with 30 threads in each run.
+Both terminal test modes passed 339 tests with one ignored; clippy and all six
+requested compat scenarios passed without divergences.
+The four echo timing rows remain red on s1 and this build. Linux throughput,
+gather, epoll, THP and TUI backpressure checks stay with the orchestrator.
+
 Scope, keeping the `TerminalSession` public API: K shard threads (K = min(available_parallelism,
 4), `ZZ_PTY_SHARDS`, chosen by the gate) own PTY fds and terminals, never migrating; each polls
 PTY fds, child exit (`EVFILT_PROC` / pidfd) and a wake fd; never `waitpid(-1)` (run-shell,
@@ -3060,6 +3072,24 @@ and >= 0.85x W0, and 4 concurrent floods >= base aggregate; `echo.p99.busy30` p9
 while 4 floods run <= 1.5x tmux; `throughput.attached.ascii_ms` <= 1.18x W0. Tests: zz-terminal
 tests, daemon exit / remain-on-exit / respawn / job control (Ctrl-Z, SIGWINCH, foreground pgid),
 `compat/run.sh`, compat/tui fixtures, `bench/run.sh` on macOS and Linux.
+
+As built (slice s1, 2026-10-01): `crates/zz-terminal/src/session/pane_actor.rs` holds the pane state and event handlers; `run_terminal` waits and dispatches on the pane thread.
+The handlers retain the read and parse turn caps, frame sampling, echo fast path, bridge spin, child exit and retained-pane handoff.
+Linux checks: 332 terminal tests passed; terminal clippy and six compatibility scenarios passed. The known daemon endpoint test stayed red; three daemon load failures passed alone, and 35 integration tests passed.
+The orchestrator owns the perf A/B and Mac checks.
+
+As built (slice s3, 2026-10-01): Unix uses crate-local command, exit-status and PTY-size types in `crates/zz-terminal/src/pty_types.rs`; the existing spawn path stays unchanged.
+The normal dependency trees contain no `portable-pty` on Linux or macOS; Windows keeps it as a target dependency.
+Linux checks: clippy passed, both terminal modes passed 337 tests with one ignored, and seven compatibility rows passed. The known daemon endpoint test stayed red; four load failures passed alone, and 35 integration tests passed with one ignored.
+Windows builds, Mac runtime checks and the perf gate were not run for this slice.
+
+As built (slice s4, 2026-10-01): `session.rs` `SEARCH_SCHEDULER` starts one process-wide `zz-terminal-search` thread on the first submitted search.
+Each actor keeps its own coalescing job and result mailbox, view cancellation tokens, and wake; dropped actors cancel their outstanding jobs.
+The shared worker preserves view ordering, wrap selection and match scratch, drops stale jobs, and sends each completed view result to its actor.
+Linux tests count one named search thread across three panes and cover overlapping view IDs, stale requests, actor wakes and output-pane results.
+Clippy passed; both terminal modes passed 350 tests with one ignored; five compatibility rows passed; 35 daemon integration tests passed with one ignored.
+The known daemon endpoint test stayed red; four load failures passed alone. Mac checks and the perf gate were not run for this slice.
+
 
 ## W3-LOOP: single-owner mux loop (effort XL)
 

@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use portable_pty::{CommandBuilder, PtySize};
+use crate::pty_types::{CommandBuilder, PtySize};
 use rustix::fs::{Access, Mode, OFlags};
 use rustix::io::FdFlags;
 use rustix::pty::OpenptFlags;

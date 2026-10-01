@@ -11,21 +11,25 @@ read "Lane brief rules" before launching anything.
 
 ## Next session: wave 3
 
-1. Start on both hosts: `git -C ~/dev/zz-perf-int checkout -b perf/wave3 main` (the integration
-   worktree sits on `perf/wave2` = `main`). alienware's own `~/dev/zz` checkout is still at
-   `fecaaa43`: `git -C ~/dev/zz pull --ff-only` there before using it.
+1. Started 2026-10-01: `perf/wave3` on both hosts, lanes `~/dev/zz-loop` (Mac) and
+   `~/dev/zz-shards` (alienware) from `dcf05102`. Create wave and lane branches from
+   `origin/main` after a fetch, never from a local `main`: alienware's clone had a stale local
+   `main` (`fecaaa43`), the first SHARDS slice started on pre-wave-2 code, and its watchdog killed
+   it for touching every wave-2 file.
 2. Lanes and hosts: W3-SHARDS on alienware (the Linux gather fold, epoll and pidfd paths and Linux
    `bench/run.sh` live there), W3-LOOP on the Mac. Write zones do not overlap (LOOP owns daemon.rs
    production code, SHARDS owns zz-terminal session code). Merge order SHARDS, then LOOP (LOOP's
    gate is against the SHARDS JSON). Lane worktrees `~/dev/zz-shards`, `~/dev/zz-loop` from
    `perf/wave3`.
 3. Slices, one commit each (see "Lane brief rules"). LOOP: e0, a, b, c, d, e as in its plan
-   section. SHARDS: s1 shard threads and wake fd owning the PTY fds (K = min(parallelism, 4),
-   `ZZ_PTY_SHARDS`); s2 the per-pane state machine (`on_readable`, `on_command`, `on_deadline`,
-   keeping 64 KiB reads, turn caps, 16 ms frames and the echo fast path); s3 terminal process
+   section. SHARDS: s1 the per-pane state machine (`PaneActor` with `on_readable`, `on_command`,
+   `on_deadline`, keeping 64 KiB reads, turn caps, 16 ms frames and the echo fast path); s2 shard
+   threads and wake fd owning the PTY fds (K = min(parallelism, 4), `ZZ_PTY_SHARDS`); s3 terminal process
    spawn without allocation in the child; s4 one lazy search thread; s5 one live frame per pane
    per publish; s6 the Linux gather fold, only if `bench/run.sh` on Linux matches; s7 the ConPTY
-   reader feeding shards (`cargo check` for Windows). Per slice: map, `lane-briefs.py '<spec>'
+   reader feeding shards (`cargo check` for Windows). The state machine goes first (s1, same
+   thread, no behaviour change), the shard threads second: a pane cannot move onto a shared
+   thread while its loop blocks. Per slice: map, `lane-briefs.py '<spec>'
    slice`, `lane-run.sh <wt> <brief> <out> high 90 60 <base> <zone-globs>`, rerun its gates, merge
    into the lane branch, then the next brief. An ultra parity review (source-only) after s2, s3,
    LOOP b and LOOP d, the risky ones.
@@ -41,6 +45,42 @@ read "Lane brief rules" before launching anything.
    +4%); `chatty.client_cpu_pct.visible` 1.08% Mac / 1.28% Linux against 1.0%. `control.latency`
    1.4-1.7x tmux goes to W4-DELIVER or the stdio handoff in CTRL's as-built notes.
 6. Release freeze until wave 4; protocol stays 107.
+
+## Wave 3 merge log (from 2026-10-01)
+
+- W3-SHARDS merged 2026-10-01 as merge 1 (`99aef76b`), slices s1 `edd445fc` (PaneActor state
+  machine), s2 `7ff4e681`+`c42a605e`+`3736bf67` (K shard threads, lazy start, coalesced wakes),
+  s3 `00314f96` (portable-pty off Unix; the allocation-free spawn already existed), s6
+  `3ef90061` (direct shard reads, opt-in `ZZ_PTY_GATHER=0`: they lose Linux Unicode throughput
+  ~10%, so gather stays the default per the plan), macOS readiness fix `6c7e10f0`, s5 `2f8d787e`
+  (one snapshot per distinct live view state), s4 `024d811f` (one lazy search thread), s7
+  `2321297c` (Windows ConPTY readers feed shards; Windows `cargo check` only). Linux gate
+  `w3-1-shards-alienware-99aef76b.json`: 65 pass, 16 fail, all owned elsewhere (LOOP: spawn x4,
+  statusjob threads, control latency; W4: chatty visible, attach) or the open echo target; its 2
+  regressed rows are timing at flat instructions. Merge A/B against the wave-2 binary: threads
+  at 20 panes 66 -> 50 (Linux) and 46 -> 30 (Mac), footprint -40% / -33%, RSS -20%, chatty flip
+  instructions -6.8% on the Mac. Open: echo latency. Linux echo is unchanged since wave 2 (p50
+  2.0 ms vs tmux 0.9) and the wave-3 rule (<= 1.5x tmux) starts here; on the Mac busy-pane echo
+  p50 rose about 15-25% with shards (a flooding pane shares a shard with the idle one). Owner:
+  a shard fairness brief (echo-ready panes ahead of a busy pane's turn), then a cross-lane echo
+  breakdown (input path, actor, delivery). Six Windows-only dead-code warnings in zz-daemon
+  (daemon.rs `BootstrapReady`/`start_lock`, timers.rs `PeerProbe`, status.rs `set_tmux_shim`,
+  user_data.rs `fs`) are handed to LOOP. Mac strict view at wave exit.
+
+- Echo work, 2026-10-01. A Linux breakdown with temporary per-stage timestamps (no commits)
+  found no fixed waits: zz's echo p50 2.03 ms against tmux 0.92 is a chain of thread handoffs of
+  90-140 us each: TUI client relays ~390 us, daemon loop read/write ~235 us (LOOP b2/b3), shard
+  wake and gather relay ~200 us, pane watcher to delivery ~95 us (W4-DELIVER); row extraction
+  p99 reaches 700 us when echo and scrolling coincide (W4-ROWS). Merged into perf/wave3:
+  `16ec41a2` (shard fairness `a8ee2ecf`: serve fresh input and pending echo ahead of a busy
+  pane's turn, never shorten output-only turns; a first version that preempted on any ready
+  pane cost chatty 16-21% instructions) and `8548e684` (new W3-TUI slice `953fa4e0`, not in the
+  plan: the TUI attach client runs on one thread and one event loop, echo p50 -240/-257 us idle
+  /busy on Linux), plus `a93bff74` (the TUI slice was built only on Linux and used rustix
+  `pipe_with`, which macOS lacks; now `pipe()` plus fcntl). Merge A/B against the SHARDS merge:
+  Linux echo zz/tmux p50 idle 2.19 -> 1.82, busy 2.25 -> 1.99; Mac busy p50 -16%, busy p99 -50%,
+  idle p99 -30%; no instruction regressions. Echo is still above the 1.5x rule on both hosts:
+  the rest is LOOP (b2/b3 already cut the loop handoffs on perf/loop) and W4-DELIVER.
 
 ## Wave 2 merge log (2026-09-30 to 10-01)
 
@@ -739,10 +779,14 @@ summary in `<out>.cost.json`, `<out>.failed` when no valid answer), `lane-watchd
    full fix list. Never `--resume`.
 4. Watchdog per lane (`lane-run.sh` starts it; every 5 min) kills the codex tree and every process
    whose cwd is inside the worktree when: the wall budget is spent; no new commit for the idle
-   limit (60 min impl, 30 min fix/focus); a helper agent appears (a subagent rollout in
+   limit (60 min impl, 30 min fix/focus, 45 min for a fix whose done criterion includes perf
+   runs; briefs say to commit a checkpoint before each measurement series, because the first
+   SHARDS s2 fix was stopped mid-series with all its work uncommitted); a helper agent appears (a subagent rollout in
    `~/.codex/sessions` for that cwd; `features.multi_agent=false` does not remove the tools in
    codex 0.159, so the brief also forbids them); a file changes outside the write-zone globs (plus
-   the design doc); a file is added under `third_party/` or a vendored crate; more than 50 or 100
+   the design doc; add `bench/results/*` when a brief runs `bench/run.sh`, which writes there,
+   or the watchdog stops the run, as it stopped SHARDS s6 at 130 min); a file is added under
+   `third_party/` or a vendored crate; more than 50 or 100
    MB of untracked files. It writes the reason to `<out>.watchdog`. Launch `lane-run.sh` from
    outside the worktree.
 5. Cheaper iteration: briefs say `cargo check -p <crate>` and focused tests while iterating,
@@ -798,6 +842,15 @@ summary in `<out>.cost.json`, `<out>.failed` when no valid answer), `lane-watchd
 - `scripts/wave1-resume.js` is the run that resumed wave 1 after the usage-limit cut, kept as the example of RESUME notes per lane (paths moved into constants, logic unchanged; its `execDone` line uses `&&` on a promise, so EXEC did not actually wait for PANE).
 
 ## Traps
+
+- macOS caps PTYs at 511: never run workspace tests and perf runs on the Mac at the same time.
+  Overlapping them failed six LOOP b6 perf runs ("tmux PTY allocation failed") and 166
+  parallel daemon tests (all passed alone).
+- A slice built on one host only needs a `cargo check` on the other before acceptance: the
+  W3-TUI slice (Linux) used a rustix API that macOS does not have.
+- `pkill -f` and `pgrep -f` over ssh match their own shell's command line: write patterns as
+  `[c]argo` / `[m]erge-checks`. A merge-check script must get a saved copy of the pre-merge
+  binary, not `target/release/zz_cli`, which the script rebuilds before its A/B.
 
 - Waiting on a remote agent with `ssh host 'pgrep -f <brief>'` never ends: the pattern matches the
   ssh shell's own command line. Wait on the report file, or write the pattern as `[c]odex`.

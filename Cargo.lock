@@ -11810,12 +11810,11 @@ dependencies = [
 name = "zz-tui"
 version = "0.14.0"
 dependencies = [
- "async-signal",
  "base64 0.23.1",
- "futures-lite",
  "log",
  "miniz_oxide 0.9.1",
  "rustix",
+ "signal-hook-registry",
  "unicode-width",
  "zz-client",
  "zz-daemon",

@@ -28,7 +28,7 @@ use crate::{
     },
     picker, sidebar,
     state::Model,
-    writer::{Sink, Submission, TerminalWriter, Wake},
+    writer::{Submission, TerminalWriter},
 };
 
 mod chooser;
@@ -249,7 +249,7 @@ pub(crate) struct Renderer {
     mode_tree: chooser::ModeTree,
     pane_modes_painted: HashMap<PaneId, bool>,
     kitty: KittyBridge,
-    writer: TerminalWriter,
+    writer: std::rc::Rc<std::cell::RefCell<TerminalWriter>>,
     control_replay: Vec<u8>,
     paint_tail: Vec<u8>,
     terminal_colours: Option<u32>,
@@ -260,11 +260,19 @@ pub(crate) struct Renderer {
 }
 
 impl Renderer {
+    #[cfg(test)]
     pub fn new() -> Self {
-        Self::with_sink(crate::writer::stdout_sink())
+        Self::with_sink(Box::new(|_| Ok(())))
     }
 
-    pub(crate) fn with_sink(sink: Sink) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_sink(sink: crate::writer::Sink) -> Self {
+        Self::with_writer(std::rc::Rc::new(std::cell::RefCell::new(
+            TerminalWriter::with_sink(sink),
+        )))
+    }
+
+    pub(crate) fn with_writer(writer: std::rc::Rc<std::cell::RefCell<TerminalWriter>>) -> Self {
         Self {
             output: Vec::with_capacity(64 * 1024),
             queued_control: Vec::new(),
@@ -290,7 +298,7 @@ impl Renderer {
             mode_tree: chooser::ModeTree::default(),
             pane_modes_painted: HashMap::new(),
             kitty: KittyBridge::default(),
-            writer: TerminalWriter::spawn(sink),
+            writer,
             control_replay: Vec::new(),
             paint_tail: Vec::new(),
             terminal_colours: crate::tty::terminal_colours(),
@@ -551,19 +559,6 @@ impl Renderer {
         self.flush_output()
     }
 
-    /// Hands the painted bytes to the writer thread.
-    ///
-    /// The terminal is written from a thread of its own so a viewer that has
-    /// stopped reading its pty costs the client queued bytes and never costs
-    /// it the next keystroke: tty.c does the same with a libevent buffer.
-    ///
-    /// Past the writer's budget the paint is dropped instead, and what this
-    /// renderer believes the terminal is showing goes with it. Two things
-    /// follow. The painted state is thrown away, so the next paint is a full
-    /// one drawn from the model, which is `tty_invalidate`. The control bytes
-    /// this paint carried are put back in the queue, because a mode change or
-    /// a kitty transmission is not something a repaint reproduces: the pin's
-    /// blocked `tty_puts` loses the same bytes and it is a bug there too.
     fn flush_output(&mut self) -> io::Result<()> {
         let control = std::mem::take(&mut self.control_replay);
         let body = self
@@ -584,7 +579,8 @@ impl Renderer {
             let tail = body.len().saturating_sub(PAINT_TAIL_BYTES);
             self.paint_tail.extend_from_slice(&body[tail..]);
         }
-        match self.writer.submit(&mut self.output)? {
+        let submission = self.writer.borrow_mut().submit(&mut self.output)?;
+        match submission {
             Submission::Queued => Ok(()),
             Submission::Dropped => {
                 if !control.is_empty() {
@@ -603,21 +599,9 @@ impl Renderer {
         self.output.append(&mut self.queued_control);
     }
 
-    /// Installs the callback the writer uses to ask for a repaint once a
-    /// dropped-output block has cleared.
-    pub fn set_repaint_notifier(&self, wake: Wake) {
-        self.writer.set_wake(wake);
-    }
-
-    /// True once per block that has cleared: the terminal is reading again and
-    /// owes the model a full repaint.
-    pub fn take_repaint_request(&self) -> bool {
-        self.writer.take_unblocked()
-    }
-
     pub fn pause(&mut self, paused: bool) {
         self.output.clear();
-        self.writer.pause(paused);
+        self.writer.borrow_mut().pause(paused);
         self.invalidate();
     }
 
@@ -630,7 +614,7 @@ impl Renderer {
     pub fn discard_queued_paints(&mut self) {
         self.output.clear();
         self.control_replay.clear();
-        self.writer.abandon();
+        self.writer.borrow_mut().abandon();
     }
 
     fn forget_default_blank_under_overlays(&mut self, model: &Model) {

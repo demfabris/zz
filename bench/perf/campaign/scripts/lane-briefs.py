@@ -13,7 +13,7 @@ PROFILER=('`sample <daemon pid> 5 -file /tmp/zzpc/<label>.txt` (or `xcrun xctrac
 OS_NOTE=('This host is macOS (M4 Max, the gate\'s reference host). Linux-only paths (/proc readers, the zz-pty-gather thread, epoll, THP, `tui-output-backpressure.sh`) cannot run here: name them in the report as not run instead of claiming them. The orchestrator runs the Linux checks on another host after your lane.' if MAC else 'This host is Linux (alienware). Run cargo with -j4 after `ulimit -n $(ulimit -Hn)`; macOS-only paths (posix_spawn, kqueue, the PTY spin bridge, ri_instructions, iOS) cannot run here: name them as not run. The orchestrator runs the Mac checks after your lane.')
 RULES=f'''House rules (from the repo's CLAUDE.md files; they bite): no comments in Rust code; prose has no em-dashes and uses plain words; never git stash, reset --hard, or check out over work you did not write; the main checkout {ROOT}/zz belongs to other sessions: never edit or build there (reading is fine); commits carry no attribution or Co-Authored-By lines; do not push; do not bump PROTOCOL_VERSION (the campaign stays on unreleased 107 and releases are frozen until W4; non-append wire changes inside 107 are allowed); new daemon tests go in a per-lane #[cfg(test)] module file under crates/zz-daemon/src/daemon/ declared next to the lane's functions, never appended to the end of daemon.rs; find code by function name, not line number. A zz-daemon test that fails under the full workspace is re-run alone before diagnosis; `concurrent_default_interactive_attaches_atomically_share_session_zero` failing with "not a terminal" is environmental. Run long suites under a timeout (`timeout 1800 cargo test ...`) and treat any test running over 60 s as a bug to fix, not to wait on; after killing a hung run, kill its leftover test binaries (`pkill -f target/debug/deps/zz_daemon-`), they hold PTYs (macOS caps at 511). Before any build check `df -h {ROOT}`; under 20 GB free, stop and report. Prefer `cargo test -p <crate> <filter>` while iterating; another lane builds at the same time in its own worktree. Never point a build at another worktree's target directory. Test sockets go directly under /tmp (sun_path limit). compat/run.sh needs bash 4+ (use /opt/homebrew/bin/bash, not /bin/bash 3.2) and an absolute ZZ_COMPAT_ZZ. Mac-only red compat rows that tmux also fails: smoke/resurrect-save, smoke/plugin-runtime-continuum, smoke/status-background-jobs; compare any red row with the pre-lane binary before blaming the lane.
 {OS_NOTE}
-Always inspect the current state first (git log, git status, git diff in the worktree) and continue from it; never redo or discard finished work. Commit a checkpoint as soon as a coherent piece works.
+Always inspect the current state first (git log, git status, git diff in the worktree) and continue from it; never redo or discard finished work. Commit a checkpoint as soon as a coherent piece works, and always before a measurement series or a long test run: a watchdog stops runs that go 30-60 min without a new commit. Fold checkpoints into one commit (`git commit --amend` on your own unpushed commits) before you answer.
 Work alone: never call spawn_agent or any other sub-agent tool; one agent per worktree.
 You have a wall-clock budget (below). Check `date` at each commit. When the budget is spent, finish the piece in hand, commit it, and write the final answer. When the done criterion (below) holds, stop: do not look for more work.
 Rows outside the lane's gate groups, and rows that were already red on the base, are not yours: list them in the final answer and do not chase them.
@@ -119,9 +119,26 @@ Done criterion: {l["done"]}
 
 Checks before the final commit: `cargo fmt --all`; clippy -D warnings on the touched crates; their tests under `timeout 1800`; the compat scenarios at risk; {quick(l)}. Update the lane's as-built notes in {DOC} (keep them short: what changed, numbers against the base, what is handed on). Commit on perf/{l["slug"]}.'''
 
+def slice_(l):
+    wt=f'{ROOT}/zz-{l["slug"]}'
+    return f'''# Lane {l["id"]}: one slice
+
+{RULES}
+
+Worktree: {wt} (branch perf/{l["slug"]}, from {INT_BRANCH}). Its target/ is warm; build only there. Work only in the worktree; prefix every command with `cd {wt} &&`. Scratch files go in {SCRATCH}. Budget: {l.get("budget",90)} minutes from your start.
+
+{context(l)}
+
+Task: {l["task"]}
+
+Done criterion: {l["done"]}
+
+When the done criterion holds: add two to six lines of as-built notes for this slice at the end of the lane section of {DOC} (the one exception to not opening it: find the section with `rg -n "^## {l["id"]}" {DOC}` and edit only there), commit on perf/{l["slug"]} with a plain message, and answer.'''
+
 if __name__=='__main__':
     spec=json.loads(sys.argv[1]); kind=sys.argv[2]
-    if kind in ('impl','slice'): print(impl(spec))
+    if kind=='impl': print(impl(spec))
+    elif kind=='slice': print(slice_(spec))
     elif kind in ('parity','perf'): print(review(spec, kind, open(sys.argv[3]).read()))
     elif kind=='focus': print(focus(spec))
     elif kind=='fix': print(fix(spec, open(sys.argv[3]).read(), '\n\n'.join(open(p).read() for p in sys.argv[4:])))

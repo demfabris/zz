@@ -3037,6 +3037,39 @@ active pages at their used size and `ModeRevision` builds viewport cells directl
 
 ## W3-SHARDS: PTY shard threads inside zz-terminal (effort XL)
 
+macOS echo fairness follow-up, 2026-10-01, perf/echo: `Shard::run` handles
+input before PTY output and dispatches input and echo windows first. Shared read
+turns yield only for peer input or an echo window; output readiness keeps full
+256 KiB / 1 ms turns. Bridge retries check input and echo work every 32 attempts,
+without peer fd polling. The existing shared-shard test streams 32 echoes with two floods.
+Five alternating quick pairs against `c59ee369`'s merged binary measured checkpoint
+`1bf5a79a`: median per-run zz/tmux busy p50 ratios 2.331 -> 2.653 (1.138x),
+busy p99 1.877 -> 2.886 (1.538x), above both 0.93x limits. Idle p50/p99 factors
+were 0.897x/0.670x. Chatty flip/hidden medians were 63.080 -> 63.169 and
+77.591 -> 78.927 Minstr/s (1.001x/1.017x); detached ASCII was
+302.066 -> 306.191 MB/s (1.014x). All ten runs were load-marked.
+The chatty and throughput limits pass, but busy echo does not; this follow-up is not gate-ready.
+Both terminal modes passed 353 tests with one ignored; terminal clippy passed.
+All four requested compat scenarios passed 16 steps without divergences.
+The quick W0 rescore of the fifth candidate run exited 0 with four existing echo
+warnings and one idle-p99 regression flag. It took no extra measurements.
+Quick mode omits Unicode and attached ASCII throughput; the headless client was absent.
+Busy30 uses a ticker in the echo pane rather than shared-shard floods. Linux throughput,
+gather, epoll, THP and TUI backpressure remain with the orchestrator.
+Evidence stays in `/tmp/zzpc/echo2-{merge,fair2}-[1-5].json`.
+
+macOS chatty follow-up, 2026-10-01: `session/shard.rs` `Shard::poll` now retains
+PTY, wake-pipe and child PID watches in one kqueue per shard. Level-triggered
+PTY reads keep the turn caps; real notifications and newly writable queued input
+trigger channel checks. Parse scratch allocates on first use. Three alternating
+quick runs against `shards-s1-mac-cli` gave flip medians 67.7897 -> 62.2157 Minstr/s
+(0.918x) and hidden 79.2885 -> 77.7577 (0.981x). The p20 footprint median was
+17.4224 MiB, below the lane base's roughly 17.7 MiB, with 30 threads in each run.
+Both terminal test modes passed 339 tests with one ignored; clippy and all six
+requested compat scenarios passed without divergences.
+The four echo timing rows remain red on s1 and this build. Linux throughput,
+gather, epoll, THP and TUI backpressure checks stay with the orchestrator.
+
 Scope, keeping the `TerminalSession` public API: K shard threads (K = min(available_parallelism,
 4), `ZZ_PTY_SHARDS`, chosen by the gate) own PTY fds and terminals, never migrating; each polls
 PTY fds, child exit (`EVFILT_PROC` / pidfd) and a wake fd; never `waitpid(-1)` (run-shell,
@@ -3060,6 +3093,24 @@ and >= 0.85x W0, and 4 concurrent floods >= base aggregate; `echo.p99.busy30` p9
 while 4 floods run <= 1.5x tmux; `throughput.attached.ascii_ms` <= 1.18x W0. Tests: zz-terminal
 tests, daemon exit / remain-on-exit / respawn / job control (Ctrl-Z, SIGWINCH, foreground pgid),
 `compat/run.sh`, compat/tui fixtures, `bench/run.sh` on macOS and Linux.
+
+As built (slice s1, 2026-10-01): `crates/zz-terminal/src/session/pane_actor.rs` holds the pane state and event handlers; `run_terminal` waits and dispatches on the pane thread.
+The handlers retain the read and parse turn caps, frame sampling, echo fast path, bridge spin, child exit and retained-pane handoff.
+Linux checks: 332 terminal tests passed; terminal clippy and six compatibility scenarios passed. The known daemon endpoint test stayed red; three daemon load failures passed alone, and 35 integration tests passed.
+The orchestrator owns the perf A/B and Mac checks.
+
+As built (slice s3, 2026-10-01): Unix uses crate-local command, exit-status and PTY-size types in `crates/zz-terminal/src/pty_types.rs`; the existing spawn path stays unchanged.
+The normal dependency trees contain no `portable-pty` on Linux or macOS; Windows keeps it as a target dependency.
+Linux checks: clippy passed, both terminal modes passed 337 tests with one ignored, and seven compatibility rows passed. The known daemon endpoint test stayed red; four load failures passed alone, and 35 integration tests passed with one ignored.
+Windows builds, Mac runtime checks and the perf gate were not run for this slice.
+
+As built (slice s4, 2026-10-01): `session.rs` `SEARCH_SCHEDULER` starts one process-wide `zz-terminal-search` thread on the first submitted search.
+Each actor keeps its own coalescing job and result mailbox, view cancellation tokens, and wake; dropped actors cancel their outstanding jobs.
+The shared worker preserves view ordering, wrap selection and match scratch, drops stale jobs, and sends each completed view result to its actor.
+Linux tests count one named search thread across three panes and cover overlapping view IDs, stale requests, actor wakes and output-pane results.
+Clippy passed; both terminal modes passed 350 tests with one ignored; five compatibility rows passed; 35 daemon integration tests passed with one ignored.
+The known daemon endpoint test stayed red; four load failures passed alone. Mac checks and the perf gate were not run for this slice.
+
 
 ## W3-LOOP: single-owner mux loop (effort XL)
 
@@ -3766,3 +3817,28 @@ generations, with invalidation tests for the mutation paths.
 - Three alternating quick pairs against `/tmp/zzpc/w3/loop-b5fix-cli`: 18 of 21 CLI/chatty instruction medians meet 1.02x. Remaining misses: `cli.instr.has_session.p20` 1.0218x, `cli.instr.select_pane.p20` 1.0702x, `chatty.instr_per_s.hidden` 1.0553x. Thread counts stay 4 to 3 at p1 and 42 to 41 at p20. Status-job instructions fall 2.7%.
 - Checks: 1382 daemon unit tests and 35 integration tests pass, one ignored; 17 timer tests pass after the clippy fix; fmt, clippy, and all four requested compat scenarios pass. The final quick W0 gate has 37 pass, 1 fail, and 42 info rows, with no harness errors or regressions. The failure is the pre-existing status-job thread rate near 3/s against a 0.5/s limit.
 - Handed on: the three instruction misses above; idle wakeups remain unmeasured because the permitted commands omit `idle`. Linux `/proc`, PTY gather, epoll, THP, and `tui-output-backpressure.sh` checks did not run on this Mac. Scratch results stay in `/tmp/zzpc/b6fix-{b5fix,b6fix}-{1,2,3}.json` and `/tmp/zzpc/loop-b6fix.json`. This step does not meet its done criterion.
+
+## W3-SHARDS TUI attach follow-up, 2026-10-01
+
+As built: `crates/zz-tui/src/app/event_loop.rs` `EventLoop::receive` reads tty keys,
+daemon frames and signal notifications on the attach thread. `TerminalWriter::flush`
+uses nonblocking tty writes, partial-write offsets and the existing 100 ms output
+recovery. The CLI already calls the TUI on its calling thread. Linux thread snapshots
+show seven attach threads on the base and one, `zz_cli`, on this build.
+
+Five alternating untraced runs against `w3/base-cli` gave idle p50 medians
+1.9660 -> 1.7255 ms and busy p50 2.0500 -> 1.7925 ms, with no missed echoes.
+The 240.5 us idle reduction misses the 250 us target by 9.5 us; busy improves
+257.5 us. tmux idle medians were 0.8935 -> 0.9300 ms and busy 0.9115 -> 0.9180 ms.
+The quick chatty/attach comparison gave attach instruction ratios 1.0034x for
+both sizes. Hidden-client CPU was 0.0000 -> 0.0080%, so the literal 1.05x bound
+against zero does not pass. These limits keep the TUI step open. The base already
+fails attach time and daemon CPU rows for both sizes. Mac checks stay with the
+orchestrator; Linux validation follows below.
+
+Linux validation: clippy passed and 524 crate tests passed. The attached-client
+fixture passed, screen-diff matched 147 asserted checkpoints, output backpressure
+passed nine assertions, and all four requested smoke scenarios had zero divergences.
+The final quick W0 gate had 14 passes, five failures and zero regressions: the four
+echo timing rows and `attach.cpu.p4` remain red, as on the base. No extra perf runs
+followed the required series. Mac runtime checks, iOS and Windows builds were not run.

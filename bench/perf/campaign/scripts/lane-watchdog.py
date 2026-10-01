@@ -52,6 +52,11 @@ def cwds():
 
 
 def kill(reason):
+    with open(out + ".watchdog", "w") as handle:
+        handle.write(f"{time.strftime('%Y-%m-%d %H:%M')} {reason}\n")
+    if os.environ.get("LANE_WATCHDOG_DRYRUN"):
+        print(reason)
+        sys.exit(0)
     table = processes()
     me = os.getpid()
     roots = {pid for pid, _, command in table if "codex" in command and brief in command}
@@ -75,8 +80,8 @@ def kill(reason):
             except OSError:
                 pass
         time.sleep(5)
-    with open(out + ".watchdog", "w") as handle:
-        handle.write(f"{time.strftime('%Y-%m-%d %H:%M')} killed {len(targets)} processes: {reason}\n")
+    with open(out + ".watchdog", "a") as handle:
+        handle.write(f"killed {len(targets)} processes\n")
     sys.exit(0)
 
 
@@ -100,7 +105,7 @@ def helpers():
 
 while True:
     time.sleep(int(os.environ.get("LANE_WATCHDOG_INTERVAL", "300")))
-    if not codex_running():
+    if not codex_running() and not os.environ.get("LANE_WATCHDOG_DRYRUN"):
         sys.exit(0)
     now = time.time()
     if now - start > budget:

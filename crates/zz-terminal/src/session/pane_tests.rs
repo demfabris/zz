@@ -482,8 +482,8 @@ fn slot_changes_made_after_a_queued_command_run_after_it() {
             input: None,
             liveness: crossbeam_channel::never(),
             slot: Arc::clone(&slot),
+            wake: ActorWake::none(),
         }),
-        wake: ActorWake::none(),
     };
     let view = TerminalViewId(3);
     commands.with_slot(|slot| {

@@ -30,6 +30,17 @@ rules" before launching anything.
    alternating A/B pairs show is timing: 1.2541 Minstr on both binaries). Linux copy entry 52.70 ->
    0.55 MiB, 104.8 -> 1.02 ms. The full `compat/run.sh` hit its 1800 s timeout after 243 rows; the
    rest ran per scenario (256/256 files covered). Raise that timeout for the wave-exit run.
+   The Mac follow-up (Ghostty `67351380`) also lowers the Linux entry: 0.36 MiB, 4.33 Minstr.
+   W2-FMT merged 2026-09-30 as merge 4 (`8fa427dd`), before CTRL, with the lane brief rules'
+   merge checks on both hosts (`/tmp/zzpc/merge-fmt`, `~/.cache/zz-perf/merge-fmt`): Mac workspace
+   4644 pass, 0 fail; Linux daemon 1291 pass with only the two known host/load failures; 37-38 of
+   38 format/status/chooser compat rows clean (the others are the known `smoke/status-background-jobs`
+   Mac row, `census-hooks` after-load-buffer and `show-options-hooks` lock differences, all red on
+   the base). Three alternating quick A/B pairs per host against the `4263d378` binary: no new
+   failure; instructions `list_keys` -96%, `list_panes_a.s20` -41..47%, `list_windows_a.s20`
+   -45..49%, `statusjob.instr_per_s` -54..63%, `chain5.p20` -40..48%. `attach.instr.p1/p4` +4.3% /
+   +3.4% on Linux (within 3% on the Mac): the first attach compiles status templates cold; CTRL
+   rewrites that path next. No strict gate JSON for this merge (wave-exit rule).
    Earlier plan text, kept for CTRL and FMT: W2-CTRL (after TERM; carries TERM's PaneFrame in its Batch via `encode_terminal_viewport_event_into`
    / `encode_terminal_patch_event_into`), then W2-FMT (after HOOKS; its hand-offs are in the HOOKS
    as-built notes), then W2-COPY. Briefs: `python3 ~/.cache/zz-perf/prompts/gen.py '<json spec>'`
@@ -688,6 +699,11 @@ The first wave-2 impl runs (W2-CTRL, W2-FMT) ran 13.5 h each and never finished 
 - `scripts/wave1-resume.js` is the run that resumed wave 1 after the usage-limit cut, kept as the example of RESUME notes per lane (paths moved into constants, logic unchanged; its `execDone` line uses `&&` on a promise, so EXEC did not actually wait for PANE).
 
 ## Traps
+
+- `just compat-check` on the Mac fails `verify_claims_test.py` (unbound `unattributed`) when
+  `/bin/bash` 3.2 comes first in PATH, on main too: run it with `/opt/homebrew/bin` first.
+- A Linux check started with `setsid nohup` over ssh gets `ulimit -n` 2048: the daemon suite then
+  fails about 140 tests with "Too many open files". Raise it to the hard limit (2097152) first.
 
 - **Stale paint slips past a single fixture run.** At the wave-1 exit, `compat/tui-screen-diff.sh`
   on the release build showed 13-14 of 147 checkpoints with stale pane or status rows per run

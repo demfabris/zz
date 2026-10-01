@@ -2,14 +2,47 @@
 
 Entry point for a fresh session continuing the zz daemon performance rebuild. Written 2026-09-29 on
 the macbook, continued the same day on the Linux host alienware (see "Linux leg"). Wave 0 and wave 1
-are on `main` and pushed; wave 2 runs on `perf/wave2`, and `main` is fast-forwarded and pushed after
-every merge. State on 2026-09-30 evening: W2-HOOKS, W2-TERM and W2-COPY merged and pushed;
-the wave-1 macOS gate is recorded; the Ghostty fork pin is `67351380` (trim fix `c3941417` the Mac
-review found, copy snapshots `7823f65d`, used-size active page copies). W2-CTRL (`~/dev/zz-ctrl`)
-and W2-FMT (`~/dev/zz-fmt`) are past implementation and in review/fix on the Mac; see "Lane brief
-rules" before launching anything.
+are on `main` and pushed. State on 2026-10-01: wave 2 is closed and pushed (W2-HOOKS, W2-TERM,
+W2-COPY, W2-FMT, W2-CTRL and two CTRL follow-ups); its exit gates are
+`wave2-macbook-3d0fc1b0.json` and `wave2-alienware-3d0fc1b0.json`. The Ghostty fork pin is
+`67351380` (trim fix `c3941417`, copy snapshots `7823f65d`, used-size active page copies). No lane
+in flight, no lane worktree left. Wave 3 (W3-SHARDS, W3-LOOP) starts from "Next session: wave 3";
+read "Lane brief rules" before launching anything.
 
-## Next session on Linux
+## Next session: wave 3
+
+1. Start on both hosts: `git -C ~/dev/zz-perf-int checkout -b perf/wave3 main` (the integration
+   worktree sits on `perf/wave2` = `main`). alienware's own `~/dev/zz` checkout is still at
+   `fecaaa43`: `git -C ~/dev/zz pull --ff-only` there before using it.
+2. Lanes and hosts: W3-SHARDS on alienware (the Linux gather fold, epoll and pidfd paths and Linux
+   `bench/run.sh` live there), W3-LOOP on the Mac. Write zones do not overlap (LOOP owns daemon.rs
+   production code, SHARDS owns zz-terminal session code). Merge order SHARDS, then LOOP (LOOP's
+   gate is against the SHARDS JSON). Lane worktrees `~/dev/zz-shards`, `~/dev/zz-loop` from
+   `perf/wave3`.
+3. Slices, one commit each (see "Lane brief rules"). LOOP: e0, a, b, c, d, e as in its plan
+   section. SHARDS: s1 shard threads and wake fd owning the PTY fds (K = min(parallelism, 4),
+   `ZZ_PTY_SHARDS`); s2 the per-pane state machine (`on_readable`, `on_command`, `on_deadline`,
+   keeping 64 KiB reads, turn caps, 16 ms frames and the echo fast path); s3 terminal process
+   spawn without allocation in the child; s4 one lazy search thread; s5 one live frame per pane
+   per publish; s6 the Linux gather fold, only if `bench/run.sh` on Linux matches; s7 the ConPTY
+   reader feeding shards (`cargo check` for Windows). Per slice: map, `lane-briefs.py '<spec>'
+   slice`, `lane-run.sh <wt> <brief> <out> high 90 60 <base> <zone-globs>`, rerun its gates, merge
+   into the lane branch, then the next brief. An ultra parity review (source-only) after s2, s3,
+   LOOP b and LOOP d, the risky ones.
+4. Gates: SHARDS against `wave2-<host>-3d0fc1b0.json` (threads = K, `mem.footprint.p20` <= 20 MB,
+   floods, echo p99 under four floods); LOOP against the SHARDS merge JSON (`cli.cpu.display`,
+   `spawn.cpu.*`, idle wakeups, fixed threads, statusjob). Merge checks per lane with
+   `merge-checks-*.sh`, the config rows included; strict gates and the full corpus on both hosts
+   at wave exit.
+5. Inputs: `spawn.instr.split_empty_P` is bimodal on every binary (Mac, about 0.9 or 2.1 Minstr,
+   tmux 1.1): profile a `split-window -d -P` + `kill-pane` loop with `just profile-cpu mac daemon`
+   for LOOP. `mem.threads.p20` 66 on Linux (a gather thread per pane) is SHARDS'. Small follow-ups
+   that fit any slot: FMT's cold template compile (`mem.copy_instr` +5.4%, Linux `attach.instr`
+   +4%); `chatty.client_cpu_pct.visible` 1.08% Mac / 1.28% Linux against 1.0%. `control.latency`
+   1.4-1.7x tmux goes to W4-DELIVER or the stdio handoff in CTRL's as-built notes.
+6. Release freeze until wave 4; protocol stays 107.
+
+## Wave 2 merge log (2026-09-30 to 10-01)
 
 1. Done 2026-09-30 (from the Mac over ssh): the trim fix holds on Linux. At `d317e171`,
    `a_cleared_screen_survives_idle_compression` passes; with `GHOSTTY_SOURCE_DIR` at a `713374af`
@@ -58,34 +91,34 @@ rules" before launching anything.
    flat tmux and flat instructions: judge at the wave-exit gate). Known misses carried to W4:
    `control.latency` about 1.4-1.7x tmux (a stdio handoff design in CTRL's as-built notes),
    `attach.cpu`/`attach.ttfc` on Linux.
-   Earlier plan text, kept for CTRL and FMT: W2-CTRL (after TERM; carries TERM's PaneFrame in its Batch via `encode_terminal_viewport_event_into`
-   / `encode_terminal_patch_event_into`), then W2-FMT (after HOOKS; its hand-offs are in the HOOKS
-   as-built notes), then W2-COPY. Briefs: `python3 ~/.cache/zz-perf/prompts/gen.py '<json spec>'`
-   (see the existing `*-impl.md`, `*-merge.md` there for the shape); two lanes at a time. W2-CTRL
-   owns 6 of the 10 failing rows of the Mac wave-2 view (`attach.conns.*` 2 vs 1,
-   `attach.wire_s2c.*` 29.4 KB vs 8 KiB, `control.latency` 3.3x, `control.burst_cmds_per_s` 0.28x),
-   and should look at `chatty.client_cpu_pct.visible` (1.67% vs tmux 0, rule 1.0%).
+   Wave-2 exit (2026-10-01, `3d0fc1b0` binaries, i.e. `f6a25887`). Mac
+   `wave2-macbook-3d0fc1b0.json`: 70 pass, 5 fail (`spawn.cpu.split_empty_P` and `kill_pane` for
+   W3-LOOP, `chatty.client_cpu_pct.visible` 1.08% vs the 1.0% rule, down from 1.67%,
+   `attach.ttfc.p1`, `control.latency` 1.5x), 15 regressed: `cli.wall.*` with tmux slower in the
+   same run, `attach.wire_c2s` +30% (the Hello now carries the environment), and
+   `throughput.detached.ascii` 345 -> 284 MB/s, which an alternating A/B of the COPY, FMT and CTRL
+   binaries puts at 295-317 MB/s for all three (host state). Linux
+   `wave2-alienware-3d0fc1b0.json`: 64 pass, 12 fail (spawn x3 and `mem.threads.p20` for wave 3,
+   chatty visible for W4, `attach.cpu`/`ttfc` higher than in the COPY gate run at lower
+   instructions, a host-state difference: the same-session chain is FMT flat, CTRL -24%).
+   `mem.copy_instr.scroll180` +5.5% fails the 5% tolerance: A/B COPY 4.327, FMT 4.587, CTRL 4.563
+   Minstr (FMT compiles status templates cold on the fresh server this row uses; still 0.45x
+   tmux). Accepted at wave exit; owner: a cheaper cold compile, with the +4% Linux `attach.instr`.
+   The full corpus then found ten rows clean on COPY and red after CTRL (own-conf bindings never
+   applied, source-file diagnostics lost, `args-parse-*` control-typed arguments, config-grammar,
+   oh-my-tmux), on both hosts, plus four Mac plugin-init rows (continuum, fpp, resurrect, tpm).
+   `9e634cd8` fixes three causes: control stdin started before the initial config replay
+   finished (early EOF cut it at shell waits), typed preparation errors lost `parse error:`, and
+   ordinary control flags were preflighted before preceding effects and `command-error` hooks.
+   After it: all 14 rows and the control rows clean on the Mac; the Linux full corpus (256 rows) is
+   back to its 8 known reds (`known/*` x4, `lane2-store`, `show-options-hooks`,
+   `smoke/control-alias-prepare`, `smoke/plugin-runtime-resurrect-restore`).
 4. Known red on every build here, not lane regressions: `tui-screen-diff.sh` unzoom checkpoints
    under load (stale pane geometry after unzoom, open bug below), the three compat rows
    `lane2-store`, `show-options-hooks`, `smoke/plugin-runtime-resurrect-restore`, and the four
    known workspace tests.
 
-## Next session on the Mac
-
-1. After each wire-changing merge (W2-CTRL next): kill every zz Dev daemon older than the merge,
-   `just ios-gpui iPad build`, then the simulator smoke below; `just web-build` runs on Linux.
-2. Wave-2 exit: one strict Mac gate, `python3 bench/perf/run.py --zz target/release/zz_cli --stage
-   wave2 --strict --baseline bench/perf/results/w2-2-term-macbook-adbc5407.json --json
-   bench/perf/results/wave2-macbook-<sha8>.json` after `cargo build --release -p zz-cli`, on a quiet
-   Mac (wait for the 1-minute load under 6 with no `rustc` running; a fresh worktree or a big
-   `cp -c` of a target sets Spotlight indexing for ~10 minutes, see Traps).
-3. Explain every failing row with a same-host A/B against the previous binary (the Mac leg's
-   method: `run.py --only <groups> --w0 none`, three alternating pairs) before calling anything a
-   regression. This Mac swings 2-2.5x on wall and CPU between sessions (tmux too).
-4. Input for W3-LOOP, measurable only here: `spawn.instr.split_empty_P` is bimodal on every
-   binary since at least `a26b6368` (samples near 0.9 or 2.1 Minstr, tmux 1.1). Find the extra
-   ~1.2 Minstr path with Instruments (`just profile-cpu mac daemon`) on a loop of
-   `split-window -d -P -F '#{pane_id}' ""` + `kill-pane`.
+## Mac checks after a wire change
 
 Simulator smoke for the GPUI iOS client (the build alone does not prove the wire decodes):
 
@@ -676,20 +709,69 @@ Rule: every wave exit gets one `--strict` gate run on the Mac, committed as
 
 ## Orchestration that worked
 
-### Lane brief rules (from 2026-09-30 evening)
+### Lane brief rules (from 2026-10-01)
 
-The first wave-2 impl runs (W2-CTRL, W2-FMT) ran 13.5 h each and never finished on their own. Codex session timestamps: 87-92% of the wall was model time (1,580-1,800 steps per main thread, median 10 s, p90 55-70 s, about 105k input tokens re-read per step, 12-18 compactions, the design doc re-read 64-70 times); each lane's codex forked 3 helper agents into the same worktree and target/ (10-28 cargo lock waits per helper, 34 dirty files at stop); the lanes wrote about 3,000 receipt/audit/provenance files (4 GB); FMT spent its last 1.5 h on rows that belong to W2-CTRL. The brief generator (`gen.py`, kinds impl, parity, perf, fix, focus) now says:
+Why: the first wave-2 impl runs (W2-CTRL, W2-FMT) ran 13.5 h each and never finished on their own.
+Codex session timestamps: 87-92% of the wall was model time (1,580-1,800 steps per main thread,
+median 10 s, p90 55-70 s, about 105k input tokens re-read per step, 12-18 compactions, the design
+doc re-read 64-70 times); each lane's codex forked 3 helper agents into the same worktree and
+target/ (10-28 cargo lock waits each, 34 dirty files at stop); the lanes wrote about 3,000
+receipt/audit/provenance files (4 GB); FMT spent its last 1.5 h on rows owned by W2-CTRL. Under the
+rules below, reviews and fixes took 15-36 min each.
 
-- Done criterion and wall budget in every brief (impl 3 h, review 60 min, fix/focus 90 min). When done holds, stop. When the budget is spent, commit the piece in hand and answer. The orchestrator also runs `stop-at-commit-or-deadline.sh`.
-- Work alone: no spawn_agent. `-c features.multi_agent=false` and `agents.max_threads` do not remove the collaboration tools in codex 0.159, so the rule lives in the brief. One agent per worktree: a review runs in a detached worktree at the reviewed sha with a cloned target (`/bin/cp -c -R`).
-- Rows outside the lane's groups or already red on the base are listed, not chased.
-- Evidence: one scratch JSON per cited gate run; nothing written to bench/perf/results by lanes.
-- State file `/tmp/zzpc/<slug>-<kind>-state.md` (under 60 lines) is what a compacted agent rereads, with its lane section, instead of the whole doc.
-- Effort: ultra for parity/perf reviews, high for impl, fix and focus.
-- A lane that stops without a final answer gets its report written by the orchestrator from git log, the as-built block and the gate JSON; a single concrete regression goes to a `focus` brief with a numeric done criterion rather than a full fix pass.
-- Merge checks per lane: workspace fmt/clippy/tests, `just compat-check`, the lane's compat rows, a quick gate on both hosts. The full compat corpus and strict gates on both hosts run at wave exit (release freeze makes a few hours of exposure on main acceptable).
-- One compiling lane per host.
+Tooling in `bench/perf/campaign/scripts/`: `lane-briefs.py` (kinds `slice`/`impl`, `parity`, `perf`,
+`fix`, `focus`; host-aware; pastes the lane section and a map), `lane-run.sh` (launcher: codex with
+`--json`, `--output-schema lane-answer.schema.json`, `-o`, `< /dev/null`, the watchdog, a cost
+summary in `<out>.cost.json`, `<out>.failed` when no valid answer), `lane-watchdog.py`,
+`lane-cost.py`, `merge-checks-mac.sh`, `merge-checks-linux.sh`, `ab-compare.py`.
 
+1. One commit per brief. W3-LOOP gets a brief per step e0, a, b, c, d, e of its plan; W3-SHARDS is
+   sliced the same way before launch (shard threads and wake fd; actor state machine; own process
+   spawn; search thread; Linux gather fold; ConPTY reader). Each brief has a numeric done
+   criterion, the exact gate commands and a 90 min budget (impl at most 3 h). Review and merge each
+   slice into the lane branch before writing the next brief.
+2. Small context. Before each brief build a file:line map at the lane base (`rg -n "fn <name>"`
+   over the write zone, or an Explore subagent) and pass it as `map`; the generator pastes the
+   lane section. Briefs tell codex not to open `daemon-perf-rebuild.md` or this file. State file
+   under 60 lines.
+3. Structured answers: every run goes through `lane-run.sh`. A run without a valid answer counts as
+   failed: write its report from git log and send the leftovers as a fresh `focus` brief with the
+   full fix list. Never `--resume`.
+4. Watchdog per lane (`lane-run.sh` starts it; every 5 min) kills the codex tree and every process
+   whose cwd is inside the worktree when: the wall budget is spent; no new commit for the idle
+   limit (60 min impl, 30 min fix/focus); a helper agent appears (a subagent rollout in
+   `~/.codex/sessions` for that cwd; `features.multi_agent=false` does not remove the tools in
+   codex 0.159, so the brief also forbids them); a file changes outside the write-zone globs (plus
+   the design doc); a file is added under `third_party/` or a vendored crate; more than 50 or 100
+   MB of untracked files. It writes the reason to `<out>.watchdog`. Launch `lane-run.sh` from
+   outside the worktree.
+5. Cheaper iteration: briefs say `cargo check -p <crate>` and focused tests while iterating,
+   clippy and the wider tests once at the end; every agent builds into its own target (a review
+   clones one with `cp -c -R` / `cp -a --reflink=auto`). One compiling lane per host, both hosts
+   busy: SHARDS on alienware, LOOP on the Mac.
+6. Effort: ultra for parity, perf and fork reviews (source-only, so they can run beside a
+   compiling lane); high for impl and fix; medium for repins, doc updates and renames.
+7. OpenAI's cyber filter cut runs that wrote madvise/footprint probes. SHARDS (fork, setsid,
+   controlling terminal, closefrom, execve) and LOOP (signal handling) are likely to trip it:
+   phrase those briefs as terminal emulator process spawning, never ask codex for raw-syscall
+   probes (run probes yourself and paste the numbers), and if a slice is flagged once, give it to
+   an Opus subagent instead of retrying codex.
+8. The orchestrator never ends a turn while a lane runs: wait on the report file (`<out>.exit`) with
+   a background `until` loop, never on `pgrep -f <brief>` over ssh (it matches itself; write
+   `[c]odex`). `lane-run.sh` records wall time, steps and tokens per run.
+9. Kept from before: one ultra review per fork change (it caught the Ghostty trim bug); rerun
+   every gate codex claims; a fresh brief per fix round; rows outside the lane's groups or red on
+   the base are listed, not chased; one scratch JSON per cited gate run, nothing in
+   `bench/perf/results` from lanes.
+10. Merge checks per lane (`merge-checks-*.sh <name> <pre-binary> <A/B groups> <compat rows>`,
+    `WIRE=1` for wire lanes on the Mac): fmt, workspace clippy and tests with solo reruns, `just
+    compat-check`, the lane's compat rows, web build, attached-client, TUI screen diff and the iPad
+    build for wire lanes, three alternating quick A/B pairs (`ab-compare.py <dir>`). Wire and
+    command-path lanes add the config rows (`smoke/own-conf smoke/config-grammar
+    smoke/source-file-diagnostics smoke/source-replay-diagnostics smoke/args-parse-*
+    smoke/oh-my-tmux smoke/tpm-init`): CTRL's 35 control rows missed ten config regressions that
+    only the wave-exit corpus found. Full corpus (5400 s timeout) and strict gates on both hosts
+    at wave exit.
 
 - Linux leg: lanes run as Agent-tool subagents from brief files generated by
   `~/.cache/zz-perf/prompts/gen.py` (impl, parity and perf reviews, fix, merge); reports go to

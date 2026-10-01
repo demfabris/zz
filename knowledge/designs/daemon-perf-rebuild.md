@@ -2565,6 +2565,19 @@ execution-context ownership transition; queue emptiness is not an idle claim.
 No such ownership change is implemented here. Linux readiness, PTY gathering,
 THP and output-backpressure remain coordinator checks on a Linux host.
 
+
+Follow-ups after the merge (2026-09-30 to 10-01). `f6a25887`: on Linux the control client's
+`%layout-change` lost the monitor-activity flag (`-` for `#-`, 7 of 8 runs of
+`smoke/control-notify`) because the raw output tap published output before the viewport worker
+raised activity; activity is now noted on the tap first, layout hooks publish compact trees under
+`snapshot_order` before the hook event, and `WindowSnapshot` carries the missing `silence` flag
+(tests in `daemon/ctrl_flags_tests.rs`). `9e634cd8`: the wave-2 exit corpus found ten config and
+argument rows red (own-conf, config-grammar, source-file and source-replay diagnostics,
+`args-parse-*`, oh-my-tmux) plus four Mac plugin-init rows: control stdin now starts only after
+the initial command replay completes, typed preparation errors keep `parse error:`, and the
+early option preflight applies to command clients only (tests in `daemon/ctrl_config_tests.rs`
+and `zz-cli` `cli_binary.rs`). Merge-time A/B numbers are in `bench/perf/campaign/HANDOFF.md`
+(wave 2 merge log).
 ## W2-HOOKS: read-only skip, then change journal (effort L)
 
 Two commits, the first mergeable alone.

@@ -290,17 +290,22 @@ impl ModeRevision {
         if let Some(grid) = &self.grid {
             let mut grid = grid.lock();
             grid.begin_viewport();
-            let mut cells =
-                Vec::with_capacity(usize::from(self.columns) * usize::from(self.viewport_rows));
-            for row in offset..offset.saturating_add(u32::from(self.viewport_rows)) {
+            let columns = usize::from(self.columns);
+            let end = offset.saturating_add(u32::from(self.viewport_rows));
+            let len = columns * usize::try_from(end - offset).expect("viewport row count");
+            let mut cells: Arc<[PackedCell]> =
+                std::iter::repeat_n(PackedCell::EMPTY, len).collect();
+            let output = Arc::get_mut(&mut cells).expect("new viewport cells");
+            for (index, row) in (offset..end).enumerate() {
                 if row < self.total {
-                    cells.extend_from_slice(&grid.row(row).expect("frozen row").cells);
-                } else {
-                    cells.resize(cells.len() + usize::from(self.columns), PackedCell::EMPTY);
+                    let source = grid.row(row).expect("frozen row");
+                    let count = source.cells.len().min(columns);
+                    output[index * columns..index * columns + count]
+                        .copy_from_slice(&source.cells[..count]);
                 }
             }
             grid.end_viewport();
-            return cells.into();
+            return cells;
         }
         let start = usize::try_from(offset)
             .unwrap_or(usize::MAX)

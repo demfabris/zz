@@ -2700,6 +2700,13 @@ functions are `command_prompt_key`, `prompt_translate_key` and `command_prompt_e
 outside the COPY write zone. The cause remains unproven. macOS launch, clonefile, kqueue, PTY
 bridge, ri_instructions, GUI profiling and iOS builds cannot be checked on this Linux host.
 
+Merged 2026-09-30 (`2cedf6ee`, Linux gate `w2-3-copy-alienware-2cedf6ee.json`): both fork
+commits are published and pinned, entry 52.70 to 0.55 MiB and 104.8 to 1.02 ms on Linux. The
+Mac entry read 1.41 MiB against the 1.0 MiB rule because a copy-on-write snapshot of a small
+active area allocated standard pages and read their unused tails. Ghostty `67351380` copies
+active pages at their used size and `ModeRevision` builds viewport cells directly into the
+`Arc` (no temporary vector): Mac entry 0.58 MiB, 5.58 to 5.00 Minstr.
+
 ## W3-SHARDS: PTY shard threads inside zz-terminal (effort XL)
 
 Scope, keeping the `TerminalSession` public API: K shard threads (K = min(available_parallelism,

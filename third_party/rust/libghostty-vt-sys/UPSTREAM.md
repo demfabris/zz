@@ -8,8 +8,8 @@ This directory is a source snapshot of `libghostty-vt-sys` from
 - Upstream crate version: `0.2.1` (no newer release exists; the stack is unreleased)
 - Upstream wrapper Ghostty pin: `56dbc4a768778753737a3b9cbe0a3f9b4e434553`
 - Upstream Ghostty base: `6301810a48aaa3426887a4316668f18833a40138` (main, 2026-09-25)
-- Published Ghostty pin: `7823f65dd55fc9ff420d5eb5cae761cbd1995994` on `demfabris/ghostty` branch `zz-2026-09-30`, pinned in `build.rs`. The branch fast-forward retains its parent, trim fix `c39414175ca2aad564b74b3f52196355f2671774`, in its history.
-- Fork history: four commits on upstream: the C ABI signal-stack option (`6fce227c`, still on `zz-2026-09-25`), the PageList spare-page reuse (`713374af`: line-limit pruning keeps the last pruned pool page resident for the next grow instead of decommitting and refaulting it; `compress` releases it and trims the last page), the trim fix (`c3941417`: preserves live cell blocks after history erase), and owned copy snapshots (`7823f65d`). `zz-2026-09-29` keeps `713374af`; the previous pin `fa7986a9` stays on `codex/cabi-signal-stack`
+- Published Ghostty pin: `67351380b6dc30124938d809809ac0aa42813283` on `demfabris/ghostty` branch `zz-2026-09-30`, pinned in `build.rs`. The branch fast-forwards retain copy snapshots `7823f65dd55fc9ff420d5eb5cae761cbd1995994` and trim fix `c39414175ca2aad564b74b3f52196355f2671774` in its history.
+- Fork history: five commits on upstream: the C ABI signal-stack option (`6fce227c`, still on `zz-2026-09-25`), the PageList spare-page reuse (`713374af`: line-limit pruning keeps the last pruned pool page resident for the next grow instead of decommitting and refaulting it; `compress` releases it and trims the last page), the trim fix (`c3941417`: preserves live cell blocks after history erase), owned copy snapshots (`7823f65d`), and copied active pages at their used size (`67351380`). `zz-2026-09-29` keeps `713374af`; the previous pin `fa7986a9` stays on `codex/cabi-signal-stack`
 - License: MIT OR Apache-2.0; the upstream MIT license is retained here.
 - Wrapper source: [`demfabris/libghostty-rs`](https://github.com/demfabris/libghostty-rs),
   published commit `8e40135fb20e9ed91c37c374fe1d14570c386d06` on new branch
@@ -138,6 +138,13 @@ that it will replace with reflowed output. The original pane can recover pooled 
 a shared history page becomes exclusive again, keeping spare-page reuse after leaving copy
 mode.
 
+Fork commit `67351380b6dc30124938d809809ac0aa42813283` sizes the eager copy of each active page to
+its used rows when cloning copy-on-write, and always copies through `cloneFrom`. Before it, a
+snapshot of a small active area allocated standard pages and read their unused tails, which
+macOS charged to the footprint: copy entry on the Mac fell from 1.41 to 0.58 MiB (Linux was
+already 0.59). Its regression test is "copy-on-write small active clone avoids standard-page
+backing"; the full native suite passes (6508 passed, 52 skipped).
+
 The C clone constructor initializes its owned terminal directly from the frozen ScreenSet.
 It skips the four raw page mappings and pool/pin bookkeeping of a blank terminal that would
 otherwise be discarded immediately. Ordinary terminal initialization keeps its existing
@@ -159,8 +166,8 @@ separately. It exposes no terminal or owned tracking handle that could escape wh
 snapshot moves to a search thread. Row references check the owning page dimensions before
 reading a cell, including incomplete reflow.
 
-The native extension and its regression tests live in published Ghostty fork commit
-`7823f65dd55fc9ff420d5eb5cae761cbd1995994`; the safe API and its tests live in published
+The native extension and its regression tests live in published Ghostty fork commits
+`7823f65dd55fc9ff420d5eb5cae761cbd1995994` and `67351380b6dc30124938d809809ac0aa42813283`; the safe API and its tests live in published
 libghostty-rs commit `8e40135fb20e9ed91c37c374fe1d14570c386d06`. Both forks expose their
 copy commits on `zz-2026-09-30`, and zz pins those commits for fetched-source builds.
 Pre-publication validation used a fresh native source path and a temporary wrapper path

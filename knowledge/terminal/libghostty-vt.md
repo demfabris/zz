@@ -17,11 +17,11 @@ remains on `zz-2026-09-25`. That base
 contains the stacked render-hold and resize-scrollback APIs needed by the current C ABI.
 The safe wrapper lives in its dependency fork. zz replaces only `libghostty-vt-sys` with
 the local snapshot documented in `third_party/rust/libghostty-vt-sys/UPSTREAM.md`.
-The published native pin is `7823f65dd55fc9ff420d5eb5cae761cbd1995994` on branch
-`zz-2026-09-30`, parent `c39414175ca2aad564b74b3f52196355f2671774`, upstream base
-`6301810a48aaa3426887a4316668f18833a40138`. It carries four changes: the C ABI
-signal-stack option, spare-page reuse, the history-erase trim fix and owned copy snapshots.
-The branch fast-forward retains the trim-fix parent in its history; `zz-2026-09-29`
+The published native pin is `67351380b6dc30124938d809809ac0aa42813283` on branch
+`zz-2026-09-30`, upstream base `6301810a48aaa3426887a4316668f18833a40138`. It carries five
+changes: the C ABI signal-stack option, spare-page reuse, the history-erase trim fix
+(`c3941417`), owned copy snapshots (`7823f65d`) and copied active pages at their used size.
+The branch fast-forwards retain the earlier pins in its history; `zz-2026-09-29`
 keeps the spare-page pin `713374af`. zz pins both published copy commits for ordinary
 fetched-source builds without source rewriting or a safe-wrapper path patch.
 Spare-page reuse keeps a pruned pool page resident for the next grow. The trim fix preserves

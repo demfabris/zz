@@ -155,19 +155,19 @@ const RAW_OUTPUT_PARSE_TURN_BYTES: usize = 16 * 1024;
 const PTY_BUFFER_POOL_SIZE: usize = 4;
 #[cfg(all(not(target_os = "linux"), any(not(unix), test)))]
 const PTY_BUFFER_POOL_SIZE: usize = 8;
-#[cfg(all(unix, not(target_os = "linux")))]
+#[cfg(unix)]
 const PTY_DRAIN_TURN_BYTES: usize = 256 * 1024;
 /// Wall-time bound on a single drain turn so the actor lane stays responsive even when the
 /// parser runs far below the byte bound's assumed rate (e.g. an unoptimized VT build).
-#[cfg(all(unix, not(target_os = "linux")))]
+#[cfg(unix)]
 const PTY_DRAIN_TURN_TIME: Duration = Duration::from_millis(1);
 #[cfg(unix)]
 const PTY_BRIDGE_THRESHOLD_BYTES: usize = 1024;
 /// Nonblocking read retries bridging a saturated producer's kernel queue refill.
 /// Probed on Mac16,5/macOS 27: spin 64/256/512 gave 281/332/348 MB/s.
-#[cfg(all(unix, not(target_os = "linux")))]
+#[cfg(unix)]
 const PTY_BRIDGE_SPIN_MAX: u32 = 512;
-#[cfg(all(unix, not(target_os = "linux")))]
+#[cfg(unix)]
 const PTY_BRIDGE_SPIN_MIN: u32 = 8;
 #[cfg(target_os = "linux")]
 const PTY_GATHER_BRIDGE_SPIN_MAX: u32 = 16;
@@ -1700,9 +1700,9 @@ impl TerminalSession {
         let (input_tx, input_rx) = input_channel();
         let (wake, wake_rx) = match &shard {
             Ok(Some(shard)) => {
-                #[cfg(all(unix, not(target_os = "linux")))]
+                #[cfg(unix)]
                 let wake_rx = None;
-                #[cfg(any(target_os = "linux", not(unix)))]
+                #[cfg(not(unix))]
                 let wake_rx = ();
                 (shard.wake.for_actor(), wake_rx)
             }
@@ -3094,9 +3094,9 @@ impl ActorWake {
     }
 }
 
-#[cfg(all(unix, not(target_os = "linux")))]
+#[cfg(unix)]
 type WakeReceiver = Option<Result<std::os::fd::OwnedFd, rustix::io::Errno>>;
-#[cfg(any(target_os = "linux", not(unix)))]
+#[cfg(not(unix))]
 type WakeReceiver = ();
 
 #[cfg(unix)]
@@ -3124,7 +3124,7 @@ fn configured_actor_wake_pipe()
 }
 
 fn actor_wake() -> (ActorWake, WakeReceiver) {
-    #[cfg(all(unix, not(target_os = "linux")))]
+    #[cfg(unix)]
     {
         match configured_actor_wake_pipe() {
             Ok((read, write)) => (
@@ -3138,7 +3138,7 @@ fn actor_wake() -> (ActorWake, WakeReceiver) {
             Err(error) => (ActorWake::none(), Some(Err(error))),
         }
     }
-    #[cfg(any(target_os = "linux", not(unix)))]
+    #[cfg(not(unix))]
     (ActorWake::none(), ())
 }
 
@@ -11735,7 +11735,7 @@ enum Wake {
     CommandsClosed,
     Search(SearchResults),
     ChildExit(std::io::Result<ExitStatus>),
-    #[cfg(all(unix, not(target_os = "linux")))]
+    #[cfg(unix)]
     PtyReadable,
     #[cfg(any(target_os = "linux", not(unix)))]
     PtyMessage(ReaderMessage),
@@ -12192,7 +12192,7 @@ fn drain_wake_pipe(wake_rx: &std::os::fd::OwnedFd) -> Result<(), WorkerError> {
     }
 }
 
-#[cfg(any(target_os = "linux", not(unix)))]
+#[cfg(not(unix))]
 fn wait_for_wake(
     control_rx: &Receiver<Command>,
     input_rx: Option<&Receiver<QueuedInput>>,

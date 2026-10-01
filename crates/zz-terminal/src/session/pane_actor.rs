@@ -22,21 +22,21 @@ pub(super) struct PaneActor {
     master: Option<Box<dyn portable_pty::MasterPty + Send>>,
     #[cfg(all(unix, not(target_os = "linux")))]
     child_watch: ChildExitWatch,
-    #[cfg(all(unix, not(target_os = "linux")))]
+    #[cfg(unix)]
     wake_rx: Option<std::os::fd::OwnedFd>,
-    #[cfg(all(unix, not(target_os = "linux")))]
-    drain_fd: filedescriptor::FileDescriptor,
-    #[cfg(all(unix, not(target_os = "linux")))]
+    #[cfg(unix)]
+    drain_fd: Option<filedescriptor::FileDescriptor>,
+    #[cfg(unix)]
     read_buffer: Vec<u8>,
-    #[cfg(all(unix, not(target_os = "linux")))]
+    #[cfg(unix)]
     bridge_spins: u32,
     #[cfg(any(target_os = "linux", not(unix)))]
     exit_rx: Receiver<std::io::Result<ExitStatus>>,
-    #[cfg(any(target_os = "linux", not(unix)))]
+    #[cfg(not(unix))]
     no_exit: Receiver<std::io::Result<ExitStatus>>,
     #[cfg(any(target_os = "linux", not(unix)))]
     output_rx: Receiver<ReaderMessage>,
-    #[cfg(any(target_os = "linux", not(unix)))]
+    #[cfg(not(unix))]
     no_output: Receiver<ReaderMessage>,
     #[cfg(any(target_os = "linux", not(unix)))]
     recycle_tx: Sender<Vec<u8>>,
@@ -106,7 +106,7 @@ impl PaneActor {
         sharded: bool,
     ) -> Result<Self, WorkerError> {
         install_kitty_png_decoder();
-        #[cfg(any(target_os = "linux", not(unix)))]
+        #[cfg(not(unix))]
         let () = wake_rx;
         let geometry = spawn
             .initial_size
@@ -209,7 +209,7 @@ impl PaneActor {
                 .map_err(WorkerError::Io)?;
         }
 
-        #[cfg(all(unix, not(target_os = "linux")))]
+        #[cfg(unix)]
         let wake_rx = wake_rx.transpose().map_err(|error| {
             WorkerError::Pty(format!("failed to configure terminal wake pipe: {error}"))
         })?;
@@ -252,44 +252,58 @@ impl PaneActor {
             tty,
         })));
 
+        #[cfg(target_os = "linux")]
+        let mut drain_fd = Some(drain_fd);
+        #[cfg(all(unix, not(target_os = "linux")))]
+        let drain_fd = Some(drain_fd);
         #[cfg(any(target_os = "linux", not(unix)))]
         let (output_rx, recycle_tx) = {
-            let (output_tx, output_rx) = crossbeam_channel::bounded(PTY_BUFFER_POOL_SIZE);
-            let (recycle_tx, recycle_rx) = crossbeam_channel::bounded(PTY_BUFFER_POOL_SIZE);
-            for _ in 0..PTY_BUFFER_POOL_SIZE {
-                recycle_tx
-                    .send(vec![0_u8; PTY_READ_BUFFER_BYTES])
-                    .map_err(|error| WorkerError::Thread(error.to_string()))?;
-            }
             #[cfg(target_os = "linux")]
-            thread::Builder::new()
-                .name("zz-pty-gather".into())
-                .spawn({
-                    let gather_child = if sharded { None } else { linux_child.take() };
-                    let output_wake = wake.clone();
-                    move || {
-                        gather_pty_linux(
-                            drain_fd,
-                            output_tx,
-                            recycle_rx,
-                            gather_child,
-                            output_wake,
-                        );
-                    }
-                })
-                .map_err(WorkerError::Io)?;
+            let gather = std::env::var_os("ZZ_PTY_GATHER").is_none_or(|value| value != "0");
             #[cfg(not(unix))]
-            {
-                let pending_output: Box<dyn Fn() -> usize + Send> = Box::new(|| 0);
-                let output_wake = wake.clone();
+            let gather = true;
+            if gather {
+                let (output_tx, output_rx) = crossbeam_channel::bounded(PTY_BUFFER_POOL_SIZE);
+                let (recycle_tx, recycle_rx) = crossbeam_channel::bounded(PTY_BUFFER_POOL_SIZE);
+                for _ in 0..PTY_BUFFER_POOL_SIZE {
+                    recycle_tx
+                        .send(vec![0_u8; PTY_READ_BUFFER_BYTES])
+                        .map_err(|error| WorkerError::Thread(error.to_string()))?;
+                }
+                #[cfg(target_os = "linux")]
                 thread::Builder::new()
-                    .name("zz-pty-reader".into())
-                    .spawn(move || {
-                        read_pty(reader, pending_output, output_tx, recycle_rx, output_wake);
+                    .name("zz-pty-gather".into())
+                    .spawn({
+                        let gather_child = if sharded { None } else { linux_child.take() };
+                        let drain_fd = drain_fd.take().expect("gather owns the PTY master");
+                        let output_wake = wake.clone();
+                        move || {
+                            gather_pty_linux(
+                                drain_fd,
+                                output_tx,
+                                recycle_rx,
+                                gather_child,
+                                output_wake,
+                            );
+                        }
                     })
                     .map_err(WorkerError::Io)?;
+                #[cfg(not(unix))]
+                {
+                    let pending_output: Box<dyn Fn() -> usize + Send> = Box::new(|| 0);
+                    let output_wake = wake.clone();
+                    thread::Builder::new()
+                        .name("zz-pty-reader".into())
+                        .spawn(move || {
+                            read_pty(reader, pending_output, output_tx, recycle_rx, output_wake);
+                        })
+                        .map_err(WorkerError::Io)?;
+                }
+                (output_rx, recycle_tx)
+            } else {
+                let (recycle_tx, _) = crossbeam_channel::unbounded();
+                (crossbeam_channel::never(), recycle_tx)
             }
-            (output_rx, recycle_tx)
         };
 
         let effects = Rc::new(RefCell::new(PtyEffects::new()));
@@ -348,13 +362,17 @@ impl PaneActor {
         let terminating = false;
         let termination_deadline = None::<Instant>;
         let termination_escalated = false;
-        #[cfg(any(target_os = "linux", not(unix)))]
+        #[cfg(not(unix))]
         let no_exit = crossbeam_channel::never();
-        #[cfg(any(target_os = "linux", not(unix)))]
+        #[cfg(not(unix))]
         let no_output = crossbeam_channel::never();
-        #[cfg(all(unix, not(target_os = "linux")))]
-        let read_buffer = vec![0_u8; PTY_READ_BUFFER_BYTES];
-        #[cfg(all(unix, not(target_os = "linux")))]
+        #[cfg(unix)]
+        let read_buffer = if drain_fd.is_some() {
+            vec![0_u8; PTY_READ_BUFFER_BYTES]
+        } else {
+            Vec::new()
+        };
+        #[cfg(unix)]
         let bridge_spins = PTY_BRIDGE_SPIN_MAX;
         let (search_worker, search_results) = SearchWorker::spawn(wake.clone());
         let search_refresh_due = None::<Instant>;
@@ -402,21 +420,21 @@ impl PaneActor {
             master,
             #[cfg(all(unix, not(target_os = "linux")))]
             child_watch,
-            #[cfg(all(unix, not(target_os = "linux")))]
+            #[cfg(unix)]
             wake_rx,
-            #[cfg(all(unix, not(target_os = "linux")))]
+            #[cfg(unix)]
             drain_fd,
-            #[cfg(all(unix, not(target_os = "linux")))]
+            #[cfg(unix)]
             read_buffer,
-            #[cfg(all(unix, not(target_os = "linux")))]
+            #[cfg(unix)]
             bridge_spins,
             #[cfg(any(target_os = "linux", not(unix)))]
             exit_rx,
-            #[cfg(any(target_os = "linux", not(unix)))]
+            #[cfg(not(unix))]
             no_exit,
             #[cfg(any(target_os = "linux", not(unix)))]
             output_rx,
-            #[cfg(any(target_os = "linux", not(unix)))]
+            #[cfg(not(unix))]
             no_output,
             #[cfg(any(target_os = "linux", not(unix)))]
             recycle_tx,
@@ -677,7 +695,7 @@ impl PaneActor {
         let timeout = self
             .next_deadline()
             .saturating_duration_since(Instant::now());
-        #[cfg(any(target_os = "linux", not(unix)))]
+        #[cfg(not(unix))]
         let child_exit = if self.exit_status.is_some() {
             &self.no_exit
         } else {
@@ -685,10 +703,11 @@ impl PaneActor {
         };
         #[cfg(all(unix, not(target_os = "linux")))]
         let child_exit = self.exit_status.is_none().then_some(&mut self.child_watch);
-        #[cfg(unix)]
+        #[cfg(all(unix, not(target_os = "linux")))]
         let available_input = (!self.writer.has_pending()).then_some(&self.input_rx.commands);
         #[cfg(not(unix))]
         let available_input = Some(&self.input_rx.commands);
+        #[cfg(not(target_os = "linux"))]
         let raw_output_read_ahead = self.raw_output_parse_backlog_bytes
             <= RAW_OUTPUT_PARSE_BACKLOG_BYTES.saturating_sub(RAW_OUTPUT_PARSE_READ_RESERVE_BYTES);
         #[cfg(all(unix, not(target_os = "linux")))]
@@ -697,25 +716,23 @@ impl PaneActor {
             available_input,
             &self.search_results,
             child_exit,
-            (!self.reader_eof && raw_output_read_ahead).then_some(&self.drain_fd),
+            self.drain_fd
+                .as_ref()
+                .filter(|_| !self.reader_eof && raw_output_read_ahead),
             self.wake_rx
                 .as_ref()
                 .expect("per-pane worker has a wake pipe"),
             timeout,
         )?;
         #[cfg(target_os = "linux")]
-        let available_output = if self.reader_eof || !raw_output_read_ahead {
-            &self.no_output
-        } else {
-            &self.output_rx
-        };
+        let wakeup = self.wait_for_wake_linux(timeout)?;
         #[cfg(not(unix))]
         let available_output = if self.reader_eof || !raw_output_read_ahead {
             &self.no_output
         } else {
             &self.output_rx
         };
-        #[cfg(any(target_os = "linux", not(unix)))]
+        #[cfg(not(unix))]
         let wakeup = wait_for_wake(
             &self.control_rx,
             available_input,
@@ -726,6 +743,56 @@ impl PaneActor {
         )?;
 
         Ok(wakeup)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn wait_for_wake_linux(&mut self, timeout: Duration) -> Result<Wake, WorkerError> {
+        use rustix::event::{PollFd, PollFlags};
+        if let Some(wake) = self.try_wake()? {
+            return Ok(wake);
+        }
+        let (pty_ready, child_ready) = {
+            let (pty, child) = self.poll_sources();
+            let mut fds = SmallVec::<[PollFd<'_>; 3]>::new();
+            fds.push(PollFd::new(
+                self.wake_rx
+                    .as_ref()
+                    .expect("per-pane worker has a wake pipe"),
+                PollFlags::IN,
+            ));
+            let pty_index = pty.map(|fd| {
+                fds.push(PollFd::new(fd, PollFlags::IN));
+                fds.len() - 1
+            });
+            let child_index = child.map(|fd| {
+                fds.push(PollFd::new(fd, PollFlags::IN));
+                fds.len() - 1
+            });
+            let timespec = rustix::event::Timespec::try_from(timeout.min(IDLE_SLEEP))
+                .expect("bounded poll timeout");
+            match rustix::event::poll(&mut fds, Some(&timespec)) {
+                Ok(_) => {}
+                Err(rustix::io::Errno::INTR) => return Ok(Wake::Deadline),
+                Err(error) => return Err(WorkerError::Io(error.into())),
+            }
+            if !fds[0].revents().is_empty() {
+                drain_wake_pipe(self.wake_rx.as_ref().expect("per-pane wake pipe"))?;
+            }
+            let ready =
+                |index: Option<usize>| index.is_some_and(|index| !fds[index].revents().is_empty());
+            (ready(pty_index), ready(child_index))
+        };
+        if child_ready {
+            self.poll_child()?;
+        }
+        if let Some(wake) = self.try_wake()? {
+            return Ok(wake);
+        }
+        Ok(if pty_ready {
+            Wake::PtyReadable
+        } else {
+            Wake::Deadline
+        })
     }
 
     pub(super) fn try_wake(&mut self) -> Result<Option<Wake>, WorkerError> {
@@ -767,7 +834,11 @@ impl PaneActor {
             {
                 return Ok(Some(Wake::ChildExit(status)));
             }
-            if self.output_read_ahead() {
+            #[cfg(target_os = "linux")]
+            let reader_thread = self.drain_fd.is_none();
+            #[cfg(not(unix))]
+            let reader_thread = true;
+            if reader_thread && self.output_read_ahead() {
                 match self.output_rx.try_recv() {
                     Ok(message) => return Ok(Some(Wake::PtyMessage(message))),
                     Err(crossbeam_channel::TryRecvError::Disconnected) => {
@@ -796,25 +867,25 @@ impl PaneActor {
         }
     }
 
-    #[cfg(all(unix, not(target_os = "linux")))]
+    #[cfg(unix)]
     pub(super) fn poll_sources(
         &self,
     ) -> (
         Option<&filedescriptor::FileDescriptor>,
         Option<&std::os::fd::OwnedFd>,
     ) {
+        #[cfg(target_os = "linux")]
+        let child = self.linux_child.as_ref().map(|watch| &watch.pidfd);
+        #[cfg(not(target_os = "linux"))]
+        let child = self
+            .exit_status
+            .is_none()
+            .then_some(self.child_watch.poll_fd())
+            .flatten();
         (
-            self.output_read_ahead().then_some(&self.drain_fd),
-            self.exit_status
-                .is_none()
-                .then_some(self.child_watch.poll_fd())
-                .flatten(),
+            self.drain_fd.as_ref().filter(|_| self.output_read_ahead()),
+            child,
         )
-    }
-
-    #[cfg(target_os = "linux")]
-    pub(super) fn child_poll_fd(&self) -> Option<&std::os::fd::OwnedFd> {
-        self.linux_child.as_ref().map(|watch| &watch.pidfd)
     }
 
     #[cfg(unix)]
@@ -833,7 +904,7 @@ impl PaneActor {
         Ok(())
     }
 
-    #[cfg(all(unix, not(target_os = "linux")))]
+    #[cfg(unix)]
     pub(super) fn on_pty_ready(&mut self, only_ready: bool) -> Result<(), WorkerError> {
         self.on_readable_with_spin(only_ready)
     }
@@ -867,10 +938,10 @@ impl PaneActor {
                 unreachable!("commands and PTY input are dispatched above")
             }
             Some(Wake::Search(result)) => self.on_search(result)?,
-            #[cfg(all(unix, not(target_os = "linux")))]
-            Some(Wake::PtyReadable) => self.on_readable()?,
+            #[cfg(unix)]
+            Some(Wake::PtyReadable) => self.on_pty_ready(true)?,
             #[cfg(any(target_os = "linux", not(unix)))]
-            Some(Wake::PtyMessage(message)) => self.on_readable(message)?,
+            Some(Wake::PtyMessage(message)) => self.on_reader_message(message)?,
             Some(Wake::ChildExit(status)) => self.on_child_exit(status)?,
             Some(Wake::Deadline) => self.on_parse_deadline(),
         }
@@ -1557,6 +1628,33 @@ impl PaneActor {
         Ok(true)
     }
 
+    #[cfg(target_os = "linux")]
+    fn wait_child_linux(&mut self, timeout: Duration) -> bool {
+        if let Some(watch) = &self.linux_child {
+            let mut fds = [rustix::event::PollFd::new(
+                &watch.pidfd,
+                rustix::event::PollFlags::IN,
+            )];
+            let deadline = Instant::now() + timeout;
+            loop {
+                if watch.reap() {
+                    return true;
+                }
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    return false;
+                }
+                let timespec =
+                    rustix::event::Timespec::try_from(remaining).expect("bounded child wait");
+                match rustix::event::poll(&mut fds, Some(&timespec)) {
+                    Ok(_) | Err(rustix::io::Errno::INTR) => {}
+                    Err(_) => return false,
+                }
+            }
+        }
+        self.exit_rx.recv_timeout(timeout).is_ok()
+    }
+
     fn on_commands_closed(&mut self) {
         if self.terminating {
             let remaining = self
@@ -1565,7 +1663,9 @@ impl PaneActor {
                 .unwrap_or_default();
             #[cfg(all(unix, not(target_os = "linux")))]
             let exited = self.child_watch.wait_timeout(remaining).is_some();
-            #[cfg(any(target_os = "linux", not(unix)))]
+            #[cfg(target_os = "linux")]
+            let exited = self.wait_child_linux(remaining);
+            #[cfg(not(unix))]
             let exited = self.exit_rx.recv_timeout(remaining).is_ok();
             if !exited && !self.termination_escalated {
                 #[cfg(unix)]
@@ -1578,7 +1678,9 @@ impl PaneActor {
                 let _ = self.killer.kill();
                 #[cfg(all(unix, not(target_os = "linux")))]
                 let _ = self.child_watch.wait_timeout(TERMINATION_KILL_WAIT);
-                #[cfg(any(target_os = "linux", not(unix)))]
+                #[cfg(target_os = "linux")]
+                let _ = self.wait_child_linux(TERMINATION_KILL_WAIT);
+                #[cfg(not(unix))]
                 let _ = self.exit_rx.recv_timeout(TERMINATION_KILL_WAIT);
             }
         } else {
@@ -1586,7 +1688,9 @@ impl PaneActor {
             if self.exit_status.is_none() {
                 #[cfg(all(unix, not(target_os = "linux")))]
                 let _ = self.child_watch.wait_timeout(TERMINATION_KILL_WAIT);
-                #[cfg(any(target_os = "linux", not(unix)))]
+                #[cfg(target_os = "linux")]
+                let _ = self.wait_child_linux(TERMINATION_KILL_WAIT);
+                #[cfg(not(unix))]
                 let _ = self.exit_rx.recv_timeout(TERMINATION_KILL_WAIT);
             }
         }
@@ -1614,55 +1718,19 @@ impl PaneActor {
         Ok(())
     }
 
-    #[cfg(all(unix, not(target_os = "linux")))]
-    fn on_readable(&mut self) -> Result<(), WorkerError> {
-        self.on_readable_with_spin(true)
-    }
-
-    #[cfg(all(unix, not(target_os = "linux")))]
+    #[cfg(unix)]
     fn on_readable_with_spin(&mut self, only_ready: bool) -> Result<(), WorkerError> {
         let mut burst = 0_usize;
         let mut spins = 0_u32;
         let turn_started = Instant::now();
         loop {
-            match rustix::io::read(&self.drain_fd, &mut self.read_buffer[..]) {
+            match self.read_pty_buffer() {
                 Ok(0) => {
                     self.reader_eof = true;
                     break;
                 }
                 Ok(length) => {
-                    log::trace!(
-                        target: "zz_terminal::diagnostics::pty",
-                        "read length={length} bytes={:?} text={:?}",
-                        &self.read_buffer[..length],
-                        String::from_utf8_lossy(&self.read_buffer[..length]),
-                    );
-                    if self.raw_output_tap.is_some() || !self.raw_output_parse_backlog.is_empty() {
-                        let bytes = Arc::<[u8]>::from(&self.read_buffer[..length]);
-                        if let Some(token) = tap_raw_output_arc(&mut self.raw_output_tap, &bytes) {
-                            self.publisher.raw_output_tap_closed(token)?;
-                        }
-                        self.raw_output_parse_backlog_bytes = self
-                            .raw_output_parse_backlog_bytes
-                            .saturating_add(bytes.len());
-                        self.raw_output_parse_backlog.push_back((bytes, 0));
-                    } else {
-                        let started = diagnostic_timer();
-                        let parsed = feed_pty_output(
-                            &mut self.terminal,
-                            &mut self.passthrough,
-                            &mut EngineOutput {
-                                filter: &mut self.engine_filter,
-                                knobs: self.engine_knobs,
-                                renames: &mut self.engine_renames,
-                                bar: &mut self.engine_bar,
-                                last_command_status: &mut self.engine_last_command_status,
-                            },
-                            &self.read_buffer[..length],
-                        );
-                        self.vt_diagnostics.record(parsed, started);
-                        self.output_pending |= parsed > 0;
-                    }
+                    self.consume_read_buffer(length)?;
                     if spins > 0 {
                         self.bridge_spins = (self.bridge_spins * 2).min(PTY_BRIDGE_SPIN_MAX);
                     }
@@ -1699,8 +1767,69 @@ impl PaneActor {
         Ok(())
     }
 
+    #[cfg(unix)]
+    fn read_pty_buffer(&mut self) -> Result<usize, rustix::io::Errno> {
+        let fd = self.drain_fd.as_ref().expect("direct PTY reader");
+        let length = rustix::io::read(fd, &mut self.read_buffer[..])?;
+        #[cfg(target_os = "linux")]
+        let mut length = length;
+        #[cfg(target_os = "linux")]
+        {
+            let mut reads = 1;
+            while length > 0 && length < self.read_buffer.len() && reads < 8 {
+                match rustix::io::read(fd, &mut self.read_buffer[length..]) {
+                    Ok(0) => break,
+                    Ok(extra) => {
+                        length += extra;
+                        reads += 1;
+                    }
+                    Err(rustix::io::Errno::INTR) => {}
+                    Err(_) => break,
+                }
+            }
+        }
+        Ok(length)
+    }
+
+    #[cfg(unix)]
+    fn consume_read_buffer(&mut self, length: usize) -> Result<(), WorkerError> {
+        log::trace!(
+            target: "zz_terminal::diagnostics::pty",
+            "read length={length} bytes={:?} text={:?}",
+            &self.read_buffer[..length],
+            String::from_utf8_lossy(&self.read_buffer[..length]),
+        );
+        if self.raw_output_tap.is_some() || !self.raw_output_parse_backlog.is_empty() {
+            let bytes = Arc::<[u8]>::from(&self.read_buffer[..length]);
+            if let Some(token) = tap_raw_output_arc(&mut self.raw_output_tap, &bytes) {
+                self.publisher.raw_output_tap_closed(token)?;
+            }
+            self.raw_output_parse_backlog_bytes = self
+                .raw_output_parse_backlog_bytes
+                .saturating_add(bytes.len());
+            self.raw_output_parse_backlog.push_back((bytes, 0));
+        } else {
+            let started = diagnostic_timer();
+            let parsed = feed_pty_output(
+                &mut self.terminal,
+                &mut self.passthrough,
+                &mut EngineOutput {
+                    filter: &mut self.engine_filter,
+                    knobs: self.engine_knobs,
+                    renames: &mut self.engine_renames,
+                    bar: &mut self.engine_bar,
+                    last_command_status: &mut self.engine_last_command_status,
+                },
+                &self.read_buffer[..length],
+            );
+            self.vt_diagnostics.record(parsed, started);
+            self.output_pending |= parsed > 0;
+        }
+        Ok(())
+    }
+
     #[cfg(any(target_os = "linux", not(unix)))]
-    fn on_readable(&mut self, message: ReaderMessage) -> Result<(), WorkerError> {
+    fn on_reader_message(&mut self, message: ReaderMessage) -> Result<(), WorkerError> {
         match message {
             ReaderMessage::Data { buffer, length } => {
                 let mut closed_tap = None;

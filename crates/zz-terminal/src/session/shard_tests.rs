@@ -146,3 +146,96 @@ fn coalesced_wakes_service_concurrent_view_and_input_bursts() {
         }
     });
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn twenty_panes_select_direct_or_gather_readers() {
+    const CHILD: &str = "ZZ_LINUX_READER_TEST";
+    if std::env::var_os(CHILD).is_none() {
+        for gather in ["0", "1"] {
+            let output = std::process::Command::new(std::env::current_exe().expect("test binary"))
+                .args([
+                    "--exact",
+                    "session::shard::tests::twenty_panes_select_direct_or_gather_readers",
+                ])
+                .env(CHILD, "1")
+                .env("ZZ_PTY_SHARDS", "4")
+                .env("ZZ_PTY_GATHER", gather)
+                .output()
+                .expect("isolated Linux reader test");
+            assert!(
+                output.status.success(),
+                "gather={gather}: {}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        return;
+    }
+    let panes = (0..20)
+        .map(|_| {
+            TerminalSession::spawn(
+                100,
+                Arc::new(TerminalAppearance::default()),
+                TerminalSpawn {
+                    command: Some(vec!["printf 'ready\\r\\n'; exec cat".to_owned()]),
+                    ..TerminalSpawn::default()
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    for pane in &panes {
+        wait(|| captured(pane, "ready"));
+    }
+    let names = std::fs::read_dir("/proc/self/task")
+        .expect("process threads")
+        .filter_map(Result::ok)
+        .filter_map(|entry| std::fs::read_to_string(entry.path().join("comm")).ok())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names
+            .iter()
+            .filter(|name| name.starts_with("zz-pty-shard-"))
+            .count(),
+        4
+    );
+    assert_eq!(
+        names
+            .iter()
+            .filter(|name| name.starts_with("zz-pty-reader"))
+            .count(),
+        0
+    );
+    let gather = std::env::var("ZZ_PTY_GATHER").expect("gather setting") == "1";
+    assert_eq!(
+        names
+            .iter()
+            .filter(|name| name.starts_with("zz-pty-gather"))
+            .count(),
+        if gather { 20 } else { 0 }
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn direct_linux_read_keeps_the_final_batch_before_hangup() {
+    let shard = ShardHandle::start(105).expect("shard");
+    let pane = session(
+        &shard,
+        "head -c 262144 /dev/zero | tr '\\0' x; printf '\\r\\nlast batch\\r\\n'",
+    );
+    wait(|| pane.completion().is_some());
+    assert!(captured(&pane, "last batch"));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn partial_linux_batches_publish_after_the_producer_stops() {
+    let shard = ShardHandle::start(104).expect("shard");
+    let pane = session(
+        &shard,
+        "head -c 4096 /dev/zero | tr '\\0' x; exec sleep 10000",
+    );
+    wait(|| pane.facts().history_size > 0);
+    assert!(pane.completion().is_none());
+}

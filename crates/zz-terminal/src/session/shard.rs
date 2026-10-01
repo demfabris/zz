@@ -223,9 +223,9 @@ impl Shard {
             ready.clear();
             while let Ok(launch) = self.incoming.try_recv() {
                 let publisher = launch.publisher.clone();
-                #[cfg(all(unix, not(target_os = "linux")))]
+                #[cfg(unix)]
                 let wake_rx = None;
-                #[cfg(any(target_os = "linux", not(unix)))]
+                #[cfg(not(unix))]
                 let wake_rx = ();
                 match PaneActor::spawn(
                     launch.control_rx,
@@ -277,7 +277,7 @@ impl Shard {
             self.collect_channels(&mut ready);
             self.collect_deadlines(&mut ready);
             ready.sort_unstable_by_key(|(id, _, _, _)| (*id < self.cursor, *id));
-            #[cfg(all(unix, not(target_os = "linux")))]
+            #[cfg(unix)]
             let only_ready = ready.first().is_some_and(|(only_id, _, _, _)| {
                 ready.iter().all(|(id, _, _, _)| id == only_id)
                     && self
@@ -293,12 +293,11 @@ impl Shard {
                             if child {
                                 actor.poll_child()?;
                             }
-                            #[cfg(not(target_os = "linux"))]
                             if pty {
                                 actor.on_pty_ready(only_ready)?;
                             }
                         }
-                        #[cfg(any(target_os = "linux", not(unix)))]
+                        #[cfg(not(unix))]
                         let _ = pty;
                         #[cfg(not(unix))]
                         let _ = child;
@@ -433,22 +432,14 @@ impl Shard {
         let mut sources = SmallVec::<[(usize, bool); 8]>::new();
         for (&id, entry) in &self.actors {
             if let Actor::Live(actor) = &entry.actor {
-                #[cfg(target_os = "linux")]
-                if let Some(fd) = actor.child_poll_fd() {
+                let (pty, child) = actor.poll_sources();
+                if let Some(fd) = pty {
+                    fds.push(PollFd::new(fd, PollFlags::IN));
+                    sources.push((id, true));
+                }
+                if let Some(fd) = child {
                     fds.push(PollFd::new(fd, PollFlags::IN));
                     sources.push((id, false));
-                }
-                #[cfg(not(target_os = "linux"))]
-                {
-                    let (pty, child) = actor.poll_sources();
-                    if let Some(fd) = pty {
-                        fds.push(PollFd::new(fd, PollFlags::IN));
-                        sources.push((id, true));
-                    }
-                    if let Some(fd) = child {
-                        fds.push(PollFd::new(fd, PollFlags::IN));
-                        sources.push((id, false));
-                    }
                 }
             }
         }

@@ -95,8 +95,11 @@ fn fixture() -> Fixture {
             .or_default()
             .insert(client);
         inner
-            .focused_windows
-            .insert(client, context.window.unwrap());
+            .clients
+            .entry(client)
+            .or_default()
+            .focused_window
+            .replace(context.window.unwrap());
         inner
             .clients
             .entry(client)

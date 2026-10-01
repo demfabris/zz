@@ -842,7 +842,11 @@ fn a_label_flush_leaves_an_unpublished_mutation_to_its_command() {
     events(&mailbox);
     let generation = shared.inner.lock().engine.state.generation();
     assert!(
-        !shared.inner.lock().visible_terminals[&client].contains(&hidden_pane),
+        !shared.inner.lock().clients[&client]
+            .visible_terminals
+            .as_ref()
+            .unwrap()
+            .contains(&hidden_pane),
         "the new window starts hidden"
     );
     {
@@ -873,7 +877,13 @@ fn a_label_flush_leaves_an_unpublished_mutation_to_its_command() {
         "the label flush claimed the command's publish"
     );
     shared.publish_snapshot();
-    assert!(shared.inner.lock().visible_terminals[&client].contains(&hidden_pane));
+    assert!(
+        shared.inner.lock().clients[&client]
+            .visible_terminals
+            .as_ref()
+            .unwrap()
+            .contains(&hidden_pane)
+    );
     assert!(
         snapshots(events(&mailbox)).is_empty(),
         "the command's publish does not resend what the flush sent"

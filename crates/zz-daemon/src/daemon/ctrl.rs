@@ -837,8 +837,9 @@ impl Shared {
                 .copied()
                 .unwrap_or_default();
             let mut terminals = inner
-                .streamed_terminals
+                .clients
                 .get(&client)
+                .and_then(|client| client.streamed_terminals.as_ref())
                 .into_iter()
                 .flat_map(|terminals| terminals.keys())
                 .filter_map(|pane| {
@@ -848,7 +849,11 @@ impl Shared {
                         .map(|terminal| (*pane, Arc::clone(terminal)))
                 })
                 .collect::<Vec<_>>();
-            if let Some(popup) = inner.popups.get(&client) {
+            if let Some(popup) = inner
+                .clients
+                .get(&client)
+                .and_then(|client| client.popup.as_ref())
+            {
                 terminals.push((popup.state.pane, Arc::clone(&popup.terminal)));
             }
             let mut overlays = vec![
@@ -857,14 +862,16 @@ impl Shared {
                 }),
                 Self::event(EventPayload::ChooseTree {
                     state: inner
-                        .choose_trees
+                        .clients
                         .get(&client)
+                        .and_then(|client| client.choose_tree.as_ref())
                         .map(|chooser| chooser.rendered.clone()),
                 }),
                 Self::event(EventPayload::ChooseBuffer {
                     state: inner
-                        .choose_buffers
+                        .clients
                         .get(&client)
+                        .and_then(|client| client.choose_buffer.as_ref())
                         .map(|chooser| chooser.rendered.clone()),
                 }),
                 Self::event(EventPayload::ChooserPresentation {
@@ -873,20 +880,30 @@ impl Shared {
                 }),
                 Self::event(EventPayload::DisplayPanes {
                     state: inner
-                        .display_panes
+                        .clients
                         .get(&client)
+                        .and_then(|client| client.display_panes.as_ref())
                         .map(|overlay| overlay.state.clone()),
                 }),
                 Self::event(EventPayload::Popup {
-                    state: inner.popups.get(&client).map(|popup| popup.state.clone()),
+                    state: inner
+                        .clients
+                        .get(&client)
+                        .and_then(|client| client.popup.as_ref())
+                        .map(|popup| popup.state.clone()),
                 }),
                 Self::event(EventPayload::Menu {
-                    state: inner.menus.get(&client).map(|menu| menu.state.clone()),
+                    state: inner
+                        .clients
+                        .get(&client)
+                        .and_then(|client| client.menu.as_ref())
+                        .map(|menu| menu.state.clone()),
                 }),
                 Self::event(EventPayload::Confirm {
                     state: inner
-                        .confirms
+                        .clients
                         .get(&client)
+                        .and_then(|client| client.confirm.as_ref())
                         .map(|confirm| confirm.state.clone()),
                 }),
             ];

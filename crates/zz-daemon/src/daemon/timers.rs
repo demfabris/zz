@@ -252,8 +252,9 @@ impl Shared {
                 if self
                     .inner
                     .lock()
-                    .display_panes
+                    .clients
                     .get(&deadline.client)
+                    .and_then(|client| client.display_panes.as_ref())
                     .is_some_and(|overlay| {
                         overlay.token == deadline.token
                             && overlay.deadline == Some(deadline.deadline)
@@ -313,8 +314,9 @@ impl Shared {
                 if self
                     .inner
                     .lock()
-                    .client_messages
+                    .clients
                     .get(&deadline.client)
+                    .and_then(|client| client.message.as_ref())
                     .is_some_and(|current| {
                         current.token == deadline.token
                             && current.deadline == Some(deadline.deadline)
@@ -415,7 +417,10 @@ impl Shared {
     pub(super) fn publish_runtime_facts(&self) {
         let (presentation, choosers) = {
             let inner = self.inner.lock();
-            let choosers = !inner.choose_trees.is_empty();
+            let choosers = !inner
+                .clients
+                .values()
+                .all(|client| client.choose_tree.is_none());
             let presentation = (!inner.subscribers.is_empty()
                 || inner.engine.has_window_style_settings()
                 || *EAGER_PUBLISH)

@@ -99,7 +99,7 @@ fn a_hidden_pane_streams_nothing_until_its_window_is_shown() {
     let view = TerminalViewId(client.0);
     {
         let inner = shared.inner.lock();
-        let streamed = &inner.streamed_terminals[&client];
+        let streamed = inner.clients[&client].streamed_terminals.as_ref().unwrap();
         assert!(streamed.contains_key(&idle));
         assert!(!streamed.contains_key(&printing));
     }
@@ -182,7 +182,11 @@ fn a_chooser_keeps_the_panes_it_previews_current() {
             .state
             .window_for_pane(printing)
             .expect("printing window");
-        let chooser = inner.choose_trees.get_mut(&client).expect("chooser");
+        let chooser = inner
+            .clients
+            .get_mut(&client)
+            .and_then(|client| client.choose_tree.as_mut())
+            .expect("chooser");
         let row = chooser
             .rendered
             .items
@@ -231,7 +235,12 @@ fn a_chooser_keeps_the_panes_it_previews_current() {
             .any(|count| count >= last)
     });
 
-    shared.inner.lock().choose_trees.remove(&client);
+    shared
+        .inner
+        .lock()
+        .clients
+        .get_mut(&client)
+        .and_then(|client| client.choose_tree.take());
     shared.publish_snapshot();
     assert!(!shared.inner.lock().preview_watched.contains(&printing));
 }

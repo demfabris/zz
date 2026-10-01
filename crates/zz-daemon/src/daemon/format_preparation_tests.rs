@@ -5,7 +5,12 @@ fn fixture(left: &str) -> (ServerState, ClientId, ExecutionContext) {
     let (session, window, pane) = inner.engine.state.create_session("prepared").unwrap();
     let client = ClientId(3);
     inner.attached.insert(session, BTreeSet::from([client]));
-    inner.focused_windows.insert(client, window);
+    inner
+        .clients
+        .entry(client)
+        .or_default()
+        .focused_window
+        .replace(window);
     inner
         .clients
         .entry(client)
@@ -350,7 +355,10 @@ fn status_preparation_retains_config_for_unknown_jobs_full_providers_and_rollbac
         mode.context.variable("config_files").as_deref(),
         Some("/retained.conf")
     );
-    inner.copy_sessions.remove(&client);
+    inner
+        .clients
+        .get_mut(&client)
+        .and_then(|client| client.copy_session.take());
     inner
         .clients
         .entry(client)
@@ -845,7 +853,12 @@ fn status_preparation_retargets_focus_session_and_replaced_engine() {
         }
         let first = request(&inner, client);
         let revision = inner.engine.format_cache_revision();
-        inner.focused_windows.insert(client, other_window);
+        inner
+            .clients
+            .entry(client)
+            .or_default()
+            .focused_window
+            .replace(other_window);
         let focused = request(&inner, client);
         assert_fresh(&first, &focused);
         assert_left(&focused, "prepared:second");
@@ -853,7 +866,12 @@ fn status_preparation_retargets_focus_session_and_replaced_engine() {
         inner
             .attached
             .insert(other_session, BTreeSet::from([client]));
-        inner.focused_windows.insert(client, third_window);
+        inner
+            .clients
+            .entry(client)
+            .or_default()
+            .focused_window
+            .replace(third_window);
         let attached = request(&inner, client);
         assert_fresh(&focused, &attached);
         assert_left(&attached, "other:third");
@@ -902,8 +920,11 @@ fn status_preparation_invalidates_scheme_startup_and_client_identity() {
             .unwrap()
             .insert(other_client);
         inner
-            .focused_windows
-            .insert(other_client, context.window.unwrap());
+            .clients
+            .entry(other_client)
+            .or_default()
+            .focused_window
+            .replace(context.window.unwrap());
         inner
             .clients
             .entry(other_client)
@@ -960,7 +981,10 @@ fn status_preparation_bypasses_live_callbacks_jobs_modes_control_and_rollback() 
         enter_copy_session(&mut inner, client, context.pane.unwrap()).unwrap();
         let mode = request(&inner, client);
         assert_fresh(&first, &mode);
-        inner.copy_sessions.remove(&client);
+        inner
+            .clients
+            .get_mut(&client)
+            .and_then(|client| client.copy_session.take());
         inner
             .clients
             .entry(client)
@@ -1022,9 +1046,11 @@ fn status_preparation_bypasses_border_prefix_and_cell_dependencies() {
         assert_eq!(first.pane_borders[0].style, "fg=green");
         let revision = inner.engine.format_cache_revision();
         inner
-            .key_engines
+            .clients
             .entry(client)
             .or_default()
+            .key_engine
+            .get_or_insert_default()
             .switch_table(Some("copy-mode".to_owned()));
         let prefix = request(&inner, client);
         assert_fresh(&first, &prefix);

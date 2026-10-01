@@ -22,7 +22,12 @@ fn fixture() -> (Arc<Shared>, ClientId, ExecutionContext) {
             .or_default()
             .tty
             .replace("/dev/ttys003".to_owned());
-        inner.focused_windows.insert(client, window);
+        inner
+            .clients
+            .entry(client)
+            .or_default()
+            .focused_window
+            .replace(window);
         inner.session_last_attached.insert(session, 73);
         inner
             .clients
@@ -59,7 +64,6 @@ fn borrowed<'a>(
         attached: &inner.attached,
         clients: &inner.clients,
         session_last_attached: &inner.session_last_attached,
-        copy_sessions: &inner.copy_sessions,
         pane_modes: &inner.pane_modes,
         seed: command_format_seed(inner, client, context),
         derived: LazyDerivedFormatFacts::default(),
@@ -394,9 +398,11 @@ fn selected_status_client_callbacks_match_complete_capture_for_every_field() {
         .replace(last_session);
     inner.client_flags.apply(client, "read-only,active-pane");
     inner
-        .key_engines
+        .clients
         .entry(client)
         .or_default()
+        .key_engine
+        .get_or_insert_default()
         .switch_table(Some("copy-mode".to_owned()));
     inner
         .clients

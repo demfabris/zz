@@ -1439,11 +1439,12 @@ fn initializing_status_waits_for_explicit_refresh_while_existing_clients_update(
             })
         )));
         assert!(
-            !shared
+            shared
                 .inner
                 .lock()
-                .client_status_rows
-                .contains_key(&initial_client)
+                .clients
+                .get(&initial_client)
+                .is_none_or(|client| client.status_rows.is_none())
         );
     }
     shared.refresh_status_filtered(None, Some(&BTreeSet::from([initial_client])));
@@ -1463,8 +1464,9 @@ fn initializing_status_waits_for_explicit_refresh_while_existing_clients_update(
         shared
             .inner
             .lock()
-            .client_status_rows
-            .contains_key(&initial_client)
+            .clients
+            .get(&initial_client)
+            .is_some_and(|client| client.status_rows.is_some())
     );
 }
 

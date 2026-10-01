@@ -373,13 +373,17 @@ fn retained_popup_keeps_history_and_copy_source_after_the_dead_notice_deadline()
     let terminal = loop {
         if let Some(terminal) = {
             let inner = fixture.shared.inner.lock();
-            inner.popups.get(&fixture.client).and_then(|popup| {
-                popup.state.dead.then(|| {
-                    assert!(!popup.state.close_on_exit);
-                    assert!(!popup.state.close_on_exit_zero);
-                    Arc::clone(&popup.terminal)
+            inner
+                .clients
+                .get(&fixture.client)
+                .and_then(|client| client.popup.as_ref())
+                .and_then(|popup| {
+                    popup.state.dead.then(|| {
+                        assert!(!popup.state.close_on_exit);
+                        assert!(!popup.state.close_on_exit_zero);
+                        Arc::clone(&popup.terminal)
+                    })
                 })
-            })
         } {
             break terminal;
         }
@@ -414,7 +418,15 @@ fn retained_popup_keeps_history_and_copy_source_after_the_dead_notice_deadline()
         .capture_copy_source()
         .expect("retained popup copy source after the notice deadline");
     fixture.run(&["display-popup", "-C"]);
-    assert!(fixture.shared.inner.lock().popups.is_empty());
+    assert!(
+        fixture
+            .shared
+            .inner
+            .lock()
+            .clients
+            .values()
+            .all(|client| client.popup.is_none())
+    );
     drop(terminal);
     let target =
         TerminalSession::spawn_empty_with_appearance(32, Arc::new(TerminalAppearance::default()));

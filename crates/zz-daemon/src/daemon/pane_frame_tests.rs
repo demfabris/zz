@@ -558,8 +558,9 @@ fn settle(shared: &Arc<Shared>, clients: &mut [Client], panes: &[PaneId], label:
             let streamed = shared
                 .inner
                 .lock()
-                .streamed_terminals
+                .clients
                 .get(&client.id)
+                .and_then(|client| client.streamed_terminals.as_ref())
                 .cloned()
                 .unwrap_or_default();
             for pane in panes.iter().filter(|pane| streamed.contains_key(pane)) {

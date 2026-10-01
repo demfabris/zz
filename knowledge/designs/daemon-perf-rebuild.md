@@ -3133,6 +3133,11 @@ Native `SearchBegin`/`SearchUpdate` already use asynchronous search results; `Da
 `ClientFormatFields` and `BorrowedFormatHookFacts` borrow the client map. The other ClientId-keyed fields remain in `ServerState` for a2 and a3.
 Checks passed: formatting, daemon clippy, 1,327 unit tests and 35 integration tests (one existing soak ignored), and all ten required compat rows with zero divergences; child scripts needed Homebrew Bash first in `PATH`.
 
+**a2 as built (2026-10-01):** `Client` owns the 28 per-client mode, key, visibility, path and status fields listed for this slice; none remain in `ServerState`.
+`unregister` drops those fields with the client record after detach handles mode cleanup. Delivery and control maps remain for a3; fields keyed by other ids stay in place.
+Format readers borrow the client fields, and diagnostics collect the same mode snapshots from them. This slice adds no threads, dependencies or wire changes.
+Checks passed: formatting, daemon clippy, 1,327 unit tests and 35 integration tests (one existing soak ignored), and all 12 required compat rows with zero divergences. The terminal-peer test failed in the first suite, passed alone, and passed in the repeated full suite.
+
 
 ## W4-DELIVER: frames straight from shards (effort L)
 

@@ -114,8 +114,9 @@ pub(super) fn presize_client_terminals(
         return seeded;
     };
     let panes = inner
-        .visible_terminals
+        .clients
         .get(&client)
+        .and_then(|client| client.visible_terminals.as_ref())
         .into_iter()
         .flatten()
         .copied()

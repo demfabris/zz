@@ -700,7 +700,11 @@ pub(super) fn chooser_presentation(
     client: ClientId,
 ) -> Option<ChooserPresentation> {
     let styles = Styles { inner };
-    if let Some(chooser) = inner.choose_trees.get(&client) {
+    if let Some(chooser) = inner
+        .clients
+        .get(&client)
+        .and_then(|client| client.choose_tree.as_ref())
+    {
         let selected = usize::try_from(chooser.rendered.selected).unwrap_or(usize::MAX);
         let preview = chooser
             .rendered
@@ -724,7 +728,10 @@ pub(super) fn chooser_presentation(
             preview,
         });
     }
-    let chooser = inner.choose_buffers.get(&client)?;
+    let chooser = inner
+        .clients
+        .get(&client)
+        .and_then(|client| client.choose_buffer.as_ref())?;
     let selected = usize::try_from(chooser.rendered.selected).unwrap_or(usize::MAX);
     let preview = chooser
         .names
@@ -778,8 +785,9 @@ fn tree_preview(
                 .pane
                 .filter(|pane| !(chooser.hide_source && *pane == chooser.source_pane));
             let (status, status_style) = inner
-                .client_status_rows
+                .clients
                 .get(&id)
+                .and_then(|client| client.status_rows.as_ref())
                 .cloned()
                 .unwrap_or_default();
             Some(ChooserPreview::Client {

@@ -85,19 +85,12 @@ pub(super) fn presize_client_terminals(
 ) -> BTreeSet<PaneId> {
     let mut seeded = BTreeSet::new();
     if !*ATTACH_PRESIZE
-        || inner.clients.get(&client).and_then(|client| client.kind)
-            != Some(ClientKind::Interactive)
-        || !inner
-            .clients
-            .get(&client)
-            .is_some_and(|client| client.has_terminal)
+        || inner.client(client).and_then(|c| c.kind) != Some(ClientKind::Interactive)
+        || !inner.client(client).is_some_and(|c| c.has_terminal)
     {
         return seeded;
     }
-    let Some((cell_width_px, cell_height_px)) = inner
-        .clients
-        .get(&client)
-        .and_then(|client| client.cell_pixels)
+    let Some((cell_width_px, cell_height_px)) = inner.client(client).and_then(|c| c.cell_pixels)
     else {
         return seeded;
     };
@@ -106,17 +99,15 @@ pub(super) fn presize_client_terminals(
     };
     let window = client_focused_window(inner, client, session_state);
     let Some((columns, rows)) = inner
-        .clients
-        .get(&client)
-        .and_then(|client| client.size.as_ref())
+        .client(client)
+        .and_then(|c| c.size.as_ref())
         .and_then(|_| interactive_client_window_extent(inner, client, session, window))
     else {
         return seeded;
     };
     let panes = inner
-        .clients
-        .get(&client)
-        .and_then(|client| client.visible_terminals.as_ref())
+        .client(client)
+        .and_then(|c| c.visible_terminals.as_ref())
         .into_iter()
         .flatten()
         .copied()
@@ -187,13 +178,8 @@ pub(super) fn write_frames(stream: &mut impl Write, frames: &[impl AsRef<[u8]>])
 
 impl Shared {
     pub(super) fn hold_attach_terminals(&self, client: ClientId) -> AttachHold {
-        let subscriber = self
-            .inner
-            .lock()
-            .clients
-            .get(&client)
-            .and_then(|client| client.subscriber.as_ref())
-            .cloned();
+        let subscriber =
+            self.read_client(client, |c| c.and_then(|c| c.subscriber.as_ref()).cloned());
         if let Some(subscriber) = &subscriber {
             subscriber.hold_terminals();
         }

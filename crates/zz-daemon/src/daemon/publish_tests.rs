@@ -405,24 +405,19 @@ fn status_interval_work_respects_subscriptions_and_keeps_independent_timers() {
     let session = context.session.expect("session");
     let pane = context.pane.expect("pane");
     inner
-        .clients
-        .entry(client)
-        .or_default()
+        .client_entry(client)
         .subscriber
         .replace(OutboundMailbox::new());
     inner.attached.entry(session).or_default().insert(client);
     inner
-        .clients
-        .entry(client)
-        .or_default()
+        .client_entry(client)
         .ctrl_subscriptions
         .replace(zz_protocol::Subscriptions::control());
     assert_eq!(Shared::status_sampler_sessions(&inner).count(), 0);
     assert!(!Shared::status_sampler_has_work(&inner));
     inner
-        .clients
-        .get_mut(&client)
-        .and_then(|client| client.ctrl_subscriptions.as_mut())
+        .client_mut(client)
+        .and_then(|c| c.ctrl_subscriptions.as_mut())
         .expect("compact client")
         .status = true;
     assert_eq!(
@@ -431,24 +426,19 @@ fn status_interval_work_respects_subscriptions_and_keeps_independent_timers() {
     );
     assert!(Shared::status_sampler_has_work(&inner));
     inner
-        .clients
-        .get_mut(&client)
-        .and_then(|client| client.ctrl_subscriptions.take());
+        .client_mut(client)
+        .and_then(|c| c.ctrl_subscriptions.take());
     assert_eq!(
         Shared::status_sampler_sessions(&inner).collect::<Vec<_>>(),
         [session]
     );
     assert!(Shared::status_sampler_has_work(&inner));
     inner
-        .clients
-        .entry(client)
-        .or_default()
+        .client_entry(client)
         .ctrl_subscriptions
         .replace(zz_protocol::Subscriptions::control());
     inner
-        .clients
-        .entry(client)
-        .or_default()
+        .client_entry(client)
         .control_output
         .get_or_insert_default()
         .subscriptions
@@ -462,9 +452,8 @@ fn status_interval_work_respects_subscriptions_and_keeps_independent_timers() {
         );
     assert!(Shared::status_sampler_has_work(&inner));
     inner
-        .clients
-        .get_mut(&client)
-        .and_then(|client| client.control_output.as_mut())
+        .client_mut(client)
+        .and_then(|c| c.control_output.as_mut())
         .expect("control output")
         .subscriptions
         .clear();
@@ -535,9 +524,7 @@ fn read_only_control_does_not_unpark_an_idle_unsubscribed_status_sampler() {
             .or_default()
             .insert(client);
         inner
-            .clients
-            .entry(client)
-            .or_default()
+            .client_entry(client)
             .ctrl_subscriptions
             .replace(zz_protocol::Subscriptions::control());
     }
@@ -787,9 +774,7 @@ fn a_runtime_fact_flush_is_silent_unless_a_template_reads_runtime_facts() {
     shared
         .inner
         .lock()
-        .clients
-        .entry(client)
-        .or_default()
+        .client_entry(client)
         .size
         .replace((80, 24));
     shared.start_timers().expect("start timers");

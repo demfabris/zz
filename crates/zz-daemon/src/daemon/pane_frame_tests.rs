@@ -41,15 +41,11 @@ fn attached_client(
     {
         let mut inner = shared.inner.lock();
         inner
-            .clients
-            .entry(client)
-            .or_default()
+            .client_entry(client)
             .size
             .replace(client_size_fact(&capabilities).expect("size fact"));
         inner
-            .clients
-            .entry(client)
-            .or_default()
+            .client_entry(client)
             .cell_pixels
             .replace(attach::client_cell_fact(&capabilities).expect("cell fact"));
     }
@@ -556,12 +552,9 @@ fn settle(shared: &Arc<Shared>, clients: &mut [Client], panes: &[PaneId], label:
                 .last_frame
                 .is_some_and(|last| last.elapsed() < Duration::from_millis(150));
             let streamed = shared
-                .inner
-                .lock()
-                .clients
-                .get(&client.id)
-                .and_then(|client| client.streamed_terminals.as_ref())
-                .cloned()
+                .read_client(client.id, |c| {
+                    c.and_then(|c| c.streamed_terminals.as_ref()).cloned()
+                })
                 .unwrap_or_default();
             for pane in panes.iter().filter(|pane| streamed.contains_key(pane)) {
                 let Some(terminal) = shared.inner.lock().terminals.get(pane).cloned() else {

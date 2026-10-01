@@ -5,12 +5,7 @@ fn fixture() -> (ServerState, ClientId, ExecutionContext) {
     let (session, window, pane) = inner.engine.state.create_session("borders").unwrap();
     let client = ClientId(3);
     inner.attached.insert(session, BTreeSet::from([client]));
-    inner
-        .clients
-        .entry(client)
-        .or_default()
-        .focused_window
-        .replace(window);
+    inner.client_entry(client).focused_window.replace(window);
     inner.engine.set_format_now(1_700_000_000);
     BORDER_FORMAT_EXPANSIONS.with(|count| count.set(0));
     (
@@ -352,12 +347,7 @@ fn border_format_cache_reuses_static_styles_across_clocks_and_invalidates_other_
         .state
         .create_window(session, None, zz_mux::PaneKind::Terminal)
         .unwrap();
-    inner
-        .clients
-        .entry(client)
-        .or_default()
-        .focused_window
-        .replace(window);
+    inner.client_entry(client).focused_window.replace(window);
     let focused = borders(&inner, client, session, &facts);
     assert_ne!(focused[0].pane, context.pane.unwrap());
     assert_eq!(
@@ -543,9 +533,7 @@ fn border_format_cache_tracks_linked_window_owner_attachments_in_the_same_second
         .attached
         .insert(viewer, BTreeSet::from([viewer_client]));
     inner
-        .clients
-        .entry(viewer_client)
-        .or_default()
+        .client_entry(viewer_client)
         .focused_window
         .replace(window);
     set_style(
@@ -560,7 +548,7 @@ fn border_format_cache_tracks_linked_window_owner_attachments_in_the_same_second
         borders(&inner, viewer_client, viewer, &facts)
     };
     assert_eq!(first[0].style, "fg=green");
-    inner.clients.entry(owner_client).or_default().suspended = true;
+    inner.client_entry(owner_client).suspended = true;
     assert_eq!(inner.engine.format_cache_revision(), revision);
     let second = {
         let facts = readonly_borrowed_format_hook_facts(&inner, CommandFormatSeed::default());
@@ -700,9 +688,8 @@ fn border_format_cache_checks_live_copy_sessions_without_materializing_maps() {
     let revision = inner.engine.format_cache_revision();
     for (exiting, expected) in [(false, "fg=red"), (true, "fg=green"), (false, "fg=red")] {
         inner
-            .clients
-            .get_mut(&copy_client)
-            .and_then(|client| client.copy_session.as_mut())
+            .client_mut(copy_client)
+            .and_then(|c| c.copy_session.as_mut())
             .unwrap()
             .exiting = exiting;
         let owned = format_hook_facts(&inner);

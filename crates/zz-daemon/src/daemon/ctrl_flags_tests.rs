@@ -44,7 +44,7 @@ fn fixture() -> (
     shared.subscribe(client, Arc::clone(&mailbox));
     {
         let mut inner = shared.inner.lock();
-        if let Some(client) = inner.clients.get_mut(&client) {
+        if let Some(client) = inner.client_mut(client) {
             client.ctrl_initializing = false;
         }
         inner.attached.entry(session).or_default().insert(client);

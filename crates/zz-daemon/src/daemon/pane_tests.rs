@@ -183,9 +183,8 @@ fn a_chooser_keeps_the_panes_it_previews_current() {
             .window_for_pane(printing)
             .expect("printing window");
         let chooser = inner
-            .clients
-            .get_mut(&client)
-            .and_then(|client| client.choose_tree.as_mut())
+            .client_mut(client)
+            .and_then(|c| c.choose_tree.as_mut())
             .expect("chooser");
         let row = chooser
             .rendered
@@ -238,9 +237,8 @@ fn a_chooser_keeps_the_panes_it_previews_current() {
     shared
         .inner
         .lock()
-        .clients
-        .get_mut(&client)
-        .and_then(|client| client.choose_tree.take());
+        .client_mut(client)
+        .and_then(|c| c.choose_tree.take());
     shared.publish_snapshot();
     assert!(!shared.inner.lock().preview_watched.contains(&printing));
 }

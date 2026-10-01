@@ -3138,6 +3138,13 @@ Checks passed: formatting, daemon clippy, 1,327 unit tests and 35 integration te
 Format readers borrow the client fields, and diagnostics collect the same mode snapshots from them. This slice adds no threads, dependencies or wire changes.
 Checks passed: formatting, daemon clippy, 1,327 unit tests and 35 integration tests (one existing soak ignored), and all 12 required compat rows with zero divergences. The terminal-peer test failed in the first suite, passed alone, and passed in the repeated full suite.
 
+**a3 as built (2026-10-01, `3560dece`):** `Client` owns delivery and control state, and `ServerState::clients` stores `Box<Client>` records.
+The lane's a3 measurement put CLI instructions within 1.4% of a1.
+
+**a4 as built (2026-10-01):** `ServerState::client`, `client_mut` and `client_entry` shorten client lookups; `Shared::read_client` reads client fields under the existing lock.
+After `cargo fmt --all`, `daemon.rs` has 116,416 lines, 2,575 fewer than a3, with no formatting skips, new macros or behavior changes.
+Checks passed: daemon clippy, 1,327 unit tests and 35 integration tests (one existing soak ignored), and all six required compat groups with zero divergences. The perf gate was not run.
+
 
 ## W4-DELIVER: frames straight from shards (effort L)
 

@@ -717,11 +717,7 @@ impl Shared {
             let inner = self.inner.lock();
             if kind != ClientKind::Interactive {
                 Some("path listing needs an interactive client".to_owned())
-            } else if !inner
-                .clients
-                .get(&client)
-                .is_some_and(|client| client.path_picker)
-            {
+            } else if !inner.client(client).is_some_and(|c| c.path_picker) {
                 Some("path listing needs the zz desktop app".to_owned())
             } else if inner.client_flags.contains(client) {
                 Some("client is read-only".to_owned())
@@ -824,9 +820,8 @@ impl Shared {
     ) -> (Option<PathBuf>, Option<PathBuf>) {
         let mut inner = self.inner.lock();
         let base = inner
-            .clients
-            .get(&client)
-            .and_then(|client| client.path_list_root.as_ref())
+            .client(client)
+            .and_then(|c| c.path_list_root.as_ref())
             .and_then(|(_, root)| root.clone());
         let expanded = dir.and_then(|dir| {
             expand_directory(dir, base.as_deref(), |user| {
@@ -834,9 +829,7 @@ impl Shared {
             })
         });
         inner
-            .clients
-            .entry(client)
-            .or_default()
+            .client_entry(client)
             .path_list_root
             .replace((request_id, expanded.clone()));
         (expanded, base)
@@ -845,9 +838,8 @@ impl Shared {
     fn restore_path_list_root(&self, client: ClientId, request_id: u64, root: Option<PathBuf>) {
         let mut inner = self.inner.lock();
         if let Some((current, stored)) = inner
-            .clients
-            .get_mut(&client)
-            .and_then(|client| client.path_list_root.as_mut())
+            .client_mut(client)
+            .and_then(|c| c.path_list_root.as_mut())
             && *current == request_id
         {
             *stored = root;
@@ -863,9 +855,8 @@ impl Shared {
     ) {
         let mut inner = self.inner.lock();
         if let Some((current, stored)) = inner
-            .clients
-            .get_mut(&client)
-            .and_then(|client| client.path_list_root.as_mut())
+            .client_mut(client)
+            .and_then(|c| c.path_list_root.as_mut())
             && *current == request_id
             && !cancel.load(Ordering::Acquire)
         {
@@ -1904,13 +1895,7 @@ mod tests {
             ),
             "{refused:?}"
         );
-        shared
-            .inner
-            .lock()
-            .clients
-            .entry(client)
-            .or_default()
-            .path_picker = true;
+        shared.inner.lock().client_entry(client).path_picker = true;
         let refused = listing(&shared, client, ClientKind::Interactive, (4, pane, None));
         assert!(
             matches!(
@@ -2037,13 +2022,7 @@ mod tests {
         shared
             .attach(client, context.session.expect("session id"))
             .expect("attach session");
-        shared
-            .inner
-            .lock()
-            .clients
-            .entry(client)
-            .or_default()
-            .path_picker = true;
+        shared.inner.lock().client_entry(client).path_picker = true;
         (shared, client, context.pane.expect("pane id"))
     }
 
@@ -2070,9 +2049,8 @@ mod tests {
             shared
                 .inner
                 .lock()
-                .clients
-                .get(&client)
-                .and_then(|client| client.path_list_root.as_ref()),
+                .client(client)
+                .and_then(|c| c.path_list_root.as_ref()),
             Some(&(3, Some(PathBuf::from("/r"))))
         );
         cancel.store(true, Ordering::Release);
@@ -2081,9 +2059,8 @@ mod tests {
             shared
                 .inner
                 .lock()
-                .clients
-                .get(&client)
-                .and_then(|client| client.path_list_root.as_ref()),
+                .client(client)
+                .and_then(|c| c.path_list_root.as_ref()),
             Some(&(3, Some(PathBuf::from("/r"))))
         );
         cancel.store(false, Ordering::Release);
@@ -2092,27 +2069,18 @@ mod tests {
             shared
                 .inner
                 .lock()
-                .clients
-                .get(&client)
-                .and_then(|client| client.path_list_root.as_ref()),
+                .client(client)
+                .and_then(|c| c.path_list_root.as_ref()),
             Some(&(3, Some(PathBuf::from("/home/me"))))
         );
 
         shared
             .inner
             .lock()
-            .clients
-            .get_mut(&client)
-            .and_then(|client| client.path_list_root.take());
+            .client_mut(client)
+            .and_then(|c| c.path_list_root.take());
         shared.record_resolved_path_list_root(client, 3, Path::new("/gone"), &cancel);
-        assert!(
-            shared
-                .inner
-                .lock()
-                .clients
-                .get(&client)
-                .is_none_or(|client| client.path_list_root.is_none())
-        );
+        assert!(shared.read_client(client, |c| c.is_none_or(|c| c.path_list_root.is_none())));
     }
 
     #[test]

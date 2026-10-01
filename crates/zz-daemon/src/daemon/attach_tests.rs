@@ -48,15 +48,11 @@ fn terminal_client(shared: &Arc<Shared>, size: (u16, u16)) -> (ClientId, Arc<Out
     {
         let mut inner = shared.inner.lock();
         inner
-            .clients
-            .entry(client)
-            .or_default()
+            .client_entry(client)
             .size
             .replace(client_size_fact(&capabilities).expect("size fact"));
         inner
-            .clients
-            .entry(client)
-            .or_default()
+            .client_entry(client)
             .cell_pixels
             .replace(attach::client_cell_fact(&capabilities).expect("cell fact"));
     }

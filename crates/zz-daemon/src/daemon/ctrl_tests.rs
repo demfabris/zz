@@ -392,9 +392,7 @@ fn quiet_control_query_sends_one_flat_completion_batch() {
     shared
         .inner
         .lock()
-        .clients
-        .entry(client)
-        .or_default()
+        .client_entry(client)
         .kind
         .replace(ClientKind::Control);
     shared.execute_compact_request(
@@ -889,12 +887,7 @@ fn compact_resize_validates_generation_before_skipping_its_exact_report() {
         .entry(pane)
         .or_default()
         .insert(client, geometry);
-    assert!(
-        inner
-            .clients
-            .get(&client)
-            .is_none_or(|client| client.ctrl_layout.is_none())
-    );
+    assert!(inner.client(client).is_none_or(|c| c.ctrl_layout.is_none()));
     let input = InputMessage::ResizeTerminalV2 {
         pane,
         columns: geometry.columns,
@@ -1050,12 +1043,7 @@ fn legacy_resize_accepts_v2_reports_without_a_compact_generation() {
             cell_height_px: 16,
         })
     ));
-    assert!(
-        inner
-            .clients
-            .get(&client)
-            .is_none_or(|client| client.ctrl_layout.is_none())
-    );
+    assert!(inner.client(client).is_none_or(|c| c.ctrl_layout.is_none()));
 }
 
 #[test]
@@ -1079,9 +1067,7 @@ fn stale_layout_size_report_is_dropped_before_geometry_changes() {
     {
         let mut inner = shared.inner.lock();
         inner
-            .clients
-            .entry(client)
-            .or_default()
+            .client_entry(client)
             .ctrl_subscriptions
             .replace(zz_protocol::Subscriptions::terminal());
         ctrl::normalize_resize(
@@ -1189,12 +1175,7 @@ fn resize_application_fixture() -> (Arc<Shared>, ClientId, PaneId, ExecutionCont
                 cell_height_px: 16,
             },
         );
-        inner
-            .clients
-            .entry(client)
-            .or_default()
-            .size
-            .replace((80, 24));
+        inner.client_entry(client).size.replace((80, 24));
     }
     context.no_hooks = true;
     shared.compact_tree_messages(client, true);
@@ -1282,9 +1263,8 @@ fn terminal_resize_is_revalidated_after_initial_admission() {
     shared
         .inner
         .lock()
-        .clients
-        .get_mut(&client)
-        .and_then(|client| client.ctrl_subscriptions.take());
+        .client_mut(client)
+        .and_then(|c| c.ctrl_subscriptions.take());
     assert!(
         shared
             .apply_terminal_size_report(client, pane, report, Some(0))
@@ -1353,9 +1333,8 @@ fn client_resize_is_revalidated_after_initial_admission() {
     shared
         .inner
         .lock()
-        .clients
-        .get_mut(&client)
-        .and_then(|client| client.ctrl_subscriptions.take());
+        .client_mut(client)
+        .and_then(|c| c.ctrl_subscriptions.take());
     assert!(shared.apply_client_size_report(
         client,
         ClientKind::Interactive,
@@ -1435,18 +1414,8 @@ fn initializing_status_waits_for_explicit_refresh_while_existing_clients_update(
             .entry(session)
             .or_default()
             .extend([existing_client, initial_client]);
-        inner
-            .clients
-            .entry(existing_client)
-            .or_default()
-            .size
-            .replace((80, 24));
-        inner
-            .clients
-            .entry(initial_client)
-            .or_default()
-            .size
-            .replace((97, 31));
+        inner.client_entry(existing_client).size.replace((80, 24));
+        inner.client_entry(initial_client).size.replace((97, 31));
     }
     for label in ["FIRST", "SECOND"] {
         shared
@@ -1477,14 +1446,9 @@ fn initializing_status_waits_for_explicit_refresh_while_existing_clients_update(
                 ..
             })
         )));
-        assert!(
-            shared
-                .inner
-                .lock()
-                .clients
-                .get(&initial_client)
-                .is_none_or(|client| client.status_rows.is_none())
-        );
+        assert!(shared.read_client(initial_client, |c| {
+            c.is_none_or(|c| c.status_rows.is_none())
+        }));
     }
     shared.refresh_status_filtered(None, Some(&BTreeSet::from([initial_client])));
     let statuses = reliable_children(&initial)
@@ -1499,14 +1463,9 @@ fn initializing_status_waits_for_explicit_refresh_while_existing_clients_update(
         .collect::<Vec<_>>();
     assert_eq!(statuses.len(), 1);
     assert_eq!(statuses[0].rows, ["SECOND"]);
-    assert!(
-        shared
-            .inner
-            .lock()
-            .clients
-            .get(&initial_client)
-            .is_some_and(|client| client.status_rows.is_some())
-    );
+    assert!(shared.read_client(initial_client, |c| {
+        c.is_some_and(|c| c.status_rows.is_some())
+    }));
 }
 
 #[test]
@@ -1624,7 +1583,7 @@ fn compact_registered(
     let (client, _) = shared.register_welcome(&hello).expect("register");
     let mailbox = OutboundMailbox::new();
     shared.subscribe(client, Arc::clone(&mailbox));
-    if let Some(client) = shared.inner.lock().clients.get_mut(&client) {
+    if let Some(client) = shared.inner.lock().client_mut(client) {
         client.ctrl_initializing = false;
     }
     (client, mailbox)
@@ -2022,9 +1981,7 @@ fn forced_attachment_stays_after_an_older_pending_publication() {
     shared
         .inner
         .lock()
-        .clients
-        .entry(client)
-        .or_default()
+        .client_entry(client)
         .kind
         .replace(ClientKind::Control);
     let publication_lock = shared.snapshot_order.lock();
@@ -2032,12 +1989,7 @@ fn forced_attachment_stays_after_an_older_pending_publication() {
     {
         let mut inner = shared.inner.lock();
         inner.attached.entry(session).or_default().insert(client);
-        inner
-            .clients
-            .entry(client)
-            .or_default()
-            .ctrl_attachment
-            .replace(1);
+        inner.client_entry(client).ctrl_attachment.replace(1);
     }
     let (started, ready) = crossbeam_channel::bounded(1);
     let (finished, completion) = crossbeam_channel::bounded(1);
@@ -2225,9 +2177,7 @@ fn disconnected_control_exec_cannot_detach_the_next_active_client() {
     shared
         .inner
         .lock()
-        .clients
-        .entry(old)
-        .or_default()
+        .client_entry(old)
         .kind
         .replace(ClientKind::Control);
     shared
@@ -2281,9 +2231,7 @@ fn disconnected_control_exec_cannot_detach_the_next_active_client() {
     shared
         .inner
         .lock()
-        .clients
-        .entry(next)
-        .or_default()
+        .client_entry(next)
         .kind
         .replace(ClientKind::Control);
     let mut next_context = ExecutionContext::default();
@@ -2400,7 +2348,7 @@ fn compact_raw_control_preflights_line_and_resolves_daemon_environment() {
     let (client, _) = shared.register_welcome(&hello).expect("register");
     let mailbox = OutboundMailbox::new();
     shared.subscribe(client, Arc::clone(&mailbox));
-    if let Some(client) = shared.inner.lock().clients.get_mut(&client) {
+    if let Some(client) = shared.inner.lock().client_mut(client) {
         client.ctrl_initializing = false;
     }
     let mut context = ExecutionContext::default();
@@ -2706,9 +2654,7 @@ fn hook_body_control_notification_follows_output_guard_without_recursive_hooks()
     shared
         .inner
         .lock()
-        .clients
-        .entry(client)
-        .or_default()
+        .client_entry(client)
         .kind
         .replace(ClientKind::Control);
     shared

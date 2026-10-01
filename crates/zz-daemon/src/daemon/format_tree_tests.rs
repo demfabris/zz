@@ -10,29 +10,18 @@ fn fixture() -> (Arc<Shared>, ClientId, ExecutionContext) {
         inner.engine.state.create_session("beta").unwrap();
         inner.attached.insert(session, BTreeSet::from([client]));
         inner
-            .clients
-            .entry(client)
-            .or_default()
+            .client_entry(client)
             .name
             .replace("watcher".to_owned());
-        inner.clients.entry(client).or_default().pid.replace(42);
+        inner.client_entry(client).pid.replace(42);
         inner
-            .clients
-            .entry(client)
-            .or_default()
+            .client_entry(client)
             .tty
             .replace("/dev/ttys003".to_owned());
-        inner
-            .clients
-            .entry(client)
-            .or_default()
-            .focused_window
-            .replace(window);
+        inner.client_entry(client).focused_window.replace(window);
         inner.session_last_attached.insert(session, 73);
         inner
-            .clients
-            .entry(client)
-            .or_default()
+            .client_entry(client)
             .environment
             .replace(Arc::new(ClientEnvironmentBlob::from_map(BTreeMap::from([
                 ("FROM_CLIENT".into(), "yes".into()),
@@ -351,35 +340,16 @@ fn selected_status_default_omits_unused_fact_maps_and_matches_complete_capture()
 fn selected_status_client_callbacks_match_complete_capture_for_every_field() {
     let (shared, client, mut target) = fixture();
     let mut inner = shared.inner.lock();
-    inner.clients.entry(client).or_default().has_terminal = true;
+    inner.client_entry(client).has_terminal = true;
+    inner.client_entry(client).size.replace((42, 13));
+    inner.client_entry(client).created_time.replace(111);
+    inner.client_entry(client).activity_time.replace(222);
     inner
-        .clients
-        .entry(client)
-        .or_default()
-        .size
-        .replace((42, 13));
-    inner
-        .clients
-        .entry(client)
-        .or_default()
-        .created_time
-        .replace(111);
-    inner
-        .clients
-        .entry(client)
-        .or_default()
-        .activity_time
-        .replace(222);
-    inner
-        .clients
-        .entry(client)
-        .or_default()
+        .client_entry(client)
         .terminal_type
         .replace("VT420".to_owned());
     inner
-        .clients
-        .entry(client)
-        .or_default()
+        .client_entry(client)
         .color_scheme
         .replace(TerminalColorScheme::Light);
     let last_session = inner
@@ -391,29 +361,21 @@ fn selected_status_client_callbacks_match_complete_capture_for_every_field() {
         .unwrap()
         .id;
     inner
-        .clients
-        .entry(client)
-        .or_default()
+        .client_entry(client)
         .last_session
         .replace(last_session);
     inner.client_flags.apply(client, "read-only,active-pane");
     inner
-        .clients
-        .entry(client)
-        .or_default()
+        .client_entry(client)
         .key_engine
         .get_or_insert_default()
         .switch_table(Some("copy-mode".to_owned()));
     inner
-        .clients
-        .entry(client)
-        .or_default()
+        .client_entry(client)
         .features
         .replace(client_features_fact(&["client-features-v1:RGB".to_owned()]));
     inner
-        .clients
-        .entry(client)
-        .or_default()
+        .client_entry(client)
         .environment
         .replace(Arc::new(ClientEnvironmentBlob::from_map(BTreeMap::from([
             ("TERM".into(), "xterm-256color".into()),
@@ -426,12 +388,7 @@ fn selected_status_client_callbacks_match_complete_capture_for_every_field() {
         state.written_bytes = 1234;
         state.discarded_bytes = 56;
     }
-    inner
-        .clients
-        .entry(client)
-        .or_default()
-        .subscriber
-        .replace(mailbox);
+    inner.client_entry(client).subscriber.replace(mailbox);
     inner
         .terminal_geometries
         .entry(target.pane.unwrap())
@@ -494,7 +451,7 @@ fn selected_status_client_callbacks_match_complete_capture_for_every_field() {
         ClientKind::Control,
         ClientKind::Command,
     ] {
-        inner.clients.entry(client).or_default().kind.replace(kind);
+        inner.client_entry(client).kind.replace(kind);
         let values = inner
             .engine
             .format_status_context(target.session, target.window, target.pane);
@@ -548,16 +505,12 @@ fn selected_status_client_dynamic_references_keep_terminal_and_environment_facts
     let (shared, client, target) = fixture();
     let mut inner = shared.inner.lock();
     inner
-        .clients
-        .entry(client)
-        .or_default()
+        .client_entry(client)
         .kind
         .replace(ClientKind::Interactive);
-    inner.clients.entry(client).or_default().has_terminal = true;
+    inner.client_entry(client).has_terminal = true;
     inner
-        .clients
-        .entry(client)
-        .or_default()
+        .client_entry(client)
         .environment
         .replace(Arc::new(ClientEnvironmentBlob::from_map(BTreeMap::from([
             ("TERM".into(), "xterm-256color".into()),
@@ -630,12 +583,7 @@ fn selected_status_dynamic_facts_and_control_clients_keep_complete_capture() {
         assert_eq!(selected.session_attachments.len(), 1);
     }
     drop(context);
-    inner
-        .clients
-        .entry(client)
-        .or_default()
-        .kind
-        .replace(ClientKind::Control);
+    inner.client_entry(client).kind.replace(ClientKind::Control);
     let request = selected_request(&inner, client);
     assert_eq!(request.facts.clients.len(), 1);
     assert!(request.facts.client_environment.is_some());

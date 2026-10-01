@@ -95,24 +95,12 @@ fn fixture() -> Fixture {
             .or_default()
             .insert(client);
         inner
-            .clients
-            .entry(client)
-            .or_default()
+            .client_entry(client)
             .focused_window
             .replace(context.window.unwrap());
-        inner
-            .clients
-            .entry(client)
-            .or_default()
-            .size
-            .replace((width, 24));
-        inner
-            .clients
-            .entry(client)
-            .or_default()
-            .activity
-            .replace(activity);
-        inner.clients.entry(client).or_default().has_terminal = true;
+        inner.client_entry(client).size.replace((width, 24));
+        inner.client_entry(client).activity.replace(activity);
+        inner.client_entry(client).has_terminal = true;
         Target {
             client,
             mailbox,
@@ -211,9 +199,7 @@ fn refresh_command_targetless_selection_preserves_origin_and_activity_precedence
         .shared
         .inner
         .lock()
-        .clients
-        .entry(fixture.invoking)
-        .or_default()
+        .client_entry(fixture.invoking)
         .origin
         .replace(fixture.targets[0].context.pane.unwrap());
     execute(&fixture, &mut context, &["refresh-client", "-S"]).unwrap();
@@ -222,9 +208,7 @@ fn refresh_command_targetless_selection_preserves_origin_and_activity_precedence
         .shared
         .inner
         .lock()
-        .clients
-        .entry(fixture.targets[0].client)
-        .or_default()
+        .client_entry(fixture.targets[0].client)
         .activity
         .replace(40);
     execute(&fixture, &mut context, &["refresh-client", "-S"]).unwrap();
@@ -232,9 +216,8 @@ fn refresh_command_targetless_selection_preserves_origin_and_activity_precedence
     {
         let mut inner = fixture.shared.inner.lock();
         inner
-            .clients
-            .get_mut(&fixture.invoking)
-            .and_then(|client| client.origin.take());
+            .client_mut(fixture.invoking)
+            .and_then(|c| c.origin.take());
         inner
             .engine
             .mark_session_active_at(fixture.targets[0].context.session.unwrap(), 30);
@@ -263,9 +246,7 @@ fn refresh_command_explicit_targets_keep_scoped_options_and_client_facts_fresh()
         .shared
         .inner
         .lock()
-        .clients
-        .entry(fixture.targets[1].client)
-        .or_default()
+        .client_entry(fixture.targets[1].client)
         .size
         .replace((121, 24));
     engine_command(
@@ -335,9 +316,7 @@ fn refresh_command_present_replay_provenance_restores_attachment_on_success_and_
         .shared
         .inner
         .lock()
-        .clients
-        .entry(fixture.invoking)
-        .or_default()
+        .client_entry(fixture.invoking)
         .origin
         .replace(fixture.targets[0].context.pane.unwrap());
     let mut context = fixture.targets[2].context.clone();
@@ -382,9 +361,7 @@ fn refresh_command_after_and_error_hooks_recompute_their_format_context_and_fact
         .shared
         .inner
         .lock()
-        .clients
-        .entry(fixture.invoking)
-        .or_default()
+        .client_entry(fixture.invoking)
         .origin
         .replace(fixture.targets[0].context.pane.unwrap());
     let mut context = fixture.targets[2].context.clone();
@@ -424,9 +401,7 @@ fn refresh_command_after_and_error_hooks_recompute_their_format_context_and_fact
         .shared
         .inner
         .lock()
-        .clients
-        .entry(fixture.targets[0].client)
-        .or_default()
+        .client_entry(fixture.targets[0].client)
         .activity
         .replace(40);
     engine_command(
@@ -539,9 +514,7 @@ fn literal_command_routing_recomputes_immediate_after_and_error_hook_facts() {
         .shared
         .inner
         .lock()
-        .clients
-        .entry(fixture.invoking)
-        .or_default()
+        .client_entry(fixture.invoking)
         .origin
         .replace(fixture.targets[0].context.pane.unwrap());
     for (hook, option) in [
@@ -589,9 +562,7 @@ fn literal_command_routing_recomputes_immediate_after_and_error_hook_facts() {
         .shared
         .inner
         .lock()
-        .clients
-        .entry(fixture.targets[0].client)
-        .or_default()
+        .client_entry(fixture.targets[0].client)
         .activity
         .replace(40);
     for args in [
@@ -639,9 +610,7 @@ fn literal_routing_keeps_formatted_setters_sources_and_listings_on_client_fact_p
         .shared
         .inner
         .lock()
-        .clients
-        .entry(fixture.invoking)
-        .or_default()
+        .client_entry(fixture.invoking)
         .origin
         .replace(fixture.targets[0].context.pane.unwrap());
     let mut context = fixture.targets[2].context.clone();
@@ -717,9 +686,7 @@ fn default_key_listing_routes_aliases_and_keeps_hook_facts_and_attachment_fresh(
         .shared
         .inner
         .lock()
-        .clients
-        .entry(fixture.invoking)
-        .or_default()
+        .client_entry(fixture.invoking)
         .origin
         .replace(fixture.targets[0].context.pane.unwrap());
     engine_command(
@@ -808,9 +775,7 @@ fn default_key_listing_routes_aliases_and_keeps_hook_facts_and_attachment_fresh(
         .shared
         .inner
         .lock()
-        .clients
-        .entry(fixture.targets[0].client)
-        .or_default()
+        .client_entry(fixture.targets[0].client)
         .activity
         .replace(40);
     engine_command(

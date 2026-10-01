@@ -249,17 +249,13 @@ impl Shared {
     fn schedule_timer(&self, deadlines: &mut Deadlines, input: &TimerInput) {
         match *input {
             TimerInput::DisplayPanes(DisplayPanesDeadlineCommand::Schedule(deadline)) => {
-                if self
-                    .inner
-                    .lock()
-                    .clients
-                    .get(&deadline.client)
-                    .and_then(|client| client.display_panes.as_ref())
-                    .is_some_and(|overlay| {
-                        overlay.token == deadline.token
-                            && overlay.deadline == Some(deadline.deadline)
-                    })
-                {
+                if self.read_client(deadline.client, |c| {
+                    c.and_then(|c| c.display_panes.as_ref())
+                        .is_some_and(|overlay| {
+                            overlay.token == deadline.token
+                                && overlay.deadline == Some(deadline.deadline)
+                        })
+                }) {
                     deadlines.insert(
                         TimerKey::DisplayPanes(deadline.client),
                         deadline.deadline,
@@ -311,17 +307,12 @@ impl Shared {
                 }
             }
             TimerInput::ClientMessage(ClientMessageDeadlineCommand::Schedule(deadline)) => {
-                if self
-                    .inner
-                    .lock()
-                    .clients
-                    .get(&deadline.client)
-                    .and_then(|client| client.message.as_ref())
-                    .is_some_and(|current| {
+                if self.read_client(deadline.client, |c| {
+                    c.and_then(|c| c.message.as_ref()).is_some_and(|current| {
                         current.token == deadline.token
                             && current.deadline == Some(deadline.deadline)
                     })
-                {
+                }) {
                     deadlines.insert(
                         TimerKey::ClientMessage(deadline.client),
                         deadline.deadline,
@@ -417,14 +408,8 @@ impl Shared {
     pub(super) fn publish_runtime_facts(&self) {
         let (presentation, choosers) = {
             let inner = self.inner.lock();
-            let choosers = !inner
-                .clients
-                .values()
-                .all(|client| client.choose_tree.is_none());
-            let presentation = (!inner
-                .clients
-                .values()
-                .all(|client| client.subscriber.is_none())
+            let choosers = !inner.clients.values().all(|c| c.choose_tree.is_none());
+            let presentation = (!inner.clients.values().all(|c| c.subscriber.is_none())
                 || inner.engine.has_window_style_settings()
                 || *EAGER_PUBLISH)
                 && inner.engine.runtime_facts_reach_presentation();
@@ -562,7 +547,7 @@ impl Shared {
         inner
             .clients
             .values()
-            .filter_map(|client| client.control_output.as_ref())
+            .filter_map(|c| c.control_output.as_ref())
             .any(|output| !output.subscriptions.is_empty())
             || inner.engine.has_format_monitors()
             || Self::peer_scan_armed(inner)
@@ -577,9 +562,8 @@ impl Shared {
             .filter_map(|(id, client)| client.subscriber.as_ref().map(|_| id))
             .filter(|client| {
                 inner
-                    .clients
-                    .get(*client)
-                    .and_then(|client| client.ctrl_subscriptions.as_ref())
+                    .client(**client)
+                    .and_then(|c| c.ctrl_subscriptions.as_ref())
                     .is_none_or(|subscription| subscription.status)
             })
             .filter_map(|client| client_attached_session(inner, *client))

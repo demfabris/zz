@@ -284,14 +284,12 @@ pub(super) fn client_chooser_rows(
             name,
             text,
             activity: inner
-                .clients
-                .get(&client)
-                .and_then(|client| client.activity)
+                .client(client)
+                .and_then(|c| c.activity)
                 .unwrap_or_default(),
             created: inner
-                .clients
-                .get(&client)
-                .and_then(|client| client.created_time)
+                .client(client)
+                .and_then(|c| c.created_time)
                 .unwrap_or_default(),
             width,
             height,
@@ -700,11 +698,7 @@ pub(super) fn chooser_presentation(
     client: ClientId,
 ) -> Option<ChooserPresentation> {
     let styles = Styles { inner };
-    if let Some(chooser) = inner
-        .clients
-        .get(&client)
-        .and_then(|client| client.choose_tree.as_ref())
-    {
+    if let Some(chooser) = inner.client(client).and_then(|c| c.choose_tree.as_ref()) {
         let selected = usize::try_from(chooser.rendered.selected).unwrap_or(usize::MAX);
         let preview = chooser
             .rendered
@@ -729,9 +723,8 @@ pub(super) fn chooser_presentation(
         });
     }
     let chooser = inner
-        .clients
-        .get(&client)
-        .and_then(|client| client.choose_buffer.as_ref())?;
+        .client(client)
+        .and_then(|c| c.choose_buffer.as_ref())?;
     let selected = usize::try_from(chooser.rendered.selected).unwrap_or(usize::MAX);
     let preview = chooser
         .names
@@ -785,9 +778,8 @@ fn tree_preview(
                 .pane
                 .filter(|pane| !(chooser.hide_source && *pane == chooser.source_pane));
             let (status, status_style) = inner
-                .clients
-                .get(&id)
-                .and_then(|client| client.status_rows.as_ref())
+                .client(id)
+                .and_then(|c| c.status_rows.as_ref())
                 .cloned()
                 .unwrap_or_default();
             Some(ChooserPreview::Client {

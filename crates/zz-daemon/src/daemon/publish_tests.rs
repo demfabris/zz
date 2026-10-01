@@ -759,7 +759,14 @@ fn a_client_attaching_later_sees_runtime_facts_changed_while_detached() {
 #[test]
 fn a_runtime_fact_flush_is_silent_unless_a_template_reads_runtime_facts() {
     let (shared, client, mut context, pane, mailbox) = attached_fixture("runtime-flush");
-    shared.inner.lock().client_sizes.insert(client, (80, 24));
+    shared
+        .inner
+        .lock()
+        .clients
+        .entry(client)
+        .or_default()
+        .size
+        .replace((80, 24));
     shared.start_timers().expect("start timers");
     let flush = |shared: &Arc<Shared>| {
         shared.request_publish(timers::PublishReason::RuntimeFacts);

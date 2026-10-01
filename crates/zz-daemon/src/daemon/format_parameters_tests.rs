@@ -172,8 +172,18 @@ fn status_preparation_reuses_engine_capture_and_keeps_client_and_config_values_f
     let client = ClientId(3);
     inner.attached.insert(session, BTreeSet::from([client]));
     inner.focused_windows.insert(client, window);
-    inner.client_kinds.insert(client, ClientKind::Interactive);
-    inner.client_sizes.insert(client, (80, 24));
+    inner
+        .clients
+        .entry(client)
+        .or_default()
+        .kind
+        .replace(ClientKind::Interactive);
+    inner
+        .clients
+        .entry(client)
+        .or_default()
+        .size
+        .replace((80, 24));
     inner.engine.set_format_now(1234);
     for args in [
         vec![
@@ -215,7 +225,12 @@ fn status_preparation_reuses_engine_capture_and_keeps_client_and_config_values_f
     let first_left = renderer.render_initial(&first).left;
     let prefix = first_left.strip_suffix("80::1").unwrap().to_owned();
     let revision = inner.engine.format_cache_revision();
-    inner.client_sizes.insert(client, (120, 24));
+    inner
+        .clients
+        .entry(client)
+        .or_default()
+        .size
+        .replace((120, 24));
     let resized = request(&inner);
     assert_eq!(inner.engine.format_cache_revision(), revision);
     assert_eq!(
@@ -238,10 +253,30 @@ fn status_fact_selection_plans_reuse_dependencies_and_keep_referenced_facts_fres
     let client = ClientId(3);
     inner.attached.insert(session, BTreeSet::from([client]));
     inner.focused_windows.insert(client, window);
-    inner.client_kinds.insert(client, ClientKind::Interactive);
-    inner.client_names.insert(client, "first".to_owned());
-    inner.client_ttys.insert(client, "/dev/first".to_owned());
-    inner.client_sizes.insert(client, (80, 24));
+    inner
+        .clients
+        .entry(client)
+        .or_default()
+        .kind
+        .replace(ClientKind::Interactive);
+    inner
+        .clients
+        .entry(client)
+        .or_default()
+        .name
+        .replace("first".to_owned());
+    inner
+        .clients
+        .entry(client)
+        .or_default()
+        .tty
+        .replace("/dev/first".to_owned());
+    inner
+        .clients
+        .entry(client)
+        .or_default()
+        .size
+        .replace((80, 24));
     let template = "#{client_name}:#{client_width}:#{session_attached_list}:#{pane_in_mode}";
     execute(&mut inner, &["set-option", "-g", "status-left", template]);
     let first = parameters(&inner, Some(session));
@@ -269,9 +304,24 @@ fn status_fact_selection_plans_reuse_dependencies_and_keep_referenced_facts_fres
     let original = facts(&inner, &first);
     assert_eq!(expand(&inner, &original), "/dev/first:80:/dev/first:0");
     let revision = inner.engine.format_cache_revision();
-    inner.client_names.insert(client, "changed".to_owned());
-    inner.client_ttys.insert(client, "/dev/changed".to_owned());
-    inner.client_sizes.insert(client, (120, 24));
+    inner
+        .clients
+        .entry(client)
+        .or_default()
+        .name
+        .replace("changed".to_owned());
+    inner
+        .clients
+        .entry(client)
+        .or_default()
+        .tty
+        .replace("/dev/changed".to_owned());
+    inner
+        .clients
+        .entry(client)
+        .or_default()
+        .size
+        .replace((120, 24));
     inner.pane_modes.insert(pane, vec![PaneModeRequest::Clock]);
     assert_eq!(inner.engine.format_cache_revision(), revision);
     for _ in 0..3 {

@@ -3128,6 +3128,11 @@ Functions live in `crates/zz-daemon/src/daemon.rs` unless a row names another fi
 
 Native `SearchBegin`/`SearchUpdate` already use asynchronous search results; `DaemonFormatHooks::pane_search` in `status.rs` scans a cached viewport under command-format callers and has no actor round trip.
 
+**a1 as built (2026-10-01):** `Client` in `crates/zz-daemon/src/daemon.rs` holds the 22 identity and terminal facts in `ServerState::clients`.
+`register_identity` and `daemon/exec.rs` `register_exec` create the record; `unregister` removes it once. Detach clears activity and last-session facts while retaining identity.
+`ClientFormatFields` and `BorrowedFormatHookFacts` borrow the client map. The other ClientId-keyed fields remain in `ServerState` for a2 and a3.
+Checks passed: formatting, daemon clippy, 1,327 unit tests and 35 integration tests (one existing soak ignored), and all ten required compat rows with zero divergences; child scripts needed Homebrew Bash first in `PATH`.
+
 
 ## W4-DELIVER: frames straight from shards (effort L)
 

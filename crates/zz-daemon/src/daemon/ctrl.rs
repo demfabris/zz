@@ -194,7 +194,9 @@ fn client_view(
 ) -> ClientView {
     let layout_generation = layout_generation(inner, client);
     let mut overlay = Vec::new();
-    let contexts = (inner.client_kinds.get(&client) != Some(&ClientKind::Control)).then(|| {
+    let contexts = (inner.clients.get(&client).and_then(|client| client.kind)
+        != Some(ClientKind::Control))
+    .then(|| {
         inner.engine.format_context_snapshot(
             client_attached_session(inner, client)
                 .map_or(FormatClient::Unattached, FormatClient::Attached),
@@ -923,7 +925,15 @@ impl Shared {
                 overlays,
             )
         };
-        if full && self.inner.lock().client_kinds.get(&client) != Some(&ClientKind::Control) {
+        if full
+            && self
+                .inner
+                .lock()
+                .clients
+                .get(&client)
+                .and_then(|client| client.kind)
+                != Some(ClientKind::Control)
+        {
             Self::send_event(
                 outbound,
                 EventPayload::AppearanceChanged {

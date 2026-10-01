@@ -585,8 +585,7 @@ mod raw {
             .expect("connection thread")
             .expect("clean exit");
         let inner = shared.inner.lock();
-        assert!(inner.client_kinds.is_empty());
-        assert!(inner.client_environments.is_empty());
+        assert!(inner.clients.is_empty());
         drop(inner);
         assert!(shared.client_writers.lock().is_empty());
         assert!(shared.exec_links.lock().is_empty());
@@ -609,7 +608,7 @@ mod raw {
             .expect("clean exit");
         let mut rest = [0_u8; 1];
         assert_eq!(std::io::Read::read(&mut client, &mut rest).expect("eof"), 0);
-        assert!(shared.inner.lock().client_kinds.is_empty());
+        assert!(shared.inner.lock().clients.is_empty());
         assert!(shared.client_writers.lock().is_empty());
     }
 

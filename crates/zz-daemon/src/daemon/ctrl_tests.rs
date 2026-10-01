@@ -392,8 +392,11 @@ fn quiet_control_query_sends_one_flat_completion_batch() {
     shared
         .inner
         .lock()
-        .client_kinds
-        .insert(client, ClientKind::Control);
+        .clients
+        .entry(client)
+        .or_default()
+        .kind
+        .replace(ClientKind::Control);
     shared.execute_compact_request(
         client,
         ClientKind::Control,
@@ -1169,7 +1172,12 @@ fn resize_application_fixture() -> (Arc<Shared>, ClientId, PaneId, ExecutionCont
                 cell_height_px: 16,
             },
         );
-        inner.client_sizes.insert(client, (80, 24));
+        inner
+            .clients
+            .entry(client)
+            .or_default()
+            .size
+            .replace((80, 24));
     }
     context.no_hooks = true;
     shared.compact_tree_messages(client, true);
@@ -1281,7 +1289,7 @@ fn client_resize_is_revalidated_after_initial_admission() {
             .toggle_zoom(pane)
             .expect("layout changed after admission");
         (
-            inner.client_sizes[&client],
+            inner.clients[&client].size.unwrap(),
             inner.engine.pane_geometry(pane),
         )
     };
@@ -1295,7 +1303,7 @@ fn client_resize_is_revalidated_after_initial_admission() {
     ));
     {
         let inner = shared.inner.lock();
-        assert_eq!(inner.client_sizes[&client], stored);
+        assert_eq!(inner.clients[&client].size.unwrap(), stored);
         assert_eq!(inner.engine.pane_geometry(pane), laid_out);
     }
     let generation = shared.inner.lock().ctrl_layouts[&client].1;
@@ -1307,7 +1315,7 @@ fn client_resize_is_revalidated_after_initial_admission() {
         25,
         Some(generation),
     ));
-    assert_eq!(shared.inner.lock().client_sizes[&client], (81, 25));
+    assert_eq!(shared.inner.lock().clients[&client].size.unwrap(), (81, 25));
     shared.inner.lock().ctrl_subscriptions.remove(&client);
     assert!(shared.apply_client_size_report(
         client,
@@ -1317,7 +1325,7 @@ fn client_resize_is_revalidated_after_initial_admission() {
         1,
         Some(0)
     ));
-    assert_eq!(shared.inner.lock().client_sizes[&client], (1, 1));
+    assert_eq!(shared.inner.lock().clients[&client].size.unwrap(), (1, 1));
 }
 
 fn compact_hello(kind: ClientKind) -> zz_protocol::Hello {
@@ -1388,8 +1396,18 @@ fn initializing_status_waits_for_explicit_refresh_while_existing_clients_update(
             .entry(session)
             .or_default()
             .extend([existing_client, initial_client]);
-        inner.client_sizes.insert(existing_client, (80, 24));
-        inner.client_sizes.insert(initial_client, (97, 31));
+        inner
+            .clients
+            .entry(existing_client)
+            .or_default()
+            .size
+            .replace((80, 24));
+        inner
+            .clients
+            .entry(initial_client)
+            .or_default()
+            .size
+            .replace((97, 31));
     }
     for label in ["FIRST", "SECOND"] {
         shared
@@ -1961,8 +1979,11 @@ fn forced_attachment_stays_after_an_older_pending_publication() {
     shared
         .inner
         .lock()
-        .client_kinds
-        .insert(client, ClientKind::Control);
+        .clients
+        .entry(client)
+        .or_default()
+        .kind
+        .replace(ClientKind::Control);
     let publication_lock = shared.snapshot_order.lock();
     let older = shared.compact_tree_messages(client, true);
     {
@@ -2151,8 +2172,11 @@ fn disconnected_control_exec_cannot_detach_the_next_active_client() {
     shared
         .inner
         .lock()
-        .client_kinds
-        .insert(old, ClientKind::Control);
+        .clients
+        .entry(old)
+        .or_default()
+        .kind
+        .replace(ClientKind::Control);
     shared
         .attach_target(old, ClientKind::Control, &mut context, "ctrl-cancel")
         .expect("attach old control");
@@ -2204,8 +2228,11 @@ fn disconnected_control_exec_cannot_detach_the_next_active_client() {
     shared
         .inner
         .lock()
-        .client_kinds
-        .insert(next, ClientKind::Control);
+        .clients
+        .entry(next)
+        .or_default()
+        .kind
+        .replace(ClientKind::Control);
     let mut next_context = ExecutionContext::default();
     let (session, _) = shared
         .attach_target(next, ClientKind::Control, &mut next_context, "ctrl-cancel")
@@ -2573,7 +2600,7 @@ fn exec_resume_upgrades_the_same_socket_and_places_tail_error_after_attachment()
         .expect("tail error");
     assert!(prefix < attached);
     assert!(attached < tail);
-    assert_eq!(shared.inner.lock().client_instances.len(), 1);
+    assert_eq!(shared.inner.lock().clients.len(), 1);
     drop(client);
     worker.join().expect("worker").expect("connection");
     compact_command(
@@ -2624,8 +2651,11 @@ fn hook_body_control_notification_follows_output_guard_without_recursive_hooks()
     shared
         .inner
         .lock()
-        .client_kinds
-        .insert(client, ClientKind::Control);
+        .clients
+        .entry(client)
+        .or_default()
+        .kind
+        .replace(ClientKind::Control);
     shared
         .attach_target(client, ClientKind::Control, &mut context, "ctrl-hook")
         .expect("attach");

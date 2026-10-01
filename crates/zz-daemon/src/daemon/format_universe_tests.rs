@@ -440,14 +440,15 @@ fn terminal_features_and_overrides_reach_a_connected_client_on_the_next_read() {
     );
     {
         let mut inner = fixture.shared.inner.lock();
-        inner.client_terminals.insert(client);
-        inner.client_environments.insert(
-            client,
-            Arc::new(ClientEnvironmentBlob::from_map(BTreeMap::from([(
-                "TERM".into(),
-                "xterm-256color".into(),
-            )]))),
-        );
+        inner.clients.entry(client).or_default().has_terminal = true;
+        inner
+            .clients
+            .entry(client)
+            .or_default()
+            .environment
+            .replace(Arc::new(ClientEnvironmentBlob::from_map(BTreeMap::from([
+                ("TERM".into(), "xterm-256color".into()),
+            ]))));
     }
     let read = || {
         let inner = fixture.shared.inner.lock();

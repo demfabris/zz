@@ -284,14 +284,14 @@ pub(super) fn client_chooser_rows(
             name,
             text,
             activity: inner
-                .client_activity
+                .clients
                 .get(&client)
-                .copied()
+                .and_then(|client| client.activity)
                 .unwrap_or_default(),
             created: inner
-                .client_created_times
+                .clients
                 .get(&client)
-                .copied()
+                .and_then(|client| client.created_time)
                 .unwrap_or_default(),
             width,
             height,

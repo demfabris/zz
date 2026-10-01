@@ -280,49 +280,34 @@ impl Shared {
         inner
             .cold_bootstrap
             .register(client, request.startup_reentry == Some(self.server_id));
-        inner
-            .client_instances
-            .insert(client, request.client_instance_id);
-        inner.client_kinds.insert(client, ClientKind::Command);
         let now = unix_timestamp();
         inner.activity_sequence = inner.activity_sequence.saturating_add(1);
         let activity = inner.activity_sequence;
-        inner.client_activity.insert(client, activity);
-        inner.client_activity_times.insert(client, now);
-        inner.client_created_times.insert(client, now);
-        inner.client_focused.insert(client, true);
-        if let Some(origin) = request.origin {
-            inner.client_origins.insert(client, origin);
-        }
-        if request.flags.contains(ExecFlags::NESTED) {
-            inner.nested_clients.insert(client);
-        }
-        if request.flags.contains(ExecFlags::UTF8) {
-            inner.utf8_clients.insert(client);
-        }
-        if request.features != 0 {
-            inner.client_features.insert(client, request.features);
-        }
-        if let Some(tty) = request.tty.as_ref().filter(|tty| !tty.is_empty()) {
-            inner.client_ttys.insert(client, tty.clone());
-        }
-        if let Some(size) = request
-            .size
-            .filter(|(columns, rows)| *columns > 0 && *rows > 0)
-        {
-            inner.client_sizes.insert(client, size);
-        }
-        inner.client_pids.insert(client, request.process_id);
-        if let Some(working_directory) =
-            client_working_directory_fact(request.working_directory.as_ref())
-        {
-            inner
-                .client_working_directories
-                .insert(client, working_directory);
-        }
-        inner
-            .client_environments
-            .insert(client, Arc::new(environment));
+        inner.clients.insert(
+            client,
+            Client {
+                instance_id: Some(request.client_instance_id),
+                kind: Some(ClientKind::Command),
+                activity: Some(activity),
+                activity_time: Some(now),
+                created_time: Some(now),
+                focused: Some(true),
+                origin: request.origin,
+                nested: request.flags.contains(ExecFlags::NESTED),
+                utf8: request.flags.contains(ExecFlags::UTF8),
+                features: (request.features != 0).then_some(request.features),
+                tty: request.tty.as_ref().filter(|tty| !tty.is_empty()).cloned(),
+                size: request
+                    .size
+                    .filter(|(columns, rows)| *columns > 0 && *rows > 0),
+                pid: Some(request.process_id),
+                working_directory: client_working_directory_fact(
+                    request.working_directory.as_ref(),
+                ),
+                environment: Some(Arc::new(environment)),
+                ..Client::default()
+            },
+        );
         let context = request
             .origin
             .and_then(|pane| ExecutionContext::for_pane(&inner.engine.state, pane))

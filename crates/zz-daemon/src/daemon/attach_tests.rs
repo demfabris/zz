@@ -48,12 +48,17 @@ fn terminal_client(shared: &Arc<Shared>, size: (u16, u16)) -> (ClientId, Arc<Out
     {
         let mut inner = shared.inner.lock();
         inner
-            .client_sizes
-            .insert(client, client_size_fact(&capabilities).expect("size fact"));
-        inner.client_cell_pixels.insert(
-            client,
-            attach::client_cell_fact(&capabilities).expect("cell fact"),
-        );
+            .clients
+            .entry(client)
+            .or_default()
+            .size
+            .replace(client_size_fact(&capabilities).expect("size fact"));
+        inner
+            .clients
+            .entry(client)
+            .or_default()
+            .cell_pixels
+            .replace(attach::client_cell_fact(&capabilities).expect("cell fact"));
     }
     (client, mailbox)
 }

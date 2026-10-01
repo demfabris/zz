@@ -545,7 +545,7 @@ fn border_format_cache_tracks_linked_window_owner_attachments_in_the_same_second
         borders(&inner, viewer_client, viewer, &facts)
     };
     assert_eq!(first[0].style, "fg=green");
-    inner.suspended_clients.insert(owner_client);
+    inner.clients.entry(owner_client).or_default().suspended = true;
     assert_eq!(inner.engine.format_cache_revision(), revision);
     let second = {
         let facts = readonly_borrowed_format_hook_facts(&inner, CommandFormatSeed::default());

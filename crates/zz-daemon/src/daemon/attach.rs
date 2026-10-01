@@ -85,12 +85,19 @@ pub(super) fn presize_client_terminals(
 ) -> BTreeSet<PaneId> {
     let mut seeded = BTreeSet::new();
     if !*ATTACH_PRESIZE
-        || inner.client_kinds.get(&client) != Some(&ClientKind::Interactive)
-        || !inner.client_terminals.contains(&client)
+        || inner.clients.get(&client).and_then(|client| client.kind)
+            != Some(ClientKind::Interactive)
+        || !inner
+            .clients
+            .get(&client)
+            .is_some_and(|client| client.has_terminal)
     {
         return seeded;
     }
-    let Some((cell_width_px, cell_height_px)) = inner.client_cell_pixels.get(&client).copied()
+    let Some((cell_width_px, cell_height_px)) = inner
+        .clients
+        .get(&client)
+        .and_then(|client| client.cell_pixels)
     else {
         return seeded;
     };
@@ -99,8 +106,9 @@ pub(super) fn presize_client_terminals(
     };
     let window = client_focused_window(inner, client, session_state);
     let Some((columns, rows)) = inner
-        .client_sizes
+        .clients
         .get(&client)
+        .and_then(|client| client.size.as_ref())
         .and_then(|_| interactive_client_window_extent(inner, client, session, window))
     else {
         return seeded;

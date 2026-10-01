@@ -835,6 +835,16 @@ pub(super) struct LoopExec {
 }
 
 #[cfg(unix)]
+pub(super) struct PreparedExec {
+    commands: std::vec::IntoIter<CommandInvocation>,
+    next_request: u64,
+    stdin_available: bool,
+    outcome: ExecOutcome,
+    pub(super) inline: bool,
+    admission: Option<ResponseAdmissionGuard>,
+}
+
+#[cfg(unix)]
 impl LoopExec {
     pub(super) fn register(
         shared: &Arc<Shared>,
@@ -870,15 +880,125 @@ impl LoopExec {
         Arc::clone(&self.registration.released)
     }
 
-    pub(super) fn run(&mut self, request: ExecRequest) -> bool {
+    pub(super) fn prepare(&mut self, request: ExecRequest) -> PreparedExec {
+        let stdin_available = request.flags.contains(ExecFlags::STDIN_AVAILABLE);
+        let mut prepared = PreparedExec {
+            commands: Vec::new().into_iter(),
+            next_request: 1,
+            stdin_available,
+            outcome: ExecOutcome::Ran,
+            inline: true,
+            admission: ResponseAdmissionGuard::new(&self.shared),
+        };
+        if prepared.admission.is_none() {
+            return prepared;
+        }
+        if request
+            .expect_server_id
+            .is_some_and(|id| id != self.shared.server_id)
+        {
+            prepared.outcome = ExecOutcome::ServerMismatch;
+            return prepared;
+        }
+        if request.commands.is_empty() {
+            return prepared;
+        }
+        if request.flags.contains(ExecFlags::PREPARED) {
+            prepared.commands = request.commands.into_iter();
+            prepared.inline = false;
+            return prepared;
+        }
+        let typed = request.flags.contains(ExecFlags::RESUME).then(|| {
+            request
+                .commands
+                .iter()
+                .map(|command| CommandInvocation::new(command.name.clone(), Vec::<String>::new()))
+                .collect::<Vec<_>>()
+        });
+        let commands = {
+            let mut inner = self.shared.inner.lock();
+            let commands =
+                Shared::prepare_command_list_with_engine(&inner.engine, request.commands, true);
+            if request.spawned_server_id == Some(self.shared.server_id) {
+                let failed = commands
+                    .iter()
+                    .any(|command| matches!(command.result, PreparedCommandResult::Error(_)));
+                inner.cold_bootstrap.prepare(self.client, failed);
+            }
+            commands
+        };
+        if let Some(error) = commands.iter().find_map(|command| match &command.result {
+            PreparedCommandResult::Ready => None,
+            PreparedCommandResult::Error(error) => Some(error.clone()),
+        }) {
+            prepared.outcome = ExecOutcome::Rejected(error);
+            return prepared;
+        }
+        if let Some(typed) = typed
+            && let Some(kind) = exec_resume_kind(&typed, &commands)
+        {
+            prepared.outcome = ExecOutcome::Resume(ExecResume { kind, commands });
+            return prepared;
+        }
+        prepared.inline = commands.iter().all(|command| self.can_inline(command));
+        prepared.commands = commands
+            .into_iter()
+            .map(|command| command.invocation)
+            .collect::<Vec<_>>()
+            .into_iter();
+        prepared
+    }
+
+    pub(super) fn run(&mut self, prepared: &mut PreparedExec, inline: bool) -> Option<bool> {
         let mailbox = Arc::clone(&self.mailbox);
-        let admission = ResponseAdmissionGuard::new(&self.shared);
-        let outcome = if admission.is_some() {
-            self.execute(&mailbox, request)
+        if prepared.admission.is_some() {
+            let shared = Arc::clone(&self.shared);
+            while !prepared.commands.as_slice().is_empty() {
+                if inline && self.output_pending() {
+                    return None;
+                }
+                if !inline {
+                    self.wait_for_output(&mailbox);
+                }
+                let mut invocation = prepared.commands.next().unwrap();
+                let request_id = prepared.next_request;
+                prepared.next_request = request_id.saturating_add(1);
+                if self.cancel.load(Ordering::Acquire) {
+                    break;
+                }
+                if shared.shutdown_pending.load(Ordering::Acquire) {
+                    let _ = mailbox.enqueue_reliable(&server_stopping_response(request_id));
+                    break;
+                }
+                invocation.set_stdin_available(prepared.stdin_available);
+                let item = shared.command_item(None);
+                item.command_item
+                    .as_ref()
+                    .expect("Exec command item")
+                    .lock()
+                    .exec_writer = Some(Arc::downgrade(&mailbox));
+                let (response, client_exit) = item.execute_command_request_with_streams(
+                    self.client,
+                    ClientKind::Command,
+                    &mut self.context,
+                    request_id,
+                    &invocation,
+                    true,
+                );
+                let failed = matches!(response, CommandResponse::Error { .. });
+                let admitted = mailbox.enqueue_reliable_with_wakeup(
+                    &ProtocolMessage::CommandResponse(response),
+                    false,
+                );
+                if failed || client_exit || !admitted {
+                    break;
+                }
+            }
         } else {
             let _ = mailbox.enqueue_reliable(&server_stopping_response(1));
-            ExecOutcome::Ran
-        };
+            prepared.outcome = ExecOutcome::Ran;
+        }
+        let outcome = std::mem::replace(&mut prepared.outcome, ExecOutcome::Ran);
         let resumed = matches!(outcome, ExecOutcome::Resume(_));
         if !self.cancel.load(Ordering::Acquire) {
             let _ = mailbox.enqueue_reliable_with_wakeup(
@@ -889,107 +1009,88 @@ impl LoopExec {
                 false,
             );
         }
-        drop(admission);
-        resumed
+        drop(prepared.admission.take());
+        Some(resumed)
     }
 
-    fn execute(&mut self, mailbox: &Arc<OutboundMailbox>, request: ExecRequest) -> ExecOutcome {
-        let shared = Arc::clone(&self.shared);
-        if request
-            .expect_server_id
-            .is_some_and(|expected| expected != shared.server_id)
-        {
-            return ExecOutcome::ServerMismatch;
+    pub(super) fn can_finish_inline(&self) -> bool {
+        let inner = self.shared.inner.lock();
+        detach_is_inert(&inner, self.client) && !inner.engine.destroy_unattached_explicit_anywhere()
+    }
+
+    fn can_inline(&self, command: &PreparedCommand) -> bool {
+        if connection::inline_query(&self.shared, &self.context, command) {
+            return true;
         }
-        if request.commands.is_empty() {
-            return ExecOutcome::Ran;
-        }
-        let stdin_available = request.flags.contains(ExecFlags::STDIN_AVAILABLE);
-        if request.flags.contains(ExecFlags::PREPARED) {
-            self.run_commands(mailbox, request.commands, stdin_available);
-            return ExecOutcome::Ran;
-        }
-        let resume = request.flags.contains(ExecFlags::RESUME);
-        let typed = resume.then(|| {
-            request
-                .commands
-                .iter()
-                .map(|command| CommandInvocation::new(command.name.clone(), Vec::<String>::new()))
-                .collect::<Vec<_>>()
-        });
-        let prepared = {
-            let mut inner = shared.inner.lock();
-            let prepared =
-                Shared::prepare_command_list_with_engine(&inner.engine, request.commands, true);
-            if request.spawned_server_id == Some(shared.server_id) {
-                let failed = prepared
-                    .iter()
-                    .any(|command| matches!(command.result, PreparedCommandResult::Error(_)));
-                inner.cold_bootstrap.prepare(self.client, failed);
-            }
-            prepared
+        let Some(name @ ("select-pane" | "send-keys")) = command.canonical_name.as_deref() else {
+            return false;
         };
-        if let Some(error) = prepared.iter().find_map(|command| match &command.result {
-            PreparedCommandResult::Ready => None,
-            PreparedCommandResult::Error(error) => Some(error.clone()),
+        let Some(spec) = zz_protocol::catalog_command_spec(name) else {
+            return false;
+        };
+        let Ok(parsed) = zz_protocol::parse_tmux_options(spec, &command.invocation.args) else {
+            return false;
+        };
+        if parsed.options.iter().any(|option| {
+            !(matches!(option, zz_protocol::TmuxOption::Value("-t", _))
+                || (name == "send-keys"
+                    && matches!(option, zz_protocol::TmuxOption::Flag("-l" | "-H" | "-R"))))
         }) {
-            return ExecOutcome::Rejected(error);
+            return false;
         }
-        if let Some(typed) = typed
-            && let Some(kind) = exec_resume_kind(&typed, &prepared)
+        let inner = self.shared.inner.lock();
+        if !inner.deferred_event_hooks.is_empty()
+            || !inner.pane_modes.is_empty()
+            || inner
+                .clients
+                .values()
+                .any(|client| client.copy_session.is_some() || client.command_output.is_some())
+            || inner
+                .engine
+                .has_hook_commands(self.context.session, "command-error")
+            || MuxEngine::after_command_hook(name)
+                .is_some_and(|hook| inner.engine.has_hook_commands(self.context.session, hook))
         {
-            return ExecOutcome::Resume(ExecResume {
-                kind,
-                commands: prepared,
-            });
+            return false;
         }
-        self.run_commands(
-            mailbox,
-            prepared.into_iter().map(|command| command.invocation),
-            stdin_available,
-        );
-        ExecOutcome::Ran
+        let target = parsed.options.iter().rev().find_map(|option| match option {
+            zz_protocol::TmuxOption::Value("-t", value) => Some(*value),
+            _ => None,
+        });
+        if name == "select-pane"
+            && matches!(target, Some(":.+" | ".+" | ":+" | ":.-" | ".-" | ":-"))
+        {
+            return false;
+        }
+        let Ok(pane) = inner
+            .engine
+            .resolve_pane(target, self.context.window, self.context.pane)
+        else {
+            return false;
+        };
+        if name == "send-keys" {
+            inner.attached.is_empty()
+        } else {
+            inner
+                .engine
+                .state
+                .window_for_pane(pane)
+                .and_then(|window| inner.engine.state.windows.get(&window))
+                .is_some_and(|window| window.active_pane == pane && window.zoomed_pane.is_none())
+        }
     }
 
-    fn run_commands(
-        &mut self,
-        mailbox: &Arc<OutboundMailbox>,
-        commands: impl IntoIterator<Item = CommandInvocation>,
-        stdin_available: bool,
-    ) {
-        let shared = Arc::clone(&self.shared);
-        for (index, mut invocation) in commands.into_iter().enumerate() {
-            let request_id = u64::try_from(index).unwrap_or(u64::MAX).saturating_add(1);
-            if self.cancel.load(Ordering::Acquire) {
-                break;
-            }
-            if shared.shutdown_pending.load(Ordering::Acquire) {
-                let _ = mailbox.enqueue_reliable(&server_stopping_response(request_id));
-                break;
-            }
-            invocation.set_stdin_available(stdin_available);
-            let item = shared.command_item(None);
-            item.command_item
-                .as_ref()
-                .expect("Exec command item")
-                .lock()
-                .exec_writer = Some(Arc::downgrade(mailbox));
-            let (response, client_exit) = item.execute_command_request_with_streams(
-                self.client,
-                ClientKind::Command,
-                &mut self.context,
-                request_id,
-                &invocation,
-                true,
-            );
-            let failed = matches!(response, CommandResponse::Error { .. });
-            let admitted = mailbox
-                .enqueue_reliable_with_wakeup(&ProtocolMessage::CommandResponse(response), false);
-            if failed || client_exit || !admitted {
-                break;
-            }
-            self.wait_for_output(mailbox);
-        }
+    fn output_pending(&self) -> bool {
+        let state = self.mailbox.state.lock();
+        state
+            .queued_bytes
+            .saturating_add(state.writer_inflight_bytes)
+            >= 64 * 1024
+            || state
+                .reliable
+                .len()
+                .saturating_add(state.writer_inflight_messages)
+                >= 64
     }
 
     fn wait_for_output(&self, mailbox: &OutboundMailbox) {

@@ -608,12 +608,36 @@ impl EventLoop {
             self.disconnect(token, shared);
             return;
         };
-        connection.client = Some(execution.client);
-        connection.kind = Some(ClientKind::Command);
-        connection.released = Some(execution.released());
+        if connection.client.is_none() {
+            connection.client = Some(execution.client);
+            connection.kind = Some(ClientKind::Command);
+            connection.released = Some(execution.released());
+        }
+        let mut prepared = execution.prepare(request);
+        if prepared.inline
+            && let Some(resumed) = execution.run(&mut prepared, true)
+        {
+            if last && !resumed {
+                if execution.can_finish_inline() {
+                    drop(execution);
+                    self.complete_exec(token, None, shared);
+                } else {
+                    connection.busy = true;
+                    self.execute_work(token, shared, move |_| {
+                        drop(execution);
+                        Ok(Completed::Exec(None))
+                    });
+                }
+            } else {
+                self.complete_exec(token, Some(execution), shared);
+            }
+            return;
+        }
         connection.busy = true;
         self.execute_work(token, shared, move |_| {
-            let resumed = execution.run(request);
+            let resumed = execution
+                .run(&mut prepared, false)
+                .expect("worker finishes Exec");
             if last && !resumed {
                 drop(execution);
                 Ok(Completed::Exec(None))
@@ -621,6 +645,29 @@ impl EventLoop {
                 Ok(Completed::Exec(Some(execution)))
             }
         });
+    }
+
+    fn complete_exec(
+        &mut self,
+        token: Token,
+        execution: Option<Box<exec::LoopExec>>,
+        shared: &Arc<Shared>,
+    ) {
+        let connection = self.connections.get_mut(&token).unwrap();
+        connection.busy = false;
+        if let Some(execution) = execution {
+            connection.exec = Some(execution);
+            if connection.cleanup_started || connection.read_closed {
+                self.disconnect(token, shared);
+            }
+        } else {
+            connection.cancel.store(true, Ordering::Release);
+            connection.read_closed = true;
+            connection.cleanup_started = true;
+            connection.pending.clear();
+            connection.pending_bytes = 0;
+            connection.outbound.close_after_flush();
+        }
     }
 
     fn enqueue_pending(
@@ -744,20 +791,7 @@ impl EventLoop {
                     }
                 }
                 Ok(Completed::Exec(execution)) => {
-                    connection.busy = false;
-                    if let Some(execution) = execution {
-                        connection.exec = Some(execution);
-                        if connection.cleanup_started || connection.read_closed {
-                            self.disconnect(completion.token, shared);
-                        }
-                    } else {
-                        connection.cancel.store(true, Ordering::Release);
-                        connection.read_closed = true;
-                        connection.cleanup_started = true;
-                        connection.pending.clear();
-                        connection.pending_bytes = 0;
-                        connection.outbound.close_after_flush();
-                    }
+                    self.complete_exec(completion.token, execution, shared);
                 }
                 result => {
                     if let Err(error) = result {
@@ -1209,3 +1243,7 @@ mod b2fix_tests;
 #[cfg(test)]
 #[path = "event_loop_b3_tests.rs"]
 mod b3_tests;
+
+#[cfg(test)]
+#[path = "event_loop_b3fix_tests.rs"]
+mod b3fix_tests;

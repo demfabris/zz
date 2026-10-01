@@ -3063,6 +3063,12 @@ tests, daemon exit / remain-on-exit / respawn / job control (Ctrl-Z, SIGWINCH, f
 
 ## W3-LOOP: single-owner mux loop (effort XL)
 
+**b3fix as built (2026-10-01, on b3 `53982eb8`).** Exec prepares each chain once. Proven queries, plain input without attached clients or hooks, and unchanged unzoomed pane selection run on the mux loop. Parking commands, relative pane selectors, and cleanup that can run hooks keep workers. Output pressure yields the remaining commands with response admission and reply IDs intact. Repeated chains retain registration data; LAST/ExecExit, Resume, and client-file replies keep their existing order.
+
+Three alternating quick `cli,control,mem` pairs against b2fix give 19/19 CLI instruction medians at 0.895-0.988x; display p1/p20 is 0.901/0.920x, control instructions 0.984x, and threads 7/45 versus 8/45. Serial daemon tests pass: 1360 unit and 35 integration, including 20 Exec and 34 event-loop tests; one existing test is ignored. Fmt, Clippy, and all eight selected compat scenarios pass. The quick W0 gate has 35 passes and one failure on control latency. Control latency and burst throughput also fail on b2fix, so those rows are left outside this fix.
+
+Linux `/proc`, zz-pty-gather, epoll, THP, and `tui-output-backpressure.sh` were not run on this Mac; the orchestrator owns those checks.
+
 ### b2 fixes as built (2026-10-01)
 
 - Initialization checks cancellation before work and between attach commands. Clean Interactive EOF

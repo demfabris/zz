@@ -601,7 +601,11 @@ impl Drop for Session {
     }
 }
 
-fn inline_query(shared: &Shared, context: &ExecutionContext, command: &PreparedCommand) -> bool {
+pub(super) fn inline_query(
+    shared: &Shared,
+    context: &ExecutionContext,
+    command: &PreparedCommand,
+) -> bool {
     command.result == PreparedCommandResult::Ready
         && command.canonical_name.as_deref() != Some("capture-pane")
         && ctrl::control_query_can_defer_wakeup(&shared.inner.lock(), context, command)

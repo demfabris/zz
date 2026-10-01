@@ -502,7 +502,7 @@ fn status_interval_work_respects_subscriptions_and_keeps_independent_timers() {
     drop(inner);
     assert!(matches!(
         shared.timer_rx.lock().as_ref().expect("timers").try_recv(),
-        Ok(timers::TimerCommand::Rename(queued)) if queued == deadline
+        Ok(timers::TimerInput::Timer(timers::TimerCommand::Rename(queued))) if queued == deadline
     ));
 }
 

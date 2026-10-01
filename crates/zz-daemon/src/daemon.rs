@@ -4164,16 +4164,6 @@ struct SharedServer {
     kitty_image_frames: Mutex<BTreeMap<KittyImageKey, Arc<[Vec<u8>]>>>,
     pasted_images: Mutex<BTreeMap<PaneId, PanePastedImages>>,
     status: Mutex<StatusRenderer>,
-    display_panes_deadline_tx: crossbeam_channel::Sender<DisplayPanesDeadlineCommand>,
-    display_panes_deadline_rx:
-        Mutex<Option<crossbeam_channel::Receiver<DisplayPanesDeadlineCommand>>>,
-    key_table_deadline_tx: crossbeam_channel::Sender<KeyTableDeadlineCommand>,
-    key_table_deadline_rx: Mutex<Option<crossbeam_channel::Receiver<KeyTableDeadlineCommand>>>,
-    silence_deadline_tx: crossbeam_channel::Sender<SilenceDeadlineCommand>,
-    silence_deadline_rx: Mutex<Option<crossbeam_channel::Receiver<SilenceDeadlineCommand>>>,
-    client_message_deadline_tx: crossbeam_channel::Sender<ClientMessageDeadlineCommand>,
-    client_message_deadline_rx:
-        Mutex<Option<crossbeam_channel::Receiver<ClientMessageDeadlineCommand>>>,
     stopping: AtomicBool,
     copy_refresh_running: AtomicBool,
     clock_refresh_running: AtomicBool,
@@ -4202,8 +4192,8 @@ struct SharedServer {
     #[cfg(unix)]
     tmux_shim: Mutex<Option<TmuxShimGuard>>,
     status_job_needs: crate::status::StatusJobNeeds,
-    timer_tx: crossbeam_channel::Sender<timers::TimerCommand>,
-    timer_rx: Mutex<Option<crossbeam_channel::Receiver<timers::TimerCommand>>>,
+    timer_tx: timers::TimerSender,
+    timer_rx: Mutex<Option<crossbeam_channel::Receiver<timers::TimerInput>>>,
     publish_flush: Mutex<timers::PublishFlush>,
     hook_worker: Mutex<timers::HookWorker>,
     status_sampler: Mutex<Option<thread::Thread>>,
@@ -5040,11 +5030,6 @@ impl Shared {
                 .mux_option_underlay
                 .set(option, value, MuxOptionSource::Default);
         }
-        let (display_panes_deadline_tx, display_panes_deadline_rx) = crossbeam_channel::unbounded();
-        let (key_table_deadline_tx, key_table_deadline_rx) = crossbeam_channel::unbounded();
-        let (silence_deadline_tx, silence_deadline_rx) = crossbeam_channel::unbounded();
-        let (client_message_deadline_tx, client_message_deadline_rx) =
-            crossbeam_channel::unbounded();
         let status = StatusRenderer::default();
         let status_job_needs = status.job_needs();
         let (timer_tx, timer_rx) = crossbeam_channel::unbounded();
@@ -5079,14 +5064,6 @@ impl Shared {
             kitty_image_frames: Mutex::new(BTreeMap::new()),
             pasted_images: Mutex::new(BTreeMap::new()),
             status: Mutex::new(status),
-            display_panes_deadline_tx,
-            display_panes_deadline_rx: Mutex::new(Some(display_panes_deadline_rx)),
-            key_table_deadline_tx,
-            key_table_deadline_rx: Mutex::new(Some(key_table_deadline_rx)),
-            silence_deadline_tx,
-            silence_deadline_rx: Mutex::new(Some(silence_deadline_rx)),
-            client_message_deadline_tx,
-            client_message_deadline_rx: Mutex::new(Some(client_message_deadline_rx)),
             stopping: AtomicBool::new(false),
             copy_refresh_running: AtomicBool::new(false),
             clock_refresh_running: AtomicBool::new(false),
@@ -5115,7 +5092,7 @@ impl Shared {
             #[cfg(unix)]
             tmux_shim: Mutex::new(None),
             status_job_needs,
-            timer_tx,
+            timer_tx: timers::TimerSender::new(timer_tx),
             timer_rx: Mutex::new(Some(timer_rx)),
             publish_flush: Mutex::new(timers::PublishFlush::default()),
             hook_worker: Mutex::new(timers::HookWorker::default()),
@@ -5192,6 +5169,7 @@ impl Shared {
         );
         hook_events::log_knobs();
         log::info!(target: "zz_daemon::perf", "format facts knob: ZZ_PERF_BORROWED_FACTS={}", u8::from(*BORROWED_FORMAT_FACTS));
+        #[cfg(any(windows, test))]
         self.start_timers()?;
         let mut context = ExecutionContext::default();
         *self.mux_config_selection.lock() =
@@ -10089,7 +10067,7 @@ impl Shared {
                                 selectable: *selectable,
                                 state: state.clone(),
                                 deadline,
-                                cancel: deadline.map(|_| self.display_panes_deadline_tx.clone()),
+                                cancel: deadline.map(|_| self.timer_tx.clone()),
                                 template: template.clone(),
                                 source: source.clone(),
                                 waiter: None,
@@ -10975,13 +10953,15 @@ impl Shared {
             self.resume_client_terminals(client);
         }
         if let Some(deadline) = client_message_schedule {
-            let _ = self
-                .client_message_deadline_tx
-                .send(ClientMessageDeadlineCommand::Schedule(deadline));
+            let _ = self.timer_tx.send(timers::TimerInput::ClientMessage(
+                ClientMessageDeadlineCommand::Schedule(deadline),
+            ));
         }
         if let Some(deadline) = display_panes_deadline {
-            self.display_panes_deadline_tx
-                .send(DisplayPanesDeadlineCommand::Schedule(deadline))
+            self.timer_tx
+                .send(timers::TimerInput::DisplayPanes(
+                    DisplayPanesDeadlineCommand::Schedule(deadline),
+                ))
                 .map_err(|_| {
                     DaemonError::Thread("display-panes deadline dispatcher stopped".to_owned())
                 })?;
@@ -10990,9 +10970,9 @@ impl Shared {
             self.reset_all_silence_timers();
         }
         for deadline in silence_schedules {
-            let _ = self
-                .silence_deadline_tx
-                .send(SilenceDeadlineCommand::Schedule(deadline));
+            let _ = self.timer_tx.send(timers::TimerInput::Silence(
+                SilenceDeadlineCommand::Schedule(deadline),
+            ));
         }
         for (window, pane) in activity_requeues {
             self.raise_window_activity(window, pane);
@@ -18996,12 +18976,12 @@ impl Shared {
         if let Some(message) = take_client_message(&mut inner, client)
             && message.deadline.is_some()
         {
-            let _ =
-                self.client_message_deadline_tx
-                    .try_send(ClientMessageDeadlineCommand::Cancel {
-                        client,
-                        token: message.token,
-                    });
+            let _ = self.timer_tx.send(timers::TimerInput::ClientMessage(
+                ClientMessageDeadlineCommand::Cancel {
+                    client,
+                    token: message.token,
+                },
+            ));
         }
         let command_output = take_command_output(&mut inner, client);
         let popup = take_popup(&mut inner, client);
@@ -24213,9 +24193,9 @@ impl Shared {
                 .is_some(),
         };
         if rescheduled {
-            let _ = self
-                .key_table_deadline_tx
-                .send(KeyTableDeadlineCommand::Schedule(client, deadline));
+            let _ = self.timer_tx.send(timers::TimerInput::KeyTable(
+                KeyTableDeadlineCommand::Schedule(client, deadline),
+            ));
         }
         let previous = if shown.0.is_some() {
             inner
@@ -26497,9 +26477,9 @@ impl Shared {
             self.request_peer_probe();
         }
         if let Some(deadline) = silence_schedule {
-            let _ = self
-                .silence_deadline_tx
-                .send(SilenceDeadlineCommand::Schedule(deadline));
+            let _ = self.timer_tx.send(timers::TimerInput::Silence(
+                SilenceDeadlineCommand::Schedule(deadline),
+            ));
         }
         if let Some(window) = alert_window {
             self.raise_window_activity(window, pane);
@@ -28420,9 +28400,9 @@ impl Shared {
                 self.retire_client_message(notification.client, retired, true);
             }
             if let Some(deadline) = notification.deadline {
-                let _ = self
-                    .client_message_deadline_tx
-                    .send(ClientMessageDeadlineCommand::Schedule(deadline));
+                let _ = self.timer_tx.send(timers::TimerInput::ClientMessage(
+                    ClientMessageDeadlineCommand::Schedule(deadline),
+                ));
             }
         }
     }
@@ -28546,12 +28526,12 @@ impl Shared {
         notify: bool,
     ) {
         if retired.deadline.is_some() {
-            let _ = self
-                .client_message_deadline_tx
-                .send(ClientMessageDeadlineCommand::Cancel {
+            let _ = self.timer_tx.send(timers::TimerInput::ClientMessage(
+                ClientMessageDeadlineCommand::Cancel {
                     client,
                     token: retired.token,
-                });
+                },
+            ));
         }
         if notify {
             self.publish_to_client(
@@ -28693,9 +28673,9 @@ impl Shared {
             }
         };
         if let Some(rearm) = rearm {
-            let _ = self
-                .silence_deadline_tx
-                .send(SilenceDeadlineCommand::Schedule(rearm));
+            let _ = self.timer_tx.send(timers::TimerInput::Silence(
+                SilenceDeadlineCommand::Schedule(rearm),
+            ));
         }
         if snapshot_changed {
             self.publish_snapshot();
@@ -28739,17 +28719,17 @@ impl Shared {
             (schedules, cancels)
         };
         for deadline in cancels {
-            let _ = self
-                .silence_deadline_tx
-                .send(SilenceDeadlineCommand::Cancel {
+            let _ = self.timer_tx.send(timers::TimerInput::Silence(
+                SilenceDeadlineCommand::Cancel {
                     window: deadline.window,
                     token: deadline.token,
-                });
+                },
+            ));
         }
         for deadline in schedules {
-            let _ = self
-                .silence_deadline_tx
-                .send(SilenceDeadlineCommand::Schedule(deadline));
+            let _ = self.timer_tx.send(timers::TimerInput::Silence(
+                SilenceDeadlineCommand::Schedule(deadline),
+            ));
         }
     }
 
@@ -33228,7 +33208,7 @@ struct DisplayPanesSession {
     selectable: bool,
     state: DisplayPanesState,
     deadline: Option<Instant>,
-    cancel: Option<crossbeam_channel::Sender<DisplayPanesDeadlineCommand>>,
+    cancel: Option<timers::TimerSender>,
     /// `cdata->state`: the optional template, kept whole so a selection can run
     /// `args_make_commands` against the chosen pane the way
     /// `cmd_display_panes_key` does.
@@ -33242,10 +33222,12 @@ struct DisplayPanesSession {
 impl DisplayPanesSession {
     fn cancel_deadline(&self, client: ClientId) {
         if let Some(cancel) = &self.cancel {
-            let _ = cancel.try_send(DisplayPanesDeadlineCommand::Cancel {
-                client,
-                token: self.token,
-            });
+            let _ = cancel.send(timers::TimerInput::DisplayPanes(
+                DisplayPanesDeadlineCommand::Cancel {
+                    client,
+                    token: self.token,
+                },
+            ));
         }
     }
 }

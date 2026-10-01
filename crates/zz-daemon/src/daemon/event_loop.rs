@@ -21,6 +21,7 @@ pub(super) struct EventLoop {
     startup_finished: mpsc::Receiver<()>,
     startup_sender: mpsc::Sender<()>,
     waker: Arc<Waker>,
+    timers: timers::LoopTimers,
     connections: BTreeMap<Token, Connection>,
     completed: mpsc::Receiver<Completion>,
     completion_sender: mpsc::Sender<Completion>,
@@ -136,6 +137,7 @@ impl EventLoop {
         shared.accept_wake.install(Arc::clone(&waker));
         let (startup_sender, startup_finished) = mpsc::channel();
         let (completion_sender, completed) = mpsc::channel();
+        let timers = timers::LoopTimers::new(shared, &waker);
         shared.loop_active.store(true, Ordering::Release);
         Ok(Self {
             poll,
@@ -143,6 +145,7 @@ impl EventLoop {
             startup_finished,
             startup_sender,
             waker,
+            timers,
             connections: BTreeMap::new(),
             completed,
             completion_sender,
@@ -304,11 +307,21 @@ impl EventLoop {
         Ok(())
     }
 
+    fn poll_timeout(&self, now: Instant) -> Option<Duration> {
+        let timer = self
+            .timers
+            .next(now)
+            .map(|deadline| deadline.saturating_duration_since(now));
+        let control = self.control_output_poll.then_some(COPY_PIPE_POLL_INTERVAL);
+        match (timer, control) {
+            (Some(timer), Some(control)) => Some(timer.min(control)),
+            (timer, control) => timer.or(control),
+        }
+    }
+
     fn poll_ready(&mut self) -> Result<(), DaemonError> {
-        match self.poll.poll(
-            &mut self.events,
-            self.control_output_poll.then_some(COPY_PIPE_POLL_INTERVAL),
-        ) {
+        let timeout = self.poll_timeout(Instant::now());
+        match self.poll.poll(&mut self.events, timeout) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == ErrorKind::Interrupted => Ok(()),
             Err(error) => Err(error.into()),
@@ -761,6 +774,7 @@ impl EventLoop {
     }
 
     fn turn(&mut self, shared: &Arc<Shared>) -> Result<(), DaemonError> {
+        self.timers.turn(shared, &self.waker)?;
         self.control_output_poll = shared.start_ready_control_output_readers();
         while let Ok(completion) = self.completed.try_recv() {
             let Some(connection) = self.connections.get_mut(&completion.token) else {
@@ -1228,6 +1242,35 @@ pub(super) fn write_fixture(
 }
 
 #[cfg(test)]
+pub(super) fn start_timer_fixture(shared: &Arc<Shared>) -> Result<(), DaemonError> {
+    let mut event_loop = EventLoop::empty(shared)?;
+    let shared = Arc::downgrade(shared);
+    thread::Builder::new()
+        .name("zz-mux-test".to_owned())
+        .spawn(move || {
+            loop {
+                let Some(shared) = shared.upgrade() else {
+                    return;
+                };
+                if shared.stopping.load(Ordering::Acquire) {
+                    return;
+                }
+                if let Err(error) = event_loop.turn(&shared) {
+                    log::error!("timer fixture turn failed: {error}");
+                    return;
+                }
+                drop(shared);
+                if let Err(error) = event_loop.poll_ready() {
+                    log::error!("timer fixture poll failed: {error}");
+                    return;
+                }
+            }
+        })
+        .map(drop)
+        .map_err(|error| DaemonError::Thread(error.to_string()))
+}
+
+#[cfg(test)]
 #[path = "event_loop_io_tests.rs"]
 mod io_tests;
 
@@ -1246,3 +1289,7 @@ mod b3fix_tests;
 #[cfg(test)]
 #[path = "event_loop_shutdown_tests.rs"]
 mod shutdown_tests;
+
+#[cfg(test)]
+#[path = "event_loop_b4_tests.rs"]
+mod b4_tests;

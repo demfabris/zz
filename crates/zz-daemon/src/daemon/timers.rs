@@ -105,12 +105,136 @@ enum Expiry {
     PublishFlush,
 }
 
-enum TimerInput {
+pub(super) enum TimerInput {
     DisplayPanes(DisplayPanesDeadlineCommand),
     KeyTable(KeyTableDeadlineCommand),
     Silence(SilenceDeadlineCommand),
     ClientMessage(ClientMessageDeadlineCommand),
     Timer(TimerCommand),
+}
+
+#[derive(Clone)]
+pub(super) struct TimerSender {
+    sender: crossbeam_channel::Sender<TimerInput>,
+    wake: Arc<AcceptWake>,
+}
+
+impl std::fmt::Debug for TimerSender {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TimerSender")
+            .field("sender", &self.sender)
+            .finish_non_exhaustive()
+    }
+}
+
+impl TimerSender {
+    pub(super) fn new(sender: crossbeam_channel::Sender<TimerInput>) -> Self {
+        Self {
+            sender,
+            wake: Arc::new(AcceptWake::new()),
+        }
+    }
+
+    pub(super) fn send(
+        &self,
+        input: TimerInput,
+    ) -> Result<(), crossbeam_channel::SendError<TimerInput>> {
+        self.sender.send(input)?;
+        self.wake.wake();
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+pub(super) const TIMER_INPUT_BURST: usize = 64;
+#[cfg(unix)]
+pub(super) const TIMER_EXPIRY_BURST: usize = 32;
+
+#[cfg(unix)]
+pub(super) struct LoopTimers {
+    inputs: Option<crossbeam_channel::Receiver<TimerInput>>,
+    deadlines: Deadlines,
+    pending: VecDeque<(Expiry, Instant)>,
+    worker_running: bool,
+    completed: crossbeam_channel::Receiver<()>,
+    completion_sender: crossbeam_channel::Sender<()>,
+}
+
+#[cfg(unix)]
+impl LoopTimers {
+    pub(super) fn new(shared: &Shared, waker: &Arc<mio::Waker>) -> Self {
+        let inputs = shared.timer_rx.lock().take();
+        if inputs.is_some() {
+            shared.timer_tx.wake.install(Arc::clone(waker));
+        }
+        let (completion_sender, completed) = crossbeam_channel::unbounded();
+        Self {
+            inputs,
+            deadlines: Deadlines::default(),
+            pending: VecDeque::new(),
+            worker_running: false,
+            completed,
+            completion_sender,
+        }
+    }
+
+    pub(super) fn next(&self, now: Instant) -> Option<Instant> {
+        if self
+            .inputs
+            .as_ref()
+            .is_some_and(|inputs| !inputs.is_empty())
+            || (!self.worker_running && !self.pending.is_empty())
+        {
+            return Some(now);
+        }
+        self.deadlines.next()
+    }
+
+    pub(super) fn turn(
+        &mut self,
+        shared: &Arc<Shared>,
+        waker: &Arc<mio::Waker>,
+    ) -> Result<(), DaemonError> {
+        if self.completed.try_recv().is_ok() {
+            self.worker_running = false;
+        }
+        if let Some(inputs) = &self.inputs {
+            for input in inputs.try_iter().take(TIMER_INPUT_BURST) {
+                shared.schedule_timer(&mut self.deadlines, &input);
+            }
+        }
+        let now = Instant::now();
+        for _ in 0..TIMER_EXPIRY_BURST {
+            let Some(expiry) = self.deadlines.pop_due(now) else {
+                break;
+            };
+            match expiry {
+                Expiry::DisplayPanes(_) | Expiry::KeyTable(_) => {
+                    shared.run_timer_expiry(expiry, now);
+                }
+                _ => self.pending.push_back((expiry, now)),
+            }
+        }
+        if !self.worker_running && !self.pending.is_empty() {
+            let expiries = self
+                .pending
+                .drain(..self.pending.len().min(TIMER_EXPIRY_BURST))
+                .collect::<Vec<_>>();
+            let shared = shared.server_owner();
+            let threads = Arc::clone(&shared.connection_threads);
+            let completed = self.completion_sender.clone();
+            let waker = Arc::clone(waker);
+            threads.run(Box::new(move || {
+                for (expiry, now) in expiries {
+                    shared.run_timer_expiry(expiry, now);
+                }
+                let _ = completed.send(());
+                let _ = waker.wake();
+            }))?;
+            self.worker_running = true;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Default)]
@@ -162,38 +286,23 @@ impl Deadlines {
 }
 
 impl Shared {
+    #[cfg(all(test, unix))]
     pub(super) fn start_timers(self: &Arc<Self>) -> Result<(), DaemonError> {
-        let receivers = (
-            self.display_panes_deadline_rx.lock().take(),
-            self.key_table_deadline_rx.lock().take(),
-            self.silence_deadline_rx.lock().take(),
-            self.client_message_deadline_rx.lock().take(),
-            self.timer_rx.lock().take(),
-        );
-        let (
-            Some(display_panes),
-            Some(key_table),
-            Some(silence),
-            Some(client_message),
-            Some(timers),
-        ) = receivers
-        else {
+        if self.timer_rx.lock().is_none() {
+            return Ok(());
+        }
+        super::event_loop::start_timer_fixture(&self.server_owner())
+    }
+
+    #[cfg(windows)]
+    pub(super) fn start_timers(self: &Arc<Self>) -> Result<(), DaemonError> {
+        let Some(inputs) = self.timer_rx.lock().take() else {
             return Ok(());
         };
         let shared = Arc::downgrade(&self.server_owner());
-        let (ready_tx, ready_rx) = crossbeam_channel::bounded(1);
         thread::Builder::new()
-            .name("zz-daemon-timers".to_owned())
+            .name("zz-deadlines".to_owned())
             .spawn(move || {
-                if ready_tx.send(()).is_err() {
-                    return;
-                }
-                let mut select = crossbeam_channel::Select::new();
-                let display_panes_index = select.recv(&display_panes);
-                let key_table_index = select.recv(&key_table);
-                let silence_index = select.recv(&silence);
-                let client_message_index = select.recv(&client_message);
-                let timers_index = select.recv(&timers);
                 let mut deadlines = Deadlines::default();
                 loop {
                     let now = Instant::now();
@@ -201,38 +310,18 @@ impl Shared {
                         let Some(shared) = shared.upgrade() else {
                             return;
                         };
-                        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            shared.expire_timer(expiry, now);
-                        }))
-                        .is_err()
-                        {
-                            log::error!(target: "zz_daemon::timers", "a timer expiry panicked");
-                        }
+                        shared.run_timer_expiry(expiry, now);
                     }
-                    let operation = match deadlines.next() {
-                        Some(deadline) => match select.select_deadline(deadline) {
-                            Ok(operation) => operation,
-                            Err(_) => continue,
+                    let input = match deadlines.next() {
+                        Some(deadline) => match inputs.recv_deadline(deadline) {
+                            Ok(input) => input,
+                            Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
+                            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
                         },
-                        None => select.select(),
-                    };
-                    let index = operation.index();
-                    let input = if index == display_panes_index {
-                        operation.recv(&display_panes).map(TimerInput::DisplayPanes)
-                    } else if index == key_table_index {
-                        operation.recv(&key_table).map(TimerInput::KeyTable)
-                    } else if index == silence_index {
-                        operation.recv(&silence).map(TimerInput::Silence)
-                    } else if index == client_message_index {
-                        operation
-                            .recv(&client_message)
-                            .map(TimerInput::ClientMessage)
-                    } else {
-                        debug_assert_eq!(index, timers_index);
-                        operation.recv(&timers).map(TimerInput::Timer)
-                    };
-                    let Ok(input) = input else {
-                        return;
+                        None => match inputs.recv() {
+                            Ok(input) => input,
+                            Err(_) => return,
+                        },
                     };
                     let Some(shared) = shared.upgrade() else {
                         return;
@@ -240,9 +329,7 @@ impl Shared {
                     shared.schedule_timer(&mut deadlines, &input);
                 }
             })
-            .map_err(|error| DaemonError::Thread(error.to_string()))?;
-        ready_rx
-            .recv()
+            .map(drop)
             .map_err(|error| DaemonError::Thread(error.to_string()))
     }
 
@@ -272,15 +359,19 @@ impl Shared {
                     deadlines.remove(key);
                 }
             }
-            TimerInput::KeyTable(KeyTableDeadlineCommand::Schedule(client, Some(deadline))) => {
-                deadlines.insert(
-                    TimerKey::KeyTable(client),
-                    deadline,
-                    Expiry::KeyTable(client),
-                );
-            }
-            TimerInput::KeyTable(KeyTableDeadlineCommand::Schedule(client, None)) => {
-                deadlines.remove(TimerKey::KeyTable(client));
+            TimerInput::KeyTable(KeyTableDeadlineCommand::Schedule(client, deadline)) => {
+                if self.read_client(client, |c| c.and_then(|c| c.key_table_deadline)) != deadline {
+                    return;
+                }
+                if let Some(deadline) = deadline {
+                    deadlines.insert(
+                        TimerKey::KeyTable(client),
+                        deadline,
+                        Expiry::KeyTable(client),
+                    );
+                } else {
+                    deadlines.remove(TimerKey::KeyTable(client));
+                }
             }
             TimerInput::Silence(SilenceDeadlineCommand::Schedule(deadline)) => {
                 if self
@@ -338,6 +429,16 @@ impl Shared {
         }
     }
 
+    fn run_timer_expiry(self: &Arc<Self>, expiry: Expiry, now: Instant) {
+        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.expire_timer(expiry, now);
+        }))
+        .is_err()
+        {
+            log::error!(target: "zz_daemon::timers", "a timer expiry panicked");
+        }
+    }
+
     fn expire_timer(self: &Arc<Self>, expiry: Expiry, now: Instant) {
         match expiry {
             Expiry::DisplayPanes(deadline) => {
@@ -369,7 +470,9 @@ impl Shared {
                     flush.scheduled = true;
                     let _ = self
                         .timer_tx
-                        .send(TimerCommand::PublishFlush(last + PUBLISH_FLUSH_INTERVAL));
+                        .send(TimerInput::Timer(TimerCommand::PublishFlush(
+                            last + PUBLISH_FLUSH_INTERVAL,
+                        )));
                     None
                 }
                 _ => {
@@ -434,7 +537,9 @@ impl Shared {
             return;
         }
         inner.scheduled_window_rename = Some(deadline);
-        let _ = self.timer_tx.send(TimerCommand::Rename(deadline));
+        let _ = self
+            .timer_tx
+            .send(TimerInput::Timer(TimerCommand::Rename(deadline)));
     }
 
     pub(super) fn apply_due_window_renames(self: &Arc<Self>, now: Instant) {
@@ -657,8 +762,13 @@ impl Shared {
 
 impl Drop for SharedServer {
     fn drop(&mut self) {
+        self.timer_tx.wake.wake();
         if let Some(sampler) = self.status_sampler.get_mut().take() {
             sampler.unpark();
         }
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "timer_loop_tests.rs"]
+mod loop_tests;

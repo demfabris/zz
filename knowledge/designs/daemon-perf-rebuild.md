@@ -3061,6 +3061,11 @@ while 4 floods run <= 1.5x tmux; `throughput.attached.ascii_ms` <= 1.18x W0. Tes
 tests, daemon exit / remain-on-exit / respawn / job control (Ctrl-Z, SIGWINCH, foreground pgid),
 `compat/run.sh`, compat/tui fixtures, `bench/run.sh` on macOS and Linux.
 
+As built (slice s1, 2026-10-01): `crates/zz-terminal/src/session/pane_actor.rs` holds the pane state and event handlers; `run_terminal` waits and dispatches on the pane thread.
+The handlers retain the read and parse turn caps, frame sampling, echo fast path, bridge spin, child exit and retained-pane handoff.
+Linux checks: 332 terminal tests passed; terminal clippy and six compatibility scenarios passed. The known daemon endpoint test stayed red; three daemon load failures passed alone, and 35 integration tests passed.
+The orchestrator owns the perf A/B and Mac checks.
+
 ## W3-LOOP: single-owner mux loop (effort XL)
 
 Commits that each keep tests green:

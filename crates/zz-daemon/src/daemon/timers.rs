@@ -421,7 +421,10 @@ impl Shared {
                 .clients
                 .values()
                 .all(|client| client.choose_tree.is_none());
-            let presentation = (!inner.subscribers.is_empty()
+            let presentation = (!inner
+                .clients
+                .values()
+                .all(|client| client.subscriber.is_none())
                 || inner.engine.has_window_style_settings()
                 || *EAGER_PUBLISH)
                 && inner.engine.runtime_facts_reach_presentation();
@@ -557,8 +560,9 @@ impl Shared {
 
     pub(super) fn status_tick_needed(inner: &ServerState) -> bool {
         inner
-            .control_outputs
+            .clients
             .values()
+            .filter_map(|client| client.control_output.as_ref())
             .any(|output| !output.subscriptions.is_empty())
             || inner.engine.has_format_monitors()
             || Self::peer_scan_armed(inner)
@@ -568,12 +572,14 @@ impl Shared {
         inner: &ServerState,
     ) -> impl Iterator<Item = SessionId> + '_ {
         inner
-            .subscribers
-            .keys()
+            .clients
+            .iter()
+            .filter_map(|(id, client)| client.subscriber.as_ref().map(|_| id))
             .filter(|client| {
                 inner
-                    .ctrl_subscriptions
+                    .clients
                     .get(*client)
+                    .and_then(|client| client.ctrl_subscriptions.as_ref())
                     .is_none_or(|subscription| subscription.status)
             })
             .filter_map(|client| client_attached_session(inner, *client))

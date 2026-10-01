@@ -285,7 +285,7 @@ impl Shared {
         let activity = inner.activity_sequence;
         inner.clients.insert(
             client,
-            Client {
+            Box::new(Client {
                 instance_id: Some(request.client_instance_id),
                 kind: Some(ClientKind::Command),
                 activity: Some(activity),
@@ -306,7 +306,7 @@ impl Shared {
                 ),
                 environment: Some(Arc::new(environment)),
                 ..Client::default()
-            },
+            }),
         );
         let context = request
             .origin

@@ -187,7 +187,13 @@ pub(super) fn write_frames(stream: &mut impl Write, frames: &[impl AsRef<[u8]>])
 
 impl Shared {
     pub(super) fn hold_attach_terminals(&self, client: ClientId) -> AttachHold {
-        let subscriber = self.inner.lock().subscribers.get(&client).cloned();
+        let subscriber = self
+            .inner
+            .lock()
+            .clients
+            .get(&client)
+            .and_then(|client| client.subscriber.as_ref())
+            .cloned();
         if let Some(subscriber) = &subscriber {
             subscriber.hold_terminals();
         }

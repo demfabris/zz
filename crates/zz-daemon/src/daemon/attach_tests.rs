@@ -223,7 +223,13 @@ fn a_fresh_attach_still_sends_the_overlays_that_exist() {
     shared
         .open_command_output(client, Some(pane), "list".to_owned(), "one\ntwo\n")
         .expect("open command output");
-    let output = Arc::clone(&shared.inner.lock().command_outputs[&client].terminal);
+    let output = Arc::clone(
+        &shared.inner.lock().clients[&client]
+            .command_output
+            .as_ref()
+            .unwrap()
+            .terminal,
+    );
     let deadline = Instant::now() + Duration::from_secs(30);
     while output
         .latest_viewport_for(TerminalViewId(client.0))

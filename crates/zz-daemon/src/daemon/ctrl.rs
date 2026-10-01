@@ -38,7 +38,11 @@ pub(super) fn options_event(
     client: ClientId,
     options: MuxOptions,
 ) -> Option<EventPayload> {
-    let Some(subscription) = inner.ctrl_subscriptions.get(&client) else {
+    let Some(subscription) = inner
+        .clients
+        .get(&client)
+        .and_then(|client| client.ctrl_subscriptions.as_ref())
+    else {
         return Some(EventPayload::MuxOptionsChanged { options });
     };
     (subscription.options != 0).then(|| EventPayload::MuxOptionsPatched {
@@ -52,7 +56,12 @@ pub(super) fn options_event(
 }
 
 fn scope(inner: &ServerState, client: ClientId) -> Option<(u8, Option<SessionId>)> {
-    match inner.ctrl_subscriptions.get(&client)?.tree {
+    match inner
+        .clients
+        .get(&client)
+        .and_then(|client| client.ctrl_subscriptions.as_ref())?
+        .tree
+    {
         TreeSubscription::None => None,
         TreeSubscription::Attached => Some((1, client_attached_session(inner, client))),
         TreeSubscription::All => Some((2, None)),
@@ -77,7 +86,12 @@ fn layout_generation(inner: &mut ServerState, client: ClientId) -> u64 {
         window.zoomed_pane.hash(&mut hash);
     }
     let digest = hash.finish();
-    let state = inner.ctrl_layouts.entry(client).or_insert((digest, 1));
+    let state = inner
+        .clients
+        .entry(client)
+        .or_default()
+        .ctrl_layout
+        .get_or_insert((digest, 1));
     if state.0 != digest {
         *state = (digest, state.1.saturating_add(1));
     }
@@ -99,7 +113,10 @@ pub(super) fn normalize_resize(
         _ => None,
     };
     if let Some(reported) = reported
-        && inner.ctrl_subscriptions.contains_key(&client)
+        && inner
+            .clients
+            .get(&client)
+            .is_some_and(|client| client.ctrl_subscriptions.is_some())
         && reported != layout_generation(inner, client)
     {
         return None;
@@ -114,7 +131,10 @@ pub(super) fn normalize_resize(
             ..
         } => {
             if *attach::ATTACH_PRESIZE
-                && inner.ctrl_subscriptions.contains_key(&client)
+                && inner
+                    .clients
+                    .get(&client)
+                    .is_some_and(|client| client.ctrl_subscriptions.is_some())
                 && inner
                     .terminal_geometries
                     .get(&pane)
@@ -304,7 +324,12 @@ fn client_view(
         read_only: flags.read_only,
         client_flags: flags.reconnect_flags(),
         layout_generation,
-        attachment_generation: inner.ctrl_attachments.get(&client).copied().unwrap_or(0),
+        attachment_generation: inner
+            .clients
+            .get(&client)
+            .and_then(|client| client.ctrl_attachment.as_ref())
+            .copied()
+            .unwrap_or(0),
         overlay,
     }
 }
@@ -538,12 +563,17 @@ impl Shared {
         )?;
         let mut inner = self.inner.lock();
         if hello.subscriptions.keys == KeySubscription::Full
-            && !inner.subscribers.keys().any(|client| {
-                inner
-                    .ctrl_subscriptions
-                    .get(client)
-                    .is_none_or(|subscription| subscription.keys == KeySubscription::Full)
-            })
+            && !inner
+                .clients
+                .iter()
+                .filter_map(|(id, client)| client.subscriber.as_ref().map(|_| id))
+                .any(|client| {
+                    inner
+                        .clients
+                        .get(client)
+                        .and_then(|client| client.ctrl_subscriptions.as_ref())
+                        .is_none_or(|subscription| subscription.keys == KeySubscription::Full)
+                })
         {
             inner.key_table_generations = inner
                 .engine
@@ -551,17 +581,28 @@ impl Shared {
                 .table_generations()
                 .map(|(name, generation)| (name.to_owned(), generation))
                 .collect();
-            if !inner.subscribers.keys().any(|client| {
-                inner
-                    .ctrl_subscriptions
-                    .get(client)
-                    .is_some_and(|subscription| subscription.keys == KeySubscription::Hash)
-            }) {
+            if !inner
+                .clients
+                .iter()
+                .filter_map(|(id, client)| client.subscriber.as_ref().map(|_| id))
+                .any(|client| {
+                    inner
+                        .clients
+                        .get(client)
+                        .and_then(|client| client.ctrl_subscriptions.as_ref())
+                        .is_some_and(|subscription| subscription.keys == KeySubscription::Hash)
+                })
+            {
                 inner.key_tables_generation = inner.engine.keys.generation();
             }
         }
-        inner.ctrl_subscriptions.insert(client, hello.subscriptions);
-        inner.ctrl_initializing.insert(client);
+        inner
+            .clients
+            .entry(client)
+            .or_default()
+            .ctrl_subscriptions
+            .replace(hello.subscriptions);
+        inner.clients.entry(client).or_default().ctrl_initializing = true;
         Some((
             client,
             Welcome {
@@ -591,7 +632,11 @@ impl Shared {
             if delta.ops.is_empty() {
                 raw.generation = before.generation;
             }
-            let known = inner.ctrl_tree_versions.get(&client).copied();
+            let known = inner
+                .clients
+                .get(&client)
+                .and_then(|client| client.ctrl_tree_version.as_ref())
+                .copied();
             if force || known != Some(raw.generation) {
                 let tree = if *TREE_DELTA {
                     if force || known != Some(before.generation) {
@@ -603,7 +648,12 @@ impl Shared {
                     EventPayload::Snapshot(raw.clone())
                 };
                 messages.push(Self::event(tree));
-                inner.ctrl_tree_versions.insert(client, raw.generation);
+                inner
+                    .clients
+                    .entry(client)
+                    .or_default()
+                    .ctrl_tree_version
+                    .replace(raw.generation);
             }
             inner.ctrl_trees.insert(scope, raw.clone());
             raw
@@ -615,8 +665,19 @@ impl Shared {
             }
         };
         let view = client_view(&mut inner, client, &raw, &facts);
-        if force || inner.ctrl_views.get(&client) != Some(&view) {
-            inner.ctrl_views.insert(client, view.clone());
+        if force
+            || inner
+                .clients
+                .get(&client)
+                .and_then(|client| client.ctrl_view.as_ref())
+                != Some(&view)
+        {
+            inner
+                .clients
+                .entry(client)
+                .or_default()
+                .ctrl_view
+                .replace(view.clone());
             messages.push(Self::event(EventPayload::ClientView(view)));
         }
         messages
@@ -649,18 +710,29 @@ impl Shared {
         }
         let sends = {
             let mut inner = self.inner.lock();
-            if inner.ctrl_subscriptions.is_empty() {
+            if inner
+                .clients
+                .values()
+                .all(|client| client.ctrl_subscriptions.is_none())
+            {
                 return;
             }
             let snapshot = inner.engine.state.snapshot();
             let facts = format_hook_facts(&inner);
             let clients = inner
-                .ctrl_subscriptions
-                .keys()
+                .clients
+                .iter()
+                .filter_map(|(id, client)| client.ctrl_subscriptions.as_ref().map(|_| id))
                 .copied()
                 .filter(|client| {
-                    inner.subscribers.contains_key(client)
-                        && !inner.ctrl_initializing.contains(client)
+                    inner
+                        .clients
+                        .get(client)
+                        .is_some_and(|client| client.subscriber.is_some())
+                        && !inner
+                            .clients
+                            .get(client)
+                            .is_some_and(|client| client.ctrl_initializing)
                 })
                 .collect::<Vec<_>>();
             let mut groups = BTreeMap::<(u8, Option<SessionId>), Vec<ClientId>>::new();
@@ -693,8 +765,12 @@ impl Shared {
                     .map(Arc::<[u8]>::from);
                 let mut shared_full = None;
                 for client in clients {
-                    let outbound = Arc::clone(&inner.subscribers[&client]);
-                    let known = inner.ctrl_tree_versions.get(&client).copied();
+                    let outbound = Arc::clone(inner.clients[&client].subscriber.as_ref().unwrap());
+                    let known = inner
+                        .clients
+                        .get(&client)
+                        .and_then(|client| client.ctrl_tree_version.as_ref())
+                        .copied();
                     if known != Some(raw.generation) {
                         let encoded = if known == Some(before.generation) {
                             shared_delta.clone()
@@ -715,11 +791,26 @@ impl Shared {
                                 .1
                                 .push(encoded.into());
                         }
-                        inner.ctrl_tree_versions.insert(client, raw.generation);
+                        inner
+                            .clients
+                            .entry(client)
+                            .or_default()
+                            .ctrl_tree_version
+                            .replace(raw.generation);
                     }
                     let view = client_view(&mut inner, client, &raw, &facts);
-                    if inner.ctrl_views.get(&client) != Some(&view) {
-                        inner.ctrl_views.insert(client, view.clone());
+                    if inner
+                        .clients
+                        .get(&client)
+                        .and_then(|client| client.ctrl_view.as_ref())
+                        != Some(&view)
+                    {
+                        inner
+                            .clients
+                            .entry(client)
+                            .or_default()
+                            .ctrl_view
+                            .replace(view.clone());
                         if let Ok(encoded) = zz_protocol::encode_protocol_message(&Self::event(
                             EventPayload::ClientView(view),
                         )) {
@@ -735,15 +826,28 @@ impl Shared {
             }
             for client in view_only {
                 let view = client_view(&mut inner, client, &MuxSnapshot::default(), &facts);
-                if inner.ctrl_views.get(&client) != Some(&view) {
-                    inner.ctrl_views.insert(client, view.clone());
+                if inner
+                    .clients
+                    .get(&client)
+                    .and_then(|client| client.ctrl_view.as_ref())
+                    != Some(&view)
+                {
+                    inner
+                        .clients
+                        .entry(client)
+                        .or_default()
+                        .ctrl_view
+                        .replace(view.clone());
                     if let Ok(encoded) = zz_protocol::encode_protocol_message(&Self::event(
                         EventPayload::ClientView(view),
                     )) {
                         sends
                             .entry(client)
                             .or_insert_with(|| {
-                                (Arc::clone(&inner.subscribers[&client]), Vec::new())
+                                (
+                                    Arc::clone(inner.clients[&client].subscriber.as_ref().unwrap()),
+                                    Vec::new(),
+                                )
                             })
                             .1
                             .push(encoded.into());
@@ -762,10 +866,13 @@ impl Shared {
             let inner = self.inner.lock();
             let mut full = Vec::new();
             let mut hash = Vec::new();
-            for (client, outbound) in &inner.subscribers {
+            for (client, outbound) in inner.clients.iter().filter_map(|(id, client)| {
+                client.subscriber.as_ref().map(|outbound| (id, outbound))
+            }) {
                 match inner
-                    .ctrl_subscriptions
+                    .clients
                     .get(client)
+                    .and_then(|client| client.ctrl_subscriptions.as_ref())
                     .map_or(KeySubscription::Full, |subscription| subscription.keys)
                 {
                     KeySubscription::Full => full.push(Arc::clone(outbound)),
@@ -802,8 +909,9 @@ impl Shared {
         let payload = {
             let inner = self.inner.lock();
             let subscription = inner
-                .ctrl_subscriptions
+                .clients
                 .get(&client)
+                .and_then(|client| client.ctrl_subscriptions.as_ref())
                 .map_or(KeySubscription::Full, |subscription| subscription.keys);
             if subscription == KeySubscription::None {
                 return;
@@ -832,8 +940,9 @@ impl Shared {
         let (appearance, provenance, options, stream, terminals, overlays) = {
             let inner = self.inner.lock();
             let subscriptions = inner
-                .ctrl_subscriptions
+                .clients
                 .get(&client)
+                .and_then(|client| client.ctrl_subscriptions.as_ref())
                 .copied()
                 .unwrap_or_default();
             let mut terminals = inner
@@ -907,7 +1016,12 @@ impl Shared {
                         .map(|confirm| confirm.state.clone()),
                 }),
             ];
-            if !full || inner.ctrl_initializing.contains(&client) {
+            if !full
+                || inner
+                    .clients
+                    .get(&client)
+                    .is_some_and(|client| client.ctrl_initializing)
+            {
                 overlays.retain(|message| match message {
                     ProtocolMessage::Event(Event { payload, .. }) => match payload {
                         EventPayload::CommandPrompt { state } => state.is_some(),
@@ -965,7 +1079,12 @@ impl Shared {
         if let Some(options) = options {
             let mut inner = self.inner.lock();
             let effective = effective_mux_options(&inner, client);
-            inner.published_mux_options.insert(client, effective);
+            inner
+                .clients
+                .entry(client)
+                .or_default()
+                .published_mux_options
+                .replace(effective);
             drop(inner);
             Self::send_event(outbound, EventPayload::MuxOptionsPatched { options });
         }
@@ -987,7 +1106,11 @@ impl Shared {
         self.send_agent_resync(client, outbound);
         if stream {
             let inner = self.inner.lock();
-            if let Some(output) = inner.command_outputs.get(&client) {
+            if let Some(output) = inner
+                .clients
+                .get(&client)
+                .and_then(|client| client.command_output.as_ref())
+            {
                 if let Some(viewport) = output
                     .terminal
                     .latest_viewport_for(TerminalViewId(client.0))
@@ -1000,7 +1123,12 @@ impl Shared {
                         },
                     ));
                 }
-            } else if full && !inner.ctrl_initializing.contains(&client) {
+            } else if full
+                && !inner
+                    .clients
+                    .get(&client)
+                    .is_some_and(|client| client.ctrl_initializing)
+            {
                 Self::send_event(
                     outbound,
                     EventPayload::CommandOutput {
@@ -1022,9 +1150,17 @@ impl Shared {
     ) -> bool {
         let initializing = {
             let mut inner = self.inner.lock();
-            let generation = inner.ctrl_attachments.entry(client).or_default();
+            let generation = inner
+                .clients
+                .entry(client)
+                .or_default()
+                .ctrl_attachment
+                .get_or_insert_default();
             *generation = generation.saturating_add(1);
-            inner.ctrl_initializing.contains(&client)
+            inner
+                .clients
+                .get(&client)
+                .is_some_and(|client| client.ctrl_initializing)
         };
         outbound.hold_terminals();
         outbound.collect_control_attach();
@@ -1296,7 +1432,9 @@ impl Shared {
         for response in pending_errors {
             let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(response));
         }
-        self.inner.lock().ctrl_initializing.remove(&client);
+        if let Some(client) = self.inner.lock().clients.get_mut(&client) {
+            client.ctrl_initializing = false;
+        }
         outbound.flush_control_batch(true);
     }
 }

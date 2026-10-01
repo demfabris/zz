@@ -245,7 +245,11 @@ fn a_runtime_fact_label_change_is_sent_under_a_new_generation() {
         ],
     );
     events(&mailbox);
-    let sent_generation = shared.inner.lock().published_snapshots[&client].1;
+    let sent_generation = shared.inner.lock().clients[&client]
+        .published_snapshot
+        .as_ref()
+        .unwrap()
+        .1;
     assert!(set_current_command(&shared, pane, "zzpub-label"));
     shared.publish_mux_snapshots();
     let sent = snapshots(events(&mailbox));
@@ -400,16 +404,25 @@ fn status_interval_work_respects_subscriptions_and_keeps_independent_timers() {
         .expect("model session");
     let session = context.session.expect("session");
     let pane = context.pane.expect("pane");
-    inner.subscribers.insert(client, OutboundMailbox::new());
+    inner
+        .clients
+        .entry(client)
+        .or_default()
+        .subscriber
+        .replace(OutboundMailbox::new());
     inner.attached.entry(session).or_default().insert(client);
     inner
+        .clients
+        .entry(client)
+        .or_default()
         .ctrl_subscriptions
-        .insert(client, zz_protocol::Subscriptions::control());
+        .replace(zz_protocol::Subscriptions::control());
     assert_eq!(Shared::status_sampler_sessions(&inner).count(), 0);
     assert!(!Shared::status_sampler_has_work(&inner));
     inner
-        .ctrl_subscriptions
+        .clients
         .get_mut(&client)
+        .and_then(|client| client.ctrl_subscriptions.as_mut())
         .expect("compact client")
         .status = true;
     assert_eq!(
@@ -417,19 +430,27 @@ fn status_interval_work_respects_subscriptions_and_keeps_independent_timers() {
         [session]
     );
     assert!(Shared::status_sampler_has_work(&inner));
-    inner.ctrl_subscriptions.remove(&client);
+    inner
+        .clients
+        .get_mut(&client)
+        .and_then(|client| client.ctrl_subscriptions.take());
     assert_eq!(
         Shared::status_sampler_sessions(&inner).collect::<Vec<_>>(),
         [session]
     );
     assert!(Shared::status_sampler_has_work(&inner));
     inner
-        .ctrl_subscriptions
-        .insert(client, zz_protocol::Subscriptions::control());
-    inner
-        .control_outputs
+        .clients
         .entry(client)
         .or_default()
+        .ctrl_subscriptions
+        .replace(zz_protocol::Subscriptions::control());
+    inner
+        .clients
+        .entry(client)
+        .or_default()
+        .control_output
+        .get_or_insert_default()
         .subscriptions
         .insert(
             "query".to_owned(),
@@ -441,8 +462,9 @@ fn status_interval_work_respects_subscriptions_and_keeps_independent_timers() {
         );
     assert!(Shared::status_sampler_has_work(&inner));
     inner
-        .control_outputs
+        .clients
         .get_mut(&client)
+        .and_then(|client| client.control_output.as_mut())
         .expect("control output")
         .subscriptions
         .clear();
@@ -513,8 +535,11 @@ fn read_only_control_does_not_unpark_an_idle_unsubscribed_status_sampler() {
             .or_default()
             .insert(client);
         inner
+            .clients
+            .entry(client)
+            .or_default()
             .ctrl_subscriptions
-            .insert(client, zz_protocol::Subscriptions::control());
+            .replace(zz_protocol::Subscriptions::control());
     }
     let (started, ready) = crossbeam_channel::bounded(1);
     let (awake, observed) = crossbeam_channel::bounded(1);

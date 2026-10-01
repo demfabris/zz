@@ -426,7 +426,12 @@ fn selected_status_client_callbacks_match_complete_capture_for_every_field() {
         state.written_bytes = 1234;
         state.discarded_bytes = 56;
     }
-    inner.subscribers.insert(client, mailbox);
+    inner
+        .clients
+        .entry(client)
+        .or_default()
+        .subscriber
+        .replace(mailbox);
     inner
         .terminal_geometries
         .entry(target.pane.unwrap())

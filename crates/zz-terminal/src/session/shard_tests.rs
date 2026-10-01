@@ -62,6 +62,44 @@ fn a_backpressured_flood_does_not_starve_input_on_the_same_shard() {
 }
 
 #[test]
+fn streamed_echoes_and_busy_panes_both_progress_on_one_shard() {
+    let shard = ShardHandle::start(107).expect("shard");
+    let floods = (0..2)
+        .map(|_| session(&shard, "exec yes flood"))
+        .collect::<Vec<_>>();
+    for flood in &floods {
+        flood.set_preview_watch(true);
+        wait(|| flood.latest_viewport().generation > 1);
+    }
+    let generations = floods
+        .iter()
+        .map(|flood| flood.latest_viewport().generation)
+        .collect::<Vec<_>>();
+    let quiet = session(&shard, "stty -echo; printf 'ready\\r\\n'; exec cat");
+    let view = TerminalViewId(107);
+    quiet.attach_view(view);
+    quiet.set_view_stream(view, ViewStream::Foreground);
+    let visible = |needle: &str| {
+        quiet.latest_view_frames().iter().any(|(id, viewport, _)| {
+            let mut text = String::new();
+            for cell in viewport.cells.iter() {
+                viewport.push_glyph(*cell, &mut text);
+            }
+            *id == view && text.contains(needle)
+        })
+    };
+    wait(|| visible("ready"));
+    for burst in 0..32 {
+        let text = format!("echo {burst:02}");
+        quiet.send_text(format!("{text}\n"));
+        wait(|| visible(&text));
+    }
+    for (flood, generation) in floods.iter().zip(generations) {
+        wait(|| flood.latest_viewport().generation > generation);
+    }
+}
+
+#[test]
 fn shutdown_of_a_signal_ignoring_child_does_not_block_other_panes() {
     let shard = ShardHandle::start(102).expect("shard");
     let stubborn = session(

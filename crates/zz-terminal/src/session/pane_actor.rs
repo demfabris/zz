@@ -917,14 +917,18 @@ impl PaneActor {
         (self.exit_status.is_none() && !self.child_watch.reaped).then_some(self.child_watch.pid)
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(unix)]
     pub(super) fn queued_input_ready(&self) -> bool {
         !self.writer.has_pending() && !self.input_rx.commands.is_empty()
     }
 
     #[cfg(unix)]
     pub(super) fn on_pty_ready(&mut self, only_ready: bool) -> Result<(), WorkerError> {
-        self.on_readable_with_spin(only_ready)
+        self.on_readable_with_spin(only_ready, || false)
+    }
+
+    pub(super) fn echo_pending(&self) -> bool {
+        self.echo.due()
     }
 
     pub(super) fn on_wake(&mut self, wakeup: Wake) -> Result<bool, WorkerError> {
@@ -1737,7 +1741,11 @@ impl PaneActor {
     }
 
     #[cfg(unix)]
-    fn on_readable_with_spin(&mut self, only_ready: bool) -> Result<(), WorkerError> {
+    pub(super) fn on_readable_with_spin(
+        &mut self,
+        only_ready: bool,
+        mut should_yield: impl FnMut() -> bool,
+    ) -> Result<(), WorkerError> {
         let mut burst = 0_usize;
         let mut spins = 0_u32;
         let turn_started = Instant::now();
@@ -1757,6 +1765,7 @@ impl PaneActor {
                     if burst >= PTY_DRAIN_TURN_BYTES
                         || self.raw_output_parse_backlog_bytes >= RAW_OUTPUT_PARSE_BACKLOG_BYTES
                         || turn_started.elapsed() >= PTY_DRAIN_TURN_TIME
+                        || should_yield()
                     {
                         break;
                     }
@@ -1767,6 +1776,7 @@ impl PaneActor {
                         if only_ready
                             && spins < self.bridge_spins
                             && turn_started.elapsed() < PTY_DRAIN_TURN_TIME
+                            && (!spins.is_multiple_of(32) || !should_yield())
                         {
                             spins += 1;
                             continue;

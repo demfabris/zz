@@ -67,6 +67,21 @@ read "Lane brief rules" before launching anything.
   (daemon.rs `BootstrapReady`/`start_lock`, timers.rs `PeerProbe`, status.rs `set_tmux_shim`,
   user_data.rs `fs`) are handed to LOOP. Mac strict view at wave exit.
 
+- Echo work, 2026-10-01. A Linux breakdown with temporary per-stage timestamps (no commits)
+  found no fixed waits: zz's echo p50 2.03 ms against tmux 0.92 is a chain of thread handoffs of
+  90-140 us each: TUI client relays ~390 us, daemon loop read/write ~235 us (LOOP b2/b3), shard
+  wake and gather relay ~200 us, pane watcher to delivery ~95 us (W4-DELIVER); row extraction
+  p99 reaches 700 us when echo and scrolling coincide (W4-ROWS). Merged into perf/wave3:
+  `16ec41a2` (shard fairness `a8ee2ecf`: serve fresh input and pending echo ahead of a busy
+  pane's turn, never shorten output-only turns; a first version that preempted on any ready
+  pane cost chatty 16-21% instructions) and `8548e684` (new W3-TUI slice `953fa4e0`, not in the
+  plan: the TUI attach client runs on one thread and one event loop, echo p50 -240/-257 us idle
+  /busy on Linux), plus `a93bff74` (the TUI slice was built only on Linux and used rustix
+  `pipe_with`, which macOS lacks; now `pipe()` plus fcntl). Merge A/B against the SHARDS merge:
+  Linux echo zz/tmux p50 idle 2.19 -> 1.82, busy 2.25 -> 1.99; Mac busy p50 -16%, busy p99 -50%,
+  idle p99 -30%; no instruction regressions. Echo is still above the 1.5x rule on both hosts:
+  the rest is LOOP (b2/b3 already cut the loop handoffs on perf/loop) and W4-DELIVER.
+
 ## Wave 2 merge log (2026-09-30 to 10-01)
 
 1. Done 2026-09-30 (from the Mac over ssh): the trim fix holds on Linux. At `d317e171`,
@@ -827,6 +842,15 @@ summary in `<out>.cost.json`, `<out>.failed` when no valid answer), `lane-watchd
 - `scripts/wave1-resume.js` is the run that resumed wave 1 after the usage-limit cut, kept as the example of RESUME notes per lane (paths moved into constants, logic unchanged; its `execDone` line uses `&&` on a promise, so EXEC did not actually wait for PANE).
 
 ## Traps
+
+- macOS caps PTYs at 511: never run workspace tests and perf runs on the Mac at the same time.
+  Overlapping them failed six LOOP b6 perf runs ("tmux PTY allocation failed") and 166
+  parallel daemon tests (all passed alone).
+- A slice built on one host only needs a `cargo check` on the other before acceptance: the
+  W3-TUI slice (Linux) used a rustix API that macOS does not have.
+- `pkill -f` and `pgrep -f` over ssh match their own shell's command line: write patterns as
+  `[c]argo` / `[m]erge-checks`. A merge-check script must get a saved copy of the pre-merge
+  binary, not `target/release/zz_cli`, which the script rebuilds before its A/B.
 
 - Waiting on a remote agent with `ssh host 'pgrep -f <brief>'` never ends: the pattern matches the
   ssh shell's own command line. Wait on the report file, or write the pattern as `[c]odex`.

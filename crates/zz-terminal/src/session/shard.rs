@@ -251,17 +251,7 @@ impl Shard {
             }
             self.expire_deadlines();
             let mut ready = Vec::new();
-            let mut failed = Vec::new();
-            for (&id, entry) in &mut self.actors {
-                match entry.actor.try_wake() {
-                    Ok(Some(wake)) => ready.push((id, Some(wake), false, false)),
-                    Ok(None) => {}
-                    Err(error) => failed.push((id, error)),
-                }
-            }
-            for (id, error) in failed {
-                self.fail(id, &error);
-            }
+            self.collect_channels(&mut ready);
             let timeout = if ready.is_empty() {
                 self.poll_timeout()
             } else {
@@ -271,13 +261,14 @@ impl Shard {
             self.poll(timeout, &mut ready)?;
             #[cfg(not(unix))]
             self.poll(timeout, &mut ready);
+            self.collect_channels(&mut ready);
             ready.sort_unstable_by_key(|(id, _, _, _)| (*id < self.cursor, *id));
-            let only_ready = ready
-                .iter()
-                .map(|(id, _, _, _)| *id)
-                .collect::<HashSet<_>>()
-                .len()
-                == 1;
+            let only_ready = ready.first().is_some_and(|(only_id, _, _, _)| {
+                ready.iter().all(|(id, _, _, _)| id == only_id)
+                    && self.actors.iter().all(|(id, entry)| {
+                        id == only_id || entry.actor.next_deadline() > Instant::now()
+                    })
+            });
             for (id, wake, pty, child) in ready {
                 if let Some(mut entry) = self.actors.remove(&id) {
                     let result = (|| {
@@ -310,6 +301,33 @@ impl Shard {
                     self.cursor = id + 1;
                 }
             }
+        }
+    }
+
+    fn collect_channels(&mut self, ready: &mut Vec<(usize, Option<Wake>, bool, bool)>) {
+        let mut failed = Vec::new();
+        for (&id, entry) in &mut self.actors {
+            let pending = ready.iter_mut().find(|(ready_id, _, _, _)| *ready_id == id);
+            if pending
+                .as_ref()
+                .is_some_and(|(_, wake, _, _)| wake.is_some())
+            {
+                continue;
+            }
+            match entry.actor.try_wake() {
+                Ok(Some(wake)) => {
+                    if let Some((_, pending_wake, _, _)) = pending {
+                        *pending_wake = Some(wake);
+                    } else {
+                        ready.push((id, Some(wake), false, false));
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => failed.push((id, error)),
+            }
+        }
+        for (id, error) in failed {
+            self.fail(id, &error);
         }
     }
 

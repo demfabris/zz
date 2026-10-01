@@ -4514,7 +4514,7 @@ impl Publisher {
     fn publish_frame(
         &self,
         fallback: FallbackFrame,
-        viewports: Vec<(TerminalViewId, TerminalViewport, Option<u64>)>,
+        viewports: Vec<(TerminalViewId, Arc<TerminalViewport>, Option<u64>)>,
         copy_facts: HashMap<TerminalViewId, Arc<CopyModeFacts>>,
         notify: bool,
     ) {
@@ -4522,7 +4522,6 @@ impl Publisher {
         let mut epochs = HashMap::with_capacity(viewports.len());
         let mut first_streamed = None;
         for (view, viewport, epoch) in viewports {
-            let viewport = Arc::new(viewport);
             if let Some(epoch) = epoch {
                 first_streamed.get_or_insert_with(|| Arc::clone(&viewport));
                 epochs.insert(view, epoch);
@@ -12872,6 +12871,8 @@ struct StreamState {
 }
 
 struct Frames<'alloc> {
+    #[cfg(test)]
+    snapshot_builds: usize,
     render: Option<RenderResources<'alloc>>,
     generations: ViewportGenerations,
     dictionary: ViewportDictionary,
@@ -12892,6 +12893,8 @@ struct Frames<'alloc> {
 impl<'alloc> Frames<'alloc> {
     fn new(appearance: &TerminalAppearance) -> Result<Self, WorkerError> {
         Ok(Self {
+            #[cfg(test)]
+            snapshot_builds: 0,
             render: None,
             generations: ViewportGenerations::new()?,
             dictionary: ViewportDictionary {
@@ -13007,6 +13010,10 @@ impl<'alloc> Frames<'alloc> {
         view: Option<&TerminalViewState>,
         status: SessionStatus,
     ) -> Result<TerminalViewport, WorkerError> {
+        #[cfg(test)]
+        {
+            self.snapshot_builds += 1;
+        }
         if let Some(view) = view
             && let Some(copy_mode) = view.copy_mode.as_ref()
         {
@@ -13118,6 +13125,38 @@ fn publish_active_views<'alloc: 'callbacks, 'callbacks>(
     )
 }
 
+#[cfg(test)]
+#[path = "session/live_frames_tests.rs"]
+mod live_frames_tests;
+
+fn share_live_frame(left: &TerminalViewState, right: &TerminalViewState) -> bool {
+    let live = |view: &TerminalViewState| {
+        view.copy_mode.is_none()
+            && view.selection.is_none()
+            && matches!(view.viewport, ViewportAnchor::FollowBottom)
+    };
+    live(left)
+        && live(right)
+        && left.screen == right.screen
+        && left.unseen_output == right.unseen_output
+        && left.hover_link == right.hover_link
+        && left.search.as_ref().map(|search| {
+            (
+                &search.matches,
+                search.current,
+                search.pending,
+                search.invalid_pattern,
+            )
+        }) == right.search.as_ref().map(|search| {
+            (
+                &search.matches,
+                search.current,
+                search.pending,
+                search.invalid_pattern,
+            )
+        })
+}
+
 #[allow(
     clippy::too_many_arguments,
     reason = "the publish entry point threads the actor's frame state and its notification choice"
@@ -13138,7 +13177,8 @@ fn publish_views<'alloc: 'callbacks, 'callbacks>(
     let force_fallback = std::mem::take(&mut frames.force_fallback);
     let mut view_ids = active.keys().copied().collect::<Vec<_>>();
     view_ids.sort_by_key(|view| view.0);
-    let mut viewports = Vec::with_capacity(view_ids.len());
+    let mut viewports: Vec<(TerminalViewId, Arc<TerminalViewport>, Option<u64>)> =
+        Vec::with_capacity(view_ids.len());
     let mut copy_facts = HashMap::new();
     let mut streamed_any = false;
     for view_id in view_ids {
@@ -13164,7 +13204,20 @@ fn publish_views<'alloc: 'callbacks, 'callbacks>(
         } else {
             restore_view_state(terminal, view, word_separators)?;
         }
-        let viewport = frames.snapshot(terminal, change, Some(view), status.clone())?;
+        let view = active
+            .get(&view_id)
+            .expect("active view id was collected from the same map");
+        let shared = viewports.iter().find(|(previous, _, _)| {
+            share_live_frame(
+                view,
+                active.get(previous).expect("published view remains active"),
+            )
+        });
+        let viewport = if let Some((_, viewport, _)) = shared {
+            Arc::clone(viewport)
+        } else {
+            Arc::new(frames.snapshot(terminal, change, Some(view), status.clone())?)
+        };
         streamed_any |= streaming;
         viewports.push((view_id, viewport, streaming.then(|| frames.epoch(view_id))));
     }

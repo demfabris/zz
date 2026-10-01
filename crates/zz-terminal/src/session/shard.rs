@@ -126,6 +126,11 @@ pub(super) enum Actor {
 }
 
 impl Actor {
+    fn echo_priority(&self, wake: Option<&Wake>) -> bool {
+        matches!(wake, Some(Wake::Input(_)))
+            || matches!(self, Self::Live(actor) if actor.echo_pending())
+    }
+
     fn next_deadline(&self) -> Instant {
         match self {
             Self::Live(actor) => actor.next_deadline(),
@@ -295,7 +300,16 @@ impl Shard {
             self.poll(timeout, &mut ready);
             self.collect_channels(&mut ready);
             self.collect_deadlines(&mut ready);
-            ready.sort_unstable_by_key(|(id, _, _, _)| (*id < self.cursor, *id));
+            ready.sort_unstable_by_key(|(id, wake, _, _)| {
+                (
+                    !self
+                        .actors
+                        .get(id)
+                        .is_some_and(|entry| entry.actor.echo_priority(wake.as_ref())),
+                    *id < self.cursor,
+                    *id,
+                )
+            });
             #[cfg(unix)]
             let only_ready = ready.first().is_some_and(|(only_id, _, _, _)| {
                 ready.iter().all(|(id, _, _, _)| id == only_id)
@@ -306,32 +320,38 @@ impl Shard {
             });
             for (id, wake, pty, child) in ready.drain(..) {
                 if let Some(entry) = self.actors.remove(&id) {
-                    #[cfg(unix)]
-                    let mut entry = entry;
                     let result = (|| {
+                        let actor = if let Some(wake) = wake {
+                            entry.actor.on_wake(wake)?
+                        } else {
+                            Some(entry.actor)
+                        };
+                        let Some(actor) = actor else {
+                            return Ok(None);
+                        };
                         #[cfg(unix)]
-                        if let Actor::Live(actor) = &mut entry.actor {
+                        let mut actor = actor;
+                        #[cfg(unix)]
+                        if let Actor::Live(actor) = &mut actor {
                             if child {
                                 actor.poll_child()?;
                             }
                             if pty {
-                                actor.on_pty_ready(only_ready)?;
+                                actor.on_readable_with_spin(only_ready, || {
+                                    self.actors.values().any(|entry| {
+                                        matches!(&entry.actor, Actor::Live(actor)
+                                            if actor.echo_pending()
+                                                || (entry.pending.load(Ordering::Acquire)
+                                                    && actor.queued_input_ready()))
+                                    })
+                                })?;
                             }
                         }
                         #[cfg(not(unix))]
                         let _ = pty;
                         #[cfg(not(unix))]
                         let _ = child;
-                        let actor = if let Some(wake) = wake {
-                            entry.actor.on_wake(wake)?
-                        } else {
-                            Some(entry.actor)
-                        };
-                        if let Some(actor) = actor {
-                            actor.on_deadline()
-                        } else {
-                            Ok(None)
-                        }
+                        actor.on_deadline()
                     })();
                     self.store_result(
                         id,

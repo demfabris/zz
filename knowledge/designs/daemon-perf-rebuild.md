@@ -3037,6 +3037,27 @@ active pages at their used size and `ModeRevision` builds viewport cells directl
 
 ## W3-SHARDS: PTY shard threads inside zz-terminal (effort XL)
 
+macOS echo fairness follow-up, 2026-10-01, perf/echo: `Shard::run` handles
+input before PTY output and dispatches input and echo windows first. Shared read
+turns yield only for peer input or an echo window; output readiness keeps full
+256 KiB / 1 ms turns. Bridge retries check input and echo work every 32 attempts,
+without peer fd polling. The existing shared-shard test streams 32 echoes with two floods.
+Five alternating quick pairs against `c59ee369`'s merged binary measured checkpoint
+`1bf5a79a`: median per-run zz/tmux busy p50 ratios 2.331 -> 2.653 (1.138x),
+busy p99 1.877 -> 2.886 (1.538x), above both 0.93x limits. Idle p50/p99 factors
+were 0.897x/0.670x. Chatty flip/hidden medians were 63.080 -> 63.169 and
+77.591 -> 78.927 Minstr/s (1.001x/1.017x); detached ASCII was
+302.066 -> 306.191 MB/s (1.014x). All ten runs were load-marked.
+The chatty and throughput limits pass, but busy echo does not; this follow-up is not gate-ready.
+Both terminal modes passed 353 tests with one ignored; terminal clippy passed.
+All four requested compat scenarios passed 16 steps without divergences.
+The quick W0 rescore of the fifth candidate run exited 0 with four existing echo
+warnings and one idle-p99 regression flag. It took no extra measurements.
+Quick mode omits Unicode and attached ASCII throughput; the headless client was absent.
+Busy30 uses a ticker in the echo pane rather than shared-shard floods. Linux throughput,
+gather, epoll, THP and TUI backpressure remain with the orchestrator.
+Evidence stays in `/tmp/zzpc/echo2-{merge,fair2}-[1-5].json`.
+
 macOS chatty follow-up, 2026-10-01: `session/shard.rs` `Shard::poll` now retains
 PTY, wake-pipe and child PID watches in one kqueue per shard. Level-triggered
 PTY reads keep the turn caps; real notifications and newly writable queued input

@@ -1033,7 +1033,15 @@ client_case() {
   run_on_both bind-key -T prefix Y choose-client -Z "display-message -d 0 CHOSE-%%"
   prefix_step 'session cho' Y
   verdict client-run-open same
-  step 'CHOSE-/dev/pts/' Enter
+  local zz_name tmux_name before_zz before_tmux
+  zz_name="$(client_name zz)"
+  tmux_name="$(client_name tmux)"
+  [ -n "$zz_name" ] && [ -n "$tmux_name" ] || die 'a selected client has no name'
+  before_zz="$(styled_screen_of zz)"
+  before_tmux="$(styled_screen_of tmux)"
+  type_on_both Enter
+  wait_screen tmux hard "$CASE_LABEL: CHOSE-$tmux_name on the tmux screen" "$before_tmux" "CHOSE-$tmux_name"
+  wait_screen zz soft "$CASE_LABEL: CHOSE-$zz_name on the zz screen" "$before_zz" "CHOSE-$zz_name"
   verdict client-run-chosen same
   step 'MARK-clients' C-c
   verdict client-run-dismissed same

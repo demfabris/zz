@@ -78,6 +78,9 @@ impl ShardHandle {
         };
         #[cfg(unix)]
         let worker_wake = wake.clone();
+        #[cfg(target_os = "macos")]
+        let kqueue =
+            rustix::event::kqueue::kqueue().map_err(|error| WorkerError::Io(error.into()))?;
         thread::Builder::new()
             .name(format!("zz-pty-shard-{index}"))
             .spawn(move || {
@@ -86,6 +89,12 @@ impl ShardHandle {
                     #[cfg(unix)]
                     wake: worker_wake,
                     wake_rx,
+                    #[cfg(target_os = "macos")]
+                    kqueue,
+                    #[cfg(target_os = "macos")]
+                    wake_registered: false,
+                    #[cfg(target_os = "macos")]
+                    events: Vec::with_capacity(32),
                     actors: HashMap::new(),
                     next_id: 0,
                     cursor: 0,
@@ -201,6 +210,8 @@ struct Entry {
     _alive: Sender<Infallible>,
     deadline: Instant,
     pending: Arc<AtomicBool>,
+    #[cfg(target_os = "macos")]
+    poll_sources: [Option<i32>; 2],
 }
 
 struct Shard {
@@ -211,6 +222,12 @@ struct Shard {
     wake_rx: std::os::fd::OwnedFd,
     #[cfg(not(unix))]
     wake_rx: Receiver<()>,
+    #[cfg(target_os = "macos")]
+    kqueue: std::os::fd::OwnedFd,
+    #[cfg(target_os = "macos")]
+    wake_registered: bool,
+    #[cfg(target_os = "macos")]
+    events: Vec<rustix::event::kqueue::Event>,
     actors: HashMap<usize, Entry>,
     next_id: usize,
     cursor: usize,
@@ -257,6 +274,8 @@ impl Shard {
                                         .as_ref()
                                         .expect("pane wake tracks readiness"),
                                 ),
+                                #[cfg(target_os = "macos")]
+                                poll_sources: [None; 2],
                             },
                         );
                         self.dispatch(id, None);
@@ -312,7 +331,15 @@ impl Shard {
                             Ok(None)
                         }
                     })();
-                    self.store_result(id, entry.publisher, entry._alive, entry.pending, result);
+                    self.store_result(
+                        id,
+                        entry.publisher,
+                        entry._alive,
+                        entry.pending,
+                        result,
+                        #[cfg(target_os = "macos")]
+                        entry.poll_sources,
+                    );
                     self.cursor = id + 1;
                 }
             }
@@ -359,7 +386,15 @@ impl Shard {
             } else {
                 entry.actor.on_deadline()
             };
-            self.store_result(id, entry.publisher, entry._alive, entry.pending, result);
+            self.store_result(
+                id,
+                entry.publisher,
+                entry._alive,
+                entry.pending,
+                result,
+                #[cfg(target_os = "macos")]
+                entry.poll_sources,
+            );
         }
     }
 
@@ -370,11 +405,19 @@ impl Shard {
         alive: Sender<Infallible>,
         pending: Arc<AtomicBool>,
         result: Result<Option<Actor>, WorkerError>,
+        #[cfg(target_os = "macos")] poll_sources: [Option<i32>; 2],
     ) {
         match result {
             Ok(Some(actor)) => {
                 let deadline = actor.next_deadline();
-                pending.store(true, Ordering::Release);
+                #[cfg(target_os = "macos")]
+                let recheck_channels =
+                    !matches!(&actor, Actor::Live(actor) if !actor.queued_input_ready());
+                #[cfg(not(target_os = "macos"))]
+                let recheck_channels = true;
+                if recheck_channels {
+                    pending.store(true, Ordering::Release);
+                }
                 self.actors.insert(
                     id,
                     Entry {
@@ -383,6 +426,8 @@ impl Shard {
                         _alive: alive,
                         deadline,
                         pending,
+                        #[cfg(target_os = "macos")]
+                        poll_sources,
                     },
                 );
             }
@@ -420,7 +465,7 @@ impl Shard {
             })
     }
 
-    #[cfg(unix)]
+    #[cfg(all(unix, not(target_os = "macos")))]
     fn poll(
         &self,
         timeout: Duration,
@@ -469,6 +514,131 @@ impl Shard {
                 } else {
                     ready.push((id, None, pty, !pty));
                 }
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn poll(
+        &mut self,
+        timeout: Duration,
+        ready: &mut Vec<(usize, Option<Wake>, bool, bool)>,
+    ) -> Result<(), WorkerError> {
+        use rustix::event::kqueue::{Event, EventFilter, EventFlags, ProcessEvents};
+        use std::os::fd::AsRawFd;
+
+        let filter = |index, source| {
+            if index == 0 {
+                EventFilter::Read(source)
+            } else {
+                EventFilter::Proc {
+                    pid: rustix::process::Pid::from_raw(source).expect("pane child pid"),
+                    flags: ProcessEvents::EXIT,
+                }
+            }
+        };
+        let mut changes = SmallVec::<[Event; 9]>::new();
+        if !self.wake_registered {
+            changes.push(Event::new(
+                EventFilter::Read(self.wake_rx.as_raw_fd()),
+                EventFlags::ADD,
+                std::ptr::null_mut(),
+            ));
+            self.wake_registered = true;
+        }
+        for (&id, entry) in &mut self.actors {
+            let sources = if let Actor::Live(actor) = &entry.actor {
+                let (pty, _) = actor.poll_sources();
+                [
+                    pty.map(AsRawFd::as_raw_fd),
+                    actor
+                        .shard_child_pid()
+                        .map(|pid| pid.as_raw_nonzero().get()),
+                ]
+            } else {
+                [None; 2]
+            };
+            for (index, source) in sources.into_iter().enumerate() {
+                if source == entry.poll_sources[index] {
+                    continue;
+                }
+                if let Some(fd) = entry.poll_sources[index] {
+                    changes.push(Event::new(
+                        filter(index, fd),
+                        EventFlags::DELETE,
+                        usize::MAX as *mut _,
+                    ));
+                }
+                if let Some(fd) = source {
+                    changes.push(Event::new(
+                        filter(index, fd),
+                        if index == 0 {
+                            EventFlags::ADD
+                        } else {
+                            EventFlags::ADD | EventFlags::ONESHOT
+                        },
+                        ((id + 1) * 2 + index) as *mut _,
+                    ));
+                }
+                entry.poll_sources[index] = source;
+            }
+        }
+        self.events.clear();
+        #[allow(
+            unsafe_code,
+            reason = "the shard owns registered descriptors until their actors close them"
+        )]
+        let polled = unsafe {
+            rustix::event::kqueue::kevent(
+                &self.kqueue,
+                &changes,
+                rustix::buffer::spare_capacity(&mut self.events),
+                Some(timeout.min(IDLE_SLEEP)),
+            )
+        };
+        match polled {
+            Ok(_) => {}
+            Err(rustix::io::Errno::INTR) => return Ok(()),
+            Err(error) => return Err(WorkerError::Io(error.into())),
+        }
+        for event in &self.events {
+            let token = event.udata() as usize;
+            if event.flags().contains(EventFlags::ERROR) {
+                if token == usize::MAX
+                    && (event.data() == i64::from(rustix::io::Errno::BADF.raw_os_error())
+                        || event.data() == i64::from(rustix::io::Errno::NOENT.raw_os_error())
+                        || event.data() == i64::from(rustix::io::Errno::SRCH.raw_os_error()))
+                {
+                    continue;
+                }
+                if token.is_multiple_of(2)
+                    || event.data() != i64::from(rustix::io::Errno::SRCH.raw_os_error())
+                {
+                    return Err(WorkerError::Io(std::io::Error::from_raw_os_error(
+                        event.data() as i32,
+                    )));
+                }
+            }
+            if token == 0 {
+                drain_wake_pipe(&self.wake_rx)?;
+                if let Some(pending) = &self.wake.pending {
+                    pending.store(false, Ordering::Release);
+                }
+                continue;
+            }
+            let id = token / 2 - 1;
+            let pty = token.is_multiple_of(2);
+            if let Some((_, _, pty_ready, child_ready)) =
+                ready.iter_mut().find(|(ready_id, _, _, _)| *ready_id == id)
+            {
+                if pty {
+                    *pty_ready = true;
+                } else {
+                    *child_ready = true;
+                }
+            } else {
+                ready.push((id, None, pty, !pty));
             }
         }
         Ok(())

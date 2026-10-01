@@ -216,9 +216,8 @@ fn twenty_panes_select_direct_or_gather_readers() {
     );
 }
 
-#[cfg(target_os = "linux")]
 #[test]
-fn direct_linux_read_keeps_the_final_batch_before_hangup() {
+fn direct_reads_keep_the_final_batch_before_hangup() {
     let shard = ShardHandle::start(105).expect("shard");
     let pane = session(
         &shard,
@@ -228,9 +227,8 @@ fn direct_linux_read_keeps_the_final_batch_before_hangup() {
     assert!(captured(&pane, "last batch"));
 }
 
-#[cfg(target_os = "linux")]
 #[test]
-fn partial_linux_batches_publish_after_the_producer_stops() {
+fn partial_batches_publish_after_the_producer_stops() {
     let shard = ShardHandle::start(104).expect("shard");
     let pane = session(
         &shard,
@@ -238,4 +236,16 @@ fn partial_linux_batches_publish_after_the_producer_stops() {
     );
     wait(|| pane.facts().history_size > 0);
     assert!(pane.completion().is_none());
+}
+
+#[test]
+fn short_lived_children_complete_without_output_on_a_shared_shard() {
+    let shard = ShardHandle::start(106).expect("shard");
+    let panes = (0..20)
+        .map(|_| session(&shard, "exit 7"))
+        .collect::<Vec<_>>();
+    for pane in &panes {
+        wait(|| pane.completion().is_some());
+        assert_eq!(pane.completion().expect("child exit").code, 7);
+    }
 }

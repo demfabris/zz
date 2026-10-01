@@ -3037,6 +3037,18 @@ active pages at their used size and `ModeRevision` builds viewport cells directl
 
 ## W3-SHARDS: PTY shard threads inside zz-terminal (effort XL)
 
+macOS chatty follow-up, 2026-10-01: `session/shard.rs` `Shard::poll` now retains
+PTY, wake-pipe and child PID watches in one kqueue per shard. Level-triggered
+PTY reads keep the turn caps; real notifications and newly writable queued input
+trigger channel checks. Parse scratch allocates on first use. Three alternating
+quick runs against `shards-s1-mac-cli` gave flip medians 67.7897 -> 62.2157 Minstr/s
+(0.918x) and hidden 79.2885 -> 77.7577 (0.981x). The p20 footprint median was
+17.4224 MiB, below the lane base's roughly 17.7 MiB, with 30 threads in each run.
+Both terminal test modes passed 339 tests with one ignored; clippy and all six
+requested compat scenarios passed without divergences.
+The four echo timing rows remain red on s1 and this build. Linux throughput,
+gather, epoll, THP and TUI backpressure checks stay with the orchestrator.
+
 Scope, keeping the `TerminalSession` public API: K shard threads (K = min(available_parallelism,
 4), `ZZ_PTY_SHARDS`, chosen by the gate) own PTY fds and terminals, never migrating; each polls
 PTY fds, child exit (`EVFILT_PROC` / pidfd) and a wake fd; never `waitpid(-1)` (run-shell,

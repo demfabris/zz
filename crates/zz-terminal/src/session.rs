@@ -11981,6 +11981,18 @@ struct ChildExitWatch {
 
 #[cfg(all(unix, not(target_os = "linux")))]
 impl ChildExitWatch {
+    #[cfg(target_os = "macos")]
+    fn for_shard(process_id: Option<u32>) -> Result<Self, WorkerError> {
+        let pid = child_pid(process_id)?;
+        let ready = reap_child(pid, false);
+        Ok(Self {
+            pid,
+            kqueue: None,
+            reaped: ready.is_some(),
+            ready,
+        })
+    }
+
     fn new(process_id: Option<u32>) -> Result<Self, WorkerError> {
         use rustix::event::kqueue::{Event, EventFilter, EventFlags, ProcessEvents};
 
@@ -12036,7 +12048,7 @@ impl ChildExitWatch {
     fn on_readable(&mut self) -> Option<std::io::Result<ExitStatus>> {
         use rustix::event::kqueue::Event;
 
-        let exited = self.kqueue.as_ref().is_some_and(|kqueue| {
+        let exited = self.kqueue.as_ref().is_none_or(|kqueue| {
             let mut events = Vec::<Event>::with_capacity(1);
             #[allow(
                 unsafe_code,

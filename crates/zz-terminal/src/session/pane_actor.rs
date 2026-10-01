@@ -183,8 +183,14 @@ impl PaneActor {
         drop(pty.slave);
         #[cfg(unix)]
         let killer = UnixChildKiller(shell_process_id);
-        #[cfg(all(unix, not(target_os = "linux")))]
+        #[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
         let child_watch = ChildExitWatch::new(shell_process_id)?;
+        #[cfg(target_os = "macos")]
+        let child_watch = if sharded {
+            ChildExitWatch::for_shard(shell_process_id)?
+        } else {
+            ChildExitWatch::new(shell_process_id)?
+        };
         #[cfg(any(target_os = "linux", not(unix)))]
         let (exit_tx, exit_rx) = crossbeam_channel::bounded(1);
         #[cfg(target_os = "linux")]
@@ -382,7 +388,7 @@ impl PaneActor {
         let raw_output_tap = None;
         let raw_output_parse_backlog = VecDeque::<(Arc<[u8]>, usize)>::new();
         let raw_output_parse_backlog_bytes = 0_usize;
-        let raw_output_parse_buffer = Vec::with_capacity(RAW_OUTPUT_PARSE_TURN_BYTES);
+        let raw_output_parse_buffer = Vec::new();
         #[cfg(unix)]
         let active_input_permit = None::<InputPermit>;
 
@@ -902,6 +908,16 @@ impl PaneActor {
             self.on_child_exit(status)?;
         }
         Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn shard_child_pid(&self) -> Option<rustix::process::Pid> {
+        (self.exit_status.is_none() && !self.child_watch.reaped).then_some(self.child_watch.pid)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn queued_input_ready(&self) -> bool {
+        !self.writer.has_pending() && !self.input_rx.commands.is_empty()
     }
 
     #[cfg(unix)]

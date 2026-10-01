@@ -1,10 +1,10 @@
 use super::*;
 
-pub(super) struct PaneActor<'context> {
-    control_rx: &'context Receiver<Command>,
+pub(super) struct PaneActor {
+    control_rx: Receiver<Command>,
     input_rx: InputReceiver,
-    slot: &'context Mutex<ControlSlot>,
-    publisher: &'context Publisher,
+    slot: Arc<Mutex<ControlSlot>>,
+    publisher: Publisher,
     max_scrollback: usize,
     geometry: Geometry,
     shell_process_id: Option<u32>,
@@ -23,7 +23,7 @@ pub(super) struct PaneActor<'context> {
     #[cfg(all(unix, not(target_os = "linux")))]
     child_watch: ChildExitWatch,
     #[cfg(all(unix, not(target_os = "linux")))]
-    wake_rx: std::os::fd::OwnedFd,
+    wake_rx: Option<std::os::fd::OwnedFd>,
     #[cfg(all(unix, not(target_os = "linux")))]
     drain_fd: filedescriptor::FileDescriptor,
     #[cfg(all(unix, not(target_os = "linux")))]
@@ -86,19 +86,24 @@ pub(super) struct PaneActor<'context> {
     active_input_permit: Option<InputPermit>,
     published_facts: Option<TerminalFacts>,
     publish_interval: Duration,
+    sharded: bool,
+    commands_closed: bool,
+    #[cfg(target_os = "linux")]
+    linux_child: Option<LinuxChildWatch>,
 }
 
-impl<'context> PaneActor<'context> {
+impl PaneActor {
     pub(super) fn spawn(
-        control_rx: &'context Receiver<Command>,
+        control_rx: Receiver<Command>,
         input_rx: InputReceiver,
-        slot: &'context Mutex<ControlSlot>,
-        publisher: &'context Publisher,
+        slot: Arc<Mutex<ControlSlot>>,
+        publisher: Publisher,
         max_scrollback: usize,
         appearance: &TerminalAppearance,
         spawn: &TerminalSpawn,
         wake: &ActorWake,
         wake_rx: WakeReceiver,
+        sharded: bool,
     ) -> Result<Self, WorkerError> {
         install_kitty_png_decoder();
         #[cfg(any(target_os = "linux", not(unix)))]
@@ -183,7 +188,7 @@ impl<'context> PaneActor<'context> {
         #[cfg(any(target_os = "linux", not(unix)))]
         let (exit_tx, exit_rx) = crossbeam_channel::bounded(1);
         #[cfg(target_os = "linux")]
-        let linux_child = watch_child_linux(shell_process_id, exit_tx)?;
+        let mut linux_child = watch_child_linux(shell_process_id, exit_tx, wake.clone())?;
         #[cfg(windows)]
         let (master_close_tx, master_close_rx) = crossbeam_channel::bounded(1);
         #[cfg(not(unix))]
@@ -205,7 +210,7 @@ impl<'context> PaneActor<'context> {
         }
 
         #[cfg(all(unix, not(target_os = "linux")))]
-        let wake_rx = wake_rx.map_err(|error| {
+        let wake_rx = wake_rx.transpose().map_err(|error| {
             WorkerError::Pty(format!("failed to configure terminal wake pipe: {error}"))
         })?;
         #[cfg(unix)]
@@ -259,14 +264,29 @@ impl<'context> PaneActor<'context> {
             #[cfg(target_os = "linux")]
             thread::Builder::new()
                 .name("zz-pty-gather".into())
-                .spawn(move || gather_pty_linux(drain_fd, output_tx, recycle_rx, linux_child))
+                .spawn({
+                    let gather_child = if sharded { None } else { linux_child.take() };
+                    let output_wake = wake.clone();
+                    move || {
+                        gather_pty_linux(
+                            drain_fd,
+                            output_tx,
+                            recycle_rx,
+                            gather_child,
+                            output_wake,
+                        );
+                    }
+                })
                 .map_err(WorkerError::Io)?;
             #[cfg(not(unix))]
             {
                 let pending_output: Box<dyn Fn() -> usize + Send> = Box::new(|| 0);
+                let output_wake = wake.clone();
                 thread::Builder::new()
                     .name("zz-pty-reader".into())
-                    .spawn(move || read_pty(reader, pending_output, output_tx, recycle_rx))
+                    .spawn(move || {
+                        read_pty(reader, pending_output, output_tx, recycle_rx, output_wake);
+                    })
                     .map_err(WorkerError::Io)?;
             }
             (output_rx, recycle_tx)
@@ -352,7 +372,7 @@ impl<'context> PaneActor<'context> {
         spawned.wait_for_exec(PANE_EXEC_WAIT);
         publish_active_views(
             &mut terminal,
-            publisher,
+            &publisher,
             &mut frames,
             SnapshotChange::Content,
             &mut active_views,
@@ -446,6 +466,10 @@ impl<'context> PaneActor<'context> {
             active_input_permit,
             published_facts: None,
             publish_interval: CONTENT_PUBLISH_STALENESS,
+            sharded,
+            commands_closed: false,
+            #[cfg(target_os = "linux")]
+            linux_child,
         })
     }
 
@@ -574,7 +598,7 @@ impl<'context> PaneActor<'context> {
             self.publisher.mark_output_activity();
             publish_active_views(
                 &mut self.terminal,
-                self.publisher,
+                &self.publisher,
                 &mut self.frames,
                 SnapshotChange::Content,
                 &mut self.active_views,
@@ -594,7 +618,7 @@ impl<'context> PaneActor<'context> {
         if !self.output_pending {
             settle_unwatched(
                 &mut self.terminal,
-                self.publisher,
+                &self.publisher,
                 &mut self.frames,
                 &mut self.active_views,
                 &self.word_separators,
@@ -609,7 +633,7 @@ impl<'context> PaneActor<'context> {
         Ok(true)
     }
 
-    fn next_deadline(&self) -> Instant {
+    pub(super) fn next_deadline(&self) -> Instant {
         let mut deadline = Instant::now() + IDLE_SLEEP;
         if !self.output_pending {
             if let Some(due) = self.frames.settle_due() {
@@ -669,12 +693,14 @@ impl<'context> PaneActor<'context> {
             <= RAW_OUTPUT_PARSE_BACKLOG_BYTES.saturating_sub(RAW_OUTPUT_PARSE_READ_RESERVE_BYTES);
         #[cfg(all(unix, not(target_os = "linux")))]
         let wakeup = wait_for_wake(
-            self.control_rx,
+            &self.control_rx,
             available_input,
             &self.search_results,
             child_exit,
             (!self.reader_eof && raw_output_read_ahead).then_some(&self.drain_fd),
-            &self.wake_rx,
+            self.wake_rx
+                .as_ref()
+                .expect("per-pane worker has a wake pipe"),
             timeout,
         )?;
         #[cfg(target_os = "linux")]
@@ -691,7 +717,7 @@ impl<'context> PaneActor<'context> {
         };
         #[cfg(any(target_os = "linux", not(unix)))]
         let wakeup = wait_for_wake(
-            self.control_rx,
+            &self.control_rx,
             available_input,
             &self.search_results,
             child_exit,
@@ -702,16 +728,126 @@ impl<'context> PaneActor<'context> {
         Ok(wakeup)
     }
 
+    pub(super) fn try_wake(&mut self) -> Result<Option<Wake>, WorkerError> {
+        if !self.commands_closed {
+            match self.control_rx.try_recv() {
+                Ok(command) => return Ok(Some(Wake::Command(command))),
+                Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                    return Ok(Some(Wake::CommandsClosed));
+                }
+                Err(crossbeam_channel::TryRecvError::Empty) => {}
+            }
+        }
+        #[cfg(unix)]
+        let input_ready = !self.writer.has_pending();
+        #[cfg(not(unix))]
+        let input_ready = true;
+        if input_ready && let Ok(input) = self.input_rx.commands.try_recv() {
+            return Ok(Some(Wake::Input(input)));
+        }
+        match self.search_results.try_recv() {
+            Ok(result) => return Ok(Some(Wake::Search(result))),
+            Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                return Err(WorkerError::Thread(
+                    "terminal search worker stopped".to_owned(),
+                ));
+            }
+            Err(crossbeam_channel::TryRecvError::Empty) => {}
+        }
+        #[cfg(all(unix, not(target_os = "linux")))]
+        if self.exit_status.is_none()
+            && let Some(status) = self.child_watch.take_ready()
+        {
+            return Ok(Some(Wake::ChildExit(status)));
+        }
+        #[cfg(any(target_os = "linux", not(unix)))]
+        {
+            if self.exit_status.is_none()
+                && let Ok(status) = self.exit_rx.try_recv()
+            {
+                return Ok(Some(Wake::ChildExit(status)));
+            }
+            if self.output_read_ahead() {
+                match self.output_rx.try_recv() {
+                    Ok(message) => return Ok(Some(Wake::PtyMessage(message))),
+                    Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                        return Ok(Some(Wake::PtyMessage(ReaderMessage::Eof)));
+                    }
+                    Err(crossbeam_channel::TryRecvError::Empty) => {}
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    pub(super) fn output_read_ahead(&self) -> bool {
+        !self.reader_eof
+            && self.raw_output_parse_backlog_bytes
+                <= RAW_OUTPUT_PARSE_BACKLOG_BYTES
+                    .saturating_sub(RAW_OUTPUT_PARSE_READ_RESERVE_BYTES)
+    }
+
+    fn shutdown(&mut self) {
+        self.commands_closed = true;
+        let _ = self.killer.kill();
+        if !self.terminating {
+            self.terminating = true;
+            self.termination_deadline = Some(Instant::now() + TERMINATION_KILL_WAIT);
+        }
+    }
+
+    #[cfg(all(unix, not(target_os = "linux")))]
+    pub(super) fn poll_sources(
+        &self,
+    ) -> (
+        Option<&filedescriptor::FileDescriptor>,
+        Option<&std::os::fd::OwnedFd>,
+    ) {
+        (
+            self.output_read_ahead().then_some(&self.drain_fd),
+            self.exit_status
+                .is_none()
+                .then_some(self.child_watch.poll_fd())
+                .flatten(),
+        )
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(super) fn child_poll_fd(&self) -> Option<&std::os::fd::OwnedFd> {
+        self.linux_child.as_ref().map(|watch| &watch.pidfd)
+    }
+
+    #[cfg(unix)]
+    pub(super) fn poll_child(&mut self) -> Result<(), WorkerError> {
+        #[cfg(target_os = "linux")]
+        if self.linux_child.as_ref().is_some_and(LinuxChildWatch::reap) {
+            self.linux_child = None;
+            if let Ok(status) = self.exit_rx.try_recv() {
+                self.on_child_exit(status)?;
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        if let Some(status) = self.child_watch.on_readable() {
+            self.on_child_exit(status)?;
+        }
+        Ok(())
+    }
+
+    #[cfg(all(unix, not(target_os = "linux")))]
+    pub(super) fn on_pty_ready(&mut self, only_ready: bool) -> Result<(), WorkerError> {
+        self.on_readable_with_spin(only_ready)
+    }
+
     pub(super) fn on_wake(&mut self, wakeup: Wake) -> Result<bool, WorkerError> {
         let mut input_permit = None;
         let (commands, wakeup) = match wakeup {
             Wake::Input(QueuedInput { command, permit }) => {
                 input_permit = Some(permit);
                 self.echo.open();
-                (take_control_slot(self.slot, Some(command), false), None)
+                (take_control_slot(&self.slot, Some(command), false), None)
             }
-            Wake::Command(command) => (take_control_slot(self.slot, Some(command), true), None),
-            wakeup => (take_control_slot(self.slot, None, false), Some(wakeup)),
+            Wake::Command(command) => (take_control_slot(&self.slot, Some(command), true), None),
+            wakeup => (take_control_slot(&self.slot, None, false), Some(wakeup)),
         };
         for command in commands {
             if !self.on_command(command)? {
@@ -721,8 +857,11 @@ impl<'context> PaneActor<'context> {
         match wakeup {
             None => {}
             Some(Wake::CommandsClosed) => {
-                self.on_commands_closed();
-                return Ok(false);
+                if !self.sharded {
+                    self.on_commands_closed();
+                    return Ok(false);
+                }
+                self.shutdown();
             }
             Some(Wake::Command(_) | Wake::Input(_)) => {
                 unreachable!("commands and PTY input are dispatched above")
@@ -765,7 +904,7 @@ impl<'context> PaneActor<'context> {
                     if viewport_changed {
                         publish_active_views(
                             &mut self.terminal,
-                            self.publisher,
+                            &self.publisher,
                             &mut self.frames,
                             SnapshotChange::View,
                             &mut self.active_views,
@@ -800,7 +939,7 @@ impl<'context> PaneActor<'context> {
                     if viewport_changed {
                         publish_active_views(
                             &mut self.terminal,
-                            self.publisher,
+                            &self.publisher,
                             &mut self.frames,
                             SnapshotChange::View,
                             &mut self.active_views,
@@ -836,7 +975,7 @@ impl<'context> PaneActor<'context> {
                     if viewport_changed {
                         publish_active_views(
                             &mut self.terminal,
-                            self.publisher,
+                            &self.publisher,
                             &mut self.frames,
                             SnapshotChange::View,
                             &mut self.active_views,
@@ -934,7 +1073,7 @@ impl<'context> PaneActor<'context> {
                     }
                     publish_active_views(
                         &mut self.terminal,
-                        self.publisher,
+                        &self.publisher,
                         &mut self.frames,
                         SnapshotChange::Content,
                         &mut self.active_views,
@@ -961,7 +1100,7 @@ impl<'context> PaneActor<'context> {
                 if selection_changed {
                     publish_active_views(
                         &mut self.terminal,
-                        self.publisher,
+                        &self.publisher,
                         &mut self.frames,
                         SnapshotChange::View,
                         &mut self.active_views,
@@ -1006,7 +1145,7 @@ impl<'context> PaneActor<'context> {
                 self.terminal.set_selection(None)?;
                 publish_active_views(
                     &mut self.terminal,
-                    self.publisher,
+                    &self.publisher,
                     &mut self.frames,
                     SnapshotChange::Content,
                     &mut self.active_views,
@@ -1029,7 +1168,7 @@ impl<'context> PaneActor<'context> {
                 }
                 publish_active_views(
                     &mut self.terminal,
-                    self.publisher,
+                    &self.publisher,
                     &mut self.frames,
                     SnapshotChange::Content,
                     &mut self.active_views,
@@ -1054,7 +1193,7 @@ impl<'context> PaneActor<'context> {
                 if self.frames.shows(view, &self.active_views) {
                     publish_active_views(
                         &mut self.terminal,
-                        self.publisher,
+                        &self.publisher,
                         &mut self.frames,
                         SnapshotChange::View,
                         &mut self.active_views,
@@ -1076,7 +1215,7 @@ impl<'context> PaneActor<'context> {
                 if shown {
                     publish_active_views(
                         &mut self.terminal,
-                        self.publisher,
+                        &self.publisher,
                         &mut self.frames,
                         SnapshotChange::View,
                         &mut self.active_views,
@@ -1098,7 +1237,7 @@ impl<'context> PaneActor<'context> {
                 {
                     publish_active_views(
                         &mut self.terminal,
-                        self.publisher,
+                        &self.publisher,
                         &mut self.frames,
                         SnapshotChange::View,
                         &mut self.active_views,
@@ -1189,7 +1328,7 @@ impl<'context> PaneActor<'context> {
                         ViewActionResult::None => {}
                         ViewActionResult::Snapshot => publish_active_views(
                             &mut self.terminal,
-                            self.publisher,
+                            &self.publisher,
                             &mut self.frames,
                             SnapshotChange::View,
                             &mut self.active_views,
@@ -1198,7 +1337,7 @@ impl<'context> PaneActor<'context> {
                         )?,
                         ViewActionResult::OverlaySnapshot => publish_active_views(
                             &mut self.terminal,
-                            self.publisher,
+                            &self.publisher,
                             &mut self.frames,
                             SnapshotChange::Overlay,
                             &mut self.active_views,
@@ -1207,7 +1346,7 @@ impl<'context> PaneActor<'context> {
                         )?,
                         ViewActionResult::ContentSnapshot => publish_active_views(
                             &mut self.terminal,
-                            self.publisher,
+                            &self.publisher,
                             &mut self.frames,
                             SnapshotChange::Content,
                             &mut self.active_views,
@@ -1220,7 +1359,7 @@ impl<'context> PaneActor<'context> {
                             if view_changed {
                                 publish_active_views(
                                     &mut self.terminal,
-                                    self.publisher,
+                                    &self.publisher,
                                     &mut self.frames,
                                     SnapshotChange::View,
                                     &mut self.active_views,
@@ -1333,7 +1472,7 @@ impl<'context> PaneActor<'context> {
                     if active_hover_changed {
                         publish_active_views(
                             &mut self.terminal,
-                            self.publisher,
+                            &self.publisher,
                             &mut self.frames,
                             SnapshotChange::Overlay,
                             &mut self.active_views,
@@ -1357,6 +1496,7 @@ impl<'context> PaneActor<'context> {
                     let _ = self.killer.kill();
                 }
             }
+            Command::Shutdown if self.sharded => self.shutdown(),
             Command::Shutdown => {
                 let _ = self.killer.kill();
                 if self.exit_status.is_none() {
@@ -1371,7 +1511,7 @@ impl<'context> PaneActor<'context> {
                 if self.frames.set_stream(view, stream) && self.active_views.contains_key(&view) {
                     publish_active_views(
                         &mut self.terminal,
-                        self.publisher,
+                        &self.publisher,
                         &mut self.frames,
                         SnapshotChange::View,
                         &mut self.active_views,
@@ -1386,7 +1526,7 @@ impl<'context> PaneActor<'context> {
                 if started {
                     publish_active_views(
                         &mut self.terminal,
-                        self.publisher,
+                        &self.publisher,
                         &mut self.frames,
                         SnapshotChange::View,
                         &mut self.active_views,
@@ -1401,7 +1541,7 @@ impl<'context> PaneActor<'context> {
                 self.frames.force_fallback = true;
                 publish_views(
                     &mut self.terminal,
-                    self.publisher,
+                    &self.publisher,
                     &mut self.frames,
                     SnapshotChange::View,
                     &mut self.active_views,
@@ -1462,7 +1602,7 @@ impl<'context> PaneActor<'context> {
         )? {
             publish_active_views(
                 &mut self.terminal,
-                self.publisher,
+                &self.publisher,
                 &mut self.frames,
                 SnapshotChange::View,
                 &mut self.active_views,
@@ -1476,6 +1616,11 @@ impl<'context> PaneActor<'context> {
 
     #[cfg(all(unix, not(target_os = "linux")))]
     fn on_readable(&mut self) -> Result<(), WorkerError> {
+        self.on_readable_with_spin(true)
+    }
+
+    #[cfg(all(unix, not(target_os = "linux")))]
+    fn on_readable_with_spin(&mut self, only_ready: bool) -> Result<(), WorkerError> {
         let mut burst = 0_usize;
         let mut spins = 0_u32;
         let turn_started = Instant::now();
@@ -1533,7 +1678,10 @@ impl<'context> PaneActor<'context> {
                 Err(rustix::io::Errno::INTR) => {}
                 Err(rustix::io::Errno::AGAIN) => {
                     if burst >= PTY_BRIDGE_THRESHOLD_BYTES {
-                        if spins < self.bridge_spins {
+                        if only_ready
+                            && spins < self.bridge_spins
+                            && turn_started.elapsed() < PTY_DRAIN_TURN_TIME
+                        {
                             spins += 1;
                             continue;
                         }
@@ -1669,7 +1817,7 @@ impl<'context> PaneActor<'context> {
         Ok(had_output)
     }
 
-    pub(super) fn finish(mut self) -> Result<(), WorkerError> {
+    pub(super) fn finish(mut self) -> Result<DeadPane, WorkerError> {
         #[cfg(all(unix, not(target_os = "linux")))]
         let had_output = false;
         #[cfg(any(target_os = "linux", not(unix)))]
@@ -1680,44 +1828,15 @@ impl<'context> PaneActor<'context> {
         drain_effects(&self.effects, &mut self.writer)?;
         let Self {
             control_rx,
-            input_rx,
             slot,
             publisher,
             max_scrollback,
             geometry,
-            #[cfg(unix)]
-            writer,
-            #[cfg(not(unix))]
-            writer,
-            #[cfg(unix)]
-            master,
-            #[cfg(not(unix))]
-            master,
-            #[cfg(all(unix, not(target_os = "linux")))]
-            child_watch,
-            #[cfg(all(unix, not(target_os = "linux")))]
-            wake_rx,
-            #[cfg(all(unix, not(target_os = "linux")))]
-            drain_fd,
-            #[cfg(all(unix, not(target_os = "linux")))]
-            read_buffer,
-            #[cfg(any(target_os = "linux", not(unix)))]
-            exit_rx,
-            #[cfg(any(target_os = "linux", not(unix)))]
-            output_rx,
-            #[cfg(any(target_os = "linux", not(unix)))]
-            recycle_tx,
             mut terminal,
             reported_color_scheme,
             mut frames,
-            key_encoder,
-            key_event,
-            mouse_encoder,
-            mouse_event,
-            input_bytes,
             word_separators,
             wrap_search,
-            passthrough,
             engine_knobs,
             pending_copy_source,
             pane_search,
@@ -1731,10 +1850,6 @@ impl<'context> PaneActor<'context> {
             mut search_worker,
             search_results,
             output_pending,
-            raw_output_parse_backlog,
-            raw_output_parse_buffer,
-            #[cfg(unix)]
-            active_input_permit,
             ..
         } = self;
         if (had_output || output_pending)
@@ -1769,10 +1884,6 @@ impl<'context> PaneActor<'context> {
         if let Some(status) = engine_last_command_status.take() {
             publisher.set_last_command_status(status.code());
         }
-        drop(writer);
-        #[cfg(unix)]
-        drop(active_input_permit);
-        drop(input_rx);
         let status = exit_status.take().expect("checked above");
         let signal = status.signal().and_then(signal_number);
         publisher.set_completion(TerminalProcessExit {
@@ -1785,112 +1896,131 @@ impl<'context> PaneActor<'context> {
         frames.force_fallback = !terminating;
         publish_active_views(
             &mut terminal,
-            publisher,
+            &publisher,
             &mut frames,
             SnapshotChange::Content,
             &mut active_views,
             &word_separators,
             SessionStatus::exited(status.exit_code(), status.signal().map(str::to_owned)),
         )?;
-        let notice_deadline = Instant::now() + DEAD_NOTICE_WAIT;
-        let mut retained = false;
-        let mut pending_commands = Vec::new();
-        while let Some(remaining) = notice_deadline.checked_duration_since(Instant::now()) {
-            match control_rx.recv_timeout(remaining) {
-                Ok(Command::WriteDeadNotice(text)) => {
-                    complete_dead_notice_command(slot);
-                    if let Some(text) = text {
-                        retained = true;
-                        write_dead_notice(&mut terminal, &text)?;
-                        publisher.set_facts(engine_filter.facts(&terminal)?);
-                        frames.force_fallback = true;
-                        publish_active_views(
-                            &mut terminal,
-                            publisher,
-                            &mut frames,
-                            SnapshotChange::Content,
-                            &mut active_views,
-                            &word_separators,
-                            SessionStatus::exited(
-                                status.exit_code(),
-                                status.signal().map(str::to_owned),
-                            ),
-                        )?;
-                    }
-                    break;
+        Ok(DeadPane {
+            control_rx,
+            slot,
+            publisher,
+            engine_filter,
+            notice_deadline: Instant::now() + DEAD_NOTICE_WAIT,
+            retained: false,
+            surface: SurfaceTerminal {
+                terminal,
+                geometry,
+                frames,
+                active_views,
+                inactive_views,
+                word_separators,
+                wrap_search,
+                mode_keys_vi: engine_knobs.mode_keys_vi,
+                reported_color_scheme,
+                max_scrollback,
+                status: SessionStatus::exited(
+                    status.exit_code(),
+                    status.signal().map(str::to_owned),
+                ),
+                pending_commands: Vec::new(),
+                pending_copy_source,
+                pane_search,
+                search: Some((search_worker, search_results)),
+            },
+        })
+    }
+}
+
+pub(super) struct DeadPane {
+    control_rx: Receiver<Command>,
+    slot: Arc<Mutex<ControlSlot>>,
+    publisher: Publisher,
+    engine_filter: EngineFilter,
+    notice_deadline: Instant,
+    retained: bool,
+    surface: SurfaceTerminal<'static, 'static>,
+}
+
+impl DeadPane {
+    pub(super) fn next_deadline(&self) -> Instant {
+        self.notice_deadline
+    }
+
+    pub(super) fn try_wake(&self) -> Option<Wake> {
+        match self.control_rx.try_recv() {
+            Ok(command) => Some(Wake::Command(command)),
+            Err(crossbeam_channel::TryRecvError::Disconnected) => Some(Wake::CommandsClosed),
+            Err(crossbeam_channel::TryRecvError::Empty) => None,
+        }
+    }
+
+    pub(super) fn wait_for_wake(&self) -> Wake {
+        self.control_rx
+            .recv_timeout(
+                self.notice_deadline
+                    .saturating_duration_since(Instant::now()),
+            )
+            .map_or(Wake::Deadline, Wake::Command)
+    }
+
+    pub(super) fn on_wake(&mut self, wake: Wake) -> Result<bool, WorkerError> {
+        match wake {
+            Wake::Command(Command::WriteDeadNotice(text)) => {
+                complete_dead_notice_command(&self.slot);
+                if let Some(text) = text {
+                    self.retained = true;
+                    write_dead_notice(&mut self.surface.terminal, &text)?;
+                    self.publisher
+                        .set_facts(self.engine_filter.facts(&self.surface.terminal)?);
+                    self.surface.frames.force_fallback = true;
+                    publish_active_views(
+                        &mut self.surface.terminal,
+                        &self.publisher,
+                        &mut self.surface.frames,
+                        SnapshotChange::Content,
+                        &mut self.surface.active_views,
+                        &self.surface.word_separators,
+                        self.surface.status.clone(),
+                    )?;
                 }
-                Ok(command) => {
-                    if let Some(command) = reply_before_dead_notice(
-                        &mut terminal,
-                        &frames.dictionary.class_hints,
-                        &active_views,
-                        &word_separators,
-                        slot,
-                        command,
-                    ) {
-                        pending_commands.push(command);
-                    }
+                return Ok(false);
+            }
+            Wake::Command(Command::Shutdown | Command::Terminate) | Wake::CommandsClosed => {
+                return Ok(false);
+            }
+            Wake::Command(command) => {
+                if let Some(command) = reply_before_dead_notice(
+                    &mut self.surface.terminal,
+                    &self.surface.frames.dictionary.class_hints,
+                    &self.surface.active_views,
+                    &self.surface.word_separators,
+                    &self.slot,
+                    command,
+                ) {
+                    self.surface.pending_commands.push(command);
                 }
-                Err(_) => break,
             }
+            Wake::Deadline if Instant::now() >= self.notice_deadline => return Ok(false),
+            _ => {}
         }
-        if retained {
-            if !*NO_COMPRESS {
-                terminal.compress(CompressionMode::Full)?;
-            }
-            publisher.set_foreground_source(None);
-            drop(master);
-            drop(raw_output_parse_buffer);
-            drop(raw_output_parse_backlog);
-            drop(passthrough);
-            drop(input_bytes);
-            drop(key_encoder);
-            drop(key_event);
-            drop(mouse_encoder);
-            drop(mouse_event);
-            #[cfg(any(target_os = "linux", not(unix)))]
-            {
-                drop(output_rx);
-                drop(recycle_tx);
-                drop(exit_rx);
-            }
-            #[cfg(all(unix, not(target_os = "linux")))]
-            {
-                drop(drain_fd);
-                drop(read_buffer);
-                drop(child_watch);
-                drop(wake_rx);
-            }
-            return run_surface_terminal(
-                control_rx,
-                slot,
-                publisher,
-                SurfaceTerminal {
-                    terminal,
-                    geometry,
-                    frames,
-                    active_views,
-                    inactive_views,
-                    word_separators,
-                    wrap_search,
-                    mode_keys_vi: engine_knobs.mode_keys_vi,
-                    reported_color_scheme,
-                    max_scrollback,
-                    status: SessionStatus::exited(
-                        status.exit_code(),
-                        status.signal().map(str::to_owned),
-                    ),
-                    pending_commands,
-                    pending_copy_source,
-                    pane_search,
-                    search: Some((search_worker, search_results)),
-                },
-                false,
-            );
+        Ok(true)
+    }
+
+    pub(super) fn into_surface(
+        self,
+    ) -> Result<Option<surface_actor::SurfaceActor<'static, 'static>>, WorkerError> {
+        if !self.retained {
+            return Ok(None);
         }
-        for view_id in active_views.keys() {
-            search_worker.cancel(*view_id);
+        self.publisher.set_foreground_source(None);
+        let mut surface = self.surface;
+        if !*NO_COMPRESS {
+            surface.terminal.compress(CompressionMode::Full)?;
         }
-        Ok(())
+        surface_actor::SurfaceActor::new(self.control_rx, self.slot, self.publisher, surface, false)
+            .map(Some)
     }
 }

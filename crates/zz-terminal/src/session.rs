@@ -65,6 +65,8 @@ mod mode_revision;
 mod pane_actor;
 #[cfg(test)]
 mod pane_tests;
+mod shard;
+mod surface_actor;
 #[cfg(unix)]
 mod unix_pty;
 
@@ -1681,10 +1683,28 @@ impl TerminalSession {
         appearance: Arc<TerminalAppearance>,
         spawn: TerminalSpawn,
     ) -> Self {
+        Self::spawn_with_shard(max_scrollback, appearance, spawn, shard::choose())
+    }
+
+    fn spawn_with_shard(
+        max_scrollback: usize,
+        appearance: Arc<TerminalAppearance>,
+        spawn: TerminalSpawn,
+        shard: Result<Option<shard::ShardHandle>, WorkerError>,
+    ) -> Self {
         let max_scrollback = max_scrollback.min(MAX_HISTORY_LIMIT);
         let (command_tx, command_rx) = command_channel();
         let (input_tx, input_rx) = input_channel();
-        let (wake, wake_rx) = actor_wake();
+        let (wake, wake_rx) = match &shard {
+            Ok(Some(shard)) => {
+                #[cfg(all(unix, not(target_os = "linux")))]
+                let wake_rx = None;
+                #[cfg(any(target_os = "linux", not(unix)))]
+                let wake_rx = ();
+                (shard.wake.clone(), wake_rx)
+            }
+            _ => actor_wake(),
+        };
         let (alive, liveness) = crossbeam_channel::bounded(0);
         let slot = Arc::new(Mutex::new(ControlSlot::default()));
         let commands = CommandSender {
@@ -1717,24 +1737,44 @@ impl TerminalSession {
         let worker_publisher = publisher.clone();
         let appearance_hash = appearance.stable_hash();
         let initial_separators = spawn.word_separators.clone().unwrap_or_default();
-        if let Err(error) = thread::Builder::new()
-            .name("zz-terminal".into())
-            .spawn(move || {
-                terminal_worker(
-                    command_rx,
+        match shard {
+            Ok(Some(shard)) => {
+                if let Err(error) = shard.launch(shard::PaneLaunch {
+                    control_rx: command_rx,
                     input_rx,
                     slot,
-                    worker_publisher,
+                    publisher: worker_publisher,
                     max_scrollback,
                     appearance,
                     spawn,
-                    wake,
-                    wake_rx,
-                );
-                drop(alive);
-            })
-        {
-            publisher.fail(&WorkerError::Thread(error.to_string()));
+                    alive,
+                }) {
+                    publisher.fail(&error);
+                }
+            }
+            Ok(None) => {
+                if let Err(error) =
+                    thread::Builder::new()
+                        .name("zz-terminal".into())
+                        .spawn(move || {
+                            terminal_worker(
+                                command_rx,
+                                input_rx,
+                                slot,
+                                worker_publisher,
+                                max_scrollback,
+                                appearance,
+                                spawn,
+                                wake,
+                                wake_rx,
+                            );
+                            drop(alive);
+                        })
+                {
+                    publisher.fail(&WorkerError::Thread(error.to_string()));
+                }
+            }
+            Err(error) => publisher.fail(&error),
         }
 
         Self {
@@ -2998,6 +3038,8 @@ fn input_channel_with_limits(
 struct ActorWake {
     #[cfg(unix)]
     pipe: Option<Arc<std::os::fd::OwnedFd>>,
+    #[cfg(not(unix))]
+    channel: Option<Sender<()>>,
 }
 
 impl ActorWake {
@@ -3005,10 +3047,16 @@ impl ActorWake {
         Self {
             #[cfg(unix)]
             pipe: None,
+            #[cfg(not(unix))]
+            channel: None,
         }
     }
 
     fn notify(&self) {
+        #[cfg(not(unix))]
+        if let Some(channel) = &self.channel {
+            let _ = channel.try_send(());
+        }
         #[cfg(unix)]
         if let Some(pipe) = &self.pipe {
             match write_actor_wake(|| rustix::io::write(&**pipe, &[1_u8])) {
@@ -3020,7 +3068,7 @@ impl ActorWake {
 }
 
 #[cfg(all(unix, not(target_os = "linux")))]
-type WakeReceiver = Result<std::os::fd::OwnedFd, rustix::io::Errno>;
+type WakeReceiver = Option<Result<std::os::fd::OwnedFd, rustix::io::Errno>>;
 #[cfg(any(target_os = "linux", not(unix)))]
 type WakeReceiver = ();
 
@@ -3037,7 +3085,7 @@ fn write_actor_wake(
     }
 }
 
-#[cfg(all(unix, not(target_os = "linux")))]
+#[cfg(unix)]
 fn configured_actor_wake_pipe()
 -> Result<(std::os::fd::OwnedFd, std::os::fd::OwnedFd), rustix::io::Errno> {
     let (read, write) = rustix::pipe::pipe()?;
@@ -3056,9 +3104,9 @@ fn actor_wake() -> (ActorWake, WakeReceiver) {
                 ActorWake {
                     pipe: Some(Arc::new(write)),
                 },
-                Ok(read),
+                Some(Ok(read)),
             ),
-            Err(error) => (ActorWake::none(), Err(error)),
+            Err(error) => (ActorWake::none(), Some(Err(error))),
         }
     }
     #[cfg(any(target_os = "linux", not(unix)))]
@@ -4754,28 +4802,32 @@ fn terminal_worker(
     wake_rx: WakeReceiver,
 ) {
     if let Err(error) = run_terminal(
-        &control_rx,
+        control_rx,
         input_rx,
-        &slot,
-        &publisher,
+        slot,
+        publisher.clone(),
         max_scrollback,
         &appearance,
         &spawn,
         &wake,
         wake_rx,
     ) {
-        log::error!("terminal worker stopped: {error}");
-        if matches!(&error, WorkerError::Spawn(_)) {
-            publisher.set_completion(TerminalProcessExit {
-                code: 1,
-                signal: None,
-            });
-            publisher.set_status(&SessionStatus::exited(1, None));
-        } else {
-            publisher.fail(&error);
-        }
+        report_worker_error(&publisher, &error);
     }
     publisher.set_foreground_source(None);
+}
+
+fn report_worker_error(publisher: &Publisher, error: &WorkerError) {
+    log::error!("terminal worker stopped: {error}");
+    if matches!(error, WorkerError::Spawn(_)) {
+        publisher.set_completion(TerminalProcessExit {
+            code: 1,
+            signal: None,
+        });
+        publisher.set_status(&SessionStatus::exited(1, None));
+    } else {
+        publisher.fail(error);
+    }
 }
 
 #[allow(
@@ -4957,7 +5009,7 @@ fn register_device_attributes(terminal: &mut Terminal<'_, '_>) -> Result<(), Wor
 
 fn run_output_view(
     command_rx: &Receiver<Command>,
-    slot: &Mutex<ControlSlot>,
+    slot: &Arc<Mutex<ControlSlot>>,
     publisher: &Publisher,
     title: &str,
     text: &str,
@@ -5021,545 +5073,23 @@ struct SurfaceTerminal<'a, 'b> {
 
 fn run_surface_terminal(
     command_rx: &Receiver<Command>,
-    slot: &Mutex<ControlSlot>,
+    slot: &Arc<Mutex<ControlSlot>>,
     publisher: &Publisher,
     surface: SurfaceTerminal<'_, '_>,
     frozen: bool,
 ) -> Result<(), WorkerError> {
-    let SurfaceTerminal {
-        mut terminal,
-        mut geometry,
-        mut frames,
-        mut active_views,
-        mut inactive_views,
-        mut word_separators,
-        mut wrap_search,
-        mut mode_keys_vi,
-        reported_color_scheme,
-        max_scrollback,
-        status,
-        pending_commands,
-        mut pending_copy_source,
-        mut pane_search,
-        search,
-    } = surface;
-    let (pending_sender, pending_receiver) = crossbeam_channel::unbounded();
-    for command in pending_commands {
-        let _ = pending_sender.send(command);
-    }
-    drop(pending_sender);
-    let mut raw_output_tap: Option<(u64, Sender<Arc<[u8]>>)> = None;
-    let mut engine_filter = EngineFilter::default();
-
-    let mut mouse_encoder = mouse::Encoder::new()?;
-    let mut mouse_event = mouse::Event::new()?;
-    let mut input_bytes = Vec::with_capacity(LINK_URI_SCRATCH_BYTES);
-    let mut writer: Box<dyn Write + Send> = Box::new(std::io::sink());
-    let bound_pasted_images = HashSet::new();
-    let (mut search_worker, search_results) =
-        search.unwrap_or_else(|| SearchWorker::spawn(ActorWake::none()));
-    let mut compression = IdleCompression::default();
-    if frozen {
-        frames.force_fallback = true;
-        publish_views(
-            &mut terminal,
-            publisher,
-            &mut frames,
-            SnapshotChange::Content,
-            &mut active_views,
-            &word_separators,
-            status.clone(),
-            false,
-        )?;
-    }
-
+    let mut actor = surface_actor::SurfaceActor::new(
+        command_rx.clone(),
+        Arc::clone(slot),
+        publisher.clone(),
+        surface,
+        frozen,
+    )?;
     loop {
-        let commands_ready = if pending_receiver.is_empty() {
-            command_rx
-        } else {
-            &pending_receiver
-        };
-        let synchronized_output_timeout = frames
-            .synchronized_output_deadline
-            .map_or_else(crossbeam_channel::never, |deadline| {
-                crossbeam_channel::after(deadline.saturating_duration_since(Instant::now()))
-            });
-        let settle_timeout = frames
-            .settle_due()
-            .map_or_else(crossbeam_channel::never, |deadline| {
-                crossbeam_channel::after(deadline.saturating_duration_since(Instant::now()))
-            });
-        compression.observe(&terminal, Instant::now());
-        let compress_timeout = compression
-            .due()
-            .map_or_else(crossbeam_channel::never, |deadline| {
-                crossbeam_channel::after(deadline.saturating_duration_since(Instant::now()))
-            });
-        crossbeam_channel::select_biased! {
-            recv(synchronized_output_timeout) -> _ => {
-                publish_active_views(
-                    &mut terminal,
-                    publisher,
-                    &mut frames,
-                    SnapshotChange::Content,
-                    &mut active_views,
-                    &word_separators,
-                    status.clone(),
-                )?;
-            }
-            recv(settle_timeout) -> _ => {
-                settle_unwatched(
-                    &mut terminal,
-                    publisher,
-                    &mut frames,
-                    &mut active_views,
-                    &word_separators,
-                    status.clone(),
-                )?;
-            }
-            recv(compress_timeout) -> _ => compression.run(&mut terminal),
-
-            recv(commands_ready) -> message => {
-                let Ok(message) = message else {
-                    return Ok(());
-                };
-                for command in take_control_slot(slot, Some(message), true) {
-                    match command {
-                        Command::AttachView(view_id) => {
-                            if frozen {
-                                if let Entry::Vacant(entry) = active_views.entry(view_id) {
-                                    let state = inactive_views
-                                        .remove(&view_id)
-                                        .map_or_else(|| output_view_state(&mut terminal).map(Box::new), Ok)?;
-                                    entry.insert(state);
-                                }
-                            } else {
-                                activate_view(
-                                    &mut terminal,
-                                    view_id,
-                                    &mut active_views,
-                                    &mut inactive_views,
-                                    &word_separators,
-                                )?;
-                            }
-                            if let Some(state) = active_views.get_mut(&view_id) {
-                                let _ = refresh_view_search(
-                                    &terminal,
-                                    view_id,
-                                    state,
-                                    &mut search_worker,
-                                )?;
-                            }
-                            publish_active_views(
-                                &mut terminal,
-                                publisher,
-                                &mut frames,
-                                SnapshotChange::Content,
-                                &mut active_views,
-                                &word_separators,
-                                status.clone(),
-                            )?;
-                        }
-                        Command::DetachView(view_id) => {
-                            if frozen {
-                                if let Some(state) = active_views.remove(&view_id) {
-                                    inactive_views.insert(view_id, state);
-                                }
-                            } else {
-                                deactivate_view(
-                                    &mut terminal,
-                                    view_id,
-                                    &mut active_views,
-                                    &mut inactive_views,
-                                    &word_separators,
-                                )?;
-                            }
-                            search_worker.cancel(view_id);
-                            publish_active_views(
-                                &mut terminal,
-                                publisher,
-                                &mut frames,
-                                SnapshotChange::View,
-                                &mut active_views,
-                                &word_separators,
-                                status.clone(),
-                            )?;
-                        }
-                        Command::ReleaseView(view_id) => {
-                            frames.forget_view(view_id);
-                            let released = if frozen {
-                                inactive_views.remove(&view_id);
-                                active_views.remove(&view_id).is_some()
-                            } else {
-                                release_view(
-                                    &mut terminal,
-                                    view_id,
-                                    &mut active_views,
-                                    &mut inactive_views,
-                                )?
-                            };
-                            search_worker.forget(view_id);
-                            if released {
-                                publish_active_views(
-                                    &mut terminal,
-                                    publisher,
-                                    &mut frames,
-                                    SnapshotChange::View,
-                                    &mut active_views,
-                                    &word_separators,
-                                    status.clone(),
-                                )?;
-                            }
-                        }
-                        Command::Resize(next) => {
-                            if next != geometry {
-                                geometry = next;
-                                terminal.resize(
-                                    geometry.columns.max(1),
-                                    geometry.rows.max(1),
-                                    geometry.cell_width_px,
-                                    geometry.cell_height_px,
-                                )?;
-                                terminal.set_scrollback_max_bytes(Some(scrollback_backstop_bytes(
-                                    max_scrollback.min(MAX_HISTORY_LIMIT),
-                                    geometry.columns.max(1),
-                                )))?;
-                                if !frozen {
-                                    resize_copy_modes(&mut active_views, geometry.columns.max(1), geometry.rows.max(1), &mut search_worker)?;
-                                    resize_copy_modes(&mut inactive_views, geometry.columns.max(1), geometry.rows.max(1), &mut search_worker)?;
-                                }
-                                for view in inactive_views.values_mut() {
-                                    if frozen {
-                                        refresh_output_view(&mut terminal, view)?;
-                                    } else {
-                                        view.invalidate_layout();
-                                    }
-                                }
-                                for view in active_views.values_mut() {
-                                    if frozen {
-                                        refresh_output_view(&mut terminal, view)?;
-                                    } else {
-                                        view.invalidate_layout();
-                                        reconcile_view_screen(
-                                            &mut terminal,
-                                            view,
-                                            &word_separators,
-                                        )?;
-                                    }
-                                }
-                                publish_active_views(
-                                    &mut terminal,
-                                    publisher,
-                                    &mut frames,
-                                    SnapshotChange::Content,
-                                    &mut active_views,
-                                    &word_separators,
-                                    status.clone(),
-                                )?;
-                            }
-                        }
-                        Command::SetWordSeparators(next) => {
-                            word_separators = *next;
-                        }
-                        Command::SetWrapSearch(next) => {
-                            wrap_search = next;
-                        }
-                        Command::SetAppearance(next) => {
-                            reported_color_scheme.set(ghostty_color_scheme(next.color_scheme));
-                            apply_terminal_appearance(&mut terminal, &next)?;
-                            frames.dictionary.class_hints = ClassHints::new(&next);
-                            frames.reset_render();
-                            for view in active_views.values_mut().chain(inactive_views.values_mut()) {
-                                refresh_frozen_view_appearance(&mut terminal, view)?;
-                            }
-                            publish_active_views(
-                                &mut terminal,
-                                publisher,
-                                &mut frames,
-                                SnapshotChange::Content,
-                                &mut active_views,
-                                &word_separators,
-                                status.clone(),
-                            )?;
-                        }
-                        Command::ViewAction { view, action } => {
-                            compression.rearm();
-                            let Some(state) = active_views.get_mut(&view) else {
-                                continue;
-                            };
-                            let result = normalize_view_action_result(apply_view_action(
-                                &mut terminal,
-                                view,
-                                state,
-                                action,
-                                geometry,
-                                &mut writer,
-                                &mut mouse_encoder,
-                                &mut mouse_event,
-                                &mut input_bytes,
-                                &mut search_worker,
-                                wrap_search,
-                                mode_keys_vi,
-                                &word_separators,
-                                &bound_pasted_images,
-                                &mut pending_copy_source,
-                                &mut pane_search,
-                            ))?;
-                            publisher.publish_search_string(pane_search.as_ref());
-                            let closed = frozen && state.copy_mode.is_none();
-                            match result {
-                                ViewActionResult::Snapshot | ViewActionResult::ContentSnapshot if !closed => {
-                                    publish_active_views(
-                                        &mut terminal,
-                                        publisher,
-                                        &mut frames,
-                                        SnapshotChange::View,
-                                        &mut active_views,
-                                        &word_separators,
-                                        status.clone(),
-                                    )?;
-                                }
-                                ViewActionResult::OverlaySnapshot if !closed => {
-                                    publish_active_views(
-                                        &mut terminal,
-                                        publisher,
-                                        &mut frames,
-                                        SnapshotChange::Overlay,
-                                        &mut active_views,
-                                        &word_separators,
-                                        status.clone(),
-                                    )?;
-                                }
-                                ViewActionResult::Copy(copy) => publisher.copy_ready(view, copy)?,
-                                ViewActionResult::OpenUri(uri) => publisher.open_uri(view, uri)?,
-                                ViewActionResult::None
-                                | ViewActionResult::Snapshot
-                                | ViewActionResult::OverlaySnapshot
-                                | ViewActionResult::ContentSnapshot => {}
-                            }
-                            if closed {
-                                search_worker.forget(view);
-                                active_views.remove(&view);
-                                inactive_views.remove(&view);
-                                publisher.view_closed(view)?;
-                                publish_active_views(
-                                    &mut terminal,
-                                    publisher,
-                                    &mut frames,
-                                    SnapshotChange::View,
-                                    &mut active_views,
-                                    &word_separators,
-                                    status.clone(),
-                                )?;
-                            }
-                        }
-                        Command::Capture(request) => {
-                            let CaptureRequest { options, reply } = *request;
-                            let mut copy_modes = active_views
-                                .values()
-                                .filter_map(|view| view.copy_mode.as_deref());
-                            let mode = match (copy_modes.next(), copy_modes.next()) {
-                                (Some(mode), None) => Some(mode),
-                                _ => None,
-                            };
-                            let _ = reply.send(capture_terminal(&terminal, mode, options));
-                            compression.rearm();
-                        }
-                        Command::PointerContext(request) => {
-                            let PointerContextRequest {
-                                view,
-                                column,
-                                row,
-                                reply,
-                            } = *request;
-                            let mode = active_views
-                                .get(&view)
-                                .and_then(|view| view.copy_mode.as_deref());
-                            let _ = reply.send(
-                                pointer_context(&terminal, mode, column, row, &word_separators)
-                                    .unwrap_or_default(),
-                            );
-                        }
-                        Command::SemanticCapture(request) => {
-                            let _ = request.reply.send(capture_last_command(&terminal));
-                        }
-                        Command::History(request) => {
-                            let HistoryCommand { start, count, reply } = *request;
-                            let _ = reply.send(capture_history(&terminal, start, count, &frames.dictionary.class_hints));
-                        }
-                        Command::KittyImage(request) => {
-                            let image = frames
-                                .generations
-                                .kitty
-                                .as_mut()
-                                .map_or(Ok(None), |kitty| kitty.image(&terminal, request.image_id))
-                                .unwrap_or_else(|error| {
-                                    log::warn!(
-                                        "could not export Kitty image {}: {error}",
-                                        request.image_id
-                                    );
-                                    None
-                                });
-                            let _ = request.reply.send(image);
-                        }
-                        Command::KittyImageGeneration(request) => {
-                            let generation = frames
-                                .generations
-                                .kitty
-                                .as_ref()
-                                .map_or(Ok(None), |_| {
-                                    KittyGraphicsState::image_generation(&terminal, request.image_id)
-                                })
-                                .unwrap_or_else(|error| {
-                                    log::warn!(
-                                        "could not read Kitty image {} generation: {error}",
-                                        request.image_id
-                                    );
-                                    None
-                                });
-                            let _ = request.reply.send(generation);
-                        }
-                        Command::SetEngineKnobs(next) => mode_keys_vi = next.mode_keys_vi,
-                        Command::SetPendingCopySource(source) => pending_copy_source = source,
-                        Command::Text { .. }
-                        | Command::Key { .. }
-                        | Command::PastePreparedBytes { .. }
-                        | Command::RawInput(_)
-                        | Command::SetAllowPassthrough(_)
-                        | Command::WriteDeadNotice(_)
-                        | Command::PendingPasteOpened { .. }
-                        | Command::ResetScreen
-                        | Command::UnbindPastedImage { .. }
-                        | Command::Wake => {}
-                        Command::CaptureCopySource { reply } => {
-                            let _ = reply.send(
-                                capture_copy_source(&mut terminal)
-                                    .map_err(|_| TerminalCaptureError::ActorStopped),
-                            );
-                        }
-                        Command::Output(bytes) => {
-                            if let Some(token) = tap_raw_output_arc(&mut raw_output_tap, &bytes) {
-                                publisher.raw_output_tap_closed(token)?;
-                            }
-                            let mut bar = None;
-                            let mut last_command_status = None;
-                            engine_filter.write(
-                                &bytes,
-                                EngineKnobs::default(),
-                                &mut terminal,
-                                &mut Vec::new(),
-                                &mut bar,
-                                &mut last_command_status,
-                            );
-                            if let Some(bar) = bar {
-                                publisher.set_progress_bar(bar);
-                            }
-                            if let Some(status) = last_command_status {
-                                publisher.set_last_command_status(status.code());
-                            }
-                            publisher.set_facts(engine_filter.facts(&terminal)?);
-                            publisher.mark_output_activity();
-                            publish_active_views(
-                                &mut terminal,
-                                publisher,
-                                &mut frames,
-                                SnapshotChange::Content,
-                                &mut active_views,
-                                &word_separators,
-                                status.clone(),
-                            )?;
-                        }
-                        Command::ArmRawOutputTap {
-                            token,
-                            output,
-                            reply,
-                        } => {
-                            raw_output_tap = Some((token, output));
-                            let _ = reply.send(true);
-                        }
-                        Command::Settle { reply } => {
-                            let _ = reply.send(());
-                        }
-                        Command::DisarmRawOutputTap { token, reply } => {
-                            if raw_output_tap
-                                .as_ref()
-                                .is_some_and(|(armed, _)| *armed == token)
-                            {
-                                raw_output_tap = None;
-                            }
-                            let _ = reply.send(());
-                        }
-                        Command::Terminate | Command::Shutdown => return Ok(()),
-                        Command::SetViewStream(view, stream) => {
-                            if frames.set_stream(view, stream) && active_views.contains_key(&view) {
-                                publish_active_views(
-                                    &mut terminal,
-                                    publisher,
-                                    &mut frames,
-                                    SnapshotChange::View,
-                                    &mut active_views,
-                                    &word_separators,
-                                    status.clone(),
-                                )?;
-                            }
-                        }
-                        Command::SetPreviewWatch(watch) => {
-                            let started = watch && !frames.preview;
-                            frames.preview = watch;
-                            if started {
-                                publish_active_views(
-                                    &mut terminal,
-                                    publisher,
-                                    &mut frames,
-                                    SnapshotChange::View,
-                                    &mut active_views,
-                                    &word_separators,
-                                    status.clone(),
-                                )?;
-                            } else {
-                                frames.release_unused(&active_views);
-                            }
-                        }
-                        Command::FreshViewport(reply) => {
-                            frames.force_fallback = true;
-                            publish_views(
-                                &mut terminal,
-                                publisher,
-                                &mut frames,
-                                SnapshotChange::View,
-                                &mut active_views,
-                                &word_separators,
-                                status.clone(),
-                                false,
-                            )?;
-                            frames.force_fallback = false;
-                            let _ = reply.send(publisher.latest_fallback());
-                        }
-                    }
-                }
-            },
-            recv(search_results) -> result => {
-                let result = result.map_err(|_| {
-                    WorkerError::Thread("terminal search worker stopped".to_owned())
-                })?;
-                if apply_search_results(
-                    &mut terminal,
-                    &mut active_views,
-                    &mut inactive_views,
-                    &mut search_worker,
-                    result,
-                )? {
-                    publish_active_views(
-                        &mut terminal,
-                        publisher,
-                        &mut frames,
-                        SnapshotChange::View,
-                        &mut active_views,
-                        &word_separators,
-                        status.clone(),
-                    )?;
-                }
-            }
+        actor.on_deadline()?;
+        let wake = actor.wait_for_wake()?;
+        if !actor.on_wake(wake)? {
+            return Ok(());
         }
     }
 }
@@ -5826,17 +5356,17 @@ fn terminal_command_preserves_tmux_argv_shapes() {
 }
 
 fn run_terminal(
-    control_rx: &Receiver<Command>,
+    control_rx: Receiver<Command>,
     input_rx: InputReceiver,
-    slot: &Mutex<ControlSlot>,
-    publisher: &Publisher,
+    slot: Arc<Mutex<ControlSlot>>,
+    publisher: Publisher,
     max_scrollback: usize,
     appearance: &TerminalAppearance,
     spawn: &TerminalSpawn,
     wake: &ActorWake,
     wake_rx: WakeReceiver,
 ) -> Result<(), WorkerError> {
-    let mut actor = PaneActor::spawn(
+    let actor = PaneActor::spawn(
         control_rx,
         input_rx,
         slot,
@@ -5846,18 +5376,19 @@ fn run_terminal(
         spawn,
         wake,
         wake_rx,
+        false,
     )?;
+    let mut actor = shard::Actor::Live(Box::new(actor));
     loop {
-        if !actor.on_deadline()? {
+        let Some(next) = actor.on_deadline()? else {
             return Ok(());
-        }
-        let wakeup = actor.wait_for_wake()?;
-        if !actor.on_wake(wakeup)? {
+        };
+        actor = next;
+        let wake = actor.wait_for_wake()?;
+        let Some(next) = actor.on_wake(wake)? else {
             return Ok(());
-        }
-        if actor.ready_to_finish() {
-            return actor.finish();
-        }
+        };
+        actor = next;
     }
 }
 
@@ -12550,16 +12081,44 @@ struct LinuxChildWatch {
     pid: rustix::process::Pid,
     pidfd: std::os::fd::OwnedFd,
     exit: Sender<std::io::Result<ExitStatus>>,
+    wake: ActorWake,
+    reaped: Cell<bool>,
 }
 
 #[cfg(target_os = "linux")]
 impl LinuxChildWatch {
     fn reap(&self) -> bool {
+        if self.reaped.get() {
+            return true;
+        }
         let Some(status) = reap_child(self.pid, false) else {
             return false;
         };
-        let _ = self.exit.send(status);
+        self.reaped.set(true);
+        let _ = self.exit.try_send(status);
+        self.wake.notify();
         true
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for LinuxChildWatch {
+    fn drop(&mut self) {
+        if self.reap() {
+            return;
+        }
+        let pid = self.pid;
+        if let Err(error) = thread::Builder::new()
+            .name("zz-child-reap".into())
+            .spawn(move || {
+                let _ = reap_child(pid, true);
+            })
+        {
+            log::warn!(
+                "could not wait for pane child {}: {error}",
+                pid.as_raw_nonzero()
+            );
+        }
     }
 }
 
@@ -12567,10 +12126,17 @@ impl LinuxChildWatch {
 fn watch_child_linux(
     process_id: Option<u32>,
     exit: Sender<std::io::Result<ExitStatus>>,
+    wake: ActorWake,
 ) -> Result<Option<LinuxChildWatch>, WorkerError> {
     let pid = child_pid(process_id)?;
     if let Ok(pidfd) = rustix::process::pidfd_open(pid, rustix::process::PidfdFlags::empty()) {
-        return Ok(Some(LinuxChildWatch { pid, pidfd, exit }));
+        return Ok(Some(LinuxChildWatch {
+            pid,
+            pidfd,
+            exit,
+            wake,
+            reaped: Cell::new(false),
+        }));
     }
     thread::Builder::new()
         .name("zz-child-wait".into())
@@ -12578,13 +12144,14 @@ fn watch_child_linux(
             let status = reap_child(pid, true).unwrap_or_else(|| {
                 Err(std::io::Error::other("the pane child was reaped elsewhere"))
             });
-            let _ = exit.send(status);
+            let _ = exit.try_send(status);
+            wake.notify();
         })
         .map_err(WorkerError::Io)?;
     Ok(None)
 }
 
-#[cfg(all(unix, not(target_os = "linux")))]
+#[cfg(unix)]
 fn drain_wake_pipe(wake_rx: &std::os::fd::OwnedFd) -> Result<(), WorkerError> {
     let mut drained = [0_u8; 64];
     loop {
@@ -12645,6 +12212,7 @@ fn gather_pty_linux(
     output: Sender<ReaderMessage>,
     recycled: Receiver<Vec<u8>>,
     mut child: Option<LinuxChildWatch>,
+    wake: ActorWake,
 ) {
     use rustix::event::{PollFd, PollFlags};
 
@@ -12719,11 +12287,15 @@ fn gather_pty_linux(
             }
         }
 
-        if length > 0 && output.send(ReaderMessage::Data { buffer, length }).is_err() {
-            return;
+        if length > 0 {
+            if output.send(ReaderMessage::Data { buffer, length }).is_err() {
+                return;
+            }
+            wake.notify();
         }
     }
     let _ = output.send(ReaderMessage::Eof);
+    wake.notify();
     while let Some(watch) = &child {
         let mut fds = [PollFd::new(&watch.pidfd, PollFlags::IN)];
         match rustix::event::poll(&mut fds, None) {
@@ -12756,6 +12328,7 @@ fn read_pty(
     pending_output: Box<dyn Fn() -> usize + Send>,
     output: Sender<ReaderMessage>,
     recycled: Receiver<Vec<u8>>,
+    wake: ActorWake,
 ) {
     let mut eof = false;
     while !eof {
@@ -12796,8 +12369,10 @@ fn read_pty(
         if output.send(ReaderMessage::Data { buffer, length }).is_err() {
             return;
         }
+        wake.notify();
     }
     let _ = output.send(ReaderMessage::Eof);
+    wake.notify();
 }
 
 #[cfg(any(target_os = "linux", not(unix)))]
@@ -20910,6 +20485,7 @@ mod tests {
                 Box::new(|| 0),
                 output_tx,
                 recycle_rx,
+                ActorWake::none(),
             );
         });
 
@@ -20952,7 +20528,9 @@ mod tests {
             allocations.push(buffer.as_ptr() as usize);
             recycle_tx.send(buffer).expect("seed gather pool");
         }
-        let gather = thread::spawn(move || gather_pty_linux(read_fd, output_tx, recycle_rx, None));
+        let gather = thread::spawn(move || {
+            gather_pty_linux(read_fd, output_tx, recycle_rx, None, ActorWake::none());
+        });
         let expected = (0..PTY_READ_BUFFER_BYTES * 2 + 137)
             .map(|index| u8::try_from(index % 251).expect("bounded byte"))
             .collect::<Vec<_>>();
@@ -21001,7 +20579,9 @@ mod tests {
                 .send(vec![0_u8; PTY_READ_BUFFER_BYTES])
                 .expect("seed gather pool");
         }
-        let gather = thread::spawn(move || gather_pty_linux(read_fd, output_tx, recycle_rx, None));
+        let gather = thread::spawn(move || {
+            gather_pty_linux(read_fd, output_tx, recycle_rx, None, ActorWake::none());
+        });
 
         assert_eq!(
             rustix::io::write(&write_fd, b"prompt").expect("interactive fixture write"),

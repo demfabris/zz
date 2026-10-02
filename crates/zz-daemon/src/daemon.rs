@@ -24825,7 +24825,7 @@ impl Shared {
         let (pane, terminal, events) =
             self.install_command_output(client, preferred_pane, title, text, false)?;
         if let Err(error) =
-            self.watch_command_output(client, pane, &terminal, events, VecDeque::new(), None, None)
+            self.watch_command_output(client, pane, &terminal, events, VecDeque::new(), None)
         {
             self.close_command_output(client, &terminal);
             return Err(error);
@@ -24870,16 +24870,6 @@ impl Shared {
                 }
             };
             let admitted_generation = viewport_generation(&viewport);
-            let (start, start_rx) = mpsc::channel();
-            self.watch_command_output(
-                client,
-                pane,
-                &terminal,
-                events,
-                prefetched,
-                Some(admitted_generation),
-                Some(start_rx),
-            )?;
             let output_id = self.enqueue_initial_command_output(
                 client,
                 pane,
@@ -24887,9 +24877,14 @@ impl Shared {
                 viewport.as_ref(),
                 outbound,
             )?;
-            if start.send(()).is_err() {
-                self.retire_current_command_output(client, &terminal);
-            }
+            self.watch_command_output(
+                client,
+                pane,
+                &terminal,
+                events,
+                prefetched,
+                Some(admitted_generation),
+            )?;
             Ok(output_id)
         })();
         if result.is_err() {
@@ -25076,23 +25071,14 @@ impl Shared {
         events: TerminalEvents,
         prefetched: VecDeque<DeferredTerminalEvent>,
         admitted_generation: Option<TerminalGeneration>,
-        start: Option<mpsc::Receiver<()>>,
     ) -> Result<(), DaemonError> {
         #[cfg(any(test, windows))]
         self.start_watcher_consumer()?;
-        let sender = self.watcher_tx.clone();
-        let watcher =
-            watchers::Watcher::command_output(client, pane, terminal, admitted_generation);
-        thread::Builder::new()
-            .name(format!("zz-output-{}", client.0))
-            .spawn(move || {
-                if start.is_some_and(|start| start.recv().is_err()) {
-                    return;
-                }
-                sender.relay(watcher, &events, prefetched);
-            })
-            .map_err(|error| DaemonError::Thread(error.to_string()))?;
-        Ok(())
+        self.watcher_tx.register(
+            watchers::Watcher::command_output(client, pane, terminal, admitted_generation),
+            events,
+            prefetched,
+        )
     }
 
     fn watch_popup(
@@ -25102,14 +25088,11 @@ impl Shared {
     ) -> Result<(), DaemonError> {
         #[cfg(any(test, windows))]
         self.start_watcher_consumer()?;
-        let sender = self.watcher_tx.clone();
-        let watcher = watchers::Watcher::popup(client, terminal);
-        let events = terminal.events();
-        thread::Builder::new()
-            .name(format!("zz-popup-{}", client.0))
-            .spawn(move || sender.relay(watcher, &events, VecDeque::new()))
-            .map_err(|error| DaemonError::Thread(error.to_string()))?;
-        Ok(())
+        self.watcher_tx.register(
+            watchers::Watcher::popup(client, terminal),
+            terminal.events(),
+            VecDeque::new(),
+        )
     }
 
     fn is_current_popup(&self, client: ClientId, terminal: &Arc<TerminalSession>) -> bool {
@@ -25463,14 +25446,11 @@ impl Shared {
             .state
             .pane(pane)
             .is_some_and(|pane| matches!(pane.kind, PaneKind::Agent(_)));
-        let sender = self.watcher_tx.clone();
-        let watcher = watchers::Watcher::terminal(pane, terminal, projects_agent);
-        let events = terminal.events();
-        thread::Builder::new()
-            .name(format!("zz-pane-{}", pane.0))
-            .spawn(move || sender.relay(watcher, &events, VecDeque::new()))
-            .map_err(|error| DaemonError::Thread(error.to_string()))?;
-        Ok(())
+        self.watcher_tx.register(
+            watchers::Watcher::terminal(pane, terminal, projects_agent),
+            terminal.events(),
+            VecDeque::new(),
+        )
     }
 
     fn close_exited_terminal(self: &Arc<Self>, pane: PaneId, terminal: &Arc<TerminalSession>) {

@@ -20,6 +20,7 @@ fn fixture() -> (Arc<Shared>, PaneId, Arc<TerminalSession>, LoopWatchers) {
         .terminals_mut()
         .insert(pane, Arc::clone(&terminal));
     terminal.attach_view(TerminalViewId(1));
+    terminal.fresh_viewport();
     let watchers = LoopWatchers::new(&shared);
     (shared, pane, terminal, watchers)
 }
@@ -30,39 +31,62 @@ fn start(
     pane: PaneId,
     terminal: &Arc<TerminalSession>,
 ) {
-    let mut watcher = Watcher::terminal(pane, terminal, false);
-    watcher.id = 1;
-    watchers
-        .input(shared, Input::Started(Box::new(watcher)))
+    shared
+        .watcher_tx
+        .register(
+            Watcher::terminal(pane, terminal, false),
+            terminal.events(),
+            VecDeque::new(),
+        )
         .unwrap();
+    let input = watchers
+        .inputs
+        .as_ref()
+        .unwrap()
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap();
+    assert!(matches!(input, Input::Started(_)));
+    watchers.input(shared, input).unwrap();
 }
 
 #[test]
-fn relay_transfers_events_while_server_state_is_locked() {
-    let (shared, pane, terminal, watchers) = fixture();
-    let inputs = watchers.inputs.as_ref().unwrap().clone();
-    let sender = shared.watcher_tx.clone();
-    let watcher = Watcher::terminal(pane, &terminal, false);
-    let events = terminal.events();
+fn producer_notifies_while_server_state_is_locked() {
+    let (shared, pane, terminal, mut watchers) = fixture();
     let locked = shared.inner.lock();
-    let relay = thread::spawn(move || sender.relay(watcher, &events, VecDeque::new()));
+    start(&mut watchers, &shared, pane, &terminal);
     assert!(matches!(
-        inputs.recv_timeout(Duration::from_secs(2)).unwrap(),
-        Input::Started(_)
+        watchers
+            .inputs
+            .as_ref()
+            .unwrap()
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap(),
+        Input::Ready(1)
     ));
-    let event = inputs.recv_timeout(Duration::from_secs(2)).unwrap();
-    assert!(matches!(event, Input::Event(_, _)));
     drop(locked);
-    drop(event);
-    shared.inner.lock().terminals_mut().remove(&pane);
-    drop(terminal);
-    relay.join().unwrap();
+    watchers.input(&shared, Input::Ready(1)).unwrap();
+    assert_eq!(
+        shared.inner.lock().engine.state.pane(pane).unwrap().title,
+        "forwarded title"
+    );
+}
+
+#[test]
+fn publication_before_registration_is_drained_by_the_loop() {
+    let (shared, pane, terminal, mut watchers) = fixture();
+    assert!(terminal.diagnostics().viewport_notification_pending);
+    start(&mut watchers, &shared, pane, &terminal);
+    watchers.turn(&shared).unwrap();
+    assert_eq!(
+        shared.inner.lock().engine.state.pane(pane).unwrap().title,
+        "forwarded title"
+    );
+    assert!(!terminal.diagnostics().viewport_notification_pending);
 }
 
 #[test]
 fn queued_viewport_from_retired_terminal_cannot_rename_its_replacement() {
     let (shared, pane, terminal, mut watchers) = fixture();
-    let event = terminal.events().recv_deferred_blocking().unwrap();
     start(&mut watchers, &shared, pane, &terminal);
     let replacement = Arc::new(TerminalSession::spawn_output_view(
         "replacement".to_owned(),
@@ -83,43 +107,109 @@ fn queued_viewport_from_retired_terminal_cannot_rename_its_replacement() {
         .unwrap()
         .title
         .clone();
-    watchers.input(&shared, Input::Event(1, event)).unwrap();
+    watchers.turn(&shared).unwrap();
     assert_eq!(
         shared.inner.lock().engine.state.pane(pane).unwrap().title,
         before
     );
     assert!(!terminal.diagnostics().viewport_notification_pending);
-    watchers.input(&shared, Input::Closed(1)).unwrap();
-    assert!(watchers.surfaces.is_empty());
+    shared.inner.lock().terminals_mut().remove(&pane);
+    drop(terminal);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !watchers.surfaces.is_empty() {
+        watchers.turn(&shared).unwrap();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
 }
 
 #[test]
 fn worker_completion_admits_queued_final_frame_before_stream_closure() {
     let (shared, pane, terminal, mut watchers) = fixture();
-    let event = terminal.events().recv_deferred_blocking().unwrap();
     start(&mut watchers, &shared, pane, &terminal);
     watchers.surfaces.get_mut(&1).unwrap().busy = true;
-    watchers.input(&shared, Input::Event(1, event)).unwrap();
-    watchers.input(&shared, Input::Closed(1)).unwrap();
+    watchers.turn(&shared).unwrap();
+
     assert!(terminal.diagnostics().viewport_notification_pending);
     assert_ne!(
         shared.inner.lock().engine.state.pane(pane).unwrap().title,
         "forwarded title"
     );
     watchers.input(&shared, Input::Completed(1)).unwrap();
+    watchers.turn(&shared).unwrap();
     assert_eq!(
         shared.inner.lock().engine.state.pane(pane).unwrap().title,
         "forwarded title"
     );
     assert!(!terminal.diagnostics().viewport_notification_pending);
+    shared.inner.lock().terminals_mut().remove(&pane);
+    drop(terminal);
+    let deadline = Instant::now() + Duration::from_secs(2);
     while !watchers.surfaces.is_empty() {
-        let completion = watchers
-            .inputs
-            .as_ref()
-            .unwrap()
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap();
-        watchers.input(&shared, completion).unwrap();
+        watchers.turn(&shared).unwrap();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
     }
-    assert!(watchers.surfaces.is_empty());
+}
+
+#[test]
+fn repeated_readiness_keeps_one_entry_per_surface() {
+    let (shared, pane, terminal, mut watchers) = fixture();
+    start(&mut watchers, &shared, pane, &terminal);
+    let watcher = watchers.surfaces.get(&1).unwrap();
+    for _ in 0..1024 {
+        LoopWatchers::schedule(&shared, watcher);
+    }
+    assert_eq!(watchers.inputs.as_ref().unwrap().len(), 1);
+    let input = watchers.inputs.as_ref().unwrap().try_recv().unwrap();
+    assert!(matches!(input, Input::Ready(1)));
+    watchers.input(&shared, input).unwrap();
+    assert!(
+        !watchers
+            .surfaces
+            .get(&1)
+            .unwrap()
+            .notified
+            .load(Ordering::Acquire)
+    );
+}
+
+#[test]
+fn drained_turn_rearms_the_coalesced_loop_wake() {
+    let shared = Arc::new(Shared::new(1));
+    let mut watchers = LoopWatchers::new(&shared);
+    let mut poll = mio::Poll::new().unwrap();
+    let waker = Arc::new(mio::Waker::new(poll.registry(), mio::Token(1)).unwrap());
+    shared.watcher_tx.wake.install(waker);
+    let mut events = mio::Events::with_capacity(8);
+    for _ in 0..2 {
+        shared.watcher_tx.send(Input::Completed(1));
+        for _ in 0..1024 {
+            shared.watcher_tx.notify_loop();
+        }
+        assert_eq!(watchers.inputs.as_ref().unwrap().len(), 1);
+        poll.poll(&mut events, Some(Duration::from_secs(1)))
+            .unwrap();
+        assert!(!events.is_empty());
+        watchers.turn(&shared).unwrap();
+        assert!(!shared.watcher_tx.pending_wake.load(Ordering::Acquire));
+        poll.poll(&mut events, Some(Duration::from_millis(10)))
+            .unwrap();
+        assert!(events.is_empty());
+    }
+}
+
+#[test]
+fn closure_without_a_final_event_removes_the_loop_receiver() {
+    let (shared, pane, terminal, mut watchers) = fixture();
+    start(&mut watchers, &shared, pane, &terminal);
+    watchers.turn(&shared).unwrap();
+    shared.inner.lock().terminals_mut().remove(&pane);
+    drop(terminal);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !watchers.surfaces.is_empty() {
+        watchers.turn(&shared).unwrap();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
 }

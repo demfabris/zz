@@ -8,7 +8,7 @@ use std::{
     path::PathBuf,
     rc::Rc,
     sync::{
-        Arc, LazyLock,
+        Arc, LazyLock, OnceLock,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     thread,
@@ -1339,10 +1339,11 @@ struct EventQueueState {
     foreground: RwLock<Option<Box<ForegroundSource>>>,
     completion: AtomicU64,
     identity_ready: parking_lot::Condvar,
+    notification_sink: Box<OnceLock<Box<dyn Fn() + Send + Sync>>>,
 }
 
 impl EventQueueState {
-    const fn new() -> Self {
+    fn new() -> Self {
         Self {
             pending_reliable: AtomicUsize::new(0),
             pending_reliable_bytes: AtomicUsize::new(0),
@@ -1352,6 +1353,13 @@ impl EventQueueState {
             foreground: RwLock::new(None),
             completion: AtomicU64::new(0),
             identity_ready: parking_lot::Condvar::new(),
+            notification_sink: Box::new(OnceLock::new()),
+        }
+    }
+
+    fn notify_consumer(&self) {
+        if let Some(sink) = self.notification_sink.get() {
+            sink();
         }
     }
 
@@ -1411,6 +1419,18 @@ impl Drop for DeferredTerminalEvent {
 }
 
 impl TerminalEvents {
+    pub fn install_notification_sink(&self, sink: impl Fn() + Send + Sync + 'static) {
+        assert!(self.state.notification_sink.set(Box::new(sink)).is_ok());
+        self.state.notify_consumer();
+    }
+
+    pub fn try_recv_deferred(&self) -> Result<DeferredTerminalEvent, async_channel::TryRecvError> {
+        Ok(DeferredTerminalEvent {
+            event: Some(self.receiver.try_recv()?),
+            state: Arc::clone(&self.state),
+        })
+    }
+
     pub fn recv_deferred_blocking(
         &self,
     ) -> Result<DeferredTerminalEvent, async_channel::RecvError> {
@@ -1434,15 +1454,42 @@ impl TerminalEvents {
     }
 }
 
-fn terminal_event_channel(
-    state: &Arc<EventQueueState>,
-) -> (async_channel::Sender<TerminalEvent>, TerminalEvents) {
+#[derive(Clone)]
+struct TerminalEventSender(Arc<TerminalEventProducer>);
+
+struct TerminalEventProducer {
+    sender: async_channel::Sender<TerminalEvent>,
+    state: Arc<EventQueueState>,
+}
+
+impl std::ops::Deref for TerminalEventSender {
+    type Target = async_channel::Sender<TerminalEvent>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0.sender
+    }
+}
+
+impl Drop for TerminalEventProducer {
+    fn drop(&mut self) {
+        self.sender.close();
+        self.state.notify_consumer();
+    }
+}
+
+fn terminal_event_channel(state: &Arc<EventQueueState>) -> (TerminalEventSender, TerminalEvents) {
     let (sender, receiver) = async_channel::bounded(MAX_PENDING_TERMINAL_EVENTS);
     let events = TerminalEvents {
         receiver,
         state: Arc::clone(state),
     };
-    (sender, events)
+    (
+        TerminalEventSender(Arc::new(TerminalEventProducer {
+            sender,
+            state: Arc::clone(state),
+        })),
+        events,
+    )
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -4533,7 +4580,7 @@ fn normalize_view_action_result(
 
 #[derive(Clone)]
 struct Publisher {
-    event_tx: async_channel::Sender<TerminalEvent>,
+    event_tx: TerminalEventSender,
     latest: Arc<RwLock<PublishedViewports>>,
     state: Arc<EventQueueState>,
 }
@@ -4685,7 +4732,8 @@ impl Publisher {
             match self.event_tx.try_send(TerminalEvent::ViewportReady {
                 output_activity: false,
             }) {
-                Ok(()) | Err(async_channel::TrySendError::Closed(_)) => {}
+                Ok(()) => self.state.notify_consumer(),
+                Err(async_channel::TrySendError::Closed(_)) => {}
                 Err(async_channel::TrySendError::Full(_)) => {
                     self.state
                         .notification_pending
@@ -4770,7 +4818,10 @@ impl Publisher {
             return Err(WorkerError::EventBackpressure);
         }
         match self.event_tx.try_send(event) {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                self.state.notify_consumer();
+                Ok(())
+            }
             Err(async_channel::TrySendError::Full(_)) => {
                 self.release_reliable(bytes);
                 Err(WorkerError::EventBackpressure)
@@ -16573,7 +16624,7 @@ mod tests {
     #[test]
     fn actor_event_handles_share_compact_queue_state() {
         let word = std::mem::size_of::<usize>();
-        assert!(std::mem::size_of::<EventQueueState>() <= 7 * word);
+        assert!(std::mem::size_of::<EventQueueState>() <= 8 * word);
         assert_eq!(std::mem::size_of::<Publisher>(), 3 * word);
         assert_eq!(std::mem::size_of::<TerminalEvents>(), 3 * word);
         assert!(

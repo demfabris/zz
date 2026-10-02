@@ -1,4 +1,3 @@
-#[cfg(any(windows, test))]
 use std::sync::LazyLock;
 
 use super::*;
@@ -12,24 +11,19 @@ thread_local! {
     static EXEC_CLIENT: Cell<Option<ClientId>> = const { Cell::new(None) };
 }
 
-#[cfg(any(windows, test))]
 type ExecJob = Box<dyn FnOnce() + Send>;
 
-#[cfg(any(windows, test))]
 const IDLE_CONNECTION_THREADS: usize = 2;
 #[cfg(windows)]
 const EXEC_FLUSH_FRAMES: usize = 64;
 #[cfg(windows)]
 const EXEC_FLUSH_BYTES: usize = 64 * 1024;
-#[cfg(any(windows, test))]
 const CONNECTION_THREAD_IDLE: Duration = Duration::from_secs(1);
 
-#[cfg(any(windows, test))]
 static SPAWN_PER_CONNECTION: LazyLock<bool> = LazyLock::new(|| {
     std::env::var_os("ZZ_PERF_CONNECTION_THREADS").is_some_and(|value| value == "0")
 });
 
-#[cfg(any(windows, test))]
 #[derive(Default)]
 pub(super) struct ConnectionThreads {
     idle: Mutex<Vec<crossbeam_channel::Sender<ExecJob>>>,
@@ -39,7 +33,6 @@ pub(super) struct ConnectionThreads {
     live_workers: Arc<std::sync::atomic::AtomicUsize>,
 }
 
-#[cfg(any(windows, test))]
 impl ConnectionThreads {
     #[cfg(windows)]
     pub(super) fn log_knob() {
@@ -123,7 +116,6 @@ impl Drop for WorkerLifetime {
     }
 }
 
-#[cfg(any(windows, test))]
 fn connection_worker(threads: &Weak<ConnectionThreads>, first: ExecJob) {
     let (worker, jobs) = crossbeam_channel::bounded::<ExecJob>(1);
     let mut job = first;

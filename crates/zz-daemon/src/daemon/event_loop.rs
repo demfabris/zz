@@ -2072,10 +2072,14 @@ pub(super) fn write_fixture(
 pub(super) fn start_timer_fixture(shared: &Arc<Shared>) -> Result<(), DaemonError> {
     let mut event_loop = EventLoop::empty(shared)?;
     event_loop.signals = Some(SignalPipes::new(&event_loop.poll)?);
+    shared.helpers.set_loop_thread(None);
     let shared = Arc::downgrade(shared);
     thread::Builder::new()
         .name("zz-mux-test".to_owned())
         .spawn(move || {
+            if let Some(shared) = shared.upgrade() {
+                shared.helpers.set_loop_thread(Some(thread::current().id()));
+            }
             loop {
                 let Some(shared) = shared.upgrade() else {
                     return;

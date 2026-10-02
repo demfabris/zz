@@ -45,6 +45,7 @@ mod exec;
 mod exec_tests;
 mod file_commands;
 mod helpers;
+mod history_io;
 #[cfg(unix)]
 #[allow(
     dead_code,
@@ -4146,7 +4147,7 @@ struct SharedServer {
     pipe_jobs: pipe_jobs::Client,
     #[cfg(all(test, unix))]
     shell_loop_start: Mutex<()>,
-    prompt_history_effects: Mutex<()>,
+    prompt_history_effects: Mutex<history_io::Saves>,
     background_insertions: Mutex<BackgroundInsertions>,
     next_background_insertion: AtomicU64,
     /// Built on the first agent pane rather than at startup: a daemon that
@@ -4213,9 +4214,8 @@ struct SharedServer {
     pending_wait_queues: Mutex<Vec<wait_queue::InsertedTask>>,
     #[cfg(windows)]
     exec_links: Mutex<BTreeMap<ClientId, Arc<exec::ExecLink>>>,
-    prompt_history_source: Mutex<Option<(PathBuf, usize)>>,
+    prompt_history_source: Mutex<history_io::Load>,
     prompt_history_settled: AtomicBool,
-    #[cfg(any(windows, test))]
     connection_threads: Arc<exec::ConnectionThreads>,
     #[cfg(unix)]
     lifecycle: lifecycle::Inbox,
@@ -5089,7 +5089,7 @@ impl Shared {
             pipe_jobs: pipe_jobs::Client::default(),
             #[cfg(all(test, unix))]
             shell_loop_start: Mutex::new(()),
-            prompt_history_effects: Mutex::new(()),
+            prompt_history_effects: Mutex::new(history_io::Saves::default()),
             background_insertions: Mutex::new(BackgroundInsertions::default()),
             next_background_insertion: AtomicU64::new(0),
             #[cfg(feature = "agent")]
@@ -5154,9 +5154,8 @@ impl Shared {
             pending_wait_queues: Mutex::new(Vec::new()),
             #[cfg(windows)]
             exec_links: Mutex::new(BTreeMap::new()),
-            prompt_history_source: Mutex::new(None),
+            prompt_history_source: Mutex::new(history_io::Load::default()),
             prompt_history_settled: AtomicBool::new(true),
-            #[cfg(any(windows, test))]
             connection_threads: Arc::default(),
             #[cfg(unix)]
             lifecycle: lifecycle::Inbox::default(),
@@ -5259,13 +5258,14 @@ impl Shared {
                 .map(|path| (path, inner.engine.prompt_history_limit()))
         };
         if let Some(source) = history_settings {
-            *self.prompt_history_source.lock() = Some(source);
+            self.prompt_history_source.lock().source = Some(source);
             self.prompt_history_settled.store(false, Ordering::Release);
         }
     }
 
     fn apply_helper_result(self: &Arc<Self>, result: helpers::Result) {
         match result {
+            helpers::Result::Complete(complete) => complete(self),
             helpers::Result::File { complete, result } => complete(self, result),
             helpers::Result::Path { result, applied } => {
                 self.apply_path_list_result(result);
@@ -5364,6 +5364,7 @@ impl Shared {
         if crate::status::terminfo_is_warm(environment) {
             return Ok(());
         }
+        self.helpers.require_off_loop()?;
         let (reply, result) = mpsc::sync_channel(1);
         self.helpers.submit_wait(helpers::Task::Terminfo {
             environment: environment.to_vec(),
@@ -5377,33 +5378,6 @@ impl Shared {
         result
             .recv()
             .map_err(|_| std::io::Error::other("terminfo helper stopped"))
-    }
-
-    fn ensure_prompt_history(&self) {
-        if self.prompt_history_settled.load(Ordering::Acquire) {
-            return;
-        }
-        let mut source = self.prompt_history_source.lock();
-        if let Some((path, limit)) = source.take() {
-            let (reply, result) = mpsc::sync_channel(1);
-            if let Err(error) = self.helpers.submit_wait(helpers::Task::HistoryLoad {
-                path: path.clone(),
-                limit,
-                reply,
-            }) {
-                *source = Some((path, limit));
-                log::warn!("could not load prompt history: {error}");
-                return;
-            }
-            let Ok((command, search)) = result.recv() else {
-                *source = Some((path, limit));
-                return;
-            };
-            let mut inner = self.inner.lock();
-            inner.command_history = command;
-            inner.search_history = search;
-        }
-        self.prompt_history_settled.store(true, Ordering::Release);
     }
 
     fn freeze_response_admissions_and_wait(&self, timeout: Duration) -> bool {
@@ -7371,6 +7345,34 @@ impl Shared {
             return Ok(Execution::default());
         }
         let command = streamed_command.as_ref().unwrap_or(command);
+        if matches!(
+            canonical_command(&command.name),
+            "command-prompt" | "show-prompt-history" | "clear-prompt-history"
+        ) {
+            self.ensure_prompt_history();
+            if let Some(wait) = self
+                .command_item
+                .as_ref()
+                .unwrap()
+                .lock()
+                .pending_wait
+                .as_mut()
+            {
+                let command = command.clone();
+                wait.file = Some(Box::new(move |shared, context, queue| {
+                    shared.execute_with_mux_source_routed_for_terminal_in_queue(
+                        client,
+                        kind,
+                        context,
+                        &command,
+                        mux_source,
+                        client_terminal,
+                        Some(queue),
+                    )
+                }));
+                return Ok(Execution::default());
+            }
+        }
         if MuxEngine::is_command_alias_group(command) {
             if let Some(parent) = queue_execution.filter(|queue| queue.frame_active.get()) {
                 let body = MuxEngine::command_alias_group_body(command).expect("alias body");
@@ -8575,7 +8577,10 @@ impl Shared {
         }
         let queued = self.watcher_effects.is_some();
         #[cfg(unix)]
-        let queued = queued || self.loop_leaf_enabled() || self.loop_active.load(Ordering::Acquire);
+        let queued = queued
+            || self.loop_leaf_enabled()
+            || self.loop_active.load(Ordering::Acquire)
+            || self.helpers.on_loop_thread();
         if queued {
             self.enqueue_event_hooks(events);
             return;
@@ -18089,7 +18094,7 @@ impl Shared {
     }
 
     fn prompt_history_command(
-        &self,
+        self: &Arc<Self>,
         name: &str,
         args: &[RawText],
     ) -> Result<Execution, DaemonError> {
@@ -25006,7 +25011,6 @@ impl Shared {
         context: &mut ExecutionContext,
         text: &str,
     ) -> bool {
-        self.ensure_prompt_history();
         let result = {
             let mut inner = self.inner.lock();
             let Some(prompt) = inner.client(client).and_then(|c| c.command_prompt.as_ref()) else {
@@ -25063,7 +25067,6 @@ impl Shared {
         input: &zz_terminal::KeyInput,
         text_follows: bool,
     ) -> bool {
-        self.ensure_prompt_history();
         let outcome = {
             let mut inner = self.inner.lock();
             let Some(mut prompt) = inner
@@ -25206,7 +25209,6 @@ impl Shared {
             )
             .into());
         }
-        self.ensure_prompt_history();
         let (read_only, read_only_pane) = {
             let inner = self.inner.lock();
             let read_only = inner.client_flags.contains(client);
@@ -25320,12 +25322,12 @@ impl Shared {
         Ok(())
     }
 
-    fn record_prompt_history(&self, prompt_type: CommandPromptType, input: &str) {
+    fn record_prompt_history(self: &Arc<Self>, prompt_type: CommandPromptType, input: &str) {
         self.record_prompt_history_with_persist_observer(prompt_type, input, || {}, || {});
     }
 
     fn record_prompt_history_with_persist_observer<BeforeLock, AfterLock>(
-        &self,
+        self: &Arc<Self>,
         prompt_type: CommandPromptType,
         input: &str,
         before_lock: BeforeLock,
@@ -25352,12 +25354,12 @@ impl Shared {
         }
     }
 
-    fn clear_prompt_history(&self, prompt_type: Option<CommandPromptType>) {
+    fn clear_prompt_history(self: &Arc<Self>, prompt_type: Option<CommandPromptType>) {
         self.clear_prompt_history_with_persist_observer(prompt_type, || {}, || {});
     }
 
     fn clear_prompt_history_with_persist_observer<BeforeLock, AfterLock>(
-        &self,
+        self: &Arc<Self>,
         prompt_type: Option<CommandPromptType>,
         before_lock: BeforeLock,
         after_lock: AfterLock,
@@ -25377,42 +25379,6 @@ impl Shared {
             }
         }
         self.persist_prompt_history_with_observer(before_lock, after_lock);
-    }
-
-    fn persist_prompt_history_with_observer<BeforeLock, AfterLock>(
-        &self,
-        before_lock: BeforeLock,
-        after_lock: AfterLock,
-    ) where
-        BeforeLock: FnOnce(),
-        AfterLock: FnOnce(),
-    {
-        before_lock();
-        let _prompt_history = self.prompt_history_effects.lock();
-        after_lock();
-        let save = {
-            let inner = self.inner.lock();
-            prompt_history_path(inner.engine.history_file()).map(|path| {
-                (
-                    path,
-                    inner.command_history.clone(),
-                    inner.search_history.clone(),
-                )
-            })
-        };
-        if let Some((path, command, search)) = save {
-            let (reply, result) = mpsc::sync_channel(1);
-            if let Err(error) = self.helpers.submit_wait(helpers::Task::HistorySave {
-                path,
-                command,
-                search,
-                reply,
-            }) {
-                log::warn!("could not save prompt history: {error}");
-            } else {
-                let _ = result.recv();
-            }
-        }
     }
 
     fn submit_command_prompt(
@@ -32554,6 +32520,17 @@ impl Shared {
 
     #[cfg(all(feature = "agent", unix))]
     fn sync_claude_peer_states(self: &Arc<Self>) {
+        if self.helpers.on_loop_thread() {
+            if let Err(error) = self.submit_helper(helpers::Task::Peers {
+                panes: self.peer_scan_inputs(),
+                always: *timers::PEER_SCAN_ALWAYS,
+                reply: None,
+                completed: None,
+            }) {
+                log::warn!("could not scan Claude peers: {error}");
+            }
+            return;
+        }
         let (reply, result) = mpsc::sync_channel(1);
         if let Err(error) = self.helpers.submit_wait(helpers::Task::Peers {
             panes: self.peer_scan_inputs(),

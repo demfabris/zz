@@ -84,7 +84,7 @@ fn twenty_registered_jobs_add_no_monitor_threads_and_reap_once() {
         )
         .unwrap();
     }
-    assert_eq!(crate::process_info::sample(pid).unwrap().threads, before);
+    assert!(crate::process_info::sample(pid).unwrap().threads <= before);
     pump(&mut poll, &mut jobs, |jobs| jobs.jobs.is_empty());
     let results = results.try_iter().collect::<Vec<_>>();
     assert_eq!(results.len(), 20);

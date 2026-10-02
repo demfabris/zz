@@ -4002,3 +4002,15 @@ stayed at 3/25 for one/twenty panes. Detached throughput was 122.8 to 124.5 MB/s
 base's 130.2; hidden chatty instructions varied from 0.914x to 1.043x the base. The final three
 alternating pairs run after this commit and decide those strict bounds. The tmux-relative
 Control burst gate was already red on the base; latency also varied. Mac checks go to the orchestrator.
+
+
+## W3 helper reply waits (2026-10-02)
+
+- Prompt-history loads park command frames; saves apply ordered snapshots through helper completions. A busy pair of helpers leaves other clients free to run. Loop completion hooks enqueue config import/reload work on execution workers.
+- Remaining synchronous replies are off-loop: guarded startup/config reads and ClientHello terminfo warming; peer scans take an async branch on the loop; path acknowledgements and discovery-job replies wait inside helpers. The test-only Hold task also waits inside a helper. Audit: `/tmp/zzpc/helperwait-recv-audit.json`.
+- Checks: 1,533 daemon tests pass, one ignored; eight helper tests pass; focused history ordering, Clippy, Windows compilation and five compatibility scenarios pass. Moved test drivers now record the running loop thread. The jobs test permits retiring threads while still rejecting any increase.
+- Quick checkpoint (`83142ff8a`): 37 passing gates, 41 informational rows, zero failures. Config source: 39.8747 Minstr (1.056x wave2); all idle counters zero; threads p1/p20 = 2/5. These are whole-W3 numbers, not the isolated helper-wait delta. W0 receipt: `/tmp/zzpc/loop-helperwait.json`.
+- Handoff: compare three alternating runs of `/tmp/zzpc/w3/loop-362c83bc-cli` and the final release CLI in `/tmp/zzpc/helperwait-{base,final}-{1,2,3}.json`; CLI/config instruction medians must stay within 2% or the base range. Linux-only checks remain for Linux; prompt-history compatibility stays excluded per the lane brief.
+
+- e21 pick (`0ca403542`, Linux): kept loop-owned startup, shutdown and client cleanup, plus the idle-lifecycle and write-drain fixes. Only `reload-config` and `import-tmux-config` hooks keep the execution-worker fallback; other hook commands use loop continuations.
+- Pick checks: eight helper tests, four prompt-history tests, the four named lifecycle/write-drain regressions, Clippy and Windows compilation pass. The serial daemon run passes 1,504 unit tests and 35 integration tests, with one soak test ignored and the allowed Mac-bundle test excluded; two earlier suite failures pass alone. Six compatibility scenarios have zero divergences across 61 steps; startup diagnostics pass 8/8. No new perf measurements: the figures above belong to the source branch. Mac-only checks stay with the orchestrator.

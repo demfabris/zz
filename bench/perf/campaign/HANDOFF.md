@@ -144,6 +144,18 @@ read "Lane brief rules" before launching anything.
     `copy_pipe_failure_is_a_reliable_client_message_and_releases_its_permit`. A Linux fix lane
     follows. e20 conflicts with e06 in daemon.rs; resolved once on the Linux branch, then the Mac
     branch takes the Linux tree through a merge (no force-push of `perf/loop`).
+  - Branches converged 2026-10-02: the e20 cherry-pick onto e06 was resolved on Linux (`036dc942`),
+    and the Mac `perf/loop` merged it taking the Linux tree (`e122e38d`; trees identical, no
+    force-push). Mac leg of e06 and the resolution: 1442 lib tests, compat clean. `perf/loop` is
+    backed up on origin (not merged to main).
+  - Mid-lane strict Mac gate (`gate-mac-65defe00.json` in /tmp/zzpc/w3, against B): 74 pass,
+    9 fail. Fixed vs B: `spawn.cpu.kill_pane` 0.373 -> 0.288 ms, `statusjob.threads_per_s` 3 -> 0.
+    Threads 3/25 -> 2/5, footprint p20 16.9 -> 10.9 MB, echo p99 busy 2.17 -> 1.13 ms (tmux 0.38),
+    idle 1.70 -> 0.87 ms. Still red: echo x4 and control.latency (ratio to tmux), attach.ttfc.p4
+    (13.3 vs tmux 11.8, improved from 19.1), client CPU visible. `spawn.instr.split_empty_P` is
+    bimodal (B itself reads 1.09 or 2.06). Only real regression vs the wave-2 exit baseline:
+    `mem.copy_instr.scroll180` 4.92 -> 5.5 Minstr, added by c01 (bisected: B 5.03-5.12, c01
+    5.51-5.56); fix lane `c01copy` on the Mac.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

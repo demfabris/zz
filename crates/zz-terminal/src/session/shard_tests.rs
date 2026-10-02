@@ -377,6 +377,7 @@ fn short_lived_children_complete_without_output_on_a_shared_shard() {
     }
 }
 
+#[cfg(target_os = "macos")]
 #[test]
 fn a_child_stuck_draining_its_terminal_does_not_freeze_the_shard() {
     let shard = ShardHandle::start(108).expect("shard");

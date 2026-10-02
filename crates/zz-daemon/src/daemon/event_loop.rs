@@ -1181,6 +1181,7 @@ impl EventLoop {
             self.jobs
                 .ready(self.poll.registry(), token, readable, writable);
         }
+        shared.drain_background_insertions();
         shared.drain_control_output_taps();
         self.watchers.turn(shared).unwrap();
     }
@@ -1190,6 +1191,12 @@ impl EventLoop {
         self.turn_pipe_jobs(shared);
         self.jobs.cancel_all(self.poll.registry());
         self.jobs.child_signal(self.poll.registry());
+    }
+
+    #[cfg(test)]
+    pub(super) fn shell_test_turn(&mut self, shared: &Arc<Shared>) {
+        self.jobs.child_signal(self.poll.registry());
+        self.turn(shared).unwrap();
     }
 
     fn turn_status_jobs(&mut self) {
@@ -1325,6 +1332,8 @@ impl EventLoop {
     }
 
     fn turn(&mut self, shared: &Arc<Shared>) -> Result<(), DaemonError> {
+        #[cfg(test)]
+        self.jobs.child_signal(self.poll.registry());
         #[cfg(feature = "agent")]
         self.agents.turn(shared);
         if shared.terminal_requests.pending()
@@ -1338,6 +1347,7 @@ impl EventLoop {
         self.turn_status_jobs();
         self.turn_pipe_jobs(shared);
         self.jobs.turn(self.poll.registry(), Instant::now());
+        shared.drain_background_insertions();
         self.watchers.turn(shared)?;
         self.timers.turn(shared, &self.waker)?;
         shared.drain_control_output_taps();
@@ -1794,6 +1804,7 @@ pub(super) fn serve_single(
     shared: &Arc<Shared>,
 ) -> Result<(), DaemonError> {
     let mut event_loop = EventLoop::empty(shared)?;
+    event_loop.signals = Some(SignalPipes::new(&event_loop.poll)?);
     event_loop.insert(stream.receive_fd()?)?;
     drop(stream);
     serve_test_loop(&mut event_loop, shared)
@@ -1810,11 +1821,29 @@ fn serve_test_loop(event_loop: &mut EventLoop, shared: &Arc<Shared>) -> Result<(
         let events = event_loop
             .events
             .iter()
-            .map(mio::event::Event::token)
+            .map(|event| {
+                (
+                    event.token(),
+                    event.is_readable() || event.is_read_closed(),
+                    event.is_writable() || event.is_write_closed(),
+                )
+            })
             .collect::<Vec<_>>();
-        for token in events {
-            if event_loop.connections.contains_key(&token) {
-                event_loop.read_ready(token, shared);
+        for (token, readable, writable) in events {
+            if token == CHILD_SIGNAL {
+                SignalPipes::drain(&mut event_loop.signals.as_mut().unwrap().child)?;
+                event_loop.jobs.child_signal(event_loop.poll.registry());
+            } else if event_loop.jobs.contains_token(token) {
+                event_loop
+                    .jobs
+                    .ready(event_loop.poll.registry(), token, readable, writable);
+            } else if event_loop.connections.contains_key(&token) {
+                if readable {
+                    event_loop.read_ready(token, shared);
+                }
+                if writable && let Some(connection) = event_loop.connections.get_mut(&token) {
+                    connection.write_ready()?;
+                }
             }
         }
     }

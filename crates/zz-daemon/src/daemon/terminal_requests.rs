@@ -314,6 +314,8 @@ impl CommandWait {
             item.pending_wait = Some(Box::new(RegisteredWait {
                 name: String::new(),
                 continuation,
+                #[cfg(unix)]
+                shell: None,
                 leaf: None,
                 guard: None,
                 terminal: Some(Arc::clone(&state)),

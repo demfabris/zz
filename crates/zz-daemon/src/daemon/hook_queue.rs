@@ -1,11 +1,9 @@
 use super::*;
-use std::os::unix::net::UnixStream;
 
 struct Queue {
     shared: Arc<Shared>,
     frames: Vec<InsertedQueueFrame<Box<CommandQueueExecution>>>,
     waiting: bool,
-    pending: Option<(PendingLeaf, InsertedCommandStep)>,
     sender: crossbeam_channel::Sender<LeafCompletion>,
     completed: crossbeam_channel::Receiver<LeafCompletion>,
 }
@@ -48,11 +46,7 @@ impl LoopHooks {
                     .lock()
                     .pending_wait
                     .as_ref()
-                    .is_none_or(|wait| wait.continuation.ready())
-                && queue
-                    .pending
-                    .as_ref()
-                    .is_none_or(|(pending, _)| pending.ready.load(Ordering::Acquire)))
+                    .is_none_or(|wait| wait.continuation.ready()))
                 || !queue.completed.is_empty()
         })
     }
@@ -136,7 +130,6 @@ impl LoopHooks {
                     shared,
                     frames: vec![frame],
                     waiting: false,
-                    pending: None,
                     sender,
                     completed,
                 });
@@ -158,7 +151,7 @@ impl LoopHooks {
         for _ in 0..count {
             let mut queue = self.queues.pop_front().expect("hook queue");
             queue.turn(waker)?;
-            if !queue.frames.is_empty() || queue.waiting || queue.pending.is_some() {
+            if !queue.frames.is_empty() || queue.waiting {
                 self.queues.push_front(queue);
                 break;
             }
@@ -172,7 +165,7 @@ fn blocking_leaf(command: &CommandInvocation) -> bool {
         return parse_run_shell_args(&command.args).is_err();
     }
     if canonical_command(&command.name) == "if-shell" {
-        return !parse_if_shell_args(&command.args).is_ok_and(|args| args.format);
+        return parse_if_shell_args(&command.args).is_err();
     }
     matches!(
         canonical_command(&command.name),
@@ -276,26 +269,7 @@ impl Queue {
             self.waiting = true;
             return Ok(());
         }
-        if let Some((pending, _)) = &self.pending
-            && !pending.ready.load(Ordering::Acquire)
-        {
-            return Ok(());
-        }
-        if let Some((pending, mut step)) = self.pending.take() {
-            let result = pending.receiver.try_recv().unwrap_or(Err(()));
-            step.0 = (pending.finish)(&shared, result);
-            let frame = self.frames.last_mut().expect("shell continuation frame");
-            let boundary = frame
-                .parked_boundary
-                .take()
-                .expect("shell continuation boundary");
-            let child = shared.settle_inserted_frame_step(client, kind, frame, boundary, step);
-            if let Some(child) = child {
-                self.frames.push(child);
-            }
-        }
         let sender = self.sender.clone();
-        let pending = &mut self.pending;
         let waiting = &mut self.waiting;
         let mut spawn_error = None;
         let finished = shared.advance_inserted_frames(
@@ -309,17 +283,6 @@ impl Queue {
                 if !blocking_leaf(command) {
                     let step =
                         shared.execute_inserted_frame_command(client, kind, frame, command, target);
-                    if let Some(leaf) = shared
-                        .command_item
-                        .as_ref()
-                        .expect("loop hook item")
-                        .lock()
-                        .pending_loop_leaf
-                        .take()
-                    {
-                        *pending = Some((leaf, step));
-                        return None;
-                    }
                     return Some(step);
                 }
                 if let Some(hook) = &frame.hook {
@@ -384,93 +347,4 @@ impl Queue {
         }
         Ok(())
     }
-}
-
-type FinishLeaf = Box<
-    dyn FnOnce(&Arc<Shared>, Result<ShellJobResult, ()>) -> Result<Execution, DaemonError> + Send,
->;
-
-pub(super) struct PendingLeaf {
-    pub(super) ready: Arc<AtomicBool>,
-    pub(super) receiver: mpsc::Receiver<Result<ShellJobResult, ()>>,
-    pub(super) finish: FinishLeaf,
-}
-
-pub(super) fn launch_shell(
-    shared: &Arc<Shared>,
-    command: &str,
-    cwd: &Path,
-    tmux: &str,
-    environment: &[(RawText, Option<RawText>)],
-    default_terminal: &str,
-    startup_reentry: Option<String>,
-    tmux_shim: Option<&Path>,
-    zz_executable: Option<&Path>,
-    show_stderr: bool,
-    permit: ShellJobPermit,
-    callback: impl FnOnce(Result<ShellJobResult, ()>) + Send + 'static,
-) -> Result<(), DaemonError> {
-    use std::os::{fd::OwnedFd, unix::process::CommandExt as _};
-    let (output, child_socket) = UnixStream::pair()?;
-    let cwd = existing_job_working_directory(cwd);
-    let mut process = shell_process(command);
-    configure_shell_job_environment(
-        &mut process,
-        environment,
-        default_terminal,
-        startup_reentry.is_some(),
-        tmux,
-        shared.socket_path.as_os_str(),
-        tmux_shim,
-        zz_executable,
-    );
-    process
-        .arg0("sh")
-        .process_group(0)
-        .current_dir(&cwd)
-        .env("PWD", cwd.as_os_str())
-        .stdin(Stdio::from(OwnedFd::from(child_socket.try_clone()?)))
-        .stdout(Stdio::from(OwnedFd::from(child_socket.try_clone()?)));
-    if let Some(startup_reentry) = startup_reentry {
-        process.env(crate::STARTUP_REENTRY_ENVIRONMENT_VARIABLE, startup_reentry);
-    }
-    if show_stderr {
-        process.stderr(Stdio::from(OwnedFd::from(child_socket.try_clone()?)));
-    } else {
-        process.stderr(Stdio::null());
-    }
-    output.shutdown(std::net::Shutdown::Write)?;
-    let child = process.spawn()?;
-    drop(process);
-    drop(child_socket);
-    shared.pipe_jobs.launch(jobs::Launch {
-        child,
-        descriptors: vec![jobs::Descriptor {
-            fd: output.into(),
-            read: true,
-            input: None,
-            socket: true,
-        }],
-        policy: jobs::CompletionPolicy::ChildExit,
-        deadline: None,
-        process_group: true,
-        output_limit: None,
-        stream: None,
-        pipe: None,
-        cancel: None,
-        complete: Box::new(move |completion| {
-            drop(permit);
-            let result = if completion.error.is_some() || completion.cancelled {
-                Err(())
-            } else if let Some(status) = completion.status {
-                Ok(ShellJobResult {
-                    output: completion.output.into_iter().next().unwrap_or_default(),
-                    status,
-                })
-            } else {
-                Err(())
-            };
-            callback(result);
-        }),
-    })
 }

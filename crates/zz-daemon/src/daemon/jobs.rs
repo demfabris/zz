@@ -14,6 +14,12 @@ use mio::{Interest, Registry, Token, unix::SourceFd};
 
 use super::status_jobs::StatusOutput;
 pub(super) use super::status_jobs::{StatusClient, StatusRequest};
+use super::{
+    DaemonError, Shared, ShellJobPermit, ShellJobResult, configure_shell_job_environment,
+    existing_job_working_directory, shell_process,
+};
+use std::path::Path;
+use zz_protocol::RawText;
 
 const IO_BURST: usize = 256 * 1024;
 
@@ -653,5 +659,96 @@ pub(super) fn launch_status(mut command: Command, mut output: StatusOutput) -> i
         pipe: None,
         cancel: None,
         complete: Box::new(|_| {}),
+    })
+}
+
+pub(super) fn launch_shell(
+    shared: &Arc<Shared>,
+    command: &str,
+    cwd: &Path,
+    tmux: &str,
+    environment: &[(RawText, Option<RawText>)],
+    default_terminal: &str,
+    startup_reentry: Option<String>,
+    tmux_shim: Option<&Path>,
+    zz_executable: Option<&Path>,
+    show_stderr: bool,
+    permit: ShellJobPermit,
+    callback: impl FnOnce(Result<ShellJobResult, ()>) + Send + 'static,
+) -> Result<(), DaemonError> {
+    use std::os::{
+        fd::OwnedFd,
+        unix::{net::UnixStream, process::CommandExt as _},
+    };
+    let (output, child_socket) = UnixStream::pair()?;
+    let cwd = existing_job_working_directory(cwd);
+    let mut process = shell_process(command);
+    configure_shell_job_environment(
+        &mut process,
+        environment,
+        default_terminal,
+        startup_reentry.is_some(),
+        tmux,
+        shared.socket_path.as_os_str(),
+        tmux_shim,
+        zz_executable,
+    );
+    process
+        .arg0("sh")
+        .process_group(0)
+        .current_dir(&cwd)
+        .env("PWD", cwd.as_os_str())
+        .stdin(Stdio::from(OwnedFd::from(child_socket.try_clone()?)))
+        .stdout(Stdio::from(OwnedFd::from(child_socket.try_clone()?)));
+    if let Some(startup_reentry) = startup_reentry {
+        process.env(crate::STARTUP_REENTRY_ENVIRONMENT_VARIABLE, startup_reentry);
+    }
+    if show_stderr {
+        process.stderr(Stdio::from(OwnedFd::from(child_socket.try_clone()?)));
+    } else {
+        process.stderr(Stdio::null());
+    }
+    output.shutdown(std::net::Shutdown::Write)?;
+    let child = loop {
+        match process.spawn() {
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            result => break result?,
+        }
+    };
+    *permit.process.lock() = Some(super::ShellJobProcess {
+        pid: child.id(),
+        cancel: Arc::clone(&permit.cancel),
+    });
+    drop(process);
+    drop(child_socket);
+    shared.pipe_jobs.launch(Launch {
+        child,
+        descriptors: vec![Descriptor {
+            fd: output.into(),
+            read: true,
+            input: None,
+            socket: true,
+        }],
+        policy: CompletionPolicy::ChildExit,
+        deadline: None,
+        process_group: true,
+        output_limit: None,
+        stream: None,
+        pipe: None,
+        cancel: Some(Arc::clone(&permit.cancel)),
+        complete: Box::new(move |completion| {
+            drop(permit);
+            let result = if completion.error.is_some() || completion.cancelled {
+                Err(())
+            } else if let Some(status) = completion.status {
+                Ok(ShellJobResult {
+                    output: completion.output.into_iter().next().unwrap_or_default(),
+                    status,
+                })
+            } else {
+                Err(())
+            };
+            callback(result);
+        }),
     })
 }

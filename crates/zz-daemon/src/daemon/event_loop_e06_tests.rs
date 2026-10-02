@@ -416,26 +416,3 @@ fn owned_request_frames_preserve_reported_source_failures() {
         }
     }
 }
-
-#[test]
-fn shell_job_leaves_are_dispatched_to_workers() {
-    let shared = Arc::new(Shared::new(612));
-    let (client, _) =
-        shared.register_subscribed(ClientKind::Command, None, None, OutboundMailbox::new());
-    for command in [
-        CommandInvocation::new("run-shell", ["true"]),
-        CommandInvocation::new("if-shell", ["true", "display-message -p after"]),
-    ] {
-        let mut task = wait_queue::CommandTask::new(
-            &shared,
-            client,
-            ClientKind::Command,
-            &ExecutionContext::default(),
-            612,
-            &command,
-            false,
-        )
-        .unwrap();
-        assert!(matches!(task.run(true), wait_queue::Progress::Worker));
-    }
-}

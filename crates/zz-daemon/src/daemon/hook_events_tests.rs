@@ -848,27 +848,35 @@ fn a_run_shell_job_sleeps_until_its_output_or_its_exit() {
             .expect("voluntary switches")
     }
     let job = |command: &str| {
-        let process = Mutex::new(None);
-        let stopping = AtomicBool::new(false);
+        let shared = Arc::new(Shared::new(1));
+        shell_jobs_e14_tests::start_loop(&shared).expect("shell loop");
+        let (completed, completion) = mpsc::sync_channel(1);
         let before = switches();
         let started = Instant::now();
-        let result = run_shell_job(
-            command,
-            &std::env::temp_dir(),
-            "tmux",
-            &[],
-            "screen",
-            Path::new("/tmp/zz-hooks-no-socket"),
-            None,
-            None,
-            None,
-            false,
-            &process,
-            &stopping,
-            false,
-            None,
-        )
-        .expect("shell job");
+        shared
+            .spawn_shell_job(
+                command.to_owned(),
+                std::env::temp_dir(),
+                "tmux".to_owned(),
+                Vec::new(),
+                "screen".to_owned(),
+                ShellJobEnvironmentTiming::CommandTime,
+                false,
+                Duration::ZERO,
+                ShellJobSpawnPolicy {
+                    shutdown_blocking: false,
+                    detached: false,
+                },
+                None,
+                move |result| {
+                    let _ = completed.send(result);
+                },
+            )
+            .expect("launch shell job");
+        let result = completion
+            .recv_timeout(Duration::from_secs(5))
+            .expect("shell completion")
+            .expect("shell job");
         (result, started.elapsed(), switches() - before)
     };
     let (result, elapsed, woke) = job("sleep 0.6; echo done");

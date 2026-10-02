@@ -3301,7 +3301,6 @@ History and mouse pointer reads enter on the mux loop; completions recheck the c
 Kitty pixel and generation replies resume publication asynchronously; terminal-bound cache entries and atomic delivered-generation checks reject stale respawn and eviction results.
 Checks: 372 terminal tests, 1,456 daemon unit tests and 37 integration tests pass (one soak ignored); seven stale-result/loop-dispatch tests, the three named capture/history/frame tests, fmt, Clippy and five compat scenarios (73 steps, zero divergences) pass. The known macOS-bundle fixture fails on Linux; the cwd fixture passes alone and in the serial rerun.
 macOS, Windows, iOS, full-workspace and full-bench checks were not run; the final six quick instruction/thread measurements remain in `/tmp/zzpc/e05-{base,final}-{1,2,3}.json`.
-||||||| parent of 8affa1f70 (Skip copy-mode status expansion for unsubscribed clients)
 ### c01copy as built (2026-10-02)
 
 `Shared::refresh_modes` in `crates/zz-daemon/src/daemon.rs` now applies `status_targets`
@@ -3318,6 +3317,14 @@ alert, and Control scenarios passed. Final-commit comparison files use
 Delay-only and foreground `run-shell -C` requests suspend their command frames. Delayed shell launches keep their command formats, retained target environment and selected-client cwd, and sample global/session environment and the default terminal at launch.
 Twenty queued delay-only and command-mode requests add zero threads and exactly twenty deadlines. The named environment and background ordering tests pass; the serial daemon suite passes 1,479 tests, daemon Clippy is clean, and six compat scenarios pass 188 steps with zero divergences.
 Synchronous source-file replay and ordinary zero-delay shell jobs retain their existing workers. Windows cross-check passes with nine existing warnings; Linux-only runtime checks remain with the orchestrator.
+
+**e14 as built (2026-10-02, macOS):** 14/16 explicit park sites now use loop continuations; `daemon/jobs.rs` runs foreground and background `run-shell` and `if-shell` jobs.
+Foreground items resume at their saved boundaries. The loop applies ready background completions by launch ticket without waiting for a slower earlier job.
+Unix has no shell process worker, foreground result receiver or per-job exit poller. Twenty concurrent jobs add zero job or command workers; admission rejects a command after 256 slots fill.
+The serial daemon suite, focused tests, fmt and daemon Clippy pass. Five compat groups are clean; `if-shell-background-order` has the same pre-lane red where tmux does not reach file order on this Mac.
+
+**e13/e14 pick integration (2026-10-02, Linux, base `42ed7108`):** Terminal acknowledgement and read continuations from e04/e05 share wait records with shell completions; hooks keep their terminal waits and pane-exit worker handoff. The Linux shell wakeup test now launches through the job registry.
+Checks: 1,460 daemon unit tests and 35 integration tests pass; the allowed macOS-bundle fixture fails both in the suite and alone, and one soak stays ignored. All 372 terminal tests pass with one ignored. The focused delay, shell and terminal continuation tests, fmt and Clippy pass; seven compat groups pass 100 steps with zero divergences. No performance runs in this pick step; macOS and Windows checks remain with the orchestrator.
 
 
 ## W4-DELIVER: frames straight from shards (effort L)

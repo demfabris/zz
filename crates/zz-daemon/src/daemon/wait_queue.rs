@@ -16,13 +16,7 @@ pub(super) fn queue_command(command: &CommandInvocation) -> bool {
     let name = canonical_command(&command.name);
     terminal_read_command(name)
         || MuxEngine::is_command_alias_group(command)
-        || name == "wait-for"
-        || name == "run-shell"
-            && parse_run_shell_args(&command.args).is_ok_and(|args| {
-                args.command_mode || args.positional.is_empty() || args.background
-            })
-        || name == "if-shell"
-            && parse_if_shell_args(&command.args).is_ok_and(|args| args.format && !args.background)
+        || matches!(name, "wait-for" | "run-shell" | "if-shell")
 }
 
 pub(super) fn task_command(command: &CommandInvocation) -> bool {

@@ -416,7 +416,75 @@ impl OutboundMailbox {
     }
 
     pub(super) fn flush_control_batch(&self, preserve_welcome: bool) -> bool {
-        self.flush_control_batch_locked(self.state.lock(), preserve_welcome, false)
+        let state = self.state.lock();
+        #[cfg(unix)]
+        let mut state = state;
+        #[cfg(unix)]
+        if !state.closed
+            && let Some(settling) = state.attach_settling.as_mut()
+        {
+            settling.flush = Some(settling.flush.unwrap_or(false) || preserve_welcome);
+            return true;
+        }
+        self.flush_control_batch_locked(state, preserve_welcome, false)
+    }
+
+    #[cfg(unix)]
+    pub(super) fn begin_attach_settles(&self, panes: usize) -> u64 {
+        let mut state = self.state.lock();
+        state.attach_rounds += 1;
+        let round = state.attach_rounds;
+        let flush = state
+            .attach_settling
+            .take()
+            .and_then(|settling| settling.flush);
+        state.attach_settling = Some(AttachSettling {
+            round,
+            pending: panes,
+            flush,
+        });
+        round
+    }
+
+    #[cfg(unix)]
+    pub(super) fn finish_attach_settle(&self, round: u64) {
+        let mut state = self.state.lock();
+        let Some(settling) = state
+            .attach_settling
+            .as_mut()
+            .filter(|settling| settling.round == round)
+        else {
+            return;
+        };
+        settling.pending = settling.pending.saturating_sub(1);
+        if settling.pending == 0 {
+            self.end_attach_settling(state);
+        }
+    }
+
+    #[cfg(unix)]
+    pub(super) fn expire_attach_settles(&self, round: u64) {
+        let state = self.state.lock();
+        if state
+            .attach_settling
+            .as_ref()
+            .is_some_and(|settling| settling.round == round)
+        {
+            self.end_attach_settling(state);
+        }
+    }
+
+    #[cfg(unix)]
+    fn end_attach_settling(&self, mut state: parking_lot::MutexGuard<'_, OutboundState>) {
+        let flush = state
+            .attach_settling
+            .take()
+            .and_then(|settling| settling.flush);
+        if let Some(preserve_welcome) = flush
+            && state.ctrl_collecting == ControlCollection::Attach
+        {
+            self.flush_control_batch_locked(state, preserve_welcome, false);
+        }
     }
 
     pub(super) fn flush_control_batch_locked(
@@ -508,6 +576,22 @@ impl OutboundMailbox {
         }
         true
     }
+}
+
+#[cfg(all(unix, test))]
+#[path = "attachframes_tests.rs"]
+mod attachframes_tests;
+
+#[cfg(unix)]
+const ATTACH_SETTLE_BOUND: Duration = Duration::from_millis(100);
+
+#[cfg(unix)]
+fn client_streams_pane(inner: &ServerState, client: ClientId, pane: PaneId) -> bool {
+    inner.terminals.contains_key(&pane)
+        || inner
+            .client(client)
+            .and_then(|c| c.popup.as_ref())
+            .is_some_and(|popup| popup.state.pane == pane)
 }
 
 pub(super) fn control_query_can_defer_wakeup(
@@ -900,6 +984,50 @@ impl Shared {
         Self::send_event(outbound, payload);
     }
 
+    #[cfg(unix)]
+    fn settle_attach_terminals(
+        &self,
+        client: ClientId,
+        outbound: Arc<OutboundMailbox>,
+        terminals: Vec<(PaneId, Arc<TerminalSession>)>,
+    ) {
+        if terminals.is_empty() {
+            return;
+        }
+        let round = outbound.begin_attach_settles(terminals.len());
+        for (pane, terminal) in terminals {
+            let outbound = Arc::clone(&outbound);
+            let request = terminal.settle_request(self.terminal_requests.notifier());
+            self.terminal_requests
+                .submit(request, move |shared, result| {
+                    let deliver = {
+                        let inner = shared.inner.lock();
+                        inner.client(client).is_some()
+                            && (result.is_ok() || client_streams_pane(&inner, client, pane))
+                    };
+                    if deliver {
+                        let viewport = terminal
+                            .latest_viewport_for(TerminalViewId(client.0))
+                            .unwrap_or_else(|| terminal.latest_viewport());
+                        if shared.enqueue_kitty_images_for_viewport(
+                            &outbound, pane, &terminal, &viewport,
+                        ) {
+                            let _ = outbound.replace_terminal_viewport(
+                                pane,
+                                Shared::next_sequence(),
+                                &viewport,
+                            );
+                        }
+                    }
+                    outbound.finish_attach_settle(round);
+                });
+        }
+        let _ = self.timer_tx.send(timers::TimerInput::Callback {
+            deadline: Some(Instant::now() + ATTACH_SETTLE_BOUND),
+            callback: Box::new(move || outbound.expire_attach_settles(round)),
+        });
+    }
+
     pub(super) fn send_compact_resync(
         &self,
         client: ClientId,
@@ -1037,33 +1165,17 @@ impl Shared {
         }
         if stream {
             let _round_trips = zz_terminal::allow_actor_round_trips();
-            for (pane, terminal) in terminals {
-                #[cfg(unix)]
-                if self.loop_active.load(Ordering::Acquire) {
-                    let outbound = self.client_writers.lock().get(&client).cloned();
-                    if let Some(outbound) = outbound {
-                        let request = terminal.settle_request(self.terminal_requests.notifier());
-                        self.terminal_requests
-                            .submit(request, move |shared, result| {
-                                if result.is_err() || shared.inner.lock().client(client).is_none() {
-                                    return;
-                                }
-                                let viewport = terminal
-                                    .latest_viewport_for(TerminalViewId(client.0))
-                                    .unwrap_or_else(|| terminal.latest_viewport());
-                                if shared.enqueue_kitty_images_for_viewport(
-                                    &outbound, pane, &terminal, &viewport,
-                                ) {
-                                    let _ = outbound.replace_terminal_viewport(
-                                        pane,
-                                        Shared::next_sequence(),
-                                        &viewport,
-                                    );
-                                }
-                            });
-                    }
-                    continue;
+            #[cfg(unix)]
+            let terminals = if self.loop_active.load(Ordering::Acquire) {
+                let outbound = self.client_writers.lock().get(&client).cloned();
+                if let Some(outbound) = outbound {
+                    self.settle_attach_terminals(client, outbound, terminals);
                 }
+                Vec::new()
+            } else {
+                terminals
+            };
+            for (pane, terminal) in terminals {
                 let fresh = terminal.fresh_viewport();
                 let viewport = terminal
                     .latest_viewport_for(TerminalViewId(client.0))

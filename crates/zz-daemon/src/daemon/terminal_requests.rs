@@ -114,6 +114,8 @@ pub(super) struct Inbox {
     receiver: crossbeam_channel::Receiver<Box<dyn Pending>>,
     active: Mutex<Vec<Box<dyn Pending>>>,
     wake: Arc<Wake>,
+    #[cfg(test)]
+    pub(super) paused: AtomicBool,
 }
 
 impl Default for Inbox {
@@ -129,6 +131,8 @@ impl Default for Inbox {
                 changed: Condvar::new(),
                 serial: Mutex::new(()),
             }),
+            #[cfg(test)]
+            paused: AtomicBool::new(false),
         }
     }
 }
@@ -229,6 +233,10 @@ impl Inbox {
     }
 
     pub(super) fn turn(&self, shared: &Arc<Shared>) -> Option<Instant> {
+        #[cfg(test)]
+        if self.paused.load(Ordering::Acquire) {
+            return None;
+        }
         self.wake.pending.store(false, Ordering::Release);
         let mut active = std::mem::take(&mut *self.active.lock());
         active.extend(self.receiver.try_iter());

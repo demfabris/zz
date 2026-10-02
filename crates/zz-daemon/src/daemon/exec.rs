@@ -1,3 +1,4 @@
+#[cfg(any(windows, test))]
 use std::sync::LazyLock;
 
 use super::*;
@@ -11,19 +12,24 @@ thread_local! {
     static EXEC_CLIENT: Cell<Option<ClientId>> = const { Cell::new(None) };
 }
 
+#[cfg(any(windows, test))]
 type ExecJob = Box<dyn FnOnce() + Send>;
 
+#[cfg(any(windows, test))]
 const IDLE_CONNECTION_THREADS: usize = 2;
 #[cfg(windows)]
 const EXEC_FLUSH_FRAMES: usize = 64;
 #[cfg(windows)]
 const EXEC_FLUSH_BYTES: usize = 64 * 1024;
+#[cfg(any(windows, test))]
 const CONNECTION_THREAD_IDLE: Duration = Duration::from_secs(1);
 
+#[cfg(any(windows, test))]
 static SPAWN_PER_CONNECTION: LazyLock<bool> = LazyLock::new(|| {
     std::env::var_os("ZZ_PERF_CONNECTION_THREADS").is_some_and(|value| value == "0")
 });
 
+#[cfg(any(windows, test))]
 #[derive(Default)]
 pub(super) struct ConnectionThreads {
     idle: Mutex<Vec<crossbeam_channel::Sender<ExecJob>>>,
@@ -33,7 +39,9 @@ pub(super) struct ConnectionThreads {
     live_workers: Arc<std::sync::atomic::AtomicUsize>,
 }
 
+#[cfg(any(windows, test))]
 impl ConnectionThreads {
+    #[cfg(windows)]
     pub(super) fn log_knob() {
         if *SPAWN_PER_CONNECTION {
             log::info!("ZZ_PERF_CONNECTION_THREADS=0: every connection starts a new thread");
@@ -115,6 +123,7 @@ impl Drop for WorkerLifetime {
     }
 }
 
+#[cfg(any(windows, test))]
 fn connection_worker(threads: &Weak<ConnectionThreads>, first: ExecJob) {
     let (worker, jobs) = crossbeam_channel::bounded::<ExecJob>(1);
     let mut job = first;
@@ -193,6 +202,12 @@ struct ExecRegistration {
 impl ExecRegistration {
     fn release(&self) {
         if self.released.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        #[cfg(unix)]
+        if self.shared.loop_active.load(Ordering::Acquire) {
+            self.shared.lifecycle.release(self.client, true);
+            self.shared.accept_wake.wake();
             return;
         }
         if !detach_is_inert(&self.shared.inner.lock(), self.client) {
@@ -305,7 +320,9 @@ impl Shared {
 
     pub(super) fn resume_pending_execs(&self) {
         self.accept_wake.wake();
+        #[cfg(windows)]
         let pending = std::mem::take(&mut *self.pending_execs.lock());
+        #[cfg(windows)]
         for job in pending {
             if let Err(error) = self.connection_threads.run(job) {
                 log::warn!("could not resume a parked command connection: {error}");
@@ -1089,6 +1106,16 @@ impl LoopExec {
         Some(resumed)
     }
 
+    pub(super) fn finish(&mut self) {
+        if self.registration.released.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        if !detach_is_inert(&self.shared.inner.lock(), self.client) {
+            self.shared.detach(self.client);
+        }
+        self.shared.unregister(self.client);
+    }
+
     pub(super) fn can_finish_inline(&self) -> bool {
         let inner = self.shared.inner.lock();
         detach_is_inert(&inner, self.client) && !inner.engine.destroy_unattached_explicit_anywhere()
@@ -1181,7 +1208,9 @@ pub(super) fn output_pending(mailbox: &OutboundMailbox) -> bool {
 #[cfg(unix)]
 impl Drop for LoopExec {
     fn drop(&mut self) {
-        self.registration.release();
+        if !self.registration.released.load(Ordering::Acquire) {
+            self.registration.release();
+        }
         self.shared
             .command_queue_cancels
             .lock()

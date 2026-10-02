@@ -709,39 +709,60 @@ pub(super) struct MouseBinding {
 #[cfg(unix)]
 impl Shared {
     pub(super) fn resume_mouse_binding(self: &Arc<Self>, mut binding: MouseBinding) {
-        let owner = self.server_owner();
-        let done = binding.done.clone();
-        if let Err(error) = self.connection_threads.run(Box::new(move || {
-            let valid = {
-                let inner = owner.inner.lock();
-                inner.client(binding.client).is_some()
-                    && client_is_attached_to_pane(&inner, binding.client, binding.pane)
-                    && binding.terminal.as_ref().is_none_or(|terminal| {
-                        inner
-                            .terminals
-                            .get(&binding.pane)
-                            .is_some_and(|current| Arc::ptr_eq(current, terminal))
-                    })
-            };
-            if valid {
-                if let Err(error) = owner.execute_key_commands(
-                    binding.client,
-                    binding.kind,
-                    &mut binding.context,
-                    binding.pane,
-                    &binding.commands,
-                    binding.repeat_binding,
-                ) {
-                    log::warn!("mouse binding failed: {error}");
-                }
-                owner.sync_key_table(binding.client, false);
-            }
+        let valid = {
+            let inner = self.inner.lock();
+            inner.client(binding.client).is_some()
+                && client_is_attached_to_pane(&inner, binding.client, binding.pane)
+                && binding.terminal.as_ref().is_none_or(|terminal| {
+                    inner
+                        .terminals
+                        .get(&binding.pane)
+                        .is_some_and(|current| Arc::ptr_eq(current, terminal))
+                })
+        };
+        if !valid {
             binding.done.complete();
-            owner.accept_wake.wake();
-        })) {
-            log::warn!("could not resume mouse binding: {error}");
-            done.complete();
-            self.accept_wake.wake();
+            return;
         }
+        binding.context.set_repeat_binding(binding.repeat_binding);
+        let client = binding.client;
+        let kind = binding.kind;
+        let title = binding.commands.first().map_or_else(
+            || "command output".to_owned(),
+            |command| {
+                if binding.commands.len() == 1 {
+                    command.name.clone()
+                } else {
+                    "command output".to_owned()
+                }
+            },
+        );
+        self.enqueue_inserted_task(
+            client,
+            kind,
+            &binding.context,
+            &InsertedCommandSource::Commands(binding.commands),
+            "<mouse-binding>",
+            None,
+            false,
+            None,
+            Box::new(move |shared, context, result| {
+                match result {
+                    Ok(result) => shared.route_background_inserted_output(
+                        client,
+                        kind,
+                        context,
+                        title,
+                        &result.output,
+                    ),
+                    Err(error) => {
+                        shared.publish_background_command_error(client, context, &error, false);
+                    }
+                }
+                shared.sync_key_table(client, false);
+                binding.done.complete();
+                shared.accept_wake.wake();
+            }),
+        );
     }
 }

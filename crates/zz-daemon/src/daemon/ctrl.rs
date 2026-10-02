@@ -1038,6 +1038,32 @@ impl Shared {
         if stream {
             let _round_trips = zz_terminal::allow_actor_round_trips();
             for (pane, terminal) in terminals {
+                #[cfg(unix)]
+                if self.loop_active.load(Ordering::Acquire) {
+                    let outbound = self.client_writers.lock().get(&client).cloned();
+                    if let Some(outbound) = outbound {
+                        let request = terminal.settle_request(self.terminal_requests.notifier());
+                        self.terminal_requests
+                            .submit(request, move |shared, result| {
+                                if result.is_err() || shared.inner.lock().client(client).is_none() {
+                                    return;
+                                }
+                                let viewport = terminal
+                                    .latest_viewport_for(TerminalViewId(client.0))
+                                    .unwrap_or_else(|| terminal.latest_viewport());
+                                if shared.enqueue_kitty_images_for_viewport(
+                                    &outbound, pane, &terminal, &viewport,
+                                ) {
+                                    let _ = outbound.replace_terminal_viewport(
+                                        pane,
+                                        Shared::next_sequence(),
+                                        &viewport,
+                                    );
+                                }
+                            });
+                    }
+                    continue;
+                }
                 let fresh = terminal.fresh_viewport();
                 let viewport = terminal
                     .latest_viewport_for(TerminalViewId(client.0))

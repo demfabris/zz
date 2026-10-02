@@ -320,7 +320,7 @@ fn stopping_prevents_further_accepts() {
 }
 
 #[test]
-fn worker_start_failure_posts_completion_and_releases_the_socket() {
+fn registration_runs_on_the_loop_without_starting_a_worker() {
     let shared = Arc::new(Shared::new(17));
     let mut event_loop = EventLoop::empty(&shared).unwrap();
     let (token, mut peer) = pair(&mut event_loop);
@@ -332,8 +332,13 @@ fn worker_start_failure_posts_completion_and_releases_the_socket() {
         .unwrap();
     event_loop.read_ready(token, &shared);
     event_loop.turn(&shared).unwrap();
-    assert!(!event_loop.connections.contains_key(&token));
-    assert!(event_loop.failure.is_some());
+    until(&mut event_loop, &shared, |event_loop| {
+        event_loop.connections[&token].initialized
+    });
+    assert!(event_loop.failure.is_none());
+    assert_eq!(shared.connection_threads.worker_count(), 0);
+    assert!(shared.connection_threads.fail_next.load(Ordering::Acquire));
+    event_loop.remove(token, &shared);
 }
 
 #[test]

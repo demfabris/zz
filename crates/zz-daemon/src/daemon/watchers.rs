@@ -617,7 +617,7 @@ impl LoopWatchers {
         }
     }
 
-    pub(super) fn turn(&mut self, shared: &Arc<Shared>) -> Result<(), DaemonError> {
+    pub(super) fn turn(&mut self, shared: &Arc<Shared>) {
         shared
             .watcher_tx
             .pending_wake
@@ -628,9 +628,9 @@ impl LoopWatchers {
                 .as_ref()
                 .and_then(|inputs| inputs.try_recv().ok())
             else {
-                return Ok(());
+                return;
             };
-            self.input(shared, input)?;
+            self.input(shared, input);
         }
         if self
             .inputs
@@ -639,7 +639,6 @@ impl LoopWatchers {
         {
             shared.watcher_tx.notify_loop();
         }
-        Ok(())
     }
 
     fn schedule(shared: &Shared, watcher: &Watcher) {
@@ -648,11 +647,11 @@ impl LoopWatchers {
         }
     }
 
-    fn input(&mut self, shared: &Arc<Shared>, input: Input) -> Result<(), DaemonError> {
+    fn input(&mut self, shared: &Arc<Shared>, input: Input) {
         let id = match input {
             Input::Started(watcher) => {
                 self.surfaces.insert(watcher.id, watcher);
-                return Ok(());
+                return;
             }
             Input::ImagesCompleted(id, success) => {
                 if let Some(watcher) = self.surfaces.get_mut(&id) {
@@ -663,7 +662,7 @@ impl LoopWatchers {
                     }
                     Self::schedule(shared, watcher);
                 }
-                return Ok(());
+                return;
             }
             Input::Ready(id) => id,
             Input::Completed(id) => {
@@ -671,49 +670,39 @@ impl LoopWatchers {
                     watcher.busy = false;
                     Self::schedule(shared, watcher);
                 }
-                return Ok(());
+                return;
             }
         };
         let Some(watcher) = self.surfaces.get_mut(&id) else {
-            return Ok(());
+            return;
         };
         watcher.notified.store(false, Ordering::Release);
         if watcher.busy {
-            return Ok(());
+            return;
         }
         watcher.drained = false;
-        Self::advance(shared, watcher)?;
+        Self::advance(shared, watcher);
         if watcher.closed && !watcher.busy {
             self.surfaces.remove(&id);
         } else if !watcher.busy && !watcher.closed && !watcher.drained {
             Self::schedule(shared, watcher);
         }
-        Ok(())
     }
 
-    fn execute(
-        shared: &Arc<Shared>,
-        watcher: &mut Watcher,
-        effects: Vec<Effect>,
-    ) -> Result<(), DaemonError> {
+    fn execute(shared: &Arc<Shared>, watcher: &mut Watcher, effects: Vec<Effect>) {
         watcher.busy = true;
         let id = watcher.id;
         let sender = shared.watcher_tx.clone();
         let owner = shared.server_owner();
-        shared
-            .connection_threads
-            .run(Box::new(move || {
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    for effect in effects {
-                        effect(&owner);
-                    }
-                }));
-                if result.is_err() {
-                    log::error!("watcher effect panicked: {id}");
-                }
-                sender.send(Input::Completed(id));
-            }))
-            .map_err(|error| DaemonError::Thread(error.to_string()))
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            for effect in effects {
+                effect(&owner);
+            }
+        }));
+        if result.is_err() {
+            log::error!("watcher effect panicked: {id}");
+        }
+        sender.send(Input::Completed(id));
     }
 
     fn drain_stopped(watcher: &mut Watcher) {
@@ -740,21 +729,21 @@ impl LoopWatchers {
         }
     }
 
-    fn advance(shared: &Arc<Shared>, watcher: &mut Watcher) -> Result<(), DaemonError> {
+    fn advance(shared: &Arc<Shared>, watcher: &mut Watcher) {
         if watcher.busy {
-            return Ok(());
+            return;
         }
         let Some(terminal) = watcher.terminal.upgrade() else {
             watcher.stopped = true;
             Self::drain_stopped(watcher);
-            return Ok(());
+            return;
         };
         if !watcher.current(shared, &terminal) {
             watcher.stopped = true;
         }
         if watcher.stopped {
             Self::drain_stopped(watcher);
-            return Ok(());
+            return;
         }
         for _ in 0..8 {
             if watcher.admitted.is_none() && watcher.pending.is_empty() {
@@ -775,7 +764,7 @@ impl LoopWatchers {
             if !watcher.current(shared, &terminal) {
                 watcher.stopped = true;
                 Self::drain_stopped(watcher);
-                return Ok(());
+                return;
             }
             if watcher.admitted.is_none() {
                 watcher.admitted = watcher
@@ -826,7 +815,7 @@ impl LoopWatchers {
                         ) {
                             watcher.frame = Some(frame);
                             watcher.busy = true;
-                            return Ok(());
+                            return;
                         }
                     }
                 }
@@ -847,11 +836,12 @@ impl LoopWatchers {
                 watcher.pending.clear();
             }
             if !effects.is_empty() {
-                return Self::execute(shared, watcher, effects);
+                Self::execute(shared, watcher, effects);
+                return;
             }
             if watcher.stopped {
                 Self::drain_stopped(watcher);
-                return Ok(());
+                return;
             }
         }
         if watcher.closed {
@@ -875,10 +865,9 @@ impl LoopWatchers {
             };
             watcher.stopped = true;
             if let Some(effect) = effect {
-                return Self::execute(shared, watcher, vec![effect]);
+                Self::execute(shared, watcher, vec![effect]);
             }
         }
-        Ok(())
     }
 }
 
@@ -951,11 +940,10 @@ impl Shared {
                             return;
                         };
                         owner.terminal_requests.turn(&owner);
-                        if input.is_some_and(|input| watchers.input(&owner, input).is_err())
-                            || watchers.turn(&owner).is_err()
-                        {
-                            return;
+                        if let Some(input) = input {
+                            watchers.input(&owner, input);
                         }
+                        watchers.turn(&owner);
                     }
                 })
                 .map_err(|error| DaemonError::Thread(error.to_string()))?;

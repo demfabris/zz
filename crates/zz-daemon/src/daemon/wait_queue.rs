@@ -113,6 +113,39 @@ impl CommandTask {
         command: &CommandInvocation,
         prepared: bool,
     ) -> Result<Self, CommandResponse> {
+        Self::new_with_log(
+            shared, client, kind, context, request_id, command, prepared, true,
+        )
+    }
+
+    pub(super) fn default_attach(
+        shared: &Arc<Shared>,
+        client: ClientId,
+        context: &ExecutionContext,
+    ) -> Result<Self, CommandResponse> {
+        Self::new_with_log(
+            shared,
+            client,
+            ClientKind::Command,
+            context,
+            0,
+            &CommandInvocation::new("new-session", ["-A", "-d"]),
+            true,
+            false,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn new_with_log(
+        shared: &Arc<Shared>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &ExecutionContext,
+        request_id: u64,
+        command: &CommandInvocation,
+        prepared: bool,
+        log_command: bool,
+    ) -> Result<Self, CommandResponse> {
         let Some(admission) = ResponseAdmissionGuard::new(shared) else {
             let ProtocolMessage::CommandResponse(response) = server_stopping_response(request_id)
             else {
@@ -155,10 +188,12 @@ impl CommandTask {
                 }
             };
             let client_name = server_log_client_name(&inner, client);
-            push_server_message(
-                &mut inner,
-                format!("{client_name} command: {}", command_log_line(&command)),
-            );
+            if log_command {
+                push_server_message(
+                    &mut inner,
+                    format!("{client_name} command: {}", command_log_line(&command)),
+                );
+            }
             if kind == ClientKind::Command
                 || kind == ClientKind::Control && command.source.is_none()
             {

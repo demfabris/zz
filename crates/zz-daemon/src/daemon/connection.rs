@@ -28,6 +28,7 @@ enum TaskAfter {
         last: bool,
     },
     Initialize,
+    Attach(Box<PendingMessage>),
 }
 
 #[cfg(unix)]
@@ -96,7 +97,7 @@ impl Session {
         );
         let startup_reentry = hello.kind == ClientKind::Command
             && hello.capabilities.contains(&startup_reentry_capability);
-        if !startup_reentry && !shared.wait_for_startup() {
+        if !startup_reentry && !*shared.startup_ready.lock() {
             return Ok(None);
         }
 
@@ -372,6 +373,21 @@ impl Session {
                                     return MessageProgress::Done;
                                 }
                             }
+                            TaskAfter::Attach(request) => {
+                                if failed {
+                                    let _ = outbound.enqueue_reliable(
+                                        &ProtocolMessage::CommandResponse(response),
+                                    );
+                                    if matches!(*request, PendingMessage::InitializeAttach) {
+                                        self.request =
+                                            Some(PendingMessage::InitializeFinish(Vec::new()));
+                                    } else {
+                                        return MessageProgress::Done;
+                                    }
+                                } else {
+                                    self.request = Some(*request);
+                                }
+                            }
                             TaskAfter::Initialize => {
                                 let Some(PendingMessage::Initialize { pending_errors, .. }) =
                                     self.request.as_mut()
@@ -410,6 +426,36 @@ impl Session {
             };
             if self.cancel.load(Ordering::Acquire) {
                 return MessageProgress::Done;
+            }
+            let default_attach = match &request {
+                PendingMessage::InitializeAttach => self.compact_hello.as_ref().is_some_and(|hello|
+                    matches!(&hello.attach, Some(AttachOperation::Session(target)) if target.is_empty())),
+                PendingMessage::Message(ProtocolMessage::Attach { session }) => session.is_empty(),
+                _ => false,
+            };
+            if default_attach
+                && matches!(
+                    self.hello.kind,
+                    ClientKind::Interactive | ClientKind::Control
+                )
+                && shared.inner.lock().engine.state.sessions.is_empty()
+            {
+                match wait_queue::CommandTask::default_attach(
+                    shared,
+                    self.client,
+                    self.context.as_ref().expect("client context"),
+                ) {
+                    Ok(task) => {
+                        self.task = Some(Box::new(task));
+                        self.task_after = TaskAfter::Attach(Box::new(request));
+                        continue;
+                    }
+                    Err(response) => {
+                        let _ =
+                            outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(response));
+                        return MessageProgress::Done;
+                    }
+                }
             }
             match request {
                 PendingMessage::Message(ProtocolMessage::Exec(request)) => {
@@ -1068,8 +1114,17 @@ impl Drop for Session {
             self.registration.armed = false;
             self.writer_registration.armed = false;
         } else {
-            self.registration.shared.detach(self.client);
-            self.registration.unregister();
+            if self.registration.shared.loop_active.load(Ordering::Acquire) {
+                self.registration
+                    .shared
+                    .lifecycle
+                    .release(self.client, false);
+                self.registration.shared.accept_wake.wake();
+                self.registration.armed = false;
+            } else {
+                self.registration.shared.detach(self.client);
+                self.registration.unregister();
+            }
             self.writer_registration.unregister();
         }
         self.registration

@@ -52,6 +52,8 @@ mod helpers;
 )]
 mod jobs;
 #[cfg(unix)]
+mod lifecycle;
+#[cfg(unix)]
 mod pipe_jobs;
 mod source_queue;
 pub(crate) mod status_jobs;
@@ -1600,6 +1602,7 @@ impl Daemon {
         T::Listener: Send + 'static,
     {
         let (mut socket_guard, identity_guard) = socket_guards;
+        #[cfg(windows)]
         exec::ConnectionThreads::log_knob();
         let color_scheme = daemon_color_scheme();
         let load = AppearanceLoad::defaults_for(color_scheme);
@@ -1669,36 +1672,22 @@ impl Daemon {
         };
         #[cfg(unix)]
         let (_ready_guard, shutdown_result) = {
-            let startup_shared = Arc::clone(&shared);
-            let daemon = self.clone();
-            let notifier = event_loop.startup_notifier();
-            let mut startup_thread = Some(
-                thread::Builder::new()
-                    .name("zz-daemon-startup".to_owned())
-                    .spawn(move || {
-                        let _notifier = notifier;
-                        startup_shared.initialize_with_mux_config_files(
-                            daemon.load_user_config,
-                            daemon.mux_config_files.as_deref(),
-                            daemon.initial_client_working_directory.as_deref(),
-                        )
-                    })
-                    .map_err(|error| DaemonError::Thread(error.to_string()))?,
-            );
+            event_loop.start_startup(
+                &shared,
+                self.load_user_config,
+                self.mux_config_files.as_deref(),
+                self.initial_client_working_directory.as_deref(),
+            )?;
             let mut ready_guard = None;
             let mut startup_result = Ok(());
             let loop_result = event_loop.run::<T>(&listener, &shared, || {
-                startup_result = event_loop::join_startup(startup_thread.take().unwrap())
-                    .and_then(|()| complete_startup().map(|guard| ready_guard = Some(guard)));
+                startup_result = complete_startup().map(|guard| ready_guard = Some(guard));
                 if startup_result.is_err() {
                     shared.request_shutdown();
                 }
             });
             if loop_result.is_err() {
                 shared.request_shutdown();
-            }
-            if let Some(startup_thread) = startup_thread {
-                startup_result = event_loop::join_startup(startup_thread);
             }
             (ready_guard, startup_result.and(loop_result))
         };
@@ -4140,6 +4129,7 @@ struct SharedServer {
     inner: Mutex<ServerState>,
     accept_wake: AcceptWake,
     helpers: helpers::Pool,
+    #[cfg(any(windows, test))]
     helper_dispatching: AtomicBool,
     terminal_requests: Arc<terminal_requests::Inbox>,
     agent_state_waits: Mutex<BTreeMap<PaneId, Vec<Weak<agent_waits::TerminalWait>>>>,
@@ -4225,7 +4215,10 @@ struct SharedServer {
     exec_links: Mutex<BTreeMap<ClientId, Arc<exec::ExecLink>>>,
     prompt_history_source: Mutex<Option<(PathBuf, usize)>>,
     prompt_history_settled: AtomicBool,
+    #[cfg(any(windows, test))]
     connection_threads: Arc<exec::ConnectionThreads>,
+    #[cfg(unix)]
+    lifecycle: lifecycle::Inbox,
     #[cfg(unix)]
     loop_active: AtomicBool,
 }
@@ -4796,6 +4789,12 @@ impl ClientRegistrationGuard {
 
     fn unregister(&mut self) {
         if std::mem::take(&mut self.armed) {
+            #[cfg(unix)]
+            if self.shared.loop_active.load(Ordering::Acquire) {
+                self.shared.lifecycle.release(self.client, false);
+                self.shared.accept_wake.wake();
+                return;
+            }
             self.shared.unregister(self.client);
         }
     }
@@ -5075,6 +5074,7 @@ impl Shared {
         let server = SharedServer {
             accept_wake: AcceptWake::new(),
             helpers: helpers::Pool::default(),
+            #[cfg(any(windows, test))]
             helper_dispatching: AtomicBool::new(false),
             terminal_requests: Arc::default(),
             agent_state_waits: Mutex::default(),
@@ -5156,7 +5156,10 @@ impl Shared {
             exec_links: Mutex::new(BTreeMap::new()),
             prompt_history_source: Mutex::new(None),
             prompt_history_settled: AtomicBool::new(true),
+            #[cfg(any(windows, test))]
             connection_threads: Arc::default(),
+            #[cfg(unix)]
+            lifecycle: lifecycle::Inbox::default(),
             #[cfg(unix)]
             loop_active: AtomicBool::new(false),
         };
@@ -5178,6 +5181,7 @@ impl Shared {
         self.resume_pending_execs();
     }
 
+    #[cfg(windows)]
     fn wait_for_startup(&self) -> bool {
         let mut ready = self.startup_ready.lock();
         while !*ready && !self.stopping.load(Ordering::Acquire) {
@@ -5196,28 +5200,14 @@ impl Shared {
         self.initialize_with_mux_config_files(load_user_config, None, None)
     }
 
+    #[cfg(any(windows, test))]
     fn initialize_with_mux_config_files(
         self: &Arc<Self>,
         load_user_config: bool,
         mux_config_files: Option<&[PathBuf]>,
         initial_client_working_directory: Option<&Path>,
     ) -> Result<(), DaemonError> {
-        log::info!(
-            target: "zz_daemon::perf",
-            "publication knobs: ZZ_PERF_EAGER_PUBLISH={} ZZ_PERF_RENAME_THROTTLE={} ZZ_PERF_PEER_SCAN={} ZZ_PERF_KEY_TABLE_DELTA={}",
-            u8::from(*timers::EAGER_PUBLISH),
-            u8::from(*timers::RENAME_THROTTLE),
-            if *timers::PEER_SCAN_ALWAYS { "always" } else { "changes" },
-            u8::from(*timers::KEY_TABLE_DELTA),
-        );
-        attach::log_knobs();
-        log::info!(
-            target: "zz_daemon::perf",
-            "terminal knobs: ZZ_PERF_ROW_PATCHES={}",
-            u8::from(*ROW_PATCHES),
-        );
-        hook_events::log_knobs();
-        log::info!(target: "zz_daemon::perf", "format facts knob: ZZ_PERF_BORROWED_FACTS={}", u8::from(*BORROWED_FORMAT_FACTS));
+        self.log_initialization_knobs();
         #[cfg(any(windows, test))]
         self.start_timers()?;
         let mut context = ExecutionContext::default();
@@ -5238,6 +5228,30 @@ impl Shared {
         self.inner.lock().startup_source_client_working_directory = None;
         replay_result?;
         *self.startup_config_causes.lock() = report.take_startup_causes();
+        self.finish_initialization();
+        Ok(())
+    }
+
+    fn log_initialization_knobs(&self) {
+        log::info!(
+            target: "zz_daemon::perf",
+            "publication knobs: ZZ_PERF_EAGER_PUBLISH={} ZZ_PERF_RENAME_THROTTLE={} ZZ_PERF_PEER_SCAN={} ZZ_PERF_KEY_TABLE_DELTA={}",
+            u8::from(*timers::EAGER_PUBLISH),
+            u8::from(*timers::RENAME_THROTTLE),
+            if *timers::PEER_SCAN_ALWAYS { "always" } else { "changes" },
+            u8::from(*timers::KEY_TABLE_DELTA),
+        );
+        attach::log_knobs();
+        log::info!(
+            target: "zz_daemon::perf",
+            "terminal knobs: ZZ_PERF_ROW_PATCHES={}",
+            u8::from(*ROW_PATCHES),
+        );
+        hook_events::log_knobs();
+        log::info!(target: "zz_daemon::perf", "format facts knob: ZZ_PERF_BORROWED_FACTS={}", u8::from(*BORROWED_FORMAT_FACTS));
+    }
+
+    fn finish_initialization(self: &Arc<Self>) {
         self.apply_stored_mux_config_overrides("startup-mux-replay");
         let history_settings = {
             let inner = self.inner.lock();
@@ -5248,7 +5262,6 @@ impl Shared {
             *self.prompt_history_source.lock() = Some(source);
             self.prompt_history_settled.store(false, Ordering::Release);
         }
-        Ok(())
     }
 
     fn apply_helper_result(self: &Arc<Self>, result: helpers::Result) {
@@ -5276,9 +5289,13 @@ impl Shared {
 
     fn submit_helper(self: &Arc<Self>, task: helpers::Task) -> std::io::Result<()> {
         self.helpers.submit(task)?;
-        self.start_helper_dispatcher()
+        #[cfg(any(windows, test))]
+        return self.start_helper_dispatcher();
+        #[cfg(all(unix, not(test)))]
+        Ok(())
     }
 
+    #[cfg(any(windows, test))]
     fn start_helper_dispatcher(self: &Arc<Self>) -> std::io::Result<()> {
         #[cfg(unix)]
         if self.loop_active.load(Ordering::Acquire) {
@@ -5326,6 +5343,7 @@ impl Shared {
         Ok(())
     }
 
+    #[cfg(windows)]
     fn warm_client_terminfo(&self, message: &ProtocolMessage) -> std::io::Result<()> {
         let environment = match message {
             ProtocolMessage::Hello(hello)
@@ -5341,6 +5359,7 @@ impl Shared {
         self.warm_terminfo(environment)
     }
 
+    #[cfg(windows)]
     fn warm_terminfo(&self, environment: &[RawText]) -> std::io::Result<()> {
         if crate::status::terminfo_is_warm(environment) {
             return Ok(());
@@ -5438,6 +5457,17 @@ impl Shared {
     }
 
     fn request_shutdown_with_hooks(self: &Arc<Self>, run_hooks: bool) {
+        #[cfg(unix)]
+        if self.loop_active.load(Ordering::Acquire) {
+            self.shutdown_pending.store(true, Ordering::Release);
+            self.lifecycle.shutdown(run_hooks);
+            self.accept_wake.wake();
+            return;
+        }
+        self.stop_with_hooks(run_hooks);
+    }
+
+    fn stop_with_hooks(self: &Arc<Self>, run_hooks: bool) {
         self.shutdown_pending.store(true, Ordering::Release);
         if run_hooks {
             self.enter_queue_shutdown_phase();
@@ -8545,7 +8575,7 @@ impl Shared {
         }
         let queued = self.watcher_effects.is_some();
         #[cfg(unix)]
-        let queued = queued || self.loop_leaf_enabled();
+        let queued = queued || self.loop_leaf_enabled() || self.loop_active.load(Ordering::Acquire);
         if queued {
             self.enqueue_event_hooks(events);
             return;
@@ -8554,6 +8584,12 @@ impl Shared {
     }
 
     fn run_shutdown_event_hooks(self: &Arc<Self>, events: Vec<PendingHookEvent>) {
+        #[cfg(unix)]
+        if self.loop_active.load(Ordering::Acquire) {
+            self.lifecycle.hooks(events);
+            self.accept_wake.wake();
+            return;
+        }
         self.run_event_hooks_with_control(events, false);
     }
 
@@ -20382,7 +20418,10 @@ impl Shared {
                 .state
                 .sessions
                 .keys()
-                .filter(|session| !inner.attached.contains_key(session))
+                .filter(|session| {
+                    !inner.attached.contains_key(session)
+                        && !inner.destroying_unattached.contains(session)
+                })
                 .filter(|session| {
                     matches!(
                         inner
@@ -20404,6 +20443,28 @@ impl Shared {
                     continue;
                 }
                 inner.destroying_unattached.insert(session);
+            }
+            #[cfg(unix)]
+            if self.loop_active.load(Ordering::Acquire) {
+                let target = session.to_string();
+                let command = CommandInvocation::new("kill-session", ["-t", target.as_str()]);
+                self.enqueue_inserted_task(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &ExecutionContext::default(),
+                    &InsertedCommandSource::Commands(vec![command]),
+                    "<destroy-unattached>",
+                    None,
+                    false,
+                    None,
+                    Box::new(move |shared, _, result| {
+                        shared.inner.lock().destroying_unattached.remove(&session);
+                        if let Err(error) = result {
+                            log::warn!("destroy-unattached could not destroy {session}: {error}");
+                        }
+                    }),
+                );
+                continue;
             }
             #[cfg(test)]
             if let Some(hook) = self.destroy_unattached_hook.lock().take() {
@@ -59542,7 +59603,7 @@ mod tests {
             reached_rx
                 .recv_timeout(Duration::from_secs(2))
                 .expect("response reached admission hook");
-            assert!(shared.stopping.load(Ordering::Acquire));
+            assert!(shared.shutdown_pending.load(Ordering::Acquire));
             assert_eq!(shared.response_admissions.lock().active, 1);
             assert!(!shared.freeze_response_admissions_and_wait(Duration::ZERO));
 
@@ -81799,6 +81860,8 @@ set-option -g @alias-mixed-next yes
         );
 
         shared.request_shutdown();
+        #[cfg(unix)]
+        lifecycle::wait_for_cleanup(&shared);
         assert!(process.load(Ordering::Acquire));
     }
 
@@ -82102,6 +82165,8 @@ set-option -g @alias-mixed-next yes
         #[cfg(windows)]
         let process = Arc::clone(&shared.inner.lock().pane_pipes[&pane].process);
         shared.request_shutdown();
+        #[cfg(unix)]
+        lifecycle::wait_for_cleanup(&shared);
         assert!(shared.inner.lock().pane_pipes.is_empty());
         #[cfg(windows)]
         assert!(process.lock().is_none());
@@ -84851,6 +84916,8 @@ set-option -g @alias-mixed-next yes
                 &CommandInvocation::new("kill-server", [] as [&str; 0]),
             )
             .expect("kill server");
+        #[cfg(unix)]
+        lifecycle::wait_for_cleanup(&shared);
         assert!(shared.inner.lock().shell_jobs.is_empty());
 
         wait_for_process_group_exit(group, Duration::from_secs(2), "shell job");
@@ -105853,6 +105920,8 @@ bind - split-window -v -c "#{pane_current_path}"
         assert_eq!(fs::read_to_string(marker).expect("hook order"), "SsUu");
         assert!(!shared.stopping.load(Ordering::Acquire));
         drop(blocker);
+        #[cfg(unix)]
+        lifecycle::wait_for_cleanup(&shared);
         assert!(shared.stopping.load(Ordering::Acquire));
     }
 
@@ -109115,6 +109184,8 @@ bind - split-window -v -c "#{pane_current_path}"
                 &CommandInvocation::new("set-option", ["-s", "-u", "exit-empty"]),
             )
             .expect("unset restores the latch rule");
+        #[cfg(unix)]
+        lifecycle::wait_for_cleanup(&shared);
         assert!(shared.stopping.load(Ordering::Acquire));
     }
 
@@ -109155,6 +109226,8 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("explicit write");
         assert!(!shared.stopping.load(Ordering::Acquire));
         shared.unregister(subscriber);
+        #[cfg(unix)]
+        lifecycle::wait_for_cleanup(&shared);
         assert!(shared.stopping.load(Ordering::Acquire));
         assert!(!shared.inner.lock().engine.state.sessions.is_empty());
     }
@@ -109212,6 +109285,8 @@ bind - split-window -v -c "#{pane_current_path}"
         assert!(shared.exit_empty_armed.load(Ordering::Acquire));
         assert!(!shared.stopping.load(Ordering::Acquire));
         shared.unregister(subscriber);
+        #[cfg(unix)]
+        lifecycle::wait_for_cleanup(&shared);
         assert!(shared.stopping.load(Ordering::Acquire));
     }
 
@@ -115066,6 +115141,8 @@ bind - split-window -v -c "#{pane_current_path}"
         );
 
         shared.unregister(client);
+        #[cfg(unix)]
+        lifecycle::wait_for_cleanup(&shared);
         assert!(shared.stopping.load(Ordering::Acquire));
     }
 

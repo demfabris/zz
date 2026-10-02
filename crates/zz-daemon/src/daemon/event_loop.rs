@@ -105,7 +105,17 @@ enum ShutdownPhase {
 pub(super) struct EventLoop {
     poll: Poll,
     events: Events,
+    startup: Option<lifecycle::Startup>,
+    lifecycle_hooks: hook_queue::LoopHooks,
+    lifecycle_shutdown: Option<bool>,
+    lifecycle_shutdown_started: bool,
+    retired: Vec<(
+        Option<Box<connection::Session>>,
+        Option<Box<exec::LoopExec>>,
+        Option<exec::PreparedExec>,
+    )>,
     startup_finished: mpsc::Receiver<()>,
+    #[cfg(test)]
     startup_sender: mpsc::Sender<()>,
     waker: Arc<Waker>,
     timers: timers::LoopTimers,
@@ -127,8 +137,6 @@ pub(super) struct EventLoop {
     terminal_request_deadline: Option<Instant>,
     shutdown_started: bool,
     shutdown_phase: ShutdownPhase,
-    shutdown_completed: mpsc::Receiver<()>,
-    shutdown_sender: mpsc::Sender<()>,
     signal_requested: bool,
     force_requested: bool,
     signals: Option<SignalPipes>,
@@ -136,11 +144,13 @@ pub(super) struct EventLoop {
     failure: Option<DaemonError>,
 }
 
+#[cfg(test)]
 pub(super) struct StartupNotifier {
     sender: mpsc::Sender<()>,
     waker: Arc<Waker>,
 }
 
+#[cfg(test)]
 impl Drop for StartupNotifier {
     fn drop(&mut self) {
         let _ = self.sender.send(());
@@ -217,6 +227,8 @@ struct Connection {
     pending_bytes: usize,
     kind: Option<ClientKind>,
     drain_input: bool,
+    hello: Option<ProtocolMessage>,
+    terminfo: Option<mpsc::Receiver<()>>,
     initializing: bool,
     busy: bool,
     initialized: bool,
@@ -232,6 +244,10 @@ mod e02_tests;
 #[cfg(test)]
 #[path = "event_loop_e06_tests.rs"]
 mod e06_tests;
+
+#[cfg(test)]
+#[path = "event_loop_e21_tests.rs"]
+mod e21_tests;
 
 struct Completion {
     token: Token,
@@ -256,7 +272,7 @@ impl EventLoop {
         shared.pipe_jobs.wake.install(Arc::clone(&waker));
         let status_client = shared.status.lock().job_client();
         status_client.install(Arc::clone(&waker));
-        let (startup_sender, startup_finished) = mpsc::channel();
+        let (_startup_sender, startup_finished) = mpsc::channel();
         let (completion_sender, completed) = mpsc::channel();
         let timers = timers::LoopTimers::new(shared, &waker);
         let watchers = watchers::LoopWatchers::new(shared);
@@ -265,13 +281,18 @@ impl EventLoop {
         let agents = agent_inbox::AgentInbox::new(shared);
         #[cfg(feature = "agent")]
         shared.agent_tx.wake.install(Arc::clone(&waker));
-        let (shutdown_sender, shutdown_completed) = mpsc::channel();
         shared.loop_active.store(true, Ordering::Release);
         Ok(Self {
             poll,
             events: Events::with_capacity(128),
+            startup: None,
+            lifecycle_hooks: hook_queue::LoopHooks::new(),
+            lifecycle_shutdown: None,
+            lifecycle_shutdown_started: false,
+            retired: Vec::new(),
             startup_finished,
-            startup_sender,
+            #[cfg(test)]
+            startup_sender: _startup_sender,
             waker,
             timers,
             watchers,
@@ -292,8 +313,6 @@ impl EventLoop {
             terminal_request_deadline: None,
             shutdown_started: false,
             shutdown_phase: ShutdownPhase::Running,
-            shutdown_completed,
-            shutdown_sender,
             signal_requested: false,
             force_requested: false,
             signals: None,
@@ -316,11 +335,29 @@ impl EventLoop {
         Ok(event_loop)
     }
 
+    #[cfg(test)]
     pub(super) fn startup_notifier(&self) -> StartupNotifier {
         StartupNotifier {
             sender: self.startup_sender.clone(),
             waker: Arc::clone(&self.waker),
         }
+    }
+
+    pub(super) fn start_startup(
+        &mut self,
+        shared: &Arc<Shared>,
+        load_user_config: bool,
+        files: Option<&[PathBuf]>,
+        base: Option<&Path>,
+    ) -> Result<(), DaemonError> {
+        self.startup = Some(lifecycle::Startup::new(
+            shared,
+            load_user_config,
+            files,
+            base,
+        ));
+        self.waker.wake()?;
+        Ok(())
     }
 
     #[allow(dead_code, reason = "job families migrate in subsequent slices")]
@@ -365,6 +402,8 @@ impl EventLoop {
                 pending_bytes: 0,
                 kind: None,
                 drain_input: false,
+                hello: None,
+                terminfo: None,
                 initializing: false,
                 busy: false,
                 initialized: false,
@@ -383,11 +422,28 @@ impl EventLoop {
         initialized: impl FnOnce(),
     ) -> Result<(), DaemonError> {
         let mut initialized = Some(initialized);
+        let mut startup_error = None;
         let mut ready = Vec::new();
         loop {
             while self.startup_finished.try_recv().is_ok() {
                 if let Some(initialized) = initialized.take() {
                     initialized();
+                }
+            }
+            if let Some(startup) = &mut self.startup
+                && let Some(result) = startup.turn()
+            {
+                self.startup = None;
+                match result {
+                    Ok(()) => {
+                        if let Some(initialized) = initialized.take() {
+                            initialized();
+                        }
+                    }
+                    Err(error) => {
+                        startup_error = Some(error);
+                        shared.request_shutdown();
+                    }
                 }
             }
             self.turn(shared)?;
@@ -396,7 +452,9 @@ impl EventLoop {
                 for token in tokens {
                     self.remove(token, shared);
                 }
-                return Ok(());
+                drop(std::mem::take(&mut self.retired));
+                self.turn_lifecycle(shared)?;
+                return startup_error.map_or(Ok(()), Err);
             }
             if std::mem::take(&mut self.accept_again) && !self.shutdown_started {
                 self.accept_ready::<T>(listener, shared)?;
@@ -418,7 +476,7 @@ impl EventLoop {
                 } else if token == SHUTDOWN_SIGNAL {
                     let count = SignalPipes::drain(&mut self.signals.as_mut().unwrap().shutdown)?;
                     for _ in 0..count {
-                        self.request_signal_shutdown(shared, SIGNAL_SHUTDOWN_GRACE)?;
+                        self.request_signal_shutdown(shared, SIGNAL_SHUTDOWN_GRACE);
                     }
                 } else if token == CHILD_SIGNAL {
                     SignalPipes::drain(&mut self.signals.as_mut().unwrap().child)?;
@@ -447,41 +505,23 @@ impl EventLoop {
         matches!(self.shutdown_phase, ShutdownPhase::Done)
     }
 
-    pub(super) fn request_signal_shutdown(
-        &mut self,
-        shared: &Arc<Shared>,
-        grace: Duration,
-    ) -> Result<(), DaemonError> {
+    pub(super) fn request_signal_shutdown(&mut self, shared: &Arc<Shared>, grace: Duration) {
         if self.signal_requested {
             return self.force_shutdown(shared);
         }
         self.signal_requested = true;
         shared.shutdown_pending.store(true, Ordering::Release);
         self.timers.shutdown_deadline(Some(Instant::now() + grace));
-        let shared = Arc::clone(shared);
-        let threads = Arc::clone(&shared.connection_threads);
-        let waker = Arc::clone(&self.waker);
-        threads.run(Box::new(move || {
-            shared.request_shutdown();
-            let _ = waker.wake();
-        }))?;
-        Ok(())
+        shared.request_shutdown();
     }
 
-    fn force_shutdown(&mut self, shared: &Arc<Shared>) -> Result<(), DaemonError> {
+    fn force_shutdown(&mut self, shared: &Arc<Shared>) {
         if self.force_requested || self.shutdown_started {
-            return Ok(());
+            return;
         }
         self.force_requested = true;
         self.timers.shutdown_deadline(None);
-        let shared = Arc::clone(shared);
-        let threads = Arc::clone(&shared.connection_threads);
-        let waker = Arc::clone(&self.waker);
-        threads.run(Box::new(move || {
-            shared.force_shutdown();
-            let _ = waker.wake();
-        }))?;
-        Ok(())
+        shared.force_shutdown();
     }
 
     fn start_shutdown(&mut self, shared: &Arc<Shared>) {
@@ -498,11 +538,14 @@ impl EventLoop {
     fn advance_shutdown(&mut self, shared: &Arc<Shared>) -> Result<(), DaemonError> {
         let mut due = self.timers.take_shutdown_due();
         if !self.shutdown_started {
-            if shared.shutdown_cleanup_complete.load(Ordering::Acquire) {
+            if shared.shutdown_cleanup_complete.load(Ordering::Acquire)
+                && !self.lifecycle_hooks.pending()
+                && shared.active_shutdown_blockers() == 0
+            {
                 self.start_shutdown(shared);
                 due = false;
             } else if due {
-                self.force_shutdown(shared)?;
+                self.force_shutdown(shared);
             }
         }
         match &self.shutdown_phase {
@@ -516,38 +559,28 @@ impl EventLoop {
                     }
                     self.timers.shutdown_deadline(None);
                     self.shutdown_phase = ShutdownPhase::Announcing;
-                    let shared = Arc::clone(shared);
-                    let threads = Arc::clone(&shared.connection_threads);
-                    let sender = self.shutdown_sender.clone();
-                    let waker = Arc::clone(&self.waker);
-                    threads.run(Box::new(move || {
-                        shared.announce_shutdown();
-                        let _ = sender.send(());
-                        let _ = waker.wake();
-                    }))?;
+                    shared.announce_shutdown();
                 }
             }
             ShutdownPhase::Announcing => {
-                if self.shutdown_completed.try_recv().is_ok() {
-                    let mut mailboxes = shared
-                        .client_writers
-                        .lock()
+                let mut mailboxes = shared
+                    .client_writers
+                    .lock()
+                    .values()
+                    .cloned()
+                    .collect::<Vec<_>>();
+                mailboxes.extend(
+                    self.connections
                         .values()
-                        .cloned()
-                        .collect::<Vec<_>>();
-                    mailboxes.extend(
-                        self.connections
-                            .values()
-                            .map(|connection| Arc::clone(&connection.outbound)),
-                    );
-                    for mailbox in &mailboxes {
-                        mailbox.close_after_flush();
-                    }
-                    self.shutdown_phase = ShutdownPhase::Writers(mailboxes);
-                    self.waker.wake()?;
-                    self.timers
-                        .shutdown_deadline(Some(Instant::now() + SHUTDOWN_WRITER_TIMEOUT));
+                        .map(|connection| Arc::clone(&connection.outbound)),
+                );
+                for mailbox in &mailboxes {
+                    mailbox.close_after_flush();
                 }
+                self.shutdown_phase = ShutdownPhase::Writers(mailboxes);
+                self.waker.wake()?;
+                self.timers
+                    .shutdown_deadline(Some(Instant::now() + SHUTDOWN_WRITER_TIMEOUT));
             }
             ShutdownPhase::Writers(mailboxes) => {
                 let drained = mailboxes
@@ -606,7 +639,9 @@ impl EventLoop {
         shared: &Arc<Shared>,
     ) -> Result<(), DaemonError> {
         for _ in 0..ACCEPT_BURST {
-            if shared.stopping.load(Ordering::Acquire) {
+            if shared.stopping.load(Ordering::Acquire)
+                || shared.shutdown_pending.load(Ordering::Acquire)
+            {
                 self.accept_again = false;
                 return Ok(());
             }
@@ -745,13 +780,8 @@ impl EventLoop {
             connection.prepare_hello(&message);
             connection.start_command();
             connection.busy = true;
-            let outbound = Arc::clone(&connection.outbound);
-            let cancel = Arc::clone(&connection.cancel);
-            self.execute(token, shared, move |shared| {
-                shared.warm_client_terminfo(&message)?;
-                connection::Session::register(shared, message, &outbound, &cancel)
-                    .map(|session| session.map(Box::new))
-            });
+            connection.hello = Some(message);
+            let _ = self.waker.wake();
         } else if let Some(client) = connection.client {
             match message {
                 ProtocolMessage::GuiResponse(response) => {
@@ -852,17 +882,12 @@ impl EventLoop {
                 connection.cancel = Arc::new(AtomicBool::new(false));
                 connection.start_command();
                 connection.busy = true;
-                let outbound = Arc::clone(&connection.outbound);
-                let cancel = Arc::clone(&connection.cancel);
-                self.execute(token, shared, move |shared| {
-                    drop(execution);
-                    if let Some(client) = exec_client {
-                        shared.client_writers.lock().remove(&client);
-                    }
-                    shared.warm_client_terminfo(&first)?;
-                    connection::Session::register(shared, first, &outbound, &cancel)
-                        .map(|session| session.map(Box::new))
-                });
+                drop(execution);
+                if let Some(client) = exec_client {
+                    shared.client_writers.lock().remove(&client);
+                }
+                connection.hello = Some(first);
+                let _ = self.waker.wake();
             }
             _ => {
                 if !connection.pending.is_empty() {
@@ -968,6 +993,7 @@ impl EventLoop {
             connection.command.take().unwrap().finish();
             if last && !resumed {
                 if execution.can_finish_inline() {
+                    execution.finish();
                     drop(execution);
                     self.complete_exec(token, None, shared);
                 } else {
@@ -1117,30 +1143,14 @@ impl EventLoop {
             .get(&token)
             .and_then(|connection| connection.command.as_ref())
             .and_then(cmdq::CommandItem::wait);
-        let shared = Arc::clone(shared);
-        let sender = self.completion_sender.clone();
-        let waker = Arc::clone(&self.waker);
-        let threads = Arc::clone(&shared.connection_threads);
-        if let Err(error) = threads.run(Box::new(move || {
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(&shared)))
-                .unwrap_or_else(|_| {
-                    Err(DaemonError::Thread("client execution panicked".to_owned()))
-                });
-            let _ = sender.send(Completion {
-                token,
-                result,
-                continuation,
-            });
-            let _ = waker.wake();
-        })) {
-            log::error!("could not start client execution: {error}");
-            let _ = self.completion_sender.send(Completion {
-                token,
-                result: Err(error.into()),
-                continuation,
-            });
-            let _ = self.waker.wake();
-        }
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(shared)))
+            .unwrap_or_else(|_| Err(DaemonError::Thread("client execution panicked".to_owned())));
+        let _ = self.completion_sender.send(Completion {
+            token,
+            result,
+            continuation,
+        });
+        let _ = self.waker.wake();
     }
 
     fn turn_pipe_jobs(&mut self, shared: &Arc<Shared>) {
@@ -1159,6 +1169,7 @@ impl EventLoop {
 
     #[cfg(test)]
     pub(super) fn pipe_test_turn(&mut self, shared: &Arc<Shared>) {
+        self.turn_lifecycle(shared).unwrap();
         self.terminal_request_deadline = shared.terminal_requests.turn(shared);
         self.turn_pipe_jobs(shared);
         self.jobs.turn(self.poll.registry(), Instant::now());
@@ -1183,7 +1194,7 @@ impl EventLoop {
         }
         shared.drain_background_insertions();
         shared.drain_control_output_taps();
-        self.watchers.turn(shared).unwrap();
+        self.watchers.turn(shared);
     }
 
     #[cfg(test)]
@@ -1331,6 +1342,34 @@ impl EventLoop {
         }
     }
 
+    fn turn_lifecycle(&mut self, shared: &Arc<Shared>) -> Result<(), DaemonError> {
+        if let Some(run_hooks) = shared.lifecycle.turn(shared) {
+            self.lifecycle_shutdown = Some(self.lifecycle_shutdown.unwrap_or(false) || run_hooks);
+        }
+        if let Some(run_hooks) = self.lifecycle_shutdown
+            && !self.lifecycle_shutdown_started
+        {
+            self.lifecycle_shutdown_started = true;
+            if run_hooks && !shared.stopping.load(Ordering::Acquire) {
+                shared.enter_queue_shutdown_phase();
+            }
+        }
+        self.lifecycle_hooks
+            .shutdown_events(shared, shared.lifecycle.take_hooks());
+        self.lifecycle_hooks.turn(shared, &self.waker)?;
+        if let Some(run_hooks) = self.lifecycle_shutdown
+            && !self.lifecycle_hooks.pending()
+            && shared.close_shutdown_blockers()
+        {
+            self.lifecycle_shutdown = None;
+            shared.begin_stopping(run_hooks);
+            self.lifecycle_hooks
+                .shutdown_events(shared, shared.lifecycle.take_hooks());
+            self.lifecycle_hooks.turn(shared, &self.waker)?;
+        }
+        Ok(())
+    }
+
     fn turn(&mut self, shared: &Arc<Shared>) -> Result<(), DaemonError> {
         #[cfg(test)]
         self.jobs.child_signal(self.poll.registry());
@@ -1348,25 +1387,19 @@ impl EventLoop {
         self.turn_pipe_jobs(shared);
         self.jobs.turn(self.poll.registry(), Instant::now());
         shared.drain_background_insertions();
-        self.watchers.turn(shared)?;
+        self.watchers.turn(shared);
         self.timers.turn(shared, &self.waker)?;
         shared.drain_control_output_taps();
         self.control_output_deadline = shared.control_output_deadline();
+        drop(std::mem::take(&mut self.retired));
+        self.turn_lifecycle(shared)?;
         while let Ok(completion) = self.completed.try_recv() {
             if let Ok(Completed::Inserted(task)) = completion.result {
                 self.inserted_queues.push(*task);
                 continue;
             }
             let Some(connection) = self.connections.get_mut(&completion.token) else {
-                if matches!(
-                    &completion.result,
-                    Ok(Completed::Client(Some(_))
-                        | Completed::Exec(Some(_))
-                        | Completed::ExecPhase(_, _))
-                ) {
-                    let threads = Arc::clone(&shared.connection_threads);
-                    let _ = threads.run(Box::new(move || drop(completion.result)));
-                }
+                drop(completion.result);
                 continue;
             };
             if let Some(continuation) = completion.continuation {
@@ -1401,8 +1434,7 @@ impl EventLoop {
                         command.finish();
                     }
                     if connection.cleanup_started {
-                        let threads = Arc::clone(&shared.connection_threads);
-                        let _ = threads.run(Box::new(move || drop(session)));
+                        drop(session);
                     } else {
                         connection.session = Some(session);
                     }
@@ -1471,6 +1503,63 @@ impl EventLoop {
                 && let cmdq::State::Waiting(continuation) = command.state()
             {
                 command.resume(continuation);
+            }
+            if connection.hello.is_some() {
+                let message = connection.hello.as_ref().unwrap();
+                let hello = match message {
+                    ProtocolMessage::Hello(hello) => Some(hello.clone().into_client()),
+                    ProtocolMessage::ClientHello(hello) => Some(hello.clone()),
+                    _ => None,
+                };
+                let reentry = hello.as_ref().is_some_and(|hello| {
+                    hello.kind == ClientKind::Command
+                        && hello.capabilities.contains(&format!(
+                            "{}{}",
+                            crate::STARTUP_REENTRY_CAPABILITY_PREFIX,
+                            shared.server_id
+                        ))
+                });
+                if *shared.startup_ready.lock()
+                    || reentry
+                    || shared.stopping.load(Ordering::Acquire)
+                {
+                    if let Some(hello) =
+                        hello.as_ref().filter(|hello| validate_hello(hello).is_ok())
+                        && !crate::status::terminfo_is_warm(&hello.environment)
+                        && connection.terminfo.is_none()
+                    {
+                        let (reply, result) = mpsc::sync_channel(1);
+                        shared.helpers.submit(helpers::Task::Terminfo {
+                            environment: hello.environment.clone(),
+                            jobs: Some(shared.helpers.jobs.clone()),
+                            reply,
+                        })?;
+                        connection.terminfo = Some(result);
+                    }
+                    if connection.terminfo.as_ref().is_none_or(|result| {
+                        !matches!(result.try_recv(), Err(mpsc::TryRecvError::Empty))
+                    }) {
+                        connection.terminfo = None;
+                        let message = connection.hello.take().unwrap();
+                        let result = connection::Session::register(
+                            shared,
+                            message,
+                            &connection.outbound,
+                            &connection.cancel,
+                        )
+                        .map(|session| Completed::Client(session.map(Box::new)));
+                        let continuation = connection
+                            .command
+                            .as_ref()
+                            .and_then(cmdq::CommandItem::wait);
+                        let _ = self.completion_sender.send(Completion {
+                            token,
+                            result,
+                            continuation,
+                        });
+                        self.waker.wake()?;
+                    }
+                }
             }
             if std::mem::take(&mut connection.read_again) {
                 self.read_ready(token, shared);
@@ -1582,11 +1671,7 @@ impl EventLoop {
             }
             if let Some(client) = connection.client {
                 while let Some(pane) = connection.outbound.take_preview_refresh() {
-                    let shared = Arc::clone(shared);
-                    let outbound = Arc::clone(&connection.outbound);
-                    let threads = Arc::clone(&shared.connection_threads);
-                    let _ =
-                        threads.run(Box::new(move || shared.send_full(client, pane, &outbound)));
+                    shared.send_full(client, pane, &connection.outbound);
                 }
             }
             let writing = !connection.frames.is_empty();
@@ -1637,56 +1722,41 @@ impl EventLoop {
         connection.cancel.store(true, Ordering::Release);
         connection.pending.clear();
         connection.pending_bytes = 0;
+        if connection.hello.take().is_some() {
+            connection.busy = false;
+            if let Some(command) = connection.command.take() {
+                command.finish();
+            }
+        }
         if connection.outbound.state.lock().ctrl_collecting == ControlCollection::Attach {
             connection.outbound.close();
         }
-        if connection.cleanup_started {
-            if let Some(execution) = connection.exec.take() {
-                let threads = Arc::clone(&shared.connection_threads);
-                let outbound = Arc::clone(&connection.outbound);
-                let _ = threads.run(Box::new(move || {
-                    drop(execution);
-                    outbound.close_after_flush();
-                }));
+        if !connection.cleanup_started
+            && let Some(client) = connection.client
+        {
+            connection.cleanup_started = true;
+            if let Some(released) = &connection.released
+                && !released.swap(true, Ordering::AcqRel)
+            {
+                shared.lifecycle.release(client, connection.exec_mode);
             }
-            return;
+            connection.session.take();
+            connection.exec.take();
+            self.waker.wake().ok();
         }
-        let Some(client) = connection.client else {
-            if !connection.busy {
-                connection.outbound.close_after_flush();
-            }
-            return;
-        };
-        connection.cleanup_started = true;
-        let outbound = Arc::clone(&connection.outbound);
-        let shared = Arc::clone(shared);
-        let threads = Arc::clone(&shared.connection_threads);
-        let waker = Arc::clone(&self.waker);
-        let session = connection.session.take();
-        let execution = connection.exec.take();
-        let exec_mode = connection.exec_mode;
-        let released = Arc::clone(connection.released.as_ref().expect("registered cleanup"));
-        let _ = threads.run(Box::new(move || {
-            if !released.swap(true, Ordering::AcqRel) {
-                if !exec_mode || !detach_is_inert(&shared.inner.lock(), client) {
-                    shared.detach(client);
-                }
-                shared.unregister(client);
-            }
-            drop(session);
-            drop(execution);
-            outbound.close_after_flush();
-            let _ = waker.wake();
-        }));
+        if !connection.busy {
+            connection.outbound.close_after_flush();
+        }
     }
 
     fn remove(&mut self, token: Token, shared: &Arc<Shared>) {
-        self.disconnect(token, shared);
         if let Some(mut connection) = self.connections.remove(&token) {
             let _ = self
                 .poll
                 .registry()
                 .deregister(&mut SourceFd(&connection.stream.as_raw_fd()));
+            connection.read_closed = true;
+            connection.cancel.store(true, Ordering::Release);
             if let Some(client) = connection.client {
                 let mut writers = shared.client_writers.lock();
                 if writers
@@ -1695,12 +1765,19 @@ impl EventLoop {
                 {
                     writers.remove(&client);
                 }
+                if let Some(released) = &connection.released
+                    && !released.swap(true, Ordering::AcqRel)
+                {
+                    shared.lifecycle.release(client, connection.exec_mode);
+                }
             }
             connection.outbound.mark_writer_finished();
-            if let Some(session) = connection.session.take() {
-                let threads = Arc::clone(&shared.connection_threads);
-                let _ = threads.run(Box::new(move || drop(session)));
-            }
+            self.retired.push((
+                connection.session.take(),
+                connection.exec.take(),
+                connection.exec_request.take(),
+            ));
+            self.waker.wake().ok();
         }
     }
 }
@@ -1850,6 +1927,7 @@ fn serve_test_loop(event_loop: &mut EventLoop, shared: &Arc<Shared>) -> Result<(
     event_loop.failure.take().map_or(Ok(()), Err)
 }
 
+#[cfg(test)]
 pub(super) fn join_startup(
     startup: thread::JoinHandle<Result<(), DaemonError>>,
 ) -> Result<(), DaemonError> {

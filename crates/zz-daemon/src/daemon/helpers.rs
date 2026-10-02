@@ -180,6 +180,7 @@ impl Pool {
         self.jobs.wake.install(waker);
     }
 
+    #[cfg(any(windows, test))]
     pub(super) fn active(&self) -> bool {
         self.state.queue.lock().workers != 0
     }
@@ -305,6 +306,8 @@ fn worker(state: &State) {
         } else if result.is_err() {
             log::error!("helper task panicked");
         }
+        state.pending.store(true, Ordering::Release);
+        state.wake.wake();
         let mut queue = state.queue.lock();
         queue.busy -= 1;
         if retire && queue.tasks.is_empty() {

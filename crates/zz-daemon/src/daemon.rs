@@ -22132,6 +22132,7 @@ impl Shared {
             command,
             "display-menu",
             true,
+            None,
         );
     }
 
@@ -22194,6 +22195,7 @@ impl Shared {
         command: &str,
         title: &str,
         uppercase_error: bool,
+        then: Option<OverlaySourceThen>,
     ) {
         let source = InsertedCommandSource::String(command.to_owned());
         #[cfg(unix)]
@@ -22209,20 +22211,25 @@ impl Shared {
                 None,
                 false,
                 None,
-                Box::new(move |shared, context, result| match result {
-                    Ok(result) => shared.route_background_inserted_output(
-                        client,
-                        ClientKind::Interactive,
-                        context,
-                        title,
-                        &result.output,
-                    ),
-                    Err(error) => shared.publish_background_command_error(
-                        client,
-                        context,
-                        &error,
-                        uppercase_error,
-                    ),
+                Box::new(move |shared, context, result| {
+                    match result {
+                        Ok(result) => shared.route_background_inserted_output(
+                            client,
+                            ClientKind::Interactive,
+                            context,
+                            title,
+                            &result.output,
+                        ),
+                        Err(error) => shared.publish_background_command_error(
+                            client,
+                            context,
+                            &error,
+                            uppercase_error,
+                        ),
+                    }
+                    if let Some(then) = then {
+                        then(shared);
+                    }
                 }),
             );
             return;
@@ -22244,6 +22251,9 @@ impl Shared {
             Err(error) => {
                 self.publish_background_command_error(client, context, &error, uppercase_error);
             }
+        }
+        if let Some(then) = then {
+            then(self);
         }
     }
 
@@ -23309,6 +23319,7 @@ impl Shared {
                         template,
                         &entry.target,
                         "switch-mode",
+                        None,
                     );
                 }
                 true
@@ -23935,23 +23946,43 @@ impl Shared {
                 self.publish_chooser_presentation(client);
             }
             ChooseTreeResult::Kill(_) | ChooseTreeResult::Command { .. } => {
-                {
-                    let mut inner = self.inner.lock();
-                    if let Some(chooser) = inner
-                        .client_mut(client)
-                        .and_then(|c| c.choose_tree.as_mut())
+                let row = self
+                    .inner
+                    .lock()
+                    .client(client)
+                    .and_then(|c| c.choose_tree.as_ref())
+                    .map(|chooser| chooser.rendered.selected);
+                let mut rebuild: Option<OverlaySourceThen> = Some(Box::new(move |shared| {
                     {
-                        chooser.pending_row = Some(chooser.rendered.selected);
+                        let mut inner = shared.inner.lock();
+                        if let Some(chooser) = inner
+                            .client_mut(client)
+                            .and_then(|c| c.choose_tree.as_mut())
+                        {
+                            chooser.pending_row = row;
+                        }
                     }
-                }
+                    shared.refresh_choose_trees();
+                }));
                 let client_target =
                     ExecutionContext::new(context.session, context.window, context.pane);
-                for (template, name, row_target) in runs {
+                let last = runs.len().checked_sub(1);
+                for (index, (template, name, row_target)) in runs.into_iter().enumerate() {
                     context.retarget(row_target.as_ref().unwrap_or(&client_target));
-                    self.execute_chooser_command(client, context, &template, &name, "choose-tree");
+                    let then = (Some(index) == last).then(|| rebuild.take()).flatten();
+                    self.execute_chooser_command(
+                        client,
+                        context,
+                        &template,
+                        &name,
+                        "choose-tree",
+                        then,
+                    );
                 }
                 context.retarget(&client_target);
-                self.refresh_choose_trees();
+                if let Some(rebuild) = rebuild {
+                    rebuild(self);
+                }
             }
             ChooseTreeResult::Swap {
                 current,
@@ -23996,6 +24027,7 @@ impl Shared {
                             &template,
                             &replacement,
                             "choose-tree",
+                            None,
                         ),
                         Err(error) => {
                             let error = DaemonError::from(error);
@@ -24250,6 +24282,7 @@ impl Shared {
                             template,
                             &name,
                             "choose-buffer",
+                            None,
                         );
                     } else {
                         self.paste_buffer_to_pane(
@@ -24715,9 +24748,10 @@ impl Shared {
         template: &str,
         replacement: &str,
         title: &str,
+        then: Option<OverlaySourceThen>,
     ) {
         let command = MuxEngine::substitute_command_prompt_template(template, &[replacement]);
-        self.execute_overlay_source_with_error_case(client, context, &command, title, true);
+        self.execute_overlay_source_with_error_case(client, context, &command, title, true, then);
     }
 
     fn inject_client_keys(
@@ -47445,6 +47479,11 @@ impl std::ops::Deref for CommandQueueExecution {
 }
 
 type DeferredShellJob = Box<dyn FnOnce(&Arc<Shared>) + Send>;
+
+type OverlaySourceThen = Box<dyn FnOnce(&Arc<Shared>) + Send>;
+
+#[cfg(all(test, unix))]
+mod focusfix_tests;
 
 impl CommandQueueExecution {
     fn insert_foreground_child(&self, child: InsertedQueueChild) {

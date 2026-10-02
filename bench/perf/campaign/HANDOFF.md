@@ -194,6 +194,11 @@ read "Lane brief rules" before launching anything.
     two branches that carry the same patches as different cherry-picks.
   - compat `prompt-history` fails on alienware with every binary back to the wave-3 start and
     passes on the Mac: a Linux environment issue, not LOOP.
+  - e09 (`095151f1`, Linux): split-window -W and wait-pane --exit park as terminal-incarnation
+    continuations; 20 exit waits add 0 workers and 0 poll deadlines; 23/23 instruction rows pass
+    (split_shell 0.987x). e08 picked onto Linux after it (`da24448e`).
+  - Order change: e10 (send_text, paste_and_submit) waits for e18 (agent-send waits go through
+    them); alienware took e11 (client file waits) meanwhile.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

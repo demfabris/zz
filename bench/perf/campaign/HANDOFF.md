@@ -342,6 +342,26 @@ read "Lane brief rules" before launching anything.
     from inside a nested list (an `if-shell -F` body, a prompt template) runs after the rest of
     that list, where tmux runs it in place. `cli.instr.display.p20` reads 0.140 or 0.151 on both
     binaries (one sample right after 19 shells start); judge it settled, not by a quick median.
+  - Second merge checks on `2ea96e66` (all four fix lanes): Linux green (5 load failures pass
+    alone, 36/36 compat rows, release). Mac: the zz-daemon lib binary hung on a quiet host (load
+    2.6) with 50 failures; a `sample` showed `zz-pty-shard-1` blocked in a blocking `waitpid`
+    (`PaneActor::poll_child` -> `ChildExitWatch::on_readable` -> `reap_child(pid, true)`: a
+    shard-owned watch has no kqueue, so `on_readable` assumes the child exited) while every
+    other pane on that shard waited on its full command channel. It came with W3-SHARDS
+    `6c7e10f0` and is on main: a macOS daemon can freeze one shard's panes until some child
+    exits. Lane `perf/shardwait`. The 50 pass alone; compat 36/36, attached-client, tui-screen,
+    web, iOS and release pass on the Mac.
+  - Linux strict wave-3 gate on `2ea96e66` (`~/.cache/zz-perf/w3/wave3-alienware-2ea96e66.json`,
+    not committed: code is still changing): 73 pass, 16 fail, 4 regressed. The fails are rows
+    that also failed at wave 2 against tmux and improved (spawn CPU x3, chatty visible CPU,
+    attach ttfc/cpu, control.latency) plus the echo rows, which the wave-3 stage now judges at
+    1.5x tmux (1.81-2.53 ms against 0.92-1.13; W4-DELIVER). Full-mode triage, alternating
+    loop-00 and the gate binary twice: `control.burst_cmds_per_s` 40.6k/42.5k vs 40.8k/39.1k (no
+    regression: the wave-2 JSON's 141k was an outlier); `attach.wire_frames.p4` 3 -> 7 and p1
+    3 -> 4 at the same bytes (the SHARDS and TUI merge binaries still send 3; Mac the same);
+    `mem.copy_wall.scroll180` 1.29/1.42 -> 1.71/2.28 ms with CPU and instructions lower (Linux
+    only; Mac -29%); `config.instr.source_1000` +3.7% against loop-00, +5.2% against the wave-2
+    JSON. Lanes `perf/attachframes`, `perf/copywall`, `perf/sourceinstr` from `2ea96e66`.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

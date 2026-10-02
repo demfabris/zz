@@ -275,6 +275,12 @@ read "Lane brief rules" before launching anything.
     connection stays scheduled for another pass; the new test stalled at 262 KB of 786 KB on the
     base and passes 10/10. The base also hung a `capture-pane` over 60 s in a perf run (large
     output to a CLI client): same bug. Instructions within 1.004x, throughput/attach within range.
+  - hookpanic (`fbd1ffbe`, Mac): event hooks raised by a finishing loop task queue on the loop's
+    hook queue after the command's output; both reproductions are tests; CLI 0.987-1.002x.
+  - helper-wait picked onto e21 on Linux (`600a5295`; config hooks reload-config/import-tmux-config
+    keep a worker there). Final convergence: hookpanic picked on the Linux tip (`3c425efa`, module
+    union), Linux fast-forwarded to it, Mac merged its tree (`534c99ee`). Both branches now hold the
+    same tree.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

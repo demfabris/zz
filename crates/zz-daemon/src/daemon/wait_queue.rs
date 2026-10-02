@@ -22,7 +22,8 @@ pub(super) fn queue_command(command: &CommandInvocation) -> bool {
         || MuxEngine::is_command_alias_group(command)
         || matches!(
             name,
-            "wait-for"
+            "list-keys"
+                | "wait-for"
                 | "run-shell"
                 | "if-shell"
                 | "display-panes"
@@ -39,7 +40,8 @@ pub(super) fn task_command(command: &CommandInvocation) -> bool {
         || terminal_read_command(name)
         || matches!(
             name,
-            "wait-for"
+            "list-keys"
+                | "wait-for"
                 | "run-shell"
                 | "if-shell"
                 | "display-panes"

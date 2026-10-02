@@ -6368,7 +6368,6 @@ impl Shared {
         let result = self
             .execute_command_request_segment(client, kind, context, request_id, command, prepared);
         let mut item = self.command_item.as_ref().expect("command item").lock();
-        item.execution_context = Some(context.clone());
         item.result = Some(result.clone());
         item.finish();
         result
@@ -7028,11 +7027,10 @@ impl Shared {
     ) -> Result<Execution, DaemonError> {
         let _round_trips = zz_terminal::forbid_actor_round_trips();
         {
-            let mut item = self.command_item.as_ref().expect("command item").lock();
+            let item = self.command_item.as_ref().expect("command item").lock();
             if let cmdq::State::Waiting(token) = item.state() {
                 item.resume(token);
             }
-            item.execution_context = Some(context.clone());
         }
         hook_events::release_input_change_window(self);
         let split_input = canonical_command(&command.name) == "split-window"
@@ -47943,7 +47941,6 @@ const PANE_WAIT_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 #[derive(Default)]
 struct CommandItemContext {
-    execution_context: Option<ExecutionContext>,
     result: Option<(CommandResponse, bool)>,
     hook_notifications_only: bool,
     key_table_publish_hold: u32,

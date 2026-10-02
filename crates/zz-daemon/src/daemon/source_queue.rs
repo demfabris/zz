@@ -3,7 +3,6 @@ use super::*;
 pub(super) struct CommandFinish {
     pub(super) command: CommandInvocation,
     pub(super) routed: CommandInvocation,
-    pub(super) group: Option<(String, u32)>,
     pub(super) previous_replay_client: Option<ClientId>,
     pub(super) previous_control_target: Option<(ClientId, u8)>,
     pub(super) early_shell_guard: bool,

@@ -34,6 +34,7 @@ pub(super) struct ConnectionThreads {
 }
 
 impl ConnectionThreads {
+    #[cfg(windows)]
     pub(super) fn log_knob() {
         if *SPAWN_PER_CONNECTION {
             log::info!("ZZ_PERF_CONNECTION_THREADS=0: every connection starts a new thread");
@@ -195,6 +196,12 @@ impl ExecRegistration {
         if self.released.swap(true, Ordering::AcqRel) {
             return;
         }
+        #[cfg(unix)]
+        if self.shared.loop_active.load(Ordering::Acquire) {
+            self.shared.lifecycle.release(self.client, true);
+            self.shared.accept_wake.wake();
+            return;
+        }
         if !detach_is_inert(&self.shared.inner.lock(), self.client) {
             self.shared.detach(self.client);
         }
@@ -305,7 +312,9 @@ impl Shared {
 
     pub(super) fn resume_pending_execs(&self) {
         self.accept_wake.wake();
+        #[cfg(windows)]
         let pending = std::mem::take(&mut *self.pending_execs.lock());
+        #[cfg(windows)]
         for job in pending {
             if let Err(error) = self.connection_threads.run(job) {
                 log::warn!("could not resume a parked command connection: {error}");
@@ -1089,6 +1098,16 @@ impl LoopExec {
         Some(resumed)
     }
 
+    pub(super) fn finish(&mut self) {
+        if self.registration.released.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        if !detach_is_inert(&self.shared.inner.lock(), self.client) {
+            self.shared.detach(self.client);
+        }
+        self.shared.unregister(self.client);
+    }
+
     pub(super) fn can_finish_inline(&self) -> bool {
         let inner = self.shared.inner.lock();
         detach_is_inert(&inner, self.client) && !inner.engine.destroy_unattached_explicit_anywhere()
@@ -1181,7 +1200,9 @@ pub(super) fn output_pending(mailbox: &OutboundMailbox) -> bool {
 #[cfg(unix)]
 impl Drop for LoopExec {
     fn drop(&mut self) {
-        self.registration.release();
+        if !self.registration.released.load(Ordering::Acquire) {
+            self.registration.release();
+        }
         self.shared
             .command_queue_cancels
             .lock()

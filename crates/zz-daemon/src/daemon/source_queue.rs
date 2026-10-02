@@ -170,6 +170,10 @@ impl Replay {
         }
     }
 
+    pub(super) fn take_context(&mut self) -> Option<ExecutionContext> {
+        self.completed_context.take()
+    }
+
     pub(super) fn run(
         &mut self,
         shared: &Arc<Shared>,

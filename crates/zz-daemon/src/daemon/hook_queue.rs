@@ -62,6 +62,25 @@ impl LoopHooks {
         );
     }
 
+    pub(super) fn shutdown_events(&mut self, shared: &Arc<Shared>, events: Vec<PendingHookEvent>) {
+        if events.is_empty() {
+            return;
+        }
+        self.enqueue(
+            shared,
+            ExecutionContext::default(),
+            &InsertedCommandSource::Events(Box::new(EventQueueSource {
+                events: RefCell::new(events),
+                publish_control: false,
+                shutdown_already_blocked: shared.active_shutdown_blockers() != 0,
+            })),
+        );
+    }
+
+    pub(super) fn pending(&self) -> bool {
+        !self.queues.is_empty()
+    }
+
     pub(super) fn monitor(
         &mut self,
         shared: &Arc<Shared>,
@@ -160,30 +179,9 @@ impl LoopHooks {
 }
 
 fn blocking_leaf(command: &CommandInvocation) -> bool {
-    if canonical_command(&command.name) == "run-shell" {
-        return parse_run_shell_args(&command.args).is_err();
-    }
-    if canonical_command(&command.name) == "if-shell" {
-        return parse_if_shell_args(&command.args).is_err();
-    }
     matches!(
         canonical_command(&command.name),
-        "run-shell"
-            | "if-shell"
-            | "wait-for"
-            | "source-file"
-            | "reload-config"
-            | "import-tmux-config"
-            | "display-menu"
-            | "display-popup"
-            | "agent-send"
-            | "new-session"
-            | "new-window"
-            | "respawn-pane"
-            | "respawn-window"
-            | "load-buffer"
-            | "save-buffer"
-            | "show-buffer"
+        "reload-config" | "import-tmux-config"
     )
 }
 
@@ -315,6 +313,16 @@ impl Queue {
             if let Err(error) = result {
                 log::debug!("queued hook failed: {error}");
             }
+        } else if !self.waiting
+            && shared
+                .command_item
+                .as_ref()
+                .unwrap()
+                .lock()
+                .pending_wait
+                .is_none()
+        {
+            waker.wake()?;
         }
         Ok(())
     }

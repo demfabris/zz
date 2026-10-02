@@ -24,9 +24,7 @@ fn signal_shutdown_waits_for_a_foreground_job_that_ends_within_its_grace() {
             crate::endpoint::shell_quote(marker.to_str().unwrap())
         ),
     );
-    event_loop
-        .request_signal_shutdown(&shared, Duration::from_secs(2))
-        .unwrap();
+    event_loop.request_signal_shutdown(&shared, Duration::from_secs(2));
     assert!(!shared.stopping.load(Ordering::Acquire));
     until(&mut event_loop, &shared, || {
         shared.shutdown_cleanup_complete.load(Ordering::Acquire)
@@ -43,7 +41,7 @@ fn signal_shutdown_stops_a_foreground_job_that_outlives_its_grace() {
     let worker = spawn_foreground_shell_job(&shared, ClientId(302), "sleep 30".to_owned());
     let grace = Duration::from_millis(200);
     let signalled = Instant::now();
-    event_loop.request_signal_shutdown(&shared, grace).unwrap();
+    event_loop.request_signal_shutdown(&shared, grace);
     until(&mut event_loop, &shared, || {
         shared.shutdown_cleanup_complete.load(Ordering::Acquire)
             && shared.inner.lock().active_shell_jobs == 0
@@ -59,15 +57,11 @@ fn repeated_signal_stops_past_active_shutdown_blockers() {
     let shared = Arc::new(Shared::new(1));
     let mut event_loop = EventLoop::empty(&shared).unwrap();
     let blocker = ShutdownBlocker::acquire(&shared, false).unwrap();
-    event_loop
-        .request_signal_shutdown(&shared, Duration::from_secs(2))
-        .unwrap();
+    event_loop.request_signal_shutdown(&shared, Duration::from_secs(2));
     assert!(shared.shutdown_pending.load(Ordering::Acquire));
     assert!(!shared.stopping.load(Ordering::Acquire));
     let second = Instant::now();
-    event_loop
-        .request_signal_shutdown(&shared, Duration::from_secs(2))
-        .unwrap();
+    event_loop.request_signal_shutdown(&shared, Duration::from_secs(2));
     until(&mut event_loop, &shared, || {
         shared.shutdown_cleanup_complete.load(Ordering::Acquire)
             && shared.inner.lock().active_shell_jobs == 0

@@ -46,7 +46,7 @@ fn start(
         .recv_timeout(Duration::from_secs(2))
         .unwrap();
     assert!(matches!(input, Input::Started(_)));
-    watchers.input(shared, input).unwrap();
+    watchers.input(shared, input);
 }
 
 #[test]
@@ -64,7 +64,7 @@ fn producer_notifies_while_server_state_is_locked() {
         Input::Ready(1)
     ));
     drop(locked);
-    watchers.input(&shared, Input::Ready(1)).unwrap();
+    watchers.input(&shared, Input::Ready(1));
     assert_eq!(
         shared.inner.lock().engine.state.pane(pane).unwrap().title,
         "forwarded title"
@@ -76,7 +76,7 @@ fn publication_before_registration_is_drained_by_the_loop() {
     let (shared, pane, terminal, mut watchers) = fixture();
     assert!(terminal.diagnostics().viewport_notification_pending);
     start(&mut watchers, &shared, pane, &terminal);
-    watchers.turn(&shared).unwrap();
+    watchers.turn(&shared);
     assert_eq!(
         shared.inner.lock().engine.state.pane(pane).unwrap().title,
         "forwarded title"
@@ -107,7 +107,7 @@ fn queued_viewport_from_retired_terminal_cannot_rename_its_replacement() {
         .unwrap()
         .title
         .clone();
-    watchers.turn(&shared).unwrap();
+    watchers.turn(&shared);
     assert_eq!(
         shared.inner.lock().engine.state.pane(pane).unwrap().title,
         before
@@ -117,7 +117,7 @@ fn queued_viewport_from_retired_terminal_cannot_rename_its_replacement() {
     drop(terminal);
     let deadline = Instant::now() + Duration::from_secs(2);
     while !watchers.surfaces.is_empty() {
-        watchers.turn(&shared).unwrap();
+        watchers.turn(&shared);
         assert!(Instant::now() < deadline);
         thread::yield_now();
     }
@@ -128,15 +128,15 @@ fn worker_completion_admits_queued_final_frame_before_stream_closure() {
     let (shared, pane, terminal, mut watchers) = fixture();
     start(&mut watchers, &shared, pane, &terminal);
     watchers.surfaces.get_mut(&1).unwrap().busy = true;
-    watchers.turn(&shared).unwrap();
+    watchers.turn(&shared);
 
     assert!(terminal.diagnostics().viewport_notification_pending);
     assert_ne!(
         shared.inner.lock().engine.state.pane(pane).unwrap().title,
         "forwarded title"
     );
-    watchers.input(&shared, Input::Completed(1)).unwrap();
-    watchers.turn(&shared).unwrap();
+    watchers.input(&shared, Input::Completed(1));
+    watchers.turn(&shared);
     assert_eq!(
         shared.inner.lock().engine.state.pane(pane).unwrap().title,
         "forwarded title"
@@ -146,7 +146,7 @@ fn worker_completion_admits_queued_final_frame_before_stream_closure() {
     drop(terminal);
     let deadline = Instant::now() + Duration::from_secs(2);
     while !watchers.surfaces.is_empty() {
-        watchers.turn(&shared).unwrap();
+        watchers.turn(&shared);
         assert!(Instant::now() < deadline);
         thread::yield_now();
     }
@@ -163,7 +163,7 @@ fn repeated_readiness_keeps_one_entry_per_surface() {
     assert_eq!(watchers.inputs.as_ref().unwrap().len(), 1);
     let input = watchers.inputs.as_ref().unwrap().try_recv().unwrap();
     assert!(matches!(input, Input::Ready(1)));
-    watchers.input(&shared, input).unwrap();
+    watchers.input(&shared, input);
     assert!(
         !watchers
             .surfaces
@@ -191,7 +191,7 @@ fn drained_turn_rearms_the_coalesced_loop_wake() {
         poll.poll(&mut events, Some(Duration::from_secs(1)))
             .unwrap();
         assert!(!events.is_empty());
-        watchers.turn(&shared).unwrap();
+        watchers.turn(&shared);
         assert!(!shared.watcher_tx.pending_wake.load(Ordering::Acquire));
         poll.poll(&mut events, Some(Duration::from_millis(10)))
             .unwrap();
@@ -203,12 +203,12 @@ fn drained_turn_rearms_the_coalesced_loop_wake() {
 fn closure_without_a_final_event_removes_the_loop_receiver() {
     let (shared, pane, terminal, mut watchers) = fixture();
     start(&mut watchers, &shared, pane, &terminal);
-    watchers.turn(&shared).unwrap();
+    watchers.turn(&shared);
     shared.inner.lock().terminals_mut().remove(&pane);
     drop(terminal);
     let deadline = Instant::now() + Duration::from_secs(2);
     while !watchers.surfaces.is_empty() {
-        watchers.turn(&shared).unwrap();
+        watchers.turn(&shared);
         assert!(Instant::now() < deadline);
         thread::yield_now();
     }

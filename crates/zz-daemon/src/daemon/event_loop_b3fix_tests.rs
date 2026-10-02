@@ -185,7 +185,7 @@ fn plain_input_and_unchanged_selection_need_no_worker() {
 }
 
 #[test]
-fn command_hooks_keep_plain_input_on_a_worker() {
+fn command_hooks_park_plain_input_on_the_loop() {
     let shared = Arc::new(Shared::new(74));
     let mut context = ExecutionContext::default();
     for command in [
@@ -214,7 +214,7 @@ fn command_hooks_keep_plain_input_on_a_worker() {
     .unwrap();
     event_loop.read_ready(token, &shared);
     assert!(event_loop.connections[&token].busy);
-    assert!(shared.connection_threads.worker_count() > 0);
+    assert_eq!(shared.connection_threads.worker_count(), 0);
     let deadline = Instant::now() + Duration::from_secs(5);
     while shared
         .inner
@@ -249,7 +249,7 @@ fn command_hooks_keep_plain_input_on_a_worker() {
 }
 
 #[test]
-fn relative_pane_selection_keeps_the_command_specific_target_on_a_worker() {
+fn relative_pane_selection_keeps_the_command_specific_target_on_the_loop() {
     let shared = Arc::new(Shared::new(75));
     let mut context = ExecutionContext::default();
     shared
@@ -293,7 +293,7 @@ fn relative_pane_selection_keeps_the_command_specific_target_on_a_worker() {
         .unwrap();
     event_loop.read_ready(token, &shared);
     assert!(event_loop.connections[&token].busy);
-    assert!(shared.connection_threads.worker_count() > 0);
+    assert_eq!(shared.connection_threads.worker_count(), 0);
     let mut input = Inbound::default();
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
@@ -338,18 +338,11 @@ fn last_query_cleanup_that_can_run_hooks_leaves_the_loop_available() {
             &CommandInvocation::new("set-option", ["-g", "destroy-unattached", "on"]),
         )
         .unwrap();
-    let (reached, seen) = crossbeam_channel::bounded(1);
-    let (release, released) = crossbeam_channel::bounded(1);
-    *shared.destroy_unattached_hook.lock() = Some(ResponseAdmissionHook {
-        reached,
-        release: released,
-    });
     let mut event_loop = EventLoop::empty(&shared).unwrap();
     let (token, mut peer) = pair(&mut event_loop);
     peer.write_all(&encode_protocol_message(&request(vec![display("last")], true)).unwrap())
         .unwrap();
     event_loop.read_ready(token, &shared);
-    seen.recv_timeout(Duration::from_secs(5)).unwrap();
     assert!(event_loop.connections[&token].busy);
     let (other_token, mut other) = pair(&mut event_loop);
     other
@@ -373,8 +366,7 @@ fn last_query_cleanup_that_can_run_hooks_leaves_the_loop_available() {
     ] if output == "last"),
         "{replies:?}"
     );
-    assert!(event_loop.connections.contains_key(&token));
-    release.send(()).unwrap();
+    assert_eq!(shared.connection_threads.worker_count(), 0);
     let deadline = Instant::now() + Duration::from_secs(10);
     while event_loop.connections.contains_key(&token) {
         assert!(Instant::now() < deadline);

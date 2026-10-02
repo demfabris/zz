@@ -170,6 +170,13 @@ read "Lane brief rules" before launching anything.
     resume through loop request tokens (`daemon/terminal_requests.rs`); a respawn rejects stale
     replies; 1450 daemon and 369 terminal tests. `spawn.instr.new_window` 0.718 -> 0.737 Minstr
     (1.026x, token registration per spawn); split_shell 1.000x, kill_pane 0.998x: accepted.
+  - e14 (`6c163955`, Mac): foreground/background run-shell and if-shell jobs on the registry, 14/16
+    explicit park sites; 20 jobs add 0 workers, admission capped at 256; 1445 daemon tests. p20
+    medians show_options/has_session/send_keys 1.020-1.024x, inside the base's spread.
+  - `if-shell-background-order` fails with every binary back to before wave 3 (`base-cli-mac`): zz
+    keeps file order for equal-cost background jobs, the fetched tmux answers
+    never-file-order-in-8. Oracle drift like control-alias-prepare; both handed to one separate
+    task.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

@@ -1,21 +1,11 @@
 use super::*;
 
-static BORROWED_FORMATS: LazyLock<bool> =
-    LazyLock::new(|| std::env::var_os("ZZ_PERF_BORROWED_FORMATS").is_none_or(|value| value != "0"));
-
 thread_local! {
     static BORROWED_OVERRIDE: Cell<Option<bool>> = const { Cell::new(None) };
 }
 
 pub(super) fn borrowed_formats() -> bool {
-    BORROWED_OVERRIDE
-        .with(Cell::get)
-        .unwrap_or(*BORROWED_FORMATS)
-}
-
-#[must_use]
-pub fn borrowed_formats_knob() -> bool {
-    *BORROWED_FORMATS
+    BORROWED_OVERRIDE.with(Cell::get).unwrap_or(true)
 }
 
 #[doc(hidden)]

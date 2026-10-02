@@ -1,14 +1,13 @@
 use std::cell::RefCell;
 use std::sync::{
-    Arc, LazyLock,
+    Arc,
     atomic::{AtomicU64, Ordering},
 };
 
 use libghostty_vt::{
-    RenderState, Terminal,
-    render::{CellIterator, RowIterator},
-    screen::{CellSemanticContent, CellWide, RowSemanticPrompt, Screen},
-    terminal::{PointCoordinate, ScrollViewport},
+    Terminal,
+    screen::{RowSemanticPrompt, Screen},
+    terminal::PointCoordinate,
 };
 
 use parking_lot::Mutex;
@@ -17,14 +16,8 @@ use super::copy_grid::{CopyGrid, CopyRow};
 
 use crate::{CellWidth, Color, PackedCell, PackedStyle, TerminalDictionary};
 
-use super::{
-    HistorySearchRow, HistorySearchSnapshot, MAX_SEARCH_SNAPSHOT_BYTES, SearchCellOffset,
-    SelectionMode, ViewportDictionary, WorkerError, color, reported_working_directory,
-    resolve_style_color, style_attributes, underline_style,
-};
+use super::{HistorySearchSnapshot, SelectionMode, WorkerError, color, reported_working_directory};
 
-static COPY_CLONE: LazyLock<bool> =
-    LazyLock::new(|| std::env::var_os("ZZ_PERF_COPY_CLONE").is_some_and(|value| value == "1"));
 const ROW_WRAPPED: u8 = 1 << 0;
 const ROW_WRAP_CONTINUATION: u8 = 1 << 1;
 const SEMANTIC_OUTPUT: u8 = 0;
@@ -87,12 +80,8 @@ pub(super) struct ModeRevision {
     palette: Box<[Color; 256]>,
     pub(super) title: Arc<str>,
     pub(super) working_directory: Option<Arc<str>>,
-    pub(super) cells: Vec<PackedCell>,
-    pub(super) dictionary: Arc<TerminalDictionary>,
-    pub(super) rows: Vec<ModeRowMeta>,
-    semantics: Vec<u8>,
     pub(super) search: Arc<HistorySearchSnapshot>,
-    grid: Option<Mutex<CopyGrid>>,
+    grid: Mutex<CopyGrid>,
     total: u32,
 }
 
@@ -116,16 +105,11 @@ impl ModeRevisionReader<'_> {
         self.revision.total_rows()
     }
 
-    fn with_row<T>(
-        &self,
-        row: u32,
-        read: impl FnOnce(&CopyRow, &TerminalDictionary) -> T,
-    ) -> Option<T> {
-        let grid = self.revision.grid.as_ref()?;
+    fn with_row<T>(&self, row: u32, read: impl FnOnce(&CopyRow, &TerminalDictionary) -> T) -> T {
         let index = row.min(self.revision.total.saturating_sub(1));
         let mut cached = self.cached.borrow_mut();
         if cached.as_ref().is_none_or(|cached| cached.index != index) {
-            let mut grid = grid.lock();
+            let mut grid = self.revision.grid.lock();
             let row = grid.row(index).expect("frozen row");
             let dictionary = grid.dictionary();
             *cached = Some(ModeReaderRow {
@@ -135,7 +119,7 @@ impl ModeRevisionReader<'_> {
             });
         }
         let cached = cached.as_ref().expect("captured row");
-        Some(read(&cached.row, &cached.dictionary))
+        read(&cached.row, &cached.dictionary)
     }
 
     fn with_cell<T>(
@@ -144,18 +128,13 @@ impl ModeRevisionReader<'_> {
         read: impl FnOnce(PackedCell, &TerminalDictionary) -> T,
     ) -> T {
         let point = self.revision.clamp_point(point);
-        if self.revision.grid.is_none() {
-            return read(self.revision.cell(point), &self.revision.dictionary);
-        }
         self.with_row(point.y, |row, dictionary| {
             read(row.cells[usize::from(point.x)], dictionary)
         })
-        .expect("paged row")
     }
 
     pub(super) fn row_meta(&self, row: u32) -> ModeRowMeta {
         self.with_row(row, |row, _| row.meta)
-            .unwrap_or_else(|| self.revision.row(row))
     }
 
     pub(super) fn cell(&self, point: PointCoordinate) -> PackedCell {
@@ -179,22 +158,9 @@ impl ModeRevisionReader<'_> {
         row: u32,
         read: impl FnOnce(&[PackedCell], ModeRowMeta, &TerminalDictionary) -> T,
     ) -> T {
-        if self.revision.grid.is_some() {
-            return self
-                .with_row(row, |row, dictionary| {
-                    read(&row.cells, row.meta, dictionary)
-                })
-                .expect("paged row");
-        }
-        let row_index = usize::try_from(row.min(self.revision.total.saturating_sub(1)))
-            .expect("flat row index");
-        let start = row_index * usize::from(self.revision.columns);
-        let end = start + usize::from(self.revision.columns);
-        read(
-            &self.revision.cells[start..end],
-            self.revision.row(row),
-            &self.revision.dictionary,
-        )
+        self.with_row(row, |row, dictionary| {
+            read(&row.cells, row.meta, dictionary)
+        })
     }
 }
 
@@ -206,19 +172,7 @@ impl ModeRevision {
         }
     }
 
-    pub(super) fn capture(terminal: &mut Terminal<'_, '_>) -> Result<Arc<Self>, WorkerError> {
-        if *COPY_CLONE {
-            Self::capture_flat(terminal)
-        } else {
-            Self::capture_paged(terminal)
-        }
-    }
-
-    pub(super) fn clone_enabled() -> bool {
-        *COPY_CLONE
-    }
-
-    fn capture_paged(terminal: &Terminal<'_, '_>) -> Result<Arc<Self>, WorkerError> {
+    pub(super) fn capture(terminal: &Terminal<'_, '_>) -> Result<Arc<Self>, WorkerError> {
         let snapshot = terminal.clone_screen()?;
         Self::from_snapshot(snapshot)
     }
@@ -254,14 +208,10 @@ impl ModeRevision {
             .ok()
             .and_then(reported_working_directory)
             .map(Arc::from);
-        let mut grid = CopyGrid::new(snapshot, foreground, background, &raw_palette, columns);
-        let dictionary = grid.dictionary();
+        let grid = CopyGrid::new(snapshot, foreground, background, &raw_palette, columns);
         let search = Arc::new(HistorySearchSnapshot {
             columns,
-            text: String::new(),
-            rows: Vec::new(),
-            offsets: Vec::new(),
-            terminal: Some(Arc::clone(&grid.terminal)),
+            terminal: Arc::clone(&grid.terminal),
             #[cfg(test)]
             search_gate: Mutex::new(()),
             total_rows: total,
@@ -276,68 +226,45 @@ impl ModeRevision {
             palette,
             title,
             working_directory,
-            cells: Vec::new(),
-            dictionary,
-            rows: Vec::new(),
-            semantics: Vec::new(),
             search,
-            grid: Some(Mutex::new(grid)),
+            grid: Mutex::new(grid),
             total,
         }))
     }
 
     pub(super) fn viewport_cells(&self, offset: u32) -> Arc<[PackedCell]> {
-        if let Some(grid) = &self.grid {
-            let mut grid = grid.lock();
-            grid.begin_viewport();
-            let columns = usize::from(self.columns);
-            let end = offset.saturating_add(u32::from(self.viewport_rows));
-            let len = columns * usize::try_from(end - offset).expect("viewport row count");
-            let mut cells: Arc<[PackedCell]> =
-                std::iter::repeat_n(PackedCell::EMPTY, len).collect();
-            let output = Arc::get_mut(&mut cells).expect("new viewport cells");
-            for (index, row) in (offset..end).enumerate() {
-                if row < self.total {
-                    let source = grid.row(row).expect("frozen row");
-                    let count = source.cells.len().min(columns);
-                    output[index * columns..index * columns + count]
-                        .copy_from_slice(&source.cells[..count]);
-                }
+        let mut grid = self.grid.lock();
+        grid.begin_viewport();
+        let columns = usize::from(self.columns);
+        let end = offset.saturating_add(u32::from(self.viewport_rows));
+        let len = columns * usize::try_from(end - offset).expect("viewport row count");
+        let mut cells: Arc<[PackedCell]> = std::iter::repeat_n(PackedCell::EMPTY, len).collect();
+        let output = Arc::get_mut(&mut cells).expect("new viewport cells");
+        for (index, row) in (offset..end).enumerate() {
+            if row < self.total {
+                let source = grid.row(row).expect("frozen row");
+                let count = source.cells.len().min(columns);
+                output[index * columns..index * columns + count]
+                    .copy_from_slice(&source.cells[..count]);
             }
-            grid.end_viewport();
-            return cells;
         }
-        let start = usize::try_from(offset)
-            .unwrap_or(usize::MAX)
-            .saturating_mul(usize::from(self.columns));
-        let len = usize::from(self.columns) * usize::from(self.viewport_rows);
-        let source = self.cells.get(start..).unwrap_or_default();
-        (0..len)
-            .map(|index| source.get(index).copied().unwrap_or(PackedCell::EMPTY))
-            .collect()
+        grid.end_viewport();
+        cells
     }
 
     pub(super) fn dictionary_generation(&self) -> u32 {
-        self.grid
-            .as_ref()
-            .map_or(0, |grid| grid.lock().generation())
+        self.grid.lock().generation()
     }
 
     pub(super) fn shared_dictionary(&self) -> Arc<TerminalDictionary> {
-        self.grid.as_ref().map_or_else(
-            || Arc::clone(&self.dictionary),
-            |grid| grid.lock().dictionary(),
-        )
+        self.grid.lock().dictionary()
     }
 
     pub(super) fn with_appearance(
         &self,
         terminal: &mut Terminal<'_, '_>,
     ) -> Result<Arc<Self>, WorkerError> {
-        let Some(grid) = &self.grid else {
-            return Self::capture_flat(terminal);
-        };
-        let snapshot = grid.lock().terminal.lock().clone_screen()?;
+        let snapshot = self.grid.lock().terminal.lock().clone_screen()?;
         let mut snapshot = snapshot;
         snapshot.set_colors_from(terminal)?;
         Self::from_snapshot(snapshot)
@@ -349,202 +276,12 @@ impl ModeRevision {
         rows: u16,
         cursor: PointCoordinate,
     ) -> Result<(Arc<Self>, PointCoordinate), WorkerError> {
-        let Some(grid) = &self.grid else {
-            return Ok((Arc::clone(self), self.clamp_point(cursor)));
-        };
-        let mut snapshot = grid.lock().terminal.lock().clone_screen()?;
+        let mut snapshot = self.grid.lock().terminal.lock().clone_screen()?;
         let cursor = snapshot
             .resize_anchored(columns, rows, self.clamp_point(cursor))?
             .unwrap_or(cursor);
         let revision = Self::from_snapshot(snapshot)?;
         Ok((revision, cursor))
-    }
-
-    fn capture_flat(terminal: &mut Terminal<'_, '_>) -> Result<Arc<Self>, WorkerError> {
-        let screen = terminal.active_screen()?;
-        let columns = terminal.cols()?.max(1);
-        let viewport_rows = terminal.rows()?.max(1);
-        let total_rows = terminal.total_rows()?.max(1);
-        let cell_count = total_rows
-            .checked_mul(usize::from(columns))
-            .ok_or(WorkerError::ViewportMetadataTooLarge)?;
-        let saved_offset = terminal.scrollbar()?.offset;
-        let title: Arc<str> = Arc::from(terminal.title().unwrap_or("zz"));
-        let working_directory = terminal
-            .pwd()
-            .ok()
-            .and_then(reported_working_directory)
-            .map(Arc::from);
-        let mut render_state = RenderState::new()?;
-        let mut row_iterator = RowIterator::new()?;
-        let mut cell_iterator = CellIterator::new()?;
-        let mut dictionary = ViewportDictionary::default();
-        let mut cells = vec![PackedCell::EMPTY; cell_count];
-        let mut semantics = vec![SEMANTIC_OUTPUT; cell_count];
-        let mut row_meta = vec![ModeRowMeta::default(); total_rows];
-        let mut search_text = String::with_capacity(cell_count.min(MAX_SEARCH_SNAPSHOT_BYTES / 2));
-        let mut search_rows = Vec::with_capacity(total_rows);
-        let mut search_offsets = Vec::with_capacity(cell_count.min(MAX_SEARCH_SNAPSHOT_BYTES / 16));
-        let mut grapheme_scratch = String::with_capacity(8);
-        let mut captured_until = 0_usize;
-        let mut foreground;
-        let mut background;
-        let mut palette = Box::new([Color::rgb(0, 0, 0); 256]);
-
-        terminal.scroll_viewport(ScrollViewport::Top);
-        loop {
-            let scrollbar = terminal.scrollbar()?;
-            let page_offset = usize::try_from(scrollbar.offset).unwrap_or(usize::MAX);
-            let maximum = scrollbar.total.saturating_sub(scrollbar.len);
-            let snapshot = render_state.update(terminal)?;
-            let colors = snapshot.colors()?;
-            foreground = color(colors.foreground);
-            background = color(colors.background);
-            *palette = colors.palette.map(color);
-            dictionary.ensure_default(
-                PackedStyle::new(foreground, background, None, 0, crate::UnderlineStyle::None),
-                &colors.palette,
-            );
-            let mut rows = row_iterator.update(&snapshot)?;
-            let mut viewport_row = 0_usize;
-            while let Some(row) = rows.next() {
-                let absolute_row = page_offset.saturating_add(viewport_row);
-                viewport_row += 1;
-                if absolute_row < captured_until || absolute_row >= total_rows {
-                    continue;
-                }
-
-                let raw_row = row.raw_row()?;
-                row_meta[absolute_row] = ModeRowMeta::new(
-                    raw_row.is_wrapped()?,
-                    raw_row.is_wrap_continuation()?,
-                    raw_row.semantic_prompt()?,
-                );
-                let text_start = u32::try_from(search_text.len())
-                    .map_err(|_| WorkerError::SearchSnapshotTooLarge)?;
-                let offset_start = u32::try_from(search_offsets.len())
-                    .map_err(|_| WorkerError::SearchSnapshotTooLarge)?;
-                let row_text_start = search_text.len();
-                let row_start = absolute_row.saturating_mul(usize::from(columns));
-                let mut page_cells = cell_iterator.update(row)?;
-                let mut column = 0_u16;
-                while let Some(cell) = page_cells.next() {
-                    if column >= columns {
-                        break;
-                    }
-                    let index = row_start.saturating_add(usize::from(column));
-                    let raw_style = cell.style()?;
-                    let mut cell_foreground = color(cell.fg_color()?.unwrap_or(colors.foreground));
-                    let mut cell_background = color(cell.bg_color()?.unwrap_or(colors.background));
-                    if raw_style.inverse {
-                        std::mem::swap(&mut cell_foreground, &mut cell_background);
-                    }
-                    grapheme_scratch.clear();
-                    cell.graphemes_utf8(&mut grapheme_scratch)?;
-                    let raw_cell = cell.raw_cell()?;
-                    let wide = raw_cell.wide()?;
-                    let width = match wide {
-                        CellWide::Narrow => CellWidth::Narrow,
-                        CellWide::Wide => CellWidth::Wide,
-                        CellWide::SpacerTail => CellWidth::SpacerTail,
-                        CellWide::SpacerHead => CellWidth::SpacerHead,
-                    };
-                    let style = PackedStyle::new(
-                        cell_foreground,
-                        cell_background,
-                        resolve_style_color(raw_style.underline_color, &colors.palette),
-                        style_attributes(
-                            &raw_style,
-                            matches!(
-                                if raw_style.inverse {
-                                    raw_style.bg_color
-                                } else {
-                                    raw_style.fg_color
-                                },
-                                libghostty_vt::style::StyleColor::Rgb(_)
-                            ),
-                            raw_cell.has_hyperlink()?,
-                        ),
-                        underline_style(raw_style.underline),
-                    );
-                    cells[index] = PackedCell::new(
-                        dictionary.encode_glyph(&grapheme_scratch),
-                        dictionary.intern_style(style),
-                        width,
-                    );
-                    semantics[index] = match raw_cell.semantic_content()? {
-                        CellSemanticContent::Output => SEMANTIC_OUTPUT,
-                        CellSemanticContent::Input => SEMANTIC_INPUT,
-                        CellSemanticContent::Prompt => SEMANTIC_PROMPT,
-                    };
-                    if !matches!(wide, CellWide::SpacerTail | CellWide::SpacerHead) {
-                        let start = u32::try_from(search_text.len() - row_text_start)
-                            .map_err(|_| WorkerError::SearchSnapshotTooLarge)?;
-                        search_text.push_str(&grapheme_scratch);
-                        let end = u32::try_from(search_text.len() - row_text_start)
-                            .map_err(|_| WorkerError::SearchSnapshotTooLarge)?;
-                        if end > start {
-                            search_offsets.push(SearchCellOffset {
-                                start,
-                                end,
-                                column,
-                                width: u16::from(matches!(wide, CellWide::Wide)) + 1,
-                            });
-                        }
-                    }
-                    column = column.saturating_add(1);
-                }
-                search_rows.push(HistorySearchRow {
-                    text_start,
-                    text_end: u32::try_from(search_text.len())
-                        .map_err(|_| WorkerError::SearchSnapshotTooLarge)?,
-                    offset_start,
-                    offset_end: u32::try_from(search_offsets.len())
-                        .map_err(|_| WorkerError::SearchSnapshotTooLarge)?,
-                });
-                captured_until = absolute_row.saturating_add(1);
-            }
-            if scrollbar.offset >= maximum || captured_until >= total_rows {
-                break;
-            }
-            let next = scrollbar.offset.saturating_add(scrollbar.len).min(maximum);
-            let delta = next.saturating_sub(scrollbar.offset);
-            terminal.scroll_viewport(ScrollViewport::Delta(super::saturating_isize(
-                i64::try_from(delta).unwrap_or(i64::MAX),
-            )));
-        }
-        terminal.scroll_viewport(ScrollViewport::Top);
-        terminal.scroll_viewport(ScrollViewport::Delta(super::saturating_isize(
-            i64::try_from(saved_offset).unwrap_or(i64::MAX),
-        )));
-        let shared_dictionary = dictionary.shared_dictionary();
-        Ok(Arc::new(Self {
-            id: NEXT_MODE_REVISION_ID.fetch_add(1, Ordering::Relaxed).max(1),
-            screen,
-            columns,
-            viewport_rows,
-            foreground,
-            background,
-            palette,
-            title,
-            working_directory,
-            cells,
-            dictionary: shared_dictionary,
-            rows: row_meta,
-            semantics,
-            search: Arc::new(HistorySearchSnapshot {
-                columns,
-                text: search_text,
-                rows: search_rows,
-                offsets: search_offsets,
-                terminal: None,
-                #[cfg(test)]
-                search_gate: Mutex::new(()),
-                total_rows: u32::try_from(total_rows).unwrap_or(u32::MAX),
-            }),
-            grid: None,
-            total: u32::try_from(total_rows).unwrap_or(u32::MAX),
-        }))
     }
 
     pub(super) fn matches_terminal_appearance(
@@ -576,14 +313,7 @@ impl ModeRevision {
 
     pub(super) fn cell(&self, point: PointCoordinate) -> PackedCell {
         let point = self.clamp_point(point);
-        if let Some(grid) = &self.grid {
-            return grid.lock().row(point.y).expect("frozen row").cells[usize::from(point.x)];
-        }
-        let index = usize::try_from(point.y)
-            .unwrap_or(usize::MAX)
-            .saturating_mul(usize::from(self.columns))
-            .saturating_add(usize::from(point.x));
-        self.cells.get(index).copied().unwrap_or(PackedCell::EMPTY)
+        self.grid.lock().row(point.y).expect("frozen row").cells[usize::from(point.x)]
     }
 
     pub(super) fn first_char(&self, point: PointCoordinate) -> Option<char> {
@@ -676,17 +406,7 @@ impl ModeRevision {
 
     pub(super) fn semantic(&self, point: PointCoordinate) -> u8 {
         let point = self.clamp_point(point);
-        if let Some(grid) = &self.grid {
-            return grid.lock().row(point.y).expect("frozen row").semantics[usize::from(point.x)];
-        }
-        let index = usize::try_from(point.y)
-            .unwrap_or(usize::MAX)
-            .saturating_mul(usize::from(self.columns))
-            .saturating_add(usize::from(point.x));
-        self.semantics
-            .get(index)
-            .copied()
-            .unwrap_or(SEMANTIC_OUTPUT)
+        self.grid.lock().row(point.y).expect("frozen row").semantics[usize::from(point.x)]
     }
 
     pub(super) fn is_input(&self, point: PointCoordinate) -> bool {
@@ -702,18 +422,11 @@ impl ModeRevision {
     }
 
     pub(super) fn row(&self, row: u32) -> ModeRowMeta {
-        if let Some(grid) = &self.grid {
-            return grid
-                .lock()
-                .row(row.min(self.total.saturating_sub(1)))
-                .expect("frozen row")
-                .meta;
-        }
-        usize::try_from(row)
-            .ok()
-            .and_then(|row| self.rows.get(row))
-            .copied()
-            .unwrap_or_default()
+        self.grid
+            .lock()
+            .row(row.min(self.total.saturating_sub(1)))
+            .expect("frozen row")
+            .meta
     }
 
     /// `window_copy_get_selection`: the last row is trimmed to its own length

@@ -462,7 +462,7 @@ impl Renderer {
                 }
             }
         } else {
-            let cleared_to_default = force && *crate::COALESCE;
+            let cleared_to_default = force;
             if force {
                 self.default_blank.clear();
             }
@@ -565,8 +565,7 @@ impl Renderer {
             .output
             .strip_prefix(PAINT_BEGIN)
             .and_then(|body| body.strip_suffix(PAINT_END));
-        if *crate::COALESCE
-            && control.is_empty()
+        if control.is_empty()
             && let Some(body) = body
             && cursor_only(body)
             && self.paint_tail.ends_with(body)
@@ -631,14 +630,13 @@ impl Renderer {
     fn paint_workspace(&mut self, model: &Model, force: bool, cleared_to_default: bool) {
         let lines = model.pane_border_lines();
         let indicators = model.pane_border_indicators();
-        let border_changed = !*crate::COALESCE
-            || self.border_chrome.as_ref().is_none_or(|cached| {
-                cached.0 != model.pane_border_status()
-                    || cached.1 != lines
-                    || cached.2 != indicators
-                    || cached.3 != model.status.pane_borders
-                    || cached.4 != model.status.theme
-            });
+        let border_changed = self.border_chrome.as_ref().is_none_or(|cached| {
+            cached.0 != model.pane_border_status()
+                || cached.1 != lines
+                || cached.2 != indicators
+                || cached.3 != model.status.pane_borders
+                || cached.4 != model.status.theme
+        });
         let force = force || border_changed;
         if border_changed {
             self.border_chrome = Some((
@@ -778,14 +776,6 @@ impl Renderer {
                     } else if cleared_to_default || known_blank {
                         self.painted.remove(&entry.pane);
                         self.default_blank.insert(entry.pane, content);
-                    } else if force && !*crate::COALESCE {
-                        self.paint_card(
-                            content,
-                            "Terminal",
-                            &pane.title,
-                            "waiting for frame",
-                            model,
-                        );
                     }
                 }
                 PaneKindSnapshot::Browser(_) if browser_live => {
@@ -916,9 +906,7 @@ impl Renderer {
         force: bool,
         damage: Option<&FrameDamage>,
     ) {
-        let coalesce = *crate::COALESCE;
-        if coalesce
-            && !force
+        if !force
             && self.painted.get(&pane).is_some_and(|previous| {
                 previous.rect == rect
                     && previous.viewport.columns == viewport.columns
@@ -940,7 +928,7 @@ impl Renderer {
                 || previous.viewport.foreground != viewport.foreground
                 || previous.viewport.background != viewport.background
         });
-        if force || structural_change || !coalesce && matches!(damage, Some(FrameDamage::All)) {
+        if force || structural_change {
             for row in 0..rect.height {
                 self.blit_row(viewport, row, rect);
             }
@@ -948,9 +936,7 @@ impl Renderer {
             for row in rows.iter().copied().filter(|row| *row < rect.height) {
                 if let Some(columns) = previous.as_ref().map_or_else(
                     || Some(0..rect.width),
-                    |previous| {
-                        changed_columns(&previous.viewport, viewport, row, rect.width, coalesce)
-                    },
+                    |previous| changed_columns(&previous.viewport, viewport, row, rect.width),
                 ) {
                     self.blit_columns(viewport, row, rect, columns);
                 }
@@ -959,9 +945,7 @@ impl Renderer {
             for row in 0..rect.height {
                 if let Some(columns) = previous.as_ref().map_or_else(
                     || Some(0..rect.width),
-                    |previous| {
-                        changed_columns(&previous.viewport, viewport, row, rect.width, coalesce)
-                    },
+                    |previous| changed_columns(&previous.viewport, viewport, row, rect.width),
                 ) {
                     self.blit_columns(viewport, row, rect, columns);
                 }
@@ -1838,8 +1822,7 @@ impl Renderer {
         let overlay = status_overlay(model, width);
         let origin = model.status_origin_y();
         let geometry = (x, origin, width);
-        if *crate::COALESCE
-            && !force
+        if !force
             && overlay.is_none()
             && self.status_geometry == Some(geometry)
             && self.status_source.as_ref() == Some(&model.status)
@@ -2398,10 +2381,9 @@ fn changed_columns(
     current: &TerminalViewport,
     row: u16,
     width: u16,
-    incremental: bool,
 ) -> Option<std::ops::Range<u16>> {
     if (!Arc::ptr_eq(&previous.dictionary, &current.dictionary)
-        && (!incremental || previous.dictionary.as_ref() != current.dictionary.as_ref()))
+        && previous.dictionary.as_ref() != current.dictionary.as_ref())
         || previous
             .overlays
             .iter()
@@ -2424,11 +2406,10 @@ fn changed_columns(
     let end = cells
         .rposition(|(before, after)| before != after)
         .map_or(start + 1, |last| start + last + 2);
-    if !incremental
-        || before[start..end]
-            .iter()
-            .chain(&after[start..end])
-            .any(|cell| cell.width() != CellWidth::Narrow)
+    if before[start..end]
+        .iter()
+        .chain(&after[start..end])
+        .any(|cell| cell.width() != CellWidth::Narrow)
     {
         Some(0..width)
     } else {
@@ -3261,9 +3242,7 @@ fn write_border_runs(
     for (&(row, column), (sgr, glyph)) in cells {
         match last {
             Some((last_row, last_column)) if last_row == row && last_column + 1 == column => {}
-            Some((last_row, last_column))
-                if *crate::COALESCE && last_row + 1 == row && last_column == column =>
-            {
+            Some((last_row, last_column)) if last_row + 1 == row && last_column == column => {
                 output.extend_from_slice(b"\x08\n");
             }
             _ => write_cursor_position(output, column, row),
@@ -4147,47 +4126,15 @@ mod tests {
     }
 
     #[test]
-    fn disabled_coalescing_repaints_full_rows_after_frame_updates() {
-        if *crate::COALESCE {
-            return;
-        }
-        let before = styled_viewport();
-        let mut after = before.clone();
-        Arc::make_mut(&mut after.cells)[1] = PackedCell::new('z' as u32, 0, CellWidth::Narrow);
-        let rect = Rect {
-            x: 0,
-            y: 0,
-            width: 3,
-            height: 1,
-        };
-        let mut renderer = Renderer::new();
-        renderer.paint_terminal(PaneId(1), &before, rect, true, None);
-        renderer.output.clear();
-        renderer.paint_terminal(
-            PaneId(1),
-            &after,
-            rect,
-            false,
-            Some(&FrameDamage::Rows(vec![0])),
-        );
-        let output = String::from_utf8(renderer.output.clone()).unwrap();
-        assert!(output.starts_with("\x1b[1;1H"), "{output:?}");
-        assert!(output.contains("az") && output.contains('c'), "{output:?}");
-        renderer.output.clear();
-        renderer.paint_terminal(PaneId(1), &after, rect, false, Some(&FrameDamage::All));
-        assert!(!renderer.output.is_empty());
-    }
-
-    #[test]
     fn changed_wide_cells_and_overlay_rows_keep_full_row_repaints() {
         let before = styled_viewport();
         let mut after = before.clone();
         Arc::make_mut(&mut after.cells)[1] = PackedCell::new('界' as u32, 0, CellWidth::Wide);
-        assert_eq!(changed_columns(&before, &after, 0, 3, true), Some(0..3));
+        assert_eq!(changed_columns(&before, &after, 0, 3), Some(0..3));
 
         let mut after = before.clone();
         after.overlays = Arc::from([OverlaySpan::new(0, 1, 2, OverlayKind::Selection)]);
-        assert_eq!(changed_columns(&before, &after, 0, 3, true), Some(0..3));
+        assert_eq!(changed_columns(&before, &after, 0, 3), Some(0..3));
     }
 
     fn waiting_pane_model() -> Model {

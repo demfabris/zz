@@ -73,14 +73,14 @@ fn live_scalar_border_probe_preserves_headers_options_and_fresh_mode_counts() {
         client,
         session,
         context.window,
-        inner.engine.format_cache_revision().unwrap_or_default(),
+        inner.engine.format_cache_revision(),
         &options,
         || {
             clock_reads.set(clock_reads.get() + 1);
             second
         },
     );
-    assert_eq!(hit.is_some(), zz_mux::format_cache_knob());
+    assert!(hit.is_some());
     assert_eq!(clock_reads.get(), 0);
     if let Some(hit) = hit {
         assert!(Arc::ptr_eq(&first, &hit));
@@ -111,7 +111,7 @@ fn live_scalar_border_probe_preserves_headers_options_and_fresh_mode_counts() {
                 probe_client,
                 probe_session,
                 probe_window,
-                inner.engine.format_cache_revision().unwrap_or_default(),
+                inner.engine.format_cache_revision(),
                 probe_options,
                 || probe_second,
             )
@@ -124,11 +124,11 @@ fn live_scalar_border_probe_preserves_headers_options_and_fresh_mode_counts() {
         client,
         session,
         context.window,
-        inner.engine.format_cache_revision().unwrap_or_default(),
+        inner.engine.format_cache_revision(),
         &options,
         || second + 1,
     );
-    assert_eq!(later.is_some(), zz_mux::format_cache_knob());
+    assert!(later.is_some());
     if let Some(later) = later {
         assert!(Arc::ptr_eq(&first, &later));
     }
@@ -140,7 +140,7 @@ fn live_scalar_border_probe_preserves_headers_options_and_fresh_mode_counts() {
             client,
             session,
             context.window,
-            inner.engine.format_cache_revision().unwrap_or_default(),
+            inner.engine.format_cache_revision(),
             &options,
             || second,
         )
@@ -168,7 +168,7 @@ fn live_scalar_border_probe_preserves_headers_options_and_fresh_mode_counts() {
             client,
             session,
             context.window,
-            inner.engine.format_cache_revision().unwrap_or_default(),
+            inner.engine.format_cache_revision(),
             &options,
             || second,
         )
@@ -203,19 +203,12 @@ fn border_format_cache_reuses_default_styles_at_twenty_windows() {
     facts.client.as_mut().unwrap().written = "99".to_owned();
     let second = borders(&inner, client, context.session.unwrap(), &facts);
     assert_eq!(second, first);
-    assert_eq!(Arc::ptr_eq(&first, &second), zz_mux::format_cache_knob());
-    assert_eq!(
-        expansions(),
-        before + usize::from(!zz_mux::format_cache_knob())
-    );
+    assert!(Arc::ptr_eq(&first, &second));
+    assert_eq!(expansions(), before);
     let cache = inner.border_presentations_cache.lock();
-    if zz_mux::format_cache_knob() {
-        let retained = cache.as_ref().unwrap().retained_bytes();
-        eprintln!("twenty-window border cache retained {retained} bytes");
-        assert!(retained <= BORDER_FORMAT_CACHE_BYTES);
-    } else {
-        assert!(cache.is_none());
-    }
+    let retained = cache.as_ref().unwrap().retained_bytes();
+    eprintln!("twenty-window border cache retained {retained} bytes");
+    assert!(retained <= BORDER_FORMAT_CACHE_BYTES);
 }
 
 #[test]
@@ -350,10 +343,7 @@ fn border_format_cache_reuses_static_styles_across_clocks_and_invalidates_other_
     inner.client_entry(client).focused_window.replace(window);
     let focused = borders(&inner, client, session, &facts);
     assert_ne!(focused[0].pane, context.pane.unwrap());
-    assert_eq!(
-        expansions(),
-        if zz_mux::format_cache_knob() { 4 } else { 6 }
-    );
+    assert_eq!(expansions(), 4);
 }
 
 #[test]
@@ -394,16 +384,14 @@ fn border_format_cache_keeps_clock_guards_for_raw_nested_and_time_modifier_sourc
         set_style(&mut inner, &mut context, "@border-inner", source);
         let before = expansions();
         let first = borders(&inner, client, session, &facts);
-        if zz_mux::format_cache_knob() {
-            assert!(
-                inner
-                    .border_presentations_cache
-                    .lock()
-                    .as_ref()
-                    .unwrap()
-                    .clock_dependent
-            );
-        }
+        assert!(
+            inner
+                .border_presentations_cache
+                .lock()
+                .as_ref()
+                .unwrap()
+                .clock_dependent
+        );
         let options = inner.engine.cached_format_option_snapshot();
         let clock_reads = Cell::new(0);
         assert!(
@@ -412,7 +400,7 @@ fn border_format_cache_keeps_clock_guards_for_raw_nested_and_time_modifier_sourc
                 client,
                 session,
                 context.window,
-                inner.engine.format_cache_revision().unwrap_or_default(),
+                inner.engine.format_cache_revision(),
                 &options,
                 || {
                     clock_reads.set(clock_reads.get() + 1);
@@ -422,11 +410,7 @@ fn border_format_cache_keeps_clock_guards_for_raw_nested_and_time_modifier_sourc
             .is_none(),
             "{source}"
         );
-        assert_eq!(
-            clock_reads.get(),
-            usize::from(zz_mux::format_cache_knob()),
-            "{source}"
-        );
+        assert_eq!(clock_reads.get(), 1, "{source}");
         let next_second = border_presentations_at(&inner, client, session, &facts, second + 1);
         assert!(!Arc::ptr_eq(&first, &next_second), "{source}");
         inner.engine.set_format_now(second + 1);
@@ -510,10 +494,10 @@ fn border_format_cache_reuses_arbitrary_captured_option_styles() {
         "fg=green"
     );
     borders(&inner, client, session, &facts);
-    assert_eq!(expansions(), 1 + usize::from(!zz_mux::format_cache_knob()));
+    assert_eq!(expansions(), 1);
     set_style(&mut inner, &mut context, "@border-choice", "1");
     assert_eq!(borders(&inner, client, session, &facts)[0].style, "fg=red");
-    assert_eq!(expansions(), 2 + usize::from(!zz_mux::format_cache_knob()));
+    assert_eq!(expansions(), 2);
 }
 
 #[test]
@@ -609,13 +593,13 @@ fn border_format_cache_checks_borrowed_mode_counts_without_materializing_maps() 
         let first = borders(&inner, client, session, &facts);
         let second = borders(&inner, client, session, &facts);
         assert_eq!(first, second);
-        assert_eq!(Arc::ptr_eq(&first, &second), zz_mux::format_cache_knob());
+        assert!(Arc::ptr_eq(&first, &second));
         assert!(facts.derived.pane_modes.get().is_none());
         assert!(facts.derived.copy_modes.get().is_none());
         first
     };
     assert!(first.iter().all(|pane| pane.style == "fg=green"));
-    if zz_mux::format_cache_knob() {
+    {
         let cache = inner.border_presentations_cache.lock();
         let cache = cache.as_ref().unwrap();
         assert!(cache.callbacks.is_empty());
@@ -739,33 +723,24 @@ fn pane_in_mode_typed_counts_preserve_owned_rows_and_provider_selection() {
         copy_modes: Arc::new(BTreeMap::from([(pane, Vec::new())])),
         ..Default::default()
     };
-    let facts = FormatHookFactsView {
-        borrowed: readonly_borrowed_format_hook_facts(&inner, CommandFormatSeed::default()),
-        owned: Some(owned),
-    };
     assert_eq!(
-        crate::status::FormatFactSource::pane_in_mode_count(&facts, pane),
+        crate::status::FormatFactSource::pane_in_mode_count(&owned, pane),
         3
     );
     let context = inner
         .engine
         .format_status_context(context.session, context.window, context.pane);
     assert_eq!(
-        DaemonFormatHooks::command(&facts).variable("pane_in_mode", &context),
+        DaemonFormatHooks::command(&owned).variable("pane_in_mode", &context),
         Some("3".to_owned())
     );
-    assert!(facts.borrowed.derived.pane_modes.get().is_none());
-    assert!(facts.borrowed.derived.copy_modes.get().is_none());
-    let facts = FormatHookFactsView {
-        borrowed: readonly_borrowed_format_hook_facts(&inner, CommandFormatSeed::default()),
-        owned: None,
-    };
+    let facts = readonly_borrowed_format_hook_facts(&inner, CommandFormatSeed::default());
     assert_eq!(
         DaemonFormatHooks::command(&facts).variable("pane_in_mode", &context),
         Some("0".to_owned())
     );
-    assert!(facts.borrowed.derived.pane_modes.get().is_none());
-    assert!(facts.borrowed.derived.copy_modes.get().is_none());
+    assert!(facts.derived.pane_modes.get().is_none());
+    assert!(facts.derived.copy_modes.get().is_none());
 }
 
 #[derive(Default)]
@@ -869,42 +844,40 @@ fn border_format_cache_pins_one_mode_count_for_style_and_expected_callbacks() {
         "fg=green,bg=green"
     );
     assert_eq!(facts.reads.get(), 1);
-    if zz_mux::format_cache_knob() {
-        facts.reads.set(0);
-        facts.count.set(0);
-        let session = context.session.unwrap();
-        let first = borders(&inner, client, session, &facts);
-        assert_eq!(first[0].style, "fg=green,bg=green");
-        assert_eq!(facts.reads.get(), 1);
-        assert_eq!(
-            inner
-                .border_presentations_cache
-                .lock()
-                .as_ref()
-                .unwrap()
-                .panes[0]
-                .pane_in_mode,
-            Some(0)
-        );
-        facts.change_after_read.set(false);
-        facts.count.set(0);
-        let second = borders(&inner, client, session, &facts);
-        assert!(Arc::ptr_eq(&first, &second));
-        assert_eq!(facts.reads.get(), 2);
-        facts.count.set(1);
-        let third = borders(&inner, client, session, &facts);
-        assert_eq!(third[0].style, "fg=red,bg=red");
-        assert!(!Arc::ptr_eq(&second, &third));
-        assert_eq!(facts.reads.get(), 4);
-        assert_eq!(
-            inner
-                .border_presentations_cache
-                .lock()
-                .as_ref()
-                .unwrap()
-                .panes[0]
-                .pane_in_mode,
-            Some(1)
-        );
-    }
+    facts.reads.set(0);
+    facts.count.set(0);
+    let session = context.session.unwrap();
+    let first = borders(&inner, client, session, &facts);
+    assert_eq!(first[0].style, "fg=green,bg=green");
+    assert_eq!(facts.reads.get(), 1);
+    assert_eq!(
+        inner
+            .border_presentations_cache
+            .lock()
+            .as_ref()
+            .unwrap()
+            .panes[0]
+            .pane_in_mode,
+        Some(0)
+    );
+    facts.change_after_read.set(false);
+    facts.count.set(0);
+    let second = borders(&inner, client, session, &facts);
+    assert!(Arc::ptr_eq(&first, &second));
+    assert_eq!(facts.reads.get(), 2);
+    facts.count.set(1);
+    let third = borders(&inner, client, session, &facts);
+    assert_eq!(third[0].style, "fg=red,bg=red");
+    assert!(!Arc::ptr_eq(&second, &third));
+    assert_eq!(facts.reads.get(), 4);
+    assert_eq!(
+        inner
+            .border_presentations_cache
+            .lock()
+            .as_ref()
+            .unwrap()
+            .panes[0]
+            .pane_in_mode,
+        Some(1)
+    );
 }

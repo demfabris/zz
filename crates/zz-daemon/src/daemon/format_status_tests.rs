@@ -354,7 +354,7 @@ fn completed_status_reads_fresh_scoped_daemon_overrides_with_the_same_detached_c
 
 #[test]
 fn completed_status_twenty_windows_fit_the_bound_and_reuse_fresh_requests() {
-    let cache_enabled = zz_mux::format_cache_knob() && zz_mux::borrowed_formats_enabled();
+    let cache_enabled = zz_mux::borrowed_formats_enabled();
     let mut engine = MuxEngine::default();
     let mut context = zz_mux::ExecutionContext::default();
     execute(&mut engine, &mut context, &["new-session", "-s", "twenty"]);
@@ -878,7 +878,7 @@ fn completed_status_option_size_memo_requires_retained_arc_identity() {
 
 #[test]
 fn completed_status_context_size_memo_reuses_clock_capture_and_recounts_mutations() {
-    let cache_enabled = zz_mux::format_cache_knob() && zz_mux::borrowed_formats_enabled();
+    let cache_enabled = zz_mux::borrowed_formats_enabled();
     let (mut engine, mut execution, _) = completed_request("#{session_name}");
     execute(
         &mut engine,
@@ -1103,7 +1103,7 @@ fn completed_status_parts_recheck_facts_layout_targets_modes_and_sources() {
 
 #[test]
 fn completed_status_shared_request_identity_keeps_clock_and_mutations_fresh() {
-    let cache_enabled = zz_mux::format_cache_knob() && zz_mux::borrowed_formats_enabled();
+    let cache_enabled = zz_mux::borrowed_formats_enabled();
     let (_, _, request) = completed_request("#{session_name}:#{client_prefix}:%S");
     let mut request = Arc::new(request);
     let mut renderer = StatusRenderer::default();
@@ -1179,7 +1179,7 @@ fn completed_status_shared_request_identity_keeps_clock_and_mutations_fresh() {
 
 #[test]
 fn completed_status_shared_request_make_mut_disassociates_weak_identity() {
-    let cache_enabled = zz_mux::format_cache_knob() && zz_mux::borrowed_formats_enabled();
+    let cache_enabled = zz_mux::borrowed_formats_enabled();
     let (_, _, request) = completed_request("#{session_name}");
     let mut request = Arc::new(request);
     let mut renderer = StatusRenderer::default();
@@ -1235,7 +1235,7 @@ fn completed_status_shared_request_bypasses_unsafe_and_forced_job_formats() {
 
 #[test]
 fn completed_status_reuses_forced_output_and_ignores_unreferenced_client_fields() {
-    let cache_enabled = zz_mux::format_cache_knob() && zz_mux::borrowed_formats_enabled();
+    let cache_enabled = zz_mux::borrowed_formats_enabled();
     let (_, _, mut request) = completed_request("#{session_name}:#{client_prefix}");
     let mut renderer = StatusRenderer::default();
     let first = renderer.render_forced_at(&request, 1_700_000_000);
@@ -1271,7 +1271,7 @@ fn completed_status_reuses_forced_output_and_ignores_unreferenced_client_fields(
 
 #[test]
 fn completed_status_shares_internal_output_and_keeps_wire_and_mode_updates_independent() {
-    let cache_enabled = zz_mux::format_cache_knob() && zz_mux::borrowed_formats_enabled();
+    let cache_enabled = zz_mux::borrowed_formats_enabled();
     let (_, _, request) = completed_request("#{session_name}");
     let mut renderer = StatusRenderer::default();
     let mut first = renderer.render_forced_at(&request, 1_700_000_000);
@@ -1468,7 +1468,7 @@ fn completed_status_cache_keeps_forced_shell_jobs_running() {
 
 #[test]
 fn completed_status_invalidates_captured_global_and_session_environment_values() {
-    let cache_enabled = zz_mux::format_cache_knob() && zz_mux::borrowed_formats_enabled();
+    let cache_enabled = zz_mux::borrowed_formats_enabled();
     let (mut engine, mut context, _) = completed_request("#{CACHE_ENV}");
     let mut renderer = StatusRenderer::default();
     for (args, expected) in [

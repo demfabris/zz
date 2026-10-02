@@ -2963,9 +2963,6 @@ impl MuxEngine {
 
     #[must_use]
     pub fn cached_format_option_snapshot(&self) -> Arc<StatusRowVariables> {
-        if !crate::format_cache_knob() {
-            return Arc::new(self.format_option_snapshot());
-        }
         let key = (self.format_options_generation, self.state.generation());
         let mut cache = self.format_option_cache.lock();
         if let Some((options, tree, snapshot)) = cache.as_ref()
@@ -2983,9 +2980,6 @@ impl MuxEngine {
         &self,
         templates: impl IntoIterator<Item = &'t str>,
     ) -> crate::FormatNeeds {
-        if !crate::format_cache_knob() {
-            return self.format_needs(templates);
-        }
         let templates = templates.into_iter().collect::<Vec<_>>();
         let key =
             std::hash::BuildHasher::hash_one(&foldhash::fast::FixedState::default(), &templates);
@@ -9932,8 +9926,7 @@ impl MuxEngine {
         }
         let notes_only = options.has("-N");
         let format = options.value("-F").unwrap_or(DEFAULT_LIST_KEYS_FORMAT);
-        let cacheable = crate::format_cache_knob()
-            && format == DEFAULT_LIST_KEYS_FORMAT
+        let cacheable = format == DEFAULT_LIST_KEYS_FORMAT
             && hooks.stable_option_lookups()
             && ((hooks.only_tmux_options() && *LIST_KEY_FORMAT_NAMES_ARE_NOT_OPTIONS) || {
                 let values = self.format_status_context_with_format_client(

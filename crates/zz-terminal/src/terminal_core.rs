@@ -55,6 +55,6 @@ pub use session::{
     TerminalCaptureError, TerminalCopyReady, TerminalEvent, TerminalEvents, TerminalFacts,
     TerminalProcessExit, TerminalRequest, TerminalRequestError, TerminalSession,
     TerminalSessionDiagnostics, TerminalSize, TerminalSpawn, ViewStream, allow_actor_round_trips,
-    forbid_actor_round_trips, perf_knobs, run_pty_exec_mode,
+    forbid_actor_round_trips, run_pty_exec_mode,
 };
 pub use word::{DEFAULT_WORD_SEPARATORS, WordSeparators};

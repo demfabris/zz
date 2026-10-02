@@ -2251,9 +2251,7 @@ impl DeadPane {
         }
         self.publisher.set_foreground_source(None);
         let mut surface = self.surface;
-        if !*NO_COMPRESS {
-            surface.terminal.compress(CompressionMode::Full)?;
-        }
+        surface.terminal.compress(CompressionMode::Full)?;
         if self
             .slot
             .lock()

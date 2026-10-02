@@ -675,18 +675,16 @@ fn a_bind_with_a_subscriber_publishes_only_the_table_it_changed() {
     )
     .expect("bind");
     let payloads = key_table_payloads(&mailbox);
-    if *timers::KEY_TABLE_DELTA {
-        assert!(
-            matches!(
-                payloads.as_slice(),
-                [EventPayload::KeyTablesPatched { tables, removed }]
-                    if removed.is_empty()
-                        && tables.len() == 1
-                        && tables[0].name == "zzdelta"
-            ),
-            "{payloads:?}"
-        );
-    }
+    assert!(
+        matches!(
+            payloads.as_slice(),
+            [EventPayload::KeyTablesPatched { tables, removed }]
+                if removed.is_empty()
+                    && tables.len() == 1
+                    && tables[0].name == "zzdelta"
+        ),
+        "{payloads:?}"
+    );
     fold_key_tables(&mut view, payloads);
     run(
         &shared,
@@ -697,16 +695,14 @@ fn a_bind_with_a_subscriber_publishes_only_the_table_it_changed() {
     assert!(key_table_payloads(&mailbox).is_empty());
     run(&shared, &mut context, &["unbind-key", "-T", "zzdelta", "x"]).expect("unbind");
     let payloads = key_table_payloads(&mailbox);
-    if *timers::KEY_TABLE_DELTA {
-        assert!(
-            matches!(
-                payloads.as_slice(),
-                [EventPayload::KeyTablesPatched { tables, removed }]
-                    if tables.is_empty() && removed == &["zzdelta".to_owned()]
-            ),
-            "{payloads:?}"
-        );
-    }
+    assert!(
+        matches!(
+            payloads.as_slice(),
+            [EventPayload::KeyTablesPatched { tables, removed }]
+                if tables.is_empty() && removed == &["zzdelta".to_owned()]
+        ),
+        "{payloads:?}"
+    );
     fold_key_tables(&mut view, payloads);
     for command in [
         &["bind-key", "-r", "C-Up", "resize-pane", "-U"][..],

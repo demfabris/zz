@@ -89,9 +89,7 @@ impl CopyGrid {
         }
         let mut terminal = self.terminal.lock();
         if self.loaded == 512 {
-            if !*super::NO_COMPRESS {
-                terminal.compress(libghostty_vt::terminal::CompressionMode::Full)?;
-            }
+            terminal.compress(libghostty_vt::terminal::CompressionMode::Full)?;
             self.loaded = 0;
         }
         self.loaded += 1;

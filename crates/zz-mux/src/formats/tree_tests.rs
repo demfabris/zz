@@ -488,10 +488,10 @@ fn indirect_references_follow_option_generations_and_scopes() {
     let first = engine.cached_format_references("#{E:status-left}");
     assert!(first.contains("session_name"));
     assert!(!first.contains("*"));
-    assert_eq!(
-        Arc::ptr_eq(&first, &engine.cached_format_references("#{E:status-left}")),
-        format_cache_knob()
-    );
+    assert!(Arc::ptr_eq(
+        &first,
+        &engine.cached_format_references("#{E:status-left}")
+    ));
     engine
         .execute(
             &mut context,
@@ -596,7 +596,7 @@ fn shared_reference_capture_reuses_identity_and_adopts_equal_reference_arcs() {
             )
         };
         let hit = lookup(&references);
-        assert_eq!(hit.is_some(), format_cache_knob());
+        assert!(hit.is_some());
         if let Some(hit) = hit {
             assert!(captured.same_detached(&hit));
             assert!(Arc::ptr_eq(&captured.variables, &hit.variables));
@@ -668,32 +668,30 @@ fn shared_reference_capture_rejects_mutation_and_weak_identity_releases_payload(
             .format_status_context(target.0, target.1, target.2)
             .detach_with_shared_references(FormatNeeds::NONE, &references);
         assert!(fresh.variables.contains_key("pane_title"));
-        if format_cache_knob() {
-            let retained = engine
+        let retained = engine
+            .format_context_cache
+            .lock()
+            .as_ref()
+            .unwrap()
+            .reference_identity
+            .as_ref()
+            .unwrap()
+            .clone();
+        drop(references);
+        assert!(retained.upgrade().is_none());
+        assert_eq!(
+            engine
                 .format_context_cache
                 .lock()
                 .as_ref()
                 .unwrap()
-                .reference_identity
-                .as_ref()
-                .unwrap()
-                .clone();
-            drop(references);
-            assert!(retained.upgrade().is_none());
-            assert_eq!(
-                engine
-                    .format_context_cache
-                    .lock()
-                    .as_ref()
-                    .unwrap()
-                    .references
-                    .as_ref(),
-                Some(&BTreeSet::from([
-                    "pane_title".to_owned(),
-                    "session_name".to_owned(),
-                ]))
-            );
-        }
+                .references
+                .as_ref(),
+            Some(&BTreeSet::from([
+                "pane_title".to_owned(),
+                "session_name".to_owned(),
+            ]))
+        );
     });
 }
 
@@ -716,7 +714,7 @@ fn detached_data_identity_ignores_only_clock_and_rejects_new_capture_sources() {
         engine.set_format_now(20);
         let second = capture(&engine, &references);
         assert!(!first.same_detached(&second));
-        assert_eq!(first.same_detached_data(&second), format_cache_knob());
+        assert!(first.same_detached_data(&second));
         assert_eq!(
             expand_status(template, &first, &mut Hooks(&engine)),
             expand_status(template, &second, &mut Hooks(&engine))
@@ -790,7 +788,7 @@ fn early_capture_lookup_preserves_exact_inputs_and_resolved_targets() {
                 &references,
                 overrides,
             );
-            assert_eq!(hit.is_some(), format_cache_knob());
+            assert!(hit.is_some());
             if let Some(hit) = hit {
                 assert!(captured.same_detached(&hit));
                 assert!(Arc::ptr_eq(&captured.variables, &hit.variables));
@@ -904,16 +902,13 @@ fn early_capture_lookup_rejects_changed_compact_ids_and_source_revisions() {
             _ => unreachable!(),
         }
         let next = engine.format_cache_revision();
-        assert_eq!(next.is_some(), format_cache_knob());
-        if let (Some(previous), Some(next)) = (previous, next) {
-            assert_ne!(previous, next);
-            match change {
-                0 => assert_ne!(previous.0, next.0),
-                1 => assert_ne!(previous.1, next.1),
-                2 => assert_ne!(previous.2, next.2),
-                3 => assert_ne!(previous.3, next.3),
-                _ => unreachable!(),
-            }
+        assert_ne!(previous, next);
+        match change {
+            0 => assert_ne!(previous.0, next.0),
+            1 => assert_ne!(previous.1, next.1),
+            2 => assert_ne!(previous.2, next.2),
+            3 => assert_ne!(previous.3, next.3),
+            _ => unreachable!(),
         }
         with_borrowed_formats(true, || {
             assert_eq!(
@@ -926,7 +921,7 @@ fn early_capture_lookup_rejects_changed_compact_ids_and_source_revisions() {
                         [],
                     )
                     .is_some(),
-                change == 3 && format_cache_knob()
+                change == 3
             );
         });
         previous = next;
@@ -948,14 +943,11 @@ fn detached_capture_cache_reuses_selected_maps_and_preserves_exact_inputs() {
     let template = "#{S:#{session_name}[#{W:#{window_name}(#{P:#{pane_id};})}]}";
     let first = cache_context(&engine, target, template);
     let second = cache_context(&engine, target, template);
-    assert_eq!(
-        Arc::ptr_eq(&first.variables, &second.variables),
-        format_cache_knob()
-    );
-    assert_eq!(
-        Arc::ptr_eq(&first.format_universe.parts, &second.format_universe.parts),
-        format_cache_knob()
-    );
+    assert!(Arc::ptr_eq(&first.variables, &second.variables));
+    assert!(Arc::ptr_eq(
+        &first.format_universe.parts,
+        &second.format_universe.parts
+    ));
     assert!(first.same_detached(&second));
     assert_cache_context_matches_w1(&engine, target, template, &second);
     let borrowed = with_borrowed_formats(true, || {
@@ -1098,14 +1090,11 @@ fn detached_capture_cache_invalidates_runtime_environment_identity_and_clocks() 
     assert_eq!(previous.format_now, Some(10));
     assert_eq!(next.format_now, Some(20));
     assert!(!previous.same_detached(&next));
-    assert_eq!(
-        Arc::ptr_eq(&previous.variables, &next.variables),
-        format_cache_knob()
-    );
-    assert_eq!(
-        Arc::ptr_eq(&previous.format_universe.parts, &next.format_universe.parts),
-        format_cache_knob()
-    );
+    assert!(Arc::ptr_eq(&previous.variables, &next.variables));
+    assert!(Arc::ptr_eq(
+        &previous.format_universe.parts,
+        &next.format_universe.parts
+    ));
     assert_cache_context_matches_w1(&engine, target, template, &next);
 }
 
@@ -1158,7 +1147,7 @@ fn detached_clock_overlay_reuses_capture_and_updates_every_nested_hook_and_modif
         assert_eq!(overlaid.format_now, Some(20));
         assert_eq!(overlaid.values.get().unwrap().format_now, Some(20));
         assert_eq!(materialized.values.get().unwrap().format_now, Some(10));
-        let shared = borrowed && format_cache_knob();
+        let shared = borrowed;
         assert_eq!(Arc::ptr_eq(&first.variables, &second.variables), shared);
         assert_eq!(
             Arc::ptr_eq(&first.format_universe.parts, &second.format_universe.parts),
@@ -1213,7 +1202,7 @@ fn capture_and_reference_union_caches_are_bounded_and_follow_rollback() {
     let sources = ["#{pane_title}", "#{S:#{session_name}}"];
     let first = engine.cached_format_references_for_templates(sources);
     let same = engine.cached_format_references_for_templates(sources);
-    assert_eq!(Arc::ptr_eq(&first, &same), format_cache_knob());
+    assert!(Arc::ptr_eq(&first, &same));
     assert_eq!(
         first.as_ref(),
         &BTreeSet::from(["pane_title".to_owned(), "session_name".to_owned()])
@@ -1223,9 +1212,7 @@ fn capture_and_reference_union_caches_are_bounded_and_follow_rollback() {
     assert_eq!(changed.as_ref(), &BTreeSet::from(["pane_id".to_owned()]));
     let oversized = "x".repeat(FORMAT_CAPTURE_CACHE_BYTES);
     let _ = engine.cached_format_references_for_templates([oversized.as_str()]);
-    if format_cache_knob() {
-        assert!(engine.format_reference_union_cache.lock().is_none());
-    }
+    assert!(engine.format_reference_union_cache.lock().is_none());
     engine.state.update_pane_title(pane, oversized).unwrap();
     let target = FormatContext {
         session: Some(session),
@@ -1327,10 +1314,7 @@ fn raw_text_bound_rejects_large_lossy_environment_captures_and_keeps_small_parit
         } else {
             assert_eq!(payload, 8);
             assert!(first.retained_bytes() < FORMAT_CAPTURE_CACHE_BYTES);
-            assert_eq!(
-                Arc::ptr_eq(&first.variables, &same.variables),
-                format_cache_knob()
-            );
+            assert!(Arc::ptr_eq(&first.variables, &same.variables));
         }
     }
     assert_eq!(cloned_raw_text_bytes(&RawText::from("valid")), 5);

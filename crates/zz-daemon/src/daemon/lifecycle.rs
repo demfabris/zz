@@ -72,7 +72,6 @@ impl Startup {
             item.loop_wait = true;
             item.loop_leaf = true;
         }
-        shared.log_initialization_knobs();
         *shared.mux_config_selection.lock() = (load_user_config, files.map(<[PathBuf]>::to_vec));
         let configs = shared.selected_mux_config_files();
         {

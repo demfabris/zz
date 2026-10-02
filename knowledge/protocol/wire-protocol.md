@@ -127,7 +127,6 @@ Nested batches are forbidden. The initial group carries one scoped tree, a `Clie
 requested appearance, options, keys, status and terminal state. Later tree changes use
 `TreeDelta { base, version, ops }`; an unusable base queues `TreeSync` for a fresh scoped tree.
 An empty tree diff sends nothing. A full snapshot remains the client's materialized model.
-`ZZ_PERF_TREE_DELTA=0` sends full scoped trees on changes while retaining Hello, Welcome and Batch.
 
 `ClientView` carries the attachment, read-only state, client flags, focused window, layout
 and attachment generations, and tree operations for recipient-specific labels, borders and
@@ -776,9 +775,9 @@ TUI and FFI clients do not, and `choose-path` answers them with an error, as doe
 `OpenPathPicker { pane, start_dir }` after `KeyTableActive`, pushed only to the invoking client.
 v107 also appends `EventPayload::KeyTablesPatched { tables, removed }` after `OpenPathPicker`: the
 tables whose bindings changed since the previous publication, each replacing the client's table of
-the same name, and the names of tables that no longer exist. The daemon sends it instead of
-`KeyTablesChanged` (every table), which it keeps for `ZZ_PERF_KEY_TABLE_DELTA=0`; `ClientCore`
-applies both. `key_tables_patched_appends_after_the_path_picker` pins the tag.
+the same name, and the names of tables that no longer exist. The daemon sends it after a change
+instead of `KeyTablesChanged` (every table), which still answers `GetKeyTables` and a full key
+subscription's first send; `ClientCore` applies both. `key_tables_patched_appends_after_the_path_picker` pins the tag.
 `ProtocolMessage` gains five variants after `ClientTerminalType`: `PathListRequest { request_id,
 pane, dir }`, `PathListBegin { request_id, result: Result<PathListRoot, String> }`, `PathListChunk
 { request_id, entries, done, truncated }`, `PathListGit { request_id, marks }` and

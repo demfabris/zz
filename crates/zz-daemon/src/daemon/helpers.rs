@@ -52,7 +52,6 @@ pub(super) enum Task {
     #[cfg(all(feature = "agent", unix))]
     Peers {
         panes: Vec<(PaneId, String, Option<u32>)>,
-        always: bool,
         reply: Option<std::sync::mpsc::SyncSender<PeerResult>>,
         completed: Option<crossbeam_channel::Sender<super::timers::TimerCompletion>>,
     },
@@ -446,10 +445,9 @@ fn run(task: Task, _state: &State) -> Option<Result> {
         #[cfg(all(feature = "agent", unix))]
         Task::Peers {
             panes,
-            always,
             reply,
             completed,
-        } => finish_peer_scan(|| scan_peers(_state, panes, always), reply, completed),
+        } => finish_peer_scan(|| scan_peers(_state, panes), reply, completed),
         Task::HistoryLoad {
             path,
             limit,
@@ -508,15 +506,9 @@ fn finish_peer_scan(
 mod reviewfixes_tests;
 
 #[cfg(all(feature = "agent", unix))]
-fn scan_peers(
-    state: &State,
-    panes: Vec<(PaneId, String, Option<u32>)>,
-    always: bool,
-) -> PeerResult {
+fn scan_peers(state: &State, panes: Vec<(PaneId, String, Option<u32>)>) -> PeerResult {
     use crate::agent::claude_peers;
-    let mut records = if always {
-        claude_peers::read_records()?
-    } else {
+    let mut records: Vec<_> = {
         let mut registry = state.peers.lock();
         registry.refresh()?;
         registry.records().cloned().collect()

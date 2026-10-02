@@ -1,5 +1,3 @@
-use std::sync::LazyLock;
-
 use super::*;
 use zz_protocol::{
     ClientEnvironmentBlob, ExecExit, ExecFlags, ExecOutcome, ExecRequest, ExecResume,
@@ -20,10 +18,6 @@ const EXEC_FLUSH_FRAMES: usize = 64;
 const EXEC_FLUSH_BYTES: usize = 64 * 1024;
 const CONNECTION_THREAD_IDLE: Duration = Duration::from_secs(1);
 
-static SPAWN_PER_CONNECTION: LazyLock<bool> = LazyLock::new(|| {
-    std::env::var_os("ZZ_PERF_CONNECTION_THREADS").is_some_and(|value| value == "0")
-});
-
 #[derive(Default)]
 pub(super) struct ConnectionThreads {
     idle: Mutex<Vec<crossbeam_channel::Sender<ExecJob>>>,
@@ -34,13 +28,6 @@ pub(super) struct ConnectionThreads {
 }
 
 impl ConnectionThreads {
-    #[cfg(windows)]
-    pub(super) fn log_knob() {
-        if *SPAWN_PER_CONNECTION {
-            log::info!("ZZ_PERF_CONNECTION_THREADS=0: every connection starts a new thread");
-        }
-    }
-
     pub(super) fn run(self: &Arc<Self>, job: ExecJob) -> std::io::Result<()> {
         #[cfg(test)]
         if self.fail_next.swap(false, Ordering::AcqRel) {
@@ -81,7 +68,7 @@ impl ConnectionThreads {
 
     fn park(&self, worker: &crossbeam_channel::Sender<ExecJob>) -> bool {
         let mut idle = self.idle.lock();
-        if *SPAWN_PER_CONNECTION || idle.len() >= IDLE_CONNECTION_THREADS {
+        if idle.len() >= IDLE_CONNECTION_THREADS {
             return false;
         }
         idle.push(worker.clone());

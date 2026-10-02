@@ -44,14 +44,6 @@ impl Drop for HookNotificationsOnlyScope {
     }
 }
 
-static TREE_DELTA: LazyLock<bool> = LazyLock::new(|| {
-    let enabled = std::env::var_os("ZZ_PERF_TREE_DELTA").is_none_or(|value| value != "0");
-    if !enabled {
-        log::info!("ZZ_PERF_TREE_DELTA=0: publish full subscribed trees");
-    }
-    enabled
-});
-
 pub(super) fn options_event(
     inner: &ServerState,
     client: ClientId,
@@ -144,10 +136,9 @@ pub(super) fn normalize_resize(
             cell_height_px,
             ..
         } => {
-            if *attach::ATTACH_PRESIZE
-                && inner
-                    .client(client)
-                    .is_some_and(|c| c.ctrl_subscriptions.is_some())
+            if inner
+                .client(client)
+                .is_some_and(|c| c.ctrl_subscriptions.is_some())
                 && inner
                     .terminal_geometries
                     .get(&pane)
@@ -734,14 +725,10 @@ impl Shared {
                 .and_then(|c| c.ctrl_tree_version.as_ref())
                 .copied();
             if force || known != Some(raw.generation) {
-                let tree = if *TREE_DELTA {
-                    if force || known != Some(before.generation) {
-                        EventPayload::Snapshot(raw.clone())
-                    } else {
-                        EventPayload::TreeDelta(delta)
-                    }
-                } else {
+                let tree = if force || known != Some(before.generation) {
                     EventPayload::Snapshot(raw.clone())
+                } else {
+                    EventPayload::TreeDelta(delta)
                 };
                 messages.push(Self::event(tree));
                 inner
@@ -833,13 +820,7 @@ impl Shared {
                     raw.generation = before.generation;
                 }
                 let shared_delta = (!delta.ops.is_empty())
-                    .then(|| {
-                        if *TREE_DELTA {
-                            Self::event(EventPayload::TreeDelta(delta))
-                        } else {
-                            Self::event(EventPayload::Snapshot(raw.clone()))
-                        }
-                    })
+                    .then(|| Self::event(EventPayload::TreeDelta(delta)))
                     .and_then(|message| zz_protocol::encode_protocol_message(&message).ok())
                     .map(Arc::<[u8]>::from);
                 let mut shared_full = None;

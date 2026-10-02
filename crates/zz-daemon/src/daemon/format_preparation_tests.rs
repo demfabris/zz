@@ -63,7 +63,7 @@ fn shared_request(inner: &ServerState, client: ClientId) -> Arc<StatusRequest> {
 }
 
 fn reuse_enabled() -> bool {
-    zz_mux::format_cache_knob() && *BORROWED_FORMAT_FACTS && zz_mux::borrowed_formats_enabled()
+    zz_mux::borrowed_formats_enabled()
 }
 
 #[test]
@@ -121,7 +121,7 @@ fn status_preparation_omits_large_unused_config_capture_and_reuses_requests() {
     assert_left(&first, "prepared:80");
     assert!(!first.references.contains("*"));
     assert!(!first.references.contains("config_files"));
-    let selective = reuse_enabled() && zz_mux::compiled_formats_knob();
+    let selective = reuse_enabled();
     if selective {
         let cache = inner.status_preparation_cache.lock();
         let cached = cache.as_ref().unwrap();
@@ -141,7 +141,7 @@ fn status_preparation_omits_large_unused_config_capture_and_reuses_requests() {
         &inner,
         context.session,
         context.window,
-        inner.engine.format_cache_revision().unwrap_or_default(),
+        inner.engine.format_cache_revision(),
         Arc::clone(&changed),
     );
     assert_eq!(candidate.config_files_requested, !selective);
@@ -352,11 +352,7 @@ fn status_preparation_retains_config_for_unknown_jobs_full_providers_and_rollbac
         .client_entry(client)
         .kind
         .replace(ClientKind::Interactive);
-    if !*BORROWED_FORMAT_FACTS
-        || !zz_mux::borrowed_formats_enabled()
-        || !zz_mux::format_cache_knob()
-        || !zz_mux::compiled_formats_knob()
-    {
+    if !zz_mux::borrowed_formats_enabled() {
         let rollback = shared_request(&inner, client);
         assert_eq!(
             rollback.context.variable("config_files").as_deref(),
@@ -480,7 +476,7 @@ fn status_preparation_clock_reuse_refreshes_nested_loop_times_and_preserves_fact
         assert_eq!(Arc::ptr_eq(&first.facts, &tick.facts), reuse_enabled());
         assert_eq!(
             first.context.same_detached_data(&tick.context),
-            zz_mux::format_cache_knob() && zz_mux::borrowed_formats_enabled()
+            zz_mux::borrowed_formats_enabled()
         );
         assert_left(&tick, "80:8:[0:0=1;1=1;][1:0=1;]");
         assert_left(&first, "80:8:[0:0=0;1=0;][1:0=0;]");
@@ -491,10 +487,7 @@ fn status_preparation_clock_reuse_refreshes_nested_loop_times_and_preserves_fact
         if reuse_enabled() {
             let cache = inner.status_preparation_cache.lock();
             let cached = cache.as_ref().unwrap();
-            assert_eq!(
-                cached.revision,
-                inner.engine.format_cache_revision().unwrap()
-            );
+            assert_eq!(cached.revision, inner.engine.format_cache_revision());
             assert!(cached.retained_bytes() <= STATUS_PREPARATION_MAX_BYTES);
         }
     });
@@ -647,7 +640,7 @@ fn status_preparation_bounds_the_retained_shared_border_payload() {
             &inner,
             context.session,
             context.window,
-            inner.engine.format_cache_revision().unwrap_or_default(),
+            inner.engine.format_cache_revision(),
             request,
         );
         assert!(cached.retained_bytes() > STATUS_PREPARATION_MAX_BYTES);
@@ -1059,7 +1052,7 @@ fn status_preparation_rejects_oversized_context_and_environment_capture() {
             &inner,
             context.session,
             context.window,
-            inner.engine.format_cache_revision().unwrap_or_default(),
+            inner.engine.format_cache_revision(),
             Arc::new(large),
         );
         assert!(candidate.retained_bytes() > STATUS_PREPARATION_MAX_BYTES);
@@ -1104,7 +1097,7 @@ fn raw_text_bound_rejects_large_prepared_job_environment_and_reuses_small_values
                 &inner,
                 context.session,
                 context.window,
-                inner.engine.format_cache_revision().unwrap_or_default(),
+                inner.engine.format_cache_revision(),
                 Arc::new(first.clone()),
             );
             if value.as_bytes().len() == 300_000 {
@@ -1114,7 +1107,7 @@ fn raw_text_bound_rejects_large_prepared_job_environment_and_reuses_small_values
                     &inner,
                     context.session,
                     context.window,
-                    inner.engine.format_cache_revision().unwrap_or_default(),
+                    inner.engine.format_cache_revision(),
                     Arc::new(without_job_environment),
                 );
                 assert!(candidate.retained_bytes() >= empty.retained_bytes() + 2_400_000);
@@ -1172,7 +1165,7 @@ fn raw_text_bound_client_blob_guard_reuses_without_retaining_parsed_payloads() {
                     &inner,
                     context.session,
                     context.window,
-                    inner.engine.format_cache_revision().unwrap_or_default(),
+                    inner.engine.format_cache_revision(),
                     Arc::new(first.clone()),
                 );
                 assert!(candidate.retained_bytes() < STATUS_PREPARATION_MAX_BYTES);

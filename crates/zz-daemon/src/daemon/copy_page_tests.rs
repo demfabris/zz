@@ -124,16 +124,7 @@ impl CopyFixture {
     fn resize_narrow(&self) {
         let before = self.terminal.fresh_viewport();
         let columns = if before.columns == 40 { 41 } else { 40 };
-        let frozen_before = self
-            .terminal
-            .latest_viewport_for(TerminalViewId(self.client.0))
-            .expect("copy viewport before resize");
-        let expected_geometry =
-            if std::env::var_os("ZZ_PERF_COPY_CLONE").is_some_and(|value| value == "1") {
-                (frozen_before.columns, frozen_before.rows)
-            } else {
-                (columns, 16)
-            };
+        let expected_geometry = (columns, 16);
         self.terminal.resize(columns, 16, 8, 18);
         assert!(self.terminal.settle());
         let actual = self.terminal.fresh_viewport();

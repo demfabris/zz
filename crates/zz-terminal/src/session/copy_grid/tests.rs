@@ -39,27 +39,16 @@ fn grid(terminal: &libghostty_vt::Terminal<'_, '_>) -> CopyGrid {
 
 #[test]
 fn paged_copy_entry_keeps_cells_and_search_offsets_lazy() {
-    if ModeRevision::clone_enabled() {
-        return;
-    }
     let mut terminal = new_terminal(180, 24, 2000).expect("terminal");
     for row in 0..1000 {
         terminal.vt_write(format!("row-{row:04} target\r\n").as_bytes());
     }
-    let revision = ModeRevision::capture(&mut terminal).expect("revision");
+    let revision = ModeRevision::capture(&terminal).expect("revision");
     assert!(revision.total_rows() >= 1000);
-    assert!(revision.cells.is_empty());
-    assert!(revision.rows.is_empty());
-    assert!(revision.search.text.is_empty());
-    assert!(revision.search.rows.is_empty());
-    assert!(revision.search.offsets.is_empty());
-    assert!(revision.search.terminal.is_some());
     assert_eq!(
         revision.capture_rows(0, 0, false, false, false),
         "row-0000 target"
     );
-    assert!(revision.cells.is_empty());
-    assert!(revision.search.offsets.is_empty());
 }
 
 #[test]
@@ -70,7 +59,7 @@ fn lazy_rows_keep_semantics_styles_wide_cells_and_graphemes_after_pruning_and_ed
         "\x1b]133;A\x1b\\\x1b[1;4;38;2;11;22;33m$ \x1b]133;B\x1b\\{cluster}界 input-old\x1b[0m\x1b]133;C\x1b\\\r\noutput-old"
     );
     terminal.vt_write(seed.as_bytes());
-    let revision = ModeRevision::capture(&mut terminal).expect("revision");
+    let revision = ModeRevision::capture(&terminal).expect("revision");
     let old_rows = revision.total_rows();
     for row in 0..4096 {
         terminal.vt_write(format!("replacement-{row}\r\n").as_bytes());
@@ -143,9 +132,6 @@ fn row_cache_stays_bounded_when_scanning_and_revisiting_history() {
 
 #[test]
 fn paged_search_maps_unicode_and_cancels_between_rows_without_flat_history() {
-    if ModeRevision::clone_enabled() {
-        return;
-    }
     let mut terminal = new_terminal(32, 4, 256).expect("terminal");
     for row in 0..100 {
         terminal.vt_write(format!("e\u{301}界 TARGET{row:02}\r\n").as_bytes());
@@ -185,9 +171,6 @@ fn paged_search_maps_unicode_and_cancels_between_rows_without_flat_history() {
     assert_eq!(matches.as_ptr(), allocation);
     assert!(!matches.is_empty());
     assert!(matches.len() < 100);
-    assert!(snapshot.text.is_empty());
-    assert!(snapshot.rows.is_empty());
-    assert!(snapshot.offsets.is_empty());
     terminal.vt_write(b"\x1b[3J\x1b[2J\x1b[Hno-targets");
     drop(terminal);
     let after = snapshot.search(&query, 9, || false).expect("frozen search");
@@ -196,9 +179,6 @@ fn paged_search_maps_unicode_and_cancels_between_rows_without_flat_history() {
 
 #[test]
 fn wrapped_literal_and_regex_are_one_match_with_physical_endpoints() {
-    if ModeRevision::clone_enabled() {
-        return;
-    }
     let mut terminal = new_terminal(12, 4, 64).expect("terminal");
     terminal.vt_write("prefix e\u{301}界 target-12345 end\r\nbar\r\nbaz".as_bytes());
     let snapshot = HistorySearchSnapshot::capture(&terminal).expect("snapshot");
@@ -242,16 +222,10 @@ fn wrapped_literal_and_regex_are_one_match_with_physical_endpoints() {
             .matches,
         [expected]
     );
-    assert!(snapshot.text.is_empty());
-    assert!(snapshot.rows.is_empty());
-    assert!(snapshot.offsets.is_empty());
 }
 
 #[test]
 fn wrapped_copy_search_places_emacs_at_end_and_vi_at_start() {
-    if ModeRevision::clone_enabled() {
-        return;
-    }
     for vi in [false, true] {
         let mut terminal = new_terminal(12, 4, 64).expect("terminal");
         terminal.vt_write("prefix e\u{301}界 target-12345 end".as_bytes());
@@ -331,9 +305,6 @@ fn wrapped_copy_search_places_emacs_at_end_and_vi_at_start() {
 
 #[test]
 fn wrapped_history_search_reuses_matches_and_cancels_without_flat_arrays() {
-    if ModeRevision::clone_enabled() {
-        return;
-    }
     let mut terminal = new_terminal(12, 4, 4096).expect("terminal");
     for _ in 0..600 {
         terminal.vt_write("prefix e\u{301}界 target-12345 end\r\n".as_bytes());
@@ -367,20 +338,14 @@ fn wrapped_history_search_reuses_matches_and_cancels_without_flat_arrays() {
     assert_eq!(scratch.as_ptr(), allocation);
     assert!(!scratch.is_empty());
     assert!(scratch.len() < 600);
-    assert!(snapshot.text.is_empty());
-    assert!(snapshot.rows.is_empty());
-    assert!(snapshot.offsets.is_empty());
     assert_eq!(std::mem::size_of::<crate::session::SearchCellOffset>(), 12);
 }
 
 #[test]
 fn appearance_refresh_keeps_frozen_text_and_explicit_colors() {
-    if ModeRevision::clone_enabled() {
-        return;
-    }
     let mut terminal = new_terminal(32, 4, 32).expect("terminal");
     terminal.vt_write(b"frozen \x1b[38;2;9;8;7mRGB\x1b[0m");
-    let original = ModeRevision::capture(&mut terminal).expect("revision");
+    let original = ModeRevision::capture(&terminal).expect("revision");
     let original_default = style(&original, point(0, 0));
     terminal.vt_write(b"\x1b[3J\x1b[2J\x1b[Hreplacement-live");
     terminal
@@ -417,12 +382,9 @@ fn appearance_refresh_keeps_frozen_text_and_explicit_colors() {
 
 #[test]
 fn frozen_resize_tracks_the_wide_cell_through_a_width_round_trip() {
-    if ModeRevision::clone_enabled() {
-        return;
-    }
     let mut terminal = new_terminal(80, 4, 64).expect("terminal");
     terminal.vt_write(format!("{}界{}", "a".repeat(73), "b".repeat(45)).as_bytes());
-    let original = ModeRevision::capture(&mut terminal).expect("revision");
+    let original = ModeRevision::capture(&terminal).expect("revision");
     let original_cursor = point(73, 0);
     terminal.vt_write(b"\x1b[3J\x1b[2J\x1b[Hlive-replacement");
     let (narrow, narrow_cursor) = original
@@ -457,7 +419,7 @@ fn row_conversion_keeps_style_links_semantics_and_mixed_unicode() {
         )
         .as_bytes(),
     );
-    let revision = ModeRevision::capture(&mut terminal).expect("revision");
+    let revision = ModeRevision::capture(&terminal).expect("revision");
     terminal.vt_write(b"\x1b[3J\x1b[2J\x1b[Hreplacement");
     drop(terminal);
 
@@ -511,7 +473,7 @@ fn formatting_reader_keeps_its_row_dictionary_after_other_rows_compact() {
             .as_bytes(),
         );
     }
-    let revision = ModeRevision::capture(&mut terminal).expect("revision");
+    let revision = ModeRevision::capture(&terminal).expect("revision");
     let reader = revision.reader();
     let original = reader.cell(point(0, 0));
     assert_eq!(reader.first_char(point(0, 0)), Some('e'));
@@ -519,9 +481,7 @@ fn formatting_reader_keeps_its_row_dictionary_after_other_rows_compact() {
     for row in 1..revision.total_rows() {
         revision.cell(point(0, row));
     }
-    if !ModeRevision::clone_enabled() {
-        assert_ne!(revision.dictionary_generation(), generation);
-    }
+    assert_ne!(revision.dictionary_generation(), generation);
     assert_eq!(reader.cell(point(0, 0)), original);
     let mut text = String::new();
     reader.push_text(point(0, 0), &mut text);
@@ -590,7 +550,7 @@ fn frozen_row_formatting_keeps_wrap_padding_unicode_and_style_contracts() {
     terminal.vt_write(
         format!("\x1b[1;38;2;11;22;33mab界cdef{cluster} Z     \x1b[0m\r\nQ       ").as_bytes(),
     );
-    let revision = ModeRevision::capture(&mut terminal).expect("revision");
+    let revision = ModeRevision::capture(&terminal).expect("revision");
     terminal.vt_write(b"\x1b[3J\x1b[2J\x1b[Hreplacement");
     drop(terminal);
 

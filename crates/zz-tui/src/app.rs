@@ -600,11 +600,6 @@ pub(crate) fn run(
     let mut remembered_session = None;
     let mut reconnect_available = true;
     let mut deferred = None;
-    if !*crate::COALESCE {
-        renderer
-            .paint(&model, true)
-            .map_err(|error| error.to_string())?;
-    }
 
     let outcome = loop {
         if browser.wants_graphics() {
@@ -762,7 +757,7 @@ pub(crate) fn run(
                         }
                     }
                     handled += 1;
-                    if !*crate::COALESCE || handled >= MAX_COALESCED_EVENTS {
+                    if handled >= MAX_COALESCED_EVENTS {
                         break;
                     }
                     next = next_paint_event(&incoming, &mut deferred);
@@ -852,9 +847,9 @@ pub(crate) fn run(
                             .map_err(|error| error.to_string())?;
                     }
                     InputOutcome::Resize(size) => {
-                        let unchanged = *crate::COALESCE && size == model.size;
-                        let same_grid = *crate::COALESCE
-                            && (size.columns, size.rows) == (model.size.columns, model.size.rows);
+                        let unchanged = size == model.size;
+                        let same_grid =
+                            (size.columns, size.rows) == (model.size.columns, model.size.rows);
                         model.set_size(size);
                         if size.columns > 0 && size.rows > 0 && !same_grid {
                             client
@@ -1018,7 +1013,7 @@ pub(crate) fn run(
                             })
                             .map_err(|error| error.to_string())?;
                     }
-                    if !*crate::COALESCE || size != previous {
+                    if size != previous {
                         send_resizes_and_sync_browser(
                             &mut model,
                             &client,
@@ -1517,11 +1512,7 @@ fn handle_core_event(
                     .map_err(|error| error.to_string())?;
             }
             *creating_default = false;
-            Ok(if *crate::COALESCE {
-                ProtocolOutcome::RepaintAll
-            } else {
-                ProtocolOutcome::None
-            })
+            Ok(ProtocolOutcome::RepaintAll)
         }
         CoreEvent::SnapshotChanged => {
             let (snapshot, layout_generation) = {
@@ -2056,10 +2047,10 @@ fn refresh_snapshot(
     if update_snapshot(model, snapshot, layout_generation) {
         send_resizes_with(model, send)?;
     }
-    Ok(if !*crate::COALESCE || model.paint_structure() != before {
-        ProtocolOutcome::RepaintAll
-    } else {
+    Ok(if model.paint_structure() == before {
         ProtocolOutcome::Repaint
+    } else {
+        ProtocolOutcome::RepaintAll
     })
 }
 
@@ -2374,12 +2365,7 @@ mod tests {
         .unwrap();
         assert_eq!(model.terminal_geometries(), geometry);
         assert_eq!(model.paint_structure(), structure);
-        assert!(
-            matches!(
-                outcome,
-                ProtocolOutcome::Repaint if *crate::COALESCE
-            ) || matches!(outcome, ProtocolOutcome::RepaintAll if !*crate::COALESCE)
-        );
+        assert!(matches!(outcome, ProtocolOutcome::Repaint));
         assert_eq!(sent.len(), 2);
         let (_, (columns, rows, cell_width_px, cell_height_px)) = geometry[0];
         for (input, layout_generation) in sent.iter().zip([42, 43]) {

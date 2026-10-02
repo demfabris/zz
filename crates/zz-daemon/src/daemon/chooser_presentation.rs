@@ -272,7 +272,7 @@ pub(super) fn client_chooser_rows(
         let name = client_facts.name.clone();
         let width = client_facts.width.parse::<u16>().unwrap_or_default();
         let height = client_facts.height.parse::<u16>().unwrap_or_default();
-        facts.set_client(Some(client_facts));
+        facts.seed.client = Some(client_facts);
         let mut hooks = DaemonFormatHooks::command(&facts).with_option_engine(&inner.engine);
         let text = expand_format_values(format, &context, &mut hooks);
         let matches = filter.is_none_or(|filter| {
@@ -323,7 +323,7 @@ fn client_info_lines(inner: &ServerState, client: ClientId) -> Vec<String> {
     context.config_files.clone_from(&inner.config_files);
     context.format_now = i64::try_from(unix_timestamp()).ok().filter(|now| *now != 0);
     let mut facts = borrowed_format_hook_facts(inner);
-    facts.set_client(Some(client_format_facts(inner, client, session_id)));
+    facts.seed.client = Some(client_format_facts(inner, client, session_id));
     WINDOW_CLIENT_INFO_LINES
         .iter()
         .map(|line| {

@@ -48,6 +48,19 @@ read "Lane brief rules" before launching anything.
 
 ## Wave 3 merge log (from 2026-10-01)
 
+- W3-LOOP in progress on `perf/loop` (worktree `~/dev/zz-loop` on the Mac; not merged): e0, a1-a4,
+  b1-b6 with fixes, then main merged in (slice 00, `1518f03d`). Step (b) plan:
+  `bench/perf/campaign/w3-loop-b-plan.txt`; steps (c)/(d)/(e), 30 slices in order:
+  `bench/perf/campaign/w3-loop-cde-plan.txt`. Baseline B for those slices:
+  `loop-B-macbook.json` (74 pass, 7 fail) and `loop-B-alienware.json` (65 pass, 16 fail), kept in
+  `/tmp/zzpc/w3` and `~/.cache/zz-perf/w3`. Against the SHARDS merge: threads p1/p20 10 -> 4 / 50
+  -> 45 on Linux, 3 / 25 on the Mac; `cli.cpu.display.p1` 0.082 -> 0.051 ms (Linux, tmux 0.074)
+  and 0.039 ms on the Mac (tmux 0.070); `control.cpu_per_cmd` near tmux on both. Linux user
+  instructions per short command are 7-18% higher (mio per-connection bookkeeping) while CPU
+  falls 20-40%: the gate rows are CPU, so this is accepted. Each b slice first added 4-10%
+  per-command instructions (worker round trips, admission wakes, status re-arming) and needed a
+  bounded fix; expect the same pattern in (e). Open gate gaps owned by (c)/(e): spawn
+  (`kill_pane` 0.37 vs tmux 0.19 ms on the Mac), `statusjob.threads_per_s` 3/s, echo.
 - W3-SHARDS merged 2026-10-01 as merge 1 (`99aef76b`), slices s1 `edd445fc` (PaneActor state
   machine), s2 `7ff4e681`+`c42a605e`+`3736bf67` (K shard threads, lazy start, coalesced wakes),
   s3 `00314f96` (portable-pty off Unix; the allocation-free spawn already existed), s6

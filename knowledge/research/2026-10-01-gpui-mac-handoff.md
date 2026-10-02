@@ -35,15 +35,18 @@ Results and method are in [macOS (Metal)](/research/2026-09-30-gpui-fork-lab.md#
    Rejected again.
 4. gpui-fast `9b2f43d` ported as local `lab/coretext` (fonts per size, run rendering, plus an
    `accessibility_active` field in the recorder): -10.8% stream, -3.1% grid, -5.1% scroll, -7.7%
-   chrome against `cc9e4d1804`, no repeat overlapping.
+   chrome against `cc9e4d1804`, no repeat overlapping. The font cache alone (`lab/coretext-fonts`)
+   gives nearly all of it; run rendering is not proven.
 5. Compact scene records, the two Metal-only commits and hot reload: see the lab document.
 
 # Still open
 
-1. **Push `lab/coretext` to `zz-patches`.** Its three commits sit on top of `cc9e4d1804` in the
-   local fork checkout at `~/.cache/zz-forks/zed-coretext`. zz built against them (bundle C). Push
-   with a dated backup of `cc9e4d1804`, then move the pin in the three manifests and both
-   lockfiles. Pushing to the fork goes over ssh with the hardware key, so it needs a person.
+1. **Push the CoreText font cache to `zz-patches`.** `lab/coretext-fonts` holds it plus the
+   recorder field on top of `cc9e4d1804` (`ff805a96b0`, `5a00ac89a4`); `lab/coretext` adds the
+   run rendering commit `3aefd2a813`, which is cleaner code but showed no proven gain. zz built
+   against both (bundles C1 and C). Push with a dated backup of `cc9e4d1804`, then move the pin in
+   the three manifests and both lockfiles. Pushing to the fork goes over ssh with the hardware
+   key, so it needs a person.
 2. **Look at the app.** Nobody has checked rendering on screen on macOS since `cc9e4d1804` or with
    `lab/coretext`: terminal backgrounds, bold and italic fallback fonts, emoji, wrapped text in
    the agent pane, sidebar, palette and settings.

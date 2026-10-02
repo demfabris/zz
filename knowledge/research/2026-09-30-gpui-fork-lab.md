@@ -271,7 +271,19 @@ C is B plus those three commits. Three repeats each:
 | chrome | 11.81% | 10.91% | -7.7% | 11.61-12.00 / 10.76-11.25 |
 
 Prepaint fell 26 to 39% in every drawing scenario, where terminal rows build their glyph raster
-data. The two CoreText commits were measured together.
+data. A second run split the commits: C1 is B plus only the font cache and the recorder field
+(local `lab/coretext-fonts`), three repeats each:
+
+| Scenario | B | C1 | C |
+| --- | --- | --- | --- |
+| stream | 6.37% | 5.73% (-10.1%) | 5.73% (-10.1%) |
+| grid-one-active | 12.65% | 11.81% (-6.7%) | 11.70% (-7.5%) |
+| scroll | 1.94% | 1.84% (-5.1%) | 1.85% (-5.0%) |
+| chrome | 11.60% | 11.05% (-4.7%) | 10.81% (-6.8%) |
+
+The font cache carries the whole prepaint drop: terminal rows shape new lines during prepaint,
+and every shape made a fresh `CTFont` per run. Run rendering takes about 3% more off paint in
+stream and chrome, but C and C1 overlap on main-thread CPU, so that commit is not proven.
 
 Risks:
 

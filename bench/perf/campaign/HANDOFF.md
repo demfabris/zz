@@ -68,8 +68,23 @@ read "Lane brief rules" before launching anything.
     enqueueing (and on close), the loop drains each surface 8 events per turn with one coalesced
     wake. Threads p1/p20 3/25 -> 2/5 on the Mac; hidden chatty 0.93x B, all 22 instruction
     medians at most 1.026x B, idle 0. Linux check rides on the e01 merge.
-  - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-10% per host: judge it on
-    the min/max of three alternating runs, not the median ratio alone.
+  - e01 (`7ce2d11e`, Linux): command items own queue state, scopes and control-event capture
+    (new `daemon/cmdq.rs`); no command guard keyed by ThreadId. Correct, but short commands pay
+    3.2-4.1% more user instructions than B on alienware (chain5 p1 0.222 -> 0.230 Minstr): a
+    bounded fix lane (`e01fix`) profiles it with `perf record -e instructions:u` and removes it.
+  - c04 (`4fa8958b`, Mac): agent publication goes through a message-only handle
+    (`daemon/agent_publisher.rs`, `agent_inbox.rs`) applied on the loop; 0 agent threads added,
+    retired runtime messages dropped. Hidden chatty read 1.19x B, but c02 vs c04 directly is
+    70-80 vs 75-80 Minstr/s and an idle inbox turn is one atomic swap: noise, accepted.
+  - e12 (`5156d733`, Mac): loop-owned job registry (`daemon/jobs.rs`): pipe/socket ports on
+    loop tokens, CHILD_SIGNAL checks only registered children, deadlines in the loop timeout; no
+    family migrated yet (e14-e16). 20 jobs add 0 threads, each child reaped once. `chain5.p1`
+    read 1.037x c04, but that row is bimodal on the Mac (c04 alone 0.2687 / 0.2689 / 0.278
+    Minstr) and the other 23 rows are flat: accepted.
+  - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
+    chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
+    the previous slice's binary, not the median ratio alone. Later briefs compare against the
+    previous slice's binary at 1.02x instead of B at 1.03x.
 - W3-LOOP in progress on `perf/loop` (worktree `~/dev/zz-loop` on the Mac; not merged): e0, a1-a4,
   b1-b6 with fixes, then main merged in (slice 00, `1518f03d`). Step (b) plan:
   `bench/perf/campaign/w3-loop-b-plan.txt`; steps (c)/(d)/(e), 30 slices in order:

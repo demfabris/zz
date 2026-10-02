@@ -247,6 +247,11 @@ read "Lane brief rules" before launching anything.
     e21; (d) becomes a separate ownership-cleanup lane after W4-DELIVER (the plan file is its
     input). Instead of the post-(d) parity review, an ultra source review of the whole c/e series
     runs before the lane merge.
+  - e21 (`b9ab5478`, Linux): startup replay, registration, default attach, disconnect/unregister,
+    destroy-unattached and shutdown run on the loop (`daemon/lifecycle.rs`); no ConnectionThreads
+    in production Unix builds (Windows keeps accepts, writers, deferred exec, timers and helper
+    dispatch on them); 1497 daemon tests, startup diagnostics 8/8. Short commands +3.5-4.1% user
+    instructions (12/19 CLI rows over): fix lane `e21fix` profiles the per-connection lifecycle.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

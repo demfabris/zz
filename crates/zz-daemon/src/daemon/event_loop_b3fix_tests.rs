@@ -79,7 +79,7 @@ fn query_chains_and_last_reply_run_without_a_worker() {
 }
 
 #[test]
-fn query_output_pressure_moves_remaining_replies_to_a_worker() {
+fn query_output_pressure_parks_remaining_replies_on_a_continuation() {
     let shared = Arc::new(Shared::new(72));
     let mut event_loop = EventLoop::empty(&shared).unwrap();
     let (token, mut peer) = pair(&mut event_loop);
@@ -87,8 +87,15 @@ fn query_output_pressure_moves_remaining_replies_to_a_worker() {
     peer.write_all(&encode_protocol_message(&request(commands, true)).unwrap())
         .unwrap();
     event_loop.read_ready(token, &shared);
-    assert!(event_loop.connections[&token].busy);
-    assert!(shared.connection_threads.worker_count() > 0);
+    let connection = &event_loop.connections[&token];
+    assert!(!connection.busy);
+    assert!(connection.output_wait);
+    assert!(matches!(
+        connection.command.as_ref().unwrap().state(),
+        cmdq::State::Waiting(_)
+    ));
+    assert!(connection.exec_request.is_some());
+    assert_eq!(shared.connection_threads.worker_count(), 0);
     {
         let mut admissions = shared.response_admissions.lock();
         assert_eq!(admissions.active, 1);
@@ -130,6 +137,7 @@ fn query_output_pressure_moves_remaining_replies_to_a_worker() {
         received.last(),
         Some(ProtocolMessage::ExecExit(_))
     ));
+    assert_eq!(shared.connection_threads.worker_count(), 0);
 }
 
 #[test]

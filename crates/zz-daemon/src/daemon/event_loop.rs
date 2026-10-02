@@ -195,6 +195,10 @@ struct Connection {
     session: Option<Box<connection::Session>>,
     exec_mode: bool,
     exec: Option<Box<exec::LoopExec>>,
+    exec_request: Option<exec::PreparedExec>,
+    command: Option<cmdq::CommandItem<()>>,
+    queue: Option<cmdq::QueueId>,
+    output_wait: bool,
     client: Option<ClientId>,
     pending: VecDeque<(ProtocolMessage, usize)>,
     pending_bytes: usize,
@@ -208,14 +212,20 @@ struct Connection {
     released: Option<Arc<AtomicBool>>,
 }
 
+#[cfg(test)]
+#[path = "event_loop_e02_tests.rs"]
+mod e02_tests;
+
 struct Completion {
     token: Token,
     result: Result<Completed, DaemonError>,
+    continuation: Option<cmdq::ContinuationToken>,
 }
 
 enum Completed {
     Client(Option<Box<connection::Session>>),
     Exec(Option<Box<exec::LoopExec>>),
+    ExecPhase(Box<exec::LoopExec>, exec::PreparedExec),
 }
 
 impl EventLoop {
@@ -318,6 +328,10 @@ impl EventLoop {
                 session: None,
                 exec_mode: false,
                 exec: None,
+                exec_request: None,
+                command: None,
+                queue: None,
+                output_wait: false,
                 client: None,
                 pending: VecDeque::new(),
                 pending_bytes: 0,
@@ -673,6 +687,12 @@ impl EventLoop {
         let connection = self.connections.get_mut(&token).unwrap();
         if connection.exec_mode {
             return match message {
+                ProtocolMessage::GuiResponse(response) => {
+                    if let Some(client) = connection.client {
+                        shared.complete_gui_request(client, response);
+                    }
+                    true
+                }
                 ProtocolMessage::ClientFileResponse(response) => {
                     if let Some(client) = connection.client {
                         shared.complete_client_file(client, response);
@@ -688,6 +708,7 @@ impl EventLoop {
                 return self.enqueue_pending(token, shared, message, bytes);
             }
             connection.prepare_hello(&message);
+            connection.start_command();
             connection.busy = true;
             let outbound = Arc::clone(&connection.outbound);
             let cancel = Arc::clone(&connection.cancel);
@@ -706,16 +727,34 @@ impl EventLoop {
                 message => {
                     if connection.initialized
                         && !connection.busy
+                        && connection.command.is_none()
                         && connection.pending.is_empty()
                         && let Some(mut session) = connection.session.take()
                     {
-                        let message =
-                            session.try_inline_message(shared, &connection.outbound, message);
-                        connection.session = Some(session);
-                        let Some(message) = message else {
-                            return true;
-                        };
-                        return self.enqueue_pending(token, shared, message, bytes);
+                        connection.start_command();
+                        session.start_message(message);
+                        match session.run_message(shared, &connection.outbound, true) {
+                            connection::MessageProgress::Done => {
+                                connection.command.take().unwrap().finish();
+                                connection.initializing = session.initializing();
+                                connection.session = Some(session);
+                            }
+                            connection::MessageProgress::Output => {
+                                connection.command.as_ref().unwrap().wait();
+                                connection.output_wait = true;
+                                connection.session = Some(session);
+                            }
+                            connection::MessageProgress::Worker => {
+                                connection.busy = true;
+                                let outbound = Arc::clone(&connection.outbound);
+                                self.execute(token, shared, move |shared| {
+                                    session.run_message(shared, &outbound, false);
+                                    Ok(Some(session))
+                                });
+                            }
+                            connection::MessageProgress::Ready => unreachable!(),
+                        }
+                        return true;
                     }
                     return self.enqueue_pending(token, shared, message, bytes);
                 }
@@ -728,7 +767,11 @@ impl EventLoop {
 
     fn advance_exec(&mut self, token: Token, shared: &Arc<Shared>) {
         let connection = self.connections.get_mut(&token).unwrap();
-        if !connection.exec_mode || connection.busy || connection.read_closed {
+        if !connection.exec_mode
+            || connection.busy
+            || connection.read_closed
+            || connection.command.is_some()
+        {
             return;
         }
         let Some((message, bytes)) = connection.pending.front() else {
@@ -756,7 +799,7 @@ impl EventLoop {
         let (message, _) = connection.pending.pop_front().unwrap();
         connection.pending_bytes -= bytes;
         match message {
-            ProtocolMessage::Exec(request) => self.run_exec(token, shared, request),
+            ProtocolMessage::Exec(request) => self.run_exec(token, shared, Some(request)),
             first @ (ProtocolMessage::Hello(_) | ProtocolMessage::ClientHello(_)) => {
                 connection.prepare_hello(&first);
                 let execution = connection.exec.take();
@@ -767,6 +810,7 @@ impl EventLoop {
                 connection.released = None;
                 connection.initialized = false;
                 connection.cancel = Arc::new(AtomicBool::new(false));
+                connection.start_command();
                 connection.busy = true;
                 let outbound = Arc::clone(&connection.outbound);
                 let cancel = Arc::clone(&connection.cancel);
@@ -791,68 +835,96 @@ impl EventLoop {
         &mut self,
         token: Token,
         shared: &Arc<Shared>,
-        mut request: zz_protocol::ExecRequest,
+        request: Option<zz_protocol::ExecRequest>,
     ) {
         let connection = self.connections.get_mut(&token).unwrap();
-        if shared.stopping.load(Ordering::Acquire)
-            || shared.shutdown_pending.load(Ordering::Acquire)
-        {
+        if connection.busy || connection.read_closed {
+            return;
+        }
+        let shutdown_pending = shared.shutdown_pending.load(Ordering::Acquire);
+        if request.is_some() && (shared.stopping.load(Ordering::Acquire) || shutdown_pending) {
             if *shared.startup_ready.lock() {
                 let _ = connection
                     .outbound
                     .enqueue_reliable(&server_stopping_response(0));
             }
+            connection.exec_request = None;
             self.disconnect(token, shared);
             return;
         }
-        let last = request.flags.contains(zz_protocol::ExecFlags::LAST);
-        if connection.exec.is_none() && request.commands.is_empty() {
-            let outcome = if request
-                .expect_server_id
-                .is_some_and(|id| id != shared.server_id)
-            {
-                zz_protocol::ExecOutcome::ServerMismatch
-            } else {
-                zz_protocol::ExecOutcome::Ran
-            };
-            let _ = connection
-                .outbound
-                .enqueue_reliable(&ProtocolMessage::ExecExit(zz_protocol::ExecExit {
-                    server_id: shared.server_id,
-                    outcome,
-                }));
-            if last {
-                self.disconnect(token, shared);
-            } else if !connection.pending.is_empty() {
-                let _ = self.waker.wake();
+        let (mut execution, mut prepared) = if let Some(mut request) = request {
+            connection.start_command();
+            let last = request.flags.contains(zz_protocol::ExecFlags::LAST);
+            if connection.exec.is_none() && request.commands.is_empty() {
+                let outcome = if request
+                    .expect_server_id
+                    .is_some_and(|id| id != shared.server_id)
+                {
+                    zz_protocol::ExecOutcome::ServerMismatch
+                } else {
+                    zz_protocol::ExecOutcome::Ran
+                };
+                let _ = connection
+                    .outbound
+                    .enqueue_reliable(&ProtocolMessage::ExecExit(zz_protocol::ExecExit {
+                        server_id: shared.server_id,
+                        outcome,
+                    }));
+                connection.command.take().unwrap().finish();
+                if last {
+                    self.disconnect(token, shared);
+                } else if !connection.pending.is_empty() {
+                    let _ = self.waker.wake();
+                }
+                return;
             }
-            return;
-        }
-        let execution = connection.exec.take().or_else(|| {
-            exec::LoopExec::register(
-                shared,
-                &mut request,
-                &connection.outbound,
-                &connection.cancel,
-            )
-            .map(Box::new)
-        });
-        let Some(mut execution) = execution else {
-            let _ = connection
-                .outbound
-                .enqueue_reliable(&server_stopping_response(0));
-            self.disconnect(token, shared);
-            return;
+            let execution = connection.exec.take().or_else(|| {
+                exec::LoopExec::register(
+                    shared,
+                    &mut request,
+                    &connection.outbound,
+                    &connection.cancel,
+                )
+                .map(Box::new)
+            });
+            let Some(mut execution) = execution else {
+                let _ = connection
+                    .outbound
+                    .enqueue_reliable(&server_stopping_response(0));
+                connection.command.take().unwrap().finish();
+                self.disconnect(token, shared);
+                return;
+            };
+            if connection.client.is_none() {
+                connection.client = Some(execution.client);
+                connection.kind = Some(ClientKind::Command);
+                connection.released = Some(execution.released());
+            }
+            let prepared = execution.prepare(request);
+            (execution, prepared)
+        } else {
+            if shutdown_pending && connection.output_wait {
+                connection.output_wait = false;
+                let command = connection.command.as_ref().expect("output continuation");
+                if let Some(continuation) = command.wait() {
+                    command.resume(continuation);
+                }
+            }
+            if connection
+                .command
+                .as_ref()
+                .is_none_or(|item| item.state() != cmdq::State::Ready)
+            {
+                return;
+            }
+            let Some(prepared) = connection.exec_request.take() else {
+                return;
+            };
+            (connection.exec.take().expect("parked Exec"), prepared)
         };
-        if connection.client.is_none() {
-            connection.client = Some(execution.client);
-            connection.kind = Some(ClientKind::Command);
-            connection.released = Some(execution.released());
-        }
-        let mut prepared = execution.prepare(request);
-        if prepared.inline
-            && let Some(resumed) = execution.run(&mut prepared, true)
-        {
+        let last = prepared.last;
+        if let Some(resumed) = execution.run(&mut prepared, !shutdown_pending) {
+            connection.command.take().unwrap().finish();
             if last && !resumed {
                 if execution.can_finish_inline() {
                     drop(execution);
@@ -869,16 +941,24 @@ impl EventLoop {
             }
             return;
         }
+        if prepared.waiting_output {
+            connection.command.as_ref().unwrap().wait();
+            connection.output_wait = true;
+            connection.exec = Some(execution);
+            connection.exec_request = Some(prepared);
+            return;
+        }
         connection.busy = true;
         self.execute_work(token, shared, move |_| {
-            let resumed = execution
-                .run(&mut prepared, false)
-                .expect("worker finishes Exec");
-            if last && !resumed {
-                drop(execution);
-                Ok(Completed::Exec(None))
+            if let Some(resumed) = execution.run(&mut prepared, false) {
+                if last && !resumed {
+                    drop(execution);
+                    Ok(Completed::Exec(None))
+                } else {
+                    Ok(Completed::Exec(Some(execution)))
+                }
             } else {
-                Ok(Completed::Exec(Some(execution)))
+                Ok(Completed::ExecPhase(execution, prepared))
             }
         });
     }
@@ -891,6 +971,9 @@ impl EventLoop {
     ) {
         let connection = self.connections.get_mut(&token).unwrap();
         connection.busy = false;
+        if let Some(command) = connection.command.take() {
+            command.finish();
+        }
         if let Some(execution) = execution {
             connection.exec = Some(execution);
             if connection.cleanup_started || connection.read_closed {
@@ -928,6 +1011,7 @@ impl EventLoop {
         }
         if connection.exec_mode
             && !connection.busy
+            && connection.command.is_none()
             && !connection.read_closed
             && connection.pending.is_empty()
             && matches!(&message, ProtocolMessage::Exec(request) if connection.client.is_some()
@@ -939,7 +1023,7 @@ impl EventLoop {
             let ProtocolMessage::Exec(request) = message else {
                 unreachable!();
             };
-            self.run_exec(token, shared, request);
+            self.run_exec(token, shared, Some(request));
             return self
                 .connections
                 .get(&token)
@@ -975,6 +1059,11 @@ impl EventLoop {
         shared: &Arc<Shared>,
         work: impl FnOnce(&Arc<Shared>) -> Result<Completed, DaemonError> + Send + 'static,
     ) {
+        let continuation = self
+            .connections
+            .get(&token)
+            .and_then(|connection| connection.command.as_ref())
+            .and_then(cmdq::CommandItem::wait);
         let shared = Arc::clone(shared);
         let sender = self.completion_sender.clone();
         let waker = Arc::clone(&self.waker);
@@ -984,13 +1073,18 @@ impl EventLoop {
                 .unwrap_or_else(|_| {
                     Err(DaemonError::Thread("client execution panicked".to_owned()))
                 });
-            let _ = sender.send(Completion { token, result });
+            let _ = sender.send(Completion {
+                token,
+                result,
+                continuation,
+            });
             let _ = waker.wake();
         })) {
             log::error!("could not start client execution: {error}");
             let _ = self.completion_sender.send(Completion {
                 token,
                 result: Err(error.into()),
+                continuation,
             });
             let _ = self.waker.wake();
         }
@@ -1007,20 +1101,45 @@ impl EventLoop {
             let Some(connection) = self.connections.get_mut(&completion.token) else {
                 if matches!(
                     &completion.result,
-                    Ok(Completed::Client(Some(_)) | Completed::Exec(Some(_)))
+                    Ok(Completed::Client(Some(_))
+                        | Completed::Exec(Some(_))
+                        | Completed::ExecPhase(_, _))
                 ) {
                     let threads = Arc::clone(&shared.connection_threads);
                     let _ = threads.run(Box::new(move || drop(completion.result)));
                 }
                 continue;
             };
+            if let Some(continuation) = completion.continuation {
+                connection
+                    .command
+                    .as_ref()
+                    .expect("waiting command")
+                    .resume(continuation);
+            }
             match completion.result {
+                Ok(Completed::ExecPhase(execution, prepared)) => {
+                    connection.busy = false;
+                    if connection.read_closed || connection.cleanup_started {
+                        drop(prepared);
+                        self.complete_exec(completion.token, Some(execution), shared);
+                    } else {
+                        connection.exec = Some(execution);
+                        connection.exec_request = Some(prepared);
+                    }
+                }
                 Ok(Completed::Client(Some(session))) => {
                     connection.busy = false;
                     connection.client = Some(session.client);
                     connection.kind = Some(session.hello.kind);
-                    connection.initializing = false;
+                    connection.initializing = session.initializing();
                     connection.released = Some(Arc::clone(&session.released));
+                    if connection.initialized
+                        && !session.message_pending()
+                        && let Some(command) = connection.command.take()
+                    {
+                        command.finish();
+                    }
                     if connection.cleanup_started {
                         let threads = Arc::clone(&shared.connection_threads);
                         let _ = threads.run(Box::new(move || drop(session)));
@@ -1053,6 +1172,13 @@ impl EventLoop {
         tokens.extend(self.connections.keys().copied());
         for &token in &tokens {
             let connection = self.connections.get_mut(&token).unwrap();
+            if connection.read_closed && !connection.drain_input && !connection.busy {
+                connection.exec_request = None;
+                if let Some(command) = connection.command.take() {
+                    command.finish();
+                }
+                connection.output_wait = false;
+            }
             if std::mem::take(&mut connection.read_again) {
                 self.read_ready(token, shared);
             }
@@ -1060,7 +1186,11 @@ impl EventLoop {
                 continue;
             };
             if connection.exec_mode {
-                self.advance_exec(token, shared);
+                if connection.exec_request.is_some() {
+                    self.run_exec(token, shared, None);
+                } else {
+                    self.advance_exec(token, shared);
+                }
             }
             let Some(connection) = self.connections.get_mut(&token) else {
                 continue;
@@ -1084,26 +1214,43 @@ impl EventLoop {
                 let outbound = Arc::clone(&connection.outbound);
                 if !connection.initialized {
                     connection.initialized = true;
-                    connection.initializing = true;
-                    connection.busy = true;
-                    self.execute(token, shared, move |shared| {
-                        session.initialize(shared, &outbound);
-                        Ok(Some(session))
-                    });
-                } else if let Some((message, bytes)) = connection.pending.pop_front() {
+                    session.start_initialize(shared, &outbound);
+                    connection.initializing = session.initializing();
+                } else if !session.message_pending()
+                    && let Some((message, bytes)) = connection.pending.pop_front()
+                {
                     connection.pending_bytes -= bytes;
-                    if let Some(message) = session.try_inline_message(shared, &outbound, message) {
-                        connection.busy = true;
-                        self.execute(token, shared, move |shared| {
-                            session.message(shared, &outbound, message);
-                            Ok(Some(session))
-                        });
-                    } else {
-                        connection.session = Some(session);
-                        if !connection.pending.is_empty() {
-                            connection.read_again = true;
-                            let _ = self.waker.wake();
+                    connection.start_command();
+                    session.start_message(message);
+                }
+                if connection
+                    .command
+                    .as_ref()
+                    .is_some_and(|item| item.state() == cmdq::State::Ready)
+                {
+                    match session.run_message(shared, &outbound, true) {
+                        connection::MessageProgress::Done => {
+                            connection.command.take().unwrap().finish();
+                            connection.initializing = session.initializing();
+                            connection.session = Some(session);
+                            if !connection.pending.is_empty() {
+                                connection.read_again = true;
+                                let _ = self.waker.wake();
+                            }
                         }
+                        connection::MessageProgress::Output => {
+                            connection.command.as_ref().unwrap().wait();
+                            connection.output_wait = true;
+                            connection.session = Some(session);
+                        }
+                        connection::MessageProgress::Worker => {
+                            connection.busy = true;
+                            self.execute(token, shared, move |shared| {
+                                session.run_message(shared, &outbound, false);
+                                Ok(Some(session))
+                            });
+                        }
+                        connection::MessageProgress::Ready => unreachable!(),
                     }
                 } else {
                     connection.session = Some(session);
@@ -1114,6 +1261,7 @@ impl EventLoop {
                 && connection.drain_input
                 && !connection.busy
                 && connection.pending.is_empty()
+                && connection.command.is_none()
             {
                 self.disconnect(token, shared);
             }
@@ -1136,6 +1284,7 @@ impl EventLoop {
             let writing = !connection.frames.is_empty();
             if connection.exec_mode
                 && !connection.busy
+                && connection.command.is_none()
                 && !connection.pending.is_empty()
                 && !writing
             {
@@ -1249,6 +1398,13 @@ impl EventLoop {
 }
 
 impl Connection {
+    fn start_command(&mut self) {
+        assert!(self.command.is_none());
+        let command = cmdq::CommandItem::new(self.queue, ());
+        self.queue = Some(command.queue);
+        self.command = Some(command);
+    }
+
     fn prepare_hello(&mut self, message: &ProtocolMessage) {
         let _ = self
             .stream
@@ -1309,6 +1465,16 @@ impl Connection {
                         self.outbound.recycle_written_batch(&mut self.frames);
                         if self.exec_mode {
                             self.outbound.ready.notify_all();
+                        }
+                    }
+                    if self.output_wait && !exec::output_pending(&self.outbound) {
+                        self.output_wait = false;
+                        let command = self.command.as_ref().expect("output continuation");
+                        if let Some(continuation) = command.wait() {
+                            command.resume(continuation);
+                        }
+                        if let Some((waker, _)) = self.outbound.loop_waker.lock().as_ref() {
+                            waker.wake()?;
                         }
                     }
                     if sent >= attach::MAX_BATCHED_WRITE_BYTES {

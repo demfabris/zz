@@ -3264,6 +3264,13 @@ Each surface has one readiness entry, bounded event drains and weak terminal own
 Three alternating quick pairs against `1518f03d` measured threads 3 -> 2 at p1 and 25 -> 5 at p20; all 22 instruction medians stay within 1.0256x B, hidden chatty is 0.9328x B, and idle instructions and wakeups are zero.
 Checks passed: 360 terminal tests, 1,389 daemon unit tests, 35 integration tests, Clippy and all seven compat fixtures (102 steps, zero divergences); one existing test per crate remains ignored. Linux-only checks were not run on this Mac.
 
+**e02 as built (2026-10-02, Linux):** Hello, Control and Exec root items retain their command queues; converted queries run on the mux loop, and each legacy command leaf returns its remaining cursor after one worker turn.
+Socket writes resume output continuations without `LoopExec::wait_for_output` or an output-only worker fallback; LAST, RESUME, first errors, ExecExit and file/GUI reply bypass retain their order. Twenty idle Exec connections followed by a 200-query chain use zero execution workers.
+Registration, startup/terminfo, legacy attach/resync, expansion resolution, nonconverted command leaves, other client messages and hook-capable cleanup still use workers; this slice keeps the helper pool and wire version 107.
+Checks: 48 loop tests, 68 control tests, the 640-command chain, 35 integration tests (one soak ignored), formatting, daemon Clippy, six compat groups (186 steps, zero divergences) and nine TUI backpressure assertions pass. The serial daemon suite passes 1,415 tests with two known host failures; status-job EINTR passes alone, and the macOS CLI fallback stays red on Linux.
+Three alternating quick `cli,control,chatty,mem` pairs against the supplied `loop-ed5ba3aa-cli` give all 19 CLI instruction medians <=1.00365x; display p1/p20 and chain5 p20 are 1.00140x/0.99080x/0.99301x. Control instructions are 0.0457/0.0462 Minstr (0.98918x), and thread medians remain 3/25. Control latency is red on both binaries; burst throughput is also red in one baseline run, with no new or outside-lane reds.
+macOS posix_spawn, kqueue, PTY spin bridge, ri_instructions and iOS checks were not run on this Linux host; the orchestrator owns them.
+
 ## W4-DELIVER: frames straight from shards (effort L)
 
 Scope: the loop pushes per-pane subscriber sinks (queue handle, stream kind, delivered base,

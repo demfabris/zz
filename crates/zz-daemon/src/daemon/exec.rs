@@ -836,11 +836,12 @@ pub(super) struct LoopExec {
 
 #[cfg(unix)]
 pub(super) struct PreparedExec {
-    commands: std::vec::IntoIter<CommandInvocation>,
+    commands: std::vec::IntoIter<PreparedCommand>,
     next_request: u64,
     stdin_available: bool,
     outcome: ExecOutcome,
-    pub(super) inline: bool,
+    pub(super) last: bool,
+    pub(super) waiting_output: bool,
     admission: Option<ResponseAdmissionGuard>,
 }
 
@@ -887,7 +888,8 @@ impl LoopExec {
             next_request: 1,
             stdin_available,
             outcome: ExecOutcome::Ran,
-            inline: true,
+            last: request.flags.contains(ExecFlags::LAST),
+            waiting_output: false,
             admission: ResponseAdmissionGuard::new(&self.shared),
         };
         if prepared.admission.is_none() {
@@ -904,8 +906,21 @@ impl LoopExec {
             return prepared;
         }
         if request.flags.contains(ExecFlags::PREPARED) {
-            prepared.commands = request.commands.into_iter();
-            prepared.inline = false;
+            prepared.commands = request
+                .commands
+                .into_iter()
+                .map(|invocation| {
+                    let canonical_name = (!MuxEngine::is_command_alias_group(&invocation))
+                        .then(|| canonical_command(&invocation.name).to_owned());
+                    PreparedCommand {
+                        invocation,
+                        canonical_name,
+                        alias_matched: false,
+                        result: PreparedCommandResult::Ready,
+                    }
+                })
+                .collect::<Vec<_>>()
+                .into_iter();
             return prepared;
         }
         let typed = request.flags.contains(ExecFlags::RESUME).then(|| {
@@ -940,27 +955,26 @@ impl LoopExec {
             prepared.outcome = ExecOutcome::Resume(ExecResume { kind, commands });
             return prepared;
         }
-        prepared.inline = commands.iter().all(|command| self.can_inline(command));
-        prepared.commands = commands
-            .into_iter()
-            .map(|command| command.invocation)
-            .collect::<Vec<_>>()
-            .into_iter();
+        prepared.commands = commands.into_iter();
         prepared
     }
 
     pub(super) fn run(&mut self, prepared: &mut PreparedExec, inline: bool) -> Option<bool> {
+        prepared.waiting_output = false;
         let mailbox = Arc::clone(&self.mailbox);
         if prepared.admission.is_some() {
             let shared = Arc::clone(&self.shared);
             while !prepared.commands.as_slice().is_empty() {
-                if inline && self.output_pending() {
-                    return None;
+                if inline {
+                    if self.output_pending() {
+                        prepared.waiting_output = true;
+                        return None;
+                    }
+                    if !self.can_inline(&prepared.commands.as_slice()[0]) {
+                        return None;
+                    }
                 }
-                if !inline {
-                    self.wait_for_output(&mailbox);
-                }
-                let mut invocation = prepared.commands.next().unwrap();
+                let mut invocation = prepared.commands.next().unwrap().invocation;
                 let request_id = prepared.next_request;
                 prepared.next_request = request_id.saturating_add(1);
                 if self.cancel.load(Ordering::Acquire) {
@@ -991,7 +1005,11 @@ impl LoopExec {
                     false,
                 );
                 if failed || client_exit || !admitted {
+                    prepared.commands = Vec::new().into_iter();
                     break;
+                }
+                if !inline && !prepared.commands.as_slice().is_empty() {
+                    return None;
                 }
             }
         } else {
@@ -1080,9 +1098,16 @@ impl LoopExec {
         }
     }
 
-    fn output_pending(&self) -> bool {
-        let state = self.mailbox.state.lock();
-        state
+    pub(super) fn output_pending(&self) -> bool {
+        output_pending(&self.mailbox)
+    }
+}
+
+#[cfg(unix)]
+pub(super) fn output_pending(mailbox: &OutboundMailbox) -> bool {
+    let state = mailbox.state.lock();
+    !state.closed
+        && (state
             .queued_bytes
             .saturating_add(state.writer_inflight_bytes)
             >= 64 * 1024
@@ -1090,27 +1115,7 @@ impl LoopExec {
                 .reliable
                 .len()
                 .saturating_add(state.writer_inflight_messages)
-                >= 64
-    }
-
-    fn wait_for_output(&self, mailbox: &OutboundMailbox) {
-        let mut state = mailbox.state.lock();
-        while !state.closed
-            && !self.cancel.load(Ordering::Acquire)
-            && (state
-                .queued_bytes
-                .saturating_add(state.writer_inflight_bytes)
-                >= 64 * 1024
-                || state
-                    .reliable
-                    .len()
-                    .saturating_add(state.writer_inflight_messages)
-                    >= 64)
-        {
-            mailbox.notify_one();
-            mailbox.ready.wait(&mut state);
-        }
-    }
+                >= 64)
 }
 
 #[cfg(unix)]

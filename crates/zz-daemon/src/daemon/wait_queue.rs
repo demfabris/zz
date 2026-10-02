@@ -93,6 +93,24 @@ pub(super) fn can_run_inline(
     connection::inline_query(shared, context, &prepared)
 }
 
+fn run_parked_event_hooks(
+    shared: &Arc<Shared>,
+    frames: &[InsertedQueueFrame<Box<CommandQueueExecution>>],
+) {
+    if frames
+        .iter()
+        .any(|frame| frame.execution.deferred_shutdown.get() == DeferredShutdown::Force)
+    {
+        return;
+    }
+    shared.run_event_hooks(
+        frames
+            .iter()
+            .flat_map(|frame| frame.execution.pending_event_hooks.take())
+            .collect(),
+    );
+}
+
 pub(super) enum Progress {
     Done,
     Waiting,
@@ -313,6 +331,7 @@ impl CommandTask {
             .pending_wait
             .is_some()
         {
+            run_parked_event_hooks(&self.shared, &self.frames);
             Progress::Waiting
         } else if inline {
             Progress::Worker
@@ -476,6 +495,7 @@ impl InsertedTask {
             .pending_wait
             .is_some()
         {
+            run_parked_event_hooks(&self.shared, &self.frames);
             Progress::Waiting
         } else if inline {
             Progress::Worker

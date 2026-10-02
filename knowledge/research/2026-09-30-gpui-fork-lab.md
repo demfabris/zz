@@ -285,6 +285,9 @@ The font cache carries the whole prepaint drop: terminal rows shape new lines du
 and every shape made a fresh `CTFont` per run. Run rendering takes about 3% more off paint in
 stream and chrome, but C and C1 overlap on main-thread CPU, so that commit is not proven.
 
+On 2026-10-02 the font cache and the recorder field went to `zz-patches` (`ff805a96b0`,
+`5a00ac89a4`) and zz pinned them; the run rendering commit stays on local `lab/coretext`.
+
 Risks:
 
 - The font cache keeps up to 1024 `CTFont` objects for the life of the text system and clears

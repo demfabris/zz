@@ -2254,6 +2254,15 @@ impl DeadPane {
         if !*NO_COMPRESS {
             surface.terminal.compress(CompressionMode::Full)?;
         }
+        if self
+            .slot
+            .lock()
+            .deferred
+            .iter()
+            .any(|(remaining, _)| *remaining == 0)
+        {
+            surface.pending_commands.push(Command::Wake);
+        }
         surface_actor::SurfaceActor::new(self.control_rx, self.slot, self.publisher, surface, false)
             .map(Some)
     }

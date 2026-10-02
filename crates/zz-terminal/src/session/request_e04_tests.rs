@@ -40,15 +40,33 @@ fn request_tokens_do_not_wait_for_acknowledgement() {
 }
 
 #[test]
-fn full_request_queue_retries_in_order_without_blocking() {
+fn full_request_queue_delivers_in_order_without_blocking_or_polling() {
     let (sender, receiver, _alive) = sender(1);
     sender.try_send(Command::ResetScreen).unwrap();
     let mut token = sender.request_token(Arc::new(|| {}), |reply| Command::Settle { reply });
-    assert!(token.pending.is_some());
+    assert_eq!(token.next_poll(), token.deadline);
     assert!(token.poll(Instant::now()).is_none());
-    assert!(matches!(receiver.try_recv().unwrap(), Command::ResetScreen));
-    assert!(token.poll(Instant::now()).is_none());
-    let Command::Settle { reply } = receiver.try_recv().unwrap() else {
+    let woke_by = receiver.try_recv().unwrap();
+    assert!(receiver.try_recv().is_err());
+    let mut commands = take_control_slot(&sender.queues.slot, Some(woke_by), true).into_iter();
+    assert!(matches!(commands.next(), Some(Command::ResetScreen)));
+    let Some(Command::Settle { reply }) = commands.next() else {
+        panic!()
+    };
+    assert!(commands.next().is_none());
+    reply.send(()).unwrap();
+    assert_eq!(token.poll(Instant::now()), Some(Ok(())));
+}
+
+#[test]
+fn a_request_deferred_after_the_queue_drained_wakes_the_actor() {
+    let (sender, receiver, _alive) = sender(1);
+    let (reply, mut token) = sender.reply_token(CAPTURE_TIMEOUT, Arc::new(|| {}));
+    sender.defer(Command::Settle { reply });
+    let woke_by = receiver.try_recv().unwrap();
+    assert!(matches!(woke_by, Command::Wake));
+    let mut commands = take_control_slot(&sender.queues.slot, Some(woke_by), true).into_iter();
+    let Some(Command::Settle { reply }) = commands.next() else {
         panic!()
     };
     reply.send(()).unwrap();

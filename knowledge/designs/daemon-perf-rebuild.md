@@ -3333,6 +3333,11 @@ Three alternating quick pairs against `loop-6c163955-cli` pass all 19 CLI instru
 **e09 as built (2026-10-02, Linux):** `daemon/pane_exit.rs` binds `split-window -W` and `wait-pane --exit` continuations to each terminal incarnation, converting two park sites (8/16 in the e09 estimate).
 Pane exit completes registrations before retention or removal; client loss and timeouts cancel individual registrations, preserving split output, after hooks, attached-client return values and signal exit codes.
 Twenty exit waits add zero command workers and zero polling deadlines. Focused exit, respawn, cancellation and formatted split tests pass; all six requested compat scenarios pass 149 steps with zero divergences.
+**e08 as built (2026-10-02, macOS):** `Shared::display_menu` reuses `OverlayWait` for one more explicit wait site; `daemon/wait_queue.rs` admits menus on the loop instead of parking a worker.
+The loop queues selected actions after closing the menu, against its saved target, while the invoking queue's tail resumes independently. Parse and runtime errors still reach the menu client; Control validation, disabled stay-open rows and resize state retain their existing behavior.
+Four new `daemon/menu_queue_e08_tests.rs` tests prove twenty open blocking menus add zero workers and lifecycle completion happens once. The serial daemon suite passes 1,490 tests with one ignored; fmt, check, daemon Clippy and six compat scenarios pass, with zero divergences across 38 steps.
+Three alternating quick pairs against `loop-705ca175-cli` pass all 19 CLI instruction rows below 1.02x base. `chain5.p20` is 0.2925 -> 0.2934 Minstr (1.00308x); idle CPU, instructions and wakeups are zero, and p1/p20 threads stay at 2/5. Linux-only checks were not run on this Mac.
+
 
 ## W4-DELIVER: frames straight from shards (effort L)
 

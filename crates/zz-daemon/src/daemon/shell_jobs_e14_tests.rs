@@ -51,6 +51,11 @@ fn shell_job_closes_stdin_and_ignores_inherited_output_descriptors_after_exit() 
 
 #[test]
 fn twenty_shell_jobs_add_no_workers_and_admission_is_capped_at_256() {
+    if !super::solo_tests::rerun_alone(
+        "daemon::shell_jobs_e14_tests::twenty_shell_jobs_add_no_workers_and_admission_is_capped_at_256",
+    ) {
+        return;
+    }
     let shared = Arc::new(Shared::new(14));
     let mut event_loop = event_loop::EventLoop::empty(&shared).unwrap();
     let before = crate::process_info::sample(std::process::id())

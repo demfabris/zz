@@ -79,22 +79,9 @@ fn finish(task: &mut wait_queue::CommandTask) {
 
 #[test]
 fn twenty_popup_waits_add_zero_watcher_or_command_workers_beyond_shards() {
-    if std::env::var_os("ZZ_E17_POPUP_THREADS_TEST").is_none() {
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "daemon::popup_queue_e17_tests::twenty_popup_waits_add_zero_watcher_or_command_workers_beyond_shards",
-                "--exact",
-                "--test-threads=1",
-            ])
-            .env("ZZ_E17_POPUP_THREADS_TEST", "1")
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
+    if !super::solo_tests::rerun_alone(
+        "daemon::popup_queue_e17_tests::twenty_popup_waits_add_zero_watcher_or_command_workers_beyond_shards",
+    ) {
         return;
     }
     let (shared, context, mut event_loop) = workspace();

@@ -2,6 +2,11 @@ use super::*;
 
 #[test]
 fn twenty_delays_add_no_threads_and_only_their_deadlines() {
+    if !crate::daemon::solo_tests::rerun_alone(
+        "daemon::timers::delay_tests::twenty_delays_add_no_threads_and_only_their_deadlines",
+    ) {
+        return;
+    }
     let shared = Arc::new(Shared::new(1));
     let poll = mio::Poll::new().unwrap();
     let waker = Arc::new(mio::Waker::new(poll.registry(), mio::Token(1)).unwrap());

@@ -544,14 +544,19 @@ mod tests {
         assert_eq!(text(&["0", "1", "2", "3"]), "0–3");
         assert_eq!(text(&["h", "j", "k", "l"]), "h j k l");
         assert_eq!(text(&["{", "}"]), "{}");
-        assert_eq!(
-            text(&["ctrl-left", "ctrl-down"]),
+        let arrows = ["ctrl-left", "ctrl-down"];
+        let expected = if cfg!(any(target_os = "macos", target_os = "ios")) {
             format!(
                 "{ctrl}{}{}",
                 Kbd::format(&Keystroke::parse("left").unwrap()),
                 Kbd::format(&Keystroke::parse("down").unwrap())
             )
-        );
+        } else {
+            arrows
+                .map(|key| Kbd::format_key(&Keystroke::parse(key).unwrap(), true))
+                .join(" ")
+        };
+        assert_eq!(text(&arrows), expected);
         assert_eq!(
             cap_text(&WhichKeyCap {
                 keys: Vec::new(),

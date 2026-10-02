@@ -90,6 +90,11 @@ fn continuation(shared: &Shared, target: ClientId, name: &str) -> cmdq::WaitCont
 
 #[test]
 fn twenty_parked_overlays_add_zero_workers() {
+    if !super::solo_tests::rerun_alone(
+        "daemon::overlay_queue_e07_tests::twenty_parked_overlays_add_zero_workers",
+    ) {
+        return;
+    }
     for name in ["display-panes", "command-prompt", "confirm-before"] {
         let (shared, context) = workspace();
         let _event_loop = event_loop::EventLoop::empty(&shared).unwrap();

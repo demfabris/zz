@@ -403,6 +403,11 @@ fn pending_bytes_are_bounded_before_the_message_count_limit() {
 
 #[test]
 fn control_output_loop_delivers_bytes_without_readers() {
+    if !crate::daemon::solo_tests::rerun_alone(
+        "daemon::event_loop::b2fix_tests::control_output_loop_delivers_bytes_without_readers",
+    ) {
+        return;
+    }
     let shared = Arc::new(Shared::new(17));
     let mut event_loop = EventLoop::empty(&shared).unwrap();
     let fixture = tempfile::NamedTempFile::new().unwrap();

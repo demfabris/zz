@@ -66,6 +66,11 @@ fn assert_reaped(pid: u32) {
 
 #[test]
 fn twenty_registered_jobs_add_no_monitor_threads_and_reap_once() {
+    if !crate::daemon::solo_tests::rerun_alone(
+        "daemon::jobs::e12_tests::twenty_registered_jobs_add_no_monitor_threads_and_reap_once",
+    ) {
+        return;
+    }
     let mut poll = Poll::new().unwrap();
     let mut jobs = JobRegistry::default();
     let mut token = 4;

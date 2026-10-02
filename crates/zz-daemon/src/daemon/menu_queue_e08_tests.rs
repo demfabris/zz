@@ -67,6 +67,11 @@ fn finish(task: &mut wait_queue::CommandTask) {
 
 #[test]
 fn twenty_open_blocking_menus_add_zero_workers() {
+    if !super::solo_tests::rerun_alone(
+        "daemon::menu_queue_e08_tests::twenty_open_blocking_menus_add_zero_workers",
+    ) {
+        return;
+    }
     let (shared, context) = workspace();
     let _event_loop = event_loop::EventLoop::empty(&shared).unwrap();
     let targets = (0..20)

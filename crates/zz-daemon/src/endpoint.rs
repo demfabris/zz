@@ -1979,6 +1979,17 @@ mod tests {
         fs::write(&cli, "#!/bin/sh\nprintf 'bundle %s\\n' \"$1\"\n").expect("write cli");
         fs::set_permissions(&cli, fs::Permissions::from_mode(0o755))
             .expect("executable permissions");
+        let tools = home.path().join("bin");
+        fs::create_dir(&tools).expect("tool directory");
+        for tool in ["sh", "uname", "getconf"] {
+            if let Some(path) = ["/usr/bin", "/bin"]
+                .iter()
+                .map(|dir| Path::new(dir).join(tool))
+                .find(|path| path.exists())
+            {
+                std::os::unix::fs::symlink(path, tools.join(tool)).expect("tool link");
+            }
+        }
         for (script, expected) in [
             (
                 remote_socket_probe(),
@@ -1991,7 +2002,7 @@ mod tests {
         ] {
             let output = Command::new("/bin/sh")
                 .args(["-c", &format!("sh -c {script}")])
-                .env("PATH", "/usr/bin:/bin")
+                .env("PATH", &tools)
                 .env("HOME", home.path())
                 .output()
                 .expect("run remote script");

@@ -13,8 +13,11 @@ timeout 3000 cargo clippy --workspace --all-targets --all-features -- -D warning
 timeout 3600 cargo test --workspace --all-features --no-fail-fast > $O/test.log 2>&1; log "workspace tests exit $? ($(grep -E '^test result' $O/test.log | awk '{p+=$4;f+=$6} END {print p" passed, "f" failed"}'))"
 grep -E '^test .* FAILED$|^    [a-z_:]+$' $O/test.log | sort -u > $O/test-failures.txt; log "failed tests: $(grep -c FAILED $O/test-failures.txt)"
 for t in $(grep FAILED $O/test-failures.txt | awk '{print $2}'); do
-  pkg=$(grep -B200 "^test $t .*FAILED" $O/test.log | grep -E 'Running (unittests|tests)' | tail -1 | sed -E 's/.*\(target\/debug\/deps\/([a-z_]+)-.*/\1/' | tr _ -)
-  timeout 600 cargo test -p ${pkg:-zz-daemon} --all-features -- --exact "$t" > $O/solo-$t.log 2>&1; log "solo $t ($pkg) exit $?"
+  run=$(grep -B200 "^test $t .*FAILED" $O/test.log | grep -E 'Running (unittests|tests)' | tail -1)
+  pkg=$(echo "$run" | sed -E 's/.*\(target\/debug\/deps\/([a-z_]+)-.*/\1/' | tr _ -)
+  target=$(echo "$run" | sed -nE 's/.*Running tests\/([a-z0-9_]+)\.rs .*/\1/p')
+  sel="-p ${pkg:-zz-daemon}"; [ -n "$target" ] && sel="--workspace --test $target"
+  timeout 600 cargo test $sel --all-features -- --exact "$t" > $O/solo-$t.log 2>&1; log "solo $t ($sel) exit $?"
 done
 just compat-check > $O/compat-check.log 2>&1; log "compat-check exit $?"
 cargo build -p zz-cli > $O/debug-build.log 2>&1; log "debug build exit $?"

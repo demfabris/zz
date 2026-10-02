@@ -2,6 +2,11 @@ use super::*;
 
 #[test]
 fn twenty_active_pipes_deliver_on_the_loop_without_reader_threads() {
+    if !super::solo_tests::rerun_alone(
+        "daemon::pipe_jobs_e16_tests::twenty_active_pipes_deliver_on_the_loop_without_reader_threads",
+    ) {
+        return;
+    }
     let shared = Arc::new(Shared::new(16));
     let _loop = pipe_jobs::Driver::new(&shared);
     let directory = tempfile::tempdir().unwrap();

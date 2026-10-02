@@ -102,6 +102,8 @@ pub(super) struct EventLoop {
     waker: Arc<Waker>,
     timers: timers::LoopTimers,
     watchers: watchers::LoopWatchers,
+    #[cfg(feature = "agent")]
+    agents: agent_inbox::AgentInbox,
     connections: BTreeMap<Token, Connection>,
     completed: mpsc::Receiver<Completion>,
     completion_sender: mpsc::Sender<Completion>,
@@ -225,6 +227,10 @@ impl EventLoop {
         let timers = timers::LoopTimers::new(shared, &waker);
         let watchers = watchers::LoopWatchers::new(shared);
         shared.watcher_tx.wake.install(Arc::clone(&waker));
+        #[cfg(feature = "agent")]
+        let agents = agent_inbox::AgentInbox::new(shared);
+        #[cfg(feature = "agent")]
+        shared.agent_tx.wake.install(Arc::clone(&waker));
         let (shutdown_sender, shutdown_completed) = mpsc::channel();
         shared.loop_active.store(true, Ordering::Release);
         Ok(Self {
@@ -235,6 +241,8 @@ impl EventLoop {
             waker,
             timers,
             watchers,
+            #[cfg(feature = "agent")]
+            agents,
             connections: BTreeMap::new(),
             completed,
             completion_sender,
@@ -969,6 +977,8 @@ impl EventLoop {
     }
 
     fn turn(&mut self, shared: &Arc<Shared>) -> Result<(), DaemonError> {
+        #[cfg(feature = "agent")]
+        self.agents.turn(shared)?;
         self.watchers.turn(shared)?;
         self.timers.turn(shared, &self.waker)?;
         self.control_output_poll = shared.start_ready_control_output_readers();

@@ -199,6 +199,14 @@ read "Lane brief rules" before launching anything.
     (split_shell 0.987x). e08 picked onto Linux after it (`da24448e`).
   - Order change: e10 (send_text, paste_and_submit) waits for e18 (agent-send waits go through
     them); alienware took e11 (client file waits) meanwhile.
+  - e18 (`ed40399a`, Mac): agent-send terminal and native turn waits, peer, permission,
+    new-agent-session and GUI replies are typed continuations; 20 parked waits add 0 workers; a
+    timed-out turn keeps running; 1474 daemon tests. `select_pane.p20` is bimodal (base
+    0.140/0.140/0.150, new 0.151/0.151/0.139): accepted.
+  - Windows build broke at some slice before e18 (`wait_queue::wait_needs_worker` called from
+    code Windows compiles while `wait_queue` is `#[cfg(unix)]`); fixed by moving the pure helper
+    next to `InsertedCommandStep` (`7a555180`). Briefs on the Mac now include
+    `cargo check -p zz-daemon --target x86_64-pc-windows-msvc`.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

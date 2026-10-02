@@ -38,6 +38,8 @@ pub(super) fn queue_command(command: &CommandInvocation) -> bool {
                 | "load-buffer"
                 | "save-buffer"
                 | "source-file"
+                | "reload-config"
+                | "import-tmux-config"
         )
 }
 
@@ -63,6 +65,8 @@ pub(super) fn task_command(command: &CommandInvocation) -> bool {
                 | "load-buffer"
                 | "save-buffer"
                 | "source-file"
+                | "reload-config"
+                | "import-tmux-config"
         )
 }
 

@@ -183,6 +183,17 @@ read "Lane brief rules" before launching anything.
   - Second sync: Mac slices c01copy, e13, e14 go onto Linux; e13 conflicts with e04/e05 in
     hook_queue.rs/wait_queue.rs, resolved by a pick lane. Design-doc conflicts are unions of both
     as-built notes.
+  - e07 (`705ca175`, Mac): display-panes, command-prompt and confirm-before park as queue
+    continuations; 20 parked overlays per type add 0 workers; 1492 daemon tests.
+  - e08 (`ab94c8d4`, Mac): display-menu parks as a continuation; 20 blocking menus add 0 workers;
+    19/19 CLI rows under 1.02x.
+  - Third sync: the e07 pick on Linux needed both sides' new `RegisteredWait` fields (`terminal`
+    from e04, `overlay` from e07) and a union of the queue-command classifiers (`aba5b662`). The Mac
+    branch took a scratch tree of the Linux tip plus e08 (`c0f35c97`) through a merge (`f29c3622`):
+    pick onto the other host's tip in a scratch worktree, then merge that tree, instead of merging
+    two branches that carry the same patches as different cherry-picks.
+  - compat `prompt-history` fails on alienware with every binary back to the wave-3 start and
+    passes on the Mac: a Linux environment issue, not LOOP.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

@@ -34,9 +34,9 @@ use libghostty_vt::{
     terminal::{
         ClipboardContent, ClipboardLocation, ClipboardWriteError, ColorScheme, CompressionMode,
         ConformanceLevel, CursorStyle as GhosttyCursorStyle, DeviceAttributeFeature,
-        DeviceAttributes, DeviceType, Mode, Point, PointCoordinate, PointSpace,
-        PrimaryDeviceAttributes, ScrollViewport, SecondaryDeviceAttributes, SizeReportSize,
-        TertiaryDeviceAttributes,
+        DeviceAttributes, DeviceType, GridRead, Mode, Point, PointCoordinate, PointSpace,
+        PrimaryDeviceAttributes, ScreenSnapshot, ScrollViewport, SecondaryDeviceAttributes,
+        SizeReportSize, TertiaryDeviceAttributes,
     },
 };
 use parking_lot::{Mutex, RwLock};
@@ -5663,6 +5663,7 @@ fn new_output_view(
             max_scrollback,
             status: SessionStatus::Running,
             pending_commands: Vec::new(),
+            captures: VecDeque::new(),
             pending_copy_source: None,
             pane_search: None,
             search: Some(SearchWorker::spawn(wake.clone())),
@@ -5684,6 +5685,7 @@ struct SurfaceTerminal<'a, 'b> {
     max_scrollback: usize,
     status: SessionStatus,
     pending_commands: Vec<Command>,
+    captures: VecDeque<CaptureWork>,
     pending_copy_source: Option<Box<CapturedCopySource>>,
     pane_search: Option<CopyModeSearch>,
     search: Option<(SearchWorker, Receiver<SearchResults>)>,
@@ -8076,6 +8078,274 @@ fn capture_history(
     ))
 }
 
+#[cfg(test)]
+#[path = "session/capture_work_e22_tests.rs"]
+mod capture_work_e22_tests;
+
+const CAPTURE_ROWS_PER_STEP: u64 = 512;
+
+trait CaptureGrid: GridRead {
+    fn capture_total(&self) -> Result<usize, libghostty_vt::Error>;
+    fn capture_rows(&self) -> Result<u16, libghostty_vt::Error>;
+    fn capture_columns(&self) -> Result<u16, libghostty_vt::Error>;
+    fn capture_history_rows(&self) -> Result<usize, libghostty_vt::Error>;
+    fn capture_screen(&self) -> Result<Screen, libghostty_vt::Error>;
+    fn capture_format(
+        &self,
+        options: FormatterOptions<'_, '_>,
+    ) -> Result<String, TerminalCaptureError>;
+}
+
+impl CaptureGrid for Terminal<'_, '_> {
+    fn capture_total(&self) -> Result<usize, libghostty_vt::Error> {
+        self.total_rows()
+    }
+    fn capture_rows(&self) -> Result<u16, libghostty_vt::Error> {
+        self.rows()
+    }
+    fn capture_columns(&self) -> Result<u16, libghostty_vt::Error> {
+        self.cols()
+    }
+    fn capture_history_rows(&self) -> Result<usize, libghostty_vt::Error> {
+        self.scrollback_rows()
+    }
+    fn capture_screen(&self) -> Result<Screen, libghostty_vt::Error> {
+        self.active_screen()
+    }
+    fn capture_format(
+        &self,
+        options: FormatterOptions<'_, '_>,
+    ) -> Result<String, TerminalCaptureError> {
+        let mut formatter = Formatter::new(self, options).map_err(capture_failure)?;
+        let length = match formatter.format_len() {
+            Ok(length) => length,
+            Err(libghostty_vt::Error::InvalidValue) => return Ok(String::new()),
+            Err(error) => return Err(capture_failure(error)),
+        };
+        if length > MAX_CAPTURE_BYTES {
+            return Err(TerminalCaptureError::TooLarge);
+        }
+        if length == 0 {
+            return Ok(String::new());
+        }
+        let mut output = vec![0_u8; length];
+        let written = formatter.format_buf(&mut output).map_err(capture_failure)?;
+        output.truncate(written);
+        String::from_utf8(output).map_err(|error| TerminalCaptureError::Failed(error.to_string()))
+    }
+}
+
+impl CaptureGrid for ScreenSnapshot {
+    fn capture_total(&self) -> Result<usize, libghostty_vt::Error> {
+        self.total_rows()
+    }
+    fn capture_rows(&self) -> Result<u16, libghostty_vt::Error> {
+        self.rows()
+    }
+    fn capture_columns(&self) -> Result<u16, libghostty_vt::Error> {
+        self.cols()
+    }
+    fn capture_history_rows(&self) -> Result<usize, libghostty_vt::Error> {
+        Ok(self.total_rows()?.saturating_sub(usize::from(self.rows()?)))
+    }
+    fn capture_screen(&self) -> Result<Screen, libghostty_vt::Error> {
+        self.active_screen()
+    }
+    fn capture_format(
+        &self,
+        options: FormatterOptions<'_, '_>,
+    ) -> Result<String, TerminalCaptureError> {
+        let bytes = match self.format_alloc(options) {
+            Ok(bytes) => bytes,
+            Err(libghostty_vt::Error::InvalidValue) => return Ok(String::new()),
+            Err(error) => return Err(capture_failure(error)),
+        };
+        if bytes.len() > MAX_CAPTURE_BYTES {
+            return Err(TerminalCaptureError::TooLarge);
+        }
+        String::from_utf8(bytes.to_vec())
+            .map_err(|error| TerminalCaptureError::Failed(error.to_string()))
+    }
+}
+
+enum CaptureSource {
+    Screen(ScreenSnapshot),
+    Mode(Arc<ModeRevision>),
+}
+
+struct CaptureWork {
+    source: CaptureSource,
+    options: CaptureOptions,
+    next: u64,
+    end: u64,
+    visible_start: u64,
+    output: String,
+    separator: bool,
+    previous: libghostty_vt::style::Style,
+    reply: ActorReply<Result<String, TerminalCaptureError>>,
+}
+
+impl CaptureWork {
+    fn start(
+        terminal: &Terminal<'_, '_>,
+        mode: Option<&CopyModeState>,
+        request: CaptureRequest,
+    ) -> Option<Self> {
+        let CaptureRequest { options, reply } = request;
+        let dimensions = if options.mode
+            && let Some(mode) = mode
+        {
+            Ok((
+                u64::from(mode.revision.total_rows()),
+                u64::from(mode.revision.viewport_rows),
+                u64::from(mode.viewport_offset),
+            ))
+        } else {
+            terminal
+                .total_rows()
+                .and_then(|total| {
+                    Ok((
+                        total as u64,
+                        u64::from(terminal.rows()?),
+                        terminal.scrollback_rows()? as u64,
+                    ))
+                })
+                .map_err(capture_failure)
+        };
+        let result = dimensions.and_then(|(total, rows, visible_start)| {
+            let visible_end = visible_start
+                .saturating_add(rows.saturating_sub(1))
+                .min(total.saturating_sub(1));
+            let start = resolve_capture_boundary(options.start, visible_start, visible_end, total);
+            let end = resolve_capture_boundary(options.end, visible_start, visible_end, total);
+            if start > end || end - start < CAPTURE_ROWS_PER_STEP {
+                return capture_terminal(terminal, mode, options).map(Err);
+            }
+            let source = if options.mode
+                && let Some(mode) = mode
+            {
+                if options.alternate && mode.revision.screen != Screen::Alternate {
+                    return Err(TerminalCaptureError::AlternateUnavailable);
+                }
+                CaptureSource::Mode(Arc::clone(&mode.revision))
+            } else {
+                if options.alternate
+                    && terminal.active_screen().map_err(capture_failure)? != Screen::Alternate
+                {
+                    return Err(TerminalCaptureError::AlternateUnavailable);
+                }
+                CaptureSource::Screen(terminal.clone_screen().map_err(capture_failure)?)
+            };
+            Ok(Ok((source, start, end, visible_start)))
+        });
+        match result {
+            Ok(Ok((source, next, end, visible_start))) => Some(Self {
+                source,
+                options,
+                next,
+                end,
+                visible_start,
+                output: String::new(),
+                separator: false,
+                previous: libghostty_vt::style::Style::default(),
+                reply,
+            }),
+            result => {
+                let _ = reply.send(match result {
+                    Ok(Err(output)) => Ok(output),
+                    Err(error) => Err(error),
+                    Ok(Ok(_)) => unreachable!(),
+                });
+                None
+            }
+        }
+    }
+
+    fn wrapped(&self, row: u64) -> Result<bool, TerminalCaptureError> {
+        match &self.source {
+            CaptureSource::Screen(screen) => screen
+                .grid_ref(Point::Screen(PointCoordinate {
+                    x: 0,
+                    y: u32::try_from(row).unwrap_or(u32::MAX),
+                }))
+                .and_then(|grid| grid.row())
+                .and_then(libghostty_vt::screen::Row::is_wrapped)
+                .map_err(capture_failure),
+            CaptureSource::Mode(revision) => Ok(revision
+                .row(u32::try_from(row).unwrap_or(u32::MAX))
+                .wrapped()),
+        }
+    }
+
+    fn step(&mut self) -> Result<bool, TerminalCaptureError> {
+        let start = self.next;
+        let end = start
+            .saturating_add(CAPTURE_ROWS_PER_STEP - 1)
+            .min(self.end);
+        let options = CaptureOptions {
+            start: CaptureBoundary::Relative(start as i64 - self.visible_start as i64),
+            end: CaptureBoundary::Relative(end as i64 - self.visible_start as i64),
+            ..self.options
+        };
+        let continuing = end < self.end && self.options.join_wrapped && self.wrapped(end)?;
+        let keep_tail = continuing
+            && !options.number_lines
+            && !options.escape_sequences
+            && !options.preserve_trailing;
+        let mut output = match &self.source {
+            CaptureSource::Screen(screen) => capture_grid(
+                screen,
+                CaptureOptions {
+                    preserve_trailing: options.preserve_trailing || keep_tail,
+                    ..options
+                },
+                &mut self.previous,
+            )?,
+            CaptureSource::Mode(revision) => {
+                capture_revision(revision, self.visible_start as u32, options)?
+            }
+        };
+        if keep_tail && matches!(self.source, CaptureSource::Screen(_)) {
+            let mut lines = output.split('\n').peekable();
+            let mut trimmed = String::with_capacity(output.len());
+            while let Some(line) = lines.next() {
+                if lines.peek().is_some() {
+                    trimmed.push_str(line.trim_end());
+                    trimmed.push('\n');
+                } else {
+                    trimmed.push_str(line);
+                }
+            }
+            output = trimmed;
+        }
+        if self.separator {
+            self.output.push('\n');
+        }
+        self.output.push_str(&output);
+        if self.output.len() > MAX_CAPTURE_BYTES {
+            return Err(TerminalCaptureError::TooLarge);
+        }
+        self.separator = !(self.options.join_wrapped && self.wrapped(end)?);
+        self.next = end + 1;
+        Ok(end == self.end)
+    }
+}
+
+fn step_capture_work(work: &mut VecDeque<CaptureWork>) {
+    let Some(mut capture) = work.pop_front() else {
+        return;
+    };
+    match capture.step() {
+        Ok(true) => {
+            let _ = capture.reply.send(Ok(capture.output));
+        }
+        Ok(false) => work.push_front(capture),
+        Err(error) => {
+            let _ = capture.reply.send(Err(error));
+        }
+    }
+}
+
 fn capture_terminal(
     terminal: &Terminal<'_, '_>,
     mode: Option<&CopyModeState>,
@@ -8089,17 +8359,29 @@ fn capture_terminal(
         }
         return capture_mode_revision(mode, options);
     }
-    let active_screen = terminal.active_screen().map_err(capture_failure)?;
+    capture_grid(
+        terminal,
+        options,
+        &mut libghostty_vt::style::Style::default(),
+    )
+}
+
+fn capture_grid(
+    terminal: &impl CaptureGrid,
+    options: CaptureOptions,
+    previous: &mut libghostty_vt::style::Style,
+) -> Result<String, TerminalCaptureError> {
+    let active_screen = terminal.capture_screen().map_err(capture_failure)?;
     if options.alternate && active_screen != Screen::Alternate {
         return Err(TerminalCaptureError::AlternateUnavailable);
     }
-    let total = terminal.total_rows().map_err(capture_failure)?;
+    let total = terminal.capture_total().map_err(capture_failure)?;
     if total == 0 {
         return Ok(String::new());
     }
     let total = u64::try_from(total).unwrap_or(u64::MAX);
-    let rows = u64::from(terminal.rows().map_err(capture_failure)?);
-    let visible_start = u64::try_from(terminal.scrollback_rows().map_err(capture_failure)?)
+    let rows = u64::from(terminal.capture_rows().map_err(capture_failure)?);
+    let visible_start = u64::try_from(terminal.capture_history_rows().map_err(capture_failure)?)
         .unwrap_or(u64::MAX)
         .min(total.saturating_sub(1));
     let visible_end = visible_start
@@ -8112,9 +8394,17 @@ fn capture_terminal(
     }
     let requested_rows = usize::try_from(end.saturating_sub(start).saturating_add(1)).unwrap_or(1);
 
-    let columns = terminal.cols().map_err(capture_failure)?;
+    let columns = terminal.capture_columns().map_err(capture_failure)?;
     if options.escape_sequences {
-        return capture_styled_terminal(terminal, options, start, end, visible_start, columns);
+        return capture_styled_terminal(
+            terminal,
+            options,
+            start,
+            end,
+            visible_start,
+            columns,
+            previous,
+        );
     }
     let head = terminal
         .grid_ref(Point::Screen(PointCoordinate {
@@ -8135,24 +8425,7 @@ fn capture_terminal(
             .with_unwrap(join_wrapped)
             .with_trim(!options.preserve_trailing)
             .with_selection(&selection);
-        let mut formatter = Formatter::new(terminal, formatter_options).map_err(capture_failure)?;
-        let length = match formatter.format_len() {
-            Ok(length) => length,
-            Err(libghostty_vt::Error::InvalidValue) => return Ok(String::new()),
-            Err(error) => return Err(capture_failure(error)),
-        };
-        if length > MAX_CAPTURE_BYTES {
-            return Err(TerminalCaptureError::TooLarge);
-        }
-        if length == 0 {
-            return Ok(String::new());
-        }
-        let mut output = vec![0_u8; length];
-        let written = formatter.format_buf(&mut output).map_err(capture_failure)?;
-        output.truncate(written);
-        let output = String::from_utf8(output)
-            .map_err(|error| TerminalCaptureError::Failed(error.to_string()))?;
-        Ok(output)
+        terminal.capture_format(formatter_options)
     };
     let output = format_range(options.join_wrapped && !options.number_lines)?;
     let rows = if options.number_lines && options.join_wrapped {
@@ -8192,15 +8465,15 @@ fn capture_terminal(
 }
 
 fn capture_styled_terminal(
-    terminal: &Terminal<'_, '_>,
+    terminal: &impl GridRead,
     options: CaptureOptions,
     start: u64,
     end: u64,
     history_rows: u64,
     columns: u16,
+    previous: &mut libghostty_vt::style::Style,
 ) -> Result<String, TerminalCaptureError> {
     let mut output = String::new();
-    let mut previous = libghostty_vt::style::Style::default();
     let mut graphemes = vec!['\0'; 8];
     for row in start..=end {
         let y = u32::try_from(row).unwrap_or(u32::MAX);
@@ -8257,8 +8530,8 @@ fn capture_styled_terminal(
                 }
                 CellContentTag::Codepoint | CellContentTag::CodepointGrapheme => {}
             }
-            push_capture_sgr(&mut line, previous, style);
-            previous = style;
+            push_capture_sgr(&mut line, *previous, style);
+            *previous = style;
             let count = match grid.graphemes(&mut graphemes) {
                 Ok(count) => count,
                 Err(libghostty_vt::Error::OutOfSpace { required }) => {
@@ -8388,7 +8661,7 @@ fn push_capture_colour(output: &mut String, colour: StyleColor, base: u16) {
 }
 
 fn measure_written_rows(
-    terminal: &Terminal<'_, '_>,
+    terminal: &impl CaptureGrid,
     selection: &Selection<'_>,
 ) -> Result<usize, TerminalCaptureError> {
     let options = FormatterOptions::new()
@@ -8396,18 +8669,12 @@ fn measure_written_rows(
         .with_unwrap(false)
         .with_trim(true)
         .with_selection(selection);
-    let mut formatter = Formatter::new(terminal, options).map_err(capture_failure)?;
-    let length = match formatter.format_len() {
-        Ok(length) => length,
-        Err(libghostty_vt::Error::InvalidValue) => return Ok(0),
-        Err(error) => return Err(capture_failure(error)),
-    };
-    if length == 0 || length > MAX_CAPTURE_BYTES {
-        return Ok(0);
-    }
-    let mut buffer = vec![0_u8; length];
-    let written = formatter.format_buf(&mut buffer).map_err(capture_failure)?;
-    Ok(buffer[..written].split(|byte| *byte == b'\n').count())
+    let output = terminal.capture_format(options)?;
+    Ok(if output.is_empty() {
+        0
+    } else {
+        output.split('\n').count()
+    })
 }
 
 fn allocated_row_width(used: usize, columns: usize) -> usize {

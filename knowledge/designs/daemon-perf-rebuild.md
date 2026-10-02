@@ -3370,6 +3370,13 @@ The final serial daemon suite passes 1,495 unit tests and fails only the allowed
 This brief runs no perf measurements. The orchestrator owns Mac posix_spawn, kqueue, PTY spin-bridge, and iOS checks; this Linux run does not check Windows.
 
 
+**e22 as built (2026-10-02, macOS):** Uncached `list-keys` renders at most 64 binding rows per loop turn, retaining sorted and filtered bindings, padding, aggregate facts, client formats and user options across yields.
+Full-history capture retains a shared-page screen or copy-mode revision and processes at most 512 rows per shard turn, preserving escapes and wrapped rows. Neither path adds a helper thread; p1/p20 thread counts remain 2/5.
+The three named tests, 760 mux tests, 371 terminal tests and 1,484 daemon unit plus 35 integration tests pass; terminal and daemon each retain one ignored test. Fmt, Clippy with warnings denied, Windows check and four compat scenarios pass, with 113 steps and zero divergences; Windows reports 15 existing warnings.
+Three alternating quick pairs against `loop-8501b400-cli` give median list-keys p20 instructions 0.6841 -> 0.6922 Minstr (1.01184x) and full-history capture 188.4714 -> 128.0279 (0.67930x); every other CLI instruction median stays below 1.02x base.
+All twelve paired fairness comparisons pass. Median echo p99 increases for zz/tmux are default list-keys 0.4056/1.6627 ms and capture 0.0406/11.6942 ms; K=1 list-keys 0.4050/1.6797 ms and capture 1.2067/11.6040 ms.
+Evidence is `/tmp/zzpc/e22-{base,new}-{1,2,3}.json`, with zero probe errors. Absolute echo reds remain outside these comparisons; Linux-only runtime checks remain with the orchestrator.
+
 ## W4-DELIVER: frames straight from shards (effort L)
 
 Scope: the loop pushes per-pane subscriber sinks (queue handle, stream kind, delivered base,

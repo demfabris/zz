@@ -101,6 +101,13 @@ read "Lane brief rules" before launching anything.
     19/19 CLI medians at most 1.004x its base, control 0.989x, tui-output-backpressure passes.
   - Both hosts now carry the same slices (cherry-picked in different orders): Mac `perf/loop`
     `fdf67a9d`, alienware `perf/loop-e01` `397d7da8`. The e01 Mac leg is green (1411 lib tests).
+  - e02 Mac leg (`fdf67a9d`): 1419 lib tests, compat clean, no instruction row moved 3%;
+    `control.burst_cmds_per_s` ranges overlap (pre 83-134k, post 72-107k cmds/s).
+  - e03a (`9f31b80d`, Linux): aliases and foreground inserted callbacks run as owned parent/child
+    queue frames; a 3-level alias suspension keeps output order while another queue runs. CLI
+    within 1.006x, control instructions +0.44% (noise, accepted). `smoke/control-alias-prepare`
+    has 2 OUT divergences on alienware on every binary back to the wave-3 start (`base-cli`): not
+    a LOOP regression; check it on the Mac before calling it a Linux gap.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

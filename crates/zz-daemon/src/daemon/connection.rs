@@ -1,5 +1,5 @@
 use super::*;
-use zz_protocol::Hello;
+use zz_protocol::{AttachOperation, Hello};
 
 pub(super) struct Session {
     pub(super) client: ClientId,
@@ -12,6 +12,37 @@ pub(super) struct Session {
     registration: ClientRegistrationGuard,
     pub(super) released: Arc<AtomicBool>,
     writer_registration: ClientWriterRegistrationGuard,
+    #[cfg(unix)]
+    request: Option<PendingMessage>,
+    initializing: bool,
+}
+
+#[cfg(unix)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "keep ready requests inline without per-command allocations"
+)]
+enum PendingMessage {
+    Message(ProtocolMessage),
+    Initialize {
+        commands: std::vec::IntoIter<PreparedCommand>,
+        request_id: u64,
+        pending_errors: Vec<CommandResponse>,
+    },
+    InitializeFinish(Vec<CommandResponse>),
+    InitializeAttach,
+    Compact {
+        commands: std::vec::IntoIter<PreparedCommand>,
+        request_id: u64,
+    },
+}
+
+#[cfg(unix)]
+pub(super) enum MessageProgress {
+    Done,
+    Output,
+    Worker,
+    Ready,
 }
 
 impl Session {
@@ -183,97 +214,308 @@ impl Session {
             registration,
             released: Arc::new(AtomicBool::new(false)),
             writer_registration,
+            #[cfg(unix)]
+            request: None,
+            initializing: false,
         }))
     }
 
+    #[cfg(test)]
     pub(super) fn initialize(&mut self, shared: &Arc<Shared>, outbound: &Arc<OutboundMailbox>) {
-        if self.cancel.load(Ordering::Acquire) || self.released.load(Ordering::Acquire) {
-            return;
-        }
-        if let Some(hello) = &self.compact_hello {
-            shared.initialize_compact(
-                self.client,
-                hello,
-                outbound,
-                self.context.as_mut().expect("client context"),
-            );
-        }
+        self.start_initialize(shared, outbound);
+        while !matches!(
+            self.run_message(shared, outbound, false),
+            MessageProgress::Done
+        ) {}
     }
 
-    pub(super) fn try_inline_message(
+    pub(super) fn start_initialize(
         &mut self,
         shared: &Arc<Shared>,
         outbound: &Arc<OutboundMailbox>,
-        message: ProtocolMessage,
-    ) -> Option<ProtocolMessage> {
-        let context = self.context.as_mut().expect("client context");
-        match message {
-            ProtocolMessage::Exec(mut request) => {
-                if let Some(line) = &request.raw_control_line {
-                    let names = zz_mux::config_expansion_names("<control>", line);
-                    if !names.homes.is_empty() || !names.variables.is_empty() {
-                        return Some(ProtocolMessage::Exec(request));
-                    }
-                    let parsed = zz_mux::parse_config_with_expansions(
-                        "<control>",
-                        line,
-                        &BTreeMap::new(),
-                        &BTreeMap::new(),
-                    );
-                    if !parsed.diagnostics.is_empty() {
-                        return Some(ProtocolMessage::Exec(request));
-                    }
-                    request.commands = parsed.commands;
-                    request.raw_control_line = None;
-                }
-                let prepared = {
-                    let inner = shared.inner.lock();
-                    Shared::prepare_command_list_with_engine(
-                        &inner.engine,
-                        request.commands.clone(),
-                        self.hello.kind == ClientKind::Command,
-                    )
-                };
-                sync_context_with_attachment(&shared.inner.lock(), self.client, context);
-                if !prepared
-                    .iter()
-                    .all(|command| inline_query(shared, context, command))
-                {
-                    return Some(ProtocolMessage::Exec(request));
-                }
-                shared.execute_prepared_compact_request(
-                    self.client,
-                    self.hello.kind,
-                    context,
-                    prepared,
-                    outbound,
-                );
-                None
-            }
-            ProtocolMessage::CommandRequest(request) => {
-                if request.prepared {
-                    return Some(ProtocolMessage::CommandRequest(request));
-                }
-                let prepared = {
-                    let inner = shared.inner.lock();
-                    Shared::prepare_command_list_with_engine(
-                        &inner.engine,
-                        vec![request.command.clone()],
-                        self.hello.kind == ClientKind::Command,
-                    )
-                };
-                sync_context_with_attachment(&shared.inner.lock(), self.client, context);
-                if !prepared
-                    .iter()
-                    .all(|command| inline_query(shared, context, command))
-                {
-                    return Some(ProtocolMessage::CommandRequest(request));
-                }
-                self.message(shared, outbound, ProtocolMessage::CommandRequest(request));
-                None
-            }
-            message => Some(message),
+    ) {
+        if self.cancel.load(Ordering::Acquire) || self.released.load(Ordering::Acquire) {
+            return;
         }
+        let Some(hello) = &self.compact_hello else {
+            return;
+        };
+        self.initializing = true;
+        self.request = match &hello.attach {
+            Some(AttachOperation::Commands(commands)) => {
+                let commands = shared.prepare_initial_commands(commands);
+                let rejected = commands.iter().enumerate().find_map(|(index, prepared)| {
+                    match &prepared.result {
+                        PreparedCommandResult::Error(error) => {
+                            Some((index as u64 + 1, error.clone()))
+                        }
+                        PreparedCommandResult::Ready => None,
+                    }
+                });
+                if let Some((request_id, error)) = rejected {
+                    let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(
+                        CommandResponse::Error {
+                            request_id,
+                            error,
+                            output: RawText::default(),
+                        },
+                    ));
+                    Some(PendingMessage::InitializeFinish(Vec::new()))
+                } else {
+                    Some(PendingMessage::Initialize {
+                        commands: commands.into_iter(),
+                        request_id: 1,
+                        pending_errors: Vec::new(),
+                    })
+                }
+            }
+            Some(AttachOperation::Session(_)) => Some(PendingMessage::InitializeAttach),
+            None => Some(PendingMessage::InitializeFinish(Vec::new())),
+        };
+    }
+
+    pub(super) fn initializing(&self) -> bool {
+        self.initializing
+    }
+
+    #[cfg(unix)]
+    pub(super) fn start_message(&mut self, message: ProtocolMessage) {
+        assert!(self.request.is_none());
+        self.request = Some(PendingMessage::Message(message));
+    }
+
+    #[cfg(unix)]
+    pub(super) fn message_pending(&self) -> bool {
+        self.request.is_some()
+    }
+
+    #[cfg(unix)]
+    pub(super) fn run_message(
+        &mut self,
+        shared: &Arc<Shared>,
+        outbound: &Arc<OutboundMailbox>,
+        inline: bool,
+    ) -> MessageProgress {
+        while let Some(request) = self.request.take() {
+            if self.cancel.load(Ordering::Acquire) {
+                return MessageProgress::Done;
+            }
+            match request {
+                PendingMessage::Message(ProtocolMessage::Exec(request)) => {
+                    if inline
+                        && request.raw_control_line.as_ref().is_some_and(|line| {
+                            let names = zz_mux::config_expansion_names("<control>", line);
+                            !names.homes.is_empty() || !names.variables.is_empty()
+                        })
+                    {
+                        self.request =
+                            Some(PendingMessage::Message(ProtocolMessage::Exec(request)));
+                        return MessageProgress::Worker;
+                    }
+                    match shared.prepare_compact_request(self.hello.kind, request, !inline) {
+                        Ok(commands) => {
+                            self.request = Some(PendingMessage::Compact {
+                                commands: commands.into_iter(),
+                                request_id: 1,
+                            });
+                        }
+                        Err(error) => {
+                            let _ = outbound.enqueue_reliable(&ProtocolMessage::ExecExit(
+                                zz_protocol::ExecExit {
+                                    server_id: shared.server_id,
+                                    outcome: zz_protocol::ExecOutcome::Rejected(error),
+                                },
+                            ));
+                            return MessageProgress::Done;
+                        }
+                    }
+                    if !inline {
+                        return MessageProgress::Ready;
+                    }
+                }
+                PendingMessage::Initialize {
+                    mut commands,
+                    request_id,
+                    mut pending_errors,
+                } => {
+                    if commands.as_slice().is_empty() {
+                        self.request = Some(PendingMessage::InitializeFinish(pending_errors));
+                        continue;
+                    }
+                    let context = self.context.as_mut().expect("client context");
+                    if inline {
+                        let progress = if exec::output_pending(outbound) {
+                            if outbound.state.lock().ctrl_collecting == ControlCollection::Attach {
+                                outbound.flush_control_batch(true);
+                            }
+                            Some(MessageProgress::Output)
+                        } else if !inline_query(shared, context, &commands.as_slice()[0]) {
+                            Some(MessageProgress::Worker)
+                        } else {
+                            None
+                        };
+                        if let Some(progress) = progress {
+                            self.request = Some(PendingMessage::Initialize {
+                                commands,
+                                request_id,
+                                pending_errors,
+                            });
+                            return progress;
+                        }
+                    }
+                    let prepared = commands.next().unwrap();
+                    let response = shared.execute_command_request_with_prepared(
+                        self.client,
+                        self.hello.kind,
+                        context,
+                        request_id,
+                        &prepared.invocation,
+                        prepared.canonical_name.is_some() || prepared.alias_matched,
+                    );
+                    let failed = matches!(response, CommandResponse::Error { .. });
+                    if failed
+                        && client_attached_session(&shared.inner.lock(), self.client).is_some()
+                    {
+                        pending_errors.push(response);
+                    } else {
+                        let _ =
+                            outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(response));
+                    }
+                    self.request = if failed {
+                        Some(PendingMessage::InitializeFinish(pending_errors))
+                    } else {
+                        Some(PendingMessage::Initialize {
+                            commands,
+                            request_id: request_id.saturating_add(1),
+                            pending_errors,
+                        })
+                    };
+                    if !inline {
+                        return MessageProgress::Ready;
+                    }
+                }
+                PendingMessage::InitializeFinish(pending_errors) => {
+                    if inline {
+                        self.request = Some(PendingMessage::InitializeFinish(pending_errors));
+                        return MessageProgress::Worker;
+                    }
+                    shared.finish_initialize_compact(self.client, outbound, pending_errors);
+                    self.initializing = false;
+                    return MessageProgress::Done;
+                }
+                PendingMessage::InitializeAttach => {
+                    if inline {
+                        self.request = Some(PendingMessage::InitializeAttach);
+                        return MessageProgress::Worker;
+                    }
+                    shared.initialize_compact(
+                        self.client,
+                        self.compact_hello.as_ref().expect("compact hello"),
+                        outbound,
+                        self.context.as_mut().expect("client context"),
+                    );
+                    self.initializing = false;
+                    return MessageProgress::Done;
+                }
+                PendingMessage::Compact {
+                    mut commands,
+                    request_id,
+                } => {
+                    if commands.as_slice().is_empty() || shared.command_queue_cancelled(self.client)
+                    {
+                        let _ = outbound.enqueue_reliable(&ProtocolMessage::ExecExit(
+                            zz_protocol::ExecExit {
+                                server_id: shared.server_id,
+                                outcome: zz_protocol::ExecOutcome::Ran,
+                            },
+                        ));
+                        return MessageProgress::Done;
+                    }
+                    let context = self.context.as_mut().expect("client context");
+                    sync_context_with_attachment(&shared.inner.lock(), self.client, context);
+                    if inline {
+                        let progress = if exec::output_pending(outbound) {
+                            Some(MessageProgress::Output)
+                        } else if !inline_query(shared, context, &commands.as_slice()[0]) {
+                            Some(MessageProgress::Worker)
+                        } else {
+                            None
+                        };
+                        if let Some(progress) = progress {
+                            self.request = Some(PendingMessage::Compact {
+                                commands,
+                                request_id,
+                            });
+                            return progress;
+                        }
+                    }
+                    let command = commands.next().unwrap();
+                    let last = commands.as_slice().is_empty();
+                    if shared.execute_compact_command(
+                        self.client,
+                        self.hello.kind,
+                        context,
+                        command,
+                        (request_id, last),
+                        outbound,
+                    ) {
+                        return MessageProgress::Done;
+                    }
+                    self.request = Some(PendingMessage::Compact {
+                        commands,
+                        request_id: request_id.saturating_add(1),
+                    });
+                    if !inline {
+                        return MessageProgress::Ready;
+                    }
+                }
+                PendingMessage::Message(message) => {
+                    if inline {
+                        let ready = if let ProtocolMessage::CommandRequest(request) = &message {
+                            if exec::output_pending(outbound) {
+                                self.request = Some(PendingMessage::Message(message));
+                                return MessageProgress::Output;
+                            }
+                            let context = self.context.as_mut().expect("client context");
+                            sync_context_with_attachment(
+                                &shared.inner.lock(),
+                                self.client,
+                                context,
+                            );
+                            let prepared = if request.prepared {
+                                vec![PreparedCommand {
+                                    invocation: request.command.clone(),
+                                    canonical_name: (!MuxEngine::is_command_alias_group(
+                                        &request.command,
+                                    ))
+                                    .then(|| canonical_command(&request.command.name).to_owned()),
+                                    alias_matched: false,
+                                    result: PreparedCommandResult::Ready,
+                                }]
+                            } else {
+                                Shared::prepare_command_list_with_engine(
+                                    &shared.inner.lock().engine,
+                                    vec![request.command.clone()],
+                                    self.hello.kind == ClientKind::Command,
+                                )
+                            };
+                            prepared
+                                .iter()
+                                .all(|command| inline_query(shared, context, command))
+                        } else {
+                            false
+                        };
+                        if !ready {
+                            self.request = Some(PendingMessage::Message(message));
+                            return MessageProgress::Worker;
+                        }
+                    }
+                    self.message(shared, outbound, message);
+                    return MessageProgress::Done;
+                }
+            }
+        }
+        MessageProgress::Done
     }
 
     pub(super) fn message(

@@ -1117,33 +1117,51 @@ impl Shared {
         if self.command_queue_cancelled(client) {
             return;
         }
-        let commands = if let Some(line) = request.raw_control_line {
-            let names = zz_mux::config_expansion_names("<control>", &line);
-            let users = names.homes.into_iter().collect::<Vec<_>>();
-            let homes = users
-                .iter()
-                .cloned()
-                .zip(self.resolve_home_directories(&users))
-                .filter_map(|(name, value)| value.map(|value| (name, value)))
-                .collect::<BTreeMap<_, _>>();
-            let names = names.variables.into_iter().collect::<Vec<_>>();
-            let variables = names
-                .iter()
-                .cloned()
-                .zip(self.resolve_environment(&names))
-                .filter_map(|(name, value)| value.map(|value| (name, value)))
-                .collect::<BTreeMap<_, _>>();
-            let parsed =
-                zz_mux::parse_config_with_expansions("<control>", &line, &homes, &variables);
-            if let Some(error) = parsed.diagnostics.first() {
+        match self.prepare_compact_request(kind, request, true) {
+            Ok(prepared) => {
+                self.execute_prepared_compact_request(client, kind, context, prepared, outbound);
+            }
+            Err(error) => {
                 let _ =
                     outbound.enqueue_reliable(&ProtocolMessage::ExecExit(zz_protocol::ExecExit {
                         server_id: self.server_id,
-                        outcome: zz_protocol::ExecOutcome::Rejected(ServerError::CommandParse(
-                            error.message.clone(),
-                        )),
+                        outcome: zz_protocol::ExecOutcome::Rejected(error),
                     }));
-                return;
+            }
+        }
+    }
+
+    pub(super) fn prepare_compact_request(
+        &self,
+        kind: ClientKind,
+        request: zz_protocol::ExecRequest,
+        resolve_expansions: bool,
+    ) -> Result<Vec<PreparedCommand>, ServerError> {
+        let commands = if let Some(line) = request.raw_control_line {
+            let (homes, variables) = if resolve_expansions {
+                let names = zz_mux::config_expansion_names("<control>", &line);
+                let users = names.homes.into_iter().collect::<Vec<_>>();
+                let homes = users
+                    .iter()
+                    .cloned()
+                    .zip(self.resolve_home_directories(&users))
+                    .filter_map(|(name, value)| value.map(|value| (name, value)))
+                    .collect::<BTreeMap<_, _>>();
+                let names = names.variables.into_iter().collect::<Vec<_>>();
+                let variables = names
+                    .iter()
+                    .cloned()
+                    .zip(self.resolve_environment(&names))
+                    .filter_map(|(name, value)| value.map(|value| (name, value)))
+                    .collect::<BTreeMap<_, _>>();
+                (homes, variables)
+            } else {
+                (BTreeMap::new(), BTreeMap::new())
+            };
+            let parsed =
+                zz_mux::parse_config_with_expansions("<control>", &line, &homes, &variables);
+            if let Some(error) = parsed.diagnostics.first() {
+                return Err(ServerError::CommandParse(error.message.clone()));
             }
             parsed.commands
         } else {
@@ -1158,13 +1176,9 @@ impl Shared {
             PreparedCommandResult::Error(error) => Some(error.clone()),
             PreparedCommandResult::Ready => None,
         }) {
-            let _ = outbound.enqueue_reliable(&ProtocolMessage::ExecExit(zz_protocol::ExecExit {
-                server_id: self.server_id,
-                outcome: zz_protocol::ExecOutcome::Rejected(error),
-            }));
-            return;
+            return Err(error);
         }
-        self.execute_prepared_compact_request(client, kind, context, prepared, outbound);
+        Ok(prepared)
     }
 
     pub(super) fn execute_prepared_compact_request(
@@ -1181,93 +1195,118 @@ impl Shared {
                 break;
             }
             sync_context_with_attachment(&self.inner.lock(), client, context);
-            let mut collecting = false;
-            if kind == ClientKind::Control {
-                let wakeup =
-                    !control_query_can_defer_wakeup(&self.inner.lock(), context, &prepared);
-                collecting = !wakeup && outbound.collect_control_query();
-                let started = Self::event(EventPayload::ControlCommandStarted {
-                    request_id: index as u64 + 1,
-                    flags: u32::from(if prepared.invocation.source.is_some() {
-                        CONTROL_COMMAND_FRAME_FLAGS_CONTROL
-                    } else {
-                        CONTROL_COMMAND_FRAME_FLAGS_NONE
-                    }),
-                    canonical_name: prepared.canonical_name.clone(),
-                    guard: !MuxEngine::is_command_alias_group(&prepared.invocation),
-                });
-                let _ = outbound.enqueue_reliable_with_wakeup(&started, wakeup);
-            }
-            let item = self
-                .command_item((kind == ClientKind::Control).then_some((client, index as u64 + 1)));
-            let response = match prepared.result {
-                PreparedCommandResult::Ready => item.execute_command_request_with_prepared(
-                    client,
-                    kind,
-                    context,
-                    index as u64 + 1,
-                    &prepared.invocation,
-                    true,
-                ),
-                PreparedCommandResult::Error(error) => CommandResponse::Error {
-                    request_id: index as u64 + 1,
-                    error,
-                    output: RawText::default(),
-                },
-            };
-            let failed = matches!(response, CommandResponse::Error { .. });
-            if kind == ClientKind::Control && (failed || index + 1 == command_count) {
-                let completion = [
-                    ProtocolMessage::CommandResponse(response),
-                    ProtocolMessage::ExecExit(zz_protocol::ExecExit {
-                        server_id: self.server_id,
-                        outcome: zz_protocol::ExecOutcome::Ran,
-                    }),
-                ];
-                let [mut response_frame, mut exit_frame] = {
-                    let mut state = outbound.state.lock();
-                    [
-                        take_recycled_frame(&mut state),
-                        take_recycled_frame(&mut state),
-                    ]
-                };
-                let frames = if let Err(error) =
-                    encode_protocol_message_into(&completion[0], &mut response_frame)
-                {
-                    outbound.recycle_frame(response_frame);
-                    outbound.recycle_frame(exit_frame);
-                    Err(error)
-                } else if let Err(error) =
-                    encode_protocol_message_into(&completion[1], &mut exit_frame)
-                {
-                    drop(response_frame);
-                    outbound.recycle_frame(exit_frame);
-                    Err(error)
-                } else {
-                    Ok(vec![response_frame.into(), exit_frame.into()])
-                };
-                if !frames.is_ok_and(|frames| outbound.enqueue_control_group(frames)) {
-                    for message in &completion {
-                        let _ = outbound.enqueue_reliable(message);
-                    }
-                }
-                if collecting {
-                    outbound.finish_control_query();
-                }
+            if self.execute_compact_command(
+                client,
+                kind,
+                context,
+                prepared,
+                (index as u64 + 1, index + 1 == command_count),
+                outbound,
+            ) {
                 return;
-            }
-            let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(response));
-            if collecting {
-                outbound.release_control_query();
-            }
-            if failed {
-                break;
             }
         }
         let _ = outbound.enqueue_reliable(&ProtocolMessage::ExecExit(zz_protocol::ExecExit {
             server_id: self.server_id,
             outcome: zz_protocol::ExecOutcome::Ran,
         }));
+    }
+
+    pub(super) fn execute_compact_command(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        prepared: PreparedCommand,
+        position: (u64, bool),
+        outbound: &Arc<OutboundMailbox>,
+    ) -> bool {
+        let (request_id, last) = position;
+        let mut collecting = false;
+        if kind == ClientKind::Control {
+            let wakeup = !control_query_can_defer_wakeup(&self.inner.lock(), context, &prepared);
+            collecting = !wakeup && outbound.collect_control_query();
+            let started = Self::event(EventPayload::ControlCommandStarted {
+                request_id,
+                flags: u32::from(if prepared.invocation.source.is_some() {
+                    CONTROL_COMMAND_FRAME_FLAGS_CONTROL
+                } else {
+                    CONTROL_COMMAND_FRAME_FLAGS_NONE
+                }),
+                canonical_name: prepared.canonical_name.clone(),
+                guard: !MuxEngine::is_command_alias_group(&prepared.invocation),
+            });
+            let _ = outbound.enqueue_reliable_with_wakeup(&started, wakeup);
+        }
+        let item = self.command_item((kind == ClientKind::Control).then_some((client, request_id)));
+        let response = match prepared.result {
+            PreparedCommandResult::Ready => item.execute_command_request_with_prepared(
+                client,
+                kind,
+                context,
+                request_id,
+                &prepared.invocation,
+                true,
+            ),
+            PreparedCommandResult::Error(error) => CommandResponse::Error {
+                request_id,
+                error,
+                output: RawText::default(),
+            },
+        };
+        let failed = matches!(response, CommandResponse::Error { .. });
+        if kind == ClientKind::Control && (failed || last) {
+            let completion = [
+                ProtocolMessage::CommandResponse(response),
+                ProtocolMessage::ExecExit(zz_protocol::ExecExit {
+                    server_id: self.server_id,
+                    outcome: zz_protocol::ExecOutcome::Ran,
+                }),
+            ];
+            let [mut response_frame, mut exit_frame] = {
+                let mut state = outbound.state.lock();
+                [
+                    take_recycled_frame(&mut state),
+                    take_recycled_frame(&mut state),
+                ]
+            };
+            let frames = if let Err(error) =
+                encode_protocol_message_into(&completion[0], &mut response_frame)
+            {
+                outbound.recycle_frame(response_frame);
+                outbound.recycle_frame(exit_frame);
+                Err(error)
+            } else if let Err(error) = encode_protocol_message_into(&completion[1], &mut exit_frame)
+            {
+                drop(response_frame);
+                outbound.recycle_frame(exit_frame);
+                Err(error)
+            } else {
+                Ok(vec![response_frame.into(), exit_frame.into()])
+            };
+            if !frames.is_ok_and(|frames| outbound.enqueue_control_group(frames)) {
+                for message in &completion {
+                    let _ = outbound.enqueue_reliable(message);
+                }
+            }
+            if collecting {
+                outbound.finish_control_query();
+            }
+            return true;
+        }
+        let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(response));
+        if collecting {
+            outbound.release_control_query();
+        }
+        if failed || last {
+            let _ = outbound.enqueue_reliable(&ProtocolMessage::ExecExit(zz_protocol::ExecExit {
+                server_id: self.server_id,
+                outcome: zz_protocol::ExecOutcome::Ran,
+            }));
+            true
+        } else {
+            false
+        }
     }
 
     pub(super) fn initialize_compact(
@@ -1300,24 +1339,7 @@ impl Shared {
                 }
             }
             Some(AttachOperation::Commands(commands)) => {
-                let commands = commands
-                    .iter()
-                    .map(|command| {
-                        if command.canonical_name.is_none()
-                            && !command.alias_matched
-                            && command.result == PreparedCommandResult::Ready
-                        {
-                            Self::prepare_command_list_with_engine(
-                                &self.inner.lock().engine,
-                                vec![command.invocation.clone()],
-                                true,
-                            )
-                            .remove(0)
-                        } else {
-                            command.clone()
-                        }
-                    })
-                    .collect::<Vec<_>>();
+                let commands = self.prepare_initial_commands(commands);
                 let rejected = commands.iter().enumerate().find_map(|(index, prepared)| {
                     if let PreparedCommandResult::Error(error) = &prepared.result {
                         Some((index as u64 + 1, error.clone()))
@@ -1373,6 +1395,39 @@ impl Shared {
             }
             None => {}
         }
+        self.finish_initialize_compact(client, outbound, pending_errors);
+    }
+
+    pub(super) fn prepare_initial_commands(
+        &self,
+        commands: &[PreparedCommand],
+    ) -> Vec<PreparedCommand> {
+        commands
+            .iter()
+            .map(|command| {
+                if command.canonical_name.is_none()
+                    && !command.alias_matched
+                    && command.result == PreparedCommandResult::Ready
+                {
+                    Self::prepare_command_list_with_engine(
+                        &self.inner.lock().engine,
+                        vec![command.invocation.clone()],
+                        true,
+                    )
+                    .remove(0)
+                } else {
+                    command.clone()
+                }
+            })
+            .collect()
+    }
+
+    pub(super) fn finish_initialize_compact(
+        self: &Arc<Self>,
+        client: ClientId,
+        outbound: &Arc<OutboundMailbox>,
+        pending_errors: Vec<CommandResponse>,
+    ) {
         if self.command_queue_cancelled(client) || self.inner.lock().client(client).is_none() {
             return;
         }

@@ -69,7 +69,7 @@ pub(crate) enum HostCommand {
     },
     NewSession {
         cwd: PathBuf,
-        reply: Option<crossbeam_channel::Sender<Result<(), String>>>,
+        reply: Option<crate::daemon::cmdq::Reply<Result<(), String>>>,
     },
     SwitchSession {
         session: AgentSessionSummary,
@@ -122,7 +122,7 @@ pub(crate) enum PermissionResponse {
     Select {
         request_id: Option<u64>,
         choice: PermissionChoice,
-        reply: crossbeam_channel::Sender<Result<String, String>>,
+        reply: crate::daemon::cmdq::Reply<Result<String, String>>,
     },
 }
 
@@ -188,7 +188,7 @@ fn select_permission(
 pub(crate) type AgentTurnResult = Result<AgentTurnReply, AgentTurnFailure>;
 #[derive(Debug)]
 pub(crate) struct AgentTurnWaiter {
-    pub(crate) reply: crossbeam_channel::Sender<AgentTurnResult>,
+    pub(crate) reply: crate::daemon::cmdq::Reply<AgentTurnResult>,
     pub(crate) on_block: AgentBlockPolicy,
     pub(crate) audit: Arc<Mutex<Vec<String>>>,
 }
@@ -204,7 +204,7 @@ pub(crate) struct QueuedPrompt {
 impl QueuedPrompt {
     pub(crate) fn settle(&mut self, result: AgentTurnResult) {
         if let Some(waiter) = self.waiter.take() {
-            let _ = waiter.reply.try_send(result);
+            waiter.reply.try_send(result);
         }
     }
 
@@ -705,7 +705,7 @@ struct PanePump {
     active_turn: Option<u64>,
     dispatched_prompt: Option<(u64, AgentPrompt)>,
     active_waiter: Option<AgentTurnWaiter>,
-    session_waiter: Option<crossbeam_channel::Sender<Result<(), String>>>,
+    session_waiter: Option<crate::daemon::cmdq::Reply<Result<(), String>>>,
     new_session_pending: bool,
     turn_reply: AgentTurnReply,
     turn_started: Instant,
@@ -837,7 +837,7 @@ impl PanePump {
                 PaneInput::Command(HostCommand::NewSession {
                     reply: Some(reply), ..
                 }) => {
-                    let _ = reply.try_send(Err("agent pane closed".to_owned()));
+                    reply.try_send(Err("agent pane closed".to_owned()));
                 }
                 _ => {}
             }
@@ -907,7 +907,7 @@ impl PanePump {
                             .then_some(option_id)
                             .ok_or_else(|| "agent runtime is busy".to_owned())
                     });
-                    let _ = reply.try_send(result);
+                    reply.try_send(result);
                 }
             },
             HostCommand::Authenticate { method_id } => {
@@ -981,7 +981,7 @@ impl PanePump {
         &mut self,
         command: RuntimeCommand,
         phase: AgentConnectionPhase,
-        reply: Option<crossbeam_channel::Sender<Result<(), String>>>,
+        reply: Option<crate::daemon::cmdq::Reply<Result<(), String>>>,
     ) {
         let accepted = {
             let mut state = self.state.lock();
@@ -1002,7 +1002,7 @@ impl PanePump {
                 message: message.clone(),
             });
             if let Some(reply) = reply {
-                let _ = reply.try_send(Err(message));
+                reply.try_send(Err(message));
             }
             return;
         }
@@ -1343,7 +1343,7 @@ impl PanePump {
 
     fn settle_active_turn(&mut self, result: AgentTurnResult) {
         if let Some(waiter) = self.active_waiter.take() {
-            let _ = waiter.reply.try_send(result);
+            waiter.reply.try_send(result);
         }
     }
 
@@ -1537,7 +1537,7 @@ impl PanePump {
             } else {
                 result
             };
-            let _ = reply.try_send(result);
+            reply.try_send(result);
         }
     }
 
@@ -1927,7 +1927,7 @@ mod tests {
                     images: Vec::new(),
                 },
                 waiter: Some(AgentTurnWaiter {
-                    reply: waiter,
+                    reply: waiter.into(),
                     on_block,
                     audit,
                 }),
@@ -2627,7 +2627,7 @@ mod tests {
                 images: Vec::new(),
             },
             waiter: Some(AgentTurnWaiter {
-                reply,
+                reply: reply.into(),
                 on_block: AgentBlockPolicy::Fail,
                 audit: Arc::default(),
             }),
@@ -2793,7 +2793,7 @@ mod tests {
         let (reply, result) = crossbeam_channel::bounded(1);
         fixture.command(HostCommand::NewSession {
             cwd: PathBuf::from("/other"),
-            reply: Some(reply),
+            reply: Some(reply.into()),
         });
         assert_eq!(result.recv_timeout(DEADLINE).unwrap(), Ok(()));
         let state = fixture.state();
@@ -2869,7 +2869,7 @@ mod tests {
         let (reply, result) = crossbeam_channel::bounded(1);
         fixture.command(HostCommand::NewSession {
             cwd: PathBuf::from("/"),
-            reply: Some(reply),
+            reply: Some(reply.into()),
         });
         received.recv_timeout(DEADLINE).unwrap();
         let prompt = fixture.prompt_waiting("old session prompt");
@@ -2940,7 +2940,7 @@ mod tests {
                     images: Vec::new(),
                 },
                 waiter: Some(AgentTurnWaiter {
-                    reply,
+                    reply: reply.into(),
                     on_block: AgentBlockPolicy::Wait,
                     audit: Arc::new(Mutex::new(Vec::new())),
                 }),
@@ -2985,7 +2985,7 @@ mod tests {
         let (reply, result) = crossbeam_channel::bounded(1);
         fixture.command(HostCommand::NewSession {
             cwd: PathBuf::from("/"),
-            reply: Some(reply),
+            reply: Some(reply.into()),
         });
         assert_eq!(
             result.recv_timeout(DEADLINE).unwrap(),
@@ -3025,13 +3025,13 @@ mod tests {
         let (first, first_result) = crossbeam_channel::bounded(1);
         fixture.command(HostCommand::NewSession {
             cwd: PathBuf::from("/"),
-            reply: Some(first),
+            reply: Some(first.into()),
         });
         received.recv_timeout(DEADLINE).unwrap();
         let (second, second_result) = crossbeam_channel::bounded(1);
         fixture.command(HostCommand::NewSession {
             cwd: PathBuf::from("/"),
-            reply: Some(second),
+            reply: Some(second.into()),
         });
         assert_eq!(
             second_result.recv_timeout(DEADLINE).unwrap(),

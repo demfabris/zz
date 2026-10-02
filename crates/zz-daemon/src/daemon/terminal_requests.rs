@@ -4,9 +4,9 @@ use zz_terminal::{TerminalRequest, TerminalRequestError};
 
 type Completion<T> = Box<dyn FnOnce(&Arc<Shared>, Result<T, TerminalRequestError>) + Send>;
 
-trait Pending: Send {
+pub(super) trait Pending: Send {
     fn poll(&mut self, shared: &Arc<Shared>, now: Instant) -> bool;
-    fn next(&self) -> Instant;
+    fn next(&self) -> Option<Instant>;
 }
 
 struct Request<T> {
@@ -23,8 +23,8 @@ impl<T: Send> Pending for Request<T> {
         true
     }
 
-    fn next(&self) -> Instant {
-        self.token.next_poll()
+    fn next(&self) -> Option<Instant> {
+        Some(self.token.next_poll())
     }
 }
 
@@ -50,7 +50,45 @@ impl Pending for Scheduled {
         true
     }
 
-    fn next(&self) -> Instant {
+    fn next(&self) -> Option<Instant> {
+        Some(self.deadline)
+    }
+}
+
+pub(super) enum ReplyOutcome<T> {
+    Ready(T),
+    Closed,
+    TimedOut,
+}
+
+type ReplyFinish<T> = Box<dyn FnOnce(&Arc<Shared>, ReplyOutcome<T>) + Send>;
+
+struct ReplyRequest<T> {
+    result: Arc<Mutex<Option<ReplyOutcome<T>>>>,
+    deadline: Option<Instant>,
+    continuation: cmdq::WaitContinuation,
+    finish: Option<ReplyFinish<T>>,
+}
+
+impl<T: Send> Pending for ReplyRequest<T> {
+    fn poll(&mut self, shared: &Arc<Shared>, now: Instant) -> bool {
+        let result = if self.continuation.ready() || shared.stopping.load(Ordering::Acquire) {
+            Some(ReplyOutcome::Closed)
+        } else if let Some(result) = self.result.lock().take() {
+            Some(result)
+        } else if self.deadline.is_some_and(|deadline| now >= deadline) {
+            Some(ReplyOutcome::TimedOut)
+        } else {
+            None
+        };
+        let Some(result) = result else {
+            return false;
+        };
+        self.finish.take().unwrap()(shared, result);
+        true
+    }
+
+    fn next(&self) -> Option<Instant> {
         self.deadline
     }
 }
@@ -118,6 +156,35 @@ impl Inbox {
         self.wake.notify();
     }
 
+    pub(super) fn push(&self, request: impl Pending + 'static) {
+        let _ = self.sender.send(Box::new(request));
+        self.wake.notify();
+    }
+
+    pub(super) fn reply<T: Send + 'static>(
+        &self,
+        deadline: Option<Instant>,
+        continuation: cmdq::WaitContinuation,
+        finish: impl FnOnce(&Arc<Shared>, ReplyOutcome<T>) + Send + 'static,
+    ) -> cmdq::Reply<T> {
+        let result = Arc::new(Mutex::new(None));
+        let _ = self.sender.send(Box::new(ReplyRequest {
+            result: Arc::clone(&result),
+            deadline,
+            continuation,
+            finish: Some(Box::new(finish)),
+        }));
+        self.wake.notify();
+        let wake = Arc::clone(&self.wake);
+        cmdq::Reply::new(move |value| {
+            *result.lock() = Some(match value {
+                Some(value) => ReplyOutcome::Ready(value),
+                None => ReplyOutcome::Closed,
+            });
+            wake.notify();
+        })
+    }
+
     pub(super) fn schedule(
         &self,
         deadline: Instant,
@@ -167,7 +234,7 @@ impl Inbox {
         active.extend(self.receiver.try_iter());
         let now = Instant::now();
         active.retain_mut(|request| !request.poll(shared, now));
-        let next = active.iter().map(|request| request.next()).min();
+        let next = active.iter().filter_map(|request| request.next()).min();
         self.active.lock().extend(active);
         next
     }
@@ -267,6 +334,15 @@ impl CommandState {
         if self.remaining.fetch_sub(1, Ordering::AcqRel) == 1 {
             self.continuation.complete();
             (self.notify)();
+        }
+    }
+
+    pub(super) fn take_failure(&self) -> Option<DaemonError> {
+        let mut output = self.output.lock();
+        if matches!(*output, Some(Err(_))) {
+            output.take().unwrap().err()
+        } else {
+            None
         }
     }
 

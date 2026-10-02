@@ -53,7 +53,7 @@ impl AgentInbox {
             let pane = message.pane;
             match message.payload {
                 Payload::Barrier(reply) => {
-                    let _ = reply.try_send(());
+                    reply.try_send(());
                     None
                 }
                 Payload::Updates {

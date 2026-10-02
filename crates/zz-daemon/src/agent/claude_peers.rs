@@ -8,8 +8,10 @@ use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
+#[cfg(test)]
+use std::sync::mpsc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use parking_lot::Mutex;
@@ -476,7 +478,7 @@ fn reply_content(content: &str) -> String {
 struct PendingWait {
     msg_id: String,
     target: String,
-    sender: Option<mpsc::Sender<Result<String, String>>>,
+    sender: Option<Arc<crate::daemon::cmdq::Reply<Result<String, String>>>>,
 }
 
 #[derive(Default)]
@@ -485,17 +487,27 @@ pub(crate) struct PeerWaits {
 }
 
 impl PeerWaits {
-    pub(crate) fn register(
+    pub(crate) fn register_reply(
         &mut self,
         msg_id: String,
         target: String,
-    ) -> mpsc::Receiver<Result<String, String>> {
-        let (sender, receiver) = mpsc::channel();
+        sender: Arc<crate::daemon::cmdq::Reply<Result<String, String>>>,
+    ) {
         self.pending.push_back(PendingWait {
             msg_id,
             target,
             sender: Some(sender),
         });
+    }
+
+    #[cfg(test)]
+    fn register(
+        &mut self,
+        msg_id: String,
+        target: String,
+    ) -> mpsc::Receiver<Result<String, String>> {
+        let (sender, receiver) = mpsc::channel();
+        self.register_reply(msg_id, target, Arc::new(sender.into()));
         receiver
     }
 
@@ -514,7 +526,7 @@ impl PeerWaits {
                     wait.sender.is_some() && from.as_deref() == Some(wait.target.as_str())
                 }) {
                     if let Some(sender) = wait.sender.take() {
-                        let _ = sender.send(Ok(reply_content(&content)));
+                        sender.try_send(Ok(reply_content(&content)));
                     }
                 } else {
                     log::info!(
@@ -551,7 +563,7 @@ impl PeerWaits {
                         || dropped_msg_ids.contains(&wait.msg_id))
                         && let Some(sender) = wait.sender.take()
                     {
-                        let _ = sender.send(Err(error.clone()));
+                        sender.try_send(Err(error.clone()));
                     }
                 }
             }

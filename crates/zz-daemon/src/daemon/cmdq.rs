@@ -76,6 +76,68 @@ impl WaitContinuation {
     }
 }
 
+type ReplyCallback<T> = Box<dyn FnOnce(Option<T>) + Send>;
+
+pub(crate) struct Reply<T> {
+    callback: Mutex<Option<ReplyCallback<T>>>,
+}
+
+impl<T> std::fmt::Debug for Reply<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Reply").finish_non_exhaustive()
+    }
+}
+
+impl<T> Reply<T> {
+    pub(crate) fn new(callback: impl FnOnce(Option<T>) + Send + 'static) -> Self {
+        Self {
+            callback: Mutex::new(Some(Box::new(callback))),
+        }
+    }
+
+    pub(crate) fn close(&self) {
+        if let Some(callback) = self.callback.lock().take() {
+            callback(None);
+        }
+    }
+
+    pub(crate) fn try_send(&self, value: T) {
+        if let Some(callback) = self.callback.lock().take() {
+            callback(Some(value));
+        }
+    }
+}
+
+impl<T> Drop for Reply<T> {
+    fn drop(&mut self) {
+        if let Some(callback) = self.callback.get_mut().take() {
+            callback(None);
+        }
+    }
+}
+
+#[cfg(test)]
+impl<T: Send + 'static> From<crossbeam_channel::Sender<T>> for Reply<T> {
+    fn from(sender: crossbeam_channel::Sender<T>) -> Self {
+        Self::new(move |value| {
+            if let Some(value) = value {
+                let _ = sender.try_send(value);
+            }
+        })
+    }
+}
+
+#[cfg(test)]
+impl<T: Send + 'static> From<mpsc::Sender<T>> for Reply<T> {
+    fn from(sender: mpsc::Sender<T>) -> Self {
+        Self::new(move |value| {
+            if let Some(value) = value {
+                let _ = sender.send(value);
+            }
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum State {
     Ready,

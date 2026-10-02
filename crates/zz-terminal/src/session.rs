@@ -1776,12 +1776,14 @@ impl TerminalSession {
             Ok(Some(shard)) => {
                 if let Err(error) = shard.launch(shard::PaneLaunch {
                     control_rx: command_rx,
-                    input_rx,
                     slot,
                     publisher: worker_publisher,
                     max_scrollback,
                     appearance,
-                    spawn,
+                    kind: shard::LaunchKind::Pty {
+                        input_rx,
+                        spawn: Box::new(spawn),
+                    },
                     alive,
                     wake,
                 }) {
@@ -1890,6 +1892,14 @@ impl TerminalSession {
         max_scrollback: usize,
         frozen: bool,
     ) -> Self {
+        #[cfg(unix)]
+        let shard = shard::choose();
+        #[cfg(not(unix))]
+        let shard: Result<Option<shard::ShardHandle>, WorkerError> = Ok(None);
+        let wake = match &shard {
+            Ok(Some(shard)) => shard.wake.for_actor(),
+            _ => ActorWake::none(),
+        };
         let (command_tx, command_rx) = command_channel();
         let (alive, liveness) = crossbeam_channel::bounded(0);
         let slot = Arc::new(Mutex::new(ControlSlot::default()));
@@ -1899,7 +1909,7 @@ impl TerminalSession {
                 input: None,
                 liveness,
                 slot: Arc::clone(&slot),
-                wake: ActorWake::none(),
+                wake: wake.clone(),
             }),
         };
         let event_state = Arc::new(EventQueueState::new());
@@ -1921,27 +1931,50 @@ impl TerminalSession {
 
         let worker_publisher = publisher.clone();
         let appearance_hash = appearance.stable_hash();
-        if let Err(error) = thread::Builder::new()
-            .name(if frozen {
-                "zz-output-view".into()
-            } else {
-                "zz-empty-pane".into()
-            })
-            .spawn(move || {
-                output_view_worker(
-                    command_rx,
+        match shard {
+            Ok(Some(shard)) => {
+                if let Err(error) = shard.launch(shard::PaneLaunch {
+                    control_rx: command_rx,
                     slot,
-                    worker_publisher,
-                    title,
-                    text,
-                    appearance,
+                    publisher: worker_publisher,
                     max_scrollback,
-                    frozen,
-                );
-                drop(alive);
-            })
-        {
-            publisher.fail(&WorkerError::Thread(error.to_string()));
+                    appearance,
+                    kind: shard::LaunchKind::Surface {
+                        title,
+                        text,
+                        frozen,
+                    },
+                    alive,
+                    wake,
+                }) {
+                    publisher.fail(&error);
+                }
+            }
+            Ok(None) => {
+                if let Err(error) = thread::Builder::new()
+                    .name(if frozen {
+                        "zz-output-view".into()
+                    } else {
+                        "zz-empty-pane".into()
+                    })
+                    .spawn(move || {
+                        output_view_worker(
+                            command_rx,
+                            slot,
+                            worker_publisher,
+                            title,
+                            text,
+                            appearance,
+                            max_scrollback,
+                            frozen,
+                        );
+                        drop(alive);
+                    })
+                {
+                    publisher.fail(&WorkerError::Thread(error.to_string()));
+                }
+            }
+            Err(error) => publisher.fail(&error),
         }
 
         Self {
@@ -4904,16 +4937,27 @@ fn output_view_worker(
     max_scrollback: usize,
     frozen: bool,
 ) {
-    if let Err(error) = run_output_view(
-        &command_rx,
-        &slot,
-        &publisher,
-        &title,
-        &text,
-        &appearance,
-        max_scrollback,
-        frozen,
-    ) {
+    let result = (|| {
+        let mut actor = new_output_view(
+            command_rx,
+            slot,
+            publisher.clone(),
+            &title,
+            &text,
+            &appearance,
+            max_scrollback,
+            frozen,
+            &ActorWake::none(),
+        )?;
+        loop {
+            actor.on_deadline()?;
+            let wake = actor.wait_for_wake()?;
+            if !actor.on_wake(wake)? {
+                return Ok::<(), WorkerError>(());
+            }
+        }
+    })();
+    if let Err(error) = result {
         log::error!("command output view stopped: {error}");
         publisher.fail(&error);
     }
@@ -5067,16 +5111,17 @@ fn register_device_attributes(terminal: &mut Terminal<'_, '_>) -> Result<(), Wor
     Ok(())
 }
 
-fn run_output_view(
-    command_rx: &Receiver<Command>,
-    slot: &Arc<Mutex<ControlSlot>>,
-    publisher: &Publisher,
+fn new_output_view(
+    command_rx: Receiver<Command>,
+    slot: Arc<Mutex<ControlSlot>>,
+    publisher: Publisher,
     title: &str,
     text: &str,
     appearance: &TerminalAppearance,
     max_scrollback: usize,
     frozen: bool,
-) -> Result<(), WorkerError> {
+    wake: &ActorWake,
+) -> Result<surface_actor::SurfaceActor<'static, 'static>, WorkerError> {
     install_kitty_png_decoder();
     let geometry = Geometry::default();
     let mut terminal = new_terminal(geometry.columns, geometry.rows, max_scrollback)?;
@@ -5088,7 +5133,7 @@ fn run_output_view(
     if frozen {
         write_output_view_content(&mut terminal, title, text);
     }
-    run_surface_terminal(
+    surface_actor::SurfaceActor::new(
         command_rx,
         slot,
         publisher,
@@ -5107,7 +5152,7 @@ fn run_output_view(
             pending_commands: Vec::new(),
             pending_copy_source: None,
             pane_search: None,
-            search: None,
+            search: Some(SearchWorker::spawn(wake.clone())),
         },
         frozen,
     )
@@ -5129,29 +5174,6 @@ struct SurfaceTerminal<'a, 'b> {
     pending_copy_source: Option<Box<CapturedCopySource>>,
     pane_search: Option<CopyModeSearch>,
     search: Option<(SearchWorker, Receiver<SearchResults>)>,
-}
-
-fn run_surface_terminal(
-    command_rx: &Receiver<Command>,
-    slot: &Arc<Mutex<ControlSlot>>,
-    publisher: &Publisher,
-    surface: SurfaceTerminal<'_, '_>,
-    frozen: bool,
-) -> Result<(), WorkerError> {
-    let mut actor = surface_actor::SurfaceActor::new(
-        command_rx.clone(),
-        Arc::clone(slot),
-        publisher.clone(),
-        surface,
-        frozen,
-    )?;
-    loop {
-        actor.on_deadline()?;
-        let wake = actor.wait_for_wake()?;
-        if !actor.on_wake(wake)? {
-            return Ok(());
-        }
-    }
 }
 
 fn write_output_view_content(terminal: &mut Terminal<'_, '_>, title: &str, text: &str) {

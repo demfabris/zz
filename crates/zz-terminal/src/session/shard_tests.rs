@@ -187,6 +187,91 @@ fn coalesced_wakes_service_concurrent_view_and_input_bursts() {
 
 #[cfg(target_os = "linux")]
 #[test]
+fn twenty_empty_and_output_surfaces_only_start_the_configured_shards() {
+    const CHILD: &str = "ZZ_SURFACE_SHARD_TEST";
+    if std::env::var_os(CHILD).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().expect("test binary"))
+            .args([
+                "--exact",
+                "session::shard::tests::twenty_empty_and_output_surfaces_only_start_the_configured_shards",
+            ])
+            .env(CHILD, "1")
+            .env("ZZ_PTY_SHARDS", "4")
+            .output()
+            .expect("isolated surface shard test");
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    let threads = || {
+        std::fs::read_dir("/proc/self/task")
+            .expect("process threads")
+            .map(|entry| {
+                std::fs::read_to_string(entry.expect("thread").path().join("comm"))
+                    .expect("thread name")
+            })
+            .collect::<Vec<_>>()
+    };
+    let before = threads().len();
+    let appearance = Arc::new(TerminalAppearance::default());
+    let mut surfaces = Vec::new();
+    for index in 0..20 {
+        let empty = TerminalSession::spawn_empty_with_appearance(64, Arc::clone(&appearance));
+        let output = if index % 2 == 0 {
+            TerminalSession::spawn_output_view_with_appearance(
+                "output".into(),
+                "surface text".into(),
+                Arc::clone(&appearance),
+            )
+        } else {
+            TerminalSession::spawn_startup_output_view_with_appearance(
+                "startup".into(),
+                "surface text".into(),
+                Arc::clone(&appearance),
+            )
+        };
+        assert!(captured(&empty, ""));
+        assert!(captured(&output, "surface text"));
+        assert_eq!(empty.process_id(), None);
+        assert_eq!(output.process_id(), None);
+        surfaces.extend([empty, output]);
+    }
+    let names = threads();
+    assert_eq!(names.len(), before + 4);
+    assert_eq!(
+        names
+            .iter()
+            .filter(|name| name.starts_with("zz-pty-shard-"))
+            .count(),
+        4
+    );
+    assert!(
+        names
+            .iter()
+            .all(|name| !name.starts_with("zz-empty-pane") && !name.starts_with("zz-output-view"))
+    );
+    for surface in &surfaces {
+        surface.terminate();
+        wait(|| {
+            matches!(
+                surface.commands.queues.liveness.try_recv(),
+                Err(crossbeam_channel::TryRecvError::Disconnected)
+            )
+        });
+        assert!(matches!(
+            surface.capture(CaptureOptions::default()),
+            Err(TerminalCaptureError::ActorStopped)
+        ));
+    }
+    assert_eq!(threads().len(), before + 4);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn twenty_panes_select_direct_or_gather_readers() {
     const CHILD: &str = "ZZ_LINUX_READER_TEST";
     if std::env::var_os(CHILD).is_none() {

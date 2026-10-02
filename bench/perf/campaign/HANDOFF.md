@@ -226,6 +226,12 @@ read "Lane brief rules" before launching anything.
   - Fourth sync onto Linux: e18 picked (`f797df18`); the Windows-build fix does not apply there
     (e11 removed `wait_needs_worker` on that branch), so the Windows check reruns on the Mac after
     convergence; e10 and e17 go through a pick lane (conflicts with e09/e11).
+  - e22 (`9e4b0160`, Mac): uncached list-keys and full-history capture yield between bounded
+    steps (64 binding rows, 512 history rows); new paired echo-fairness probes pass 12/12 against
+    tmux's increase (also with K=1); capture instructions 0.68x, list-keys 1.012x.
+  - Fifth sync: e10/e17 picked onto Linux by a lane (`bf401683`), e22 picked onto that in a scratch
+    worktree (`ba4d2afa`, classifier union again), Mac `perf/loop` merged that tree (`362c83bc`).
+    The Mac's Windows-build fix is subsumed: e11 removed `wait_needs_worker` on the Linux side.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

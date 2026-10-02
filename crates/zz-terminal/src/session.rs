@@ -3569,17 +3569,12 @@ struct IdentityState {
 pub struct TerminalRequest<T> {
     response: Receiver<Result<T, TerminalRequestError>>,
     deadline: Instant,
-    pending: Option<Command>,
     queues: Arc<CommandQueues>,
 }
 
 impl<T> TerminalRequest<T> {
     pub fn next_poll(&self) -> Instant {
-        if self.pending.is_some() {
-            self.deadline.min(Instant::now() + Duration::from_millis(1))
-        } else {
-            self.deadline
-        }
+        self.deadline
     }
 
     pub fn poll(&mut self, now: Instant) -> Option<Result<T, TerminalRequestError>> {
@@ -3587,20 +3582,7 @@ impl<T> TerminalRequest<T> {
             return Some(result);
         }
         if now >= self.deadline {
-            self.pending.take();
             return Some(Err(TerminalRequestError::TimedOut));
-        }
-        if let Some(command) = self.pending.take() {
-            let sender = CommandSender {
-                queues: Arc::clone(&self.queues),
-            };
-            match sender.try_send(command) {
-                Ok(()) => {}
-                Err(crossbeam_channel::TrySendError::Full(command)) => self.pending = Some(command),
-                Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
-                    return Some(Err(TerminalRequestError::ActorStopped));
-                }
-            }
         }
         if let Err(crossbeam_channel::TryRecvError::Disconnected) = self.queues.liveness.try_recv()
         {
@@ -3798,7 +3780,6 @@ impl CommandSender {
             TerminalRequest {
                 response,
                 deadline,
-                pending: None,
                 queues: Arc::clone(&self.queues),
             },
         )
@@ -3809,11 +3790,22 @@ impl CommandSender {
         notify: Arc<dyn Fn() + Send + Sync>,
         command: impl FnOnce(ActorReply<T>) -> Command,
     ) -> TerminalRequest<T> {
-        let (reply, mut request) = self.reply_token(CAPTURE_TIMEOUT, notify);
+        let (reply, request) = self.reply_token(CAPTURE_TIMEOUT, notify);
         if let Err(crossbeam_channel::TrySendError::Full(command)) = self.try_send(command(reply)) {
-            request.pending = Some(command);
+            self.defer(command);
         }
         request
+    }
+
+    fn defer(&self, command: Command) {
+        let mut slot = self.queues.slot.lock();
+        let in_flight = slot.in_flight;
+        slot.deferred.push((in_flight, command));
+        let wake = in_flight == 0 && !std::mem::replace(&mut slot.wake_queued, true);
+        drop(slot);
+        if wake {
+            let _ = self.try_send(Command::Wake);
+        }
     }
 
     fn request<T>(

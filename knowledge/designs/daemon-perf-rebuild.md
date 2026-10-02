@@ -3114,6 +3114,18 @@ The known daemon endpoint test stayed red; four load failures passed alone. Mac 
 
 ## W3-LOOP: single-owner mux loop (effort XL)
 
+As built, e19fix (2026-10-02, base `6e7d954e3`): empty peer updates skip format-fact
+snapshots, and drained peer-probe workers exit immediately. Other helpers reuse workers for
+250 ms. Path acknowledgements and discovery output wait for events; the loop owns job
+deadlines and shares path cancellation flags. A full helper queue refuses loop submissions.
+The p20 counter test reports zero helper tasks and zero starts per steady `send-keys`.
+The pre-commit Mac quick W0 gate passed 36 scored rows: `send_keys.p20` was 0.1805 Minstr
+against e19's historical median 0.2242; idle CPU/instructions/wakeups were zero, with 2/5
+threads at p1/p20. Live 100-command samples matched e12 at about 0.165/0.167 Minstr for
+p1/p20. Final three-pair comparisons belong in `/tmp/zzpc/e19fix-{pre,post}-{1,2,3}.json`.
+Linux process readers, PTY gathering, epoll, THP, and TUI backpressure remain with the
+orchestrator; this Mac did not run them.
+
 **b3fix as built (2026-10-01, on b3 `53982eb8`).** Exec prepares each chain once. Proven queries, plain input without attached clients or hooks, and unchanged unzoomed pane selection run on the mux loop. Parking commands, relative pane selectors, and cleanup that can run hooks keep workers. Output pressure yields the remaining commands with response admission and reply IDs intact. Repeated chains retain registration data; LAST/ExecExit, Resume, and client-file replies keep their existing order.
 
 Three alternating quick `cli,control,mem` pairs against b2fix give 19/19 CLI instruction medians at 0.895-0.988x; display p1/p20 is 0.901/0.920x, control instructions 0.984x, and threads 7/45 versus 8/45. Serial daemon tests pass: 1360 unit and 35 integration, including 20 Exec and 34 event-loop tests; one existing test is ignored. Fmt, Clippy, and all eight selected compat scenarios pass. The quick W0 gate has 35 passes and one failure on control latency. Control latency and burst throughput also fail on b2fix, so those rows are left outside this fix.

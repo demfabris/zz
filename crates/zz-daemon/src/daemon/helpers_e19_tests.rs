@@ -42,4 +42,9 @@ fn helpers_are_bounded_and_retire_within_one_second() {
     ready.recv_timeout(Duration::from_secs(1)).unwrap();
     assert_eq!(pool.state.queue.lock().workers, 1);
     release.send(()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while pool.active() {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(5));
+    }
 }

@@ -15,7 +15,7 @@ use super::{ClientId, PaneId, path_listing};
 
 const MAX_WORKERS: usize = 2;
 const MAX_PENDING: usize = 64;
-const IDLE_TIMEOUT: Duration = Duration::from_millis(50);
+const IDLE_TIMEOUT: Duration = Duration::from_millis(250);
 
 pub(super) enum Task {
     Path(Box<path_listing::Task>),
@@ -89,6 +89,10 @@ struct Queue {
     workers: usize,
     busy: usize,
     stopped: bool,
+    #[cfg(test)]
+    starts: usize,
+    #[cfg(test)]
+    submitted: usize,
 }
 
 struct State {
@@ -97,6 +101,8 @@ struct State {
     results: crossbeam_channel::Sender<Result>,
     wake: super::AcceptWake,
     pending: Arc<AtomicBool>,
+    #[cfg(unix)]
+    loop_thread: Mutex<Option<thread::ThreadId>>,
     #[cfg(all(feature = "agent", unix))]
     peers: Mutex<crate::agent::claude_peers::RegistryCache>,
 }
@@ -123,6 +129,8 @@ impl Default for Pool {
                 results,
                 wake: super::AcceptWake::new(),
                 pending: Arc::clone(&pending),
+                #[cfg(unix)]
+                loop_thread: Mutex::new(None),
                 #[cfg(all(feature = "agent", unix))]
                 peers: Mutex::new(crate::agent::claude_peers::RegistryCache::default()),
             }),
@@ -142,7 +150,8 @@ impl Default for Pool {
 impl Pool {
     #[cfg(unix)]
     pub(super) fn take_pending(&self) -> bool {
-        self.state.pending.swap(false, Ordering::AcqRel)
+        self.state.pending.load(Ordering::Acquire)
+            && self.state.pending.swap(false, Ordering::AcqRel)
     }
 
     #[cfg(unix)]
@@ -153,6 +162,7 @@ impl Pool {
 
     #[cfg(unix)]
     pub(super) fn install(&self, waker: Arc<mio::Waker>) {
+        *self.state.loop_thread.lock() = Some(thread::current().id());
         self.state.wake.install(Arc::clone(&waker));
         self.jobs.wake.install(waker);
     }
@@ -195,6 +205,8 @@ impl Pool {
     }
 
     fn enqueue(&self, task: Task, wait: bool) -> io::Result<()> {
+        #[cfg(unix)]
+        let wait = wait && *self.state.loop_thread.lock() != Some(thread::current().id());
         let mut queue = self.state.queue.lock();
         while wait && !queue.stopped && queue.tasks.len() >= MAX_PENDING {
             self.state.available.wait(&mut queue);
@@ -206,13 +218,23 @@ impl Pool {
             ));
         }
         queue.tasks.push_back(task);
+        #[cfg(test)]
+        {
+            queue.submitted += 1;
+        }
         if queue.workers < MAX_WORKERS && queue.tasks.len() > queue.workers - queue.busy {
             let state = Arc::clone(&self.state);
             match thread::Builder::new()
                 .name("zz-helper".into())
                 .spawn(move || worker(&state))
             {
-                Ok(_) => queue.workers += 1,
+                Ok(_) => {
+                    queue.workers += 1;
+                    #[cfg(test)]
+                    {
+                        queue.starts += 1;
+                    }
+                }
                 Err(error) if queue.workers == 0 => {
                     queue.tasks.pop_back();
                     return Err(error);
@@ -258,6 +280,10 @@ fn worker(state: &State) {
             state.available.notify_all();
             task
         };
+        #[cfg(all(feature = "agent", unix))]
+        let retire = matches!(&task, Task::Peers { .. });
+        #[cfg(not(all(feature = "agent", unix)))]
+        let retire = false;
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(task, state)));
         if let Ok(Some(result)) = result {
             let _ = state.results.send(result);
@@ -266,7 +292,13 @@ fn worker(state: &State) {
         } else if result.is_err() {
             log::error!("helper task panicked");
         }
-        state.queue.lock().busy -= 1;
+        let mut queue = state.queue.lock();
+        queue.busy -= 1;
+        if retire && queue.tasks.is_empty() {
+            queue.workers -= 1;
+            state.available.notify_all();
+            return;
+        }
     }
 }
 
@@ -285,17 +317,7 @@ fn run(task: Task, _state: &State) -> Option<Result> {
                 }
                 _state.pending.store(true, Ordering::Release);
                 _state.wake.wake();
-                loop {
-                    match ready.recv_timeout(Duration::from_millis(10)) {
-                        Ok(()) => return !cancel.load(std::sync::atomic::Ordering::Acquire),
-                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return false,
-                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                            if cancel.load(std::sync::atomic::Ordering::Acquire) {
-                                return false;
-                            }
-                        }
-                    }
-                }
+                ready.recv().is_ok() && !cancel.load(Ordering::Acquire)
             });
             None
         }
@@ -334,7 +356,7 @@ fn run(task: Task, _state: &State) -> Option<Result> {
                             command,
                             1024 * 1024,
                             std::time::Instant::now() + Duration::from_secs(2),
-                            &|| false,
+                            Arc::new(AtomicBool::new(false)),
                         )
                         .ok();
                 }
@@ -466,45 +488,39 @@ pub(super) struct JobRequest {
 
 #[cfg(unix)]
 impl JobClient {
+    pub(super) fn notify(&self) {
+        self.pending.store(true, Ordering::Release);
+        self.wake.wake();
+    }
+
     pub(super) fn output(
         &self,
         command: std::process::Command,
         limit: usize,
         deadline: std::time::Instant,
-        cancelled: &dyn Fn() -> bool,
+        cancel: Arc<AtomicBool>,
     ) -> std::result::Result<std::process::Output, String> {
         let (reply, receiver) = std::sync::mpsc::sync_channel(1);
-        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
         self.requests
             .try_send(JobRequest {
                 command,
                 limit,
                 deadline,
-                cancel: Arc::clone(&cancel),
+                cancel,
                 reply,
             })
             .map_err(|error| error.to_string())?;
-        self.pending.store(true, Ordering::Release);
-        self.wake.wake();
-        let mut cancelling = false;
-        loop {
-            if !cancelling && (cancelled() || std::time::Instant::now() >= deadline) {
-                cancelling = true;
-                cancel.store(true, std::sync::atomic::Ordering::Release);
-                self.pending.store(true, Ordering::Release);
-                self.wake.wake();
-            }
-            match receiver.recv_timeout(Duration::from_millis(10)) {
-                Ok(result) => return result,
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    return Err("discovery job stopped".into());
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-            }
-        }
+        self.notify();
+        receiver
+            .recv()
+            .map_err(|_| "discovery job stopped".to_owned())?
     }
 }
 
 #[cfg(test)]
 #[path = "helpers_e19_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "helpers_e19fix_tests.rs"]
+mod e19fix_tests;

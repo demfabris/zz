@@ -132,6 +132,18 @@ read "Lane brief rules" before launching anything.
     `cli.instr.list_panes.p1` is bimodal on the Mac (base 0.149/0.151/0.163) and hidden chatty's
     median fell. Mac p1 CLI rows sit in two modes about 7% apart; judge them on min/max.
   - e03b Mac leg (`66cc31a4`): 1430 lib tests, source/hook compat clean.
+  - e06 (`576a9d13`, Linux): wait-for signal and lock waiters are cmdq continuations
+    (`daemon/wait_queue.rs`); 20 waiters add 0 workers and complete once; new
+    `smoke/wait-for-loop` matches tmux; instructions within 1.016x.
+  - e20 (`65defe00`, Mac): timer transitions, monitors and queued hooks run on the loop
+    (`daemon/hook_queue.rs`); zz-copy-refresh, zz-clock-mode and zz-daemon-hooks gone;
+    `plain_input_and_unchanged_selection_need_no_worker` 20/20. Only the bimodal p1 rows flagged.
+  - Linux leg of e15/e16: status jobs, tui-output-backpressure and pipe compat pass, but two e16
+    tests fail deterministically on Linux with or without e06:
+    `control_output_loop_delivers_bytes_without_readers` (5 s timeout) and
+    `copy_pipe_failure_is_a_reliable_client_message_and_releases_its_permit`. A Linux fix lane
+    follows. e20 conflicts with e06 in daemon.rs; resolved once on the Linux branch, then the Mac
+    branch takes the Linux tree through a merge (no force-push of `perf/loop`).
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

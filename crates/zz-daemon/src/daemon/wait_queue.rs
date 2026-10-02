@@ -167,6 +167,7 @@ impl CommandTask {
             failed_group: None,
             boundary: None,
             terminal_error: None,
+            parked_boundary: None,
             hook: None,
             events: None,
         };

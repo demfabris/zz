@@ -916,7 +916,7 @@ impl Shared {
                                     let Ok(message) = message else { return; };
                                     let Some(owner) = owner.upgrade() else { return; };
                                     agents.apply(&owner, message);
-                                    if agents.turn(&owner).is_err() { return; }
+                                    agents.turn(&owner);
                                     None
                                 }
                             }

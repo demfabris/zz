@@ -238,6 +238,15 @@ read "Lane brief rules" before launching anything.
     clean except `prompt-history`, which now fails on the Mac for every binary back to the wave-3
     start although e07's lane passed it hours earlier with the same pinned tmux: state between
     runs, not code. Added to the compat-drift task with the other two scenarios.
+  - Step (d) decision (2026-10-02): a read-only ultra plan (`bench/perf/campaign/w3-loop-d-plan.txt`)
+    counts 570 production `inner.lock()` sites (the rest of the ~2300 matches are tests) and 18
+    ConnectionThreads submissions, and splits (d) into d01a/d01b plus d02a-h, about 12-15 hours.
+    Its value estimate: a short command takes about 27 uncontended model lock/unlock pairs, 540-1080
+    instructions, 0.4-0.8% of `cli.instr.display.p1`; a chatty frame 2+V. After e21 the loop is the
+    only lock taker on Unix, so the lock is uncontended. Decision: W3-LOOP's perf work ends at
+    e21; (d) becomes a separate ownership-cleanup lane after W4-DELIVER (the plan file is its
+    input). Instead of the post-(d) parity review, an ultra source review of the whole c/e series
+    runs before the lane merge.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

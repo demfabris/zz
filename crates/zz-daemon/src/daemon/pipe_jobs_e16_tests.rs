@@ -21,6 +21,7 @@ fn twenty_active_pipes_deliver_on_the_loop_without_reader_threads() {
             .unwrap();
         let pane = context.pane.unwrap();
         let terminal = Arc::clone(&shared.inner.lock().terminals[&pane]);
+        terminal.capture(CaptureOptions::default()).unwrap();
         panes.push((
             pane,
             terminal,

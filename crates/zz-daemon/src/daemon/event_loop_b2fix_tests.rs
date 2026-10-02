@@ -458,7 +458,9 @@ fn control_output_loop_delivers_bytes_without_readers() {
     loop {
         assert!(
             Instant::now() < deadline,
-            "bulk raw output progress deadline"
+            "bulk raw output progress deadline: {} bytes, tail {:?}",
+            received.len(),
+            String::from_utf8_lossy(&received[received.len().saturating_sub(64)..])
         );
         event_loop.turn(&shared).unwrap();
         for message in super::io_tests::messages(&mut peer, &mut inbound) {
@@ -470,7 +472,13 @@ fn control_output_loop_delivers_bytes_without_readers() {
         {
             break;
         }
-        event_loop.poll_ready().unwrap();
+        event_loop
+            .poll
+            .poll(
+                &mut event_loop.events,
+                Some(deadline.saturating_duration_since(Instant::now())),
+            )
+            .unwrap();
     }
     assert!(received.len() >= 4_200_000);
     assert!(

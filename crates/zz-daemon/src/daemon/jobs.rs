@@ -440,6 +440,13 @@ impl JobRegistry {
                         Ok(count) => port.written += count,
                         Err(rustix::io::Errno::INTR) => {}
                         Err(rustix::io::Errno::AGAIN) => break,
+                        #[cfg(target_os = "linux")]
+                        Err(rustix::io::Errno::PIPE)
+                            if !port.descriptor.socket && job.pipe.is_none() =>
+                        {
+                            port.written = input.len();
+                            break;
+                        }
                         Err(error) => return Err(error.into()),
                     }
                 }
@@ -604,6 +611,10 @@ impl JobRegistry {
 #[cfg(test)]
 #[path = "jobs_e12_tests.rs"]
 mod e12_tests;
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "jobs_e16fix_tests.rs"]
+mod e16fix_tests;
 
 pub(super) fn launch_status(mut command: Command, mut output: StatusOutput) -> io::Result<Launch> {
     use std::os::unix::process::CommandExt as _;

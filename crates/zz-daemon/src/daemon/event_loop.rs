@@ -1539,12 +1539,23 @@ impl EventLoop {
                 self.disconnect(token, shared);
             }
             let connection = self.connections.get_mut(&token).unwrap();
+            #[cfg(target_os = "linux")]
+            let control_written = (self.control_output_deadline.is_some()
+                && connection.kind == Some(ClientKind::Control))
+            .then(|| connection.outbound.state.lock().written_bytes);
             if let Err(error) = connection.write_ready() {
                 log::debug!("client write failed: {error}");
                 self.remove(token, shared);
                 continue;
             }
             let connection = self.connections.get_mut(&token).unwrap();
+            #[cfg(target_os = "linux")]
+            if self.control_output_deadline.is_some()
+                && control_written
+                    .is_some_and(|before| connection.outbound.state.lock().written_bytes > before)
+            {
+                self.waker.wake()?;
+            }
             if let Some(client) = connection.client {
                 while let Some(pane) = connection.outbound.take_preview_refresh() {
                     let shared = Arc::clone(shared);

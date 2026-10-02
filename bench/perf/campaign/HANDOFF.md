@@ -81,6 +81,12 @@ read "Lane brief rules" before launching anything.
     family migrated yet (e14-e16). 20 jobs add 0 threads, each child reaped once. `chain5.p1`
     read 1.037x c04, but that row is bimodal on the Mac (c04 alone 0.2687 / 0.2689 / 0.278
     Minstr) and the other 23 rows are flat: accepted.
+  - e01fix (`3c21e82c`, Linux): `perf record -e instructions:u` showed command entry and
+    completion copying a request context nobody read; removing it leaves short commands 1.2-2.0%
+    above B on alienware (was 3.2-4.1%). Accepted.
+  - Linux leg of c04 and e12 on the combined branch: c04 tests and the slow-client soak pass;
+    five e12 registry tests failed in the serial suite only (EINTR from a SIGCHLD handler an
+    earlier test installed); fixed in the test pump (`78c906b4`). The loop itself retries.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the
@@ -893,6 +899,9 @@ summary in `<out>.cost.json`, `<out>.failed` when no valid answer), `lane-watchd
 
 ## Traps
 
+- Tests that call `Poll::poll` or other blocking syscalls must retry `Interrupted`: on Linux an
+  earlier test in the same process can leave a SIGCHLD handler installed, so the call fails
+  only in the serial suite. macOS did not show it (e12's registry tests).
 - Launching a lane over ssh with `nohup ... &` keeps the ssh call open until its timeout (the
   lane survives). Use `setsid -f lane-run.sh ... > log 2>&1 < /dev/null`.
 - macOS caps PTYs at 511: never run workspace tests and perf runs on the Mac at the same time.

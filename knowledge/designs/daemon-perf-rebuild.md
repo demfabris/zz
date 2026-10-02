@@ -3338,6 +3338,7 @@ The loop queues selected actions after closing the menu, against its saved targe
 Four new `daemon/menu_queue_e08_tests.rs` tests prove twenty open blocking menus add zero workers and lifecycle completion happens once. The serial daemon suite passes 1,490 tests with one ignored; fmt, check, daemon Clippy and six compat scenarios pass, with zero divergences across 38 steps.
 Three alternating quick pairs against `loop-705ca175-cli` pass all 19 CLI instruction rows below 1.02x base. `chain5.p20` is 0.2925 -> 0.2934 Minstr (1.00308x); idle CPU, instructions and wakeups are zero, and p1/p20 threads stay at 2/5. Linux-only checks were not run on this Mac.
 
+e11fix as-built (2026-10-02): Instruction profiles against da24448ee measured 41.34 -> 44.00 Minstr for 1,000 config lines. Per-line hook eligibility checks added lookups, searches and string comparisons; the split finish path repeated command resolution and moved finish state. Replay now executes through the continuation-aware path first and retains a frame for a wait or child, then resumes the completed step. Finish reuses its resolved command name. A 100-probe profile measured 41.99 Minstr, 1.57% above da24448ee. Hook-parking tests cover hooks installed within the source file and side effects that must run once. Mac checks stay with the orchestrator.
 
 ## W4-DELIVER: frames straight from shards (effort L)
 

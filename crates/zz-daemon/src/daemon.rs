@@ -31814,7 +31814,7 @@ impl Shared {
         let previous_replay_client = context.replay_client();
         let alias_group = MuxEngine::is_command_alias_group(&routed);
         let execution_replay_client = if options.control_target.is_some()
-            && !matches!(canonical_command(&routed.name), "if-shell" | "run-shell")
+            && !matches!(routed_name, "if-shell" | "run-shell")
         {
             None
         } else {
@@ -31857,9 +31857,6 @@ impl Shared {
             alias_group,
             caller_source_stream,
         };
-        if queue_execution.frame_active.get() {
-            return Ok(ConfigFrameAction::Command(Box::new(finish)));
-        }
         let result = self.execute_with_mux_source_routed_for_terminal_in_queue(
             ClientId(u64::MAX),
             ClientKind::Command,
@@ -31869,6 +31866,18 @@ impl Shared {
             client_terminal,
             Some(queue_execution),
         );
+        if queue_execution.frame_active.get()
+            && (queue_execution.child.borrow().is_some()
+                || self
+                    .command_item
+                    .as_ref()
+                    .unwrap()
+                    .lock()
+                    .pending_wait
+                    .is_some())
+        {
+            return Ok(ConfigFrameAction::Command(Box::new((finish, result))));
+        }
         self.finish_config_frame_command(
             path,
             context,
@@ -31971,19 +31980,17 @@ impl Shared {
             |error| daemon_error_output(error).cloned().unwrap_or_default(),
             |execution| execution.output.clone(),
         );
-        if canonical_command(&routed.name) == "display-message"
+        if routed_name == "display-message"
             && let Ok(execution) = &result
         {
             report.note_startup_display(&command, &execution.output);
         }
-        let raw_stdout = matches!(
-            canonical_command(&routed.name),
-            "save-buffer" | "show-buffer"
-        ) || alias_group
-            && options
-                .replay_client
-                .zip(stdout_sequence)
-                .is_some_and(|(client, sequence)| self.command_raw_stdout_since(client, sequence));
+        let raw_stdout =
+            matches!(routed_name, "save-buffer" | "show-buffer")
+                || alias_group
+                    && options.replay_client.zip(stdout_sequence).is_some_and(
+                        |(client, sequence)| self.command_raw_stdout_since(client, sequence),
+                    );
         if report.note_stdout(&captured_output, raw_stdout) == ReplayStdoutWrite::Denied
             && let Some(replay_client) = options.replay_client
         {
@@ -33606,7 +33613,7 @@ struct ConfigSourceBoundary {
 }
 
 enum ConfigFrameAction {
-    Command(Box<source_queue::CommandFinish>),
+    Command(Box<(source_queue::CommandFinish, Result<Execution, DaemonError>)>),
     ReadSource(Box<source_queue::SourceRead>),
     Continue,
     Source(Box<ConfigSourceBoundary>),

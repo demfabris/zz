@@ -328,20 +328,7 @@ impl Replay {
                     .pop_front()
                     .map_or(Ok(ConfigFrameAction::Finish), |prepared| {
                         let execution = frame.execution.as_ref().unwrap();
-                        let name = canonical_command(&prepared.routed.name);
-                        let direct = matches!(
-                            name,
-                            "set-option" | "set-window-option" | "bind-key" | "unbind-key"
-                        ) && {
-                            let inner = shared.inner.lock();
-                            !inner
-                                .engine
-                                .has_hook_commands(frame.context.session, "command-error")
-                                && !MuxEngine::after_command_hook(name).is_some_and(|hook| {
-                                    inner.engine.has_hook_commands(frame.context.session, hook)
-                                })
-                        };
-                        execution.frame_active.set(!direct);
+                        execution.frame_active.set(true);
                         shared.execute_config_frame_command(
                             &frame.path,
                             &mut frame.context,
@@ -358,19 +345,53 @@ impl Replay {
                     })
             });
             match action {
-                Ok(ConfigFrameAction::Command(finish)) => {
+                Ok(ConfigFrameAction::Command(started)) => {
+                    let (finish, result) = *started;
                     let execution = frame.execution.take().unwrap();
-                    let root = file_commands::root(
-                        frame.context.clone(),
+                    let mut root = file_commands::root(
+                        std::mem::take(&mut frame.context),
                         finish.routed.clone(),
                         execution,
                         self.terminal,
                         MuxOptionSource::TmuxConfig,
                     );
-                    self.active = Some(Active {
-                        commands: vec![root],
-                        finish: *finish,
-                    });
+                    let command = root.commands.next().unwrap();
+                    let group = command
+                        .source
+                        .as_ref()
+                        .map_or(InsertedPhysicalGroup::Unlocated, |source| {
+                            InsertedPhysicalGroup::Source(source.source.clone(), source.line)
+                        });
+                    let boundary = InsertedCommandBoundary {
+                        command,
+                        group,
+                        callback_failures_start: finish.callback_parse_failures_start,
+                        command_control_target: None,
+                        stdout_sequence: finish.stdout_sequence.unwrap_or(0),
+                    };
+                    let step = (result, None, false, None, false);
+                    let child = if shared
+                        .command_item
+                        .as_ref()
+                        .unwrap()
+                        .lock()
+                        .pending_wait
+                        .is_some()
+                    {
+                        root.wait_boundary = Some((boundary, step));
+                        None
+                    } else {
+                        shared.settle_inserted_frame_step(
+                            ClientId(u64::MAX),
+                            ClientKind::Command,
+                            &mut root,
+                            boundary,
+                            step,
+                        )
+                    };
+                    let mut commands = vec![root];
+                    commands.extend(child);
+                    self.active = Some(Active { commands, finish });
                     continue;
                 }
                 Ok(ConfigFrameAction::ReadSource(sources)) => {

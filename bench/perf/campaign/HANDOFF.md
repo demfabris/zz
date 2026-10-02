@@ -211,6 +211,10 @@ read "Lane brief rules" before launching anything.
     echo waits resume on output changes and deadlines (`daemon/terminal_reads.rs`); 20 waits add
     0 workers and 0 scan timers; 19/19 CLI and 6/6 chatty rows pass. Windows check passes with 16
     warnings (dead code on that target), left for the d steps.
+  - e11 (`e4330884`, Linux): client file requests, caller stdin and sourced replay resume through
+    continuations (`daemon/source_queue.rs`); 20 outstanding operations add 0 workers; wrong-owner
+    and duplicate replies rejected; 1479 daemon tests. `config.instr.source_1000` 41.4 -> 44.2
+    Minstr (+6.8%, outside the base's range): fix lane `e11fix` profiles it on alienware.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

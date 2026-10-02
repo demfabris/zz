@@ -89408,34 +89408,40 @@ bind - split-window -v -c "#{pane_current_path}"
         shared.spawn_copy_pipe(pane, client, command.to_owned(), "selection".to_owned());
 
         let message = wait_for_error(&subscriber);
-        assert!(matches!(
-            message,
-            ProtocolMessage::Event(Event {
-                payload: EventPayload::ClientMessage {
-                    pane: Some(actual),
-                    kind: ClientMessageKind::Error,
-                    text,
-                },
-                ..
-            }) if actual == pane && text.contains("exited unsuccessfully")
-        ));
+        assert!(
+            matches!(
+                &message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ClientMessage {
+                        pane: Some(actual),
+                        kind: ClientMessageKind::Error,
+                        text,
+                    },
+                    ..
+                }) if *actual == pane && text.contains("exited unsuccessfully")
+            ),
+            "{message:?}"
+        );
         assert!(control_subscriber.state.lock().reliable.is_empty());
         assert_eq!(shared.inner.lock().active_copy_pipes, 0);
 
         shared.spawn_copy_pipe(pane, control, command.to_owned(), "selection".to_owned());
 
         let message = wait_for_error(&subscriber);
-        assert!(matches!(
-            message,
-            ProtocolMessage::Event(Event {
-                payload: EventPayload::ClientMessage {
-                    pane: Some(actual),
-                    kind: ClientMessageKind::Error,
-                    text,
-                },
-                ..
-            }) if actual == pane && text.contains("exited unsuccessfully")
-        ));
+        assert!(
+            matches!(
+                &message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ClientMessage {
+                        pane: Some(actual),
+                        kind: ClientMessageKind::Error,
+                        text,
+                    },
+                    ..
+                }) if *actual == pane && text.contains("exited unsuccessfully")
+            ),
+            "{message:?}"
+        );
         assert!(control_subscriber.state.lock().reliable.is_empty());
         assert_eq!(shared.inner.lock().active_copy_pipes, 0);
     }

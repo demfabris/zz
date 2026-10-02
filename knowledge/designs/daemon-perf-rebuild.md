@@ -3900,3 +3900,20 @@ Remove two write-only `ExecutionContext` snapshots in `Shared::execute_command_r
 The instruction profiles put context cloning at 0.91% before and 0.60% after, and `memcpy` at 10.17% before and 9.47% after. Three alternating quick runs against the 1518f03d loop-00 binary pass 18/19 CLI instruction medians: chain5 p1/p20 ratios are 1.0131/1.0164; select-pane p20 is 1.02046, above the 1.02 limit. Chatty hidden is 51.0584 Minstr/s against B's maximum 52.8874; flip is 32.9205 against 32.9090 and misses by 0.035%. The sixth run also flags send-keys p20 wall time, outside this step's instruction criterion. The instruction gate remains open; hand on the select-pane and flip misses with the six scratch results under `/tmp/zzpc/e01fix-{B,C}-{1,2,3}.json`.
 
 Validation: formatting and daemon clippy with all targets/features and warnings denied pass. The serial daemon unit suite passes 1393/1395; `status_job_output_reaches_clients_without_a_periodic_deadline` passes alone, and `remote_scripts_fall_back_to_the_mac_app_bundle_cli` also fails on 71d59edb. The plain-input worker test passes. The remaining integration targets pass 35 tests with one ignored soak; doc tests contain no cases. All six selected compat scenarios pass 219 steps with zero divergences. Mac, iOS, Windows, full-workspace and full-compat checks remain for orchestration.
+
+## W3-LOOP e16 Linux fix, as built (2026-10-02)
+
+Linux resumes bounded Control tap delivery after the loop writer frees client output capacity.
+Linux copy-pipe jobs retain the child's exit status when stdin closes early; the loop still reaps
+and releases the permit. The pipe thread test waits for terminal startup, including Linux's
+`zz-pty-gather`, before sampling. Four-chunk backpressure and the macOS production paths stay intact.
+The three named tests passed 10 times each with gather and direct reads. Daemon checks passed
+1,444 library and 35 integration tests after excluding the known Mac bundle lookup test;
+terminal checks passed 364 tests. Clippy, formatting, 99 compat steps, and nine TUI backpressure
+assertions passed. An initial mode-keys timeout passed alone and in the serial recheck.
+Diagnostics against `loop-pre-e16fix-cli`: the base stalled the 16 MiB Control transfer for 120 s;
+the fix delivered 126.8 to 134.6 MB/s. Control instructions stayed at 0.0469 M/cmd, and threads
+stayed at 3/25 for one/twenty panes. Detached throughput was 122.8 to 124.5 MB/s against the
+base's 130.2; hidden chatty instructions varied from 0.914x to 1.043x the base. The final three
+alternating pairs run after this commit and decide those strict bounds. The tmux-relative
+Control burst gate was already red on the base; latency also varied. Mac checks go to the orchestrator.

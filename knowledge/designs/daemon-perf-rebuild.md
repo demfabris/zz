@@ -3114,6 +3114,22 @@ The known daemon endpoint test stayed red; four load failures passed alone. Mac 
 
 ## W3-LOOP: single-owner mux loop (effort XL)
 
+### Write batch drain (2026-10-02)
+
+`Connection::write_ready` wakes the mux loop when a full write batch leaves queued or
+inflight output, including ordinary clients. The poll-driven regression queues 786,483
+bytes: the base stops after 262,161 bytes; the fix drains them and passes ten runs.
+The serial daemon suite passes 1,500 library tests with only the named Mac bundle fallback
+exception; 35 integration tests, clippy, Windows check, four compat scenarios and all nine
+TUI backpressure assertions pass. Windows emits existing warnings.
+
+The preliminary Linux quick run against saved `c8beb4f9` gives 130.7 versus 129.4 MB/s
+detached throughput and CLI instruction ratios at most 1.004. Hidden chatty instructions
+are 45.24 versus 36.88 Minstr/s in these single runs; repeat the alternating series on the
+final commit before claiming the 1.02 instruction bound. The W0 gate has 45 passing and
+three failing attach rows; the saved base also fails attach rows. Hand Mac-only checks to
+the orchestrator. Scratch measurements stay under `/tmp/zzpc`.
+
 As built (e21fix): `EventLoop::remove` retires and wakes only for real cleanup;
 `Inbox::take_pending` skips empty lifecycle locks while parked hooks and shutdown keep advancing.
 The 5,000-display instruction profiles were 361.67 M at bf401683, 373.96 M in e21, and 364.85 M

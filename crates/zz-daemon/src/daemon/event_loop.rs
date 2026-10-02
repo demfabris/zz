@@ -1883,7 +1883,11 @@ impl Connection {
                         }
                     }
                     if sent >= attach::MAX_BATCHED_WRITE_BYTES {
-                        self.outbound.notify_one();
+                        if (!self.frames.is_empty() || self.outbound.state.lock().queued_bytes != 0)
+                            && let Some((waker, _)) = self.outbound.loop_waker.lock().as_ref()
+                        {
+                            waker.wake()?;
+                        }
                         return Ok(());
                     }
                 }
@@ -1894,6 +1898,10 @@ impl Connection {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "event_loop_writestall_tests.rs"]
+mod writestall_tests;
 
 #[cfg(test)]
 pub(super) fn serve_single(

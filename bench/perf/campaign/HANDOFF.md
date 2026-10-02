@@ -316,6 +316,32 @@ read "Lane brief rules" before launching anything.
     `perf/perffix` (`~/dev/zz-perffix`, Linux builds in alienware `~/dev/zz-loop-e01`: status-job
     and CLI instructions). All from `ebc4f781`; merge them, rerun the merge checks, then the
     wave-3 exit gates.
+  - Fix lanes merged 2026-10-02 (wall time, all Opus): testfix `42c8dc06` (40 min; a shared
+    `solo_tests::rerun_alone` runs the process-wide thread-count tests alone in a child process,
+    the which-key test expects spelled key names off macOS, the endpoint test runs with a PATH
+    of three symlinked tools, the merge-check scripts re-run integration tests with
+    `--workspace --test <target>`). testfix also found two more regressions: `zz reload-config`
+    hit the helper-wait guard, and a late client during a draining kill-server alias got EOF.
+    drainfix `363cf238` (14 min): `b9ab5478` had widened the accept gate in
+    `EventLoop::accept_ready` to `shutdown_pending`, so no connection was accepted during the
+    drain; back to `stopping`, with a real-socket test in `drainfix_tests.rs`. perffix
+    `f9f34b33` (90 min): status renders only when a job's output changes or it can restart this
+    second (1.375 renders per job before), one read buffer kept on the loop (an 8 KiB zeroing per
+    command), `Box<Client>` built in place, `task_command` evaluated once, the response clone in
+    `CommandTask::finish` only when someone else holds the item, no child frame for empty hook
+    lists. Linux statusjob instr/s 2.31 -> 1.25 Minstr/s (-46% against wave 2), Mac -26%, every
+    Linux CLI row within 2% of wave 2 (chain5 and list_keys +1 to +1.6%). loopfix `b333fc79`
+    (2 h 12 min): `loop_handoff.rs` hands a key binding that contains a parking command
+    (source-file, foreground run-shell, shell if-shell, load/save-buffer, prompt history while it
+    loads) to one queued task, keeping its order, and runs `reload-config` and
+    `import-tmux-config` on a connection worker; a queued caller parks on a CommandWait. Two of
+    those paths had hung the whole daemon (key-bound `run-shell`, including `-C`, parked forever).
+    The menu row was a TUI bug from W3-TUI (`8548e684`): a menu closed and a nested one opened in
+    the same batch left the old choice pending and ate every later key; `ClientCore` now counts
+    menu opens and `Model::sync_menu` drops the stale choice. Known gap: a command handed off
+    from inside a nested list (an `if-shell -F` body, a prompt template) runs after the rest of
+    that list, where tmux runs it in place. `cli.instr.display.p20` reads 0.140 or 0.151 on both
+    binaries (one sample right after 19 shells start); judge it settled, not by a quick median.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

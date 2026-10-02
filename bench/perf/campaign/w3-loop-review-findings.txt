@@ -1,0 +1,31 @@
+Review of perf/loop at 362c83bc7. Code read from an exported copy (/tmp/zzpc/review2/snap), because the worktree had uncommitted edits from another session. Line numbers are from that copy.
+
+1. P1, CONFIRMED (from the code, not reproduced): an event hook that waits panics the hook runner.
+   CommandTask items have loop_wait=true (wait_queue.rs:129). When a task finishes (wait_queue.rs:261/408), run_event_hooks (daemon.rs:7698) only queues hooks to LoopHooks when loop_leaf is set (8548), and only LoopHooks sets it. So the hooks run through the synchronous runner (8569). A run-shell, if-shell or wait-for inside the hook parks (16169), advance_inserted_frames returns None, and `.expect("synchronous inserted queue finished")` (14530) panics.
+   Scenario: `set-hook -g window-layout-changed 'run-shell true'`, then `split-window`. That task runs on the loop thread, which has no catch_unwind, so the daemon dies. On a worker (e.g. rename-window with a window-renamed hook), execute_work catches the panic, but the client is dropped with no response or ExecExit. Regression from the base. after-* hooks are not affected.
+
+2. P2, CONFIRMED in code; the trigger is Linux. After a 256 KiB batch, nothing wakes the loop again for the rest of the mailbox.
+   - write_ready returns after 256 KiB and calls notify_one (event_loop.rs:1788-1790), which does nothing on the loop thread (daemon.rs:2434-2438).
+   - If the batch went out in full, `frames` is empty, so no WRITABLE interest is registered (event_loop.rs:1592 and after).
+   - Frames and command output are now enqueued on the loop thread (the zz-pane-*/zz-output-* threads are gone), so the remainder waits for an unrelated event.
+   Why Linux: a 256 KiB send buffer comes out at about 416 KiB there, so a full batch fits in one writev. A probe on this Mac took only 256 KiB of a 300 KiB write, which arms WRITABLE. ffcef23e2's Linux wake (event_loop.rs:1566-1582) only covers Control clients.
+   Scenario: Linux GUI client, a window switch with large panes or kitty images queues about 600 KiB in one turn. About 300 KiB goes out; the rest waits for the next key press or timer.
+
+3. P3, CONFIRMED: the Windows test build no longer compiles.
+   watcher_tests.rs:181, agent_inbox_tests.rs:186-189, listing_e22_tests.rs:13 and terminal_reads_e05_tests.rs:133 use unix-only items (mio, pipe_jobs, LoopTimers, wait_queue). They are included under a bare #[cfg(test)] from modules that build on Windows (watchers.rs:967, agent_inbox.rs:105, cmdq.rs:281, terminal_reads.rs:693). The base gated such tests with cfg(all(test, unix)). The Windows CI test step has continue-on-error, so it turns red quietly and hides all Windows results. The library cross-checks clean for windows-msvc and linux-gnu.
+
+4. P3, PLAUSIBLE: a panic in scan_peers turns peer probing off until restart.
+   helpers.rs:418 runs before TimerCompletion::Peer is sent (425-427), and the worker's catch_unwind swallows the panic. peer_running stays true (timers.rs:471), so sync (timers.rs:284) never re-arms PeerProbe.
+
+5. P3, PLAUSIBLE race: a client-file waiter can leak.
+   unregister takes the waiters (daemon.rs:6457-6463), then removes the client under a separate lock (6470). client_file_operation checks the client (18853) but inserts later (18881) without re-checking.
+   Interleaving: the check passes, unregister takes the waiters, then the insert lands. Nothing removes that entry.
+   A background InsertedTask waiting on it (e.g. `run-shell -b -C 'load-buffer -'` and the CLI exits) parks forever holding a ShutdownBlocker, so a kill-server with no signal never finishes.
+
+Already in the base: stop_shutdown_resources (daemon.rs:5485-5653) skips command_prompt.waiter. A CLI parked on `command-prompt -t <client>` waits the 2 s admissions timeout at shutdown, then gets EOF.
+
+Nothing else found:
+A. Coalesced flags are cleared before their drains, and bounded drains re-notify when work is left. Timer re-arm and cancel compare tokens.
+B. Nothing at P1 or P2. expect("waiting command") at event_loop.rs:1376 cannot fire. Waits complete exactly once on disconnect.
+C. Apart from the known EPIPE case, the job registry behaves the same on Linux and macOS: EINTR is retried and SIGCHLD uses a self-pipe, as in the base.
+D. No ordering regressions apart from item 1. Hook blocks get their own %begin/%end, and ExecExit follows the last response.

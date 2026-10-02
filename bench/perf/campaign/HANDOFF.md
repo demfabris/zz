@@ -259,6 +259,15 @@ read "Lane brief rules" before launching anything.
     cancels the job and force-stops the child, unlike Linux). Fix lane `helperwait` on the Mac;
     the remaining review areas (wake flags, client-loss cleanup, platform guards, output order) go to
     an Opus subagent per brief rule 7.
+  - e21fix (`ff4e3335`, Linux): an empty retirement allocation, an extra loop wake and empty
+    lifecycle locking per command (1.8k instructions); 19/19 CLI rows at most 1.016x. Linux leg of
+    e22 on top (`c8beb4f9`): 1499 daemon, 374 terminal, 656 mux tests, backpressure passes.
+  - Opus review of the rest (`bench/perf/campaign/w3-loop-review-findings.txt`): P1 a waiting
+    event hook after a queued task panics the daemon (`set-hook -g window-layout-changed 'run-shell
+    true'` + split-window); P2 on Linux a fully accepted 256 KiB write batch leaves the rest of a
+    client's mailbox waiting for an unrelated event; P3 the Windows test build, a peer-scan panic
+    that stops peer probes, a client-file waiter leak race. Fix lanes: `hookpanic` and
+    `reviewfixes` (with the macOS copy-pipe EPIPE case) on the Mac, `writestall` on Linux.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

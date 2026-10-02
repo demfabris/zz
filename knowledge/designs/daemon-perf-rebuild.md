@@ -3859,3 +3859,12 @@ passed nine assertions, and all four requested smoke scenarios had zero divergen
 The final quick W0 gate had 14 passes, five failures and zero regressions: the four
 echo timing rows and `attach.cpu.p4` remain red, as on the base. No extra perf runs
 followed the required series. Mac runtime checks, iOS and Windows builds were not run.
+
+
+### W3-LOOP e01 instruction fix (2026-10-02)
+
+Remove two write-only `ExecutionContext` snapshots in `Shared::execute_command_request_with_streams_in_item` and `Shared::execute_with_mux_source_routed_for_terminal_in_queue_in_item`, plus their item field. Keep context in `LoopExec` or the command worker. Keep item and queue ids, continuation tokens, scope isolation, cached results and duplicate completion guards. Move the owner's context when adding future parked continuations instead of copying it on each command.
+
+The instruction profiles put context cloning at 0.91% before and 0.60% after, and `memcpy` at 10.17% before and 9.47% after. Three alternating quick runs against the 1518f03d loop-00 binary pass 18/19 CLI instruction medians: chain5 p1/p20 ratios are 1.0131/1.0164; select-pane p20 is 1.02046, above the 1.02 limit. Chatty hidden is 51.0584 Minstr/s against B's maximum 52.8874; flip is 32.9205 against 32.9090 and misses by 0.035%. The sixth run also flags send-keys p20 wall time, outside this step's instruction criterion. The instruction gate remains open; hand on the select-pane and flip misses with the six scratch results under `/tmp/zzpc/e01fix-{B,C}-{1,2,3}.json`.
+
+Validation: formatting and daemon clippy with all targets/features and warnings denied pass. The serial daemon unit suite passes 1393/1395; `status_job_output_reaches_clients_without_a_periodic_deadline` passes alone, and `remote_scripts_fall_back_to_the_mac_app_bundle_cli` also fails on 71d59edb. The plain-input worker test passes. The remaining integration targets pass 35 tests with one ignored soak; doc tests contain no cases. All six selected compat scenarios pass 219 steps with zero divergences. Mac, iOS, Windows, full-workspace and full-compat checks remain for orchestration.

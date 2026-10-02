@@ -12,8 +12,12 @@ fn session(shard: &ShardHandle, command: &str) -> TerminalSession {
     )
 }
 
-fn wait(mut ready: impl FnMut() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(2);
+fn wait(ready: impl FnMut() -> bool) {
+    wait_within(Duration::from_secs(2), ready);
+}
+
+fn wait_within(limit: Duration, mut ready: impl FnMut() -> bool) {
+    let deadline = Instant::now() + limit;
     while !ready() {
         assert!(
             Instant::now() < deadline,
@@ -371,4 +375,27 @@ fn short_lived_children_complete_without_output_on_a_shared_shard() {
         wait(|| pane.completion().is_some());
         assert_eq!(pane.completion().expect("child exit").code, 7);
     }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_child_stuck_draining_its_terminal_does_not_freeze_the_shard() {
+    let shard = ShardHandle::start(108).expect("shard");
+    let live = session(&shard, "stty -echo; printf 'ready\\r\\n'; exec cat");
+    wait(|| captured(&live, "ready"));
+    let exiting = session(&shard, "set -m; sleep 5 & printf 'unread\\r\\n'; exit 7");
+    let busy = TerminalSession::spawn_surface_with_shard(
+        String::new(),
+        "busy surface line\r\n".repeat(50_000),
+        Arc::new(TerminalAppearance::default()),
+        MAX_OUTPUT_VIEW_SCROLLBACK,
+        true,
+        Ok(Some(shard.clone())),
+    );
+    live.send_text("still served\n");
+    wait_within(Duration::from_secs(1), || captured(&live, "still served"));
+    wait(|| exiting.completion().is_some());
+    assert_eq!(exiting.completion().expect("child exit").code, 7);
+    assert!(captured(&exiting, "unread"));
+    drop(busy);
 }

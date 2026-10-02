@@ -694,6 +694,10 @@ impl PaneActor {
         if let Some(due) = self.termination_deadline {
             deadline = deadline.min(due);
         }
+        #[cfg(target_os = "macos")]
+        if let Some(due) = self.child_watch.retry {
+            deadline = deadline.min(due);
+        }
         if !self.raw_output_parse_backlog.is_empty() {
             deadline = Instant::now();
         }
@@ -929,8 +933,19 @@ impl PaneActor {
     }
 
     #[cfg(target_os = "macos")]
+    pub(super) fn retry_child(&mut self) -> Result<(), WorkerError> {
+        if self.exit_status.is_none()
+            && let Some(status) = self.child_watch.retry_due()
+        {
+            self.on_child_exit(status)?;
+        }
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
     pub(super) fn shard_child_pid(&self) -> Option<rustix::process::Pid> {
-        (self.exit_status.is_none() && !self.child_watch.reaped).then_some(self.child_watch.pid)
+        (self.exit_status.is_none() && !self.child_watch.reaped && self.child_watch.retry.is_none())
+            .then_some(self.child_watch.pid)
     }
 
     #[cfg(unix)]

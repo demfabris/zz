@@ -232,6 +232,12 @@ read "Lane brief rules" before launching anything.
   - Fifth sync: e10/e17 picked onto Linux by a lane (`bf401683`), e22 picked onto that in a scratch
     worktree (`ba4d2afa`, classifier union again), Mac `perf/loop` merged that tree (`362c83bc`).
     The Mac's Windows-build fix is subsumed: e11 removed `wait_needs_worker` on the Linux side.
+  - Mac leg of the fifth sync (`362c83bc`): clippy, Windows check, zz-mux 655, zz-terminal 371,
+    zz-daemon 1493 lib tests (one serial-suite failure of
+    `twenty_registered_jobs_add_no_monitor_threads_and_reap_once`, 3/3 alone), 16 compat scenarios
+    clean except `prompt-history`, which now fails on the Mac for every binary back to the wave-3
+    start although e07's lane passed it hours earlier with the same pinned tmux: state between
+    runs, not code. Added to the compat-drift task with the other two scenarios.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

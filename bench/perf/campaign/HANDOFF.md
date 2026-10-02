@@ -108,6 +108,15 @@ read "Lane brief rules" before launching anything.
     within 1.006x, control instructions +0.44% (noise, accepted). `smoke/control-alias-prepare`
     has 2 OUT divergences on alienware on every binary back to the wave-3 start (`base-cli`): not
     a LOOP regression; check it on the Mac before calling it a Linux gap.
+  - e15 (`6fdb9049`, Mac): status `#()` jobs run on the job registry (`daemon/status_jobs.rs`),
+    the first family to use it; no reader or drop-cleanup threads. `statusjob.threads_per_s` 3 -> 0,
+    status CPU 0.21% (limit about 0.7%), status instructions 7.14 -> 6.94 Minstr/s, CLI within
+    1.015x, 1458 daemon tests. `smoke/status-background-jobs` fails its clock assertion on the base
+    and on tmux on this Mac (not e15).
+  - e03a Mac leg (`07fb0a4c`): 1424 lib tests, alias compat clean. `smoke/control-alias-prepare`
+    also fails on the Mac with the wave-3 start binary: zz answers frozen/sequential as the
+    2026-09-06 closure recorded, the fetched tmux oracle now answers broken. Oracle drift, not
+    LOOP; handed to a separate task.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

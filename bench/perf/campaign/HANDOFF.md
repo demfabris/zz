@@ -220,6 +220,12 @@ read "Lane brief rules" before launching anything.
     tests. `show_options.p1` 1.027x is one of the bimodal Mac p1 rows.
   - Order change: e21 (startup replay, registration, shutdown) touches the source replay e11's fix
     is rewriting, so the Mac took e22 (cooperative list-keys and full-history capture) first.
+  - e11fix (`64e475f5`, Linux): per-line hook eligibility searches, repeated command-name
+    resolution and finish-state copies in source replay; the replay now runs a line first and keeps
+    a frame only for waits or children. `config.instr.source_1000` 1.020x the base (was 1.068x).
+  - Fourth sync onto Linux: e18 picked (`f797df18`); the Windows-build fix does not apply there
+    (e11 removed `wait_needs_worker` on that branch), so the Windows check reruns on the Mac after
+    convergence; e10 and e17 go through a pick lane (conflicts with e09/e11).
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

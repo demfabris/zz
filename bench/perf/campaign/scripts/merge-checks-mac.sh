@@ -1,6 +1,6 @@
 #!/opt/homebrew/bin/bash
 set -u
-STAGE=${STAGE:-wave3}
+STAGE=${STAGE:-final}
 cd ~/dev/zz-perf-int
 unset GHOSTTY_SOURCE_DIR
 export PATH=/opt/homebrew/opt/coreutils/libexec/gnubin:/opt/homebrew/opt/gnu-sed/libexec/gnubin:/opt/homebrew/opt/grep/libexec/gnubin:/opt/homebrew/bin:$PATH LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -u
-STAGE=${STAGE:-wave3}
+STAGE=${STAGE:-final}
 ulimit -n "$(ulimit -Hn)"
 cd ~/dev/zz-perf-int
 unset GHOSTTY_SOURCE_DIR

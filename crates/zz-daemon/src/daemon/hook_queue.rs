@@ -172,6 +172,8 @@ fn blocking_leaf(command: &CommandInvocation) -> bool {
             | "if-shell"
             | "wait-for"
             | "source-file"
+            | "reload-config"
+            | "import-tmux-config"
             | "display-menu"
             | "display-popup"
             | "agent-send"

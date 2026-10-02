@@ -6,10 +6,14 @@ pub(super) fn start_loop(shared: &Arc<Shared>) -> Result<(), DaemonError> {
         return Ok(());
     }
     let mut event_loop = event_loop::EventLoop::empty(shared)?;
+    shared.helpers.set_loop_thread(None);
     let owner = Arc::downgrade(shared);
     thread::Builder::new()
         .name("zz-test-shell-loop".into())
         .spawn(move || {
+            if let Some(shared) = owner.upgrade() {
+                shared.helpers.set_loop_thread(Some(thread::current().id()));
+            }
             while let Some(shared) = owner.upgrade() {
                 event_loop.shell_test_turn(&shared);
                 drop(shared);

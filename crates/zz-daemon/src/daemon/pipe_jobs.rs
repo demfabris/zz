@@ -50,12 +50,14 @@ pub(super) struct Driver {
 impl Driver {
     pub(super) fn new(shared: &Arc<Shared>) -> Self {
         let mut event_loop = event_loop::EventLoop::empty(shared).unwrap();
+        shared.helpers.set_loop_thread(None);
         let stop = Arc::new(AtomicBool::new(false));
         let stopped = Arc::clone(&stop);
         let shared = Arc::clone(shared);
         let worker = thread::Builder::new()
             .name("zz-test-mux".into())
             .spawn(move || {
+                shared.helpers.set_loop_thread(Some(thread::current().id()));
                 while !stopped.load(Ordering::Acquire) {
                     event_loop.pipe_test_turn(&shared);
                     thread::sleep(Duration::from_millis(2));

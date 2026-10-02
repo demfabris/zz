@@ -59,13 +59,13 @@ pub(super) enum Task {
     HistoryLoad {
         path: std::path::PathBuf,
         limit: usize,
-        reply: std::sync::mpsc::SyncSender<(Vec<String>, Vec<String>)>,
+        complete: Completion<(Vec<String>, Vec<String>)>,
     },
     HistorySave {
         path: std::path::PathBuf,
         command: Vec<String>,
         search: Vec<String>,
-        reply: std::sync::mpsc::SyncSender<()>,
+        complete: Completion<()>,
     },
     #[cfg(test)]
     Hold(
@@ -77,7 +77,10 @@ pub(super) enum Task {
 #[cfg(all(feature = "agent", unix))]
 pub(super) type PeerResult = io::Result<Vec<(PaneId, Option<u32>, Option<String>)>>;
 
+pub(super) type Completion<T> = Box<dyn FnOnce(&Arc<super::Shared>, T) + Send>;
+
 pub(super) enum Result {
+    Complete(Box<dyn FnOnce(&Arc<super::Shared>) + Send>),
     File {
         complete: super::file_commands::Completion,
         result: std::result::Result<Vec<u8>, super::DaemonError>,
@@ -180,14 +183,42 @@ impl Pool {
         self.jobs.wake.install(waker);
     }
 
+    #[cfg(all(test, unix))]
+    pub(super) fn set_loop_thread(&self, owner: Option<thread::ThreadId>) {
+        *self.state.loop_thread.lock() = owner;
+    }
+
     pub(super) fn active(&self) -> bool {
         self.state.queue.lock().workers != 0
+    }
+
+    pub(super) fn on_loop_thread(&self) -> bool {
+        #[cfg(unix)]
+        {
+            *self.state.loop_thread.lock() == Some(thread::current().id())
+        }
+        #[cfg(not(unix))]
+        {
+            false
+        }
+    }
+
+    pub(super) fn require_off_loop(&self) -> io::Result<()> {
+        if self.on_loop_thread() {
+            Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "synchronous helper reply on mux loop",
+            ))
+        } else {
+            Ok(())
+        }
     }
 
     pub(super) fn import_source(
         &self,
         path: &std::path::Path,
     ) -> std::result::Result<String, super::DaemonError> {
+        self.require_off_loop()?;
         let (reply, result) = std::sync::mpsc::sync_channel(1);
         self.submit_wait(Task::ImportRead {
             path: path.to_owned(),
@@ -199,6 +230,7 @@ impl Pool {
     }
 
     pub(super) fn read(&self, path: &std::path::Path) -> io::Result<Vec<u8>> {
+        self.require_off_loop()?;
         let (reply, result) = std::sync::mpsc::sync_channel(1);
         self.submit_wait(Task::Read {
             path: path.to_owned(),
@@ -427,19 +459,26 @@ fn run(task: Task, _state: &State) -> Option<Result> {
             }
             result
         }
-        Task::HistoryLoad { path, limit, reply } => {
-            let _ = reply.send(super::load_command_prompt_history(&path, limit));
-            None
+        Task::HistoryLoad {
+            path,
+            limit,
+            complete,
+        } => {
+            let history = super::load_command_prompt_history(&path, limit);
+            Some(Result::Complete(Box::new(move |shared| {
+                complete(shared, history);
+            })))
         }
         Task::HistorySave {
             path,
             command,
             search,
-            reply,
+            complete,
         } => {
             super::save_command_prompt_history(&path, &command, &search);
-            let _ = reply.send(());
-            None
+            Some(Result::Complete(Box::new(move |shared| {
+                complete(shared, ());
+            })))
         }
         #[cfg(test)]
         Task::Hold(wait, started) => {
@@ -559,3 +598,7 @@ mod tests;
 #[cfg(test)]
 #[path = "helpers_e19fix_tests.rs"]
 mod e19fix_tests;
+
+#[cfg(test)]
+#[path = "helpers_helperwait_tests.rs"]
+mod helperwait_tests;

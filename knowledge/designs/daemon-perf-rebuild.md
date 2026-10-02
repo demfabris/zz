@@ -3330,6 +3330,11 @@ Selection, acceptance, replacement, expiry, cancellation, detach and disconnect 
 Six new tests cover twenty parked overlays of each type with zero added workers, child frames and lifecycle completion. The serial daemon suite passes 1,492 tests with one ignored; fmt, daemon Clippy and six compat scenarios pass, with zero divergences across 43 steps.
 Three alternating quick pairs against `loop-6c163955-cli` pass all 19 CLI instruction rows under the 1.02x-or-baseline-range rule. `chain5.p20` is 0.2910 -> 0.2923 Minstr (1.00447x); idle CPU, instructions and wakeups are zero, and p1/p20 threads stay at 2/5. Linux-only checks were not run on this Mac.
 
+**e08 as built (2026-10-02, macOS):** `Shared::display_menu` reuses `OverlayWait` for one more explicit wait site; `daemon/wait_queue.rs` admits menus on the loop instead of parking a worker.
+The loop queues selected actions after closing the menu, against its saved target, while the invoking queue's tail resumes independently. Parse and runtime errors still reach the menu client; Control validation, disabled stay-open rows and resize state retain their existing behavior.
+Four new `daemon/menu_queue_e08_tests.rs` tests prove twenty open blocking menus add zero workers and lifecycle completion happens once. The serial daemon suite passes 1,490 tests with one ignored; fmt, check, daemon Clippy and six compat scenarios pass, with zero divergences across 38 steps.
+Three alternating quick pairs against `loop-705ca175-cli` pass all 19 CLI instruction rows below 1.02x base. `chain5.p20` is 0.2925 -> 0.2934 Minstr (1.00308x); idle CPU, instructions and wakeups are zero, and p1/p20 threads stay at 2/5. Linux-only checks were not run on this Mac.
+
 
 ## W4-DELIVER: frames straight from shards (effort L)
 

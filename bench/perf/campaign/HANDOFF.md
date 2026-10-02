@@ -164,6 +164,8 @@ read "Lane brief rules" before launching anything.
     Control client with status subscriptions off ahead of the copy-mode reply; `status_targets`
     now skips it. `mem.copy_instr.scroll180` 5.55 -> 4.97 Minstr (wave-2 exit value 4.92).
   - e16 Linux fix Mac leg (`ffcef23e`): 1442 lib tests, the three e16 tests, pipe compat clean.
+  - e13 (`326de470`, Mac): run-shell delays and `-C` callbacks on the timer heap with a ready-queue
+    activation for zero delay; 20 delays add 0 threads and 20 deadlines; 1479 daemon tests.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

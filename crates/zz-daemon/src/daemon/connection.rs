@@ -500,13 +500,19 @@ impl Session {
                         continue;
                     }
                     let context = self.context.as_mut().expect("client context");
+                    let task = wait_queue::task_command(&commands.as_slice()[0].invocation);
                     if inline {
                         let progress = if exec::output_pending(outbound) {
                             if outbound.state.lock().ctrl_collecting == ControlCollection::Attach {
                                 outbound.flush_control_batch(true);
                             }
                             Some(MessageProgress::Output)
-                        } else if !inline_query(shared, context, &commands.as_slice()[0]) {
+                        } else if !inline_task_or_query(
+                            shared,
+                            context,
+                            &commands.as_slice()[0],
+                            task,
+                        ) {
                             Some(MessageProgress::Worker)
                         } else {
                             None
@@ -521,7 +527,7 @@ impl Session {
                         }
                     }
                     let prepared = commands.next().unwrap();
-                    if wait_queue::task_command(&prepared.invocation) || !inline {
+                    if task || !inline {
                         self.task = wait_queue::CommandTask::new(
                             shared,
                             self.client,
@@ -612,10 +618,16 @@ impl Session {
                     }
                     let context = self.context.as_mut().expect("client context");
                     sync_context_with_attachment(&shared.inner.lock(), self.client, context);
+                    let task = wait_queue::task_command(&commands.as_slice()[0].invocation);
                     if inline {
                         let progress = if exec::output_pending(outbound) {
                             Some(MessageProgress::Output)
-                        } else if !inline_query(shared, context, &commands.as_slice()[0]) {
+                        } else if !inline_task_or_query(
+                            shared,
+                            context,
+                            &commands.as_slice()[0],
+                            task,
+                        ) {
                             Some(MessageProgress::Worker)
                         } else {
                             None
@@ -630,9 +642,7 @@ impl Session {
                     }
                     let command = commands.next().unwrap();
                     let last = commands.as_slice().is_empty();
-                    if (wait_queue::task_command(&command.invocation) || !inline)
-                        && command.result == PreparedCommandResult::Ready
-                    {
+                    if (task || !inline) && command.result == PreparedCommandResult::Ready {
                         if self.hello.kind == ClientKind::Control {
                             let _ = outbound.enqueue_reliable(&Shared::event(
                                 EventPayload::ControlCommandStarted {
@@ -1140,7 +1150,20 @@ pub(super) fn inline_query(
     context: &ExecutionContext,
     command: &PreparedCommand,
 ) -> bool {
+    inline_task_or_query(
+        shared,
+        context,
+        command,
+        wait_queue::task_command(&command.invocation),
+    )
+}
+
+fn inline_task_or_query(
+    shared: &Shared,
+    context: &ExecutionContext,
+    command: &PreparedCommand,
+    task: bool,
+) -> bool {
     command.result == PreparedCommandResult::Ready
-        && (wait_queue::task_command(&command.invocation)
-            || ctrl::control_query_can_defer_wakeup(&shared.inner.lock(), context, command))
+        && (task || ctrl::control_query_can_defer_wakeup(&shared.inner.lock(), context, command))
 }

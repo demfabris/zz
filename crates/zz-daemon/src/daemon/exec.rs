@@ -343,31 +343,25 @@ impl Shared {
         let now = unix_timestamp();
         inner.activity_sequence = inner.activity_sequence.saturating_add(1);
         let activity = inner.activity_sequence;
-        inner.clients.insert(
-            client,
-            Box::new(Client {
-                instance_id: Some(request.client_instance_id),
-                kind: Some(ClientKind::Command),
-                activity: Some(activity),
-                activity_time: Some(now),
-                created_time: Some(now),
-                focused: Some(true),
-                origin: request.origin,
-                nested: request.flags.contains(ExecFlags::NESTED),
-                utf8: request.flags.contains(ExecFlags::UTF8),
-                features: (request.features != 0).then_some(request.features),
-                tty: request.tty.as_ref().filter(|tty| !tty.is_empty()).cloned(),
-                size: request
-                    .size
-                    .filter(|(columns, rows)| *columns > 0 && *rows > 0),
-                pid: Some(request.process_id),
-                working_directory: client_working_directory_fact(
-                    request.working_directory.as_ref(),
-                ),
-                environment: Some(Arc::new(environment)),
-                ..Client::default()
-            }),
-        );
+        let mut entry = Box::<Client>::default();
+        entry.instance_id = Some(request.client_instance_id);
+        entry.kind = Some(ClientKind::Command);
+        entry.activity = Some(activity);
+        entry.activity_time = Some(now);
+        entry.created_time = Some(now);
+        entry.focused = Some(true);
+        entry.origin = request.origin;
+        entry.nested = request.flags.contains(ExecFlags::NESTED);
+        entry.utf8 = request.flags.contains(ExecFlags::UTF8);
+        entry.features = (request.features != 0).then_some(request.features);
+        entry.tty = request.tty.as_ref().filter(|tty| !tty.is_empty()).cloned();
+        entry.size = request
+            .size
+            .filter(|(columns, rows)| *columns > 0 && *rows > 0);
+        entry.pid = Some(request.process_id);
+        entry.working_directory = client_working_directory_fact(request.working_directory.as_ref());
+        entry.environment = Some(Arc::new(environment));
+        inner.clients.insert(client, entry);
         let context = request
             .origin
             .and_then(|pane| ExecutionContext::for_pane(&inner.engine.state, pane))
@@ -989,14 +983,19 @@ impl LoopExec {
         if prepared.admission.is_some() {
             let shared = Arc::clone(&self.shared);
             while prepared.task.is_some() || !prepared.commands.as_slice().is_empty() {
+                let mut task_command = None;
                 if inline {
                     if self.output_pending() {
                         prepared.waiting_output = true;
                         return None;
                     }
-                    if prepared.task.is_none() && !self.can_inline(&prepared.commands.as_slice()[0])
-                    {
-                        return None;
+                    if prepared.task.is_none() {
+                        let command = &prepared.commands.as_slice()[0];
+                        let task = wait_queue::task_command(&command.invocation);
+                        if !task && !self.can_inline(command) {
+                            return None;
+                        }
+                        task_command = Some(task);
                     }
                 }
                 let (response, client_exit) = if let Some(mut task) = prepared.task.take() {
@@ -1033,7 +1032,9 @@ impl LoopExec {
                         break;
                     }
                     invocation.set_stdin_available(prepared.stdin_available);
-                    if wait_queue::task_command(&invocation) || !inline {
+                    if !inline
+                        || task_command.unwrap_or_else(|| wait_queue::task_command(&invocation))
+                    {
                         match wait_queue::CommandTask::new(
                             &shared,
                             self.client,
@@ -1114,8 +1115,12 @@ impl LoopExec {
     }
 
     fn can_inline(&self, command: &PreparedCommand) -> bool {
-        if wait_queue::task_command(&command.invocation)
-            || connection::inline_query(&self.shared, &self.context, command)
+        if command.result == PreparedCommandResult::Ready
+            && ctrl::control_query_can_defer_wakeup(
+                &self.shared.inner.lock(),
+                &self.context,
+                command,
+            )
         {
             return true;
         }

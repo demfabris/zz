@@ -54,9 +54,13 @@ struct ShellJob {
 }
 
 impl ShellCacheEntry {
-    fn set_output(&mut self, output: String) {
+    fn set_output(&mut self, output: String) -> bool {
+        if self.output.as_ref() == Some(&output) {
+            return false;
+        }
         self.output_needs = zz_mux::format_needs_without_engine([output.as_str()]);
         self.output = Some(output);
+        true
     }
 
     fn poll(&mut self, command: &str) -> bool {
@@ -75,17 +79,17 @@ impl ShellCacheEntry {
             streamed |= update.streamed;
             failed |= update.failed;
         }
-        let changed = latest.is_some() || complete;
-        if failed {
-            self.set_output(format!("<'{command}' didn't start>"));
-        } else if let Some(output) = latest {
-            self.set_output(output);
-        }
+        let mut changed = if failed {
+            self.set_output(format!("<'{command}' didn't start>"))
+        } else {
+            latest.is_some_and(|output| self.set_output(output))
+        };
         if streamed {
             self.last = shell_second();
         }
         if complete {
             self.job = None;
+            changed |= self.last != shell_second();
         }
         changed
     }

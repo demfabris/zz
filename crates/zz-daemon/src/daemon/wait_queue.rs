@@ -339,7 +339,9 @@ impl CommandTask {
             frame.request_result.take().unwrap(),
         );
         let mut item = self.shared.command_item.as_ref().unwrap().lock();
-        item.result = Some((response.clone(), client_exit));
+        if Arc::strong_count(&self.shared) != 1 || Arc::weak_count(&self.shared) != 0 {
+            item.result = Some((response.clone(), client_exit));
+        }
         item.finish();
         (response, client_exit, frame.context, self.admission.take())
     }

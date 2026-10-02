@@ -8700,7 +8700,7 @@ impl Shared {
             let commands = inner.engine.event_hook_commands(&context, event.name);
             (context, commands)
         };
-        let commands = commands?;
+        let commands = commands.filter(|commands| !commands.is_empty())?;
         let draining =
             self.shutdown_pending.load(Ordering::Acquire) && !state.shutdown_already_blocked;
         Some(InsertedQueueChild {

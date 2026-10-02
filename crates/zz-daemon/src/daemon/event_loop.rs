@@ -126,11 +126,12 @@ pub(super) struct EventLoop {
     status_jobs: BTreeMap<u64, jobs::JobId>,
     #[cfg(feature = "agent")]
     agents: agent_inbox::AgentInbox,
-    connections: BTreeMap<Token, Connection>,
+    connections: BTreeMap<Token, Box<Connection>>,
     inserted_queues: Vec<wait_queue::InsertedTask>,
     completed: mpsc::Receiver<Completion>,
     completion_sender: mpsc::Sender<Completion>,
     turn_tokens: Vec<Token>,
+    read_buffer: Box<[u8]>,
     next_token: usize,
     accept_again: bool,
     control_output_deadline: Option<Instant>,
@@ -315,6 +316,7 @@ impl EventLoop {
             completed,
             completion_sender,
             turn_tokens: Vec::new(),
+            read_buffer: vec![0; 8192].into_boxed_slice(),
             next_token: 4,
             accept_again: false,
             control_output_deadline: None,
@@ -387,7 +389,7 @@ impl EventLoop {
         *outbound.loop_waker.lock() = Some((Arc::clone(&self.waker), thread::current().id()));
         self.connections.insert(
             token,
-            Connection {
+            Box::new(Connection {
                 stream,
                 inbound: Inbound::default(),
                 outbound,
@@ -418,7 +420,7 @@ impl EventLoop {
                 cancel: Arc::new(AtomicBool::new(false)),
                 cleanup_started: false,
                 released: None,
-            },
+            }),
         );
         Ok(token)
     }
@@ -672,7 +674,6 @@ impl EventLoop {
     }
 
     fn read_ready(&mut self, token: Token, shared: &Arc<Shared>) {
-        let mut scratch = [0; 8192];
         let mut received = 0;
         loop {
             loop {
@@ -720,7 +721,7 @@ impl EventLoop {
             if connection.read_closed {
                 return;
             }
-            let read = connection.stream.read(&mut scratch);
+            let read = connection.stream.read(&mut self.read_buffer);
             match read {
                 Ok(0) => {
                     let clean = connection.inbound.eof().is_ok();
@@ -736,7 +737,10 @@ impl EventLoop {
                 }
                 Ok(read) => {
                     received += read;
-                    connection.inbound.bytes.extend_from_slice(&scratch[..read]);
+                    connection
+                        .inbound
+                        .bytes
+                        .extend_from_slice(&self.read_buffer[..read]);
                 }
                 Err(error) if error.kind() == ErrorKind::Interrupted => continue,
                 Err(error) if error.kind() == ErrorKind::WouldBlock => return,

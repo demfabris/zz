@@ -15,7 +15,7 @@ Worktree: {wt} (branch {branch}, from {lb.INT_BRANCH} = origin/main 06ea9cf1 plu
 Wave 4 is the last wave. Its gate is `--stage final`. These rows fail that stage on the wave-3 exit build (rescored from bench/perf/results/wave3-<host>-e9bc174c.json, zz median, zz max, tmux median, ratio):
 
 {FINAL}
-Other lanes run at the same time in their own worktrees: W4-DELIVER (shard frame delivery, ~/dev/zz-deliver: publish_terminal_for_pane, OutboundState terminal slots, subscription handlers, control output taps, zz-pty-gather threads), W4-BINARY (~/dev/zz-binary: a daemon-only executable and packaging), W4-ROWS (~/dev/zz-rows: libghostty row extraction), KNOBS (~/dev/zz-knobs: deletes every ZZ_PERF_* rollback knob from waves 1 and 2 and the fallback paths behind them) and SPAWN (alienware ~/dev/zz-spawn: pane spawn CPU). Stay inside your own write zone; when the work you need sits in another lane's zone, report it under open instead of editing it.
+Other lanes run at the same time in their own worktrees: W4-DELIVER (shard frame delivery, ~/dev/zz-deliver: publish_terminal_for_pane, OutboundState terminal slots, subscription handlers, control output taps, zz-pty-gather threads), W4-BINARY (~/dev/zz-binary: a daemon-only executable and packaging), W4-ROWS (~/dev/zz-rows: libghostty row extraction), KNOBS (~/dev/zz-knobs: deletes every ZZ_PERF_* rollback knob from waves 1 and 2 and the fallback paths behind them), SPAWN (~/dev/zz-spawn, built on alienware: pane spawn CPU), DL6 (~/dev/zz-gather, built on alienware: one Linux PTY gather thread per shard), CONTROL (~/dev/zz-control: zz_cli -C latency) and TUI-ECHO (~/dev/zz-tuiecho: the attach client's cost per key). Stay inside your own write zone; when the work you need sits in another lane's zone, report it under open instead of editing it.
 '''
 
 def knobs():
@@ -102,9 +102,76 @@ Task: profile the daemon across a `split-window` / `new-window` / `split-window 
 
 Done criterion: on this host, three alternating quick runs on alienware of `cd {lw} && python3 bench/perf/run.py --zz <bin> --stage final --quick --only spawn --w0 none --json /tmp/zzpc/spawn/<label>.json` for the base ({lint}/target/release/zz_cli) and the lane build ({lw}/target/release/zz_cli): `spawn.cpu.split_shell`, `spawn.cpu.new_window` and `spawn.cpu.split_empty_P` medians at most 1.2x the tmux medians of the same runs, or, if a row cannot get there inside your zone, at least 25% fewer instructions than the base with the remaining cost itemised by function with sample shares; `spawn.wall.*` no worse than the base; zz-terminal and zz-daemon tests that touch spawn, respawn, kill-pane, remain-on-exit and pane exit pass; compat rows whose names contain split, spawn, respawn, kill, remain, exit or new-window pass or match the base; `cargo clippy` on touched crates clean. Run Linux builds with `ulimit -n $(ulimit -Hn)` and `-j6`; when you time anything on alienware, run it through `OWN={lw} ~/.cache/zz-perf/quiet-gate.sh --exec <cmd>` (pauses other compiles under ~/dev there). Commit on perf/spawn in {wt}, one commit, and push it to alienware as above at the end.'''
 
+
+
+PLAN_PATH = os.path.expanduser('~/dev/zz-perf-int/bench/perf/campaign/w4-deliver-plan.txt')
+
+def plan_line(prefix):
+    for line in open(PLAN_PATH):
+        if line.startswith(prefix):
+            return line.strip()
+    raise SystemExit(f'no plan line {prefix}')
+
+def plan_asis():
+    text = open(PLAN_PATH).read()
+    return text[text.index('As-is'):text.index('Slices in merge order:')].strip()
+
+def linux_hosts(slug):
+    wt = f'{lb.ROOT}/zz-{slug}'
+    lw = f'/home/demfabris/dev/zz-{slug}'
+    return f'''Hosts: you run on the Mac, but this slice runs only on Linux (alienware). Edit and commit in the Mac worktree {wt} (it has no target: do not build there). To build and measure: `cd {wt} && git push -q -f ssh://alienware/home/demfabris/dev/zz perf/{slug}:perf/{slug} && ssh alienware 'cd {lw} && git checkout -q --detach perf/{slug} && ulimit -n $(ulimit -Hn) && cargo build --release -j6 -p zz-cli'` ({lw} is a detached worktree there with a warm target; never check out a branch in it). Every Linux command goes through `ssh alienware '...'`, each call under 10 minutes (use `timeout`, or start long runs with `setsid -f ... > log 2>&1 < /dev/null` and poll the log). Linux base binary: /home/demfabris/dev/zz-perf-int/target/release/zz_cli (the perf/wave4 build). Linux scratch: /tmp/zzpc/{slug} on alienware. Time anything through `OWN={lw} ~/.cache/zz-perf/quiet-gate.sh --exec <cmd>` there (pauses other compiles under ~/dev). Commit on perf/{slug} in {wt}, one commit, and push it to alienware as above at the end.
+'''
+
+def gather():
+    wt = f'{lb.ROOT}/zz-gather'
+    return header('Wave 4 lane W4-DELIVER slice DL6: one PTY gather thread per shard (Linux)', wt, 'perf/gather', 180) + linux_hosts('gather') + f'''
+The W4-DELIVER plan (bench/perf/campaign/w4-deliver-plan.txt in the worktree; read only its As-is block and the DL6 line) found this as-is state:
+
+{plan_asis()}
+
+Your slice, verbatim from the plan:
+
+{plan_line('DL6 |')}
+
+SPAWN (another lane) edits PaneActor::spawn's spawn path on Linux at the same time: keep your change to the gather branch and poll_sources, and say in the report which functions you touched so the merge can be ordered.
+
+Done criterion: the DL6 done criterion above, measured on alienware against the base binary in the same session.'''
+
+def control():
+    l_wt = f'{lb.ROOT}/zz-control'
+    return header('Wave 4 lane CONTROL (C1): control-mode command latency at tmux parity', l_wt, 'perf/control', 180) + f'''
+The W4-DELIVER plan (bench/perf/campaign/w4-deliver-plan.txt in the worktree) measured this and handed it to a separate lane:
+
+{plan_line('Decision on control.latency')}
+
+Its as-is note on the control client: {[l for l in plan_asis().splitlines() if l.startswith('10.')][0]}
+
+Your lane, verbatim from the plan:
+
+{plan_line('C1 (')}
+
+Decision for this run: try the relay variant first. If it cannot reach the done criterion, the stdio variant is allowed now (DL5 has not started and will rebase on you): the daemon receives the control client's stdin/stdout over the socket with SCM_RIGHTS and writes the control protocol bytes to that fd directly, with a plain rollback switch `ZZ_CONTROL_RELAY=1` read once at CLI start that keeps the relay path. Keep `pump_control_output_at` rendering and `publish_control_output_for_pane` unchanged (DL5's zone); change only where the rendered bytes are written and how control lines arrive. Measure with `python3 bench/perf/campaign/w4-deliver-control.py <zz_cli> /opt/homebrew/bin/tmux {lb.SCRATCH}/control/control-<label>.json` (it exists in the worktree) and the `control` group of bench/perf/run.py; on the Mac only; Linux rows are NOT RUN here (the orchestrator runs them; say what you expect there).
+
+Done criterion: the C1 done criterion above for the Mac rows, with the Linux rows marked NOT RUN, and every listed compat row and test passing.'''
+
+def tuiecho():
+    wt = f'{lb.ROOT}/zz-tuiecho'
+    return header('Wave 4 lane TUI-ECHO: the attach client\'s cost per keystroke', wt, 'perf/tuiecho', 180) + f'''
+The W4-DELIVER plan (bench/perf/campaign/w4-deliver-plan.txt in the worktree) found that no wave-4 lane covers the raw-terminal attach client's share of echo latency:
+
+{[l for l in plan_asis().splitlines() if l.startswith('11.')][0]}
+
+{plan_line('macbook echo.p50.idle')}
+
+Earlier Linux breakdown (before W3-TUI, which then cut about 250 us): TUI client relay ~390 us of a 2.03 ms p50; W3-TUI runs the TUI client on one thread and one event loop (crates/zz-tui; the binary entry is crates/zz-cli). The final-stage rules: echo.p50.idle <= 1.5x tmux (Mac 0.589 ms against 0.262; Linux 1.78 against 0.928).
+
+Task: profile the zz TUI client (not the daemon) per keystroke on the Mac: `python3 bench/perf/campaign/w4-deliver-echo.py <zz_cli> {lb.SCRATCH}/tuiecho/echo-<label>.json` reports client kinstr and CPU per key; `sample <client pid> 5` during a typing loop shows where it goes. Cut the work between reading a key from the tty and writing the echoed cell to the tty: input decode and key encoding, the request to the daemon (one write, no extra wake or allocation per key), frame receipt and decode, the patch application, and the paint (only the changed cells and the cursor; no full-row or status rework for a one-cell echo; one write to the tty per frame). Write zone: crates/zz-tui and the TUI entry in crates/zz-cli; crates/zz-client only for the sans-IO reduction the TUI calls per frame (keep the GUI, web and iOS behaviour identical; their tests must pass). Not yours: the daemon (DELIVER's slices), libghostty row extraction (W4-ROWS). KNOBS deletes the `ZZ_PERF_TUI_COALESCE` knob in crates/zz-tui/src/lib.rs at the same time: do not touch that static or its uses beyond what your change needs, and keep the default (coalescing) behaviour.
+
+Done criterion: zz TUI client instructions per echoed key at most 40 kinstr (105 today) and CPU per key at most 30 us (70 today), from w4-deliver-echo.py medians over three runs against the base binary in the same session; echo.p50.idle on the Mac at least 30 us lower than the base in three alternating quick pairs (`python3 bench/perf/run.py --zz <bin> --stage final --quick --only echo --w0 none --json ...`, then `python3 bench/perf/campaign/scripts/ab-compare.py <dir>` with ab-pre-N/ab-post-N names); `chatty.client_cpu_pct.visible` not regressed; `cargo test -p zz-tui -p zz-client -p zz-cli`, clippy -D warnings on touched crates, and compat/tui-screen-diff.sh, compat/tui-copy-mode.sh, compat/tui-overlays.sh, compat/tui-choosers.sh and compat/attached-client.sh pass (`/opt/homebrew/bin/bash compat/<f>.sh $PWD/target/debug/zz_cli $PWD/compat/.cache/tmux-src/tmux`); Linux is NOT RUN here (the orchestrator measures it).'''
+
 if __name__ == '__main__':
     which = sys.argv[1]
-    text = {'knobs': knobs, 'deliver-plan': deliver_plan, 'binary': binary, 'rows': rows, 'spawn': spawn}[which]()
+    text = {'knobs': knobs, 'deliver-plan': deliver_plan, 'binary': binary, 'rows': rows, 'spawn': spawn, 'gather': gather, 'control': control, 'tuiecho': tuiecho}[which]()
     out = sys.argv[2] if len(sys.argv) > 2 else f'{OUT}/{which}.md'
     os.makedirs(os.path.dirname(out), exist_ok=True)
     open(out, 'w').write(text)

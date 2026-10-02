@@ -100,6 +100,24 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   - Decision: five lanes at once, four compiling on the Mac (owner, 2026-10-02: "bump the gas, we
     have usage"). Instruction, byte, count and thread rows are the signal while they build; wall
     and CPU rows are judged in quiet A/Bs at merge time.
+- W4-DELIVER plan done in 21 min (`a1f6fe3a` on perf/wave4, cherry-picked from the plan lane):
+  `bench/perf/campaign/w4-deliver-plan.txt` plus four probe scripts (`w4-deliver-*.py`). Wave 3
+  already removed the `zz-pane-N` threads and (on unix) the control tap threads; a second client
+  on a pane costs +6 Minstr/5 s against +515 for the first. Slices DL1 (current command, cwd and
+  activity off the frame path), DL2 (per-pane stream sequence, encode once), DL3/DL3b (shard
+  sinks), DL4 (shard writes the socket directly when the queue is empty), DL5 (%output as a sink
+  kind and the per-pane sequence barrier), DL6 (Linux: one gather thread per shard, threads
+  25 -> 9). Owners for all 28 final-stage fails. Two new lanes from it: C1 CONTROL
+  (`control.latency`: the daemon is already cheaper than tmux per command, the gap is the
+  `zz_cli -C` process, 9.5 us and 64 kinstr per command) and TUI-ECHO (the TUI client spends 105
+  kinstr and 70 us per key; DELIVER alone gives 60-100 us of the 196 us the Mac echo p50 needs).
+  Order: DL1, DL2 and DL4 start after KNOBS merges (it deletes knobs inside their functions); DL3
+  and DL3b rebase on W4-ROWS; DL6 merges after SPAWN.
+- Launched at 21:15: DL6 (`~/dev/zz-gather`, Mac edits, detached alienware worktree for builds),
+  CONTROL (`~/dev/zz-control`, Mac; decision: relay variant first, the SCM_RIGHTS stdio variant
+  allowed if the relay misses, behind `ZZ_CONTROL_RELAY=1`, since DL5 has not started and will
+  rebase on it) and TUI-ECHO (`~/dev/zz-tuiecho`, Mac). Seven lanes in flight: five compiling on
+  the Mac (load about 28 on 16 cores, 64% memory free), two building on alienware.
 
 ## Wave 3 merge log (from 2026-10-01)
 

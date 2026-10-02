@@ -3296,6 +3296,12 @@ Three alternating quick `cli,control,mem` pairs against `loop-b626aa02-cli` put 
 Control latency is red in all six runs; burst throughput is red only in new-2. The runs have zero harness errors; these tmux threshold rows are outside this slice's instruction/thread comparison.
 Shell jobs and other unconverted leaves, registration/startup and hook-capable cleanup still use workers. The Windows/test synchronous adapter remains; macOS, Windows, iOS, full-workspace, TUI and full-bench checks were not run for this slice.
 
+**e05 as built (2026-10-02, Linux):** `daemon/terminal_reads.rs` and `daemon/terminal_requests.rs` resume capture, semantic output, send-text, wait-pane and run-pane reads through actor reply tokens and cmdq continuations; synchronous terminal APIs remain for off-loop callers.
+History and mouse pointer reads enter on the mux loop; completions recheck the client and terminal identity. Mouse bindings retain the existing worker adapter after the pointer reply, with connection input ordering preserved.
+Kitty pixel and generation replies resume publication asynchronously; terminal-bound cache entries and atomic delivered-generation checks reject stale respawn and eviction results.
+Checks: 372 terminal tests, 1,456 daemon unit tests and 37 integration tests pass (one soak ignored); seven stale-result/loop-dispatch tests, the three named capture/history/frame tests, fmt, Clippy and five compat scenarios (73 steps, zero divergences) pass. The known macOS-bundle fixture fails on Linux; the cwd fixture passes alone and in the serial rerun.
+macOS, Windows, iOS, full-workspace and full-bench checks were not run; the final six quick instruction/thread measurements remain in `/tmp/zzpc/e05-{base,final}-{1,2,3}.json`.
+
 ## W4-DELIVER: frames straight from shards (effort L)
 
 Scope: the loop pushes per-pane subscriber sinks (queue handle, stream kind, delivered base,

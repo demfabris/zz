@@ -52,6 +52,7 @@ mod jobs;
 #[cfg(unix)]
 mod pipe_jobs;
 pub(crate) mod status_jobs;
+mod terminal_reads;
 mod terminal_requests;
 mod watchers;
 pub use exec::exec_resume_kind;
@@ -84,18 +85,18 @@ use zz_protocol::{
     ControlSourceFileEvent, DisplayPanesAction, DisplayPanesState, Event, EventPayload,
     GuiResponse, InputMessage, MAX_AGENT_SEND_BYTES, MAX_BROWSER_KEY_REPEAT,
     MAX_CHOOSE_BUFFER_QUERY_BYTES, MAX_CHOOSE_ITEM_KEY_BYTES, MAX_CHOOSE_ITEM_TEXT_BYTES,
-    MAX_CHOOSE_TREE_QUERY_BYTES, MAX_ENCODED_FRAME_BYTES, MAX_KITTY_IMAGE_REMOVALS,
-    MAX_PANE_INDICATOR_LABEL_BYTES, MAX_STARTUP_CONFIG_CAUSE_BYTES, MAX_STARTUP_CONFIG_CAUSES,
-    MAX_STARTUP_CONFIG_CAUSES_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES, MENU_ROW_MARGIN, MenuAction,
-    MenuItem, MenuState, MuxOptionKey, MuxOptionSource, MuxOptions, MuxSnapshot,
-    NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId, PaneIndicator, PaneKindSnapshot,
-    PaneMode, PasteUploadPurpose, PastedImageFormat, PatchTail, PopupAction, PopupBorderLines,
-    PopupPointer, PopupPointerButton, PopupState, PreparedCommand, PreparedCommandResult,
-    ProtocolError, ProtocolMessage, RawText, SERVER_OPTION_CAPABILITY_PREFIX, SPLIT_RATIO_BASIS,
-    ServerError, ServerHello, SessionId, SessionViewer, SourceSpan, SplitId, StatusLine,
-    StdoutClaim, WindowId, canonical_key, encode_protocol_message_into,
-    encode_terminal_patch_event_into, encode_terminal_viewport_event_into, is_key_name,
-    layout_menu_row, menu_row_cells, menu_row_width, resolve_command,
+    MAX_CHOOSE_TREE_QUERY_BYTES, MAX_ENCODED_FRAME_BYTES, MAX_PANE_INDICATOR_LABEL_BYTES,
+    MAX_STARTUP_CONFIG_CAUSE_BYTES, MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES,
+    MAX_WINDOW_STATUS_LABEL_BYTES, MENU_ROW_MARGIN, MenuAction, MenuItem, MenuState, MuxOptionKey,
+    MuxOptionSource, MuxOptions, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION,
+    PaneId, PaneIndicator, PaneKindSnapshot, PaneMode, PasteUploadPurpose, PastedImageFormat,
+    PatchTail, PopupAction, PopupBorderLines, PopupPointer, PopupPointerButton, PopupState,
+    PreparedCommand, PreparedCommandResult, ProtocolError, ProtocolMessage, RawText,
+    SERVER_OPTION_CAPABILITY_PREFIX, SPLIT_RATIO_BASIS, ServerError, ServerHello, SessionId,
+    SessionViewer, SourceSpan, SplitId, StatusLine, StdoutClaim, WindowId, canonical_key,
+    encode_protocol_message_into, encode_terminal_patch_event_into,
+    encode_terminal_viewport_event_into, is_key_name, layout_menu_row, menu_row_cells,
+    menu_row_width, resolve_command,
 };
 use zz_terminal::{
     AppearanceColor, AppearanceConfigDisposition, AppearanceLoad, AppearanceProvenance,
@@ -2750,6 +2751,7 @@ impl OutboundMailbox {
         KittyImageEnqueue::Queued
     }
 
+    #[cfg(test)]
     fn enqueue_kitty_images_removed(&self, pane: PaneId, image_ids: &[u32]) {
         let image_ids = {
             let state = self.state.lock();
@@ -2762,7 +2764,7 @@ impl OutboundMailbox {
                 .filter(|image_id| delivered.contains_key(image_id))
                 .collect::<Vec<_>>()
         };
-        for image_ids in image_ids.chunks(MAX_KITTY_IMAGE_REMOVALS) {
+        for image_ids in image_ids.chunks(zz_protocol::MAX_KITTY_IMAGE_REMOVALS) {
             let message = ProtocolMessage::Event(Event {
                 sequence: Shared::next_sequence(),
                 payload: EventPayload::KittyImagesRemoved {
@@ -2774,6 +2776,41 @@ impl OutboundMailbox {
                 break;
             }
         }
+    }
+
+    fn enqueue_kitty_image_removed_if_generation(
+        &self,
+        pane: PaneId,
+        image_id: u32,
+        generation: u64,
+    ) {
+        let message = ProtocolMessage::Event(Event {
+            sequence: Shared::next_sequence(),
+            payload: EventPayload::KittyImagesRemoved {
+                pane,
+                image_ids: vec![image_id],
+            },
+        });
+        let Ok(encoded) = self.encode_message(&message) else {
+            return;
+        };
+        let state = self.state.lock();
+        if state
+            .delivered_images
+            .get(&pane)
+            .and_then(|images| images.get(&image_id))
+            != Some(&generation)
+        {
+            return;
+        }
+        self.enqueue_encoded_reliable_with_locked(state, encoded.into(), |state| {
+            if let Some(images) = state.delivered_images.get_mut(&pane) {
+                images.remove(&image_id);
+                if images.is_empty() {
+                    state.delivered_images.remove(&pane);
+                }
+            }
+        });
     }
 
     fn enqueue_pasted_image(
@@ -4134,7 +4171,7 @@ struct SharedServer {
     peer_wait_inbox: Mutex<Option<crate::agent::claude_peers::PeerInbox>>,
     #[cfg(all(feature = "agent", unix))]
     peer_waits: Arc<Mutex<crate::agent::claude_peers::PeerWaits>>,
-    kitty_image_frames: Mutex<BTreeMap<KittyImageKey, Arc<[Vec<u8>]>>>,
+    kitty_image_frames: Mutex<BTreeMap<KittyImageKey, KittyImageFrames>>,
     pasted_images: Mutex<BTreeMap<PaneId, PanePastedImages>>,
     status: Mutex<StatusRenderer>,
     stopping: AtomicBool,
@@ -4542,6 +4579,11 @@ struct KittyImageKey {
     pane: PaneId,
     image_id: u32,
     generation: u64,
+}
+
+struct KittyImageFrames {
+    terminal: Weak<TerminalSession>,
+    frames: Arc<[Vec<u8>]>,
 }
 
 #[derive(Debug)]
@@ -7692,7 +7734,7 @@ impl Shared {
                         self.agent_catalog(client, context, &command.args)
                     }
                     DaemonCommandDispatch::CapturePane => {
-                        self.capture_pane(context, canonical, &command.args)
+                        self.capture_pane(client, context, canonical, &command.args)
                     }
                     DaemonCommandDispatch::RunShell => {
                         self.run_shell(client, kind, context, canonical, command, queue_execution)
@@ -7710,13 +7752,15 @@ impl Shared {
                         self.agent_respond(kind, context, &command.args)
                     }
                     DaemonCommandDispatch::SendLastOutput => {
-                        self.send_last_output(context, &command.args)
+                        self.send_last_output(client, context, &command.args)
                     }
                     DaemonCommandDispatch::ShowLastOutput => {
-                        self.show_last_output(context, &command.args)
+                        self.show_last_output(client, context, &command.args)
                     }
                     DaemonCommandDispatch::Inspect => self.inspect(client, context, &command.args),
-                    DaemonCommandDispatch::SendText => self.send_text(context, &command.args),
+                    DaemonCommandDispatch::SendText => {
+                        self.send_text(client, context, &command.args)
+                    }
                     DaemonCommandDispatch::WaitPane => {
                         self.wait_pane(client, kind, context, &command.args)
                     }
@@ -11925,12 +11969,13 @@ impl Shared {
 
     fn capture_pane(
         self: &Arc<Self>,
+        client: ClientId,
         context: &ExecutionContext,
         command_name: &str,
         args: &[RawText],
     ) -> Result<Execution, DaemonError> {
         let mut parsed = parse_capture_pane_args(args)?;
-        let (pane, terminal, dead, mut start, mut end) = {
+        let (pane, terminal, mut start, mut end) = {
             let mut inner = self.inner.lock();
             let pane = inner.engine.resolve_pane(
                 parsed.target.as_deref(),
@@ -11969,8 +12014,7 @@ impl Shared {
                 .get(&pane)
                 .cloned()
                 .ok_or(ServerError::PaneExited(pane))?;
-            let dead = inner.engine.state.pane(pane).is_some_and(|pane| pane.dead);
-            (pane, terminal, dead, start, end)
+            (pane, terminal, start, end)
         };
         if matches!(
             (start, end),
@@ -11980,29 +12024,46 @@ impl Shared {
         }
         parsed.options.start = start;
         parsed.options.end = end;
-        let capture = if dead {
-            terminal.capture_frozen_frame(parsed.options)
-        } else {
-            let _round_trips = zz_terminal::allow_actor_round_trips();
-            match terminal.capture(parsed.options) {
-                Err(TerminalCaptureError::ActorStopped) => {
-                    let retained = {
-                        let inner = self.inner.lock();
-                        inner
-                            .terminals
-                            .get(&pane)
-                            .is_some_and(|current| Arc::ptr_eq(current, &terminal))
-                            && inner.engine.state.pane(pane).is_some_and(|pane| pane.dead)
-                    };
-                    if retained {
-                        terminal.capture_frozen_frame(parsed.options)
-                    } else {
-                        Err(TerminalCaptureError::ActorStopped)
-                    }
-                }
-                result => result,
-            }
-        };
+        let wait = terminal_requests::CommandWait::new(self);
+        let request = terminal.capture_request(parsed.options, self.terminal_requests.notifier());
+        let no_hooks = context.no_hooks;
+        let retained = Arc::clone(&terminal);
+        wait.read(
+            self,
+            client,
+            pane,
+            terminal,
+            request,
+            move |shared, result| {
+                let capture = result
+                    .map_err(TerminalCaptureError::from)
+                    .and_then(|result| result);
+                let capture = if matches!(capture, Err(TerminalCaptureError::ActorStopped))
+                    && shared
+                        .inner
+                        .lock()
+                        .engine
+                        .state
+                        .pane(pane)
+                        .is_some_and(|pane| pane.dead)
+                {
+                    retained.capture_retained_frame(parsed.options)
+                } else {
+                    capture
+                };
+                shared.finish_capture_pane(pane, &parsed, no_hooks, capture)
+            },
+        );
+        wait.finish(self, Execution::default())
+    }
+
+    fn finish_capture_pane(
+        self: &Arc<Self>,
+        pane: PaneId,
+        parsed: &ParsedCapturePane,
+        no_hooks: bool,
+        capture: Result<String, TerminalCaptureError>,
+    ) -> Result<Execution, DaemonError> {
         let mut unavailable_alternate = false;
         let output = match capture {
             Ok(output) => output,
@@ -12045,7 +12106,7 @@ impl Shared {
                 true,
             )?
         };
-        if !context.no_hooks {
+        if !no_hooks {
             self.run_event_hooks(events);
         }
         self.refresh_choose_buffers();
@@ -16142,7 +16203,7 @@ impl Shared {
     }
 
     fn send_terminal_message_and_wait(
-        &self,
+        self: &Arc<Self>,
         client: ClientId,
         pane: PaneId,
         payload: &str,
@@ -16776,40 +16837,58 @@ impl Shared {
 
     fn send_last_output(
         self: &Arc<Self>,
+        client: ClientId,
         context: &ExecutionContext,
         args: &[RawText],
     ) -> Result<Execution, DaemonError> {
-        let (pane, capture, status) =
-            self.capture_last_command_for("send-last-output", context, args)?;
-        let agent = self
-            .inner
-            .lock()
-            .engine
-            .state
-            .recent_agent_pane(pane)
-            .ok_or_else(|| {
-                ServerError::MissingTarget(format!("no agent pane in the window holding {pane}"))
-            })?;
-        self.deliver_to_agent(agent, last_command_block(pane, &capture, status), false)?;
-        Ok(Execution {
-            output: format!("sent the last command from {pane} to {agent}").into(),
-            effects: Vec::new(),
-        })
+        self.capture_last_command_for(
+            client,
+            "send-last-output",
+            context,
+            args,
+            |shared, pane, capture, status| {
+                let agent = shared
+                    .inner
+                    .lock()
+                    .engine
+                    .state
+                    .recent_agent_pane(pane)
+                    .ok_or_else(|| {
+                        ServerError::MissingTarget(format!(
+                            "no agent pane in the window holding {pane}"
+                        ))
+                    })?;
+                shared.deliver_to_agent(
+                    agent,
+                    last_command_block(pane, &capture, status),
+                    false,
+                )?;
+                Ok(Execution {
+                    output: format!("sent the last command from {pane} to {agent}").into(),
+                    effects: Vec::new(),
+                })
+            },
+        )
     }
 
-    /// The read twin of `send-last-output`: the same OSC 133 extraction,
-    /// printed for whoever asked instead of routed to an agent.
     fn show_last_output(
         self: &Arc<Self>,
+        client: ClientId,
         context: &ExecutionContext,
         args: &[RawText],
     ) -> Result<Execution, DaemonError> {
-        let (pane, capture, status) =
-            self.capture_last_command_for("show-last-output", context, args)?;
-        Ok(Execution {
-            output: last_command_block(pane, &capture, status).into(),
-            effects: Vec::new(),
-        })
+        self.capture_last_command_for(
+            client,
+            "show-last-output",
+            context,
+            args,
+            |_, pane, capture, status| {
+                Ok(Execution {
+                    output: last_command_block(pane, &capture, status).into(),
+                    effects: Vec::new(),
+                })
+            },
+        )
     }
 
     /// `send-text`: paste into a terminal pane, wait until the text is
@@ -16817,19 +16896,28 @@ impl Shared {
     /// when the app asked for it; the echo poll is what makes the Enter
     /// safe, which is the whole point over `send-keys`.
     fn send_text(
-        &self,
+        self: &Arc<Self>,
+        client: ClientId,
         context: &ExecutionContext,
         args: &[RawText],
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_send_text_args(args)?;
         let text = parsed.payload()?;
-        let pane = self.inner.lock().engine.resolve_pane(
+        let (pane, terminal) = self.terminal_wait_target(
+            "send-text",
+            ClientKind::Command,
+            context,
             parsed.target.as_deref(),
-            context.window,
-            context.pane,
         )?;
-        self.paste_and_submit(pane, &text, parsed.timeout, !parsed.no_enter)?;
-        Ok(Execution::default())
+        terminal_reads::send_text(
+            self,
+            client,
+            pane,
+            terminal,
+            &text,
+            parsed.timeout,
+            !parsed.no_enter,
+        )
     }
 
     #[cfg(all(feature = "agent", unix))]
@@ -16852,7 +16940,11 @@ impl Shared {
     }
 
     #[cfg(all(feature = "agent", unix))]
-    fn deliver_to_terminal_pane(&self, pane: PaneId, text: &str) -> Result<(), DaemonError> {
+    fn deliver_to_terminal_pane(
+        self: &Arc<Self>,
+        pane: PaneId,
+        text: &str,
+    ) -> Result<(), DaemonError> {
         use crate::agent::codex_queue::{self, QueueError};
 
         if let Some((pid, title, cwd)) = self.codex_terminal_context(pane) {
@@ -16908,7 +17000,7 @@ impl Shared {
     }
 
     fn wait_pane(
-        &self,
+        self: &Arc<Self>,
         client: ClientId,
         kind: ClientKind,
         context: &ExecutionContext,
@@ -16917,163 +17009,11 @@ impl Shared {
         let parsed = parse_wait_pane_args(args)?;
         let (pane, terminal) =
             self.terminal_wait_target("wait-pane", kind, context, parsed.target.as_deref())?;
-        let started = Instant::now();
-        if matches!(parsed.condition, PaneWaitCondition::Exit) {
-            let (wait, status) = {
-                let mut inner = self.inner.lock();
-                if !inner
-                    .terminals
-                    .get(&pane)
-                    .is_some_and(|current| Arc::ptr_eq(current, &terminal))
-                {
-                    return Ok(Execution::default());
-                }
-                if terminal.completion().is_some() {
-                    let exit_code =
-                        pane_wait_exit_code(&terminal, &terminal.latest_viewport().status);
-                    return if exit_code == 0 {
-                        Ok(Execution::default())
-                    } else {
-                        Err(DaemonError::CommandExit {
-                            output: RawText::default(),
-                            exit_code,
-                        })
-                    };
-                }
-                let entry = inner
-                    .pane_exit_waits
-                    .entry(pane)
-                    .or_insert_with(PaneExitWait::new);
-                (entry.wait.clone(), Arc::clone(&entry.exit_code))
-            };
-            self.report_command_queue_park();
-            loop {
-                if self.command_queue_cancelled(client) {
-                    return Ok(Execution::default());
-                }
-                let interval = if parsed.timeout.is_zero() {
-                    PANE_WAIT_POLL_INTERVAL
-                } else {
-                    PANE_WAIT_POLL_INTERVAL.min(parsed.timeout.saturating_sub(started.elapsed()))
-                };
-                match wait.recv_timeout(interval) {
-                    Ok(()) | Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
-                        let exit_code = status.load(Ordering::Acquire);
-                        return if exit_code == 0 {
-                            Ok(Execution::default())
-                        } else {
-                            Err(DaemonError::CommandExit {
-                                output: RawText::default(),
-                                exit_code,
-                            })
-                        };
-                    }
-                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                        if !parsed.timeout.is_zero() && started.elapsed() >= parsed.timeout {
-                            return Err(DaemonError::CommandExit {
-                                output: format!(
-                                    "wait-pane: timed out waiting for --exit on {pane}\n"
-                                )
-                                .into(),
-                                exit_code: 124,
-                            });
-                        }
-                    }
-                }
-            }
-        }
-        let options = CaptureOptions {
-            start: CaptureBoundary::HistoryStart,
-            join_wrapped: true,
-            preserve_trailing: true,
-            ..CaptureOptions::default()
-        };
-        let scan_start = if matches!(
-            parsed.condition,
-            PaneWaitCondition::Until(_) | PaneWaitCondition::Regex(_)
-        ) {
-            capture_screen(&terminal, pane, &options)?
-                .lines()
-                .count()
-                .saturating_sub(usize::from(terminal.latest_viewport().rows))
-        } else {
-            0
-        };
-        let mut first = true;
-        self.report_command_queue_park();
-        loop {
-            if self.command_queue_cancelled(client) {
-                return Ok(Execution::default());
-            }
-            let last_output = {
-                let inner = self.inner.lock();
-                if !inner
-                    .terminals
-                    .get(&pane)
-                    .is_some_and(|current| Arc::ptr_eq(current, &terminal))
-                {
-                    return Err(ServerError::PaneExited(pane).into());
-                }
-                inner
-                    .last_output
-                    .get(&pane)
-                    .copied()
-                    .unwrap_or(started)
-                    .max(started)
-            };
-            match &parsed.condition {
-                PaneWaitCondition::Idle(dwell) => {
-                    if !first && last_output.elapsed() >= *dwell {
-                        return Ok(Execution::default());
-                    }
-                }
-                condition => {
-                    let screen = capture_screen(&terminal, pane, &options)?;
-                    if let Some(line) = screen
-                        .lines()
-                        .rev()
-                        .take(
-                            screen
-                                .lines()
-                                .count()
-                                .saturating_sub(scan_start)
-                                .min(10_000),
-                        )
-                        .skip_while(|line| line.trim().is_empty())
-                        .take(parsed.tail.unwrap_or(usize::MAX))
-                        .find(|line| match condition {
-                            PaneWaitCondition::Until(text) => line.contains(text),
-                            PaneWaitCondition::Regex(regex) => regex.is_match(line),
-                            PaneWaitCondition::Idle(_) | PaneWaitCondition::Exit => false,
-                        })
-                    {
-                        return Ok(Execution {
-                            output: format!("{line}\n").into(),
-                            effects: Vec::new(),
-                        });
-                    }
-                }
-            }
-            if !parsed.timeout.is_zero() && started.elapsed() >= parsed.timeout {
-                let condition = match &parsed.condition {
-                    PaneWaitCondition::Exit => "--exit".to_owned(),
-                    PaneWaitCondition::Idle(dwell) => format!("--idle {}", dwell.as_millis()),
-                    PaneWaitCondition::Until(text) => format!("--until {text:?}"),
-                    PaneWaitCondition::Regex(regex) => format!("--regex {:?}", regex.as_str()),
-                };
-                return Err(DaemonError::CommandExit {
-                    output: format!("wait-pane: timed out waiting for {condition} on {pane}\n")
-                        .into(),
-                    exit_code: 124,
-                });
-            }
-            first = false;
-            thread::sleep(SEND_TEXT_POLL_INTERVAL);
-        }
+        terminal_reads::wait_pane(self, client, pane, terminal, parsed)
     }
 
     fn run_pane(
-        &self,
+        self: &Arc<Self>,
         client: ClientId,
         kind: ClientKind,
         context: &ExecutionContext,
@@ -17082,171 +17022,52 @@ impl Shared {
         let parsed = parse_run_pane_args(args)?;
         let (pane, terminal) =
             self.terminal_wait_target("run-pane", kind, context, parsed.target.as_deref())?;
-        let mut nonce = [0_u8; 8];
-        getrandom::fill(&mut nonce).map_err(std::io::Error::other)?;
-        let nonce = u64::from_ne_bytes(nonce);
-        let marker = format!("ZZRUN-{nonce:016x}");
-        let line = format!(
-            "printf '\\n%s\\n' '{marker}-BEGIN'; {}; printf '\\n{marker}-RC=%d=END\\n' $?",
-            parsed.command,
-        );
-        let started = Instant::now();
-        self.report_command_queue_park();
-        if self.command_queue_cancelled(client) {
-            return Ok(Execution::default());
-        }
-        let echo_timeout = if parsed.timeout.is_zero() {
-            Duration::ZERO
-        } else {
-            parsed
-                .timeout
-                .saturating_sub(started.elapsed())
-                .max(Duration::from_nanos(1))
-        };
-        if let Err(error) = self.paste_and_submit(pane, &line, echo_timeout, true) {
-            if !parsed.timeout.is_zero() && started.elapsed() >= parsed.timeout {
-                self.record_command_stderr(
-                    client,
-                    &format!(
-                        "run-pane: timed out after {}s on {pane}; the command keeps running",
-                        parsed.timeout.as_secs_f64(),
-                    ),
-                );
-                return Err(DaemonError::CommandExit {
-                    output: RawText::default(),
-                    exit_code: 125,
-                });
-            }
-            return Err(error);
-        }
-        let options = CaptureOptions {
-            start: CaptureBoundary::HistoryStart,
-            join_wrapped: true,
-            preserve_trailing: true,
-            ..CaptureOptions::default()
-        };
-        let mut output = String::new();
-        let mut collecting = false;
-        loop {
-            if self.command_queue_cancelled(client) {
-                return Ok(Execution::default());
-            }
-            let screen = capture_screen(&terminal, pane, &options)?;
-            let (captured, exit_code) = run_pane_result(&screen, &marker, collecting);
-            if let Some(captured) = captured {
-                collecting = true;
-                captured.clone_into(&mut output);
-            }
-            if let Some(exit_code) = exit_code {
-                return if exit_code == 0 {
-                    Ok(Execution {
-                        output: output.into(),
-                        effects: Vec::new(),
-                    })
-                } else {
-                    Err(DaemonError::CommandExit {
-                        output: output.into(),
-                        exit_code,
-                    })
-                };
-            }
-            if !parsed.timeout.is_zero() && started.elapsed() >= parsed.timeout {
-                self.record_command_stderr(
-                    client,
-                    &format!(
-                        "run-pane: timed out after {}s on {pane}; the command keeps running",
-                        parsed.timeout.as_secs_f64(),
-                    ),
-                );
-                return Err(DaemonError::CommandExit {
-                    output: output.into(),
-                    exit_code: 125,
-                });
-            }
-            thread::sleep(SEND_TEXT_POLL_INTERVAL);
-        }
+        terminal_reads::run_pane(self, client, pane, terminal, parsed)
     }
 
     fn paste_and_submit(
-        &self,
+        self: &Arc<Self>,
         pane: PaneId,
         text: &str,
         timeout: Duration,
         enter: bool,
     ) -> Result<(), DaemonError> {
-        let (terminal, sinks) = {
-            let inner = self.inner.lock();
-            if !matches!(
-                inner.engine.state.pane(pane).map(|pane| &pane.kind),
-                Some(PaneKind::Terminal)
-            ) {
-                return Err(
-                    ServerError::InvalidTarget(format!("{pane} is not a terminal pane")).into(),
-                );
-            }
-            let terminal = inner
-                .terminals
-                .get(&pane)
-                .cloned()
-                .ok_or(ServerError::PaneExited(pane))?;
-            let sinks = resolve_input_sinks(&inner, pane)?
-                .into_iter()
-                .filter_map(|sink| match sink {
-                    PaneSink::Terminal(terminal) => Some(terminal),
-                    PaneSink::Browser(_) => None,
-                })
-                .collect::<Vec<_>>();
-            (terminal, sinks)
-        };
-        if sinks.is_empty() {
-            return Err(ServerError::InvalidCommand(format!("{pane}: pane input is off")).into());
-        }
-        let options = CaptureOptions {
-            join_wrapped: true,
-            ..CaptureOptions::default()
-        };
-        let collapsed_before = capture_screen(&terminal, pane, &options)?
-            .matches(PASTE_COLLAPSE_MARKER)
-            .count();
-        let bytes = prepare_paste_buffer(text.as_bytes(), b"\r", true)
-            .map_err(|error| ServerError::InvalidCommand(format!("send-text: {error}")))?;
-        let bytes: Arc<[u8]> = Arc::from(bytes);
-        for sink in &sinks {
-            sink.paste_prepared_bytes(None, Arc::clone(&bytes), true);
-        }
-        let tail = echo_tail(text);
-        let started = Instant::now();
-        loop {
-            thread::sleep(SEND_TEXT_POLL_INTERVAL);
-            let screen = capture_screen(&terminal, pane, &options)?;
-            if collapse_whitespace(&screen).contains(&tail)
-                || screen.matches(PASTE_COLLAPSE_MARKER).count() > collapsed_before
-            {
-                break;
-            }
-            if !timeout.is_zero() && started.elapsed() >= timeout {
-                return Err(ServerError::InvalidCommand(format!(
-                    "{pane}: text not echoed within {} seconds; nothing submitted",
-                    timeout.as_secs_f64(),
-                ))
-                .into());
-            }
-        }
-        if enter && !send_tokens(&sinks, &[zz_protocol::KeyToken::Named("Enter".to_owned())]) {
-            return Err(ServerError::InvalidCommand(format!(
-                "{pane}: input queue is full; text delivered but Enter not sent"
-            ))
-            .into());
-        }
-        Ok(())
+        let context = ExecutionContext::for_pane(&self.inner.lock().engine.state, pane)
+            .ok_or(ServerError::PaneExited(pane))?;
+        let (pane, terminal) = self.terminal_wait_target(
+            "send-text",
+            ClientKind::Command,
+            &context,
+            Some(&pane.to_string()),
+        )?;
+        let detached = self.server_owner().command_item(None);
+        terminal_reads::send_text(
+            &detached,
+            ClientId(u64::MAX),
+            pane,
+            terminal,
+            text,
+            timeout,
+            enter,
+        )
+        .map(|_| ())
     }
 
     fn capture_last_command_for(
-        &self,
+        self: &Arc<Self>,
+        client: ClientId,
         verb: &str,
         context: &ExecutionContext,
         args: &[RawText],
-    ) -> Result<(PaneId, LastCommandCapture, Option<i32>), DaemonError> {
+        finish: impl FnOnce(
+            &Arc<Shared>,
+            PaneId,
+            LastCommandCapture,
+            Option<i32>,
+        ) -> Result<Execution, DaemonError>
+        + Send
+        + 'static,
+    ) -> Result<Execution, DaemonError> {
         let target = parse_target_only_args(verb, args)?;
         let (pane, terminal, is_agent) = {
             let inner = self.inner.lock();
@@ -17271,39 +17092,57 @@ impl Shared {
                 .ok_or(ServerError::PaneExited(pane))?;
             (pane, terminal, is_agent)
         };
-        let _round_trips = zz_terminal::allow_actor_round_trips();
-        let capture = match terminal.capture_last_command() {
-            Ok(capture) => capture,
-            Err(TerminalCaptureError::NoSemanticMarks) if is_agent => {
-                return Err(ServerError::InvalidCommand(format!(
-                    "{pane} has not completed a turn yet"
-                ))
-                .into());
-            }
-            Err(TerminalCaptureError::NoSemanticMarks) => {
-                return Err(ServerError::InvalidCommand(format!(
+        let wait = terminal_requests::CommandWait::new(self);
+        let request = terminal.capture_last_command_request(self.terminal_requests.notifier());
+        let captured = Arc::clone(&terminal);
+        let verb = verb.to_owned();
+        wait.read(
+            self,
+            client,
+            pane,
+            terminal,
+            request,
+            move |shared, result| {
+                let capture = match result
+                    .map_err(TerminalCaptureError::from)
+                    .and_then(|result| result)
+                {
+                    Ok(capture) => capture,
+                    Err(TerminalCaptureError::NoSemanticMarks) if is_agent => {
+                        return Err(ServerError::InvalidCommand(format!(
+                            "{pane} has not completed a turn yet"
+                        ))
+                        .into());
+                    }
+                    Err(TerminalCaptureError::NoSemanticMarks) => {
+                        return Err(ServerError::InvalidCommand(format!(
                     "{pane} has no shell-integration marks; {verb} needs a shell that emits \
                      OSC 133 prompt marks (ghostty, kitty, wezterm, or starship shell \
                      integration all do)"
                 ))
                 .into());
-            }
-            Err(TerminalCaptureError::ActorStopped) => {
-                return Err(ServerError::PaneExited(pane).into());
-            }
-            Err(TerminalCaptureError::TimedOut) => {
-                return Err(ServerError::Internal("terminal capture timed out".to_owned()).into());
-            }
-            Err(error) => return Err(ServerError::Internal(error.to_string()).into()),
-        };
-        if capture.command.trim().is_empty() {
-            let unit = if is_agent { "turn" } else { "command" };
-            return Err(ServerError::InvalidCommand(format!(
-                "{pane} has not completed a {unit} yet"
-            ))
-            .into());
-        }
-        Ok((pane, capture, terminal.last_command_status()))
+                    }
+                    Err(TerminalCaptureError::ActorStopped) => {
+                        return Err(ServerError::PaneExited(pane).into());
+                    }
+                    Err(TerminalCaptureError::TimedOut) => {
+                        return Err(
+                            ServerError::Internal("terminal capture timed out".to_owned()).into(),
+                        );
+                    }
+                    Err(error) => return Err(ServerError::Internal(error.to_string()).into()),
+                };
+                if capture.command.trim().is_empty() {
+                    let unit = if is_agent { "turn" } else { "command" };
+                    return Err(ServerError::InvalidCommand(format!(
+                        "{pane} has not completed a {unit} yet"
+                    ))
+                    .into());
+                }
+                finish(shared, pane, capture, captured.last_command_status())
+            },
+        );
+        wait.finish(self, Execution::default())
     }
 
     fn capture_browser(
@@ -22985,15 +22824,96 @@ impl Shared {
         let (variables, probe) =
             mouse_format_variables(&self.inner.lock(), &mouse, TerminalViewId(client.0));
         context.format_variables.extend(variables);
-        if let Some(probe) = probe {
-            context
-                .format_variables
-                .extend(pointer_format_variables(&probe));
-        }
         context.set_invoking_key(Some(key.to_owned()));
         context.set_invoking_mouse(Some(mouse));
-        let result =
-            self.execute_key_commands(client, kind, context, pane, &commands, repeat_binding);
+        let continuation = cmdq::WaitContinuation::new(None, None);
+        #[cfg(unix)]
+        if self.loop_active.load(Ordering::Acquire)
+            && let Some(item) = &self.command_item
+        {
+            item.lock().pending_wait = Some(Box::new(RegisteredWait {
+                name: String::new(),
+                continuation: continuation.clone(),
+                leaf: None,
+                guard: None,
+                terminal: None,
+            }));
+        }
+        let result = if let Some(probe) = probe {
+            let request = probe.terminal.pointer_context_request(
+                probe.view,
+                probe.column,
+                probe.row,
+                self.terminal_requests.notifier(),
+            );
+            let done = continuation.clone();
+            let mut captured_context = context.clone();
+            let terminal = probe.terminal;
+            self.terminal_requests
+                .submit(request, move |shared, result| {
+                    let valid = {
+                        let inner = shared.inner.lock();
+                        inner.client(client).is_some()
+                            && client_is_attached_to_pane(&inner, client, pane)
+                            && inner
+                                .terminals
+                                .get(&pane)
+                                .is_some_and(|current| Arc::ptr_eq(current, &terminal))
+                    };
+                    if valid {
+                        captured_context
+                            .format_variables
+                            .extend(pointer_format_variables(result.unwrap_or_default()));
+                        #[cfg(unix)]
+                        if shared.loop_active.load(Ordering::Acquire) {
+                            shared.resume_mouse_binding(terminal_reads::MouseBinding {
+                                client,
+                                kind,
+                                pane,
+                                terminal: Some(terminal),
+                                context: captured_context,
+                                commands,
+                                repeat_binding,
+                                done,
+                            });
+                            return;
+                        }
+                        if let Err(error) = shared.execute_key_commands(
+                            client,
+                            kind,
+                            &mut captured_context,
+                            pane,
+                            &commands,
+                            repeat_binding,
+                        ) {
+                            log::warn!("mouse binding failed: {error}");
+                        }
+                        shared.sync_key_table(client, false);
+                    }
+                    done.complete();
+                });
+            self.terminal_requests.finish_off_loop(self, &continuation);
+            Ok(())
+        } else {
+            #[cfg(unix)]
+            if self.loop_active.load(Ordering::Acquire) {
+                self.resume_mouse_binding(terminal_reads::MouseBinding {
+                    client,
+                    kind,
+                    pane,
+                    terminal: None,
+                    context: context.clone(),
+                    commands,
+                    repeat_binding,
+                    done: continuation,
+                });
+                Ok(())
+            } else {
+                self.execute_key_commands(client, kind, context, pane, &commands, repeat_binding)
+            }
+            #[cfg(not(unix))]
+            self.execute_key_commands(client, kind, context, pane, &commands, repeat_binding)
+        };
         context.set_invoking_key(previous);
         context.set_invoking_mouse(previous_mouse);
         context.format_variables = previous_variables;
@@ -25709,7 +25629,7 @@ impl Shared {
     fn kitty_image_frames(
         &self,
         pane: PaneId,
-        terminal: &TerminalSession,
+        terminal: &Arc<TerminalSession>,
         image_id: u32,
         generation: u64,
     ) -> Option<Arc<[Vec<u8>]>> {
@@ -25718,27 +25638,30 @@ impl Shared {
             image_id,
             generation,
         };
-        if let Some(frames) = self.kitty_image_frames.lock().get(&key).cloned() {
-            return Some(frames);
-        }
-        if self.watcher_effects.is_some() {
-            return None;
-        }
-        let _round_trips = zz_terminal::allow_actor_round_trips();
-        let image = match terminal.kitty_image(image_id) {
-            Ok(Some(image)) if image.generation == generation => image,
-            Ok(Some(image)) => {
-                log::debug!(
-                    "Kitty image {image_id} moved from requested generation {generation} to {} before export",
-                    image.generation
-                );
-                return None;
-            }
-            Ok(None) => return None,
-            Err(error) => {
-                log::warn!("could not fetch Kitty image {image_id} for {pane}: {error}");
-                return None;
-            }
+        self.kitty_image_frames
+            .lock()
+            .get(&key)
+            .filter(|entry| {
+                entry
+                    .terminal
+                    .upgrade()
+                    .is_some_and(|current| Arc::ptr_eq(&current, terminal))
+            })
+            .map(|entry| Arc::clone(&entry.frames))
+    }
+
+    fn store_kitty_image_frames(
+        &self,
+        pane: PaneId,
+        terminal: &Arc<TerminalSession>,
+        image: &zz_terminal::KittyImage,
+    ) -> Option<Arc<[Vec<u8>]>> {
+        let image_id = image.image_id;
+        let generation = image.generation;
+        let key = KittyImageKey {
+            pane,
+            image_id,
+            generation,
         };
         let total_bytes = u32::try_from(image.bgra.len()).ok()?;
         let mut frames =
@@ -25772,42 +25695,135 @@ impl Shared {
             frames.push(encoded);
         }
         let frames: Arc<[Vec<u8>]> = frames.into();
-        let mut cache = self.kitty_image_frames.lock();
-        Some(
-            cache
-                .entry(key)
-                .or_insert_with(|| Arc::clone(&frames))
-                .clone(),
-        )
+        self.kitty_image_frames.lock().insert(
+            key,
+            KittyImageFrames {
+                terminal: Arc::downgrade(terminal),
+                frames: Arc::clone(&frames),
+            },
+        );
+        Some(frames)
+    }
+
+    fn request_kitty_images(
+        &self,
+        pane: PaneId,
+        terminal: &Arc<TerminalSession>,
+        referenced: &BTreeSet<(u32, u64)>,
+        finish: impl FnOnce(&Arc<Shared>, bool) + Send + 'static,
+    ) -> bool {
+        let missing = referenced
+            .iter()
+            .filter(|(image, generation)| {
+                self.kitty_image_frames(pane, terminal, *image, *generation)
+                    .is_none()
+            })
+            .copied()
+            .collect::<Vec<_>>();
+        if missing.is_empty() {
+            return true;
+        }
+        let remaining = Arc::new(std::sync::atomic::AtomicUsize::new(missing.len()));
+        let finish = Arc::new(Mutex::new(Some(finish)));
+        let success = Arc::new(AtomicBool::new(true));
+        for (image_id, generation) in missing {
+            let request = terminal.kitty_image_request(image_id, self.terminal_requests.notifier());
+            let terminal = Arc::clone(terminal);
+            let remaining = Arc::clone(&remaining);
+            let finish = Arc::clone(&finish);
+            let success = Arc::clone(&success);
+            self.terminal_requests
+                .submit(request, move |shared, result| {
+                    if shared.is_current_image_terminal(pane, &terminal)
+                        && let Ok(Some(image)) = result
+                        && image.generation == generation
+                    {
+                        if shared
+                            .store_kitty_image_frames(pane, &terminal, &image)
+                            .is_none()
+                        {
+                            success.store(false, Ordering::Release);
+                        }
+                    } else {
+                        success.store(false, Ordering::Release);
+                    }
+                    if remaining.fetch_sub(1, Ordering::AcqRel) == 1 {
+                        finish.lock().take().unwrap()(shared, success.load(Ordering::Acquire));
+                    }
+                });
+        }
+        false
+    }
+
+    fn is_current_image_terminal(&self, pane: PaneId, terminal: &Arc<TerminalSession>) -> bool {
+        let inner = self.inner.lock();
+        inner
+            .terminals
+            .get(&pane)
+            .is_some_and(|current| Arc::ptr_eq(current, terminal))
+            || inner.clients.values().any(|client| {
+                client.popup.as_ref().is_some_and(|popup| {
+                    popup.state.pane == pane && Arc::ptr_eq(&popup.terminal, terminal)
+                }) || client.command_output.as_ref().is_some_and(|output| {
+                    output.pane == pane && Arc::ptr_eq(&output.terminal, terminal)
+                })
+            })
     }
 
     fn enqueue_kitty_images_for_viewport(
         &self,
         outbound: &OutboundMailbox,
         pane: PaneId,
-        terminal: &TerminalSession,
+        terminal: &Arc<TerminalSession>,
         viewport: &TerminalViewport,
-    ) {
+    ) -> bool {
         let referenced = viewport
             .kitty_placements
             .iter()
             .map(|placement| (placement.image_id, placement.image_generation))
             .collect::<BTreeSet<_>>();
+        if referenced.is_empty() {
+            return true;
+        }
+        let subscriber = self
+            .inner
+            .lock()
+            .clients
+            .iter()
+            .find_map(|(client, state)| {
+                state
+                    .subscriber
+                    .as_ref()
+                    .filter(|subscriber| std::ptr::eq(subscriber.as_ref(), outbound))
+                    .map(|subscriber| (*client, Arc::clone(subscriber)))
+            });
+        let terminal_ready = Arc::clone(terminal);
+        if !self.request_kitty_images(pane, terminal, &referenced, move |shared, success| {
+            if success
+                && shared.is_current_image_terminal(pane, &terminal_ready)
+                && let Some((client, subscriber)) = subscriber
+            {
+                shared.send_full(client, pane, &subscriber);
+            }
+        }) {
+            return false;
+        }
         for (image_id, generation) in referenced {
             let Some(frames) = self.kitty_image_frames(pane, terminal, image_id, generation) else {
                 continue;
             };
             match outbound.enqueue_kitty_image(pane, image_id, generation, &frames) {
-                KittyImageEnqueue::AlreadyDelivered => {}
-                KittyImageEnqueue::Queued | KittyImageEnqueue::Closed => break,
+                KittyImageEnqueue::AlreadyDelivered | KittyImageEnqueue::Queued => {}
+                KittyImageEnqueue::Closed => return false,
             }
         }
+        true
     }
 
     fn evict_absent_kitty_images(
         &self,
         pane: PaneId,
-        terminal: &TerminalSession,
+        terminal: &Arc<TerminalSession>,
         referenced: &BTreeSet<(u32, u64)>,
     ) {
         let candidates = self
@@ -25817,41 +25833,39 @@ impl Shared {
             .filter(|key| key.pane == pane && !referenced.contains(&(key.image_id, key.generation)))
             .copied()
             .collect::<Vec<_>>();
-        let mut removed = BTreeSet::new();
-        let mut stale = Vec::new();
-        let _round_trips = zz_terminal::allow_actor_round_trips();
         for key in candidates {
-            match terminal.kitty_image_generation(key.image_id) {
-                Ok(generation) if generation == Some(key.generation) => {}
-                Ok(_) => {
-                    stale.push(key);
-                    removed.insert(key.image_id);
-                }
-                Err(error) => log::warn!(
-                    "could not verify Kitty image {} storage for {pane}: {error}",
-                    key.image_id
-                ),
-            }
-        }
-        if stale.is_empty() {
-            return;
-        }
-        let mut cache = self.kitty_image_frames.lock();
-        for key in stale {
-            cache.remove(&key);
-        }
-        drop(cache);
-        let image_ids = removed.into_iter().collect::<Vec<_>>();
-        let subscribers = self
-            .inner
-            .lock()
-            .clients
-            .values()
-            .filter_map(|c| c.subscriber.as_ref())
-            .cloned()
-            .collect::<Vec<_>>();
-        for subscriber in subscribers {
-            subscriber.enqueue_kitty_images_removed(pane, &image_ids);
+            let request = terminal
+                .kitty_image_generation_request(key.image_id, self.terminal_requests.notifier());
+            let terminal = Arc::clone(terminal);
+            self.terminal_requests
+                .submit(request, move |shared, result| {
+                    if !shared.is_current_image_terminal(pane, &terminal) {
+                        return;
+                    }
+                    let Ok(generation) = result else {
+                        return;
+                    };
+                    if generation == Some(key.generation) {
+                        return;
+                    }
+                    let removed = shared.kitty_image_frames.lock().remove(&key).is_some();
+                    if removed {
+                        let subscribers = shared
+                            .inner
+                            .lock()
+                            .clients
+                            .values()
+                            .filter_map(|client| client.subscriber.clone())
+                            .collect::<Vec<_>>();
+                        for subscriber in subscribers {
+                            subscriber.enqueue_kitty_image_removed_if_generation(
+                                pane,
+                                key.image_id,
+                                key.generation,
+                            );
+                        }
+                    }
+                });
         }
     }
 
@@ -26043,8 +26057,10 @@ impl Shared {
             );
         }
         for (pane, kind, terminal, viewport) in viewports {
-            if kind == TerminalStreamKind::Foreground {
-                self.enqueue_kitty_images_for_viewport(outbound, pane, &terminal, &viewport);
+            if kind == TerminalStreamKind::Foreground
+                && !self.enqueue_kitty_images_for_viewport(outbound, pane, &terminal, &viewport)
+            {
+                continue;
             }
             let message = Self::event(EventPayload::TerminalViewport { pane, viewport });
             match kind {
@@ -26058,9 +26074,12 @@ impl Shared {
                 }
             }
         }
-        if let Some((state, _terminal, viewport)) =
+        if let Some((state, terminal, viewport)) =
             popup.filter(|_| !client_terminal_publication_frozen(&self.inner.lock(), client))
         {
+            if !self.enqueue_kitty_images_for_viewport(outbound, state.pane, &terminal, &viewport) {
+                return;
+            }
             let _ = outbound.replace_terminal_viewport(
                 state.pane,
                 Self::next_sequence(),
@@ -26108,14 +26127,20 @@ impl Shared {
                 .and_then(|c| c.popup.as_ref())
                 .and_then(|popup| {
                     (popup.state.pane == pane).then(|| {
-                        popup
-                            .terminal
-                            .latest_viewport_for(TerminalViewId(client.0))
-                            .unwrap_or_else(|| popup.terminal.latest_viewport())
+                        (
+                            Arc::clone(&popup.terminal),
+                            popup
+                                .terminal
+                                .latest_viewport_for(TerminalViewId(client.0))
+                                .unwrap_or_else(|| popup.terminal.latest_viewport()),
+                        )
                     })
                 })
         };
-        if let Some(viewport) = popup {
+        if let Some((terminal, viewport)) = popup {
+            if !self.enqueue_kitty_images_for_viewport(outbound, pane, &terminal, &viewport) {
+                return;
+            }
             let _ =
                 outbound.replace_terminal_viewport(pane, Self::next_sequence(), viewport.as_ref());
             return;
@@ -26145,7 +26170,10 @@ impl Shared {
         if let Some((kind, foreground_panes, terminal, viewport)) = viewport {
             match kind {
                 TerminalStreamKind::Foreground => {
-                    self.enqueue_kitty_images_for_viewport(outbound, pane, &terminal, &viewport);
+                    if !self.enqueue_kitty_images_for_viewport(outbound, pane, &terminal, &viewport)
+                    {
+                        return;
+                    }
                     let _ = outbound.replace_terminal_viewport(
                         pane,
                         Self::next_sequence(),
@@ -26166,12 +26194,12 @@ impl Shared {
     }
 
     fn send_history(
-        &self,
+        self: &Arc<Self>,
         client: ClientId,
         pane: PaneId,
         start: u32,
         count: u32,
-        outbound: &OutboundMailbox,
+        outbound: &Arc<OutboundMailbox>,
     ) {
         let terminal = {
             let inner = self.inner.lock();
@@ -26186,23 +26214,44 @@ impl Shared {
         let Some(terminal) = terminal else {
             return;
         };
-        let Ok((start, rows, dictionary, scrollbar, columns)) =
-            terminal.history(start, count.min(MAX_HISTORY_CHUNK_ROWS))
-        else {
-            return;
-        };
-        Self::send_event(
-            outbound,
-            EventPayload::HistoryChunk {
-                pane,
-                start,
-                total: scrollbar.total,
-                offset: scrollbar.offset,
-                columns,
-                rows,
-                dictionary,
-            },
+        let request = terminal.history_request(
+            start,
+            count.min(MAX_HISTORY_CHUNK_ROWS),
+            self.terminal_requests.notifier(),
         );
+        let outbound = Arc::clone(outbound);
+        let continuation = cmdq::WaitContinuation::new(None, None);
+        let done = continuation.clone();
+        self.terminal_requests
+            .submit(request, move |shared, result| {
+                let valid = {
+                    let inner = shared.inner.lock();
+                    inner.client(client).is_some()
+                        && inner
+                            .terminals
+                            .get(&pane)
+                            .is_some_and(|current| Arc::ptr_eq(current, &terminal))
+                        && client_attached_session(&inner, client).is_some_and(|session| {
+                            visible_terminal_panes(&inner, client, session).contains(&pane)
+                        })
+                };
+                if valid && let Ok(Ok((start, rows, dictionary, scrollbar, columns))) = result {
+                    Self::send_event(
+                        &outbound,
+                        EventPayload::HistoryChunk {
+                            pane,
+                            start,
+                            total: scrollbar.total,
+                            offset: scrollbar.offset,
+                            columns,
+                            rows,
+                            dictionary,
+                        },
+                    );
+                }
+                done.complete();
+            });
+        self.terminal_requests.finish_off_loop(self, &continuation);
     }
 
     fn open_command_output(
@@ -26525,7 +26574,9 @@ impl Shared {
         let Some(subscriber) = subscriber else {
             return;
         };
-        self.enqueue_kitty_images_for_viewport(&subscriber, pane, terminal, viewport);
+        if !self.enqueue_kitty_images_for_viewport(&subscriber, pane, terminal, viewport) {
+            return;
+        }
         let sequence = Self::next_sequence();
         let patch =
             base.and_then(|base| TerminalViewport::diff_shared(base, viewport, &mut fanout.diff));
@@ -27889,15 +27940,25 @@ impl Shared {
                 subscriber.suspend_terminal(pane);
             }
             for (pane, terminal, viewport) in newly_foreground {
-                self.enqueue_kitty_images_for_viewport(&subscriber, pane, &terminal, &viewport);
+                if !self.enqueue_kitty_images_for_viewport(&subscriber, pane, &terminal, &viewport)
+                {
+                    continue;
+                }
                 let message = Self::event(EventPayload::TerminalViewport { pane, viewport });
                 if subscriber.enqueue_terminal(pane, &message) == TerminalEnqueue::NeedsFull {
                     let _ = subscriber.replace_terminal(pane, &message);
                 }
             }
             for (pane, kind, terminal, viewport) in newly_streamed {
-                if kind == TerminalStreamKind::Foreground {
-                    self.enqueue_kitty_images_for_viewport(&subscriber, pane, &terminal, &viewport);
+                if kind == TerminalStreamKind::Foreground
+                    && !self.enqueue_kitty_images_for_viewport(
+                        &subscriber,
+                        pane,
+                        &terminal,
+                        &viewport,
+                    )
+                {
+                    continue;
                 }
                 let message = Self::event(EventPayload::TerminalViewport { pane, viewport });
                 match kind {
@@ -29034,7 +29095,7 @@ impl Shared {
         client: ClientId,
         base: Option<&TerminalViewport>,
         current: &TerminalViewport,
-        terminal: &TerminalSession,
+        terminal: &Arc<TerminalSession>,
         fanout: &mut PaneFrameFanout,
     ) {
         let (subscriber, kind, foreground_panes, unclaimed, mode_event, kill_pending) = {
@@ -29104,8 +29165,10 @@ impl Shared {
         }
         if let Some(subscriber) = subscriber {
             let kind = kind.expect("a terminal subscriber has a stream kind");
-            if kind == TerminalStreamKind::Foreground {
-                self.enqueue_kitty_images_for_viewport(&subscriber, pane, terminal, current);
+            if kind == TerminalStreamKind::Foreground
+                && !self.enqueue_kitty_images_for_viewport(&subscriber, pane, terminal, current)
+            {
+                return;
             }
             let sequence = Self::next_sequence();
             let delivery = match kind {
@@ -39495,15 +39558,8 @@ fn mouse_format_variables(
 /// Each answers NULL where there is nothing under the pointer, and a name the
 /// tree never carries expands the same empty a NULL does, so a read that finds
 /// nothing publishes nothing.
-fn pointer_format_variables(probe: &PointerProbe) -> BTreeMap<String, String> {
-    let _round_trips = zz_terminal::allow_actor_round_trips();
+fn pointer_format_variables(context: zz_terminal::PointerContext) -> BTreeMap<String, String> {
     let mut variables = BTreeMap::new();
-    let Ok(context) = probe
-        .terminal
-        .pointer_context(probe.view, probe.column, probe.row)
-    else {
-        return variables;
-    };
     for (name, value) in [
         ("mouse_word", context.word),
         ("mouse_line", context.line),
@@ -48844,22 +48900,6 @@ fn check_plain_text(command: &str, text: &str) -> Result<(), ServerError> {
         )));
     }
     Ok(())
-}
-
-fn capture_screen(
-    terminal: &TerminalSession,
-    pane: PaneId,
-    options: &CaptureOptions,
-) -> Result<String, DaemonError> {
-    let _round_trips = zz_terminal::allow_actor_round_trips();
-    match terminal.capture(*options) {
-        Ok(screen) => Ok(screen),
-        Err(TerminalCaptureError::ActorStopped) => Err(ServerError::PaneExited(pane).into()),
-        Err(TerminalCaptureError::TimedOut) => {
-            Err(ServerError::Internal("terminal capture timed out".to_owned()).into())
-        }
-        Err(error) => Err(ServerError::Internal(error.to_string()).into()),
-    }
 }
 
 fn collapse_whitespace(text: &str) -> String {
@@ -85405,7 +85445,7 @@ set-option -g @alias-mixed-next yes
         )));
         assert_eq!(
             shared
-                .show_last_output(&context, &[])
+                .show_last_output(ClientId(u64::MAX), &context, &[])
                 .expect("unknown exit status")
                 .output,
             format!("{pane} $ false\n```\nfailed\n```")
@@ -85413,7 +85453,7 @@ set-option -g @alias-mixed-next yes
         assert!(terminal.feed(Arc::from(b"\x1b]133;D;1\x07\x1b]133;A\x07$ ".as_slice())));
         assert_eq!(
             shared
-                .show_last_output(&context, &[])
+                .show_last_output(ClientId(u64::MAX), &context, &[])
                 .expect("failed command")
                 .output,
             format!("{pane} $ false\nexit: 1\n```\nfailed\n```")
@@ -85421,7 +85461,7 @@ set-option -g @alias-mixed-next yes
         assert!(terminal.feed(Arc::from(b"\x1b]133;D\x07".as_slice())));
         assert_eq!(
             shared
-                .show_last_output(&context, &[])
+                .show_last_output(ClientId(u64::MAX), &context, &[])
                 .expect("cleared exit status")
                 .output,
             format!("{pane} $ false\n```\nfailed\n```")
@@ -89722,7 +89762,10 @@ bind - split-window -v -c "#{pane_current_path}"
 
     #[test]
     fn outbound_mailbox_batches_kitty_image_removals_without_losing_ids() {
-        for count in [MAX_KITTY_IMAGE_REMOVALS, MAX_KITTY_IMAGE_REMOVALS + 1] {
+        for count in [
+            zz_protocol::MAX_KITTY_IMAGE_REMOVALS,
+            zz_protocol::MAX_KITTY_IMAGE_REMOVALS + 1,
+        ] {
             let mailbox = OutboundMailbox::new();
             let pane = PaneId(9);
             let other_pane = PaneId(10);
@@ -89740,7 +89783,10 @@ bind - split-window -v -c "#{pane_current_path}"
             requested.push(u32::MAX);
             mailbox.enqueue_kitty_images_removed(pane, &requested);
             let messages = take_reliable_messages(&mailbox);
-            assert_eq!(messages.len(), count.div_ceil(MAX_KITTY_IMAGE_REMOVALS));
+            assert_eq!(
+                messages.len(),
+                count.div_ceil(zz_protocol::MAX_KITTY_IMAGE_REMOVALS)
+            );
             let mut removed = Vec::new();
             let mut last_sequence = None;
             for message in messages {
@@ -89756,7 +89802,7 @@ bind - split-window -v -c "#{pane_current_path}"
                     panic!("expected Kitty image removals");
                 };
                 assert_eq!(target, pane);
-                assert!(image_ids.len() <= MAX_KITTY_IMAGE_REMOVALS);
+                assert!(image_ids.len() <= zz_protocol::MAX_KITTY_IMAGE_REMOVALS);
                 assert!(last_sequence.is_none_or(|previous| previous < sequence));
                 last_sequence = Some(sequence);
                 removed.extend(image_ids);

@@ -28,6 +28,25 @@ impl<T: Send> Pending for Request<T> {
     }
 }
 
+struct Scheduled {
+    deadline: Instant,
+    finish: Option<Box<dyn FnOnce(&Arc<Shared>) + Send>>,
+}
+
+impl Pending for Scheduled {
+    fn poll(&mut self, shared: &Arc<Shared>, now: Instant) -> bool {
+        if now < self.deadline {
+            return false;
+        }
+        self.finish.take().unwrap()(shared);
+        true
+    }
+
+    fn next(&self) -> Instant {
+        self.deadline
+    }
+}
+
 struct Wake {
     pending: AtomicBool,
     accept: AcceptWake,
@@ -89,6 +108,30 @@ impl Inbox {
             finish: Some(Box::new(finish)),
         }));
         self.wake.notify();
+    }
+
+    pub(super) fn schedule(
+        &self,
+        deadline: Instant,
+        finish: impl FnOnce(&Arc<Shared>) + Send + 'static,
+    ) {
+        let _ = self.sender.send(Box::new(Scheduled {
+            deadline,
+            finish: Some(Box::new(finish)),
+        }));
+        self.wake.notify();
+    }
+
+    pub(super) fn finish_off_loop(
+        &self,
+        shared: &Arc<Shared>,
+        continuation: &cmdq::WaitContinuation,
+    ) {
+        #[cfg(unix)]
+        if shared.loop_active.load(Ordering::Acquire) {
+            return;
+        }
+        self.wait(shared, continuation);
     }
 
     pub(super) fn pending(&self) -> bool {
@@ -186,7 +229,7 @@ impl Drop for TapAck {
 pub(super) struct CommandState {
     remaining: AtomicUsize,
     pub(super) continuation: cmdq::WaitContinuation,
-    output: Mutex<Option<Result<RawText, DaemonError>>>,
+    output: Mutex<Option<Result<Execution, DaemonError>>>,
     notify: Arc<dyn Fn() + Send + Sync>,
 }
 
@@ -202,12 +245,18 @@ impl CommandState {
         }
     }
 
+    pub(super) fn resolve(&self, result: Result<Execution, DaemonError>) {
+        *self.output.lock() = Some(result);
+        self.complete();
+    }
+
     pub(super) fn apply(&self, result: &mut Result<Execution, DaemonError>) {
         if let Some(output) = self.output.lock().take() {
             match output {
                 Ok(output) => {
                     if let Ok(execution) = result {
-                        let tail = std::mem::replace(&mut execution.output, output);
+                        let tail = std::mem::replace(&mut execution.output, output.output);
+                        execution.effects.extend(output.effects);
                         append_inserted_output(&mut execution.output, &tail);
                     }
                 }
@@ -318,7 +367,67 @@ impl CommandWait {
                     &variables,
                     &command,
                 );
-                *state.output.lock() = Some(result);
+                *state.output.lock() = Some(result.map(|output| Execution {
+                    output,
+                    effects: Vec::new(),
+                }));
+                state.complete();
+            });
+    }
+
+    pub(super) fn start(&self) -> Arc<CommandState> {
+        self.state.add();
+        Arc::clone(&self.state)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn read<T: Send + 'static>(
+        &self,
+        shared: &Arc<Shared>,
+        client: ClientId,
+        pane: PaneId,
+        terminal: Arc<TerminalSession>,
+        request: TerminalRequest<T>,
+        finish: impl FnOnce(
+            &Arc<Shared>,
+            Result<T, TerminalRequestError>,
+        ) -> Result<Execution, DaemonError>
+        + Send
+        + 'static,
+    ) {
+        let guard_client = client != ClientId(u64::MAX) && {
+            let registered = shared.inner.lock().client(client).is_some();
+            #[cfg(unix)]
+            let registered = registered || shared.loop_active.load(Ordering::Acquire);
+            registered
+        };
+        self.state.add();
+        let state = Arc::clone(&self.state);
+        shared
+            .terminal_requests
+            .submit(request, move |shared, result| {
+                let valid = {
+                    let inner = shared.inner.lock();
+                    if guard_client
+                        && (inner.client(client).is_none()
+                            || shared.command_queue_cancelled(client))
+                    {
+                        None
+                    } else {
+                        Some(
+                            inner
+                                .terminals
+                                .get(&pane)
+                                .is_some_and(|current| Arc::ptr_eq(current, &terminal)),
+                        )
+                    }
+                };
+                let output = match valid {
+                    None => Ok(Execution::default()),
+                    Some(false) => Err(ServerError::PaneExited(pane).into()),
+                    Some(true) => finish(shared, result),
+                };
+                *state.output.lock() = Some(output);
                 state.complete();
             });
     }

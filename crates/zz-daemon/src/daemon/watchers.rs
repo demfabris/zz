@@ -15,6 +15,7 @@ pub(super) enum Input {
     Started(Box<Watcher>),
     Ready(u64),
     Completed(u64),
+    ImagesCompleted(u64, bool),
 }
 
 impl Sender {
@@ -656,6 +657,17 @@ impl LoopWatchers {
                 self.surfaces.insert(watcher.id, watcher);
                 return Ok(());
             }
+            Input::ImagesCompleted(id, success) => {
+                if let Some(watcher) = self.surfaces.get_mut(&id) {
+                    watcher.busy = false;
+                    if !success {
+                        watcher.frame = None;
+                        watcher.admitted = None;
+                    }
+                    Self::schedule(shared, watcher);
+                }
+                return Ok(());
+            }
             Input::Ready(id) => id,
             Input::Completed(id) => {
                 if let Some(watcher) = self.surfaces.get_mut(&id) {
@@ -804,18 +816,21 @@ impl LoopWatchers {
                             .keys()
                             .any(|key| key.pane == pane)
                     {
-                        watcher.frame = Some(frame);
-                        let terminal = Arc::clone(&terminal);
-                        return Self::execute(
-                            shared,
-                            watcher,
-                            vec![Box::new(move |shared| {
-                                shared.evict_absent_kitty_images(pane, &terminal, &images);
-                                for (image, generation) in images {
-                                    shared.kitty_image_frames(pane, &terminal, image, generation);
-                                }
-                            })],
-                        );
+                        shared.evict_absent_kitty_images(pane, &terminal, &images);
+                        let id = watcher.id;
+                        let sender = shared.watcher_tx.clone();
+                        if !shared.request_kitty_images(
+                            pane,
+                            &terminal,
+                            &images,
+                            move |_, success| {
+                                sender.send(Input::ImagesCompleted(id, success));
+                            },
+                        ) {
+                            watcher.frame = Some(frame);
+                            watcher.busy = true;
+                            return Ok(());
+                        }
                     }
                 }
                 watcher.frame = Some(frame);
@@ -912,6 +927,7 @@ impl Shared {
                                     let Ok(input) = input else { return; };
                                     Some(input)
                                 }
+                                default(Duration::from_millis(5)) => { None }
                                 recv(agent_rx) -> message => {
                                     let Ok(message) = message else { return; };
                                     let Some(owner) = owner.upgrade() else { return; };
@@ -923,14 +939,21 @@ impl Shared {
                         };
                         #[cfg(not(feature = "agent"))]
                         let input = {
-                            let Ok(input) = watchers.inputs.as_ref().unwrap().recv() else {
-                                return;
-                            };
-                            Some(input)
+                            match watchers
+                                .inputs
+                                .as_ref()
+                                .unwrap()
+                                .recv_timeout(Duration::from_millis(5))
+                            {
+                                Ok(input) => Some(input),
+                                Err(crossbeam_channel::RecvTimeoutError::Timeout) => None,
+                                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
+                            }
                         };
                         let Some(owner) = owner.upgrade() else {
                             return;
                         };
+                        owner.terminal_requests.turn(&owner);
                         if input.is_some_and(|input| watchers.input(&owner, input).is_err())
                             || watchers.turn(&owner).is_err()
                         {

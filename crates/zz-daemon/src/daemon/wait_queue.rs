@@ -1,21 +1,34 @@
 use super::*;
 
+fn terminal_read_command(name: &str) -> bool {
+    matches!(
+        name,
+        "capture-pane"
+            | "show-last-output"
+            | "send-last-output"
+            | "send-text"
+            | "wait-pane"
+            | "run-pane"
+    )
+}
+
 pub(super) fn queue_command(command: &CommandInvocation) -> bool {
-    MuxEngine::is_command_alias_group(command)
-        || canonical_command(&command.name) == "wait-for"
-        || canonical_command(&command.name) == "run-shell"
+    let name = canonical_command(&command.name);
+    terminal_read_command(name)
+        || MuxEngine::is_command_alias_group(command)
+        || name == "wait-for"
+        || name == "run-shell"
             && parse_run_shell_args(&command.args)
                 .is_ok_and(|args| args.command_mode && !args.background && args.delay.is_none())
-        || canonical_command(&command.name) == "if-shell"
+        || name == "if-shell"
             && parse_if_shell_args(&command.args).is_ok_and(|args| args.format && !args.background)
 }
 
 pub(super) fn task_command(command: &CommandInvocation) -> bool {
+    let name = canonical_command(&command.name);
     MuxEngine::is_command_alias_group(command)
-        || matches!(
-            canonical_command(&command.name),
-            "wait-for" | "run-shell" | "if-shell"
-        )
+        || terminal_read_command(name)
+        || matches!(name, "wait-for" | "run-shell" | "if-shell")
 }
 
 pub(super) fn can_run_inline(

@@ -2404,7 +2404,12 @@ impl TerminalSession {
     /// Copy one stored Kitty image from the actor-owned VT as premultiplied BGRA8.
     pub fn kitty_image(&self, image_id: u32) -> Result<Option<KittyImage>, KittyImageRequestError> {
         self.commands
-            .request(|reply| Command::KittyImage(Box::new(KittyImageRequest { image_id, reply })))
+            .request(|reply| {
+                Command::KittyImage(Box::new(KittyImageRequest {
+                    image_id,
+                    reply: reply.into(),
+                }))
+            })
             .map_err(Into::into)
     }
 
@@ -2417,7 +2422,7 @@ impl TerminalSession {
             .request(|reply| {
                 Command::KittyImageGeneration(Box::new(KittyImageGenerationRequest {
                     image_id,
-                    reply,
+                    reply: reply.into(),
                 }))
             })
             .map_err(Into::into)
@@ -2709,6 +2714,77 @@ impl TerminalSession {
             .request_token(notify, |reply| Command::CaptureCopySource { reply })
     }
 
+    pub fn capture_request(
+        &self,
+        options: CaptureOptions,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    ) -> TerminalRequest<Result<String, TerminalCaptureError>> {
+        self.commands.request_token(notify, |reply| {
+            Command::Capture(Box::new(CaptureRequest { options, reply }))
+        })
+    }
+
+    pub fn history_request(
+        &self,
+        start: u32,
+        count: u32,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    ) -> TerminalRequest<Result<HistoryCapture, TerminalCaptureError>> {
+        self.commands.request_token(notify, |reply| {
+            Command::History(Box::new(HistoryCommand {
+                start,
+                count,
+                reply,
+            }))
+        })
+    }
+
+    pub fn capture_last_command_request(
+        &self,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    ) -> TerminalRequest<Result<LastCommandCapture, TerminalCaptureError>> {
+        self.commands.request_token(notify, |reply| {
+            Command::SemanticCapture(Box::new(LastCommandRequest { reply }))
+        })
+    }
+
+    pub fn pointer_context_request(
+        &self,
+        view: TerminalViewId,
+        column: u16,
+        row: u16,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    ) -> TerminalRequest<PointerContext> {
+        self.commands.request_token(notify, |reply| {
+            Command::PointerContext(Box::new(PointerContextRequest {
+                view,
+                column,
+                row,
+                reply,
+            }))
+        })
+    }
+
+    pub fn kitty_image_request(
+        &self,
+        image_id: u32,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    ) -> TerminalRequest<Option<KittyImage>> {
+        self.commands.request_token(notify, |reply| {
+            Command::KittyImage(Box::new(KittyImageRequest { image_id, reply }))
+        })
+    }
+
+    pub fn kitty_image_generation_request(
+        &self,
+        image_id: u32,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    ) -> TerminalRequest<Option<u64>> {
+        self.commands.request_token(notify, |reply| {
+            Command::KittyImageGeneration(Box::new(KittyImageGenerationRequest { image_id, reply }))
+        })
+    }
+
     /// Open the observation window that binds one pasted image to the next
     /// numbered placeholder the application prints.
     pub fn open_pending_paste(&self, token: u64) {
@@ -2740,28 +2816,36 @@ impl TerminalSession {
                     view,
                     column,
                     row,
-                    reply,
+                    reply: reply.into(),
                 }))
             })
             .map_err(Into::into)
     }
 
     pub fn capture(&self, options: CaptureOptions) -> Result<String, TerminalCaptureError> {
-        self.commands
-            .request(|reply| Command::Capture(Box::new(CaptureRequest { options, reply })))?
+        self.commands.request(|reply| {
+            Command::Capture(Box::new(CaptureRequest {
+                options,
+                reply: reply.into(),
+            }))
+        })?
     }
 
     pub fn capture_frozen_frame(
         &self,
         options: CaptureOptions,
     ) -> Result<String, TerminalCaptureError> {
-        let _round_trips = allow_actor_round_trips();
         match self.capture(options) {
-            Err(TerminalCaptureError::ActorStopped) => {
-                capture_viewport(&self.latest_viewport(), options)
-            }
+            Err(TerminalCaptureError::ActorStopped) => self.capture_retained_frame(options),
             result => result,
         }
+    }
+
+    pub fn capture_retained_frame(
+        &self,
+        options: CaptureOptions,
+    ) -> Result<String, TerminalCaptureError> {
+        capture_viewport(&self.latest_viewport(), options)
     }
 
     /// Copies one absolute span of retained primary-screen history without moving
@@ -2789,7 +2873,7 @@ impl TerminalSession {
             Command::History(Box::new(HistoryCommand {
                 start,
                 count,
-                reply,
+                reply: reply.into(),
             }))
         })?
     }
@@ -2802,8 +2886,11 @@ impl TerminalSession {
     /// [`TerminalCaptureError::NoSemanticMarks`] when the shell emits no OSC 133
     /// marks, plus the same failures as [`Self::capture`].
     pub fn capture_last_command(&self) -> Result<LastCommandCapture, TerminalCaptureError> {
-        self.commands
-            .request(|reply| Command::SemanticCapture(Box::new(LastCommandRequest { reply })))?
+        self.commands.request(|reply| {
+            Command::SemanticCapture(Box::new(LastCommandRequest {
+                reply: reply.into(),
+            }))
+        })?
     }
 
     /// Feed bytes straight into a PTY-free session's parser, as if a child
@@ -2912,7 +2999,7 @@ impl Geometry {
 #[derive(Debug)]
 struct CaptureRequest {
     options: CaptureOptions,
-    reply: Sender<Result<String, TerminalCaptureError>>,
+    reply: ActorReply<Result<String, TerminalCaptureError>>,
 }
 
 #[derive(Debug)]
@@ -2920,7 +3007,7 @@ struct PointerContextRequest {
     view: TerminalViewId,
     column: u16,
     row: u16,
-    reply: Sender<PointerContext>,
+    reply: ActorReply<PointerContext>,
 }
 
 /// What `format_cb_mouse_word`, `format_cb_mouse_line` and
@@ -2936,22 +3023,22 @@ pub struct PointerContext {
 
 #[derive(Debug)]
 struct LastCommandRequest {
-    reply: Sender<Result<LastCommandCapture, TerminalCaptureError>>,
+    reply: ActorReply<Result<LastCommandCapture, TerminalCaptureError>>,
 }
 
 #[derive(Debug)]
 struct KittyImageRequest {
     image_id: u32,
-    reply: Sender<Option<KittyImage>>,
+    reply: ActorReply<Option<KittyImage>>,
 }
 
 #[derive(Debug)]
 struct KittyImageGenerationRequest {
     image_id: u32,
-    reply: Sender<Option<u64>>,
+    reply: ActorReply<Option<u64>>,
 }
 
-type HistoryCapture = (
+pub type HistoryCapture = (
     u32,
     Vec<Vec<PackedCell>>,
     TerminalDictionary,
@@ -2963,7 +3050,7 @@ type HistoryCapture = (
 struct HistoryCommand {
     start: u32,
     count: u32,
-    reply: Sender<Result<HistoryCapture, TerminalCaptureError>>,
+    reply: ActorReply<Result<HistoryCapture, TerminalCaptureError>>,
 }
 
 #[derive(Debug)]
@@ -3802,6 +3889,10 @@ impl CommandSender {
 #[cfg(test)]
 #[path = "session/request_e04_tests.rs"]
 mod request_e04_tests;
+
+#[cfg(test)]
+#[path = "session/request_e05_tests.rs"]
+mod request_e05_tests;
 
 /// Where `recentre-top-bottom` parks the cursor line on its next press.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -16526,7 +16617,7 @@ mod tests {
         assert_eq!(
             commands.request(|reply| Command::Capture(Box::new(CaptureRequest {
                 options: CaptureOptions::default(),
-                reply,
+                reply: reply.into(),
             }))),
             Err(ActorRequestError::ActorStopped)
         );

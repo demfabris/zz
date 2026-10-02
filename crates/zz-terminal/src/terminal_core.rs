@@ -51,9 +51,9 @@ pub use session::{
     CaptureBoundary, CaptureOptions, CopyModeFacts, CopyModeSelectionFacts, DeferredTerminalEvent,
     EngineKnobs, KittyImage, KittyImageRequestError, LastCommandCapture, MAX_LAST_COMMAND_BYTES,
     MAX_LAST_COMMAND_LINES, PointerContext, ProgressBar, ProgressBarState, RawOutputTapError,
-    RoundTripGuard, TerminalCaptureError, TerminalCopyReady, TerminalEvent, TerminalEvents,
-    TerminalFacts, TerminalProcessExit, TerminalSession, TerminalSessionDiagnostics, TerminalSize,
-    TerminalSpawn, ViewStream, allow_actor_round_trips, forbid_actor_round_trips, perf_knobs,
-    run_pty_exec_mode,
+    RawOutputTapReceiver, RawOutputTapSender, RoundTripGuard, TerminalCaptureError,
+    TerminalCopyReady, TerminalEvent, TerminalEvents, TerminalFacts, TerminalProcessExit,
+    TerminalSession, TerminalSessionDiagnostics, TerminalSize, TerminalSpawn, ViewStream,
+    allow_actor_round_trips, forbid_actor_round_trips, perf_knobs, run_pty_exec_mode,
 };
 pub use word::{DEFAULT_WORD_SEPARATORS, WordSeparators};

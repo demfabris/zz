@@ -79,7 +79,7 @@ pub(super) struct PaneActor {
     last_content_publish: Instant,
     output_pending: bool,
     vt_diagnostics: VtWriteDiagnostics,
-    raw_output_tap: Option<(u64, Sender<Arc<[u8]>>)>,
+    raw_output_tap: Option<(u64, RawOutputTapSender)>,
     raw_output_parse_backlog: VecDeque<(Arc<[u8]>, usize)>,
     raw_output_parse_backlog_bytes: usize,
     raw_output_parse_buffer: Vec<u8>,
@@ -716,8 +716,14 @@ impl PaneActor {
         #[cfg(not(unix))]
         let available_input = Some(&self.input_rx.commands);
         #[cfg(not(target_os = "linux"))]
-        let raw_output_read_ahead = self.raw_output_parse_backlog_bytes
-            <= RAW_OUTPUT_PARSE_BACKLOG_BYTES.saturating_sub(RAW_OUTPUT_PARSE_READ_RESERVE_BYTES);
+        let raw_output_read_ahead = !self.reader_eof
+            && self
+                .raw_output_tap
+                .as_ref()
+                .is_none_or(|(_, tap)| !tap.is_full())
+            && self.raw_output_parse_backlog_bytes
+                <= RAW_OUTPUT_PARSE_BACKLOG_BYTES
+                    .saturating_sub(RAW_OUTPUT_PARSE_READ_RESERVE_BYTES);
         #[cfg(all(unix, not(target_os = "linux")))]
         let wakeup = wait_for_wake(
             &self.control_rx,
@@ -861,6 +867,10 @@ impl PaneActor {
 
     pub(super) fn output_read_ahead(&self) -> bool {
         !self.reader_eof
+            && self
+                .raw_output_tap
+                .as_ref()
+                .is_none_or(|(_, tap)| !tap.is_full())
             && self.raw_output_parse_backlog_bytes
                 <= RAW_OUTPUT_PARSE_BACKLOG_BYTES
                     .saturating_sub(RAW_OUTPUT_PARSE_READ_RESERVE_BYTES)
@@ -1750,6 +1760,9 @@ impl PaneActor {
         let mut spins = 0_u32;
         let turn_started = Instant::now();
         loop {
+            if !self.output_read_ahead() {
+                break;
+            }
             match self.read_pty_buffer() {
                 Ok(0) => {
                     self.reader_eof = true;
@@ -1862,11 +1875,18 @@ impl PaneActor {
             ReaderMessage::Data { buffer, length } => {
                 let mut closed_tap = None;
                 let mut consumed_output = false;
+                let max_chunks = self
+                    .raw_output_tap
+                    .as_ref()
+                    .map_or(PTY_BUFFER_POOL_SIZE, |(_, tap)| {
+                        RAW_OUTPUT_TAP_PENDING_CHUNKS.saturating_sub(tap.sender.len())
+                    });
                 self.reader_eof |= drain_pty_output_burst(
                     &self.output_rx,
                     buffer,
                     length,
                     cfg!(not(unix)) && self.sharded,
+                    max_chunks,
                     |buffer, length| {
                         if self.raw_output_tap.is_some()
                             || !self.raw_output_parse_backlog.is_empty()

@@ -6,7 +6,7 @@ use std::{
     ffi::{OsStr, OsString},
     fmt::Write as _,
     fs,
-    io::{ErrorKind, Read, Seek, SeekFrom, Write},
+    io::{ErrorKind, Read, Write},
     path::{Path, PathBuf},
     process::{Child, ExitStatus, Stdio},
     sync::{
@@ -19,6 +19,8 @@ use std::{
 };
 
 use parking_lot::{Condvar, Mutex};
+#[cfg(windows)]
+use std::io::{Seek, SeekFrom};
 
 #[cfg(feature = "agent")]
 mod agent_inbox;
@@ -45,6 +47,8 @@ mod helpers;
     reason = "job families move to the loop registry in subsequent slices"
 )]
 mod jobs;
+#[cfg(unix)]
+mod pipe_jobs;
 pub(crate) mod status_jobs;
 mod watchers;
 pub use exec::exec_resume_kind;
@@ -94,11 +98,11 @@ use zz_terminal::{
     AppearanceColor, AppearanceConfigDisposition, AppearanceLoad, AppearanceProvenance,
     CaptureBoundary, CaptureOptions, ClipboardTarget, Color, ColourClass, CursorBlinkPolicy,
     CursorStyle, DeferredTerminalEvent, EngineKnobs, LastCommandCapture, PasteBufferAction,
-    ProgressBarState, RawOutputTapError, TerminalAppearance, TerminalCaptureError,
-    TerminalColorScheme, TerminalDiffScratch, TerminalEvent, TerminalEvents, TerminalMode,
-    TerminalPalette, TerminalPatchRef, TerminalSession, TerminalSize, TerminalSpawn,
-    TerminalViewId, TerminalViewport, ViewStream, WordSeparators, apply_appearance_overrides,
-    parse_x11_color, prepare_paste_buffer,
+    ProgressBarState, RawOutputTapError, RawOutputTapReceiver, RawOutputTapSender,
+    TerminalAppearance, TerminalCaptureError, TerminalColorScheme, TerminalDiffScratch,
+    TerminalEvent, TerminalEvents, TerminalMode, TerminalPalette, TerminalPatchRef,
+    TerminalSession, TerminalSize, TerminalSpawn, TerminalViewId, TerminalViewport, ViewStream,
+    WordSeparators, apply_appearance_overrides, parse_x11_color, prepare_paste_buffer,
 };
 
 #[cfg(feature = "agent")]
@@ -4101,6 +4105,8 @@ struct SharedServer {
     response_admissions_changed: Condvar,
     default_attach_effects: Mutex<()>,
     pipe_effects: Mutex<()>,
+    #[cfg(unix)]
+    pipe_jobs: pipe_jobs::Client,
     prompt_history_effects: Mutex<()>,
     background_insertions: Mutex<BackgroundInsertions>,
     next_background_insertion: AtomicU64,
@@ -5024,6 +5030,8 @@ impl Shared {
             response_admissions_changed: Condvar::new(),
             default_attach_effects: Mutex::new(()),
             pipe_effects: Mutex::new(()),
+            #[cfg(unix)]
+            pipe_jobs: pipe_jobs::Client::default(),
             prompt_history_effects: Mutex::new(()),
             background_insertions: Mutex::new(BackgroundInsertions::default()),
             next_background_insertion: AtomicU64::new(0),
@@ -8517,6 +8525,7 @@ impl Shared {
         let mut refresh_armed = false;
         let mut unfocused_copy_mode_exits = Vec::new();
         let mut pipes_to_close = Vec::new();
+        #[cfg(windows)]
         let mut pipe_taps_to_rearm = Vec::new();
         let mut display_panes_deadline = None;
         let mut client_message_retires = Vec::new();
@@ -9232,9 +9241,13 @@ impl Shared {
                                 geometry,
                             });
                         }
+                        #[cfg(windows)]
                         let multiplexed = inner.control_output_taps.contains_key(pane);
                         if let Some(pipe) = inner.pane_pipes.get_mut(pane) {
                             *pipe.terminal.lock() = Arc::clone(&session);
+                            #[cfg(unix)]
+                            pipe.jobs.wake.wake();
+                            #[cfg(windows)]
                             if let Some(output) = pipe.tap_output.clone()
                                 && !multiplexed
                             {
@@ -10831,6 +10844,7 @@ impl Shared {
             stop_pane_pipe(pipe);
         }
 
+        #[cfg(windows)]
         for (pane, token, terminal, output) in pipe_taps_to_rearm {
             self.rearm_pane_pipe(pane, token, &terminal, output);
         }
@@ -12107,6 +12121,7 @@ impl Shared {
         }
         let pipe_input = parsed.has('I');
         let pipe_output = parsed.has('O') || !pipe_input;
+        #[cfg(windows)]
         let multiplexed = self.inner.lock().control_output_taps.contains_key(&pane);
         let (token, command) = {
             let mut inner = self.inner.lock();
@@ -12156,6 +12171,7 @@ impl Shared {
         let child_output = child.stdout.take();
         let (tap_output, tap) = if pipe_output {
             let (output, receiver) = TerminalSession::raw_output_tap_channel();
+            #[cfg(windows)]
             if !multiplexed {
                 terminal
                     .arm_raw_output_tap(token, output.clone())
@@ -12164,80 +12180,162 @@ impl Shared {
                         ServerError::Internal(format!("could not arm pane output pipe: {error}"))
                     })?;
             }
+            #[cfg(unix)]
+            {
+                let wake = Arc::clone(&self.pipe_jobs.wake);
+                output.set_notification(move || wake.wake());
+            }
             (Some(output), Some(receiver))
         } else {
             (None, None)
         };
-        let process = Arc::new(Mutex::new(Some(child)));
-        let stop = Arc::new(AtomicBool::new(false));
-        let terminal_target = Arc::new(Mutex::new(Arc::clone(&terminal)));
-        let (start, started) = crossbeam_channel::bounded(1);
-        let worker_process = Arc::clone(&process);
-        let worker_stop = Arc::clone(&stop);
-        let worker_terminal = Arc::clone(&terminal_target);
-        let weak = Arc::downgrade(&self.server_owner());
-        let worker = thread::Builder::new()
-            .name(format!("zz-pipe-{}", pane.0))
-            .spawn(move || {
-                if started.recv().is_err() {
-                    return;
+        #[cfg(unix)]
+        {
+            let cancel = Arc::new(AtomicBool::new(false));
+            let terminal_target = Arc::new(Mutex::new(Arc::clone(&terminal)));
+            let valid = {
+                let mut inner = self.inner.lock();
+                let valid = !self.stopping.load(Ordering::Acquire)
+                    && inner
+                        .terminals
+                        .get(&pane)
+                        .is_some_and(|current| Arc::ptr_eq(current, &terminal))
+                    && inner.engine.state.pane(pane).is_some_and(|pane| !pane.dead);
+                if valid {
+                    inner.pane_pipes.insert(
+                        pane,
+                        PanePipe {
+                            token,
+                            pid,
+                            terminal: Arc::clone(&terminal_target),
+                            tap_output,
+                            cancel: Arc::clone(&cancel),
+                            jobs: self.pipe_jobs.clone(),
+                        },
+                    );
                 }
-                run_pane_pipe(
-                    &weak,
-                    pane,
-                    token,
-                    &worker_terminal,
-                    &worker_process,
-                    &worker_stop,
-                    child_input,
-                    child_output,
+                valid
+            };
+            if !valid {
+                terminate_copy_pipe(&mut child);
+                return Err(ServerError::PaneExited(pane).into());
+            }
+            let mut descriptors = Vec::new();
+            if let Some(input) = child_input {
+                descriptors.push(jobs::Descriptor {
+                    fd: input.into(),
+                    read: false,
+                    input: None,
+                    socket: false,
+                });
+            }
+            if let Some(output) = child_output {
+                descriptors.push(jobs::Descriptor {
+                    fd: output.into(),
+                    read: true,
+                    input: None,
+                    socket: false,
+                });
+            }
+            let weak = Arc::downgrade(&self.server_owner());
+            let launch = jobs::Launch {
+                child,
+                descriptors,
+                policy: jobs::CompletionPolicy::ChildExit,
+                deadline: None,
+                process_group: true,
+                output_limit: None,
+                stream: None,
+                pipe: Some(jobs::PipeIo::new(
+                    terminal_target,
                     tap,
-                );
-            })
-            .map_err(|error| {
+                    std::task::Waker::from(Arc::clone(&self.pipe_jobs.wake)),
+                )),
+                cancel: Some(cancel),
+                complete: Box::new(move |_| {
+                    if let Some(shared) = weak.upgrade() {
+                        shared.pipe_finished(pane, token);
+                    }
+                }),
+            };
+            if let Err(error) = self.pipe_jobs.launch(launch) {
+                self.pipe_finished(pane, token);
+                return Err(error);
+            }
+        }
+        #[cfg(windows)]
+        {
+            let process = Arc::new(Mutex::new(Some(child)));
+            let stop = Arc::new(AtomicBool::new(false));
+            let terminal_target = Arc::new(Mutex::new(Arc::clone(&terminal)));
+            let (start, started) = crossbeam_channel::bounded(1);
+            let worker_process = Arc::clone(&process);
+            let worker_stop = Arc::clone(&stop);
+            let worker_terminal = Arc::clone(&terminal_target);
+            let weak = Arc::downgrade(&self.server_owner());
+            let worker = thread::Builder::new()
+                .name(format!("zz-pipe-{}", pane.0))
+                .spawn(move || {
+                    if started.recv().is_err() {
+                        return;
+                    }
+                    run_pane_pipe(
+                        &weak,
+                        pane,
+                        token,
+                        &worker_terminal,
+                        &worker_process,
+                        &worker_stop,
+                        child_input,
+                        child_output,
+                        tap,
+                    );
+                })
+                .map_err(|error| {
+                    terminate_managed_process(&process);
+                    let _ = terminal.disarm_raw_output_tap(token);
+                    DaemonError::Thread(error.to_string())
+                })?;
+            let valid = {
+                let mut inner = self.inner.lock();
+                let valid = !self.stopping.load(Ordering::Acquire)
+                    && inner
+                        .terminals
+                        .get(&pane)
+                        .is_some_and(|current| Arc::ptr_eq(current, &terminal))
+                    && inner.engine.state.pane(pane).is_some_and(|pane| !pane.dead);
+                if valid {
+                    inner.pane_pipes.insert(
+                        pane,
+                        PanePipe {
+                            token,
+                            pid,
+                            terminal: terminal_target,
+                            tap_output,
+                            process: Arc::clone(&process),
+                            stop: Arc::clone(&stop),
+                            thread: Some(worker),
+                        },
+                    );
+                }
+                valid
+            };
+            if !valid {
+                drop(start);
+                stop.store(true, Ordering::Release);
                 terminate_managed_process(&process);
                 let _ = terminal.disarm_raw_output_tap(token);
-                DaemonError::Thread(error.to_string())
-            })?;
-        let valid = {
-            let mut inner = self.inner.lock();
-            let valid = !self.stopping.load(Ordering::Acquire)
-                && inner
-                    .terminals
-                    .get(&pane)
-                    .is_some_and(|current| Arc::ptr_eq(current, &terminal))
-                && inner.engine.state.pane(pane).is_some_and(|pane| !pane.dead);
-            if valid {
-                inner.pane_pipes.insert(
-                    pane,
-                    PanePipe {
-                        token,
-                        pid,
-                        terminal: terminal_target,
-                        tap_output,
-                        process: Arc::clone(&process),
-                        stop: Arc::clone(&stop),
-                        thread: Some(worker),
-                    },
-                );
+                return Err(ServerError::PaneExited(pane).into());
             }
-            valid
-        };
-        if !valid {
-            drop(start);
-            stop.store(true, Ordering::Release);
-            terminate_managed_process(&process);
-            let _ = terminal.disarm_raw_output_tap(token);
-            return Err(ServerError::PaneExited(pane).into());
+            let _ = start.send(());
         }
-        let _ = start.send(());
         drop(_serial);
         self.refresh_control_output_taps();
         self.refresh_status();
         Ok(Execution::default())
     }
 
-    fn pipe_finished(&self, pane: PaneId, token: u64) {
+    fn pipe_finished(self: &Arc<Self>, pane: PaneId, token: u64) {
         let removed = {
             let mut inner = self.inner.lock();
             if inner
@@ -12252,16 +12350,18 @@ impl Shared {
             }
         };
         if removed {
+            self.server_owner().refresh_control_output_taps();
             self.refresh_status();
         }
     }
 
+    #[cfg(windows)]
     fn rearm_pane_pipe(
         &self,
         pane: PaneId,
         token: u64,
         terminal: &Arc<TerminalSession>,
-        output: crossbeam_channel::Sender<Arc<[u8]>>,
+        output: RawOutputTapSender,
     ) {
         let _serial = self.pipe_effects.lock();
         let (valid, multiplexed) = {
@@ -12324,6 +12424,10 @@ impl Shared {
                     .clients
                     .values()
                     .any(|c| c.kind == Some(ClientKind::Control))
+                && !inner
+                    .pane_pipes
+                    .values()
+                    .any(|pipe| pipe.tap_output.is_some())
             {
                 return;
             }
@@ -12331,7 +12435,12 @@ impl Shared {
                 .terminals
                 .iter()
                 .filter(|(pane, _)| {
-                    control_output_wanted(&inner, **pane)
+                    (control_output_wanted(&inner, **pane)
+                        || cfg!(unix)
+                            && inner
+                                .pane_pipes
+                                .get(pane)
+                                .is_some_and(|pipe| pipe.tap_output.is_some()))
                         && !matches!(
                             inner.engine.state.pane(**pane).map(|pane| &pane.kind),
                             Some(PaneKind::Agent(_))
@@ -12345,7 +12454,9 @@ impl Shared {
                 .filter_map(|(pane, tap)| {
                     desired
                         .get(pane)
-                        .is_none_or(|terminal| !Arc::ptr_eq(terminal, &tap.terminal))
+                        .is_none_or(|terminal| {
+                            cfg!(windows) && !Arc::ptr_eq(terminal, &tap.terminal)
+                        })
                         .then_some(*pane)
                 })
                 .collect::<Vec<_>>();
@@ -12359,11 +12470,33 @@ impl Shared {
             stop_control_output_tap(tap);
         }
         for (pane, terminal) in desired {
+            #[cfg(unix)]
+            let existing = self
+                .inner
+                .lock()
+                .control_output_taps
+                .get(&pane)
+                .map(|tap| (tap.token, Arc::clone(&tap.terminal), tap.output.clone()));
+            #[cfg(unix)]
+            if let Some((token, previous, output)) = existing {
+                if !Arc::ptr_eq(&previous, &terminal) {
+                    let _round_trips = zz_terminal::allow_actor_round_trips();
+                    let _ = previous.disarm_raw_output_tap(token);
+                    if let Err(error) = terminal.arm_raw_output_tap(token, output) {
+                        log::warn!("could not rearm raw output for {pane}: {error}");
+                    } else if let Some(tap) = self.inner.lock().control_output_taps.get_mut(&pane) {
+                        tap.terminal = Arc::clone(&terminal);
+                    }
+                }
+                continue;
+            }
+            #[cfg(windows)]
             if self.inner.lock().control_output_taps.contains_key(&pane) {
                 continue;
             }
             self.start_control_output_tap(pane, &terminal);
         }
+        #[cfg(windows)]
         let direct_pipes = {
             let inner = self.inner.lock();
             inner
@@ -12385,6 +12518,7 @@ impl Shared {
                 .collect::<Vec<_>>()
         };
         drop(serial);
+        #[cfg(windows)]
         for (pane, token, terminal, output) in direct_pipes {
             self.rearm_pane_pipe(pane, token, &terminal, output);
         }
@@ -12397,14 +12531,29 @@ impl Shared {
             inner.next_pipe_token = inner.next_pipe_token.wrapping_add(1).max(1);
             inner.next_pipe_token
         };
-        let (output, receiver) = TerminalSession::raw_output_tap_channel();
+        let make_channel = || {
+            let (output, receiver) = TerminalSession::raw_output_tap_channel();
+            #[cfg(unix)]
+            {
+                let wake = Arc::clone(&self.pipe_jobs.wake);
+                output.set_notification(move || wake.wake());
+            }
+            (output, receiver)
+        };
+        let (output, receiver) = make_channel();
         let mut token = next_token(self);
+        #[cfg(unix)]
+        let mut retained_output = output.clone();
         let receiver = match terminal.arm_raw_output_tap(token, output) {
             Ok(()) => receiver,
             Err(RawOutputTapError::TimedOut) => {
                 log::warn!("control output tap arm timed out for {pane}, retrying once");
-                let (output, retry_receiver) = TerminalSession::raw_output_tap_channel();
+                let (output, retry_receiver) = make_channel();
                 token = next_token(self);
+                #[cfg(unix)]
+                {
+                    retained_output = output.clone();
+                }
                 if let Err(error) = terminal.arm_raw_output_tap(token, output) {
                     log::warn!("control output tap arm failed for {pane}: {error}");
                     return;
@@ -12416,46 +12565,49 @@ impl Shared {
                 return;
             }
         };
-        let stop = Arc::new(AtomicBool::new(false));
+        #[cfg(windows)]
         let weak = Arc::downgrade(&self.server_owner());
-        #[cfg(unix)]
-        let on_loop = self.loop_active.load(Ordering::Acquire);
-        #[cfg(not(unix))]
-        let on_loop = false;
-        let (worker, receiver) = if on_loop {
-            (None, Some(receiver))
-        } else {
+        #[cfg(windows)]
+        let stop = Arc::new(AtomicBool::new(false));
+        #[cfg(windows)]
+        let worker = {
             let worker_stop = Arc::clone(&stop);
             let owner = weak.clone();
+            let received = receiver.clone();
             let Ok(worker) = thread::Builder::new()
                 .name(format!("zz-control-output-{}", pane.0))
-                .spawn(move || run_control_output_tap(&owner, pane, &worker_stop, &receiver))
+                .spawn(move || run_control_output_tap(&owner, pane, &worker_stop, &received))
             else {
                 let _ = terminal.disarm_raw_output_tap(token);
                 return;
             };
-            (Some(worker), None)
+            Some(worker)
         };
-        #[cfg(not(unix))]
-        let _ = receiver;
         let mut tap = Some(ControlOutputTap {
             #[cfg(unix)]
-            receiver,
+            receiver: Some(receiver),
             #[cfg(unix)]
             pending: None,
             #[cfg(unix)]
-            owner: weak,
+            output: retained_output,
             #[cfg(unix)]
             pane,
             token,
             terminal: Arc::clone(terminal),
+            #[cfg(windows)]
             stop,
+            #[cfg(windows)]
             thread: worker,
         });
         let valid = {
             let mut inner = self.inner.lock();
             let valid = !self.stopping.load(Ordering::Acquire)
-                && control_output_wanted(&inner, pane)
+                && (control_output_wanted(&inner, pane)
+                    || cfg!(unix)
+                        && inner
+                            .pane_pipes
+                            .get(&pane)
+                            .is_some_and(|pipe| pipe.tap_output.is_some()))
                 && inner
                     .terminals
                     .get(&pane)
@@ -12473,144 +12625,143 @@ impl Shared {
         }
     }
 
-    fn publish_control_output_for_pane(&self, pane: PaneId, bytes: &Arc<[u8]>) {
+    fn publish_control_output_for_pane(&self, pane: PaneId, bytes: &Arc<[u8]>) -> bool {
+        let mut inner = self.inner.lock();
+        let Some(window) = inner.engine.state.window_for_pane(pane) else {
+            return true;
+        };
+        let clients = inner
+            .engine
+            .state
+            .sessions
+            .iter()
+            .filter(|(_, session)| session.windows.contains(&window))
+            .flat_map(|(session, _)| inner.attached.get(session).into_iter().flatten())
+            .filter(|client| {
+                inner
+                    .client(**client)
+                    .is_some_and(|c| c.kind == Some(ClientKind::Control) && c.subscriber.is_some())
+            })
+            .copied()
+            .collect::<BTreeSet<_>>();
+        if clients.iter().any(|client| {
+            let output = inner
+                .client_entry(*client)
+                .control_output
+                .get_or_insert_default();
+            !output.no_output
+                && output.panes.entry(pane).or_default().mode == ControlPaneOutputMode::On
+                && output.panes[&pane].pending.len() >= CONTROL_PENDING_CHUNKS_PER_PANE
+        }) {
+            return false;
+        }
+        if let Some(pipe) = inner
+            .pane_pipes
+            .get(&pane)
+            .and_then(|pipe| pipe.tap_output.as_ref())
+        {
+            match pipe.try_send(Arc::clone(bytes)) {
+                Ok(()) | Err(crossbeam_channel::TrySendError::Disconnected(_)) => {}
+                Err(crossbeam_channel::TrySendError::Full(_)) => return false,
+            }
+        }
+        let enqueued_at = Instant::now();
+        for client in clients {
+            let output = inner
+                .client_entry(client)
+                .control_output
+                .get_or_insert_default();
+            if !output.no_output {
+                let pane_output = output.panes.entry(pane).or_default();
+                if pane_output.mode == ControlPaneOutputMode::On {
+                    pane_output.pending.push_back(PendingControlOutput {
+                        bytes: Arc::clone(bytes),
+                        offset: 0,
+                        enqueued_at,
+                    });
+                }
+            }
+        }
+        drop(inner);
         if !bytes.is_empty() {
             self.note_control_output_activity(pane);
         }
-        self.publish_pipe_output_for_pane(pane, bytes);
-
-        loop {
-            let queued = {
-                let mut inner = self.inner.lock();
-                let Some(window) = inner.engine.state.window_for_pane(pane) else {
-                    return;
-                };
-                let clients = inner
-                    .engine
-                    .state
-                    .sessions
-                    .iter()
-                    .filter(|(_, session)| session.windows.contains(&window))
-                    .flat_map(|(session, _)| inner.attached.get(session).into_iter().flatten())
-                    .filter(|client| {
-                        inner.client(**client).and_then(|c| c.kind) == Some(ClientKind::Control)
-                            && inner
-                                .client(**client)
-                                .is_some_and(|c| c.subscriber.is_some())
-                    })
-                    .copied()
-                    .collect::<BTreeSet<_>>();
-                let blocked = clients.iter().any(|client| {
-                    let output = inner
-                        .client_entry(*client)
-                        .control_output
-                        .get_or_insert_default();
-                    if output.no_output {
-                        return false;
-                    }
-                    let pane_output = output.panes.entry(pane).or_default();
-                    pane_output.mode == ControlPaneOutputMode::On
-                        && pane_output.pending.len() >= CONTROL_PENDING_CHUNKS_PER_PANE
-                });
-                if blocked {
-                    false
-                } else {
-                    let enqueued_at = Instant::now();
-                    for client in clients {
-                        let output = inner
-                            .client_entry(client)
-                            .control_output
-                            .get_or_insert_default();
-                        if output.no_output {
-                            continue;
-                        }
-                        let pane_output = output.panes.entry(pane).or_default();
-                        if pane_output.mode == ControlPaneOutputMode::On {
-                            pane_output.pending.push_back(PendingControlOutput {
-                                bytes: Arc::clone(bytes),
-                                offset: 0,
-                                enqueued_at,
-                            });
-                        }
-                    }
-                    true
-                }
-            };
-            self.pump_control_output_at(Instant::now());
-            if queued {
-                break;
-            }
-            thread::sleep(Duration::from_millis(1));
-        }
+        self.pump_control_output_at(Instant::now());
+        true
     }
 
     #[cfg(unix)]
-    fn start_ready_control_output_readers(&self) -> bool {
+    fn drain_control_output_taps(&self) {
         if self.inner.lock().control_output_taps.is_empty() {
-            return false;
+            return;
         }
+        self.pump_control_output_at(Instant::now());
         let _serial = self.pipe_effects.lock();
-        let mut inner = self.inner.lock();
-        let mut pending = false;
-        for (pane, tap) in &mut inner.control_output_taps {
-            let Some(receiver) = tap.receiver.as_ref() else {
-                continue;
-            };
-            if tap.pending.is_none() {
-                match receiver.try_recv() {
-                    Ok(bytes) => tap.pending = Some(bytes),
-                    Err(crossbeam_channel::TryRecvError::Empty) => {
-                        pending = true;
-                        continue;
-                    }
-                    Err(crossbeam_channel::TryRecvError::Disconnected) => {
-                        tap.receiver = None;
-                        continue;
-                    }
-                }
-            }
-            let first = tap.pending.clone().expect("ready output is retained");
-            let receiver = receiver.clone();
-            let owner = tap.owner.clone();
-            let stop = Arc::clone(&tap.stop);
-            let pane = *pane;
-            match thread::Builder::new()
-                .name(format!("zz-control-output-{}", pane.0))
-                .spawn(move || {
-                    if let Some(shared) = owner.upgrade() {
-                        if stop.load(Ordering::Acquire) {
-                            shared.publish_pipe_output_for_pane(pane, &first);
-                        } else {
-                            shared.publish_control_output_for_pane(pane, &first);
-                        }
-                    }
-                    run_control_output_tap(&owner, pane, &stop, &receiver);
-                }) {
-                Ok(worker) => {
-                    tap.pending = None;
-                    tap.receiver = None;
-                    tap.thread = Some(worker);
-                }
-                Err(error) => {
-                    log::warn!("could not start control output reader: {error}");
-                    pending = true;
-                }
-            }
+        let mut taps = std::mem::take(&mut self.inner.lock().control_output_taps);
+        for tap in taps.values_mut() {
+            self.drain_output_tap(tap);
         }
-        pending
+        self.inner.lock().control_output_taps = taps;
     }
 
-    fn publish_pipe_output_for_pane(&self, pane: PaneId, bytes: &Arc<[u8]>) {
-        let pipe = {
-            let inner = self.inner.lock();
-            inner
-                .pane_pipes
-                .get(&pane)
-                .and_then(|pipe| pipe.tap_output.clone())
-        };
-        if let Some(pipe) = pipe {
-            let _ = pipe.send(Arc::clone(bytes));
+    #[cfg(unix)]
+    fn drain_output_tap(&self, tap: &mut ControlOutputTap) {
+        for _ in 0..16 {
+            if tap.pending.is_none() {
+                let Some(receiver) = tap.receiver.as_ref() else {
+                    return;
+                };
+                match receiver.try_recv() {
+                    Ok(bytes) => tap.pending = Some(bytes),
+                    Err(crossbeam_channel::TryRecvError::Empty) => return,
+                    Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                        tap.receiver = None;
+                        return;
+                    }
+                }
+            }
+            if !self.publish_control_output_for_pane(tap.pane, tap.pending.as_ref().unwrap()) {
+                return;
+            }
+            tap.pending = None;
         }
+        self.pipe_jobs.wake.wake();
+    }
+
+    #[cfg(windows)]
+    fn publish_pipe_output_for_pane(&self, pane: PaneId, bytes: &Arc<[u8]>) -> bool {
+        let inner = self.inner.lock();
+        let Some(pipe) = inner
+            .pane_pipes
+            .get(&pane)
+            .and_then(|pipe| pipe.tap_output.as_ref())
+        else {
+            return true;
+        };
+        !matches!(
+            pipe.try_send(Arc::clone(bytes)),
+            Err(crossbeam_channel::TrySendError::Full(_))
+        )
+    }
+
+    #[cfg(unix)]
+    fn control_output_deadline(&self) -> Option<Instant> {
+        let inner = self.inner.lock();
+        inner
+            .clients
+            .values()
+            .filter_map(|client| client.control_output.as_ref())
+            .flat_map(|output| {
+                output.panes.values().filter_map(|pane| {
+                    pane.pending.front().map(|chunk| {
+                        chunk.enqueued_at
+                            + output
+                                .pause_after_ms
+                                .map_or(CONTROL_MAXIMUM_AGE, Duration::from_millis)
+                    })
+                })
+            })
+            .min()
     }
 
     fn pump_control_output_at(&self, now: Instant) {
@@ -28900,30 +29051,68 @@ impl Shared {
             return;
         }
 
-        let shared = self.server_owner();
-        let worker_subscriber = subscriber.clone();
-        let permit = CopyPipePermit {
-            shared: self.server_owner(),
-        };
-        if let Err(error) = thread::Builder::new()
-            .name("zz-copy-pipe".to_owned())
-            .spawn(move || {
-                let result = run_copy_pipe(&command, &data, &environment);
+        #[cfg(unix)]
+        {
+            let shared = self.server_owner();
+            let permit = CopyPipePermit {
+                shared: Arc::downgrade(&shared),
+            };
+            let owner = Arc::downgrade(&shared);
+            let worker_subscriber = subscriber.clone();
+            let complete = Box::new(move |completion| {
                 drop(permit);
-                if let Err(error) = result {
+                if let Err(error) = copy_pipe_result(completion, COPY_PIPE_TIMEOUT)
+                    && let Some(shared) = owner.upgrade()
+                {
                     shared.publish_copy_pipe_message(
                         pane,
                         worker_subscriber.as_deref(),
                         format!("copy-pipe failed: {error}"),
                     );
                 }
-            })
+            });
+            match launch_copy_pipe(&command, data, &environment, COPY_PIPE_TIMEOUT, complete)
+                .and_then(|launch| {
+                    self.pipe_jobs
+                        .launch(launch)
+                        .map_err(|error| error.to_string())
+                }) {
+                Ok(()) => {}
+                Err(error) => self.publish_copy_pipe_message(
+                    pane,
+                    subscriber.as_deref(),
+                    format!("copy-pipe failed: {error}"),
+                ),
+            }
+            drop(command);
+        }
+        #[cfg(windows)]
         {
-            self.publish_copy_pipe_message(
-                pane,
-                subscriber.as_deref(),
-                format!("copy-pipe failed to start worker: {error}"),
-            );
+            let shared = self.server_owner();
+            let worker_subscriber = subscriber.clone();
+            let permit = CopyPipePermit {
+                shared: Arc::downgrade(&self.server_owner()),
+            };
+            if let Err(error) = thread::Builder::new()
+                .name("zz-copy-pipe".to_owned())
+                .spawn(move || {
+                    let result = run_copy_pipe(&command, &data, &environment);
+                    drop(permit);
+                    if let Err(error) = result {
+                        shared.publish_copy_pipe_message(
+                            pane,
+                            worker_subscriber.as_deref(),
+                            format!("copy-pipe failed: {error}"),
+                        );
+                    }
+                })
+            {
+                self.publish_copy_pipe_message(
+                    pane,
+                    subscriber.as_deref(),
+                    format!("copy-pipe failed to start worker: {error}"),
+                );
+            }
         }
     }
 
@@ -32971,24 +33160,33 @@ struct PanePipe {
     token: u64,
     pid: u32,
     terminal: Arc<Mutex<Arc<TerminalSession>>>,
-    tap_output: Option<crossbeam_channel::Sender<Arc<[u8]>>>,
+    tap_output: Option<RawOutputTapSender>,
+    #[cfg(unix)]
+    cancel: Arc<AtomicBool>,
+    #[cfg(unix)]
+    jobs: pipe_jobs::Client,
+    #[cfg(windows)]
     process: Arc<Mutex<Option<Child>>>,
+    #[cfg(windows)]
     stop: Arc<AtomicBool>,
+    #[cfg(windows)]
     thread: Option<thread::JoinHandle<()>>,
 }
 
 struct ControlOutputTap {
     #[cfg(unix)]
-    receiver: Option<crossbeam_channel::Receiver<Arc<[u8]>>>,
+    receiver: Option<RawOutputTapReceiver>,
     #[cfg(unix)]
     pending: Option<Arc<[u8]>>,
     #[cfg(unix)]
-    owner: Weak<Shared>,
+    output: RawOutputTapSender,
     #[cfg(unix)]
     pane: PaneId,
     token: u64,
     terminal: Arc<TerminalSession>,
+    #[cfg(windows)]
     stop: Arc<AtomicBool>,
+    #[cfg(windows)]
     thread: Option<thread::JoinHandle<()>>,
 }
 
@@ -42297,13 +42495,15 @@ fn shell_exit(_: ExitStatus) -> Option<i32> {
 }
 
 struct CopyPipePermit {
-    shared: Arc<Shared>,
+    shared: Weak<Shared>,
 }
 
 impl Drop for CopyPipePermit {
     fn drop(&mut self) {
-        let mut inner = self.shared.inner.lock();
-        inner.active_copy_pipes = inner.active_copy_pipes.saturating_sub(1);
+        if let Some(shared) = self.shared.upgrade() {
+            let mut inner = shared.inner.lock();
+            inner.active_copy_pipes = inner.active_copy_pipes.saturating_sub(1);
+        }
     }
 }
 
@@ -42314,6 +42514,7 @@ struct CopyPipeEnvironment {
     zz_socket: PathBuf,
 }
 
+#[cfg(any(test, windows))]
 fn run_copy_pipe(
     command: &str,
     data: &str,
@@ -42322,6 +42523,7 @@ fn run_copy_pipe(
     run_copy_pipe_with_timeout(command, data, environment, COPY_PIPE_TIMEOUT)
 }
 
+#[cfg(windows)]
 fn run_copy_pipe_with_timeout(
     command: &str,
     data: &str,
@@ -42394,6 +42596,129 @@ fn run_copy_pipe_with_timeout(
     }
 }
 
+#[cfg(all(test, unix))]
+#[path = "daemon/pipe_jobs_e16_tests.rs"]
+mod pipe_jobs_e16_tests;
+
+#[cfg(unix)]
+fn launch_copy_pipe(
+    command: &str,
+    data: String,
+    environment: &CopyPipeEnvironment,
+    timeout: Duration,
+    complete: Box<dyn FnOnce(jobs::Completion) + Send>,
+) -> Result<jobs::Launch, String> {
+    use std::os::unix::process::CommandExt as _;
+    let mut process = shell_process(command);
+    process.process_group(0);
+    configure_shell_job_environment(
+        &mut process,
+        &environment.variables,
+        &environment.default_terminal,
+        false,
+        &environment.tmux,
+        environment.zz_socket.as_os_str(),
+        None,
+        None,
+    );
+    process
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut child = process
+        .spawn()
+        .map_err(|error| format!("could not start process: {error}"))?;
+    let input = child.stdin.take().unwrap();
+    Ok(jobs::Launch {
+        child,
+        descriptors: vec![jobs::Descriptor {
+            fd: input.into(),
+            read: false,
+            input: Some(data.into_bytes()),
+            socket: false,
+        }],
+        policy: jobs::CompletionPolicy::ChildExit,
+        deadline: Some(Instant::now() + timeout),
+        process_group: true,
+        output_limit: None,
+        stream: None,
+        pipe: None,
+        cancel: None,
+        complete,
+    })
+}
+
+#[cfg(unix)]
+fn copy_pipe_result(completion: jobs::Completion, timeout: Duration) -> Result<(), String> {
+    if completion.cancelled {
+        return Err(format!(
+            "process timed out after {} seconds",
+            timeout.as_secs()
+        ));
+    }
+    if let Some(error) = completion.error {
+        return Err(error.to_string());
+    }
+    match completion.status {
+        Some(status) if status.success() => Ok(()),
+        Some(status) => Err(format!("process exited unsuccessfully ({status})")),
+        None => Err("process exited without status".into()),
+    }
+}
+
+#[cfg(all(test, unix))]
+fn run_copy_pipe_with_timeout(
+    command: &str,
+    data: &str,
+    environment: &CopyPipeEnvironment,
+    timeout: Duration,
+) -> Result<(), String> {
+    let mut poll = mio::Poll::new().map_err(|error| error.to_string())?;
+    let mut registry = jobs::JobRegistry::default();
+    let mut token = 4;
+    let (done, completed) = mpsc::channel();
+    let launch = launch_copy_pipe(
+        command,
+        data.to_owned(),
+        environment,
+        timeout,
+        Box::new(move |completion| {
+            let _ = done.send(completion);
+        }),
+    )?;
+    let id = registry
+        .register(poll.registry(), &mut token, launch)
+        .map_err(|error| error.to_string())?;
+    let mut events = mio::Events::with_capacity(16);
+    while registry.contains(id) {
+        registry.turn(poll.registry(), Instant::now());
+        registry.child_signal(poll.registry());
+        let timeout = registry
+            .next(Instant::now())
+            .map_or(COPY_PIPE_POLL_INTERVAL, |deadline| {
+                deadline.saturating_duration_since(Instant::now())
+            })
+            .min(COPY_PIPE_POLL_INTERVAL);
+        match poll.poll(&mut events, Some(timeout)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error.to_string()),
+        }
+        for event in &events {
+            registry.ready(
+                poll.registry(),
+                event.token(),
+                event.is_readable() || event.is_read_closed(),
+                event.is_writable() || event.is_write_closed(),
+            );
+        }
+    }
+    copy_pipe_result(
+        completed.recv().map_err(|error| error.to_string())?,
+        timeout,
+    )
+}
+
 fn terminate_copy_pipe(child: &mut Child) -> (Option<String>, Option<std::io::Error>) {
     #[cfg(unix)]
     let tree_result = rustix::process::kill_process_group(
@@ -42446,6 +42771,7 @@ fn terminate_managed_process(process: &Mutex<Option<Child>>) {
     let _ = terminate_copy_pipe(&mut child);
 }
 
+#[cfg(windows)]
 fn pane_pipe_process_exited(process: &Mutex<Option<Child>>) -> bool {
     let mut process = process.lock();
     let Some(child) = process.as_mut() else {
@@ -42466,6 +42792,17 @@ fn pane_pipe_process_exited(process: &Mutex<Option<Child>>) -> bool {
     }
 }
 
+#[cfg(unix)]
+fn stop_pane_pipe(pipe: PanePipe) {
+    if let Some(pid) = rustix::process::Pid::from_raw(pipe.pid as i32) {
+        let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+    }
+    pipe.cancel.store(true, Ordering::Release);
+    pipe.jobs.wake.wake();
+    drop(pipe);
+}
+
+#[cfg(windows)]
 fn stop_pane_pipe(mut pipe: PanePipe) {
     pipe.stop.store(true, Ordering::Release);
     terminate_managed_process(&pipe.process);
@@ -42548,6 +42885,14 @@ fn drain_control_pane_output(
     (age_ms, bytes)
 }
 
+#[cfg(unix)]
+fn stop_control_output_tap(tap: ControlOutputTap) {
+    let _round_trips = zz_terminal::allow_actor_round_trips();
+    let _ = tap.terminal.disarm_raw_output_tap(tap.token);
+    drop(tap);
+}
+
+#[cfg(windows)]
 fn stop_control_output_tap(mut tap: ControlOutputTap) {
     let _round_trips = zz_terminal::allow_actor_round_trips();
     tap.stop.store(true, Ordering::Release);
@@ -42568,11 +42913,12 @@ fn stop_control_output_tap(mut tap: ControlOutputTap) {
     }
 }
 
+#[cfg(windows)]
 fn run_control_output_tap(
     shared: &std::sync::Weak<Shared>,
     pane: PaneId,
     stop: &Arc<AtomicBool>,
-    receiver: &crossbeam_channel::Receiver<Arc<[u8]>>,
+    receiver: &RawOutputTapReceiver,
 ) {
     loop {
         match receiver.recv_timeout(COPY_PIPE_POLL_INTERVAL) {
@@ -42583,7 +42929,11 @@ fn run_control_output_tap(
                 if stop.load(Ordering::Acquire) {
                     shared.publish_pipe_output_for_pane(pane, &bytes);
                 } else {
-                    shared.publish_control_output_for_pane(pane, &bytes);
+                    while !shared.publish_control_output_for_pane(pane, &bytes)
+                        && !stop.load(Ordering::Acquire)
+                    {
+                        thread::sleep(COPY_PIPE_POLL_INTERVAL);
+                    }
                 }
             }
             Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
@@ -42600,6 +42950,7 @@ fn run_control_output_tap(
     }
 }
 
+#[cfg(windows)]
 #[allow(clippy::too_many_arguments)]
 fn run_pane_pipe(
     shared: &std::sync::Weak<Shared>,
@@ -42610,7 +42961,7 @@ fn run_pane_pipe(
     stop: &Arc<AtomicBool>,
     mut child_input: Option<std::process::ChildStdin>,
     child_output: Option<std::process::ChildStdout>,
-    tap: Option<crossbeam_channel::Receiver<Arc<[u8]>>>,
+    tap: Option<RawOutputTapReceiver>,
 ) {
     let input_worker = child_output.map(|mut output| {
         let terminal = Arc::clone(terminal);
@@ -79355,6 +79706,8 @@ set-option -g @alias-mixed-next yes
     #[test]
     fn pipe_pane_enforces_arity_and_hard_targets() {
         let shared = Arc::new(Shared::new(1));
+        #[cfg(unix)]
+        let _loop = pipe_jobs::Driver::new(&shared);
         let error = shared
             .pipe_pane(
                 &ExecutionContext::default(),
@@ -79384,6 +79737,8 @@ set-option -g @alias-mixed-next yes
     #[test]
     fn pipe_pane_rejects_dead_targets_before_closing_the_existing_pipe() {
         let shared = Arc::new(Shared::new(1));
+        #[cfg(unix)]
+        let _loop = pipe_jobs::Driver::new(&shared);
         let mut context = ExecutionContext::default();
         shared
             .execute(
@@ -79426,6 +79781,8 @@ set-option -g @alias-mixed-next yes
     #[test]
     fn pipe_pane_streams_single_shell_burst_without_loss() {
         let shared = Arc::new(Shared::new(1));
+        #[cfg(unix)]
+        let _loop = pipe_jobs::Driver::new(&shared);
         let mailbox = OutboundMailbox::new();
         let (client, _) =
             shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
@@ -79548,6 +79905,8 @@ set-option -g @alias-mixed-next yes
     #[test]
     fn pipe_pane_has_no_gap_when_control_attaches_during_a_flood() {
         let shared = Arc::new(Shared::new(1));
+        #[cfg(unix)]
+        let _loop = pipe_jobs::Driver::new(&shared);
         let interactive_mailbox = OutboundMailbox::new();
         let (interactive, _) = shared.register_subscribed(
             ClientKind::Interactive,
@@ -79675,6 +80034,8 @@ set-option -g @alias-mixed-next yes
     #[test]
     fn pipe_pane_survives_respawn_with_the_same_child() {
         let shared = Arc::new(Shared::new(1));
+        #[cfg(unix)]
+        let _loop = pipe_jobs::Driver::new(&shared);
         let mailbox = OutboundMailbox::new();
         let (client, _) =
             shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
@@ -79716,7 +80077,7 @@ set-option -g @alias-mixed-next yes
         let (pid, process) = {
             let inner = shared.inner.lock();
             let pipe = &inner.pane_pipes[&pane];
-            (pipe.pid, Arc::clone(&pipe.process))
+            (pipe.pid, Arc::clone(&pipe.cancel))
         };
 
         let control_mailbox = OutboundMailbox::new();
@@ -79733,7 +80094,7 @@ set-option -g @alias-mixed-next yes
             let inner = shared.inner.lock();
             let pipe = &inner.pane_pipes[&pane];
             assert_eq!(pipe.pid, pid);
-            assert!(Arc::ptr_eq(&pipe.process, &process));
+            assert!(Arc::ptr_eq(&pipe.cancel, &process));
             assert!(inner.control_output_taps.contains_key(&pane));
         }
         original_terminal.send_raw_input(Arc::from(b"WITH_CONTROL\n".as_slice()));
@@ -79754,8 +80115,8 @@ set-option -g @alias-mixed-next yes
             let inner = shared.inner.lock();
             let pipe = &inner.pane_pipes[&pane];
             assert_eq!(pipe.pid, pid);
-            assert!(Arc::ptr_eq(&pipe.process, &process));
-            assert!(!inner.control_output_taps.contains_key(&pane));
+            assert!(Arc::ptr_eq(&pipe.cancel, &process));
+            assert!(inner.control_output_taps.contains_key(&pane));
         }
         original_terminal.send_raw_input(Arc::from(b"AFTER_CONTROL\n".as_slice()));
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -79794,7 +80155,7 @@ set-option -g @alias-mixed-next yes
             let inner = shared.inner.lock();
             let pipe = &inner.pane_pipes[&pane];
             assert_eq!(pipe.pid, pid);
-            assert!(Arc::ptr_eq(&pipe.process, &process));
+            assert!(Arc::ptr_eq(&pipe.cancel, &process));
         }
 
         replacement_terminal.send_raw_input(Arc::from(b"POST_RESPAWN_PIPE\n".as_slice()));
@@ -79827,13 +80188,15 @@ set-option -g @alias-mixed-next yes
         );
 
         shared.request_shutdown();
-        assert!(process.lock().is_none());
+        assert!(process.load(Ordering::Acquire));
     }
 
     #[cfg(unix)]
     #[test]
     fn disconnected_pipe_tap_closes_child_and_formats() {
         let shared = Arc::new(Shared::new(1));
+        #[cfg(unix)]
+        let _loop = pipe_jobs::Driver::new(&shared);
         let client = ClientId(1);
         let mut context = ExecutionContext::default();
         shared
@@ -79861,13 +80224,13 @@ set-option -g @alias-mixed-next yes
         let (token, process) = {
             let inner = shared.inner.lock();
             let pipe = &inner.pane_pipes[&pane];
-            (pipe.token, Arc::clone(&pipe.process))
+            (pipe.token, Arc::clone(&pipe.cancel))
         };
 
         shared.pipe_tap_closed(pane, token, &terminal);
 
         assert!(shared.inner.lock().pane_pipes.is_empty());
-        assert!(process.lock().is_none());
+        assert!(process.load(Ordering::Acquire));
         assert_eq!(
             shared
                 .execute(
@@ -79891,6 +80254,8 @@ set-option -g @alias-mixed-next yes
     #[test]
     fn pipe_pane_streams_raw_output_toggles_formats_injects_and_expands_time() {
         let shared = Arc::new(Shared::new(1));
+        #[cfg(unix)]
+        let _loop = pipe_jobs::Driver::new(&shared);
         let mailbox = OutboundMailbox::new();
         let (client, _) =
             shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
@@ -80121,10 +80486,20 @@ set-option -g @alias-mixed-next yes
                 &CommandInvocation::new("pipe-pane", ["-t", target.as_str(), "sleep 60"]),
             )
             .expect("shutdown pipe");
+        #[cfg(unix)]
+        let pid = shared.inner.lock().pane_pipes[&pane].pid;
+        #[cfg(windows)]
         let process = Arc::clone(&shared.inner.lock().pane_pipes[&pane].process);
         shared.request_shutdown();
         assert!(shared.inner.lock().pane_pipes.is_empty());
+        #[cfg(windows)]
         assert!(process.lock().is_none());
+        #[cfg(unix)]
+        wait_for_process_group_exit(
+            rustix::process::Pid::from_raw(pid as i32).unwrap(),
+            Duration::from_secs(8),
+            "pipe shutdown",
+        );
     }
 
     #[test]
@@ -87986,6 +88361,8 @@ bind - split-window -v -c "#{pane_current_path}"
     #[test]
     fn copy_pipe_failure_is_a_reliable_client_message_and_releases_its_permit() {
         let shared = Arc::new(Shared::new(1));
+        #[cfg(unix)]
+        let _loop = pipe_jobs::Driver::new(&shared);
         let subscriber = OutboundMailbox::new();
         let control_subscriber = OutboundMailbox::new();
         let (pane, client, control) = {

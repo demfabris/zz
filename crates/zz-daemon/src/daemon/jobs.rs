@@ -3,6 +3,10 @@ use std::{
     io,
     os::fd::{AsRawFd, OwnedFd},
     process::{Child, Command, ExitStatus, Stdio},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Instant,
 };
 
@@ -37,6 +41,26 @@ pub(super) struct Descriptor {
     pub(super) socket: bool,
 }
 
+pub(super) struct PipeIo {
+    terminal: Arc<parking_lot::Mutex<Arc<zz_terminal::TerminalSession>>>,
+    input: Option<zz_terminal::RawOutputTapReceiver>,
+    waker: std::task::Waker,
+}
+
+impl PipeIo {
+    pub(super) fn new(
+        terminal: Arc<parking_lot::Mutex<Arc<zz_terminal::TerminalSession>>>,
+        input: Option<zz_terminal::RawOutputTapReceiver>,
+        waker: std::task::Waker,
+    ) -> Self {
+        Self {
+            terminal,
+            input,
+            waker,
+        }
+    }
+}
+
 pub(super) struct Launch {
     pub(super) child: Child,
     pub(super) descriptors: Vec<Descriptor>,
@@ -45,6 +69,8 @@ pub(super) struct Launch {
     pub(super) process_group: bool,
     pub(super) output_limit: Option<usize>,
     pub(super) stream: Option<StatusOutput>,
+    pub(super) pipe: Option<PipeIo>,
+    pub(super) cancel: Option<Arc<AtomicBool>>,
     pub(super) complete: Box<dyn FnOnce(Completion) + Send>,
 }
 
@@ -64,11 +90,15 @@ struct Port {
     eof: bool,
     registered: bool,
     drain_left: Option<usize>,
+    pending_output: Option<Arc<[u8]>>,
 }
 
 impl Port {
     fn interest(&self) -> Option<Interest> {
-        let read = self.descriptor.read && !self.eof && self.drain_left != Some(0);
+        let read = self.descriptor.read
+            && !self.eof
+            && self.drain_left != Some(0)
+            && self.pending_output.is_none();
         let write = self.descriptor.input.is_some();
         match (read, write) {
             (true, true) => Some(Interest::READABLE | Interest::WRITABLE),
@@ -107,6 +137,8 @@ struct Job {
     process_group: bool,
     output_limit: Option<usize>,
     stream: Option<StatusOutput>,
+    pipe: Option<PipeIo>,
+    cancel_flag: Option<Arc<AtomicBool>>,
     status: Option<ExitStatus>,
     error: Option<io::Error>,
     cancelled: bool,
@@ -171,10 +203,10 @@ impl Job {
         self.child.is_none()
             && (self.cancelled
                 || match self.policy {
-                    CompletionPolicy::ChildExit => self
-                        .ports
-                        .values()
-                        .all(|port| port.drain_left.is_none_or(|left| left == 0)),
+                    CompletionPolicy::ChildExit => self.ports.values().all(|port| {
+                        port.pending_output.is_none()
+                            && port.drain_left.is_none_or(|left| left == 0)
+                    }),
                     CompletionPolicy::ChildExitAndEof => self
                         .ports
                         .values()
@@ -223,6 +255,8 @@ impl JobRegistry {
             process_group,
             output_limit,
             stream,
+            pipe,
+            cancel,
             complete,
         } = launch;
         let mut job = Job {
@@ -235,6 +269,8 @@ impl JobRegistry {
             process_group,
             output_limit,
             stream,
+            pipe,
+            cancel_flag: cancel,
             status: None,
             error: None,
             cancelled: false,
@@ -256,6 +292,7 @@ impl JobRegistry {
                     eof: false,
                     registered: false,
                     drain_left: None,
+                    pending_output: None,
                 };
                 port.sync(registry, token)?;
                 job.ports.insert(token, port);
@@ -270,6 +307,20 @@ impl JobRegistry {
                 if port.registered {
                     let _ = registry.deregister(&mut SourceFd(&port.descriptor.fd.as_raw_fd()));
                 }
+            }
+            job.cancel();
+            if let Some(mut child) = job.child.take() {
+                let _ = child.wait();
+            }
+            if let Some(complete) = job.complete.take() {
+                complete(Completion {
+                    id: JobId(self.next_id),
+                    pid: job.pid,
+                    status: None,
+                    output: std::mem::take(&mut job.output),
+                    error: Some(io::Error::other(error.to_string())),
+                    cancelled: false,
+                });
             }
             return Err(error);
         }
@@ -316,7 +367,12 @@ impl JobRegistry {
         let job = self.jobs.get_mut(&id).unwrap();
         let port = job.ports.get_mut(&token).unwrap();
         let result = (|| {
-            if readable && port.descriptor.read && !port.eof && port.drain_left != Some(0) {
+            if readable
+                && port.descriptor.read
+                && !port.eof
+                && port.drain_left != Some(0)
+                && port.pending_output.is_none()
+            {
                 let mut left = IO_BURST.min(port.drain_left.unwrap_or(usize::MAX));
                 let mut buffer = [0; 8192];
                 while left != 0 {
@@ -340,7 +396,16 @@ impl JobRegistry {
                             }) {
                                 return Err(io::Error::other("job output limit exceeded"));
                             }
-                            if let Some(stream) = &mut job.stream {
+                            if let Some(pipe) = &job.pipe {
+                                let bytes = Arc::<[u8]>::from(&buffer[..count]);
+                                if !pipe
+                                    .terminal
+                                    .lock()
+                                    .send_raw_input_notified(Arc::clone(&bytes), &pipe.waker)
+                                {
+                                    port.pending_output = Some(bytes);
+                                }
+                            } else if let Some(stream) = &mut job.stream {
                                 stream.read(&buffer[..count]);
                             } else {
                                 job.output[port.index].extend_from_slice(&buffer[..count]);
@@ -348,6 +413,9 @@ impl JobRegistry {
                             left -= count;
                             if let Some(remaining) = &mut port.drain_left {
                                 *remaining = remaining.saturating_sub(count);
+                            }
+                            if port.pending_output.is_some() {
+                                break;
                             }
                         }
                         Err(rustix::io::Errno::INTR) => {}
@@ -360,7 +428,7 @@ impl JobRegistry {
                         Err(error) => return Err(error.into()),
                     }
                 }
-                if left == 0 && port.drain_left != Some(0) {
+                if left == 0 && port.drain_left != Some(0) && port.pending_output.is_none() {
                     self.pending.insert(token);
                 }
             }
@@ -387,7 +455,7 @@ impl JobRegistry {
             port.sync(registry, token)?;
             Ok::<_, io::Error>(())
         })();
-        let remove = !port.registered && !port.descriptor.read;
+        let remove = !port.registered && !port.descriptor.read && job.pipe.is_none();
         if let Err(error) = result {
             job.error.get_or_insert(error);
             job.cancel();
@@ -477,6 +545,48 @@ impl JobRegistry {
     }
 
     pub(super) fn turn(&mut self, registry: &Registry, now: Instant) {
+        let ids = self.jobs.keys().copied().collect::<Vec<_>>();
+        for id in ids {
+            if self.jobs[&id]
+                .cancel_flag
+                .as_ref()
+                .is_some_and(|cancel| cancel.load(Ordering::Acquire))
+            {
+                self.cancel(registry, id);
+                continue;
+            }
+            let job = self.jobs.get_mut(&id).unwrap();
+            let Some(pipe) = &mut job.pipe else {
+                continue;
+            };
+            for (&token, port) in &mut job.ports {
+                if let Some(bytes) = &port.pending_output
+                    && pipe
+                        .terminal
+                        .lock()
+                        .send_raw_input_notified(Arc::clone(bytes), &pipe.waker)
+                {
+                    port.pending_output = None;
+                    self.pending.insert(token);
+                }
+                if !port.descriptor.read
+                    && port.descriptor.input.is_none()
+                    && let Some(input) = &pipe.input
+                {
+                    match input.try_recv() {
+                        Ok(bytes) => {
+                            port.descriptor.input = Some(bytes.to_vec());
+                            port.written = 0;
+                            self.pending.insert(token);
+                        }
+                        Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                            pipe.input = None;
+                        }
+                        Err(crossbeam_channel::TryRecvError::Empty) => {}
+                    }
+                }
+            }
+        }
         let due = self
             .jobs
             .iter()
@@ -529,6 +639,8 @@ pub(super) fn launch_status(mut command: Command, mut output: StatusOutput) -> i
         process_group: true,
         output_limit: None,
         stream: Some(output),
+        pipe: None,
+        cancel: None,
         complete: Box::new(|_| {}),
     })
 }

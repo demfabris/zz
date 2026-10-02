@@ -1703,6 +1703,121 @@ pub enum KittyImageRequestError {
     ActorStopped,
 }
 
+struct RawOutputTapState {
+    notification: OnceLock<Box<dyn Fn() + Send + Sync>>,
+    capacity_wake: Mutex<ActorWake>,
+    receivers: AtomicUsize,
+}
+
+#[derive(Clone)]
+pub struct RawOutputTapSender {
+    sender: Sender<Arc<[u8]>>,
+    state: Arc<RawOutputTapState>,
+}
+
+impl std::fmt::Debug for RawOutputTapSender {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RawOutputTapSender").finish_non_exhaustive()
+    }
+}
+
+impl RawOutputTapSender {
+    pub fn set_notification(&self, notification: impl Fn() + Send + Sync + 'static) {
+        let _ = self.state.notification.set(Box::new(notification));
+    }
+
+    pub fn is_full(&self) -> bool {
+        self.sender.is_full() && self.state.receivers.load(Ordering::Acquire) != 0
+    }
+
+    pub fn try_send(
+        &self,
+        bytes: Arc<[u8]>,
+    ) -> Result<(), crossbeam_channel::TrySendError<Arc<[u8]>>> {
+        self.sender.try_send(bytes)?;
+        self.notify();
+        Ok(())
+    }
+
+    fn send(&self, bytes: Arc<[u8]>) -> Result<(), crossbeam_channel::SendError<Arc<[u8]>>> {
+        self.sender.send(bytes)?;
+        self.notify();
+        Ok(())
+    }
+
+    fn notify(&self) {
+        if let Some(notification) = self.state.notification.get() {
+            notification();
+        }
+    }
+}
+
+pub struct RawOutputTapReceiver {
+    receiver: Option<Receiver<Arc<[u8]>>>,
+    state: Arc<RawOutputTapState>,
+}
+
+impl Clone for RawOutputTapReceiver {
+    fn clone(&self) -> Self {
+        self.state.receivers.fetch_add(1, Ordering::Relaxed);
+        Self {
+            receiver: self.receiver.clone(),
+            state: Arc::clone(&self.state),
+        }
+    }
+}
+
+impl RawOutputTapReceiver {
+    pub fn try_recv(&self) -> Result<Arc<[u8]>, crossbeam_channel::TryRecvError> {
+        let bytes = self.receiver.as_ref().unwrap().try_recv()?;
+        self.state.capacity_wake.lock().notify();
+        if let Some(notification) = self.state.notification.get() {
+            notification();
+        }
+        Ok(bytes)
+    }
+
+    pub fn recv_timeout(
+        &self,
+        timeout: Duration,
+    ) -> Result<Arc<[u8]>, crossbeam_channel::RecvTimeoutError> {
+        let bytes = self.receiver.as_ref().unwrap().recv_timeout(timeout)?;
+        self.state.capacity_wake.lock().notify();
+        if let Some(notification) = self.state.notification.get() {
+            notification();
+        }
+        Ok(bytes)
+    }
+
+    pub fn recv(&self) -> Result<Arc<[u8]>, crossbeam_channel::RecvError> {
+        let bytes = self.receiver.as_ref().unwrap().recv()?;
+        self.state.capacity_wake.lock().notify();
+        if let Some(notification) = self.state.notification.get() {
+            notification();
+        }
+        Ok(bytes)
+    }
+
+    pub fn recv_deadline(
+        &self,
+        deadline: Instant,
+    ) -> Result<Arc<[u8]>, crossbeam_channel::RecvTimeoutError> {
+        self.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+    }
+
+    pub fn try_iter(&self) -> impl Iterator<Item = Arc<[u8]>> + '_ {
+        std::iter::from_fn(|| self.try_recv().ok())
+    }
+}
+
+impl Drop for RawOutputTapReceiver {
+    fn drop(&mut self) {
+        self.receiver.take();
+        self.state.receivers.fetch_sub(1, Ordering::Release);
+        self.state.capacity_wake.lock().notify();
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
 pub enum RawOutputTapError {
     #[error("terminal actor did not answer the raw output tap request in time")]
@@ -2468,15 +2583,41 @@ impl TerminalSession {
         self.send_command(Command::RawInput(bytes))
     }
 
-    pub fn raw_output_tap_channel() -> (Sender<Arc<[u8]>>, Receiver<Arc<[u8]>>) {
-        crossbeam_channel::bounded(RAW_OUTPUT_TAP_PENDING_CHUNKS)
+    pub fn send_raw_input_notified(&self, bytes: Arc<[u8]>, waker: &std::task::Waker) -> bool {
+        self.commands.queues.slot.lock().raw_input_space_waker = Some(waker.clone());
+        if self.send_raw_input(bytes) {
+            self.commands.queues.slot.lock().raw_input_space_waker = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn raw_output_tap_channel() -> (RawOutputTapSender, RawOutputTapReceiver) {
+        let (sender, receiver) = crossbeam_channel::bounded(RAW_OUTPUT_TAP_PENDING_CHUNKS);
+        let state = Arc::new(RawOutputTapState {
+            notification: OnceLock::new(),
+            capacity_wake: Mutex::new(ActorWake::none()),
+            receivers: AtomicUsize::new(1),
+        });
+        (
+            RawOutputTapSender {
+                sender,
+                state: Arc::clone(&state),
+            },
+            RawOutputTapReceiver {
+                receiver: Some(receiver),
+                state,
+            },
+        )
     }
 
     pub fn arm_raw_output_tap(
         &self,
         token: u64,
-        output: Sender<Arc<[u8]>>,
+        output: RawOutputTapSender,
     ) -> Result<(), RawOutputTapError> {
+        *output.state.capacity_wake.lock() = self.commands.queues.wake.clone();
         if self.commands.request(|reply| Command::ArmRawOutputTap {
             token,
             output,
@@ -2795,7 +2936,7 @@ enum Command {
     Output(Arc<[u8]>),
     ArmRawOutputTap {
         token: u64,
-        output: Sender<Arc<[u8]>>,
+        output: RawOutputTapSender,
         reply: Sender<bool>,
     },
     DisarmRawOutputTap {
@@ -2841,6 +2982,7 @@ impl ViewStream {
 
 #[derive(Default)]
 struct ControlSlot {
+    raw_input_space_waker: Option<std::task::Waker>,
     pending: PendingControl,
     deferred: Vec<(usize, Command)>,
     in_flight: usize,
@@ -2948,6 +3090,9 @@ fn take_control_slot(
         return commands;
     };
     let counted = from_control && !matches!(command, Command::Wake);
+    if from_control && let Some(waker) = slot.raw_input_space_waker.take() {
+        waker.wake();
+    }
     commands.push(command);
     if counted {
         slot.in_flight = slot.in_flight.saturating_sub(1);
@@ -12528,7 +12673,7 @@ fn consume_pty_output(
     terminal: &mut Terminal<'_, '_>,
     passthrough: &mut PassthroughFilter,
     engine: &mut EngineOutput<'_>,
-    raw_output_tap: &mut Option<(u64, Sender<Arc<[u8]>>)>,
+    raw_output_tap: &mut Option<(u64, RawOutputTapSender)>,
     buffer: Vec<u8>,
     length: usize,
     recycled: &Sender<Vec<u8>>,
@@ -12546,12 +12691,12 @@ fn consume_pty_output(
 }
 
 #[cfg(any(target_os = "linux", not(unix), test))]
-fn tap_raw_output(tap: &mut Option<(u64, Sender<Arc<[u8]>>)>, bytes: &[u8]) -> Option<u64> {
+fn tap_raw_output(tap: &mut Option<(u64, RawOutputTapSender)>, bytes: &[u8]) -> Option<u64> {
     tap_raw_output_arc(tap, &Arc::from(bytes))
 }
 
 fn tap_raw_output_arc(
-    tap: &mut Option<(u64, Sender<Arc<[u8]>>)>,
+    tap: &mut Option<(u64, RawOutputTapSender)>,
     bytes: &Arc<[u8]>,
 ) -> Option<u64> {
     let disconnected = tap
@@ -12635,13 +12780,14 @@ fn drain_pty_output_burst(
     first_buffer: Vec<u8>,
     first_length: usize,
     limit_turn: bool,
+    max_chunks: usize,
     mut consume: impl FnMut(Vec<u8>, usize),
 ) -> bool {
     let started = limit_turn.then(Instant::now);
     let mut bytes = first_length;
     consume(first_buffer, first_length);
 
-    for _ in 1..PTY_BUFFER_POOL_SIZE {
+    for _ in 1..PTY_BUFFER_POOL_SIZE.min(max_chunks) {
         if limit_turn
             && (bytes >= PTY_DRAIN_TURN_BYTES
                 || started.is_some_and(|started| started.elapsed() >= PTY_DRAIN_TURN_TIME))
@@ -20824,10 +20970,16 @@ mod tests {
         }
 
         let mut consumed = Vec::new();
-        let reached_eof =
-            drain_pty_output_burst(&output_rx, vec![0], 1, false, |buffer, length| {
+        let reached_eof = drain_pty_output_burst(
+            &output_rx,
+            vec![0],
+            1,
+            false,
+            PTY_BUFFER_POOL_SIZE,
+            |buffer, length| {
                 consumed.extend_from_slice(&buffer[..length]);
-            });
+            },
+        );
 
         let burst_limit = u8::try_from(PTY_BUFFER_POOL_SIZE).expect("burst limit fits in a byte");
         assert!(!reached_eof);
@@ -20842,7 +20994,7 @@ mod tests {
 
     #[test]
     fn raw_output_tap_blocks_at_four_read_chunks_and_receiver_drop_unblocks_it() {
-        let (output, receiver) = crossbeam_channel::bounded(RAW_OUTPUT_TAP_PENDING_CHUNKS);
+        let (output, receiver) = TerminalSession::raw_output_tap_channel();
         let mut tap = Some((1, output));
         for _ in 0..RAW_OUTPUT_TAP_PENDING_CHUNKS {
             assert_eq!(
@@ -20869,6 +21021,47 @@ mod tests {
             Some(1)
         );
         worker.join().expect("tap worker");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn full_raw_output_tap_keeps_actor_requests_live_and_draining_resumes_output() {
+        let session = TerminalSession::spawn(
+            DEFAULT_HISTORY_LIMIT,
+            Arc::new(TerminalAppearance::default()),
+            TerminalSpawn {
+                command: Some(vec![
+                    "read _; head -c 1048576 /dev/zero; printf TAP_END; read _".into(),
+                ]),
+                ..TerminalSpawn::default()
+            },
+        );
+        attach_streaming(&session, TerminalViewId(116));
+        wait_for_test_viewport(&session, |viewport| {
+            matches!(viewport.status, SessionStatus::Running)
+        });
+        let (tap, output) = TerminalSession::raw_output_tap_channel();
+        let (notified, notifications) = crossbeam_channel::bounded(1);
+        tap.set_notification(move || {
+            let _ = notified.try_send(());
+        });
+        session.arm_raw_output_tap(116, tap.clone()).unwrap();
+        assert!(session.send_raw_input(Arc::from(b"go\n".as_slice())));
+        notifications.recv_timeout(Duration::from_secs(5)).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !tap.is_full() {
+            assert!(Instant::now() < deadline, "tap never reached four chunks");
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert!(session.settle());
+        session.capture(CaptureOptions::default()).unwrap();
+        let mut received = Vec::new();
+        while !received.ends_with(b"TAP_END") {
+            received.extend_from_slice(&output.recv_deadline(deadline).unwrap());
+        }
+        assert!(received.len() >= 1_048_576);
+        session.disarm_raw_output_tap(116).unwrap();
+        session.terminate();
     }
 
     fn synchronized_output_session() -> (TerminalSession, Arc<TerminalViewport>) {

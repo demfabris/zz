@@ -397,7 +397,7 @@ fn pending_bytes_are_bounded_before_the_message_count_limit() {
 }
 
 #[test]
-fn control_output_reader_starts_only_when_bytes_arrive() {
+fn control_output_loop_delivers_bytes_without_readers() {
     let shared = Arc::new(Shared::new(17));
     let mut event_loop = EventLoop::empty(&shared).unwrap();
     let fixture = tempfile::NamedTempFile::new().unwrap();
@@ -430,10 +430,13 @@ fn control_output_reader_starts_only_when_bytes_arrive() {
     });
     let terminal = {
         let inner = shared.inner.lock();
-        assert!(inner.control_output_taps[&pane].thread.is_none());
+        assert!(inner.control_output_taps[&pane].receiver.is_some());
         assert!(inner.control_output_taps[&pane].receiver.is_some());
         Arc::clone(&inner.terminals[&pane])
     };
+    let threads = crate::process_info::sample(std::process::id())
+        .unwrap()
+        .threads;
     assert!(terminal.send_raw_input(Arc::from(b"b2-bytes\n".as_slice())));
     let mut inbound = Inbound::default();
     let mut received = Vec::new();
@@ -471,8 +474,14 @@ fn control_output_reader_starts_only_when_bytes_arrive() {
     }
     assert!(received.len() >= 4_200_000);
     assert!(
+        crate::process_info::sample(std::process::id())
+            .unwrap()
+            .threads
+            <= threads
+    );
+    assert!(
         shared.inner.lock().control_output_taps[&pane]
-            .thread
+            .receiver
             .is_some()
     );
     event_loop.remove(token, &shared);

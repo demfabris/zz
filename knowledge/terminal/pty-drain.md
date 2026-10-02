@@ -4,7 +4,7 @@ title: PTY drain topology (the IO fast path)
 description: How macOS keeps its tuned inline PTY actor while Linux overlaps a bounded gather stage with VT parsing; includes the probe and benchmark results behind each platform choice.
 resource: crates/zz-terminal/src/session.rs
 tags: [pty, throughput, drain, spin-bridge, poll, benchmark, session]
-timestamp: 2026-09-28T00:00:00Z
+timestamp: 2026-10-02T00:00:00Z
 ---
 
 # Overview
@@ -12,7 +12,7 @@ timestamp: 2026-09-28T00:00:00Z
 `run_terminal` in `session.rs` is the terminal actor. It owns the libghostty-vt state (see
 [libghostty-vt](/terminal/libghostty-vt.md)), command handling, and snapshot publishing.
 macOS and other Unix targets drain the PTY inline with the actor. Linux gives PTY reads to
-one bounded gather thread while the actor parses the previous batch. Windows keeps the
+one bounded gather thread per shard while the actor parses the previous batch. Windows keeps the
 portable blocking-reader path. Each platform keeps libghostty state on the actor thread.
 
 Benchmarked 2026-07-28 (`bench/`, Mac16,5, 180×50, medians of 5 hyperfine runs):
@@ -149,15 +149,21 @@ both costs in series:
 337.55 ms observed
 ```
 
-The Linux path rotates four preallocated 64 KiB buffers through bounded Crossbeam channels.
-The gather thread owns `read` and `poll`; the actor consumes at most four batches per turn
-and returns each buffer to the pool. A full ring stops PTY reads and lets kernel flow control
-backpressure the child.
+The Linux path rotates four preallocated 64 KiB buffers per pane through bounded Crossbeam
+channels. Each shard starts one `zz-pty-gather-N` thread with its first PTY pane. It owns
+`read` and `poll` for every PTY master on the shard, plus its own wake pipe, which carries
+launches, exits and buffer returns. The actor consumes at most four batches per turn and
+returns each buffer to the pool. A pane whose four buffers are all with its actor leaves the
+poll set until one comes back, so a stalled pane does not hold up the others on the shard,
+and a full ring still lets kernel flow control backpressure the child. One poll round reads
+every ready pane in turn, one read per pane per pass, until each has filled its buffer or gone
+quiet, so several busy panes keep their PTY queues refilling in parallel. `ZZ_PTY_GATHER=0`
+reads on the shard thread instead.
 
 ```mermaid
 flowchart LR
     child["PTY child"] --> kernel["Linux PTY queue"]
-    kernel --> gather["zz-pty-gather<br/>poll + nonblocking read<br/>spin 16"]
+    kernel --> gather["zz-pty-gather-N, one per shard<br/>poll + nonblocking read<br/>spin 16"]
     gather -->|"4 × 64 KiB bounded pool"| actor["zz-terminal actor<br/>vt_write + commands"]
     actor -->|"recycle buffer"| gather
     actor -->|"snapshot at 16 ms gate"| render["GUI"]
@@ -165,8 +171,8 @@ flowchart LR
 
 A partial batch below 1 KiB goes to the actor at its first `EAGAIN`. Saturated output gets
 16 direct read retries, enough to bridge Linux queue refills without the 512-spin macOS
-budget. The actor sleeps in `select_biased!`, with commands and search results ahead of PTY
-output. The channels wake it without a Unix self-pipe.
+budget. The shard sleeps in `poll` on its wake pipe; the gather marks the pane ready and
+writes that pipe at most once until the shard drains it.
 
 ## The macOS inline spin bridge (`Wake::PtyReadable` arm)
 

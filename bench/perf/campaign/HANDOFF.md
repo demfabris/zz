@@ -6,7 +6,7 @@ the macbook, continued the same day on the Linux host alienware (see "Linux leg"
 Opus fix lanes) closed at `e9bc174c`; its exit gates are `wave3-macbook-e9bc174c.json` and
 `wave3-alienware-e9bc174c.json`. The Ghostty fork pin is `67351380` (trim fix `c3941417`, copy
 snapshots `7823f65d`, used-size active page copies). No lane in flight, no lane worktree left.
-Wave 4 starts from "Next session: wave 4"; read "Lane brief rules" before launching anything.
+Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" before launching anything.
 
 ## Next session: wave 4
 
@@ -65,6 +65,41 @@ Wave 4 starts from "Next session: wave 4"; read "Lane brief rules" before launch
    rows. The wave-exit corpus found what 36 merge rows did not (two W3-LOOP parity regressions):
    run the full corpus before calling a wave done.
 6. Release freeze until wave 4 exits; protocol stays 107.
+
+## Wave 4 merge log (from 2026-10-02)
+
+- Start, 2026-10-02 20:45. `perf/wave4` from main `06ea9cf1` in `~/dev/zz-perf-int` on both hosts
+  (alienware gets it through `perf/wave4-mac`, then `--ff-only`: pushing a branch that a worktree
+  has checked out is refused). `lane-briefs.py` points at wave 4 (`--stage final`, base
+  `wave3-<host>-e9bc174c.json`, wave-3 reds listed, plain rollback switches instead of
+  `ZZ_PERF_*`). Final-stage rescore of the wave-3 exit gates (`run.py --rescore <json> --stage
+  final`): Mac 8 fails (`spawn.cpu.split_empty_P` 2.1x, `chatty.cpu_pct.visible`, five echo rows,
+  `control.latency` 1.41x), Linux 20 (spawn CPU x3, chatty flip/visible, `mem.threads.*` x4 at
+  25-26 against 12, `attach.cpu.p1`/`.p4` 1.4-1.48x, six echo rows, `control.latency` 1.52x,
+  `control.burst_cmds_per_s` 0.83x, and the noisy `cli.wall.capture_history.p20`).
+- Lanes launched at once as Opus subagents (`lane-impl`), briefs from
+  `bench/perf/campaign/scripts/wave4-briefs.py` (copied from scratch `/tmp/zzpc/w4/`), lane check
+  `/tmp/zzpc/w4/lanecheck.sh` every 15 min:
+  - KNOBS (`~/dev/zz-knobs`, Mac): delete every `ZZ_PERF_*` knob and the code only it reaches.
+    Decision: all 26 go now. The doc's rule deletes wave-N knobs when wave N+2 starts; the wave-1
+    knobs were missed at the start of wave 3, so wave 1 and wave 2 go together. Merges first: it
+    touches every lane's files and is the smallest.
+  - W4-DELIVER plan (`~/dev/zz-deliver`, Mac): the section predates wave 3, so the first brief maps
+    the as-built code and writes `bench/perf/campaign/w4-deliver-plan.txt` (slices, zones, done
+    criteria, parallel groups, and whether control latency/burst and Linux attach CPU belong here
+    or in a separate control lane). Slices follow the plan.
+  - W4-BINARY (`~/dev/zz-binary`, Mac): the daemon-only executable and packaging; Linux build and
+    ssh remote start are mine after the lane.
+  - W4-ROWS (`~/dev/zz-rows`, Mac). Decision: profile now on the wave-4 base instead of after the
+    DELIVER merge (DELIVER changes routing, not how a frame reads cells); it is re-measured on the
+    DELIVER merge before it merges. A fork change is committed in a scratch Ghostty clone, not
+    pushed; it gets one review, then I publish a dated branch and repin.
+  - SPAWN (new lane, no doc section; the wave-3 handoff left `spawn.cpu.*` unowned): edits in the
+    Mac worktree `~/dev/zz-spawn`, builds and measures in a detached alienware worktree of the same
+    name (`git checkout --detach perf/spawn` after each push).
+  - Decision: five lanes at once, four compiling on the Mac (owner, 2026-10-02: "bump the gas, we
+    have usage"). Instruction, byte, count and thread rows are the signal while they build; wall
+    and CPU rows are judged in quiet A/Bs at merge time.
 
 ## Wave 3 merge log (from 2026-10-01)
 

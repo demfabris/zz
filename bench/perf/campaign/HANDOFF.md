@@ -215,6 +215,11 @@ read "Lane brief rules" before launching anything.
     continuations (`daemon/source_queue.rs`); 20 outstanding operations add 0 workers; wrong-owner
     and duplicate replies rejected; 1479 daemon tests. `config.instr.source_1000` 41.4 -> 44.2
     Minstr (+6.8%, outside the base's range): fix lane `e11fix` profiles it on alienware.
+  - e17 (`8501b400`, Mac): display-popup waits are continuations completed from loop-owned popup
+    events; popup PTY children stay with their shard; 20 popup waits add 0 workers; 1483 daemon
+    tests. `show_options.p1` 1.027x is one of the bimodal Mac p1 rows.
+  - Order change: e21 (startup replay, registration, shutdown) touches the source replay e11's fix
+    is rewriting, so the Mac took e22 (cooperative list-keys and full-history capture) first.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

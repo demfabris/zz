@@ -16,7 +16,6 @@ type FinishedLeaf = (
 
 enum LeafCompletion {
     Leaf(Box<FinishedLeaf>),
-    Frames(Vec<InsertedQueueFrame<Box<CommandQueueExecution>>>),
 }
 
 pub(super) struct LoopHooks {
@@ -178,7 +177,6 @@ fn blocking_leaf(command: &CommandInvocation) -> bool {
             | "agent-send"
             | "new-session"
             | "new-window"
-            | "split-window"
             | "respawn-pane"
             | "respawn-window"
             | "load-buffer"
@@ -204,7 +202,6 @@ impl Queue {
                 .lock()
                 .loop_leaf = true;
             match completion {
-                LeafCompletion::Frames(frames) => self.frames = frames,
                 LeafCompletion::Leaf(leaf) => {
                     let (execution, context, step) = *leaf;
                     let frame = self.frames.last_mut().expect("waiting frame");
@@ -239,32 +236,6 @@ impl Queue {
             .as_ref()
             .is_some_and(|wait| !wait.continuation.ready())
         {
-            return Ok(());
-        }
-        if self
-            .frames
-            .last()
-            .and_then(|frame| frame.wait_boundary.as_ref())
-            .is_some_and(|(_, step)| wait_queue::wait_needs_worker(step))
-        {
-            let mut frames = std::mem::take(&mut self.frames);
-            let owner = Arc::clone(&shared);
-            let sender = self.sender.clone();
-            let wake = Arc::clone(waker);
-            shared.connection_threads.run(Box::new(move || {
-                owner.advance_inserted_frames(
-                    client,
-                    kind,
-                    &mut frames,
-                    1,
-                    false,
-                    true,
-                    |_, _, _| unreachable!(),
-                );
-                let _ = sender.send(LeafCompletion::Frames(frames));
-                let _ = wake.wake();
-            }))?;
-            self.waiting = true;
             return Ok(());
         }
         let sender = self.sender.clone();

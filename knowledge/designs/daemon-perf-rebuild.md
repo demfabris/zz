@@ -3330,6 +3330,9 @@ Selection, acceptance, replacement, expiry, cancellation, detach and disconnect 
 Six new tests cover twenty parked overlays of each type with zero added workers, child frames and lifecycle completion. The serial daemon suite passes 1,492 tests with one ignored; fmt, daemon Clippy and six compat scenarios pass, with zero divergences across 43 steps.
 Three alternating quick pairs against `loop-6c163955-cli` pass all 19 CLI instruction rows under the 1.02x-or-baseline-range rule. `chain5.p20` is 0.2910 -> 0.2923 Minstr (1.00447x); idle CPU, instructions and wakeups are zero, and p1/p20 threads stay at 2/5. Linux-only checks were not run on this Mac.
 
+**e09 as built (2026-10-02, Linux):** `daemon/pane_exit.rs` binds `split-window -W` and `wait-pane --exit` continuations to each terminal incarnation, converting two park sites (8/16 in the e09 estimate).
+Pane exit completes registrations before retention or removal; client loss and timeouts cancel individual registrations, preserving split output, after hooks, attached-client return values and signal exit codes.
+Twenty exit waits add zero command workers and zero polling deadlines. Focused exit, respawn, cancellation and formatted split tests pass; all six requested compat scenarios pass 149 steps with zero divergences.
 
 ## W4-DELIVER: frames straight from shards (effort L)
 

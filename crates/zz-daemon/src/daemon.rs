@@ -5551,6 +5551,7 @@ impl Shared {
                 client.focused_window = None;
             }
             let wakes = take_all_wait_wakes(&mut inner.wait_channels);
+            pane_exit::cancel_all(&mut inner);
             let pipes = std::mem::take(&mut inner.pane_pipes)
                 .into_values()
                 .collect::<Vec<_>>();
@@ -6448,6 +6449,7 @@ impl Shared {
                 .paste_uploads
                 .retain(|(uploader, _), _| *uploader != client);
             let wait_wakes = remove_client_wait_items(&mut inner.wait_channels, client);
+            pane_exit::cancel_client(&mut inner, client);
             let popup_waiters = inner
                 .clients
                 .values_mut()
@@ -6893,64 +6895,41 @@ impl Shared {
         writer.release_control_query();
     }
 
-    /// `cmd_split_window_exec`'s `-W` tail: the item that created the pane
-    /// parks on it, and `window_pane_wait_finish` gives an unattached client
-    /// the child's exit status, or 128 plus its signal, once the child is
-    /// gone. Only a Command or Control invoker can park, the way the overlay
-    /// waits do, because an Interactive client's commands run on the thread
-    /// that would deliver the wake. The execution comes back unchanged beside
-    /// the status so the item's after hook is picked the way the pin picks it
-    /// at exec; `finish_pane_command` turns the status into the client's
-    /// afterwards.
     fn wait_for_pane_command(
         self: &Arc<Self>,
         client: ClientId,
         kind: ClientKind,
         result: Result<Execution, DaemonError>,
-    ) -> (Result<Execution, DaemonError>, u8) {
+    ) -> (Result<Execution, DaemonError>, Option<Arc<AtomicU8>>) {
         let Ok(execution) = result else {
-            return (result, 0);
+            return (result, None);
         };
         let Some(pane) = execution.effects.iter().find_map(|effect| match effect {
             MuxEffect::PaneWaitForExit { pane } => Some(*pane),
             _ => None,
         }) else {
-            return (Ok(execution), 0);
+            return (Ok(execution), None);
         };
-        let Some((wait, status)) = ({
+        let completion = {
             let mut inner = self.inner.lock();
-            let subscription = inner
+            let completion = inner
                 .pane_exit_waits
                 .get_mut(&pane)
                 .and_then(|entry| entry.command_wait.take());
-            if inner
-                .pane_exit_waits
-                .get(&pane)
-                .is_some_and(|entry| entry.wake.is_none())
-            {
-                inner.pane_exit_waits.remove(&pane);
-            }
-            subscription
-        }) else {
-            return (Ok(execution), 0);
+            pane_exit::remove_unused(&mut inner, pane);
+            completion
+        };
+        let Some(completion) = completion else {
+            return (Ok(execution), None);
         };
         if !matches!(kind, ClientKind::Command | ClientKind::Control) {
-            return (Ok(execution), 0);
+            return (Ok(execution), None);
         }
+        let wait = terminal_requests::CommandWait::new(self);
+        let status = Arc::new(AtomicU8::new(0));
+        completion.subscribe(client, wait.start(), Some(Arc::clone(&status)));
         self.report_command_queue_park();
-        let exit_code = loop {
-            match wait.recv_timeout(PANE_WAIT_POLL_INTERVAL) {
-                Ok(()) | Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
-                    break status.load(Ordering::Acquire);
-                }
-                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                    if self.command_queue_cancelled(client) {
-                        break 0;
-                    }
-                }
-            }
-        };
-        (Ok(execution), exit_code)
+        (wait.finish(self, execution), Some(status))
     }
 
     /// `window_pane_wait_finish` only sets `c->retval` when the client has no
@@ -6979,15 +6958,10 @@ impl Shared {
     }
 
     fn wake_pane_exit_wait(inner: &mut ServerState, pane: PaneId, exit_code: u8) {
-        if let Some(entry) = inner.pane_exit_waits.get_mut(&pane) {
-            if entry.wake.is_some() {
-                entry.exit_code.store(exit_code, Ordering::Release);
-                entry.wake.take();
-            }
-            if entry.command_wait.is_none() {
-                inner.pane_exit_waits.remove(&pane);
-            }
+        if let Some(entry) = inner.pane_exit_waits.get(&pane) {
+            entry.current.complete(exit_code);
         }
+        pane_exit::remove_unused(inner, pane);
     }
 
     /// Whether the connection that owns this client's command queue has gone.
@@ -7431,12 +7405,14 @@ impl Shared {
             queue_execution,
             format_facts_unread,
         );
+        let (result, pane_exit_status) = self.wait_for_pane_command(client, kind, result);
         let mut leaf = InsertedLeafContinuation {
             original_context,
             previous_client_terminal,
             no_hooks,
             name,
             command: None,
+            pane_exit_status,
         };
         if let Some(queue) = queue_execution
             && let Some(child) = queue.child.borrow_mut().as_mut()
@@ -7479,9 +7455,10 @@ impl Shared {
             previous_client_terminal,
             no_hooks,
             name,
+            pane_exit_status,
             ..
         } = leaf;
-        let (result, pane_exit_code) = self.wait_for_pane_command(client, kind, result);
+        let pane_exit_code = pane_exit_status.map_or(0, |status| status.load(Ordering::Acquire));
         set_context_client_terminal(context, previous_client_terminal);
         context.copy_client_attachment(&original_context);
         let suppress_after_hook = matches!(
@@ -9392,7 +9369,7 @@ impl Shared {
                         Self::wake_pane_exit_wait(&mut inner, *pane, 0);
                         if let Some(entry) = inner.pane_exit_waits.get_mut(pane) {
                             let command_wait = entry.command_wait.take();
-                            *entry = PaneExitWait::new();
+                            *entry = PaneExitWait::new(&session);
                             entry.command_wait = command_wait;
                         }
                         if let Some(previous) =
@@ -9466,12 +9443,13 @@ impl Shared {
                     }
                     | MuxEffect::SuppressAfterHook => {}
                     MuxEffect::PaneWaitForExit { pane } => {
-                        let entry = inner
-                            .pane_exit_waits
-                            .entry(*pane)
-                            .or_insert_with(PaneExitWait::new);
-                        entry.command_wait =
-                            Some((entry.wait.clone(), Arc::clone(&entry.exit_code)));
+                        if let Some(terminal) = inner.terminals.get(pane).cloned() {
+                            let entry = inner
+                                .pane_exit_waits
+                                .entry(*pane)
+                                .or_insert_with(|| PaneExitWait::new(&terminal));
+                            entry.command_wait = Some(Arc::clone(&entry.current));
+                        }
                     }
                     MuxEffect::PaneCreated {
                         pane,
@@ -14457,13 +14435,7 @@ impl Shared {
                 let wait = {
                     let mut item = self.command_item.as_ref().expect("command item").lock();
                     let wait = item.pending_wait.as_ref().expect("registered wait");
-                    if !wait.continuation.ready()
-                        || inline
-                            && frame
-                                .wait_boundary
-                                .as_ref()
-                                .is_some_and(|(_, step)| wait_queue::wait_needs_worker(step))
-                    {
+                    if !wait.continuation.ready() {
                         return None;
                     }
                     item.pending_wait.take().unwrap()
@@ -17287,7 +17259,11 @@ impl Shared {
         let parsed = parse_wait_pane_args(args)?;
         let (pane, terminal) =
             self.terminal_wait_target("wait-pane", kind, context, parsed.target.as_deref())?;
-        terminal_reads::wait_pane(self, client, pane, terminal, parsed)
+        if matches!(parsed.condition, PaneWaitCondition::Exit) {
+            pane_exit::wait(self, client, pane, &terminal, parsed.timeout)
+        } else {
+            terminal_reads::wait_pane(self, client, pane, terminal, parsed)
+        }
     }
 
     fn run_pane(
@@ -27227,6 +27203,12 @@ impl Shared {
 
     fn close_exited_terminal(self: &Arc<Self>, pane: PaneId, terminal: &Arc<TerminalSession>) {
         let status = terminal.latest_viewport().status.clone();
+        if matches!(
+            status,
+            zz_terminal::SessionStatus::Starting | zz_terminal::SessionStatus::Running
+        ) {
+            return;
+        }
         {
             let exit_code = pane_wait_exit_code(terminal, &status);
             let mut inner = self.inner.lock();
@@ -34775,20 +34757,20 @@ impl Default for AutomaticPasteBufferLimit {
     }
 }
 
+mod pane_exit;
+
+#[cfg(all(test, unix))]
+mod pane_exit_e09_tests;
+
 struct PaneExitWait {
-    wake: Option<crossbeam_channel::Sender<()>>,
-    wait: crossbeam_channel::Receiver<()>,
-    exit_code: Arc<AtomicU8>,
-    command_wait: Option<(crossbeam_channel::Receiver<()>, Arc<AtomicU8>)>,
+    current: Arc<pane_exit::Completion>,
+    command_wait: Option<Arc<pane_exit::Completion>>,
 }
 
 impl PaneExitWait {
-    fn new() -> Self {
-        let (wake, wait) = crossbeam_channel::bounded(0);
+    fn new(terminal: &Arc<TerminalSession>) -> Self {
         Self {
-            wake: Some(wake),
-            wait,
-            exit_code: Arc::new(AtomicU8::new(0)),
+            current: pane_exit::Completion::new(terminal),
             command_wait: None,
         }
     }
@@ -46921,6 +46903,7 @@ struct InsertedLeafContinuation {
     no_hooks: bool,
     name: String,
     command: Option<CommandInvocation>,
+    pane_exit_status: Option<Arc<AtomicU8>>,
 }
 
 struct InsertedControlGuard {
@@ -50350,10 +50333,6 @@ fn ensure_browser_attached(inner: &ServerState, pane: PaneId) -> Result<(), Serv
         Err(ServerError::PaneNotAttached(pane))
     }
 }
-
-/// How often a parked `split-window -W` rechecks whether the queue that owns it
-/// was freed while its pane is still alive.
-const PANE_WAIT_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 #[derive(Default)]
 struct CommandItemContext {
@@ -74090,7 +74069,7 @@ set-option -g @alias-mixed-next yes
             .lock()
             .pane_exit_waits
             .get(&pane)
-            .is_none_or(|entry| Arc::strong_count(&entry.exit_code) < 3)
+            .is_none_or(|entry| entry.current.waiters() < 2)
         {
             assert!(Instant::now() < deadline, "both waits must share the entry");
             thread::sleep(SEND_TEXT_POLL_INTERVAL);
@@ -74445,88 +74424,6 @@ set-option -g @alias-mixed-next yes
                 ));
             }
         }
-    }
-
-    #[test]
-    fn pane_exit_notifications_broadcast_and_preserve_pending_split_status() {
-        let shared = Arc::new(Shared::new(1));
-        let pane = PaneId(1);
-        let mut inner = shared.inner.lock();
-        let entry = inner
-            .pane_exit_waits
-            .entry(pane)
-            .or_insert_with(PaneExitWait::new);
-        entry.command_wait = Some((entry.wait.clone(), Arc::clone(&entry.exit_code)));
-        let subscribers = (0..3)
-            .map(|_| (entry.wait.clone(), Arc::clone(&entry.exit_code)))
-            .collect::<Vec<_>>();
-        Shared::wake_pane_exit_wait(&mut inner, pane, 7);
-        Shared::wake_pane_exit_wait(&mut inner, pane, 0);
-        drop(inner);
-        for (wait, status) in subscribers {
-            assert_eq!(
-                wait.recv_timeout(Duration::from_secs(1)),
-                Err(crossbeam_channel::RecvTimeoutError::Disconnected)
-            );
-            assert_eq!(status.load(Ordering::Acquire), 7);
-        }
-        let (result, exit_code) = shared.wait_for_pane_command(
-            ClientId(7),
-            ClientKind::Command,
-            Ok(Execution {
-                output: RawText::default(),
-                effects: vec![MuxEffect::PaneWaitForExit { pane }],
-            }),
-        );
-        assert!(result.is_ok());
-        assert_eq!(exit_code, 7);
-        assert!(!shared.inner.lock().pane_exit_waits.contains_key(&pane));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn wait_pane_exit_after_respawn_preserves_an_unconsumed_split_wait() {
-        let (shared, client, target) = send_text_fixture(
-            "waitrespawnpending",
-            "printf 'zz-ready\\r\\n'; exec sleep 30",
-        );
-        let pane = target.parse::<PaneId>().unwrap();
-        {
-            let mut inner = shared.inner.lock();
-            let entry = inner
-                .pane_exit_waits
-                .entry(pane)
-                .or_insert_with(PaneExitWait::new);
-            entry.command_wait = Some((entry.wait.clone(), Arc::clone(&entry.exit_code)));
-        }
-        shared
-            .execute(
-                client,
-                ClientKind::Command,
-                &mut ExecutionContext::default(),
-                &CommandInvocation::new("respawn-pane", ["-k", "-t", &target, "sleep 30"]),
-            )
-            .unwrap();
-        let result = shared.execute(
-            client,
-            ClientKind::Command,
-            &mut ExecutionContext::default(),
-            &CommandInvocation::new("wait-pane", ["--exit", "-t", &target, "--timeout", "0.05"]),
-        );
-        assert!(matches!(
-            result,
-            Err(DaemonError::CommandExit { exit_code: 124, .. })
-        ));
-        let (result, exit_code) = shared.wait_for_pane_command(
-            client,
-            ClientKind::Command,
-            Ok(Execution {
-                output: RawText::default(),
-                effects: vec![MuxEffect::PaneWaitForExit { pane }],
-            }),
-        );
-        assert!(result.is_ok());
-        assert_eq!(exit_code, 0);
     }
 
     #[cfg(unix)]

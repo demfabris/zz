@@ -18,7 +18,8 @@ pub(super) fn queue_command(command: &CommandInvocation) -> bool {
         || MuxEngine::is_command_alias_group(command)
         || matches!(
             name,
-            "wait-for"
+            "split-window"
+                | "wait-for"
                 | "run-shell"
                 | "if-shell"
                 | "display-panes"
@@ -33,7 +34,8 @@ pub(super) fn task_command(command: &CommandInvocation) -> bool {
         || terminal_read_command(name)
         || matches!(
             name,
-            "wait-for"
+            "split-window"
+                | "wait-for"
                 | "run-shell"
                 | "if-shell"
                 | "display-panes"
@@ -63,15 +65,6 @@ pub(super) fn can_run_inline(
         result: PreparedCommandResult::Ready,
     };
     connection::inline_query(shared, context, &prepared)
-}
-
-pub(super) fn wait_needs_worker(step: &InsertedCommandStep) -> bool {
-    step.0.as_ref().is_ok_and(|execution| {
-        execution
-            .effects
-            .iter()
-            .any(|effect| matches!(effect, MuxEffect::PaneWaitForExit { .. }))
-    })
 }
 
 pub(super) enum Progress {
@@ -250,15 +243,6 @@ impl CommandTask {
                 .finish_command_queue_execution(&frame.execution, None);
             self.finished = Some(frame);
             Progress::Done
-        } else if inline
-            && self.ready()
-            && self
-                .frames
-                .last()
-                .and_then(|frame| frame.wait_boundary.as_ref())
-                .is_some_and(|(_, step)| wait_needs_worker(step))
-        {
-            Progress::Worker
         } else if self
             .shared
             .command_item
@@ -315,6 +299,7 @@ impl Drop for CommandTask {
             .pending_wait
             .take();
         if let Some(wait) = pending {
+            pane_exit::cancel_token(&mut self.shared.inner.lock(), wait.continuation.token);
             self.shared.wake_wait_items([wait.continuation.clone()]);
             let next = remove_wait_item(
                 &mut self.shared.inner.lock(),
@@ -418,15 +403,6 @@ impl InsertedTask {
             };
             self.completion.take().unwrap()(&self.shared.server_owner(), &frame.context, result);
             Progress::Done
-        } else if inline
-            && self.ready()
-            && self
-                .frames
-                .last()
-                .and_then(|frame| frame.wait_boundary.as_ref())
-                .is_some_and(|(_, step)| wait_needs_worker(step))
-        {
-            Progress::Worker
         } else if self
             .shared
             .command_item
@@ -456,6 +432,7 @@ impl Drop for InsertedTask {
             .pending_wait
             .take();
         if let Some(wait) = pending {
+            pane_exit::cancel_token(&mut self.shared.inner.lock(), wait.continuation.token);
             self.shared.wake_wait_items([wait.continuation.clone()]);
             let next = remove_wait_item(
                 &mut self.shared.inner.lock(),

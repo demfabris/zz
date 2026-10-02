@@ -252,7 +252,6 @@ struct Wait {
     started: Instant,
     scan_start: Option<usize>,
     first: bool,
-    exit: Option<(crossbeam_channel::Receiver<()>, Arc<AtomicU8>)>,
 }
 
 pub(super) fn wait_pane(
@@ -264,18 +263,6 @@ pub(super) fn wait_pane(
 ) -> Result<Execution, DaemonError> {
     let wait = terminal_requests::CommandWait::new(shared);
     let target = Target::new(shared, client, pane, terminal, wait.start());
-    let exit = if matches!(parsed.condition, PaneWaitCondition::Exit)
-        && target.terminal.completion().is_none()
-    {
-        let mut inner = shared.inner.lock();
-        let entry = inner
-            .pane_exit_waits
-            .entry(pane)
-            .or_insert_with(PaneExitWait::new);
-        Some((entry.wait.clone(), Arc::clone(&entry.exit_code)))
-    } else {
-        None
-    };
     shared.report_command_queue_park();
     let scan_start = (!matches!(
         parsed.condition,
@@ -290,61 +277,17 @@ pub(super) fn wait_pane(
             started: Instant::now(),
             scan_start,
             first: true,
-            exit,
         },
     );
     wait.finish(shared, Execution::default())
 }
 
 fn poll_wait(shared: &Arc<Shared>, target: Arc<Target>, mut wait: Wait) {
-    if let Some((receiver, status)) = &wait.exit
-        && !matches!(
-            receiver.try_recv(),
-            Err(crossbeam_channel::TryRecvError::Empty)
-        )
-    {
-        let exit_code = status.load(Ordering::Acquire);
-        target.state.resolve(if exit_code == 0 {
-            Ok(Execution::default())
-        } else {
-            Err(DaemonError::CommandExit {
-                output: RawText::default(),
-                exit_code,
-            })
-        });
-        return;
-    }
-    if matches!(wait.parsed.condition, PaneWaitCondition::Exit)
-        && !shared
-            .inner
-            .lock()
-            .terminals
-            .get(&target.pane)
-            .is_some_and(|current| Arc::ptr_eq(current, &target.terminal))
-    {
-        target.state.resolve(Ok(Execution::default()));
-        return;
-    }
-    if matches!(wait.parsed.condition, PaneWaitCondition::Exit)
-        && target.terminal.completion().is_some()
-    {
-        let exit_code =
-            pane_wait_exit_code(&target.terminal, &target.terminal.latest_viewport().status);
-        target.state.resolve(if exit_code == 0 {
-            Ok(Execution::default())
-        } else {
-            Err(DaemonError::CommandExit {
-                output: RawText::default(),
-                exit_code,
-            })
-        });
-        return;
-    }
     if !target.check(shared) {
         return;
     }
     match wait.parsed.condition {
-        PaneWaitCondition::Exit => finish_wait_poll(shared, target, wait),
+        PaneWaitCondition::Exit => unreachable!(),
         PaneWaitCondition::Idle(dwell) => {
             let last_output = shared
                 .inner

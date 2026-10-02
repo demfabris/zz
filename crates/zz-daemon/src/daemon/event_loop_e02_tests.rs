@@ -419,11 +419,13 @@ fn gui_replies_bypass_a_waiting_control_queue() {
     });
     let client = event_loop.connections[&token].client.unwrap();
     let (reply, replied) = crossbeam_channel::bounded(1);
-    shared
-        .inner
-        .lock()
-        .pending_gui_requests
-        .insert(202, PendingGuiRequest { client, reply });
+    shared.inner.lock().pending_gui_requests.insert(
+        202,
+        PendingGuiRequest {
+            client,
+            reply: reply.into(),
+        },
+    );
     let encoded = [
         request(vec![display("queued")], false),
         ProtocolMessage::GuiResponse(GuiResponse::Success {

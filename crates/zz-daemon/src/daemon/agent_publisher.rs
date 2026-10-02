@@ -33,7 +33,7 @@ pub(super) struct Message {
 }
 
 pub(super) enum Payload {
-    Barrier(crossbeam_channel::Sender<()>),
+    Barrier(crate::daemon::cmdq::Reply<()>),
     Updates {
         first_seq: u64,
         items: Vec<Vec<u8>>,
@@ -106,7 +106,7 @@ impl Publisher {
 }
 
 impl AgentPublisher for Publisher {
-    fn barrier(&self, generation: u64, pane: PaneId, reply: crossbeam_channel::Sender<()>) {
+    fn barrier(&self, generation: u64, pane: PaneId, reply: crate::daemon::cmdq::Reply<()>) {
         self.post(generation, pane, Payload::Barrier(reply));
     }
 

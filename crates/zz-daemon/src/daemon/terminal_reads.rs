@@ -247,6 +247,34 @@ pub(super) fn send_text(
     wait.finish(shared, Execution::default())
 }
 
+pub(super) fn submit_agent_text(
+    shared: &Arc<Shared>,
+    client: ClientId,
+    pane: PaneId,
+    terminal: Arc<TerminalSession>,
+    text: &str,
+    finish: impl FnOnce(&Arc<Shared>, Result<(), DaemonError>) + Send + 'static,
+) {
+    let wait = terminal_requests::CommandWait::new(shared);
+    let target = Target::new(shared, client, pane, terminal, wait.start());
+    let finish = Arc::new(Mutex::new(Some(finish)));
+    let completed = Arc::clone(&finish);
+    if let Err(error) = paste(
+        shared,
+        Arc::clone(&target),
+        text,
+        SEND_TEXT_TIMEOUT,
+        true,
+        Box::new(move |shared, target, result| {
+            completed.lock().take().unwrap()(shared, result);
+            target.state.complete();
+        }),
+    ) {
+        finish.lock().take().unwrap()(shared, Err(error));
+        target.state.complete();
+    }
+}
+
 struct Wait {
     parsed: ParsedWaitPane,
     started: Instant,

@@ -9,6 +9,10 @@ fn terminal_read_command(name: &str) -> bool {
             | "send-text"
             | "wait-pane"
             | "run-pane"
+            | "agent-send"
+            | "agent-respond"
+            | "new-agent-session"
+            | "capture-browser"
     )
 }
 
@@ -318,6 +322,7 @@ impl Drop for CommandTask {
             .take();
         if let Some(wait) = pending {
             self.shared.wake_wait_items([wait.continuation.clone()]);
+            (self.shared.terminal_requests.notifier())();
             let next = remove_wait_item(
                 &mut self.shared.inner.lock(),
                 &wait.name,
@@ -459,6 +464,7 @@ impl Drop for InsertedTask {
             .take();
         if let Some(wait) = pending {
             self.shared.wake_wait_items([wait.continuation.clone()]);
+            (self.shared.terminal_requests.notifier())();
             let next = remove_wait_item(
                 &mut self.shared.inner.lock(),
                 &wait.name,

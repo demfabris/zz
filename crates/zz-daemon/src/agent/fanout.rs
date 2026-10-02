@@ -70,7 +70,7 @@ pub(crate) enum AgentRequestReply {
 /// knows nothing about mailboxes, sessions, or visibility; this is the whole
 /// surface it reaches the daemon through.
 pub(crate) trait AgentPublisher: Send + Sync + 'static {
-    fn barrier(&self, generation: u64, pane: PaneId, reply: crossbeam_channel::Sender<()>);
+    fn barrier(&self, generation: u64, pane: PaneId, reply: crate::daemon::cmdq::Reply<()>);
     /// One coalesced frame to every client the pane is visible to, plus
     /// `also` — the client whose replay produced it, visible or not.
     fn publish_agent_updates(
@@ -279,14 +279,10 @@ impl AgentRuntime {
         })
     }
 
-    pub(crate) fn publication_barrier(
-        &self,
-        pane: PaneId,
-    ) -> Option<crossbeam_channel::Receiver<()>> {
-        let generation = self.pane_generation(pane)?;
-        let (reply, completed) = crossbeam_channel::bounded(1);
-        self.publisher.barrier(generation, pane, reply);
-        Some(completed)
+    pub(crate) fn publication_barrier(&self, pane: PaneId, reply: crate::daemon::cmdq::Reply<()>) {
+        if let Some(generation) = self.pane_generation(pane) {
+            self.publisher.barrier(generation, pane, reply);
+        }
     }
 
     pub(crate) fn pane_generation(&self, pane: PaneId) -> Option<u64> {
@@ -716,7 +712,7 @@ impl AgentFanout {
             HostCommand::NewSession { reply, .. } => {
                 let message = "agent command queue is busy".to_owned();
                 if let Some(reply) = reply {
-                    let _ = reply.try_send(Err(message.clone()));
+                    reply.try_send(Err(message.clone()));
                 }
                 AgentStreamPayload::SessionSwitchFailed { message }
             }
@@ -1515,8 +1511,8 @@ mod tests {
     }
 
     impl AgentPublisher for Recorder {
-        fn barrier(&self, _generation: u64, _pane: PaneId, reply: crossbeam_channel::Sender<()>) {
-            let _ = reply.send(());
+        fn barrier(&self, _generation: u64, _pane: PaneId, reply: crate::daemon::cmdq::Reply<()>) {
+            reply.try_send(());
         }
 
         fn publish_agent_updates(

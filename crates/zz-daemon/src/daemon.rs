@@ -28,8 +28,9 @@ use zz_terminal::RawOutputTapError;
 mod agent_inbox;
 #[cfg(feature = "agent")]
 mod agent_publisher;
+mod agent_waits;
 mod chooser_presentation;
-mod cmdq;
+pub(crate) mod cmdq;
 #[cfg(unix)]
 mod connection;
 mod ctrl;
@@ -4138,6 +4139,7 @@ struct SharedServer {
     helpers: helpers::Pool,
     helper_dispatching: AtomicBool,
     terminal_requests: Arc<terminal_requests::Inbox>,
+    agent_state_waits: Mutex<BTreeMap<PaneId, Vec<Weak<agent_waits::TerminalWait>>>>,
     client_writers: Mutex<BTreeMap<ClientId, Arc<OutboundMailbox>>>,
     /// One flag per connection that owns a command queue. `server_client_lost`
     /// frees the lost client's `cmdq`, so every queue loop this client owns
@@ -5072,6 +5074,7 @@ impl Shared {
             helpers: helpers::Pool::default(),
             helper_dispatching: AtomicBool::new(false),
             terminal_requests: Arc::default(),
+            agent_state_waits: Mutex::default(),
             inner: Mutex::new(state),
             client_writers: Mutex::new(BTreeMap::new()),
             command_queue_cancels: Mutex::new(BTreeMap::new()),
@@ -11318,6 +11321,7 @@ impl Shared {
                 .filter(|target| target.starts_with('%'))
                 .and_then(|target| target.parse::<PaneId>().ok())
             {
+                agent_waits::state_changed(self, pane);
                 let event = {
                     let inner = self.inner.lock();
                     PendingHookEvent::live_pane("agent-state-changed", pane, &inner.engine).map(
@@ -16361,28 +16365,9 @@ impl Shared {
                             )
                             .into());
                         }
-                        let started = Instant::now();
-                        let result = self.send_peer_message_and_wait(
-                            pane,
-                            record,
-                            &payload,
-                            &name,
-                            parsed.wait_timeout(),
+                        return self.send_peer_message_and_wait(
+                            client, pane, record, &payload, &name, &parsed,
                         );
-                        if result.is_ok() {
-                            self.record_command_stderr(client, &pane.to_string());
-                        }
-                        return result.map(|mut execution| {
-                            execution.output = agent_terminal_reply_output(
-                                pane,
-                                &execution.output,
-                                started.elapsed(),
-                                "end_turn",
-                                &parsed,
-                            )
-                            .into();
-                            execution
-                        });
                     }
                     claude_peers::post_message(record, &payload, &name, socket.as_deref())?;
                     return Ok(Execution {
@@ -16445,19 +16430,7 @@ impl Shared {
                 )
                 .into());
             }
-            let result = self.submit_agent_prompt_and_wait(client, pane, payload, &parsed);
-            if result.is_ok()
-                || matches!(
-                    &result,
-                    Err(DaemonError::CommandExit {
-                        exit_code: 1 | 3,
-                        ..
-                    })
-                )
-            {
-                self.record_command_stderr(client, &pane.to_string());
-            }
-            return result;
+            return self.submit_agent_prompt_and_wait(client, pane, payload, &parsed);
         }
         let mut execution = self.deliver_to_agent(pane, payload, parsed.submit)?;
         if parsed.submit && kind != ClientKind::Interactive {
@@ -16496,101 +16469,72 @@ impl Shared {
         if initial.is_empty() {
             return Err(ServerError::InvalidCommand(format!(
                 "{pane}: agent-send --wait needs an agent state; the pane reports none (@agent_state is unset)"
-            ))
-            .into());
+            )).into());
         }
+        let wait = terminal_requests::CommandWait::new(self);
+        let terminal_wait = agent_waits::TerminalWait::subscribe(
+            self,
+            client,
+            pane,
+            parsed,
+            wait.start(),
+            &initial,
+        );
         #[cfg(all(feature = "agent", unix))]
-        self.deliver_to_terminal_pane(pane, payload)?;
+        let queued = if let Some((pid, title, cwd)) = self.codex_terminal_context(pane) {
+            match crate::agent::codex_queue::deliver(pid, &title, &cwd, payload) {
+                Ok(_) => true,
+                Err(crate::agent::codex_queue::QueueError::NoName) => false,
+                Err(error) => {
+                    terminal_wait.submitted(Err(ServerError::InvalidCommand(
+                        error.for_pane(pane, &title, &cwd),
+                    )
+                    .into()));
+                    return wait.finish(self, Execution::default());
+                }
+            }
+        } else {
+            false
+        };
         #[cfg(not(all(feature = "agent", unix)))]
-        self.paste_and_submit(pane, payload, SEND_TEXT_TIMEOUT, true)?;
-        self.report_command_queue_park();
-        let started = Instant::now();
-        let mut seen_working = initial != "idle";
-        loop {
-            match self.pane_agent_state(pane).as_str() {
-                "idle" if seen_working => {
-                    self.record_command_stderr(client, &pane.to_string());
-                    return Ok(Execution {
-                        output: agent_terminal_reply_output(
-                            pane,
-                            "",
-                            started.elapsed(),
-                            "end_turn",
-                            parsed,
-                        )
-                        .into(),
-                        effects: Vec::new(),
-                    });
-                }
-                "blocked" if parsed.on_block == AgentBlockPolicy::Fail => {
-                    self.record_command_stderr(client, &pane.to_string());
-                    return Err(DaemonError::CommandExit {
-                        output: if parsed.json {
-                            agent_terminal_reply_output(
-                                pane,
-                                "",
-                                started.elapsed(),
-                                "blocked",
-                                parsed,
-                            )
-                        } else {
-                            format!("{pane}: blocked (agent_state=blocked)")
-                        }
-                        .into(),
-                        exit_code: 3,
-                    });
-                }
-                "failed" => {
-                    return Err(DaemonError::CommandExit {
-                        output: format!("{pane}: agent_state=failed").into(),
-                        exit_code: 1,
-                    });
-                }
-                "" | "idle" => {}
-                _ => seen_working = true,
+        let queued = false;
+        if queued {
+            terminal_wait.submitted(Ok(()));
+            agent_waits::state_changed(self, pane);
+        } else {
+            let terminal = self.inner.lock().terminals.get(&pane).cloned();
+            if let Some(terminal) = terminal {
+                terminal_reads::submit_agent_text(
+                    self,
+                    client,
+                    pane,
+                    terminal,
+                    payload,
+                    move |shared, result| {
+                        terminal_wait.submitted(result);
+                        agent_waits::state_changed(shared, pane);
+                    },
+                );
+            } else {
+                terminal_wait.submitted(Err(ServerError::PaneExited(pane).into()));
             }
-            if self.command_queue_cancelled(client) {
-                return Ok(Execution::default());
-            }
-            if let Some(timeout) = parsed.wait_timeout()
-                && started.elapsed() >= timeout
-            {
-                return Err(DaemonError::CommandExit {
-                    output: format!(
-                        "{pane}: no idle state within {} seconds; the turn may still be running",
-                        timeout.as_secs(),
-                    )
-                    .into(),
-                    exit_code: 124,
-                });
-            }
-            if !seen_working && started.elapsed() >= AGENT_STATE_START_GRACE {
-                return Err(DaemonError::CommandExit {
-                    output: format!(
-                        "{pane}: agent_state stayed idle for {} seconds after the send",
-                        AGENT_STATE_START_GRACE.as_secs(),
-                    )
-                    .into(),
-                    exit_code: 124,
-                });
-            }
-            thread::sleep(SEND_TEXT_POLL_INTERVAL);
         }
+        self.report_command_queue_park();
+        wait.finish(self, Execution::default())
     }
 
     #[cfg(all(feature = "agent", unix))]
     fn send_peer_message_and_wait(
-        &self,
+        self: &Arc<Self>,
+        client: ClientId,
         pane: PaneId,
         record: &crate::agent::claude_peers::PeerRecord,
         text: &str,
         name: &str,
-        timeout: Option<Duration>,
+        parsed: &ParsedAgentSend,
     ) -> Result<Execution, DaemonError> {
         use crate::agent::claude_peers::{self, PeerInbox, PeerKind, PeerMetadata};
-
-        let started = Instant::now();
-        let (message, reply) = {
+        let message = {
             let mut inbox = self.peer_wait_inbox.lock();
             if inbox.is_none() {
                 let waits = Arc::clone(&self.peer_waits);
@@ -16609,8 +16553,7 @@ impl Shared {
             let peer = inbox
                 .as_ref()
                 .ok_or_else(|| ServerError::InvalidCommand("reply peer unavailable".to_owned()))?;
-            let message = match claude_peers::prepare_message(text, name, Some(peer.socket_path()))
-            {
+            match claude_peers::prepare_message(text, name, Some(peer.socket_path())) {
                 Ok(message) => message,
                 Err(error) => {
                     if self.peer_waits.lock().is_empty() {
@@ -16618,62 +16561,70 @@ impl Shared {
                     }
                     return Err(error.into());
                 }
-            };
-            let reply = self.peer_waits.lock().register(
-                message.msg_id().to_owned(),
-                format!("uds:{}", record.messaging_socket_path.display()),
-            );
-            (message, reply)
+            }
         };
-        let result = (|| {
-            claude_peers::post_prepared(record, &message)?;
-            loop {
-                let interval = timeout.map_or(Duration::from_millis(100), |timeout| {
-                    timeout
-                        .saturating_sub(started.elapsed())
-                        .min(Duration::from_millis(100))
-                });
-                match reply.recv_timeout(interval) {
-                    Ok(Ok(text)) => {
-                        return Ok(Execution {
-                            output: text.into(),
+        let started = Instant::now();
+        let timeout = parsed.wait_timeout();
+        let parsed = parsed.clone();
+        let message_id = message.msg_id().to_owned();
+        let (wait, reply) =
+            agent_waits::reply::<Result<String, String>>(self, timeout, move |shared, outcome| {
+                let inbox = {
+                    let mut inbox = shared.peer_wait_inbox.lock();
+                    let mut waits = shared.peer_waits.lock();
+                    waits.cancel(&message_id);
+                    if waits.is_empty() { inbox.take() } else { None }
+                };
+                drop(inbox);
+                match outcome {
+                    terminal_requests::ReplyOutcome::Ready(Ok(text)) => {
+                        shared.record_command_stderr(client, &pane.to_string());
+                        Ok(Execution {
+                            output: agent_terminal_reply_output(
+                                pane,
+                                &text,
+                                started.elapsed(),
+                                "end_turn",
+                                &parsed,
+                            )
+                            .into(),
                             effects: Vec::new(),
-                        });
+                        })
                     }
-                    Ok(Err(message)) => {
-                        return Err(
-                            ServerError::InvalidCommand(format!("{pane}: {message}")).into()
-                        );
+                    terminal_requests::ReplyOutcome::Ready(Err(message)) => {
+                        Err(ServerError::InvalidCommand(format!("{pane}: {message}")).into())
                     }
-                    Err(mpsc::RecvTimeoutError::Disconnected) => {
-                        return Err(ServerError::PaneExited(pane).into());
+                    terminal_requests::ReplyOutcome::Closed => {
+                        Err(ServerError::PaneExited(pane).into())
                     }
-                    Err(mpsc::RecvTimeoutError::Timeout) => {}
-                }
-                if !claude_peers::pid_alive(record.pid) {
-                    return Err(ServerError::PaneExited(pane).into());
-                }
-                if let Some(timeout) = timeout
-                    && started.elapsed() >= timeout
-                {
-                    return Err(DaemonError::CommandExit {
+                    terminal_requests::ReplyOutcome::TimedOut => Err(DaemonError::CommandExit {
                         output: format!(
                             "{pane}: no reply within {} seconds; the turn is still running",
-                            timeout.as_secs(),
+                            timeout.unwrap().as_secs()
                         )
                         .into(),
                         exit_code: 124,
-                    });
+                    }),
                 }
-            }
-        })();
-        let mut inbox = self.peer_wait_inbox.lock();
-        let mut waits = self.peer_waits.lock();
-        waits.cancel(message.msg_id());
-        if waits.is_empty() {
-            inbox.take();
+            });
+        let reply = Arc::new(reply);
+        self.peer_waits.lock().register_reply(
+            message.msg_id().to_owned(),
+            format!("uds:{}", record.messaging_socket_path.display()),
+            Arc::clone(&reply),
+        );
+        if let Err(error) = claude_peers::post_prepared(record, &message) {
+            wait.state.resolve(Err(error.into()));
+            return wait.finish(self, Execution::default());
         }
-        result
+        agent_waits::watch_peer(
+            self,
+            record.pid,
+            Arc::downgrade(&reply),
+            wait.state.continuation.clone(),
+        );
+        self.report_command_queue_park();
+        wait.finish(self, Execution::default())
     }
 
     fn resolve_agent_permission_pane(
@@ -16756,8 +16707,54 @@ impl Shared {
         #[cfg(feature = "agent")]
         {
             let runtime = self.agent_runtime().ok_or(ServerError::PaneExited(pane))?;
-            let (waiter, reply) = crossbeam_channel::bounded(1);
-            let started = Instant::now();
+            let timeout = (!timeout.is_zero()).then_some(timeout);
+            let (wait, published) =
+                agent_waits::reply::<Result<(), String>>(self, timeout, move |_, outcome| {
+                    match outcome {
+                        terminal_requests::ReplyOutcome::Ready(Ok(())) => Ok(Execution::default()),
+                        terminal_requests::ReplyOutcome::Ready(Err(message)) => {
+                            Err(DaemonError::CommandExit {
+                                output: message.into(),
+                                exit_code: 1,
+                            })
+                        }
+                        terminal_requests::ReplyOutcome::TimedOut => {
+                            Err(DaemonError::CommandExit {
+                                output: format!(
+                                    "{pane}: new session not ready within {} seconds",
+                                    timeout.unwrap().as_secs_f64()
+                                )
+                                .into(),
+                                exit_code: 124,
+                            })
+                        }
+                        terminal_requests::ReplyOutcome::Closed => {
+                            Err(ServerError::PaneExited(pane).into())
+                        }
+                    }
+                });
+            let owner = Arc::downgrade(&self.server_owner());
+            let waiter = cmdq::Reply::new(move |result| {
+                let Some(result) = result else {
+                    return;
+                };
+                match result {
+                    Ok(()) => {
+                        if let Some(runtime) = owner
+                            .upgrade()
+                            .and_then(|shared| shared.open_agent_runtime())
+                        {
+                            let applied = cmdq::Reply::new(move |result: Option<()>| {
+                                if result.is_some() {
+                                    published.try_send(Ok(()));
+                                }
+                            });
+                            runtime.publication_barrier(pane, applied);
+                        }
+                    }
+                    Err(message) => published.try_send(Err(message)),
+                }
+            });
             if !runtime.command(
                 pane,
                 HostCommand::NewSession {
@@ -16767,49 +16764,8 @@ impl Shared {
             ) {
                 return Err(ServerError::PaneExited(pane).into());
             }
-            let result = if timeout.is_zero() {
-                reply
-                    .recv()
-                    .map_err(|_| crossbeam_channel::RecvTimeoutError::Disconnected)
-            } else {
-                reply.recv_timeout(timeout)
-            };
-            let result = result.and_then(|result| match result {
-                Ok(()) => {
-                    let applied = runtime
-                        .publication_barrier(pane)
-                        .ok_or(crossbeam_channel::RecvTimeoutError::Disconnected)?;
-                    if timeout.is_zero() {
-                        applied
-                            .recv()
-                            .map_err(|_| crossbeam_channel::RecvTimeoutError::Disconnected)
-                    } else {
-                        applied.recv_timeout(timeout.saturating_sub(started.elapsed()))
-                    }
-                    .map(Ok)
-                }
-                Err(message) => Ok(Err(message)),
-            });
-            match result {
-                Ok(Ok(())) => Ok(Execution::default()),
-                Ok(Err(message)) => Err(DaemonError::CommandExit {
-                    output: message.into(),
-                    exit_code: 1,
-                }),
-                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                    Err(DaemonError::CommandExit {
-                        output: format!(
-                            "{pane}: new session not ready within {} seconds",
-                            timeout.as_secs_f64()
-                        )
-                        .into(),
-                        exit_code: 124,
-                    })
-                }
-                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
-                    Err(ServerError::PaneExited(pane).into())
-                }
-            }
+            self.report_command_queue_park();
+            wait.finish(self, Execution::default())
         }
         #[cfg(not(feature = "agent"))]
         {
@@ -17066,7 +17022,7 @@ impl Shared {
     }
 
     fn agent_respond(
-        &self,
+        self: &Arc<Self>,
         kind: ClientKind,
         context: &ExecutionContext,
         args: &[RawText],
@@ -17092,7 +17048,21 @@ impl Shared {
             let runtime = self.open_agent_runtime().ok_or_else(|| {
                 ServerError::InvalidCommand(format!("no pending permission: {pane}"))
             })?;
-            let (reply, result) = crossbeam_channel::bounded(1);
+            let (wait, reply) =
+                agent_waits::reply::<Result<String, String>>(self, None, move |_, outcome| {
+                    let option = match outcome {
+                        terminal_requests::ReplyOutcome::Ready(result) => {
+                            result.map_err(|error| {
+                                ServerError::InvalidCommand(format!("{error}: {pane}"))
+                            })?
+                        }
+                        _ => return Err(ServerError::PaneExited(pane).into()),
+                    };
+                    Ok(Execution {
+                        output: option.into(),
+                        effects: Vec::new(),
+                    })
+                });
             if !runtime.command(
                 pane,
                 HostCommand::RespondPermission {
@@ -17105,14 +17075,8 @@ impl Shared {
             ) {
                 return Err(ServerError::PaneExited(pane).into());
             }
-            let option = result
-                .recv()
-                .map_err(|_| ServerError::PaneExited(pane))?
-                .map_err(|error| ServerError::InvalidCommand(format!("{error}: {pane}")))?;
-            Ok(Execution {
-                output: option.into(),
-                effects: Vec::new(),
-            })
+            self.report_command_queue_park();
+            wait.finish(self, Execution::default())
         }
         #[cfg(not(feature = "agent"))]
         Err(ServerError::InvalidCommand(format!("no pending permission: {pane}")).into())
@@ -17429,7 +17393,7 @@ impl Shared {
     }
 
     fn capture_browser(
-        &self,
+        self: &Arc<Self>,
         context: &ExecutionContext,
         args: &[RawText],
     ) -> Result<Execution, DaemonError> {
@@ -17469,13 +17433,9 @@ impl Shared {
             }
             pane
         };
-        let output = self.request_from_gui(pane, |request_id| EventPayload::BrowserCommand {
+        self.request_from_gui(pane, |request_id| EventPayload::BrowserCommand {
             pane,
             command: BrowserCommand::Screenshot { request_id, path },
-        })?;
-        Ok(Execution {
-            output: output.into(),
-            effects: Vec::new(),
         })
     }
 
@@ -17518,14 +17478,10 @@ impl Shared {
         } else {
             AgentCommand::ComposerAppend { text }
         };
-        let output = self.request_from_gui(pane, move |request_id| EventPayload::AgentCommand {
+        self.request_from_gui(pane, move |request_id| EventPayload::AgentCommand {
             pane,
             request_id,
             command,
-        })?;
-        Ok(Execution {
-            output: output.into(),
-            effects: Vec::new(),
         })
     }
 
@@ -29342,14 +29298,13 @@ impl Shared {
     }
 
     fn request_from_gui(
-        &self,
+        self: &Arc<Self>,
         pane: PaneId,
         payload: impl FnOnce(u64) -> EventPayload,
-    ) -> Result<String, DaemonError> {
+    ) -> Result<Execution, DaemonError> {
         let request_id = Self::next_gui_request_id();
-        let (reply, response) = crossbeam_channel::bounded(1);
-        let subscriber = {
-            let mut inner = self.inner.lock();
+        let (client, subscriber) = {
+            let inner = self.inner.lock();
             let window = inner
                 .engine
                 .state
@@ -29371,43 +29326,57 @@ impl Shared {
                 .and_then(|c| c.subscriber.as_ref())
                 .cloned()
                 .ok_or(ServerError::PaneNotAttached(pane))?;
-            inner
-                .pending_gui_requests
-                .insert(request_id, PendingGuiRequest { client, reply });
-            subscriber
+            (client, subscriber)
         };
-        let message = Self::event(payload(request_id));
-        if !subscriber.enqueue_reliable(&message) {
+        let (wait, reply) = agent_waits::reply::<Result<String, String>>(
+            self,
+            Some(GUI_REQUEST_TIMEOUT),
+            move |shared, outcome| {
+                shared.inner.lock().pending_gui_requests.remove(&request_id);
+                match outcome {
+                    terminal_requests::ReplyOutcome::Ready(Ok(output)) => Ok(Execution {
+                        output: output.into(),
+                        effects: Vec::new(),
+                    }),
+                    terminal_requests::ReplyOutcome::Ready(Err(message)) => {
+                        Err(ServerError::InvalidCommand(message).into())
+                    }
+                    _ => Err(ServerError::Internal(format!(
+                        "the zz window did not answer within {} seconds",
+                        GUI_REQUEST_TIMEOUT.as_secs()
+                    ))
+                    .into()),
+                }
+            },
+        );
+        self.inner
+            .lock()
+            .pending_gui_requests
+            .insert(request_id, PendingGuiRequest { client, reply });
+        if !subscriber.enqueue_reliable(&Self::event(payload(request_id))) {
             self.inner.lock().pending_gui_requests.remove(&request_id);
-            return Err(ServerError::PaneNotAttached(pane).into());
+            wait.state
+                .resolve(Err(ServerError::PaneNotAttached(pane).into()));
+            return wait.finish(self, Execution::default());
         }
-        let outcome = response.recv_timeout(GUI_REQUEST_TIMEOUT);
-        self.inner.lock().pending_gui_requests.remove(&request_id);
-        match outcome {
-            Ok(Ok(output)) => Ok(output),
-            Ok(Err(message)) => Err(ServerError::InvalidCommand(message).into()),
-            Err(_) => Err(ServerError::Internal(format!(
-                "the zz window did not answer within {} seconds",
-                GUI_REQUEST_TIMEOUT.as_secs()
-            ))
-            .into()),
-        }
+        self.report_command_queue_park();
+        wait.finish(self, Execution::default())
     }
 
     fn complete_gui_request(&self, client: ClientId, response: GuiResponse) {
         let request_id = response.request_id();
-        let Some(pending) = self.inner.lock().pending_gui_requests.remove(&request_id) else {
-            return;
+        let pending = {
+            let mut inner = self.inner.lock();
+            let Some(pending) = inner.pending_gui_requests.get(&request_id) else {
+                return;
+            };
+            if pending.client != client {
+                log::warn!(target: "zz_daemon::diagnostics::connection", "discarding GUI response for request={request_id} from client={client}; owner is {}", pending.client);
+                return;
+            }
+            inner.pending_gui_requests.remove(&request_id).unwrap()
         };
-        if pending.client != client {
-            log::warn!(
-                target: "zz_daemon::diagnostics::connection",
-                "discarding GUI response for request={request_id} from client={client}; owner is {}",
-                pending.client,
-            );
-            return;
-        }
-        let _ = pending.reply.try_send(match response {
+        pending.reply.try_send(match response {
             GuiResponse::Success { output, .. } => Ok(output),
             GuiResponse::Error { message, .. } => Err(message),
         });
@@ -29426,7 +29395,7 @@ impl Shared {
                 .collect::<Vec<_>>()
         };
         for request in pending {
-            let _ = request
+            request
                 .reply
                 .try_send(Err("the zz window disconnected".to_owned()));
         }
@@ -32724,9 +32693,6 @@ impl Shared {
         })
     }
 
-    /// `agent-send --wait`: submit, then park this command's thread until the
-    /// turn that prompt started settles. Nothing is locked while waiting, and
-    /// a timeout leaves the turn running.
     #[cfg(feature = "agent")]
     fn submit_agent_prompt_and_wait(
         self: &Arc<Self>,
@@ -32736,9 +32702,106 @@ impl Shared {
         parsed: &ParsedAgentSend,
     ) -> Result<Execution, DaemonError> {
         let runtime = self.agent_runtime().ok_or(ServerError::PaneExited(pane))?;
-        let (waiter, reply) = crossbeam_channel::bounded(1);
-        let audit = Arc::new(Mutex::new(Vec::new()));
-        let sent = runtime.prompt_with_waiter(
+        let audit = Arc::new(Mutex::new(Vec::<String>::new()));
+        let collected = Arc::clone(&audit);
+        let parsed = parsed.clone();
+        let on_block = parsed.on_block;
+        let timeout = parsed.wait_timeout();
+        let (wait, waiter) = agent_waits::reply::<crate::agent::host::AgentTurnResult>(
+            self,
+            timeout,
+            move |shared, outcome| {
+                for line in collected.lock().iter() {
+                    shared.record_command_stderr(client, line);
+                }
+                let result = match outcome {
+                    terminal_requests::ReplyOutcome::Ready(result) => result,
+                    terminal_requests::ReplyOutcome::Closed => {
+                        return Err(ServerError::PaneExited(pane).into());
+                    }
+                    terminal_requests::ReplyOutcome::TimedOut => {
+                        return Err(DaemonError::CommandExit {
+                            output: format!(
+                                "{pane}: no reply within {} seconds; the turn is still running",
+                                timeout.unwrap().as_secs()
+                            )
+                            .into(),
+                            exit_code: 124,
+                        });
+                    }
+                };
+                let result = (|| {
+                    let output = match result {
+                        Ok(reply) => agent_turn_reply_output(pane, &reply, &parsed, None),
+                        Err(AgentTurnFailure::Blocked { permission, reply }) => {
+                            let permission = agent_permission_json(&permission);
+                            return Err(DaemonError::CommandExit {
+                                output: if parsed.json {
+                                    agent_turn_reply_output(
+                                        pane,
+                                        &reply,
+                                        &parsed,
+                                        Some(&permission),
+                                    )
+                                } else {
+                                    permission.to_string()
+                                }
+                                .into(),
+                                exit_code: 3,
+                            });
+                        }
+                        Err(AgentTurnFailure::Stopped { reason, reply }) => {
+                            shared.record_command_stderr(
+                                client,
+                                &format!("agent-send: turn stopped: {reason}"),
+                            );
+                            return Err(DaemonError::CommandExit {
+                                output: agent_turn_reply_output(pane, &reply, &parsed, None).into(),
+                                exit_code: 1,
+                            });
+                        }
+                        Err(AgentTurnFailure::Failed(message)) => {
+                            return Err(ServerError::InvalidCommand(format!(
+                                "{pane}: turn failed: {message}"
+                            ))
+                            .into());
+                        }
+                        Err(AgentTurnFailure::Cancelled) => {
+                            return Err(ServerError::InvalidCommand(format!(
+                                "{pane}: turn cancelled"
+                            ))
+                            .into());
+                        }
+                        Err(AgentTurnFailure::Reclaimed) => {
+                            return Err(ServerError::InvalidCommand(format!(
+                                "{pane}: prompt handed back before its turn ran"
+                            ))
+                            .into());
+                        }
+                        Err(AgentTurnFailure::Closed) => {
+                            return Err(ServerError::PaneExited(pane).into());
+                        }
+                    };
+                    Ok(Execution {
+                        output: output.into(),
+                        effects: Vec::new(),
+                    })
+                })();
+                if result.is_ok()
+                    || matches!(
+                        &result,
+                        Err(DaemonError::CommandExit {
+                            exit_code: 1 | 3,
+                            ..
+                        })
+                    )
+                {
+                    shared.record_command_stderr(client, &pane.to_string());
+                }
+                result
+            },
+        );
+        if !runtime.prompt_with_waiter(
             pane,
             AgentPrompt {
                 owner: ClientInstanceId(u64::MAX),
@@ -32747,76 +32810,14 @@ impl Shared {
             },
             Some(crate::agent::host::AgentTurnWaiter {
                 reply: waiter,
-                on_block: parsed.on_block,
-                audit: Arc::clone(&audit),
+                on_block,
+                audit,
             }),
-        );
-        if !sent {
+        ) {
             return Err(ServerError::PaneExited(pane).into());
         }
-        let result = match parsed.wait_timeout() {
-            Some(timeout) => reply.recv_timeout(timeout).map_err(|error| match error {
-                crossbeam_channel::RecvTimeoutError::Timeout => DaemonError::CommandExit {
-                    output: format!(
-                        "{pane}: no reply within {} seconds; the turn is still running",
-                        timeout.as_secs()
-                    )
-                    .into(),
-                    exit_code: 124,
-                },
-                crossbeam_channel::RecvTimeoutError::Disconnected => {
-                    ServerError::PaneExited(pane).into()
-                }
-            }),
-            None => reply
-                .recv()
-                .map_err(|_| DaemonError::from(ServerError::PaneExited(pane))),
-        };
-        for line in audit.lock().iter() {
-            self.record_command_stderr(client, line);
-        }
-        let result = result?;
-        let output = match result {
-            Ok(reply) => agent_turn_reply_output(pane, &reply, parsed, None),
-            Err(AgentTurnFailure::Blocked { permission, reply }) => {
-                let permission = agent_permission_json(&permission);
-                return Err(DaemonError::CommandExit {
-                    output: if parsed.json {
-                        agent_turn_reply_output(pane, &reply, parsed, Some(&permission))
-                    } else {
-                        permission.to_string()
-                    }
-                    .into(),
-                    exit_code: 3,
-                });
-            }
-            Err(AgentTurnFailure::Stopped { reason, reply }) => {
-                self.record_command_stderr(client, &format!("agent-send: turn stopped: {reason}"));
-                return Err(DaemonError::CommandExit {
-                    output: agent_turn_reply_output(pane, &reply, parsed, None).into(),
-                    exit_code: 1,
-                });
-            }
-            Err(AgentTurnFailure::Failed(message)) => {
-                return Err(
-                    ServerError::InvalidCommand(format!("{pane}: turn failed: {message}")).into(),
-                );
-            }
-            Err(AgentTurnFailure::Cancelled) => {
-                return Err(ServerError::InvalidCommand(format!("{pane}: turn cancelled")).into());
-            }
-            Err(AgentTurnFailure::Reclaimed) => {
-                return Err(ServerError::InvalidCommand(format!(
-                    "{pane}: prompt handed back before its turn ran"
-                ))
-                .into());
-            }
-            Err(AgentTurnFailure::Closed) => return Err(ServerError::PaneExited(pane).into()),
-        };
-        Ok(Execution {
-            output: output.into(),
-            effects: Vec::new(),
-        })
+        self.report_command_queue_park();
+        wait.finish(self, Execution::default())
     }
 
     #[cfg(not(feature = "agent"))]
@@ -34782,7 +34783,7 @@ impl DiagnosticSample {
 #[derive(Debug)]
 struct PendingGuiRequest {
     client: ClientId,
-    reply: crossbeam_channel::Sender<Result<String, String>>,
+    reply: cmdq::Reply<Result<String, String>>,
 }
 
 impl ServerState {
@@ -48534,7 +48535,7 @@ fn default_capture_boundary(start: bool) -> CaptureBoundary {
     }
 }
 
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct ContextReference {
     path: String,
     start: Option<u32>,
@@ -48654,7 +48655,7 @@ pub(crate) enum AgentBlockPolicy {
     Deny,
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 struct ParsedAgentSend {
     on_block: AgentBlockPolicy,
     json: bool,
@@ -116038,9 +116039,13 @@ bind - split-window -v -c "#{pane_current_path}"
                     lane: CommittedTextLane::Terminal,
                     suppressed_character: Some('b'),
                 }]));
-            inner
-                .pending_gui_requests
-                .insert(99, PendingGuiRequest { client, reply });
+            inner.pending_gui_requests.insert(
+                99,
+                PendingGuiRequest {
+                    client,
+                    reply: reply.into(),
+                },
+            );
         }
 
         zz_protocol::write_protocol_message(&mut client_stream, &ProtocolMessage::Detach)

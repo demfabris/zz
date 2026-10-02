@@ -647,9 +647,7 @@ impl EventLoop {
         shared: &Arc<Shared>,
     ) -> Result<(), DaemonError> {
         for _ in 0..ACCEPT_BURST {
-            if shared.stopping.load(Ordering::Acquire)
-                || shared.shutdown_pending.load(Ordering::Acquire)
-            {
+            if shared.stopping.load(Ordering::Acquire) {
                 self.accept_again = false;
                 return Ok(());
             }
@@ -2137,6 +2135,10 @@ mod io_tests;
 #[cfg(test)]
 #[path = "event_loop_b2fix_tests.rs"]
 mod b2fix_tests;
+
+#[cfg(test)]
+#[path = "drainfix_tests.rs"]
+mod drainfix_tests;
 
 #[cfg(test)]
 #[path = "event_loop_b3_tests.rs"]

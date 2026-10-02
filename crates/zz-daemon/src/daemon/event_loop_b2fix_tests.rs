@@ -313,6 +313,8 @@ fn stopping_prevents_further_accepts() {
         total: 65,
     };
     shared.request_shutdown();
+    event_loop.turn(&shared).unwrap();
+    assert!(shared.stopping.load(Ordering::Acquire));
     event_loop
         .accept_ready::<BurstTransport>(&listener, &shared)
         .unwrap();

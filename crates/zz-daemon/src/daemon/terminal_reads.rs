@@ -7,6 +7,7 @@ struct Target {
     pane: PaneId,
     terminal: Arc<TerminalSession>,
     state: Arc<CommandState>,
+    observation: Arc<Observation>,
 }
 
 impl Target {
@@ -17,7 +18,22 @@ impl Target {
         terminal: Arc<TerminalSession>,
         state: Arc<CommandState>,
     ) -> Arc<Self> {
-        let registered = shared.inner.lock().client(client).is_some();
+        let mut inner = shared.inner.lock();
+        let registered = inner.client(client).is_some();
+        let observation = inner
+            .pane_read_observations
+            .get(&pane)
+            .and_then(Weak::upgrade)
+            .unwrap_or_else(|| {
+                let observation = Arc::new(Observation {
+                    generation: AtomicU64::new(0),
+                    notify: shared.terminal_requests.notifier(),
+                });
+                inner
+                    .pane_read_observations
+                    .insert(pane, Arc::downgrade(&observation));
+                observation
+            });
         #[cfg(unix)]
         let registered = registered || shared.loop_active.load(Ordering::Acquire);
         Arc::new(Self {
@@ -26,10 +42,18 @@ impl Target {
             pane,
             terminal,
             state,
+            observation,
         })
     }
 
+    fn generation(&self) -> u64 {
+        self.observation.generation.load(Ordering::Acquire)
+    }
+
     fn check(&self, shared: &Shared) -> bool {
+        if self.state.continuation.ready() {
+            return false;
+        }
         if shared.command_queue_cancelled(self.client)
             || shared.stopping.load(Ordering::Acquire)
             || self.guard_client && shared.inner.lock().client(self.client).is_none()
@@ -50,6 +74,80 @@ impl Target {
         }
         true
     }
+}
+
+pub(super) struct Observation {
+    generation: AtomicU64,
+    notify: Arc<dyn Fn() + Send + Sync>,
+}
+
+pub(super) fn pane_changed(inner: &mut ServerState, pane: PaneId) {
+    if let Some(observation) = inner.pane_read_observations.get(&pane) {
+        if let Some(observation) = observation.upgrade() {
+            observation.generation.fetch_add(1, Ordering::Release);
+            (observation.notify)();
+        } else {
+            inner.pane_read_observations.remove(&pane);
+        }
+    }
+}
+
+type ObserveFinish = Box<dyn FnOnce(&Arc<Shared>, Arc<Target>) + Send>;
+
+struct OutputWait {
+    target: Arc<Target>,
+    generation: u64,
+    deadline: Option<Instant>,
+    finish: Option<ObserveFinish>,
+}
+
+impl terminal_requests::Pending for OutputWait {
+    fn poll(&mut self, shared: &Arc<Shared>, now: Instant) -> bool {
+        if self.target.state.continuation.ready() {
+            return true;
+        }
+        let invalid = {
+            let inner = shared.inner.lock();
+            !inner
+                .terminals
+                .get(&self.target.pane)
+                .is_some_and(|terminal| Arc::ptr_eq(terminal, &self.target.terminal))
+                || self.target.guard_client && inner.client(self.target.client).is_none()
+        };
+        if self.target.generation() == self.generation
+            && self.deadline.is_none_or(|deadline| now < deadline)
+            && !invalid
+            && !shared.command_queue_cancelled(self.target.client)
+            && !shared.stopping.load(Ordering::Acquire)
+        {
+            return false;
+        }
+        self.finish.take().unwrap()(shared, Arc::clone(&self.target));
+        true
+    }
+
+    fn next(&self) -> Option<Instant> {
+        self.deadline
+    }
+}
+
+fn observe_output(
+    shared: &Arc<Shared>,
+    target: Arc<Target>,
+    generation: u64,
+    deadline: Option<Instant>,
+    finish: impl FnOnce(&Arc<Shared>, Arc<Target>) + Send + 'static,
+) {
+    shared.terminal_requests.push(OutputWait {
+        target,
+        generation,
+        deadline,
+        finish: Some(Box::new(finish)),
+    });
+}
+
+fn timeout_deadline(started: Instant, timeout: Duration) -> Option<Instant> {
+    (!timeout.is_zero()).then(|| started + timeout)
 }
 
 fn capture_screen(
@@ -92,6 +190,7 @@ struct Paste {
     bytes: Arc<[u8]>,
     tail: String,
     collapsed_before: usize,
+    generation: u64,
     started: Instant,
     timeout: Duration,
     enter: bool,
@@ -128,6 +227,7 @@ fn paste(
         bytes: bytes.into(),
         tail: echo_tail(text),
         collapsed_before: 0,
+        generation: target.generation(),
         started: Instant::now(),
         timeout,
         enter,
@@ -149,22 +249,19 @@ fn paste(
                 }
             };
             paste.collapsed_before = screen.matches(PASTE_COLLAPSE_MARKER).count();
+            paste.generation = target.generation();
             for sink in &paste.sinks {
                 sink.paste_prepared_bytes(None, Arc::clone(&paste.bytes), true);
             }
             paste.started = Instant::now();
-            shared.terminal_requests.schedule(
-                Instant::now() + SEND_TEXT_POLL_INTERVAL,
-                move |shared| {
-                    poll_paste(shared, target, paste);
-                },
-            );
+            poll_paste(shared, target, paste);
         },
     );
     Ok(())
 }
 
 fn poll_paste(shared: &Arc<Shared>, target: Arc<Target>, paste: Paste) {
+    let generation = target.generation();
     capture_screen(
         shared,
         target,
@@ -180,8 +277,9 @@ fn poll_paste(shared: &Arc<Shared>, target: Arc<Target>, paste: Paste) {
                     return;
                 }
             };
-            if collapse_whitespace(&screen).contains(&paste.tail)
-                || screen.matches(PASTE_COLLAPSE_MARKER).count() > paste.collapsed_before
+            if (paste.tail.is_empty() || generation != paste.generation)
+                && (collapse_whitespace(&screen).contains(&paste.tail)
+                    || screen.matches(PASTE_COLLAPSE_MARKER).count() > paste.collapsed_before)
             {
                 let result = if paste.enter
                     && !send_tokens(
@@ -209,10 +307,26 @@ fn poll_paste(shared: &Arc<Shared>, target: Arc<Target>, paste: Paste) {
                     .into()),
                 );
             } else {
-                shared.terminal_requests.schedule(
-                    Instant::now() + SEND_TEXT_POLL_INTERVAL,
-                    move |shared| {
-                        poll_paste(shared, target, paste);
+                observe_output(
+                    shared,
+                    target,
+                    generation,
+                    timeout_deadline(paste.started, paste.timeout),
+                    move |shared, target| {
+                        if target.generation() != generation {
+                            poll_paste(shared, target, paste);
+                        } else if target.check(shared) {
+                            (paste.finish)(
+                                shared,
+                                Arc::clone(&target),
+                                Err(ServerError::InvalidCommand(format!(
+                                    "{}: text not echoed within {} seconds; nothing submitted",
+                                    target.pane,
+                                    paste.timeout.as_secs_f64()
+                                ))
+                                .into()),
+                            );
+                        }
                     },
                 );
             }
@@ -291,7 +405,6 @@ pub(super) fn wait_pane(
 ) -> Result<Execution, DaemonError> {
     let wait = terminal_requests::CommandWait::new(shared);
     let target = Target::new(shared, client, pane, terminal, wait.start());
-    shared.report_command_queue_park();
     let scan_start = (!matches!(
         parsed.condition,
         PaneWaitCondition::Until(_) | PaneWaitCondition::Regex(_)
@@ -311,6 +424,7 @@ pub(super) fn wait_pane(
 }
 
 fn poll_wait(shared: &Arc<Shared>, target: Arc<Target>, mut wait: Wait) {
+    let generation = target.generation();
     if !target.check(shared) {
         return;
     }
@@ -328,7 +442,7 @@ fn poll_wait(shared: &Arc<Shared>, target: Arc<Target>, mut wait: Wait) {
             if !wait.first && last_output.elapsed() >= dwell {
                 target.state.resolve(Ok(Execution::default()));
             } else {
-                finish_wait_poll(shared, target, wait);
+                finish_wait_poll(shared, target, wait, generation);
             }
         }
         _ => capture_screen(
@@ -377,14 +491,14 @@ fn poll_wait(shared: &Arc<Shared>, target: Arc<Target>, mut wait: Wait) {
                         effects: Vec::new(),
                     }));
                 } else {
-                    finish_wait_poll(shared, target, wait);
+                    finish_wait_poll(shared, target, wait, generation);
                 }
             },
         ),
     }
 }
 
-fn finish_wait_poll(shared: &Arc<Shared>, target: Arc<Target>, mut wait: Wait) {
+fn finish_wait_poll(shared: &Arc<Shared>, target: Arc<Target>, mut wait: Wait, generation: u64) {
     if !wait.parsed.timeout.is_zero() && wait.started.elapsed() >= wait.parsed.timeout {
         let condition = match &wait.parsed.condition {
             PaneWaitCondition::Exit => "--exit".to_owned(),
@@ -401,11 +515,45 @@ fn finish_wait_poll(shared: &Arc<Shared>, target: Arc<Target>, mut wait: Wait) {
             exit_code: 124,
         }));
     } else {
+        if wait.first {
+            shared.report_command_queue_park();
+        }
         wait.first = false;
-        shared.terminal_requests.schedule(
-            Instant::now() + SEND_TEXT_POLL_INTERVAL,
-            move |shared| {
-                poll_wait(shared, target, wait);
+        let idle = if let PaneWaitCondition::Idle(dwell) = wait.parsed.condition {
+            Some(
+                shared
+                    .inner
+                    .lock()
+                    .last_output
+                    .get(&target.pane)
+                    .copied()
+                    .unwrap_or(wait.started)
+                    .max(wait.started)
+                    + dwell,
+            )
+        } else {
+            None
+        };
+        let deadline = timeout_deadline(wait.started, wait.parsed.timeout)
+            .into_iter()
+            .chain(idle)
+            .min();
+        observe_output(
+            shared,
+            target,
+            generation,
+            deadline,
+            move |shared, target| {
+                if target.generation() != generation
+                    || matches!(
+                        wait.parsed.condition,
+                        PaneWaitCondition::Idle(_) | PaneWaitCondition::Exit
+                    )
+                {
+                    poll_wait(shared, target, wait);
+                } else if target.check(shared) {
+                    finish_wait_poll(shared, target, wait, generation);
+                }
             },
         );
     }
@@ -482,6 +630,7 @@ fn timeout_run(shared: &Shared, target: &Target, run: Run) {
 }
 
 fn poll_run(shared: &Arc<Shared>, target: Arc<Target>, mut run: Run) {
+    let generation = target.generation();
     capture_screen(
         shared,
         target,
@@ -519,16 +668,27 @@ fn poll_run(shared: &Arc<Shared>, target: Arc<Target>, mut run: Run) {
             } else if !run.parsed.timeout.is_zero() && run.started.elapsed() >= run.parsed.timeout {
                 timeout_run(shared, &target, run);
             } else {
-                shared.terminal_requests.schedule(
-                    Instant::now() + SEND_TEXT_POLL_INTERVAL,
-                    move |shared| {
-                        poll_run(shared, target, run);
+                observe_output(
+                    shared,
+                    target,
+                    generation,
+                    timeout_deadline(run.started, run.parsed.timeout),
+                    move |shared, target| {
+                        if target.generation() != generation {
+                            poll_run(shared, target, run);
+                        } else if target.check(shared) {
+                            timeout_run(shared, &target, run);
+                        }
                     },
                 );
             }
         },
     );
 }
+
+#[cfg(all(test, unix))]
+#[path = "terminal_reads_e10_tests.rs"]
+mod e10_tests;
 
 #[cfg(test)]
 #[path = "terminal_reads_e05_tests.rs"]

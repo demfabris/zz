@@ -996,38 +996,69 @@ impl FocusProbeScope {
     }
 }
 
-thread_local! {
-    static INPUT_FOCUS: RefCell<Option<FocusProbeScope>> = const { RefCell::new(None) };
+pub(super) struct InputFocusScope {
+    shared: Arc<Shared>,
+    depth: usize,
+    active: bool,
 }
 
-pub(super) struct InputFocusScope(());
-
 impl InputFocusScope {
-    pub(super) fn open(inner: &mut ServerState) -> Self {
+    pub(super) fn open(shared: &Arc<Shared>, inner: &mut ServerState) -> Self {
         let scope = FocusProbeScope::open(inner);
-        INPUT_FOCUS.with_borrow_mut(|slot| *slot = Some(scope));
-        Self(())
+        let mut item = shared.command_item.as_ref().expect("command item").lock();
+        let depth = item.input_focus.len();
+        item.input_focus.push(scope);
+        Self {
+            shared: Arc::clone(shared),
+            depth,
+            active: true,
+        }
     }
 
-    pub(super) fn close(self, inner: &ServerState) -> Option<PaneFocusProbe> {
-        INPUT_FOCUS
-            .with_borrow_mut(Option::take)
-            .map(|scope| scope.close(inner))
+    pub(super) fn close(mut self, inner: &ServerState) -> Option<PaneFocusProbe> {
+        self.active = false;
+        let scope = self
+            .shared
+            .command_item
+            .as_ref()
+            .expect("command item")
+            .lock()
+            .input_focus
+            .pop();
+        scope.map(|scope| scope.close(inner))
     }
 }
 
 impl Drop for InputFocusScope {
     fn drop(&mut self) {
-        INPUT_FOCUS.with_borrow_mut(Option::take);
+        if self.active {
+            self.shared
+                .command_item
+                .as_ref()
+                .expect("command item")
+                .lock()
+                .input_focus
+                .truncate(self.depth);
+        }
     }
 }
 
 pub(super) fn release_input_change_window(shared: &Shared) {
-    INPUT_FOCUS.with_borrow_mut(|slot| {
-        if let Some(scope) = slot.as_mut().filter(|scope| scope.window.is_some()) {
-            scope.materialize(&shared.inner.lock());
-        }
-    });
+    let Some(item) = &shared.command_item else {
+        return;
+    };
+    if !item
+        .lock()
+        .input_focus
+        .iter()
+        .any(|scope| scope.window.is_some())
+    {
+        return;
+    }
+    let inner = shared.inner.lock();
+    for scope in &mut item.lock().input_focus {
+        scope.materialize(&inner);
+    }
 }
 
 pub(super) fn live_session_context(state: &MuxState, session: SessionId) -> ExecutionContext {

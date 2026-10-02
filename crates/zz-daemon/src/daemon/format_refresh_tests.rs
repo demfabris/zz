@@ -95,11 +95,12 @@ fn fixture() -> Fixture {
             .or_default()
             .insert(client);
         inner
-            .focused_windows
-            .insert(client, context.window.unwrap());
-        inner.client_sizes.insert(client, (width, 24));
-        inner.client_activity.insert(client, activity);
-        inner.client_terminals.insert(client);
+            .client_entry(client)
+            .focused_window
+            .replace(context.window.unwrap());
+        inner.client_entry(client).size.replace((width, 24));
+        inner.client_entry(client).activity.replace(activity);
+        inner.client_entry(client).has_terminal = true;
         Target {
             client,
             mailbox,
@@ -198,21 +199,25 @@ fn refresh_command_targetless_selection_preserves_origin_and_activity_precedence
         .shared
         .inner
         .lock()
-        .client_origins
-        .insert(fixture.invoking, fixture.targets[0].context.pane.unwrap());
+        .client_entry(fixture.invoking)
+        .origin
+        .replace(fixture.targets[0].context.pane.unwrap());
     execute(&fixture, &mut context, &["refresh-client", "-S"]).unwrap();
     assert_status(&fixture, 1, &fixture.targets[1].row);
     fixture
         .shared
         .inner
         .lock()
-        .client_activity
-        .insert(fixture.targets[0].client, 40);
+        .client_entry(fixture.targets[0].client)
+        .activity
+        .replace(40);
     execute(&fixture, &mut context, &["refresh-client", "-S"]).unwrap();
     assert_status(&fixture, 0, &fixture.targets[0].row);
     {
         let mut inner = fixture.shared.inner.lock();
-        inner.client_origins.remove(&fixture.invoking);
+        inner
+            .client_mut(fixture.invoking)
+            .and_then(|c| c.origin.take());
         inner
             .engine
             .mark_session_active_at(fixture.targets[0].context.session.unwrap(), 30);
@@ -241,8 +246,9 @@ fn refresh_command_explicit_targets_keep_scoped_options_and_client_facts_fresh()
         .shared
         .inner
         .lock()
-        .client_sizes
-        .insert(fixture.targets[1].client, (121, 24));
+        .client_entry(fixture.targets[1].client)
+        .size
+        .replace((121, 24));
     engine_command(
         &fixture.shared,
         &["set-option", "-t", "alpha", "@flavour", "A2"],
@@ -310,8 +316,9 @@ fn refresh_command_present_replay_provenance_restores_attachment_on_success_and_
         .shared
         .inner
         .lock()
-        .client_origins
-        .insert(fixture.invoking, fixture.targets[0].context.pane.unwrap());
+        .client_entry(fixture.invoking)
+        .origin
+        .replace(fixture.targets[0].context.pane.unwrap());
     let mut context = fixture.targets[2].context.clone();
     let attached = &fixture.targets[0].context;
     context.set_attached_client_context(Some((
@@ -354,8 +361,9 @@ fn refresh_command_after_and_error_hooks_recompute_their_format_context_and_fact
         .shared
         .inner
         .lock()
-        .client_origins
-        .insert(fixture.invoking, fixture.targets[0].context.pane.unwrap());
+        .client_entry(fixture.invoking)
+        .origin
+        .replace(fixture.targets[0].context.pane.unwrap());
     let mut context = fixture.targets[2].context.clone();
     context.set_format_client(FormatClient::NoClient);
     for (hook, option) in [
@@ -393,8 +401,9 @@ fn refresh_command_after_and_error_hooks_recompute_their_format_context_and_fact
         .shared
         .inner
         .lock()
-        .client_activity
-        .insert(fixture.targets[0].client, 40);
+        .client_entry(fixture.targets[0].client)
+        .activity
+        .replace(40);
     engine_command(
         &fixture.shared,
         &["set-option", "-t", "beta", "@flavour", "B2"],
@@ -505,8 +514,9 @@ fn literal_command_routing_recomputes_immediate_after_and_error_hook_facts() {
         .shared
         .inner
         .lock()
-        .client_origins
-        .insert(fixture.invoking, fixture.targets[0].context.pane.unwrap());
+        .client_entry(fixture.invoking)
+        .origin
+        .replace(fixture.targets[0].context.pane.unwrap());
     for (hook, option) in [
         ("@option-changed", "@route-immediate"),
         ("after-set-option", "@route-after"),
@@ -552,8 +562,9 @@ fn literal_command_routing_recomputes_immediate_after_and_error_hook_facts() {
         .shared
         .inner
         .lock()
-        .client_activity
-        .insert(fixture.targets[0].client, 40);
+        .client_entry(fixture.targets[0].client)
+        .activity
+        .replace(40);
     for args in [
         vec!["set-option", "definitely-invalid-format-option", "value"],
         vec!["set-option", "-Z", "@route-invalid", "value"],
@@ -599,8 +610,9 @@ fn literal_routing_keeps_formatted_setters_sources_and_listings_on_client_fact_p
         .shared
         .inner
         .lock()
-        .client_origins
-        .insert(fixture.invoking, fixture.targets[0].context.pane.unwrap());
+        .client_entry(fixture.invoking)
+        .origin
+        .replace(fixture.targets[0].context.pane.unwrap());
     let mut context = fixture.targets[2].context.clone();
     context.set_format_client(FormatClient::NoClient);
     let before = context.clone();
@@ -674,8 +686,9 @@ fn default_key_listing_routes_aliases_and_keeps_hook_facts_and_attachment_fresh(
         .shared
         .inner
         .lock()
-        .client_origins
-        .insert(fixture.invoking, fixture.targets[0].context.pane.unwrap());
+        .client_entry(fixture.invoking)
+        .origin
+        .replace(fixture.targets[0].context.pane.unwrap());
     engine_command(
         &fixture.shared,
         &[
@@ -762,8 +775,9 @@ fn default_key_listing_routes_aliases_and_keeps_hook_facts_and_attachment_fresh(
         .shared
         .inner
         .lock()
-        .client_activity
-        .insert(fixture.targets[0].client, 40);
+        .client_entry(fixture.targets[0].client)
+        .activity
+        .replace(40);
     engine_command(
         &fixture.shared,
         &["set-option", "-t", "beta", "@flavour", "B2"],

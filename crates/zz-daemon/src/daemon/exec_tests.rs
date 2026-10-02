@@ -367,7 +367,7 @@ fn a_client_file_read_goes_live_and_the_connection_keeps_serving() {
 }
 
 #[test]
-fn an_idle_connection_thread_serves_the_next_connection_then_retires() {
+fn an_idle_execution_worker_serves_the_next_chain_then_retires() {
     let threads = Arc::new(exec::ConnectionThreads::default());
     let (ran, seen) = mpsc::channel();
     let first = ran.clone();
@@ -415,7 +415,7 @@ fn an_idle_connection_thread_serves_the_next_connection_then_retires() {
         seen.recv_timeout(Duration::from_secs(5))
             .expect("fourth ran"),
         busy,
-        "a busy connection thread never delays the next connection"
+        "a busy execution worker never delays the next chain"
     );
     drop(release);
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -585,11 +585,9 @@ mod raw {
             .expect("connection thread")
             .expect("clean exit");
         let inner = shared.inner.lock();
-        assert!(inner.client_kinds.is_empty());
-        assert!(inner.client_environments.is_empty());
+        assert!(inner.clients.is_empty());
         drop(inner);
         assert!(shared.client_writers.lock().is_empty());
-        assert!(shared.exec_links.lock().is_empty());
         assert!(shared.command_queue_cancels.lock().is_empty());
     }
 
@@ -609,7 +607,7 @@ mod raw {
             .expect("clean exit");
         let mut rest = [0_u8; 1];
         assert_eq!(std::io::Read::read(&mut client, &mut rest).expect("eof"), 0);
-        assert!(shared.inner.lock().client_kinds.is_empty());
+        assert!(shared.inner.lock().clients.is_empty());
         assert!(shared.client_writers.lock().is_empty());
     }
 
@@ -623,15 +621,21 @@ mod raw {
             &ProtocolMessage::Exec(request(display("late"))),
         )
         .expect("exec");
-        connection
-            .join()
-            .expect("connection thread")
-            .expect("parked");
-        assert_eq!(shared.pending_execs.lock().len(), 1);
+        client
+            .set_read_timeout(Some(Duration::from_millis(50)))
+            .expect("parking timeout");
+        assert!(read_protocol_message(&mut client).is_err());
+        assert!(shared.inner.lock().clients.is_empty());
+        assert_eq!(shared.connection_threads.idle_count(), 0);
+        client
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .expect("reply timeout");
         shared.finish_startup();
         let (frames, exit) = read_exit(&mut client);
         assert_eq!(exit.outcome, ExecOutcome::Ran);
         assert_eq!(frames.len(), 1);
+        drop(client);
+        connection.join().expect("loop thread").expect("clean exit");
     }
 
     #[test]
@@ -659,13 +663,18 @@ mod raw {
             &ProtocolMessage::Exec(request(display("never"))),
         )
         .expect("exec");
-        connection
-            .join()
-            .expect("connection thread")
-            .expect("parked");
+        client
+            .set_read_timeout(Some(Duration::from_millis(50)))
+            .expect("parking timeout");
+        assert!(read_protocol_message(&mut client).is_err());
+        assert!(shared.inner.lock().clients.is_empty());
+        client
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .expect("reply timeout");
         shared.request_shutdown();
         assert!(shared.pending_execs.lock().is_empty());
         assert!(read_protocol_message(&mut client).is_err());
+        connection.join().expect("loop thread").expect("clean exit");
     }
 
     #[test]

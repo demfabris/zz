@@ -6,6 +6,7 @@ use zz_protocol::{
     ExecResumeKind,
 };
 
+#[cfg(windows)]
 thread_local! {
     static EXEC_CLIENT: Cell<Option<ClientId>> = const { Cell::new(None) };
 }
@@ -13,7 +14,9 @@ thread_local! {
 type ExecJob = Box<dyn FnOnce() + Send>;
 
 const IDLE_CONNECTION_THREADS: usize = 2;
+#[cfg(windows)]
 const EXEC_FLUSH_FRAMES: usize = 64;
+#[cfg(windows)]
 const EXEC_FLUSH_BYTES: usize = 64 * 1024;
 const CONNECTION_THREAD_IDLE: Duration = Duration::from_secs(1);
 
@@ -24,9 +27,14 @@ static SPAWN_PER_CONNECTION: LazyLock<bool> = LazyLock::new(|| {
 #[derive(Default)]
 pub(super) struct ConnectionThreads {
     idle: Mutex<Vec<crossbeam_channel::Sender<ExecJob>>>,
+    #[cfg(test)]
+    pub(super) fail_next: AtomicBool,
+    #[cfg(test)]
+    live_workers: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl ConnectionThreads {
+    #[cfg(windows)]
     pub(super) fn log_knob() {
         if *SPAWN_PER_CONNECTION {
             log::info!("ZZ_PERF_CONNECTION_THREADS=0: every connection starts a new thread");
@@ -34,6 +42,10 @@ impl ConnectionThreads {
     }
 
     pub(super) fn run(self: &Arc<Self>, job: ExecJob) -> std::io::Result<()> {
+        #[cfg(test)]
+        if self.fail_next.swap(false, Ordering::AcqRel) {
+            return Err(std::io::Error::other("injected worker start failure"));
+        }
         let mut job = job;
         loop {
             let Some(worker) = self.idle.lock().pop() else {
@@ -45,15 +57,26 @@ impl ConnectionThreads {
             }
         }
         let threads = Arc::downgrade(self);
+        #[cfg(test)]
+        let lifetime = WorkerLifetime::new(Arc::clone(&self.live_workers));
         thread::Builder::new()
             .name("zz-client".to_owned())
-            .spawn(move || connection_worker(&threads, job))
+            .spawn(move || {
+                #[cfg(test)]
+                let _lifetime = lifetime;
+                connection_worker(&threads, job);
+            })
             .map(drop)
     }
 
     #[cfg(test)]
     pub(super) fn idle_count(&self) -> usize {
         self.idle.lock().len()
+    }
+
+    #[cfg(test)]
+    pub(super) fn worker_count(&self) -> usize {
+        self.live_workers.load(Ordering::Acquire)
     }
 
     fn park(&self, worker: &crossbeam_channel::Sender<ExecJob>) -> bool {
@@ -72,6 +95,24 @@ impl ConnectionThreads {
         };
         idle.swap_remove(index);
         true
+    }
+}
+
+#[cfg(test)]
+struct WorkerLifetime(Arc<std::sync::atomic::AtomicUsize>);
+
+#[cfg(test)]
+impl WorkerLifetime {
+    fn new(workers: Arc<std::sync::atomic::AtomicUsize>) -> Self {
+        workers.fetch_add(1, Ordering::AcqRel);
+        Self(workers)
+    }
+}
+
+#[cfg(test)]
+impl Drop for WorkerLifetime {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
@@ -106,19 +147,23 @@ fn connection_worker(threads: &Weak<ConnectionThreads>, first: ExecJob) {
     }
 }
 
+#[cfg(windows)]
 pub(super) struct ExecLink {
     starter: Mutex<Option<ExecStarter>>,
     live: Mutex<Option<ExecLive>>,
 }
 
+#[cfg(windows)]
 struct ExecLive {
     writer: thread::JoinHandle<()>,
     reader: thread::JoinHandle<()>,
     requests: crossbeam_channel::Receiver<ExecRequest>,
 }
 
+#[cfg(windows)]
 type ExecStarter = Box<dyn FnOnce() -> Option<ExecLive> + Send>;
 
+#[cfg(windows)]
 impl ExecLink {
     fn go_live(&self) {
         let mut starter = self.starter.lock();
@@ -143,12 +188,18 @@ impl ExecLink {
 struct ExecRegistration {
     shared: Arc<Shared>,
     client: ClientId,
-    released: AtomicBool,
+    released: Arc<AtomicBool>,
 }
 
 impl ExecRegistration {
     fn release(&self) {
         if self.released.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        #[cfg(unix)]
+        if self.shared.loop_active.load(Ordering::Acquire) {
+            self.shared.lifecycle.release(self.client, true);
+            self.shared.accept_wake.wake();
             return;
         }
         if !detach_is_inert(&self.shared.inner.lock(), self.client) {
@@ -158,8 +209,10 @@ impl ExecRegistration {
     }
 }
 
+#[cfg(windows)]
 struct ExecClientScope;
 
+#[cfg(windows)]
 impl ExecClientScope {
     fn new(client: ClientId) -> Self {
         EXEC_CLIENT.with(|current| current.set(Some(client)));
@@ -167,6 +220,7 @@ impl ExecClientScope {
     }
 }
 
+#[cfg(windows)]
 impl Drop for ExecClientScope {
     fn drop(&mut self) {
         EXEC_CLIENT.with(|current| current.set(None));
@@ -230,6 +284,7 @@ fn prepared_command_any(
 }
 
 impl Shared {
+    #[cfg(windows)]
     pub(super) fn go_live_exec(&self, client: ClientId) {
         let link = self.exec_links.lock().get(&client).cloned();
         if let Some(link) = link {
@@ -237,12 +292,14 @@ impl Shared {
         }
     }
 
+    #[cfg(windows)]
     pub(super) fn go_live_current_exec(&self) {
         if let Some(client) = EXEC_CLIENT.with(Cell::get) {
             self.go_live_exec(client);
         }
     }
 
+    #[cfg(windows)]
     fn defer_exec_until_startup(&self, job: ExecJob) -> Option<ExecJob> {
         let ready = self.startup_ready.lock();
         if *ready || self.stopping.load(Ordering::Acquire) {
@@ -254,7 +311,10 @@ impl Shared {
     }
 
     pub(super) fn resume_pending_execs(&self) {
+        self.accept_wake.wake();
+        #[cfg(windows)]
         let pending = std::mem::take(&mut *self.pending_execs.lock());
+        #[cfg(windows)]
         for job in pending {
             if let Err(error) = self.connection_threads.run(job) {
                 log::warn!("could not resume a parked command connection: {error}");
@@ -266,7 +326,7 @@ impl Shared {
         drop(std::mem::take(&mut *self.pending_execs.lock()));
     }
 
-    fn register_exec(
+    pub(super) fn register_exec(
         &self,
         request: &ExecRequest,
         environment: ClientEnvironmentBlob,
@@ -280,49 +340,34 @@ impl Shared {
         inner
             .cold_bootstrap
             .register(client, request.startup_reentry == Some(self.server_id));
-        inner
-            .client_instances
-            .insert(client, request.client_instance_id);
-        inner.client_kinds.insert(client, ClientKind::Command);
         let now = unix_timestamp();
         inner.activity_sequence = inner.activity_sequence.saturating_add(1);
         let activity = inner.activity_sequence;
-        inner.client_activity.insert(client, activity);
-        inner.client_activity_times.insert(client, now);
-        inner.client_created_times.insert(client, now);
-        inner.client_focused.insert(client, true);
-        if let Some(origin) = request.origin {
-            inner.client_origins.insert(client, origin);
-        }
-        if request.flags.contains(ExecFlags::NESTED) {
-            inner.nested_clients.insert(client);
-        }
-        if request.flags.contains(ExecFlags::UTF8) {
-            inner.utf8_clients.insert(client);
-        }
-        if request.features != 0 {
-            inner.client_features.insert(client, request.features);
-        }
-        if let Some(tty) = request.tty.as_ref().filter(|tty| !tty.is_empty()) {
-            inner.client_ttys.insert(client, tty.clone());
-        }
-        if let Some(size) = request
-            .size
-            .filter(|(columns, rows)| *columns > 0 && *rows > 0)
-        {
-            inner.client_sizes.insert(client, size);
-        }
-        inner.client_pids.insert(client, request.process_id);
-        if let Some(working_directory) =
-            client_working_directory_fact(request.working_directory.as_ref())
-        {
-            inner
-                .client_working_directories
-                .insert(client, working_directory);
-        }
-        inner
-            .client_environments
-            .insert(client, Arc::new(environment));
+        inner.clients.insert(
+            client,
+            Box::new(Client {
+                instance_id: Some(request.client_instance_id),
+                kind: Some(ClientKind::Command),
+                activity: Some(activity),
+                activity_time: Some(now),
+                created_time: Some(now),
+                focused: Some(true),
+                origin: request.origin,
+                nested: request.flags.contains(ExecFlags::NESTED),
+                utf8: request.flags.contains(ExecFlags::UTF8),
+                features: (request.features != 0).then_some(request.features),
+                tty: request.tty.as_ref().filter(|tty| !tty.is_empty()).cloned(),
+                size: request
+                    .size
+                    .filter(|(columns, rows)| *columns > 0 && *rows > 0),
+                pid: Some(request.process_id),
+                working_directory: client_working_directory_fact(
+                    request.working_directory.as_ref(),
+                ),
+                environment: Some(Arc::new(environment)),
+                ..Client::default()
+            }),
+        );
         let context = request
             .origin
             .and_then(|pane| ExecutionContext::for_pane(&inner.engine.state, pane))
@@ -340,6 +385,7 @@ impl Shared {
     }
 }
 
+#[cfg(windows)]
 pub(super) fn serve_exec<S: TransportStream>(
     mut stream: S,
     shared: &Arc<Shared>,
@@ -403,6 +449,7 @@ pub(super) fn serve_exec<S: TransportStream>(
     Ok(())
 }
 
+#[cfg(windows)]
 fn serve_exec_ready<S: TransportStream>(
     mut stream: S,
     shared: &Arc<Shared>,
@@ -426,7 +473,7 @@ fn serve_exec_ready<S: TransportStream>(
     let registration = Arc::new(ExecRegistration {
         shared: Arc::clone(shared),
         client,
-        released: AtomicBool::new(false),
+        released: Arc::new(AtomicBool::new(false)),
     });
     let mut connection = ExecConnection {
         shared: Arc::clone(shared),
@@ -466,6 +513,7 @@ fn serve_exec_ready<S: TransportStream>(
     );
 }
 
+#[cfg(windows)]
 struct ExecConnection<S: TransportStream> {
     shared: Arc<Shared>,
     stream: Arc<Mutex<Option<S>>>,
@@ -478,6 +526,7 @@ struct ExecConnection<S: TransportStream> {
     resumed: bool,
 }
 
+#[cfg(windows)]
 impl<S: TransportStream> ExecConnection<S> {
     fn run(&mut self, request: ExecRequest) {
         let (mailbox, link) = if let Some((mailbox, link)) = &self.live {
@@ -781,5 +830,382 @@ impl<S: TransportStream> ExecConnection<S> {
         {
             writers.remove(&self.client);
         }
+    }
+}
+
+#[cfg(unix)]
+pub(super) struct LoopExec {
+    shared: Arc<Shared>,
+    pub(super) client: ClientId,
+    context: ExecutionContext,
+    cancel: Arc<AtomicBool>,
+    registration: ExecRegistration,
+    mailbox: Arc<OutboundMailbox>,
+}
+
+#[cfg(unix)]
+pub(super) struct PreparedExec {
+    commands: std::vec::IntoIter<PreparedCommand>,
+    next_request: u64,
+    stdin_available: bool,
+    outcome: ExecOutcome,
+    pub(super) last: bool,
+    pub(super) waiting_output: bool,
+    pub(super) waiting_command: bool,
+    pub(super) ready_on_loop: bool,
+    task: Option<Box<wait_queue::CommandTask>>,
+    admission: Option<ResponseAdmissionGuard>,
+}
+
+#[cfg(unix)]
+impl PreparedExec {
+    pub(super) fn command_ready(&self) -> bool {
+        self.task.as_ref().is_none_or(|task| task.ready())
+    }
+}
+
+#[cfg(unix)]
+impl LoopExec {
+    pub(super) fn register(
+        shared: &Arc<Shared>,
+        request: &mut ExecRequest,
+        mailbox: &Arc<OutboundMailbox>,
+        cancel: &Arc<AtomicBool>,
+    ) -> Option<Self> {
+        let environment = std::mem::take(&mut request.environment);
+        let (client, context) = shared.register_exec(request, environment)?;
+        shared
+            .command_queue_cancels
+            .lock()
+            .insert(client, Arc::clone(cancel));
+        shared
+            .client_writers
+            .lock()
+            .insert(client, Arc::clone(mailbox));
+        Some(Self {
+            shared: Arc::clone(shared),
+            client,
+            context,
+            cancel: Arc::clone(cancel),
+            registration: ExecRegistration {
+                shared: Arc::clone(shared),
+                client,
+                released: Arc::new(AtomicBool::new(false)),
+            },
+            mailbox: Arc::clone(mailbox),
+        })
+    }
+
+    pub(super) fn released(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.registration.released)
+    }
+
+    pub(super) fn prepare(&mut self, request: ExecRequest) -> PreparedExec {
+        let stdin_available = request.flags.contains(ExecFlags::STDIN_AVAILABLE);
+        let mut prepared = PreparedExec {
+            commands: Vec::new().into_iter(),
+            next_request: 1,
+            stdin_available,
+            outcome: ExecOutcome::Ran,
+            last: request.flags.contains(ExecFlags::LAST),
+            waiting_output: false,
+            waiting_command: false,
+            ready_on_loop: false,
+            task: None,
+            admission: ResponseAdmissionGuard::new(&self.shared),
+        };
+        if prepared.admission.is_none() {
+            return prepared;
+        }
+        if request
+            .expect_server_id
+            .is_some_and(|id| id != self.shared.server_id)
+        {
+            prepared.outcome = ExecOutcome::ServerMismatch;
+            return prepared;
+        }
+        if request.commands.is_empty() {
+            return prepared;
+        }
+        if request.flags.contains(ExecFlags::PREPARED) {
+            prepared.commands = request
+                .commands
+                .into_iter()
+                .map(|invocation| {
+                    let canonical_name = (!MuxEngine::is_command_alias_group(&invocation))
+                        .then(|| canonical_command(&invocation.name).to_owned());
+                    PreparedCommand {
+                        invocation,
+                        canonical_name,
+                        alias_matched: false,
+                        result: PreparedCommandResult::Ready,
+                    }
+                })
+                .collect::<Vec<_>>()
+                .into_iter();
+            return prepared;
+        }
+        let typed = request.flags.contains(ExecFlags::RESUME).then(|| {
+            request
+                .commands
+                .iter()
+                .map(|command| CommandInvocation::new(command.name.clone(), Vec::<String>::new()))
+                .collect::<Vec<_>>()
+        });
+        let commands = {
+            let mut inner = self.shared.inner.lock();
+            let commands =
+                Shared::prepare_command_list_with_engine(&inner.engine, request.commands, true);
+            if request.spawned_server_id == Some(self.shared.server_id) {
+                let failed = commands
+                    .iter()
+                    .any(|command| matches!(command.result, PreparedCommandResult::Error(_)));
+                inner.cold_bootstrap.prepare(self.client, failed);
+            }
+            commands
+        };
+        if let Some(error) = commands.iter().find_map(|command| match &command.result {
+            PreparedCommandResult::Ready => None,
+            PreparedCommandResult::Error(error) => Some(error.clone()),
+        }) {
+            prepared.outcome = ExecOutcome::Rejected(error);
+            return prepared;
+        }
+        if let Some(typed) = typed
+            && let Some(kind) = exec_resume_kind(&typed, &commands)
+        {
+            prepared.outcome = ExecOutcome::Resume(ExecResume { kind, commands });
+            return prepared;
+        }
+        prepared.commands = commands.into_iter();
+        prepared
+    }
+
+    pub(super) fn run(&mut self, prepared: &mut PreparedExec, inline: bool) -> Option<bool> {
+        prepared.waiting_output = false;
+        prepared.waiting_command = false;
+        prepared.ready_on_loop = false;
+        let mailbox = Arc::clone(&self.mailbox);
+        if prepared.admission.is_some() {
+            let shared = Arc::clone(&self.shared);
+            while prepared.task.is_some() || !prepared.commands.as_slice().is_empty() {
+                if inline {
+                    if self.output_pending() {
+                        prepared.waiting_output = true;
+                        return None;
+                    }
+                    if prepared.task.is_none() && !self.can_inline(&prepared.commands.as_slice()[0])
+                    {
+                        return None;
+                    }
+                }
+                let (response, client_exit) = if let Some(mut task) = prepared.task.take() {
+                    match task.run(inline) {
+                        wait_queue::Progress::Done => {
+                            let (response, client_exit, context, _admission) = task.finish();
+                            self.context = context;
+                            (response, client_exit)
+                        }
+                        wait_queue::Progress::Waiting => {
+                            prepared.waiting_command = true;
+                            prepared.task = Some(task);
+                            return None;
+                        }
+                        wait_queue::Progress::Worker => {
+                            prepared.task = Some(task);
+                            return None;
+                        }
+                        wait_queue::Progress::Ready => {
+                            prepared.ready_on_loop = true;
+                            prepared.task = Some(task);
+                            return None;
+                        }
+                    }
+                } else {
+                    let mut invocation = prepared.commands.next().unwrap().invocation;
+                    let request_id = prepared.next_request;
+                    prepared.next_request = request_id.saturating_add(1);
+                    if self.cancel.load(Ordering::Acquire) {
+                        break;
+                    }
+                    if shared.shutdown_pending.load(Ordering::Acquire) {
+                        let _ = mailbox.enqueue_reliable(&server_stopping_response(request_id));
+                        break;
+                    }
+                    invocation.set_stdin_available(prepared.stdin_available);
+                    if wait_queue::task_command(&invocation) || !inline {
+                        match wait_queue::CommandTask::new(
+                            &shared,
+                            self.client,
+                            ClientKind::Command,
+                            &self.context,
+                            request_id,
+                            &invocation,
+                            true,
+                        ) {
+                            Ok(task) => {
+                                prepared.task = Some(Box::new(task));
+                                continue;
+                            }
+                            Err(response) => (response, false),
+                        }
+                    } else {
+                        let item = shared.command_item(None);
+                        item.command_item
+                            .as_ref()
+                            .expect("Exec command item")
+                            .lock()
+                            .exec_writer = Some(Arc::downgrade(&mailbox));
+                        item.execute_command_request_with_streams(
+                            self.client,
+                            ClientKind::Command,
+                            &mut self.context,
+                            request_id,
+                            &invocation,
+                            true,
+                        )
+                    }
+                };
+                let failed = matches!(response, CommandResponse::Error { .. });
+                let admitted = mailbox.enqueue_reliable_with_wakeup(
+                    &ProtocolMessage::CommandResponse(response),
+                    false,
+                );
+                if failed || client_exit || !admitted {
+                    prepared.commands = Vec::new().into_iter();
+                    break;
+                }
+                if !inline && !prepared.commands.as_slice().is_empty() {
+                    return None;
+                }
+            }
+        } else {
+            let _ = mailbox.enqueue_reliable(&server_stopping_response(1));
+            prepared.outcome = ExecOutcome::Ran;
+        }
+        let outcome = std::mem::replace(&mut prepared.outcome, ExecOutcome::Ran);
+        let resumed = matches!(outcome, ExecOutcome::Resume(_));
+        if !self.cancel.load(Ordering::Acquire) {
+            let _ = mailbox.enqueue_reliable_with_wakeup(
+                &ProtocolMessage::ExecExit(ExecExit {
+                    server_id: self.shared.server_id,
+                    outcome,
+                }),
+                false,
+            );
+        }
+        drop(prepared.admission.take());
+        Some(resumed)
+    }
+
+    pub(super) fn finish(&mut self) {
+        if self.registration.released.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        if !detach_is_inert(&self.shared.inner.lock(), self.client) {
+            self.shared.detach(self.client);
+        }
+        self.shared.unregister(self.client);
+    }
+
+    pub(super) fn can_finish_inline(&self) -> bool {
+        let inner = self.shared.inner.lock();
+        detach_is_inert(&inner, self.client) && !inner.engine.destroy_unattached_explicit_anywhere()
+    }
+
+    fn can_inline(&self, command: &PreparedCommand) -> bool {
+        if wait_queue::task_command(&command.invocation)
+            || connection::inline_query(&self.shared, &self.context, command)
+        {
+            return true;
+        }
+        let Some(name @ ("select-pane" | "send-keys")) = command.canonical_name.as_deref() else {
+            return false;
+        };
+        let Some(spec) = zz_protocol::catalog_command_spec(name) else {
+            return false;
+        };
+        let Ok(parsed) = zz_protocol::parse_tmux_options(spec, &command.invocation.args) else {
+            return false;
+        };
+        if parsed.options.iter().any(|option| {
+            !(matches!(option, zz_protocol::TmuxOption::Value("-t", _))
+                || (name == "send-keys"
+                    && matches!(option, zz_protocol::TmuxOption::Flag("-l" | "-H" | "-R"))))
+        }) {
+            return false;
+        }
+        let inner = self.shared.inner.lock();
+        if !inner.deferred_event_hooks.is_empty()
+            || !inner.pane_modes.is_empty()
+            || inner
+                .clients
+                .values()
+                .any(|client| client.copy_session.is_some() || client.command_output.is_some())
+            || inner
+                .engine
+                .has_hook_commands(self.context.session, "command-error")
+            || MuxEngine::after_command_hook(name)
+                .is_some_and(|hook| inner.engine.has_hook_commands(self.context.session, hook))
+        {
+            return false;
+        }
+        let target = parsed.options.iter().rev().find_map(|option| match option {
+            zz_protocol::TmuxOption::Value("-t", value) => Some(*value),
+            _ => None,
+        });
+        if name == "select-pane"
+            && matches!(target, Some(":.+" | ".+" | ":+" | ":.-" | ".-" | ":-"))
+        {
+            return false;
+        }
+        let Ok(pane) = inner
+            .engine
+            .resolve_pane(target, self.context.window, self.context.pane)
+        else {
+            return false;
+        };
+        if name == "send-keys" {
+            inner.attached.is_empty()
+        } else {
+            inner
+                .engine
+                .state
+                .window_for_pane(pane)
+                .and_then(|window| inner.engine.state.windows.get(&window))
+                .is_some_and(|window| window.active_pane == pane && window.zoomed_pane.is_none())
+        }
+    }
+
+    pub(super) fn output_pending(&self) -> bool {
+        output_pending(&self.mailbox)
+    }
+}
+
+#[cfg(unix)]
+pub(super) fn output_pending(mailbox: &OutboundMailbox) -> bool {
+    let state = mailbox.state.lock();
+    !state.closed
+        && (state
+            .queued_bytes
+            .saturating_add(state.writer_inflight_bytes)
+            >= 64 * 1024
+            || state
+                .reliable
+                .len()
+                .saturating_add(state.writer_inflight_messages)
+                >= 64)
+}
+
+#[cfg(unix)]
+impl Drop for LoopExec {
+    fn drop(&mut self) {
+        if !self.registration.released.load(Ordering::Acquire) {
+            self.registration.release();
+        }
+        self.shared
+            .command_queue_cancels
+            .lock()
+            .remove(&self.client);
     }
 }

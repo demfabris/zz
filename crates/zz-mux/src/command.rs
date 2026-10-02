@@ -1369,6 +1369,41 @@ struct ListKeyHooks<'a, H> {
     has_repeat: bool,
     key_width: &'a str,
     table_width: &'a str,
+    options: &'a StatusRowVariables,
+    user_options: &'a FormatFacts,
+    fallback: &'a StatusContext<'static>,
+}
+
+#[cfg(all(test, unix))]
+#[path = "command/listing_e22_tests.rs"]
+mod listing_e22_tests;
+
+pub struct KeyListing {
+    values: StatusContext<'static>,
+    options: Arc<StatusRowVariables>,
+    user_options: FormatFacts,
+    fallback: StatusContext<'static>,
+    context: ExecutionContext,
+    args: Vec<RawText>,
+    generation: u64,
+    cacheable: bool,
+    single: bool,
+    had_binding: bool,
+    format: String,
+    bindings: Vec<OwnedListedKey>,
+    next: usize,
+    prefix: String,
+    notes_only: bool,
+    has_repeat: bool,
+    key_width: String,
+    table_width: String,
+    output: String,
+}
+
+struct OwnedListedKey {
+    table: String,
+    key: String,
+    binding: Binding,
 }
 
 #[derive(Debug)]
@@ -1613,6 +1648,33 @@ impl<H: StatusHooks> StatusHooks for ListKeyHooks<'_, H> {
     }
 
     fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+        let option_context = if context.session_id.is_empty()
+            && context.window_id.is_empty()
+            && context.pane_id.is_empty()
+        {
+            self.fallback
+        } else {
+            context
+        };
+        if let Some(value) = self.options.lookup(
+            &option_context.session_id,
+            &option_context.window_id,
+            &option_context.pane_id,
+            name,
+        ) {
+            return Some(value);
+        }
+        if name.starts_with('@') {
+            return self
+                .user_options
+                .user_option(
+                    &option_context.pane_id,
+                    &option_context.window_id,
+                    &option_context.session_id,
+                    name,
+                )
+                .map(str::to_owned);
+        }
         if self.inner.only_tmux_options()
             && *LIST_KEY_FORMAT_NAMES_ARE_NOT_OPTIONS
             && (LIST_KEY_BINDING_CONTEXT_FORMATS.contains(&name)
@@ -9819,6 +9881,20 @@ impl MuxEngine {
         args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
+        let mut listing = self.start_key_listing(context, args, hooks)?;
+        loop {
+            if let Some(execution) = self.step_key_listing(&mut listing, hooks) {
+                return Ok(execution);
+            }
+        }
+    }
+
+    pub fn start_key_listing(
+        &self,
+        context: &ExecutionContext,
+        args: &[RawText],
+        hooks: &mut impl StatusHooks,
+    ) -> Result<KeyListing, ServerError> {
         let (options, positional) = parse_command_options("list-keys", args)?;
         if positional.len() > 1 {
             return Err(ServerError::CommandParse(
@@ -9860,19 +9936,28 @@ impl MuxEngine {
                     .any(|name| hooks.option_variable(name, &values).is_some())
             });
         if cacheable && let Some((output, had_binding)) = self.cached_key_listing(args) {
-            return Ok(self.key_listing_execution(context, options.has("-1"), had_binding, output));
+            return Ok(KeyListing {
+                values: StatusContext::default(),
+                options: Arc::default(),
+                user_options: FormatFacts::default(),
+                fallback: StatusContext::default(),
+                context: context.clone(),
+                args: Vec::new(),
+                generation: self.keys.generation(),
+                cacheable: false,
+                single: options.has("-1"),
+                had_binding,
+                format: String::new(),
+                bindings: Vec::new(),
+                next: 0,
+                prefix: String::new(),
+                notes_only,
+                has_repeat: false,
+                key_width: String::new(),
+                table_width: String::new(),
+                output,
+            });
         }
-        let prepared = PreparedFormat::new(
-            self,
-            FormatContext {
-                session: context.session,
-                window: context.window,
-                pane: context.pane,
-                active_session: context.session,
-                format_client: context.target_format_client(),
-                format_type: FormatType::None,
-            },
-        );
         let mut bindings;
         if let Some(table) = options.value("-T") {
             bindings = listed_keys(self.keys.list(Some(table)));
@@ -9927,42 +10012,140 @@ impl MuxEngine {
             str::to_owned,
         );
         let had_binding = !bindings.is_empty();
-        let mut output = Vec::new();
-        for listed in bindings {
-            let mut item_hooks = ListKeyHooks {
-                inner: &mut *hooks,
-                table: listed.table,
-                key: &listed.key,
-                binding: listed.binding,
-                prefix: &prefix,
-                notes_only,
-                has_repeat,
-                key_width: &key_width,
-                table_width: &table_width,
-            };
-            let line = prepared.expand(format, &mut item_hooks);
-            if !line.is_empty() {
-                output.push(line);
+        let prepared = PreparedFormat::new(
+            self,
+            FormatContext {
+                session: context.session,
+                window: context.window,
+                pane: context.pane,
+                active_session: context.session,
+                format_client: context.target_format_client(),
+                format_type: FormatType::None,
+            },
+        );
+        let values = prepared
+            .values()
+            .clone()
+            .detach_with_templates(self.format_needs([format]), [format]);
+        let fallback = match context.target_format_client() {
+            FormatClient::Attached(session) => Some(session),
+            _ => None,
+        }
+        .map(|session| {
+            let window = self
+                .state
+                .sessions
+                .get(&session)
+                .map(|session| session.active_window);
+            let pane = window.and_then(|window| {
+                self.state
+                    .windows
+                    .get(&window)
+                    .map(|window| window.active_pane)
+            });
+            self.format_status_context_with_format_client(
+                Some(session),
+                window,
+                pane,
+                Some(session),
+                context.target_format_client(),
+            )
+            .detach(crate::formats::FormatNeeds::NONE)
+        })
+        .unwrap_or_default();
+        Ok(KeyListing {
+            values,
+            options: self.cached_format_option_snapshot(),
+            user_options: self.format_facts(),
+            fallback,
+            context: context.clone(),
+            args: args.to_vec(),
+            generation: self.keys.generation(),
+            cacheable,
+            single: options.has("-1"),
+            had_binding,
+            format: format.to_owned(),
+            bindings: bindings
+                .into_iter()
+                .map(|listed| OwnedListedKey {
+                    table: listed.table.to_owned(),
+                    key: listed.key,
+                    binding: listed.binding.clone(),
+                })
+                .collect(),
+            next: 0,
+            prefix,
+            notes_only,
+            has_repeat,
+            key_width,
+            table_width,
+            output: String::new(),
+        })
+    }
+
+    pub fn step_key_listing(
+        &self,
+        listing: &mut KeyListing,
+        hooks: &mut impl StatusHooks,
+    ) -> Option<Execution> {
+        if listing.next < listing.bindings.len() {
+            let end = (listing.next + 64).min(listing.bindings.len());
+            for listed in &listing.bindings[listing.next..end] {
+                let mut item_hooks = ListKeyHooks {
+                    inner: &mut *hooks,
+                    table: &listed.table,
+                    key: &listed.key,
+                    binding: &listed.binding,
+                    prefix: &listing.prefix,
+                    notes_only: listing.notes_only,
+                    has_repeat: listing.has_repeat,
+                    key_width: &listing.key_width,
+                    table_width: &listing.table_width,
+                    options: &listing.options,
+                    user_options: &listing.user_options,
+                    fallback: &listing.fallback,
+                };
+                let line = crate::formats::expand_format_bytes(
+                    &listing.format,
+                    &listing.values,
+                    &mut item_hooks,
+                );
+                if !line.is_empty() {
+                    if !listing.output.is_empty() {
+                        listing.output.push('\n');
+                    }
+                    listing.output.push_str(&line);
+                }
+            }
+            listing.next = end;
+            if end < listing.bindings.len() {
+                return None;
             }
         }
-        let output = output.join("\n");
-        if cacheable {
+        let output = std::mem::take(&mut listing.output);
+        if listing.cacheable && listing.generation == self.keys.generation() {
             let bytes = std::mem::size_of::<CachedKeyListing>()
                 + output.len()
-                + args
+                + listing
+                    .args
                     .iter()
                     .map(|argument| {
                         std::mem::size_of::<RawText>() + argument.len() + argument.as_bytes().len()
                     })
                     .sum::<usize>();
             *self.key_listing_cache.lock() = (bytes <= 1024 * 1024).then(|| CachedKeyListing {
-                generation: self.keys.generation(),
-                args: args.to_vec(),
+                generation: listing.generation,
+                args: listing.args.clone(),
                 output: output.clone(),
-                had_binding,
+                had_binding: listing.had_binding,
             });
         }
-        Ok(self.key_listing_execution(context, options.has("-1"), had_binding, output))
+        Some(self.key_listing_execution(
+            &listing.context,
+            listing.single,
+            listing.had_binding,
+            output,
+        ))
     }
 
     fn cached_key_listing(&self, args: &[RawText]) -> Option<(String, bool)> {

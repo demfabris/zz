@@ -8,7 +8,7 @@ use std::{
     path::PathBuf,
     rc::Rc,
     sync::{
-        Arc, LazyLock,
+        Arc, LazyLock, OnceLock,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     thread,
@@ -34,9 +34,9 @@ use libghostty_vt::{
     terminal::{
         ClipboardContent, ClipboardLocation, ClipboardWriteError, ColorScheme, CompressionMode,
         ConformanceLevel, CursorStyle as GhosttyCursorStyle, DeviceAttributeFeature,
-        DeviceAttributes, DeviceType, Mode, Point, PointCoordinate, PointSpace,
-        PrimaryDeviceAttributes, ScrollViewport, SecondaryDeviceAttributes, SizeReportSize,
-        TertiaryDeviceAttributes,
+        DeviceAttributes, DeviceType, GridRead, Mode, Point, PointCoordinate, PointSpace,
+        PrimaryDeviceAttributes, ScreenSnapshot, ScrollViewport, SecondaryDeviceAttributes,
+        SizeReportSize, TertiaryDeviceAttributes,
     },
 };
 use parking_lot::{Mutex, RwLock};
@@ -64,6 +64,8 @@ use crate::{
 };
 
 mod copy_grid;
+#[cfg(test)]
+mod deferred_event_tests;
 mod mode_revision;
 mod pane_actor;
 #[cfg(test)]
@@ -1333,53 +1335,58 @@ struct EventQueueState {
     pending_reliable_bytes: AtomicUsize,
     notification_pending: AtomicBool,
     output_activity_pending: AtomicBool,
-    identity: Mutex<bool>,
+    identity: Box<IdentityLatch>,
     foreground: RwLock<Option<Box<ForegroundSource>>>,
     completion: AtomicU64,
-    identity_ready: parking_lot::Condvar,
+    notification_sink: Box<OnceLock<Box<dyn Fn() + Send + Sync>>>,
 }
 
 impl EventQueueState {
-    const fn new() -> Self {
+    fn new() -> Self {
         Self {
             pending_reliable: AtomicUsize::new(0),
             pending_reliable_bytes: AtomicUsize::new(0),
             notification_pending: AtomicBool::new(false),
             output_activity_pending: AtomicBool::new(false),
-            identity: Mutex::new(false),
+            identity: Box::new(IdentityLatch::default()),
             foreground: RwLock::new(None),
             completion: AtomicU64::new(0),
-            identity_ready: parking_lot::Condvar::new(),
+            notification_sink: Box::new(OnceLock::new()),
+        }
+    }
+
+    fn notify_consumer(&self) {
+        if let Some(sink) = self.notification_sink.get() {
+            sink();
         }
     }
 
     fn resolve_identity(&self) {
-        let mut resolved = self.identity.lock();
-        if !*resolved {
-            *resolved = true;
-            self.identity_ready.notify_all();
+        let mut resolved = self.identity.state.lock();
+        if !resolved.ready {
+            resolved.ready = true;
+            self.identity.ready.notify_all();
+            let replies = std::mem::take(&mut resolved.replies);
+            drop(resolved);
+            for reply in replies {
+                let _ = reply.send(true);
+            }
         }
     }
 }
 
-impl TerminalEvents {
+impl EventQueueState {
     fn received(&self, event: &mut TerminalEvent) {
         if let TerminalEvent::ViewportReady { output_activity } = event {
-            self.state
-                .notification_pending
-                .store(false, Ordering::Release);
-            *output_activity = self
-                .state
-                .output_activity_pending
-                .swap(false, Ordering::AcqRel);
+            self.notification_pending.store(false, Ordering::Release);
+            *output_activity = self.output_activity_pending.swap(false, Ordering::AcqRel);
             return;
         }
 
-        let previous = self.state.pending_reliable.fetch_sub(1, Ordering::AcqRel);
+        let previous = self.pending_reliable.fetch_sub(1, Ordering::AcqRel);
         debug_assert!(previous > 0, "reliable terminal event accounting underflow");
         let bytes = reliable_event_bytes(event);
         let previous_bytes = self
-            .state
             .pending_reliable_bytes
             .fetch_sub(bytes, Ordering::AcqRel);
         debug_assert!(
@@ -1387,30 +1394,105 @@ impl TerminalEvents {
             "reliable terminal event byte accounting underflow"
         );
     }
+}
+
+pub struct DeferredTerminalEvent {
+    event: Option<TerminalEvent>,
+    state: Arc<EventQueueState>,
+}
+
+impl DeferredTerminalEvent {
+    pub fn event(&self) -> &TerminalEvent {
+        self.event.as_ref().expect("unconsumed terminal event")
+    }
+
+    pub fn into_event(mut self) -> TerminalEvent {
+        let mut event = self.event.take().expect("unconsumed terminal event");
+        self.state.received(&mut event);
+        event
+    }
+}
+
+impl Drop for DeferredTerminalEvent {
+    fn drop(&mut self) {
+        if let Some(mut event) = self.event.take() {
+            self.state.received(&mut event);
+        }
+    }
+}
+
+impl TerminalEvents {
+    pub fn install_notification_sink(&self, sink: impl Fn() + Send + Sync + 'static) {
+        assert!(self.state.notification_sink.set(Box::new(sink)).is_ok());
+        self.state.notify_consumer();
+    }
+
+    pub fn try_recv_deferred(&self) -> Result<DeferredTerminalEvent, async_channel::TryRecvError> {
+        Ok(DeferredTerminalEvent {
+            event: Some(self.receiver.try_recv()?),
+            state: Arc::clone(&self.state),
+        })
+    }
+
+    pub fn recv_deferred_blocking(
+        &self,
+    ) -> Result<DeferredTerminalEvent, async_channel::RecvError> {
+        Ok(DeferredTerminalEvent {
+            event: Some(self.receiver.recv_blocking()?),
+            state: Arc::clone(&self.state),
+        })
+    }
 
     /// Receives the next terminal event, blocking the caller.
     pub fn recv_blocking(&self) -> Result<TerminalEvent, async_channel::RecvError> {
         let mut event = self.receiver.recv_blocking()?;
-        self.received(&mut event);
+        self.state.received(&mut event);
         Ok(event)
     }
 
     pub fn try_recv(&self) -> Result<TerminalEvent, async_channel::TryRecvError> {
         let mut event = self.receiver.try_recv()?;
-        self.received(&mut event);
+        self.state.received(&mut event);
         Ok(event)
     }
 }
 
-fn terminal_event_channel(
-    state: &Arc<EventQueueState>,
-) -> (async_channel::Sender<TerminalEvent>, TerminalEvents) {
+#[derive(Clone)]
+struct TerminalEventSender(Arc<TerminalEventProducer>);
+
+struct TerminalEventProducer {
+    sender: async_channel::Sender<TerminalEvent>,
+    state: Arc<EventQueueState>,
+}
+
+impl std::ops::Deref for TerminalEventSender {
+    type Target = async_channel::Sender<TerminalEvent>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0.sender
+    }
+}
+
+impl Drop for TerminalEventProducer {
+    fn drop(&mut self) {
+        self.sender.close();
+        self.state.notify_consumer();
+    }
+}
+
+fn terminal_event_channel(state: &Arc<EventQueueState>) -> (TerminalEventSender, TerminalEvents) {
     let (sender, receiver) = async_channel::bounded(MAX_PENDING_TERMINAL_EVENTS);
     let events = TerminalEvents {
         receiver,
         state: Arc::clone(state),
     };
-    (sender, events)
+    (
+        TerminalEventSender(Arc::new(TerminalEventProducer {
+            sender,
+            state: Arc::clone(state),
+        })),
+        events,
+    )
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -1624,6 +1706,121 @@ pub enum KittyImageRequestError {
     ActorStopped,
 }
 
+struct RawOutputTapState {
+    notification: OnceLock<Box<dyn Fn() + Send + Sync>>,
+    capacity_wake: Mutex<ActorWake>,
+    receivers: AtomicUsize,
+}
+
+#[derive(Clone)]
+pub struct RawOutputTapSender {
+    sender: Sender<Arc<[u8]>>,
+    state: Arc<RawOutputTapState>,
+}
+
+impl std::fmt::Debug for RawOutputTapSender {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RawOutputTapSender").finish_non_exhaustive()
+    }
+}
+
+impl RawOutputTapSender {
+    pub fn set_notification(&self, notification: impl Fn() + Send + Sync + 'static) {
+        let _ = self.state.notification.set(Box::new(notification));
+    }
+
+    pub fn is_full(&self) -> bool {
+        self.sender.is_full() && self.state.receivers.load(Ordering::Acquire) != 0
+    }
+
+    pub fn try_send(
+        &self,
+        bytes: Arc<[u8]>,
+    ) -> Result<(), crossbeam_channel::TrySendError<Arc<[u8]>>> {
+        self.sender.try_send(bytes)?;
+        self.notify();
+        Ok(())
+    }
+
+    fn send(&self, bytes: Arc<[u8]>) -> Result<(), crossbeam_channel::SendError<Arc<[u8]>>> {
+        self.sender.send(bytes)?;
+        self.notify();
+        Ok(())
+    }
+
+    fn notify(&self) {
+        if let Some(notification) = self.state.notification.get() {
+            notification();
+        }
+    }
+}
+
+pub struct RawOutputTapReceiver {
+    receiver: Option<Receiver<Arc<[u8]>>>,
+    state: Arc<RawOutputTapState>,
+}
+
+impl Clone for RawOutputTapReceiver {
+    fn clone(&self) -> Self {
+        self.state.receivers.fetch_add(1, Ordering::Relaxed);
+        Self {
+            receiver: self.receiver.clone(),
+            state: Arc::clone(&self.state),
+        }
+    }
+}
+
+impl RawOutputTapReceiver {
+    pub fn try_recv(&self) -> Result<Arc<[u8]>, crossbeam_channel::TryRecvError> {
+        let bytes = self.receiver.as_ref().unwrap().try_recv()?;
+        self.state.capacity_wake.lock().notify();
+        if let Some(notification) = self.state.notification.get() {
+            notification();
+        }
+        Ok(bytes)
+    }
+
+    pub fn recv_timeout(
+        &self,
+        timeout: Duration,
+    ) -> Result<Arc<[u8]>, crossbeam_channel::RecvTimeoutError> {
+        let bytes = self.receiver.as_ref().unwrap().recv_timeout(timeout)?;
+        self.state.capacity_wake.lock().notify();
+        if let Some(notification) = self.state.notification.get() {
+            notification();
+        }
+        Ok(bytes)
+    }
+
+    pub fn recv(&self) -> Result<Arc<[u8]>, crossbeam_channel::RecvError> {
+        let bytes = self.receiver.as_ref().unwrap().recv()?;
+        self.state.capacity_wake.lock().notify();
+        if let Some(notification) = self.state.notification.get() {
+            notification();
+        }
+        Ok(bytes)
+    }
+
+    pub fn recv_deadline(
+        &self,
+        deadline: Instant,
+    ) -> Result<Arc<[u8]>, crossbeam_channel::RecvTimeoutError> {
+        self.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+    }
+
+    pub fn try_iter(&self) -> impl Iterator<Item = Arc<[u8]>> + '_ {
+        std::iter::from_fn(|| self.try_recv().ok())
+    }
+}
+
+impl Drop for RawOutputTapReceiver {
+    fn drop(&mut self) {
+        self.receiver.take();
+        self.state.receivers.fetch_sub(1, Ordering::Release);
+        self.state.capacity_wake.lock().notify();
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
 pub enum RawOutputTapError {
     #[error("terminal actor did not answer the raw output tap request in time")]
@@ -1634,11 +1831,15 @@ pub enum RawOutputTapError {
     Unavailable,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ActorRequestError {
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
+pub enum TerminalRequestError {
+    #[error("terminal actor request timed out")]
     TimedOut,
+    #[error("terminal actor stopped")]
     ActorStopped,
 }
+
+type ActorRequestError = TerminalRequestError;
 
 impl From<ActorRequestError> for TerminalCaptureError {
     fn from(error: ActorRequestError) -> Self {
@@ -1711,7 +1912,7 @@ impl TerminalSession {
         let (alive, liveness) = crossbeam_channel::bounded(0);
         let slot = Arc::new(Mutex::new(ControlSlot::default()));
         let commands = CommandSender {
-            queues: Box::new(CommandQueues {
+            queues: Arc::new(CommandQueues {
                 control: command_tx,
                 input: Some(input_tx),
                 liveness,
@@ -1744,12 +1945,14 @@ impl TerminalSession {
             Ok(Some(shard)) => {
                 if let Err(error) = shard.launch(shard::PaneLaunch {
                     control_rx: command_rx,
-                    input_rx,
                     slot,
                     publisher: worker_publisher,
                     max_scrollback,
                     appearance,
-                    spawn,
+                    kind: shard::LaunchKind::Pty {
+                        input_rx,
+                        spawn: Box::new(spawn),
+                    },
                     alive,
                     wake,
                 }) {
@@ -1858,16 +2061,24 @@ impl TerminalSession {
         max_scrollback: usize,
         frozen: bool,
     ) -> Self {
+        #[cfg(unix)]
+        let shard = shard::choose();
+        #[cfg(not(unix))]
+        let shard: Result<Option<shard::ShardHandle>, WorkerError> = Ok(None);
+        let wake = match &shard {
+            Ok(Some(shard)) => shard.wake.for_actor(),
+            _ => ActorWake::none(),
+        };
         let (command_tx, command_rx) = command_channel();
         let (alive, liveness) = crossbeam_channel::bounded(0);
         let slot = Arc::new(Mutex::new(ControlSlot::default()));
         let commands = CommandSender {
-            queues: Box::new(CommandQueues {
+            queues: Arc::new(CommandQueues {
                 control: command_tx,
                 input: None,
                 liveness,
                 slot: Arc::clone(&slot),
-                wake: ActorWake::none(),
+                wake: wake.clone(),
             }),
         };
         let event_state = Arc::new(EventQueueState::new());
@@ -1889,27 +2100,50 @@ impl TerminalSession {
 
         let worker_publisher = publisher.clone();
         let appearance_hash = appearance.stable_hash();
-        if let Err(error) = thread::Builder::new()
-            .name(if frozen {
-                "zz-output-view".into()
-            } else {
-                "zz-empty-pane".into()
-            })
-            .spawn(move || {
-                output_view_worker(
-                    command_rx,
+        match shard {
+            Ok(Some(shard)) => {
+                if let Err(error) = shard.launch(shard::PaneLaunch {
+                    control_rx: command_rx,
                     slot,
-                    worker_publisher,
-                    title,
-                    text,
-                    appearance,
+                    publisher: worker_publisher,
                     max_scrollback,
-                    frozen,
-                );
-                drop(alive);
-            })
-        {
-            publisher.fail(&WorkerError::Thread(error.to_string()));
+                    appearance,
+                    kind: shard::LaunchKind::Surface {
+                        title,
+                        text,
+                        frozen,
+                    },
+                    alive,
+                    wake,
+                }) {
+                    publisher.fail(&error);
+                }
+            }
+            Ok(None) => {
+                if let Err(error) = thread::Builder::new()
+                    .name(if frozen {
+                        "zz-output-view".into()
+                    } else {
+                        "zz-empty-pane".into()
+                    })
+                    .spawn(move || {
+                        output_view_worker(
+                            command_rx,
+                            slot,
+                            worker_publisher,
+                            title,
+                            text,
+                            appearance,
+                            max_scrollback,
+                            frozen,
+                        );
+                        drop(alive);
+                    })
+                {
+                    publisher.fail(&WorkerError::Thread(error.to_string()));
+                }
+            }
+            Err(error) => publisher.fail(&error),
         }
 
         Self {
@@ -1951,17 +2185,35 @@ impl TerminalSession {
     pub fn wait_for_identity(&self, timeout: Duration) -> bool {
         let state = &self.events.state;
         let deadline = Instant::now() + timeout;
-        let mut resolved = state.identity.lock();
-        while !*resolved {
+        let mut resolved = state.identity.state.lock();
+        debug_assert!(!ROUND_TRIPS_FORBIDDEN.with(Cell::get));
+        while !resolved.ready {
             if state
-                .identity_ready
+                .identity
+                .ready
                 .wait_until(&mut resolved, deadline)
                 .timed_out()
             {
                 break;
             }
         }
-        *resolved
+        resolved.ready
+    }
+
+    pub fn identity_request(
+        &self,
+        timeout: Duration,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    ) -> TerminalRequest<bool> {
+        let (reply, request) = self.commands.reply_token(timeout, notify);
+        let mut identity = self.events.state.identity.state.lock();
+        identity.replies.push(reply);
+        if identity.ready {
+            let reply = identity.replies.pop().unwrap();
+            drop(identity);
+            let _ = reply.send(true);
+        }
+        request
     }
 
     #[must_use]
@@ -2033,8 +2285,9 @@ impl TerminalSession {
     /// `window_copy_clone_screen` runs on the source pane, so the revision a
     /// `copy-mode -s` entry needs has to be built on that pane's own worker.
     pub fn capture_copy_source(&self) -> Result<CapturedCopySource, TerminalCaptureError> {
-        self.commands
-            .request(|reply| Command::CaptureCopySource { reply })?
+        self.commands.request(|reply| Command::CaptureCopySource {
+            reply: reply.into(),
+        })?
     }
 
     /// Hands a retained pane its expanded `remain-on-exit-format` while the
@@ -2151,7 +2404,12 @@ impl TerminalSession {
     /// Copy one stored Kitty image from the actor-owned VT as premultiplied BGRA8.
     pub fn kitty_image(&self, image_id: u32) -> Result<Option<KittyImage>, KittyImageRequestError> {
         self.commands
-            .request(|reply| Command::KittyImage(Box::new(KittyImageRequest { image_id, reply })))
+            .request(|reply| {
+                Command::KittyImage(Box::new(KittyImageRequest {
+                    image_id,
+                    reply: reply.into(),
+                }))
+            })
             .map_err(Into::into)
     }
 
@@ -2164,7 +2422,7 @@ impl TerminalSession {
             .request(|reply| {
                 Command::KittyImageGeneration(Box::new(KittyImageGenerationRequest {
                     image_id,
-                    reply,
+                    reply: reply.into(),
                 }))
             })
             .map_err(Into::into)
@@ -2356,19 +2614,45 @@ impl TerminalSession {
         self.send_command(Command::RawInput(bytes))
     }
 
-    pub fn raw_output_tap_channel() -> (Sender<Arc<[u8]>>, Receiver<Arc<[u8]>>) {
-        crossbeam_channel::bounded(RAW_OUTPUT_TAP_PENDING_CHUNKS)
+    pub fn send_raw_input_notified(&self, bytes: Arc<[u8]>, waker: &std::task::Waker) -> bool {
+        self.commands.queues.slot.lock().raw_input_space_waker = Some(waker.clone());
+        if self.send_raw_input(bytes) {
+            self.commands.queues.slot.lock().raw_input_space_waker = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn raw_output_tap_channel() -> (RawOutputTapSender, RawOutputTapReceiver) {
+        let (sender, receiver) = crossbeam_channel::bounded(RAW_OUTPUT_TAP_PENDING_CHUNKS);
+        let state = Arc::new(RawOutputTapState {
+            notification: OnceLock::new(),
+            capacity_wake: Mutex::new(ActorWake::none()),
+            receivers: AtomicUsize::new(1),
+        });
+        (
+            RawOutputTapSender {
+                sender,
+                state: Arc::clone(&state),
+            },
+            RawOutputTapReceiver {
+                receiver: Some(receiver),
+                state,
+            },
+        )
     }
 
     pub fn arm_raw_output_tap(
         &self,
         token: u64,
-        output: Sender<Arc<[u8]>>,
+        output: RawOutputTapSender,
     ) -> Result<(), RawOutputTapError> {
+        *output.state.capacity_wake.lock() = self.commands.queues.wake.clone();
         if self.commands.request(|reply| Command::ArmRawOutputTap {
             token,
             output,
-            reply,
+            reply: reply.into(),
         })? {
             Ok(())
         } else {
@@ -2378,14 +2662,127 @@ impl TerminalSession {
 
     pub fn disarm_raw_output_tap(&self, token: u64) -> Result<(), RawOutputTapError> {
         self.commands
-            .request(|reply| Command::DisarmRawOutputTap { token, reply })
+            .request(|reply| Command::DisarmRawOutputTap {
+                token,
+                reply: reply.into(),
+            })
             .map_err(Into::into)
     }
 
     pub fn settle(&self) -> bool {
         self.commands
-            .request(|reply| Command::Settle { reply })
+            .request(|reply| Command::Settle {
+                reply: reply.into(),
+            })
             .is_ok()
+    }
+
+    pub fn arm_raw_output_tap_request(
+        &self,
+        token: u64,
+        output: RawOutputTapSender,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    ) -> TerminalRequest<bool> {
+        *output.state.capacity_wake.lock() = self.commands.queues.wake.clone();
+        self.commands
+            .request_token(notify, |reply| Command::ArmRawOutputTap {
+                token,
+                output,
+                reply,
+            })
+    }
+
+    pub fn disarm_raw_output_tap_request(
+        &self,
+        token: u64,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    ) -> TerminalRequest<()> {
+        self.commands
+            .request_token(notify, |reply| Command::DisarmRawOutputTap { token, reply })
+    }
+
+    pub fn settle_request(&self, notify: Arc<dyn Fn() + Send + Sync>) -> TerminalRequest<()> {
+        self.commands
+            .request_token(notify, |reply| Command::Settle { reply })
+    }
+
+    pub fn copy_source_request(
+        &self,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    ) -> TerminalRequest<Result<CapturedCopySource, TerminalCaptureError>> {
+        self.commands
+            .request_token(notify, |reply| Command::CaptureCopySource { reply })
+    }
+
+    pub fn capture_request(
+        &self,
+        options: CaptureOptions,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    ) -> TerminalRequest<Result<String, TerminalCaptureError>> {
+        self.commands.request_token(notify, |reply| {
+            Command::Capture(Box::new(CaptureRequest { options, reply }))
+        })
+    }
+
+    pub fn history_request(
+        &self,
+        start: u32,
+        count: u32,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    ) -> TerminalRequest<Result<HistoryCapture, TerminalCaptureError>> {
+        self.commands.request_token(notify, |reply| {
+            Command::History(Box::new(HistoryCommand {
+                start,
+                count,
+                reply,
+            }))
+        })
+    }
+
+    pub fn capture_last_command_request(
+        &self,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    ) -> TerminalRequest<Result<LastCommandCapture, TerminalCaptureError>> {
+        self.commands.request_token(notify, |reply| {
+            Command::SemanticCapture(Box::new(LastCommandRequest { reply }))
+        })
+    }
+
+    pub fn pointer_context_request(
+        &self,
+        view: TerminalViewId,
+        column: u16,
+        row: u16,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    ) -> TerminalRequest<PointerContext> {
+        self.commands.request_token(notify, |reply| {
+            Command::PointerContext(Box::new(PointerContextRequest {
+                view,
+                column,
+                row,
+                reply,
+            }))
+        })
+    }
+
+    pub fn kitty_image_request(
+        &self,
+        image_id: u32,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    ) -> TerminalRequest<Option<KittyImage>> {
+        self.commands.request_token(notify, |reply| {
+            Command::KittyImage(Box::new(KittyImageRequest { image_id, reply }))
+        })
+    }
+
+    pub fn kitty_image_generation_request(
+        &self,
+        image_id: u32,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    ) -> TerminalRequest<Option<u64>> {
+        self.commands.request_token(notify, |reply| {
+            Command::KittyImageGeneration(Box::new(KittyImageGenerationRequest { image_id, reply }))
+        })
     }
 
     /// Open the observation window that binds one pasted image to the next
@@ -2419,28 +2816,36 @@ impl TerminalSession {
                     view,
                     column,
                     row,
-                    reply,
+                    reply: reply.into(),
                 }))
             })
             .map_err(Into::into)
     }
 
     pub fn capture(&self, options: CaptureOptions) -> Result<String, TerminalCaptureError> {
-        self.commands
-            .request(|reply| Command::Capture(Box::new(CaptureRequest { options, reply })))?
+        self.commands.request(|reply| {
+            Command::Capture(Box::new(CaptureRequest {
+                options,
+                reply: reply.into(),
+            }))
+        })?
     }
 
     pub fn capture_frozen_frame(
         &self,
         options: CaptureOptions,
     ) -> Result<String, TerminalCaptureError> {
-        let _round_trips = allow_actor_round_trips();
         match self.capture(options) {
-            Err(TerminalCaptureError::ActorStopped) => {
-                capture_viewport(&self.latest_viewport(), options)
-            }
+            Err(TerminalCaptureError::ActorStopped) => self.capture_retained_frame(options),
             result => result,
         }
+    }
+
+    pub fn capture_retained_frame(
+        &self,
+        options: CaptureOptions,
+    ) -> Result<String, TerminalCaptureError> {
+        capture_viewport(&self.latest_viewport(), options)
     }
 
     /// Copies one absolute span of retained primary-screen history without moving
@@ -2468,7 +2873,7 @@ impl TerminalSession {
             Command::History(Box::new(HistoryCommand {
                 start,
                 count,
-                reply,
+                reply: reply.into(),
             }))
         })?
     }
@@ -2481,8 +2886,11 @@ impl TerminalSession {
     /// [`TerminalCaptureError::NoSemanticMarks`] when the shell emits no OSC 133
     /// marks, plus the same failures as [`Self::capture`].
     pub fn capture_last_command(&self) -> Result<LastCommandCapture, TerminalCaptureError> {
-        self.commands
-            .request(|reply| Command::SemanticCapture(Box::new(LastCommandRequest { reply })))?
+        self.commands.request(|reply| {
+            Command::SemanticCapture(Box::new(LastCommandRequest {
+                reply: reply.into(),
+            }))
+        })?
     }
 
     /// Feed bytes straight into a PTY-free session's parser, as if a child
@@ -2591,7 +2999,7 @@ impl Geometry {
 #[derive(Debug)]
 struct CaptureRequest {
     options: CaptureOptions,
-    reply: Sender<Result<String, TerminalCaptureError>>,
+    reply: ActorReply<Result<String, TerminalCaptureError>>,
 }
 
 #[derive(Debug)]
@@ -2599,7 +3007,7 @@ struct PointerContextRequest {
     view: TerminalViewId,
     column: u16,
     row: u16,
-    reply: Sender<PointerContext>,
+    reply: ActorReply<PointerContext>,
 }
 
 /// What `format_cb_mouse_word`, `format_cb_mouse_line` and
@@ -2615,22 +3023,22 @@ pub struct PointerContext {
 
 #[derive(Debug)]
 struct LastCommandRequest {
-    reply: Sender<Result<LastCommandCapture, TerminalCaptureError>>,
+    reply: ActorReply<Result<LastCommandCapture, TerminalCaptureError>>,
 }
 
 #[derive(Debug)]
 struct KittyImageRequest {
     image_id: u32,
-    reply: Sender<Option<KittyImage>>,
+    reply: ActorReply<Option<KittyImage>>,
 }
 
 #[derive(Debug)]
 struct KittyImageGenerationRequest {
     image_id: u32,
-    reply: Sender<Option<u64>>,
+    reply: ActorReply<Option<u64>>,
 }
 
-type HistoryCapture = (
+pub type HistoryCapture = (
     u32,
     Vec<Vec<PackedCell>>,
     TerminalDictionary,
@@ -2642,7 +3050,7 @@ type HistoryCapture = (
 struct HistoryCommand {
     start: u32,
     count: u32,
-    reply: Sender<Result<HistoryCapture, TerminalCaptureError>>,
+    reply: ActorReply<Result<HistoryCapture, TerminalCaptureError>>,
 }
 
 #[derive(Debug)]
@@ -2662,7 +3070,7 @@ enum Command {
     SetWrapSearch(bool),
     SetEngineKnobs(EngineKnobs),
     CaptureCopySource {
-        reply: Sender<Result<CapturedCopySource, TerminalCaptureError>>,
+        reply: ActorReply<Result<CapturedCopySource, TerminalCaptureError>>,
     },
     SetPendingCopySource(Option<Box<CapturedCopySource>>),
     WriteDeadNotice(Option<Arc<str>>),
@@ -2683,15 +3091,15 @@ enum Command {
     Output(Arc<[u8]>),
     ArmRawOutputTap {
         token: u64,
-        output: Sender<Arc<[u8]>>,
-        reply: Sender<bool>,
+        output: RawOutputTapSender,
+        reply: ActorReply<bool>,
     },
     DisarmRawOutputTap {
         token: u64,
-        reply: Sender<()>,
+        reply: ActorReply<()>,
     },
     Settle {
-        reply: Sender<()>,
+        reply: ActorReply<()>,
     },
     Capture(Box<CaptureRequest>),
     PointerContext(Box<PointerContextRequest>),
@@ -2729,6 +3137,7 @@ impl ViewStream {
 
 #[derive(Default)]
 struct ControlSlot {
+    raw_input_space_waker: Option<std::task::Waker>,
     pending: PendingControl,
     deferred: Vec<(usize, Command)>,
     in_flight: usize,
@@ -2836,6 +3245,9 @@ fn take_control_slot(
         return commands;
     };
     let counted = from_control && !matches!(command, Command::Wake);
+    if from_control && let Some(waker) = slot.raw_input_space_waker.take() {
+        waker.wake();
+    }
     commands.push(command);
     if counted {
         slot.in_flight = slot.in_flight.saturating_sub(1);
@@ -3142,6 +3554,126 @@ fn actor_wake() -> (ActorWake, WakeReceiver) {
     (ActorWake::none(), ())
 }
 
+#[derive(Default)]
+struct IdentityLatch {
+    state: Mutex<IdentityState>,
+    ready: parking_lot::Condvar,
+}
+
+#[derive(Default)]
+struct IdentityState {
+    ready: bool,
+    replies: Vec<ActorReply<bool>>,
+}
+
+pub struct TerminalRequest<T> {
+    response: Receiver<Result<T, TerminalRequestError>>,
+    deadline: Instant,
+    pending: Option<Command>,
+    queues: Arc<CommandQueues>,
+}
+
+impl<T> TerminalRequest<T> {
+    pub fn next_poll(&self) -> Instant {
+        if self.pending.is_some() {
+            self.deadline.min(Instant::now() + Duration::from_millis(1))
+        } else {
+            self.deadline
+        }
+    }
+
+    pub fn poll(&mut self, now: Instant) -> Option<Result<T, TerminalRequestError>> {
+        if let Ok(result) = self.response.try_recv() {
+            return Some(result);
+        }
+        if now >= self.deadline {
+            self.pending.take();
+            return Some(Err(TerminalRequestError::TimedOut));
+        }
+        if let Some(command) = self.pending.take() {
+            let sender = CommandSender {
+                queues: Arc::clone(&self.queues),
+            };
+            match sender.try_send(command) {
+                Ok(()) => {}
+                Err(crossbeam_channel::TrySendError::Full(command)) => self.pending = Some(command),
+                Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
+                    return Some(Err(TerminalRequestError::ActorStopped));
+                }
+            }
+        }
+        if let Err(crossbeam_channel::TryRecvError::Disconnected) = self.queues.liveness.try_recv()
+        {
+            return Some(
+                self.response
+                    .try_recv()
+                    .unwrap_or(Err(TerminalRequestError::ActorStopped)),
+            );
+        }
+        match self.response.try_recv() {
+            Ok(result) => Some(result),
+            Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                Some(Err(TerminalRequestError::ActorStopped))
+            }
+            Err(crossbeam_channel::TryRecvError::Empty) => None,
+        }
+    }
+}
+
+enum ActorReply<T> {
+    Sync(Sender<T>),
+    Async {
+        reply: Option<Sender<Result<T, TerminalRequestError>>>,
+        deadline: Instant,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    },
+}
+
+impl<T> std::fmt::Debug for ActorReply<T> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("ActorReply")
+    }
+}
+
+impl<T> From<Sender<T>> for ActorReply<T> {
+    fn from(reply: Sender<T>) -> Self {
+        Self::Sync(reply)
+    }
+}
+
+impl<T> ActorReply<T> {
+    fn send(mut self, value: T) -> Result<(), ()> {
+        match &mut self {
+            Self::Sync(reply) => reply.send(value).map_err(|_| ()),
+            Self::Async {
+                reply,
+                deadline,
+                notify,
+            } => {
+                let value = if Instant::now() <= *deadline {
+                    Ok(value)
+                } else {
+                    Err(TerminalRequestError::TimedOut)
+                };
+                let result = reply.take().unwrap().try_send(value).map_err(|_| ());
+                notify();
+                result
+            }
+        }
+    }
+}
+
+impl<T> Drop for ActorReply<T> {
+    fn drop(&mut self) {
+        if let Self::Async { reply, notify, .. } = self
+            && let Some(reply) = reply.take()
+        {
+            let _ = reply.try_send(Err(TerminalRequestError::ActorStopped));
+            notify();
+        }
+    }
+}
+
 struct CommandQueues {
     control: Sender<Command>,
     input: Option<InputSender>,
@@ -3151,7 +3683,7 @@ struct CommandQueues {
 }
 
 struct CommandSender {
-    queues: Box<CommandQueues>,
+    queues: Arc<CommandQueues>,
 }
 
 impl CommandSender {
@@ -3250,6 +3782,40 @@ impl CommandSender {
         result
     }
 
+    fn reply_token<T>(
+        &self,
+        timeout: Duration,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    ) -> (ActorReply<T>, TerminalRequest<T>) {
+        let (reply, response) = crossbeam_channel::bounded(1);
+        let deadline = Instant::now() + timeout;
+        (
+            ActorReply::Async {
+                reply: Some(reply),
+                deadline,
+                notify,
+            },
+            TerminalRequest {
+                response,
+                deadline,
+                pending: None,
+                queues: Arc::clone(&self.queues),
+            },
+        )
+    }
+
+    fn request_token<T>(
+        &self,
+        notify: Arc<dyn Fn() + Send + Sync>,
+        command: impl FnOnce(ActorReply<T>) -> Command,
+    ) -> TerminalRequest<T> {
+        let (reply, mut request) = self.reply_token(CAPTURE_TIMEOUT, notify);
+        if let Err(crossbeam_channel::TrySendError::Full(command)) = self.try_send(command(reply)) {
+            request.pending = Some(command);
+        }
+        request
+    }
+
     fn request<T>(
         &self,
         command: impl FnOnce(Sender<T>) -> Command,
@@ -3319,6 +3885,14 @@ impl CommandSender {
             .map_or((0, 0), InputSender::pending)
     }
 }
+
+#[cfg(test)]
+#[path = "session/request_e04_tests.rs"]
+mod request_e04_tests;
+
+#[cfg(test)]
+#[path = "session/request_e05_tests.rs"]
+mod request_e05_tests;
 
 /// Where `recentre-top-bottom` parks the cursor line on its next press.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -4468,7 +5042,7 @@ fn normalize_view_action_result(
 
 #[derive(Clone)]
 struct Publisher {
-    event_tx: async_channel::Sender<TerminalEvent>,
+    event_tx: TerminalEventSender,
     latest: Arc<RwLock<PublishedViewports>>,
     state: Arc<EventQueueState>,
 }
@@ -4620,7 +5194,8 @@ impl Publisher {
             match self.event_tx.try_send(TerminalEvent::ViewportReady {
                 output_activity: false,
             }) {
-                Ok(()) | Err(async_channel::TrySendError::Closed(_)) => {}
+                Ok(()) => self.state.notify_consumer(),
+                Err(async_channel::TrySendError::Closed(_)) => {}
                 Err(async_channel::TrySendError::Full(_)) => {
                     self.state
                         .notification_pending
@@ -4705,7 +5280,10 @@ impl Publisher {
             return Err(WorkerError::EventBackpressure);
         }
         match self.event_tx.try_send(event) {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                self.state.notify_consumer();
+                Ok(())
+            }
             Err(async_channel::TrySendError::Full(_)) => {
                 self.release_reliable(bytes);
                 Err(WorkerError::EventBackpressure)
@@ -4872,16 +5450,27 @@ fn output_view_worker(
     max_scrollback: usize,
     frozen: bool,
 ) {
-    if let Err(error) = run_output_view(
-        &command_rx,
-        &slot,
-        &publisher,
-        &title,
-        &text,
-        &appearance,
-        max_scrollback,
-        frozen,
-    ) {
+    let result = (|| {
+        let mut actor = new_output_view(
+            command_rx,
+            slot,
+            publisher.clone(),
+            &title,
+            &text,
+            &appearance,
+            max_scrollback,
+            frozen,
+            &ActorWake::none(),
+        )?;
+        loop {
+            actor.on_deadline()?;
+            let wake = actor.wait_for_wake()?;
+            if !actor.on_wake(wake)? {
+                return Ok::<(), WorkerError>(());
+            }
+        }
+    })();
+    if let Err(error) = result {
         log::error!("command output view stopped: {error}");
         publisher.fail(&error);
     }
@@ -5035,16 +5624,17 @@ fn register_device_attributes(terminal: &mut Terminal<'_, '_>) -> Result<(), Wor
     Ok(())
 }
 
-fn run_output_view(
-    command_rx: &Receiver<Command>,
-    slot: &Arc<Mutex<ControlSlot>>,
-    publisher: &Publisher,
+fn new_output_view(
+    command_rx: Receiver<Command>,
+    slot: Arc<Mutex<ControlSlot>>,
+    publisher: Publisher,
     title: &str,
     text: &str,
     appearance: &TerminalAppearance,
     max_scrollback: usize,
     frozen: bool,
-) -> Result<(), WorkerError> {
+    wake: &ActorWake,
+) -> Result<surface_actor::SurfaceActor<'static, 'static>, WorkerError> {
     install_kitty_png_decoder();
     let geometry = Geometry::default();
     let mut terminal = new_terminal(geometry.columns, geometry.rows, max_scrollback)?;
@@ -5056,7 +5646,7 @@ fn run_output_view(
     if frozen {
         write_output_view_content(&mut terminal, title, text);
     }
-    run_surface_terminal(
+    surface_actor::SurfaceActor::new(
         command_rx,
         slot,
         publisher,
@@ -5073,9 +5663,10 @@ fn run_output_view(
             max_scrollback,
             status: SessionStatus::Running,
             pending_commands: Vec::new(),
+            captures: VecDeque::new(),
             pending_copy_source: None,
             pane_search: None,
-            search: None,
+            search: Some(SearchWorker::spawn(wake.clone())),
         },
         frozen,
     )
@@ -5094,32 +5685,10 @@ struct SurfaceTerminal<'a, 'b> {
     max_scrollback: usize,
     status: SessionStatus,
     pending_commands: Vec<Command>,
+    captures: VecDeque<CaptureWork>,
     pending_copy_source: Option<Box<CapturedCopySource>>,
     pane_search: Option<CopyModeSearch>,
     search: Option<(SearchWorker, Receiver<SearchResults>)>,
-}
-
-fn run_surface_terminal(
-    command_rx: &Receiver<Command>,
-    slot: &Arc<Mutex<ControlSlot>>,
-    publisher: &Publisher,
-    surface: SurfaceTerminal<'_, '_>,
-    frozen: bool,
-) -> Result<(), WorkerError> {
-    let mut actor = surface_actor::SurfaceActor::new(
-        command_rx.clone(),
-        Arc::clone(slot),
-        publisher.clone(),
-        surface,
-        frozen,
-    )?;
-    loop {
-        actor.on_deadline()?;
-        let wake = actor.wait_for_wake()?;
-        if !actor.on_wake(wake)? {
-            return Ok(());
-        }
-    }
 }
 
 fn write_output_view_content(terminal: &mut Terminal<'_, '_>, title: &str, text: &str) {
@@ -7509,6 +8078,274 @@ fn capture_history(
     ))
 }
 
+#[cfg(test)]
+#[path = "session/capture_work_e22_tests.rs"]
+mod capture_work_e22_tests;
+
+const CAPTURE_ROWS_PER_STEP: u64 = 512;
+
+trait CaptureGrid: GridRead {
+    fn capture_total(&self) -> Result<usize, libghostty_vt::Error>;
+    fn capture_rows(&self) -> Result<u16, libghostty_vt::Error>;
+    fn capture_columns(&self) -> Result<u16, libghostty_vt::Error>;
+    fn capture_history_rows(&self) -> Result<usize, libghostty_vt::Error>;
+    fn capture_screen(&self) -> Result<Screen, libghostty_vt::Error>;
+    fn capture_format(
+        &self,
+        options: FormatterOptions<'_, '_>,
+    ) -> Result<String, TerminalCaptureError>;
+}
+
+impl CaptureGrid for Terminal<'_, '_> {
+    fn capture_total(&self) -> Result<usize, libghostty_vt::Error> {
+        self.total_rows()
+    }
+    fn capture_rows(&self) -> Result<u16, libghostty_vt::Error> {
+        self.rows()
+    }
+    fn capture_columns(&self) -> Result<u16, libghostty_vt::Error> {
+        self.cols()
+    }
+    fn capture_history_rows(&self) -> Result<usize, libghostty_vt::Error> {
+        self.scrollback_rows()
+    }
+    fn capture_screen(&self) -> Result<Screen, libghostty_vt::Error> {
+        self.active_screen()
+    }
+    fn capture_format(
+        &self,
+        options: FormatterOptions<'_, '_>,
+    ) -> Result<String, TerminalCaptureError> {
+        let mut formatter = Formatter::new(self, options).map_err(capture_failure)?;
+        let length = match formatter.format_len() {
+            Ok(length) => length,
+            Err(libghostty_vt::Error::InvalidValue) => return Ok(String::new()),
+            Err(error) => return Err(capture_failure(error)),
+        };
+        if length > MAX_CAPTURE_BYTES {
+            return Err(TerminalCaptureError::TooLarge);
+        }
+        if length == 0 {
+            return Ok(String::new());
+        }
+        let mut output = vec![0_u8; length];
+        let written = formatter.format_buf(&mut output).map_err(capture_failure)?;
+        output.truncate(written);
+        String::from_utf8(output).map_err(|error| TerminalCaptureError::Failed(error.to_string()))
+    }
+}
+
+impl CaptureGrid for ScreenSnapshot {
+    fn capture_total(&self) -> Result<usize, libghostty_vt::Error> {
+        self.total_rows()
+    }
+    fn capture_rows(&self) -> Result<u16, libghostty_vt::Error> {
+        self.rows()
+    }
+    fn capture_columns(&self) -> Result<u16, libghostty_vt::Error> {
+        self.cols()
+    }
+    fn capture_history_rows(&self) -> Result<usize, libghostty_vt::Error> {
+        Ok(self.total_rows()?.saturating_sub(usize::from(self.rows()?)))
+    }
+    fn capture_screen(&self) -> Result<Screen, libghostty_vt::Error> {
+        self.active_screen()
+    }
+    fn capture_format(
+        &self,
+        options: FormatterOptions<'_, '_>,
+    ) -> Result<String, TerminalCaptureError> {
+        let bytes = match self.format_alloc(options) {
+            Ok(bytes) => bytes,
+            Err(libghostty_vt::Error::InvalidValue) => return Ok(String::new()),
+            Err(error) => return Err(capture_failure(error)),
+        };
+        if bytes.len() > MAX_CAPTURE_BYTES {
+            return Err(TerminalCaptureError::TooLarge);
+        }
+        String::from_utf8(bytes.to_vec())
+            .map_err(|error| TerminalCaptureError::Failed(error.to_string()))
+    }
+}
+
+enum CaptureSource {
+    Screen(ScreenSnapshot),
+    Mode(Arc<ModeRevision>),
+}
+
+struct CaptureWork {
+    source: CaptureSource,
+    options: CaptureOptions,
+    next: u64,
+    end: u64,
+    visible_start: u64,
+    output: String,
+    separator: bool,
+    previous: libghostty_vt::style::Style,
+    reply: ActorReply<Result<String, TerminalCaptureError>>,
+}
+
+impl CaptureWork {
+    fn start(
+        terminal: &Terminal<'_, '_>,
+        mode: Option<&CopyModeState>,
+        request: CaptureRequest,
+    ) -> Option<Self> {
+        let CaptureRequest { options, reply } = request;
+        let dimensions = if options.mode
+            && let Some(mode) = mode
+        {
+            Ok((
+                u64::from(mode.revision.total_rows()),
+                u64::from(mode.revision.viewport_rows),
+                u64::from(mode.viewport_offset),
+            ))
+        } else {
+            terminal
+                .total_rows()
+                .and_then(|total| {
+                    Ok((
+                        total as u64,
+                        u64::from(terminal.rows()?),
+                        terminal.scrollback_rows()? as u64,
+                    ))
+                })
+                .map_err(capture_failure)
+        };
+        let result = dimensions.and_then(|(total, rows, visible_start)| {
+            let visible_end = visible_start
+                .saturating_add(rows.saturating_sub(1))
+                .min(total.saturating_sub(1));
+            let start = resolve_capture_boundary(options.start, visible_start, visible_end, total);
+            let end = resolve_capture_boundary(options.end, visible_start, visible_end, total);
+            if start > end || end - start < CAPTURE_ROWS_PER_STEP {
+                return capture_terminal(terminal, mode, options).map(Err);
+            }
+            let source = if options.mode
+                && let Some(mode) = mode
+            {
+                if options.alternate && mode.revision.screen != Screen::Alternate {
+                    return Err(TerminalCaptureError::AlternateUnavailable);
+                }
+                CaptureSource::Mode(Arc::clone(&mode.revision))
+            } else {
+                if options.alternate
+                    && terminal.active_screen().map_err(capture_failure)? != Screen::Alternate
+                {
+                    return Err(TerminalCaptureError::AlternateUnavailable);
+                }
+                CaptureSource::Screen(terminal.clone_screen().map_err(capture_failure)?)
+            };
+            Ok(Ok((source, start, end, visible_start)))
+        });
+        match result {
+            Ok(Ok((source, next, end, visible_start))) => Some(Self {
+                source,
+                options,
+                next,
+                end,
+                visible_start,
+                output: String::new(),
+                separator: false,
+                previous: libghostty_vt::style::Style::default(),
+                reply,
+            }),
+            result => {
+                let _ = reply.send(match result {
+                    Ok(Err(output)) => Ok(output),
+                    Err(error) => Err(error),
+                    Ok(Ok(_)) => unreachable!(),
+                });
+                None
+            }
+        }
+    }
+
+    fn wrapped(&self, row: u64) -> Result<bool, TerminalCaptureError> {
+        match &self.source {
+            CaptureSource::Screen(screen) => screen
+                .grid_ref(Point::Screen(PointCoordinate {
+                    x: 0,
+                    y: u32::try_from(row).unwrap_or(u32::MAX),
+                }))
+                .and_then(|grid| grid.row())
+                .and_then(libghostty_vt::screen::Row::is_wrapped)
+                .map_err(capture_failure),
+            CaptureSource::Mode(revision) => Ok(revision
+                .row(u32::try_from(row).unwrap_or(u32::MAX))
+                .wrapped()),
+        }
+    }
+
+    fn step(&mut self) -> Result<bool, TerminalCaptureError> {
+        let start = self.next;
+        let end = start
+            .saturating_add(CAPTURE_ROWS_PER_STEP - 1)
+            .min(self.end);
+        let options = CaptureOptions {
+            start: CaptureBoundary::Relative(start as i64 - self.visible_start as i64),
+            end: CaptureBoundary::Relative(end as i64 - self.visible_start as i64),
+            ..self.options
+        };
+        let continuing = end < self.end && self.options.join_wrapped && self.wrapped(end)?;
+        let keep_tail = continuing
+            && !options.number_lines
+            && !options.escape_sequences
+            && !options.preserve_trailing;
+        let mut output = match &self.source {
+            CaptureSource::Screen(screen) => capture_grid(
+                screen,
+                CaptureOptions {
+                    preserve_trailing: options.preserve_trailing || keep_tail,
+                    ..options
+                },
+                &mut self.previous,
+            )?,
+            CaptureSource::Mode(revision) => {
+                capture_revision(revision, self.visible_start as u32, options)?
+            }
+        };
+        if keep_tail && matches!(self.source, CaptureSource::Screen(_)) {
+            let mut lines = output.split('\n').peekable();
+            let mut trimmed = String::with_capacity(output.len());
+            while let Some(line) = lines.next() {
+                if lines.peek().is_some() {
+                    trimmed.push_str(line.trim_end());
+                    trimmed.push('\n');
+                } else {
+                    trimmed.push_str(line);
+                }
+            }
+            output = trimmed;
+        }
+        if self.separator {
+            self.output.push('\n');
+        }
+        self.output.push_str(&output);
+        if self.output.len() > MAX_CAPTURE_BYTES {
+            return Err(TerminalCaptureError::TooLarge);
+        }
+        self.separator = !(self.options.join_wrapped && self.wrapped(end)?);
+        self.next = end + 1;
+        Ok(end == self.end)
+    }
+}
+
+fn step_capture_work(work: &mut VecDeque<CaptureWork>) {
+    let Some(mut capture) = work.pop_front() else {
+        return;
+    };
+    match capture.step() {
+        Ok(true) => {
+            let _ = capture.reply.send(Ok(capture.output));
+        }
+        Ok(false) => work.push_front(capture),
+        Err(error) => {
+            let _ = capture.reply.send(Err(error));
+        }
+    }
+}
+
 fn capture_terminal(
     terminal: &Terminal<'_, '_>,
     mode: Option<&CopyModeState>,
@@ -7522,17 +8359,29 @@ fn capture_terminal(
         }
         return capture_mode_revision(mode, options);
     }
-    let active_screen = terminal.active_screen().map_err(capture_failure)?;
+    capture_grid(
+        terminal,
+        options,
+        &mut libghostty_vt::style::Style::default(),
+    )
+}
+
+fn capture_grid(
+    terminal: &impl CaptureGrid,
+    options: CaptureOptions,
+    previous: &mut libghostty_vt::style::Style,
+) -> Result<String, TerminalCaptureError> {
+    let active_screen = terminal.capture_screen().map_err(capture_failure)?;
     if options.alternate && active_screen != Screen::Alternate {
         return Err(TerminalCaptureError::AlternateUnavailable);
     }
-    let total = terminal.total_rows().map_err(capture_failure)?;
+    let total = terminal.capture_total().map_err(capture_failure)?;
     if total == 0 {
         return Ok(String::new());
     }
     let total = u64::try_from(total).unwrap_or(u64::MAX);
-    let rows = u64::from(terminal.rows().map_err(capture_failure)?);
-    let visible_start = u64::try_from(terminal.scrollback_rows().map_err(capture_failure)?)
+    let rows = u64::from(terminal.capture_rows().map_err(capture_failure)?);
+    let visible_start = u64::try_from(terminal.capture_history_rows().map_err(capture_failure)?)
         .unwrap_or(u64::MAX)
         .min(total.saturating_sub(1));
     let visible_end = visible_start
@@ -7545,9 +8394,17 @@ fn capture_terminal(
     }
     let requested_rows = usize::try_from(end.saturating_sub(start).saturating_add(1)).unwrap_or(1);
 
-    let columns = terminal.cols().map_err(capture_failure)?;
+    let columns = terminal.capture_columns().map_err(capture_failure)?;
     if options.escape_sequences {
-        return capture_styled_terminal(terminal, options, start, end, visible_start, columns);
+        return capture_styled_terminal(
+            terminal,
+            options,
+            start,
+            end,
+            visible_start,
+            columns,
+            previous,
+        );
     }
     let head = terminal
         .grid_ref(Point::Screen(PointCoordinate {
@@ -7568,24 +8425,7 @@ fn capture_terminal(
             .with_unwrap(join_wrapped)
             .with_trim(!options.preserve_trailing)
             .with_selection(&selection);
-        let mut formatter = Formatter::new(terminal, formatter_options).map_err(capture_failure)?;
-        let length = match formatter.format_len() {
-            Ok(length) => length,
-            Err(libghostty_vt::Error::InvalidValue) => return Ok(String::new()),
-            Err(error) => return Err(capture_failure(error)),
-        };
-        if length > MAX_CAPTURE_BYTES {
-            return Err(TerminalCaptureError::TooLarge);
-        }
-        if length == 0 {
-            return Ok(String::new());
-        }
-        let mut output = vec![0_u8; length];
-        let written = formatter.format_buf(&mut output).map_err(capture_failure)?;
-        output.truncate(written);
-        let output = String::from_utf8(output)
-            .map_err(|error| TerminalCaptureError::Failed(error.to_string()))?;
-        Ok(output)
+        terminal.capture_format(formatter_options)
     };
     let output = format_range(options.join_wrapped && !options.number_lines)?;
     let rows = if options.number_lines && options.join_wrapped {
@@ -7625,15 +8465,15 @@ fn capture_terminal(
 }
 
 fn capture_styled_terminal(
-    terminal: &Terminal<'_, '_>,
+    terminal: &impl GridRead,
     options: CaptureOptions,
     start: u64,
     end: u64,
     history_rows: u64,
     columns: u16,
+    previous: &mut libghostty_vt::style::Style,
 ) -> Result<String, TerminalCaptureError> {
     let mut output = String::new();
-    let mut previous = libghostty_vt::style::Style::default();
     let mut graphemes = vec!['\0'; 8];
     for row in start..=end {
         let y = u32::try_from(row).unwrap_or(u32::MAX);
@@ -7690,8 +8530,8 @@ fn capture_styled_terminal(
                 }
                 CellContentTag::Codepoint | CellContentTag::CodepointGrapheme => {}
             }
-            push_capture_sgr(&mut line, previous, style);
-            previous = style;
+            push_capture_sgr(&mut line, *previous, style);
+            *previous = style;
             let count = match grid.graphemes(&mut graphemes) {
                 Ok(count) => count,
                 Err(libghostty_vt::Error::OutOfSpace { required }) => {
@@ -7821,7 +8661,7 @@ fn push_capture_colour(output: &mut String, colour: StyleColor, base: u16) {
 }
 
 fn measure_written_rows(
-    terminal: &Terminal<'_, '_>,
+    terminal: &impl CaptureGrid,
     selection: &Selection<'_>,
 ) -> Result<usize, TerminalCaptureError> {
     let options = FormatterOptions::new()
@@ -7829,18 +8669,12 @@ fn measure_written_rows(
         .with_unwrap(false)
         .with_trim(true)
         .with_selection(selection);
-    let mut formatter = Formatter::new(terminal, options).map_err(capture_failure)?;
-    let length = match formatter.format_len() {
-        Ok(length) => length,
-        Err(libghostty_vt::Error::InvalidValue) => return Ok(0),
-        Err(error) => return Err(capture_failure(error)),
-    };
-    if length == 0 || length > MAX_CAPTURE_BYTES {
-        return Ok(0);
-    }
-    let mut buffer = vec![0_u8; length];
-    let written = formatter.format_buf(&mut buffer).map_err(capture_failure)?;
-    Ok(buffer[..written].split(|byte| *byte == b'\n').count())
+    let output = terminal.capture_format(options)?;
+    Ok(if output.is_empty() {
+        0
+    } else {
+        output.split('\n').count()
+    })
 }
 
 fn allocated_row_width(used: usize, columns: usize) -> usize {
@@ -12423,7 +13257,7 @@ fn consume_pty_output(
     terminal: &mut Terminal<'_, '_>,
     passthrough: &mut PassthroughFilter,
     engine: &mut EngineOutput<'_>,
-    raw_output_tap: &mut Option<(u64, Sender<Arc<[u8]>>)>,
+    raw_output_tap: &mut Option<(u64, RawOutputTapSender)>,
     buffer: Vec<u8>,
     length: usize,
     recycled: &Sender<Vec<u8>>,
@@ -12441,12 +13275,12 @@ fn consume_pty_output(
 }
 
 #[cfg(any(target_os = "linux", not(unix), test))]
-fn tap_raw_output(tap: &mut Option<(u64, Sender<Arc<[u8]>>)>, bytes: &[u8]) -> Option<u64> {
+fn tap_raw_output(tap: &mut Option<(u64, RawOutputTapSender)>, bytes: &[u8]) -> Option<u64> {
     tap_raw_output_arc(tap, &Arc::from(bytes))
 }
 
 fn tap_raw_output_arc(
-    tap: &mut Option<(u64, Sender<Arc<[u8]>>)>,
+    tap: &mut Option<(u64, RawOutputTapSender)>,
     bytes: &Arc<[u8]>,
 ) -> Option<u64> {
     let disconnected = tap
@@ -12530,13 +13364,14 @@ fn drain_pty_output_burst(
     first_buffer: Vec<u8>,
     first_length: usize,
     limit_turn: bool,
+    max_chunks: usize,
     mut consume: impl FnMut(Vec<u8>, usize),
 ) -> bool {
     let started = limit_turn.then(Instant::now);
     let mut bytes = first_length;
     consume(first_buffer, first_length);
 
-    for _ in 1..PTY_BUFFER_POOL_SIZE {
+    for _ in 1..PTY_BUFFER_POOL_SIZE.min(max_chunks) {
         if limit_turn
             && (bytes >= PTY_DRAIN_TURN_BYTES
                 || started.is_some_and(|started| started.elapsed() >= PTY_DRAIN_TURN_TIME))
@@ -16035,7 +16870,7 @@ mod tests {
         let (control, stranded) = command_channel();
         let (alive, liveness) = crossbeam_channel::bounded(0);
         let commands = CommandSender {
-            queues: Box::new(CommandQueues {
+            queues: Arc::new(CommandQueues {
                 control,
                 input: None,
                 liveness,
@@ -16049,7 +16884,7 @@ mod tests {
         assert_eq!(
             commands.request(|reply| Command::Capture(Box::new(CaptureRequest {
                 options: CaptureOptions::default(),
-                reply,
+                reply: reply.into(),
             }))),
             Err(ActorRequestError::ActorStopped)
         );
@@ -16062,7 +16897,7 @@ mod tests {
         let (control, control_rx) = command_channel();
         let (input, input_rx) = input_channel();
         let commands = CommandSender {
-            queues: Box::new(CommandQueues {
+            queues: Arc::new(CommandQueues {
                 control,
                 input: Some(input),
                 liveness: crossbeam_channel::never(),
@@ -16519,7 +17354,7 @@ mod tests {
     #[test]
     fn actor_event_handles_share_compact_queue_state() {
         let word = std::mem::size_of::<usize>();
-        assert!(std::mem::size_of::<EventQueueState>() <= 7 * word);
+        assert!(std::mem::size_of::<EventQueueState>() <= 8 * word);
         assert_eq!(std::mem::size_of::<Publisher>(), 3 * word);
         assert_eq!(std::mem::size_of::<TerminalEvents>(), 3 * word);
         assert!(
@@ -20719,10 +21554,16 @@ mod tests {
         }
 
         let mut consumed = Vec::new();
-        let reached_eof =
-            drain_pty_output_burst(&output_rx, vec![0], 1, false, |buffer, length| {
+        let reached_eof = drain_pty_output_burst(
+            &output_rx,
+            vec![0],
+            1,
+            false,
+            PTY_BUFFER_POOL_SIZE,
+            |buffer, length| {
                 consumed.extend_from_slice(&buffer[..length]);
-            });
+            },
+        );
 
         let burst_limit = u8::try_from(PTY_BUFFER_POOL_SIZE).expect("burst limit fits in a byte");
         assert!(!reached_eof);
@@ -20737,7 +21578,7 @@ mod tests {
 
     #[test]
     fn raw_output_tap_blocks_at_four_read_chunks_and_receiver_drop_unblocks_it() {
-        let (output, receiver) = crossbeam_channel::bounded(RAW_OUTPUT_TAP_PENDING_CHUNKS);
+        let (output, receiver) = TerminalSession::raw_output_tap_channel();
         let mut tap = Some((1, output));
         for _ in 0..RAW_OUTPUT_TAP_PENDING_CHUNKS {
             assert_eq!(
@@ -20764,6 +21605,47 @@ mod tests {
             Some(1)
         );
         worker.join().expect("tap worker");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn full_raw_output_tap_keeps_actor_requests_live_and_draining_resumes_output() {
+        let session = TerminalSession::spawn(
+            DEFAULT_HISTORY_LIMIT,
+            Arc::new(TerminalAppearance::default()),
+            TerminalSpawn {
+                command: Some(vec![
+                    "read _; head -c 1048576 /dev/zero; printf TAP_END; read _".into(),
+                ]),
+                ..TerminalSpawn::default()
+            },
+        );
+        attach_streaming(&session, TerminalViewId(116));
+        wait_for_test_viewport(&session, |viewport| {
+            matches!(viewport.status, SessionStatus::Running)
+        });
+        let (tap, output) = TerminalSession::raw_output_tap_channel();
+        let (notified, notifications) = crossbeam_channel::bounded(1);
+        tap.set_notification(move || {
+            let _ = notified.try_send(());
+        });
+        session.arm_raw_output_tap(116, tap.clone()).unwrap();
+        assert!(session.send_raw_input(Arc::from(b"go\n".as_slice())));
+        notifications.recv_timeout(Duration::from_secs(5)).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !tap.is_full() {
+            assert!(Instant::now() < deadline, "tap never reached four chunks");
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert!(session.settle());
+        session.capture(CaptureOptions::default()).unwrap();
+        let mut received = Vec::new();
+        while !received.ends_with(b"TAP_END") {
+            received.extend_from_slice(&output.recv_deadline(deadline).unwrap());
+        }
+        assert!(received.len() >= 1_048_576);
+        session.disarm_raw_output_tap(116).unwrap();
+        session.terminate();
     }
 
     fn synchronized_output_session() -> (TerminalSession, Arc<TerminalViewport>) {

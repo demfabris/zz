@@ -48,12 +48,13 @@ fn terminal_client(shared: &Arc<Shared>, size: (u16, u16)) -> (ClientId, Arc<Out
     {
         let mut inner = shared.inner.lock();
         inner
-            .client_sizes
-            .insert(client, client_size_fact(&capabilities).expect("size fact"));
-        inner.client_cell_pixels.insert(
-            client,
-            attach::client_cell_fact(&capabilities).expect("cell fact"),
-        );
+            .client_entry(client)
+            .size
+            .replace(client_size_fact(&capabilities).expect("size fact"));
+        inner
+            .client_entry(client)
+            .cell_pixels
+            .replace(attach::client_cell_fact(&capabilities).expect("cell fact"));
     }
     (client, mailbox)
 }
@@ -218,7 +219,13 @@ fn a_fresh_attach_still_sends_the_overlays_that_exist() {
     shared
         .open_command_output(client, Some(pane), "list".to_owned(), "one\ntwo\n")
         .expect("open command output");
-    let output = Arc::clone(&shared.inner.lock().command_outputs[&client].terminal);
+    let output = Arc::clone(
+        &shared.inner.lock().clients[&client]
+            .command_output
+            .as_ref()
+            .unwrap()
+            .terminal,
+    );
     let deadline = Instant::now() + Duration::from_secs(30);
     while output
         .latest_viewport_for(TerminalViewId(client.0))

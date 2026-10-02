@@ -49,6 +49,7 @@ pub(super) struct PaneActor {
     reported_color_scheme: Rc<Cell<ColorScheme>>,
     frames: Frames<'static>,
     compression: IdleCompression,
+    captures: VecDeque<CaptureWork>,
     echo: EchoWindow,
     key_encoder: key::Encoder<'static>,
     key_event: key::Event<'static>,
@@ -79,7 +80,7 @@ pub(super) struct PaneActor {
     last_content_publish: Instant,
     output_pending: bool,
     vt_diagnostics: VtWriteDiagnostics,
-    raw_output_tap: Option<(u64, Sender<Arc<[u8]>>)>,
+    raw_output_tap: Option<(u64, RawOutputTapSender)>,
     raw_output_parse_backlog: VecDeque<(Arc<[u8]>, usize)>,
     raw_output_parse_backlog_bytes: usize,
     raw_output_parse_buffer: Vec<u8>,
@@ -454,6 +455,7 @@ impl PaneActor {
             reported_color_scheme,
             frames,
             compression,
+            captures: VecDeque::new(),
             echo,
             key_encoder,
             key_event,
@@ -500,6 +502,7 @@ impl PaneActor {
     }
 
     pub(super) fn on_deadline(&mut self) -> Result<bool, WorkerError> {
+        step_capture_work(&mut self.captures);
         let facts = self.engine_filter.facts(&self.terminal)?;
         if self.published_facts != Some(facts) {
             self.publisher.set_facts(facts);
@@ -661,6 +664,9 @@ impl PaneActor {
 
     pub(super) fn next_deadline(&self) -> Instant {
         let mut deadline = Instant::now() + IDLE_SLEEP;
+        if !self.captures.is_empty() {
+            deadline = Instant::now();
+        }
         if !self.output_pending {
             if let Some(due) = self.frames.settle_due() {
                 deadline = deadline.min(due);
@@ -716,8 +722,14 @@ impl PaneActor {
         #[cfg(not(unix))]
         let available_input = Some(&self.input_rx.commands);
         #[cfg(not(target_os = "linux"))]
-        let raw_output_read_ahead = self.raw_output_parse_backlog_bytes
-            <= RAW_OUTPUT_PARSE_BACKLOG_BYTES.saturating_sub(RAW_OUTPUT_PARSE_READ_RESERVE_BYTES);
+        let raw_output_read_ahead = !self.reader_eof
+            && self
+                .raw_output_tap
+                .as_ref()
+                .is_none_or(|(_, tap)| !tap.is_full())
+            && self.raw_output_parse_backlog_bytes
+                <= RAW_OUTPUT_PARSE_BACKLOG_BYTES
+                    .saturating_sub(RAW_OUTPUT_PARSE_READ_RESERVE_BYTES);
         #[cfg(all(unix, not(target_os = "linux")))]
         let wakeup = wait_for_wake(
             &self.control_rx,
@@ -861,6 +873,10 @@ impl PaneActor {
 
     pub(super) fn output_read_ahead(&self) -> bool {
         !self.reader_eof
+            && self
+                .raw_output_tap
+                .as_ref()
+                .is_none_or(|(_, tap)| !tap.is_full())
             && self.raw_output_parse_backlog_bytes
                 <= RAW_OUTPUT_PARSE_BACKLOG_BYTES
                     .saturating_sub(RAW_OUTPUT_PARSE_READ_RESERVE_BYTES)
@@ -1466,7 +1482,6 @@ impl PaneActor {
                 }
             }
             Command::Capture(request) => {
-                let CaptureRequest { options, reply } = *request;
                 let mut copy_modes = self
                     .active_views
                     .values()
@@ -1475,8 +1490,9 @@ impl PaneActor {
                     (Some(mode), None) => Some(mode),
                     _ => None,
                 };
-                let result = capture_terminal(&self.terminal, mode, options);
-                let _ = reply.send(result);
+                if let Some(capture) = CaptureWork::start(&self.terminal, mode, *request) {
+                    self.captures.push_back(capture);
+                }
                 self.compression.rearm();
             }
             Command::PointerContext(request) => {
@@ -1750,6 +1766,9 @@ impl PaneActor {
         let mut spins = 0_u32;
         let turn_started = Instant::now();
         loop {
+            if !self.output_read_ahead() {
+                break;
+            }
             match self.read_pty_buffer() {
                 Ok(0) => {
                     self.reader_eof = true;
@@ -1862,11 +1881,18 @@ impl PaneActor {
             ReaderMessage::Data { buffer, length } => {
                 let mut closed_tap = None;
                 let mut consumed_output = false;
+                let max_chunks = self
+                    .raw_output_tap
+                    .as_ref()
+                    .map_or(PTY_BUFFER_POOL_SIZE, |(_, tap)| {
+                        RAW_OUTPUT_TAP_PENDING_CHUNKS.saturating_sub(tap.sender.len())
+                    });
                 self.reader_eof |= drain_pty_output_burst(
                     &self.output_rx,
                     buffer,
                     length,
                     cfg!(not(unix)) && self.sharded,
+                    max_chunks,
                     |buffer, length| {
                         if self.raw_output_tap.is_some()
                             || !self.raw_output_parse_backlog.is_empty()
@@ -1952,7 +1978,10 @@ impl PaneActor {
     }
 
     pub(super) fn ready_to_finish(&self) -> bool {
-        self.exit_status.is_some() && self.reader_eof && self.raw_output_parse_backlog.is_empty()
+        self.exit_status.is_some()
+            && self.reader_eof
+            && self.raw_output_parse_backlog.is_empty()
+            && self.captures.is_empty()
     }
 
     #[cfg(any(target_os = "linux", not(unix)))]
@@ -2091,6 +2120,7 @@ impl PaneActor {
                     status.signal().map(str::to_owned),
                 ),
                 pending_commands: Vec::new(),
+                captures: self.captures,
                 pending_copy_source,
                 pane_search,
                 search: Some((search_worker, search_results)),
@@ -2111,7 +2141,11 @@ pub(super) struct DeadPane {
 
 impl DeadPane {
     pub(super) fn next_deadline(&self) -> Instant {
-        self.notice_deadline
+        if self.surface.captures.is_empty() {
+            self.notice_deadline
+        } else {
+            Instant::now()
+        }
     }
 
     pub(super) fn try_wake(&self) -> Option<Wake> {
@@ -2125,7 +2159,7 @@ impl DeadPane {
     pub(super) fn wait_for_wake(&self) -> Wake {
         self.control_rx
             .recv_timeout(
-                self.notice_deadline
+                self.next_deadline()
                     .saturating_duration_since(Instant::now()),
             )
             .map_or(Wake::Deadline, Wake::Command)
@@ -2156,6 +2190,21 @@ impl DeadPane {
             Wake::Command(Command::Shutdown | Command::Terminate) | Wake::CommandsClosed => {
                 return Ok(false);
             }
+            Wake::Command(Command::Capture(request)) => {
+                let mut modes = self
+                    .surface
+                    .active_views
+                    .values()
+                    .filter_map(|view| view.copy_mode.as_deref());
+                let mode = match (modes.next(), modes.next()) {
+                    (Some(mode), None) => Some(mode),
+                    _ => None,
+                };
+                if let Some(capture) = CaptureWork::start(&self.surface.terminal, mode, *request) {
+                    self.surface.captures.push_back(capture);
+                }
+                complete_dead_notice_command(&self.slot);
+            }
             Wake::Command(command) => {
                 if let Some(command) = reply_before_dead_notice(
                     &mut self.surface.terminal,
@@ -2168,7 +2217,12 @@ impl DeadPane {
                     self.surface.pending_commands.push(command);
                 }
             }
-            Wake::Deadline if Instant::now() >= self.notice_deadline => return Ok(false),
+            Wake::Deadline => {
+                step_capture_work(&mut self.surface.captures);
+                if self.surface.captures.is_empty() && Instant::now() >= self.notice_deadline {
+                    return Ok(false);
+                }
+            }
             _ => {}
         }
         Ok(true)

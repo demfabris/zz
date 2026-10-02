@@ -392,8 +392,9 @@ fn quiet_control_query_sends_one_flat_completion_batch() {
     shared
         .inner
         .lock()
-        .client_kinds
-        .insert(client, ClientKind::Control);
+        .client_entry(client)
+        .kind
+        .replace(ClientKind::Control);
     shared.execute_compact_request(
         client,
         ClientKind::Control,
@@ -886,7 +887,7 @@ fn compact_resize_validates_generation_before_skipping_its_exact_report() {
         .entry(pane)
         .or_default()
         .insert(client, geometry);
-    assert!(!inner.ctrl_layouts.contains_key(&client));
+    assert!(inner.client(client).is_none_or(|c| c.ctrl_layout.is_none()));
     let input = InputMessage::ResizeTerminalV2 {
         pane,
         columns: geometry.columns,
@@ -896,7 +897,7 @@ fn compact_resize_validates_generation_before_skipping_its_exact_report() {
         layout_generation: 1,
     };
     let normalized = ctrl::normalize_resize(&mut inner, client, input);
-    assert_eq!(inner.ctrl_layouts[&client].1, 1);
+    assert_eq!(inner.clients[&client].ctrl_layout.as_ref().unwrap().1, 1);
     if *attach::ATTACH_PRESIZE {
         assert!(normalized.is_none());
     } else {
@@ -1042,7 +1043,7 @@ fn legacy_resize_accepts_v2_reports_without_a_compact_generation() {
             cell_height_px: 16,
         })
     ));
-    assert!(!inner.ctrl_layouts.contains_key(&client));
+    assert!(inner.client(client).is_none_or(|c| c.ctrl_layout.is_none()));
 }
 
 #[test]
@@ -1066,8 +1067,9 @@ fn stale_layout_size_report_is_dropped_before_geometry_changes() {
     {
         let mut inner = shared.inner.lock();
         inner
+            .client_entry(client)
             .ctrl_subscriptions
-            .insert(client, zz_protocol::Subscriptions::terminal());
+            .replace(zz_protocol::Subscriptions::terminal());
         ctrl::normalize_resize(
             &mut inner,
             client,
@@ -1094,7 +1096,11 @@ fn stale_layout_size_report_is_dropped_before_geometry_changes() {
         &["-Z", "-t", &pane.to_string()],
     );
     shared.compact_tree_messages(client, true);
-    let generation = shared.inner.lock().ctrl_layouts[&client].1;
+    let generation = shared.inner.lock().clients[&client]
+        .ctrl_layout
+        .as_ref()
+        .unwrap()
+        .1;
     compact_command(
         &shared,
         &mut context,
@@ -1169,11 +1175,15 @@ fn resize_application_fixture() -> (Arc<Shared>, ClientId, PaneId, ExecutionCont
                 cell_height_px: 16,
             },
         );
-        inner.client_sizes.insert(client, (80, 24));
+        inner.client_entry(client).size.replace((80, 24));
     }
     context.no_hooks = true;
     shared.compact_tree_messages(client, true);
-    let generation = shared.inner.lock().ctrl_layouts[&client].1;
+    let generation = shared.inner.lock().clients[&client]
+        .ctrl_layout
+        .as_ref()
+        .unwrap()
+        .1;
     (shared, client, pane, context, generation)
 }
 
@@ -1231,7 +1241,11 @@ fn terminal_resize_is_revalidated_after_initial_admission() {
         (current.columns, current.rows),
         (viewport.columns, viewport.rows)
     );
-    let generation = shared.inner.lock().ctrl_layouts[&client].1;
+    let generation = shared.inner.lock().clients[&client]
+        .ctrl_layout
+        .as_ref()
+        .unwrap()
+        .1;
     let current = TerminalGeometry {
         columns: 82,
         rows: 26,
@@ -1246,7 +1260,11 @@ fn terminal_resize_is_revalidated_after_initial_admission() {
         shared.inner.lock().terminal_geometries[&pane][&client],
         current
     );
-    shared.inner.lock().ctrl_subscriptions.remove(&client);
+    shared
+        .inner
+        .lock()
+        .client_mut(client)
+        .and_then(|c| c.ctrl_subscriptions.take());
     assert!(
         shared
             .apply_terminal_size_report(client, pane, report, Some(0))
@@ -1281,7 +1299,7 @@ fn client_resize_is_revalidated_after_initial_admission() {
             .toggle_zoom(pane)
             .expect("layout changed after admission");
         (
-            inner.client_sizes[&client],
+            inner.clients[&client].size.unwrap(),
             inner.engine.pane_geometry(pane),
         )
     };
@@ -1295,10 +1313,14 @@ fn client_resize_is_revalidated_after_initial_admission() {
     ));
     {
         let inner = shared.inner.lock();
-        assert_eq!(inner.client_sizes[&client], stored);
+        assert_eq!(inner.clients[&client].size.unwrap(), stored);
         assert_eq!(inner.engine.pane_geometry(pane), laid_out);
     }
-    let generation = shared.inner.lock().ctrl_layouts[&client].1;
+    let generation = shared.inner.lock().clients[&client]
+        .ctrl_layout
+        .as_ref()
+        .unwrap()
+        .1;
     assert!(shared.apply_client_size_report(
         client,
         ClientKind::Interactive,
@@ -1307,8 +1329,12 @@ fn client_resize_is_revalidated_after_initial_admission() {
         25,
         Some(generation),
     ));
-    assert_eq!(shared.inner.lock().client_sizes[&client], (81, 25));
-    shared.inner.lock().ctrl_subscriptions.remove(&client);
+    assert_eq!(shared.inner.lock().clients[&client].size.unwrap(), (81, 25));
+    shared
+        .inner
+        .lock()
+        .client_mut(client)
+        .and_then(|c| c.ctrl_subscriptions.take());
     assert!(shared.apply_client_size_report(
         client,
         ClientKind::Interactive,
@@ -1317,7 +1343,7 @@ fn client_resize_is_revalidated_after_initial_admission() {
         1,
         Some(0)
     ));
-    assert_eq!(shared.inner.lock().client_sizes[&client], (1, 1));
+    assert_eq!(shared.inner.lock().clients[&client].size.unwrap(), (1, 1));
 }
 
 fn compact_hello(kind: ClientKind) -> zz_protocol::Hello {
@@ -1388,8 +1414,8 @@ fn initializing_status_waits_for_explicit_refresh_while_existing_clients_update(
             .entry(session)
             .or_default()
             .extend([existing_client, initial_client]);
-        inner.client_sizes.insert(existing_client, (80, 24));
-        inner.client_sizes.insert(initial_client, (97, 31));
+        inner.client_entry(existing_client).size.replace((80, 24));
+        inner.client_entry(initial_client).size.replace((97, 31));
     }
     for label in ["FIRST", "SECOND"] {
         shared
@@ -1420,13 +1446,9 @@ fn initializing_status_waits_for_explicit_refresh_while_existing_clients_update(
                 ..
             })
         )));
-        assert!(
-            !shared
-                .inner
-                .lock()
-                .client_status_rows
-                .contains_key(&initial_client)
-        );
+        assert!(shared.read_client(initial_client, |c| {
+            c.is_none_or(|c| c.status_rows.is_none())
+        }));
     }
     shared.refresh_status_filtered(None, Some(&BTreeSet::from([initial_client])));
     let statuses = reliable_children(&initial)
@@ -1441,13 +1463,9 @@ fn initializing_status_waits_for_explicit_refresh_while_existing_clients_update(
         .collect::<Vec<_>>();
     assert_eq!(statuses.len(), 1);
     assert_eq!(statuses[0].rows, ["SECOND"]);
-    assert!(
-        shared
-            .inner
-            .lock()
-            .client_status_rows
-            .contains_key(&initial_client)
-    );
+    assert!(shared.read_client(initial_client, |c| {
+        c.is_some_and(|c| c.status_rows.is_some())
+    }));
 }
 
 #[test]
@@ -1565,7 +1583,9 @@ fn compact_registered(
     let (client, _) = shared.register_welcome(&hello).expect("register");
     let mailbox = OutboundMailbox::new();
     shared.subscribe(client, Arc::clone(&mailbox));
-    shared.inner.lock().ctrl_initializing.remove(&client);
+    if let Some(client) = shared.inner.lock().client_mut(client) {
+        client.ctrl_initializing = false;
+    }
     (client, mailbox)
 }
 
@@ -1847,9 +1867,9 @@ fn assert_initial_compact_attach(commands: bool) {
     if commands {
         let inner = shared.inner.lock();
         let client = inner
-            .subscribers
-            .keys()
-            .next()
+            .clients
+            .iter()
+            .find_map(|(id, client)| client.subscriber.as_ref().map(|_| id))
             .copied()
             .expect("attached client");
         let pane = client_context_pane(&inner, client).expect("active pane");
@@ -1961,14 +1981,15 @@ fn forced_attachment_stays_after_an_older_pending_publication() {
     shared
         .inner
         .lock()
-        .client_kinds
-        .insert(client, ClientKind::Control);
+        .client_entry(client)
+        .kind
+        .replace(ClientKind::Control);
     let publication_lock = shared.snapshot_order.lock();
     let older = shared.compact_tree_messages(client, true);
     {
         let mut inner = shared.inner.lock();
         inner.attached.entry(session).or_default().insert(client);
-        inner.ctrl_attachments.insert(client, 1);
+        inner.client_entry(client).ctrl_attachment.replace(1);
     }
     let (started, ready) = crossbeam_channel::bounded(1);
     let (finished, completion) = crossbeam_channel::bounded(1);
@@ -1985,7 +2006,12 @@ fn forced_attachment_stays_after_an_older_pending_publication() {
         .recv_timeout(Duration::from_secs(2))
         .expect("forced sender started");
     thread::sleep(Duration::from_millis(20));
-    let still_unattached = shared.inner.lock().ctrl_views[&client].session.is_none();
+    let still_unattached = shared.inner.lock().clients[&client]
+        .ctrl_view
+        .as_ref()
+        .unwrap()
+        .session
+        .is_none();
     let older = older
         .iter()
         .map(|message| {
@@ -2151,8 +2177,9 @@ fn disconnected_control_exec_cannot_detach_the_next_active_client() {
     shared
         .inner
         .lock()
-        .client_kinds
-        .insert(old, ClientKind::Control);
+        .client_entry(old)
+        .kind
+        .replace(ClientKind::Control);
     shared
         .attach_target(old, ClientKind::Control, &mut context, "ctrl-cancel")
         .expect("attach old control");
@@ -2204,8 +2231,9 @@ fn disconnected_control_exec_cannot_detach_the_next_active_client() {
     shared
         .inner
         .lock()
-        .client_kinds
-        .insert(next, ClientKind::Control);
+        .client_entry(next)
+        .kind
+        .replace(ClientKind::Control);
     let mut next_context = ExecutionContext::default();
     let (session, _) = shared
         .attach_target(next, ClientKind::Control, &mut next_context, "ctrl-cancel")
@@ -2320,7 +2348,9 @@ fn compact_raw_control_preflights_line_and_resolves_daemon_environment() {
     let (client, _) = shared.register_welcome(&hello).expect("register");
     let mailbox = OutboundMailbox::new();
     shared.subscribe(client, Arc::clone(&mailbox));
-    shared.inner.lock().ctrl_initializing.remove(&client);
+    if let Some(client) = shared.inner.lock().client_mut(client) {
+        client.ctrl_initializing = false;
+    }
     let mut context = ExecutionContext::default();
     let request = |line: &str| zz_protocol::ExecRequest {
         protocol_version: PROTOCOL_VERSION,
@@ -2573,7 +2603,7 @@ fn exec_resume_upgrades_the_same_socket_and_places_tail_error_after_attachment()
         .expect("tail error");
     assert!(prefix < attached);
     assert!(attached < tail);
-    assert_eq!(shared.inner.lock().client_instances.len(), 1);
+    assert_eq!(shared.inner.lock().clients.len(), 1);
     drop(client);
     worker.join().expect("worker").expect("connection");
     compact_command(
@@ -2624,8 +2654,9 @@ fn hook_body_control_notification_follows_output_guard_without_recursive_hooks()
     shared
         .inner
         .lock()
-        .client_kinds
-        .insert(client, ClientKind::Control);
+        .client_entry(client)
+        .kind
+        .replace(ClientKind::Control);
     shared
         .attach_target(client, ClientKind::Control, &mut context, "ctrl-hook")
         .expect("attach");
@@ -3378,7 +3409,7 @@ mod quiet_socket {
     }
 
     #[test]
-    fn compact_control_installs_the_actual_local_stream_socket() {
+    fn compact_control_keeps_socket_writes_on_the_loop() {
         let directory = tempfile::Builder::new()
             .prefix("zzqf.")
             .tempdir_in("/tmp")
@@ -3419,21 +3450,8 @@ mod quiet_socket {
             .get(&welcome.client_id)
             .cloned()
             .expect("registered local writer");
-        assert_eq!(
-            mailbox.state.lock().quiet_socket.is_some(),
-            *attach::BATCHED_WRITES
-        );
-        #[cfg(target_vendor = "apple")]
-        if *attach::BATCHED_WRITES {
-            let state = mailbox.state.lock();
-            let socket = state.quiet_socket.as_ref().expect("installed Apple socket");
-            assert!(rustix::net::sockopt::socket_nosigpipe(socket).expect("SIGPIPE option"));
-            assert!(
-                !rustix::fs::fcntl_getfl(socket)
-                    .expect("installed blocking flags")
-                    .contains(rustix::fs::OFlags::NONBLOCK)
-            );
-        }
+        assert!(mailbox.state.lock().quiet_socket.is_some());
+        assert!(mailbox.loop_waker.lock().is_some());
         zz_protocol::write_protocol_message(
             &mut client,
             &ProtocolMessage::Exec(compact_exec_request(vec![CommandInvocation::new(

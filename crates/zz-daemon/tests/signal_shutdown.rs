@@ -41,15 +41,6 @@ fn send_sigterm() {
         .expect("send SIGTERM to this process");
 }
 
-#[cfg(target_os = "linux")]
-fn signal_listener_running() -> bool {
-    fs::read_dir("/proc/self/task")
-        .expect("list this process's threads")
-        .flatten()
-        .filter_map(|task| fs::read_to_string(task.path().join("comm")).ok())
-        .any(|name| name.starts_with("zz-daemon-sig"))
-}
-
 #[test]
 fn sigterm_stops_a_daemon_held_open_by_a_foreground_job() {
     let id = std::process::id();
@@ -74,11 +65,6 @@ fn sigterm_stops_a_daemon_held_open_by_a_foreground_job() {
         stopped.recv_timeout(Duration::from_millis(300)).is_err(),
         "the first SIGTERM waits for the foreground job during its grace"
     );
-    #[cfg(target_os = "linux")]
-    assert!(
-        signal_listener_running(),
-        "the signal listener keeps running after its first signal"
-    );
 
     stopped
         .recv_timeout(Duration::from_secs(15))
@@ -90,6 +76,37 @@ fn sigterm_stops_a_daemon_held_open_by_a_foreground_job() {
         "the stopped job reports failure"
     );
 
+    let _ = fs::remove_file(&started);
+    let _ = fs::remove_file(&socket);
+    second_notification_skips_the_grace();
+}
+
+fn second_notification_skips_the_grace() {
+    let id = std::process::id();
+    let socket = PathBuf::from(format!("/tmp/zz-sigterm-second-{id}.sock"));
+    let started = PathBuf::from(format!("/tmp/zz-sigterm-second-{id}.started"));
+    let _ = fs::remove_file(&socket);
+    let _ = fs::remove_file(&started);
+    let daemon = Daemon::new(&socket).without_user_config();
+    let (sender, stopped) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = sender.send(daemon.run_foreground());
+    });
+    let mut client = connect(&socket);
+    let command = format!("printf started > {}; sleep 30", started.display());
+    let job = thread::spawn(move || client.execute(CommandInvocation::new("run-shell", [command])));
+    wait_for_file(&started);
+    send_sigterm();
+    assert!(stopped.recv_timeout(Duration::from_millis(300)).is_err());
+    assert!(socket.exists(), "the listener stays present during grace");
+    let second = Instant::now();
+    send_sigterm();
+    stopped
+        .recv_timeout(Duration::from_millis(1500))
+        .expect("second signal skips grace")
+        .expect("clean shutdown");
+    assert!(second.elapsed() < Duration::from_millis(1500));
+    assert!(job.join().expect("run-shell client").is_err());
     let _ = fs::remove_file(&started);
     let _ = fs::remove_file(&socket);
 }

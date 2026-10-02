@@ -21,11 +21,11 @@ agent = [
 ]
 daemon = [
     "dep:async-channel",
-    "dep:async-signal",
+    "dep:signal-hook",
     "dep:chrono",
     "dep:crossbeam-channel",
-    "dep:futures-lite",
     "dep:ignore",
+    "dep:mio",
     "dep:zz-mux",
     "zz-terminal/session",
 ]
@@ -65,11 +65,13 @@ core-foundation.workspace = true
 security-framework-sys = "2.17"
 
 [target.'cfg(unix)'.dependencies]
-async-signal = { workspace = true, optional = true }
+mio = { version = "1.2.3", features = ["os-poll", "os-ext"], optional = true }
+signal-hook = { version = "0.4.4", optional = true, default-features = false }
 rustix = { workspace = true, features = ["fs", "net"] }
 
 [target.'cfg(windows)'.dependencies]
 sysinfo.workspace = true
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Pipes"] }
 
 [dev-dependencies]
 chrono = { workspace = true, features = ["clock"] }

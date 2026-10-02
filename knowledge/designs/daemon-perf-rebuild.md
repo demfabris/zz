@@ -3114,6 +3114,93 @@ The known daemon endpoint test stayed red; four load failures passed alone. Mac 
 
 ## W3-LOOP: single-owner mux loop (effort XL)
 
+**Review fixes, 2026-10-02, against base `534c99ee3`:**
+
+- Gate Unix-only tests on Windows. Finish peer probes after a panic, remove clients and their file waiters under one lock, and accept EPIPE as closed job input while preserving child status. Keep the hook response/exit checks and drive queued lifecycle work and hooks in the two timing-sensitive tests.
+- Mac daemon and mux suites, clippy, and the five compat scenarios pass. Both timing-sensitive tests pass 20/20 runs. Windows no-run links 11 executables and check passes with cached SDK headers, LLVM/Rust tools, and a local cached Wuffs build setting that forwards the SDK libc file to translate-c; tracked dependencies stay unchanged.
+- One quick cli/mem run per build: 33 scored rows pass on both. Display CPU p1 is 0.0338 -> 0.0283 ms; p20 is 0.0329 -> 0.0372 ms. Footprint p1 is 4.78 -> 4.73 MiB; p20 is 10.89 -> 10.80 MiB. Threads remain 2/5. Results: `/tmp/zzpc/loop-reviewfixes-{base,final}-perf.json`.
+- Hand Linux-only checks to the orchestrator; this Mac did not run /proc readers, zz-pty-gather, epoll, THP, or tui-output-backpressure.sh.
+
+### Write batch drain (2026-10-02)
+
+`Connection::write_ready` wakes the mux loop when a full write batch leaves queued or
+inflight output, including ordinary clients. The poll-driven regression queues 786,483
+bytes: the base stops after 262,161 bytes; the fix drains them and passes ten runs.
+The serial daemon suite passes 1,500 library tests with only the named Mac bundle fallback
+exception; 35 integration tests, clippy, Windows check, four compat scenarios and all nine
+TUI backpressure assertions pass. Windows emits existing warnings.
+
+The preliminary Linux quick run against saved `c8beb4f9` gives 130.7 versus 129.4 MB/s
+detached throughput and CLI instruction ratios at most 1.004. Hidden chatty instructions
+are 45.24 versus 36.88 Minstr/s in these single runs; repeat the alternating series on the
+final commit before claiming the 1.02 instruction bound. The W0 gate has 45 passing and
+three failing attach rows; the saved base also fails attach rows. Hand Mac-only checks to
+the orchestrator. Scratch measurements stay under `/tmp/zzpc`.
+
+As built (e21fix): `EventLoop::remove` retires and wakes only for real cleanup;
+`Inbox::take_pending` skips empty lifecycle locks while parked hooks and shutdown keep advancing.
+The 5,000-display instruction profiles were 361.67 M at bf401683, 373.96 M in e21, and 364.85 M
+with the fix. The pre-final quick gate put all 19 CLI instruction rows within 1.02x of the three
+base medians: display p1/p20 0.0735/0.0781 vs 0.0726/0.0775 Minstr; kill-pane 0.1896 vs 0.1923.
+Idle counters stay zero and threads stay 3/25. Unit tests: 1,498 pass and only the known Mac
+bundle-path case fails; 35 integration tests pass, compat is 101/101, and startup diagnostics are 8/8.
+Hand on the Mac checks and existing split-shell/kill-pane CPU gate failures to the orchestrator.
+**As built, hook panic fix (2026-10-02):** `Shared::run_event_hooks` sends event hooks
+from `loop_wait` command items to `TimerInput::Hooks`, including items finishing on workers.
+The command keeps its output; the loop hook queue owns the hook's parked frames. Two regression
+tests check split/layout and worker rename hooks, response and exit delivery, and hook resumption.
+The full daemon suite passes (1500 unit and 35 integration tests, one ignored), as do the existing
+hook tests, clippy, Windows check, and six compat scenarios (103 steps). Windows reports 16 warnings.
+One preliminary quick pair against `e3a2a1fde` gives CLI instruction ratios 0.9908 to 1.0209x;
+display CPU p1 is 0.0492 vs 0.0526 ms and p20 is 0.0496 vs 0.0456 ms. Both have 0 idle wakeups/s;
+p20 footprint is 11.0942 vs 11.1723 MiB. The quick W0 gate has 35 passes and no failures.
+Final-commit acceptance uses three alternating runs per binary, with scratch JSONs under
+`/tmp/zzpc/hookpanic-{base,new}-{1,2,3}.json`. The orchestrator owns the Linux-only checks.
+
+As built, e19fix (2026-10-02, base `6e7d954e3`): empty peer updates skip format-fact
+snapshots, and drained peer-probe workers exit immediately. Other helpers reuse workers for
+250 ms. Path acknowledgements and discovery output wait for events; the loop owns job
+deadlines and shares path cancellation flags. A full helper queue refuses loop submissions.
+The p20 counter test reports zero helper tasks and zero starts per steady `send-keys`.
+The pre-commit Mac quick W0 gate passed 36 scored rows: `send_keys.p20` was 0.1805 Minstr
+against e19's historical median 0.2242; idle CPU/instructions/wakeups were zero, with 2/5
+threads at p1/p20. Live 100-command samples matched e12 at about 0.165/0.167 Minstr for
+p1/p20. Final three-pair comparisons belong in `/tmp/zzpc/e19fix-{pre,post}-{1,2,3}.json`.
+Linux process readers, PTY gathering, epoll, THP, and TUI backpressure remain with the
+orchestrator; this Mac did not run them.
+
+**b3fix as built (2026-10-01, on b3 `53982eb8`).** Exec prepares each chain once. Proven queries, plain input without attached clients or hooks, and unchanged unzoomed pane selection run on the mux loop. Parking commands, relative pane selectors, and cleanup that can run hooks keep workers. Output pressure yields the remaining commands with response admission and reply IDs intact. Repeated chains retain registration data; LAST/ExecExit, Resume, and client-file replies keep their existing order.
+
+Three alternating quick `cli,control,mem` pairs against b2fix give 19/19 CLI instruction medians at 0.895-0.988x; display p1/p20 is 0.901/0.920x, control instructions 0.984x, and threads 7/45 versus 8/45. Serial daemon tests pass: 1360 unit and 35 integration, including 20 Exec and 34 event-loop tests; one existing test is ignored. Fmt, Clippy, and all eight selected compat scenarios pass. The quick W0 gate has 35 passes and one failure on control latency. Control latency and burst throughput also fail on b2fix, so those rows are left outside this fix.
+
+Linux `/proc`, zz-pty-gather, epoll, THP, and `tui-output-backpressure.sh` were not run on this Mac; the orchestrator owns those checks.
+
+### b2 fixes as built (2026-10-01)
+
+- Initialization checks cancellation before work and between attach commands. Clean Interactive EOF
+  runs admitted input and drains replies; aborted compact Hello releases held Attach output.
+- Pending input is limited to 4096 messages and 16 MiB; the count allows pasted-input bursts. GUI and client-file responses bypass a
+  parked command. Acceptance yields after 32 connections, schedules continuation, and checks shutdown.
+  Failed worker starts post completion. Bulk image limits include reliable messages held by the writer.
+- Read-only queries without pending or command hooks run on the loop, in request order. Actor-backed
+  `capture-pane`, prepared legacy requests, and control lines requiring expansion stay on workers.
+  Direct quiet writes require the loop owner. Loop-owned replies skip self-wakes and writer
+  condition-variable notifications. Raw output readers
+  start when bytes arrive, retaining the existing streaming path.
+- Three alternating quick `control,cli` runs against b1 `dd97bbd3`: control instructions median
+  0.0724 -> 0.0684 Minstr (0.9448x); all 19 CLI instruction medians <=1.0108x (limits 1.05x/1.10x).
+  Raw output median 138.5609 -> 141.2872 MB/s. `control.latency` and
+  `control.burst_cmds_per_s` thresholds against tmux were red on both binaries; no errors.
+- Validation: 1347 daemon unit tests and 35 integration tests passed, one existing test ignored;
+  clippy, formatting, all seven requested compat rows, and the full attached-client fixture passed.
+  Quick W0 `control,cli`: 29 pass, one pre-existing latency failure, 34 informational rows,
+  no regressions or errors. Perf `attach` was omitted under the brief's explicit group restriction.
+- Handed on: first-frame routing and Exec connections still use the existing worker pool;
+  registration, initialization, parkable commands, cleanup, preview work, and active raw output
+  still use workers. Mutex removal and park-point continuations remain later W3 work. Linux `/proc`,
+  PTY gather, epoll, THP, and TUI output backpressure were not run on this Mac.
+
+
 Commits that each keep tests green:
 - (e0) Move the per-request thread_locals into a per-cmdq-item context:
   `CLIENT_KEY_INJECTION_DEPTH`, `DEFERRED_CONTROL_NOTIFICATIONS`, `COMMAND_QUEUE_PARK`. List every
@@ -3147,6 +3234,182 @@ Gate vs SHARDS JSON: `cli.cpu.display` <= max(1.2x, tmux + 0.03 ms) at p1 and p2
 history delay another pane's echo p99 no more than tmux does. Tests: workspace (flaky daemon tests
 re-run alone), `compat/run.sh`, compat/tui, control-mode fixtures, `cargo check` Windows, full bench
 at `wave3`.
+
+### e0 as built (2026-10-01)
+
+Each queue item now owns one `CommandItemContext` on its `Shared` execution handle; nested commands, hooks and injected keys keep that handle.
+Independent workers and agent publishers keep the server owner. `SharedServer` holds the existing server fields and sampler cleanup; this slice adds no threads, dependencies or wire fields.
+Checks passed: formatting, daemon clippy, 1,327 unit tests and 35 integration tests (one existing soak ignored), plus all eight required compat rows. Two parallel-suite failures passed alone and the full suite passed with `RUST_TEST_THREADS=1`; child compat scripts needed Homebrew Bash first in `PATH`.
+The table records the waits that step (e) must replace with command-item continuations; e0 keeps their current behavior.
+Functions live in `crates/zz-daemon/src/daemon.rs` unless a row names another file; terminal actor methods live in `crates/zz-terminal/src/session.rs`.
+
+| Function | What it waits for | Continuation in step (e) |
+| --- | --- | --- |
+| `execute_with_mux_source_inner` -> `wait_for_terminal_identity` | Spawned pane publishes its PID and TTY, or the two-second identity deadline expires | Identity reply or timer; rebuild spawn-format facts and resume |
+| `execute_with_mux_source_inner` (copy-mode tail) | `terminal.settle()` acknowledges prior copy-mode actions, including synchronous copy search | Settled reply; finish the command and its after hook |
+| `run_copy_mode_search` (`zz-terminal/src/session.rs`) | History scan on the actor delays the caller's settle reply | Search result; apply cursor and selection updates before completing the settle continuation |
+| `capture_pane` | `terminal.capture()` returns live or retained-pane content | Capture reply; print output or store the paste buffer |
+| `capture_screen` (`wait_pane`, `run_pane`, `paste_and_submit`) | Capture replies for pattern, command-output and paste-echo polling | Capture reply; match content, then resume or park on pane output and the deadline |
+| `capture_last_command_for` (`send_last_output`, `show_last_output`) | `terminal.capture_last_command()` returns shell-integration marks and output | Semantic-capture reply; deliver or display the result |
+| `send_compact_resync` (`daemon/ctrl.rs`) | `terminal.fresh_viewport()` publishes a fresh frame | Viewport reply; send the resync frame |
+| `pipe_pane` | Raw-output tap arm acknowledgement; replacement also calls `stop_pane_pipe` while pipe serialization is held | Tap reply and old-pipe cleanup; finish installing the pipe |
+| `rearm_pane_pipe` | Raw-output tap arm acknowledgement after pane replacement | Tap reply; retain the pipe or stop it on failure |
+| `start_control_output_tap` | Raw-output tap arm acknowledgement, with one retry on timeout | Tap reply or retry timer; install the control reader |
+| `stop_pane_pipe` | Raw-output tap disarm acknowledgement after child and reader cleanup | Tap-disarmed reply plus child/reader completion; finish pipe cleanup |
+| `stop_control_output_tap` | Raw-output tap disarm acknowledgement followed by reader join | Tap-disarmed reply and reader completion; finish control-tap cleanup |
+| `kitty_image_frames` | `terminal.kitty_image()` returns image pixels and generation | Image reply; build and cache the outbound image frames |
+| `evict_absent_kitty_images` | `terminal.kitty_image_generation()` answers once per cached candidate | Generation reply; advance the candidate cursor and evict stale frames |
+| `pointer_format_variables` | `terminal.pointer_context()` returns the word, line and hyperlink under a cell | Pointer-context reply; expand mouse formats and dispatch the command |
+| `DeferredTerminalCommand::run` (`ArmCopySource`) | `source.capture_copy_source()` clones the source screen on its actor | Copy-source reply; set the target's pending source before entering copy mode |
+| `TerminalSession::capture_frozen_frame` (`zz-terminal/src/session.rs`) | Live capture request before falling back to the cached viewport when the actor has stopped | Capture reply or stopped-actor fallback; resume the retained-pane capture |
+| `send_history` (input path) | `terminal.history()` returns history rows and their dictionary | History reply; enqueue `HistoryChunk` |
+
+Native `SearchBegin`/`SearchUpdate` already use asynchronous search results; `DaemonFormatHooks::pane_search` in `status.rs` scans a cached viewport under command-format callers and has no actor round trip.
+
+**a1 as built (2026-10-01):** `Client` in `crates/zz-daemon/src/daemon.rs` holds the 22 identity and terminal facts in `ServerState::clients`.
+`register_identity` and `daemon/exec.rs` `register_exec` create the record; `unregister` removes it once. Detach clears activity and last-session facts while retaining identity.
+`ClientFormatFields` and `BorrowedFormatHookFacts` borrow the client map. The other ClientId-keyed fields remain in `ServerState` for a2 and a3.
+Checks passed: formatting, daemon clippy, 1,327 unit tests and 35 integration tests (one existing soak ignored), and all ten required compat rows with zero divergences; child scripts needed Homebrew Bash first in `PATH`.
+
+**a2 as built (2026-10-01):** `Client` owns the 28 per-client mode, key, visibility, path and status fields listed for this slice; none remain in `ServerState`.
+`unregister` drops those fields with the client record after detach handles mode cleanup. Delivery and control maps remain for a3; fields keyed by other ids stay in place.
+Format readers borrow the client fields, and diagnostics collect the same mode snapshots from them. This slice adds no threads, dependencies or wire changes.
+Checks passed: formatting, daemon clippy, 1,327 unit tests and 35 integration tests (one existing soak ignored), and all 12 required compat rows with zero divergences. The terminal-peer test failed in the first suite, passed alone, and passed in the repeated full suite.
+
+**a3 as built (2026-10-01, `3560dece`):** `Client` owns delivery and control state, and `ServerState::clients` stores `Box<Client>` records.
+The lane's a3 measurement put CLI instructions within 1.4% of a1.
+
+**a4 as built (2026-10-01):** `ServerState::client`, `client_mut` and `client_entry` shorten client lookups; `Shared::read_client` reads client fields under the existing lock.
+After `cargo fmt --all`, `daemon.rs` has 116,416 lines, 2,575 fewer than a3, with no formatting skips, new macros or behavior changes.
+Checks passed: daemon clippy, 1,327 unit tests and 35 integration tests (one existing soak ignored), and all six required compat groups with zero divergences. The perf gate was not run.
+
+**b1 as built (2026-10-01):** `crates/zz-daemon/src/daemon/event_loop.rs` `EventLoop::run` accepts Unix sockets on the foreground mio loop; connection workers and their mutex access remain.
+Startup replay runs on a temporary worker. Its channel and Waker return completion to the foreground thread, which joins the worker and invokes readiness; shutdown wakes the same loop.
+The two macOS memory runs measured settled threads against `b47ffeae`: p1 fell from 9 to 8 and p20 from 46 to 45. Native thread inspection found no `zz-daemon-accept` or startup worker.
+Checks passed: formatting, daemon clippy, 1,330 unit tests and 35 integration tests (one existing soak ignored), and all seven required compat scenarios with 175 steps and zero divergences.
+Windows named pipes retain the blocking transport. The Windows target check was unavailable here; Linux-only checks remain for the orchestrator.
+
+### As-built: writer shutdown follow-up (2026-10-01, Linux)
+
+In `crates/zz-daemon/src/daemon/event_loop.rs`, `disconnect` retains client writer registrations
+through partial-output drain. `remove` drops the matching registration before signaling writer
+completion; disconnect workers release session state. Response admission still precedes writer
+shutdown, with the same deadlines.
+At `8129cf07`, the original kill-server test passed 0/1 and two deterministic regressions passed
+0/2. With this fix, they pass 20/20 and 2/2. Formatting and daemon clippy pass; all four selected
+control/client-exit compat scenarios report zero divergences. The daemon suite passes 1362/1364:
+the known macOS CLI fallback test stays red alone, and the process-info large-argv test passes
+alone after failing under load. All 35 integration tests pass, with one soak ignored and no doc
+tests. The orchestrator owns macOS checks; this step runs no perf gate.
+
+### b5 command-cost fix (2026-10-01)
+
+`ResponseAdmissionGuard::finish` notifies response waiters and the mux loop only after
+admissions freeze. The existing admission mutex protects the count and freeze together.
+Three alternating quick `cli,mem` runs against b4 measured instruction median ratios of
+0.9836..1.0167 across all 19 CLI rows, below the 1.02 limit. Thread counts stay 6 -> 4 at p1
+and 44 -> 42 at p20. The poll-wake test covers normal completion, frozen admissions, and
+the final outstanding response. Final fmt, clippy with warnings denied, the serial daemon
+suite, all four requested compatibility scenarios, and the quick W0 gate passed. The W0
+gate reports 32 pass, 0 fail, and 37 info rows. Later loop slices retain the b5 signal and
+drain phases; the orchestrator runs Linux-only checks on its Linux host.
+
+**c02 as built (2026-10-01):** `TerminalEvents::install_notification_sink` posts coalesced readiness to `daemon/watchers.rs` `LoopWatchers`, which owns pane, command-output and popup receivers; their relay threads are gone.
+Each surface has one readiness entry, bounded event drains and weak terminal ownership; the four reliable slots and one viewport slot remain. The last producer closes and notifies the stream even without a final event.
+Three alternating quick pairs against `1518f03d` measured threads 3 -> 2 at p1 and 25 -> 5 at p20; all 22 instruction medians stay within 1.0256x B, hidden chatty is 0.9328x B, and idle instructions and wakeups are zero.
+Checks passed: 360 terminal tests, 1,389 daemon unit tests, 35 integration tests, Clippy and all seven compat fixtures (102 steps, zero divergences); one existing test per crate remains ignored. Linux-only checks were not run on this Mac.
+
+**e02 as built (2026-10-02, Linux):** Hello, Control and Exec root items retain their command queues; converted queries run on the mux loop, and each legacy command leaf returns its remaining cursor after one worker turn.
+Socket writes resume output continuations without `LoopExec::wait_for_output` or an output-only worker fallback; LAST, RESUME, first errors, ExecExit and file/GUI reply bypass retain their order. Twenty idle Exec connections followed by a 200-query chain use zero execution workers.
+Registration, startup/terminfo, legacy attach/resync, expansion resolution, nonconverted command leaves, other client messages and hook-capable cleanup still use workers; this slice keeps the helper pool and wire version 107.
+Checks: 48 loop tests, 68 control tests, the 640-command chain, 35 integration tests (one soak ignored), formatting, daemon Clippy, six compat groups (186 steps, zero divergences) and nine TUI backpressure assertions pass. The serial daemon suite passes 1,415 tests with two known host failures; status-job EINTR passes alone, and the macOS CLI fallback stays red on Linux.
+Three alternating quick `cli,control,chatty,mem` pairs against the supplied `loop-ed5ba3aa-cli` give all 19 CLI instruction medians <=1.00365x; display p1/p20 and chain5 p20 are 1.00140x/0.99080x/0.99301x. Control instructions are 0.0457/0.0462 Minstr (0.98918x), and thread medians remain 3/25. Control latency is red on both binaries; burst throughput is also red in one baseline run, with no new or outside-lane reds.
+macOS posix_spawn, kqueue, PTY spin bridge, ri_instructions and iOS checks were not run on this Linux host; the orchestrator owns them.
+
+**e03b as built (2026-10-02, Linux):** `crates/zz-daemon/src/daemon.rs` keeps source replay in owned queue frames through `replay_config_file_in_queue_in_item`, preserving source depth, `current_file`, source-relative cwd, frozen aliases and warning order.
+`run_hook_commands_with_policy` uses owned frames for after-command, event and shutdown hooks; continuation tokens resume parents after their child work and retain output and error ordering.
+Event frames keep formats captured at mutation and repair targets at execution; source and hook child boundaries release input change windows before suspension.
+Three alternating quick pairs against `loop-9f31b80d-cli` pass all 23 required rows: the largest instruction ratio is 1.004324x, chain5 p20 is 0.997947x, and thread medians remain 3/25. Control latency is red on both binaries with no harness errors.
+Formatting, daemon Clippy, 3 new frame tests, 35 integration tests and 8 selected compat scenarios pass with zero divergences; the serial daemon suite passes 1,422 tests with three known failures, including the status-job test that passes alone. macOS and Windows checks were not run on this Linux host.
+
+**e06 as built (2026-10-02, Linux):** Both `wait-for` receiver parks now register cmdq continuation IDs; signal wakes all waiters, lock grants transfer FIFO, and cancellation after a grant transfers the lock to the next waiter.
+Owned root and inserted queue frames preserve nested aliases, callbacks, hooks, reply order and sticky signals. Twenty signal, lock and inserted waiters add zero workers and complete each continuation once.
+Seven continuation tests, named wait-for/shutdown tests, formatting, daemon Clippy and five compat groups (62 steps, zero divergences) pass. The serial suite passes 1,427/1,432; four failures pass alone, and the known macOS-bundle fallback failure persists on Linux. All 35 integration tests pass, with one existing soak ignored.
+Three alternating quick `cli,control,mem` pairs against `loop-b626aa02-cli` put all 19 CLI instruction medians at 0.99814–1.01563x; `chain5.p20` is 0.2425 -> 0.2454 Minstr (1.01196x), and thread medians remain 3/25.
+Control latency is red in all six runs; burst throughput is red only in new-2. The runs have zero harness errors; these tmux threshold rows are outside this slice's instruction/thread comparison.
+Shell jobs and other unconverted leaves, registration/startup and hook-capable cleanup still use workers. The Windows/test synchronous adapter remains; macOS, Windows, iOS, full-workspace, TUI and full-bench checks were not run for this slice.
+
+**e05 as built (2026-10-02, Linux):** `daemon/terminal_reads.rs` and `daemon/terminal_requests.rs` resume capture, semantic output, send-text, wait-pane and run-pane reads through actor reply tokens and cmdq continuations; synchronous terminal APIs remain for off-loop callers.
+History and mouse pointer reads enter on the mux loop; completions recheck the client and terminal identity. Mouse bindings retain the existing worker adapter after the pointer reply, with connection input ordering preserved.
+Kitty pixel and generation replies resume publication asynchronously; terminal-bound cache entries and atomic delivered-generation checks reject stale respawn and eviction results.
+Checks: 372 terminal tests, 1,456 daemon unit tests and 37 integration tests pass (one soak ignored); seven stale-result/loop-dispatch tests, the three named capture/history/frame tests, fmt, Clippy and five compat scenarios (73 steps, zero divergences) pass. The known macOS-bundle fixture fails on Linux; the cwd fixture passes alone and in the serial rerun.
+macOS, Windows, iOS, full-workspace and full-bench checks were not run; the final six quick instruction/thread measurements remain in `/tmp/zzpc/e05-{base,final}-{1,2,3}.json`.
+### c01copy as built (2026-10-02)
+
+`Shared::refresh_modes` in `crates/zz-daemon/src/daemon.rs` now applies `status_targets`
+before collecting copy facts and expanding mode formats. Control clients with status subscriptions
+off no longer prepare a presentation they cannot receive. Temporary counters measured about
+0.945 Minstr in that cold expansion; moving watcher work onto the loop made it run before the reply.
+The preliminary quick Mac check measured first entry at 5.006 Minstr versus 5.566 on e122e38d,
+with 2/5 threads at p1/p20. The quick W0 gate passed 36 rows with zero failures or regressions
+(`/tmp/zzpc/loop-c01copy.json`). Terminal and serial daemon tests, clippy, and the requested copy,
+alert, and Control scenarios passed. Final-commit comparison files use
+`/tmp/zzpc/c01copy-{base,new}-{1,2,3}.json`; Linux checks remain with the orchestrator.
+
+**e13 as built (2026-10-02, macOS):** 12/16 explicit park sites now use loop continuations. `Shared::spawn_delay` posts callbacks to `LoopTimers`; zero delays activate its ready queue, and positive delays add only their launch deadlines.
+Delay-only and foreground `run-shell -C` requests suspend their command frames. Delayed shell launches keep their command formats, retained target environment and selected-client cwd, and sample global/session environment and the default terminal at launch.
+Twenty queued delay-only and command-mode requests add zero threads and exactly twenty deadlines. The named environment and background ordering tests pass; the serial daemon suite passes 1,479 tests, daemon Clippy is clean, and six compat scenarios pass 188 steps with zero divergences.
+Synchronous source-file replay and ordinary zero-delay shell jobs retain their existing workers. Windows cross-check passes with nine existing warnings; Linux-only runtime checks remain with the orchestrator.
+
+**e14 as built (2026-10-02, macOS):** 14/16 explicit park sites now use loop continuations; `daemon/jobs.rs` runs foreground and background `run-shell` and `if-shell` jobs.
+Foreground items resume at their saved boundaries. The loop applies ready background completions by launch ticket without waiting for a slower earlier job.
+Unix has no shell process worker, foreground result receiver or per-job exit poller. Twenty concurrent jobs add zero job or command workers; admission rejects a command after 256 slots fill.
+The serial daemon suite, focused tests, fmt and daemon Clippy pass. Five compat groups are clean; `if-shell-background-order` has the same pre-lane red where tmux does not reach file order on this Mac.
+
+**e13/e14 pick integration (2026-10-02, Linux, base `42ed7108`):** Terminal acknowledgement and read continuations from e04/e05 share wait records with shell completions; hooks keep their terminal waits and pane-exit worker handoff. The Linux shell wakeup test now launches through the job registry.
+Checks: 1,460 daemon unit tests and 35 integration tests pass; the allowed macOS-bundle fixture fails both in the suite and alone, and one soak stays ignored. All 372 terminal tests pass with one ignored. The focused delay, shell and terminal continuation tests, fmt and Clippy pass; seven compat groups pass 100 steps with zero divergences. No performance runs in this pick step; macOS and Windows checks remain with the orchestrator.
+**e07 as built (2026-10-02, macOS):** `Shared::register_overlay_wait` registers display-panes, command-prompt and confirm-before continuations before publishing their overlays; Unix workers return while the client records own the waits.
+Selection, acceptance, replacement, expiry, cancellation, detach and disconnect complete each wait once. Accepted confirms insert child queue frames; prompt answers retain their wait until the callback finishes, preserving history, freezing and alias timing.
+Six new tests cover twenty parked overlays of each type with zero added workers, child frames and lifecycle completion. The serial daemon suite passes 1,492 tests with one ignored; fmt, daemon Clippy and six compat scenarios pass, with zero divergences across 43 steps.
+Three alternating quick pairs against `loop-6c163955-cli` pass all 19 CLI instruction rows under the 1.02x-or-baseline-range rule. `chain5.p20` is 0.2910 -> 0.2923 Minstr (1.00447x); idle CPU, instructions and wakeups are zero, and p1/p20 threads stay at 2/5. Linux-only checks were not run on this Mac.
+
+**e09 as built (2026-10-02, Linux):** `daemon/pane_exit.rs` binds `split-window -W` and `wait-pane --exit` continuations to each terminal incarnation, converting two park sites (8/16 in the e09 estimate).
+Pane exit completes registrations before retention or removal; client loss and timeouts cancel individual registrations, preserving split output, after hooks, attached-client return values and signal exit codes.
+Twenty exit waits add zero command workers and zero polling deadlines. Focused exit, respawn, cancellation and formatted split tests pass; all six requested compat scenarios pass 149 steps with zero divergences.
+**e08 as built (2026-10-02, macOS):** `Shared::display_menu` reuses `OverlayWait` for one more explicit wait site; `daemon/wait_queue.rs` admits menus on the loop instead of parking a worker.
+The loop queues selected actions after closing the menu, against its saved target, while the invoking queue's tail resumes independently. Parse and runtime errors still reach the menu client; Control validation, disabled stay-open rows and resize state retain their existing behavior.
+Four new `daemon/menu_queue_e08_tests.rs` tests prove twenty open blocking menus add zero workers and lifecycle completion happens once. The serial daemon suite passes 1,490 tests with one ignored; fmt, check, daemon Clippy and six compat scenarios pass, with zero divergences across 38 steps.
+Three alternating quick pairs against `loop-705ca175-cli` pass all 19 CLI instruction rows below 1.02x base. `chain5.p20` is 0.2925 -> 0.2934 Minstr (1.00308x); idle CPU, instructions and wakeups are zero, and p1/p20 threads stay at 2/5. Linux-only checks were not run on this Mac.
+
+e11fix as-built (2026-10-02): Instruction profiles against da24448ee measured 41.34 -> 44.00 Minstr for 1,000 config lines. Per-line hook eligibility checks added lookups, searches and string comparisons; the split finish path repeated command resolution and moved finish state. Replay now executes through the continuation-aware path first and retains a frame for a wait or child, then resumes the completed step. Finish reuses its resolved command name. A 100-probe profile measured 41.99 Minstr, 1.57% above da24448ee. Hook-parking tests cover hooks installed within the source file and side effects that must run once. Mac checks stay with the orchestrator.
+**e18 as built (2026-10-02, macOS):** Six wait families now use typed continuations: terminal agent state, native turns, peer replies, permissions, new sessions and GUI requests.
+`daemon/terminal_requests.rs` carries producer replies and timeout deadlines on the loop; terminal subscriptions register before delivery and retain short working-to-idle edges. New sessions retain their publication barrier, and GUI replies check their owner before removing a request.
+The named functions contain no blocking receive or sleep. Twenty parked native waits add zero command workers; timeout leaves the native turn running. Agent runtime threads remain.
+Six new tests, 1,474 daemon unit tests and 35 integration tests pass, with one streaming soak ignored. Fmt, daemon Clippy and the four requested compat groups pass: 59 steps with zero divergences.
+Windows cross-check reaches an unchanged base error: `run_inserted_queue_frames` references the Unix-only `wait_queue` module without a guard. Linux runtime checks were not run on this Mac. Final-commit comparison files use `/tmp/zzpc/e18-{base,new}-{1,2,3}.json`.
+
+### e10 as built (2026-10-02)
+
+`terminal_reads.rs` parks wait-pane conditions, run-pane markers, and paste echo waits on per-pane output generations and timeout or idle-dwell deadlines; its four 20 ms scan scheduling sites are gone.
+The first condition capture fixes the scan boundary before reporting the park. Unchanged history needs no new capture; tail limits, collapsed-paste detection, statuses 124/125, and commands continuing after timeout keep their behavior. Nonempty pastes need a fresh output generation before Enter.
+Four e10 tests prove 20 parked commands add zero workers and zero scan deadlines, output during registration resumes the wait, marker and echo waits have no deadline without a timeout, and old echo cannot submit a new paste. Exit, respawn, shutdown, and client departure wake parked waits.
+The Mac serial daemon suite passes 1,478 unit and 35 integration tests, with one existing test ignored. The e18 agent waits, Clippy, Windows check, and five selected compat scenarios pass; Linux-only checks remain with the orchestrator.
+
+### e10/e17 Linux integration (2026-10-02)
+
+The picks on `f797df18` keep e09 pane-exit completions beside e10 output notifications, and retain e11 file resumes in popup and source-queue waits. The e18 agent waits still pass.
+The popup thread test compares 20 command popups with 20 interactive popups, including Linux's existing PTY gather threads. It uses a fresh process and waits for Running viewports before counting threads.
+Fmt, daemon Clippy, the focused e10/e17/e09/e11/e18 checks, the CLI build, 35 integration tests, and eight compat groups pass. Compat reports 80 steps with zero divergences; one existing streaming soak remains ignored.
+The final serial daemon suite passes 1,495 unit tests and fails only the allowed `remote_scripts_fall_back_to_the_mac_app_bundle_cli` test. An earlier SOCKS loopback shutdown timeout passes alone and in the final suite; no test runs over 60 seconds.
+This brief runs no perf measurements. The orchestrator owns Mac posix_spawn, kqueue, PTY spin-bridge, and iOS checks; this Linux run does not check Windows.
+
+
+**e22 as built (2026-10-02, macOS):** Uncached `list-keys` renders at most 64 binding rows per loop turn, retaining sorted and filtered bindings, padding, aggregate facts, client formats and user options across yields.
+Full-history capture retains a shared-page screen or copy-mode revision and processes at most 512 rows per shard turn, preserving escapes and wrapped rows. Neither path adds a helper thread; p1/p20 thread counts remain 2/5.
+The three named tests, 760 mux tests, 371 terminal tests and 1,484 daemon unit plus 35 integration tests pass; terminal and daemon each retain one ignored test. Fmt, Clippy with warnings denied, Windows check and four compat scenarios pass, with 113 steps and zero divergences; Windows reports 15 existing warnings.
+Three alternating quick pairs against `loop-8501b400-cli` give median list-keys p20 instructions 0.6841 -> 0.6922 Minstr (1.01184x) and full-history capture 188.4714 -> 128.0279 (0.67930x); every other CLI instruction median stays below 1.02x base.
+All twelve paired fairness comparisons pass. Median echo p99 increases for zz/tmux are default list-keys 0.4056/1.6627 ms and capture 0.0406/11.6942 ms; K=1 list-keys 0.4050/1.6797 ms and capture 1.2067/11.6040 ms.
+Evidence is `/tmp/zzpc/e22-{base,new}-{1,2,3}.json`, with zero probe errors. Absolute echo reds remain outside these comparisons; Linux-only runtime checks remain with the orchestrator.
 
 ## W4-DELIVER: frames straight from shards (effort L)
 
@@ -3699,6 +3962,14 @@ generations, with invalidation tests for the mutation paths.
   an informational frame-sink row but still needs a reference baseline. Copy-mode entry has
   footprint and time gates from W2-COPY.
 
+
+### W3-LOOP b6fix as built (2026-10-01)
+
+- Client timers now follow status option effects, monitor presence, attachment changes, and control subscriptions. Unattached subscription changes and unregister after detach no longer send redundant timer messages. The mux loop skips timer dispatch while no input, completion, or deadline needs work.
+- Three alternating quick pairs against `/tmp/zzpc/w3/loop-b5fix-cli`: 18 of 21 CLI/chatty instruction medians meet 1.02x. Remaining misses: `cli.instr.has_session.p20` 1.0218x, `cli.instr.select_pane.p20` 1.0702x, `chatty.instr_per_s.hidden` 1.0553x. Thread counts stay 4 to 3 at p1 and 42 to 41 at p20. Status-job instructions fall 2.7%.
+- Checks: 1382 daemon unit tests and 35 integration tests pass, one ignored; 17 timer tests pass after the clippy fix; fmt, clippy, and all four requested compat scenarios pass. The final quick W0 gate has 37 pass, 1 fail, and 42 info rows, with no harness errors or regressions. The failure is the pre-existing status-job thread rate near 3/s against a 0.5/s limit.
+- Handed on: the three instruction misses above; idle wakeups remain unmeasured because the permitted commands omit `idle`. Linux `/proc`, PTY gather, epoll, THP, and `tui-output-backpressure.sh` checks did not run on this Mac. Scratch results stay in `/tmp/zzpc/b6fix-{b5fix,b6fix}-{1,2,3}.json` and `/tmp/zzpc/loop-b6fix.json`. This step does not meet its done criterion.
+
 ## W3-SHARDS TUI attach follow-up, 2026-10-01
 
 As built: `crates/zz-tui/src/app/event_loop.rs` `EventLoop::receive` reads tty keys,
@@ -3723,3 +3994,41 @@ passed nine assertions, and all four requested smoke scenarios had zero divergen
 The final quick W0 gate had 14 passes, five failures and zero regressions: the four
 echo timing rows and `attach.cpu.p4` remain red, as on the base. No extra perf runs
 followed the required series. Mac runtime checks, iOS and Windows builds were not run.
+
+
+### W3-LOOP e01 instruction fix (2026-10-02)
+
+Remove two write-only `ExecutionContext` snapshots in `Shared::execute_command_request_with_streams_in_item` and `Shared::execute_with_mux_source_routed_for_terminal_in_queue_in_item`, plus their item field. Keep context in `LoopExec` or the command worker. Keep item and queue ids, continuation tokens, scope isolation, cached results and duplicate completion guards. Move the owner's context when adding future parked continuations instead of copying it on each command.
+
+The instruction profiles put context cloning at 0.91% before and 0.60% after, and `memcpy` at 10.17% before and 9.47% after. Three alternating quick runs against the 1518f03d loop-00 binary pass 18/19 CLI instruction medians: chain5 p1/p20 ratios are 1.0131/1.0164; select-pane p20 is 1.02046, above the 1.02 limit. Chatty hidden is 51.0584 Minstr/s against B's maximum 52.8874; flip is 32.9205 against 32.9090 and misses by 0.035%. The sixth run also flags send-keys p20 wall time, outside this step's instruction criterion. The instruction gate remains open; hand on the select-pane and flip misses with the six scratch results under `/tmp/zzpc/e01fix-{B,C}-{1,2,3}.json`.
+
+Validation: formatting and daemon clippy with all targets/features and warnings denied pass. The serial daemon unit suite passes 1393/1395; `status_job_output_reaches_clients_without_a_periodic_deadline` passes alone, and `remote_scripts_fall_back_to_the_mac_app_bundle_cli` also fails on 71d59edb. The plain-input worker test passes. The remaining integration targets pass 35 tests with one ignored soak; doc tests contain no cases. All six selected compat scenarios pass 219 steps with zero divergences. Mac, iOS, Windows, full-workspace and full-compat checks remain for orchestration.
+
+## W3-LOOP e16 Linux fix, as built (2026-10-02)
+
+Linux resumes bounded Control tap delivery after the loop writer frees client output capacity.
+Linux copy-pipe jobs retain the child's exit status when stdin closes early; the loop still reaps
+and releases the permit. The pipe thread test waits for terminal startup, including Linux's
+`zz-pty-gather`, before sampling. Four-chunk backpressure and the macOS production paths stay intact.
+The three named tests passed 10 times each with gather and direct reads. Daemon checks passed
+1,444 library and 35 integration tests after excluding the known Mac bundle lookup test;
+terminal checks passed 364 tests. Clippy, formatting, 99 compat steps, and nine TUI backpressure
+assertions passed. An initial mode-keys timeout passed alone and in the serial recheck.
+Diagnostics against `loop-pre-e16fix-cli`: the base stalled the 16 MiB Control transfer for 120 s;
+the fix delivered 126.8 to 134.6 MB/s. Control instructions stayed at 0.0469 M/cmd, and threads
+stayed at 3/25 for one/twenty panes. Detached throughput was 122.8 to 124.5 MB/s against the
+base's 130.2; hidden chatty instructions varied from 0.914x to 1.043x the base. The final three
+alternating pairs run after this commit and decide those strict bounds. The tmux-relative
+Control burst gate was already red on the base; latency also varied. Mac checks go to the orchestrator.
+
+
+## W3 helper reply waits (2026-10-02)
+
+- Prompt-history loads park command frames; saves apply ordered snapshots through helper completions. A busy pair of helpers leaves other clients free to run. Loop completion hooks enqueue config import/reload work on execution workers.
+- Remaining synchronous replies are off-loop: guarded startup/config reads and ClientHello terminfo warming; peer scans take an async branch on the loop; path acknowledgements and discovery-job replies wait inside helpers. The test-only Hold task also waits inside a helper. Audit: `/tmp/zzpc/helperwait-recv-audit.json`.
+- Checks: 1,533 daemon tests pass, one ignored; eight helper tests pass; focused history ordering, Clippy, Windows compilation and five compatibility scenarios pass. Moved test drivers now record the running loop thread. The jobs test permits retiring threads while still rejecting any increase.
+- Quick checkpoint (`83142ff8a`): 37 passing gates, 41 informational rows, zero failures. Config source: 39.8747 Minstr (1.056x wave2); all idle counters zero; threads p1/p20 = 2/5. These are whole-W3 numbers, not the isolated helper-wait delta. W0 receipt: `/tmp/zzpc/loop-helperwait.json`.
+- Handoff: compare three alternating runs of `/tmp/zzpc/w3/loop-362c83bc-cli` and the final release CLI in `/tmp/zzpc/helperwait-{base,final}-{1,2,3}.json`; CLI/config instruction medians must stay within 2% or the base range. Linux-only checks remain for Linux; prompt-history compatibility stays excluded per the lane brief.
+
+- e21 pick (`0ca403542`, Linux): kept loop-owned startup, shutdown and client cleanup, plus the idle-lifecycle and write-drain fixes. Only `reload-config` and `import-tmux-config` hooks keep the execution-worker fallback; other hook commands use loop continuations.
+- Pick checks: eight helper tests, four prompt-history tests, the four named lifecycle/write-drain regressions, Clippy and Windows compilation pass. The serial daemon run passes 1,504 unit tests and 35 integration tests, with one soak test ignored and the allowed Mac-bundle test excluded; two earlier suite failures pass alone. Six compatibility scenarios have zero divergences across 61 steps; startup diagnostics pass 8/8. No new perf measurements: the figures above belong to the source branch. Mac-only checks stay with the orchestrator.

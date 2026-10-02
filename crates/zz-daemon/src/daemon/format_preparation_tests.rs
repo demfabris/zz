@@ -5,13 +5,17 @@ fn fixture(left: &str) -> (ServerState, ClientId, ExecutionContext) {
     let (session, window, pane) = inner.engine.state.create_session("prepared").unwrap();
     let client = ClientId(3);
     inner.attached.insert(session, BTreeSet::from([client]));
-    inner.focused_windows.insert(client, window);
-    inner.client_kinds.insert(client, ClientKind::Interactive);
-    inner.client_terminals.insert(client);
-    inner.client_sizes.insert(client, (80, 24));
+    inner.client_entry(client).focused_window.replace(window);
     inner
-        .client_environments
-        .insert(client, environment("xterm"));
+        .client_entry(client)
+        .kind
+        .replace(ClientKind::Interactive);
+    inner.client_entry(client).has_terminal = true;
+    inner.client_entry(client).size.replace((80, 24));
+    inner
+        .client_entry(client)
+        .environment
+        .replace(environment("xterm"));
     inner.engine.set_format_now(1_700_000_000);
     let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
     for (name, value) in [
@@ -337,14 +341,17 @@ fn status_preparation_retains_config_for_unknown_jobs_full_providers_and_rollbac
         mode.context.variable("config_files").as_deref(),
         Some("/retained.conf")
     );
-    inner.copy_sessions.remove(&client);
-    inner.client_kinds.insert(client, ClientKind::Control);
+    inner.client_mut(client).and_then(|c| c.copy_session.take());
+    inner.client_entry(client).kind.replace(ClientKind::Control);
     let control = shared_request(&inner, client);
     assert_eq!(
         control.context.variable("config_files").as_deref(),
         Some("/retained.conf")
     );
-    inner.client_kinds.insert(client, ClientKind::Interactive);
+    inner
+        .client_entry(client)
+        .kind
+        .replace(ClientKind::Interactive);
     if !*BORROWED_FORMAT_FACTS
         || !zz_mux::borrowed_formats_enabled()
         || !zz_mux::format_cache_knob()
@@ -678,25 +685,28 @@ fn status_preparation_tracks_fresh_width_features_and_client_environment() {
         let (mut inner, client, _) = fixture("#{client_width}:#{client_colours}");
         let first = request(&inner, client);
         let revision = inner.engine.format_cache_revision();
-        inner.client_sizes.insert(client, (100, 30));
+        inner.client_entry(client).size.replace((100, 30));
         let wider = request(&inner, client);
         assert_fresh(&first, &wider);
         assert_left(&wider, "100:8");
-        inner.client_features.insert(
-            client,
-            client_features_fact(&["client-features-v1:RGB".to_owned()]),
-        );
+        inner
+            .client_entry(client)
+            .features
+            .replace(client_features_fact(&["client-features-v1:RGB".to_owned()]));
         let rgb = request(&inner, client);
         assert_fresh(&wider, &rgb);
         assert_left(&rgb, "100:16777216");
-        inner.client_features.remove(&client);
+        inner.client_mut(client).and_then(|c| c.features.take());
         inner
-            .client_environments
-            .insert(client, environment("xterm-256color"));
+            .client_entry(client)
+            .environment
+            .replace(environment("xterm-256color"));
         let colours = request(&inner, client);
         assert_fresh(&rgb, &colours);
         assert_left(&colours, "100:256");
-        inner.client_terminals.remove(&client);
+        inner
+            .client_mut(client)
+            .map(|client| std::mem::take(&mut client.has_terminal));
         let no_terminal = request(&inner, client);
         assert_fresh(&colours, &no_terminal);
         assert_eq!(no_terminal.facts.client.as_ref().unwrap().colours, "");
@@ -806,7 +816,10 @@ fn status_preparation_retargets_focus_session_and_replaced_engine() {
         }
         let first = request(&inner, client);
         let revision = inner.engine.format_cache_revision();
-        inner.focused_windows.insert(client, other_window);
+        inner
+            .client_entry(client)
+            .focused_window
+            .replace(other_window);
         let focused = request(&inner, client);
         assert_fresh(&first, &focused);
         assert_left(&focused, "prepared:second");
@@ -814,7 +827,10 @@ fn status_preparation_retargets_focus_session_and_replaced_engine() {
         inner
             .attached
             .insert(other_session, BTreeSet::from([client]));
-        inner.focused_windows.insert(client, third_window);
+        inner
+            .client_entry(client)
+            .focused_window
+            .replace(third_window);
         let attached = request(&inner, client);
         assert_fresh(&focused, &attached);
         assert_left(&attached, "other:third");
@@ -839,8 +855,9 @@ fn status_preparation_invalidates_scheme_startup_and_client_identity() {
         let first = request(&inner, client);
         let revision = inner.engine.format_cache_revision();
         inner
-            .client_color_schemes
-            .insert(client, TerminalColorScheme::Light);
+            .client_entry(client)
+            .color_scheme
+            .replace(TerminalColorScheme::Light);
         let light = request(&inner, client);
         assert_fresh(&first, &light);
         assert_eq!(light.client_scheme, Some(TerminalColorScheme::Light));
@@ -860,12 +877,14 @@ fn status_preparation_invalidates_scheme_startup_and_client_identity() {
             .unwrap()
             .insert(other_client);
         inner
-            .focused_windows
-            .insert(other_client, context.window.unwrap());
-        inner.client_sizes.insert(other_client, (55, 24));
+            .client_entry(other_client)
+            .focused_window
+            .replace(context.window.unwrap());
+        inner.client_entry(other_client).size.replace((55, 24));
         inner
-            .client_kinds
-            .insert(other_client, ClientKind::Interactive);
+            .client_entry(other_client)
+            .kind
+            .replace(ClientKind::Interactive);
         let other = request(&inner, other_client);
         assert_fresh(&startup, &other);
         assert_eq!(other.client, other_client);
@@ -910,11 +929,14 @@ fn status_preparation_bypasses_live_callbacks_jobs_modes_control_and_rollback() 
         enter_copy_session(&mut inner, client, context.pane.unwrap()).unwrap();
         let mode = request(&inner, client);
         assert_fresh(&first, &mode);
-        inner.copy_sessions.remove(&client);
-        inner.client_kinds.insert(client, ClientKind::Control);
+        inner.client_mut(client).and_then(|c| c.copy_session.take());
+        inner.client_entry(client).kind.replace(ClientKind::Control);
         let control = request(&inner, client);
         assert_fresh(&first, &control);
-        inner.client_kinds.insert(client, ClientKind::Interactive);
+        inner
+            .client_entry(client)
+            .kind
+            .replace(ClientKind::Interactive);
         let owned = zz_mux::with_borrowed_formats(false, || request(&inner, client));
         assert_fresh(&first, &owned);
         assert_left(&owned, "prepared");
@@ -962,9 +984,9 @@ fn status_preparation_bypasses_border_prefix_and_cell_dependencies() {
         assert_eq!(first.pane_borders[0].style, "fg=green");
         let revision = inner.engine.format_cache_revision();
         inner
-            .key_engines
-            .entry(client)
-            .or_default()
+            .client_entry(client)
+            .key_engine
+            .get_or_insert_default()
             .switch_table(Some("copy-mode".to_owned()));
         let prefix = request(&inner, client);
         assert_fresh(&first, &prefix);
@@ -1129,8 +1151,16 @@ fn raw_text_bound_client_blob_guard_reuses_without_retaining_parsed_payloads() {
                 assert!(blob.is_valid());
                 assert_eq!(blob.map().get("BAD_0").unwrap().as_bytes().len(), size);
                 let minimum_payload = blob.as_bytes().len() + 16 * size * 4;
-                inner.client_environments.insert(client, Arc::new(blob));
-                let identity = Arc::downgrade(inner.client_environments.get(&client).unwrap());
+                inner
+                    .client_entry(client)
+                    .environment
+                    .replace(Arc::new(blob));
+                let identity = Arc::downgrade(
+                    inner
+                        .client(client)
+                        .and_then(|c| c.environment.as_ref())
+                        .unwrap(),
+                );
                 let first = request(&inner, client);
                 let same = request(&inner, client);
                 assert_left(&first, "prepared:8");
@@ -1158,7 +1188,12 @@ fn raw_text_bound_client_blob_guard_reuses_without_retaining_parsed_payloads() {
                 drop(candidate);
                 drop(first);
                 drop(same);
-                assert!(inner.client_environments.remove(&client).is_some());
+                assert!(
+                    inner
+                        .client_mut(client)
+                        .and_then(|c| c.environment.take())
+                        .is_some()
+                );
                 assert!(identity.upgrade().is_none());
             }
         }
@@ -1210,7 +1245,7 @@ fn status_preparation_tracks_viewport_changes_without_engine_revisions() {
             "pane-active-border-style",
             "fg=#{?window_bigger,red,green}",
         );
-        inner.client_sizes.insert(client, (100, 100));
+        inner.client_entry(client).size.replace((100, 100));
         let fitting = request(&inner, client);
         let same_fitting = request(&inner, client);
         assert_eq!(
@@ -1218,12 +1253,12 @@ fn status_preparation_tracks_viewport_changes_without_engine_revisions() {
             reuse_enabled()
         );
         assert_left(&same_fitting, "0::");
-        inner.client_sizes.insert(client, (40, 12));
+        inner.client_entry(client).size.replace((40, 12));
         let narrowed = request(&inner, client);
         assert_fresh(&fitting, &narrowed);
         assert_left(&narrowed, "1:0:0");
         assert_left(&fitting, "0::");
-        inner.client_sizes.remove(&client);
+        inner.client_mut(client).and_then(|c| c.size.take());
         inner
             .terminal_geometries
             .entry(context.pane.unwrap())

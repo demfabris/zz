@@ -477,7 +477,7 @@ fn slot_changes_made_after_a_queued_command_run_after_it() {
     let (control, control_rx) = command_channel();
     let slot = Arc::new(parking_lot::Mutex::new(super::ControlSlot::default()));
     let commands = CommandSender {
-        queues: Box::new(CommandQueues {
+        queues: Arc::new(CommandQueues {
             control,
             input: None,
             liveness: crossbeam_channel::never(),

@@ -39,14 +39,25 @@ pub(super) struct ShardHandle {
 
 pub(super) struct PaneLaunch {
     pub(super) control_rx: Receiver<Command>,
-    pub(super) input_rx: InputReceiver,
     pub(super) slot: Arc<Mutex<ControlSlot>>,
     pub(super) publisher: Publisher,
     pub(super) max_scrollback: usize,
     pub(super) appearance: Arc<TerminalAppearance>,
-    pub(super) spawn: TerminalSpawn,
+    pub(super) kind: LaunchKind,
     pub(super) alive: Sender<Infallible>,
     pub(super) wake: ActorWake,
+}
+
+pub(super) enum LaunchKind {
+    Pty {
+        input_rx: InputReceiver,
+        spawn: Box<TerminalSpawn>,
+    },
+    Surface {
+        title: String,
+        text: String,
+        frozen: bool,
+    },
 }
 
 impl ShardHandle {
@@ -249,18 +260,38 @@ impl Shard {
                 let wake_rx = None;
                 #[cfg(not(unix))]
                 let wake_rx = ();
-                match PaneActor::spawn(
-                    launch.control_rx,
-                    launch.input_rx,
-                    launch.slot,
-                    launch.publisher,
-                    launch.max_scrollback,
-                    &launch.appearance,
-                    &launch.spawn,
-                    &launch.wake,
-                    wake_rx,
-                    true,
-                ) {
+                let actor = match launch.kind {
+                    LaunchKind::Pty { input_rx, spawn } => PaneActor::spawn(
+                        launch.control_rx,
+                        input_rx,
+                        launch.slot,
+                        launch.publisher,
+                        launch.max_scrollback,
+                        &launch.appearance,
+                        &spawn,
+                        &launch.wake,
+                        wake_rx,
+                        true,
+                    )
+                    .map(|actor| Actor::Live(Box::new(actor))),
+                    LaunchKind::Surface {
+                        title,
+                        text,
+                        frozen,
+                    } => new_output_view(
+                        launch.control_rx,
+                        launch.slot,
+                        launch.publisher,
+                        &title,
+                        &text,
+                        &launch.appearance,
+                        launch.max_scrollback,
+                        frozen,
+                        &launch.wake,
+                    )
+                    .map(|actor| Actor::Surface(Box::new(actor))),
+                };
+                match actor {
                     Ok(actor) => {
                         let id = self.next_id;
                         self.next_id += 1;
@@ -268,7 +299,7 @@ impl Shard {
                         self.actors.insert(
                             id,
                             Entry {
-                                actor: Actor::Live(Box::new(actor)),
+                                actor,
                                 publisher,
                                 _alive: launch.alive,
                                 deadline,

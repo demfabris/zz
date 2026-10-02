@@ -20,7 +20,7 @@ pub(super) struct SurfaceActor<'a, 'b> {
     control_rx: Receiver<Command>,
     slot: Arc<Mutex<ControlSlot>>,
     publisher: Publisher,
-    raw_output_tap: Option<(u64, Sender<Arc<[u8]>>)>,
+    raw_output_tap: Option<(u64, RawOutputTapSender)>,
     engine_filter: EngineFilter,
     mouse_encoder: mouse::Encoder<'static>,
     mouse_event: mouse::Event<'static>,
@@ -28,6 +28,7 @@ pub(super) struct SurfaceActor<'a, 'b> {
     writer: Box<dyn Write + Send>,
     bound_pasted_images: HashSet<u32>,
     compression: IdleCompression,
+    captures: VecDeque<CaptureWork>,
     frozen: bool,
 }
 
@@ -52,6 +53,7 @@ impl<'a, 'b> SurfaceActor<'a, 'b> {
             max_scrollback,
             status,
             pending_commands,
+            captures,
             pending_copy_source,
             pane_search,
             search,
@@ -86,6 +88,7 @@ impl<'a, 'b> SurfaceActor<'a, 'b> {
             writer: Box::new(std::io::sink()),
             bound_pasted_images: HashSet::new(),
             compression: IdleCompression::default(),
+            captures,
             frozen,
         };
         if frozen {
@@ -106,6 +109,9 @@ impl<'a, 'b> SurfaceActor<'a, 'b> {
 
     pub(super) fn next_deadline(&self) -> Instant {
         let mut due = Instant::now() + IDLE_SLEEP;
+        if !self.captures.is_empty() {
+            due = Instant::now();
+        }
         for deadline in [
             self.frames.synchronized_output_deadline,
             self.frames.settle_due(),
@@ -120,6 +126,7 @@ impl<'a, 'b> SurfaceActor<'a, 'b> {
     }
 
     pub(super) fn on_deadline(&mut self) -> Result<(), WorkerError> {
+        step_capture_work(&mut self.captures);
         let now = Instant::now();
         if self
             .frames
@@ -462,7 +469,6 @@ impl<'a, 'b> SurfaceActor<'a, 'b> {
                 }
             }
             Command::Capture(request) => {
-                let CaptureRequest { options, reply } = *request;
                 let mut copy_modes = self
                     .active_views
                     .values()
@@ -471,7 +477,9 @@ impl<'a, 'b> SurfaceActor<'a, 'b> {
                     (Some(mode), None) => Some(mode),
                     _ => None,
                 };
-                let _ = reply.send(capture_terminal(&self.terminal, mode, options));
+                if let Some(capture) = CaptureWork::start(&self.terminal, mode, *request) {
+                    self.captures.push_back(capture);
+                }
                 self.compression.rearm();
             }
             Command::PointerContext(request) => {

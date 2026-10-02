@@ -6,10 +6,6 @@
 //! here: request replies (session listings, turn diffs) leave the stream
 //! entirely, and a replay that outruns the ring synthesizes fresh items, so
 //! only this side can promise the numbering a client replays against.
-//!
-//! Lock order is fanout-then-daemon, never the reverse: a publisher call may
-//! take the daemon's state lock, so nothing holding that lock may reach in
-//! here.
 
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -74,38 +70,48 @@ pub(crate) enum AgentRequestReply {
 /// knows nothing about mailboxes, sessions, or visibility; this is the whole
 /// surface it reaches the daemon through.
 pub(crate) trait AgentPublisher: Send + Sync + 'static {
+    fn barrier(&self, generation: u64, pane: PaneId, reply: crate::daemon::cmdq::Reply<()>);
     /// One coalesced frame to every client the pane is visible to, plus
     /// `also` — the client whose replay produced it, visible or not.
     fn publish_agent_updates(
         &self,
+        generation: u64,
         pane: PaneId,
         first_seq: u64,
         items: Vec<Vec<u8>>,
         also: Option<ClientId>,
     );
-    fn send_agent_replay(&self, client: ClientId, pane: PaneId, frames: Vec<(u64, Vec<Vec<u8>>)>);
+    fn send_agent_replay(
+        &self,
+        generation: u64,
+        client: ClientId,
+        pane: PaneId,
+        frames: Vec<(u64, Vec<Vec<u8>>)>,
+    );
     fn publish_agent_replay(
         &self,
+        generation: u64,
         pane: PaneId,
         frames: Vec<(u64, Vec<Vec<u8>>)>,
         also: Option<ClientId>,
     );
-    fn publish_agent_state(&self, pane: PaneId, state: AgentPaneWire);
-    fn publish_agent_tool_call(&self, pane: PaneId, call: AgentToolCall);
-    fn send_agent_reply(&self, pane: PaneId, reply: AgentRequestReply);
+    fn publish_agent_state(&self, generation: u64, pane: PaneId, state: AgentPaneWire);
+    fn publish_agent_tool_call(&self, generation: u64, pane: PaneId, call: AgentToolCall);
+    fn send_agent_reply(&self, generation: u64, pane: PaneId, reply: AgentRequestReply);
     /// The adapter named the session this pane is now speaking to. The daemon
     /// owns that metadata, so it lands in the mux state, not just the stream.
     fn adopt_agent_session(
         &self,
+        generation: u64,
         pane: PaneId,
         provider: AgentProvider,
         session_id: String,
         cwd: Option<PathBuf>,
     );
-    fn title_agent_pane(&self, pane: PaneId, title: String);
+    fn title_agent_pane(&self, generation: u64, pane: PaneId, title: String);
     /// Bytes of the pane's transcript projection — what `capture-pane` and
     /// `pipe-pane` see for an agent pane.
-    fn feed_agent_pane_text(&self, pane: PaneId, bytes: Vec<u8>);
+    fn feed_agent_pane_text(&self, generation: u64, pane: PaneId, bytes: Vec<u8>);
 }
 
 /// The daemon's handle on the agent runtime: one host, one lane per pane.
@@ -113,6 +119,7 @@ pub(crate) struct AgentRuntime {
     host: AgentHost,
     fanout: Arc<AgentFanout>,
     generation: AtomicU64,
+    publisher: Arc<dyn AgentPublisher>,
     lifecycle: Arc<Mutex<()>>,
 }
 
@@ -142,6 +149,7 @@ impl AgentRuntime {
             host,
             fanout,
             generation: AtomicU64::new(1),
+            publisher: Arc::clone(publisher),
             lifecycle,
         }
     }
@@ -229,8 +237,12 @@ impl AgentRuntime {
             return false;
         }
         self.fanout.remember_prompt(pane, text);
-        if let Some((title, publisher)) = title.zip(self.fanout.publisher.upgrade()) {
-            publisher.title_agent_pane(pane, title);
+        if let (Some(title), Some(publisher), Some(generation)) = (
+            title,
+            self.fanout.publisher.upgrade(),
+            self.pane_generation(pane),
+        ) {
+            publisher.title_agent_pane(generation, pane, title);
         }
         true
     }
@@ -265,6 +277,20 @@ impl AgentRuntime {
                 .snapshot_state(pane)
                 .map(|state| wire(&state, None))
         })
+    }
+
+    pub(crate) fn publication_barrier(&self, pane: PaneId, reply: crate::daemon::cmdq::Reply<()>) {
+        if let Some(generation) = self.pane_generation(pane) {
+            self.publisher.barrier(generation, pane, reply);
+        }
+    }
+
+    pub(crate) fn pane_generation(&self, pane: PaneId) -> Option<u64> {
+        self.fanout
+            .lanes
+            .lock()
+            .get(&pane)
+            .map(|lane| lane.generation)
     }
 
     pub(crate) fn replay(&self, client: ClientId, pane: PaneId, from_seq: u64) {
@@ -638,9 +664,9 @@ impl AgentFanout {
         let Some(publisher) = self.publisher.upgrade() else {
             return false;
         };
-        if !self.lanes.lock().contains_key(&pane) {
+        let Some(generation) = self.lanes.lock().get(&pane).map(|lane| lane.generation) else {
             return false;
-        }
+        };
         let payload = match command {
             HostCommand::Authenticate { .. } => AgentStreamPayload::AuthenticationFailed {
                 message: "agent command queue is busy".to_owned(),
@@ -661,7 +687,11 @@ impl AgentFanout {
                 let Some(result) = encode_reply(&payload) else {
                     return false;
                 };
-                publisher.send_agent_reply(pane, AgentRequestReply::Sessions { client, result });
+                publisher.send_agent_reply(
+                    generation,
+                    pane,
+                    AgentRequestReply::Sessions { client, result },
+                );
                 return true;
             }
             HostCommand::DeleteSession { client, .. } => {
@@ -672,13 +702,17 @@ impl AgentFanout {
                 let Some(result) = encode_reply(&payload) else {
                     return false;
                 };
-                publisher.send_agent_reply(pane, AgentRequestReply::Sessions { client, result });
+                publisher.send_agent_reply(
+                    generation,
+                    pane,
+                    AgentRequestReply::Sessions { client, result },
+                );
                 return true;
             }
             HostCommand::NewSession { reply, .. } => {
                 let message = "agent command queue is busy".to_owned();
                 if let Some(reply) = reply {
-                    let _ = reply.try_send(Err(message.clone()));
+                    reply.try_send(Err(message.clone()));
                 }
                 AgentStreamPayload::SessionSwitchFailed { message }
             }
@@ -877,19 +911,19 @@ impl AgentFanout {
         drop(lanes);
         self.wake.notify_all();
         if !projection.is_empty() {
-            publisher.feed_agent_pane_text(pane, projection);
+            publisher.feed_agent_pane_text(generation, pane, projection);
         }
         if let Some(call) = tool_call {
-            publisher.publish_agent_tool_call(pane, call);
+            publisher.publish_agent_tool_call(generation, pane, call);
         }
         if let Some(reply) = reply {
-            publisher.send_agent_reply(pane, reply);
+            publisher.send_agent_reply(generation, pane, reply);
         }
         if let Some((provider, session_id, cwd)) = adoption {
-            publisher.adopt_agent_session(pane, provider, session_id, cwd);
+            publisher.adopt_agent_session(generation, pane, provider, session_id, cwd);
         }
         if let Some(next_state) = next_state {
-            publisher.publish_agent_state(pane, next_state);
+            publisher.publish_agent_state(generation, pane, next_state);
         }
     }
 
@@ -926,6 +960,7 @@ impl AgentFanout {
         let Some(lane) = lanes.get_mut(&pane) else {
             return;
         };
+        let generation = lane.generation;
         let from = from_seq.max(1);
         if from > lane.evicted_seq {
             let items = lane
@@ -942,9 +977,9 @@ impl AgentFanout {
                 items.into_iter().map(|(_, encoded)| encoded).collect(),
             );
             for (first_seq, items) in lane.take_batch() {
-                publisher.publish_agent_updates(pane, first_seq, items, None);
+                publisher.publish_agent_updates(generation, pane, first_seq, items, None);
             }
-            publisher.send_agent_replay(client, pane, frames);
+            publisher.send_agent_replay(generation, client, pane, frames);
             return;
         }
         let replay = lane
@@ -955,7 +990,7 @@ impl AgentFanout {
             .and_then(|(session_id, journal)| journal.replay_for(lane.provider, session_id).ok());
         let Some(replay) = replay else {
             for (first_seq, items) in lane.take_batch() {
-                publisher.publish_agent_updates(pane, first_seq, items, None);
+                publisher.publish_agent_updates(generation, pane, first_seq, items, None);
             }
             log::warn!(
                 target: "zz::agent",
@@ -984,7 +1019,7 @@ impl AgentFanout {
             for payload in metadata {
                 lane.stamp_recovery(pane, payload, &mut items, true);
             }
-            publisher.send_agent_replay(client, pane, split_frames(first_seq, items));
+            publisher.send_agent_replay(generation, client, pane, split_frames(first_seq, items));
             drop(lanes);
             self.wake.notify_all();
             return;
@@ -1018,7 +1053,7 @@ impl AgentFanout {
             lane.stamp_recovery(pane, payload, &mut synthesized, false);
         }
         let frames = split_frames(first_seq, synthesized);
-        publisher.publish_agent_replay(pane, frames, Some(client));
+        publisher.publish_agent_replay(generation, pane, frames, Some(client));
     }
 
     fn acknowledge_prompt_restore(&self, owner: ClientInstanceId, pane: PaneId, reclaim_id: u64) {
@@ -1268,7 +1303,7 @@ fn run_flusher(fanout: &Weak<AgentFanout>) {
                 continue;
             }
             for (first_seq, items) in lane.take_batch() {
-                due.push((*pane, first_seq, items));
+                due.push((*pane, lane.generation, first_seq, items));
             }
         }
         if due.is_empty() {
@@ -1285,8 +1320,8 @@ fn run_flusher(fanout: &Weak<AgentFanout>) {
         let Some(publisher) = fanout.publisher.upgrade() else {
             return;
         };
-        for (pane, first_seq, items) in due {
-            publisher.publish_agent_updates(pane, first_seq, items, None);
+        for (pane, generation, first_seq, items) in due {
+            publisher.publish_agent_updates(generation, pane, first_seq, items, None);
         }
     }
 }
@@ -1476,8 +1511,13 @@ mod tests {
     }
 
     impl AgentPublisher for Recorder {
+        fn barrier(&self, _generation: u64, _pane: PaneId, reply: crate::daemon::cmdq::Reply<()>) {
+            reply.try_send(());
+        }
+
         fn publish_agent_updates(
             &self,
+            _generation: u64,
             pane: PaneId,
             first_seq: u64,
             items: Vec<Vec<u8>>,
@@ -1492,6 +1532,7 @@ mod tests {
 
         fn send_agent_replay(
             &self,
+            _generation: u64,
             client: ClientId,
             pane: PaneId,
             frames: Vec<(u64, Vec<Vec<u8>>)>,
@@ -1505,6 +1546,7 @@ mod tests {
 
         fn publish_agent_replay(
             &self,
+            _generation: u64,
             pane: PaneId,
             frames: Vec<(u64, Vec<Vec<u8>>)>,
             also: Option<ClientId>,
@@ -1516,13 +1558,13 @@ mod tests {
             );
         }
 
-        fn publish_agent_state(&self, pane: PaneId, state: AgentPaneWire) {
+        fn publish_agent_state(&self, _generation: u64, pane: PaneId, state: AgentPaneWire) {
             self.states.lock().push((pane, state));
         }
 
-        fn publish_agent_tool_call(&self, _pane: PaneId, _call: AgentToolCall) {}
+        fn publish_agent_tool_call(&self, _generation: u64, _pane: PaneId, _call: AgentToolCall) {}
 
-        fn send_agent_reply(&self, pane: PaneId, reply: AgentRequestReply) {
+        fn send_agent_reply(&self, _generation: u64, pane: PaneId, reply: AgentRequestReply) {
             let AgentRequestReply::Sessions { client, result } = reply;
             let request_id = 0;
             self.replies.lock().push((client, pane, request_id, result));
@@ -1530,6 +1572,7 @@ mod tests {
 
         fn adopt_agent_session(
             &self,
+            _generation: u64,
             pane: PaneId,
             _provider: AgentProvider,
             session_id: String,
@@ -1538,11 +1581,11 @@ mod tests {
             self.sessions.lock().push((pane, session_id));
         }
 
-        fn title_agent_pane(&self, pane: PaneId, title: String) {
+        fn title_agent_pane(&self, _generation: u64, pane: PaneId, title: String) {
             self.titles.lock().push((pane, title));
         }
 
-        fn feed_agent_pane_text(&self, _pane: PaneId, _bytes: Vec<u8>) {}
+        fn feed_agent_pane_text(&self, _generation: u64, _pane: PaneId, _bytes: Vec<u8>) {}
     }
 
     struct Fixture {

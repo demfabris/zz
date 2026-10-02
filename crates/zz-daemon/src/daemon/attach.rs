@@ -1,7 +1,7 @@
-use std::{
-    io::{self, IoSlice, Write},
-    sync::LazyLock,
-};
+use std::sync::LazyLock;
+
+#[cfg(any(windows, test))]
+use std::io::{self, IoSlice, Write};
 
 use super::*;
 
@@ -19,8 +19,10 @@ pub(super) static BATCHED_WRITES: LazyLock<bool> =
 
 pub(super) const MAX_BATCHED_WRITE_BYTES: usize = 256 * 1024;
 
+#[cfg(windows)]
 const INBOUND_BUFFER_BYTES: usize = 8 * 1024;
 
+#[cfg(windows)]
 pub(super) fn inbound_reader<S: io::Read>(stream: S) -> io::BufReader<S> {
     io::BufReader::with_capacity(
         if *BATCHED_WRITES {
@@ -85,12 +87,12 @@ pub(super) fn presize_client_terminals(
 ) -> BTreeSet<PaneId> {
     let mut seeded = BTreeSet::new();
     if !*ATTACH_PRESIZE
-        || inner.client_kinds.get(&client) != Some(&ClientKind::Interactive)
-        || !inner.client_terminals.contains(&client)
+        || inner.client(client).and_then(|c| c.kind) != Some(ClientKind::Interactive)
+        || !inner.client(client).is_some_and(|c| c.has_terminal)
     {
         return seeded;
     }
-    let Some((cell_width_px, cell_height_px)) = inner.client_cell_pixels.get(&client).copied()
+    let Some((cell_width_px, cell_height_px)) = inner.client(client).and_then(|c| c.cell_pixels)
     else {
         return seeded;
     };
@@ -99,15 +101,15 @@ pub(super) fn presize_client_terminals(
     };
     let window = client_focused_window(inner, client, session_state);
     let Some((columns, rows)) = inner
-        .client_sizes
-        .get(&client)
+        .client(client)
+        .and_then(|c| c.size.as_ref())
         .and_then(|_| interactive_client_window_extent(inner, client, session, window))
     else {
         return seeded;
     };
     let panes = inner
-        .visible_terminals
-        .get(&client)
+        .client(client)
+        .and_then(|c| c.visible_terminals.as_ref())
         .into_iter()
         .flatten()
         .copied()
@@ -154,6 +156,7 @@ pub(super) fn attach_frame_superseded(
     })
 }
 
+#[cfg(any(windows, test))]
 pub(super) fn write_frames(stream: &mut impl Write, frames: &[impl AsRef<[u8]>]) -> io::Result<()> {
     let mut slices = frames
         .iter()
@@ -178,7 +181,8 @@ pub(super) fn write_frames(stream: &mut impl Write, frames: &[impl AsRef<[u8]>])
 
 impl Shared {
     pub(super) fn hold_attach_terminals(&self, client: ClientId) -> AttachHold {
-        let subscriber = self.inner.lock().subscribers.get(&client).cloned();
+        let subscriber =
+            self.read_client(client, |c| c.and_then(|c| c.subscriber.as_ref()).cloned());
         if let Some(subscriber) = &subscriber {
             subscriber.hold_terminals();
         }
@@ -207,14 +211,17 @@ impl Drop for AttachHold {
     }
 }
 
+#[cfg(windows)]
 pub(super) struct WriterThread(crossbeam_channel::Receiver<()>);
 
+#[cfg(windows)]
 impl WriterThread {
     pub(super) fn join(self) -> Result<(), ()> {
         self.0.recv().map_err(drop)
     }
 }
 
+#[cfg(windows)]
 pub(super) fn spawn_writer(
     threads: &Arc<exec::ConnectionThreads>,
     client: ClientId,

@@ -224,11 +224,13 @@ fn status_requests_with_partial_needs_render_what_the_eager_universe_renders() {
     assert!(line.rows[1].contains("@pp=b"), "{:?}", line.rows);
 }
 
+#[cfg(unix)]
 #[test]
 fn status_job_output_reads_parts_the_templates_do_not() {
     let fixture = fixture();
     one_status_row(&fixture, "#(echo '##{S:##{session_name}.}')");
     let mut renderer = StatusRenderer::default();
+    let _jobs = status_jobs::tests::Driver::new(renderer.job_client());
     assert_eq!(
         renderer
             .render_changed(&[status_request_for(&fixture, FormatNeeds::NONE)])
@@ -440,14 +442,13 @@ fn terminal_features_and_overrides_reach_a_connected_client_on_the_next_read() {
     );
     {
         let mut inner = fixture.shared.inner.lock();
-        inner.client_terminals.insert(client);
-        inner.client_environments.insert(
-            client,
-            Arc::new(ClientEnvironmentBlob::from_map(BTreeMap::from([(
-                "TERM".into(),
-                "xterm-256color".into(),
-            )]))),
-        );
+        inner.client_entry(client).has_terminal = true;
+        inner
+            .client_entry(client)
+            .environment
+            .replace(Arc::new(ClientEnvironmentBlob::from_map(BTreeMap::from([
+                ("TERM".into(), "xterm-256color".into()),
+            ]))));
     }
     let read = || {
         let inner = fixture.shared.inner.lock();

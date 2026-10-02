@@ -126,6 +126,12 @@ read "Lane brief rules" before launching anything.
     as cmdq work on the loop) owns the fix and must pass it 20/20 on Linux.
   - Order change: e04 (tap arm/disarm, rearm_pane_pipe) would collide with e16 on the Mac, so
     alienware took e06 (wait-for continuations) first; e04 follows e16.
+  - e16 (`d640ed4b`, Mac): pane pipes, copy-pipe and raw Control output run on the loop and
+    the job registry (`daemon/pipe_jobs.rs`), bounded tap delivery with capacity notifications;
+    0 reader threads, 1468 daemon and 361 terminal tests. Flagged rows were noise:
+    `cli.instr.list_panes.p1` is bimodal on the Mac (base 0.149/0.151/0.163) and hidden chatty's
+    median fell. Mac p1 CLI rows sit in two modes about 7% apart; judge them on min/max.
+  - e03b Mac leg (`66cc31a4`): 1430 lib tests, source/hook compat clean.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

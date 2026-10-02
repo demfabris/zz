@@ -4134,8 +4134,6 @@ struct SharedServer {
     pasted_images: Mutex<BTreeMap<PaneId, PanePastedImages>>,
     status: Mutex<StatusRenderer>,
     stopping: AtomicBool,
-    copy_refresh_running: AtomicBool,
-    clock_refresh_running: AtomicBool,
     shutdown_pending: AtomicBool,
     shutdown_forced: AtomicBool,
     shutdown_announced: AtomicBool,
@@ -4168,7 +4166,6 @@ struct SharedServer {
     timer_tx: timers::TimerSender,
     timer_rx: Mutex<Option<crossbeam_channel::Receiver<timers::TimerInput>>>,
     publish_flush: Mutex<timers::PublishFlush>,
-    hook_worker: Mutex<timers::HookWorker>,
     snapshot_order: Mutex<()>,
     #[cfg(all(feature = "agent", unix))]
     peer_probe: AtomicBool,
@@ -5057,8 +5054,6 @@ impl Shared {
             pasted_images: Mutex::new(BTreeMap::new()),
             status: Mutex::new(status),
             stopping: AtomicBool::new(false),
-            copy_refresh_running: AtomicBool::new(false),
-            clock_refresh_running: AtomicBool::new(false),
             shutdown_pending: AtomicBool::new(false),
             shutdown_forced: AtomicBool::new(false),
             shutdown_announced: AtomicBool::new(false),
@@ -5091,7 +5086,6 @@ impl Shared {
             timer_tx,
             timer_rx: Mutex::new(Some(timer_rx)),
             publish_flush: Mutex::new(timers::PublishFlush::default()),
-            hook_worker: Mutex::new(timers::HookWorker::default()),
             snapshot_order: Mutex::new(()),
             #[cfg(all(feature = "agent", unix))]
             peer_probe: AtomicBool::new(false),
@@ -5909,6 +5903,15 @@ impl Shared {
             let Some((context, commands, variables)) = prepared else {
                 continue;
             };
+            #[cfg(unix)]
+            if self.timer_rx.lock().is_none() {
+                let _ = self.timer_tx.send(timers::TimerInput::MonitorHook {
+                    context: Box::new(context),
+                    commands,
+                    variables,
+                });
+                continue;
+            }
             self.run_hook_commands_with_policy(
                 ClientId(u64::MAX),
                 ClientKind::Command,
@@ -8188,11 +8191,11 @@ impl Shared {
         )
     }
 
-    fn finish_hook_frame_command(
+    fn finish_hook_frame_command<E: InsertedExecution>(
         self: &Arc<Self>,
         client: ClientId,
         kind: ClientKind,
-        frame: &mut InsertedQueueFrame,
+        frame: &mut InsertedQueueFrame<E>,
         boundary: InsertedCommandBoundary,
         step: InsertedCommandStep,
     ) -> InsertedFrameAction {
@@ -8326,12 +8329,23 @@ impl Shared {
     }
 
     fn run_event_hooks(self: &Arc<Self>, events: Vec<PendingHookEvent>) {
-        if let Some(effects) = &self.watcher_effects {
-            if !events.is_empty() {
-                effects
-                    .lock()
-                    .push(Box::new(move |shared| shared.run_event_hooks(events)));
-            }
+        if events.is_empty() {
+            return;
+        }
+        #[cfg(any(test, windows))]
+        if let Some(effects) = &self.watcher_effects
+            && self.timer_rx.lock().is_some()
+        {
+            effects
+                .lock()
+                .push(Box::new(move |shared| shared.run_event_hooks(events)));
+            return;
+        }
+        let queued = self.watcher_effects.is_some();
+        #[cfg(unix)]
+        let queued = queued || self.loop_leaf_enabled();
+        if queued {
+            self.enqueue_event_hooks(events);
             return;
         }
         self.run_event_hooks_with_control(events, true);
@@ -8585,6 +8599,8 @@ impl Shared {
             let journal = *hook_events::HOOK_JOURNAL;
             let generation_before = inner.engine.state.generation();
             let monitors_before = inner.engine.has_format_monitors();
+            let refresh_before = (!read_only).then(|| copy_mode_refresh_needed(&inner));
+            let clock_before = (!read_only).then(|| clock_mode_timer_needed(&inner));
             let hook_scope = (captures && (event_hooks_enabled || journal))
                 .then(|| hook_events::HookScope::open(&mut inner.engine));
             let pane_focus_before = (event_hooks_enabled && captures).then(|| {
@@ -10790,7 +10806,9 @@ impl Shared {
                 !read_only || pending_hook_events.len() == hook_events_before,
                 "read-only {command_name} raised hook events"
             );
-            client_timers_changed = monitors_before != inner.engine.has_format_monitors();
+            client_timers_changed = monitors_before != inner.engine.has_format_monitors()
+                || refresh_before.is_some_and(|before| before != copy_mode_refresh_needed(&inner))
+                || clock_before.is_some_and(|before| before != clock_mode_timer_needed(&inner));
             (execution, mux_options_changed, recheck_shutdown_requested)
         };
 
@@ -13224,19 +13242,25 @@ impl Shared {
                     })?;
                     Ok(Execution::default())
                 } else {
-                    let (sender, receiver) = mpsc::sync_channel(1);
-                    self.spawn_delay(delay, move || {
-                        let _ = sender.send(());
-                    })?;
-                    // `run-shell -C` with no delay is `event_active`, which the
-                    // pin's own loop pass resumes before it can check whether
-                    // the client wants to exit, so the queue never rests here.
-                    if !delay.is_zero() {
-                        self.report_command_queue_park();
+                    #[cfg(unix)]
+                    let loop_callback = self.loop_leaf_enabled() && delay.is_zero();
+                    #[cfg(not(unix))]
+                    let loop_callback = false;
+                    if !loop_callback {
+                        let (sender, receiver) = mpsc::sync_channel(1);
+                        self.spawn_delay(delay, move || {
+                            let _ = sender.send(());
+                        })?;
+                        // `run-shell -C` with no delay is `event_active`, which the
+                        // pin's own loop pass resumes before it can check whether
+                        // the client wants to exit, so the queue never rests here.
+                        if !delay.is_zero() {
+                            self.report_command_queue_park();
+                        }
+                        receiver.recv().map_err(|error| {
+                            DaemonError::Thread(format!("run-shell delay worker stopped: {error}"))
+                        })?;
                     }
-                    receiver.recv().map_err(|error| {
-                        DaemonError::Thread(format!("run-shell delay worker stopped: {error}"))
-                    })?;
                     let mut command_context = command_context;
                     command_context.retarget(&inserted_target);
                     let result = self.execute_foreground_inserted_commands(
@@ -13371,6 +13395,14 @@ impl Shared {
                     Ok(Execution::default())
                 } else {
                     let (sender, receiver) = mpsc::sync_channel(1);
+                    #[cfg(unix)]
+                    let loop_leaf = self.loop_leaf_enabled() && delay.is_zero();
+                    #[cfg(unix)]
+                    let ready = Arc::new(AtomicBool::new(false));
+                    #[cfg(unix)]
+                    let completed = Arc::clone(&ready);
+                    #[cfg(unix)]
+                    let wake = self.timer_tx.clone();
                     let failed_command = command.clone();
                     self.spawn_shell_job(
                         command.clone(),
@@ -13389,8 +13421,33 @@ impl Shared {
                         queue_execution,
                         move |result| {
                             let _ = sender.send(result);
+                            #[cfg(unix)]
+                            if loop_leaf {
+                                completed.store(true, Ordering::Release);
+                                let _ = wake.send(timers::TimerInput::HookReady);
+                            }
                         },
                     )?;
+                    #[cfg(unix)]
+                    if loop_leaf {
+                        self.command_item
+                            .as_ref()
+                            .expect("loop command item")
+                            .lock()
+                            .pending_loop_leaf = Some(hook_queue::PendingLeaf {
+                            ready,
+                            receiver,
+                            finish: Box::new(move |shared, result| {
+                                let result = result.map_err(|()| {
+                                    ServerError::InvalidCommand(format!(
+                                        "failed to run command: {failed_command}"
+                                    ))
+                                })?;
+                                shared.finish_run_shell(route, &command, &result)
+                            }),
+                        });
+                        return Ok(Execution::default());
+                    }
                     self.report_command_queue_park();
                     let result = receiver.recv().map_err(|error| {
                         DaemonError::Thread(format!("run-shell worker stopped: {error}"))
@@ -13938,7 +13995,37 @@ impl Shared {
             stdin,
         )?;
         let mut frames = vec![root];
-        loop {
+        let (finished, result) = self
+            .advance_inserted_frames(
+                client,
+                kind,
+                &mut frames,
+                usize::MAX,
+                |frame, command, target| {
+                    Some(self.execute_inserted_frame_command(client, kind, frame, command, target))
+                },
+            )
+            .expect("synchronous inserted queue finished");
+        *context = finished.context;
+        result
+    }
+
+    fn advance_inserted_frames<E: InsertedExecution>(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        frames: &mut Vec<InsertedQueueFrame<E>>,
+        budget: usize,
+        mut execute: impl FnMut(
+            &mut InsertedQueueFrame<E>,
+            &CommandInvocation,
+            Option<(ClientId, u8)>,
+        ) -> Option<InsertedCommandStep>,
+    ) -> Option<(
+        InsertedQueueFrame<E>,
+        Result<InsertedCommandResult, DaemonError>,
+    )> {
+        for _ in 0..budget {
             let frame = frames.last_mut().expect("inserted queue frame");
             let stream_client = frame.context.replay_client().unwrap_or(client);
             let cancelled = frame.execution.has_yielded()
@@ -13983,19 +14070,17 @@ impl Shared {
                         || frame.execution.deferred_shutdown.get() != DeferredShutdown::Force
                 });
                 let stdout_sequence = self.command_stdout_sequence(stream_client);
-                let step = self.execute_inserted_frame_command(
-                    client,
-                    kind,
-                    frame,
-                    &command,
-                    command_control_target,
-                );
+                let step = execute(frame, &command, command_control_target);
                 let boundary = InsertedCommandBoundary {
                     command,
                     group,
                     callback_failures_start,
                     command_control_target,
                     stdout_sequence,
+                };
+                let Some(step) = step else {
+                    frame.parked_boundary = Some(boundary);
+                    return None;
                 };
                 if let Some(child) =
                     self.settle_inserted_frame_step(client, kind, frame, boundary, step)
@@ -14035,9 +14120,8 @@ impl Shared {
                 let yielded = frame.execution.has_yielded();
                 self.finish_command_queue_execution(&frame.execution, Some(&hook.parent));
                 if !yielded && let Some(commands) = hook.groups.pop_front() {
-                    frame.execution = InsertedFrameExecution::Owned(Box::new(
-                        self.hook_group_execution(&hook.parent, hook.initial_draining),
-                    ));
+                    frame.execution =
+                        E::owned(self.hook_group_execution(&hook.parent, hook.initial_draining));
                     frame.execution.frame_active.set(true);
                     frame.context = hook.context.clone();
                     frame.commands = commands.into_iter();
@@ -14073,20 +14157,20 @@ impl Shared {
                     frames.push(child);
                 }
             } else {
-                *context = finished.context;
-                return result;
+                return Some((finished, result));
             }
         }
+        None
     }
 
-    fn settle_inserted_frame_step<'a>(
+    fn settle_inserted_frame_step<E: InsertedExecution>(
         self: &Arc<Self>,
         client: ClientId,
         kind: ClientKind,
-        frame: &mut InsertedQueueFrame<'a>,
+        frame: &mut InsertedQueueFrame<E>,
         mut boundary: InsertedCommandBoundary,
         mut step: InsertedCommandStep,
-    ) -> Option<InsertedQueueFrame<'a>> {
+    ) -> Option<InsertedQueueFrame<E>> {
         loop {
             let child = frame.execution.child.borrow_mut().take();
             if let Some(child) = child {
@@ -14113,7 +14197,7 @@ impl Shared {
                     &child.label,
                     child.control_target,
                     child.mux_source,
-                    InsertedFrameExecution::Owned(Box::new(execution)),
+                    E::owned(execution),
                     alias_terminal,
                     stdin,
                 );
@@ -14157,17 +14241,17 @@ impl Shared {
         }
     }
 
-    fn prepare_inserted_queue_frame<'a>(
+    fn prepare_inserted_queue_frame<E: InsertedExecution>(
         self: &Arc<Self>,
         context: ExecutionContext,
         source: &InsertedCommandSource,
         label: &str,
         control_target: Option<(ClientId, u8)>,
         mux_source: MuxOptionSource,
-        execution: InsertedFrameExecution<'a>,
+        execution: E,
         alias_terminal: Option<ClientTerminal>,
         stdin: Option<RawText>,
-    ) -> Result<InsertedQueueFrame<'a>, DaemonError> {
+    ) -> Result<InsertedQueueFrame<E>, DaemonError> {
         if let InsertedCommandSource::Events(source) = source {
             execution.frame_active.set(true);
             return Ok(InsertedQueueFrame {
@@ -14187,6 +14271,7 @@ impl Shared {
                 failed_group: None,
                 boundary: None,
                 terminal_error: None,
+                parked_boundary: None,
                 hook: None,
                 events: Some(EventQueueFrame {
                     events: std::mem::take(&mut *source.events.borrow_mut()).into(),
@@ -14215,7 +14300,7 @@ impl Shared {
             let commands = groups.pop_front().unwrap_or_default().into_iter();
             group_execution.frame_active.set(true);
             return Ok(InsertedQueueFrame {
-                execution: InsertedFrameExecution::Owned(Box::new(group_execution)),
+                execution: E::owned(group_execution),
                 context: hook_context.clone(),
                 commands,
                 prepared: true,
@@ -14231,6 +14316,7 @@ impl Shared {
                 failed_group: None,
                 boundary: None,
                 terminal_error: None,
+                parked_boundary: None,
                 events: None,
                 hook: Some(HookQueueFrame {
                     parent: execution,
@@ -14285,16 +14371,17 @@ impl Shared {
             failed_group: None,
             boundary: None,
             terminal_error: None,
+            parked_boundary: None,
             hook: None,
             events: None,
         })
     }
 
-    fn execute_inserted_frame_command(
+    fn execute_inserted_frame_command<E: InsertedExecution>(
         self: &Arc<Self>,
         client: ClientId,
         kind: ClientKind,
-        frame: &mut InsertedQueueFrame,
+        frame: &mut InsertedQueueFrame<E>,
         command: &CommandInvocation,
         command_control_target: Option<(ClientId, u8)>,
     ) -> InsertedCommandStep {
@@ -14306,6 +14393,29 @@ impl Shared {
         let prepared = frame.prepared;
         let mux_source = frame.mux_source;
         let context = &mut frame.context;
+        self.execute_inserted_leaf(
+            client,
+            kind,
+            context,
+            command,
+            command_control_target,
+            prepared,
+            mux_source,
+            mode,
+        )
+    }
+
+    fn execute_inserted_leaf(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        command: &CommandInvocation,
+        command_control_target: Option<(ClientId, u8)>,
+        prepared: bool,
+        mux_source: MuxOptionSource,
+        mode: InsertedCommandMode,
+    ) -> InsertedCommandStep {
         let (
             execution,
             routed_name,
@@ -14391,11 +14501,11 @@ impl Shared {
         )
     }
 
-    fn resume_inserted_child(
+    fn resume_inserted_child<E: InsertedExecution>(
         self: &Arc<Self>,
         client: ClientId,
         kind: ClientKind,
-        parent: &mut InsertedQueueFrame,
+        parent: &mut InsertedQueueFrame<E>,
         child: Box<InsertedQueueChild>,
         result: Result<InsertedCommandResult, DaemonError>,
         callback_failures_start: usize,
@@ -14472,11 +14582,11 @@ impl Shared {
         }
     }
 
-    fn finish_inserted_frame_command(
+    fn finish_inserted_frame_command<E: InsertedExecution>(
         self: &Arc<Self>,
         client: ClientId,
         kind: ClientKind,
-        frame: &mut InsertedQueueFrame,
+        frame: &mut InsertedQueueFrame<E>,
         boundary: InsertedCommandBoundary,
         step: InsertedCommandStep,
     ) -> InsertedFrameAction {
@@ -14741,11 +14851,11 @@ impl Shared {
         InsertedFrameAction::Continue
     }
 
-    fn finish_inserted_queue_frame(
+    fn finish_inserted_queue_frame<E: InsertedExecution>(
         &self,
         client: ClientId,
         kind: ClientKind,
-        frame: &mut InsertedQueueFrame,
+        frame: &mut InsertedQueueFrame<E>,
     ) -> Result<InsertedCommandResult, DaemonError> {
         if let Some(events) = frame.events.take() {
             self.finish_event_queue_notifications(events.notifications);
@@ -15301,6 +15411,13 @@ impl Shared {
         }
     }
 
+    #[cfg(unix)]
+    fn loop_leaf_enabled(&self) -> bool {
+        self.command_item
+            .as_ref()
+            .is_some_and(|item| item.lock().loop_leaf)
+    }
+
     fn spawn_shell_job(
         self: &Arc<Self>,
         command: String,
@@ -15346,6 +15463,26 @@ impl Shared {
         );
         #[cfg(not(unix))]
         let (tmux_shim, zz_executable) = (None::<PathBuf>, None::<PathBuf>);
+        #[cfg(unix)]
+        if self.loop_leaf_enabled()
+            && delay.is_zero()
+            && matches!(&environment_timing, ShellJobEnvironmentTiming::CommandTime)
+        {
+            return hook_queue::launch_shell(
+                self,
+                &command,
+                &cwd,
+                &tmux,
+                &environment,
+                &default_terminal,
+                startup_reentry,
+                tmux_shim.as_deref(),
+                zz_executable.as_deref(),
+                show_stderr,
+                permit,
+                callback,
+            );
+        }
         let (started_sender, started_receiver) = if policy.wait_for_start {
             let (sender, receiver) = mpsc::sync_channel(1);
             (Some(sender), Some(receiver))
@@ -20257,12 +20394,15 @@ impl Shared {
                                 self.note_terminal_input(client, pane);
                             }
                         }
-                        sync_copy_session_for_view_action(
-                            &mut self.inner.lock(),
-                            client,
-                            pane,
-                            &action,
-                        )?;
+                        let refresh_changed = {
+                            let mut inner = self.inner.lock();
+                            let before = copy_mode_refresh_needed(&inner);
+                            sync_copy_session_for_view_action(&mut inner, client, pane, &action)?;
+                            before != copy_mode_refresh_needed(&inner)
+                        };
+                        if refresh_changed {
+                            self.nudge_client_timers();
+                        }
                         terminal.view_action(TerminalViewId(client.0), action);
                     }
                 }
@@ -22289,6 +22429,7 @@ impl Shared {
             }
             PaneModeRequest::Clock => {
                 pop_pane_mode(&mut self.inner.lock(), pane);
+                self.nudge_client_timers();
                 self.reap_pane_mode_kill_panes(client, ClientKind::Interactive, context);
                 self.publish_snapshot();
                 true
@@ -23560,96 +23701,12 @@ impl Shared {
         }
     }
 
-    /// `window_copy_refresh_timer` is a 50ms libevent timer per mode entry.
-    /// zz has one frozen view per client and the terminal worker owns no
-    /// timers, so the daemon runs one thread for every armed view and lets the
-    /// engine decide which ticks do anything. The thread lives only while some
-    /// copy session still asks for a refresh.
     fn arm_copy_mode_refresh(self: &Arc<Self>) {
-        if self.copy_refresh_running.swap(true, Ordering::AcqRel) {
-            return;
-        }
-        let shared = Arc::downgrade(&self.server_owner());
-        if let Err(error) = thread::Builder::new()
-            .name("zz-copy-refresh".to_owned())
-            .spawn(move || {
-                loop {
-                    thread::sleep(COPY_MODE_REFRESH_INTERVAL);
-                    let Some(shared) = shared.upgrade() else {
-                        return;
-                    };
-                    if shared.stopping.load(Ordering::Acquire) {
-                        shared.copy_refresh_running.store(false, Ordering::Release);
-                        return;
-                    }
-                    let ticks = copy_mode_refresh_ticks(&shared.inner.lock());
-                    if ticks.is_empty() {
-                        shared.copy_refresh_running.store(false, Ordering::Release);
-                        // An arm that raced the store above would have found
-                        // the thread still running and skipped its own spawn,
-                        // so look once more before letting the thread go.
-                        if copy_mode_refresh_ticks(&shared.inner.lock()).is_empty()
-                            || shared.copy_refresh_running.swap(true, Ordering::AcqRel)
-                        {
-                            return;
-                        }
-                        continue;
-                    }
-                    for (client, terminal) in ticks {
-                        terminal.view_action(
-                            TerminalViewId(client.0),
-                            zz_terminal::TerminalViewAction::CopyMode(
-                                zz_terminal::CopyModeAction::RefreshRevision,
-                            ),
-                        );
-                    }
-                }
-            })
-        {
-            self.copy_refresh_running.store(false, Ordering::Release);
-            log::error!(
-                target: "zz_daemon::diagnostics::terminal",
-                "failed to start the copy-mode refresh timer: {error}"
-            );
-        }
+        self.nudge_client_timers();
     }
 
     fn arm_pane_mode_clock(self: &Arc<Self>) {
-        if self.clock_refresh_running.swap(true, Ordering::AcqRel) {
-            return;
-        }
-        let shared = Arc::downgrade(&self.server_owner());
-        if let Err(error) = thread::Builder::new()
-            .name("zz-clock-mode".to_owned())
-            .spawn(move || {
-                loop {
-                    thread::sleep(duration_to_next_second());
-                    let Some(shared) = shared.upgrade() else {
-                        return;
-                    };
-                    if shared.stopping.load(Ordering::Acquire) {
-                        shared.clock_refresh_running.store(false, Ordering::Release);
-                        return;
-                    }
-                    if !clock_modes_are_open(&shared.inner.lock()) {
-                        shared.clock_refresh_running.store(false, Ordering::Release);
-                        if !clock_modes_are_open(&shared.inner.lock())
-                            || shared.clock_refresh_running.swap(true, Ordering::AcqRel)
-                        {
-                            return;
-                        }
-                        continue;
-                    }
-                    shared.publish_mux_snapshots();
-                }
-            })
-        {
-            self.clock_refresh_running.store(false, Ordering::Release);
-            log::error!(
-                target: "zz_daemon::diagnostics::terminal",
-                "failed to start the clock-mode redraw timer: {error}"
-            );
-        }
+        self.nudge_client_timers();
     }
 
     /// `window_pane_reset_mode` kills a `copy-mode -k` pane once the mode is
@@ -28707,6 +28764,7 @@ impl Shared {
             }
         }
         if let Some(event) = mode_event {
+            self.nudge_client_timers();
             self.run_event_hooks(vec![event]);
         }
     }
@@ -29122,7 +29180,7 @@ impl Shared {
         }
         self.publish_window_alert_notifications(notifications);
         if let Some(hook) = hook {
-            self.run_event_hooks_on_worker(vec![hook]);
+            self.enqueue_event_hooks(vec![hook]);
         }
     }
 
@@ -31452,7 +31510,13 @@ impl Shared {
                     "idle".to_owned()
                 }
             };
-            self.write_pane_agent_state(pane, &value);
+            if self.loop_active.load(Ordering::Acquire) {
+                let _ = self
+                    .timer_tx
+                    .send(timers::TimerInput::PeerSample { pane, value });
+            } else {
+                self.write_pane_agent_state(pane, &value);
+            }
         }
     }
 
@@ -37418,7 +37482,14 @@ fn counted_copy_mode_action(
     }
 }
 
-/// Every client view whose copy session still asks for the refresh timer.
+fn copy_mode_refresh_needed(inner: &ServerState) -> bool {
+    inner.clients.values().any(|client| {
+        client.copy_session.as_ref().is_some_and(|session| {
+            session.refresh && !session.exiting && inner.terminals.contains_key(&session.pane)
+        })
+    })
+}
+
 fn copy_mode_refresh_ticks(inner: &ServerState) -> Vec<(ClientId, Arc<TerminalSession>)> {
     inner
         .clients
@@ -41492,6 +41563,8 @@ fn snapshot_presence(inner: &ServerState) -> SnapshotPresence {
         .collect()
 }
 
+#[cfg(unix)]
+mod hook_queue;
 mod timers;
 
 #[cfg(test)]
@@ -44831,6 +44904,29 @@ fn consume_pane_mode_mouse(
     true
 }
 
+fn clock_mode_timer_needed(inner: &ServerState) -> bool {
+    inner.pane_modes.iter().any(|(pane, modes)| {
+        matches!(modes.last(), Some(PaneModeRequest::Clock))
+            && inner
+                .engine
+                .state
+                .window_for_pane(*pane)
+                .and_then(|window| inner.engine.state.windows.get(&window))
+                .is_some_and(|window| {
+                    inner.clients.iter().any(|(id, client)| {
+                        client.subscriber.is_some()
+                            && client_attached_session(inner, *id) == Some(window.session)
+                            && client
+                                .ctrl_subscriptions
+                                .as_ref()
+                                .is_none_or(|subscriptions| {
+                                    subscriptions.tree != zz_protocol::TreeSubscription::None
+                                })
+                    })
+                })
+    })
+}
+
 fn clock_modes_are_open(inner: &ServerState) -> bool {
     inner.pane_modes.values().any(|modes| {
         modes
@@ -45891,8 +45987,24 @@ impl std::ops::Deref for InsertedFrameExecution<'_> {
     }
 }
 
-struct InsertedQueueFrame<'a> {
-    execution: InsertedFrameExecution<'a>,
+trait InsertedExecution: std::ops::Deref<Target = CommandQueueExecution> {
+    fn owned(execution: CommandQueueExecution) -> Self;
+}
+
+impl InsertedExecution for InsertedFrameExecution<'_> {
+    fn owned(execution: CommandQueueExecution) -> Self {
+        Self::Owned(Box::new(execution))
+    }
+}
+
+impl InsertedExecution for Box<CommandQueueExecution> {
+    fn owned(execution: CommandQueueExecution) -> Self {
+        Box::new(execution)
+    }
+}
+
+struct InsertedQueueFrame<E> {
+    execution: E,
     context: ExecutionContext,
     commands: std::vec::IntoIter<CommandInvocation>,
     prepared: bool,
@@ -45912,7 +46024,8 @@ struct InsertedQueueFrame<'a> {
         cmdq::ContinuationToken,
     )>,
     terminal_error: Option<DaemonError>,
-    hook: Option<HookQueueFrame<'a>>,
+    parked_boundary: Option<InsertedCommandBoundary>,
+    hook: Option<HookQueueFrame<E>>,
     events: Option<EventQueueFrame>,
 }
 
@@ -46004,8 +46117,8 @@ struct HookQueueSource {
     replaying: bool,
 }
 
-struct HookQueueFrame<'a> {
-    parent: InsertedFrameExecution<'a>,
+struct HookQueueFrame<E> {
+    parent: E,
     variables: BTreeMap<String, String>,
     skip_resolution_errors: bool,
     replaying: bool,
@@ -49485,6 +49598,10 @@ struct CommandItemContext {
     park: Option<(ClientId, u64)>,
     #[cfg(unix)]
     exec_writer: Option<Weak<OutboundMailbox>>,
+    #[cfg(unix)]
+    loop_leaf: bool,
+    #[cfg(unix)]
+    pending_loop_leaf: Option<hook_queue::PendingLeaf>,
 }
 
 struct DeferredControlNotification {

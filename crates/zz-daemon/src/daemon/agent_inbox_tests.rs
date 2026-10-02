@@ -63,7 +63,7 @@ fn retired_runtime_incarnation_messages_are_dropped() {
     }
     let (current, live, generation) = runtime(&shared, pane);
     retired.shutdown();
-    inbox.turn(&shared).expect("agent inbox turn");
+    inbox.turn(&shared);
     {
         let inner = shared.inner.lock();
         assert_ne!(
@@ -91,7 +91,7 @@ fn retired_runtime_incarnation_messages_are_dropped() {
             ..AgentPaneWire::default()
         },
     );
-    inbox.turn(&shared).expect("agent inbox turn");
+    inbox.turn(&shared);
     assert_eq!(
         shared.inner.lock().agent_states[&pane].title.as_deref(),
         Some("current state")
@@ -115,7 +115,7 @@ fn restarted_pane_generation_messages_are_dropped() {
     assert!(runtime.restart(pane, shared.agent_pane_spec(pane).unwrap()));
     let generation = runtime.pane_generation(pane).unwrap();
     assert_ne!(generation, old_generation);
-    inbox.turn(&shared).expect("agent inbox turn");
+    inbox.turn(&shared);
     assert_ne!(
         shared.inner.lock().engine.state.pane(pane).unwrap().title,
         "retired title"
@@ -130,7 +130,7 @@ fn restarted_pane_generation_messages_are_dropped() {
         Some("retired state")
     );
     publisher.title_agent_pane(generation, pane, "current title".into());
-    inbox.turn(&shared).expect("agent inbox turn");
+    inbox.turn(&shared);
     assert_eq!(
         shared.inner.lock().engine.state.pane(pane).unwrap().title,
         "current title"
@@ -142,7 +142,7 @@ fn restarted_pane_generation_messages_are_dropped() {
 fn agent_inbox_bounds_each_turn_and_keeps_the_next_wake() {
     let (shared, mut inbox, pane) = fixture();
     let (publisher, runtime, generation) = runtime(&shared, pane);
-    inbox.turn(&shared).expect("agent inbox turn");
+    inbox.turn(&shared);
     for index in 0..=DRAIN_BURST {
         publisher.publish_agent_state(
             generation,
@@ -153,13 +153,13 @@ fn agent_inbox_bounds_each_turn_and_keeps_the_next_wake() {
             },
         );
     }
-    inbox.turn(&shared).expect("agent inbox turn");
+    inbox.turn(&shared);
     assert_eq!(
         shared.inner.lock().agent_states[&pane].title.as_deref(),
         Some((DRAIN_BURST - 1).to_string().as_str())
     );
     assert!(shared.agent_tx.pending.load(Ordering::Acquire));
-    inbox.turn(&shared).expect("agent inbox turn");
+    inbox.turn(&shared);
     assert_eq!(
         shared.inner.lock().agent_states[&pane].title.as_deref(),
         Some(DRAIN_BURST.to_string().as_str())
@@ -183,22 +183,28 @@ fn a_shell_hook_keeps_the_agent_inbox_running() {
             ),
         )
         .expect("parked hook");
+    let poll = mio::Poll::new().unwrap();
+    let waker = Arc::new(mio::Waker::new(poll.registry(), mio::Token(1)).unwrap());
+    let mut timers = timers::LoopTimers::new(&shared, &waker);
+    let _jobs = pipe_jobs::Driver::new(&shared);
     inbox.hooks.push_back(
         PendingHookEvent::live_pane("pane-mode-changed", pane, &shared.inner.lock().engine)
             .expect("live hook pane"),
     );
-    inbox.turn(&shared).expect("agent state turn");
+    inbox.turn(&shared);
     publisher.title_agent_pane(generation, pane, "while hook waits".into());
-    assert!(inbox.hook_running);
-    inbox.turn(&shared).expect("inbox turn while hook runs");
+    timers.turn(&shared, &waker).unwrap();
+    assert!(!timers.hooks.is_empty());
+    inbox.turn(&shared);
     assert_eq!(
         shared.inner.lock().engine.state.pane(pane).unwrap().title,
         "while hook waits"
     );
     let deadline = Instant::now() + Duration::from_secs(2);
-    while inbox.hook_running {
+    while !timers.hooks.is_empty() {
+        timers.turn(&shared, &waker).unwrap();
         assert!(Instant::now() < deadline, "hook did not finish");
-        inbox.turn(&shared).expect("hook completion turn");
+        inbox.turn(&shared);
         thread::sleep(Duration::from_millis(1));
     }
     runtime.shutdown();

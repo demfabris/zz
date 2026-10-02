@@ -23,8 +23,9 @@ fn empty_timer_heap_allows_indefinite_poll_and_control_output_uses_its_age_deadl
 }
 
 #[test]
-fn a_blocked_publication_worker_leaves_prefix_expiry_and_socket_writes_on_the_loop() {
+fn publication_flush_and_prefix_expiry_run_without_a_worker() {
     let (shared, client, _, _, mailbox) = key_table_fixture("b4-worker");
+    let workers = shared.connection_threads.worker_count();
     let mut event_loop = EventLoop::empty(&shared).unwrap();
     let (server, mut peer) = UnixStream::pair().unwrap();
     peer.set_nonblocking(true).unwrap();
@@ -40,7 +41,10 @@ fn a_blocked_publication_worker_leaves_prefix_expiry_and_socket_writes_on_the_lo
     take_reliable_messages(&mailbox);
     shared.request_publish(timers::PublishReason::Tree);
     shared.request_publish(timers::PublishReason::Tree);
-    let blocked = shared.snapshot_order.lock();
+    shared
+        .connection_threads
+        .fail_next
+        .store(true, Ordering::Release);
     shared
         .timer_tx
         .send(timers::TimerInput::Timer(
@@ -66,7 +70,13 @@ fn a_blocked_publication_worker_leaves_prefix_expiry_and_socket_writes_on_the_lo
         ]
     );
     assert_eq!(messages(&mut peer, &mut Inbound::default()), vec![output]);
-    drop(blocked);
+    assert!(
+        shared
+            .connection_threads
+            .fail_next
+            .swap(false, Ordering::AcqRel)
+    );
+    assert_eq!(shared.connection_threads.worker_count(), workers);
     event_loop.remove(token, &shared);
     shared.request_shutdown();
 }

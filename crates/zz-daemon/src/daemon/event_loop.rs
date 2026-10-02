@@ -1296,7 +1296,7 @@ impl EventLoop {
 
     fn turn(&mut self, shared: &Arc<Shared>) -> Result<(), DaemonError> {
         #[cfg(feature = "agent")]
-        self.agents.turn(shared)?;
+        self.agents.turn(shared);
         self.turn_helpers(shared);
         self.turn_status_jobs();
         self.turn_pipe_jobs(shared);

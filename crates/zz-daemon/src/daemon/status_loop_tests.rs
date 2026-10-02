@@ -299,6 +299,7 @@ fn peer_requests_throttle_and_follow_up_without_client_timers() {
 #[test]
 fn a_blocked_monitor_hook_does_not_delay_subscription_deadlines() {
     let (shared, mut context, client, _poll, waker, mut timers) = fixture();
+    let _jobs = pipe_jobs::Driver::new(&shared);
     model(&shared, &mut context, &["set", "-g", "status", "off"]);
     shared.update_control_subscription(client, "query::#{session_name}");
     struct Release(PathBuf);
@@ -329,6 +330,7 @@ fn a_blocked_monitor_hook_does_not_delay_subscription_deadlines() {
     timers.turn(&shared, &waker).unwrap();
     let deadline = Instant::now() + Duration::from_secs(2);
     while !started_path.exists() {
+        timers.turn(&shared, &waker).unwrap();
         assert!(Instant::now() < deadline, "monitor hook did not park");
         thread::sleep(Duration::from_millis(1));
     }
@@ -340,6 +342,7 @@ fn a_blocked_monitor_hook_does_not_delay_subscription_deadlines() {
     let started = Instant::now();
     timers.turn(&shared, &waker).unwrap();
     assert!(started.elapsed() < Duration::from_millis(100));
+    assert_eq!(shared.connection_threads.worker_count(), 0);
     let samples = shared
         .inner
         .lock()
@@ -353,7 +356,7 @@ fn a_blocked_monitor_hook_does_not_delay_subscription_deadlines() {
         .len();
     drop(release);
     assert_eq!(samples, 1);
-    while timers.clients.monitor_running {
+    while !timers.hooks.is_empty() {
         assert!(Instant::now() < deadline, "monitor did not finish");
         timers.turn(&shared, &waker).unwrap();
         thread::sleep(Duration::from_millis(1));

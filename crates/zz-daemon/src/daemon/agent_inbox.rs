@@ -6,7 +6,6 @@ const DRAIN_BURST: usize = 128;
 pub(super) struct AgentInbox {
     pub(super) receiver: Option<crossbeam_channel::Receiver<Message>>,
     hooks: VecDeque<PendingHookEvent>,
-    hook_running: bool,
 }
 
 impl AgentInbox {
@@ -14,11 +13,10 @@ impl AgentInbox {
         Self {
             receiver: shared.agent_rx.lock().take(),
             hooks: VecDeque::new(),
-            hook_running: false,
         }
     }
 
-    pub(super) fn turn(&mut self, shared: &Arc<Shared>) -> Result<(), DaemonError> {
+    pub(super) fn turn(&mut self, shared: &Arc<Shared>) {
         if shared.agent_tx.pending.swap(false, Ordering::AcqRel)
             && let Some(receiver) = self.receiver.clone()
         {
@@ -29,32 +27,12 @@ impl AgentInbox {
                 shared.agent_tx.notify_loop();
             }
         }
-        if !self.hook_running && !self.hooks.is_empty() {
-            let events = self.hooks.drain(..).collect();
-            let wake = shared.agent_tx.clone();
-            let owner = shared.server_owner();
-            shared
-                .connection_threads
-                .run(Box::new(move || {
-                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        owner.run_event_hooks(events);
-                    }));
-                    if result.is_err() {
-                        log::error!("agent hook execution panicked");
-                    }
-                    wake.hooks_completed();
-                }))
-                .map_err(|error| DaemonError::Thread(error.to_string()))?;
-            self.hook_running = true;
+        if !self.hooks.is_empty() {
+            shared.enqueue_event_hooks(self.hooks.drain(..).collect());
         }
-        Ok(())
     }
 
     pub(super) fn apply(&mut self, shared: &Arc<Shared>, message: Message) {
-        if matches!(message.payload, Payload::HooksCompleted) {
-            self.hook_running = false;
-            return;
-        }
         let event = {
             let _effects = shared.agent_effects.lock();
             if shared.agent_stopped.load(Ordering::Acquire)
@@ -74,7 +52,6 @@ impl AgentInbox {
             }
             let pane = message.pane;
             match message.payload {
-                Payload::HooksCompleted => unreachable!(),
                 Payload::Barrier(reply) => {
                     let _ = reply.try_send(());
                     None

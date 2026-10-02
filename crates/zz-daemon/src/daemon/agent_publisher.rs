@@ -33,7 +33,6 @@ pub(super) struct Message {
 }
 
 pub(super) enum Payload {
-    HooksCompleted,
     Barrier(crossbeam_channel::Sender<()>),
     Updates {
         first_seq: u64,
@@ -78,21 +77,6 @@ impl Sender {
         Publisher {
             sender: self.clone(),
             incarnation: self.incarnation.fetch_add(1, Ordering::AcqRel) + 1,
-        }
-    }
-
-    pub(super) fn hooks_completed(&self) {
-        if self
-            .sender
-            .send(Message {
-                incarnation: 0,
-                pane: PaneId(0),
-                generation: 0,
-                payload: Payload::HooksCompleted,
-            })
-            .is_ok()
-        {
-            self.notify_loop();
         }
     }
 

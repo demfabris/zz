@@ -30,6 +30,7 @@ fn signal_shutdown_waits_for_a_foreground_job_that_ends_within_its_grace() {
     assert!(!shared.stopping.load(Ordering::Acquire));
     until(&mut event_loop, &shared, || {
         shared.shutdown_cleanup_complete.load(Ordering::Acquire)
+            && shared.inner.lock().active_shell_jobs == 0
     });
     worker.join().unwrap().unwrap();
     assert_eq!(fs::read_to_string(marker).unwrap(), "finished");
@@ -45,6 +46,7 @@ fn signal_shutdown_stops_a_foreground_job_that_outlives_its_grace() {
     event_loop.request_signal_shutdown(&shared, grace).unwrap();
     until(&mut event_loop, &shared, || {
         shared.shutdown_cleanup_complete.load(Ordering::Acquire)
+            && shared.inner.lock().active_shell_jobs == 0
     });
     assert!(signalled.elapsed() >= grace);
     assert!(worker.join().unwrap().is_err());
@@ -68,6 +70,7 @@ fn repeated_signal_stops_past_active_shutdown_blockers() {
         .unwrap();
     until(&mut event_loop, &shared, || {
         shared.shutdown_cleanup_complete.load(Ordering::Acquire)
+            && shared.inner.lock().active_shell_jobs == 0
     });
     assert!(second.elapsed() < Duration::from_secs(1));
     assert!(ShutdownBlocker::acquire(&shared, false).is_none());

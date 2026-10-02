@@ -3313,6 +3313,11 @@ Delay-only and foreground `run-shell -C` requests suspend their command frames. 
 Twenty queued delay-only and command-mode requests add zero threads and exactly twenty deadlines. The named environment and background ordering tests pass; the serial daemon suite passes 1,479 tests, daemon Clippy is clean, and six compat scenarios pass 188 steps with zero divergences.
 Synchronous source-file replay and ordinary zero-delay shell jobs retain their existing workers. Windows cross-check passes with nine existing warnings; Linux-only runtime checks remain with the orchestrator.
 
+**e14 as built (2026-10-02, macOS):** 14/16 explicit park sites now use loop continuations; `daemon/jobs.rs` runs foreground and background `run-shell` and `if-shell` jobs.
+Foreground items resume at their saved boundaries. The loop applies ready background completions by launch ticket without waiting for a slower earlier job.
+Unix has no shell process worker, foreground result receiver or per-job exit poller. Twenty concurrent jobs add zero job or command workers; admission rejects a command after 256 slots fill.
+The serial daemon suite, focused tests, fmt and daemon Clippy pass. Five compat groups are clean; `if-shell-background-order` has the same pre-lane red where tmux does not reach file order on this Mac.
+
 
 ## W4-DELIVER: frames straight from shards (effort L)
 

@@ -172,6 +172,7 @@ const MAX_SHELL_JOBS: usize = 256;
 const MAX_COPY_PIPE_BYTES: usize = 32 * 1024 * 1024;
 const MAX_COPY_PIPE_COMMAND_BYTES: usize = 8 * 1024;
 const COPY_PIPE_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(any(test, not(unix)))]
 const COPY_PIPE_POLL_INTERVAL: Duration = Duration::from_millis(20);
 /// `WINDOW_COPY_REFRESH_INTERVAL`.
 const COPY_MODE_REFRESH_INTERVAL: Duration = Duration::from_millis(50);
@@ -4107,6 +4108,8 @@ struct SharedServer {
     pipe_effects: Mutex<()>,
     #[cfg(unix)]
     pipe_jobs: pipe_jobs::Client,
+    #[cfg(all(test, unix))]
+    shell_loop_start: Mutex<()>,
     prompt_history_effects: Mutex<()>,
     background_insertions: Mutex<BackgroundInsertions>,
     next_background_insertion: AtomicU64,
@@ -5031,6 +5034,8 @@ impl Shared {
             pipe_effects: Mutex::new(()),
             #[cfg(unix)]
             pipe_jobs: pipe_jobs::Client::default(),
+            #[cfg(all(test, unix))]
+            shell_loop_start: Mutex::new(()),
             prompt_history_effects: Mutex::new(()),
             background_insertions: Mutex::new(BackgroundInsertions::default()),
             next_background_insertion: AtomicU64::new(0),
@@ -5560,6 +5565,15 @@ impl Shared {
             stop_control_output_tap(tap);
         }
         for process in shell_jobs {
+            #[cfg(unix)]
+            if let Some(process) = process.lock().take() {
+                process.cancel.store(true, Ordering::Release);
+                if let Some(pid) = rustix::process::Pid::from_raw(process.pid as i32) {
+                    let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+                }
+                self.pipe_jobs.notify();
+            }
+            #[cfg(not(unix))]
             terminate_managed_process(&process);
         }
         for (client, popup) in popups {
@@ -12189,6 +12203,8 @@ impl Shared {
                 item.pending_wait = Some(Box::new(RegisteredWait {
                     name: name.to_owned(),
                     continuation,
+                    #[cfg(unix)]
+                    shell: None,
                     leaf: None,
                     guard: None,
                 }));
@@ -13417,6 +13433,7 @@ impl Shared {
                     let background_command = command.clone();
                     let worker_context = command_context.clone();
                     let policy = ShellJobSpawnPolicy {
+                        #[cfg(not(unix))]
                         wait_for_start: delay.is_zero(),
                         shutdown_blocking: draining && !parsed.background && delay.is_zero(),
                         detached,
@@ -13515,70 +13532,73 @@ impl Shared {
                     }
                     Ok(Execution::default())
                 } else {
-                    let (sender, receiver) = mpsc::sync_channel(1);
                     #[cfg(unix)]
-                    let loop_leaf = self.loop_leaf_enabled();
-                    #[cfg(unix)]
-                    let ready = Arc::new(AtomicBool::new(false));
-                    #[cfg(unix)]
-                    let completed = Arc::clone(&ready);
-                    #[cfg(unix)]
-                    let wake = self.timer_tx.clone();
-                    let failed_command = command.clone();
-                    self.spawn_shell_job(
-                        command.clone(),
-                        cwd,
-                        tmux,
-                        environment,
-                        default_terminal,
-                        environment_timing,
-                        parsed.show_stderr,
-                        delay,
-                        ShellJobSpawnPolicy {
-                            wait_for_start: false,
-                            shutdown_blocking: delay.is_zero(),
-                            detached,
-                        },
-                        queue_execution,
-                        move |result| {
-                            let _ = sender.send(result);
-                            #[cfg(unix)]
-                            if loop_leaf {
-                                completed.store(true, Ordering::Release);
-                                let _ = wake.send(timers::TimerInput::HookReady);
-                            }
-                        },
-                    )?;
-                    #[cfg(unix)]
-                    if loop_leaf {
-                        self.command_item
-                            .as_ref()
-                            .expect("loop command item")
-                            .lock()
-                            .pending_loop_leaf = Some(hook_queue::PendingLeaf {
-                            ready,
-                            receiver,
-                            finish: Box::new(move |shared, result| {
-                                let result = result.map_err(|()| {
-                                    ServerError::InvalidCommand(format!(
-                                        "failed to run command: {failed_command}"
-                                    ))
-                                })?;
-                                shared.finish_run_shell(route, &command, &result)
-                            }),
+                    {
+                        let failed_command = command.clone();
+                        let finish_command = command.clone();
+                        let (wait, callback) = ShellWait::new(self, move |shared, _, _, result| {
+                            let result = result.map_err(|()| {
+                                ServerError::InvalidCommand(format!(
+                                    "failed to run command: {failed_command}"
+                                ))
+                            })?;
+                            shared.finish_run_shell(route, &finish_command, &result)
                         });
-                        return Ok(Execution::default());
+                        self.spawn_shell_job(
+                            command,
+                            cwd,
+                            tmux,
+                            environment,
+                            default_terminal,
+                            environment_timing,
+                            parsed.show_stderr,
+                            delay,
+                            ShellJobSpawnPolicy {
+                                #[cfg(not(unix))]
+                                wait_for_start: false,
+                                shutdown_blocking: delay.is_zero(),
+                                detached,
+                            },
+                            queue_execution,
+                            callback,
+                        )?;
+                        self.park_shell_job(wait, context, queue_execution)
                     }
-                    self.report_command_queue_park();
-                    let result = receiver.recv().map_err(|error| {
-                        DaemonError::Thread(format!("run-shell worker stopped: {error}"))
-                    })?;
-                    let result = result.map_err(|()| {
-                        ServerError::InvalidCommand(format!(
-                            "failed to run command: {failed_command}"
-                        ))
-                    })?;
-                    self.finish_run_shell(route, &command, &result)
+                    #[cfg(not(unix))]
+                    {
+                        let (sender, receiver) = mpsc::sync_channel(1);
+                        let failed_command = command.clone();
+                        self.spawn_shell_job(
+                            command.clone(),
+                            cwd,
+                            tmux,
+                            environment,
+                            default_terminal,
+                            environment_timing,
+                            parsed.show_stderr,
+                            delay,
+                            ShellJobSpawnPolicy {
+                                #[cfg(not(unix))]
+                                wait_for_start: false,
+                                shutdown_blocking: delay.is_zero(),
+                                detached,
+                            },
+                            queue_execution,
+                            move |result| {
+                                let _ = sender.send(result);
+                            },
+                        )?;
+                        self.report_command_queue_park();
+                        let result = receiver.recv().map_err(|error| {
+                            DaemonError::Thread(format!("run-shell worker stopped: {error}"))
+                        })?;
+                        let result = result.map_err(|()| {
+                            ServerError::InvalidCommand(format!(
+                                "failed to run command: {failed_command}"
+                            ))
+                        })?;
+                        self.finish_run_shell(route, &command, &result)
+                    }
                 }
             }
         }
@@ -13717,6 +13737,7 @@ impl Shared {
                 false,
                 Duration::ZERO,
                 ShellJobSpawnPolicy {
+                    #[cfg(not(unix))]
                     wait_for_start: true,
                     shutdown_blocking: draining && !parsed.background,
                     detached,
@@ -13828,49 +13849,99 @@ impl Shared {
             return Ok(Execution::default());
         }
 
-        let (sender, receiver) = mpsc::sync_channel(1);
-        let failed_condition = condition.clone();
-        self.spawn_shell_job(
-            condition,
-            cwd,
-            tmux,
-            environment,
-            default_terminal,
-            ShellJobEnvironmentTiming::CommandTime,
-            false,
-            Duration::ZERO,
-            ShellJobSpawnPolicy {
-                wait_for_start: false,
-                shutdown_blocking: true,
-                detached,
-            },
-            queue_execution,
-            move |result| {
-                let _ = sender.send(result);
-            },
-        )?;
-        self.report_command_queue_park();
-        let result = receiver
-            .recv()
-            .map_err(|error| DaemonError::Thread(format!("if-shell worker stopped: {error}")))?;
-        let result = result.map_err(|()| {
-            ServerError::InvalidCommand(format!("failed to run command: {failed_condition}"))
-        })?;
-        let Some(source) = select_if_shell_branch(&branches, result.status.success()) else {
-            return Ok(Execution::default());
-        };
-        let mut command_context = command_context;
-        command_context.retarget(&inserted_target);
-        let result = self.execute_foreground_inserted_commands(
-            client,
-            kind,
-            &mut command_context,
-            source,
-            "<if-shell>",
-            queue_execution,
-        )?;
-        *context = command_context;
-        inserted_execution(client, kind, result)
+        #[cfg(unix)]
+        {
+            let failed_condition = condition.clone();
+            let (wait, callback) = ShellWait::new(self, move |shared, context, queue, result| {
+                let result = result.map_err(|()| {
+                    ServerError::InvalidCommand(format!(
+                        "failed to run command: {failed_condition}"
+                    ))
+                })?;
+                let Some(source) = select_if_shell_branch(&branches, result.status.success())
+                else {
+                    return Ok(Execution::default());
+                };
+                let mut command_context = command_context;
+                command_context.retarget(&inserted_target);
+                let result = shared.execute_foreground_inserted_commands(
+                    client,
+                    kind,
+                    &mut command_context,
+                    source,
+                    "<if-shell>",
+                    queue,
+                )?;
+                *context = command_context;
+                inserted_execution(client, kind, result)
+            });
+            self.spawn_shell_job(
+                condition,
+                cwd,
+                tmux,
+                environment,
+                default_terminal,
+                ShellJobEnvironmentTiming::CommandTime,
+                false,
+                Duration::ZERO,
+                ShellJobSpawnPolicy {
+                    #[cfg(not(unix))]
+                    wait_for_start: false,
+                    shutdown_blocking: true,
+                    detached,
+                },
+                queue_execution,
+                callback,
+            )?;
+            self.park_shell_job(wait, context, queue_execution)
+        }
+        #[cfg(not(unix))]
+        {
+            let (sender, receiver) = mpsc::sync_channel(1);
+            let failed_condition = condition.clone();
+            self.spawn_shell_job(
+                condition,
+                cwd,
+                tmux,
+                environment,
+                default_terminal,
+                ShellJobEnvironmentTiming::CommandTime,
+                false,
+                Duration::ZERO,
+                ShellJobSpawnPolicy {
+                    #[cfg(not(unix))]
+                    wait_for_start: false,
+                    shutdown_blocking: true,
+                    detached,
+                },
+                queue_execution,
+                move |result| {
+                    let _ = sender.send(result);
+                },
+            )?;
+            self.report_command_queue_park();
+            let result = receiver.recv().map_err(|error| {
+                DaemonError::Thread(format!("if-shell worker stopped: {error}"))
+            })?;
+            let result = result.map_err(|()| {
+                ServerError::InvalidCommand(format!("failed to run command: {failed_condition}"))
+            })?;
+            let Some(source) = select_if_shell_branch(&branches, result.status.success()) else {
+                return Ok(Execution::default());
+            };
+            let mut command_context = command_context;
+            command_context.retarget(&inserted_target);
+            let result = self.execute_foreground_inserted_commands(
+                client,
+                kind,
+                &mut command_context,
+                source,
+                "<if-shell>",
+                queue_execution,
+            )?;
+            *context = command_context;
+            inserted_execution(client, kind, result)
+        }
     }
 
     fn execute_foreground_inserted_commands(
@@ -14247,6 +14318,10 @@ impl Shared {
                     false,
                 );
                 let (boundary, mut step) = frame.wait_boundary.take().unwrap();
+                #[cfg(unix)]
+                if let Some(shell) = wait.shell {
+                    step.0 = shell.finish(self, &mut frame.context, Some(&frame.execution));
+                }
                 if let Some(mut leaf) = wait.leaf {
                     let command = leaf.command.take().expect("wait command");
                     step.0 = self.finish_inserted_leaf(
@@ -15719,6 +15794,8 @@ impl Shared {
                 item.pending_wait = Some(Box::new(RegisteredWait {
                     name: String::new(),
                     continuation,
+                    #[cfg(unix)]
+                    shell: None,
                     leaf: None,
                     guard: None,
                 }));
@@ -15729,16 +15806,62 @@ impl Shared {
         Ok(())
     }
 
+    #[cfg(unix)]
+    fn park_shell_job(
+        self: &Arc<Self>,
+        wait: ShellWait,
+        context: &mut ExecutionContext,
+        queue_execution: Option<&CommandQueueExecution>,
+    ) -> Result<Execution, DaemonError> {
+        self.report_command_queue_park();
+        if let Some(item) = &self.command_item {
+            let mut item = item.lock();
+            if (item.loop_wait || item.loop_leaf)
+                && queue_execution.is_some_and(|queue| queue.frame_active.get())
+            {
+                item.pending_wait = Some(Box::new(RegisteredWait {
+                    name: String::new(),
+                    continuation: wait.continuation.clone(),
+                    shell: Some(wait),
+                    leaf: None,
+                    guard: None,
+                }));
+                return Ok(Execution::default());
+            }
+        }
+        wait.continuation.wait();
+        wait.finish(self, context, queue_execution)
+    }
+
     fn background_insertion_ticket(&self) -> u64 {
         self.next_background_insertion
             .fetch_add(1, Ordering::AcqRel)
     }
 
     fn apply_background_insertion(&self, ticket: u64, work: impl FnOnce() + Send + 'static) {
+        #[cfg(unix)]
+        if self.loop_active.load(Ordering::Acquire) {
+            self.background_insertions
+                .lock()
+                .pending
+                .insert(ticket, Box::new(work));
+            self.accept_wake.wake();
+            return;
+        }
+        self.background_insertions
+            .lock()
+            .pending
+            .insert(ticket, Box::new(work));
+        self.drain_background_insertions();
+    }
+
+    fn drain_background_insertions(&self) {
+        if self.next_background_insertion.load(Ordering::Acquire) == 0 {
+            return;
+        }
         {
             let mut insertions = self.background_insertions.lock();
-            insertions.pending.insert(ticket, Box::new(work));
-            if insertions.draining {
+            if insertions.draining || insertions.pending.is_empty() {
                 return;
             }
             insertions.draining = true;
@@ -15795,7 +15918,9 @@ impl Shared {
         if let Some(blocker) = &mut permit.shutdown_blocker {
             blocker.shared = blocker.shared.server_owner();
         }
+        #[cfg(not(unix))]
         let failed_command = command.clone();
+        #[cfg(not(unix))]
         let zz_socket = self.socket_path.clone();
         let startup_reentry =
             if matches!(&environment_timing, ShellJobEnvironmentTiming::CommandTime) {
@@ -15811,8 +15936,9 @@ impl Shared {
         #[cfg(not(unix))]
         let (tmux_shim, zz_executable) = (None::<PathBuf>, None::<PathBuf>);
         #[cfg(unix)]
-        if self.loop_leaf_enabled() || !delay.is_zero() && self.loop_active.load(Ordering::Acquire)
         {
+            #[cfg(test)]
+            shell_jobs_e14_tests::start_loop(&self.server_owner())?;
             let shared = self.server_owner();
             let launch = move || {
                 if shared.stopping.load(Ordering::Acquire)
@@ -15842,7 +15968,7 @@ impl Shared {
                 };
                 let callback = Arc::new(Mutex::new(Some(callback)));
                 let completed = Arc::clone(&callback);
-                if hook_queue::launch_shell(
+                if jobs::launch_shell(
                     &shared,
                     &command,
                     &cwd,
@@ -15870,85 +15996,89 @@ impl Shared {
                 launch();
                 return Ok(());
             }
-            return self.spawn_delay(delay, launch);
+            self.spawn_delay(delay, launch)
         }
-        let (started_sender, started_receiver) = if policy.wait_for_start {
-            let (sender, receiver) = mpsc::sync_channel(1);
-            (Some(sender), Some(receiver))
-        } else {
-            (None, None)
-        };
-        let launch = move || {
-            thread::Builder::new()
-                .name("zz-run-shell".to_owned())
-                .spawn(move || {
-                    if permit.shared.stopping.load(Ordering::Acquire)
-                        && !policy.detached
-                        && !policy.shutdown_blocking
-                    {
-                        drop(permit);
-                        callback(Err(()));
-                        return;
-                    }
-                    let (environment, default_terminal, startup_reentry) = match environment_timing
-                    {
-                        ShellJobEnvironmentTiming::CommandTime => {
-                            (environment, default_terminal, startup_reentry)
+        #[cfg(not(unix))]
+        {
+            let (started_sender, started_receiver) = if policy.wait_for_start {
+                let (sender, receiver) = mpsc::sync_channel(1);
+                (Some(sender), Some(receiver))
+            } else {
+                (None, None)
+            };
+            let launch = move || {
+                thread::Builder::new()
+                    .name("zz-run-shell".to_owned())
+                    .spawn(move || {
+                        if permit.shared.stopping.load(Ordering::Acquire)
+                            && !policy.detached
+                            && !policy.shutdown_blocking
+                        {
+                            drop(permit);
+                            callback(Err(()));
+                            return;
                         }
-                        ShellJobEnvironmentTiming::LaunchTime {
-                            session_environment,
-                        } => {
-                            let (environment, default_terminal, startup_reentry) = {
-                                let inner = permit.shared.inner.lock();
-                                let startup_ready = *permit.shared.startup_ready.lock();
-                                (
-                                    inner.engine.job_environment_with_retained_session(
-                                        session_environment.as_ref(),
-                                    ),
-                                    inner.engine.default_terminal_for_spawn().to_owned(),
-                                    (!startup_ready).then(|| permit.shared.server_id.to_string()),
-                                )
+                        let (environment, default_terminal, startup_reentry) =
+                            match environment_timing {
+                                ShellJobEnvironmentTiming::CommandTime => {
+                                    (environment, default_terminal, startup_reentry)
+                                }
+                                ShellJobEnvironmentTiming::LaunchTime {
+                                    session_environment,
+                                } => {
+                                    let (environment, default_terminal, startup_reentry) = {
+                                        let inner = permit.shared.inner.lock();
+                                        let startup_ready = *permit.shared.startup_ready.lock();
+                                        (
+                                            inner.engine.job_environment_with_retained_session(
+                                                session_environment.as_ref(),
+                                            ),
+                                            inner.engine.default_terminal_for_spawn().to_owned(),
+                                            (!startup_ready)
+                                                .then(|| permit.shared.server_id.to_string()),
+                                        )
+                                    };
+                                    (environment, default_terminal, startup_reentry)
+                                }
                             };
-                            (environment, default_terminal, startup_reentry)
-                        }
-                    };
-                    let result = run_shell_job(
-                        &command,
-                        &cwd,
-                        &tmux,
-                        &environment,
-                        &default_terminal,
-                        &zz_socket,
-                        startup_reentry.as_deref(),
-                        tmux_shim.as_deref(),
-                        zz_executable.as_deref(),
-                        show_stderr,
-                        &permit.process,
-                        &permit.shared.stopping,
-                        policy.detached || policy.shutdown_blocking,
-                        started_sender.as_ref(),
-                    );
-                    drop(permit);
-                    callback(result);
-                })
-                .map(drop)
-                .map_err(|error| DaemonError::Thread(error.to_string()))
-        };
-        if delay.is_zero() {
-            launch()?;
-        } else {
-            self.spawn_delay(delay, move || {
-                if let Err(error) = launch() {
-                    log::error!("failed to run shell worker: {error}");
-                }
-            })?;
+                        let result = run_shell_job(
+                            &command,
+                            &cwd,
+                            &tmux,
+                            &environment,
+                            &default_terminal,
+                            &zz_socket,
+                            startup_reentry.as_deref(),
+                            tmux_shim.as_deref(),
+                            zz_executable.as_deref(),
+                            show_stderr,
+                            &permit.process,
+                            &permit.shared.stopping,
+                            policy.detached || policy.shutdown_blocking,
+                            started_sender.as_ref(),
+                        );
+                        drop(permit);
+                        callback(result);
+                    })
+                    .map(drop)
+                    .map_err(|error| DaemonError::Thread(error.to_string()))
+            };
+            if delay.is_zero() {
+                launch()?;
+            } else {
+                self.spawn_delay(delay, move || {
+                    if let Err(error) = launch() {
+                        log::error!("failed to run shell worker: {error}");
+                    }
+                })?;
+            }
+            if let Some(started_receiver) = started_receiver {
+                started_receiver.recv().map_err(|_| {
+                    ServerError::InvalidCommand(format!("failed to run command: {failed_command}"))
+                })?;
+            }
+            Ok(())
         }
-        if let Some(started_receiver) = started_receiver {
-            started_receiver.recv().map_err(|_| {
-                ServerError::InvalidCommand(format!("failed to run command: {failed_command}"))
-            })?;
-        }
-        Ok(())
     }
 
     fn agent_send(
@@ -34021,6 +34151,9 @@ struct ServerState {
     automatic_paste_buffer_limit: AutomaticPasteBufferLimit,
     active_copy_pipes: usize,
     active_shell_jobs: usize,
+    #[cfg(unix)]
+    shell_jobs: BTreeMap<u64, Arc<Mutex<Option<ShellJobProcess>>>>,
+    #[cfg(not(unix))]
     shell_jobs: BTreeMap<u64, Arc<Mutex<Option<Child>>>>,
     next_shell_job_token: u64,
     next_buffer_id: u64,
@@ -34050,6 +34183,8 @@ struct WaitItem {
 struct RegisteredWait {
     name: String,
     continuation: cmdq::WaitContinuation,
+    #[cfg(unix)]
+    shell: Option<ShellWait>,
     leaf: Option<InsertedLeafContinuation>,
     guard: Option<InsertedControlGuard>,
 }
@@ -42978,9 +43113,94 @@ impl Drop for ShutdownBlocker {
     }
 }
 
+#[cfg(all(test, unix))]
+#[path = "daemon/shell_jobs_e14_tests.rs"]
+mod shell_jobs_e14_tests;
+
+#[cfg(unix)]
+struct ShellJobProcess {
+    pid: u32,
+    cancel: Arc<AtomicBool>,
+}
+
+#[cfg(unix)]
+type ShellFinish = Box<
+    dyn FnOnce(
+            &Arc<Shared>,
+            &mut ExecutionContext,
+            Option<&CommandQueueExecution>,
+            Result<ShellJobResult, ()>,
+        ) -> Result<Execution, DaemonError>
+        + Send,
+>;
+
+#[cfg(unix)]
+struct ShellWait {
+    continuation: cmdq::WaitContinuation,
+    result: Arc<Mutex<Option<Result<ShellJobResult, ()>>>>,
+    finish: ShellFinish,
+}
+
+#[cfg(unix)]
+impl ShellWait {
+    fn new(
+        shared: &Arc<Shared>,
+        finish: impl FnOnce(
+            &Arc<Shared>,
+            &mut ExecutionContext,
+            Option<&CommandQueueExecution>,
+            Result<ShellJobResult, ()>,
+        ) -> Result<Execution, DaemonError>
+        + Send
+        + 'static,
+    ) -> (
+        Self,
+        impl FnOnce(Result<ShellJobResult, ()>) + Send + 'static,
+    ) {
+        let continuation = cmdq::WaitContinuation::new(
+            shared
+                .command_item
+                .as_ref()
+                .and_then(|item| item.lock().wait()),
+            None,
+        );
+        let result = Arc::new(Mutex::new(None));
+        let completed = continuation.clone();
+        let output = Arc::clone(&result);
+        let wake = shared.timer_tx.clone();
+        (
+            Self {
+                continuation,
+                result,
+                finish: Box::new(finish),
+            },
+            move |result| {
+                *output.lock() = Some(result);
+                completed.complete();
+                let _ = wake.send(timers::TimerInput::HookReady);
+            },
+        )
+    }
+
+    fn finish(
+        self,
+        shared: &Arc<Shared>,
+        context: &mut ExecutionContext,
+        queue: Option<&CommandQueueExecution>,
+    ) -> Result<Execution, DaemonError> {
+        let result = self.result.lock().take().expect("completed shell job");
+        (self.finish)(shared, context, queue, result)
+    }
+}
+
 struct ShellJobPermit {
     shared: Arc<Shared>,
     token: u64,
+    #[cfg(unix)]
+    process: Arc<Mutex<Option<ShellJobProcess>>>,
+    #[cfg(unix)]
+    cancel: Arc<AtomicBool>,
+    #[cfg(not(unix))]
     process: Arc<Mutex<Option<Child>>>,
     managed: bool,
     shutdown_blocker: Option<ShutdownBlocker>,
@@ -43022,6 +43242,8 @@ impl ShellJobPermit {
             shared: Arc::clone(shared),
             token,
             process,
+            #[cfg(unix)]
+            cancel: Arc::new(AtomicBool::new(false)),
             managed,
             shutdown_blocker,
         })
@@ -43043,204 +43265,6 @@ impl Drop for ShellJobPermit {
 struct ShellJobResult {
     output: Vec<u8>,
     status: ExitStatus,
-}
-
-#[cfg(unix)]
-fn run_shell_job(
-    command: &str,
-    cwd: &Path,
-    tmux: &str,
-    environment: &[(RawText, Option<RawText>)],
-    default_terminal: &str,
-    zz_socket: &Path,
-    startup_reentry: Option<&str>,
-    tmux_shim: Option<&Path>,
-    zz_executable: Option<&Path>,
-    show_stderr: bool,
-    job_process: &Mutex<Option<Child>>,
-    stopping: &AtomicBool,
-    detached: bool,
-    started: Option<&mpsc::SyncSender<()>>,
-) -> Result<ShellJobResult, ()> {
-    use std::{
-        net::Shutdown,
-        os::{fd::OwnedFd, unix::net::UnixStream, unix::process::CommandExt as _},
-        process::Stdio,
-    };
-
-    let (mut output, child_socket) = UnixStream::pair().map_err(|_| ())?;
-    let stdin = OwnedFd::from(child_socket.try_clone().map_err(|_| ())?);
-    let stdout = OwnedFd::from(child_socket.try_clone().map_err(|_| ())?);
-    let cwd = existing_job_working_directory(cwd);
-    let mut process = shell_process(command);
-    configure_shell_job_environment(
-        &mut process,
-        environment,
-        default_terminal,
-        startup_reentry.is_some(),
-        tmux,
-        zz_socket.as_os_str(),
-        tmux_shim,
-        zz_executable,
-    );
-    process
-        .arg0("sh")
-        .process_group(0)
-        .current_dir(&cwd)
-        .env("PWD", cwd.as_os_str())
-        .stdin(Stdio::from(stdin))
-        .stdout(Stdio::from(stdout));
-    if let Some(startup_reentry) = startup_reentry {
-        process.env(crate::STARTUP_REENTRY_ENVIRONMENT_VARIABLE, startup_reentry);
-    }
-    if show_stderr {
-        let stderr = OwnedFd::from(child_socket.try_clone().map_err(|_| ())?);
-        process.stderr(Stdio::from(stderr));
-    } else {
-        process.stderr(Stdio::null());
-    }
-    output.shutdown(Shutdown::Write).map_err(|_| ())?;
-    output.set_nonblocking(true).map_err(|_| ())?;
-    let child = process.spawn().map_err(|_| ())?;
-    drop(process);
-    drop(child_socket);
-    let exit = ShellJobExit::watch(child.id());
-    install_shell_job_process(job_process, stopping, child, detached)?;
-    if let Some(started) = started {
-        let _ = started.send(());
-    }
-    let mut bytes = Vec::new();
-    let mut buffer = [0_u8; 8192];
-    let status = loop {
-        let reached_eof = read_available_shell_job_output(&mut output, &mut bytes, &mut buffer)
-            .map_err(|()| {
-                terminate_managed_process(job_process);
-            })?;
-        if reached_eof {
-            break wait_shell_job_process(job_process, || exit.wait(None))?;
-        }
-        if let Some(status) = reap_shell_job_process(job_process)? {
-            read_available_shell_job_output(&mut output, &mut bytes, &mut buffer)?;
-            break status;
-        }
-        exit.wait(Some(&output));
-    };
-    Ok(ShellJobResult {
-        output: bytes,
-        status,
-    })
-}
-
-#[cfg(unix)]
-struct ShellJobExit(Option<std::os::fd::OwnedFd>);
-
-#[cfg(unix)]
-impl ShellJobExit {
-    #[cfg(target_os = "linux")]
-    fn watch(pid: u32) -> Self {
-        Self(
-            i32::try_from(pid)
-                .ok()
-                .and_then(rustix::process::Pid::from_raw)
-                .and_then(|pid| {
-                    rustix::process::pidfd_open(pid, rustix::process::PidfdFlags::empty()).ok()
-                }),
-        )
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    fn watch(pid: u32) -> Self {
-        use rustix::event::kqueue::{Event, EventFilter, EventFlags, ProcessEvents};
-
-        let Some(pid) = i32::try_from(pid)
-            .ok()
-            .and_then(rustix::process::Pid::from_raw)
-        else {
-            return Self(None);
-        };
-        let Ok(kqueue) = rustix::event::kqueue::kqueue() else {
-            return Self(None);
-        };
-        let change = [Event::new(
-            EventFilter::Proc {
-                pid,
-                flags: ProcessEvents::EXIT,
-            },
-            EventFlags::ADD | EventFlags::ONESHOT,
-            std::ptr::null_mut(),
-        )];
-        #[allow(
-            unsafe_code,
-            reason = "a process filter names no descriptor that could close under the kqueue"
-        )]
-        let registered = unsafe {
-            rustix::event::kqueue::kevent(&kqueue, &change, &mut [] as &mut [Event; 0], None)
-        };
-        Self(registered.ok().map(|_| kqueue))
-    }
-
-    fn wait(&self, output: Option<&std::os::unix::net::UnixStream>) {
-        use rustix::event::{PollFd, PollFlags, Timespec, poll};
-
-        let interval = Timespec::try_from(COPY_PIPE_POLL_INTERVAL)
-            .expect("the shell job poll interval fits in a timespec");
-        let _ = match (&self.0, output) {
-            (Some(exit), Some(output)) => poll(
-                &mut [
-                    PollFd::new(exit, PollFlags::IN),
-                    PollFd::new(output, PollFlags::IN),
-                ],
-                None,
-            ),
-            (Some(exit), None) => poll(&mut [PollFd::new(exit, PollFlags::IN)], None),
-            (None, Some(output)) => {
-                poll(&mut [PollFd::new(output, PollFlags::IN)], Some(&interval))
-            }
-            (None, None) => {
-                thread::sleep(COPY_PIPE_POLL_INTERVAL);
-                Ok(0)
-            }
-        };
-    }
-}
-
-#[cfg(unix)]
-fn read_available_shell_job_output(
-    output: &mut std::os::unix::net::UnixStream,
-    bytes: &mut Vec<u8>,
-    buffer: &mut [u8],
-) -> Result<bool, ()> {
-    let mut available = usize::try_from(rustix::io::ioctl_fionread(&*output).map_err(|_| ())?)
-        .unwrap_or(usize::MAX);
-    if available == 0 {
-        return loop {
-            match output.read(&mut buffer[..1]) {
-                Ok(0) => break Ok(true),
-                Ok(1) => {
-                    bytes.push(buffer[0]);
-                    break Ok(false);
-                }
-                Ok(_) => unreachable!("one-byte read returned more than one byte"),
-                Err(error) if error.kind() == ErrorKind::WouldBlock => break Ok(false),
-                Err(error) if error.kind() == ErrorKind::Interrupted => {}
-                Err(_) => break Err(()),
-            }
-        };
-    }
-    while available != 0 {
-        let length = available.min(buffer.len());
-        match output.read(&mut buffer[..length]) {
-            Ok(0) => return Ok(true),
-            Ok(length) => {
-                bytes.extend_from_slice(&buffer[..length]);
-                available = available.saturating_sub(length);
-            }
-            Err(error) if error.kind() == ErrorKind::WouldBlock => break,
-            Err(error) if error.kind() == ErrorKind::Interrupted => {}
-            Err(_) => return Err(()),
-        }
-    }
-    Ok(false)
 }
 
 #[cfg(not(unix))]
@@ -43315,6 +43339,7 @@ fn run_shell_job(
     Ok(ShellJobResult { output, status })
 }
 
+#[cfg(not(unix))]
 fn install_shell_job_process(
     process: &Mutex<Option<Child>>,
     stopping: &AtomicBool,
@@ -43340,6 +43365,7 @@ fn try_reap_shell_job_child(child: &mut Child) -> std::io::Result<Option<ExitSta
     }
 }
 
+#[cfg(not(unix))]
 fn reap_shell_job_process(process: &Mutex<Option<Child>>) -> Result<Option<ExitStatus>, ()> {
     let mut process = process.lock();
     let Some(child) = process.as_mut() else {
@@ -43360,6 +43386,7 @@ fn reap_shell_job_process(process: &Mutex<Option<Child>>) -> Result<Option<ExitS
     }
 }
 
+#[cfg(not(unix))]
 fn wait_shell_job_process(
     process: &Mutex<Option<Child>>,
     mut pause: impl FnMut(),
@@ -43680,6 +43707,7 @@ fn terminate_copy_pipe(child: &mut Child) -> (Option<String>, Option<std::io::Er
     (kill_error, wait_error)
 }
 
+#[cfg(not(unix))]
 fn terminate_managed_process(process: &Mutex<Option<Child>>) {
     let Some(mut child) = process.lock().take() else {
         return;
@@ -46889,6 +46917,7 @@ enum ShellJobEnvironmentTiming {
 
 #[derive(Clone, Copy)]
 struct ShellJobSpawnPolicy {
+    #[cfg(not(unix))]
     wait_for_start: bool,
     shutdown_blocking: bool,
     detached: bool,
@@ -50071,8 +50100,6 @@ struct CommandItemContext {
     exec_writer: Option<Weak<OutboundMailbox>>,
     #[cfg(unix)]
     loop_leaf: bool,
-    #[cfg(unix)]
-    pending_loop_leaf: Option<hook_queue::PendingLeaf>,
 }
 
 struct DeferredControlNotification {
@@ -84124,53 +84151,6 @@ set-option -g @alias-mixed-next yes
             )
             .expect("interactive background inserted command");
         assert_eq!(wait_for_error(&mailbox), "Unknown command: not-a-command");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn shell_job_closes_stdin_and_ignores_inherited_output_descriptors_after_exit() {
-        let process = Arc::new(Mutex::new(None));
-        let worker_process = Arc::clone(&process);
-        let (finished, result) = mpsc::sync_channel(1);
-        let worker = thread::spawn(move || {
-            let stopping = AtomicBool::new(false);
-            let result = run_shell_job(
-                "if read value; then exit 9; fi; trap '' HUP; sleep 30 & printf '%s detached' \"$!\"",
-                Path::new("/"),
-                "",
-                &[],
-                "tmux-256color",
-                Path::new("/tmp/zz-shell-job-test"),
-                None,
-                None,
-                None,
-                false,
-                &worker_process,
-                &stopping,
-                false,
-                None,
-            );
-            let _ = finished.send(result);
-        });
-        let result = match result.recv_timeout(Duration::from_secs(2)) {
-            Ok(result) => result.expect("shell job"),
-            Err(error) => {
-                terminate_managed_process(&process);
-                worker.join().expect("shell job worker");
-                panic!("shell job did not finish after its direct child exited: {error}");
-            }
-        };
-        worker.join().expect("shell job worker");
-        assert!(result.status.success());
-        let output = String::from_utf8(result.output).expect("UTF-8 shell output");
-        let pid = output
-            .strip_suffix(" detached")
-            .expect("detached output marker")
-            .parse::<i32>()
-            .expect("detached child pid");
-        if let Some(pid) = rustix::process::Pid::from_raw(pid) {
-            let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
-        }
     }
 
     #[cfg(windows)]

@@ -1,15 +1,16 @@
 ---
 type: Research
 title: GPUI fork lab (gpui-fast, gpui-ce, upstream, hot reload)
-description: What zz took from longbridge/gpui-fast, gpui-ce and upstream zed after measuring each candidate on Linux, what it rejected and why, the combined frame-cost result, and the Subsecond hot reload prototype.
+description: What zz took from longbridge/gpui-fast, gpui-ce and upstream zed after measuring each candidate on Linux and macOS, what it rejected and why, the combined frame-cost results on both, and the Subsecond hot reload prototype.
 resource: Cargo.toml
 tags:
 - performance
 - gpui
 - fork
 - linux
+- macos
 - hot-reload
-timestamp: 2026-10-01T12:00:00Z
+timestamp: 2026-10-02T06:00:00Z
 ---
 
 # Scope
@@ -28,8 +29,8 @@ GNOME Wayland at scale 1.25), six Codex lanes evaluated GPUI changes for the `de
 | hotreload | Can zz Dev patch UI code into the running app? |
 
 A candidate counted only with an A/B on this box against the same base, a zz build, and a risk
-list. Numbers copied from a README did not count. Everything ran on Linux; macOS is untested
-and is the subject of the [macOS handoff](/research/2026-10-01-gpui-mac-handoff.md).
+list. Numbers copied from a README did not count. The sections up to Hot reload ran on Linux;
+[macOS (Metal)](#macos-metal) repeats the key measurements on the MacBook.
 
 # Yardstick
 
@@ -74,8 +75,8 @@ retention. In gpui-fast's own native showcase on this box, retention also replay
 per frame; its real-window wins come from its smaller changes, not retention.
 
 The port is 43 files, +12,514/-700 lines, and 33 of our then-58 carried commits touch the same
-files. It was not carried. On macOS AccessKit only activates when an assistive client asks, so this
-verdict may not hold there; see the handoff.
+files. It was not carried. On macOS accessibility stays inactive and views are reused, but the
+retained build still costs more there; see [macOS (Metal)](#macos-metal).
 
 Measured cost of the always-on GNOME tree on the integrated build: 0.2 to 0.65 points of CPU per
 scenario. A lazy-activation patch would need AT-SPI subscription and query-only client handling
@@ -186,3 +187,111 @@ inside gpui itself; zz did not need a fork hook.
 
 Linker and codegen tweaks (LLD, mold, split debuginfo, codegen units, shared generics) gave no
 reliable gain on the incremental zz rebuild under load.
+
+# macOS (Metal)
+
+Measured 2026-10-01 and 02 on the MacBook (M4 Max, 12 performance and 4 efficiency cores, 48 GB,
+macOS 27.0) driving an external 6K display at 60 Hz and scale 2. Every build was a profiling
+bundle (`cargo xtask bundle-cef --profile profiling`: release, fat LTO, full debug info).
+
+`bench/gpui/frames.py` is the Mac yardstick. It launches a bundle with its own `HOME` and socket,
+pins the window to 1280x900 through `window-state.json`, and drives the five Linux scenarios
+through the CLI (stream: a Perl writer at 240 rows/s; scroll: copy mode at 20 commands/s). Each
+scenario gets 5 s of warmup and a 20 s window, and builds alternate within each repeat.
+Main-thread CPU comes from the first thread in `ps -M`; phases come from `GPUI_FRAME_STATS`.
+
+The Mac shared the machine with the daemon perf lanes. A window that overlapped a compile, a perf
+gate or a compat run was retried, because the performance cores clock up under load and the same
+frame then costs less CPU time. Every window reported below ran with nothing else compiling or
+measuring. On this display every drawing scenario runs at 60 frames per second, the same for every
+build, and idle draws no frames.
+
+## The lab pin against the old pin
+
+A is the old pin `e01edb6b1a` with the recorder cherry-picked on top (local `lab/mac-base`). B is
+`cc9e4d1804`. Four repeats each. Main-thread CPU as a share of one core:
+
+| Scenario | A | B | Change | Ranges (A / B) |
+| --- | --- | --- | --- | --- |
+| stream | 6.72% | 6.35% | -5.5% | 6.57-6.88 / 6.27-6.47 |
+| grid-one-active | 13.88% | 12.70% | -8.5% | 13.29-14.24 / 12.30-12.90 |
+| scroll | 2.04% | 1.94% | -4.9% | 1.99-2.04 / 1.89-1.94 |
+| chrome | 13.22% | 11.55% | -12.6% | 13.08-13.34 / 11.25-11.61 |
+
+No B repeat was slower than an A repeat. Per-frame medians show where the gain comes from: scene
+finish dropped 47 to 78% (the bounds grid), paint 13 to 15% and prepaint 8 to 12% in grid and
+chrome, while Metal submit did not move (the two WGPU commits do not touch Metal). The stream and
+scroll regression seen on Linux does not appear on Metal.
+
+## Retained mode, again
+
+The recorder now writes `accessibility_active` per frame. With Rectangle, Logi Options+ and the
+usual apps running, accessibility was inactive in every frame of every run on macOS, so this time
+view retention did reuse views (3 views per stream frame against 5).
+
+`lab/retained` was rebased onto `zz-patches` as local `lab/retained-mac`: the 5 commits plus 4
+fixes, with duplicate implementations that `zz-patches` already carried dropped (global element
+ids, line layout carry-over, lazy listeners, dispatch copy), and all 475 gpui library tests
+passing. D is that fork with the seven zz-side fixes from `lab/gpui-retained`; D0 is D with
+`GPUI_VIEW_RETENTION=0`. Three repeats each against B:
+
+| Scenario | B | D | D0 |
+| --- | --- | --- | --- |
+| stream | 6.47% | 8.02% (+24%) | 8.22% (+27%) |
+| grid-one-active | 12.65% | 12.51% (-1%) | 12.60% (0%) |
+| scroll | 1.94% | 2.44% (+26%) | 2.45% (+26%) |
+| chrome | 11.81% | 14.69% (+24%) | 16.59% (+40%) |
+
+Layout retention cut grid layout time by 38%, but the retained bookkeeping added 48 to 110% to
+prepaint and up to 39% to paint, which cancels the gain in grid and loses everywhere else. Rejected
+on macOS too, now on cost rather than accessibility.
+
+## CoreText glyph runs
+
+gpui-fast `9b2f43d` was ported onto `zz-patches` as local `lab/coretext`:
+
+- `f1f8964a35` keeps one CoreText font per size in the macOS text system instead of making a
+  `CTFont` for every run of every shaped line, and checks for emoji once per glyph run.
+- `3aefd2a813` works out a glyph run's rendering (subpixel choice and smoothing level) once per
+  font and color change instead of once per glyph, and snaps the content mask once per line. It
+  covers both `paint_line` and the prepaint glyph raster path that terminal panes use.
+- `8aa67c753d` adds the `accessibility_active` field above.
+
+gpui-fast's decoration capacity change was left out because `a278dcc512` already carries it.
+macOS text tests 5/5 (including gpui-fast's kept-font layout test), gpui text system tests 54/54,
+full gpui library 411/412 with one spring animation test that fails only under parallel load.
+
+C is B plus those three commits. Three repeats each:
+
+| Scenario | B | C | Change | Ranges (B / C) |
+| --- | --- | --- | --- | --- |
+| stream | 6.47% | 5.78% | -10.8% | 6.37-6.52 / 5.68-5.88 |
+| grid-one-active | 12.65% | 12.26% | -3.1% | 12.55-12.66 / 11.75-12.31 |
+| scroll | 1.94% | 1.84% | -5.1% | 1.94-1.99 / 1.74-1.85 |
+| chrome | 11.81% | 10.91% | -7.7% | 11.61-12.00 / 10.76-11.25 |
+
+Prepaint fell 26 to 39% in every drawing scenario, where terminal rows build their glyph raster
+data. The two CoreText commits were measured together.
+
+Risks:
+
+- The font cache keeps up to 1024 `CTFont` objects for the life of the text system and clears
+  itself when full. Animated font sizes refill it quickly.
+- The cache is keyed by `FontId`, which the macOS text system never reuses.
+- Run rendering is cached per font and color within one line. A change to the window background
+  appearance in the middle of painting a line would apply from the next line.
+- The snapped content mask is taken once per line. Underline callbacks that push their own mask
+  restore it before the next glyph.
+
+## Dropped or not measured on the Mac
+
+- **Compact scene records** (`c7b073228d`): the cherry-pick conflicts in six places with the
+  shader layer primitive. On Metal, after the bounds grid, scene finish is 0.4 to 2% of a
+  frame's draw CPU and the Metal submit that replays the scene adds 4 to 14% on top. That caps
+  what it could save, and Linux measured its sorting 13% slower. Not ported.
+- **Headless Metal renderer and WGSL shader layers** (`88d396491d`, `e01edb6b1a`): zz main
+  already paints shader layers, so neither can be toggled without changing zz. Without a layer in
+  the frame, the Metal renderer only resets a flag and clears two empty vectors, and the headless
+  renderer runs only in tests. Not measured.
+- **Hot reload on macOS**: not attempted. dioxus-cli 0.7.10 is not installed here (`dx` on this
+  PATH is another tool), and the bundle, CEF framework and codesigning questions stand.

@@ -26,8 +26,8 @@ Your final answer reports: done (true only when the done criterion holds), head,
 def section(lane_id):
     text=open(f'{INT}/{DOC}').read()
     start=text.index(f'\n## {lane_id}')
-    end=text.find('\n## ',start+1)
-    return text[start+1:end if end>0 else None].strip()
+    ends=[e for e in (text.find('\n## ',start+1),text.find('\n# ',start+1)) if e>0]
+    return text[start+1:min(ends) if ends else None].strip()
 
 def context(l):
     parts=[f'Lane section from {DOC} at the lane base:\n\n{section(l["id"])}']

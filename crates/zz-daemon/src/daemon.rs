@@ -20,6 +20,10 @@ use std::{
 
 use parking_lot::{Condvar, Mutex};
 
+#[cfg(feature = "agent")]
+mod agent_inbox;
+#[cfg(feature = "agent")]
+mod agent_publisher;
 mod chooser_presentation;
 mod cmdq;
 #[cfg(unix)]
@@ -4103,7 +4107,9 @@ struct SharedServer {
     #[cfg(all(feature = "agent", unix))]
     agent_peers: Mutex<BTreeMap<PaneId, crate::agent::claude_peers::PeerInbox>>,
     #[cfg(feature = "agent")]
-    agent_peer_owner: Mutex<Weak<Shared>>,
+    agent_tx: agent_publisher::Sender,
+    #[cfg(feature = "agent")]
+    agent_rx: Mutex<Option<crossbeam_channel::Receiver<agent_publisher::Message>>>,
     #[cfg(all(feature = "agent", unix))]
     peer_wait_inbox: Mutex<Option<crate::agent::claude_peers::PeerInbox>>,
     #[cfg(all(feature = "agent", unix))]
@@ -4991,6 +4997,8 @@ impl Shared {
                 .mux_option_underlay
                 .set(option, value, MuxOptionSource::Default);
         }
+        #[cfg(feature = "agent")]
+        let (agent_tx, agent_rx) = agent_publisher::Sender::new();
         let (watcher_tx, watcher_rx) = watchers::Sender::new();
         let (timer_tx, timer_rx) = crossbeam_channel::unbounded();
         let timer_tx = timers::TimerSender::new(timer_tx);
@@ -5020,7 +5028,9 @@ impl Shared {
             #[cfg(all(feature = "agent", unix))]
             agent_peers: Mutex::new(BTreeMap::new()),
             #[cfg(feature = "agent")]
-            agent_peer_owner: Mutex::new(Weak::new()),
+            agent_tx,
+            #[cfg(feature = "agent")]
+            agent_rx: Mutex::new(Some(agent_rx)),
             #[cfg(all(feature = "agent", unix))]
             peer_wait_inbox: Mutex::new(None),
             #[cfg(all(feature = "agent", unix))]
@@ -14971,6 +14981,7 @@ impl Shared {
         {
             let runtime = self.agent_runtime().ok_or(ServerError::PaneExited(pane))?;
             let (waiter, reply) = crossbeam_channel::bounded(1);
+            let started = Instant::now();
             if !runtime.command(
                 pane,
                 HostCommand::NewSession {
@@ -14987,6 +14998,22 @@ impl Shared {
             } else {
                 reply.recv_timeout(timeout)
             };
+            let result = result.and_then(|result| match result {
+                Ok(()) => {
+                    let applied = runtime
+                        .publication_barrier(pane)
+                        .ok_or(crossbeam_channel::RecvTimeoutError::Disconnected)?;
+                    if timeout.is_zero() {
+                        applied
+                            .recv()
+                            .map_err(|_| crossbeam_channel::RecvTimeoutError::Disconnected)
+                    } else {
+                        applied.recv_timeout(timeout.saturating_sub(started.elapsed()))
+                    }
+                    .map(Ok)
+                }
+                Err(message) => Ok(Err(message)),
+            });
             match result {
                 Ok(Ok(())) => Ok(Execution::default()),
                 Ok(Err(message)) => Err(DaemonError::CommandExit {
@@ -30035,6 +30062,8 @@ impl Shared {
         self: &Arc<Self>,
         journal: Option<Arc<crate::agent::journal::AgentJournal>>,
     ) -> Option<Arc<AgentRuntime>> {
+        #[cfg(any(test, windows))]
+        self.start_watcher_consumer().ok()?;
         let config = self.agent_spawn_config();
         let mut slot = self.agent.lock();
         if self.agent_stopped.load(Ordering::Acquire) {
@@ -30043,8 +30072,7 @@ impl Shared {
         if let Some(runtime) = slot.as_ref() {
             return Some(Arc::clone(runtime));
         }
-        *self.agent_peer_owner.lock() = Arc::downgrade(&self.server_owner());
-        let publisher: Arc<dyn AgentPublisher> = self.server_owner();
+        let publisher: Arc<dyn AgentPublisher> = Arc::new(self.agent_tx.publisher());
         let runtime = Arc::new(AgentRuntime::new(&publisher, config, journal));
         runtime.prewarm();
         #[cfg(test)]
@@ -30420,7 +30448,11 @@ impl Shared {
     }
 
     #[cfg(unix)]
-    fn update_agent_peer(&self, pane: PaneId, phase: &zz_protocol::AgentConnectionPhase) {
+    fn update_agent_peer(
+        self: &Arc<Self>,
+        pane: PaneId,
+        phase: &zz_protocol::AgentConnectionPhase,
+    ) {
         use crate::agent::claude_peers::{PeerEvent, PeerInbox, PeerKind, PeerMetadata, peer_name};
         use zz_protocol::AgentConnectionPhase;
 
@@ -30486,7 +30518,7 @@ impl Shared {
             }
             return;
         }
-        let owner = self.agent_peer_owner.lock().clone();
+        let owner = Arc::downgrade(&self.server_owner());
         match PeerInbox::register(metadata, move |event| {
             if let PeerEvent::Message { content: text, .. } = event
                 && let Some(shared) = owner.upgrade()
@@ -30880,7 +30912,7 @@ impl Shared {
 }
 
 #[cfg(feature = "agent")]
-impl AgentPublisher for Shared {
+impl Shared {
     fn publish_agent_updates(
         &self,
         pane: PaneId,
@@ -30995,7 +31027,11 @@ impl AgentPublisher for Shared {
         }
     }
 
-    fn publish_agent_state(&self, pane: PaneId, state: AgentPaneWire) {
+    fn apply_agent_state(
+        self: &Arc<Self>,
+        pane: PaneId,
+        state: AgentPaneWire,
+    ) -> Option<PendingHookEvent> {
         let changed = {
             let mut inner = self.inner.lock();
             let previous = Arc::make_mut(&mut inner.agent_states).insert(pane, state.clone());
@@ -31009,9 +31045,9 @@ impl AgentPublisher for Shared {
         if changed {
             self.update_agent_peer(pane, &state.phase);
         }
-        if changed {
+        let event = if changed {
             self.signal_wait_channel(&format!("agent_state@{pane}"));
-            let event = {
+            {
                 let inner = self.inner.lock();
                 PendingHookEvent::live_pane("agent-state-changed", pane, &inner.engine).map(
                     |mut event| {
@@ -31030,17 +31066,16 @@ impl AgentPublisher for Shared {
                         event
                     },
                 )
-            };
-            let owner = self.agent_peer_owner.lock().upgrade();
-            if let (Some(owner), Some(event)) = (owner, event) {
-                owner.run_event_hooks(vec![event]);
             }
-        }
+        } else {
+            None
+        };
         self.publish_for_pane(pane, &EventPayload::AgentState { pane, state });
+        event
     }
 
-    fn publish_agent_tool_call(&self, pane: PaneId, call: AgentToolCall) {
-        let event = {
+    fn agent_tool_call_event(&self, pane: PaneId, call: AgentToolCall) -> Option<PendingHookEvent> {
+        {
             let inner = self.inner.lock();
             PendingHookEvent::live_pane("agent-tool-call", pane, &inner.engine).map(|mut event| {
                 event.variables.extend([
@@ -31051,10 +31086,13 @@ impl AgentPublisher for Shared {
                 ]);
                 event
             })
-        };
-        let owner = self.agent_peer_owner.lock().upgrade();
-        if let (Some(owner), Some(event)) = (owner, event) {
-            owner.run_event_hooks(vec![event]);
+        }
+    }
+
+    #[cfg(test)]
+    fn publish_agent_state(self: &Arc<Self>, pane: PaneId, state: AgentPaneWire) {
+        if let Some(event) = self.apply_agent_state(pane, state) {
+            self.run_event_hooks(vec![event]);
         }
     }
 
@@ -77828,7 +77866,6 @@ set-option -g @alias-mixed-next yes
     #[test]
     fn agent_state_changes_publish_the_hook_event_for_agent_panes() {
         let shared = Arc::new(Shared::new(1));
-        *shared.agent_peer_owner.lock() = Arc::downgrade(&shared);
         let mut context = ExecutionContext::default();
         {
             let mut inner = shared.inner.lock();

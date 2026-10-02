@@ -896,18 +896,43 @@ impl Shared {
             if watchers.inputs.is_none() {
                 return Ok(());
             }
+            #[cfg(feature = "agent")]
+            let mut agents = agent_inbox::AgentInbox::new(self);
             let owner = Arc::downgrade(&self.server_owner());
             thread::Builder::new()
                 .name("zz-watchers".to_owned())
                 .spawn(move || {
                     loop {
-                        let Ok(input) = watchers.inputs.as_ref().unwrap().recv() else {
-                            return;
+                        #[cfg(feature = "agent")]
+                        let input = {
+                            let never = crossbeam_channel::never();
+                            let agent_rx = agents.receiver.as_ref().unwrap_or(&never);
+                            crossbeam_channel::select! {
+                                recv(watchers.inputs.as_ref().unwrap()) -> input => {
+                                    let Ok(input) = input else { return; };
+                                    Some(input)
+                                }
+                                recv(agent_rx) -> message => {
+                                    let Ok(message) = message else { return; };
+                                    let Some(owner) = owner.upgrade() else { return; };
+                                    agents.apply(&owner, message);
+                                    if agents.turn(&owner).is_err() { return; }
+                                    None
+                                }
+                            }
+                        };
+                        #[cfg(not(feature = "agent"))]
+                        let input = {
+                            let Ok(input) = watchers.inputs.as_ref().unwrap().recv() else {
+                                return;
+                            };
+                            Some(input)
                         };
                         let Some(owner) = owner.upgrade() else {
                             return;
                         };
-                        if watchers.input(&owner, input).is_err() || watchers.turn(&owner).is_err()
+                        if input.is_some_and(|input| watchers.input(&owner, input).is_err())
+                            || watchers.turn(&owner).is_err()
                         {
                             return;
                         }

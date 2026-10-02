@@ -281,6 +281,17 @@ read "Lane brief rules" before launching anything.
     keep a worker there). Final convergence: hookpanic picked on the Linux tip (`3c425efa`, module
     union), Linux fast-forwarded to it, Mac merged its tree (`534c99ee`). Both branches now hold the
     same tree.
+  - reviewfixes (`8b01d408` Mac, `880f37bb` Linux, same tree): Windows test build links again
+    (Unix-only tests gated), peer-scan panics still complete the probe, client-file waiter insert
+    re-checks the client, EPIPE on a job's input ends the input instead of cancelling the job, the
+    hookpanic worker test no longer asserts a worker, and two tests that raced queued loop work
+    (`first_command_session_uses_zero_ids_and_arms_last_session_shutdown`,
+    `shell_formats_use_the_selected_current_client`, 4/15 failures alone) drive the loop until the
+    condition. Both hosts green (1509/1510 daemon tests).
+  - Lane merge 2026-10-02: `perf/loop` (`8b01d408`) merged into `perf/wave3` as `6701b511` (clean,
+    Cargo.lock auto-merged with main's GPUI-lab pin). Merge checks running on both hosts
+    (`/tmp/zzpc/merge-w3-loop`, `~/.cache/zz-perf/merge-w3-loop`), WIRE=1 on the Mac, PRE =
+    `loop-00-cli` (main's daemon code is unchanged since the lane's base).
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

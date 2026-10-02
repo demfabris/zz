@@ -1133,13 +1133,34 @@ const DEFAULT_YPIXEL: u32 = 32;
 /// the only portable reader that also prints the extended section the tmux
 /// capability names live in. The result depends on nothing but the TERM name,
 /// so it is read once per name for the life of the process.
+type TerminfoEntries = BTreeMap<String, Option<Arc<Vec<String>>>>;
+static TERMINFO_ENTRIES: OnceLock<Mutex<TerminfoEntries>> = OnceLock::new();
+
+pub(crate) fn terminfo_is_warm(environment: &[RawText]) -> bool {
+    let Some(term) = environment
+        .iter()
+        .find_map(|entry| entry.strip_prefix("TERM="))
+    else {
+        return true;
+    };
+    TERMINFO_ENTRIES
+        .get()
+        .is_some_and(|cache| cache.lock().is_ok_and(|cache| cache.contains_key(term)))
+}
+
 fn terminfo_entries(term: &str) -> Option<Arc<Vec<String>>> {
-    static ENTRIES: OnceLock<Mutex<BTreeMap<String, Option<Arc<Vec<String>>>>>> = OnceLock::new();
-    let cache = ENTRIES.get_or_init(|| Mutex::new(BTreeMap::new()));
+    terminfo_entries_using(term, &|mut command| command.output().ok())
+}
+
+fn terminfo_entries_using(
+    term: &str,
+    output: &dyn Fn(Command) -> Option<std::process::Output>,
+) -> Option<Arc<Vec<String>>> {
+    let cache = TERMINFO_ENTRIES.get_or_init(|| Mutex::new(BTreeMap::new()));
     if let Some(cached) = cache.lock().ok()?.get(term) {
         return cached.clone();
     }
-    let read = read_terminfo_entries(term).map(Arc::new);
+    let read = read_terminfo_entries(term, output).map(Arc::new);
     if read.is_none() {
         log::warn!(
             target: "zz_daemon::diagnostics::status",
@@ -1152,15 +1173,16 @@ fn terminfo_entries(term: &str) -> Option<Arc<Vec<String>>> {
     read
 }
 
-fn read_terminfo_entries(term: &str) -> Option<Vec<String>> {
+fn read_terminfo_entries(
+    term: &str,
+    output: &dyn Fn(Command) -> Option<std::process::Output>,
+) -> Option<Vec<String>> {
     if term.is_empty() || term.contains('/') || term.starts_with('-') {
         return None;
     }
-    let output = Command::new("infocmp")
-        .args(["-x", "-1", term])
-        .stdin(Stdio::null())
-        .output()
-        .ok()?;
+    let mut command = Command::new("infocmp");
+    command.args(["-x", "-1", term]).stdin(Stdio::null());
+    let output = output(command)?;
     if !output.status.success() {
         return None;
     }
@@ -1274,9 +1296,16 @@ fn decode_terminfo_string(value: &str) -> String {
 /// it. Reading the database is a subprocess, so registration warms the cache
 /// while the state lock is down and the format path only ever reads it back.
 pub(crate) fn warm_terminfo_entries(environment: &[RawText]) {
+    warm_terminfo_entries_using(environment, &|mut command| command.output().ok());
+}
+
+pub(crate) fn warm_terminfo_entries_using(
+    environment: &[RawText],
+    output: &dyn Fn(Command) -> Option<std::process::Output>,
+) {
     for entry in environment {
         if let Some(term) = entry.strip_prefix("TERM=") {
-            let _ = terminfo_entries(term);
+            let _ = terminfo_entries_using(term, output);
             return;
         }
     }

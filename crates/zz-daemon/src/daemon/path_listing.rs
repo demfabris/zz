@@ -1,5 +1,5 @@
 use super::*;
-use std::{collections::HashSet, path::Component, sync::atomic::AtomicUsize};
+use std::{collections::HashSet, path::Component};
 
 use ignore::WalkBuilder;
 use zz_protocol::{
@@ -16,7 +16,6 @@ const PATH_LIST_TURN_POLL: Duration = Duration::from_millis(10);
 const PATH_LIST_FLUSH_INTERVAL: Duration = Duration::from_millis(30);
 const PATH_LIST_MESSAGE_OVERHEAD: usize = 32;
 const PATH_ENTRY_OVERHEAD: usize = 8;
-const MAX_PATH_LIST_WALKERS: usize = 4;
 const GIT_MARK_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_GIT_MARK_OUTPUT_BYTES: usize = 2 * 1024 * 1024;
 const LISTED_ONLY_NAMES: &[&str] = &["node_modules", "target", "__pycache__", "venv"];
@@ -44,8 +43,6 @@ const PROMPT_SHELLS: &[&str] = &[
     "powershell",
 ];
 
-static LIVE_PATH_WALKERS: AtomicUsize = AtomicUsize::new(0);
-
 pub fn path_walk_enters(relative: &Path, home_root_child: bool) -> bool {
     let name = relative
         .file_name()
@@ -54,25 +51,6 @@ pub fn path_walk_enters(relative: &Path, home_root_child: bool) -> bool {
     !(LISTED_ONLY_NAMES.contains(&name)
         || relative.ends_with("go/pkg/mod")
         || home_root_child && HOME_MEDIA_ROOTS.contains(&name))
-}
-
-struct PathWalkerSlot(&'static AtomicUsize);
-
-impl PathWalkerSlot {
-    fn acquire(counter: &'static AtomicUsize) -> Option<Self> {
-        counter
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |live| {
-                (live < MAX_PATH_LIST_WALKERS).then_some(live + 1)
-            })
-            .ok()
-            .map(|_| Self(counter))
-    }
-}
-
-impl Drop for PathWalkerSlot {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::AcqRel);
-    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -278,10 +256,26 @@ fn git_filter_drivers(names: &[u8]) -> Option<BTreeSet<&str>> {
     Some(drivers)
 }
 
+#[cfg(test)]
 fn git_marks(root: &Path, cancelled: &dyn Fn() -> bool) -> Vec<(String, GitMark)> {
+    git_marks_with(root, cancelled, &|command, limit, deadline, cancelled| {
+        crate::bounded_command::run_output_until_cancelled(command, limit, deadline, cancelled)
+    })
+}
+
+fn git_marks_with(
+    root: &Path,
+    cancelled: &dyn Fn() -> bool,
+    output: &dyn Fn(
+        std::process::Command,
+        usize,
+        Instant,
+        &dyn Fn() -> bool,
+    ) -> std::result::Result<std::process::Output, String>,
+) -> Vec<(String, GitMark)> {
     let deadline = Instant::now() + GIT_MARK_TIMEOUT;
     let run = |args: &[&str]| {
-        crate::bounded_command::run_output_until_cancelled(
+        output(
             git_command(root, args),
             MAX_GIT_MARK_OUTPUT_BYTES,
             deadline,
@@ -736,75 +730,50 @@ impl Shared {
         }
         let (expanded, previous) =
             self.record_requested_path_list_root(client, request_id, dir.as_deref());
-        let shared = self.server_owner();
-        let walker_outbound = Arc::clone(outbound);
-        let walker_cancel = Arc::clone(cancel);
-        let walker_turn = Arc::clone(turn);
-        let spawned = thread::Builder::new()
-            .name(format!("zz-path-list-{}", client.0))
-            .spawn(move || {
-                let stream = PathListStream {
-                    outbound: &walker_outbound,
-                    cancel: &walker_cancel,
-                    request_id,
-                };
-                let waited = Instant::now();
-                let _turn = loop {
-                    if stream.cancelled() {
-                        return;
-                    }
-                    if let Some(turn) = walker_turn.try_lock_for(PATH_LIST_TURN_POLL) {
-                        break turn;
-                    }
-                    if waited.elapsed() >= PATH_LIST_BUDGET {
-                        shared.restore_path_list_root(client, request_id, previous);
-                        let _ = stream
-                            .begin(Err("an earlier path listing is still running".to_owned()));
-                        return;
-                    }
-                };
-                if stream.cancelled() {
-                    return;
+        let input = {
+            let inner = self.inner.lock();
+            inner.terminals.get(&pane).map(|terminal| {
+                let facts = inner.engine.pane_runtime_facts(pane);
+                ListingInput {
+                    pane,
+                    pane_pid: terminal.process_id(),
+                    foreground: terminal.foreground_process_id(),
+                    start_path: facts
+                        .map(|facts| facts.start_path.clone())
+                        .unwrap_or_default(),
+                    reported_path: facts
+                        .map(|facts| facts.reported_path.clone())
+                        .unwrap_or_default(),
+                    home: home_directory_for(&inner.engine, ""),
                 }
-                let listing = match shared.resolve_path_list(pane, dir.as_deref(), expanded) {
-                    Ok(listing) => listing,
-                    Err(error) => {
-                        shared.restore_path_list_root(client, request_id, previous);
-                        let _ = stream.begin(Err(error));
-                        return;
-                    }
-                };
-                shared.record_resolved_path_list_root(
-                    client,
-                    request_id,
-                    &listing.root,
-                    &walker_cancel,
-                );
-                let Some(_slot) = PathWalkerSlot::acquire(&LIVE_PATH_WALKERS) else {
-                    let _ = stream.begin(Ok(listing.begin)) && stream.chunk(Vec::new(), true, true);
-                    return;
-                };
-                if !stream.begin(Ok(listing.begin)) {
-                    return;
-                }
-                let (marks_sender, marks) = mpsc::sync_channel(1);
-                let git_root = listing.root.clone();
-                let git_cancel = Arc::clone(&walker_cancel);
-                let git = thread::Builder::new()
-                    .name(format!("zz-path-git-{}", client.0))
-                    .spawn(move || {
-                        let _ = marks_sender
-                            .send(git_marks(&git_root, &|| git_cancel.load(Ordering::Acquire)));
-                    })
-                    .is_ok();
-                let _ = stream.walk(
-                    &listing.root,
-                    listing.root_is_home,
-                    WalkLimits::default(),
-                    git.then_some(&marks),
-                );
+            })
+        };
+        let Some(input) = input else {
+            self.restore_path_list_root(client, request_id, previous);
+            let _ = outbound.enqueue_reliable(&ProtocolMessage::PathListBegin {
+                request_id,
+                result: Err(format!("{pane} is not a terminal pane")),
             });
-        if let Err(error) = spawned {
+            return;
+        };
+        let task = Task {
+            client,
+            request_id,
+            dir,
+            expanded,
+            previous: previous.clone(),
+            input,
+            outbound: Arc::clone(outbound),
+            cancel: Arc::clone(cancel),
+            turn: Arc::clone(turn),
+            #[cfg(unix)]
+            jobs: self
+                .loop_active
+                .load(Ordering::Acquire)
+                .then(|| self.helpers.jobs.clone()),
+        };
+        if let Err(error) = self.submit_helper(helpers::Task::Path(Box::new(task))) {
+            self.restore_path_list_root(client, request_id, previous);
             let _ = outbound.enqueue_reliable(&ProtocolMessage::PathListBegin {
                 request_id,
                 result: Err(format!("path listing could not start: {error}")),
@@ -864,85 +833,208 @@ impl Shared {
         }
     }
 
-    fn resolve_path_list(
-        &self,
-        pane: PaneId,
-        dir: Option<&str>,
-        expanded: Option<PathBuf>,
-    ) -> Result<ResolvedListing, String> {
-        let (terminal, start_path, reported_path, home) = {
-            let inner = self.inner.lock();
-            let terminal = inner
-                .terminals
-                .get(&pane)
-                .cloned()
-                .ok_or_else(|| format!("{pane} is not a terminal pane"))?;
-            let facts = inner.engine.pane_runtime_facts(pane);
-            (
-                terminal,
-                facts
-                    .map(|facts| facts.start_path.clone())
-                    .unwrap_or_default(),
-                facts
-                    .map(|facts| facts.reported_path.clone())
-                    .unwrap_or_default(),
-                home_directory_for(&inner.engine, ""),
-            )
-        };
-        let foreground = terminal.foreground_process_id();
-        let basename = foreground_basename(&terminal_current_command(&terminal));
-        if REMOTE_FOREGROUND_COMMANDS.contains(&basename.as_str()) {
-            return Err(format!(
-                "{basename} is in the foreground, so its files are on another machine"
-            ));
+    pub(super) fn apply_path_list_result(&self, result: PathResult) {
+        if result.restore {
+            self.restore_path_list_root(result.client, result.request_id, result.root);
+        } else if let Some(root) = result.root {
+            self.record_resolved_path_list_root(
+                result.client,
+                result.request_id,
+                &root,
+                &result.cancel,
+            );
         }
-        let live = terminal_working_directory(&terminal).filter(|path| path.is_dir());
-        let fallback = live
-            .clone()
-            .or_else(|| osc7_directory(&reported_path))
-            .or_else(|| {
-                (!start_path.is_empty())
-                    .then(|| PathBuf::from(&start_path))
-                    .filter(|path| path.is_dir())
-            });
-        let requested = match dir {
-            Some(dir) => Some(
-                expanded
-                    .or_else(|| expand_directory(dir, fallback.as_deref(), |_| None))
-                    .filter(|path| path.is_dir())
-                    .ok_or_else(|| format!("{dir} is not a directory"))?,
-            ),
-            None => None,
-        };
-        let root = requested
-            .or(fallback)
-            .ok_or_else(|| format!("{pane} has no working directory"))?;
-        let root_text = root
-            .to_str()
-            .filter(|text| text.len() <= MAX_PATH_LIST_TEXT_BYTES && listable_text(text))
-            .ok_or_else(|| "the directory name cannot be listed".to_owned())?
-            .to_owned();
-        let cwd = live
-            .as_deref()
-            .and_then(Path::to_str)
-            .filter(|text| text.len() <= MAX_PATH_LIST_TEXT_BYTES && listable_text(text));
-        let begin = PathListRoot {
-            root: root_text,
-            display_root: display_root(&root, home.as_deref()),
-            cwd: cwd.map(str::to_owned),
-            insert: insert_style(pane, terminal.process_id(), foreground, &basename),
-        };
-        Ok(ResolvedListing {
-            root_is_home: home.as_deref().is_some_and(|home| Path::new(home) == root),
-            root,
-            begin,
-        })
     }
+}
+
+struct ListingInput {
+    pane: PaneId,
+    pane_pid: Option<u32>,
+    foreground: Option<u32>,
+    start_path: String,
+    reported_path: String,
+    home: Option<String>,
+}
+
+pub(super) struct Task {
+    client: ClientId,
+    request_id: u64,
+    dir: Option<String>,
+    expanded: Option<PathBuf>,
+    previous: Option<PathBuf>,
+    input: ListingInput,
+    outbound: Arc<OutboundMailbox>,
+    cancel: Arc<AtomicBool>,
+    turn: Arc<Mutex<()>>,
+    #[cfg(unix)]
+    jobs: Option<helpers::JobClient>,
+}
+
+pub(super) struct PathResult {
+    client: ClientId,
+    request_id: u64,
+    root: Option<PathBuf>,
+    restore: bool,
+    pub(super) cancel: Arc<AtomicBool>,
+}
+
+impl Task {
+    pub(super) fn run(self, publish: &dyn Fn(PathResult) -> bool) {
+        let mut result = PathResult {
+            client: self.client,
+            request_id: self.request_id,
+            root: self.previous.clone(),
+            restore: false,
+            cancel: Arc::clone(&self.cancel),
+        };
+        let stream = PathListStream {
+            outbound: &self.outbound,
+            cancel: &self.cancel,
+            request_id: self.request_id,
+        };
+        let waited = Instant::now();
+        let _turn = loop {
+            if stream.cancelled() {
+                return;
+            }
+            if let Some(turn) = self.turn.try_lock_for(PATH_LIST_TURN_POLL) {
+                break turn;
+            }
+            if waited.elapsed() >= PATH_LIST_BUDGET {
+                result.restore = true;
+                if publish(result) {
+                    let _ =
+                        stream.begin(Err("an earlier path listing is still running".to_owned()));
+                }
+                return;
+            }
+        };
+        if stream.cancelled() {
+            return;
+        }
+        let listing = match resolve_path_list(self.input, self.dir.as_deref(), self.expanded) {
+            Ok(listing) => listing,
+            Err(error) => {
+                result.restore = true;
+                if publish(result) {
+                    let _ = stream.begin(Err(error));
+                }
+                return;
+            }
+        };
+        result.root = Some(listing.root.clone());
+        if !publish(result) || stream.cancelled() {
+            return;
+        }
+        if !stream.begin(Ok(listing.begin)) {
+            return;
+        }
+        let (marks_sender, marks) = mpsc::sync_channel(1);
+        #[cfg(unix)]
+        let git = self.jobs.as_ref().map(|jobs| {
+            git_marks_with(
+                &listing.root,
+                &|| stream.cancelled(),
+                &|command, limit, deadline, cancelled| {
+                    jobs.output(command, limit, deadline, cancelled)
+                },
+            )
+        });
+        #[cfg(not(unix))]
+        let git = Some(git_marks_with(
+            &listing.root,
+            &|| stream.cancelled(),
+            &|command, limit, deadline, cancelled| {
+                crate::bounded_command::run_output_until_cancelled(
+                    command, limit, deadline, cancelled,
+                )
+            },
+        ));
+        if let Some(git) = git {
+            let _ = marks_sender.send(git);
+        }
+        drop(marks_sender);
+        let _ = stream.walk(
+            &listing.root,
+            listing.root_is_home,
+            WalkLimits::default(),
+            Some(&marks),
+        );
+    }
+}
+
+fn resolve_path_list(
+    input: ListingInput,
+    dir: Option<&str>,
+    expanded: Option<PathBuf>,
+) -> std::result::Result<ResolvedListing, String> {
+    let ListingInput {
+        pane,
+        pane_pid,
+        foreground,
+        start_path,
+        reported_path,
+        home,
+    } = input;
+    let basename = foreground_basename(
+        &foreground
+            .and_then(crate::process_info::command_name)
+            .unwrap_or_default(),
+    );
+    if REMOTE_FOREGROUND_COMMANDS.contains(&basename.as_str()) {
+        return Err(format!(
+            "{basename} is in the foreground, so its files are on another machine"
+        ));
+    }
+    let live = foreground
+        .and_then(crate::process_info::working_directory)
+        .filter(|path| path.is_dir());
+    let fallback = live
+        .clone()
+        .or_else(|| osc7_directory(&reported_path))
+        .or_else(|| {
+            (!start_path.is_empty())
+                .then(|| PathBuf::from(&start_path))
+                .filter(|path| path.is_dir())
+        });
+    let requested = match dir {
+        Some(dir) => Some(
+            expanded
+                .or_else(|| expand_directory(dir, fallback.as_deref(), |_| None))
+                .filter(|path| path.is_dir())
+                .ok_or_else(|| format!("{dir} is not a directory"))?,
+        ),
+        None => None,
+    };
+    let root = requested
+        .or(fallback)
+        .ok_or_else(|| format!("{pane} has no working directory"))?;
+    let root_text = root
+        .to_str()
+        .filter(|text| text.len() <= MAX_PATH_LIST_TEXT_BYTES && listable_text(text))
+        .ok_or_else(|| "the directory name cannot be listed".to_owned())?
+        .to_owned();
+    let cwd = live
+        .as_deref()
+        .and_then(Path::to_str)
+        .filter(|text| text.len() <= MAX_PATH_LIST_TEXT_BYTES && listable_text(text));
+    let begin = PathListRoot {
+        root: root_text,
+        display_root: display_root(&root, home.as_deref()),
+        cwd: cwd.map(str::to_owned),
+        insert: insert_style(pane, pane_pid, foreground, &basename),
+    };
+    Ok(ResolvedListing {
+        root_is_home: home.as_deref().is_some_and(|home| Path::new(home) == root),
+        root,
+        begin,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicUsize;
 
     fn touch(root: &Path, relative: &str) {
         let path = root.join(relative);
@@ -1230,18 +1322,6 @@ mod tests {
             &mut |_| panic!("a cancelled walk emitted"),
         );
         assert_eq!(end, WalkEnd::Stopped);
-    }
-
-    #[test]
-    fn walker_slots_are_capped_and_released() {
-        static COUNTER: AtomicUsize = AtomicUsize::new(0);
-        let slots = (0..MAX_PATH_LIST_WALKERS)
-            .map(|_| PathWalkerSlot::acquire(&COUNTER).expect("slot under the cap"))
-            .collect::<Vec<_>>();
-        assert!(PathWalkerSlot::acquire(&COUNTER).is_none());
-        drop(slots);
-        assert_eq!(COUNTER.load(Ordering::Acquire), 0);
-        assert!(PathWalkerSlot::acquire(&COUNTER).is_some());
     }
 
     fn wide_tree(files: usize) -> tempfile::TempDir {

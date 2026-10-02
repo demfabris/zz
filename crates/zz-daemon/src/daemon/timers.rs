@@ -258,7 +258,7 @@ impl ClientTimers {
 }
 
 #[cfg(unix)]
-enum TimerCompletion {
+pub(super) enum TimerCompletion {
     Expiries,
     Monitor,
     Peer,
@@ -420,23 +420,30 @@ impl LoopTimers {
                     } else {
                         self.clients.monitor_running = true;
                     }
-                    let owner = shared.server_owner();
-                    let completed = self.completion_sender.clone();
-                    let wake = Arc::clone(waker);
-                    let job: Box<dyn FnOnce() + Send> = Box::new(move || {
-                        owner.run_timer_expiry(expiry, now);
-                        let _ = completed.send(if peer {
-                            TimerCompletion::Peer
-                        } else {
-                            TimerCompletion::Monitor
-                        });
-                        let _ = wake.wake();
-                    });
                     if peer {
-                        thread::Builder::new()
-                            .name("zz-peer-probe".to_owned())
-                            .spawn(job)?;
+                        #[cfg(all(feature = "agent", unix))]
+                        if let Err(error) = shared.helpers.submit(helpers::Task::Peers {
+                            panes: shared.peer_scan_inputs(),
+                            always: *PEER_SCAN_ALWAYS,
+                            reply: None,
+                            completed: Some(self.completion_sender.clone()),
+                        }) {
+                            self.clients.peer_running = false;
+                            log::warn!("could not start peer scan: {error}");
+                        }
+                        #[cfg(not(all(feature = "agent", unix)))]
+                        {
+                            self.clients.peer_running = false;
+                        }
                     } else {
+                        let owner = shared.server_owner();
+                        let completed = self.completion_sender.clone();
+                        let wake = Arc::clone(waker);
+                        let job: Box<dyn FnOnce() + Send> = Box::new(move || {
+                            owner.run_timer_expiry(expiry, now);
+                            let _ = completed.send(TimerCompletion::Monitor);
+                            let _ = wake.wake();
+                        });
                         shared.connection_threads.run(job)?;
                     }
                 }

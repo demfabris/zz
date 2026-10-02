@@ -37,6 +37,7 @@ mod event_loop_tests;
 mod exec;
 #[cfg(test)]
 mod exec_tests;
+mod helpers;
 #[cfg(unix)]
 #[allow(
     dead_code,
@@ -4087,6 +4088,8 @@ impl std::ops::Deref for Shared {
 struct SharedServer {
     inner: Mutex<ServerState>,
     accept_wake: AcceptWake,
+    helpers: helpers::Pool,
+    helper_dispatching: AtomicBool,
     client_writers: Mutex<BTreeMap<ClientId, Arc<OutboundMailbox>>>,
     /// One flag per connection that owns a command queue. `server_client_lost`
     /// frees the lost client's `cmdq`, so every queue loop this client owns
@@ -4161,8 +4164,6 @@ struct SharedServer {
     snapshot_order: Mutex<()>,
     #[cfg(all(feature = "agent", unix))]
     peer_probe: AtomicBool,
-    #[cfg(all(feature = "agent", unix))]
-    peer_registry: Mutex<crate::agent::claude_peers::RegistryCache>,
     pending_execs: Mutex<Vec<Box<dyn FnOnce() + Send>>>,
     #[cfg(windows)]
     exec_links: Mutex<BTreeMap<ClientId, Arc<exec::ExecLink>>>,
@@ -5002,6 +5003,8 @@ impl Shared {
         let status_job_needs = status.job_needs();
         let server = SharedServer {
             accept_wake: AcceptWake::new(),
+            helpers: helpers::Pool::default(),
+            helper_dispatching: AtomicBool::new(false),
             inner: Mutex::new(state),
             client_writers: Mutex::new(BTreeMap::new()),
             command_queue_cancels: Mutex::new(BTreeMap::new()),
@@ -5072,8 +5075,6 @@ impl Shared {
             snapshot_order: Mutex::new(()),
             #[cfg(all(feature = "agent", unix))]
             peer_probe: AtomicBool::new(false),
-            #[cfg(all(feature = "agent", unix))]
-            peer_registry: Mutex::new(crate::agent::claude_peers::RegistryCache::default()),
             pending_execs: Mutex::new(Vec::new()),
             #[cfg(windows)]
             exec_links: Mutex::new(BTreeMap::new()),
@@ -5174,13 +5175,134 @@ impl Shared {
         Ok(())
     }
 
+    fn apply_helper_result(self: &Arc<Self>, result: helpers::Result) {
+        match result {
+            helpers::Result::Path { result, applied } => {
+                self.apply_path_list_result(result);
+                let _ = applied.send(());
+            }
+            #[cfg(feature = "agent")]
+            helpers::Result::Catalog {
+                client,
+                pane,
+                result,
+            } => {
+                self.agent_catalog_pending
+                    .lock()
+                    .remove(&(client, pane, result.catalog_provider));
+                self.publish_agent_catalog(client, pane, result);
+            }
+            #[cfg(all(feature = "agent", unix))]
+            helpers::Result::Peers(result) => self.apply_peer_states(result),
+        }
+    }
+
+    fn submit_helper(self: &Arc<Self>, task: helpers::Task) -> std::io::Result<()> {
+        self.helpers.submit(task)?;
+        self.start_helper_dispatcher()
+    }
+
+    fn start_helper_dispatcher(self: &Arc<Self>) -> std::io::Result<()> {
+        #[cfg(unix)]
+        if self.loop_active.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        if self.helper_dispatching.swap(true, Ordering::AcqRel) {
+            return Ok(());
+        }
+        let owner = self.server_owner();
+        if let Err(error) = self.connection_threads.run(Box::new(move || {
+            loop {
+                #[cfg(unix)]
+                if owner.loop_active.load(Ordering::Acquire) {
+                    owner.helper_dispatching.store(false, Ordering::Release);
+                    owner.accept_wake.wake();
+                    return;
+                }
+                match owner
+                    .helpers
+                    .results
+                    .recv_timeout(Duration::from_millis(20))
+                {
+                    Ok(result) => owner.apply_helper_result(result),
+                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+                        owner.helper_dispatching.store(false, Ordering::Release);
+                        return;
+                    }
+                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                        if !owner.helpers.active() {
+                            owner.helper_dispatching.store(false, Ordering::Release);
+                            if (!owner.helpers.results.is_empty() || owner.helpers.active())
+                                && !owner.helper_dispatching.swap(true, Ordering::AcqRel)
+                            {
+                                continue;
+                            }
+                            return;
+                        }
+                    }
+                }
+            }
+        })) {
+            self.helper_dispatching.store(false, Ordering::Release);
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    fn warm_client_terminfo(&self, message: &ProtocolMessage) -> std::io::Result<()> {
+        let environment = match message {
+            ProtocolMessage::Hello(hello)
+                if validate_hello(&hello.clone().into_client()).is_ok() =>
+            {
+                &hello.client.environment
+            }
+            ProtocolMessage::ClientHello(hello) if validate_hello(hello).is_ok() => {
+                &hello.environment
+            }
+            _ => return Ok(()),
+        };
+        self.warm_terminfo(environment)
+    }
+
+    fn warm_terminfo(&self, environment: &[RawText]) -> std::io::Result<()> {
+        if crate::status::terminfo_is_warm(environment) {
+            return Ok(());
+        }
+        let (reply, result) = mpsc::sync_channel(1);
+        self.helpers.submit_wait(helpers::Task::Terminfo {
+            environment: environment.to_vec(),
+            #[cfg(unix)]
+            jobs: self
+                .loop_active
+                .load(Ordering::Acquire)
+                .then(|| self.helpers.jobs.clone()),
+            reply,
+        })?;
+        result
+            .recv()
+            .map_err(|_| std::io::Error::other("terminfo helper stopped"))
+    }
+
     fn ensure_prompt_history(&self) {
         if self.prompt_history_settled.load(Ordering::Acquire) {
             return;
         }
         let mut source = self.prompt_history_source.lock();
         if let Some((path, limit)) = source.take() {
-            let (command, search) = load_command_prompt_history(&path, limit);
+            let (reply, result) = mpsc::sync_channel(1);
+            if let Err(error) = self.helpers.submit_wait(helpers::Task::HistoryLoad {
+                path: path.clone(),
+                limit,
+                reply,
+            }) {
+                *source = Some((path, limit));
+                log::warn!("could not load prompt history: {error}");
+                return;
+            }
+            let Ok((command, search)) = result.recv() else {
+                *source = Some((path, limit));
+                return;
+            };
             let mut inner = self.inner.lock();
             inner.command_history = command;
             inner.search_history = search;
@@ -15045,22 +15167,12 @@ impl Shared {
                 }
             }
             let config = self.agent_spawn_config();
-            let shared = self.server_owner();
-            let worker_result = result.clone();
-            if let Err(error) = thread::Builder::new()
-                .name("zz-agent-catalog".into())
-                .spawn(move || {
-                    let mut result = worker_result;
-                    match futures_lite::future::block_on(crate::agent::catalog::load(
-                        config, provider, cwd,
-                    )) {
-                        Ok(options) => result.config_options = Some(options),
-                        Err(error) => result.error = Some(error),
-                    }
-                    shared.agent_catalog_pending.lock().remove(&key);
-                    shared.publish_agent_catalog(client, pane, result);
-                })
-            {
+            if let Err(error) = self.submit_helper(helpers::Task::Catalog {
+                client,
+                pane,
+                config: Box::new(config),
+                result: result.clone(),
+            }) {
                 self.agent_catalog_pending.lock().remove(&key);
                 result.error = Some(format!("Could not load the model catalog: {error}"));
                 self.publish_agent_catalog(client, pane, result);
@@ -23474,7 +23586,17 @@ impl Shared {
             })
         };
         if let Some((path, command, search)) = save {
-            save_command_prompt_history(&path, &command, &search);
+            let (reply, result) = mpsc::sync_channel(1);
+            if let Err(error) = self.helpers.submit_wait(helpers::Task::HistorySave {
+                path,
+                command,
+                search,
+                reply,
+            }) {
+                log::warn!("could not save prompt history: {error}");
+            } else {
+                let _ = result.recv();
+            }
         }
     }
 
@@ -28642,7 +28764,7 @@ impl Shared {
             .ok_or_else(|| {
                 ServerError::InvalidCommand("no zz/mux.conf path available".to_owned())
             })?;
-        let donor_text = read_mux_import_source(&source).map_err(|error| {
+        let donor_text = self.helpers.import_source(&source).map_err(|error| {
             ServerError::InvalidCommand(match error {
                 DaemonError::Io(error) => format!("{}: {}", source.display(), error.kind()),
                 error => error.to_string(),
@@ -28650,7 +28772,7 @@ impl Shared {
         })?;
         let (copied, commands, unsupported) =
             prepare_tmux_import(&self.inner.lock().engine, &source, &donor_text);
-        let existing = match read_mux_import_source(&target) {
+        let existing = match self.helpers.import_source(&target) {
             Ok(source) => source,
             Err(DaemonError::Io(error)) if error.kind() == ErrorKind::NotFound => String::new(),
             Err(error) => return Err(error),
@@ -28958,7 +29080,7 @@ impl Shared {
         top_level: bool,
     ) -> Result<Option<PreparedConfig>, DaemonError> {
         report.control_guarded |= options.control_target.is_some();
-        let bytes = match fs::read(path) {
+        let bytes = match self.helpers.read(path) {
             Ok(bytes) => bytes,
             Err(error)
                 if error.kind() == ErrorKind::NotFound && options.control_target.is_none() =>
@@ -28980,7 +29102,7 @@ impl Shared {
         report: &mut ConfigLoadReport,
         explicit: bool,
     ) -> Option<PreparedConfig> {
-        let bytes = match fs::read(path) {
+        let bytes = match self.helpers.read(path) {
             Ok(bytes) => bytes,
             Err(error) => {
                 log::warn!(
@@ -30175,116 +30297,120 @@ impl Shared {
     }
 
     #[cfg(all(feature = "agent", unix))]
-    fn sync_claude_peer_states(self: &Arc<Self>) {
-        use crate::agent::claude_peers;
+    fn peer_scan_inputs(&self) -> Vec<(PaneId, String, Option<u32>)> {
+        if self.agent_stopped.load(Ordering::Acquire) {
+            return Vec::new();
+        }
+        let inner = self.inner.lock();
+        let facts = inner.engine.format_facts();
+        inner
+            .engine
+            .state
+            .windows
+            .values()
+            .flat_map(|window| {
+                window
+                    .panes
+                    .iter()
+                    .map(move |(pane, state)| (window, pane, state))
+            })
+            .filter_map(|(window, pane, state)| {
+                if !matches!(state.kind, PaneKind::Terminal) {
+                    return None;
+                }
+                let target = pane.to_string();
+                if facts.user_option(
+                    &target,
+                    &window.id.to_string(),
+                    &window.session.to_string(),
+                    "@agent-peer-state",
+                ) == Some("off")
+                {
+                    return None;
+                }
+                Some((
+                    *pane,
+                    target,
+                    inner
+                        .engine
+                        .pane_runtime_facts(*pane)
+                        .and_then(|runtime| runtime.pid),
+                ))
+            })
+            .collect()
+    }
 
+    #[cfg(all(feature = "agent", unix))]
+    fn sync_claude_peer_states(self: &Arc<Self>) {
+        let (reply, result) = mpsc::sync_channel(1);
+        if let Err(error) = self.helpers.submit_wait(helpers::Task::Peers {
+            panes: self.peer_scan_inputs(),
+            always: *timers::PEER_SCAN_ALWAYS,
+            reply: Some(reply),
+            completed: None,
+        }) {
+            log::warn!("could not scan Claude peers: {error}");
+            return;
+        }
+        if let Ok(result) = result.recv() {
+            self.apply_peer_states(result);
+        }
+    }
+
+    #[cfg(all(feature = "agent", unix))]
+    fn apply_peer_states(self: &Arc<Self>, result: helpers::PeerResult) {
         if self.agent_stopped.load(Ordering::Acquire) {
             return;
         }
-        let records = if *timers::PEER_SCAN_ALWAYS {
-            claude_peers::read_records()
-        } else {
-            let mut registry = self.peer_registry.lock();
-            registry.refresh().map(|_| {
-                registry
-                    .records()
-                    .filter(|record| record.zz.is_none())
-                    .cloned()
-                    .collect()
-            })
-        };
-        let mut records = match records {
-            Ok(records) => records,
+        let updates = match result {
+            Ok(updates) => updates,
             Err(error) => {
                 log::warn!(target: "zz::agent", "could not read Claude peers: {error}");
                 return;
             }
         };
-        records.retain(|record| record.zz.is_none());
-        let panes = {
-            let inner = self.inner.lock();
-            if records.is_empty() && inner.claude_peer_states.is_empty() {
-                return;
-            }
-            let facts = inner.engine.format_facts();
-            inner
-                .engine
-                .state
-                .windows
-                .values()
-                .flat_map(|window| {
-                    window
-                        .panes
-                        .iter()
-                        .map(move |(pane, state)| (window, pane, state))
-                })
-                .filter_map(|(window, pane, state)| {
-                    if !matches!(state.kind, PaneKind::Terminal) {
-                        return None;
-                    }
-                    let target = pane.to_string();
-                    if facts.user_option(
-                        &target,
-                        &window.id.to_string(),
-                        &window.session.to_string(),
-                        "@agent-peer-state",
-                    ) == Some("off")
-                    {
-                        return None;
-                    }
-                    Some((
-                        *pane,
-                        target,
-                        inner
-                            .engine
-                            .pane_runtime_facts(*pane)
-                            .and_then(|runtime| runtime.pid),
-                    ))
-                })
-                .collect::<Vec<_>>()
-        };
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
-        for (pane, target, pane_pid) in panes {
-            let value = claude_peers::record_for_pane(&records, &target, pane_pid)
-                .filter(|record| {
-                    let updated_at = if record.status_updated_at == 0 {
-                        record.updated_at
-                    } else {
-                        record.status_updated_at
-                    };
-                    !record.status.is_empty()
-                        && now.checked_sub(updated_at).is_some_and(|age| {
-                            u128::from(age) <= Duration::from_mins(10).as_millis()
-                        })
-                })
-                .map(|record| {
-                    if record.status == "busy" {
-                        "working"
-                    } else {
-                        "idle"
-                    }
-                });
+        for (pane, pid, value) in updates {
             let value = {
                 let mut inner = self.inner.lock();
-                if inner.engine.state.window_for_pane(pane).is_none() {
+                let Some(window) = inner.engine.state.window_for_pane(pane) else {
+                    continue;
+                };
+                if !inner
+                    .engine
+                    .state
+                    .pane(pane)
+                    .is_some_and(|pane| matches!(pane.kind, PaneKind::Terminal))
+                    || inner
+                        .engine
+                        .pane_runtime_facts(pane)
+                        .and_then(|runtime| runtime.pid)
+                        != pid
+                {
+                    continue;
+                }
+                let session = inner.engine.state.windows[&window].session;
+                if inner.engine.format_facts().user_option(
+                    &pane.to_string(),
+                    &window.to_string(),
+                    &session.to_string(),
+                    "@agent-peer-state",
+                ) == Some("off")
+                {
                     continue;
                 }
                 if let Some(value) = value {
-                    if inner.claude_peer_states.get(&pane).map(String::as_str) == Some(value) {
+                    if inner.claude_peer_states.get(&pane) == Some(&value) {
                         continue;
                     }
-                    inner.claude_peer_states.insert(pane, value.to_owned());
+                    inner.claude_peer_states.insert(pane, value.clone());
                     value
                 } else if inner.claude_peer_states.remove(&pane).is_none() {
                     continue;
                 } else {
-                    "idle"
+                    "idle".to_owned()
                 }
             };
-            self.write_pane_agent_state(pane, value);
+            self.write_pane_agent_state(pane, &value);
         }
     }
 
@@ -48096,7 +48222,7 @@ fn handle_connection_message<S: TransportStream>(
             client_working_directory_fact(hello.working_directory.as_ref());
         registered.environment = Some(client_environment_fact(&hello.environment));
     }
-    warm_terminfo_entries(&hello.environment);
+    shared.warm_terminfo(&hello.environment)?;
     let mut registration = ClientRegistrationGuard::new(shared, client);
     log::debug!(
         target: "zz_daemon::diagnostics::connection",

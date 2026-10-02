@@ -9,6 +9,10 @@ use zz_protocol::decode_protocol_frame;
 
 use super::*;
 
+#[cfg(test)]
+#[path = "event_loop_e19_tests.rs"]
+mod e19_tests;
+
 const LISTENER: Token = Token(0);
 const WAKE: Token = Token(1);
 const SHUTDOWN_SIGNAL: Token = Token(2);
@@ -103,6 +107,7 @@ pub(super) struct EventLoop {
     timers: timers::LoopTimers,
     watchers: watchers::LoopWatchers,
     jobs: jobs::JobRegistry,
+    helper_jobs: Vec<(jobs::JobId, Arc<AtomicBool>)>,
     #[cfg(feature = "agent")]
     agents: agent_inbox::AgentInbox,
     connections: BTreeMap<Token, Connection>,
@@ -223,6 +228,7 @@ impl EventLoop {
         let poll = Poll::new()?;
         let waker = Arc::new(Waker::new(poll.registry(), WAKE)?);
         shared.accept_wake.install(Arc::clone(&waker));
+        shared.helpers.install(Arc::clone(&waker));
         let (startup_sender, startup_finished) = mpsc::channel();
         let (completion_sender, completed) = mpsc::channel();
         let timers = timers::LoopTimers::new(shared, &waker);
@@ -243,6 +249,7 @@ impl EventLoop {
             timers,
             watchers,
             jobs: jobs::JobRegistry::default(),
+            helper_jobs: Vec::new(),
             #[cfg(feature = "agent")]
             agents,
             connections: BTreeMap::new(),
@@ -692,6 +699,7 @@ impl EventLoop {
             let outbound = Arc::clone(&connection.outbound);
             let cancel = Arc::clone(&connection.cancel);
             self.execute(token, shared, move |shared| {
+                shared.warm_client_terminfo(&message)?;
                 connection::Session::register(shared, message, &outbound, &cancel)
                     .map(|session| session.map(Box::new))
             });
@@ -775,6 +783,7 @@ impl EventLoop {
                     if let Some(client) = exec_client {
                         shared.client_writers.lock().remove(&client);
                     }
+                    shared.warm_client_terminfo(&first)?;
                     connection::Session::register(shared, first, &outbound, &cancel)
                         .map(|session| session.map(Box::new))
                 });
@@ -996,9 +1005,104 @@ impl EventLoop {
         }
     }
 
+    fn turn_helpers(&mut self, shared: &Arc<Shared>) {
+        if !shared.helpers.take_pending() && self.helper_jobs.is_empty() {
+            return;
+        }
+        for result in shared.helpers.results.try_iter().take(64) {
+            shared.apply_helper_result(result);
+        }
+        if !shared.helpers.results.is_empty() {
+            shared.helpers.notify_loop();
+        }
+        self.helper_jobs.retain(|(id, cancel)| {
+            if cancel.load(Ordering::Acquire) {
+                self.jobs.cancel(self.poll.registry(), *id);
+            }
+            self.jobs.contains(*id)
+        });
+        for request in shared.helpers.job_requests.try_iter().take(64) {
+            let helpers::JobRequest {
+                mut command,
+                limit,
+                deadline,
+                cancel,
+                reply,
+            } = request;
+            if cancel.load(Ordering::Acquire) || Instant::now() >= deadline {
+                let _ = reply.send(Err("discovery job cancelled or timed out".into()));
+                continue;
+            }
+            use std::os::unix::process::CommandExt as _;
+            command
+                .process_group(0)
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            let mut child = match command.spawn() {
+                Ok(child) => child,
+                Err(error) => {
+                    let _ = reply.send(Err(error.to_string()));
+                    continue;
+                }
+            };
+            let descriptors = vec![
+                jobs::Descriptor {
+                    fd: child.stdout.take().unwrap().into(),
+                    read: true,
+                    input: None,
+                    socket: false,
+                },
+                jobs::Descriptor {
+                    fd: child.stderr.take().unwrap().into(),
+                    read: true,
+                    input: None,
+                    socket: false,
+                },
+            ];
+            let failed = reply.clone();
+            let launch = jobs::Launch {
+                child,
+                descriptors,
+                policy: jobs::CompletionPolicy::ChildExit,
+                deadline: Some(deadline),
+                process_group: true,
+                output_limit: Some(limit),
+                complete: Box::new(move |mut completion| {
+                    let result = if let Some(error) = completion.error {
+                        Err(error.to_string())
+                    } else if completion.cancelled {
+                        Err("discovery job cancelled or timed out".into())
+                    } else if let Some(status) = completion.status {
+                        let stderr = completion.output.pop().unwrap_or_default();
+                        let stdout = completion.output.pop().unwrap_or_default();
+                        Ok(std::process::Output {
+                            status,
+                            stdout,
+                            stderr,
+                        })
+                    } else {
+                        Err("discovery job exited without status".into())
+                    };
+                    let _ = reply.send(result);
+                }),
+            };
+            match self.register_job(launch) {
+                Ok(id) => self.helper_jobs.push((id, cancel)),
+                Err(error) => {
+                    let _ = failed.send(Err(error.to_string()));
+                }
+            }
+        }
+        if !shared.helpers.job_requests.is_empty() {
+            shared.helpers.notify_loop();
+        }
+    }
+
     fn turn(&mut self, shared: &Arc<Shared>) -> Result<(), DaemonError> {
         #[cfg(feature = "agent")]
         self.agents.turn(shared)?;
+        self.turn_helpers(shared);
         self.jobs.turn(self.poll.registry(), Instant::now());
         self.watchers.turn(shared)?;
         self.timers.turn(shared, &self.waker)?;

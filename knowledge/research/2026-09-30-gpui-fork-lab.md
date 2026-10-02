@@ -208,7 +208,7 @@ build, and idle draws no frames.
 
 ## The lab pin against the old pin
 
-A is the old pin `e01edb6b1a` with the recorder cherry-picked on top (local `lab/mac-base`). B is
+A is the old pin `e01edb6b1a` with the recorder cherry-picked on top (fork commit `b179dfb473`). B is
 `cc9e4d1804`. Four repeats each. Main-thread CPU as a share of one core:
 
 | Scenario | A | B | Change | Ranges (A / B) |
@@ -229,10 +229,10 @@ The recorder now writes `accessibility_active` per frame. With Rectangle, Logi O
 usual apps running, accessibility was inactive in every frame of every run on macOS, so this time
 view retention did reuse views (3 views per stream frame against 5).
 
-`lab/retained` was rebased onto `zz-patches` as local `lab/retained-mac`: the 5 commits plus 4
+The retained port (`68fda66d21`) was rebased onto `zz-patches` as `33656c6f51`: the 5 commits plus 4
 fixes, with duplicate implementations that `zz-patches` already carried dropped (global element
 ids, line layout carry-over, lazy listeners, dispatch copy), and all 475 gpui library tests
-passing. D is that fork with the seven zz-side fixes from `lab/gpui-retained`; D0 is D with
+passing. D is that fork with the seven zz-side fixes from zz commit `1b00da9ca`; D0 is D with
 `GPUI_VIEW_RETENTION=0`. Three repeats each against B:
 
 | Scenario | B | D | D0 |
@@ -248,7 +248,7 @@ on macOS too, now on cost rather than accessibility.
 
 ## CoreText glyph runs
 
-gpui-fast `9b2f43d` was ported onto `zz-patches` as local `lab/coretext`:
+gpui-fast `9b2f43d` was ported onto `zz-patches` as three commits:
 
 - `f1f8964a35` keeps one CoreText font per size in the macOS text system instead of making a
   `CTFont` for every run of every shaped line, and checks for emoji once per glyph run.
@@ -272,7 +272,7 @@ C is B plus those three commits. Three repeats each:
 
 Prepaint fell 26 to 39% in every drawing scenario, where terminal rows build their glyph raster
 data. A second run split the commits: C1 is B plus only the font cache and the recorder field
-(local `lab/coretext-fonts`), three repeats each:
+(`ff805a96b0` and `5a00ac89a4`), three repeats each:
 
 | Scenario | B | C1 | C |
 | --- | --- | --- | --- |
@@ -286,7 +286,7 @@ and every shape made a fresh `CTFont` per run. Run rendering takes about 3% more
 stream and chrome, but C and C1 overlap on main-thread CPU, so that commit is not proven.
 
 On 2026-10-02 the font cache and the recorder field went to `zz-patches` (`ff805a96b0`,
-`5a00ac89a4`) and zz pinned them; the run rendering commit stays on local `lab/coretext`.
+`5a00ac89a4`) and zz pinned them; the run rendering commit `3aefd2a813` was not carried.
 
 Risks:
 

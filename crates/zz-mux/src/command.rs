@@ -1374,7 +1374,7 @@ struct ListKeyHooks<'a, H> {
     fallback: &'a StatusContext<'static>,
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "command/listing_e22_tests.rs"]
 mod listing_e22_tests;
 

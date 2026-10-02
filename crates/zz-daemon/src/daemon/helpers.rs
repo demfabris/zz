@@ -449,19 +449,7 @@ fn run(task: Task, _state: &State) -> Option<Result> {
             always,
             reply,
             completed,
-        } => {
-            let result = scan_peers(_state, panes, always);
-            let result = if let Some(reply) = reply {
-                let _ = reply.send(result);
-                None
-            } else {
-                Some(Result::Peers(result))
-            };
-            if let Some(completed) = completed {
-                let _ = completed.send(super::timers::TimerCompletion::Peer);
-            }
-            result
-        }
+        } => finish_peer_scan(|| scan_peers(_state, panes, always), reply, completed),
         Task::HistoryLoad {
             path,
             limit,
@@ -491,6 +479,33 @@ fn run(task: Task, _state: &State) -> Option<Result> {
         }
     }
 }
+
+#[cfg(all(feature = "agent", unix))]
+fn finish_peer_scan(
+    scan: impl FnOnce() -> PeerResult,
+    reply: Option<std::sync::mpsc::SyncSender<PeerResult>>,
+    completed: Option<crossbeam_channel::Sender<super::timers::TimerCompletion>>,
+) -> Option<Result> {
+    let result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(scan)).unwrap_or_else(|_| {
+            log::error!("peer scan panicked");
+            Err(io::Error::other("peer scan panicked"))
+        });
+    let result = if let Some(reply) = reply {
+        let _ = reply.send(result);
+        None
+    } else {
+        Some(Result::Peers(result))
+    };
+    if let Some(completed) = completed {
+        let _ = completed.send(super::timers::TimerCompletion::Peer);
+    }
+    result
+}
+
+#[cfg(all(test, feature = "agent", unix))]
+#[path = "helpers_reviewfixes_tests.rs"]
+mod reviewfixes_tests;
 
 #[cfg(all(feature = "agent", unix))]
 fn scan_peers(

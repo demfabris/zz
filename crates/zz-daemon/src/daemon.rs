@@ -4309,7 +4309,7 @@ const PRODUCED_NON_AFTER_PINNED_HOOKS: &[&str] = &[
 ];
 
 mod hook_events;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod hook_events_tests;
 #[cfg(test)]
 use hook_events::mux_hook_events;
@@ -4899,6 +4899,10 @@ fn prepare_config_command(
     validate_static_command_chain(std::slice::from_ref(&command))?;
     Ok((command, alias_matched))
 }
+
+#[cfg(all(test, unix))]
+#[path = "daemon/loop_reviewfixes_tests.rs"]
+mod loop_reviewfixes_tests;
 
 impl Shared {
     #[inline]
@@ -6459,6 +6463,7 @@ impl Shared {
             wait_wakes,
         ) = {
             let mut inner = self.inner.lock();
+            let mut removed_client = inner.clients.remove(&client);
             let files = inner
                 .client_file_waiters
                 .extract_if(.., |_, waiter| waiter.client == client)
@@ -6472,7 +6477,6 @@ impl Shared {
                 );
             }
             let mut inner = self.inner.lock();
-            let mut removed_client = inner.clients.remove(&client);
             if inner
                 .pane_read_observations
                 .values()
@@ -18919,21 +18923,12 @@ impl Shared {
                 })
                 .map_err(Into::into);
         };
-        let request_id = {
-            let mut inner = self.inner.lock();
-            inner.next_client_file_request = inner.next_client_file_request.wrapping_add(1).max(1);
-            let request_id = inner.next_client_file_request;
-            inner.client_file_waiters.insert(
-                request_id,
-                ClientFileWaiter {
-                    client,
-                    path: path.to_owned(),
-                    pane,
-                    complete,
-                },
-            );
-            request_id
-        };
+        let request_id = self.insert_client_file_waiter(ClientFileWaiter {
+            client,
+            path: path.to_owned(),
+            pane,
+            complete,
+        })?;
         if !writer.enqueue_reliable(&ProtocolMessage::ClientFileRequest(ClientFileRequest {
             request_id,
             path: path.to_string_lossy().into_owned(),
@@ -18949,6 +18944,17 @@ impl Shared {
             );
         }
         Ok(())
+    }
+
+    fn insert_client_file_waiter(&self, waiter: ClientFileWaiter) -> Result<u64, DaemonError> {
+        let mut inner = self.inner.lock();
+        if !inner.clients.contains_key(&waiter.client) {
+            return Err(client_file_failure("the invoking client is gone", &waiter.path).into());
+        }
+        inner.next_client_file_request = inner.next_client_file_request.wrapping_add(1).max(1);
+        let request_id = inner.next_client_file_request;
+        inner.client_file_waiters.insert(request_id, waiter);
+        Ok(request_id)
     }
 
     fn cancel_pane_files(self: &Arc<Self>, pane: PaneId) {
@@ -34824,7 +34830,7 @@ struct OverlayCommands {
     accepted: Arc<AtomicBool>,
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod overlay_queue_e07_tests;
 
 struct RegisteredWait {
@@ -37516,7 +37522,7 @@ struct ModeTreeMenu {
     outside: bool,
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod menu_queue_e08_tests;
 
 /// A `-t` the daemon resolved for the mux. `command` is the rewritten
@@ -42825,7 +42831,7 @@ fn snapshot_presence(inner: &ServerState) -> SnapshotPresence {
 mod hook_queue;
 mod timers;
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod publish_tests;
 
 fn note_snapshot_sent(inner: &mut ServerState, client: ClientId, snapshot: &MuxSnapshot) {
@@ -83493,6 +83499,7 @@ set-option -g @alias-mixed-next yes
     #[test]
     fn shell_formats_use_the_selected_current_client() {
         let shared = Arc::new(Shared::new(1));
+        let mut event_loop = event_loop::EventLoop::empty(&shared).unwrap();
         let (first_session, first_window, first_pane, second_session, second_pane) = {
             let mut inner = shared.inner.lock();
             let (first_session, first_window, first_pane) = inner
@@ -83533,14 +83540,15 @@ set-option -g @alias-mixed-next yes
         let mut context =
             ExecutionContext::new(Some(first_session), Some(first_window), Some(first_pane));
 
-        let output = shared
-            .execute(
-                command_client,
-                ClientKind::Command,
-                &mut context,
-                &CommandInvocation::new("run-shell", ["printf '#{session_active}'"]),
-            )
-            .expect("current-session run-shell format");
+        let output = loop_reviewfixes_tests::execute_and_drive_loop(
+            &shared,
+            &mut event_loop,
+            command_client,
+            ClientKind::Command,
+            &mut context,
+            &CommandInvocation::new("run-shell", ["printf '#{session_active}'"]),
+        )
+        .expect("current-session run-shell format");
         assert_eq!(output.output, "1");
 
         let directory = tempfile::tempdir().expect("shell format directory");
@@ -83549,55 +83557,58 @@ set-option -g @alias-mixed-next yes
             "printf '#{{session_active}}' > {}",
             shell_quote(&other_output)
         );
-        shared
-            .execute(
-                command_client,
-                ClientKind::Command,
-                &mut context,
-                &CommandInvocation::new(
-                    "run-shell",
-                    ["-t", &second_pane.to_string(), command.as_str()],
-                ),
-            )
-            .expect("other-session run-shell format");
+        loop_reviewfixes_tests::execute_and_drive_loop(
+            &shared,
+            &mut event_loop,
+            command_client,
+            ClientKind::Command,
+            &mut context,
+            &CommandInvocation::new(
+                "run-shell",
+                ["-t", &second_pane.to_string(), command.as_str()],
+            ),
+        )
+        .expect("other-session run-shell format");
         assert_eq!(fs::read_to_string(other_output).unwrap(), "0");
 
-        let output = shared
-            .execute(
-                command_client,
-                ClientKind::Command,
-                &mut context,
-                &CommandInvocation::new(
-                    "if-shell",
-                    [
-                        "-F",
-                        "#{session_active}",
-                        "display-message -p active",
-                        "display-message -p inactive",
-                    ],
-                ),
-            )
-            .expect("current-session if-shell format");
+        let output = loop_reviewfixes_tests::execute_and_drive_loop(
+            &shared,
+            &mut event_loop,
+            command_client,
+            ClientKind::Command,
+            &mut context,
+            &CommandInvocation::new(
+                "if-shell",
+                [
+                    "-F",
+                    "#{session_active}",
+                    "display-message -p active",
+                    "display-message -p inactive",
+                ],
+            ),
+        )
+        .expect("current-session if-shell format");
         assert_eq!(output.output, "active");
 
-        let output = shared
-            .execute(
-                command_client,
-                ClientKind::Command,
-                &mut context,
-                &CommandInvocation::new(
-                    "if-shell",
-                    [
-                        "-F",
-                        "-t",
-                        &second_pane.to_string(),
-                        "#{session_active}",
-                        "display-message -p active",
-                        "display-message -p inactive",
-                    ],
-                ),
-            )
-            .expect("other-session if-shell format");
+        let output = loop_reviewfixes_tests::execute_and_drive_loop(
+            &shared,
+            &mut event_loop,
+            command_client,
+            ClientKind::Command,
+            &mut context,
+            &CommandInvocation::new(
+                "if-shell",
+                [
+                    "-F",
+                    "-t",
+                    &second_pane.to_string(),
+                    "#{session_active}",
+                    "display-message -p active",
+                    "display-message -p inactive",
+                ],
+            ),
+        )
+        .expect("other-session if-shell format");
         assert_eq!(output.output, "inactive");
 
         let (second_client, _) = shared.register_subscribed(
@@ -83627,34 +83638,36 @@ set-option -g @alias-mixed-next yes
             ),
         )
         .expect("write sourced format command");
-        shared
-            .execute(
-                interactive,
-                ClientKind::Control,
-                &mut context,
-                &CommandInvocation::new(
-                    "set-hook",
-                    [
-                        "-g",
-                        "after-display-message",
-                        "new-session -d -s 'sourced-hook-#{session_active}'",
-                    ],
-                ),
-            )
-            .expect("install sourced client hook");
-        shared
-            .execute(
-                interactive,
-                ClientKind::Control,
-                &mut context,
-                &CommandInvocation::new("source-file", [source.display().to_string()]),
-            )
-            .expect("source format command");
+        loop_reviewfixes_tests::execute_and_drive_loop(
+            &shared,
+            &mut event_loop,
+            interactive,
+            ClientKind::Control,
+            &mut context,
+            &CommandInvocation::new(
+                "set-hook",
+                [
+                    "-g",
+                    "after-display-message",
+                    "new-session -d -s 'sourced-hook-#{session_active}'",
+                ],
+            ),
+        )
+        .expect("install sourced client hook");
+        loop_reviewfixes_tests::execute_and_drive_loop(
+            &shared,
+            &mut event_loop,
+            interactive,
+            ClientKind::Control,
+            &mut context,
+            &CommandInvocation::new("source-file", [source.display().to_string()]),
+        )
+        .expect("source format command");
         assert_eq!(
             fs::read_to_string(source_output).unwrap(),
             "shell-first|1|shell-first"
         );
-        assert!(
+        loop_reviewfixes_tests::drive_loop_until(&shared, &mut event_loop, || {
             shared
                 .inner
                 .lock()
@@ -83663,7 +83676,7 @@ set-option -g @alias-mixed-next yes
                 .sessions
                 .values()
                 .any(|session| session.name == "sourced-hook-1")
-        );
+        });
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             let inner = shared.inner.lock();
@@ -83684,7 +83697,7 @@ set-option -g @alias-mixed-next yes
                 break;
             }
             assert!(Instant::now() < deadline, "background format sessions");
-            thread::sleep(Duration::from_millis(10));
+            event_loop.shell_test_turn(&shared);
         }
 
         let hook_output = directory.path().join("hook-session-active");
@@ -83692,50 +83705,66 @@ set-option -g @alias-mixed-next yes
             "run-shell \"printf '#{{session_active}}' > {}\"",
             shell_quote(&hook_output)
         );
-        shared
-            .execute(
-                interactive,
-                ClientKind::Control,
-                &mut context,
-                &CommandInvocation::new(
-                    "set-hook",
-                    ["-g", "after-display-message", hook_command.as_str()],
-                ),
-            )
-            .expect("install client format hook");
-        shared
-            .execute(
-                interactive,
-                ClientKind::Control,
-                &mut context,
-                &CommandInvocation::new("display-message", ["-p", "trigger"]),
-            )
-            .expect("trigger client format hook");
-        assert_eq!(fs::read_to_string(hook_output).unwrap(), "1");
+        loop_reviewfixes_tests::execute_and_drive_loop(
+            &shared,
+            &mut event_loop,
+            interactive,
+            ClientKind::Control,
+            &mut context,
+            &CommandInvocation::new(
+                "set-hook",
+                ["-g", "after-display-message", hook_command.as_str()],
+            ),
+        )
+        .expect("install client format hook");
+        loop_reviewfixes_tests::execute_and_drive_loop(
+            &shared,
+            &mut event_loop,
+            interactive,
+            ClientKind::Control,
+            &mut context,
+            &CommandInvocation::new("display-message", ["-p", "trigger"]),
+        )
+        .expect("trigger client format hook");
+        loop_reviewfixes_tests::drive_loop_until(&shared, &mut event_loop, || {
+            fs::read_to_string(&hook_output).is_ok_and(|output| output == "1")
+        });
 
-        shared
-            .execute(
-                interactive,
-                ClientKind::Control,
-                &mut context,
-                &CommandInvocation::new(
-                    "set-hook",
-                    [
-                        "-g",
-                        "session-created",
-                        "new-session -d -s 'event-#{session_active}'",
-                    ],
-                ),
-            )
-            .expect("install clientless event hook");
-        shared
-            .execute(
-                interactive,
-                ClientKind::Control,
-                &mut context,
-                &CommandInvocation::new("new-session", ["-d", "-s", "event-trigger"]),
-            )
-            .expect("trigger clientless event hook");
+        loop_reviewfixes_tests::execute_and_drive_loop(
+            &shared,
+            &mut event_loop,
+            interactive,
+            ClientKind::Control,
+            &mut context,
+            &CommandInvocation::new(
+                "set-hook",
+                [
+                    "-g",
+                    "session-created",
+                    "new-session -d -s 'event-#{session_active}'",
+                ],
+            ),
+        )
+        .expect("install clientless event hook");
+        loop_reviewfixes_tests::execute_and_drive_loop(
+            &shared,
+            &mut event_loop,
+            interactive,
+            ClientKind::Control,
+            &mut context,
+            &CommandInvocation::new("new-session", ["-d", "-s", "event-trigger"]),
+        )
+        .expect("trigger clientless event hook");
+        loop_reviewfixes_tests::drive_loop_until(&shared, &mut event_loop, || {
+            shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .sessions
+                .values()
+                .any(|session| session.name == "event-")
+        });
         let inner = shared.inner.lock();
         assert!(
             inner
@@ -83757,14 +83786,15 @@ set-option -g @alias-mixed-next yes
 
         shared.detach(second_client);
         shared.detach(interactive);
-        let output = shared
-            .execute(
-                command_client,
-                ClientKind::Command,
-                &mut context,
-                &CommandInvocation::new("run-shell", ["printf '[#{session_active}]'"]),
-            )
-            .expect("clientless run-shell format");
+        let output = loop_reviewfixes_tests::execute_and_drive_loop(
+            &shared,
+            &mut event_loop,
+            command_client,
+            ClientKind::Command,
+            &mut context,
+            &CommandInvocation::new("run-shell", ["printf '[#{session_active}]'"]),
+        )
+        .expect("clientless run-shell format");
         assert_eq!(output.output, "[]");
     }
 
@@ -115064,6 +115094,8 @@ bind - split-window -v -c "#{pane_current_path}"
     #[test]
     fn first_command_session_uses_zero_ids_and_arms_last_session_shutdown() {
         let shared = Arc::new(Shared::new(1));
+        #[cfg(unix)]
+        let mut event_loop = event_loop::EventLoop::empty(&shared).unwrap();
         shared.initialize(false).expect("initialize daemon state");
         let mut context = ExecutionContext::default();
 
@@ -115121,6 +115153,10 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("kill the last session");
 
         assert!(shared.inner.lock().engine.state.sessions.is_empty());
+        #[cfg(unix)]
+        loop_reviewfixes_tests::drive_loop_until(&shared, &mut event_loop, || {
+            shared.stopping.load(Ordering::Acquire)
+        });
         assert!(shared.stopping.load(Ordering::Acquire));
     }
 

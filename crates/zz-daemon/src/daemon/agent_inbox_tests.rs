@@ -168,6 +168,7 @@ fn agent_inbox_bounds_each_turn_and_keeps_the_next_wake() {
     runtime.shutdown();
 }
 
+#[cfg(unix)]
 #[test]
 fn a_shell_hook_keeps_the_agent_inbox_running() {
     let (shared, mut inbox, pane) = fixture();

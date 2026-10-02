@@ -3114,6 +3114,13 @@ The known daemon endpoint test stayed red; four load failures passed alone. Mac 
 
 ## W3-LOOP: single-owner mux loop (effort XL)
 
+**Review fixes, 2026-10-02, against base `534c99ee3`:**
+
+- Gate Unix-only tests on Windows. Finish peer probes after a panic, remove clients and their file waiters under one lock, and accept EPIPE as closed job input while preserving child status. Keep the hook response/exit checks and drive queued lifecycle work and hooks in the two timing-sensitive tests.
+- Mac daemon and mux suites, clippy, and the five compat scenarios pass. Both timing-sensitive tests pass 20/20 runs. Windows no-run links 11 executables and check passes with cached SDK headers, LLVM/Rust tools, and a local cached Wuffs build setting that forwards the SDK libc file to translate-c; tracked dependencies stay unchanged.
+- One quick cli/mem run per build: 33 scored rows pass on both. Display CPU p1 is 0.0338 -> 0.0283 ms; p20 is 0.0329 -> 0.0372 ms. Footprint p1 is 4.78 -> 4.73 MiB; p20 is 10.89 -> 10.80 MiB. Threads remain 2/5. Results: `/tmp/zzpc/loop-reviewfixes-{base,final}-perf.json`.
+- Hand Linux-only checks to the orchestrator; this Mac did not run /proc readers, zz-pty-gather, epoll, THP, or tui-output-backpressure.sh.
+
 ### Write batch drain (2026-10-02)
 
 `Connection::write_ready` wakes the mux loop when a full write batch leaves queued or

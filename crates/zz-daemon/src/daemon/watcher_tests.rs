@@ -174,6 +174,7 @@ fn repeated_readiness_keeps_one_entry_per_surface() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn drained_turn_rearms_the_coalesced_loop_wake() {
     let shared = Arc::new(Shared::new(1));

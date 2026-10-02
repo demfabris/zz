@@ -224,6 +224,7 @@ fn status_requests_with_partial_needs_render_what_the_eager_universe_renders() {
     assert!(line.rows[1].contains("@pp=b"), "{:?}", line.rows);
 }
 
+#[cfg(unix)]
 #[test]
 fn status_job_output_reads_parts_the_templates_do_not() {
     let fixture = fixture();

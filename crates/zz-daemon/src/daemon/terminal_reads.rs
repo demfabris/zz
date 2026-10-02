@@ -690,7 +690,7 @@ fn poll_run(shared: &Arc<Shared>, target: Arc<Target>, mut run: Run) {
 #[path = "terminal_reads_e10_tests.rs"]
 mod e10_tests;
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "terminal_reads_e05_tests.rs"]
 mod tests;
 

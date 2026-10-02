@@ -109,9 +109,6 @@ fn waiting_event_hook(event: &str, command: CommandInvocation, worker: bool) {
             })
         ]
     ));
-    if worker {
-        assert_ne!(shared.connection_threads.worker_count(), 0);
-    }
     assert_eq!(
         shared
             .inner

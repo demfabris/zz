@@ -278,6 +278,6 @@ pub(super) fn render_key_listing(
         });
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "listing_e22_tests.rs"]
 mod listing_e22_tests;

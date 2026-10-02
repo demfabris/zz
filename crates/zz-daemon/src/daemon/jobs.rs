@@ -440,16 +440,18 @@ impl JobRegistry {
             }
             if writable && let Some(input) = &port.descriptor.input {
                 let end = input.len().min(port.written.saturating_add(IO_BURST));
+                let mut broken_pipe = false;
                 while port.written < end {
                     match rustix::io::write(&port.descriptor.fd, &input[port.written..end]) {
                         Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
                         Ok(count) => port.written += count,
                         Err(rustix::io::Errno::INTR) => {}
                         Err(rustix::io::Errno::AGAIN) => break,
-                        #[cfg(target_os = "linux")]
-                        Err(rustix::io::Errno::PIPE)
-                            if !port.descriptor.socket && job.pipe.is_none() =>
-                        {
+                        Err(rustix::io::Errno::PIPE) => {
+                            broken_pipe = true;
+                            if let Some(pipe) = &mut job.pipe {
+                                pipe.input = None;
+                            }
                             port.written = input.len();
                             break;
                         }
@@ -458,7 +460,7 @@ impl JobRegistry {
                 }
                 if port.written == input.len() {
                     port.descriptor.input = None;
-                    if port.descriptor.socket {
+                    if port.descriptor.socket && !broken_pipe {
                         rustix::net::shutdown(&port.descriptor.fd, rustix::net::Shutdown::Write)?;
                     }
                 } else if port.written == end {
@@ -618,9 +620,13 @@ impl JobRegistry {
 #[path = "jobs_e12_tests.rs"]
 mod e12_tests;
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
 #[path = "jobs_e16fix_tests.rs"]
 mod e16fix_tests;
+
+#[cfg(test)]
+#[path = "jobs_reviewfixes_tests.rs"]
+mod reviewfixes_tests;
 
 pub(super) fn launch_status(mut command: Command, mut output: StatusOutput) -> io::Result<Launch> {
     use std::os::unix::process::CommandExt as _;

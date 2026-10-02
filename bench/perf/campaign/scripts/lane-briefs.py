@@ -36,7 +36,7 @@ def context(l):
     return '\n\n'.join(parts)
 
 def quick(l):
-    return f'`just perf-gate {STAGE} --quick --only {l["groups"]} --baseline {QUICK_W0} --json {SCRATCH}/{l["slug"]}-<label>.json` (quick against the quick W0; the full Mac wave-2 view to compare with is {BASE_JSON})'
+    return f'`just perf-gate {STAGE} --quick --only {l["groups"]} --baseline {QUICK_W0} --json {SCRATCH}/{l["slug"]}-<label>.json` (quick against the quick W0; the full {HOST} wave-3 exit gate to compare with is {BASE_JSON})'
 
 def impl(l):
     wt=f'{ROOT}/zz-{l["slug"]}'

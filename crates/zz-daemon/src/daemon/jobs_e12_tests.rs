@@ -36,8 +36,11 @@ fn pump(poll: &mut Poll, jobs: &mut JobRegistry, until: impl Fn(&JobRegistry) ->
     while !until(jobs) {
         assert!(Instant::now() < deadline, "jobs did not complete");
         jobs.turn(poll.registry(), Instant::now());
-        poll.poll(&mut events, Some(Duration::from_millis(2)))
-            .unwrap();
+        match poll.poll(&mut events, Some(Duration::from_millis(2))) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => panic!("poll failed: {error}"),
+        }
         for event in &events {
             jobs.ready(
                 poll.registry(),

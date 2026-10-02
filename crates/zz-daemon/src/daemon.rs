@@ -21,6 +21,8 @@ use std::{
 use parking_lot::{Condvar, Mutex};
 #[cfg(windows)]
 use std::io::{Seek, SeekFrom};
+#[cfg(windows)]
+use zz_terminal::RawOutputTapError;
 
 #[cfg(feature = "agent")]
 mod agent_inbox;
@@ -50,6 +52,7 @@ mod jobs;
 #[cfg(unix)]
 mod pipe_jobs;
 pub(crate) mod status_jobs;
+mod terminal_requests;
 mod watchers;
 pub use exec::exec_resume_kind;
 pub(crate) mod path_listing;
@@ -98,11 +101,11 @@ use zz_terminal::{
     AppearanceColor, AppearanceConfigDisposition, AppearanceLoad, AppearanceProvenance,
     CaptureBoundary, CaptureOptions, ClipboardTarget, Color, ColourClass, CursorBlinkPolicy,
     CursorStyle, DeferredTerminalEvent, EngineKnobs, LastCommandCapture, PasteBufferAction,
-    ProgressBarState, RawOutputTapError, RawOutputTapReceiver, RawOutputTapSender,
-    TerminalAppearance, TerminalCaptureError, TerminalColorScheme, TerminalDiffScratch,
-    TerminalEvent, TerminalEvents, TerminalMode, TerminalPalette, TerminalPatchRef,
-    TerminalSession, TerminalSize, TerminalSpawn, TerminalViewId, TerminalViewport, ViewStream,
-    WordSeparators, apply_appearance_overrides, parse_x11_color, prepare_paste_buffer,
+    ProgressBarState, RawOutputTapReceiver, RawOutputTapSender, TerminalAppearance,
+    TerminalCaptureError, TerminalColorScheme, TerminalDiffScratch, TerminalEvent, TerminalEvents,
+    TerminalMode, TerminalPalette, TerminalPatchRef, TerminalSession, TerminalSize, TerminalSpawn,
+    TerminalViewId, TerminalViewport, ViewStream, WordSeparators, apply_appearance_overrides,
+    parse_x11_color, prepare_paste_buffer,
 };
 
 #[cfg(feature = "agent")]
@@ -4096,6 +4099,7 @@ struct SharedServer {
     accept_wake: AcceptWake,
     helpers: helpers::Pool,
     helper_dispatching: AtomicBool,
+    terminal_requests: Arc<terminal_requests::Inbox>,
     client_writers: Mutex<BTreeMap<ClientId, Arc<OutboundMailbox>>>,
     /// One flag per connection that owns a command queue. `server_client_lost`
     /// frees the lost client's `cmdq`, so every queue loop this client owns
@@ -5022,6 +5026,7 @@ impl Shared {
             accept_wake: AcceptWake::new(),
             helpers: helpers::Pool::default(),
             helper_dispatching: AtomicBool::new(false),
+            terminal_requests: Arc::default(),
             inner: Mutex::new(state),
             client_writers: Mutex::new(BTreeMap::new()),
             command_queue_cancels: Mutex::new(BTreeMap::new()),
@@ -8599,6 +8604,7 @@ impl Shared {
         let mut retired_command_outputs = Vec::new();
         let mut retired_popups = Vec::new();
         let mut deferred_terminal_commands = Vec::new();
+        let mut terminal_wait = None;
         let mut injected_client_keys = Vec::new();
         let mut mode_table_keys = Vec::new();
         let mut pane_mode_keys = Vec::new();
@@ -10742,49 +10748,43 @@ impl Shared {
                 }
             }
             if let Some((pane, format, active_session, format_client)) = pane_format_output {
-                if let Some(terminal) = inner.terminals.get(&pane).cloned() {
-                    if !split_caller_stream {
-                        drop(inner);
-                        wait_for_terminal_identity(&terminal);
-                        inner = self.inner.lock();
-                    }
-                    if inner
-                        .terminals
-                        .get(&pane)
-                        .is_some_and(|current| Arc::ptr_eq(current, &terminal))
-                    {
-                        let mut runtime = inner
-                            .engine
-                            .pane_runtime_facts(pane)
-                            .cloned()
-                            .unwrap_or_default();
-                        runtime.pid = terminal.process_id();
-                        runtime.tty = terminal
-                            .tty()
-                            .map(|path| path.to_string_lossy().into_owned())
-                            .unwrap_or_default();
-                        inner
-                            .engine
-                            .set_pane_runtime_facts_with_hooks(pane, runtime, &mut hooks);
-                    }
+                if let Some(terminal) = inner.terminals.get(&pane).cloned()
+                    && !split_caller_stream
+                {
+                    execution.output = RawText::default();
+                    drop(inner);
+                    let wait = terminal_wait
+                        .get_or_insert_with(|| terminal_requests::CommandWait::new(self));
+                    wait.pane_output(
+                        self,
+                        pane,
+                        terminal,
+                        format,
+                        active_session,
+                        format_client,
+                        format_variables.clone(),
+                        command_name.to_owned(),
+                    );
+                    inner = self.inner.lock();
+                } else {
+                    let target = ExecutionContext::for_pane(&inner.engine.state, pane)
+                        .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+                    let facts = borrowed_format_hook_facts(&inner);
+                    let mut hooks = DaemonFormatHooks::command_with_optional_variables(
+                        &facts,
+                        (!format_variables.is_empty()).then_some(&format_variables),
+                    )
+                    .with_command_item(command_name);
+                    let mut output = inner.engine.expand_pane_format(
+                        &format,
+                        &target,
+                        active_session,
+                        format_client,
+                        &mut hooks,
+                    );
+                    output.push('\n');
+                    execution.output = output.into();
                 }
-                let target = ExecutionContext::for_pane(&inner.engine.state, pane)
-                    .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
-                let facts = borrowed_format_hook_facts(&inner);
-                let mut hooks = DaemonFormatHooks::command_with_optional_variables(
-                    &facts,
-                    (!format_variables.is_empty()).then_some(&format_variables),
-                )
-                .with_command_item(command_name);
-                let mut output = inner.engine.expand_pane_format(
-                    &format,
-                    &target,
-                    active_session,
-                    format_client,
-                    &mut hooks,
-                );
-                output.push('\n');
-                execution.output = output.into();
             }
             let recheck_shutdown_requested = self.should_shutdown_if_empty(&inner);
             if snapshot_changed {
@@ -10937,27 +10937,43 @@ impl Shared {
             self.refresh_control_output_taps();
         }
 
-        let mut copy_mode_terminals: Vec<Arc<TerminalSession>> = Vec::new();
-        for command in deferred_terminal_commands {
-            #[cfg(test)]
-            let wrap_search = command.wrap_search();
-            if let Some(terminal) = command.copy_mode_terminal()
-                && !copy_mode_terminals
+        #[cfg(unix)]
+        if !terminals_to_watch.is_empty() {
+            let acknowledgements = {
+                let inner = self.inner.lock();
+                terminals_to_watch
                     .iter()
-                    .any(|settled| Arc::ptr_eq(settled, terminal))
-            {
-                copy_mode_terminals.push(Arc::clone(terminal));
-            }
-            command.run();
-            #[cfg(test)]
-            if let Some(enabled) = wrap_search {
-                self.delivered_wrap_search_commands.lock().push(enabled);
+                    .filter_map(|(pane, _)| {
+                        inner
+                            .control_output_taps
+                            .get(pane)
+                            .map(|tap| Arc::clone(&tap.ack))
+                    })
+                    .filter(|ack| !ack.ready())
+                    .collect::<Vec<_>>()
+            };
+            for ack in acknowledgements {
+                terminal_wait
+                    .get_or_insert_with(|| terminal_requests::CommandWait::new(self))
+                    .tap(&ack);
             }
         }
-        if !copy_mode_terminals.is_empty() {
-            let _round_trips = zz_terminal::allow_actor_round_trips();
-            for terminal in copy_mode_terminals {
-                terminal.settle();
+        if deferred_terminal_commands.iter().any(|command| {
+            matches!(command, DeferredTerminalCommand::ArmCopySource { .. })
+                || command.copy_mode_terminal().is_some()
+        }) {
+            let wait =
+                terminal_wait.get_or_insert_with(|| terminal_requests::CommandWait::new(self));
+            wait.effects(self, deferred_terminal_commands);
+        } else {
+            for command in deferred_terminal_commands {
+                #[cfg(test)]
+                let wrap_search = command.wrap_search();
+                command.run();
+                #[cfg(test)]
+                if let Some(enabled) = wrap_search {
+                    self.delivered_wrap_search_commands.lock().push(enabled);
+                }
             }
         }
         if respawned_terminals && !snapshot_changed {
@@ -11818,7 +11834,10 @@ impl Shared {
                 output: execution.output,
                 exit_code: 1,
             }),
-            None => Ok(execution),
+            None => match terminal_wait {
+                Some(wait) => wait.finish(self, execution),
+                None => Ok(execution),
+            },
         }
     }
 
@@ -12186,6 +12205,7 @@ impl Shared {
                     continuation,
                     leaf: None,
                     guard: None,
+                    terminal: None,
                 }));
                 return Ok(());
             }
@@ -12473,6 +12493,20 @@ impl Shared {
         drop(_serial);
         self.refresh_control_output_taps();
         self.refresh_status();
+        #[cfg(unix)]
+        if pipe_output {
+            let ack = self
+                .inner
+                .lock()
+                .control_output_taps
+                .get(&pane)
+                .map(|tap| Arc::clone(&tap.ack));
+            if let Some(ack) = ack {
+                let wait = terminal_requests::CommandWait::new(self);
+                wait.tap(&ack);
+                return wait.finish(self, Execution::default());
+            }
+        }
         Ok(Execution::default())
     }
 
@@ -12621,13 +12655,16 @@ impl Shared {
             #[cfg(unix)]
             if let Some((token, previous, output)) = existing {
                 if !Arc::ptr_eq(&previous, &terminal) {
-                    let _round_trips = zz_terminal::allow_actor_round_trips();
-                    let _ = previous.disarm_raw_output_tap(token);
-                    if let Err(error) = terminal.arm_raw_output_tap(token, output) {
-                        log::warn!("could not rearm raw output for {pane}: {error}");
-                    } else if let Some(tap) = self.inner.lock().control_output_taps.get_mut(&pane) {
+                    let request = previous
+                        .disarm_raw_output_tap_request(token, self.terminal_requests.notifier());
+                    self.terminal_requests.submit(request, |_, _| {});
+                    if let Some(tap) = self.inner.lock().control_output_taps.get_mut(&pane) {
+                        tap.ack
+                            .complete(Err(zz_terminal::TerminalRequestError::ActorStopped));
+                        tap.ack = Arc::default();
                         tap.terminal = Arc::clone(&terminal);
                     }
+                    self.arm_control_output_tap(pane, token, &terminal, output, false);
                 }
                 continue;
             }
@@ -12665,6 +12702,7 @@ impl Shared {
         }
     }
 
+    #[cfg(windows)]
     fn start_control_output_tap(self: &Arc<Self>, pane: PaneId, terminal: &Arc<TerminalSession>) {
         let _round_trips = zz_terminal::allow_actor_round_trips();
         let next_token = |daemon: &Self| {
@@ -14255,7 +14293,13 @@ impl Shared {
                 let wait = {
                     let mut item = self.command_item.as_ref().expect("command item").lock();
                     let wait = item.pending_wait.as_ref().expect("registered wait");
-                    if !wait.continuation.ready() {
+                    if !wait.continuation.ready()
+                        || inline
+                            && frame
+                                .wait_boundary
+                                .as_ref()
+                                .is_some_and(|(_, step)| wait_queue::wait_needs_worker(step))
+                    {
                         return None;
                     }
                     item.pending_wait.take().unwrap()
@@ -14267,6 +14311,9 @@ impl Shared {
                     false,
                 );
                 let (boundary, mut step) = frame.wait_boundary.take().unwrap();
+                if let Some(terminal) = wait.terminal {
+                    terminal.apply(&mut step.0);
+                }
                 if let Some(mut leaf) = wait.leaf {
                     let command = leaf.command.take().expect("wait command");
                     step.0 = self.finish_inserted_leaf(
@@ -33977,6 +34024,7 @@ struct RegisteredWait {
     continuation: cmdq::WaitContinuation,
     leaf: Option<InsertedLeafContinuation>,
     guard: Option<InsertedControlGuard>,
+    terminal: Option<Arc<terminal_requests::CommandState>>,
 }
 
 #[derive(Default)]
@@ -34014,6 +34062,10 @@ struct ControlOutputTap {
     output: RawOutputTapSender,
     #[cfg(unix)]
     pane: PaneId,
+    #[cfg(unix)]
+    requests: Arc<terminal_requests::Inbox>,
+    #[cfg(unix)]
+    ack: Arc<terminal_requests::TapAck>,
     token: u64,
     terminal: Arc<TerminalSession>,
     #[cfg(windows)]
@@ -43728,8 +43780,10 @@ fn drain_control_pane_output(
 
 #[cfg(unix)]
 fn stop_control_output_tap(tap: ControlOutputTap) {
-    let _round_trips = zz_terminal::allow_actor_round_trips();
-    let _ = tap.terminal.disarm_raw_output_tap(tap.token);
+    let request = tap
+        .terminal
+        .disarm_raw_output_tap_request(tap.token, tap.requests.notifier());
+    tap.requests.submit(request, |_, _| {});
     drop(tap);
 }
 
@@ -43966,15 +44020,8 @@ impl DeferredTerminalCommand {
             }
             Self::SetWrapSearch { terminal, enabled } => terminal.set_wrap_search(enabled),
             Self::SetEngineKnobs { terminal, knobs } => terminal.set_engine_knobs(knobs),
-            Self::ArmCopySource { terminal, source } => {
-                let _round_trips = zz_terminal::allow_actor_round_trips();
-                match source.capture_copy_source() {
-                    Ok(captured) => terminal.set_pending_copy_source(Some(Box::new(captured))),
-                    Err(error) => log::warn!(
-                        target: "zz_daemon::diagnostics::terminal",
-                        "could not clone the copy-mode source screen: {error}"
-                    ),
-                }
+            Self::ArmCopySource { .. } => {
+                unreachable!("copy sources resume through the terminal inbox")
             }
             Self::SetAppearance {
                 terminal,
@@ -45053,6 +45100,7 @@ fn mouse_pane_cell(
     Some((usize::from(x), usize::from(y)))
 }
 
+#[cfg(test)]
 fn wait_for_terminal_identity(terminal: &TerminalSession) {
     terminal.wait_for_identity(Duration::from_secs(2));
 }

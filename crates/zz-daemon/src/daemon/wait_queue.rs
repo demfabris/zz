@@ -41,6 +41,15 @@ pub(super) fn can_run_inline(
     connection::inline_query(shared, context, &prepared)
 }
 
+pub(super) fn wait_needs_worker(step: &InsertedCommandStep) -> bool {
+    step.0.as_ref().is_ok_and(|execution| {
+        execution
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, MuxEffect::PaneWaitForExit { .. }))
+    })
+}
+
 pub(super) enum Progress {
     Done,
     Waiting,
@@ -217,6 +226,15 @@ impl CommandTask {
                 .finish_command_queue_execution(&frame.execution, None);
             self.finished = Some(frame);
             Progress::Done
+        } else if inline
+            && self.ready()
+            && self
+                .frames
+                .last()
+                .and_then(|frame| frame.wait_boundary.as_ref())
+                .is_some_and(|(_, step)| wait_needs_worker(step))
+        {
+            Progress::Worker
         } else if self
             .shared
             .command_item
@@ -375,6 +393,15 @@ impl InsertedTask {
             };
             self.completion.take().unwrap()(&self.shared.server_owner(), &frame.context, result);
             Progress::Done
+        } else if inline
+            && self.ready()
+            && self
+                .frames
+                .last()
+                .and_then(|frame| frame.wait_boundary.as_ref())
+                .is_some_and(|(_, step)| wait_needs_worker(step))
+        {
+            Progress::Worker
         } else if self
             .shared
             .command_item

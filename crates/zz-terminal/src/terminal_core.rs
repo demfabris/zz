@@ -48,8 +48,8 @@ pub use paste::{PastePreparationError, prepare_paste_buffer};
 pub use session::disable_transparent_huge_pages;
 #[cfg(feature = "session")]
 pub use session::{
-    CaptureBoundary, CaptureOptions, CopyModeFacts, CopyModeSelectionFacts, EngineKnobs,
-    KittyImage, KittyImageRequestError, LastCommandCapture, MAX_LAST_COMMAND_BYTES,
+    CaptureBoundary, CaptureOptions, CopyModeFacts, CopyModeSelectionFacts, DeferredTerminalEvent,
+    EngineKnobs, KittyImage, KittyImageRequestError, LastCommandCapture, MAX_LAST_COMMAND_BYTES,
     MAX_LAST_COMMAND_LINES, PointerContext, ProgressBar, ProgressBarState, RawOutputTapError,
     RoundTripGuard, TerminalCaptureError, TerminalCopyReady, TerminalEvent, TerminalEvents,
     TerminalFacts, TerminalProcessExit, TerminalSession, TerminalSessionDiagnostics, TerminalSize,

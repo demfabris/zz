@@ -101,6 +101,7 @@ pub(super) struct EventLoop {
     startup_sender: mpsc::Sender<()>,
     waker: Arc<Waker>,
     timers: timers::LoopTimers,
+    watchers: watchers::LoopWatchers,
     connections: BTreeMap<Token, Connection>,
     completed: mpsc::Receiver<Completion>,
     completion_sender: mpsc::Sender<Completion>,
@@ -222,6 +223,8 @@ impl EventLoop {
         let (startup_sender, startup_finished) = mpsc::channel();
         let (completion_sender, completed) = mpsc::channel();
         let timers = timers::LoopTimers::new(shared, &waker);
+        let watchers = watchers::LoopWatchers::new(shared);
+        shared.watcher_tx.wake.install(Arc::clone(&waker));
         let (shutdown_sender, shutdown_completed) = mpsc::channel();
         shared.loop_active.store(true, Ordering::Release);
         Ok(Self {
@@ -231,6 +234,7 @@ impl EventLoop {
             startup_sender,
             waker,
             timers,
+            watchers,
             connections: BTreeMap::new(),
             completed,
             completion_sender,
@@ -965,6 +969,7 @@ impl EventLoop {
     }
 
     fn turn(&mut self, shared: &Arc<Shared>) -> Result<(), DaemonError> {
+        self.watchers.turn(shared)?;
         self.timers.turn(shared, &self.waker)?;
         self.control_output_poll = shared.start_ready_control_output_readers();
         while let Ok(completion) = self.completed.try_recv() {

@@ -64,6 +64,8 @@ use crate::{
 };
 
 mod copy_grid;
+#[cfg(test)]
+mod deferred_event_tests;
 mod mode_revision;
 mod pane_actor;
 #[cfg(test)]
@@ -1362,24 +1364,18 @@ impl EventQueueState {
     }
 }
 
-impl TerminalEvents {
+impl EventQueueState {
     fn received(&self, event: &mut TerminalEvent) {
         if let TerminalEvent::ViewportReady { output_activity } = event {
-            self.state
-                .notification_pending
-                .store(false, Ordering::Release);
-            *output_activity = self
-                .state
-                .output_activity_pending
-                .swap(false, Ordering::AcqRel);
+            self.notification_pending.store(false, Ordering::Release);
+            *output_activity = self.output_activity_pending.swap(false, Ordering::AcqRel);
             return;
         }
 
-        let previous = self.state.pending_reliable.fetch_sub(1, Ordering::AcqRel);
+        let previous = self.pending_reliable.fetch_sub(1, Ordering::AcqRel);
         debug_assert!(previous > 0, "reliable terminal event accounting underflow");
         let bytes = reliable_event_bytes(event);
         let previous_bytes = self
-            .state
             .pending_reliable_bytes
             .fetch_sub(bytes, Ordering::AcqRel);
         debug_assert!(
@@ -1387,17 +1383,53 @@ impl TerminalEvents {
             "reliable terminal event byte accounting underflow"
         );
     }
+}
+
+pub struct DeferredTerminalEvent {
+    event: Option<TerminalEvent>,
+    state: Arc<EventQueueState>,
+}
+
+impl DeferredTerminalEvent {
+    pub fn event(&self) -> &TerminalEvent {
+        self.event.as_ref().expect("unconsumed terminal event")
+    }
+
+    pub fn into_event(mut self) -> TerminalEvent {
+        let mut event = self.event.take().expect("unconsumed terminal event");
+        self.state.received(&mut event);
+        event
+    }
+}
+
+impl Drop for DeferredTerminalEvent {
+    fn drop(&mut self) {
+        if let Some(mut event) = self.event.take() {
+            self.state.received(&mut event);
+        }
+    }
+}
+
+impl TerminalEvents {
+    pub fn recv_deferred_blocking(
+        &self,
+    ) -> Result<DeferredTerminalEvent, async_channel::RecvError> {
+        Ok(DeferredTerminalEvent {
+            event: Some(self.receiver.recv_blocking()?),
+            state: Arc::clone(&self.state),
+        })
+    }
 
     /// Receives the next terminal event, blocking the caller.
     pub fn recv_blocking(&self) -> Result<TerminalEvent, async_channel::RecvError> {
         let mut event = self.receiver.recv_blocking()?;
-        self.received(&mut event);
+        self.state.received(&mut event);
         Ok(event)
     }
 
     pub fn try_recv(&self) -> Result<TerminalEvent, async_channel::TryRecvError> {
         let mut event = self.receiver.try_recv()?;
-        self.received(&mut event);
+        self.state.received(&mut event);
         Ok(event)
     }
 }

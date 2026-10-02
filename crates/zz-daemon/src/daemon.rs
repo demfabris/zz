@@ -33,6 +33,7 @@ mod event_loop_tests;
 mod exec;
 #[cfg(test)]
 mod exec_tests;
+mod watchers;
 pub use exec::exec_resume_kind;
 pub(crate) mod path_listing;
 use zz_mux::{
@@ -79,12 +80,12 @@ use zz_protocol::{
 use zz_terminal::{
     AppearanceColor, AppearanceConfigDisposition, AppearanceLoad, AppearanceProvenance,
     CaptureBoundary, CaptureOptions, ClipboardTarget, Color, ColourClass, CursorBlinkPolicy,
-    CursorStyle, EngineKnobs, LastCommandCapture, PasteBufferAction, ProgressBarState,
-    RawOutputTapError, TerminalAppearance, TerminalCaptureError, TerminalColorScheme,
-    TerminalDiffScratch, TerminalEvent, TerminalEvents, TerminalMode, TerminalPalette,
-    TerminalPatchRef, TerminalSession, TerminalSize, TerminalSpawn, TerminalViewId,
-    TerminalViewport, ViewStream, WordSeparators, apply_appearance_overrides, parse_x11_color,
-    prepare_paste_buffer,
+    CursorStyle, DeferredTerminalEvent, EngineKnobs, LastCommandCapture, PasteBufferAction,
+    ProgressBarState, RawOutputTapError, TerminalAppearance, TerminalCaptureError,
+    TerminalColorScheme, TerminalDiffScratch, TerminalEvent, TerminalEvents, TerminalMode,
+    TerminalPalette, TerminalPatchRef, TerminalSession, TerminalSize, TerminalSpawn,
+    TerminalViewId, TerminalViewport, ViewStream, WordSeparators, apply_appearance_overrides,
+    parse_x11_color, prepare_paste_buffer,
 };
 
 #[cfg(feature = "agent")]
@@ -4062,6 +4063,7 @@ struct Shared {
     server: Arc<SharedServer>,
     command_item: Option<Mutex<CommandItemContext>>,
     owner: Option<Arc<Shared>>,
+    watcher_effects: Option<Mutex<Vec<watchers::Effect>>>,
 }
 
 impl std::ops::Deref for Shared {
@@ -4138,6 +4140,8 @@ struct SharedServer {
     #[cfg(unix)]
     tmux_shim: Mutex<Option<TmuxShimGuard>>,
     status_job_needs: crate::status::StatusJobNeeds,
+    watcher_tx: watchers::Sender,
+    watcher_rx: Mutex<Option<crossbeam_channel::Receiver<watchers::Input>>>,
     timer_tx: timers::TimerSender,
     timer_rx: Mutex<Option<crossbeam_channel::Receiver<timers::TimerInput>>>,
     publish_flush: Mutex<timers::PublishFlush>,
@@ -4841,6 +4845,7 @@ impl Shared {
                 ..CommandItemContext::default()
             })),
             owner: Some(self.server_owner()),
+            watcher_effects: None,
         })
     }
 
@@ -4975,6 +4980,7 @@ impl Shared {
                 .mux_option_underlay
                 .set(option, value, MuxOptionSource::Default);
         }
+        let (watcher_tx, watcher_rx) = watchers::Sender::new();
         let (timer_tx, timer_rx) = crossbeam_channel::unbounded();
         let timer_tx = timers::TimerSender::new(timer_tx);
         let mut status = StatusRenderer::default();
@@ -5041,6 +5047,8 @@ impl Shared {
             #[cfg(unix)]
             tmux_shim: Mutex::new(None),
             status_job_needs,
+            watcher_tx,
+            watcher_rx: Mutex::new(Some(watcher_rx)),
             timer_tx,
             timer_rx: Mutex::new(Some(timer_rx)),
             publish_flush: Mutex::new(timers::PublishFlush::default()),
@@ -5063,6 +5071,7 @@ impl Shared {
             server: Arc::new(server),
             command_item: None,
             owner: None,
+            watcher_effects: None,
         }
     }
 
@@ -8066,6 +8075,14 @@ impl Shared {
     }
 
     fn run_event_hooks(self: &Arc<Self>, events: Vec<PendingHookEvent>) {
+        if let Some(effects) = &self.watcher_effects {
+            if !events.is_empty() {
+                effects
+                    .lock()
+                    .push(Box::new(move |shared| shared.run_event_hooks(events)));
+            }
+            return;
+        }
         self.run_event_hooks_with_control(events, true);
     }
 
@@ -24257,6 +24274,9 @@ impl Shared {
         if let Some(frames) = self.kitty_image_frames.lock().get(&key).cloned() {
             return Some(frames);
         }
+        if self.watcher_effects.is_some() {
+            return None;
+        }
         let _round_trips = zz_terminal::allow_actor_round_trips();
         let image = match terminal.kitty_image(image_id) {
             Ok(Some(image)) if image.generation == generation => image,
@@ -24750,15 +24770,9 @@ impl Shared {
         }
         let (pane, terminal, events) =
             self.install_command_output(client, preferred_pane, title, text, false)?;
-        if let Err(error) = self.watch_command_output(
-            client,
-            pane,
-            Arc::clone(&terminal),
-            events,
-            VecDeque::new(),
-            None,
-            None,
-        ) {
+        if let Err(error) =
+            self.watch_command_output(client, pane, &terminal, events, VecDeque::new(), None, None)
+        {
             self.close_command_output(client, &terminal);
             return Err(error);
         }
@@ -24779,25 +24793,26 @@ impl Shared {
             let view = TerminalViewId(client.0);
             let mut prefetched = VecDeque::new();
             let viewport = loop {
-                let event = events.recv_blocking().map_err(|error| {
+                let event = events.recv_deferred_blocking().map_err(|error| {
                     DaemonError::Thread(format!(
                         "command output event stream closed before its initial viewport: {error}"
                     ))
                 })?;
-                match event {
+                match event.event() {
                     TerminalEvent::ViewportReady { .. } => {
+                        event.into_event();
                         break terminal.latest_viewport_for(view).ok_or_else(|| {
                             DaemonError::Thread(
                                 "command output did not publish its initial viewport".to_owned(),
                             )
                         })?;
                     }
-                    TerminalEvent::ViewClosed(closed) if closed == view => {
+                    TerminalEvent::ViewClosed(closed) if *closed == view => {
                         return Err(DaemonError::Thread(
                             "command output closed before its initial viewport".to_owned(),
                         ));
                     }
-                    event => prefetched.push_back(event),
+                    _ => prefetched.push_back(event),
                 }
             };
             let admitted_generation = viewport_generation(&viewport);
@@ -24805,7 +24820,7 @@ impl Shared {
             self.watch_command_output(
                 client,
                 pane,
-                Arc::clone(&terminal),
+                &terminal,
                 events,
                 prefetched,
                 Some(admitted_generation),
@@ -25003,103 +25018,24 @@ impl Shared {
         self: &Arc<Self>,
         client: ClientId,
         pane: PaneId,
-        terminal: Arc<TerminalSession>,
+        terminal: &Arc<TerminalSession>,
         events: TerminalEvents,
-        mut prefetched: VecDeque<TerminalEvent>,
-        mut admitted_generation: Option<TerminalGeneration>,
+        prefetched: VecDeque<DeferredTerminalEvent>,
+        admitted_generation: Option<TerminalGeneration>,
         start: Option<mpsc::Receiver<()>>,
     ) -> Result<(), DaemonError> {
-        let shared = self.server_owner();
+        #[cfg(any(test, windows))]
+        self.start_watcher_consumer()?;
+        let sender = self.watcher_tx.clone();
+        let watcher =
+            watchers::Watcher::command_output(client, pane, terminal, admitted_generation);
         thread::Builder::new()
             .name(format!("zz-output-{}", client.0))
             .spawn(move || {
                 if start.is_some_and(|start| start.recv().is_err()) {
                     return;
                 }
-                let mut presented = None;
-                loop {
-                    let event = match prefetched.pop_front() {
-                        Some(event) => event,
-                        None => match events.recv_blocking() {
-                            Ok(event) => event,
-                            Err(_) => break,
-                        },
-                    };
-                    if !shared.is_current_command_output(client, &terminal) {
-                        break;
-                    }
-                    match event {
-                        TerminalEvent::ViewportReady { .. } => {
-                            if let Some(viewport) =
-                                terminal.latest_viewport_for(TerminalViewId(client.0))
-                            {
-                                let key = (
-                                    mode_kind(viewport.mode),
-                                    viewport.scrollbar,
-                                    viewport.search,
-                                );
-                                if presented != Some(key) {
-                                    presented = Some(key);
-                                    shared
-                                        .status
-                                        .lock()
-                                        .request_mode_refresh(BTreeSet::from([client]));
-                                }
-                                if admitted_generation == Some(viewport_generation(&viewport)) {
-                                    continue;
-                                }
-                                admitted_generation = None;
-                                shared.publish_command_output(client, pane, &terminal, &viewport);
-                            }
-                        }
-                        TerminalEvent::CopyReady { view, copy }
-                            if view == TerminalViewId(client.0) =>
-                        {
-                            let copy = *copy;
-                            if let Some(buffer) = copy.buffer {
-                                shared.store_copy_buffer(copy.text.clone(), buffer);
-                            }
-                            if let Some(command) = copy.pipe {
-                                shared.spawn_copy_pipe(pane, client, command, copy.text.clone());
-                            }
-                            if let Some(target) = copy.clipboard {
-                                shared.publish_to_client(
-                                    client,
-                                    EventPayload::Clipboard {
-                                        pane,
-                                        request_id: copy.request_id,
-                                        target,
-                                        text: copy.text,
-                                        producer: ClipboardProducer::Server,
-                                    },
-                                );
-                                shared.raise_copy_mode_set_clipboard(pane);
-                            }
-                        }
-                        TerminalEvent::OpenUri(open) if open.view == TerminalViewId(client.0) => {
-                            shared.publish_to_client(
-                                client,
-                                EventPayload::OpenUri {
-                                    pane,
-                                    uri: open.uri,
-                                },
-                            );
-                        }
-                        TerminalEvent::ViewClosed(view) if view == TerminalViewId(client.0) => {
-                            shared.close_command_output(client, &terminal);
-                            break;
-                        }
-                        TerminalEvent::CopyReady { .. }
-                        | TerminalEvent::OpenUri(_)
-                        | TerminalEvent::ViewClosed(_)
-                        | TerminalEvent::ClipboardSet { .. }
-                        | TerminalEvent::Bell
-                        | TerminalEvent::RenameWindow(_)
-                        | TerminalEvent::PlaceholderBound { .. }
-                        | TerminalEvent::PendingPasteExpired { .. }
-                        | TerminalEvent::RawOutputTapClosed { .. } => {}
-                    }
-                }
+                sender.relay(watcher, &events, prefetched);
             })
             .map_err(|error| DaemonError::Thread(error.to_string()))?;
         Ok(())
@@ -25110,115 +25046,14 @@ impl Shared {
         client: ClientId,
         terminal: &Arc<TerminalSession>,
     ) -> Result<(), DaemonError> {
+        #[cfg(any(test, windows))]
+        self.start_watcher_consumer()?;
+        let sender = self.watcher_tx.clone();
+        let watcher = watchers::Watcher::popup(client, terminal);
         let events = terminal.events();
-        let terminal = Arc::downgrade(terminal);
-        let shared = self.server_owner();
         thread::Builder::new()
             .name(format!("zz-popup-{}", client.0))
-            .spawn(move || {
-                let mut previous = None::<Arc<TerminalViewport>>;
-                let mut fanout = PaneFrameFanout::new();
-                while let Ok(event) = events.recv_blocking() {
-                    let Some(terminal) = terminal.upgrade() else {
-                        return;
-                    };
-                    if !shared.is_current_popup(client, &terminal) {
-                        return;
-                    }
-                    match event {
-                        TerminalEvent::ViewportReady { .. } => {
-                            let viewport = terminal
-                                .latest_viewport_for(TerminalViewId(client.0))
-                                .unwrap_or_else(|| terminal.latest_viewport());
-                            shared.publish_popup_terminal(
-                                client,
-                                &terminal,
-                                previous.as_deref(),
-                                &viewport,
-                                &mut fanout,
-                            );
-                            fanout.diff.release_shared();
-                            previous = Some(viewport);
-                            if let Some(exit_code) = popup_exit_code(&terminal) {
-                                shared.finish_popup(client, &terminal, exit_code);
-                                return;
-                            }
-                        }
-                        TerminalEvent::ClipboardSet { target, text } => {
-                            let pane = shared.read_client(client, |c| {
-                                c.and_then(|c| c.popup.as_ref())
-                                    .map(|popup| popup.state.pane)
-                            });
-                            if let Some(pane) = pane {
-                                shared.publish_to_client(
-                                    client,
-                                    EventPayload::Clipboard {
-                                        pane,
-                                        request_id: 0,
-                                        target,
-                                        text,
-                                        producer: ClipboardProducer::Application,
-                                    },
-                                );
-                            }
-                        }
-                        TerminalEvent::OpenUri(open) if open.view == TerminalViewId(client.0) => {
-                            let pane = shared.read_client(client, |c| {
-                                c.and_then(|c| c.popup.as_ref())
-                                    .map(|popup| popup.state.pane)
-                            });
-                            if let Some(pane) = pane {
-                                shared.publish_to_client(
-                                    client,
-                                    EventPayload::OpenUri {
-                                        pane,
-                                        uri: open.uri,
-                                    },
-                                );
-                            }
-                        }
-                        TerminalEvent::CopyReady { view, copy }
-                            if view == TerminalViewId(client.0) =>
-                        {
-                            let copy = *copy;
-                            if let Some(buffer) = copy.buffer {
-                                shared.store_copy_buffer(copy.text.clone(), buffer);
-                            }
-                            if let Some(target) = copy.clipboard
-                                && let Some(pane) = shared.read_client(client, |c| {
-                                    c.and_then(|c| c.popup.as_ref())
-                                        .map(|popup| popup.state.pane)
-                                })
-                            {
-                                shared.publish_to_client(
-                                    client,
-                                    EventPayload::Clipboard {
-                                        pane,
-                                        request_id: copy.request_id,
-                                        target,
-                                        text: copy.text,
-                                        producer: ClipboardProducer::Server,
-                                    },
-                                );
-                            }
-                        }
-                        TerminalEvent::ViewClosed(_)
-                        | TerminalEvent::CopyReady { .. }
-                        | TerminalEvent::OpenUri(_)
-                        | TerminalEvent::Bell
-                        | TerminalEvent::RenameWindow(_)
-                        | TerminalEvent::PlaceholderBound { .. }
-                        | TerminalEvent::PendingPasteExpired { .. }
-                        | TerminalEvent::RawOutputTapClosed { .. } => {}
-                    }
-                }
-                let Some(terminal) = terminal.upgrade() else {
-                    return;
-                };
-                if let Some(exit_code) = popup_exit_code(&terminal) {
-                    shared.finish_popup(client, &terminal, exit_code);
-                }
-            })
+            .spawn(move || sender.relay(watcher, &events, VecDeque::new()))
             .map_err(|error| DaemonError::Thread(error.to_string()))?;
         Ok(())
     }
@@ -25565,221 +25400,21 @@ impl Shared {
         pane: PaneId,
         terminal: &Arc<TerminalSession>,
     ) -> Result<(), DaemonError> {
+        #[cfg(any(test, windows))]
+        self.start_watcher_consumer()?;
+        let projects_agent = self
+            .inner
+            .lock()
+            .engine
+            .state
+            .pane(pane)
+            .is_some_and(|pane| matches!(pane.kind, PaneKind::Agent(_)));
+        let sender = self.watcher_tx.clone();
+        let watcher = watchers::Watcher::terminal(pane, terminal, projects_agent);
         let events = terminal.events();
-        let terminal = Arc::downgrade(terminal);
-        let shared = self.server_owner();
         thread::Builder::new()
             .name(format!("zz-pane-{}", pane.0))
-            .spawn(move || {
-                let mut previous = BTreeMap::<TerminalViewId, (u64, Arc<TerminalViewport>)>::new();
-                let mut previous_title = None::<String>;
-                let mut previous_title_writes = 0;
-                let projects_agent = shared
-                    .inner
-                    .lock()
-                    .engine
-                    .state
-                    .pane(pane)
-                    .is_some_and(|pane| matches!(pane.kind, PaneKind::Agent(_)));
-                let mut previous_bar_state = ProgressBarState::Hidden;
-                let mut fanout = PaneFrameFanout::new();
-                let mut mode_memo = BTreeMap::new();
-                let mut completion_handled = false;
-                while let Ok(event) = events.recv_blocking() {
-                    let Some(terminal) = terminal.upgrade() else {
-                        break;
-                    };
-                    if !shared.is_current_terminal(pane, &terminal) {
-                        break;
-                    }
-                    match event {
-                        TerminalEvent::ViewportReady { output_activity } => {
-                            #[cfg(unix)]
-                            if output_activity
-                                && shared
-                                    .inner
-                                    .lock()
-                                    .control_output_taps
-                                    .get(&pane)
-                                    .is_some_and(|tap| tap.receiver.is_some())
-                            {
-                                shared.accept_wake.wake();
-                            }
-                            let current = terminal.latest_view_frames();
-                            let runtime_viewport = terminal.latest_viewport();
-                            let referenced_images = current
-                                .iter()
-                                .flat_map(|(_, viewport, _)| {
-                                    viewport.kitty_placements.iter().map(|placement| {
-                                        (placement.image_id, placement.image_generation)
-                                    })
-                                })
-                                .collect::<BTreeSet<_>>();
-                            shared.evict_absent_kitty_images(pane, &terminal, &referenced_images);
-                            for (image_id, generation) in &referenced_images {
-                                let _ = shared.kitty_image_frames(
-                                    pane,
-                                    &terminal,
-                                    *image_id,
-                                    *generation,
-                                );
-                            }
-                            let active = current
-                                .iter()
-                                .map(|(view, _, _)| *view)
-                                .collect::<BTreeSet<_>>();
-                            let mut finished =
-                                terminal_status_should_close(&runtime_viewport.status);
-                            let mut mode_clients = BTreeSet::new();
-                            for (view, viewport, epoch) in current {
-                                finished |= terminal_status_should_close(&viewport.status);
-                                let base = epoch.and_then(|epoch| {
-                                    previous
-                                        .get(&view)
-                                        .filter(|(seen, _)| *seen == epoch)
-                                        .map(|(_, previous)| previous.as_ref())
-                                });
-                                shared.publish_terminal_for_pane(
-                                    pane,
-                                    ClientId(view.0),
-                                    base,
-                                    &viewport,
-                                    &terminal,
-                                    &mut fanout,
-                                );
-                                let key = (
-                                    mode_kind(viewport.mode),
-                                    viewport.scrollbar,
-                                    viewport.search,
-                                );
-                                let before = mode_memo.insert(view, key);
-                                if before != Some(key)
-                                    && (key.0 != 0 || before.is_some_and(|before| before.0 != 0))
-                                {
-                                    mode_clients.insert(ClientId(view.0));
-                                }
-                                match epoch {
-                                    Some(epoch) => {
-                                        previous.insert(view, (epoch, viewport));
-                                    }
-                                    None => {
-                                        previous.remove(&view);
-                                    }
-                                }
-                            }
-                            fanout.diff.release_shared();
-                            mode_memo.retain(|view, _| active.contains(view));
-                            previous.retain(|view, _| active.contains(view));
-                            if !terminal_status_should_close(&runtime_viewport.status) {
-                                let current_command = terminal_current_command(&terminal);
-                                shared.synchronize_pane_runtime(
-                                    pane,
-                                    &terminal,
-                                    &runtime_viewport,
-                                    &current_command,
-                                    output_activity,
-                                );
-                                let bar_state = terminal.progress_bar().state;
-                                if !projects_agent && previous_bar_state != bar_state {
-                                    previous_bar_state = bar_state;
-                                    shared.synchronize_pane_progress(
-                                        pane,
-                                        &terminal,
-                                        &current_command,
-                                        bar_state,
-                                    );
-                                }
-                            }
-                            let title_writes = terminal.facts().program_title_writes;
-                            if !projects_agent
-                                && (previous_title_writes != title_writes
-                                    || previous_title.as_deref().is_none_or(|previous| {
-                                        previous != runtime_viewport.title()
-                                    }))
-                            {
-                                shared.synchronize_pane_title(
-                                    pane,
-                                    &terminal,
-                                    runtime_viewport.title(),
-                                    previous_title_writes != title_writes,
-                                );
-                                previous_title = Some(runtime_viewport.title().to_owned());
-                                previous_title_writes = title_writes;
-                            }
-                            if terminal.take_preview_ready() {
-                                shared.refresh_chooser_previews();
-                            }
-                            if !mode_clients.is_empty() {
-                                shared.status.lock().request_mode_refresh(mode_clients);
-                            }
-                            if finished && !completion_handled {
-                                shared.close_exited_terminal(pane, &terminal);
-                                completion_handled = true;
-                                if !shared.is_current_terminal(pane, &terminal) {
-                                    return;
-                                }
-                            }
-                        }
-                        TerminalEvent::CopyReady { view, copy } => {
-                            let client = ClientId(view.0);
-                            let copy = *copy;
-                            if let Some(buffer) = copy.buffer {
-                                shared.store_copy_buffer(copy.text.clone(), buffer);
-                            }
-                            if let Some(command) = copy.pipe {
-                                shared.spawn_copy_pipe(pane, client, command, copy.text.clone());
-                            }
-                            if let Some(target) = copy.clipboard {
-                                shared.publish_to_client(
-                                    client,
-                                    EventPayload::Clipboard {
-                                        pane,
-                                        request_id: copy.request_id,
-                                        target,
-                                        text: copy.text,
-                                        producer: ClipboardProducer::Server,
-                                    },
-                                );
-                                shared.raise_copy_mode_set_clipboard(pane);
-                            }
-                        }
-                        TerminalEvent::OpenUri(open) => {
-                            shared.publish_to_client(
-                                ClientId(open.view.0),
-                                EventPayload::OpenUri {
-                                    pane,
-                                    uri: open.uri,
-                                },
-                            );
-                        }
-                        TerminalEvent::PlaceholderBound { token, number } => {
-                            shared.bind_pasted_image(pane, &terminal, token, number);
-                        }
-                        TerminalEvent::PendingPasteExpired { token } => {
-                            shared.expire_pending_pasted_image(pane, &terminal, token);
-                        }
-                        TerminalEvent::RawOutputTapClosed { token } => {
-                            if !shared.control_output_tap_closed(pane, token, &terminal) {
-                                shared.pipe_tap_closed(pane, token, &terminal);
-                            }
-                        }
-                        TerminalEvent::ClipboardSet { target, text } => {
-                            shared.deliver_clipboard_write(pane, target, text);
-                        }
-                        TerminalEvent::Bell => shared.raise_pane_bell(pane),
-                        TerminalEvent::RenameWindow(name) => {
-                            shared.rename_window_from_pane(pane, &terminal, &name);
-                        }
-                        TerminalEvent::ViewClosed(_) => {}
-                    }
-                }
-                let Some(terminal) = terminal.upgrade() else {
-                    return;
-                };
-                if terminal_status_should_close(&terminal.latest_viewport().status) {
-                    shared.close_exited_terminal(pane, &terminal);
-                }
-            })
+            .spawn(move || sender.relay(watcher, &events, VecDeque::new()))
             .map_err(|error| DaemonError::Thread(error.to_string()))?;
         Ok(())
     }
@@ -28024,7 +27659,13 @@ impl Shared {
             );
         }
         if kill_pending {
-            self.reap_copy_mode_kill_panes();
+            if let Some(effects) = &self.watcher_effects {
+                effects
+                    .lock()
+                    .push(Box::new(Shared::reap_copy_mode_kill_panes));
+            } else {
+                self.reap_copy_mode_kill_panes();
+            }
         }
         if let Some(subscriber) = subscriber {
             let kind = kind.expect("a terminal subscriber has a stream kind");

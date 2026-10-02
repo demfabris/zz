@@ -14,7 +14,8 @@ fn terminal_read_command(name: &str) -> bool {
 
 pub(super) fn queue_command(command: &CommandInvocation) -> bool {
     let name = canonical_command(&command.name);
-    terminal_read_command(name)
+    command_stdin_sink(name, &command.args).is_some()
+        || terminal_read_command(name)
         || MuxEngine::is_command_alias_group(command)
         || matches!(
             name,
@@ -26,12 +27,16 @@ pub(super) fn queue_command(command: &CommandInvocation) -> bool {
                 | "display-menu"
                 | "command-prompt"
                 | "confirm-before"
+                | "load-buffer"
+                | "save-buffer"
+                | "source-file"
         )
 }
 
 pub(super) fn task_command(command: &CommandInvocation) -> bool {
     let name = canonical_command(&command.name);
-    MuxEngine::is_command_alias_group(command)
+    command_stdin_sink(name, &command.args).is_some()
+        || MuxEngine::is_command_alias_group(command)
         || terminal_read_command(name)
         || matches!(
             name,
@@ -43,6 +48,9 @@ pub(super) fn task_command(command: &CommandInvocation) -> bool {
                 | "display-menu"
                 | "command-prompt"
                 | "confirm-before"
+                | "load-buffer"
+                | "save-buffer"
+                | "source-file"
         )
 }
 

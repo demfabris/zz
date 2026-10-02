@@ -42,6 +42,7 @@ mod event_loop_tests;
 mod exec;
 #[cfg(test)]
 mod exec_tests;
+mod file_commands;
 mod helpers;
 #[cfg(unix)]
 #[allow(
@@ -51,6 +52,7 @@ mod helpers;
 mod jobs;
 #[cfg(unix)]
 mod pipe_jobs;
+mod source_queue;
 pub(crate) mod status_jobs;
 mod terminal_reads;
 mod terminal_requests;
@@ -5247,6 +5249,7 @@ impl Shared {
 
     fn apply_helper_result(self: &Arc<Self>, result: helpers::Result) {
         match result {
+            helpers::Result::File { complete, result } => complete(self, result),
             helpers::Result::Path { result, applied } => {
                 self.apply_path_list_result(result);
                 let _ = applied.send(());
@@ -6439,9 +6442,19 @@ impl Shared {
             wait_wakes,
         ) = {
             let mut inner = self.inner.lock();
-            inner
+            let files = inner
                 .client_file_waiters
-                .retain(|_, waiter| waiter.client != client);
+                .extract_if(.., |_, waiter| waiter.client == client)
+                .map(|(_, waiter)| waiter)
+                .collect::<Vec<_>>();
+            drop(inner);
+            for waiter in files {
+                (waiter.complete)(
+                    self,
+                    Err(client_file_failure("the invoking client is gone", &waiter.path).into()),
+                );
+            }
+            let mut inner = self.inner.lock();
             let mut removed_client = inner.clients.remove(&client);
             let control = removed_client.as_ref().and_then(|c| c.kind) == Some(ClientKind::Control);
             inner.client_flags.clear(client);
@@ -7281,6 +7294,31 @@ impl Shared {
         } else {
             self.command_with_caller_stdin(client, context, command)?
         };
+        if streamed_command.is_none()
+            && command_stdin_sink(canonical_command(&command.name), &command.args).is_some()
+            && let Some(wait) = self
+                .command_item
+                .as_ref()
+                .unwrap()
+                .lock()
+                .pending_wait
+                .as_mut()
+            && wait.file.is_some()
+        {
+            let command = command.clone();
+            wait.file = Some(Box::new(move |shared, context, queue| {
+                shared.execute_with_mux_source_routed_for_terminal_in_queue(
+                    client,
+                    kind,
+                    context,
+                    &command,
+                    mux_source,
+                    client_terminal,
+                    Some(queue),
+                )
+            }));
+            return Ok(Execution::default());
+        }
         let command = streamed_command.as_ref().unwrap_or(command);
         if MuxEngine::is_command_alias_group(command) {
             if let Some(parent) = queue_execution.filter(|queue| queue.frame_active.get()) {
@@ -8156,6 +8194,7 @@ impl Shared {
                 leaf: None,
                 guard: None,
                 terminal: None,
+                file: None,
             }));
         }
         let ticket = OverlayTicket {
@@ -11279,6 +11318,7 @@ impl Shared {
             }
         }
         for pane in removed_panes {
+            self.cancel_pane_files(pane);
             self.publish(EventPayload::PaneRemoved(pane));
         }
         if mux_options_event {
@@ -11602,6 +11642,55 @@ impl Shared {
         {
             queue_execution.yield_queue();
             pending_source_files.clear();
+        }
+        if source_invocation
+            && queue_execution.is_some()
+            && self
+                .command_item
+                .as_ref()
+                .is_some_and(|item| item.lock().loop_wait)
+        {
+            return source_queue::SourceExecution {
+                client,
+                kind,
+                execution,
+                source_client,
+                source_kind,
+                source_client_terminal,
+                source_client_base,
+                control_target,
+                control_client,
+                source_file_error,
+                source_path_error,
+                source_path_matched,
+                control_source_errors,
+                control_source_matched,
+                source_verbose_output,
+                source_replay_output,
+                source_diagnostics_output,
+                source_invocations,
+                source_invocation,
+                reported_source_failure,
+                reported_source_callback_failure,
+                control_source_invocation,
+                suppress_source_replay_output,
+                reload_config,
+                read_only,
+                client_timers_changed,
+                status_formats_changed,
+                status_refresh_sessions,
+                pending_hook_events,
+                notifications_only,
+                incremental_start,
+                terminal_wait,
+                pending: pending_source_files.into(),
+                parsed: VecDeque::new(),
+                read: None,
+                replay: None,
+                replay_pending: None,
+                deferred_control_config_warnings: Vec::new(),
+            }
+            .run(self, context, queue_execution);
         }
         let mut parsed_source_files = Vec::new();
         let mut deferred_control_config_warnings = Vec::new();
@@ -12323,6 +12412,7 @@ impl Shared {
                     leaf: None,
                     guard: None,
                     terminal: None,
+                    file: None,
                 }));
                 return Ok(());
             }
@@ -14397,14 +14487,26 @@ impl Shared {
             |frame, command, target| {
                 Some(if frame.request_root {
                     (
-                        self.execute_with_mux_source_routed_in_queue(
-                            client,
-                            kind,
-                            &mut frame.context,
-                            command,
-                            frame.mux_source,
-                            Some(&frame.execution),
-                        ),
+                        if let Some(terminal) = frame.alias_terminal {
+                            self.execute_with_mux_source_routed_for_terminal_in_queue(
+                                client,
+                                kind,
+                                &mut frame.context,
+                                command,
+                                frame.mux_source,
+                                terminal,
+                                Some(&frame.execution),
+                            )
+                        } else {
+                            self.execute_with_mux_source_routed_in_queue(
+                                client,
+                                kind,
+                                &mut frame.context,
+                                command,
+                                frame.mux_source,
+                                Some(&frame.execution),
+                            )
+                        },
                         None,
                         false,
                         None,
@@ -14452,8 +14554,28 @@ impl Shared {
                     false,
                 );
                 let (boundary, mut step) = frame.wait_boundary.take().unwrap();
-                if let Some(terminal) = wait.terminal {
+                if let Some(terminal) = &wait.terminal {
                     terminal.apply(&mut step.0);
+                }
+                if let Some(resume) = wait.file.filter(|_| step.0.is_ok()) {
+                    step.0 = resume(self, &mut frame.context, &frame.execution);
+                    if let Some(next) = self
+                        .command_item
+                        .as_ref()
+                        .unwrap()
+                        .lock()
+                        .pending_wait
+                        .as_mut()
+                    {
+                        if next.leaf.is_none() {
+                            next.leaf = wait.leaf;
+                        }
+                        if next.guard.is_none() {
+                            next.guard = wait.guard;
+                        }
+                        frame.wait_boundary = Some((boundary, step));
+                        return None;
+                    }
                 }
                 #[cfg(unix)]
                 if let Some(shell) = wait.shell {
@@ -15381,7 +15503,8 @@ impl Shared {
             self.finish_event_queue_notifications(events.notifications);
         }
         let stream_client = frame.context.replay_client().unwrap_or(client);
-        if frame.alias_terminal.is_some()
+        if !frame.request_root
+            && frame.alias_terminal.is_some()
             && kind == ClientKind::Command
             && stream_client != ClientId(u64::MAX)
         {
@@ -15954,6 +16077,7 @@ impl Shared {
                     leaf: None,
                     guard: None,
                     terminal: None,
+                    file: None,
                 }));
                 return Ok(());
             }
@@ -15983,6 +16107,7 @@ impl Shared {
                     leaf: None,
                     guard: None,
                     terminal: None,
+                    file: None,
                 }));
                 return Ok(Execution::default());
             }
@@ -18662,71 +18787,103 @@ impl Shared {
         }
     }
 
-    /// Hand one bounded file operation to the command client that invoked the
-    /// command, the way `file_read` and `file_write` send `MSG_READ_OPEN` and
-    /// `MSG_WRITE_OPEN` to a client that is not attached instead of touching
-    /// the server's own filesystem. `None` means the daemon owns the IO.
     fn client_file_operation(
         self: &Arc<Self>,
         client: Option<ClientId>,
         path: &Path,
         operation: ClientFileOperation,
-    ) -> Option<Result<Vec<u8>, ServerError>> {
-        let client = client?;
-        if self.read_client(client, |c| c.and_then(|c| c.kind)) != Some(ClientKind::Command) {
-            return None;
-        }
+        pane: Option<PaneId>,
+        complete: file_commands::Completion,
+    ) -> Result<(), DaemonError> {
+        let client = client.filter(|client| {
+            self.read_client(*client, |c| c.and_then(|c| c.kind)) == Some(ClientKind::Command)
+        });
+        let Some(client) = client else {
+            return self
+                .submit_helper(helpers::Task::File {
+                    path: path.to_owned(),
+                    operation,
+                    complete,
+                })
+                .map_err(Into::into);
+        };
         #[cfg(windows)]
         self.go_live_exec(client);
-        let writer = self.client_writers.lock().get(&client).cloned()?;
-        let (request_id, wait) = {
+        let writer = self.client_writers.lock().get(&client).cloned();
+        let Some(writer) = writer else {
+            return self
+                .submit_helper(helpers::Task::File {
+                    path: path.to_owned(),
+                    operation,
+                    complete,
+                })
+                .map_err(Into::into);
+        };
+        let request_id = {
             let mut inner = self.inner.lock();
             inner.next_client_file_request = inner.next_client_file_request.wrapping_add(1).max(1);
             let request_id = inner.next_client_file_request;
-            let (wake, wait) = crossbeam_channel::bounded(1);
-            inner
-                .client_file_waiters
-                .insert(request_id, ClientFileWaiter { client, wake });
-            (request_id, wait)
-        };
-        let sent =
-            writer.enqueue_reliable(&ProtocolMessage::ClientFileRequest(ClientFileRequest {
+            inner.client_file_waiters.insert(
                 request_id,
-                path: path.to_string_lossy().into_owned(),
-                operation,
-            }));
-        if !sent {
-            self.inner.lock().client_file_waiters.remove(&request_id);
-            return Some(Err(client_file_failure(
-                "the invoking client is gone",
-                path,
-            )));
+                ClientFileWaiter {
+                    client,
+                    path: path.to_owned(),
+                    pane,
+                    complete,
+                },
+            );
+            request_id
+        };
+        if !writer.enqueue_reliable(&ProtocolMessage::ClientFileRequest(ClientFileRequest {
+            request_id,
+            path: path.to_string_lossy().into_owned(),
+            operation,
+        })) {
+            self.complete_client_file(
+                client,
+                ClientFileResponse {
+                    request_id,
+                    data: Vec::new(),
+                    error: Some("the invoking client is gone".to_owned()),
+                },
+            );
         }
-        let reply = wait.recv().ok();
-        self.inner.lock().client_file_waiters.remove(&request_id);
-        Some(match reply {
-            Some(reply) => match reply.error {
-                Some(error) => Err(client_file_failure(&error, path)),
-                None => Ok(reply.data),
-            },
-            None => Err(client_file_failure(
-                "the invoking client stopped answering",
-                path,
-            )),
-        })
+        Ok(())
     }
 
-    /// Wake the command parked on one [`ClientFileRequest`].
-    fn complete_client_file(&self, client: ClientId, response: ClientFileResponse) {
-        let waiter = self
+    fn cancel_pane_files(self: &Arc<Self>, pane: PaneId) {
+        let files = self
             .inner
             .lock()
             .client_file_waiters
-            .remove(&response.request_id)
-            .filter(|waiter| waiter.client == client);
-        if let Some(waiter) = waiter {
-            let _ = waiter.wake.send(response);
+            .extract_if(.., |_, waiter| waiter.pane == Some(pane))
+            .map(|(_, waiter)| waiter)
+            .collect::<Vec<_>>();
+        for waiter in files {
+            (waiter.complete)(self, Err(ServerError::PaneExited(pane).into()));
         }
+    }
+
+    fn complete_client_file(self: &Arc<Self>, client: ClientId, response: ClientFileResponse) {
+        let waiter = {
+            let mut inner = self.inner.lock();
+            if inner
+                .client_file_waiters
+                .get(&response.request_id)
+                .is_none_or(|waiter| waiter.client != client)
+            {
+                return;
+            }
+            inner
+                .client_file_waiters
+                .remove(&response.request_id)
+                .unwrap()
+        };
+        let result = response.error.map_or(Ok(response.data), |error| {
+            Err(client_file_failure(&error, &waiter.path).into())
+        });
+        (waiter.complete)(self, result);
+        self.accept_wake.wake();
     }
 
     /// Re-fit the overlays a client owns after its own terminal geometry
@@ -19577,18 +19734,15 @@ impl Shared {
                     payload.as_bytes().to_vec()
                 } else {
                     let path = buffer_file_path(&self.inner.lock(), invoking_client, &path);
-                    match self.client_file_operation(
+                    return file_commands::load_buffer(
+                        self,
                         invoking_client,
+                        context,
                         &path,
-                        ClientFileOperation::Read,
-                    ) {
-                        Some(result) => {
-                            let data = result?;
-                            validate_paste_buffer_size(data.len())?;
-                            data
-                        }
-                        None => read_paste_buffer_file(&path)?,
-                    }
+                        parsed.value('b').map(str::to_owned),
+                        parsed.value('t').map(str::to_owned),
+                        parsed.has('w'),
+                    );
                 };
                 if data.is_empty() {
                     return Ok(Execution::default());
@@ -19634,20 +19788,7 @@ impl Shared {
                 }
                 let path = buffer_file_path(&self.inner.lock(), invoking_client, &path);
                 let append = parsed.has('a');
-                match self.client_file_operation(
-                    invoking_client,
-                    &path,
-                    ClientFileOperation::Write {
-                        append,
-                        data: data.to_vec(),
-                    },
-                ) {
-                    Some(result) => {
-                        result?;
-                    }
-                    None => write_paste_buffer_file(&path, &data, append)?,
-                }
-                Ok(Execution::default())
+                file_commands::save_buffer(self, invoking_client, &path, &data, append)
             }
             "delete-buffer" | "deleteb" => {
                 let parsed = parse_buffer_command_args(name, args, &['b'], &[])?;
@@ -23179,6 +23320,7 @@ impl Shared {
                 leaf: None,
                 guard: None,
                 terminal: None,
+                file: None,
             }));
         }
         let result = if let Some(probe) = probe {
@@ -28528,9 +28670,9 @@ impl Shared {
     }
 
     fn begin_control_command_event_capture(
-        &self,
+        self: &Arc<Self>,
         client: ClientId,
-    ) -> ControlCommandEventCapture<'_> {
+    ) -> ControlCommandEventCapture {
         let item_id = self.command_item.as_ref().expect("command item").lock().id;
         self.inner
             .lock()
@@ -28539,7 +28681,7 @@ impl Shared {
             .or_default()
             .push(CapturedControlCommandEvents::default());
         ControlCommandEventCapture {
-            shared: self,
+            shared: Arc::clone(self),
             client,
             item_id,
             active: true,
@@ -28789,29 +28931,8 @@ impl Shared {
         self.stream_caller_stdin_to_created_pane(client, pane);
     }
 
-    /// `window_pane_input_callback` again: a pane that disappears while the
-    /// caller's stream is still open raises the invocation's status, stops the
-    /// rest of the client's chain and cancels the read.
     fn stream_caller_stdin_to_created_pane(self: &Arc<Self>, client: ClientId, pane: PaneId) {
-        while let Some(Ok(chunk)) = self.client_file_operation(
-            Some(client),
-            Path::new("-"),
-            ClientFileOperation::ReadStdinChunk,
-        ) {
-            if self.pane_stream_target_lost(pane) {
-                self.request_command_client_exit(client);
-                return;
-            }
-            if chunk.is_empty() {
-                return;
-            }
-            if !self.feed_pane_stream_input(pane, &chunk) {
-                if self.pane_stream_target_lost(pane) {
-                    self.request_command_client_exit(client);
-                }
-                return;
-            }
-        }
+        file_commands::stream_stdin(self, client, pane);
     }
 
     fn pane_stream_target_lost(&self, pane: PaneId) -> bool {
@@ -28952,34 +29073,19 @@ impl Shared {
             self.stream_caller_stdin_to_pane(client, context, command);
             Some(SourceStream::Spent)
         } else if stdin.is_none() && available {
-            let bytes = self
-                .client_file_operation(
-                    Some(client),
-                    Path::new("-"),
-                    ClientFileOperation::ReadStdin {
-                        binary: sink.accepts_binary(),
-                    },
-                )
-                .ok_or_else(|| ServerError::InvalidCommand(spent_source_stream_error()))?;
-            Some(match bytes {
-                Ok(bytes) => SourceStream::Bytes(RawText::from_bytes(bytes)),
-                Err(error)
-                    if (sink == CommandStdinSink::Config
-                        || canonical_command(&command.name) == "load-buffer")
-                        && caller_stdin_read_failure(&error.tmux_message()) =>
-                {
-                    if let Some(streams) = self
-                        .inner
-                        .lock()
-                        .client_mut(client)
-                        .and_then(|c| c.command_streams.as_mut())
-                    {
-                        streams.stdin_error = Some(error.tmux_message());
-                    }
-                    SourceStream::Spent
-                }
-                Err(error) => return Err(error.into()),
-            })
+            file_commands::read_stdin(self, client, sink, command)?;
+            if self
+                .command_item
+                .as_ref()
+                .is_some_and(|item| item.lock().pending_wait.is_some())
+            {
+                return Ok(None);
+            }
+            self.inner
+                .lock()
+                .client_mut(client)
+                .and_then(|c| c.command_streams.as_mut())
+                .and_then(|streams| streams.stdin.replace(SourceStream::Spent))
         } else {
             stdin
         };
@@ -31249,6 +31355,9 @@ impl Shared {
                         )
                     });
             match action {
+                Ok(ConfigFrameAction::Command(_) | ConfigFrameAction::ReadSource(_)) => {
+                    unreachable!("synchronous config replay")
+                }
                 Ok(ConfigFrameAction::Continue) => continue,
                 Ok(ConfigFrameAction::Source(source)) => {
                     frame.source = Some(source);
@@ -31284,9 +31393,9 @@ impl Shared {
     }
 
     fn config_frame_capture(
-        &self,
+        self: &Arc<Self>,
         options: SourceFileLoadOptions,
-    ) -> Option<ControlCommandEventCapture<'_>> {
+    ) -> Option<ControlCommandEventCapture> {
         options
             .suppress_replay_output
             .then(|| {
@@ -31612,6 +31721,21 @@ impl Shared {
                     });
                 }
             }
+            if queue_execution.frame_active.get() {
+                report.push_stdout_frame();
+                return Ok(ConfigFrameAction::ReadSource(Box::new(
+                    source_queue::SourceRead {
+                        pending: pending_sources.into(),
+                        parsed: VecDeque::new(),
+                        command,
+                        group,
+                        source_error_group,
+                        source_error,
+                        source_command_error,
+                        source_has_file,
+                    },
+                )));
+            }
             let mut parsed_sources = Vec::new();
             report.push_stdout_frame();
             for pending in pending_sources {
@@ -31719,15 +31843,70 @@ impl Shared {
         let stdout_sequence = options
             .replay_client
             .map(|client| self.command_stdout_sequence(client));
+        let finish = source_queue::CommandFinish {
+            command,
+            routed,
+            group,
+            previous_replay_client,
+            previous_control_target,
+            early_shell_guard,
+            guard_capture,
+            callback_parse_failures_start,
+            deferred_replay_issues_start,
+            stdout_sequence,
+            alias_group,
+            caller_source_stream,
+        };
+        if queue_execution.frame_active.get() {
+            return Ok(ConfigFrameAction::Command(Box::new(finish)));
+        }
         let result = self.execute_with_mux_source_routed_for_terminal_in_queue(
             ClientId(u64::MAX),
             ClientKind::Command,
             context,
-            &routed,
+            &finish.routed,
             MuxOptionSource::TmuxConfig,
             client_terminal,
             Some(queue_execution),
         );
+        self.finish_config_frame_command(
+            path,
+            context,
+            report,
+            options,
+            queue_execution,
+            failed_group,
+            finish,
+            result,
+        )
+    }
+
+    fn finish_config_frame_command(
+        self: &Arc<Self>,
+        path: &Path,
+        context: &mut ExecutionContext,
+        report: &mut ConfigLoadReport,
+        options: SourceFileLoadOptions,
+        queue_execution: &CommandQueueExecution,
+        failed_group: &mut Option<(String, u32)>,
+        finish: source_queue::CommandFinish,
+        result: Result<Execution, DaemonError>,
+    ) -> Result<ConfigFrameAction, DaemonError> {
+        let source_queue::CommandFinish {
+            command,
+            routed,
+            group,
+            previous_replay_client,
+            previous_control_target,
+            early_shell_guard,
+            guard_capture,
+            callback_parse_failures_start,
+            deferred_replay_issues_start,
+            stdout_sequence,
+            alias_group,
+            caller_source_stream,
+        } = finish;
+        let routed_name = canonical_command(&routed.name);
         let mut callback_parse_failures = queue_execution
             .callback_parse_failures
             .borrow_mut()
@@ -33411,7 +33590,7 @@ struct ConfigQueueFrame<'a> {
     finish_report: bool,
     failed_group: Option<(String, u32)>,
     source: Option<Box<ConfigSourceBoundary>>,
-    suppressed_control_capture: Option<ControlCommandEventCapture<'a>>,
+    suppressed_control_capture: Option<ControlCommandEventCapture>,
 }
 
 struct ConfigSourceBoundary {
@@ -33427,6 +33606,8 @@ struct ConfigSourceBoundary {
 }
 
 enum ConfigFrameAction {
+    Command(Box<source_queue::CommandFinish>),
+    ReadSource(Box<source_queue::SourceRead>),
     Continue,
     Source(Box<ConfigSourceBoundary>),
     Finish,
@@ -34043,14 +34224,14 @@ impl CapturedControlCommandEvents {
     }
 }
 
-struct ControlCommandEventCapture<'a> {
-    shared: &'a Shared,
+struct ControlCommandEventCapture {
+    shared: Arc<Shared>,
     client: ClientId,
     item_id: cmdq::ItemId,
     active: bool,
 }
 
-impl ControlCommandEventCapture<'_> {
+impl ControlCommandEventCapture {
     fn finish(mut self) -> CapturedControlCommandEvents {
         self.active = false;
         self.shared
@@ -34059,7 +34240,7 @@ impl ControlCommandEventCapture<'_> {
     }
 }
 
-impl Drop for ControlCommandEventCapture<'_> {
+impl Drop for ControlCommandEventCapture {
     fn drop(&mut self) {
         if self.active {
             let _ = self
@@ -34503,6 +34684,7 @@ struct RegisteredWait {
     leaf: Option<InsertedLeafContinuation>,
     guard: Option<InsertedControlGuard>,
     terminal: Option<Arc<terminal_requests::CommandState>>,
+    file: Option<file_commands::Resume>,
 }
 
 #[derive(Default)]
@@ -37038,11 +37220,11 @@ struct PopupWaiter {
     wake: crossbeam_channel::Sender<u8>,
 }
 
-/// One `load-buffer` or `save-buffer` parked on the client that has to do the
-/// IO, keyed in `client_file_waiters` by the request id the reply carries.
 struct ClientFileWaiter {
     client: ClientId,
-    wake: crossbeam_channel::Sender<ClientFileResponse>,
+    path: PathBuf,
+    pane: Option<PaneId>,
+    complete: file_commands::Completion,
 }
 
 struct PopupSession {

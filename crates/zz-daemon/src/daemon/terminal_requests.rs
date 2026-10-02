@@ -345,6 +345,7 @@ impl CommandWait {
                 leaf: None,
                 guard: None,
                 terminal: Some(Arc::clone(&state)),
+                file: None,
             }));
         }
         Self { state, registered }

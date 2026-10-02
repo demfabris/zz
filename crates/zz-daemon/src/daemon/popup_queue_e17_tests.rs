@@ -79,6 +79,24 @@ fn finish(task: &mut wait_queue::CommandTask) {
 
 #[test]
 fn twenty_popup_waits_add_zero_watcher_or_command_workers_beyond_shards() {
+    if std::env::var_os("ZZ_E17_POPUP_THREADS_TEST").is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "daemon::popup_queue_e17_tests::twenty_popup_waits_add_zero_watcher_or_command_workers_beyond_shards",
+                "--exact",
+                "--test-threads=1",
+            ])
+            .env("ZZ_E17_POPUP_THREADS_TEST", "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
     let (shared, context, mut event_loop) = workspace();
     let targets = (0..20)
         .map(|index| target(&shared, &context, index))
@@ -92,25 +110,39 @@ fn twenty_popup_waits_add_zero_watcher_or_command_workers_beyond_shards() {
                 .min(4)
         });
     assert!(shards > 0);
-    for index in 0..shards {
-        let target = targets[index % targets.len()];
+    let mut warmup = Vec::new();
+    for target in &targets {
         shared
             .execute(
-                target,
+                *target,
                 ClientKind::Interactive,
                 &mut context.clone(),
                 &CommandInvocation::new("display-popup", ["sleep 30"]),
             )
             .unwrap();
-        let terminal = terminal(&shared, target);
-        turn_until(&shared, &mut event_loop, || terminal.process_id().is_some());
-        shared.close_popup(target, true);
-        turn_until(&shared, &mut event_loop, || terminal.completion().is_some());
+        warmup.push(terminal(&shared, *target));
     }
+    turn_until(&shared, &mut event_loop, || {
+        warmup.iter().all(|terminal| {
+            terminal.process_id().is_some()
+                && matches!(
+                    terminal.latest_viewport().status,
+                    zz_terminal::SessionStatus::Running
+                )
+        })
+    });
     assert_eq!(shared.connection_threads.worker_count(), 0);
     let before = crate::process_info::sample(std::process::id())
         .unwrap()
         .threads;
+    for target in &targets {
+        shared.close_popup(*target, true);
+    }
+    turn_until(&shared, &mut event_loop, || {
+        warmup
+            .iter()
+            .all(|terminal| terminal.completion().is_some())
+    });
     let mut tasks = (0..20)
         .map(|index| task(&shared, &context, index, &[], "sleep 30").1)
         .collect::<Vec<_>>();
@@ -119,9 +151,13 @@ fn twenty_popup_waits_add_zero_watcher_or_command_workers_beyond_shards() {
         .map(|client| terminal(&shared, *client))
         .collect::<Vec<_>>();
     turn_until(&shared, &mut event_loop, || {
-        terminals
-            .iter()
-            .all(|terminal| terminal.process_id().is_some())
+        terminals.iter().all(|terminal| {
+            terminal.process_id().is_some()
+                && matches!(
+                    terminal.latest_viewport().status,
+                    zz_terminal::SessionStatus::Running
+                )
+        })
     });
     assert!(tasks.iter().all(|task| !task.ready()));
     assert_eq!(shared.connection_threads.worker_count(), 0);

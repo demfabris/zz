@@ -60,6 +60,10 @@ impl WaitContinuation {
         true
     }
 
+    pub(super) fn rearm(&self) {
+        *self.completion.ready.lock() = false;
+    }
+
     pub(super) fn ready(&self) -> bool {
         *self.completion.ready.lock()
     }

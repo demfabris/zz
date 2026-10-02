@@ -30,11 +30,19 @@ impl<T: Send> Pending for Request<T> {
 
 struct Scheduled {
     deadline: Instant,
+    until: Option<cmdq::WaitContinuation>,
     finish: Option<Box<dyn FnOnce(&Arc<Shared>) + Send>>,
 }
 
 impl Pending for Scheduled {
     fn poll(&mut self, shared: &Arc<Shared>, now: Instant) -> bool {
+        if self
+            .until
+            .as_ref()
+            .is_some_and(cmdq::WaitContinuation::ready)
+        {
+            return true;
+        }
         if now < self.deadline {
             return false;
         }
@@ -184,6 +192,21 @@ impl Inbox {
     ) {
         let _ = self.sender.send(Box::new(Scheduled {
             deadline,
+            until: None,
+            finish: Some(Box::new(finish)),
+        }));
+        self.wake.notify();
+    }
+
+    pub(super) fn schedule_until(
+        &self,
+        deadline: Instant,
+        until: cmdq::WaitContinuation,
+        finish: impl FnOnce(&Arc<Shared>) + Send + 'static,
+    ) {
+        let _ = self.sender.send(Box::new(Scheduled {
+            deadline,
+            until: Some(until),
             finish: Some(Box::new(finish)),
         }));
         self.wake.notify();
@@ -302,7 +325,9 @@ pub(super) struct CommandState {
 
 impl CommandState {
     fn add(&self) {
-        self.remaining.fetch_add(1, Ordering::Relaxed);
+        if self.remaining.fetch_add(1, Ordering::AcqRel) == 0 {
+            self.continuation.rearm();
+        }
     }
 
     pub(super) fn complete(&self) {
@@ -397,6 +422,7 @@ impl CommandWait {
                 leaf: None,
                 guard: None,
                 terminal: Some(Arc::clone(&state)),
+                file: None,
             }));
         }
         Self { state, registered }

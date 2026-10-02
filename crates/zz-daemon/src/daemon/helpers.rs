@@ -18,6 +18,15 @@ const MAX_PENDING: usize = 64;
 const IDLE_TIMEOUT: Duration = Duration::from_millis(250);
 
 pub(super) enum Task {
+    SourceRead {
+        path: std::path::PathBuf,
+        complete: super::file_commands::Completion,
+    },
+    File {
+        path: std::path::PathBuf,
+        operation: zz_protocol::ClientFileOperation,
+        complete: super::file_commands::Completion,
+    },
     Path(Box<path_listing::Task>),
     #[cfg(feature = "agent")]
     Catalog {
@@ -69,6 +78,10 @@ pub(super) enum Task {
 pub(super) type PeerResult = io::Result<Vec<(PaneId, Option<u32>, Option<String>)>>;
 
 pub(super) enum Result {
+    File {
+        complete: super::file_commands::Completion,
+        result: std::result::Result<Vec<u8>, super::DaemonError>,
+    },
     #[cfg(all(feature = "agent", unix))]
     Peers(PeerResult),
     Path {
@@ -304,6 +317,28 @@ fn worker(state: &State) {
 
 fn run(task: Task, _state: &State) -> Option<Result> {
     match task {
+        Task::SourceRead { path, complete } => Some(Result::File {
+            complete,
+            result: std::fs::read(path).map_err(Into::into),
+        }),
+        Task::File {
+            path,
+            operation,
+            complete,
+        } => {
+            let result = match operation {
+                zz_protocol::ClientFileOperation::Read => super::read_paste_buffer_file(&path),
+                zz_protocol::ClientFileOperation::Write { append, data } => {
+                    super::write_paste_buffer_file(&path, &data, append).map(|()| Vec::new())
+                }
+                _ => Err(super::client_file_failure(
+                    "no invoking stdin client",
+                    &path,
+                )),
+            }
+            .map_err(Into::into);
+            Some(Result::File { complete, result })
+        }
         Task::Path(task) => {
             task.run(&|result| {
                 let cancel = Arc::clone(&result.cancel);

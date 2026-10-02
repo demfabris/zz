@@ -3330,11 +3330,15 @@ Selection, acceptance, replacement, expiry, cancellation, detach and disconnect 
 Six new tests cover twenty parked overlays of each type with zero added workers, child frames and lifecycle completion. The serial daemon suite passes 1,492 tests with one ignored; fmt, daemon Clippy and six compat scenarios pass, with zero divergences across 43 steps.
 Three alternating quick pairs against `loop-6c163955-cli` pass all 19 CLI instruction rows under the 1.02x-or-baseline-range rule. `chain5.p20` is 0.2910 -> 0.2923 Minstr (1.00447x); idle CPU, instructions and wakeups are zero, and p1/p20 threads stay at 2/5. Linux-only checks were not run on this Mac.
 
+**e09 as built (2026-10-02, Linux):** `daemon/pane_exit.rs` binds `split-window -W` and `wait-pane --exit` continuations to each terminal incarnation, converting two park sites (8/16 in the e09 estimate).
+Pane exit completes registrations before retention or removal; client loss and timeouts cancel individual registrations, preserving split output, after hooks, attached-client return values and signal exit codes.
+Twenty exit waits add zero command workers and zero polling deadlines. Focused exit, respawn, cancellation and formatted split tests pass; all six requested compat scenarios pass 149 steps with zero divergences.
 **e08 as built (2026-10-02, macOS):** `Shared::display_menu` reuses `OverlayWait` for one more explicit wait site; `daemon/wait_queue.rs` admits menus on the loop instead of parking a worker.
 The loop queues selected actions after closing the menu, against its saved target, while the invoking queue's tail resumes independently. Parse and runtime errors still reach the menu client; Control validation, disabled stay-open rows and resize state retain their existing behavior.
 Four new `daemon/menu_queue_e08_tests.rs` tests prove twenty open blocking menus add zero workers and lifecycle completion happens once. The serial daemon suite passes 1,490 tests with one ignored; fmt, check, daemon Clippy and six compat scenarios pass, with zero divergences across 38 steps.
 Three alternating quick pairs against `loop-705ca175-cli` pass all 19 CLI instruction rows below 1.02x base. `chain5.p20` is 0.2925 -> 0.2934 Minstr (1.00308x); idle CPU, instructions and wakeups are zero, and p1/p20 threads stay at 2/5. Linux-only checks were not run on this Mac.
 
+e11fix as-built (2026-10-02): Instruction profiles against da24448ee measured 41.34 -> 44.00 Minstr for 1,000 config lines. Per-line hook eligibility checks added lookups, searches and string comparisons; the split finish path repeated command resolution and moved finish state. Replay now executes through the continuation-aware path first and retains a frame for a wait or child, then resumes the completed step. Finish reuses its resolved command name. A 100-probe profile measured 41.99 Minstr, 1.57% above da24448ee. Hook-parking tests cover hooks installed within the source file and side effects that must run once. Mac checks stay with the orchestrator.
 **e18 as built (2026-10-02, macOS):** Six wait families now use typed continuations: terminal agent state, native turns, peer replies, permissions, new sessions and GUI requests.
 `daemon/terminal_requests.rs` carries producer replies and timeout deadlines on the loop; terminal subscriptions register before delivery and retain short working-to-idle edges. New sessions retain their publication barrier, and GUI replies check their owner before removing a request.
 The named functions contain no blocking receive or sleep. Twenty parked native waits add zero command workers; timeout leaves the native turn running. Agent runtime threads remain.
@@ -3347,6 +3351,14 @@ Windows cross-check reaches an unchanged base error: `run_inserted_queue_frames`
 The first condition capture fixes the scan boundary before reporting the park. Unchanged history needs no new capture; tail limits, collapsed-paste detection, statuses 124/125, and commands continuing after timeout keep their behavior. Nonempty pastes need a fresh output generation before Enter.
 Four e10 tests prove 20 parked commands add zero workers and zero scan deadlines, output during registration resumes the wait, marker and echo waits have no deadline without a timeout, and old echo cannot submit a new paste. Exit, respawn, shutdown, and client departure wake parked waits.
 The Mac serial daemon suite passes 1,478 unit and 35 integration tests, with one existing test ignored. The e18 agent waits, Clippy, Windows check, and five selected compat scenarios pass; Linux-only checks remain with the orchestrator.
+
+### e10/e17 Linux integration (2026-10-02)
+
+The picks on `f797df18` keep e09 pane-exit completions beside e10 output notifications, and retain e11 file resumes in popup and source-queue waits. The e18 agent waits still pass.
+The popup thread test compares 20 command popups with 20 interactive popups, including Linux's existing PTY gather threads. It uses a fresh process and waits for Running viewports before counting threads.
+Fmt, daemon Clippy, the focused e10/e17/e09/e11/e18 checks, the CLI build, 35 integration tests, and eight compat groups pass. Compat reports 80 steps with zero divergences; one existing streaming soak remains ignored.
+The final serial daemon suite passes 1,495 unit tests and fails only the allowed `remote_scripts_fall_back_to_the_mac_app_bundle_cli` test. An earlier SOCKS loopback shutdown timeout passes alone and in the final suite; no test runs over 60 seconds.
+This brief runs no perf measurements. The orchestrator owns Mac posix_spawn, kqueue, PTY spin-bridge, and iOS checks; this Linux run does not check Windows.
 
 
 **e22 as built (2026-10-02, macOS):** Uncached `list-keys` renders at most 64 binding rows per loop turn, retaining sorted and filtered bindings, padding, aggregate facts, client formats and user options across yields.

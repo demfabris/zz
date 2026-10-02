@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn formatted_split_wait_resumes_its_pane_wait_outside_the_loop() {
+fn formatted_split_wait_resumes_its_pane_wait_on_the_loop() {
     let shared = Arc::new(Shared::new(408));
     let mailbox = OutboundMailbox::new();
     let (client, _) = shared.register_subscribed(ClientKind::Command, None, None, mailbox);
@@ -37,28 +37,9 @@ fn formatted_split_wait_resumes_its_pane_wait_outside_the_loop() {
         false,
     )
     .unwrap_or_else(|_| panic!("split wait task"));
-    assert!(matches!(task.run(false), wait_queue::Progress::Waiting));
+    assert!(matches!(task.run(true), wait_queue::Progress::Waiting));
     let deadline = Instant::now() + Duration::from_secs(5);
     while !task.ready() {
-        assert!(Instant::now() < deadline);
-        event_loop.turn(&shared).unwrap();
-        thread::sleep(Duration::from_millis(1));
-    }
-    assert!(matches!(task.run(true), wait_queue::Progress::Worker));
-    let (completed, receiver) = mpsc::channel();
-    shared
-        .connection_threads
-        .run(Box::new(move || {
-            task.run(false);
-            completed
-                .send(task)
-                .unwrap_or_else(|_| panic!("waiting task receiver"));
-        }))
-        .unwrap();
-    let mut task = loop {
-        if let Ok(task) = receiver.try_recv() {
-            break task;
-        }
         assert!(Instant::now() < deadline);
         event_loop.turn(&shared).unwrap();
         let mut query = context.clone();
@@ -73,7 +54,7 @@ fn formatted_split_wait_resumes_its_pane_wait_outside_the_loop() {
             .output;
         assert_eq!(output, "responsive");
         thread::sleep(Duration::from_millis(1));
-    };
+    }
     assert!(matches!(task.run(true), wait_queue::Progress::Done));
     let (response, _, _, _) = task.finish();
     assert!(

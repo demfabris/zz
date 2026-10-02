@@ -18,11 +18,13 @@ fn terminal_read_command(name: &str) -> bool {
 
 pub(super) fn queue_command(command: &CommandInvocation) -> bool {
     let name = canonical_command(&command.name);
-    terminal_read_command(name)
+    command_stdin_sink(name, &command.args).is_some()
+        || terminal_read_command(name)
         || MuxEngine::is_command_alias_group(command)
         || matches!(
             name,
-            "list-keys"
+            "split-window"
+                | "list-keys"
                 | "wait-for"
                 | "run-shell"
                 | "if-shell"
@@ -31,16 +33,21 @@ pub(super) fn queue_command(command: &CommandInvocation) -> bool {
                 | "display-popup"
                 | "command-prompt"
                 | "confirm-before"
+                | "load-buffer"
+                | "save-buffer"
+                | "source-file"
         )
 }
 
 pub(super) fn task_command(command: &CommandInvocation) -> bool {
     let name = canonical_command(&command.name);
-    MuxEngine::is_command_alias_group(command)
+    command_stdin_sink(name, &command.args).is_some()
+        || MuxEngine::is_command_alias_group(command)
         || terminal_read_command(name)
         || matches!(
             name,
-            "list-keys"
+            "split-window"
+                | "list-keys"
                 | "wait-for"
                 | "run-shell"
                 | "if-shell"
@@ -49,6 +56,9 @@ pub(super) fn task_command(command: &CommandInvocation) -> bool {
                 | "display-popup"
                 | "command-prompt"
                 | "confirm-before"
+                | "load-buffer"
+                | "save-buffer"
+                | "source-file"
         )
 }
 
@@ -251,15 +261,6 @@ impl CommandTask {
                 .finish_command_queue_execution(&frame.execution, None);
             self.finished = Some(frame);
             Progress::Done
-        } else if inline
-            && self.ready()
-            && self
-                .frames
-                .last()
-                .and_then(|frame| frame.wait_boundary.as_ref())
-                .is_some_and(|(_, step)| wait_needs_worker(step))
-        {
-            Progress::Worker
         } else if self
             .shared
             .command_item
@@ -316,6 +317,7 @@ impl Drop for CommandTask {
             .pending_wait
             .take();
         if let Some(wait) = pending {
+            pane_exit::cancel_token(&mut self.shared.inner.lock(), wait.continuation.token);
             self.shared.wake_wait_items([wait.continuation.clone()]);
             (self.shared.terminal_requests.notifier())();
             let next = remove_wait_item(
@@ -420,15 +422,6 @@ impl InsertedTask {
             };
             self.completion.take().unwrap()(&self.shared.server_owner(), &frame.context, result);
             Progress::Done
-        } else if inline
-            && self.ready()
-            && self
-                .frames
-                .last()
-                .and_then(|frame| frame.wait_boundary.as_ref())
-                .is_some_and(|(_, step)| wait_needs_worker(step))
-        {
-            Progress::Worker
         } else if self
             .shared
             .command_item
@@ -458,6 +451,7 @@ impl Drop for InsertedTask {
             .pending_wait
             .take();
         if let Some(wait) = pending {
+            pane_exit::cancel_token(&mut self.shared.inner.lock(), wait.continuation.token);
             self.shared.wake_wait_items([wait.continuation.clone()]);
             (self.shared.terminal_requests.notifier())();
             let next = remove_wait_item(

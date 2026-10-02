@@ -2055,3 +2055,11 @@ mod e12_tests;
 #[cfg(test)]
 #[path = "event_loop_e04_tests.rs"]
 mod e04_tests;
+
+#[cfg(test)]
+#[path = "file_commands_e11_tests.rs"]
+mod e11_tests;
+
+#[cfg(test)]
+#[path = "source_queue_e11fix_tests.rs"]
+mod e11fix_tests;

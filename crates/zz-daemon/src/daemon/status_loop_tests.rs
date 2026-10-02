@@ -216,6 +216,7 @@ fn pending_modes_wake_the_loop_without_a_periodic_status_deadline() {
 #[test]
 fn status_job_output_reaches_clients_without_a_periodic_deadline() {
     let (shared, mut context, client, mut poll, waker, mut timers) = fixture();
+    let _jobs = status_jobs::tests::Driver::new(shared.status.lock().job_client());
     model(
         &shared,
         &mut context,
@@ -252,11 +253,16 @@ fn status_job_output_reaches_clients_without_a_periodic_deadline() {
             Instant::now() < deadline,
             "status job update did not reach the client"
         );
-        poll.poll(
-            &mut events,
-            Some(deadline.saturating_duration_since(Instant::now())),
-        )
-        .unwrap();
+        loop {
+            match poll.poll(
+                &mut events,
+                Some(deadline.saturating_duration_since(Instant::now())),
+            ) {
+                Ok(()) => break,
+                Err(error) if error.kind() == ErrorKind::Interrupted => {}
+                Err(error) => panic!("status poll failed: {error}"),
+            }
+        }
         timers.turn(&shared, &waker).unwrap();
     }
     assert!(timers.deadlines.entries.is_empty());

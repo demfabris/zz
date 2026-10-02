@@ -229,6 +229,7 @@ fn status_job_output_reads_parts_the_templates_do_not() {
     let fixture = fixture();
     one_status_row(&fixture, "#(echo '##{S:##{session_name}.}')");
     let mut renderer = StatusRenderer::default();
+    let _jobs = status_jobs::tests::Driver::new(renderer.job_client());
     assert_eq!(
         renderer
             .render_changed(&[status_request_for(&fixture, FormatNeeds::NONE)])

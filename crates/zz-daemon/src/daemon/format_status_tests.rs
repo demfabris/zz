@@ -129,6 +129,8 @@ fn status_forget_cleans_rendered_clients_and_preserves_other_clients_and_jobs() 
     let mut second = first.clone();
     second.client = ClientId(2);
     let mut renderer = StatusRenderer::default();
+    #[cfg(unix)]
+    let _jobs = crate::daemon::status_jobs::tests::Driver::new(renderer.job_client());
     settled(&mut renderer, &first);
     settled(&mut renderer, &second);
     renderer.render_initial(&first);
@@ -495,6 +497,7 @@ fn whole_status(request: &StatusRequest, now: i64) -> StatusLine {
         None,
         None,
         None,
+        &crate::daemon::status_jobs::StatusClient::default(),
         None,
     )
 }
@@ -1220,6 +1223,8 @@ fn completed_status_shared_request_bypasses_unsafe_and_forced_job_formats() {
     let format = format!("#(echo run >> '{}'; echo value)", count.display());
     let request = Arc::new(request(1, &format, ""));
     let mut renderer = StatusRenderer::default();
+    #[cfg(unix)]
+    let _jobs = crate::daemon::status_jobs::tests::Driver::new(renderer.job_client());
     assert_eq!(settled(&mut renderer, &request).left, "value");
     let runs = std::fs::read_to_string(&count).unwrap().lines().count();
     renderer.render_forced_shared(&request);
@@ -1450,6 +1455,8 @@ fn completed_status_cache_keeps_forced_shell_jobs_running() {
     let count = directory.path().join("count");
     let format = format!("#(echo run >> '{}'; echo value)", count.display());
     let mut renderer = StatusRenderer::default();
+    #[cfg(unix)]
+    let _jobs = crate::daemon::status_jobs::tests::Driver::new(renderer.job_client());
     let request = request(1, &format, "");
     assert_eq!(settled(&mut renderer, &request).left, "value");
     let runs = std::fs::read_to_string(&count).unwrap().lines().count();
@@ -1503,6 +1510,8 @@ fn completed_status_invalidates_captured_global_and_session_environment_values()
 fn completed_status_rejects_stale_references_after_unsafe_template_changes() {
     let (_, _, mut request) = completed_request("#{session_name}");
     let mut renderer = StatusRenderer::default();
+    #[cfg(unix)]
+    let _jobs = crate::daemon::status_jobs::tests::Driver::new(renderer.job_client());
     assert_eq!(
         renderer.render_forced_at(&request, 1_700_000_000).left,
         "cached"

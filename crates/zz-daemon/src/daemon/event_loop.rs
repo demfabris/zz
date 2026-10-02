@@ -13,6 +13,10 @@ use super::*;
 #[path = "event_loop_e19_tests.rs"]
 mod e19_tests;
 
+#[cfg(test)]
+#[path = "event_loop_e15_tests.rs"]
+mod e15_tests;
+
 const LISTENER: Token = Token(0);
 const WAKE: Token = Token(1);
 const SHUTDOWN_SIGNAL: Token = Token(2);
@@ -108,6 +112,8 @@ pub(super) struct EventLoop {
     watchers: watchers::LoopWatchers,
     jobs: jobs::JobRegistry,
     helper_jobs: Vec<(jobs::JobId, Arc<AtomicBool>)>,
+    status_client: jobs::StatusClient,
+    status_jobs: BTreeMap<u64, jobs::JobId>,
     #[cfg(feature = "agent")]
     agents: agent_inbox::AgentInbox,
     connections: BTreeMap<Token, Connection>,
@@ -245,6 +251,8 @@ impl EventLoop {
         let waker = Arc::new(Waker::new(poll.registry(), WAKE)?);
         shared.accept_wake.install(Arc::clone(&waker));
         shared.helpers.install(Arc::clone(&waker));
+        let status_client = shared.status.lock().job_client();
+        status_client.install(Arc::clone(&waker));
         let (startup_sender, startup_finished) = mpsc::channel();
         let (completion_sender, completed) = mpsc::channel();
         let timers = timers::LoopTimers::new(shared, &waker);
@@ -266,6 +274,8 @@ impl EventLoop {
             watchers,
             jobs: jobs::JobRegistry::default(),
             helper_jobs: Vec::new(),
+            status_client,
+            status_jobs: BTreeMap::new(),
             #[cfg(feature = "agent")]
             agents,
             connections: BTreeMap::new(),
@@ -471,8 +481,10 @@ impl EventLoop {
     }
 
     fn start_shutdown(&mut self, shared: &Arc<Shared>) {
-        self.jobs.cancel_all(self.poll.registry());
         self.shutdown_started = true;
+        self.status_client.stop();
+        self.turn_status_jobs();
+        self.jobs.cancel_all(self.poll.registry());
         shared.response_admissions.lock().frozen = true;
         self.shutdown_phase = ShutdownPhase::Admissions;
         self.timers
@@ -1122,6 +1134,41 @@ impl EventLoop {
         }
     }
 
+    fn turn_status_jobs(&mut self) {
+        if !self.status_client.take_pending() {
+            return;
+        }
+        self.status_jobs.retain(|_, id| self.jobs.contains(*id));
+        let client = self.status_client.clone();
+        for request in client.requests() {
+            match request {
+                jobs::StatusRequest::Launch {
+                    serial,
+                    command,
+                    mut output,
+                } => {
+                    if self.shutdown_started {
+                        output.publish(true, false);
+                        continue;
+                    }
+                    match jobs::launch_status(*command, output)
+                        .and_then(|launch| self.register_job(launch))
+                    {
+                        Ok(id) => {
+                            self.status_jobs.insert(serial, id);
+                        }
+                        Err(error) => log::debug!("status command failed to start: {error}"),
+                    }
+                }
+                jobs::StatusRequest::Cancel(serial) => {
+                    if let Some(id) = self.status_jobs.remove(&serial) {
+                        self.jobs.cancel(self.poll.registry(), id);
+                    }
+                }
+            }
+        }
+    }
+
     fn turn_helpers(&mut self, shared: &Arc<Shared>) {
         if !shared.helpers.take_pending() && self.helper_jobs.is_empty() {
             return;
@@ -1185,6 +1232,7 @@ impl EventLoop {
                 deadline: Some(deadline),
                 process_group: true,
                 output_limit: Some(limit),
+                stream: None,
                 complete: Box::new(move |mut completion| {
                     let result = if let Some(error) = completion.error {
                         Err(error.to_string())
@@ -1220,6 +1268,7 @@ impl EventLoop {
         #[cfg(feature = "agent")]
         self.agents.turn(shared)?;
         self.turn_helpers(shared);
+        self.turn_status_jobs();
         self.jobs.turn(self.poll.registry(), Instant::now());
         self.watchers.turn(shared)?;
         self.timers.turn(shared, &self.waker)?;

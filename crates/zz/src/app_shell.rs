@@ -304,241 +304,244 @@ impl AppShell {
 
 impl Render for AppShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let (route, mode, sidebar_width) = {
-            let sidebar = self.sidebar.read(cx);
-            (sidebar.route(), sidebar.mode(), sidebar.width())
-        };
-        let (sidebar, titlebar) = match (route, mode) {
-            (WorkspaceRoute::Settings, _) => (
-                self.sidebar.clone().into_any_element(),
-                self.render_control_strip(window, cx),
-            ),
-            (WorkspaceRoute::App, ChromeMode::Sidebar) => (
-                AnyView::from(self.sidebar.clone())
-                    .cached(
-                        StyleRefinement::default()
-                            .h_full()
-                            .w(px(sidebar_width))
-                            .flex_none(),
-                    )
-                    .into_any_element(),
-                self.render_control_strip(window, cx),
-            ),
-            (WorkspaceRoute::App, ChromeMode::Titlebar) => (
-                div().into_any_element(),
-                Some(self.render_status_bar(window, cx)),
-            ),
-        };
-        let dialog_layer = Root::render_dialog_layer(window, cx);
-        let notification_layer = Root::render_notification_layer(window, cx);
+        crate::hotreload::render!({
+            let (route, mode, sidebar_width) = {
+                let sidebar = self.sidebar.read(cx);
+                (sidebar.route(), sidebar.mode(), sidebar.width())
+            };
+            let (sidebar, titlebar) = match (route, mode) {
+                (WorkspaceRoute::Settings, _) => (
+                    self.sidebar.clone().into_any_element(),
+                    self.render_control_strip(window, cx),
+                ),
+                (WorkspaceRoute::App, ChromeMode::Sidebar) => (
+                    AnyView::from(self.sidebar.clone())
+                        .cached(
+                            StyleRefinement::default()
+                                .h_full()
+                                .w(px(sidebar_width))
+                                .flex_none(),
+                        )
+                        .into_any_element(),
+                    self.render_control_strip(window, cx),
+                ),
+                (WorkspaceRoute::App, ChromeMode::Titlebar) => (
+                    div().into_any_element(),
+                    Some(self.render_status_bar(window, cx)),
+                ),
+            };
+            let dialog_layer = Root::render_dialog_layer(window, cx);
+            let notification_layer = Root::render_notification_layer(window, cx);
 
-        let slideover = (route == WorkspaceRoute::App && self.sidebar.read(cx).slideover_open())
+            let slideover = (route == WorkspaceRoute::App
+                && self.sidebar.read(cx).slideover_open())
             .then(|| self.render_slideover(cx));
-        let overlays = slideover
-            .into_iter()
-            .chain(dialog_layer.into_iter().map(IntoElement::into_any_element))
-            .chain(
-                notification_layer
-                    .into_iter()
-                    .map(IntoElement::into_any_element),
-            );
-        #[cfg(target_os = "macos")]
-        let overlays = overlays.chain(std::iter::once(
-            crate::browser::underlay::UnderlayFlush.into_any_element(),
-        ));
-        let overlays = overlays.collect::<Vec<_>>();
-        let shell = app_shell_surface(
-            "app-shell",
-            if cfg!(target_os = "linux")
-                && matches!(
-                    window.window_decorations(),
-                    gpui::Decorations::Client { .. }
-                )
-            {
-                gpui::transparent_black()
-            } else {
-                crate::theme::chrome_background(cx)
-            },
-            sidebar,
-            titlebar,
-            self.workspace.clone(),
-            overlays,
-        )
-        .map(|shell| {
-            WindowCorners::for_window(window).round_div(shell, frame_content_corner_radius(cx))
-        })
-        .on_drag_move::<SidebarResizeDrag>(cx.listener(Self::on_sidebar_resize_drag_move))
-        .capture_key_up(cx.listener(|shell, event: &KeyUpEvent, window, cx| {
-            shell.workspace.update(cx, |workspace, cx| {
-                workspace.on_claim_key_up(event, window, cx);
-            });
-        }));
-
-        let settings_sidebar = self.sidebar.clone();
-        let shell = shell.on_action(move |_: &OpenSettings, window, cx| {
-            settings_sidebar.update(cx, |sidebar, cx| sidebar.open_settings(window, cx));
-        });
-
-        let workspace = self.workspace.clone();
-        let sidebar = self.sidebar.clone();
-        let shell = shell.on_action(move |_: &ClosePane, window, cx| {
-            if sidebar.read(cx).route() == WorkspaceRoute::Settings {
-                sidebar.update(cx, |sidebar, cx| {
-                    sidebar.close_settings(window, cx);
+            let overlays = slideover
+                .into_iter()
+                .chain(dialog_layer.into_iter().map(IntoElement::into_any_element))
+                .chain(
+                    notification_layer
+                        .into_iter()
+                        .map(IntoElement::into_any_element),
+                );
+            #[cfg(target_os = "macos")]
+            let overlays = overlays.chain(std::iter::once(
+                crate::browser::underlay::UnderlayFlush.into_any_element(),
+            ));
+            let overlays = overlays.collect::<Vec<_>>();
+            let shell = app_shell_surface(
+                "app-shell",
+                if cfg!(target_os = "linux")
+                    && matches!(
+                        window.window_decorations(),
+                        gpui::Decorations::Client { .. }
+                    )
+                {
+                    gpui::transparent_black()
+                } else {
+                    crate::theme::chrome_background(cx)
+                },
+                sidebar,
+                titlebar,
+                self.workspace.clone(),
+                overlays,
+            )
+            .map(|shell| {
+                WindowCorners::for_window(window).round_div(shell, frame_content_corner_radius(cx))
+            })
+            .on_drag_move::<SidebarResizeDrag>(cx.listener(Self::on_sidebar_resize_drag_move))
+            .capture_key_up(cx.listener(|shell, event: &KeyUpEvent, window, cx| {
+                shell.workspace.update(cx, |workspace, cx| {
+                    workspace.on_claim_key_up(event, window, cx);
                 });
-            } else if !workspace.update(cx, AppView::close_active_pane) {
-                cx.propagate();
+            }));
+
+            let settings_sidebar = self.sidebar.clone();
+            let shell = shell.on_action(move |_: &OpenSettings, window, cx| {
+                settings_sidebar.update(cx, |sidebar, cx| sidebar.open_settings(window, cx));
+            });
+
+            let workspace = self.workspace.clone();
+            let sidebar = self.sidebar.clone();
+            let shell = shell.on_action(move |_: &ClosePane, window, cx| {
+                if sidebar.read(cx).route() == WorkspaceRoute::Settings {
+                    sidebar.update(cx, |sidebar, cx| {
+                        sidebar.close_settings(window, cx);
+                    });
+                } else if !workspace.update(cx, AppView::close_active_pane) {
+                    cx.propagate();
+                }
+            });
+
+            #[cfg(not(target_os = "ios"))]
+            let shell = {
+                use crate::menus;
+                use crate::mux::nav::{TreeTarget, kill_target_command, new_window_command};
+                use zz_protocol::{Axis, CommandInvocation};
+
+                shell
+                    .on_action(cx.listener(|shell, _: &menus::NewSession, _, cx| {
+                        let mux = shell.mux.read(cx);
+                        mux.new_session(mux.attached_host());
+                    }))
+                    .on_action(cx.listener(|shell, _: &menus::NewWindow, _, cx| {
+                        let mux = shell.mux.read(cx);
+                        if let Some(session) = mux.attached_session() {
+                            mux.execute(new_window_command(session));
+                        }
+                    }))
+                    .on_action(cx.listener(|shell, _: &menus::SplitRight, _, cx| {
+                        shell.split_menu_pane(Axis::Horizontal, cx);
+                    }))
+                    .on_action(cx.listener(|shell, _: &menus::SplitDown, _, cx| {
+                        shell.split_menu_pane(Axis::Vertical, cx);
+                    }))
+                    .when(crate::browser::controller::is_available(cx), |shell| {
+                        shell.on_action(cx.listener(|shell, _: &menus::NewBrowserPane, _, cx| {
+                            shell.pane_menu_command("split-window", &["--kind", "browser"], cx);
+                        }))
+                    })
+                    .when(crate::config::agent_pane_enabled(cx), |shell| {
+                        shell.on_action(cx.listener(|shell, _: &menus::NewAgentPane, _, cx| {
+                            shell.pane_menu_command("split-window", &["--kind", "agent"], cx);
+                        }))
+                    })
+                    .on_action(cx.listener(|shell, action: &menus::SwitchSession, _, cx| {
+                        let session = shell
+                            .mux
+                            .read(cx)
+                            .snapshot()
+                            .sessions
+                            .iter()
+                            .find(|session| session.name == action.name)
+                            .map(|session| session.id);
+                        if let Some(session) = session {
+                            shell.mux.update(cx, |mux, _| mux.attach(session));
+                        }
+                    }))
+                    .on_action(cx.listener(|shell, _: &menus::RenameSession, _, cx| {
+                        shell.rename_menu_target(true, cx);
+                    }))
+                    .on_action(cx.listener(|shell, _: &menus::RenameWindow, _, cx| {
+                        shell.rename_menu_target(false, cx);
+                    }))
+                    .on_action(cx.listener(|shell, _: &menus::KillWindow, _, cx| {
+                        if let Some((target, _)) = shell.active_menu_target(false, cx) {
+                            shell.mux.read(cx).execute(kill_target_command(target));
+                        }
+                    }))
+                    .on_action(cx.listener(|shell, _: &menus::KillSession, _, cx| {
+                        if let Some((TreeTarget::Session(session), name)) =
+                            shell.active_menu_target(true, cx)
+                        {
+                            shell.mux.read(cx).execute(CommandInvocation::new(
+                                "confirm-before",
+                                [
+                                    "-p".to_owned(),
+                                    format!("Kill session {name}? (y/n)"),
+                                    format!("kill-session -t {session}"),
+                                ],
+                            ));
+                        }
+                    }))
+                    .on_action(cx.listener(|shell, _: &menus::Detach, _, cx| {
+                        shell
+                            .mux
+                            .read(cx)
+                            .execute(CommandInvocation::new("detach-client", [] as [&str; 0]));
+                    }))
+                    .on_action(cx.listener(|shell, _: &menus::ZoomPane, _, cx| {
+                        shell.pane_menu_command("resize-pane", &["-Z"], cx);
+                    }))
+                    .on_action(cx.listener(|shell, action: &menus::SelectPane, _, cx| {
+                        let direction = match action.direction.as_str() {
+                            "U" => "-U",
+                            "D" => "-D",
+                            "L" => "-L",
+                            "R" => "-R",
+                            _ => return,
+                        };
+                        shell.pane_menu_command("select-pane", &[direction], cx);
+                    }))
+                    .on_action(cx.listener(|shell, _: &menus::ToggleSidebar, _, cx| {
+                        shell.sidebar.update(cx, WorkspaceSidebar::toggle_mode);
+                    }))
+                    .on_action(|_: &menus::CheckForUpdates, _, cx| crate::update::check_now(cx))
+                    .on_action(|_: &menus::OpenLogs, _, cx| crate::diagnostics::open_logs(cx))
+                    .on_action(|_: &menus::ImportTmuxConfig, window, cx| {
+                        crate::config::import_prompt::choose_tmux_config(window, cx);
+                    })
+                    .on_action(cx.listener(|shell, _: &menus::About, window, cx| {
+                        shell
+                            .sidebar
+                            .update(cx, |sidebar, cx| sidebar.open_settings(window, cx));
+                        if let Some(settings) = shell.sidebar.read(cx).settings_view() {
+                            settings.update(cx, |settings, cx| {
+                                settings.set_section(
+                                    zz_ui::settings::SettingsSection::About,
+                                    window,
+                                    cx,
+                                );
+                            });
+                        }
+                    }))
+                    .on_action(|action: &menus::OpenUrl, _, cx| {
+                        if action.url == menus::RELEASE_NOTES_URL
+                            && let Some(crate::update::Status {
+                                check: crate::update::CheckState::Available(release),
+                                ..
+                            }) = crate::update::status(cx)
+                        {
+                            cx.open_url(&release.url);
+                        } else {
+                            cx.open_url(&action.url);
+                        }
+                    })
+            };
+
+            #[cfg(target_os = "macos")]
+            let shell = {
+                let controller = self.controller.clone();
+                let agent_controller = self.agent_controller.clone();
+                shell
+                    .on_action(move |_: &CloseWindow, window, cx| {
+                        if request_window_close(&controller, &agent_controller, window, cx) {
+                            window.remove_window();
+                        }
+                    })
+                    .on_action(|_: &Minimize, window, _| window.minimize_window())
+                    .on_action(|_: &Zoom, window, _| window.zoom_window())
+            };
+
+            #[cfg(target_os = "linux")]
+            {
+                rounded_window_frame().child(shell)
             }
-        });
-
-        #[cfg(not(target_os = "ios"))]
-        let shell = {
-            use crate::menus;
-            use crate::mux::nav::{TreeTarget, kill_target_command, new_window_command};
-            use zz_protocol::{Axis, CommandInvocation};
-
-            shell
-                .on_action(cx.listener(|shell, _: &menus::NewSession, _, cx| {
-                    let mux = shell.mux.read(cx);
-                    mux.new_session(mux.attached_host());
-                }))
-                .on_action(cx.listener(|shell, _: &menus::NewWindow, _, cx| {
-                    let mux = shell.mux.read(cx);
-                    if let Some(session) = mux.attached_session() {
-                        mux.execute(new_window_command(session));
-                    }
-                }))
-                .on_action(cx.listener(|shell, _: &menus::SplitRight, _, cx| {
-                    shell.split_menu_pane(Axis::Horizontal, cx);
-                }))
-                .on_action(cx.listener(|shell, _: &menus::SplitDown, _, cx| {
-                    shell.split_menu_pane(Axis::Vertical, cx);
-                }))
-                .when(crate::browser::controller::is_available(cx), |shell| {
-                    shell.on_action(cx.listener(|shell, _: &menus::NewBrowserPane, _, cx| {
-                        shell.pane_menu_command("split-window", &["--kind", "browser"], cx);
-                    }))
-                })
-                .when(crate::config::agent_pane_enabled(cx), |shell| {
-                    shell.on_action(cx.listener(|shell, _: &menus::NewAgentPane, _, cx| {
-                        shell.pane_menu_command("split-window", &["--kind", "agent"], cx);
-                    }))
-                })
-                .on_action(cx.listener(|shell, action: &menus::SwitchSession, _, cx| {
-                    let session = shell
-                        .mux
-                        .read(cx)
-                        .snapshot()
-                        .sessions
-                        .iter()
-                        .find(|session| session.name == action.name)
-                        .map(|session| session.id);
-                    if let Some(session) = session {
-                        shell.mux.update(cx, |mux, _| mux.attach(session));
-                    }
-                }))
-                .on_action(cx.listener(|shell, _: &menus::RenameSession, _, cx| {
-                    shell.rename_menu_target(true, cx);
-                }))
-                .on_action(cx.listener(|shell, _: &menus::RenameWindow, _, cx| {
-                    shell.rename_menu_target(false, cx);
-                }))
-                .on_action(cx.listener(|shell, _: &menus::KillWindow, _, cx| {
-                    if let Some((target, _)) = shell.active_menu_target(false, cx) {
-                        shell.mux.read(cx).execute(kill_target_command(target));
-                    }
-                }))
-                .on_action(cx.listener(|shell, _: &menus::KillSession, _, cx| {
-                    if let Some((TreeTarget::Session(session), name)) =
-                        shell.active_menu_target(true, cx)
-                    {
-                        shell.mux.read(cx).execute(CommandInvocation::new(
-                            "confirm-before",
-                            [
-                                "-p".to_owned(),
-                                format!("Kill session {name}? (y/n)"),
-                                format!("kill-session -t {session}"),
-                            ],
-                        ));
-                    }
-                }))
-                .on_action(cx.listener(|shell, _: &menus::Detach, _, cx| {
-                    shell
-                        .mux
-                        .read(cx)
-                        .execute(CommandInvocation::new("detach-client", [] as [&str; 0]));
-                }))
-                .on_action(cx.listener(|shell, _: &menus::ZoomPane, _, cx| {
-                    shell.pane_menu_command("resize-pane", &["-Z"], cx);
-                }))
-                .on_action(cx.listener(|shell, action: &menus::SelectPane, _, cx| {
-                    let direction = match action.direction.as_str() {
-                        "U" => "-U",
-                        "D" => "-D",
-                        "L" => "-L",
-                        "R" => "-R",
-                        _ => return,
-                    };
-                    shell.pane_menu_command("select-pane", &[direction], cx);
-                }))
-                .on_action(cx.listener(|shell, _: &menus::ToggleSidebar, _, cx| {
-                    shell.sidebar.update(cx, WorkspaceSidebar::toggle_mode);
-                }))
-                .on_action(|_: &menus::CheckForUpdates, _, cx| crate::update::check_now(cx))
-                .on_action(|_: &menus::OpenLogs, _, cx| crate::diagnostics::open_logs(cx))
-                .on_action(|_: &menus::ImportTmuxConfig, window, cx| {
-                    crate::config::import_prompt::choose_tmux_config(window, cx);
-                })
-                .on_action(cx.listener(|shell, _: &menus::About, window, cx| {
-                    shell
-                        .sidebar
-                        .update(cx, |sidebar, cx| sidebar.open_settings(window, cx));
-                    if let Some(settings) = shell.sidebar.read(cx).settings_view() {
-                        settings.update(cx, |settings, cx| {
-                            settings.set_section(
-                                zz_ui::settings::SettingsSection::About,
-                                window,
-                                cx,
-                            );
-                        });
-                    }
-                }))
-                .on_action(|action: &menus::OpenUrl, _, cx| {
-                    if action.url == menus::RELEASE_NOTES_URL
-                        && let Some(crate::update::Status {
-                            check: crate::update::CheckState::Available(release),
-                            ..
-                        }) = crate::update::status(cx)
-                    {
-                        cx.open_url(&release.url);
-                    } else {
-                        cx.open_url(&action.url);
-                    }
-                })
-        };
-
-        #[cfg(target_os = "macos")]
-        let shell = {
-            let controller = self.controller.clone();
-            let agent_controller = self.agent_controller.clone();
-            shell
-                .on_action(move |_: &CloseWindow, window, cx| {
-                    if request_window_close(&controller, &agent_controller, window, cx) {
-                        window.remove_window();
-                    }
-                })
-                .on_action(|_: &Minimize, window, _| window.minimize_window())
-                .on_action(|_: &Zoom, window, _| window.zoom_window())
-        };
-
-        #[cfg(target_os = "linux")]
-        {
-            rounded_window_frame().child(shell)
-        }
-        #[cfg(not(target_os = "linux"))]
-        {
-            shell
-        }
+            #[cfg(not(target_os = "linux"))]
+            {
+                shell
+            }
+        })
     }
 }
 

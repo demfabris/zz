@@ -772,79 +772,81 @@ fn expand_new_hosts(
 
 impl Render for WorkspaceSidebar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let (attached_host, attached) = {
-            let mux = self.mux.read(cx);
-            (mux.attached_host(), mux.attached_session())
-        };
-        if self.synchronize_tree(cx) {
-            let agents = self.agents.clone();
-            self.reconcile_attention(&agents, cx);
-        }
+        crate::hotreload::render!({
+            let (attached_host, attached) = {
+                let mux = self.mux.read(cx);
+                (mux.attached_host(), mux.attached_session())
+            };
+            if self.synchronize_tree(cx) {
+                let agents = self.agents.clone();
+                self.reconcile_attention(&agents, cx);
+            }
 
-        let sidebar = cx.entity().clone();
-        let width = self.width;
-        let settings_route = self.route == WorkspaceRoute::Settings;
-        let navigation = if settings_route {
-            self.render_settings_navigation(&sidebar, cx)
-        } else {
-            self.render_navigation(&sidebar, attached_host, attached, window, cx)
-        };
-        let controls = if settings_route {
-            div().into_any_element()
-        } else {
-            self.render_controls(&sidebar, cx)
-        };
-        let titlebar = workspace_sidebar_titlebar("workspace-sidebar-titlebar", controls, cx)
-            .window_control_area(WindowControlArea::Drag);
-        let titlebar = if crate::profile::profile(cx).fixed_window {
-            titlebar
-        } else {
-            window_drag_handle("workspace-sidebar-titlebar-drag", titlebar, window, cx)
-        };
-        let corners = if !settings_route && self.mode() == ChromeMode::Sidebar {
-            WindowCorners::for_window(window).left().top()
-        } else {
-            WindowCorners::for_window(window).left()
-        };
-        let divider_hidden =
-            (settings_route || matches!(self.mode(), ChromeMode::Sidebar)) && pane_gaps(cx);
-        let shell = corners.round_div(
-            workspace_sidebar_surface("workspace-sidebar", width, titlebar, navigation, cx)
+            let sidebar = cx.entity().clone();
+            let width = self.width;
+            let settings_route = self.route == WorkspaceRoute::Settings;
+            let navigation = if settings_route {
+                self.render_settings_navigation(&sidebar, cx)
+            } else {
+                self.render_navigation(&sidebar, attached_host, attached, window, cx)
+            };
+            let controls = if settings_route {
+                div().into_any_element()
+            } else {
+                self.render_controls(&sidebar, cx)
+            };
+            let titlebar = workspace_sidebar_titlebar("workspace-sidebar-titlebar", controls, cx)
+                .window_control_area(WindowControlArea::Drag);
+            let titlebar = if crate::profile::profile(cx).fixed_window {
+                titlebar
+            } else {
+                window_drag_handle("workspace-sidebar-titlebar-drag", titlebar, window, cx)
+            };
+            let corners = if !settings_route && self.mode() == ChromeMode::Sidebar {
+                WindowCorners::for_window(window).left().top()
+            } else {
+                WindowCorners::for_window(window).left()
+            };
+            let divider_hidden =
+                (settings_route || matches!(self.mode(), ChromeMode::Sidebar)) && pane_gaps(cx);
+            let shell = corners.round_div(
+                workspace_sidebar_surface("workspace-sidebar", width, titlebar, navigation, cx)
+                    .when(divider_hidden, |this| {
+                        this.border_color(gpui::transparent_black())
+                    }),
+                frame_content_corner_radius(cx),
+            );
+            let resize_handle = div()
+                .id("workspace-sidebar-resize-handle")
+                .absolute()
+                .top(px(0.0))
+                .right(px(0.0))
+                .bottom(px(0.0))
+                .w(px(SIDEBAR_RESIZE_HANDLE_WIDTH))
+                .cursor(CursorStyle::ResizeLeftRight)
+                .occlude()
                 .when(divider_hidden, |this| {
-                    this.border_color(gpui::transparent_black())
-                }),
-            frame_content_corner_radius(cx),
-        );
-        let resize_handle = div()
-            .id("workspace-sidebar-resize-handle")
-            .absolute()
-            .top(px(0.0))
-            .right(px(0.0))
-            .bottom(px(0.0))
-            .w(px(SIDEBAR_RESIZE_HANDLE_WIDTH))
-            .cursor(CursorStyle::ResizeLeftRight)
-            .occlude()
-            .when(divider_hidden, |this| {
-                this.hover(|this| {
-                    this.border_r_1()
-                        .border_color(workspace_sidebar_divider(cx))
+                    this.hover(|this| {
+                        this.border_r_1()
+                            .border_color(workspace_sidebar_divider(cx))
+                    })
                 })
-            })
-            .on_drag(SidebarResizeDrag, |_: &SidebarResizeDrag, _, _, cx| {
-                cx.new(|_| SidebarResizePreview)
-            });
-        div()
-            .id("workspace-sidebar-clip")
-            .relative()
-            .h_full()
-            .w(px(width))
-            .flex()
-            .flex_none()
-            .overflow_hidden()
-            .child(shell)
-            .when(!crate::profile::profile(cx).fixed_window, |sidebar| {
-                sidebar.child(resize_handle)
-            })
+                .on_drag(SidebarResizeDrag, |_: &SidebarResizeDrag, _, _, cx| {
+                    cx.new(|_| SidebarResizePreview)
+                });
+            div()
+                .id("workspace-sidebar-clip")
+                .relative()
+                .h_full()
+                .w(px(width))
+                .flex()
+                .flex_none()
+                .overflow_hidden()
+                .child(shell)
+                .when(!crate::profile::profile(cx).fixed_window, |sidebar| {
+                    sidebar.child(resize_handle)
+                })
+        })
     }
 }
 

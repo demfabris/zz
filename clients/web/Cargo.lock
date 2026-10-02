@@ -1032,7 +1032,7 @@ dependencies = [
 [[package]]
 name = "collections"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=e01edb6b1a997d18d4e1c6db62109dd495a4f0db#e01edb6b1a997d18d4e1c6db62109dd495a4f0db"
+source = "git+https://github.com/demfabris/zed?rev=cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc#cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc"
 dependencies = [
  "gpui_util",
  "indexmap 2.14.2",
@@ -1528,7 +1528,7 @@ dependencies = [
 [[package]]
 name = "derive_refineable"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=e01edb6b1a997d18d4e1c6db62109dd495a4f0db#e01edb6b1a997d18d4e1c6db62109dd495a4f0db"
+source = "git+https://github.com/demfabris/zed?rev=cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc#cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2479,7 +2479,7 @@ dependencies = [
 [[package]]
 name = "gpui"
 version = "0.2.2"
-source = "git+https://github.com/demfabris/zed?rev=e01edb6b1a997d18d4e1c6db62109dd495a4f0db#e01edb6b1a997d18d4e1c6db62109dd495a4f0db"
+source = "git+https://github.com/demfabris/zed?rev=cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc#cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc"
 dependencies = [
  "accesskit",
  "anyhow",
@@ -2506,6 +2506,7 @@ dependencies = [
  "image",
  "inventory",
  "itertools 0.14.0",
+ "libc",
  "log",
  "lyon",
  "num_cpus",
@@ -2551,7 +2552,7 @@ dependencies = [
 [[package]]
 name = "gpui_apple"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=e01edb6b1a997d18d4e1c6db62109dd495a4f0db#e01edb6b1a997d18d4e1c6db62109dd495a4f0db"
+source = "git+https://github.com/demfabris/zed?rev=cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc#cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc"
 dependencies = [
  "anyhow",
  "block2 0.6.2",
@@ -2575,7 +2576,7 @@ dependencies = [
 [[package]]
 name = "gpui_linux"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=e01edb6b1a997d18d4e1c6db62109dd495a4f0db#e01edb6b1a997d18d4e1c6db62109dd495a4f0db"
+source = "git+https://github.com/demfabris/zed?rev=cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc#cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc"
 dependencies = [
  "accesskit",
  "accesskit_unix",
@@ -2621,7 +2622,7 @@ dependencies = [
 [[package]]
 name = "gpui_macos"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=e01edb6b1a997d18d4e1c6db62109dd495a4f0db#e01edb6b1a997d18d4e1c6db62109dd495a4f0db"
+source = "git+https://github.com/demfabris/zed?rev=cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc#cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -2667,7 +2668,7 @@ dependencies = [
 [[package]]
 name = "gpui_macros"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=e01edb6b1a997d18d4e1c6db62109dd495a4f0db#e01edb6b1a997d18d4e1c6db62109dd495a4f0db"
+source = "git+https://github.com/demfabris/zed?rev=cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc#cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -2678,7 +2679,7 @@ dependencies = [
 [[package]]
 name = "gpui_platform"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=e01edb6b1a997d18d4e1c6db62109dd495a4f0db#e01edb6b1a997d18d4e1c6db62109dd495a4f0db"
+source = "git+https://github.com/demfabris/zed?rev=cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc#cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
@@ -2692,7 +2693,7 @@ dependencies = [
 [[package]]
 name = "gpui_shared_string"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=e01edb6b1a997d18d4e1c6db62109dd495a4f0db#e01edb6b1a997d18d4e1c6db62109dd495a4f0db"
+source = "git+https://github.com/demfabris/zed?rev=cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc#cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc"
 dependencies = [
  "schemars 1.2.2",
  "serde",
@@ -2702,7 +2703,7 @@ dependencies = [
 [[package]]
 name = "gpui_util"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=e01edb6b1a997d18d4e1c6db62109dd495a4f0db#e01edb6b1a997d18d4e1c6db62109dd495a4f0db"
+source = "git+https://github.com/demfabris/zed?rev=cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc#cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc"
 dependencies = [
  "anyhow",
  "log",
@@ -2712,7 +2713,7 @@ dependencies = [
 [[package]]
 name = "gpui_web"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=e01edb6b1a997d18d4e1c6db62109dd495a4f0db#e01edb6b1a997d18d4e1c6db62109dd495a4f0db"
+source = "git+https://github.com/demfabris/zed?rev=cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc#cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
@@ -2740,7 +2741,7 @@ dependencies = [
 [[package]]
 name = "gpui_wgpu"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=e01edb6b1a997d18d4e1c6db62109dd495a4f0db#e01edb6b1a997d18d4e1c6db62109dd495a4f0db"
+source = "git+https://github.com/demfabris/zed?rev=cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc#cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -2767,7 +2768,7 @@ dependencies = [
 [[package]]
 name = "gpui_windows"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=e01edb6b1a997d18d4e1c6db62109dd495a4f0db#e01edb6b1a997d18d4e1c6db62109dd495a4f0db"
+source = "git+https://github.com/demfabris/zed?rev=cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc#cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc"
 dependencies = [
  "accesskit",
  "accesskit_windows",
@@ -2948,7 +2949,7 @@ dependencies = [
 [[package]]
 name = "http_client"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=e01edb6b1a997d18d4e1c6db62109dd495a4f0db#e01edb6b1a997d18d4e1c6db62109dd495a4f0db"
+source = "git+https://github.com/demfabris/zed?rev=cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc#cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc"
 dependencies = [
  "anyhow",
  "async-compression",
@@ -4741,7 +4742,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 [[package]]
 name = "perf"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=e01edb6b1a997d18d4e1c6db62109dd495a4f0db#e01edb6b1a997d18d4e1c6db62109dd495a4f0db"
+source = "git+https://github.com/demfabris/zed?rev=cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc#cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc"
 dependencies = [
  "collections",
  "serde",
@@ -5495,7 +5496,7 @@ dependencies = [
 [[package]]
 name = "refineable"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=e01edb6b1a997d18d4e1c6db62109dd495a4f0db#e01edb6b1a997d18d4e1c6db62109dd495a4f0db"
+source = "git+https://github.com/demfabris/zed?rev=cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc#cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc"
 dependencies = [
  "derive_refineable",
 ]
@@ -5745,7 +5746,7 @@ dependencies = [
 [[package]]
 name = "scheduler"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=e01edb6b1a997d18d4e1c6db62109dd495a4f0db#e01edb6b1a997d18d4e1c6db62109dd495a4f0db"
+source = "git+https://github.com/demfabris/zed?rev=cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc#cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc"
 dependencies = [
  "async-task",
  "backtrace",
@@ -6341,7 +6342,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "sum_tree"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=e01edb6b1a997d18d4e1c6db62109dd495a4f0db#e01edb6b1a997d18d4e1c6db62109dd495a4f0db"
+source = "git+https://github.com/demfabris/zed?rev=cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc#cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc"
 dependencies = [
  "heapless",
  "log",
@@ -7147,7 +7148,7 @@ checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
 [[package]]
 name = "util_macros"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=e01edb6b1a997d18d4e1c6db62109dd495a4f0db#e01edb6b1a997d18d4e1c6db62109dd495a4f0db"
+source = "git+https://github.com/demfabris/zed?rev=cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc#cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc"
 dependencies = [
  "perf",
  "quote",
@@ -8567,7 +8568,7 @@ checksum = "34b31d188d9d685a4f9c7b46d6e36631b07058d2cfe190267adce54dc230bf12"
 [[package]]
 name = "zlog"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=e01edb6b1a997d18d4e1c6db62109dd495a4f0db#e01edb6b1a997d18d4e1c6db62109dd495a4f0db"
+source = "git+https://github.com/demfabris/zed?rev=cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc#cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc"
 dependencies = [
  "anyhow",
  "chrono",
@@ -8584,7 +8585,7 @@ checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 [[package]]
 name = "ztracing"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=e01edb6b1a997d18d4e1c6db62109dd495a4f0db#e01edb6b1a997d18d4e1c6db62109dd495a4f0db"
+source = "git+https://github.com/demfabris/zed?rev=cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc#cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc"
 dependencies = [
  "tracing",
  "tracing-subscriber",
@@ -8595,7 +8596,7 @@ dependencies = [
 [[package]]
 name = "ztracing_macro"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=e01edb6b1a997d18d4e1c6db62109dd495a4f0db#e01edb6b1a997d18d4e1c6db62109dd495a4f0db"
+source = "git+https://github.com/demfabris/zed?rev=cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc#cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc"
 
 [[package]]
 name = "zune-core"

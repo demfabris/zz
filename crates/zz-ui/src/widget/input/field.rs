@@ -252,6 +252,7 @@ impl RenderOnce for Input {
         let mut element = div()
             .id(("zz-input", self.state.entity_id()))
             .role(role)
+            .aria_disabled(disabled)
             .key_context(actions::CONTEXT)
             .track_focus(&focus_handle)
             .tab_index(self.tab_index)

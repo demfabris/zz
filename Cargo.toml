@@ -7,6 +7,7 @@ members = [
     "crates/zz-client",
     "crates/zz-config",
     "crates/zz-gpui-ios",
+    "crates/zz-hotreload",
     "crates/zz-client-ffi",
     "crates/zz-daemon",
     "crates/zz-mux",
@@ -105,8 +106,8 @@ cef-dll-sys = { path = "third_party/rust/cef-dll-sys" }
 libghostty-vt-sys = { path = "third_party/rust/libghostty-vt-sys" }
 
 [patch."https://github.com/zed-industries/zed"]
-gpui = { git = "https://github.com/demfabris/zed", rev = "e01edb6b1a997d18d4e1c6db62109dd495a4f0db", version = "=0.2.2" }
-gpui_platform = { git = "https://github.com/demfabris/zed", rev = "e01edb6b1a997d18d4e1c6db62109dd495a4f0db" }
+gpui = { git = "https://github.com/demfabris/zed", rev = "cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc", version = "=0.2.2" }
+gpui_platform = { git = "https://github.com/demfabris/zed", rev = "cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"
@@ -155,6 +156,14 @@ opt-level = 3
 lto = "fat"
 codegen-units = 1
 strip = true
+
+[profile.hotreload]
+inherits = "dev"
+debug = 0
+strip = "none"
+
+[profile.hotreload.package.fff-search]
+opt-level = 0
 
 [profile.profiling]
 inherits = "release"

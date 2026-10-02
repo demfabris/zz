@@ -278,6 +278,10 @@ impl JobRegistry {
         Ok(id)
     }
 
+    pub(super) fn contains(&self, id: JobId) -> bool {
+        self.jobs.contains_key(&id)
+    }
+
     pub(super) fn contains_token(&self, token: Token) -> bool {
         self.tokens.contains_key(&token)
     }

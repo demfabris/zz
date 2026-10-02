@@ -292,6 +292,30 @@ read "Lane brief rules" before launching anything.
     Cargo.lock auto-merged with main's GPUI-lab pin). Merge checks running on both hosts
     (`/tmp/zzpc/merge-w3-loop`, `~/.cache/zz-perf/merge-w3-loop`), WIRE=1 on the Mac, PRE =
     `loop-00-cli` (main's daemon code is unchanged since the lane's base).
+  - Merge checks on `6701b511`: fmt and clippy clean on both hosts. Workspace tests under load: Mac
+    28 failures (26 pass alone; most are timeouts and the process-wide thread-count asserts of
+    e07/e08/e12/e14/e16), Linux 11. Failing alone on Linux: `endpoint::tests::remote_scripts_fall_back_to_the_mac_app_bundle_cli`
+    (environmental: the Arch package's `/usr/bin/zz` wins over the bundle fallback) and zz-ui
+    `which_key::tests::caps_fold_families_and_ranges` (main's `b8270500` test expects macOS glyphs).
+    The two `cli_binary` failures never ran alone: the scripts passed the test target as a package.
+    Compat rows 31/32 on both hosts: `smoke/display-menu-action-queue` is red with the merge and
+    with the lane tip `8b01d408`, clean with `loop-00-cli`. Mac `attached-client.sh` fails: a
+    key-binding `source-file -F` glob runs on the mux loop and hits the helper-wait guard
+    ("synchronous helper reply on mux loop"). web-build, release, tui-screen-diff and the iOS
+    build pass. A/B against `loop-00-cli` (3 alternating quick pairs per host): threads p20
+    25 -> 5 Mac / 45 -> 25 Linux, footprint p20 -36% / -20%, statusjob threads/s 3 -> 0, Mac
+    kill-pane instructions -36%, copy CPU -33 to -38%, Linux control output +88%; regressions
+    that block the strict gate: `statusjob.instr_per_s` +42% Linux / +10.5% Mac (hard),
+    `config.{cpu,wall}.source_1000` +36 to +55% with instructions +3 to +5%; also Linux CLI
+    instructions +4 to +8% per command, `control.instr_per_cmd` +5.5%, Linux kill-pane
+    instructions +9.2%.
+  - Fix lanes from 2026-10-02 12:17, the first Opus lanes: `perf/loopfix` (`~/dev/zz-loop`:
+    helper replies on the loop, the menu row, source_1000 timing), `perf/testfix`
+    (`~/dev/zz-testfix`: thread-count tests re-run alone in a child process, the which-key and
+    endpoint tests, the solo re-run of integration tests in both merge-check scripts),
+    `perf/perffix` (`~/dev/zz-perffix`, Linux builds in alienware `~/dev/zz-loop-e01`: status-job
+    and CLI instructions). All from `ebc4f781`; merge them, rerun the merge checks, then the
+    wave-3 exit gates.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

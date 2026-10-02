@@ -56,7 +56,7 @@ Done criterion: {l["done"]}
 
 Do:
 1. Measure first: `just perf-gate baseline --quick --only {l["groups"]} --json {SCRATCH}/{l["slug"]}-before.json`.
-2. Implement the whole lane scope, including its rollback knob(s) (ZZ_PERF_*) and the tests and fixtures the doc assigns to it, with tmux parity (compat/scenarios compare output byte for byte against pinned tmux).
+2. Implement the whole lane scope, including a rollback switch where a behaviour changes (a plain ZZ_* environment variable read once at start; no new ZZ_PERF_* knobs, wave 4 deletes those) and the tests and fixtures the doc assigns to it, with tmux parity (compat/scenarios compare output byte for byte against pinned tmux).
 3. Check: `cargo fmt --all`; `cargo clippy -p <touched crates and their dependents> --all-targets --all-features -- -D warnings`; `timeout 1800 cargo test -p <those crates>`; the compat scenarios at risk (`cargo build -p zz-cli && ZZ_COMPAT_ZZ={wt}/target/debug/zz_cli /opt/homebrew/bin/bash compat/run.sh <rows>`; compat/.cache already holds the pinned tmux); {quick(l)}. Instruction counts, bytes, counts, footprint and threads are the reliable signal; wall and CPU time are noisy while the other lane builds.
 4. Fix your lane's section of the doc where it is wrong about the code, and add as-built notes (what was built, measured numbers against the previous merge, what is handed on).
 5. Commit on perf/{l["slug"]} with a plain message. Leave the worktree in place.

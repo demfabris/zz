@@ -392,6 +392,7 @@ impl CommandWait {
                 continuation,
                 #[cfg(unix)]
                 shell: None,
+                popup: None,
                 overlay: None,
                 leaf: None,
                 guard: None,

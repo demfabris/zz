@@ -27,6 +27,7 @@ pub(super) fn queue_command(command: &CommandInvocation) -> bool {
                 | "if-shell"
                 | "display-panes"
                 | "display-menu"
+                | "display-popup"
                 | "command-prompt"
                 | "confirm-before"
         )
@@ -43,6 +44,7 @@ pub(super) fn task_command(command: &CommandInvocation) -> bool {
                 | "if-shell"
                 | "display-panes"
                 | "display-menu"
+                | "display-popup"
                 | "command-prompt"
                 | "confirm-before"
         )

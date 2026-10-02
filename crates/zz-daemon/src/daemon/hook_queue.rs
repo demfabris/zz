@@ -44,7 +44,7 @@ impl LoopHooks {
                     .shared
                     .command_item
                     .as_ref()
-                    .unwrap()
+                    .expect("loop hook item")
                     .lock()
                     .pending_wait
                     .as_ref()
@@ -169,8 +169,7 @@ impl LoopHooks {
 
 fn blocking_leaf(command: &CommandInvocation) -> bool {
     if canonical_command(&command.name) == "run-shell" {
-        return !parse_run_shell_args(&command.args)
-            .is_ok_and(|args| !args.background && args.delay.unwrap_or_default().is_zero());
+        return parse_run_shell_args(&command.args).is_err();
     }
     if canonical_command(&command.name) == "if-shell" {
         return !parse_if_shell_args(&command.args).is_ok_and(|args| args.format);

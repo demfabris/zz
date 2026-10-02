@@ -203,6 +203,8 @@ fn nested_alias_wait_preserves_frames_without_a_worker() {
         &shared,
         vec![CommandInvocation::new("first", [] as [&str; 0])],
     );
+    assert!(!shared.inner.lock().wait_channels.contains_key("e06-alias"));
+    event_loop.turn(&shared).unwrap();
     assert_eq!(
         shared.inner.lock().wait_channels["e06-alias"].waiters.len(),
         1
@@ -398,11 +400,15 @@ fn owned_request_frames_preserve_reported_source_failures() {
                 false,
             )
             .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(3);
             loop {
+                assert!(Instant::now() < deadline, "owned request did not finish");
                 match task.run(false) {
                     wait_queue::Progress::Done => break,
                     wait_queue::Progress::Ready | wait_queue::Progress::Worker => {}
-                    wait_queue::Progress::Waiting => panic!("unexpected source wait"),
+                    wait_queue::Progress::Waiting => {
+                        thread::sleep(Duration::from_millis(1));
+                    }
                 }
             }
             let (actual, _, _, _) = task.finish();

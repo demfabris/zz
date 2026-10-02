@@ -12256,6 +12256,7 @@ impl Shared {
         Ok(Execution::default())
     }
 
+    #[cfg_attr(test, allow(clippy::unnecessary_wraps))]
     fn park_wait_for(
         &self,
         name: &str,
@@ -12275,7 +12276,7 @@ impl Shared {
                 return Ok(());
             }
         }
-        #[cfg(unix)]
+        #[cfg(all(unix, not(test)))]
         if self.loop_active.load(Ordering::Acquire) {
             let next = remove_wait_item(&mut self.inner.lock(), name, continuation.token, true);
             self.wake_wait_items(next);
@@ -13344,14 +13345,7 @@ impl Shared {
                     self.spawn_delay(delay, || {})?;
                     Ok(Execution::default())
                 } else {
-                    let (sender, receiver) = mpsc::sync_channel(1);
-                    self.spawn_delay(delay, move || {
-                        let _ = sender.send(());
-                    })?;
-                    self.report_command_queue_park();
-                    receiver.recv().map_err(|error| {
-                        DaemonError::Thread(format!("run-shell delay worker stopped: {error}"))
-                    })?;
+                    self.park_shell_delay(delay, true, queue_execution)?;
                     Ok(Execution::default())
                 }
             }
@@ -13486,25 +13480,7 @@ impl Shared {
                     })?;
                     Ok(Execution::default())
                 } else {
-                    #[cfg(unix)]
-                    let loop_callback = self.loop_leaf_enabled() && delay.is_zero();
-                    #[cfg(not(unix))]
-                    let loop_callback = false;
-                    if !loop_callback {
-                        let (sender, receiver) = mpsc::sync_channel(1);
-                        self.spawn_delay(delay, move || {
-                            let _ = sender.send(());
-                        })?;
-                        // `run-shell -C` with no delay is `event_active`, which the
-                        // pin's own loop pass resumes before it can check whether
-                        // the client wants to exit, so the queue never rests here.
-                        if !delay.is_zero() {
-                            self.report_command_queue_park();
-                        }
-                        receiver.recv().map_err(|error| {
-                            DaemonError::Thread(format!("run-shell delay worker stopped: {error}"))
-                        })?;
-                    }
+                    self.park_shell_delay(delay, !delay.is_zero(), queue_execution)?;
                     let mut command_context = command_context;
                     command_context.retarget(&inserted_target);
                     let result = self.execute_foreground_inserted_commands(
@@ -13640,7 +13616,7 @@ impl Shared {
                 } else {
                     let (sender, receiver) = mpsc::sync_channel(1);
                     #[cfg(unix)]
-                    let loop_leaf = self.loop_leaf_enabled() && delay.is_zero();
+                    let loop_leaf = self.loop_leaf_enabled();
                     #[cfg(unix)]
                     let ready = Arc::new(AtomicBool::new(false));
                     #[cfg(unix)]
@@ -15804,18 +15780,62 @@ impl Shared {
     }
 
     fn spawn_delay(
-        &self,
+        self: &Arc<Self>,
         delay: Duration,
         callback: impl FnOnce() + Send + 'static,
     ) -> Result<(), DaemonError> {
-        thread::Builder::new()
-            .name("zz-run-shell".to_owned())
-            .spawn(move || {
-                thread::sleep(delay);
-                callback();
+        #[cfg(all(test, unix))]
+        if !self.loop_active.load(Ordering::Acquire) {
+            self.start_timers()?;
+        }
+        self.timer_tx
+            .send(timers::TimerInput::Callback {
+                deadline: (!delay.is_zero()).then(|| Instant::now() + delay),
+                callback: Box::new(callback),
             })
-            .map(|_| ())
             .map_err(|error| DaemonError::Thread(error.to_string()))
+    }
+
+    fn park_shell_delay(
+        self: &Arc<Self>,
+        delay: Duration,
+        report: bool,
+        queue_execution: Option<&CommandQueueExecution>,
+    ) -> Result<(), DaemonError> {
+        let continuation = cmdq::WaitContinuation::new(
+            self.command_item
+                .as_ref()
+                .and_then(|item| item.lock().wait()),
+            None,
+        );
+        let completed = continuation.clone();
+        self.spawn_delay(delay, move || {
+            completed.complete();
+        })?;
+        if report {
+            self.report_command_queue_park();
+        }
+        if let Some(item) = &self.command_item {
+            let mut item = item.lock();
+            #[cfg(unix)]
+            let loop_leaf = item.loop_leaf;
+            #[cfg(not(unix))]
+            let loop_leaf = false;
+            if (item.loop_wait || loop_leaf)
+                && queue_execution.is_some_and(|queue| queue.frame_active.get())
+            {
+                item.pending_wait = Some(Box::new(RegisteredWait {
+                    name: String::new(),
+                    continuation,
+                    leaf: None,
+                    guard: None,
+                    terminal: None,
+                }));
+                return Ok(());
+            }
+        }
+        continuation.wait();
+        Ok(())
     }
 
     fn background_insertion_ticket(&self) -> u64 {
@@ -15900,36 +15920,11 @@ impl Shared {
         #[cfg(not(unix))]
         let (tmux_shim, zz_executable) = (None::<PathBuf>, None::<PathBuf>);
         #[cfg(unix)]
-        if self.loop_leaf_enabled()
-            && delay.is_zero()
-            && matches!(&environment_timing, ShellJobEnvironmentTiming::CommandTime)
+        if self.loop_leaf_enabled() || !delay.is_zero() && self.loop_active.load(Ordering::Acquire)
         {
-            return hook_queue::launch_shell(
-                self,
-                &command,
-                &cwd,
-                &tmux,
-                &environment,
-                &default_terminal,
-                startup_reentry,
-                tmux_shim.as_deref(),
-                zz_executable.as_deref(),
-                show_stderr,
-                permit,
-                callback,
-            );
-        }
-        let (started_sender, started_receiver) = if policy.wait_for_start {
-            let (sender, receiver) = mpsc::sync_channel(1);
-            (Some(sender), Some(receiver))
-        } else {
-            (None, None)
-        };
-        thread::Builder::new()
-            .name("zz-run-shell".to_owned())
-            .spawn(move || {
-                thread::sleep(delay);
-                if permit.shared.stopping.load(Ordering::Acquire)
+            let shared = self.server_owner();
+            let launch = move || {
+                if shared.stopping.load(Ordering::Acquire)
                     && !policy.detached
                     && !policy.shutdown_blocking
                 {
@@ -15944,42 +15939,119 @@ impl Shared {
                     ShellJobEnvironmentTiming::LaunchTime {
                         session_environment,
                     } => {
-                        let (environment, default_terminal, startup_reentry) = {
-                            let inner = permit.shared.inner.lock();
-                            let startup_ready = *permit.shared.startup_ready.lock();
-                            (
-                                inner.engine.job_environment_with_retained_session(
-                                    session_environment.as_ref(),
-                                ),
-                                inner.engine.default_terminal_for_spawn().to_owned(),
-                                (!startup_ready).then(|| permit.shared.server_id.to_string()),
-                            )
-                        };
-                        (environment, default_terminal, startup_reentry)
+                        let inner = shared.inner.lock();
+                        (
+                            inner.engine.job_environment_with_retained_session(
+                                session_environment.as_ref(),
+                            ),
+                            inner.engine.default_terminal_for_spawn().to_owned(),
+                            (!*shared.startup_ready.lock()).then(|| shared.server_id.to_string()),
+                        )
                     }
                 };
-                let result = run_shell_job(
+                let callback = Arc::new(Mutex::new(Some(callback)));
+                let completed = Arc::clone(&callback);
+                if hook_queue::launch_shell(
+                    &shared,
                     &command,
                     &cwd,
                     &tmux,
                     &environment,
                     &default_terminal,
-                    &zz_socket,
-                    startup_reentry.as_deref(),
+                    startup_reentry,
                     tmux_shim.as_deref(),
                     zz_executable.as_deref(),
                     show_stderr,
-                    &permit.process,
-                    &permit.shared.stopping,
-                    policy.detached || policy.shutdown_blocking,
-                    started_sender.as_ref(),
-                );
-                drop(permit);
-                callback(result);
-            })
-            .map_err(|_| {
-                ServerError::InvalidCommand(format!("failed to run command: {failed_command}"))
+                    permit,
+                    move |result| {
+                        if let Some(callback) = completed.lock().take() {
+                            callback(result);
+                        }
+                    },
+                )
+                .is_err()
+                    && let Some(callback) = callback.lock().take()
+                {
+                    callback(Err(()));
+                }
+            };
+            if delay.is_zero() {
+                launch();
+                return Ok(());
+            }
+            return self.spawn_delay(delay, launch);
+        }
+        let (started_sender, started_receiver) = if policy.wait_for_start {
+            let (sender, receiver) = mpsc::sync_channel(1);
+            (Some(sender), Some(receiver))
+        } else {
+            (None, None)
+        };
+        let launch = move || {
+            thread::Builder::new()
+                .name("zz-run-shell".to_owned())
+                .spawn(move || {
+                    if permit.shared.stopping.load(Ordering::Acquire)
+                        && !policy.detached
+                        && !policy.shutdown_blocking
+                    {
+                        drop(permit);
+                        callback(Err(()));
+                        return;
+                    }
+                    let (environment, default_terminal, startup_reentry) = match environment_timing
+                    {
+                        ShellJobEnvironmentTiming::CommandTime => {
+                            (environment, default_terminal, startup_reentry)
+                        }
+                        ShellJobEnvironmentTiming::LaunchTime {
+                            session_environment,
+                        } => {
+                            let (environment, default_terminal, startup_reentry) = {
+                                let inner = permit.shared.inner.lock();
+                                let startup_ready = *permit.shared.startup_ready.lock();
+                                (
+                                    inner.engine.job_environment_with_retained_session(
+                                        session_environment.as_ref(),
+                                    ),
+                                    inner.engine.default_terminal_for_spawn().to_owned(),
+                                    (!startup_ready).then(|| permit.shared.server_id.to_string()),
+                                )
+                            };
+                            (environment, default_terminal, startup_reentry)
+                        }
+                    };
+                    let result = run_shell_job(
+                        &command,
+                        &cwd,
+                        &tmux,
+                        &environment,
+                        &default_terminal,
+                        &zz_socket,
+                        startup_reentry.as_deref(),
+                        tmux_shim.as_deref(),
+                        zz_executable.as_deref(),
+                        show_stderr,
+                        &permit.process,
+                        &permit.shared.stopping,
+                        policy.detached || policy.shutdown_blocking,
+                        started_sender.as_ref(),
+                    );
+                    drop(permit);
+                    callback(result);
+                })
+                .map(drop)
+                .map_err(|error| DaemonError::Thread(error.to_string()))
+        };
+        if delay.is_zero() {
+            launch()?;
+        } else {
+            self.spawn_delay(delay, move || {
+                if let Err(error) = launch() {
+                    log::error!("failed to run shell worker: {error}");
+                }
             })?;
+        }
         if let Some(started_receiver) = started_receiver {
             started_receiver.recv().map_err(|_| {
                 ServerError::InvalidCommand(format!("failed to run command: {failed_command}"))

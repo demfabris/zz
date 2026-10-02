@@ -100,6 +100,7 @@ enum TimerKey {
     Diagnostics,
     CopyRefresh,
     ClockMode,
+    Callback(u64),
     #[cfg(unix)]
     Shutdown,
 }
@@ -120,11 +121,16 @@ enum Expiry {
     Diagnostics,
     CopyRefresh,
     ClockMode,
+    Callback(u64),
     #[cfg(unix)]
     Shutdown,
 }
 
 pub(super) enum TimerInput {
+    Callback {
+        deadline: Option<Instant>,
+        callback: Box<dyn FnOnce() + Send>,
+    },
     DisplayPanes(DisplayPanesDeadlineCommand),
     KeyTable(KeyTableDeadlineCommand),
     Silence(SilenceDeadlineCommand),
@@ -394,6 +400,9 @@ impl LoopTimers {
         if let Some(inputs) = &self.inputs {
             for input in inputs.try_iter().take(TIMER_INPUT_BURST) {
                 match input {
+                    TimerInput::Callback { deadline, callback } => {
+                        self.deadlines.callback(deadline, callback);
+                    }
                     TimerInput::ClientTimersChanged => changed = true,
                     TimerInput::StatusJobs => {
                         shared
@@ -439,6 +448,7 @@ impl LoopTimers {
                 break;
             };
             match expiry {
+                Expiry::Callback(id) => self.deadlines.run_callback(id),
                 Expiry::Shutdown => self.shutdown_due = true,
                 Expiry::Status(session) => {
                     recurring_due = true;
@@ -496,11 +506,37 @@ impl LoopTimers {
 
 #[derive(Default)]
 struct Deadlines {
+    next_callback: u64,
+    callbacks: BTreeMap<u64, Box<dyn FnOnce() + Send>>,
+    ready: VecDeque<(Instant, u64)>,
     order: BTreeSet<(Instant, TimerKey)>,
     entries: BTreeMap<TimerKey, (Instant, Expiry)>,
 }
 
 impl Deadlines {
+    fn callback(&mut self, deadline: Option<Instant>, callback: Box<dyn FnOnce() + Send>) {
+        self.next_callback = self
+            .next_callback
+            .checked_add(1)
+            .expect("timer callback id");
+        let id = self.next_callback;
+        self.callbacks.insert(id, callback);
+        if let Some(deadline) = deadline {
+            self.insert(TimerKey::Callback(id), deadline, Expiry::Callback(id));
+        } else {
+            self.ready.push_back((Instant::now(), id));
+        }
+    }
+
+    #[cfg(unix)]
+    fn run_callback(&mut self, id: u64) {
+        if let Some(callback) = self.callbacks.remove(&id)
+            && std::panic::catch_unwind(std::panic::AssertUnwindSafe(callback)).is_err()
+        {
+            log::error!(target: "zz_daemon::timers", "a timer callback panicked");
+        }
+    }
+
     fn insert(&mut self, key: TimerKey, deadline: Instant, expiry: Expiry) {
         if let Some((previous, _)) = self.entries.insert(key, (deadline, expiry)) {
             self.order.remove(&(previous, key));
@@ -529,10 +565,19 @@ impl Deadlines {
     }
 
     fn next(&self) -> Option<Instant> {
-        self.order.first().map(|(deadline, _)| *deadline)
+        self.ready
+            .front()
+            .map(|(ready, _)| *ready)
+            .into_iter()
+            .chain(self.order.first().map(|(deadline, _)| *deadline))
+            .min()
     }
 
     fn pop_due(&mut self, now: Instant) -> Option<Expiry> {
+        if self.ready.front().is_some_and(|(ready, _)| *ready <= now) {
+            let (_, id) = self.ready.pop_front().expect("ready callback");
+            return Some(Expiry::Callback(id));
+        }
         let (deadline, key) = *self.order.first()?;
         if deadline > now {
             return None;
@@ -582,7 +627,15 @@ impl Shared {
                         if matches!(expiry, Expiry::PeerProbe) {
                             shared.prepare_peer_probe(&mut clients.probe, now);
                         }
-                        shared.run_timer_expiry(expiry, now);
+                        if let Expiry::Callback(id) = expiry {
+                            if let Some(callback) = deadlines.callbacks.remove(&id)
+                                && let Err(error) = shared.connection_threads.run(callback)
+                            {
+                                log::error!("failed to run timer callback: {error}");
+                            }
+                        } else {
+                            shared.run_timer_expiry(expiry, now);
+                        }
                         clients.sync(&shared, &mut deadlines, Instant::now());
                     }
                     let deadline = deadlines.next().into_iter().chain(status_jobs.next()).min();
@@ -600,6 +653,10 @@ impl Shared {
                     let Some(shared) = shared.upgrade() else {
                         return;
                     };
+                    if let TimerInput::Callback { deadline, callback } = input {
+                        deadlines.callback(deadline, callback);
+                        continue;
+                    }
                     match &input {
                         TimerInput::Hooks(events) => shared.run_event_hooks(events.clone()),
                         TimerInput::MonitorHook {
@@ -631,6 +688,7 @@ impl Shared {
 
     fn schedule_timer(&self, deadlines: &mut Deadlines, input: &TimerInput) {
         match *input {
+            TimerInput::Callback { .. } => unreachable!(),
             TimerInput::HookReady => {}
             #[cfg(all(feature = "agent", unix))]
             TimerInput::PeerSample { .. } => unreachable!(),
@@ -748,6 +806,7 @@ impl Shared {
 
     fn expire_timer(self: &Arc<Self>, expiry: Expiry, now: Instant) {
         match expiry {
+            Expiry::Callback(_) => unreachable!(),
             Expiry::DisplayPanes(deadline) => {
                 self.expire_display_panes(deadline, now);
             }
@@ -1068,3 +1127,7 @@ mod b6fix_tests;
 #[cfg(all(test, unix))]
 #[path = "timers_e20_tests.rs"]
 mod e20_tests;
+
+#[cfg(all(test, unix))]
+#[path = "delay_timer_tests.rs"]
+mod delay_tests;

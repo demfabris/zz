@@ -177,6 +177,12 @@ read "Lane brief rules" before launching anything.
     keeps file order for equal-cost background jobs, the fetched tmux answers
     never-file-order-in-8. Oracle drift like control-alias-prepare; both handed to one separate
     task.
+  - e05 (`6afbb9f5`, Linux): capture, history, semantic capture, pointer-context and Kitty reads
+    resume through actor completions (`daemon/terminal_reads`); stale client, respawn and image
+    generation results dropped; 22/22 perf rows at most 1.006x; 1456 daemon and 372 terminal tests.
+  - Second sync: Mac slices c01copy, e13, e14 go onto Linux; e13 conflicts with e04/e05 in
+    hook_queue.rs/wait_queue.rs, resolved by a pick lane. Design-doc conflicts are unions of both
+    as-built notes.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

@@ -3259,6 +3259,11 @@ suite, all four requested compatibility scenarios, and the quick W0 gate passed.
 gate reports 32 pass, 0 fail, and 37 info rows. Later loop slices retain the b5 signal and
 drain phases; the orchestrator runs Linux-only checks on its Linux host.
 
+**c02 as built (2026-10-01):** `TerminalEvents::install_notification_sink` posts coalesced readiness to `daemon/watchers.rs` `LoopWatchers`, which owns pane, command-output and popup receivers; their relay threads are gone.
+Each surface has one readiness entry, bounded event drains and weak terminal ownership; the four reliable slots and one viewport slot remain. The last producer closes and notifies the stream even without a final event.
+Three alternating quick pairs against `1518f03d` measured threads 3 -> 2 at p1 and 25 -> 5 at p20; all 22 instruction medians stay within 1.0256x B, hidden chatty is 0.9328x B, and idle instructions and wakeups are zero.
+Checks passed: 360 terminal tests, 1,389 daemon unit tests, 35 integration tests, Clippy and all seven compat fixtures (102 steps, zero divergences); one existing test per crate remains ignored. Linux-only checks were not run on this Mac.
+
 ## W4-DELIVER: frames straight from shards (effort L)
 
 Scope: the loop pushes per-pane subscriber sinks (queue handle, stream kind, delivered base,

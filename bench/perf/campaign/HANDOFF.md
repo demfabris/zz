@@ -87,6 +87,11 @@ read "Lane brief rules" before launching anything.
   - Linux leg of c04 and e12 on the combined branch: c04 tests and the slow-client soak pass;
     five e12 registry tests failed in the serial suite only (EINTR from a SIGCHLD handler an
     earlier test installed); fixed in the test pump (`78c906b4`). The loop itself retries.
+  - e19 (`6e7d954e`, Mac): bounded demand-started helper pool (`daemon/helpers.rs`) for path
+    listing, git/catalog discovery, prompt history, terminfo warming and peer probes; 1439 daemon
+    tests. My A/B of its final HEAD vs e12: `send_keys.p20` +28.7% and `mem.threads.p1` 2 -> 3 (its
+    own runs predated its last fixes). Fix lane `e19fix` (helper thread start per command with a
+    50 ms idle exit, 10 ms polling waits).
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the
@@ -837,7 +842,7 @@ summary in `<out>.cost.json`, `<out>.failed` when no valid answer), `lane-watchd
    whose cwd is inside the worktree when: the wall budget is spent; no new commit for the idle
    limit (60 min impl, 30 min fix/focus, 45 min for a fix whose done criterion includes perf
    runs; briefs say to commit a checkpoint before each measurement series, because the first
-   SHARDS s2 fix was stopped mid-series with all its work uncommitted); a helper agent appears (a subagent rollout in
+   SHARDS s2 fix was stopped mid-series with all its work uncommitted); the gate series itself runs once on the final code, because e19 measured, changed code and ran out of allowed runs; a helper agent appears (a subagent rollout in
    `~/.codex/sessions` for that cwd; `features.multi_agent=false` does not remove the tools in
    codex 0.159, so the brief also forbids them); a file changes outside the write-zone globs (plus
    the design doc; add `bench/results/*` when a brief runs `bench/run.sh`, which writes there,

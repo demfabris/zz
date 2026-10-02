@@ -386,6 +386,24 @@ read "Lane brief rules" before launching anything.
   - Not a bug: a pane whose command prints and exits at once (`new-window 'echo MARK'` with
     remain-on-exit) shows only "Pane is dead" on macOS for zz and for tmux alike (10 of 10 on
     pinned tmux): the macOS PTY drops output the reader has not taken when the last slave closes.
+  - Wave-3 exit run on `fe57a839` (`/tmp/zzpc/wave3-exit`, `~/.cache/zz-perf/wave3-exit`): fmt,
+    clippy, compat-check, builds, web, iOS and tui-screen pass; workspace tests Mac 25 / Linux few
+    load failures, all pass alone (an A/B with `ZZ_PTY_SHARDS` 4, 16 and 0 gives 1-8 failures in
+    any setting, so the shared shards are not the cause); Mac attached-client failed on the tmux
+    side ("command-output view did not show one ordered replay transcript", a known load flake).
+    Linux gate (load 1.1): 76 pass, 12 fail (the known tmux reds plus echo), 2 regressed, both
+    explained: `control.burst_cmds_per_s` (the wave-2 JSON's 141k is an outlier; loop-00 reads
+    40-42k) and `cli.wall.version.p1`, which reads 0.78 or 2.0-2.5 ms on loop-00, this build and
+    tmux alike in a quiet-gate A/B. The Mac gate started at load 25 (my shard experiment), so it
+    is rerun. Corpus: Linux adds three reds to wave 2's known eight; Mac adds five to its known
+    ones. `smoke/chooser-kill-keys` and `smoke/hooks-pane-focus-clients` (both hosts) are W3-LOOP
+    regressions, clean on every binary before the W3-LOOP merge: lane `perf/focusfix`
+    `16fb164b` (41 min; the overlay's `pane-focus-out` waited in `pending_event_hooks` until the
+    queue finished, now parked queues run their pending hooks at the park as tmux's global queue
+    does; the chooser's kill refresh ran before the queued kill, now it runs after it).
+    `smoke/format-modifier-client-loop` is red only with the Linux debug build (clean release).
+    `census-hooks`, `smoke/plugin-runtime-vim-tmux-navigator` and `smoke/source-file-byte-name`
+    are red on the Mac with loop-00 too (pre-existing, not wave 3).
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

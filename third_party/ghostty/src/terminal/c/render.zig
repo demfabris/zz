@@ -803,6 +803,162 @@ pub fn row_cells_get_multi(
     return .success;
 }
 
+/// C: GhosttyRenderStateCell
+pub const CopiedCell = extern struct {
+    content: u32,
+    style: u16,
+    grapheme: u16,
+    content_tag: u8,
+    wide: u8,
+    flags: u8,
+    semantic_content: u8,
+
+    pub const hyperlink: u8 = 1 << 0;
+    pub const protected: u8 = 1 << 1;
+};
+
+/// C: GhosttyRenderStateGrapheme
+pub const CopiedGrapheme = extern struct {
+    offset: u32,
+    len: u32,
+};
+
+/// C: GhosttyRenderStateRowCellsCopy
+pub const RowCellsCopy = extern struct {
+    size: usize = @sizeOf(RowCellsCopy),
+    cells: ?[*]CopiedCell = null,
+    cells_cap: usize = 0,
+    cells_len: usize = 0,
+    styles: ?[*]style_c.Style = null,
+    styles_cap: usize = 0,
+    styles_len: usize = 0,
+    graphemes: ?[*]CopiedGrapheme = null,
+    graphemes_cap: usize = 0,
+    graphemes_len: usize = 0,
+    grapheme_bytes: ?[*]u8 = null,
+    grapheme_bytes_cap: usize = 0,
+    grapheme_bytes_len: usize = 0,
+};
+
+/// Slots in the direct-mapped style cache of `row_cells_copy`. A
+/// collision only costs a duplicate style table entry.
+const copy_style_slots = 256;
+const copy_style_slot_empty = std.math.maxInt(u32);
+
+pub fn row_cells_copy(
+    cells_: RowCells,
+    x: size.CellCountInt,
+    len: size.CellCountInt,
+    out_: ?*RowCellsCopy,
+) callconv(lib.calling_conv) Result {
+    const cells = cells_ orelse return .invalid_value;
+    const out = out_ orelse return .invalid_value;
+    if (out.size < @sizeOf(RowCellsCopy)) return .invalid_value;
+    if (x > cells.raws.len) return .invalid_value;
+    const start: usize = x;
+    const end: usize = @min(start + len, cells.raws.len);
+
+    var styles_len: usize = 1;
+    if (out.styles_cap >= 1) {
+        if (out.styles) |styles| styles[0] = style_c.Style.default;
+    }
+    var graphemes_len: usize = 0;
+    var bytes_len: usize = 0;
+    var slots: [copy_style_slots]u32 = undefined;
+    @memset(&slots, copy_style_slot_empty);
+    var previous_x: usize = position_none;
+    var previous_style: u16 = 0;
+
+    for (start..end, 0..) |cx, i| {
+        const cell = cells.raws[cx];
+
+        var style_index: u16 = 0;
+        if (cell.hasStyling()) {
+            const s = cells.styles[cx];
+            if (previous_x != position_none and cells.styles[previous_x].eql(s)) {
+                style_index = previous_style;
+            } else {
+                const slot = &slots[@as(usize, @truncate(s.hash())) % copy_style_slots];
+                if (slot.* != copy_style_slot_empty and
+                    cells.styles[slot.* >> 16].eql(s))
+                {
+                    style_index = @truncate(slot.*);
+                } else {
+                    style_index = @intCast(styles_len);
+                    if (styles_len < out.styles_cap) {
+                        if (out.styles) |styles| style_c.Style.write(s, &styles[styles_len]);
+                    }
+                    styles_len += 1;
+                    slot.* = (@as(u32, @intCast(cx)) << 16) | style_index;
+                }
+            }
+            previous_x = cx;
+            previous_style = style_index;
+        }
+
+        var grapheme: u16 = 0;
+        if (cell.hasGrapheme() and cell.hasText()) {
+            const fits = bytes_len < out.grapheme_bytes_cap and out.grapheme_bytes != null;
+            var buffer: lib.Buffer = .{
+                .ptr = if (fits) out.grapheme_bytes.? + bytes_len else null,
+                .cap = if (fits) out.grapheme_bytes_cap - bytes_len else 0,
+            };
+            switch (rowCellsGetGraphemesUtf8(cell, cells.graphemes[cx], &buffer)) {
+                .success, .out_of_space => {},
+                else => |result| return result,
+            }
+            if (graphemes_len < out.graphemes_cap and
+                bytes_len + buffer.len <= out.grapheme_bytes_cap)
+            {
+                if (out.graphemes) |graphemes| graphemes[graphemes_len] = .{
+                    .offset = @intCast(bytes_len),
+                    .len = @intCast(buffer.len),
+                };
+            }
+            graphemes_len += 1;
+            bytes_len += buffer.len;
+            grapheme = @intCast(graphemes_len);
+        }
+
+        if (i < out.cells_cap) {
+            if (out.cells) |dest| dest[i] = .{
+                .content = switch (cell.content_tag) {
+                    .codepoint, .codepoint_grapheme => cell.content.codepoint.data,
+                    .bg_color_palette => cell.content.color_palette.data,
+                    .bg_color_rgb => rgb: {
+                        const rgb = cell.content.color_rgb;
+                        break :rgb (@as(u32, rgb.r) << 16) | (@as(u32, rgb.g) << 8) | rgb.b;
+                    },
+                },
+                .style = style_index,
+                .grapheme = grapheme,
+                .content_tag = @intFromEnum(cell.content_tag),
+                .wide = @intFromEnum(cell.wide),
+                .flags = (if (cell.hyperlink) CopiedCell.hyperlink else 0) |
+                    (if (cell.protected) CopiedCell.protected else 0),
+                .semantic_content = @intFromEnum(cell.semantic_content),
+            };
+        }
+    }
+
+    out.cells_len = end - start;
+    out.styles_len = styles_len;
+    out.graphemes_len = graphemes_len;
+    out.grapheme_bytes_len = bytes_len;
+    if ((out.cells_len > 0 and out.cells == null) or
+        out.cells_len > out.cells_cap or
+        out.styles == null or
+        styles_len > out.styles_cap or
+        (graphemes_len > 0 and out.graphemes == null) or
+        graphemes_len > out.graphemes_cap or
+        (bytes_len > 0 and out.grapheme_bytes == null) or
+        bytes_len > out.grapheme_bytes_cap)
+    {
+        return .out_of_space;
+    }
+    return .success;
+}
+
 inline fn rowCellsGetDispatch(
     cells: *const RowCellsWrapper,
     x: usize,
@@ -1941,6 +2097,207 @@ test "render: row cells get graphemes utf8" {
     var text: lib.Buffer = .{ .ptr = &buf, .cap = buf.len };
     try testing.expectEqual(Result.success, row_cells_get(cells, .graphemes_utf8, @ptrCast(&text)));
     try testing.expectEqual(@as(usize, 0), text.len);
+}
+
+fn expectCopiedStyle(expected: style_c.Style, actual: style_c.Style) !void {
+    const colors = [_][2]style_c.Color{
+        .{ expected.fg_color, actual.fg_color },
+        .{ expected.bg_color, actual.bg_color },
+        .{ expected.underline_color, actual.underline_color },
+    };
+    for (colors) |pair| {
+        try testing.expectEqual(pair[0].tag, pair[1].tag);
+        try testing.expectEqual(pair[0].value._padding, pair[1].value._padding);
+    }
+    try testing.expectEqual(expected.bold, actual.bold);
+    try testing.expectEqual(expected.italic, actual.italic);
+    try testing.expectEqual(expected.faint, actual.faint);
+    try testing.expectEqual(expected.blink, actual.blink);
+    try testing.expectEqual(expected.inverse, actual.inverse);
+    try testing.expectEqual(expected.invisible, actual.invisible);
+    try testing.expectEqual(expected.strikethrough, actual.strikethrough);
+    try testing.expectEqual(expected.overline, actual.overline);
+    try testing.expectEqual(expected.underline, actual.underline);
+}
+
+test "render: row cells copy matches the per-cell getters" {
+    var terminal: terminal_c.Terminal = null;
+    try testing.expectEqual(Result.success, terminal_c.new(
+        &lib.alloc.test_allocator,
+        &terminal,
+        12,
+        4,
+    ));
+    defer terminal_c.free(terminal);
+
+    const input = "\x1b[1;31mab\x1b[0mc\x1b[1;31md\x1b[0me\u{301}\u{4E2D}" ++
+        "\x1b]8;;http://x\x1b\\L\x1b]8;;\x1b\\\x1b[4;38;2;1;2;3mu\x1b[0m" ++
+        "\r\n\x1b[48;5;4m\x1b[K\x1b[0m\r\n\x1b[48;2;7;8;9m\x1b[K\x1b[0mz";
+    terminal_c.vt_write(terminal, input, input.len);
+
+    var state: RenderState = null;
+    try testing.expectEqual(Result.success, new(&lib.alloc.test_allocator, &state));
+    defer free(state);
+    try testing.expectEqual(Result.success, update(state, terminal));
+
+    var it: RowIterator = null;
+    try testing.expectEqual(Result.success, row_iterator_new(&lib.alloc.test_allocator, &it));
+    defer row_iterator_free(it);
+    var cells: RowCells = null;
+    try testing.expectEqual(Result.success, row_cells_new(&lib.alloc.test_allocator, &cells));
+    defer row_cells_free(cells);
+    try testing.expectEqual(Result.success, get(state, .row_iterator, @ptrCast(&it)));
+
+    var copied: [12]CopiedCell = undefined;
+    var styles: [13]style_c.Style = undefined;
+    var graphemes: [12]CopiedGrapheme = undefined;
+    var bytes: [96]u8 = undefined;
+    var rows: usize = 0;
+    while (row_iterator_next(it)) : (rows += 1) {
+        try testing.expectEqual(Result.success, row_get(it, .cells, @ptrCast(&cells)));
+        var out: RowCellsCopy = .{
+            .cells = &copied,
+            .cells_cap = copied.len,
+            .styles = &styles,
+            .styles_cap = styles.len,
+            .graphemes = &graphemes,
+            .graphemes_cap = graphemes.len,
+            .grapheme_bytes = &bytes,
+            .grapheme_bytes_cap = bytes.len,
+        };
+        try testing.expectEqual(Result.success, row_cells_copy(cells, 0, 12, &out));
+        try testing.expectEqual(@as(usize, 12), out.cells_len);
+        try expectCopiedStyle(style_c.Style.default, styles[0]);
+        if (rows == 0) {
+            try testing.expectEqual(@as(usize, 3), out.styles_len);
+            try testing.expectEqual(copied[0].style, copied[3].style);
+            try testing.expectEqual(@as(usize, 1), out.graphemes_len);
+            try testing.expect(copied[7].flags & CopiedCell.hyperlink != 0);
+        }
+
+        for (0..12) |x| {
+            const cell = copied[x];
+            try testing.expectEqual(Result.success, row_cells_select(cells, @intCast(x)));
+            var raw_value: page.Cell.C = undefined;
+            try testing.expectEqual(Result.success, row_cells_get(cells, .raw, @ptrCast(&raw_value)));
+            const raw: page.Cell = @bitCast(raw_value);
+            try testing.expectEqual(@as(u8, @intFromEnum(raw.content_tag)), cell.content_tag);
+            try testing.expectEqual(@as(u8, @intFromEnum(raw.wide)), cell.wide);
+            try testing.expectEqual(raw.hyperlink, cell.flags & CopiedCell.hyperlink != 0);
+            try testing.expectEqual(@as(u8, @intFromEnum(raw.semantic_content)), cell.semantic_content);
+
+            var expected_style: style_c.Style = undefined;
+            try testing.expectEqual(Result.success, row_cells_get(cells, .style, @ptrCast(&expected_style)));
+            try testing.expect(cell.style < out.styles_len);
+            try expectCopiedStyle(expected_style, styles[cell.style]);
+
+            var text_buf: [32]u8 = undefined;
+            var text: lib.Buffer = .{ .ptr = &text_buf, .cap = text_buf.len };
+            try testing.expectEqual(Result.success, row_cells_get(cells, .graphemes_utf8, @ptrCast(&text)));
+            if (cell.grapheme != 0) {
+                const span = graphemes[cell.grapheme - 1];
+                try testing.expectEqualStrings(text_buf[0..text.len], bytes[span.offset..][0..span.len]);
+            } else if (text.len > 0) {
+                var encoded: [4]u8 = undefined;
+                const n = try std.unicode.utf8Encode(@intCast(cell.content), &encoded);
+                try testing.expectEqualStrings(text_buf[0..text.len], encoded[0..n]);
+            }
+
+            var bg: colorpkg.RGB.C = undefined;
+            const bg_result = row_cells_get(cells, .bg_color, @ptrCast(&bg));
+            switch (raw.content_tag) {
+                .bg_color_palette => {
+                    try testing.expectEqual(Result.success, bg_result);
+                    try testing.expectEqual(@as(u32, 4), cell.content);
+                },
+                .bg_color_rgb => {
+                    try testing.expectEqual(Result.success, bg_result);
+                    try testing.expectEqual(
+                        (@as(u32, bg.r) << 16) | (@as(u32, bg.g) << 8) | bg.b,
+                        cell.content,
+                    );
+                },
+                .codepoint, .codepoint_grapheme => try testing.expectEqual(
+                    @as(u32, raw.codepoint()),
+                    cell.content,
+                ),
+            }
+        }
+    }
+    try testing.expectEqual(@as(usize, 4), rows);
+}
+
+test "render: row cells copy reports short buffers and ranges" {
+    var terminal: terminal_c.Terminal = null;
+    try testing.expectEqual(Result.success, terminal_c.new(
+        &lib.alloc.test_allocator,
+        &terminal,
+        8,
+        2,
+    ));
+    defer terminal_c.free(terminal);
+
+    const input = "\x1b[1ma\x1b[3mb\x1b[0mce\u{301}";
+    terminal_c.vt_write(terminal, input, input.len);
+
+    var state: RenderState = null;
+    try testing.expectEqual(Result.success, new(&lib.alloc.test_allocator, &state));
+    defer free(state);
+    try testing.expectEqual(Result.success, update(state, terminal));
+    var it: RowIterator = null;
+    try testing.expectEqual(Result.success, row_iterator_new(&lib.alloc.test_allocator, &it));
+    defer row_iterator_free(it);
+    var cells: RowCells = null;
+    try testing.expectEqual(Result.success, row_cells_new(&lib.alloc.test_allocator, &cells));
+    defer row_cells_free(cells);
+    try testing.expectEqual(Result.success, get(state, .row_iterator, @ptrCast(&it)));
+    try testing.expect(row_iterator_next(it));
+    try testing.expectEqual(Result.success, row_get(it, .cells, @ptrCast(&cells)));
+
+    var query: RowCellsCopy = .{};
+    try testing.expectEqual(Result.out_of_space, row_cells_copy(cells, 0, 8, &query));
+    try testing.expectEqual(@as(usize, 8), query.cells_len);
+    try testing.expectEqual(@as(usize, 3), query.styles_len);
+    try testing.expectEqual(@as(usize, 1), query.graphemes_len);
+    try testing.expectEqual(@as(usize, 3), query.grapheme_bytes_len);
+
+    var copied: [8]CopiedCell = undefined;
+    var styles: [3]style_c.Style = undefined;
+    var graphemes: [1]CopiedGrapheme = undefined;
+    var bytes: [2]u8 = undefined;
+    var short: RowCellsCopy = .{
+        .cells = &copied,
+        .cells_cap = copied.len,
+        .styles = &styles,
+        .styles_cap = styles.len,
+        .graphemes = &graphemes,
+        .graphemes_cap = graphemes.len,
+        .grapheme_bytes = &bytes,
+        .grapheme_bytes_cap = bytes.len,
+    };
+    try testing.expectEqual(Result.out_of_space, row_cells_copy(cells, 0, 8, &short));
+    try testing.expectEqual(@as(usize, 3), short.grapheme_bytes_len);
+
+    var tail: RowCellsCopy = .{
+        .cells = &copied,
+        .cells_cap = copied.len,
+        .styles = &styles,
+        .styles_cap = styles.len,
+    };
+    try testing.expectEqual(Result.success, row_cells_copy(cells, 1, 2, &tail));
+    try testing.expectEqual(@as(usize, 2), tail.cells_len);
+    try testing.expectEqual(@as(usize, 2), tail.styles_len);
+    try testing.expectEqual(@as(u32, 'b'), copied[0].content);
+    try testing.expectEqual(@as(u16, 1), copied[0].style);
+    try testing.expectEqual(@as(u16, 0), copied[1].style);
+
+    try testing.expectEqual(Result.success, row_cells_copy(cells, 6, 100, &tail));
+    try testing.expectEqual(@as(usize, 2), tail.cells_len);
+    try testing.expectEqual(Result.success, row_cells_copy(cells, 8, 1, &tail));
+    try testing.expectEqual(@as(usize, 0), tail.cells_len);
+    try testing.expectEqual(Result.invalid_value, row_cells_copy(cells, 9, 1, &tail));
+    try testing.expectEqual(Result.invalid_value, row_cells_copy(null, 0, 1, &tail));
+    try testing.expectEqual(Result.invalid_value, row_cells_copy(cells, 0, 1, null));
 }
 
 test "render: row iterator next" {

@@ -589,6 +589,100 @@ typedef struct {
 } GhosttyRenderStateColors;
 
 /**
+ * Flag bits for GhosttyRenderStateCell.flags.
+ *
+ * @ingroup render
+ */
+#define GHOSTTY_RENDER_STATE_CELL_HYPERLINK (1u << 0)
+#define GHOSTTY_RENDER_STATE_CELL_PROTECTED (1u << 1)
+
+/**
+ * One cell written by ghostty_render_state_row_cells_copy().
+ *
+ * @ingroup render
+ */
+typedef struct {
+  /** The base codepoint (0 when the cell has no text), the background
+   *  palette index, or the background color as 0xRRGGBB, chosen by
+   *  content_tag. */
+  uint32_t content;
+
+  /** Index into the copy's style table. Index 0 is the default style. */
+  uint16_t style;
+
+  /** Zero when the cell has at most one codepoint, otherwise one plus the
+   *  index of its span in the copy's grapheme table. */
+  uint16_t grapheme;
+
+  /** The cell content tag (GhosttyCellContentTag). */
+  uint8_t content_tag;
+
+  /** The cell width (GhosttyCellWide). */
+  uint8_t wide;
+
+  /** GHOSTTY_RENDER_STATE_CELL_* flag bits. */
+  uint8_t flags;
+
+  /** The semantic content of the cell (GhosttyCellSemanticContent). */
+  uint8_t semantic_content;
+} GhosttyRenderStateCell;
+
+/**
+ * A grapheme cluster in the copy's grapheme byte buffer.
+ *
+ * @ingroup render
+ */
+typedef struct {
+  /** Byte offset of the cluster's UTF-8 encoding. */
+  uint32_t offset;
+
+  /** Byte length of the cluster's UTF-8 encoding, base codepoint first. */
+  uint32_t len;
+} GhosttyRenderStateGrapheme;
+
+/**
+ * Caller-provided buffers for ghostty_render_state_row_cells_copy().
+ *
+ * This struct uses the sized-struct ABI pattern. Initialize with
+ * GHOSTTY_INIT_SIZED(GhosttyRenderStateRowCellsCopy), then point each
+ * array at storage and set its capacity. On return every *_len field holds
+ * the number of entries the copy needs; when any of them exceeds its
+ * capacity the call returns GHOSTTY_OUT_OF_SPACE and the caller grows that
+ * buffer and copies again.
+ *
+ * The style table holds each distinct style of the copied cells once, in
+ * first-use order after the default style at index 0, so a caller resolves
+ * every style once per copy instead of once per cell. A cells capacity of
+ * len and a styles capacity of len + 1 never run short.
+ *
+ * @ingroup render
+ */
+typedef struct {
+  /** Size of this struct in bytes. Must be set to sizeof(GhosttyRenderStateRowCellsCopy). */
+  size_t size;
+
+  /** Cell output, one entry per copied column. */
+  GhosttyRenderStateCell* cells;
+  size_t cells_cap;
+  size_t cells_len;
+
+  /** Style table output. Index 0 is always the default style. */
+  GhosttyStyle* styles;
+  size_t styles_cap;
+  size_t styles_len;
+
+  /** Grapheme table output, one span per multi-codepoint cell. */
+  GhosttyRenderStateGrapheme* graphemes;
+  size_t graphemes_cap;
+  size_t graphemes_len;
+
+  /** UTF-8 bytes of the grapheme table's clusters. */
+  uint8_t* grapheme_bytes;
+  size_t grapheme_bytes_cap;
+  size_t grapheme_bytes_len;
+} GhosttyRenderStateRowCellsCopy;
+
+/**
  * Create a new render state instance.
  *
  * @param allocator Pointer to allocator, or NULL to use the default allocator
@@ -1085,6 +1179,33 @@ GHOSTTY_API GhosttyResult ghostty_render_state_row_cells_get_multi(
     const GhosttyRenderStateRowCellsData* keys,
     void** values,
     size_t* out_written);
+
+/**
+ * Copy a column range of the current row into packed cells in one call.
+ *
+ * Copies the columns [x, x + len) of the row that populated `cells`,
+ * clamped to the row width, with styles and multi-codepoint graphemes as
+ * indexes into tables written alongside. A cell's style and text match
+ * GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_STYLE and _GRAPHEMES_UTF8; its
+ * colors resolve from the style and content tag through the render state
+ * palette the way _FG_COLOR and _BG_COLOR resolve them. The iterator
+ * position is not used or changed.
+ *
+ * @param cells The row cells handle (NULL returns GHOSTTY_INVALID_VALUE)
+ * @param x The first column to copy (past the row width returns
+ *          GHOSTTY_INVALID_VALUE)
+ * @param len The number of columns to copy
+ * @param[in,out] out Sized output buffers (NULL returns GHOSTTY_INVALID_VALUE)
+ * @return GHOSTTY_SUCCESS when everything fit, GHOSTTY_OUT_OF_SPACE when a
+ *         buffer is short (the *_len fields hold the sizes needed)
+ *
+ * @ingroup render
+ */
+GHOSTTY_API GhosttyResult ghostty_render_state_row_cells_copy(
+    GhosttyRenderStateRowCells cells,
+    uint16_t x,
+    uint16_t len,
+    GhosttyRenderStateRowCellsCopy* out);
 
 /**
  * Free a row cells instance.

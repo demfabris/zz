@@ -3289,6 +3289,13 @@ Event frames keep formats captured at mutation and repair targets at execution; 
 Three alternating quick pairs against `loop-9f31b80d-cli` pass all 23 required rows: the largest instruction ratio is 1.004324x, chain5 p20 is 0.997947x, and thread medians remain 3/25. Control latency is red on both binaries with no harness errors.
 Formatting, daemon Clippy, 3 new frame tests, 35 integration tests and 8 selected compat scenarios pass with zero divergences; the serial daemon suite passes 1,422 tests with three known failures, including the status-job test that passes alone. macOS and Windows checks were not run on this Linux host.
 
+**e06 as built (2026-10-02, Linux):** Both `wait-for` receiver parks now register cmdq continuation IDs; signal wakes all waiters, lock grants transfer FIFO, and cancellation after a grant transfers the lock to the next waiter.
+Owned root and inserted queue frames preserve nested aliases, callbacks, hooks, reply order and sticky signals. Twenty signal, lock and inserted waiters add zero workers and complete each continuation once.
+Seven continuation tests, named wait-for/shutdown tests, formatting, daemon Clippy and five compat groups (62 steps, zero divergences) pass. The serial suite passes 1,427/1,432; four failures pass alone, and the known macOS-bundle fallback failure persists on Linux. All 35 integration tests pass, with one existing soak ignored.
+Three alternating quick `cli,control,mem` pairs against `loop-b626aa02-cli` put all 19 CLI instruction medians at 0.99814–1.01563x; `chain5.p20` is 0.2425 -> 0.2454 Minstr (1.01196x), and thread medians remain 3/25.
+Control latency is red in all six runs; burst throughput is red only in new-2. The runs have zero harness errors; these tmux threshold rows are outside this slice's instruction/thread comparison.
+Shell jobs and other unconverted leaves, registration/startup and hook-capable cleanup still use workers. The Windows/test synchronous adapter remains; macOS, Windows, iOS, full-workspace, TUI and full-bench checks were not run for this slice.
+
 ## W4-DELIVER: frames straight from shards (effort L)
 
 Scope: the loop pushes per-pane subscriber sinks (queue handle, stream kind, delivered base,

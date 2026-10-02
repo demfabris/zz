@@ -1,0 +1,6 @@
+corpus: none
+stage: fixtures/wait-for-loop.sh ~/wait-for-loop.sh
+stage: fixtures/wait-for-loop.py ~/wait-for-loop.py
+out: set-environment -gu WAIT_FOR_LOOP
+run-shell 'sh ~/wait-for-loop.sh'
+out: show-environment -g WAIT_FOR_LOOP

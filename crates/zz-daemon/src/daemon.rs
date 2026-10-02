@@ -4166,6 +4166,8 @@ struct SharedServer {
     #[cfg(all(feature = "agent", unix))]
     peer_probe: AtomicBool,
     pending_execs: Mutex<Vec<Box<dyn FnOnce() + Send>>>,
+    #[cfg(unix)]
+    pending_wait_queues: Mutex<Vec<wait_queue::InsertedTask>>,
     #[cfg(windows)]
     exec_links: Mutex<BTreeMap<ClientId, Arc<exec::ExecLink>>>,
     prompt_history_source: Mutex<Option<(PathBuf, usize)>>,
@@ -5087,6 +5089,8 @@ impl Shared {
             #[cfg(all(feature = "agent", unix))]
             peer_probe: AtomicBool::new(false),
             pending_execs: Mutex::new(Vec::new()),
+            #[cfg(unix)]
+            pending_wait_queues: Mutex::new(Vec::new()),
             #[cfg(windows)]
             exec_links: Mutex::new(BTreeMap::new()),
             prompt_history_source: Mutex::new(None),
@@ -5545,7 +5549,7 @@ impl Shared {
         for terminal in terminals {
             terminal.terminate();
         }
-        wake_wait_items(wakes);
+        self.wake_wait_items(wakes);
         for pipe in pipes {
             stop_pane_pipe(pipe);
         }
@@ -6347,7 +6351,15 @@ impl Shared {
         self.enforce_destroy_unattached();
         self.fail_gui_requests_for(client);
         self.status.lock().forget(client);
-        let (terminals, command_output, popup_waiters, menu_waiters, confirm_waiters, shutdown) = {
+        let (
+            terminals,
+            command_output,
+            popup_waiters,
+            menu_waiters,
+            confirm_waiters,
+            shutdown,
+            wait_wakes,
+        ) = {
             let mut inner = self.inner.lock();
             inner
                 .client_file_waiters
@@ -6358,7 +6370,7 @@ impl Shared {
             inner
                 .paste_uploads
                 .retain(|(uploader, _), _| *uploader != client);
-            remove_client_wait_items(&mut inner.wait_channels, client);
+            let wait_wakes = remove_client_wait_items(&mut inner.wait_channels, client);
             let popup_waiters = inner
                 .clients
                 .values_mut()
@@ -6414,8 +6426,10 @@ impl Shared {
                 menu_waiters,
                 confirm_waiters,
                 (shutdown, control),
+                wait_wakes,
             )
         };
+        self.wake_wait_items(wait_wakes);
         let (shutdown, control) = shutdown;
         let view = TerminalViewId(client.0);
         if let Some(command_output) = command_output {
@@ -6587,6 +6601,27 @@ impl Shared {
             execution
         };
         context.set_control_command_target(previous_control_target);
+        self.finish_command_request_segment(
+            client,
+            kind,
+            context,
+            request_id,
+            &command,
+            &client_name,
+            execution,
+        )
+    }
+
+    fn finish_command_request_segment(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &ExecutionContext,
+        request_id: u64,
+        command: &CommandInvocation,
+        client_name: &str,
+        execution: Result<Execution, DaemonError>,
+    ) -> (CommandResponse, bool) {
         let response = match execution {
             Ok(execution) => CommandResponse::Success {
                 request_id,
@@ -7318,6 +7353,14 @@ impl Shared {
             leaf.command = Some(command.clone());
             child.leaf = Some(leaf);
             return result;
+        }
+        if let Some(item) = &self.command_item {
+            let mut item = item.lock();
+            if let Some(wait) = item.pending_wait.as_mut() {
+                leaf.command = Some(command.clone());
+                wait.leaf = Some(leaf);
+                return result;
+            }
         }
         self.finish_inserted_leaf(
             client,
@@ -8179,11 +8222,11 @@ impl Shared {
         )
     }
 
-    fn finish_hook_frame_command(
+    fn finish_hook_frame_command<E: FrameExecution>(
         self: &Arc<Self>,
         client: ClientId,
         kind: ClientKind,
-        frame: &mut InsertedQueueFrame,
+        frame: &mut InsertedQueueFrame<E>,
         boundary: InsertedCommandBoundary,
         step: InsertedCommandStep,
     ) -> InsertedFrameAction {
@@ -11957,8 +12000,6 @@ impl Shared {
         Ok(Execution::default())
     }
 
-    /// `wait-for -S`: wake everyone parked on the channel, or leave a sticky
-    /// signal for the next waiter when nobody is.
     fn signal_wait_channel(&self, name: &str) {
         let wakes = {
             let mut inner = self.inner.lock();
@@ -11970,12 +12011,22 @@ impl Shared {
             let wakes = channel
                 .waiters
                 .drain(..)
-                .map(|item| item.wake)
+                .map(|item| item.continuation)
                 .collect::<Vec<_>>();
             remove_wait_channel_if_unused(&mut inner.wait_channels, name);
             wakes
         };
-        wake_wait_items(wakes);
+        self.wake_wait_items(wakes);
+    }
+
+    fn wake_wait_items(&self, wakes: impl IntoIterator<Item = cmdq::WaitContinuation>) {
+        let mut completed = false;
+        for wake in wakes {
+            completed |= wake.complete();
+        }
+        if completed {
+            self.accept_wake.wake();
+        }
     }
 
     fn wait_for(
@@ -11992,13 +12043,14 @@ impl Shared {
             self.signal_wait_channel(name);
             return Ok(Execution::default());
         }
+        let wake_owner = self.client_writers.lock().get(&client).map(Arc::downgrade);
         if parsed.has('L') {
             if !matches!(kind, ClientKind::Command | ClientKind::Control)
                 || client == ClientId(u64::MAX)
             {
                 return Err(ServerError::InvalidCommand("not able to lock".to_owned()).into());
             }
-            let receiver = {
+            let continuation = {
                 let mut inner = self.inner.lock();
                 if self.stopping.load(Ordering::Acquire)
                     || self.shutdown_pending.load(Ordering::Acquire)
@@ -12006,23 +12058,24 @@ impl Shared {
                 {
                     return Ok(Execution::default());
                 }
-                let token = next_wait_token(&mut inner);
                 let channel = inner.wait_channels.entry(name.clone()).or_default();
                 if !channel.locked {
                     channel.locked = true;
                     return Ok(Execution::default());
                 }
-                let (wake, receiver) = crossbeam_channel::bounded(1);
+                let continuation = cmdq::WaitContinuation::new(
+                    self.command_item
+                        .as_ref()
+                        .and_then(|item| item.lock().wait()),
+                    wake_owner.clone(),
+                );
                 channel.lockers.push_back(WaitItem {
-                    token,
                     client,
-                    wake,
+                    continuation: continuation.clone(),
                 });
-                (token, receiver)
+                continuation
             };
-            self.report_command_queue_park();
-            let _ = receiver.1.recv();
-            remove_wait_item(&mut self.inner.lock(), name, receiver.0);
+            self.park_wait_for(name, continuation)?;
             return Ok(Execution::default());
         }
         if parsed.has('U') {
@@ -12038,17 +12091,18 @@ impl Shared {
                         ServerError::InvalidCommand(format!("channel {name} not locked")).into(),
                     );
                 }
+                channel.granted = None;
                 if let Some(item) = channel.lockers.pop_front() {
-                    Some(item.wake)
+                    let continuation = item.continuation.clone();
+                    channel.granted = Some(item);
+                    Some(continuation)
                 } else {
                     channel.locked = false;
                     remove_wait_channel_if_unused(&mut inner.wait_channels, name);
                     None
                 }
             };
-            if let Some(wake) = wake {
-                let _ = wake.try_send(());
-            }
+            self.wake_wait_items(wake);
             return Ok(Execution::default());
         }
         if !matches!(kind, ClientKind::Command | ClientKind::Control)
@@ -12056,7 +12110,7 @@ impl Shared {
         {
             return Err(ServerError::InvalidCommand("not able to wait".to_owned()).into());
         }
-        let receiver = {
+        let continuation = {
             let mut inner = self.inner.lock();
             if self.stopping.load(Ordering::Acquire)
                 || self.shutdown_pending.load(Ordering::Acquire)
@@ -12064,24 +12118,69 @@ impl Shared {
             {
                 return Ok(Execution::default());
             }
-            let token = next_wait_token(&mut inner);
             let channel = inner.wait_channels.entry(name.clone()).or_default();
             if channel.woken {
                 remove_wait_channel_if_unused(&mut inner.wait_channels, name);
                 return Ok(Execution::default());
             }
-            let (wake, receiver) = crossbeam_channel::bounded(1);
+            let continuation = cmdq::WaitContinuation::new(
+                self.command_item
+                    .as_ref()
+                    .and_then(|item| item.lock().wait()),
+                wake_owner.clone(),
+            );
             channel.waiters.push_back(WaitItem {
-                token,
                 client,
-                wake,
+                continuation: continuation.clone(),
             });
-            (token, receiver)
+            continuation
         };
-        self.report_command_queue_park();
-        let _ = receiver.1.recv();
-        remove_wait_item(&mut self.inner.lock(), name, receiver.0);
+        self.park_wait_for(name, continuation)?;
         Ok(Execution::default())
+    }
+
+    fn park_wait_for(
+        &self,
+        name: &str,
+        continuation: cmdq::WaitContinuation,
+    ) -> Result<(), DaemonError> {
+        self.report_command_queue_park();
+        if let Some(item) = &self.command_item {
+            let mut item = item.lock();
+            if item.loop_wait {
+                item.pending_wait = Some(Box::new(RegisteredWait {
+                    name: name.to_owned(),
+                    continuation,
+                    leaf: None,
+                    guard: None,
+                }));
+                return Ok(());
+            }
+        }
+        #[cfg(unix)]
+        if self.loop_active.load(Ordering::Acquire) {
+            let next = remove_wait_item(&mut self.inner.lock(), name, continuation.token, true);
+            self.wake_wait_items(next);
+            return Err(ServerError::InvalidCommand(
+                "not able to wait outside a command queue".to_owned(),
+            )
+            .into());
+        }
+        #[cfg(any(test, windows))]
+        {
+            continuation.wait();
+            remove_wait_item(&mut self.inner.lock(), name, continuation.token, false);
+            Ok(())
+        }
+        #[cfg(all(unix, not(test)))]
+        {
+            let next = remove_wait_item(&mut self.inner.lock(), name, continuation.token, true);
+            self.wake_wait_items(next);
+            Err(
+                ServerError::InvalidCommand("not able to wait outside a command queue".to_owned())
+                    .into(),
+            )
+        }
     }
 
     fn pipe_pane(
@@ -12983,7 +13082,11 @@ impl Shared {
                     Ok(Execution::default())
                 }
             }
-            Some(source @ (InsertedCommandSource::String(_) | InsertedCommandSource::Block(_))) => {
+            Some(
+                source @ (InsertedCommandSource::String(_)
+                | InsertedCommandSource::Block(_)
+                | InsertedCommandSource::Commands(_)),
+            ) => {
                 if parsed.background || draining && !delay.is_zero() {
                     if draining && !parsed.background {
                         queue_execution
@@ -13025,6 +13128,44 @@ impl Shared {
                         }
                         let mut context = command_context;
                         context.retarget(&inserted_target);
+                        #[cfg(unix)]
+                        if shared.loop_active.load(Ordering::Acquire) {
+                            shared.enqueue_inserted_task(
+                                client,
+                                kind,
+                                &context,
+                                &source,
+                                "<run-shell -C>",
+                                control_target,
+                                parsed.background,
+                                detached_callback_blocker,
+                                Box::new(move |shared, context, execution| match execution {
+                                    Ok(result) => {
+                                        let _ = shared.finish_inserted_run_shell(
+                                            route,
+                                            "run-shell".to_owned(),
+                                            &result,
+                                        );
+                                    }
+                                    Err(_) if control_target.is_some() => {}
+                                    Err(error) => {
+                                        if let Some(output) = daemon_error_output(&error) {
+                                            shared.route_background_inserted_output(
+                                                client,
+                                                kind,
+                                                context,
+                                                "run-shell".to_owned(),
+                                                output,
+                                            );
+                                        }
+                                        shared.publish_background_command_error(
+                                            client, context, &error, true,
+                                        );
+                                    }
+                                }),
+                            );
+                            return;
+                        }
                         let execution = if parsed.background {
                             shared.execute_detached_inserted_commands_with_control_target(
                                 client,
@@ -13411,6 +13552,44 @@ impl Shared {
                         applier.apply_background_insertion(ticket, move || {
                             let mut context = command_context;
                             context.retarget(&inserted_target);
+                            #[cfg(unix)]
+                            if shared.loop_active.load(Ordering::Acquire) {
+                                shared.enqueue_inserted_task(
+                                    client,
+                                    kind,
+                                    &context,
+                                    &source,
+                                    "<if-shell>",
+                                    control_target,
+                                    false,
+                                    None,
+                                    Box::new(move |shared, context, execution| match execution {
+                                        Ok(result) => shared.route_background_inserted_output(
+                                            client,
+                                            kind,
+                                            context,
+                                            "if-shell".to_owned(),
+                                            &result.output,
+                                        ),
+                                        Err(_) if control_target.is_some() => {}
+                                        Err(error) => {
+                                            if let Some(output) = daemon_error_output(&error) {
+                                                shared.route_background_inserted_output(
+                                                    client,
+                                                    kind,
+                                                    context,
+                                                    "if-shell".to_owned(),
+                                                    output,
+                                                );
+                                            }
+                                            shared.publish_background_command_error(
+                                                client, context, &error, true,
+                                            );
+                                        }
+                                    }),
+                                );
+                                return;
+                            }
                             match shared.execute_inserted_commands_with_control_target(
                                 client,
                                 kind,
@@ -13786,8 +13965,83 @@ impl Shared {
             stdin,
         )?;
         let mut frames = vec![root];
+        let (finished, result) = self
+            .run_inserted_queue_frames(client, kind, &mut frames, false, false)
+            .expect("synchronous inserted queue");
+        *context = finished.context;
+        result
+    }
+
+    fn run_inserted_queue_frames<E: FrameExecution>(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        frames: &mut Vec<InsertedQueueFrame<E>>,
+        inline: bool,
+        step_limit: bool,
+    ) -> Option<(
+        InsertedQueueFrame<E>,
+        Result<InsertedCommandResult, DaemonError>,
+    )> {
         loop {
             let frame = frames.last_mut().expect("inserted queue frame");
+            if frame.wait_boundary.is_some() {
+                let wait = {
+                    let mut item = self.command_item.as_ref().expect("command item").lock();
+                    let wait = item.pending_wait.as_ref().expect("registered wait");
+                    if !wait.continuation.ready() {
+                        return None;
+                    }
+                    item.pending_wait.take().unwrap()
+                };
+                remove_wait_item(
+                    &mut self.inner.lock(),
+                    &wait.name,
+                    wait.continuation.token,
+                    false,
+                );
+                let (boundary, mut step) = frame.wait_boundary.take().unwrap();
+                if let Some(mut leaf) = wait.leaf {
+                    let command = leaf.command.take().expect("wait command");
+                    step.0 = self.finish_inserted_leaf(
+                        client,
+                        kind,
+                        &mut frame.context,
+                        step.0,
+                        Some(&frame.execution),
+                        &command,
+                        leaf,
+                    );
+                }
+                if let Some(guard) = wait.guard {
+                    if let Some(child) = frame.execution.child.borrow_mut().as_mut() {
+                        child.guard = Some(guard);
+                    } else {
+                        step = self.finish_inserted_control_guard(
+                            step.0,
+                            inserted_frame_mode(&frame.execution, frame.alias_terminal),
+                            guard,
+                        );
+                    }
+                }
+                if let Some(child) =
+                    self.settle_inserted_frame_step(client, kind, frame, boundary, step)
+                {
+                    frames.push(child);
+                }
+                if !inline && step_limit {
+                    return None;
+                }
+                continue;
+            }
+            #[cfg(unix)]
+            if inline
+                && frame.commands.as_slice().first().is_some_and(|command| {
+                    !wait_queue::can_run_inline(self, &frame.context, command)
+                })
+            {
+                return None;
+            }
             let stream_client = frame.context.replay_client().unwrap_or(client);
             let cancelled = frame.execution.has_yielded()
                 || self.command_queue_cancelled(client)
@@ -13831,13 +14085,30 @@ impl Shared {
                         || frame.execution.deferred_shutdown.get() != DeferredShutdown::Force
                 });
                 let stdout_sequence = self.command_stdout_sequence(stream_client);
-                let step = self.execute_inserted_frame_command(
-                    client,
-                    kind,
-                    frame,
-                    &command,
-                    command_control_target,
-                );
+                let step = if frame.request_root {
+                    (
+                        self.execute_with_mux_source_routed_in_queue(
+                            client,
+                            kind,
+                            &mut frame.context,
+                            &command,
+                            frame.mux_source,
+                            Some(&frame.execution),
+                        ),
+                        None,
+                        false,
+                        None,
+                        false,
+                    )
+                } else {
+                    self.execute_inserted_frame_command(
+                        client,
+                        kind,
+                        frame,
+                        &command,
+                        command_control_target,
+                    )
+                };
                 let boundary = InsertedCommandBoundary {
                     command,
                     group,
@@ -13845,10 +14116,21 @@ impl Shared {
                     command_control_target,
                     stdout_sequence,
                 };
+                if self
+                    .command_item
+                    .as_ref()
+                    .is_some_and(|item| item.lock().pending_wait.is_some())
+                {
+                    frame.wait_boundary = Some((boundary, step));
+                    return None;
+                }
                 if let Some(child) =
                     self.settle_inserted_frame_step(client, kind, frame, boundary, step)
                 {
                     frames.push(child);
+                }
+                if !inline && step_limit {
+                    return None;
                 }
                 continue;
             }
@@ -13883,9 +14165,8 @@ impl Shared {
                 let yielded = frame.execution.has_yielded();
                 self.finish_command_queue_execution(&frame.execution, Some(&hook.parent));
                 if !yielded && let Some(commands) = hook.groups.pop_front() {
-                    frame.execution = InsertedFrameExecution::Owned(Box::new(
-                        self.hook_group_execution(&hook.parent, hook.initial_draining),
-                    ));
+                    frame.execution =
+                        E::owned(self.hook_group_execution(&hook.parent, hook.initial_draining));
                     frame.execution.frame_active.set(true);
                     frame.context = hook.context.clone();
                     frame.commands = commands.into_iter();
@@ -13921,20 +14202,19 @@ impl Shared {
                     frames.push(child);
                 }
             } else {
-                *context = finished.context;
-                return result;
+                return Some((finished, result));
             }
         }
     }
 
-    fn settle_inserted_frame_step<'a>(
+    fn settle_inserted_frame_step<E: FrameExecution>(
         self: &Arc<Self>,
         client: ClientId,
         kind: ClientKind,
-        frame: &mut InsertedQueueFrame<'a>,
+        frame: &mut InsertedQueueFrame<E>,
         mut boundary: InsertedCommandBoundary,
         mut step: InsertedCommandStep,
-    ) -> Option<InsertedQueueFrame<'a>> {
+    ) -> Option<InsertedQueueFrame<E>> {
         loop {
             let child = frame.execution.child.borrow_mut().take();
             if let Some(child) = child {
@@ -13961,7 +14241,7 @@ impl Shared {
                     &child.label,
                     child.control_target,
                     child.mux_source,
-                    InsertedFrameExecution::Owned(Box::new(execution)),
+                    E::owned(execution),
                     alias_terminal,
                     stdin,
                 );
@@ -14005,20 +14285,23 @@ impl Shared {
         }
     }
 
-    fn prepare_inserted_queue_frame<'a>(
+    fn prepare_inserted_queue_frame<E: FrameExecution>(
         self: &Arc<Self>,
         context: ExecutionContext,
         source: &InsertedCommandSource,
         label: &str,
         control_target: Option<(ClientId, u8)>,
         mux_source: MuxOptionSource,
-        execution: InsertedFrameExecution<'a>,
+        execution: E,
         alias_terminal: Option<ClientTerminal>,
         stdin: Option<RawText>,
-    ) -> Result<InsertedQueueFrame<'a>, DaemonError> {
+    ) -> Result<InsertedQueueFrame<E>, DaemonError> {
         if let InsertedCommandSource::Events(source) = source {
             execution.frame_active.set(true);
             return Ok(InsertedQueueFrame {
+                request_root: false,
+                request_result: None,
+                wait_boundary: None,
                 execution,
                 context,
                 commands: Vec::new().into_iter(),
@@ -14063,7 +14346,10 @@ impl Shared {
             let commands = groups.pop_front().unwrap_or_default().into_iter();
             group_execution.frame_active.set(true);
             return Ok(InsertedQueueFrame {
-                execution: InsertedFrameExecution::Owned(Box::new(group_execution)),
+                request_root: false,
+                request_result: None,
+                wait_boundary: None,
+                execution: E::owned(group_execution),
                 context: hook_context.clone(),
                 commands,
                 prepared: true,
@@ -14091,35 +14377,44 @@ impl Shared {
                 }),
             });
         }
-        let (input, prepared) = match source {
-            InsertedCommandSource::String(input) => (input, false),
-            InsertedCommandSource::Block(input) => (input, true),
-            InsertedCommandSource::Shell(_)
-            | InsertedCommandSource::Hooks(_)
-            | InsertedCommandSource::Events(_) => unreachable!(),
+        let (commands, prepared) = if let InsertedCommandSource::Commands(commands) = source {
+            (commands.clone(), true)
+        } else {
+            let (input, prepared) = match source {
+                InsertedCommandSource::String(input) => (input, false),
+                InsertedCommandSource::Block(input) => (input, true),
+                InsertedCommandSource::Commands(_)
+                | InsertedCommandSource::Shell(_)
+                | InsertedCommandSource::Hooks(_)
+                | InsertedCommandSource::Events(_) => unreachable!(),
+            };
+            let mut parsed = {
+                let inner = self.inner.lock();
+                inner.engine.parse_config(label, input)
+            };
+            if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
+                return Err(DaemonError::InsertedCommandParse(diagnostic.message));
+            }
+            if prepared {
+                let owner = label
+                    .strip_prefix('<')
+                    .and_then(|label| label.strip_suffix('>'))
+                    .unwrap_or(label);
+                self.inner
+                    .lock()
+                    .engine
+                    .prepare_frozen_callback_invocations(&mut parsed.commands, owner)?;
+            }
+            (parsed.commands, prepared)
         };
-        let mut parsed = {
-            let inner = self.inner.lock();
-            inner.engine.parse_config(label, input)
-        };
-        if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
-            return Err(DaemonError::InsertedCommandParse(diagnostic.message));
-        }
-        if prepared {
-            let owner = label
-                .strip_prefix('<')
-                .and_then(|label| label.strip_suffix('>'))
-                .unwrap_or(label);
-            self.inner
-                .lock()
-                .engine
-                .prepare_frozen_callback_invocations(&mut parsed.commands, owner)?;
-        }
         execution.frame_active.set(true);
         Ok(InsertedQueueFrame {
+            request_root: false,
+            request_result: None,
+            wait_boundary: None,
             execution,
             context,
-            commands: parsed.commands.into_iter(),
+            commands: commands.into_iter(),
             prepared,
             control_target,
             mux_source,
@@ -14138,11 +14433,11 @@ impl Shared {
         })
     }
 
-    fn execute_inserted_frame_command(
+    fn execute_inserted_frame_command<E: FrameExecution>(
         self: &Arc<Self>,
         client: ClientId,
         kind: ClientKind,
-        frame: &mut InsertedQueueFrame,
+        frame: &mut InsertedQueueFrame<E>,
         command: &CommandInvocation,
         command_control_target: Option<(ClientId, u8)>,
     ) -> InsertedCommandStep {
@@ -14239,11 +14534,11 @@ impl Shared {
         )
     }
 
-    fn resume_inserted_child(
+    fn resume_inserted_child<E: FrameExecution>(
         self: &Arc<Self>,
         client: ClientId,
         kind: ClientKind,
-        parent: &mut InsertedQueueFrame,
+        parent: &mut InsertedQueueFrame<E>,
         child: Box<InsertedQueueChild>,
         result: Result<InsertedCommandResult, DaemonError>,
         callback_failures_start: usize,
@@ -14320,14 +14615,18 @@ impl Shared {
         }
     }
 
-    fn finish_inserted_frame_command(
+    fn finish_inserted_frame_command<E: FrameExecution>(
         self: &Arc<Self>,
         client: ClientId,
         kind: ClientKind,
-        frame: &mut InsertedQueueFrame,
+        frame: &mut InsertedQueueFrame<E>,
         boundary: InsertedCommandBoundary,
         step: InsertedCommandStep,
     ) -> InsertedFrameAction {
+        if frame.request_root {
+            frame.request_result = Some(step.0);
+            return InsertedFrameAction::Finish(None);
+        }
         if frame.events.is_some() {
             return InsertedFrameAction::Continue;
         }
@@ -14589,11 +14888,11 @@ impl Shared {
         InsertedFrameAction::Continue
     }
 
-    fn finish_inserted_queue_frame(
+    fn finish_inserted_queue_frame<E: FrameExecution>(
         &self,
         client: ClientId,
         kind: ClientKind,
-        frame: &mut InsertedQueueFrame,
+        frame: &mut InsertedQueueFrame<E>,
     ) -> Result<InsertedCommandResult, DaemonError> {
         if let Some(events) = frame.events.take() {
             self.finish_event_queue_notifications(events.notifications);
@@ -14725,6 +15024,19 @@ impl Shared {
         }
         let mut capture = capture;
         capture.active = false;
+        {
+            let mut item = self.command_item.as_ref().expect("command item").lock();
+            if let Some(wait) = item.pending_wait.as_mut() {
+                wait.guard = Some(guard);
+                return (
+                    execution,
+                    None,
+                    alias_group,
+                    None,
+                    direct_command_prepare_error,
+                );
+            }
+        }
         self.finish_inserted_control_guard(execution, mode, guard)
     }
 
@@ -21138,6 +21450,20 @@ impl Shared {
         commands: &[CommandInvocation],
         queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
+        if let Some(parent) = queue_execution.filter(|queue| queue.frame_active.get()) {
+            parent.insert_foreground_child(InsertedQueueChild {
+                context: context.clone(),
+                source: InsertedCommandSource::Commands(commands.to_vec()),
+                label: "<confirm-before>".to_owned(),
+                control_target: context.control_command_target(),
+                mux_source: MuxOptionSource::RuntimeCommand,
+                kind: InsertedQueueChildKind::Foreground(None),
+                leaf: None,
+                guard: None,
+                leaf_name: None,
+            });
+            return Ok(Execution::default());
+        }
         if queue_execution.is_none() && context.control_command_target().is_some() {
             let queue_execution = self.command_queue_execution(CommandExecutionState {
                 draining: false,
@@ -33363,7 +33689,6 @@ struct ServerState {
     pending_gui_requests: BTreeMap<u64, PendingGuiRequest>,
     paste_uploads: BTreeMap<(ClientId, u64), PasteUpload>,
     wait_channels: BTreeMap<String, WaitChannel>,
-    next_wait_token: u64,
     pane_pipes: BTreeMap<PaneId, PanePipe>,
     control_output_taps: BTreeMap<PaneId, ControlOutputTap>,
     next_pipe_token: u64,
@@ -33377,9 +33702,15 @@ struct ServerState {
 }
 
 struct WaitItem {
-    token: u64,
     client: ClientId,
-    wake: crossbeam_channel::Sender<()>,
+    continuation: cmdq::WaitContinuation,
+}
+
+struct RegisteredWait {
+    name: String,
+    continuation: cmdq::WaitContinuation,
+    leaf: Option<InsertedLeafContinuation>,
+    guard: Option<InsertedControlGuard>,
 }
 
 #[derive(Default)]
@@ -33388,6 +33719,7 @@ struct WaitChannel {
     woken: bool,
     waiters: VecDeque<WaitItem>,
     lockers: VecDeque<WaitItem>,
+    granted: Option<WaitItem>,
 }
 
 struct PanePipe {
@@ -45461,12 +45793,11 @@ fn resolve_buffer<'a>(
     find_buffer(inner, name).ok_or_else(|| missing.error(name))
 }
 
-const WAIT_FOR_USAGE: &str = "usage: wait-for [-L|-S|-U] channel";
+#[cfg(unix)]
+#[path = "daemon/wait_queue.rs"]
+mod wait_queue;
 
-fn next_wait_token(inner: &mut ServerState) -> u64 {
-    inner.next_wait_token = inner.next_wait_token.wrapping_add(1).max(1);
-    inner.next_wait_token
-}
+const WAIT_FOR_USAGE: &str = "usage: wait-for [-L|-S|-U] channel";
 
 fn remove_wait_channel_if_unused(channels: &mut BTreeMap<String, WaitChannel>, name: &str) {
     if channels
@@ -45477,41 +45808,89 @@ fn remove_wait_channel_if_unused(channels: &mut BTreeMap<String, WaitChannel>, n
     }
 }
 
-fn remove_wait_item(inner: &mut ServerState, name: &str, token: u64) {
-    let Some(channel) = inner.wait_channels.get_mut(name) else {
-        return;
-    };
-    channel.waiters.retain(|item| item.token != token);
-    channel.lockers.retain(|item| item.token != token);
-    remove_wait_channel_if_unused(&mut inner.wait_channels, name);
-}
-
-fn wake_wait_items(wakes: impl IntoIterator<Item = crossbeam_channel::Sender<()>>) {
-    for wake in wakes {
-        let _ = wake.try_send(());
+fn remove_wait_item(
+    inner: &mut ServerState,
+    name: &str,
+    token: cmdq::ContinuationToken,
+    cancelled: bool,
+) -> Option<cmdq::WaitContinuation> {
+    let channel = inner.wait_channels.get_mut(name)?;
+    channel
+        .waiters
+        .retain(|item| item.continuation.token != token);
+    channel
+        .lockers
+        .retain(|item| item.continuation.token != token);
+    let mut wake = None;
+    if channel
+        .granted
+        .as_ref()
+        .is_some_and(|item| item.continuation.token == token)
+    {
+        channel.granted = None;
+        if cancelled {
+            channel.granted = channel.lockers.pop_front();
+            channel.locked = channel.granted.is_some();
+            wake = channel
+                .granted
+                .as_ref()
+                .map(|item| item.continuation.clone());
+        }
     }
+    remove_wait_channel_if_unused(&mut inner.wait_channels, name);
+    wake
 }
 
 fn take_all_wait_wakes(
     channels: &mut BTreeMap<String, WaitChannel>,
-) -> Vec<crossbeam_channel::Sender<()>> {
+) -> Vec<cmdq::WaitContinuation> {
     let mut wakes = Vec::new();
     for (_, mut channel) in std::mem::take(channels) {
-        wakes.extend(channel.waiters.drain(..).map(|item| item.wake));
-        wakes.extend(channel.lockers.drain(..).map(|item| item.wake));
+        wakes.extend(channel.waiters.drain(..).map(|item| item.continuation));
+        wakes.extend(channel.lockers.drain(..).map(|item| item.continuation));
+        wakes.extend(channel.granted.take().map(|item| item.continuation));
     }
     wakes
 }
 
-fn remove_client_wait_items(channels: &mut BTreeMap<String, WaitChannel>, client: ClientId) {
+fn remove_client_wait_items(
+    channels: &mut BTreeMap<String, WaitChannel>,
+    client: ClientId,
+) -> Vec<cmdq::WaitContinuation> {
+    let mut wakes = Vec::new();
     for channel in channels.values_mut() {
-        channel.waiters.retain(|item| item.client != client);
-        channel.lockers.retain(|item| item.client != client);
+        for items in [&mut channel.waiters, &mut channel.lockers] {
+            items.retain(|item| {
+                if item.client == client {
+                    wakes.push(item.continuation.clone());
+                    false
+                } else {
+                    true
+                }
+            });
+        }
+        if channel
+            .granted
+            .as_ref()
+            .is_some_and(|item| item.client == client)
+        {
+            wakes.extend(channel.granted.take().map(|item| item.continuation));
+            channel.granted = channel.lockers.pop_front();
+            channel.locked = channel.granted.is_some();
+            wakes.extend(
+                channel
+                    .granted
+                    .as_ref()
+                    .map(|item| item.continuation.clone()),
+            );
+        }
     }
+    wakes
 }
 
 #[derive(Clone)]
 enum InsertedCommandSource {
+    Commands(Vec<CommandInvocation>),
     Shell(String),
     String(String),
     Block(String),
@@ -45539,8 +45918,27 @@ impl std::ops::Deref for InsertedFrameExecution<'_> {
     }
 }
 
-struct InsertedQueueFrame<'a> {
-    execution: InsertedFrameExecution<'a>,
+trait FrameExecution: std::ops::Deref<Target = CommandQueueExecution> {
+    fn owned(execution: CommandQueueExecution) -> Self;
+}
+
+impl FrameExecution for InsertedFrameExecution<'_> {
+    fn owned(execution: CommandQueueExecution) -> Self {
+        Self::Owned(Box::new(execution))
+    }
+}
+
+impl FrameExecution for Box<CommandQueueExecution> {
+    fn owned(execution: CommandQueueExecution) -> Self {
+        Box::new(execution)
+    }
+}
+
+struct InsertedQueueFrame<E: FrameExecution> {
+    request_root: bool,
+    request_result: Option<Result<Execution, DaemonError>>,
+    wait_boundary: Option<(InsertedCommandBoundary, InsertedCommandStep)>,
+    execution: E,
     context: ExecutionContext,
     commands: std::vec::IntoIter<CommandInvocation>,
     prepared: bool,
@@ -45560,7 +45958,7 @@ struct InsertedQueueFrame<'a> {
         cmdq::ContinuationToken,
     )>,
     terminal_error: Option<DaemonError>,
-    hook: Option<HookQueueFrame<'a>>,
+    hook: Option<HookQueueFrame<E>>,
     events: Option<EventQueueFrame>,
 }
 
@@ -45652,8 +46050,8 @@ struct HookQueueSource {
     replaying: bool,
 }
 
-struct HookQueueFrame<'a> {
-    parent: InsertedFrameExecution<'a>,
+struct HookQueueFrame<E: FrameExecution> {
+    parent: E,
     variables: BTreeMap<String, String>,
     skip_resolution_errors: bool,
     replaying: bool,
@@ -49124,6 +49522,8 @@ const PANE_WAIT_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 #[derive(Default)]
 struct CommandItemContext {
+    loop_wait: bool,
+    pending_wait: Option<Box<RegisteredWait>>,
     result: Option<(CommandResponse, bool)>,
     hook_notifications_only: bool,
     key_table_publish_hold: u32,

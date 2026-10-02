@@ -5580,7 +5580,7 @@ impl Shared {
             Self::retire_popup(client, popup, true);
         }
         for waiter in menu_waiters {
-            let _ = waiter.wake.try_send(());
+            waiter.complete(false);
         }
         for waiter in confirm_waiters {
             waiter.complete(false);
@@ -6421,7 +6421,7 @@ impl Shared {
                 .filter_map(|menu| {
                     menu.waiter
                         .as_ref()
-                        .is_some_and(|waiter| waiter.client == client)
+                        .is_some_and(|waiter| waiter.0.client == client)
                         .then(|| menu.waiter.take())
                         .flatten()
                 })
@@ -6489,7 +6489,7 @@ impl Shared {
             let _ = waiter.wake.try_send(129);
         }
         for waiter in menu_waiters {
-            let _ = waiter.wake.try_send(());
+            waiter.complete(false);
         }
         for waiter in confirm_waiters {
             waiter.complete(false);
@@ -7795,9 +7795,14 @@ impl Shared {
                     DaemonCommandDispatch::DisplayPopup => {
                         self.display_popup(client, kind, context, canonical, &command.args)
                     }
-                    DaemonCommandDispatch::DisplayMenu => {
-                        self.display_menu(client, kind, context, canonical, command)
-                    }
+                    DaemonCommandDispatch::DisplayMenu => self.display_menu(
+                        client,
+                        kind,
+                        context,
+                        canonical,
+                        command,
+                        queue_execution,
+                    ),
                     DaemonCommandDispatch::ConfirmBefore => self.confirm_before(
                         client,
                         kind,
@@ -19046,6 +19051,7 @@ impl Shared {
         context: &ExecutionContext,
         command_name: &str,
         command: &CommandInvocation,
+        queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_display_menu_args(&command.args)?;
         if kind == ClientKind::Control {
@@ -19252,12 +19258,13 @@ impl Shared {
                 commands,
             )
         };
-        let (wake, wait) = crossbeam_channel::bounded(1);
-        {
+        let waiter = {
             let mut inner = self.inner.lock();
             if any_overlay_present(&inner, target_client) {
                 return Ok(Execution::default());
             }
+            let waiter = matches!(kind, ClientKind::Command | ClientKind::Control)
+                .then(|| self.register_overlay_wait(client, None, queue_execution));
             inner.client_entry(target_client).menu.replace(MenuSession {
                 state: state.clone(),
                 commands,
@@ -19269,14 +19276,16 @@ impl Shared {
                     selected_style: parsed.selected_style.clone(),
                     border_style: parsed.border_style.clone(),
                 },
-                waiter: matches!(kind, ClientKind::Command | ClientKind::Control)
-                    .then_some(MenuWaiter { client, wake }),
+                waiter: self
+                    .command_item
+                    .as_ref()
+                    .and_then(|item| item.lock().raising_overlay.take()),
             });
-        }
+            waiter
+        };
         self.publish_to_client(target_client, EventPayload::Menu { state: Some(state) });
-        if matches!(kind, ClientKind::Command | ClientKind::Control) {
-            self.report_command_queue_park();
-            let _ = wait.recv();
+        if let Some(waiter) = waiter {
+            self.finish_overlay_wait(&waiter, true);
         }
         Ok(Execution::default())
     }
@@ -20609,7 +20618,7 @@ impl Shared {
         }
         if let Some(menu) = menu {
             if let Some(waiter) = menu.waiter {
-                let _ = waiter.wake.try_send(());
+                waiter.complete(false);
             }
             self.publish_to_client(client, EventPayload::Menu { state: None });
         }
@@ -21886,7 +21895,7 @@ impl Shared {
         };
         self.publish_to_client(client, EventPayload::Menu { state: None });
         if let Some(waiter) = session.waiter {
-            let _ = waiter.wake.try_send(());
+            waiter.complete(false);
         }
         let MenuAction::Choose(index) = action else {
             return;
@@ -21999,6 +22008,37 @@ impl Shared {
         uppercase_error: bool,
     ) {
         let source = InsertedCommandSource::String(command.to_owned());
+        #[cfg(unix)]
+        if self.loop_active.load(Ordering::Acquire) {
+            let label = format!("<{title}>");
+            let title = title.to_owned();
+            self.enqueue_inserted_task(
+                client,
+                ClientKind::Interactive,
+                context,
+                &source,
+                &label,
+                None,
+                false,
+                None,
+                Box::new(move |shared, context, result| match result {
+                    Ok(result) => shared.route_background_inserted_output(
+                        client,
+                        ClientKind::Interactive,
+                        context,
+                        title,
+                        &result.output,
+                    ),
+                    Err(error) => shared.publish_background_command_error(
+                        client,
+                        context,
+                        &error,
+                        uppercase_error,
+                    ),
+                }),
+            );
+            return;
+        }
         match self.execute_inserted_commands(
             client,
             ClientKind::Interactive,
@@ -36965,7 +37005,7 @@ struct MenuSession {
     commands: Vec<Option<String>>,
     target: ExecutionContext,
     styles: OverlayStyleOverrides,
-    waiter: Option<MenuWaiter>,
+    waiter: Option<OverlayWait>,
     /// Set for the menu a popup raises for itself. tmux keeps that one in
     /// `pd->md` rather than on the client, and `popup_menu_done` switches on
     /// the chosen row's key instead of running a command.
@@ -36979,10 +37019,8 @@ struct ModeTreeMenu {
     outside: bool,
 }
 
-struct MenuWaiter {
-    client: ClientId,
-    wake: crossbeam_channel::Sender<()>,
-}
+#[cfg(test)]
+mod menu_queue_e08_tests;
 
 /// A `-t` the daemon resolved for the mux. `command` is the rewritten
 /// invocation when the alias found a pane, and `None` when it did not, which is
@@ -37149,7 +37187,7 @@ fn dismiss_overlays(
         && let Some(menu) = inner.client_mut(client).and_then(|c| c.menu.take())
     {
         if let Some(waiter) = menu.waiter {
-            let _ = waiter.wake.try_send(());
+            waiter.complete(false);
         }
         events.push(EventPayload::Menu { state: None });
     }

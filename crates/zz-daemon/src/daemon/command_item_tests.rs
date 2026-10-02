@@ -102,3 +102,129 @@ fn unwinding_discards_only_the_items_held_notifications() {
             .is_some()
     );
 }
+
+#[test]
+fn interleaved_items_for_one_client_keep_captures_and_scopes_separate() {
+    let shared = Arc::new(Shared::new(1));
+    let client = ClientId(7);
+    let first = shared.command_item(Some((client, 10)));
+    let second = shared.command_item(Some((client, 20)));
+    let first_capture = first.begin_control_command_event_capture(client);
+    let second_capture = second.begin_control_command_event_capture(client);
+    let first_hooks = ctrl::HookNotificationsOnlyScope::new(&first, true);
+    let nested_hooks = ctrl::HookNotificationsOnlyScope::new(&first, false);
+    assert!(
+        first
+            .command_item
+            .as_ref()
+            .unwrap()
+            .lock()
+            .hook_notifications_only
+    );
+    drop(nested_hooks);
+    let first_keys = timers::KeyTablePublishHold::enter(&first);
+    let first_focus = hook_events::InputFocusScope::open(&first, &mut shared.inner.lock());
+    let second_focus = hook_events::InputFocusScope::open(&second, &mut shared.inner.lock());
+    first.publish_control_command_guard(Some((client, 0)), "first".into(), false, false);
+    second.publish_control_command_guard(Some((client, 0)), "second".into(), false, false);
+    assert!(
+        first
+            .command_item
+            .as_ref()
+            .unwrap()
+            .lock()
+            .hook_notifications_only
+    );
+    assert!(
+        !second
+            .command_item
+            .as_ref()
+            .unwrap()
+            .lock()
+            .hook_notifications_only
+    );
+    assert!(timers::KeyTablePublishHold::active(&first));
+    assert!(!timers::KeyTablePublishHold::active(&second));
+    first.report_command_queue_park();
+    let token = match first.command_item.as_ref().unwrap().lock().state() {
+        cmdq::State::Waiting(token) => token,
+        state => panic!("unexpected item state: {state:?}"),
+    };
+    assert_eq!(
+        second.command_item.as_ref().unwrap().lock().state(),
+        cmdq::State::Ready
+    );
+    drop(first_hooks);
+    drop(first_keys);
+    assert!(!timers::KeyTablePublishHold::active(&first));
+    assert!(first.command_item.as_ref().unwrap().lock().resume(token));
+    assert!(first_focus.close(&shared.inner.lock()).is_some());
+    assert!(second_focus.close(&shared.inner.lock()).is_some());
+    let second_events = second_capture.finish();
+    let first_events = first_capture.finish();
+    assert!(
+        matches!(first_events.events.as_slice(), [EventPayload::ControlCommandGuard { output, .. }] if output == "first")
+    );
+    assert!(
+        matches!(second_events.events.as_slice(), [EventPayload::ControlCommandGuard { output, .. }] if output == "second")
+    );
+    assert!(
+        shared
+            .inner
+            .lock()
+            .control_command_event_captures
+            .is_empty()
+    );
+}
+
+#[test]
+fn duplicate_queue_completion_finishes_hooks_jobs_and_blockers_once() {
+    let shared = Arc::new(Shared::new(1)).command_item(None);
+    let count = Arc::new(AtomicU64::new(0));
+    let job_count = Arc::clone(&count);
+    let execution = shared.command_queue_execution(CommandExecutionState {
+        draining: false,
+        wait_yields: false,
+        detached: false,
+        deferred_shutdown: Cell::new(DeferredShutdown::None),
+        deferred_control_exit: Cell::new(None),
+        yielded: Cell::new(CommandQueueYield::None),
+        yield_boundary: false,
+        shutdown_blocker: RefCell::new(ShutdownBlocker::acquire(&shared, false)),
+        pending_event_hooks: RefCell::new(Vec::new()),
+        deferred_shell_jobs: RefCell::new(vec![Box::new(move |_| {
+            job_count.fetch_add(1, Ordering::Relaxed);
+        })]),
+        callback_parse_failures: RefCell::new(Vec::new()),
+        deferred_config_replay_issues: RefCell::new(Vec::new()),
+        reported_failures: Cell::new(false),
+        suppress_after_hooks: Cell::new(false),
+        suppress_output: Cell::new(false),
+    });
+    assert_eq!(shared.active_shutdown_blockers(), 1);
+    let _hold = shared.defer_control_notifications();
+    execution
+        .pending_event_hooks
+        .borrow_mut()
+        .push(PendingHookEvent::paste_buffer(
+            "paste-buffer-changed",
+            "one".to_owned(),
+        ));
+    shared.finish_command_queue_execution(&execution, None);
+    shared.finish_command_queue_execution(&execution, None);
+    assert_eq!(execution.item.state(), cmdq::State::Done);
+    assert_eq!(count.load(Ordering::Relaxed), 1);
+    assert_eq!(shared.active_shutdown_blockers(), 0);
+    assert_eq!(
+        shared
+            .command_item
+            .as_ref()
+            .unwrap()
+            .lock()
+            .deferred_control_notifications
+            .as_ref()
+            .unwrap()
+            .len(),
+        1
+    );
+}

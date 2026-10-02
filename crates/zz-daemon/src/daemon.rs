@@ -8759,6 +8759,7 @@ impl Shared {
         let mut retired_popups = Vec::new();
         let mut deferred_terminal_commands = Vec::new();
         let mut terminal_wait = None;
+        let mut key_listing = None;
         let mut injected_client_keys = Vec::new();
         let mut mode_table_keys = Vec::new();
         let mut pane_mode_keys = Vec::new();
@@ -8963,15 +8964,39 @@ impl Shared {
             let previous_refuse_new_session_attach = context.refuses_new_session_attach();
             set_context_client_terminal(context, invoking_client_terminal);
             context.set_refuse_new_session_attach(nested_attach_guard.is_some());
+            let mut pending_listing = None;
             let execution = if let Some(seed) = command_seed {
                 let (engine, facts) = split_borrowed_format_hook_facts(&mut inner, seed);
                 let mut hooks = DaemonFormatHooks::command_with_optional_variables(
                     &facts,
                     (!format_variables.is_empty()).then_some(&format_variables),
                 );
-                engine.execute_without_alias_expansion(context, command, &mut hooks, &mut |shell| {
-                    shell_is_valid(Path::new(shell))
-                })
+                if command_name == "list-keys" {
+                    hooks = hooks.with_command_item("list-keys");
+                    cmdq::start_key_listing(
+                        engine,
+                        context,
+                        &command.args,
+                        &mut hooks,
+                        &mut pending_listing,
+                    )
+                } else {
+                    engine.execute_without_alias_expansion(
+                        context,
+                        command,
+                        &mut hooks,
+                        &mut |shell| shell_is_valid(Path::new(shell)),
+                    )
+                }
+            } else if command_name == "list-keys" {
+                hooks = hooks.with_command_item("list-keys");
+                cmdq::start_key_listing(
+                    &inner.engine,
+                    context,
+                    &command.args,
+                    &mut hooks,
+                    &mut pending_listing,
+                )
             } else {
                 inner.engine.execute_without_alias_expansion(
                     context,
@@ -8980,6 +9005,12 @@ impl Shared {
                     &mut |shell| shell_is_valid(Path::new(shell)),
                 )
             };
+            if let Some(listing) = pending_listing {
+                key_listing = Some((
+                    listing,
+                    format_hook_facts_for_client(&inner, client, context),
+                ));
+            }
             context.set_refuse_new_session_attach(previous_refuse_new_session_attach);
             set_context_client_terminal(context, previous_client_terminal);
             let mut execution = execution?;
@@ -11120,6 +11151,11 @@ impl Shared {
                     .get_or_insert_with(|| terminal_requests::CommandWait::new(self))
                     .tap(&ack);
             }
+        }
+        if let Some((listing, facts)) = key_listing {
+            let wait =
+                terminal_wait.get_or_insert_with(|| terminal_requests::CommandWait::new(self));
+            cmdq::render_key_listing(self, client, listing, facts, format_variables, wait.start());
         }
         if deferred_terminal_commands.iter().any(|command| {
             matches!(command, DeferredTerminalCommand::ArmCopySource { .. })

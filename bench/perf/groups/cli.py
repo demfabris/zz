@@ -1,4 +1,8 @@
+import shlex
 import time
+
+import isolate
+from groups.copy import history_file
 
 import timing
 
@@ -68,6 +72,13 @@ def run(ctx):
     for verb, args in VERBS:
         if verb != "version":
             measure(ctx, verb, args, "p20", runs, warm)
+    path = ctx.env.path("cli-capture-history.txt")
+    history_file(path)
+    for mux in ctx.muxes:
+        mux.run("respawn-pane", "-k", "-t", "s:19.0", f"cat {shlex.quote(path)}; exec sleep 1000000", check=True)
+        if not ctx.wait(lambda mux=mux: mux.out("display-message", "-p", "-t", "s:19.0", "#{history_size}") == str(isolate.HISTORY_LIMIT), 30):
+            raise RuntimeError(f"{mux.name} capture history did not fill")
+    measure(ctx, "capture_history", ["capture-pane", "-p", "-t", "s:19.0", "-S", "-"], "p20", runs, warm)
     for mux in ctx.muxes:
         mux.run("kill-window", "-a", "-t", "s:0", check=True)
         for n in range(1, 20):

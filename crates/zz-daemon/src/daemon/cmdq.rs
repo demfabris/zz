@@ -223,3 +223,61 @@ impl<T> std::ops::DerefMut for CommandItem<T> {
 #[cfg(test)]
 #[path = "cmdq_tests.rs"]
 mod tests;
+
+pub(super) fn start_key_listing(
+    engine: &MuxEngine,
+    context: &ExecutionContext,
+    args: &[RawText],
+    hooks: &mut impl StatusHooks,
+    pending: &mut Option<zz_mux::KeyListing>,
+) -> Result<Execution, ServerError> {
+    let mut listing = engine
+        .start_key_listing(context, args, hooks)
+        .map_err(|error| {
+            zz_protocol::catalog_command_spec("list-keys")
+                .unwrap()
+                .classify_usage_error(error)
+        })?;
+    if let Some(execution) = engine.step_key_listing(&mut listing, hooks) {
+        Ok(execution)
+    } else {
+        *pending = Some(listing);
+        Ok(Execution::default())
+    }
+}
+
+pub(super) fn render_key_listing(
+    shared: &Arc<Shared>,
+    client: ClientId,
+    mut listing: zz_mux::KeyListing,
+    facts: FormatHookFacts,
+    variables: BTreeMap<String, String>,
+    state: Arc<terminal_requests::CommandState>,
+) {
+    shared
+        .terminal_requests
+        .schedule(Instant::now(), move |shared| {
+            if shared.command_queue_cancelled(client) || shared.stopping.load(Ordering::Acquire) {
+                state.resolve(Ok(Execution::default()));
+                return;
+            }
+            let execution = {
+                let inner = shared.inner.lock();
+                let mut hooks = DaemonFormatHooks::command_with_optional_variables(
+                    &facts,
+                    (!variables.is_empty()).then_some(&variables),
+                )
+                .with_command_item("list-keys");
+                inner.engine.step_key_listing(&mut listing, &mut hooks)
+            };
+            if let Some(execution) = execution {
+                state.resolve(Ok(execution));
+            } else {
+                render_key_listing(shared, client, listing, facts, variables, state);
+            }
+        });
+}
+
+#[cfg(test)]
+#[path = "listing_e22_tests.rs"]
+mod listing_e22_tests;

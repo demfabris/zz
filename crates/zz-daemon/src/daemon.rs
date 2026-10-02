@@ -4895,6 +4895,20 @@ fn resolve_and_prepare_command(
     Ok((command, alias_matched))
 }
 
+fn source_group(command: &CommandInvocation) -> Option<(String, u32)> {
+    command
+        .source
+        .as_ref()
+        .map(|source| (source.source.clone(), source.line))
+}
+
+fn in_source_group(command: &CommandInvocation, source: &str, line: u32) -> bool {
+    command
+        .source
+        .as_ref()
+        .is_some_and(|span| span.line == line && span.source == source)
+}
+
 fn prepare_config_command(
     engine: &MuxEngine,
     command: &CommandInvocation,
@@ -7591,7 +7605,8 @@ impl Shared {
         } else if let Some(hook) = match &result {
             Ok(_) => MuxEngine::after_command_hook(&name),
             Err(_) => Some("command-error"),
-        } {
+        } && self.command_hook_set(hook)
+        {
             let mut hook_context = match &result {
                 Ok(execution) => self.command_hook_context(&name, execution, context),
                 Err(_) => original_context,
@@ -8336,6 +8351,13 @@ impl Shared {
             hook_context.retarget_to_pane(&inner.engine.state, pane);
         }
         hook_context
+    }
+
+    fn command_hook_set(&self, hook: &str) -> bool {
+        self.inner
+            .lock()
+            .engine
+            .has_hook_commands_in_any_session(hook)
     }
 
     fn run_command_hook(
@@ -31126,7 +31148,7 @@ impl Shared {
         let non_empty = !input.is_empty();
         let (parsed, construction, verbose_groups) = {
             let mut inner = self.inner.lock();
-            let parsed = match input {
+            let mut parsed = match input {
                 ConfigInput::Text(text) => {
                     let parsed = if options.parse_only {
                         inner.engine.parse_config_parse_only(source, text)
@@ -31161,30 +31183,36 @@ impl Shared {
             let mut commands = Vec::new();
             let mut verbose_groups = Vec::new();
             let mut failure = None;
-            'groups: for group in parsed.commands.chunk_by(|left, right| {
-                left.source
-                    .as_ref()
-                    .map(|source| (&source.source, source.line))
-                    == right
-                        .source
+            let group_lengths = parsed
+                .commands
+                .chunk_by(|left, right| {
+                    left.source
                         .as_ref()
                         .map(|source| (&source.source, source.line))
-            }) {
-                let mut prepared_group = Vec::with_capacity(group.len());
-                for command in group {
-                    match prepare_config_command(&inner.engine, command) {
+                        == right
+                            .source
+                            .as_ref()
+                            .map(|source| (&source.source, source.line))
+                })
+                .map(<[CommandInvocation]>::len)
+                .collect::<Vec<_>>();
+            let mut parsed_commands = std::mem::take(&mut parsed.commands).into_iter();
+            'groups: for length in group_lengths {
+                let mut prepared_group = Vec::with_capacity(length);
+                for command in parsed_commands.by_ref().take(length) {
+                    match prepare_config_command(&inner.engine, &command) {
                         Ok((routed, alias_matched)) => {
                             if options.verbose && alias_matched {
                                 verbose_groups.push(vec![routed.clone()]);
                             }
                             prepared_group.push(PreparedConfigCommand {
-                                original: command.clone(),
+                                original: command,
                                 routed,
                             });
                         }
                         Err(error) => {
                             failure = Some(PreparedConfigFailure {
-                                original: command.clone(),
+                                original: command,
                                 message: error.tmux_message(),
                             });
                             break 'groups;
@@ -31618,6 +31646,7 @@ impl Shared {
         }
         let command = prepared.original;
         if !options.suppress_replay_output
+            && report.delivered_replay_issues < report.replay_issues().len()
             && let Some(replay_client) = options.replay_client
         {
             let replay_kind = self
@@ -31629,13 +31658,9 @@ impl Shared {
                 });
             self.route_config_replay_errors(replay_client, replay_kind, context.pane, report);
         }
-        let group = command
-            .source
+        if failed_group
             .as_ref()
-            .map(|source| (source.source.clone(), source.line));
-        if group
-            .as_ref()
-            .is_some_and(|group| failed_group.as_ref() == Some(group))
+            .is_some_and(|(source, line)| in_source_group(&command, source, *line))
         {
             return Ok(ConfigFrameAction::Continue);
         }
@@ -31736,7 +31761,7 @@ impl Shared {
                         true,
                         false,
                     );
-                    *failed_group = group;
+                    *failed_group = source_group(&command);
                     return Ok(ConfigFrameAction::Continue);
                 }
                 Err(error) => {
@@ -31749,7 +31774,7 @@ impl Shared {
                         true,
                         true,
                     );
-                    *failed_group = group;
+                    *failed_group = source_group(&command);
                     return Ok(ConfigFrameAction::Continue);
                 }
             };
@@ -31768,7 +31793,7 @@ impl Shared {
                     true,
                     false,
                 );
-                *failed_group = group;
+                *failed_group = source_group(&command);
                 return Ok(ConfigFrameAction::Continue);
             }
             if source_effects.is_empty() {
@@ -31856,8 +31881,8 @@ impl Shared {
                     source_queue::SourceRead {
                         pending: pending_sources.into(),
                         parsed: VecDeque::new(),
+                        group: source_group(&command),
                         command,
-                        group,
                         source_error_group,
                         source_error,
                         source_command_error,
@@ -31910,8 +31935,8 @@ impl Shared {
                     .wait()
                     .expect("source continuation token"),
                 children,
+                group: source_group(&command),
                 command,
-                group,
                 source_error_group,
                 source_error,
                 source_command_error,
@@ -31936,7 +31961,7 @@ impl Shared {
                     &command,
                     &name_error,
                 );
-                *failed_group = group;
+                *failed_group = source_group(&command);
                 return Ok(ConfigFrameAction::Continue);
             }
         }
@@ -31975,7 +32000,6 @@ impl Shared {
         let finish = source_queue::CommandFinish {
             command,
             routed,
-            group,
             previous_replay_client,
             previous_control_target,
             early_shell_guard,
@@ -32033,7 +32057,6 @@ impl Shared {
         let source_queue::CommandFinish {
             command,
             routed,
-            group,
             previous_replay_client,
             previous_control_target,
             early_shell_guard,
@@ -32224,7 +32247,7 @@ impl Shared {
                     }
                 }
                 if failed_source_group {
-                    *failed_group = group;
+                    *failed_group = source_group(&command);
                 }
             }
             Err(DaemonError::Server(
@@ -32237,7 +32260,7 @@ impl Shared {
                 report.note_unlocated_command_error(&message);
                 append_inserted_output(&mut captured_output, &message);
                 publish_guard(captured_output, true, false, captured_events);
-                *failed_group = group;
+                *failed_group = source_group(&command);
             }
             Err(DaemonError::Server(error)) => {
                 let message = error.tmux_message();
@@ -32245,7 +32268,7 @@ impl Shared {
                 report.note_command_error(&command, &message);
                 append_inserted_output(&mut captured_output, &message);
                 publish_guard(captured_output, true, true, captured_events);
-                *failed_group = group;
+                *failed_group = source_group(&command);
             }
             Err(error) => {
                 report.note_startup_command_cause(&command, &daemon_error_text(&error));

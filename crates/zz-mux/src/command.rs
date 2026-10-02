@@ -2710,6 +2710,19 @@ impl MuxEngine {
     }
 
     #[must_use]
+    pub fn has_hook_commands_in_any_session(&self, name: &str) -> bool {
+        self.global_hooks
+            .get(name)
+            .into_iter()
+            .chain(
+                self.session_hooks
+                    .values()
+                    .filter_map(|hooks| hooks.get(name)),
+            )
+            .any(|hooks| !hooks.is_empty())
+    }
+
+    #[must_use]
     pub fn hook_commands(
         &self,
         session: Option<SessionId>,

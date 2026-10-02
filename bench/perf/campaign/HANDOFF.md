@@ -92,6 +92,15 @@ read "Lane brief rules" before launching anything.
     tests. My A/B of its final HEAD vs e12: `send_keys.p20` +28.7% and `mem.threads.p1` 2 -> 3 (its
     own runs predated its last fixes). Fix lane `e19fix` (helper thread start per command with a
     50 ms idle exit, 10 ms polling waits).
+  - e19fix (`999439ae`, Mac): idle helpers linger 250 ms instead of 50 ms, empty peer probes
+    retire their worker, discovery waits block on the reply (the registry enforces the deadline),
+    and the loop thread never blocks on a full helper queue. send-keys p20 back to 0.168 Minstr
+    (e12 0.168), threads 2/5, idle 0, 1442 daemon tests. e19's Linux tests pass.
+  - e02 (`c16fd4e2`, Linux): Hello, Control and Exec requests run as cmdq queues resumed on the
+    loop; output pressure parks a continuation until the socket drains (`wait_for_output` gone).
+    19/19 CLI medians at most 1.004x its base, control 0.989x, tui-output-backpressure passes.
+  - Both hosts now carry the same slices (cherry-picked in different orders): Mac `perf/loop`
+    `fdf67a9d`, alienware `perf/loop-e01` `397d7da8`. The e01 Mac leg is green (1411 lib tests).
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

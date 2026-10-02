@@ -16,14 +16,30 @@ pub(super) fn queue_command(command: &CommandInvocation) -> bool {
     let name = canonical_command(&command.name);
     terminal_read_command(name)
         || MuxEngine::is_command_alias_group(command)
-        || matches!(name, "wait-for" | "run-shell" | "if-shell")
+        || matches!(
+            name,
+            "wait-for"
+                | "run-shell"
+                | "if-shell"
+                | "display-panes"
+                | "command-prompt"
+                | "confirm-before"
+        )
 }
 
 pub(super) fn task_command(command: &CommandInvocation) -> bool {
     let name = canonical_command(&command.name);
     MuxEngine::is_command_alias_group(command)
         || terminal_read_command(name)
-        || matches!(name, "wait-for" | "run-shell" | "if-shell")
+        || matches!(
+            name,
+            "wait-for"
+                | "run-shell"
+                | "if-shell"
+                | "display-panes"
+                | "command-prompt"
+                | "confirm-before"
+        )
 }
 
 pub(super) fn can_run_inline(
@@ -299,6 +315,7 @@ impl Drop for CommandTask {
             .pending_wait
             .take();
         if let Some(wait) = pending {
+            self.shared.wake_wait_items([wait.continuation.clone()]);
             let next = remove_wait_item(
                 &mut self.shared.inner.lock(),
                 &wait.name,
@@ -439,6 +456,7 @@ impl Drop for InsertedTask {
             .pending_wait
             .take();
         if let Some(wait) = pending {
+            self.shared.wake_wait_items([wait.continuation.clone()]);
             let next = remove_wait_item(
                 &mut self.shared.inner.lock(),
                 &wait.name,

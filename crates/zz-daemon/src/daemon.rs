@@ -5585,7 +5585,7 @@ impl Shared {
                 .values_mut()
                 .filter_map(|c| c.confirm.take())
                 .filter_map(|confirm| match confirm.execution {
-                    ConfirmExecution::Blocking { wake, .. } => Some(wake),
+                    ConfirmExecution::Blocking { waiter } => Some(waiter),
                     ConfirmExecution::Deferred { .. } | ConfirmExecution::Background { .. } => None,
                 })
                 .collect::<Vec<_>>();
@@ -5630,7 +5630,7 @@ impl Shared {
             let _ = waiter.wake.try_send(());
         }
         for waiter in confirm_waiters {
-            let _ = waiter.try_send(false);
+            waiter.complete(false);
         }
         events
     }
@@ -6475,18 +6475,32 @@ impl Shared {
                 .collect::<Vec<_>>();
             let confirm_waiters = inner
                 .clients
-                .values_mut()
-                .filter_map(|c| c.confirm.as_mut())
-                .filter_map(|confirm| {
-                    let ConfirmExecution::Blocking {
-                        client: owner,
-                        wake,
-                    } = &confirm.execution
-                    else {
-                        return None;
-                    };
-                    (*owner == client).then(|| wake.clone())
+                .values()
+                .flat_map(|client| {
+                    let confirm =
+                        client
+                            .confirm
+                            .as_ref()
+                            .and_then(|confirm| match &confirm.execution {
+                                ConfirmExecution::Blocking { waiter } => Some(waiter),
+                                _ => None,
+                            });
+                    [
+                        confirm,
+                        client
+                            .display_panes
+                            .as_ref()
+                            .and_then(|overlay| overlay.waiter.as_ref()),
+                        client
+                            .command_prompt
+                            .as_ref()
+                            .and_then(|prompt| prompt.waiter.as_ref()),
+                    ]
+                    .into_iter()
+                    .flatten()
                 })
+                .filter(|waiter| waiter.0.client == client)
+                .cloned()
                 .collect::<Vec<_>>();
             let cold_shutdown = inner.cold_bootstrap.unregister(client);
             if cold_shutdown {
@@ -6525,7 +6539,7 @@ impl Shared {
             let _ = waiter.wake.try_send(());
         }
         for waiter in confirm_waiters {
-            let _ = waiter.try_send(false);
+            waiter.complete(false);
         }
         if detached && control {
             self.refresh_control_output_taps();
@@ -7917,6 +7931,8 @@ impl Shared {
             if already_up {
                 Ok(Execution::default())
             } else {
+                let waiter =
+                    wait.then(|| self.register_overlay_wait(client, None, queue_execution));
                 let result = self.execute_with_mux_source_inner(
                     target,
                     target_kind,
@@ -7927,12 +7943,15 @@ impl Shared {
                     queue_execution,
                     None,
                 );
-                if result.is_ok() && wait {
-                    self.wait_for_display_panes(target);
+                if let Some(waiter) = waiter {
+                    self.finish_overlay_wait(&waiter, result.is_ok());
                 }
                 result
             }
         } else if let Some(mut route) = prompt_route {
+            let waiter = route
+                .wait
+                .then(|| self.register_overlay_wait(client, None, queue_execution));
             let result = self.execute_with_mux_source_inner(
                 route.client,
                 route.kind,
@@ -7943,8 +7962,8 @@ impl Shared {
                 queue_execution,
                 None,
             );
-            if result.is_ok() && route.wait {
-                self.wait_for_command_prompt(route.client);
+            if let Some(waiter) = waiter {
+                self.finish_overlay_wait(&waiter, result.is_ok());
             }
             result
         } else if let Some(route) = client_alias_route {
@@ -8116,50 +8135,75 @@ impl Shared {
         Some(ClientAliasRoute { command })
     }
 
-    /// `cmd_display_panes_free` calls `cmdq_continue`, so the issuing queue
-    /// resumes whichever way the overlay closes: a chosen pane, a key that is
-    /// not an index, the timer, or the client leaving.
-    fn wait_for_display_panes(self: &Arc<Self>, target: ClientId) {
-        let wait = {
-            let mut inner = self.inner.lock();
-            let Some(overlay) = inner
-                .client_mut(target)
-                .and_then(|c| c.display_panes.as_mut())
-            else {
-                return;
-            };
-            if overlay.waiter.is_some() {
-                return;
-            }
-            let (wake, wait) = crossbeam_channel::bounded(1);
-            overlay.waiter = Some(wake);
-            wait
+    fn register_overlay_wait(
+        self: &Arc<Self>,
+        client: ClientId,
+        commands: Option<Vec<CommandInvocation>>,
+        queue_execution: Option<&CommandQueueExecution>,
+    ) -> OverlayTicket {
+        let continuation = cmdq::WaitContinuation::new(
+            self.command_item
+                .as_ref()
+                .and_then(|item| item.lock().wait()),
+            self.client_writers.lock().get(&client).map(Arc::downgrade),
+        );
+        let waiter = OverlayWait(Arc::new(OverlayCompletion {
+            client,
+            continuation: continuation.clone(),
+            accepted: Arc::new(AtomicBool::new(false)),
+            owner: Arc::downgrade(&self.server_owner()),
+            completing: Mutex::new(()),
+        }));
+        let mut item = self.command_item.as_ref().expect("command item").lock();
+        #[cfg(unix)]
+        let loop_leaf = item.loop_leaf;
+        #[cfg(not(unix))]
+        let loop_leaf = false;
+        if (item.loop_wait || loop_leaf)
+            && queue_execution.is_some_and(|queue| queue.frame_active.get())
+        {
+            item.pending_wait = Some(Box::new(RegisteredWait {
+                name: String::new(),
+                continuation,
+                #[cfg(unix)]
+                shell: None,
+                overlay: commands.map(|commands| OverlayCommands {
+                    commands,
+                    accepted: Arc::clone(&waiter.0.accepted),
+                }),
+                leaf: None,
+                guard: None,
+                terminal: None,
+            }));
+        }
+        let ticket = OverlayTicket {
+            continuation: waiter.0.continuation.clone(),
+            accepted: Arc::clone(&waiter.0.accepted),
         };
-        self.report_command_queue_park();
-        let _ = wait.recv();
+        item.raising_overlay = Some(waiter);
+        ticket
     }
 
-    /// The `cmdq_wait` half: the issuing queue resumes when
-    /// `cmd_command_prompt_callback` or `cmd_command_prompt_free` calls
-    /// `cmdq_continue`, which is every way the prompt can end.
-    fn wait_for_command_prompt(self: &Arc<Self>, target: ClientId) {
-        let wait = {
-            let mut inner = self.inner.lock();
-            let Some(prompt) = inner
-                .client_mut(target)
-                .and_then(|c| c.command_prompt.as_mut())
-            else {
-                return;
-            };
-            if prompt.waiter.is_some() {
-                return;
+    fn finish_overlay_wait(&self, waiter: &OverlayTicket, succeeded: bool) {
+        let queued = {
+            let mut item = self.command_item.as_ref().expect("command item").lock();
+            item.raising_overlay.take();
+            if !succeeded {
+                item.pending_wait.take();
             }
-            let (wake, wait) = crossbeam_channel::bounded(1);
-            prompt.waiter = Some(wake);
-            wait
+            item.pending_wait.is_some()
         };
+        if !succeeded {
+            return;
+        }
         self.report_command_queue_park();
-        let _ = wait.recv();
+        if queued || waiter.continuation.ready() {
+            return;
+        }
+        #[cfg(any(test, windows))]
+        waiter.continuation.wait();
+        #[cfg(all(unix, not(test)))]
+        let _ = waiter;
     }
 
     fn enforce_destroy_unattached_if_changed(
@@ -10059,7 +10103,7 @@ impl Shared {
                             let (vi_keys, word_separators) = inner
                                 .engine
                                 .prompt_key_options(client_attached_session(&inner, client));
-                            let prompt = CommandPrompt::new(
+                            let mut prompt = CommandPrompt::new(
                                 steps.clone(),
                                 template.clone(),
                                 source.clone(),
@@ -10069,6 +10113,10 @@ impl Shared {
                                 *pane,
                             )
                             .with_key_options(vi_keys, word_separators);
+                            prompt.waiter = self
+                                .command_item
+                                .as_ref()
+                                .and_then(|item| item.lock().raising_overlay.take());
                             // `status_prompt_set` clears any message first, and
                             // its own freeze then decides the gate.
                             prompt_cleared_message = take_client_message(&mut inner, client);
@@ -10303,7 +10351,10 @@ impl Shared {
                                 cancel: deadline.map(|_| self.timer_tx.clone()),
                                 template: template.clone(),
                                 source: source.clone(),
-                                waiter: None,
+                                waiter: self
+                                    .command_item
+                                    .as_ref()
+                                    .and_then(|item| item.lock().raising_overlay.take()),
                             });
                         if let Some(deadline) = deadline {
                             display_panes_deadline = Some(DisplayPanesDeadline {
@@ -12285,6 +12336,7 @@ impl Shared {
                     continuation,
                     #[cfg(unix)]
                     shell: None,
+                    overlay: None,
                     leaf: None,
                     guard: None,
                     terminal: None,
@@ -14430,6 +14482,23 @@ impl Shared {
                 if let Some(shell) = wait.shell {
                     step.0 = shell.finish(self, &mut frame.context, Some(&frame.execution));
                 }
+                if let Some(overlay) = wait.overlay {
+                    step.0 = if overlay.accepted.load(Ordering::Acquire) {
+                        self.run_confirm_commands(
+                            client,
+                            kind,
+                            &mut frame.context,
+                            &overlay.commands,
+                            Some(&frame.execution),
+                        )
+                        .map_err(post_admission_callback_error)
+                    } else {
+                        Err(DaemonError::CommandExit {
+                            output: RawText::default(),
+                            exit_code: 1,
+                        })
+                    };
+                }
                 if let Some(mut leaf) = wait.leaf {
                     let command = leaf.command.take().expect("wait command");
                     step.0 = self.finish_inserted_leaf(
@@ -15904,6 +15973,7 @@ impl Shared {
                     continuation,
                     #[cfg(unix)]
                     shell: None,
+                    overlay: None,
                     leaf: None,
                     guard: None,
                     terminal: None,
@@ -15932,6 +16002,7 @@ impl Shared {
                     name: String::new(),
                     continuation: wait.continuation.clone(),
                     shell: Some(wait),
+                    overlay: None,
                     leaf: None,
                     guard: None,
                     terminal: None,
@@ -19187,12 +19258,23 @@ impl Shared {
             confirm_key: bytes[0],
             default_yes: parsed.default_yes,
         };
-        let (wake, wait) = crossbeam_channel::bounded(1);
         let blocking_commands = commands.clone();
+        let waiter = (!parsed.background
+            && matches!(kind, ClientKind::Command | ClientKind::Control))
+        .then(|| self.register_overlay_wait(client, Some(commands.clone()), queue_execution));
         let execution = if parsed.background {
             ConfirmExecution::Background { commands }
         } else if matches!(kind, ClientKind::Command | ClientKind::Control) {
-            ConfirmExecution::Blocking { client, wake }
+            ConfirmExecution::Blocking {
+                waiter: self
+                    .command_item
+                    .as_ref()
+                    .unwrap()
+                    .lock()
+                    .raising_overlay
+                    .take()
+                    .unwrap(),
+            }
         } else {
             ConfirmExecution::Deferred {
                 commands,
@@ -19238,9 +19320,16 @@ impl Shared {
         if parsed.background || !matches!(kind, ClientKind::Command | ClientKind::Control) {
             return Ok(Execution::default());
         }
-        self.report_command_queue_park();
-        let accepted = wait.recv().unwrap_or(false);
-        if !accepted {
+        let waiter = waiter.unwrap();
+        self.finish_overlay_wait(&waiter, true);
+        if self
+            .command_item
+            .as_ref()
+            .is_some_and(|item| item.lock().pending_wait.is_some())
+        {
+            return Ok(Execution::default());
+        }
+        if !waiter.accepted.load(Ordering::Acquire) {
             return Err(DaemonError::CommandExit {
                 output: RawText::default(),
                 exit_code: 1,
@@ -20414,8 +20503,8 @@ impl Shared {
             self.publish_to_client(client, EventPayload::Menu { state: None });
         }
         if let Some(confirm) = confirm {
-            if let ConfirmExecution::Blocking { wake, .. } = confirm.execution {
-                let _ = wake.try_send(false);
+            if let ConfirmExecution::Blocking { waiter } = confirm.execution {
+                waiter.complete(false);
             }
             self.publish_to_client(client, EventPayload::Confirm { state: None });
         }
@@ -21755,8 +21844,8 @@ impl Shared {
         self.publish_to_client(client, EventPayload::Confirm { state: None });
         let ConfirmAction::Reply(accepted) = action;
         match session.execution {
-            ConfirmExecution::Blocking { wake, .. } => {
-                let _ = wake.try_send(accepted);
+            ConfirmExecution::Blocking { waiter } => {
+                waiter.complete(accepted);
             }
             ConfirmExecution::Deferred {
                 commands,
@@ -21827,6 +21916,33 @@ impl Shared {
         commands: &[CommandInvocation],
         title: &str,
     ) {
+        #[cfg(unix)]
+        if self.loop_active.load(Ordering::Acquire) {
+            let title = title.to_owned();
+            self.enqueue_inserted_task(
+                client,
+                kind,
+                context,
+                &InsertedCommandSource::Commands(commands.to_vec()),
+                "<confirm-before>",
+                context.control_command_target(),
+                false,
+                None,
+                Box::new(move |shared, context, result| match result {
+                    Ok(result) => shared.route_background_inserted_output(
+                        client,
+                        kind,
+                        context,
+                        title,
+                        &result.output,
+                    ),
+                    Err(error) => {
+                        shared.publish_background_command_error(client, context, &error, false);
+                    }
+                }),
+            );
+            return;
+        }
         match self.run_confirm_commands(client, kind, context, commands, None) {
             Ok(execution) => self.route_background_inserted_output(
                 client,
@@ -23043,6 +23159,7 @@ impl Shared {
                 continuation: continuation.clone(),
                 #[cfg(unix)]
                 shell: None,
+                overlay: None,
                 leaf: None,
                 guard: None,
                 terminal: None,
@@ -24860,7 +24977,7 @@ impl Shared {
                     ))
                     .into());
                 }
-                let (submission, remembered, prompt_type, retired, chained) = {
+                let (submission, remembered, prompt_type, retired, chained, waiter) = {
                     let mut inner = self.inner.lock();
                     let Some(mut prompt) = inner
                         .client_mut(client)
@@ -24876,10 +24993,11 @@ impl Shared {
                     if prompt.mode != CommandPromptMode::Incremental && prompt.advance() {
                         let state = prompt.state(prompt_history(&inner, prompt_type));
                         inner.client_entry(client).command_prompt.replace(prompt);
-                        (None, remembered, prompt_type, false, Some(state))
+                        (None, remembered, prompt_type, false, Some(state), None)
                     } else {
                         // `-i` already ran the template on every edit; its Enter
                         // only records history and closes.
+                        let waiter = prompt.waiter.take();
                         let submission = (prompt.mode != CommandPromptMode::Incremental
                             && (prompt.answers.iter().any(|answer| !answer.is_empty())
                                 || prompt.template.is_some()))
@@ -24888,7 +25006,7 @@ impl Shared {
                             template: prompt.template,
                             source: prompt.source,
                         });
-                        (submission, remembered, prompt_type, retired, None)
+                        (submission, remembered, prompt_type, retired, None, waiter)
                     }
                 };
                 if let Some(remembered) = &remembered {
@@ -24908,6 +25026,7 @@ impl Shared {
                 if let Some(submission) = submission {
                     self.submit_command_prompt(client, kind, context, &submission);
                 }
+                drop(waiter);
             }
             CommandPromptAction::Close => {
                 let retired = self
@@ -34294,11 +34413,71 @@ struct WaitItem {
     continuation: cmdq::WaitContinuation,
 }
 
+#[derive(Clone)]
+struct OverlayTicket {
+    continuation: cmdq::WaitContinuation,
+    accepted: Arc<AtomicBool>,
+}
+
+#[derive(Clone)]
+struct OverlayWait(Arc<OverlayCompletion>);
+
+struct OverlayCompletion {
+    client: ClientId,
+    continuation: cmdq::WaitContinuation,
+    accepted: Arc<AtomicBool>,
+    owner: Weak<Shared>,
+    completing: Mutex<()>,
+}
+
+impl std::fmt::Debug for OverlayWait {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_tuple("OverlayWait")
+            .field(&self.0.client)
+            .finish()
+    }
+}
+
+impl OverlayWait {
+    fn complete(&self, accepted: bool) {
+        let _completing = self.0.completing.lock();
+        if self.0.continuation.ready() {
+            return;
+        }
+        self.0.accepted.store(accepted, Ordering::Release);
+        if self.0.continuation.complete()
+            && let Some(owner) = self.0.owner.upgrade()
+        {
+            owner.accept_wake.wake();
+        }
+    }
+}
+
+impl Drop for OverlayCompletion {
+    fn drop(&mut self) {
+        if self.continuation.complete()
+            && let Some(owner) = self.owner.upgrade()
+        {
+            owner.accept_wake.wake();
+        }
+    }
+}
+
+struct OverlayCommands {
+    commands: Vec<CommandInvocation>,
+    accepted: Arc<AtomicBool>,
+}
+
+#[cfg(test)]
+mod overlay_queue_e07_tests;
+
 struct RegisteredWait {
     name: String,
     continuation: cmdq::WaitContinuation,
     #[cfg(unix)]
     shell: Option<ShellWait>,
+    overlay: Option<OverlayCommands>,
     leaf: Option<InsertedLeafContinuation>,
     guard: Option<InsertedControlGuard>,
     terminal: Option<Arc<terminal_requests::CommandState>>,
@@ -34632,7 +34811,7 @@ struct DisplayPanesSession {
     source: Option<SourceSpan>,
     /// `cdata->item`: the queue parked on the overlay, released when the
     /// session is dropped, which `cmd_display_panes_free` mirrors exactly.
-    waiter: Option<crossbeam_channel::Sender<()>>,
+    waiter: Option<OverlayWait>,
 }
 
 impl DisplayPanesSession {
@@ -36985,8 +37164,7 @@ struct CommandPromptRoute {
 
 enum ConfirmExecution {
     Blocking {
-        client: ClientId,
-        wake: crossbeam_channel::Sender<bool>,
+        waiter: OverlayWait,
     },
     Deferred {
         commands: Vec<CommandInvocation>,
@@ -37099,8 +37277,8 @@ fn dismiss_overlays(
     if raising != Some(Overlay::Confirm)
         && let Some(confirm) = inner.client_mut(client).and_then(|c| c.confirm.take())
     {
-        if let ConfirmExecution::Blocking { wake, .. } = confirm.execution {
-            let _ = wake.try_send(false);
+        if let ConfirmExecution::Blocking { waiter } = confirm.execution {
+            waiter.complete(false);
         }
         events.push(EventPayload::Confirm { state: None });
     }
@@ -37194,7 +37372,7 @@ struct CommandPrompt {
     /// prompt is `cmd_command_prompt_free`, so every way the prompt ends wakes
     /// the queue, and an answered prompt hands it to `PromptKeyOutcome` first
     /// so the answer's commands run before the issuing queue resumes.
-    waiter: Option<crossbeam_channel::Sender<()>>,
+    waiter: Option<OverlayWait>,
     /// `pr->keys` and `pr->word_separators`, filled by `prompt_set_options`
     /// from the raising session's `status-keys` and `word-separators` and kept
     /// for the prompt's whole life, plus the `PROMPT_COMMANDMODE` flag the vi
@@ -37730,7 +37908,7 @@ struct PromptKeyOutcome {
     limit_exceeded: bool,
     /// The parked command queue, released once the answer's own commands have
     /// run, the way `cmdq_insert_after` puts them ahead of `cmdq_continue`.
-    waiter: Option<crossbeam_channel::Sender<()>>,
+    waiter: Option<OverlayWait>,
 }
 
 fn command_prompt_focus_action(mode: CommandPromptMode, focused: bool) -> PromptKeyAction {
@@ -50181,6 +50359,7 @@ const PANE_WAIT_POLL_INTERVAL: Duration = Duration::from_millis(200);
 struct CommandItemContext {
     loop_wait: bool,
     pending_wait: Option<Box<RegisteredWait>>,
+    raising_overlay: Option<OverlayWait>,
     result: Option<(CommandResponse, bool)>,
     hook_notifications_only: bool,
     key_table_publish_hold: u32,

@@ -3325,6 +3325,10 @@ The serial daemon suite, focused tests, fmt and daemon Clippy pass. Five compat 
 
 **e13/e14 pick integration (2026-10-02, Linux, base `42ed7108`):** Terminal acknowledgement and read continuations from e04/e05 share wait records with shell completions; hooks keep their terminal waits and pane-exit worker handoff. The Linux shell wakeup test now launches through the job registry.
 Checks: 1,460 daemon unit tests and 35 integration tests pass; the allowed macOS-bundle fixture fails both in the suite and alone, and one soak stays ignored. All 372 terminal tests pass with one ignored. The focused delay, shell and terminal continuation tests, fmt and Clippy pass; seven compat groups pass 100 steps with zero divergences. No performance runs in this pick step; macOS and Windows checks remain with the orchestrator.
+**e07 as built (2026-10-02, macOS):** `Shared::register_overlay_wait` registers display-panes, command-prompt and confirm-before continuations before publishing their overlays; Unix workers return while the client records own the waits.
+Selection, acceptance, replacement, expiry, cancellation, detach and disconnect complete each wait once. Accepted confirms insert child queue frames; prompt answers retain their wait until the callback finishes, preserving history, freezing and alias timing.
+Six new tests cover twenty parked overlays of each type with zero added workers, child frames and lifecycle completion. The serial daemon suite passes 1,492 tests with one ignored; fmt, daemon Clippy and six compat scenarios pass, with zero divergences across 43 steps.
+Three alternating quick pairs against `loop-6c163955-cli` pass all 19 CLI instruction rows under the 1.02x-or-baseline-range rule. `chain5.p20` is 0.2910 -> 0.2923 Minstr (1.00447x); idle CPU, instructions and wakeups are zero, and p1/p20 threads stay at 2/5. Linux-only checks were not run on this Mac.
 
 
 ## W4-DELIVER: frames straight from shards (effort L)

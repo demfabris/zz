@@ -173,8 +173,6 @@ fn blocking_leaf(command: &CommandInvocation) -> bool {
             | "if-shell"
             | "wait-for"
             | "source-file"
-            | "confirm-before"
-            | "command-prompt"
             | "display-menu"
             | "display-popup"
             | "agent-send"

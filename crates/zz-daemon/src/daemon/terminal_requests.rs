@@ -316,6 +316,7 @@ impl CommandWait {
                 continuation,
                 #[cfg(unix)]
                 shell: None,
+                overlay: None,
                 leaf: None,
                 guard: None,
                 terminal: Some(Arc::clone(&state)),

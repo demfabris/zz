@@ -765,6 +765,7 @@ Lanes in flight:
 - One unreleased protocol version, 107, for the whole campaign. No lane bumps `PROTOCOL_VERSION`; non-append changes inside 107 are allowed.
 - "No compromises": targets are floors. A lane that meets its target but still shows avoidable work on its path removes that work too.
 - Wave 3 (single-owner loop and PTY shards) is committed, not optional. W2-FMT, W4-ROWS and W4-BINARY are reinstated lanes.
+- 2026-10-02: implementation lanes run as Opus 5.5 subagents at xhigh effort, not codex (too slow for implementation). Deeper reviews are unchanged.
 
 ## Decisions taken on the Linux leg (owner away; revisit if you disagree)
 
@@ -1025,6 +1026,12 @@ Tooling in `bench/perf/campaign/scripts/`: `lane-briefs.py` (kinds `slice`/`impl
 `--json`, `--output-schema lane-answer.schema.json`, `-o`, `< /dev/null`, the watchdog, a cost
 summary in `<out>.cost.json`, `<out>.failed` when no valid answer), `lane-watchdog.py`,
 `lane-cost.py`, `merge-checks-mac.sh`, `merge-checks-linux.sh`, `ab-compare.py`.
+
+Opus lanes (from 2026-10-02): the agent definition `~/.claude/agents/lane-impl.md` (`model: opus`,
+`effort: xhigh`) takes the same `lane-briefs.py` brief and runs in the background through the
+orchestrator's Agent tool, one per worktree, building on the Mac and reaching Linux over ssh.
+`lane-run.sh` and its watchdog do not apply: the orchestrator checks each lane's commits every
+15 minutes and stops a stuck agent itself.
 
 1. One commit per brief. W3-LOOP gets a brief per step e0, a, b, c, d, e of its plan; W3-SHARDS is
    sliced the same way before launch (shard threads and wake fd; actor state machine; own process

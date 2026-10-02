@@ -3283,6 +3283,12 @@ Checks: 48 loop tests, 68 control tests, the 640-command chain, 35 integration t
 Three alternating quick `cli,control,chatty,mem` pairs against the supplied `loop-ed5ba3aa-cli` give all 19 CLI instruction medians <=1.00365x; display p1/p20 and chain5 p20 are 1.00140x/0.99080x/0.99301x. Control instructions are 0.0457/0.0462 Minstr (0.98918x), and thread medians remain 3/25. Control latency is red on both binaries; burst throughput is also red in one baseline run, with no new or outside-lane reds.
 macOS posix_spawn, kqueue, PTY spin bridge, ri_instructions and iOS checks were not run on this Linux host; the orchestrator owns them.
 
+**e03b as built (2026-10-02, Linux):** `crates/zz-daemon/src/daemon.rs` keeps source replay in owned queue frames through `replay_config_file_in_queue_in_item`, preserving source depth, `current_file`, source-relative cwd, frozen aliases and warning order.
+`run_hook_commands_with_policy` uses owned frames for after-command, event and shutdown hooks; continuation tokens resume parents after their child work and retain output and error ordering.
+Event frames keep formats captured at mutation and repair targets at execution; source and hook child boundaries release input change windows before suspension.
+Three alternating quick pairs against `loop-9f31b80d-cli` pass all 23 required rows: the largest instruction ratio is 1.004324x, chain5 p20 is 0.997947x, and thread medians remain 3/25. Control latency is red on both binaries with no harness errors.
+Formatting, daemon Clippy, 3 new frame tests, 35 integration tests and 8 selected compat scenarios pass with zero divergences; the serial daemon suite passes 1,422 tests with three known failures, including the status-job test that passes alone. macOS and Windows checks were not run on this Linux host.
+
 ## W4-DELIVER: frames straight from shards (effort L)
 
 Scope: the loop pushes per-pane subscriber sinks (queue handle, stream kind, delivered base,

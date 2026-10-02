@@ -7380,16 +7380,43 @@ impl Shared {
         } else {
             String::new()
         };
+        if let Some(queue) = queue_execution
+            && let Some(child) = queue.child.borrow_mut().as_mut()
+            && let InsertedQueueChildKind::Hook(continuation) = &mut child.kind
+        {
+            *continuation = Some(HookLeafContinuation {
+                result,
+                pane_exit_code,
+            });
+            return Ok(Execution::default());
+        }
+        self.finish_hook_leaf_result(
+            client,
+            queue_execution,
+            result,
+            pane_exit_code,
+            &hook_output,
+        )
+    }
+
+    fn finish_hook_leaf_result(
+        &self,
+        client: ClientId,
+        queue_execution: Option<&CommandQueueExecution>,
+        result: Result<Execution, DaemonError>,
+        pane_exit_code: u8,
+        hook_output: &str,
+    ) -> Result<Execution, DaemonError> {
         match result {
             Ok(mut execution) => {
-                append_inserted_output(&mut execution.output, &hook_output);
+                append_inserted_output(&mut execution.output, hook_output);
                 self.finish_pane_command(client, execution, pane_exit_code)
             }
             Err(DaemonError::CommandExit {
                 mut output,
                 exit_code,
             }) => {
-                append_inserted_output(&mut output, &hook_output);
+                append_inserted_output(&mut output, hook_output);
                 Err(DaemonError::CommandExit { output, exit_code })
             }
             Err(DaemonError::ReportedCommandExit { output, .. })
@@ -7405,11 +7432,11 @@ impl Shared {
                 mut output,
                 exit_code,
             }) => {
-                append_inserted_output(&mut output, &hook_output);
+                append_inserted_output(&mut output, hook_output);
                 Err(DaemonError::ReportedCommandExit { output, exit_code })
             }
             Err(DaemonError::CommandFailed { mut output, error }) => {
-                append_inserted_output(&mut output, &hook_output);
+                append_inserted_output(&mut output, hook_output);
                 Err(DaemonError::CommandFailed { output, error })
             }
             Err(error) if hook_output.is_empty() => Err(error),
@@ -8104,224 +8131,189 @@ impl Shared {
         parent_queue: Option<&CommandQueueExecution>,
         initial_draining: bool,
     ) -> (String, bool) {
-        let mut output = RawText::default();
-        let mut yielded_any = false;
-        for commands in commands {
-            let detached = parent_queue.is_some_and(|execution| execution.detached);
-            let shutdown_blocker =
-                parent_queue.and_then(|execution| execution.fork_shutdown_blocker(detached));
-            let queue_execution = self.command_queue_execution(CommandExecutionState {
-                draining: initial_draining
-                    || parent_queue.is_some_and(CommandQueueExecution::is_draining),
-                wait_yields: parent_queue.is_some_and(|execution| execution.wait_yields),
-                detached,
-                deferred_shutdown: Cell::new(DeferredShutdown::None),
-                deferred_control_exit: Cell::new(None),
-                yielded: Cell::new(CommandQueueYield::None),
-                yield_boundary: true,
-                shutdown_blocker: RefCell::new(shutdown_blocker),
-                pending_event_hooks: RefCell::new(Vec::new()),
-                deferred_shell_jobs: RefCell::new(Vec::new()),
-                callback_parse_failures: RefCell::new(Vec::new()),
-                deferred_config_replay_issues: RefCell::new(Vec::new()),
-                reported_failures: Cell::new(false),
-                frame_active: Cell::new(false),
-                child: RefCell::new(None),
-                suppress_after_hooks: Cell::new(
-                    parent_queue.is_some_and(|execution| execution.suppress_after_hooks.get()),
-                ),
-                suppress_output: Cell::new(
-                    parent_queue.is_some_and(|execution| execution.suppress_output.get()),
-                ),
+        if commands.is_empty() {
+            return (String::new(), false);
+        }
+        let source = InsertedCommandSource::Hooks(Box::new(HookQueueSource {
+            commands: RefCell::new(commands),
+            variables: variables.clone(),
+            skip_resolution_errors,
+            initial_draining,
+            replaying: context.replay_client().is_some(),
+        }));
+        if let Some(parent) = parent_queue.filter(|queue| queue.frame_active.get()) {
+            parent.insert_foreground_child(InsertedQueueChild {
+                context: context.clone(),
+                source,
+                label: "<hook>".to_owned(),
+                control_target: None,
+                mux_source: MuxOptionSource::RuntimeCommand,
+                kind: InsertedQueueChildKind::Hook(None),
+                leaf: None,
+                guard: None,
+                leaf_name: None,
             });
-            let mut hook_context = context.clone();
-            let control_target = hook_context
-                .control_command_target()
-                .map(|(client, _)| (client, CONTROL_COMMAND_FRAME_FLAGS_NONE));
-            if let Some(target) = control_target {
-                hook_context.set_control_command_target(Some(target));
-                hook_context.set_replay_client(None);
-            } else {
-                let replaying_control = hook_context.replay_client().is_some_and(|client| {
-                    self.read_client(client, |c| c.and_then(|c| c.kind))
-                        == Some(ClientKind::Control)
-                });
-                if replaying_control {
-                    hook_context.set_replay_client(None);
-                }
-            }
-            hook_context.enter_hook(variables.clone());
-            for command in commands {
-                if queue_execution.has_yielded()
-                    || self.stopping.load(Ordering::Acquire)
-                        && !queue_execution.is_draining()
-                        && !queue_execution.detached
-                {
-                    break;
-                }
-                hook_context.no_hooks = true;
-                hook_context.format_variables.clone_from(variables);
-                let callback_failures_start =
-                    queue_execution.callback_parse_failures.borrow().len();
-                let (execution, direct_callback_failure) = match control_target {
-                    Some(target) => {
-                        let (execution, _, _, callback_failure, _) = self
-                            .execute_control_command_with_guard(
-                                client,
-                                kind,
-                                &mut hook_context,
-                                &command,
-                                target,
-                                true,
-                                MuxOptionSource::RuntimeCommand,
-                                InsertedCommandMode::Standard(&queue_execution),
-                            );
-                        (execution, callback_failure)
-                    }
-                    None => (
-                        self.execute_with_mux_source_routed_in_queue(
-                            client,
-                            kind,
-                            &mut hook_context,
-                            &command,
-                            MuxOptionSource::RuntimeCommand,
-                            Some(&queue_execution),
-                        ),
-                        None,
-                    ),
-                };
-                if let Some(failure) = direct_callback_failure {
-                    queue_execution
-                        .callback_parse_failures
-                        .borrow_mut()
-                        .push(failure);
-                }
-                if control_target.is_none()
-                    && context.replay_client().is_some()
-                    && execution.as_ref().err().is_some_and(command_parse_error)
-                    && queue_execution.callback_parse_failures.borrow().len()
-                        == callback_failures_start
-                {
-                    queue_execution.callback_parse_failures.borrow_mut().push(
-                        CallbackParseFailure::runtime_command(
-                            execution
-                                .as_ref()
-                                .err()
-                                .map_or_else(String::new, daemon_error_text),
-                            canonical_command(&command.name),
-                        ),
-                    );
-                }
-                let callback_parse_depth = execution
+            return (String::new(), false);
+        }
+        let mut queue_execution = self.inserted_child_execution(parent_queue, false, None);
+        queue_execution.item.yield_boundary = true;
+        let mut hook_context = context.clone();
+        let result = self.execute_inserted_commands_with_control_target_and_mux_source(
+            client,
+            kind,
+            &mut hook_context,
+            &source,
+            "<hook>",
+            None,
+            MuxOptionSource::RuntimeCommand,
+            InsertedCommandMode::Standard(&queue_execution),
+        );
+        let yielded = queue_execution.has_yielded();
+        self.finish_command_queue_execution(&queue_execution, parent_queue);
+        (
+            result.map_or_else(
+                |error| daemon_error_output(&error).map_or_else(String::new, ToString::to_string),
+                |result| result.output.to_string(),
+            ),
+            yielded,
+        )
+    }
+
+    fn finish_hook_frame_command(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        frame: &mut InsertedQueueFrame,
+        boundary: InsertedCommandBoundary,
+        step: InsertedCommandStep,
+    ) -> InsertedFrameAction {
+        let policy = frame.hook.as_ref().expect("hook frame policy");
+        let variables = &policy.variables;
+        let skip_resolution_errors = policy.skip_resolution_errors;
+        let replaying = policy.replaying;
+        let queue_execution = &frame.execution;
+        let control_target = frame.control_target;
+        let hook_context = &frame.context;
+        let command = boundary.command;
+        let callback_failures_start = boundary.callback_failures_start;
+        let (execution, _, _, direct_callback_failure, _) = step;
+        let output = &mut frame.result.output;
+        if let Some(failure) = direct_callback_failure {
+            queue_execution
+                .callback_parse_failures
+                .borrow_mut()
+                .push(failure);
+        }
+        if control_target.is_none()
+            && replaying
+            && execution.as_ref().err().is_some_and(command_parse_error)
+            && queue_execution.callback_parse_failures.borrow().len() == callback_failures_start
+        {
+            queue_execution.callback_parse_failures.borrow_mut().push(
+                CallbackParseFailure::runtime_command(
+                    execution
+                        .as_ref()
+                        .err()
+                        .map_or_else(String::new, daemon_error_text),
+                    canonical_command(&command.name),
+                ),
+            );
+        }
+        let callback_parse_depth = execution
+            .as_ref()
+            .err()
+            .map_or(0, post_admission_callback_parse_depth);
+        if callback_parse_depth != 0
+            && queue_execution.callback_parse_failures.borrow().len() == callback_failures_start
+            && let Some(failure) = CallbackParseFailure::for_command(
+                execution
                     .as_ref()
                     .err()
-                    .map_or(0, post_admission_callback_parse_depth);
-                if callback_parse_depth != 0
-                    && queue_execution.callback_parse_failures.borrow().len()
-                        == callback_failures_start
-                    && let Some(failure) = CallbackParseFailure::for_command(
-                        execution
-                            .as_ref()
-                            .err()
-                            .map_or_else(String::new, daemon_error_text),
-                        canonical_command(&command.name),
-                        None,
-                        callback_parse_depth,
-                    )
-                {
-                    queue_execution
-                        .callback_parse_failures
-                        .borrow_mut()
-                        .push(failure);
-                }
-                let callback_group_action = queue_execution.callback_group_action_since(
-                    callback_failures_start,
-                    canonical_command(&command.name),
-                    callback_parse_depth,
-                );
-                let nested_callback_only =
-                    callback_parse_depth > 1 && callback_group_action.is_none();
-                let mut callback_failures = queue_execution
+                    .map_or_else(String::new, daemon_error_text),
+                canonical_command(&command.name),
+                None,
+                callback_parse_depth,
+            )
+        {
+            queue_execution
+                .callback_parse_failures
+                .borrow_mut()
+                .push(failure);
+        }
+        let callback_group_action = queue_execution.callback_group_action_since(
+            callback_failures_start,
+            canonical_command(&command.name),
+            callback_parse_depth,
+        );
+        let nested_callback_only = callback_parse_depth > 1 && callback_group_action.is_none();
+        let mut callback_failures = queue_execution
+            .callback_parse_failures
+            .borrow_mut()
+            .split_off(callback_failures_start);
+        if !callback_failures.is_empty() {
+            queue_execution.note_reported_failure();
+            let owner = if variables
+                .get(HOOK_CONTEXT_FORMAT)
+                .is_some_and(|hook| hook == "command-error")
+            {
+                CallbackFailureOwner::CommandErrorHook
+            } else {
+                CallbackFailureOwner::Hook
+            };
+            for failure in &mut callback_failures {
+                failure.owner = owner;
+            }
+            if owner == CallbackFailureOwner::CommandErrorHook
+                && control_target.is_none()
+                && replaying
+            {
+                queue_execution
+                    .deferred_config_replay_issues
+                    .borrow_mut()
+                    .extend(
+                        callback_failures
+                            .into_iter()
+                            .map(DeferredConfigReplayIssue::Callback),
+                    );
+            } else {
+                queue_execution
                     .callback_parse_failures
                     .borrow_mut()
-                    .split_off(callback_failures_start);
-                if !callback_failures.is_empty() {
-                    queue_execution.note_reported_failure();
-                    let owner = if variables
-                        .get(HOOK_CONTEXT_FORMAT)
-                        .is_some_and(|hook| hook == "command-error")
-                    {
-                        CallbackFailureOwner::CommandErrorHook
-                    } else {
-                        CallbackFailureOwner::Hook
-                    };
-                    for failure in &mut callback_failures {
-                        failure.owner = owner;
-                    }
-                    if owner == CallbackFailureOwner::CommandErrorHook
-                        && control_target.is_none()
-                        && context.replay_client().is_some()
-                    {
-                        queue_execution
-                            .deferred_config_replay_issues
-                            .borrow_mut()
-                            .extend(
-                                callback_failures
-                                    .into_iter()
-                                    .map(DeferredConfigReplayIssue::Callback),
-                            );
-                    } else {
-                        queue_execution
-                            .callback_parse_failures
-                            .borrow_mut()
-                            .extend(callback_failures);
-                    }
-                }
-                match execution {
-                    Ok(execution) => {
-                        if control_target.is_none() {
-                            append_inserted_output(&mut output, &execution.output);
-                        }
-                    }
-                    Err(error) => {
-                        if queue_execution.deferred_shutdown.get() == DeferredShutdown::Force
-                            && kind == ClientKind::Command
-                            && client != ClientId(u64::MAX)
-                        {
-                            self.record_command_stderr(client, &daemon_error_text(&error));
-                        }
-                        if skip_resolution_errors && hook_resolution_error(&error) {
-                            break;
-                        }
-                        if control_target.is_none() {
-                            if let Some(error_output) = daemon_error_output(&error) {
-                                append_inserted_output(&mut output, error_output);
-                            }
-                            self.publish_background_command_error(
-                                client,
-                                &hook_context,
-                                &error,
-                                false,
-                            );
-                        }
-                        if callback_parse_depth != 0
-                            && (callback_group_action == Some(CallbackGroupAction::Continue)
-                                || nested_callback_only)
-                        {
-                            continue;
-                        }
-                        break;
-                    }
-                }
-            }
-            let yielded = queue_execution.has_yielded();
-            yielded_any |= yielded;
-            self.finish_command_queue_execution(&queue_execution, parent_queue);
-            if yielded {
-                break;
+                    .extend(callback_failures);
             }
         }
-        (output.to_string(), yielded_any)
+        match execution {
+            Ok(execution) => {
+                if control_target.is_none() {
+                    append_inserted_output(output, &execution.output);
+                }
+            }
+            Err(error) => {
+                if queue_execution.deferred_shutdown.get() == DeferredShutdown::Force
+                    && kind == ClientKind::Command
+                    && client != ClientId(u64::MAX)
+                {
+                    self.record_command_stderr(client, &daemon_error_text(&error));
+                }
+                if skip_resolution_errors && hook_resolution_error(&error) {
+                    return InsertedFrameAction::Finish(None);
+                }
+                if control_target.is_none() {
+                    if let Some(error_output) = daemon_error_output(&error) {
+                        append_inserted_output(output, error_output);
+                    }
+                    self.publish_background_command_error(client, hook_context, &error, false);
+                }
+                if callback_parse_depth != 0
+                    && (callback_group_action == Some(CallbackGroupAction::Continue)
+                        || nested_callback_only)
+                {
+                    return InsertedFrameAction::Continue;
+                }
+                return InsertedFrameAction::Finish(None);
+            }
+        }
+        InsertedFrameAction::Continue
     }
 
     fn run_event_hooks(self: &Arc<Self>, events: Vec<PendingHookEvent>) {
@@ -8354,80 +8346,112 @@ impl Shared {
         events: Vec<PendingHookEvent>,
         publish_control: bool,
     ) {
-        let shutdown_already_blocked = self.active_shutdown_blockers() != 0;
-        let mut control_notifications = Vec::new();
-        for event in events {
-            let attached_only = matches!(
-                event.name,
-                "window-layout-changed"
-                    | "window-linked"
-                    | "window-unlinked"
-                    | "window-renamed"
-                    | "client-session-changed"
-            );
-            let mut control_variables = event.variables.clone();
-            if event.name == "client-session-changed"
-                && let Some(session) = event.context.session
+        if events.is_empty() {
+            return;
+        }
+        let queue_execution = self.inserted_child_execution(None, false, None);
+        let source = InsertedCommandSource::Events(Box::new(EventQueueSource {
+            events: RefCell::new(events),
+            publish_control,
+            shutdown_already_blocked: self.active_shutdown_blockers() != 0,
+        }));
+        let mut context = ExecutionContext::default();
+        let _ = self.execute_inserted_commands_with_control_target_and_mux_source(
+            ClientId(u64::MAX),
+            ClientKind::Command,
+            &mut context,
+            &source,
+            "<event-hooks>",
+            None,
+            MuxOptionSource::RuntimeCommand,
+            InsertedCommandMode::Standard(&queue_execution),
+        );
+        self.finish_command_queue_execution(&queue_execution, None);
+    }
+
+    fn next_event_queue_child(
+        self: &Arc<Self>,
+        state: &mut EventQueueFrame,
+        event: PendingHookEvent,
+    ) -> Option<InsertedQueueChild> {
+        let attached_only = matches!(
+            event.name,
+            "window-layout-changed"
+                | "window-linked"
+                | "window-unlinked"
+                | "window-renamed"
+                | "client-session-changed"
+        );
+        let mut control_variables = event.variables.clone();
+        if event.name == "client-session-changed"
+            && let Some(session) = event.context.session
+        {
+            control_variables.insert("hook_session".to_owned(), session.to_string());
+            if let Some(name) = self
+                .inner
+                .lock()
+                .engine
+                .state
+                .sessions
+                .get(&session)
+                .map(|session| session.name.clone())
             {
-                control_variables.insert("hook_session".to_owned(), session.to_string());
-                if let Some(name) = self
-                    .inner
-                    .lock()
-                    .engine
-                    .state
-                    .sessions
-                    .get(&session)
-                    .map(|session| session.name.clone())
-                {
-                    control_variables.insert("hook_session_name".to_owned(), name);
-                }
-            }
-            if publish_control {
-                control_notifications.push((
-                    EventPayload::HookEvent {
-                        name: event.name.to_owned(),
-                        variables: control_variables,
-                    },
-                    event.exclude_client,
-                    attached_only,
-                ));
-            }
-            if self
-                .command_item
-                .as_ref()
-                .is_some_and(|item| item.lock().hook_notifications_only)
-            {
-                continue;
-            }
-            let (context, commands) = {
-                let inner = self.inner.lock();
-                let mut context = event.context.clone();
-                inner.engine.repair_event_context(&mut context);
-                context.set_no_client();
-                context.set_replay_client(None);
-                context.set_control_command_target(None);
-                let commands = inner.engine.event_hook_commands(&context, event.name);
-                (context, commands)
-            };
-            let Some(commands) = commands else {
-                continue;
-            };
-            let draining =
-                self.shutdown_pending.load(Ordering::Acquire) && !shutdown_already_blocked;
-            let (_, yielded) = self.run_hook_commands_with_policy(
-                ClientId(u64::MAX),
-                ClientKind::Command,
-                &context,
-                commands,
-                &event.variables,
-                true,
-                None,
-                draining,
-            );
-            if draining && yielded {
-                break;
+                control_variables.insert("hook_session_name".to_owned(), name);
             }
         }
+        if state.publish_control {
+            state.notifications.push((
+                EventPayload::HookEvent {
+                    name: event.name.to_owned(),
+                    variables: control_variables,
+                },
+                event.exclude_client,
+                attached_only,
+            ));
+        }
+        if self
+            .command_item
+            .as_ref()
+            .is_some_and(|item| item.lock().hook_notifications_only)
+        {
+            return None;
+        }
+        let (context, commands) = {
+            let inner = self.inner.lock();
+            let mut context = event.context.clone();
+            inner.engine.repair_event_context(&mut context);
+            context.set_no_client();
+            context.set_replay_client(None);
+            context.set_control_command_target(None);
+            let commands = inner.engine.event_hook_commands(&context, event.name);
+            (context, commands)
+        };
+        let commands = commands?;
+        let draining =
+            self.shutdown_pending.load(Ordering::Acquire) && !state.shutdown_already_blocked;
+        Some(InsertedQueueChild {
+            context,
+            source: InsertedCommandSource::Hooks(Box::new(HookQueueSource {
+                commands: RefCell::new(commands),
+                variables: event.variables,
+                skip_resolution_errors: true,
+                initial_draining: draining,
+                replaying: false,
+            })),
+            label: "<event-hook>".to_owned(),
+            control_target: None,
+            mux_source: MuxOptionSource::RuntimeCommand,
+            kind: InsertedQueueChildKind::Event { draining },
+            leaf: None,
+            guard: None,
+            leaf_name: None,
+        })
+    }
+
+    fn finish_event_queue_notifications(
+        &self,
+        control_notifications: Vec<(EventPayload, Option<ClientId>, bool)>,
+    ) {
         if let Some(item) = &self.command_item
             && let Some(held) = item.lock().deferred_control_notifications.as_mut()
         {
@@ -13081,6 +13105,9 @@ impl Shared {
                     self.finish_inserted_run_shell(route, "run-shell".to_owned(), &result)
                 }
             }
+            Some(InsertedCommandSource::Hooks(_) | InsertedCommandSource::Events(_)) => {
+                unreachable!()
+            }
             Some(InsertedCommandSource::Shell(command)) => {
                 if parsed.background || draining {
                     if draining && !parsed.background {
@@ -13672,6 +13699,17 @@ impl Shared {
         })
     }
 
+    fn hook_group_execution(
+        &self,
+        parent: &CommandQueueExecution,
+        initial_draining: bool,
+    ) -> CommandQueueExecution {
+        let mut execution = self.inserted_child_execution(Some(parent), false, None);
+        execution.item.draining |= initial_draining;
+        execution.item.yield_boundary = true;
+        execution
+    }
+
     fn execute_inserted_commands_with_control_target_in_queue_in_item(
         self: &Arc<Self>,
         client: ClientId,
@@ -13786,7 +13824,8 @@ impl Shared {
                 let callback_failures_start =
                     frame.execution.callback_parse_failures.borrow().len();
                 let command_control_target = frame.control_target.filter(|(client, _)| {
-                    frame.alias_terminal.is_some()
+                    frame.hook.is_some()
+                        || frame.alias_terminal.is_some()
                         || frame.execution.detached
                         || self.is_capturing_control_command_events(*client)
                         || frame.execution.deferred_shutdown.get() != DeferredShutdown::Force
@@ -13806,71 +13845,68 @@ impl Shared {
                     command_control_target,
                     stdout_sequence,
                 };
-                let child = frame.execution.child.borrow_mut().take();
-                if let Some(child) = child {
-                    let execution =
-                        self.inserted_child_execution(Some(&frame.execution), false, None);
-                    let (alias_terminal, stdin) = match &child.kind {
-                        InsertedQueueChildKind::Alias {
-                            client_terminal,
-                            stdin,
-                        } => (Some(*client_terminal), stdin.clone()),
-                        InsertedQueueChildKind::Foreground(_) => (None, None),
-                    };
-                    let prepared_child = self.prepare_inserted_queue_frame(
-                        child.context.clone(),
-                        &child.source,
-                        &child.label,
-                        child.control_target,
-                        child.mux_source,
-                        InsertedFrameExecution::Owned(Box::new(execution)),
-                        alias_terminal,
-                        stdin,
-                    );
-                    let mut child = child;
-                    child.leaf_name = step.1;
-                    frame.boundary = Some((boundary, child));
-                    match prepared_child {
-                        Ok(child_frame) => {
-                            frames.push(child_frame);
-                            continue;
-                        }
-                        Err(error) => {
-                            let (boundary, child) =
-                                frame.boundary.take().expect("child continuation");
-                            let step = self.resume_inserted_child(
-                                client,
-                                kind,
-                                frame,
-                                child,
-                                Err(error),
-                                boundary.callback_failures_start,
-                            );
-                            if let InsertedFrameAction::Finish(error) = self
-                                .finish_inserted_frame_command(client, kind, frame, boundary, step)
-                            {
-                                frame.terminal_error = error;
-                                frame.commands = Vec::new().into_iter();
-                            }
-                            continue;
-                        }
-                    }
-                }
-                if let InsertedFrameAction::Finish(error) =
-                    self.finish_inserted_frame_command(client, kind, frame, boundary, step)
+                if let Some(child) =
+                    self.settle_inserted_frame_step(client, kind, frame, boundary, step)
                 {
-                    frame.terminal_error = error;
-                    frame.commands = Vec::new().into_iter();
+                    frames.push(child);
                 }
                 continue;
+            }
+            if !frame.execution.has_yielded()
+                && let Some(state) = frame.events.as_mut()
+                && let Some(event) = state.events.pop_front()
+            {
+                if let Some(child) = self.next_event_queue_child(state, event) {
+                    frame.execution.insert_foreground_child(child);
+                    let boundary = InsertedCommandBoundary {
+                        command: CommandInvocation::new("<event-hook>", [] as [&str; 0]),
+                        group: InsertedPhysicalGroup::Unlocated,
+                        callback_failures_start: frame
+                            .execution
+                            .callback_parse_failures
+                            .borrow()
+                            .len(),
+                        command_control_target: None,
+                        stdout_sequence: 0,
+                    };
+                    let step = (Ok(Execution::default()), None, false, None, false);
+                    if let Some(child) =
+                        self.settle_inserted_frame_step(client, kind, frame, boundary, step)
+                    {
+                        frames.push(child);
+                    }
+                }
+                continue;
+            }
+            if let Some(hook) = frame.hook.as_mut() {
+                frame.execution.frame_active.set(false);
+                let yielded = frame.execution.has_yielded();
+                self.finish_command_queue_execution(&frame.execution, Some(&hook.parent));
+                if !yielded && let Some(commands) = hook.groups.pop_front() {
+                    frame.execution = InsertedFrameExecution::Owned(Box::new(
+                        self.hook_group_execution(&hook.parent, hook.initial_draining),
+                    ));
+                    frame.execution.frame_active.set(true);
+                    frame.context = hook.context.clone();
+                    frame.commands = commands.into_iter();
+                    continue;
+                }
+                let hook = frame.hook.take().expect("finished hook policy");
+                frame.execution = hook.parent;
             }
             let mut finished = frames.pop().expect("finished inserted frame");
             finished.execution.frame_active.set(false);
             let result = self.finish_inserted_queue_frame(client, kind, &mut finished);
             if let Some(parent) = frames.last_mut() {
-                let (boundary, child) = parent.boundary.take().expect("parent continuation");
+                let (boundary, child, token) = parent.boundary.take().expect("parent continuation");
+                assert!(parent.execution.item.resume(token));
                 self.finish_command_queue_execution(&finished.execution, Some(&parent.execution));
-                parent.context = finished.context.clone();
+                if !matches!(
+                    child.kind,
+                    InsertedQueueChildKind::Hook(_) | InsertedQueueChildKind::Event { .. }
+                ) {
+                    parent.context = finished.context.clone();
+                }
                 let step = self.resume_inserted_child(
                     client,
                     kind,
@@ -13879,16 +13915,93 @@ impl Shared {
                     result,
                     boundary.callback_failures_start,
                 );
-                if let InsertedFrameAction::Finish(error) =
-                    self.finish_inserted_frame_command(client, kind, parent, boundary, step)
+                if let Some(child) =
+                    self.settle_inserted_frame_step(client, kind, parent, boundary, step)
                 {
-                    parent.terminal_error = error;
-                    parent.commands = Vec::new().into_iter();
+                    frames.push(child);
                 }
             } else {
                 *context = finished.context;
                 return result;
             }
+        }
+    }
+
+    fn settle_inserted_frame_step<'a>(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        frame: &mut InsertedQueueFrame<'a>,
+        mut boundary: InsertedCommandBoundary,
+        mut step: InsertedCommandStep,
+    ) -> Option<InsertedQueueFrame<'a>> {
+        loop {
+            let child = frame.execution.child.borrow_mut().take();
+            if let Some(child) = child {
+                let mut execution =
+                    self.inserted_child_execution(Some(&frame.execution), false, None);
+                if matches!(
+                    child.kind,
+                    InsertedQueueChildKind::Hook(_) | InsertedQueueChildKind::Event { .. }
+                ) {
+                    execution.item.yield_boundary = true;
+                }
+                let (alias_terminal, stdin) = match &child.kind {
+                    InsertedQueueChildKind::Alias {
+                        client_terminal,
+                        stdin,
+                    } => (Some(*client_terminal), stdin.clone()),
+                    InsertedQueueChildKind::Foreground(_)
+                    | InsertedQueueChildKind::Hook(_)
+                    | InsertedQueueChildKind::Event { .. } => (None, None),
+                };
+                let prepared_child = self.prepare_inserted_queue_frame(
+                    child.context.clone(),
+                    &child.source,
+                    &child.label,
+                    child.control_target,
+                    child.mux_source,
+                    InsertedFrameExecution::Owned(Box::new(execution)),
+                    alias_terminal,
+                    stdin,
+                );
+                let mut child = child;
+                child.leaf_name = step.1;
+                let token = frame
+                    .execution
+                    .item
+                    .wait()
+                    .expect("parent continuation token");
+                frame.boundary = Some((boundary, child, token));
+                match prepared_child {
+                    Ok(child) => {
+                        hook_events::release_input_change_window(self);
+                        return Some(child);
+                    }
+                    Err(error) => {
+                        let (saved_boundary, child, token) =
+                            frame.boundary.take().expect("child continuation");
+                        assert!(frame.execution.item.resume(token));
+                        boundary = saved_boundary;
+                        step = self.resume_inserted_child(
+                            client,
+                            kind,
+                            frame,
+                            child,
+                            Err(error),
+                            boundary.callback_failures_start,
+                        );
+                        continue;
+                    }
+                }
+            }
+            if let InsertedFrameAction::Finish(error) =
+                self.finish_inserted_frame_command(client, kind, frame, boundary, step)
+            {
+                frame.terminal_error = error;
+                frame.commands = Vec::new().into_iter();
+            }
+            return None;
         }
     }
 
@@ -13903,10 +14016,87 @@ impl Shared {
         alias_terminal: Option<ClientTerminal>,
         stdin: Option<RawText>,
     ) -> Result<InsertedQueueFrame<'a>, DaemonError> {
+        if let InsertedCommandSource::Events(source) = source {
+            execution.frame_active.set(true);
+            return Ok(InsertedQueueFrame {
+                execution,
+                context,
+                commands: Vec::new().into_iter(),
+                prepared: true,
+                control_target: None,
+                mux_source,
+                alias_terminal: None,
+                carried_a_stream: false,
+                stdin: None,
+                label: label.to_owned(),
+                result: InsertedCommandResult::default(),
+                stdout_claim: StdoutClaim::None,
+                first_error: None,
+                failed_group: None,
+                boundary: None,
+                terminal_error: None,
+                hook: None,
+                events: Some(EventQueueFrame {
+                    events: std::mem::take(&mut *source.events.borrow_mut()).into(),
+                    publish_control: source.publish_control,
+                    shutdown_already_blocked: source.shutdown_already_blocked,
+                    notifications: Vec::new(),
+                }),
+            });
+        }
+        if let InsertedCommandSource::Hooks(source) = source {
+            let mut hook_context = context;
+            let control_target = hook_context
+                .control_command_target()
+                .map(|(client, _)| (client, CONTROL_COMMAND_FRAME_FLAGS_NONE));
+            if let Some(target) = control_target {
+                hook_context.set_control_command_target(Some(target));
+                hook_context.set_replay_client(None);
+            } else if hook_context.replay_client().is_some_and(|client| {
+                self.read_client(client, |c| c.and_then(|c| c.kind)) == Some(ClientKind::Control)
+            }) {
+                hook_context.set_replay_client(None);
+            }
+            hook_context.enter_hook(source.variables.clone());
+            let group_execution = self.hook_group_execution(&execution, source.initial_draining);
+            let mut groups: VecDeque<_> = std::mem::take(&mut *source.commands.borrow_mut()).into();
+            let commands = groups.pop_front().unwrap_or_default().into_iter();
+            group_execution.frame_active.set(true);
+            return Ok(InsertedQueueFrame {
+                execution: InsertedFrameExecution::Owned(Box::new(group_execution)),
+                context: hook_context.clone(),
+                commands,
+                prepared: true,
+                control_target,
+                mux_source,
+                alias_terminal: None,
+                carried_a_stream: false,
+                stdin: None,
+                label: label.to_owned(),
+                result: InsertedCommandResult::default(),
+                stdout_claim: StdoutClaim::None,
+                first_error: None,
+                failed_group: None,
+                boundary: None,
+                terminal_error: None,
+                events: None,
+                hook: Some(HookQueueFrame {
+                    parent: execution,
+                    variables: source.variables.clone(),
+                    skip_resolution_errors: source.skip_resolution_errors,
+                    replaying: source.replaying,
+                    initial_draining: source.initial_draining,
+                    groups,
+                    context: hook_context,
+                }),
+            });
+        }
         let (input, prepared) = match source {
             InsertedCommandSource::String(input) => (input, false),
             InsertedCommandSource::Block(input) => (input, true),
-            InsertedCommandSource::Shell(_) => unreachable!(),
+            InsertedCommandSource::Shell(_)
+            | InsertedCommandSource::Hooks(_)
+            | InsertedCommandSource::Events(_) => unreachable!(),
         };
         let mut parsed = {
             let inner = self.inner.lock();
@@ -13943,6 +14133,8 @@ impl Shared {
             failed_group: None,
             boundary: None,
             terminal_error: None,
+            hook: None,
+            events: None,
         })
     }
 
@@ -13954,6 +14146,10 @@ impl Shared {
         command: &CommandInvocation,
         command_control_target: Option<(ClientId, u8)>,
     ) -> InsertedCommandStep {
+        if let Some(hook) = &frame.hook {
+            frame.context.no_hooks = true;
+            frame.context.format_variables.clone_from(&hook.variables);
+        }
         let mode = inserted_frame_mode(&frame.execution, frame.alias_terminal);
         let prepared = frame.prepared;
         let mux_source = frame.mux_source;
@@ -14071,6 +14267,34 @@ impl Shared {
                     Err(error) => Err(error),
                 }
             }
+            InsertedQueueChildKind::Hook(continuation) => {
+                let output = result.map_or_else(
+                    |error| {
+                        daemon_error_output(&error).map_or_else(String::new, ToString::to_string)
+                    },
+                    |result| result.output.to_string(),
+                );
+                if let Some(continuation) = continuation {
+                    self.finish_hook_leaf_result(
+                        client,
+                        Some(&parent.execution),
+                        continuation.result,
+                        continuation.pane_exit_code,
+                        &output,
+                    )
+                } else {
+                    Ok(Execution {
+                        output: output.into(),
+                        effects: Vec::new(),
+                    })
+                }
+            }
+            InsertedQueueChildKind::Event { draining } => {
+                if draining && result.as_ref().is_ok_and(|result| result.yielded) {
+                    parent.execution.yield_locally();
+                }
+                Ok(Execution::default())
+            }
         };
         if let Some(mut leaf) = child.leaf {
             let command = leaf.command.take().expect("suspended command");
@@ -14083,6 +14307,10 @@ impl Shared {
                 &command,
                 leaf,
             );
+        }
+        if let Some(next) = parent.execution.child.borrow_mut().as_mut() {
+            next.guard = child.guard;
+            return (execution, child.leaf_name, alias_group, None, false);
         }
         if let Some(guard) = child.guard {
             let mode = inserted_frame_mode(&parent.execution, parent.alias_terminal);
@@ -14100,6 +14328,12 @@ impl Shared {
         boundary: InsertedCommandBoundary,
         step: InsertedCommandStep,
     ) -> InsertedFrameAction {
+        if frame.events.is_some() {
+            return InsertedFrameAction::Continue;
+        }
+        if frame.hook.is_some() {
+            return self.finish_hook_frame_command(client, kind, frame, boundary, step);
+        }
         let InsertedCommandBoundary {
             command,
             group,
@@ -14361,6 +14595,9 @@ impl Shared {
         kind: ClientKind,
         frame: &mut InsertedQueueFrame,
     ) -> Result<InsertedCommandResult, DaemonError> {
+        if let Some(events) = frame.events.take() {
+            self.finish_event_queue_notifications(events.notifications);
+        }
         let stream_client = frame.context.replay_client().unwrap_or(client);
         if frame.alias_terminal.is_some()
             && kind == ClientKind::Command
@@ -29757,10 +29994,34 @@ impl Shared {
         deferred_control_config_warnings: &mut Vec<DeferredControlConfigWarning>,
         parent_queue: Option<&CommandQueueExecution>,
     ) -> Result<(), DaemonError> {
+        let queue_execution = self.config_child_execution(parent_queue);
+        let result = self.replay_config_file_in_queue(
+            path,
+            parsed,
+            context,
+            depth,
+            report,
+            client_terminal,
+            source_client_base,
+            source_invocations,
+            options,
+            deferred_control_config_warnings,
+            &queue_execution,
+        );
+        let reported_failure = queue_execution.reported_failures.get();
+        report.reported_failure |= reported_failure;
+        self.finish_command_queue_execution(&queue_execution, parent_queue);
+        result
+    }
+
+    fn config_child_execution(
+        &self,
+        parent_queue: Option<&CommandQueueExecution>,
+    ) -> CommandQueueExecution {
         let detached = parent_queue.is_some_and(|execution| execution.detached);
         let shutdown_blocker =
             parent_queue.and_then(|execution| execution.fork_shutdown_blocker(detached));
-        let queue_execution = self.command_queue_execution(CommandExecutionState {
+        self.command_queue_execution(CommandExecutionState {
             draining: parent_queue.is_some_and(CommandQueueExecution::is_draining),
             wait_yields: true,
             detached,
@@ -29782,24 +30043,7 @@ impl Shared {
             suppress_output: Cell::new(
                 parent_queue.is_some_and(|execution| execution.suppress_output.get()),
             ),
-        });
-        let result = self.replay_config_file_in_queue(
-            path,
-            parsed,
-            context,
-            depth,
-            report,
-            client_terminal,
-            source_client_base,
-            source_invocations,
-            options,
-            deferred_control_config_warnings,
-            &queue_execution,
-        );
-        let reported_failure = queue_execution.reported_failures.get();
-        report.reported_failure |= reported_failure;
-        self.finish_command_queue_execution(&queue_execution, parent_queue);
-        result
+        })
     }
 
     fn replay_config_file_in_queue(
@@ -29846,25 +30090,185 @@ impl Shared {
         queue_execution: &CommandQueueExecution,
     ) -> Result<(), DaemonError> {
         let _key_table_hold = timers::KeyTablePublishHold::enter(self);
-        // cfg.c adds `current_file` to the state every command parsed out of this
-        // file inherits. A nested source replays through its own cloned context,
-        // so a child overrides its parent for its own commands only.
+        let suppressed_control_capture = self.config_frame_capture(options);
+        let (commands, finish_report) = self.prepare_config_queue_frame(
+            path,
+            parsed,
+            context,
+            report,
+            options,
+            deferred_control_config_warnings,
+        );
+        let root = ConfigQueueFrame {
+            execution: InsertedFrameExecution::Borrowed(queue_execution),
+            path: path.to_owned(),
+            context: context.clone(),
+            depth,
+            options,
+            commands,
+            finish_report,
+            failed_group: None,
+            source: None,
+            suppressed_control_capture,
+        };
+        let mut frames = vec![root];
+        loop {
+            let frame = frames.last_mut().expect("config queue frame");
+            if let Some(mut source) = frame.source.take() {
+                if let Some((pending, parsed, diagnostics)) = source.children.pop_front() {
+                    if let Some((client, _)) = pending.options.control_target {
+                        source.warnings.extend(
+                            diagnostics
+                                .into_iter()
+                                .map(|text| DeferredControlConfigWarning { client, text }),
+                        );
+                    }
+                    let execution = self.config_child_execution(Some(&frame.execution));
+                    let mut child_context = pending.context;
+                    let suppressed_control_capture = self.config_frame_capture(pending.options);
+                    let (commands, finish_report) = self.prepare_config_queue_frame(
+                        &pending.path,
+                        parsed,
+                        &mut child_context,
+                        report,
+                        pending.options,
+                        &mut source.warnings,
+                    );
+                    let child = ConfigQueueFrame {
+                        execution: InsertedFrameExecution::Owned(Box::new(execution)),
+                        path: pending.path,
+                        context: child_context,
+                        depth: frame.depth + 1,
+                        options: pending.options,
+                        commands,
+                        finish_report,
+                        failed_group: None,
+                        source: None,
+                        suppressed_control_capture,
+                    };
+                    frame.source = Some(source);
+                    hook_events::release_input_change_window(self);
+                    frames.push(child);
+                    continue;
+                }
+                assert!(frame.execution.item.resume(source.token));
+                report.pop_stdout_frame();
+                self.publish_deferred_control_config_warnings(source.warnings);
+                self.publish_control_source_complete(frame.options.control_target);
+                if source.source_command_error && !source.source_has_file {
+                    frame.failed_group = source.group;
+                }
+                if let Some(error) = source.source_error {
+                    let mut finished = frames.pop().expect("failed config frame");
+                    finished.suppressed_control_capture.take();
+                    if let Some(parent) = frames.last_mut() {
+                        report.reported_failure |= finished.execution.reported_failures.get();
+                        self.finish_command_queue_execution(
+                            &finished.execution,
+                            Some(&parent.execution),
+                        );
+                        let boundary = parent.source.as_mut().expect("source boundary");
+                        self.record_config_child_error(
+                            &finished.path,
+                            &finished.context,
+                            parent.options,
+                            source_invocations,
+                            report,
+                            boundary,
+                            error,
+                        );
+                        continue;
+                    }
+                    *context = std::mem::take(&mut finished.context);
+                    return Err(error);
+                }
+            }
+            let action =
+                frame
+                    .commands
+                    .pop_front()
+                    .map_or(Ok(ConfigFrameAction::Finish), |prepared| {
+                        self.execute_config_frame_command(
+                            &frame.path,
+                            &mut frame.context,
+                            frame.depth,
+                            report,
+                            client_terminal,
+                            source_client_base,
+                            source_invocations,
+                            frame.options,
+                            &frame.execution,
+                            &mut frame.failed_group,
+                            prepared,
+                        )
+                    });
+            match action {
+                Ok(ConfigFrameAction::Continue) => continue,
+                Ok(ConfigFrameAction::Source(source)) => {
+                    frame.source = Some(source);
+                    continue;
+                }
+                Ok(ConfigFrameAction::Finish) | Err(_) => {}
+            }
+            if action.is_ok() && frame.finish_report {
+                self.finish_config_queue_frame(&frame.context, frame.options, report);
+            }
+            let mut finished = frames.pop().expect("finished config frame");
+            finished.suppressed_control_capture.take();
+            if let Some(parent) = frames.last_mut() {
+                report.reported_failure |= finished.execution.reported_failures.get();
+                self.finish_command_queue_execution(&finished.execution, Some(&parent.execution));
+                if let Err(error) = action {
+                    let boundary = parent.source.as_mut().expect("source boundary");
+                    self.record_config_child_error(
+                        &finished.path,
+                        &finished.context,
+                        parent.options,
+                        source_invocations,
+                        report,
+                        boundary,
+                        error,
+                    );
+                }
+            } else {
+                *context = finished.context;
+                return action.map(|_| ());
+            }
+        }
+    }
+
+    fn config_frame_capture(
+        &self,
+        options: SourceFileLoadOptions,
+    ) -> Option<ControlCommandEventCapture<'_>> {
+        options
+            .suppress_replay_output
+            .then(|| {
+                options
+                    .control_target
+                    .map(|(client, _)| self.begin_control_command_event_capture(client))
+            })
+            .flatten()
+    }
+
+    fn prepare_config_queue_frame(
+        self: &Arc<Self>,
+        path: &Path,
+        parsed: PreparedConfig,
+        context: &mut ExecutionContext,
+        report: &mut ConfigLoadReport,
+        options: SourceFileLoadOptions,
+        deferred_control_config_warnings: &mut Vec<DeferredControlConfigWarning>,
+    ) -> (VecDeque<PreparedConfigCommand>, bool) {
         context.format_variables.insert(
             CURRENT_FILE_CONTEXT_FORMAT.to_owned(),
             path.display().to_string(),
         );
-        let _suppressed_control_capture = if options.suppress_replay_output {
-            options
-                .control_target
-                .map(|(client, _)| self.begin_control_command_event_capture(client))
-        } else {
-            None
-        };
         if parsed.empty_command_item && !options.parse_only {
             self.publish_control_source_complete(options.control_target);
         }
         let commands = match parsed.construction {
-            Ok(_) if options.parse_only => return Ok(()),
+            Ok(_) if options.parse_only => return (VecDeque::new(), false),
             Ok(commands) => commands,
             Err(failure) => {
                 if !options.suppress_replay_output
@@ -29898,662 +30302,648 @@ impl Shared {
                         text: config_command_error(&failure.original, &failure.message),
                     });
                 }
-                return Ok(());
+                return (VecDeque::new(), false);
             }
         };
-        let mut failed_group = None;
-        for prepared in commands {
-            if queue_execution.has_yielded()
-                || options
-                    .replay_client
-                    .is_some_and(|client| self.command_queue_cancelled(client))
-                || self.stopping.load(Ordering::Acquire)
-                    && !queue_execution.is_draining()
-                    && !queue_execution.detached
-            {
-                break;
-            }
-            let command = prepared.original;
-            if !options.suppress_replay_output
-                && let Some(replay_client) = options.replay_client
-            {
-                let replay_kind = self
-                    .read_client(replay_client, |client| client.and_then(|c| c.kind))
-                    .unwrap_or(if options.control_target.is_some() {
-                        ClientKind::Control
-                    } else {
-                        ClientKind::Command
-                    });
-                self.route_config_replay_errors(replay_client, replay_kind, context.pane, report);
-            }
-            let group = command
-                .source
-                .as_ref()
-                .map(|source| (source.source.clone(), source.line));
-            if group
-                .as_ref()
-                .is_some_and(|group| failed_group.as_ref() == Some(group))
-            {
-                continue;
-            }
-            let routed = prepared.routed;
-            let routed_name = canonical_command(&routed.name);
-            let show_buffer_waits = routed_name == "show-buffer"
-                && client_terminal == ClientTerminal::Absent
-                && options.replay_client.is_some_and(|client| {
-                    self.read_client(client, |c| c.and_then(|c| c.kind))
-                        == Some(ClientKind::Command)
+        (commands.into(), true)
+    }
+
+    fn execute_config_frame_command(
+        self: &Arc<Self>,
+        path: &Path,
+        context: &mut ExecutionContext,
+        depth: usize,
+        report: &mut ConfigLoadReport,
+        client_terminal: ClientTerminal,
+        source_client_base: Option<&Path>,
+        source_invocations: &mut SourceInvocationAccounting,
+        options: SourceFileLoadOptions,
+        queue_execution: &CommandQueueExecution,
+        failed_group: &mut Option<(String, u32)>,
+        prepared: PreparedConfigCommand,
+    ) -> Result<ConfigFrameAction, DaemonError> {
+        if queue_execution.has_yielded()
+            || options
+                .replay_client
+                .is_some_and(|client| self.command_queue_cancelled(client))
+            || self.stopping.load(Ordering::Acquire)
+                && !queue_execution.is_draining()
+                && !queue_execution.detached
+        {
+            return Ok(ConfigFrameAction::Finish);
+        }
+        let command = prepared.original;
+        if !options.suppress_replay_output
+            && let Some(replay_client) = options.replay_client
+        {
+            let replay_kind = self
+                .read_client(replay_client, |client| client.and_then(|c| c.kind))
+                .unwrap_or(if options.control_target.is_some() {
+                    ClientKind::Control
+                } else {
+                    ClientKind::Command
                 });
-            if queue_execution.draining
-                && queue_execution.wait_yields
-                && (matches!(routed_name, "load-buffer" | "save-buffer") || show_buffer_waits)
-            {
-                queue_execution.yield_queue();
-                break;
-            }
-            if routed.name == "reload-config" {
-                log::warn!(
-                    "{}: ignoring reload-config while loading configuration",
-                    path.display()
-                );
-                self.publish_control_command_guard(
-                    options.control_target,
-                    RawText::default(),
-                    false,
-                    false,
-                );
-                continue;
-            }
-            let caller_source_stream = routed_name == "source-file"
-                && source_file_reads_stdin(&routed.args)
-                && (options.control_target.is_some()
-                    || options.replay_client.is_some_and(|client| {
-                        self.read_client(client, |c| {
-                            c.and_then(|c| c.command_streams.as_ref())
-                                .is_some_and(|streams| {
-                                    streams.stdin.is_some() || streams.stdin_available
-                                })
-                        })
-                    }));
-            if routed_name == "source-file" && !caller_source_stream {
-                let source_effects = {
-                    let mut inner = self.inner.lock();
-                    inner.engine.execute_prepared(context, &routed)
-                };
-                let source_effects = match source_effects {
-                    Ok(execution) => execution
-                        .effects
-                        .into_iter()
-                        .filter_map(|effect| match effect {
-                            MuxEffect::SourceFile {
-                                path,
-                                quiet,
-                                parse_only,
-                                verbose,
-                                context,
-                                stdin,
-                            } => Some(SourceFileRequest {
-                                path,
-                                quiet,
-                                parse_only,
-                                verbose,
-                                context,
-                                stdin,
-                            }),
-                            _ => None,
-                        })
-                        .collect::<Vec<_>>(),
-                    Err(
-                        ServerError::UnsupportedCommand(unsupported)
-                        | ServerError::NativeUnsupportedCommand(unsupported),
-                    ) => {
-                        log::warn!(
-                            "{}: ignoring unsupported tmux command: {unsupported}",
-                            path.display()
-                        );
-                        report.note_skip_command(&command, &unsupported);
-                        self.publish_control_command_guard(
-                            options.control_target,
-                            RawText::default(),
-                            false,
-                            false,
-                        );
-                        continue;
-                    }
-                    Err(
-                        ServerError::CommandParse(message)
-                        | ServerError::NativeCommandParse(message),
-                    ) => {
-                        log::warn!(
-                            "{}: ignoring invalid tmux command: {message}",
-                            path.display()
-                        );
-                        report.note_unlocated_command_error(&message);
-                        self.publish_control_command_guard(
-                            options.control_target,
-                            message.into(),
-                            true,
-                            false,
-                        );
-                        failed_group = group;
-                        continue;
-                    }
-                    Err(error) => {
-                        let message = error.tmux_message();
-                        log::warn!("{}: tmux command error: {message}", path.display());
-                        report.note_command_error(&command, &message);
-                        self.publish_control_command_guard(
-                            options.control_target,
-                            message.into(),
-                            true,
-                            true,
-                        );
-                        failed_group = group;
-                        continue;
-                    }
-                };
-                let startup = source_invocations.is_startup();
-                if source_invocations.refuses(depth) {
-                    let error = if startup {
-                        config_command_error(&command, NESTED_SOURCE_LIMIT_ERROR)
-                    } else {
-                        NESTED_SOURCE_LIMIT_ERROR.to_owned()
-                    };
-                    log::warn!("{error}");
-                    report.note_source_error(&mut None, &error);
+            self.route_config_replay_errors(replay_client, replay_kind, context.pane, report);
+        }
+        let group = command
+            .source
+            .as_ref()
+            .map(|source| (source.source.clone(), source.line));
+        if group
+            .as_ref()
+            .is_some_and(|group| failed_group.as_ref() == Some(group))
+        {
+            return Ok(ConfigFrameAction::Continue);
+        }
+        let routed = prepared.routed;
+        let routed_name = canonical_command(&routed.name);
+        let show_buffer_waits = routed_name == "show-buffer"
+            && client_terminal == ClientTerminal::Absent
+            && options.replay_client.is_some_and(|client| {
+                self.read_client(client, |c| c.and_then(|c| c.kind)) == Some(ClientKind::Command)
+            });
+        if queue_execution.draining
+            && queue_execution.wait_yields
+            && (matches!(routed_name, "load-buffer" | "save-buffer") || show_buffer_waits)
+        {
+            queue_execution.yield_queue();
+            return Ok(ConfigFrameAction::Finish);
+        }
+        if routed.name == "reload-config" {
+            log::warn!(
+                "{}: ignoring reload-config while loading configuration",
+                path.display()
+            );
+            self.publish_control_command_guard(
+                options.control_target,
+                RawText::default(),
+                false,
+                false,
+            );
+            return Ok(ConfigFrameAction::Continue);
+        }
+        let caller_source_stream = routed_name == "source-file"
+            && source_file_reads_stdin(&routed.args)
+            && (options.control_target.is_some()
+                || options.replay_client.is_some_and(|client| {
+                    self.read_client(client, |c| {
+                        c.and_then(|c| c.command_streams.as_ref())
+                            .is_some_and(|streams| {
+                                streams.stdin.is_some() || streams.stdin_available
+                            })
+                    })
+                }));
+        if routed_name == "source-file" && !caller_source_stream {
+            let source_effects = {
+                let mut inner = self.inner.lock();
+                inner.engine.execute_prepared(context, &routed)
+            };
+            let source_effects = match source_effects {
+                Ok(execution) => execution
+                    .effects
+                    .into_iter()
+                    .filter_map(|effect| match effect {
+                        MuxEffect::SourceFile {
+                            path,
+                            quiet,
+                            parse_only,
+                            verbose,
+                            context,
+                            stdin,
+                        } => Some(SourceFileRequest {
+                            path,
+                            quiet,
+                            parse_only,
+                            verbose,
+                            context,
+                            stdin,
+                        }),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>(),
+                Err(
+                    ServerError::UnsupportedCommand(unsupported)
+                    | ServerError::NativeUnsupportedCommand(unsupported),
+                ) => {
+                    log::warn!(
+                        "{}: ignoring unsupported tmux command: {unsupported}",
+                        path.display()
+                    );
+                    report.note_skip_command(&command, &unsupported);
                     self.publish_control_command_guard(
                         options.control_target,
-                        error.into(),
+                        RawText::default(),
+                        false,
+                        false,
+                    );
+                    return Ok(ConfigFrameAction::Continue);
+                }
+                Err(
+                    ServerError::CommandParse(message) | ServerError::NativeCommandParse(message),
+                ) => {
+                    log::warn!(
+                        "{}: ignoring invalid tmux command: {message}",
+                        path.display()
+                    );
+                    report.note_unlocated_command_error(&message);
+                    self.publish_control_command_guard(
+                        options.control_target,
+                        message.into(),
                         true,
                         false,
                     );
-                    failed_group = group;
+                    *failed_group = group;
+                    return Ok(ConfigFrameAction::Continue);
+                }
+                Err(error) => {
+                    let message = error.tmux_message();
+                    log::warn!("{}: tmux command error: {message}", path.display());
+                    report.note_command_error(&command, &message);
+                    self.publish_control_command_guard(
+                        options.control_target,
+                        message.into(),
+                        true,
+                        true,
+                    );
+                    *failed_group = group;
+                    return Ok(ConfigFrameAction::Continue);
+                }
+            };
+            let startup = source_invocations.is_startup();
+            if source_invocations.refuses(depth) {
+                let error = if startup {
+                    config_command_error(&command, NESTED_SOURCE_LIMIT_ERROR)
+                } else {
+                    NESTED_SOURCE_LIMIT_ERROR.to_owned()
+                };
+                log::warn!("{error}");
+                report.note_source_error(&mut None, &error);
+                self.publish_control_command_guard(
+                    options.control_target,
+                    error.into(),
+                    true,
+                    false,
+                );
+                *failed_group = group;
+                return Ok(ConfigFrameAction::Continue);
+            }
+            if source_effects.is_empty() {
+                log::warn!("{}: ignoring source-file without a path", path.display());
+            }
+            let mut source_error = None;
+            let mut source_error_group = None;
+            let mut source_has_file = false;
+            let mut source_command_error = false;
+            let mut source_parse_error = false;
+            let mut source_diagnostics = RawText::default();
+            let mut prepared_sources = Vec::new();
+            for source_request in source_effects {
+                if source_request.path == "-" {
+                    source_has_file = true;
+                    log::warn!("{STANDARD_INPUT_SOURCE_WARNING}");
+                    report.note_invalid_command(&command, STANDARD_INPUT_SOURCE_WARNING);
+                    append_inserted_output(
+                        &mut source_diagnostics,
+                        config_command_error(&command, STANDARD_INPUT_SOURCE_WARNING),
+                    );
+                    source_parse_error = true;
                     continue;
                 }
-                if source_effects.is_empty() {
-                    log::warn!("{}: ignoring source-file without a path", path.display());
+                let declared_path = PathBuf::from(source_request.path.to_os_string());
+                let pattern = source_client_base.map_or_else(
+                    || expand_relative(path, &source_request.path),
+                    |base| resolve_source_path(&source_request.path, Some(base)),
+                );
+                let matches = source_glob_matches(&pattern);
+                for error in &matches.errors {
+                    let warning = source_glob_error_warning(&declared_path, error);
+                    log::warn!("{warning}");
+                    report.note_located_source_error(&command, &mut source_error_group, &warning);
+                    append_inserted_output(&mut source_diagnostics, &warning);
+                    source_command_error = true;
                 }
-                let mut source_error = None;
-                let mut source_error_group = None;
-                let mut source_has_file = false;
-                let mut source_command_error = false;
-                let mut source_parse_error = false;
-                let mut source_diagnostics = RawText::default();
-                let mut prepared_sources = Vec::new();
-                for source_request in source_effects {
-                    if source_request.path == "-" {
-                        source_has_file = true;
-                        log::warn!("{STANDARD_INPUT_SOURCE_WARNING}");
-                        report.note_invalid_command(&command, STANDARD_INPUT_SOURCE_WARNING);
-                        append_inserted_output(
-                            &mut source_diagnostics,
-                            config_command_error(&command, STANDARD_INPUT_SOURCE_WARNING),
-                        );
-                        source_parse_error = true;
-                        continue;
+                if matches.paths.is_empty() && matches.errors.is_empty() {
+                    if !source_request.quiet {
+                        let error = missing_source_error(&declared_path);
+                        log::warn!("{error}");
+                        report.note_located_source_error(&command, &mut source_error_group, &error);
+                        append_inserted_output(&mut source_diagnostics, &error);
+                        source_command_error = true;
                     }
-                    let declared_path = PathBuf::from(source_request.path.to_os_string());
-                    let pattern = source_client_base.map_or_else(
-                        || expand_relative(path, &source_request.path),
-                        |base| resolve_source_path(&source_request.path, Some(base)),
-                    );
-                    let matches = source_glob_matches(&pattern);
-                    for error in &matches.errors {
-                        let warning = source_glob_error_warning(&declared_path, error);
+                    continue;
+                }
+                source_has_file |= !matches.paths.is_empty();
+                prepared_sources.push((source_request, matches.paths));
+            }
+            self.publish_control_command_guard(
+                options.control_target,
+                source_diagnostics,
+                source_parse_error || source_command_error && !source_has_file,
+                false,
+            );
+            if queue_execution.wait_yields && queue_execution.is_draining() {
+                queue_execution.yield_queue();
+                self.publish_control_source_complete(options.control_target);
+                return Ok(ConfigFrameAction::Finish);
+            }
+            let mut pending_sources = Vec::new();
+            for (source_request, sources) in prepared_sources {
+                let nested_options = SourceFileLoadOptions {
+                    parse_only: source_request.parse_only,
+                    verbose: !options.suppress_verbose
+                        && (options.verbose || source_request.verbose),
+                    suppress_verbose: options.suppress_verbose,
+                    control_target: options.control_target,
+                    replay_client: options.replay_client,
+                    suppress_replay_output: options.suppress_replay_output,
+                };
+                for source in sources {
+                    pending_sources.push(PendingConfigFile {
+                        path: source,
+                        context: source_request.context.clone(),
+                        options: nested_options,
+                        stdin: None,
+                    });
+                }
+            }
+            let mut parsed_sources = Vec::new();
+            report.push_stdout_frame();
+            for pending in pending_sources {
+                let diagnostics_start = report.diagnostics().len();
+                match self.parse_config_file(&pending.path, report, pending.options, true) {
+                    Ok(Some(parsed)) => {
+                        let diagnostics = report.diagnostics()[diagnostics_start..].to_vec();
+                        parsed_sources.push((pending, parsed, diagnostics));
+                    }
+                    Err(DaemonError::Io(error)) => {
+                        let warning = if options.control_target.is_some()
+                            || source_invocations.is_startup()
+                        {
+                            source_read_error_warning(&pending.path, &error)
+                        } else {
+                            source_glob_error_warning(&pending.path, &error.to_string())
+                        };
                         log::warn!("{warning}");
                         report.note_located_source_error(
                             &command,
                             &mut source_error_group,
                             &warning,
                         );
-                        append_inserted_output(&mut source_diagnostics, &warning);
-                        source_command_error = true;
-                    }
-                    if matches.paths.is_empty() && matches.errors.is_empty() {
-                        if !source_request.quiet {
-                            let error = missing_source_error(&declared_path);
-                            log::warn!("{error}");
-                            report.note_located_source_error(
-                                &command,
-                                &mut source_error_group,
-                                &error,
+                        if let Some(target) = options.control_target {
+                            self.publish_control_source_read_error(
+                                target,
+                                pending.context.pane,
+                                error.kind(),
+                                warning,
                             );
-                            append_inserted_output(&mut source_diagnostics, &error);
-                            source_command_error = true;
-                        }
-                        continue;
-                    }
-                    source_has_file |= !matches.paths.is_empty();
-                    prepared_sources.push((source_request, matches.paths));
-                }
-                self.publish_control_command_guard(
-                    options.control_target,
-                    source_diagnostics,
-                    source_parse_error || source_command_error && !source_has_file,
-                    false,
-                );
-                if queue_execution.wait_yields && queue_execution.is_draining() {
-                    queue_execution.yield_queue();
-                    self.publish_control_source_complete(options.control_target);
-                    break;
-                }
-                let mut pending_sources = Vec::new();
-                for (source_request, sources) in prepared_sources {
-                    let nested_options = SourceFileLoadOptions {
-                        parse_only: source_request.parse_only,
-                        verbose: !options.suppress_verbose
-                            && (options.verbose || source_request.verbose),
-                        suppress_verbose: options.suppress_verbose,
-                        control_target: options.control_target,
-                        replay_client: options.replay_client,
-                        suppress_replay_output: options.suppress_replay_output,
-                    };
-                    for source in sources {
-                        pending_sources.push(PendingConfigFile {
-                            path: source,
-                            context: source_request.context.clone(),
-                            options: nested_options,
-                            stdin: None,
-                        });
-                    }
-                }
-                let mut parsed_sources = Vec::new();
-                report.push_stdout_frame();
-                for pending in pending_sources {
-                    let diagnostics_start = report.diagnostics().len();
-                    match self.parse_config_file(&pending.path, report, pending.options, true) {
-                        Ok(Some(parsed)) => {
-                            let diagnostics = report.diagnostics()[diagnostics_start..].to_vec();
-                            parsed_sources.push((pending, parsed, diagnostics));
-                        }
-                        Err(DaemonError::Io(error)) => {
-                            let warning = if options.control_target.is_some()
-                                || source_invocations.is_startup()
-                            {
-                                source_read_error_warning(&pending.path, &error)
-                            } else {
-                                source_glob_error_warning(&pending.path, &error.to_string())
-                            };
-                            log::warn!("{warning}");
-                            report.note_located_source_error(
-                                &command,
-                                &mut source_error_group,
-                                &warning,
-                            );
-                            if let Some(target) = options.control_target {
-                                self.publish_control_source_read_error(
-                                    target,
-                                    pending.context.pane,
-                                    error.kind(),
-                                    warning,
-                                );
-                            }
-                        }
-                        Err(error) if source_error.is_none() => source_error = Some(error),
-                        Ok(None) => report.note_startup_command_cause(
-                            &command,
-                            &missing_source_error(&pending.path),
-                        ),
-                        Err(_) => {}
-                    }
-                }
-                let mut nested_control_config_warnings = Vec::new();
-                for (pending, parsed, diagnostics) in parsed_sources {
-                    if let Some((client, _)) = pending.options.control_target {
-                        nested_control_config_warnings.extend(
-                            diagnostics
-                                .into_iter()
-                                .map(|text| DeferredControlConfigWarning { client, text }),
-                        );
-                    }
-                    let mut source_context = pending.context.clone();
-                    match self.replay_config_file_with_parent_queue(
-                        &pending.path,
-                        parsed,
-                        &mut source_context,
-                        depth + 1,
-                        report,
-                        client_terminal,
-                        source_client_base,
-                        source_invocations,
-                        pending.options,
-                        &mut nested_control_config_warnings,
-                        Some(queue_execution),
-                    ) {
-                        Err(DaemonError::Io(error)) => {
-                            let warning = if options.control_target.is_some()
-                                || source_invocations.is_startup()
-                            {
-                                source_read_error_warning(&pending.path, &error)
-                            } else {
-                                source_glob_error_warning(&pending.path, &error.to_string())
-                            };
-                            log::warn!("{warning}");
-                            report.note_located_source_error(
-                                &command,
-                                &mut source_error_group,
-                                &warning,
-                            );
-                            if let Some(target) = options.control_target {
-                                self.publish_control_source_read_error(
-                                    target,
-                                    pending.context.pane,
-                                    error.kind(),
-                                    warning,
-                                );
-                            }
-                        }
-                        Err(error) if source_error.is_none() => source_error = Some(error),
-                        Ok(()) | Err(_) => {}
-                    }
-                }
-                report.pop_stdout_frame();
-                self.publish_deferred_control_config_warnings(nested_control_config_warnings);
-                self.publish_control_source_complete(options.control_target);
-                if let Some(error) = source_error {
-                    return Err(error);
-                }
-                if source_command_error && !source_has_file {
-                    failed_group = group;
-                }
-                continue;
-            }
-            if options.control_target.is_some() && !MuxEngine::is_command_alias_group(&routed) {
-                let name_error = match resolve_command(&routed.name) {
-                    CommandResolution::Ambiguous(message) => Some(message),
-                    CommandResolution::Unknown => Some(format!("unknown command: {}", routed.name)),
-                    CommandResolution::Canonical(_) | CommandResolution::Unimplemented(_) => None,
-                };
-                if let Some(name_error) = name_error {
-                    log::warn!(
-                        "{}: ignoring invalid tmux command: {name_error}",
-                        path.display()
-                    );
-                    report.note_invalid_command(&command, &name_error);
-                    self.publish_sourced_config_warning(
-                        options.control_target.map(|(client, _)| client),
-                        &command,
-                        &name_error,
-                    );
-                    failed_group = group;
-                    continue;
-                }
-            }
-            let previous_replay_client = context.replay_client();
-            let alias_group = MuxEngine::is_command_alias_group(&routed);
-            let execution_replay_client = if options.control_target.is_some()
-                && !matches!(canonical_command(&routed.name), "if-shell" | "run-shell")
-            {
-                None
-            } else {
-                options.replay_client
-            };
-            context.set_replay_client(execution_replay_client);
-            let previous_control_target = context.control_command_target();
-            context.set_control_command_target(options.control_target);
-            let early_shell_guard = routed_name == "run-shell"
-                && parse_run_shell_args(&routed.args).is_ok_and(|args| !args.command_mode);
-            if early_shell_guard {
-                self.publish_control_command_guard(
-                    options.control_target,
-                    RawText::default(),
-                    false,
-                    false,
-                );
-            }
-            let guard_capture = options
-                .control_target
-                .map(|(client, _)| client)
-                .map(|client| self.begin_control_command_event_capture(client));
-            let callback_parse_failures_start =
-                queue_execution.callback_parse_failures.borrow().len();
-            let deferred_replay_issues_start =
-                queue_execution.deferred_config_replay_issues.borrow().len();
-            let stdout_sequence = options
-                .replay_client
-                .map(|client| self.command_stdout_sequence(client));
-            let result = self.execute_with_mux_source_routed_for_terminal_in_queue(
-                ClientId(u64::MAX),
-                ClientKind::Command,
-                context,
-                &routed,
-                MuxOptionSource::TmuxConfig,
-                client_terminal,
-                Some(queue_execution),
-            );
-            let mut callback_parse_failures = queue_execution
-                .callback_parse_failures
-                .borrow_mut()
-                .split_off(callback_parse_failures_start);
-            let deferred_replay_issues = queue_execution
-                .deferred_config_replay_issues
-                .borrow_mut()
-                .split_off(deferred_replay_issues_start);
-            let callback_parse_depth = result
-                .as_ref()
-                .err()
-                .map_or(0, post_admission_callback_parse_depth);
-            let had_source_callback_failure = callback_parse_failures
-                .iter()
-                .any(|failure| failure.owner.is_replay_callback());
-            let direct_callback = callback_parse_depth == 1 && !had_source_callback_failure;
-            if direct_callback {
-                let failure = CallbackParseFailure::for_command(
-                    result
-                        .as_ref()
-                        .err()
-                        .map_or_else(String::new, daemon_error_text),
-                    routed_name,
-                    None,
-                    callback_parse_depth,
-                )
-                .unwrap_or(CallbackParseFailure {
-                    message: result
-                        .as_ref()
-                        .err()
-                        .map_or_else(String::new, daemon_error_text),
-                    group_action: CallbackGroupAction::Handled,
-                    owner: CallbackFailureOwner::Source,
-                    control_event: None,
-                    depth: callback_parse_depth,
-                });
-                let index = callback_parse_failures
-                    .iter()
-                    .position(|failure| failure.owner == CallbackFailureOwner::CommandErrorHook)
-                    .unwrap_or(callback_parse_failures.len());
-                callback_parse_failures.insert(index, failure);
-            }
-            let mut callback_failures_before_result = Vec::new();
-            let mut callback_failures_after_result = Vec::new();
-            for failure in callback_parse_failures {
-                if callback_parse_depth == 0
-                    && failure.owner == CallbackFailureOwner::CommandErrorHook
-                {
-                    callback_failures_after_result.push(failure);
-                } else {
-                    callback_failures_before_result.push(failure);
-                }
-            }
-            let source_callback_failures =
-                report.note_callback_failures(path, &command, callback_failures_before_result);
-            context.set_replay_client(previous_replay_client);
-            context.set_control_command_target(previous_control_target);
-            let mut captured_events = guard_capture.map_or_else(
-                CapturedControlCommandEvents::default,
-                ControlCommandEventCapture::finish,
-            );
-            let mut captured_output = result.as_ref().map_or_else(
-                |error| daemon_error_output(error).cloned().unwrap_or_default(),
-                |execution| execution.output.clone(),
-            );
-            if canonical_command(&routed.name) == "display-message"
-                && let Ok(execution) = &result
-            {
-                report.note_startup_display(&command, &execution.output);
-            }
-            let raw_stdout =
-                matches!(
-                    canonical_command(&routed.name),
-                    "save-buffer" | "show-buffer"
-                ) || alias_group
-                    && options.replay_client.zip(stdout_sequence).is_some_and(
-                        |(client, sequence)| self.command_raw_stdout_since(client, sequence),
-                    );
-            if report.note_stdout(&captured_output, raw_stdout) == ReplayStdoutWrite::Denied
-                && let Some(replay_client) = options.replay_client
-            {
-                self.record_command_stderr(replay_client, "Bad file descriptor: -");
-                self.record_command_failure(replay_client);
-            }
-            let publish_guard =
-                |output: RawText, error: bool, sticky_failure: bool, captured_events| {
-                    if alias_group
-                        || early_shell_guard
-                        || caller_source_stream && routed_name == "source-file"
-                    {
-                        if let Some((client, _)) = options.control_target {
-                            self.publish_captured_control_command_events(client, captured_events);
-                        }
-                    } else {
-                        self.publish_control_command_guard_tree(
-                            options.control_target,
-                            output,
-                            error,
-                            sticky_failure,
-                            captured_events,
-                        );
-                    }
-                };
-            if options.control_target.is_some()
-                && !direct_callback
-                && !source_callback_failures.is_empty()
-            {
-                let qualified =
-                    captured_events.qualify_callback_parse_events(&source_callback_failures);
-                debug_assert_eq!(
-                    qualified,
-                    source_callback_failures
-                        .iter()
-                        .filter(|failure| {
-                            failure.owner == CallbackFailureOwner::Source
-                                && failure.control_event.is_some()
-                        })
-                        .count()
-                );
-            }
-            match result.map_err(discard_command_output) {
-                Ok(_) => publish_guard(captured_output, false, false, captured_events),
-                Err(DaemonError::Server(
-                    ServerError::UnsupportedCommand(unsupported)
-                    | ServerError::NativeUnsupportedCommand(unsupported),
-                )) => {
-                    log::warn!(
-                        "{}: ignoring unsupported tmux command: {unsupported}",
-                        path.display()
-                    );
-                    report.note_skip_command(&command, &unsupported);
-                    publish_guard(captured_output, false, false, captured_events);
-                }
-                Err(DaemonError::InsertedCommandParse(message)) => {
-                    log::warn!(
-                        "{}: invalid inserted tmux command: {message}",
-                        path.display()
-                    );
-                    let _ = report.note_callback_failures(
-                        path,
-                        &command,
-                        std::mem::take(&mut callback_failures_after_result),
-                    );
-                    report.note_deferred_config_replay_issues(
-                        path,
-                        &command,
-                        deferred_replay_issues,
-                    );
-                    return Err(DaemonError::InsertedCommandParse(config_command_error(
-                        &command, &message,
-                    )));
-                }
-                Err(error) if post_admission_callback_parse_depth(&error) != 0 => {
-                    let failed_source_group = source_callback_failures.iter().any(|failure| {
-                        failure.depth == 1 && failure.group_action == CallbackGroupAction::Fail
-                    });
-                    let diagnostics = source_callback_failures;
-                    if let Some((client, _)) = options.control_target {
-                        self.inner
-                            .lock()
-                            .client_entry(client)
-                            .command_streams
-                            .get_or_insert_default()
-                            .exit_code = 1;
-                    }
-                    if !direct_callback {
-                        publish_guard(captured_output, false, false, captured_events);
-                    } else if routed_name == "if-shell" {
-                        for diagnostic in &diagnostics {
-                            append_inserted_output(&mut captured_output, &diagnostic.message);
-                        }
-                        publish_guard(captured_output, true, false, captured_events);
-                    } else {
-                        publish_guard(captured_output, false, false, captured_events);
-                        if let Some((client, _)) = options.control_target {
-                            for diagnostic in diagnostics {
-                                self.publish_to_client(
-                                    client,
-                                    EventPayload::ControlCommandOutput {
-                                        output: diagnostic.message,
-                                    },
-                                );
-                            }
                         }
                     }
-                    if failed_source_group {
-                        failed_group = group;
-                    }
-                }
-                Err(DaemonError::Server(
-                    ServerError::CommandParse(message) | ServerError::NativeCommandParse(message),
-                )) => {
-                    log::warn!(
-                        "{}: ignoring invalid tmux command: {message}",
-                        path.display()
-                    );
-                    report.note_unlocated_command_error(&message);
-                    append_inserted_output(&mut captured_output, &message);
-                    publish_guard(captured_output, true, false, captured_events);
-                    failed_group = group;
-                }
-                Err(DaemonError::Server(error)) => {
-                    let message = error.tmux_message();
-                    log::warn!("{}: tmux command error: {message}", path.display());
-                    report.note_command_error(&command, &message);
-                    append_inserted_output(&mut captured_output, &message);
-                    publish_guard(captured_output, true, true, captured_events);
-                    failed_group = group;
-                }
-                Err(error) => {
-                    report.note_startup_command_cause(&command, &daemon_error_text(&error));
-                    append_inserted_output(&mut captured_output, daemon_error_text(&error));
-                    publish_guard(captured_output, true, true, captured_events);
-                    let _ = report.note_callback_failures(
-                        path,
-                        &command,
-                        std::mem::take(&mut callback_failures_after_result),
-                    );
-                    report.note_deferred_config_replay_issues(
-                        path,
-                        &command,
-                        deferred_replay_issues,
-                    );
-                    return Err(error);
+                    Err(error) if source_error.is_none() => source_error = Some(error),
+                    Ok(None) => report
+                        .note_startup_command_cause(&command, &missing_source_error(&pending.path)),
+                    Err(_) => {}
                 }
             }
-            let _ = report.note_callback_failures(
-                path,
-                &command,
-                std::mem::take(&mut callback_failures_after_result),
-            );
-            report.note_deferred_config_replay_issues(path, &command, deferred_replay_issues);
+            let children = parsed_sources.into();
+            return Ok(ConfigFrameAction::Source(Box::new(ConfigSourceBoundary {
+                token: queue_execution
+                    .item
+                    .wait()
+                    .expect("source continuation token"),
+                children,
+                command,
+                group,
+                source_error_group,
+                source_error,
+                source_command_error,
+                source_has_file,
+                warnings: Vec::new(),
+            })));
         }
+        if options.control_target.is_some() && !MuxEngine::is_command_alias_group(&routed) {
+            let name_error = match resolve_command(&routed.name) {
+                CommandResolution::Ambiguous(message) => Some(message),
+                CommandResolution::Unknown => Some(format!("unknown command: {}", routed.name)),
+                CommandResolution::Canonical(_) | CommandResolution::Unimplemented(_) => None,
+            };
+            if let Some(name_error) = name_error {
+                log::warn!(
+                    "{}: ignoring invalid tmux command: {name_error}",
+                    path.display()
+                );
+                report.note_invalid_command(&command, &name_error);
+                self.publish_sourced_config_warning(
+                    options.control_target.map(|(client, _)| client),
+                    &command,
+                    &name_error,
+                );
+                *failed_group = group;
+                return Ok(ConfigFrameAction::Continue);
+            }
+        }
+        let previous_replay_client = context.replay_client();
+        let alias_group = MuxEngine::is_command_alias_group(&routed);
+        let execution_replay_client = if options.control_target.is_some()
+            && !matches!(canonical_command(&routed.name), "if-shell" | "run-shell")
+        {
+            None
+        } else {
+            options.replay_client
+        };
+        context.set_replay_client(execution_replay_client);
+        let previous_control_target = context.control_command_target();
+        context.set_control_command_target(options.control_target);
+        let early_shell_guard = routed_name == "run-shell"
+            && parse_run_shell_args(&routed.args).is_ok_and(|args| !args.command_mode);
+        if early_shell_guard {
+            self.publish_control_command_guard(
+                options.control_target,
+                RawText::default(),
+                false,
+                false,
+            );
+        }
+        let guard_capture = options
+            .control_target
+            .map(|(client, _)| client)
+            .map(|client| self.begin_control_command_event_capture(client));
+        let callback_parse_failures_start = queue_execution.callback_parse_failures.borrow().len();
+        let deferred_replay_issues_start =
+            queue_execution.deferred_config_replay_issues.borrow().len();
+        let stdout_sequence = options
+            .replay_client
+            .map(|client| self.command_stdout_sequence(client));
+        let result = self.execute_with_mux_source_routed_for_terminal_in_queue(
+            ClientId(u64::MAX),
+            ClientKind::Command,
+            context,
+            &routed,
+            MuxOptionSource::TmuxConfig,
+            client_terminal,
+            Some(queue_execution),
+        );
+        let mut callback_parse_failures = queue_execution
+            .callback_parse_failures
+            .borrow_mut()
+            .split_off(callback_parse_failures_start);
+        let deferred_replay_issues = queue_execution
+            .deferred_config_replay_issues
+            .borrow_mut()
+            .split_off(deferred_replay_issues_start);
+        let callback_parse_depth = result
+            .as_ref()
+            .err()
+            .map_or(0, post_admission_callback_parse_depth);
+        let had_source_callback_failure = callback_parse_failures
+            .iter()
+            .any(|failure| failure.owner.is_replay_callback());
+        let direct_callback = callback_parse_depth == 1 && !had_source_callback_failure;
+        if direct_callback {
+            let failure = CallbackParseFailure::for_command(
+                result
+                    .as_ref()
+                    .err()
+                    .map_or_else(String::new, daemon_error_text),
+                routed_name,
+                None,
+                callback_parse_depth,
+            )
+            .unwrap_or(CallbackParseFailure {
+                message: result
+                    .as_ref()
+                    .err()
+                    .map_or_else(String::new, daemon_error_text),
+                group_action: CallbackGroupAction::Handled,
+                owner: CallbackFailureOwner::Source,
+                control_event: None,
+                depth: callback_parse_depth,
+            });
+            let index = callback_parse_failures
+                .iter()
+                .position(|failure| failure.owner == CallbackFailureOwner::CommandErrorHook)
+                .unwrap_or(callback_parse_failures.len());
+            callback_parse_failures.insert(index, failure);
+        }
+        let mut callback_failures_before_result = Vec::new();
+        let mut callback_failures_after_result = Vec::new();
+        for failure in callback_parse_failures {
+            if callback_parse_depth == 0 && failure.owner == CallbackFailureOwner::CommandErrorHook
+            {
+                callback_failures_after_result.push(failure);
+            } else {
+                callback_failures_before_result.push(failure);
+            }
+        }
+        let source_callback_failures =
+            report.note_callback_failures(path, &command, callback_failures_before_result);
+        context.set_replay_client(previous_replay_client);
+        context.set_control_command_target(previous_control_target);
+        let mut captured_events = guard_capture.map_or_else(
+            CapturedControlCommandEvents::default,
+            ControlCommandEventCapture::finish,
+        );
+        let mut captured_output = result.as_ref().map_or_else(
+            |error| daemon_error_output(error).cloned().unwrap_or_default(),
+            |execution| execution.output.clone(),
+        );
+        if canonical_command(&routed.name) == "display-message"
+            && let Ok(execution) = &result
+        {
+            report.note_startup_display(&command, &execution.output);
+        }
+        let raw_stdout = matches!(
+            canonical_command(&routed.name),
+            "save-buffer" | "show-buffer"
+        ) || alias_group
+            && options
+                .replay_client
+                .zip(stdout_sequence)
+                .is_some_and(|(client, sequence)| self.command_raw_stdout_since(client, sequence));
+        if report.note_stdout(&captured_output, raw_stdout) == ReplayStdoutWrite::Denied
+            && let Some(replay_client) = options.replay_client
+        {
+            self.record_command_stderr(replay_client, "Bad file descriptor: -");
+            self.record_command_failure(replay_client);
+        }
+        let publish_guard =
+            |output: RawText, error: bool, sticky_failure: bool, captured_events| {
+                if alias_group
+                    || early_shell_guard
+                    || caller_source_stream && routed_name == "source-file"
+                {
+                    if let Some((client, _)) = options.control_target {
+                        self.publish_captured_control_command_events(client, captured_events);
+                    }
+                } else {
+                    self.publish_control_command_guard_tree(
+                        options.control_target,
+                        output,
+                        error,
+                        sticky_failure,
+                        captured_events,
+                    );
+                }
+            };
+        if options.control_target.is_some()
+            && !direct_callback
+            && !source_callback_failures.is_empty()
+        {
+            let qualified =
+                captured_events.qualify_callback_parse_events(&source_callback_failures);
+            debug_assert_eq!(
+                qualified,
+                source_callback_failures
+                    .iter()
+                    .filter(|failure| {
+                        failure.owner == CallbackFailureOwner::Source
+                            && failure.control_event.is_some()
+                    })
+                    .count()
+            );
+        }
+        match result.map_err(discard_command_output) {
+            Ok(_) => publish_guard(captured_output, false, false, captured_events),
+            Err(DaemonError::Server(
+                ServerError::UnsupportedCommand(unsupported)
+                | ServerError::NativeUnsupportedCommand(unsupported),
+            )) => {
+                log::warn!(
+                    "{}: ignoring unsupported tmux command: {unsupported}",
+                    path.display()
+                );
+                report.note_skip_command(&command, &unsupported);
+                publish_guard(captured_output, false, false, captured_events);
+            }
+            Err(DaemonError::InsertedCommandParse(message)) => {
+                log::warn!(
+                    "{}: invalid inserted tmux command: {message}",
+                    path.display()
+                );
+                let _ = report.note_callback_failures(
+                    path,
+                    &command,
+                    std::mem::take(&mut callback_failures_after_result),
+                );
+                report.note_deferred_config_replay_issues(path, &command, deferred_replay_issues);
+                return Err(DaemonError::InsertedCommandParse(config_command_error(
+                    &command, &message,
+                )));
+            }
+            Err(error) if post_admission_callback_parse_depth(&error) != 0 => {
+                let failed_source_group = source_callback_failures.iter().any(|failure| {
+                    failure.depth == 1 && failure.group_action == CallbackGroupAction::Fail
+                });
+                let diagnostics = source_callback_failures;
+                if let Some((client, _)) = options.control_target {
+                    self.inner
+                        .lock()
+                        .client_entry(client)
+                        .command_streams
+                        .get_or_insert_default()
+                        .exit_code = 1;
+                }
+                if !direct_callback {
+                    publish_guard(captured_output, false, false, captured_events);
+                } else if routed_name == "if-shell" {
+                    for diagnostic in &diagnostics {
+                        append_inserted_output(&mut captured_output, &diagnostic.message);
+                    }
+                    publish_guard(captured_output, true, false, captured_events);
+                } else {
+                    publish_guard(captured_output, false, false, captured_events);
+                    if let Some((client, _)) = options.control_target {
+                        for diagnostic in diagnostics {
+                            self.publish_to_client(
+                                client,
+                                EventPayload::ControlCommandOutput {
+                                    output: diagnostic.message,
+                                },
+                            );
+                        }
+                    }
+                }
+                if failed_source_group {
+                    *failed_group = group;
+                }
+            }
+            Err(DaemonError::Server(
+                ServerError::CommandParse(message) | ServerError::NativeCommandParse(message),
+            )) => {
+                log::warn!(
+                    "{}: ignoring invalid tmux command: {message}",
+                    path.display()
+                );
+                report.note_unlocated_command_error(&message);
+                append_inserted_output(&mut captured_output, &message);
+                publish_guard(captured_output, true, false, captured_events);
+                *failed_group = group;
+            }
+            Err(DaemonError::Server(error)) => {
+                let message = error.tmux_message();
+                log::warn!("{}: tmux command error: {message}", path.display());
+                report.note_command_error(&command, &message);
+                append_inserted_output(&mut captured_output, &message);
+                publish_guard(captured_output, true, true, captured_events);
+                *failed_group = group;
+            }
+            Err(error) => {
+                report.note_startup_command_cause(&command, &daemon_error_text(&error));
+                append_inserted_output(&mut captured_output, daemon_error_text(&error));
+                publish_guard(captured_output, true, true, captured_events);
+                let _ = report.note_callback_failures(
+                    path,
+                    &command,
+                    std::mem::take(&mut callback_failures_after_result),
+                );
+                report.note_deferred_config_replay_issues(path, &command, deferred_replay_issues);
+                return Err(error);
+            }
+        }
+        let _ = report.note_callback_failures(
+            path,
+            &command,
+            std::mem::take(&mut callback_failures_after_result),
+        );
+        report.note_deferred_config_replay_issues(path, &command, deferred_replay_issues);
+        Ok(ConfigFrameAction::Continue)
+    }
+
+    fn record_config_child_error(
+        &self,
+        path: &Path,
+        context: &ExecutionContext,
+        options: SourceFileLoadOptions,
+        source_invocations: &SourceInvocationAccounting,
+        report: &mut ConfigLoadReport,
+        boundary: &mut ConfigSourceBoundary,
+        error: DaemonError,
+    ) {
+        if let DaemonError::Io(error) = error {
+            let warning = if options.control_target.is_some() || source_invocations.is_startup() {
+                source_read_error_warning(path, &error)
+            } else {
+                source_glob_error_warning(path, &error.to_string())
+            };
+            log::warn!("{warning}");
+            report.note_located_source_error(
+                &boundary.command,
+                &mut boundary.source_error_group,
+                &warning,
+            );
+            if let Some(target) = options.control_target {
+                self.publish_control_source_read_error(target, context.pane, error.kind(), warning);
+            }
+        } else if boundary.source_error.is_none() {
+            boundary.source_error = Some(error);
+        }
+    }
+
+    fn finish_config_queue_frame(
+        &self,
+        context: &ExecutionContext,
+        options: SourceFileLoadOptions,
+        report: &mut ConfigLoadReport,
+    ) {
         let defer_command_error_hook_replay_issues = options.control_target.is_none()
             && context
                 .format_variables
@@ -30572,9 +30962,12 @@ impl Shared {
                 });
             self.route_config_replay_errors(replay_client, replay_kind, context.pane, report);
         }
-        Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "daemon/source_hook_queue_tests.rs"]
+mod source_hook_queue_tests;
 
 /// Everything the daemon owns on behalf of agent panes. Nothing in here may be
 /// reached while the daemon's own state lock is held: the runtime calls back
@@ -31954,6 +32347,37 @@ enum ConfigReplayIssue {
 enum DeferredConfigReplayIssue {
     Callback(CallbackParseFailure),
     Replay(ConfigReplayIssue),
+}
+
+struct ConfigQueueFrame<'a> {
+    execution: InsertedFrameExecution<'a>,
+    path: PathBuf,
+    context: ExecutionContext,
+    depth: usize,
+    options: SourceFileLoadOptions,
+    commands: VecDeque<PreparedConfigCommand>,
+    finish_report: bool,
+    failed_group: Option<(String, u32)>,
+    source: Option<Box<ConfigSourceBoundary>>,
+    suppressed_control_capture: Option<ControlCommandEventCapture<'a>>,
+}
+
+struct ConfigSourceBoundary {
+    token: cmdq::ContinuationToken,
+    children: VecDeque<(PendingConfigFile, PreparedConfig, Vec<String>)>,
+    command: CommandInvocation,
+    group: Option<(String, u32)>,
+    source_error_group: Option<usize>,
+    source_error: Option<DaemonError>,
+    source_command_error: bool,
+    source_has_file: bool,
+    warnings: Vec<DeferredControlConfigWarning>,
+}
+
+enum ConfigFrameAction {
+    Continue,
+    Source(Box<ConfigSourceBoundary>),
+    Finish,
 }
 
 #[derive(Default)]
@@ -45091,6 +45515,8 @@ enum InsertedCommandSource {
     Shell(String),
     String(String),
     Block(String),
+    Hooks(Box<HookQueueSource>),
+    Events(Box<EventQueueSource>),
 }
 
 #[cfg(test)]
@@ -45128,8 +45554,14 @@ struct InsertedQueueFrame<'a> {
     stdout_claim: StdoutClaim,
     first_error: Option<DaemonError>,
     failed_group: Option<InsertedPhysicalGroup>,
-    boundary: Option<(InsertedCommandBoundary, Box<InsertedQueueChild>)>,
+    boundary: Option<(
+        InsertedCommandBoundary,
+        Box<InsertedQueueChild>,
+        cmdq::ContinuationToken,
+    )>,
     terminal_error: Option<DaemonError>,
+    hook: Option<HookQueueFrame<'a>>,
+    events: Option<EventQueueFrame>,
 }
 
 fn inserted_frame_mode(
@@ -45191,6 +45623,48 @@ enum InsertedQueueChildKind {
         stdin: Option<RawText>,
     },
     Foreground(Option<RunShellRoute>),
+    Hook(Option<HookLeafContinuation>),
+    Event {
+        draining: bool,
+    },
+}
+
+#[derive(Clone)]
+struct EventQueueSource {
+    events: RefCell<Vec<PendingHookEvent>>,
+    publish_control: bool,
+    shutdown_already_blocked: bool,
+}
+
+struct EventQueueFrame {
+    events: VecDeque<PendingHookEvent>,
+    publish_control: bool,
+    shutdown_already_blocked: bool,
+    notifications: Vec<(EventPayload, Option<ClientId>, bool)>,
+}
+
+#[derive(Clone)]
+struct HookQueueSource {
+    commands: RefCell<Vec<Vec<CommandInvocation>>>,
+    variables: BTreeMap<String, String>,
+    skip_resolution_errors: bool,
+    initial_draining: bool,
+    replaying: bool,
+}
+
+struct HookQueueFrame<'a> {
+    parent: InsertedFrameExecution<'a>,
+    variables: BTreeMap<String, String>,
+    skip_resolution_errors: bool,
+    replaying: bool,
+    initial_draining: bool,
+    groups: VecDeque<Vec<CommandInvocation>>,
+    context: ExecutionContext,
+}
+
+struct HookLeafContinuation {
+    result: Result<Execution, DaemonError>,
+    pane_exit_code: u8,
 }
 
 struct InsertedLeafContinuation {

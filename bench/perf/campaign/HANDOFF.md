@@ -156,6 +156,10 @@ read "Lane brief rules" before launching anything.
     bimodal (B itself reads 1.09 or 2.06). Only real regression vs the wave-2 exit baseline:
     `mem.copy_instr.scroll180` 4.92 -> 5.5 Minstr, added by c01 (bisected: B 5.03-5.12, c01
     5.51-5.56); fix lane `c01copy` on the Mac.
+  - e16 Linux fix (`fa29d51d`): Control output resumes when the bounded tap drains and copy-pipe
+    exits keep their status on Linux; the three e16 tests pass 10/10. On the base every Control
+    transfer in the throughput probe timed out (a real Linux stall), now 131-137 MB/s. Detached
+    throughput median 134 vs 136 MB/s (timing), hidden chatty median 1.006x.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

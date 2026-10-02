@@ -117,6 +117,7 @@ pub(super) struct EventLoop {
     #[cfg(feature = "agent")]
     agents: agent_inbox::AgentInbox,
     connections: BTreeMap<Token, Connection>,
+    inserted_queues: Vec<wait_queue::InsertedTask>,
     completed: mpsc::Receiver<Completion>,
     completion_sender: mpsc::Sender<Completion>,
     turn_tokens: Vec<Token>,
@@ -227,6 +228,10 @@ struct Connection {
 #[path = "event_loop_e02_tests.rs"]
 mod e02_tests;
 
+#[cfg(test)]
+#[path = "event_loop_e06_tests.rs"]
+mod e06_tests;
+
 struct Completion {
     token: Token,
     result: Result<Completed, DaemonError>,
@@ -234,6 +239,7 @@ struct Completion {
 }
 
 enum Completed {
+    Inserted(Box<wait_queue::InsertedTask>),
     Client(Option<Box<connection::Session>>),
     Exec(Option<Box<exec::LoopExec>>),
     ExecPhase(Box<exec::LoopExec>, exec::PreparedExec),
@@ -274,6 +280,7 @@ impl EventLoop {
             #[cfg(feature = "agent")]
             agents,
             connections: BTreeMap::new(),
+            inserted_queues: Vec::new(),
             completed,
             completion_sender,
             turn_tokens: Vec::new(),
@@ -762,6 +769,10 @@ impl EventLoop {
                                 connection.initializing = session.initializing();
                                 connection.session = Some(session);
                             }
+                            connection::MessageProgress::Wait => {
+                                connection.command.as_ref().unwrap().wait();
+                                connection.session = Some(session);
+                            }
                             connection::MessageProgress::Output => {
                                 connection.command.as_ref().unwrap().wait();
                                 connection.output_wait = true;
@@ -963,6 +974,18 @@ impl EventLoop {
             } else {
                 self.complete_exec(token, Some(execution), shared);
             }
+            return;
+        }
+        if prepared.waiting_command {
+            connection.command.as_ref().unwrap().wait();
+            connection.exec = Some(execution);
+            connection.exec_request = Some(prepared);
+            return;
+        }
+        if prepared.ready_on_loop {
+            connection.exec = Some(execution);
+            connection.exec_request = Some(prepared);
+            let _ = self.waker.wake();
             return;
         }
         if prepared.waiting_output {
@@ -1306,6 +1329,10 @@ impl EventLoop {
         shared.drain_control_output_taps();
         self.control_output_deadline = shared.control_output_deadline();
         while let Ok(completion) = self.completed.try_recv() {
+            if let Ok(Completed::Inserted(task)) = completion.result {
+                self.inserted_queues.push(*task);
+                continue;
+            }
             let Some(connection) = self.connections.get_mut(&completion.token) else {
                 if matches!(
                     &completion.result,
@@ -1326,6 +1353,7 @@ impl EventLoop {
                     .resume(continuation);
             }
             match completion.result {
+                Ok(Completed::Inserted(_)) => unreachable!(),
                 Ok(Completed::ExecPhase(execution, prepared)) => {
                     connection.busy = false;
                     if connection.read_closed || connection.cleanup_started {
@@ -1375,6 +1403,25 @@ impl EventLoop {
                 }
             }
         }
+        self.inserted_queues
+            .extend(std::mem::take(&mut *shared.pending_wait_queues.lock()));
+        for mut task in std::mem::take(&mut self.inserted_queues) {
+            if !task.ready() {
+                self.inserted_queues.push(task);
+                continue;
+            }
+            match task.run(true) {
+                wait_queue::Progress::Done => {}
+                wait_queue::Progress::Waiting => self.inserted_queues.push(task),
+                wait_queue::Progress::Worker => {
+                    self.execute_work(LISTENER, shared, move |_| {
+                        task.run(false);
+                        Ok(Completed::Inserted(Box::new(task)))
+                    });
+                }
+                wait_queue::Progress::Ready => unreachable!(),
+            }
+        }
         let mut tokens = std::mem::take(&mut self.turn_tokens);
         tokens.clear();
         tokens.extend(self.connections.keys().copied());
@@ -1386,6 +1433,20 @@ impl EventLoop {
                     command.finish();
                 }
                 connection.output_wait = false;
+            }
+            let wait_ready = connection
+                .exec_request
+                .as_ref()
+                .is_some_and(|request| request.waiting_command && request.command_ready())
+                || connection
+                    .session
+                    .as_ref()
+                    .is_some_and(|session| session.command_wait_ready());
+            if wait_ready
+                && let Some(command) = &connection.command
+                && let cmdq::State::Waiting(continuation) = command.state()
+            {
+                command.resume(continuation);
             }
             if std::mem::take(&mut connection.read_again) {
                 self.read_ready(token, shared);
@@ -1445,6 +1506,10 @@ impl EventLoop {
                                 connection.read_again = true;
                                 let _ = self.waker.wake();
                             }
+                        }
+                        connection::MessageProgress::Wait => {
+                            connection.command.as_ref().unwrap().wait();
+                            connection.session = Some(session);
                         }
                         connection::MessageProgress::Output => {
                             connection.command.as_ref().unwrap().wait();

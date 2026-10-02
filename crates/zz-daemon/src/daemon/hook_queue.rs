@@ -236,6 +236,8 @@ impl Queue {
             kind,
             &mut self.frames,
             64,
+            false,
+            false,
             |frame, command, target| {
                 if !blocking_leaf(command) {
                     let step =

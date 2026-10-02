@@ -224,6 +224,7 @@ fn command_hooks_keep_plain_input_on_a_worker() {
         .is_none_or(|channel| channel.waiters.is_empty())
     {
         assert!(Instant::now() < deadline);
+        event_loop.turn(&shared).unwrap();
         thread::sleep(Duration::from_millis(1));
     }
     shared

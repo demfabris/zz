@@ -15,6 +15,18 @@ pub(super) struct Session {
     #[cfg(unix)]
     request: Option<PendingMessage>,
     initializing: bool,
+    task: Option<Box<wait_queue::CommandTask>>,
+    task_after: TaskAfter,
+}
+
+#[derive(Default)]
+enum TaskAfter {
+    #[default]
+    Request,
+    Compact {
+        last: bool,
+    },
+    Initialize,
 }
 
 #[cfg(unix)]
@@ -41,6 +53,7 @@ enum PendingMessage {
 pub(super) enum MessageProgress {
     Done,
     Output,
+    Wait,
     Worker,
     Ready,
 }
@@ -217,6 +230,8 @@ impl Session {
             #[cfg(unix)]
             request: None,
             initializing: false,
+            task: None,
+            task_after: TaskAfter::Request,
         }))
     }
 
@@ -286,7 +301,11 @@ impl Session {
 
     #[cfg(unix)]
     pub(super) fn message_pending(&self) -> bool {
-        self.request.is_some()
+        self.request.is_some() || self.task.is_some()
+    }
+
+    pub(super) fn command_wait_ready(&self) -> bool {
+        self.task.as_ref().is_some_and(|task| task.ready())
     }
 
     #[cfg(unix)]
@@ -296,7 +315,86 @@ impl Session {
         outbound: &Arc<OutboundMailbox>,
         inline: bool,
     ) -> MessageProgress {
-        while let Some(request) = self.request.take() {
+        loop {
+            if let Some(mut task) = self.task.take() {
+                match task.run(inline) {
+                    wait_queue::Progress::Waiting => {
+                        self.task = Some(task);
+                        return MessageProgress::Wait;
+                    }
+                    wait_queue::Progress::Worker => {
+                        self.task = Some(task);
+                        return MessageProgress::Worker;
+                    }
+                    wait_queue::Progress::Ready => {
+                        self.task = Some(task);
+                        return MessageProgress::Ready;
+                    }
+                    wait_queue::Progress::Done => {
+                        let (response, client_exit, context, _admission) = task.finish();
+                        self.context = Some(context);
+                        let failed = matches!(response, CommandResponse::Error { .. });
+                        match std::mem::take(&mut self.task_after) {
+                            TaskAfter::Request => {
+                                #[cfg(test)]
+                                if let Some(hook) = shared.response_admission_hook.lock().take() {
+                                    let _ = hook.reached.send(());
+                                    let _ = hook.release.recv();
+                                }
+                                let _ = outbound
+                                    .enqueue_reliable(&ProtocolMessage::CommandResponse(response));
+                                return MessageProgress::Done;
+                            }
+                            TaskAfter::Compact { last } => {
+                                let _ = outbound
+                                    .enqueue_reliable(&ProtocolMessage::CommandResponse(response));
+                                if failed || last || client_exit {
+                                    self.request = None;
+                                    let _ = outbound.enqueue_reliable(&ProtocolMessage::ExecExit(
+                                        zz_protocol::ExecExit {
+                                            server_id: shared.server_id,
+                                            outcome: zz_protocol::ExecOutcome::Ran,
+                                        },
+                                    ));
+                                    return MessageProgress::Done;
+                                }
+                            }
+                            TaskAfter::Initialize => {
+                                let Some(PendingMessage::Initialize { pending_errors, .. }) =
+                                    self.request.as_mut()
+                                else {
+                                    unreachable!()
+                                };
+                                if failed
+                                    && client_attached_session(&shared.inner.lock(), self.client)
+                                        .is_some()
+                                {
+                                    pending_errors.push(response);
+                                } else {
+                                    let _ = outbound.enqueue_reliable(
+                                        &ProtocolMessage::CommandResponse(response),
+                                    );
+                                }
+                                if failed {
+                                    let Some(PendingMessage::Initialize { pending_errors, .. }) =
+                                        self.request.take()
+                                    else {
+                                        unreachable!()
+                                    };
+                                    self.request =
+                                        Some(PendingMessage::InitializeFinish(pending_errors));
+                                }
+                            }
+                        }
+                        if !inline {
+                            return MessageProgress::Ready;
+                        }
+                    }
+                }
+            }
+            let Some(request) = self.request.take() else {
+                break;
+            };
             if self.cancel.load(Ordering::Acquire) {
                 return MessageProgress::Done;
             }
@@ -364,6 +462,28 @@ impl Session {
                         }
                     }
                     let prepared = commands.next().unwrap();
+                    if wait_queue::task_command(&prepared.invocation) || !inline {
+                        self.task = wait_queue::CommandTask::new(
+                            shared,
+                            self.client,
+                            self.hello.kind,
+                            context,
+                            request_id,
+                            &prepared.invocation,
+                            prepared.canonical_name.is_some() || prepared.alias_matched,
+                        )
+                        .map(Box::new)
+                        .ok();
+                        if self.task.is_some() {
+                            self.task_after = TaskAfter::Initialize;
+                            self.request = Some(PendingMessage::Initialize {
+                                commands,
+                                request_id: request_id.saturating_add(1),
+                                pending_errors,
+                            });
+                            continue;
+                        }
+                    }
                     let response = shared.execute_command_request_with_prepared(
                         self.client,
                         self.hello.kind,
@@ -451,6 +571,54 @@ impl Session {
                     }
                     let command = commands.next().unwrap();
                     let last = commands.as_slice().is_empty();
+                    if (wait_queue::task_command(&command.invocation) || !inline)
+                        && command.result == PreparedCommandResult::Ready
+                    {
+                        if self.hello.kind == ClientKind::Control {
+                            let _ = outbound.enqueue_reliable(&Shared::event(
+                                EventPayload::ControlCommandStarted {
+                                    request_id,
+                                    flags: u32::from(if command.invocation.source.is_some() {
+                                        CONTROL_COMMAND_FRAME_FLAGS_CONTROL
+                                    } else {
+                                        CONTROL_COMMAND_FRAME_FLAGS_NONE
+                                    }),
+                                    canonical_name: command.canonical_name.clone(),
+                                    guard: !MuxEngine::is_command_alias_group(&command.invocation),
+                                },
+                            ));
+                        }
+                        match wait_queue::CommandTask::new(
+                            shared,
+                            self.client,
+                            self.hello.kind,
+                            context,
+                            request_id,
+                            &command.invocation,
+                            true,
+                        ) {
+                            Ok(task) => {
+                                self.task = Some(Box::new(task));
+                                self.task_after = TaskAfter::Compact { last };
+                                self.request = Some(PendingMessage::Compact {
+                                    commands,
+                                    request_id: request_id.saturating_add(1),
+                                });
+                                continue;
+                            }
+                            Err(response) => {
+                                let _ = outbound
+                                    .enqueue_reliable(&ProtocolMessage::CommandResponse(response));
+                                let _ = outbound.enqueue_reliable(&ProtocolMessage::ExecExit(
+                                    zz_protocol::ExecExit {
+                                        server_id: shared.server_id,
+                                        outcome: zz_protocol::ExecOutcome::Ran,
+                                    },
+                                ));
+                                return MessageProgress::Done;
+                            }
+                        }
+                    }
                     if shared.execute_compact_command(
                         self.client,
                         self.hello.kind,
@@ -470,6 +638,42 @@ impl Session {
                     }
                 }
                 PendingMessage::Message(message) => {
+                    if let ProtocolMessage::CommandRequest(request) = &message {
+                        let prepared = if request.prepared {
+                            Ok(request.command.clone())
+                        } else {
+                            resolve_and_prepare_command(
+                                &shared.inner.lock().engine,
+                                &request.command,
+                            )
+                            .map(|(command, _)| command)
+                        };
+                        if let Ok(command) = prepared
+                            && (wait_queue::task_command(&command) || !inline)
+                        {
+                            match wait_queue::CommandTask::new(
+                                shared,
+                                self.client,
+                                self.hello.kind,
+                                self.context.as_ref().expect("client context"),
+                                request.request_id,
+                                &command,
+                                true,
+                            ) {
+                                Ok(task) => {
+                                    self.task = Some(Box::new(task));
+                                    self.task_after = TaskAfter::Request;
+                                    continue;
+                                }
+                                Err(response) => {
+                                    let _ = outbound.enqueue_reliable(
+                                        &ProtocolMessage::CommandResponse(response),
+                                    );
+                                    return MessageProgress::Done;
+                                }
+                            }
+                        }
+                    }
                     if inline {
                         let ready = if let ProtocolMessage::CommandRequest(request) = &message {
                             if exec::output_pending(outbound) {
@@ -849,6 +1053,7 @@ pub(super) fn inline_query(
     command: &PreparedCommand,
 ) -> bool {
     command.result == PreparedCommandResult::Ready
-        && command.canonical_name.as_deref() != Some("capture-pane")
-        && ctrl::control_query_can_defer_wakeup(&shared.inner.lock(), context, command)
+        && (wait_queue::task_command(&command.invocation)
+            || command.canonical_name.as_deref() != Some("capture-pane")
+                && ctrl::control_query_can_defer_wakeup(&shared.inner.lock(), context, command))
 }

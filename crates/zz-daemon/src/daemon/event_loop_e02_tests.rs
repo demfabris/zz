@@ -147,7 +147,8 @@ fn a_legacy_leaf_returns_to_the_loop_without_replaying_queries() {
     peer.write_all(&encode_protocol_message(&chain).unwrap())
         .unwrap();
     event_loop.read_ready(token, &shared);
-    assert!(event_loop.connections[&token].busy);
+    assert!(!event_loop.connections[&token].busy);
+    assert_eq!(shared.connection_threads.worker_count(), 0);
     let item = event_loop.connections[&token].command.as_ref().unwrap().id;
     assert!(matches!(
         event_loop.connections[&token]
@@ -165,6 +166,7 @@ fn a_legacy_leaf_returns_to_the_loop_without_replaying_queries() {
             .get("e02-leaf")
             .is_some_and(|channel| !channel.waiters.is_empty())
     });
+    event_loop.turn(&shared).unwrap();
     let mut input = Inbound::default();
     let mut received = io_tests::messages(&mut peer, &mut input);
     assert_eq!(outputs(&received), [(1, "before".to_owned())]);

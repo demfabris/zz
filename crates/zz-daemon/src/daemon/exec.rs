@@ -842,7 +842,17 @@ pub(super) struct PreparedExec {
     outcome: ExecOutcome,
     pub(super) last: bool,
     pub(super) waiting_output: bool,
+    pub(super) waiting_command: bool,
+    pub(super) ready_on_loop: bool,
+    task: Option<Box<wait_queue::CommandTask>>,
     admission: Option<ResponseAdmissionGuard>,
+}
+
+#[cfg(unix)]
+impl PreparedExec {
+    pub(super) fn command_ready(&self) -> bool {
+        self.task.as_ref().is_none_or(|task| task.ready())
+    }
 }
 
 #[cfg(unix)]
@@ -890,6 +900,9 @@ impl LoopExec {
             outcome: ExecOutcome::Ran,
             last: request.flags.contains(ExecFlags::LAST),
             waiting_output: false,
+            waiting_command: false,
+            ready_on_loop: false,
+            task: None,
             admission: ResponseAdmissionGuard::new(&self.shared),
         };
         if prepared.admission.is_none() {
@@ -961,44 +974,89 @@ impl LoopExec {
 
     pub(super) fn run(&mut self, prepared: &mut PreparedExec, inline: bool) -> Option<bool> {
         prepared.waiting_output = false;
+        prepared.waiting_command = false;
+        prepared.ready_on_loop = false;
         let mailbox = Arc::clone(&self.mailbox);
         if prepared.admission.is_some() {
             let shared = Arc::clone(&self.shared);
-            while !prepared.commands.as_slice().is_empty() {
+            while prepared.task.is_some() || !prepared.commands.as_slice().is_empty() {
                 if inline {
                     if self.output_pending() {
                         prepared.waiting_output = true;
                         return None;
                     }
-                    if !self.can_inline(&prepared.commands.as_slice()[0]) {
+                    if prepared.task.is_none() && !self.can_inline(&prepared.commands.as_slice()[0])
+                    {
                         return None;
                     }
                 }
-                let mut invocation = prepared.commands.next().unwrap().invocation;
-                let request_id = prepared.next_request;
-                prepared.next_request = request_id.saturating_add(1);
-                if self.cancel.load(Ordering::Acquire) {
-                    break;
-                }
-                if shared.shutdown_pending.load(Ordering::Acquire) {
-                    let _ = mailbox.enqueue_reliable(&server_stopping_response(request_id));
-                    break;
-                }
-                invocation.set_stdin_available(prepared.stdin_available);
-                let item = shared.command_item(None);
-                item.command_item
-                    .as_ref()
-                    .expect("Exec command item")
-                    .lock()
-                    .exec_writer = Some(Arc::downgrade(&mailbox));
-                let (response, client_exit) = item.execute_command_request_with_streams(
-                    self.client,
-                    ClientKind::Command,
-                    &mut self.context,
-                    request_id,
-                    &invocation,
-                    true,
-                );
+                let (response, client_exit) = if let Some(mut task) = prepared.task.take() {
+                    match task.run(inline) {
+                        wait_queue::Progress::Done => {
+                            let (response, client_exit, context, _admission) = task.finish();
+                            self.context = context;
+                            (response, client_exit)
+                        }
+                        wait_queue::Progress::Waiting => {
+                            prepared.waiting_command = true;
+                            prepared.task = Some(task);
+                            return None;
+                        }
+                        wait_queue::Progress::Worker => {
+                            prepared.task = Some(task);
+                            return None;
+                        }
+                        wait_queue::Progress::Ready => {
+                            prepared.ready_on_loop = true;
+                            prepared.task = Some(task);
+                            return None;
+                        }
+                    }
+                } else {
+                    let mut invocation = prepared.commands.next().unwrap().invocation;
+                    let request_id = prepared.next_request;
+                    prepared.next_request = request_id.saturating_add(1);
+                    if self.cancel.load(Ordering::Acquire) {
+                        break;
+                    }
+                    if shared.shutdown_pending.load(Ordering::Acquire) {
+                        let _ = mailbox.enqueue_reliable(&server_stopping_response(request_id));
+                        break;
+                    }
+                    invocation.set_stdin_available(prepared.stdin_available);
+                    if wait_queue::task_command(&invocation) || !inline {
+                        match wait_queue::CommandTask::new(
+                            &shared,
+                            self.client,
+                            ClientKind::Command,
+                            &self.context,
+                            request_id,
+                            &invocation,
+                            true,
+                        ) {
+                            Ok(task) => {
+                                prepared.task = Some(Box::new(task));
+                                continue;
+                            }
+                            Err(response) => (response, false),
+                        }
+                    } else {
+                        let item = shared.command_item(None);
+                        item.command_item
+                            .as_ref()
+                            .expect("Exec command item")
+                            .lock()
+                            .exec_writer = Some(Arc::downgrade(&mailbox));
+                        item.execute_command_request_with_streams(
+                            self.client,
+                            ClientKind::Command,
+                            &mut self.context,
+                            request_id,
+                            &invocation,
+                            true,
+                        )
+                    }
+                };
                 let failed = matches!(response, CommandResponse::Error { .. });
                 let admitted = mailbox.enqueue_reliable_with_wakeup(
                     &ProtocolMessage::CommandResponse(response),
@@ -1037,7 +1095,9 @@ impl LoopExec {
     }
 
     fn can_inline(&self, command: &PreparedCommand) -> bool {
-        if connection::inline_query(&self.shared, &self.context, command) {
+        if wait_queue::task_command(&command.invocation)
+            || connection::inline_query(&self.shared, &self.context, command)
+        {
             return true;
         }
         let Some(name @ ("select-pane" | "send-keys")) = command.canonical_name.as_deref() else {

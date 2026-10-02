@@ -3138,6 +3138,17 @@ base medians: display p1/p20 0.0735/0.0781 vs 0.0726/0.0775 Minstr; kill-pane 0.
 Idle counters stay zero and threads stay 3/25. Unit tests: 1,498 pass and only the known Mac
 bundle-path case fails; 35 integration tests pass, compat is 101/101, and startup diagnostics are 8/8.
 Hand on the Mac checks and existing split-shell/kill-pane CPU gate failures to the orchestrator.
+**As built, hook panic fix (2026-10-02):** `Shared::run_event_hooks` sends event hooks
+from `loop_wait` command items to `TimerInput::Hooks`, including items finishing on workers.
+The command keeps its output; the loop hook queue owns the hook's parked frames. Two regression
+tests check split/layout and worker rename hooks, response and exit delivery, and hook resumption.
+The full daemon suite passes (1500 unit and 35 integration tests, one ignored), as do the existing
+hook tests, clippy, Windows check, and six compat scenarios (103 steps). Windows reports 16 warnings.
+One preliminary quick pair against `e3a2a1fde` gives CLI instruction ratios 0.9908 to 1.0209x;
+display CPU p1 is 0.0492 vs 0.0526 ms and p20 is 0.0496 vs 0.0456 ms. Both have 0 idle wakeups/s;
+p20 footprint is 11.0942 vs 11.1723 MiB. The quick W0 gate has 35 passes and no failures.
+Final-commit acceptance uses three alternating runs per binary, with scratch JSONs under
+`/tmp/zzpc/hookpanic-{base,new}-{1,2,3}.json`. The orchestrator owns the Linux-only checks.
 
 As built, e19fix (2026-10-02, base `6e7d954e3`): empty peer updates skip format-fact
 snapshots, and drained peer-probe workers exit immediately. Other helpers reuse workers for

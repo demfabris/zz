@@ -8575,14 +8575,18 @@ impl Shared {
                 .push(Box::new(move |shared| shared.run_event_hooks(events)));
             return;
         }
-        let queued = self.watcher_effects.is_some();
+        let queued = self.watcher_effects.is_some()
+            || self
+                .command_item
+                .as_ref()
+                .is_some_and(|item| item.lock().loop_wait);
         #[cfg(unix)]
         let queued = queued
             || self.loop_leaf_enabled()
             || self.loop_active.load(Ordering::Acquire)
             || self.helpers.on_loop_thread();
         if queued {
-            self.enqueue_event_hooks(events);
+            let _ = self.timer_tx.send(timers::TimerInput::Hooks(events));
             return;
         }
         self.run_event_hooks_with_control(events, true);

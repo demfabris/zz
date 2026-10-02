@@ -253,6 +253,10 @@ mod e21_tests;
 #[path = "event_loop_e21fix_tests.rs"]
 mod e21fix_tests;
 
+#[cfg(test)]
+#[path = "hookpanic_tests.rs"]
+mod hookpanic_tests;
+
 struct Completion {
     token: Token,
     result: Result<Completed, DaemonError>,

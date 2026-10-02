@@ -127,6 +127,7 @@ pub(crate) struct Model {
     pub menu_selection: Option<usize>,
     pub menu_action_pending: bool,
     pub menu_swallowed_key: Option<KeyCode>,
+    pub menu_opened: u64,
     pub confirm: Option<ConfirmState>,
     pub confirm_reply_pending: bool,
     pub confirm_swallowed_key: Option<KeyCode>,
@@ -255,6 +256,7 @@ impl Model {
                 .and_then(|selected| usize::try_from(selected).ok()),
             menu_action_pending: false,
             menu_swallowed_key: None,
+            menu_opened: core.menu_opened(),
             confirm: core.confirm().cloned(),
             confirm_reply_pending: false,
             confirm_swallowed_key: None,
@@ -316,6 +318,7 @@ impl Model {
             self.viewports.insert(popup.pane, viewport.clone());
         }
         self.set_menu(core.menu().cloned());
+        self.menu_opened = core.menu_opened();
         self.menu_action_pending = false;
         self.menu_swallowed_key = None;
         self.confirm = core.confirm().cloned();
@@ -454,6 +457,14 @@ impl Model {
         }
         self.command_output_id = output_id;
         self.command_output = output;
+    }
+
+    pub fn sync_menu(&mut self, core: &ClientCore) {
+        if self.menu_opened != core.menu_opened() {
+            self.menu_opened = core.menu_opened();
+            self.menu = None;
+        }
+        self.set_menu(core.menu().cloned());
     }
 
     pub fn set_menu(&mut self, menu: Option<MenuState>) {
@@ -1316,6 +1327,47 @@ mod tests {
         assert_eq!(model.menu_selection, None);
         assert!(!model.menu_action_pending);
         assert_eq!(model.menu_swallowed_key, None);
+    }
+
+    #[test]
+    fn a_menu_closed_and_reopened_before_the_model_syncs_drops_the_pending_choice() {
+        let publish = |core: &mut ClientCore, state: Option<MenuState>| {
+            core.handle_message(zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+                sequence: 1,
+                payload: zz_protocol::EventPayload::Menu { state },
+            }));
+        };
+        let mut core = ClientCore::new();
+        publish(&mut core, Some(menu_state(None)));
+        let endpoint = Endpoint::parse("unix:///tmp/zz-state-menu-reopen-test.sock").unwrap();
+        let mut model = Model::new(
+            &core,
+            TerminalSize {
+                columns: 80,
+                rows: 24,
+                cell_width_px: 8,
+                cell_height_px: 16,
+            },
+            "host".to_owned(),
+            "host".to_owned(),
+            endpoint.clone(),
+            endpoint,
+            Vec::new(),
+        );
+        model.menu_action_pending = true;
+
+        publish(&mut core, None);
+        publish(&mut core, Some(menu_state(Some(0))));
+        model.sync_menu(&core);
+        model.sync_menu(&core);
+        assert_eq!(model.menu, Some(menu_state(Some(0))));
+        assert_eq!(model.menu_selection, Some(0));
+        assert!(!model.menu_action_pending);
+
+        model.menu_action_pending = true;
+        publish(&mut core, Some(menu_state(None)));
+        model.sync_menu(&core);
+        assert!(model.menu_action_pending);
     }
 
     #[test]

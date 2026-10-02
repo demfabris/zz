@@ -1590,7 +1590,7 @@ fn handle_core_event(
             Ok(ProtocolOutcome::RepaintAll)
         }
         CoreEvent::MenuChanged => {
-            model.set_menu(lock_core(core).menu().cloned());
+            model.sync_menu(&lock_core(core));
             Ok(ProtocolOutcome::RepaintAll)
         }
         CoreEvent::ConfirmChanged => {

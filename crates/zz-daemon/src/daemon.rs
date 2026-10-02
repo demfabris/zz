@@ -55,6 +55,8 @@ mod jobs;
 #[cfg(unix)]
 mod lifecycle;
 #[cfg(unix)]
+mod loop_handoff;
+#[cfg(unix)]
 mod pipe_jobs;
 mod source_queue;
 pub(crate) mod status_jobs;
@@ -7312,8 +7314,22 @@ impl Shared {
                 item.resume(token);
             }
         }
+        let canonical = canonical_command(&command.name);
+        #[cfg(unix)]
+        if let Some(handed_off) = self.hand_off_from_loop(
+            client,
+            kind,
+            context,
+            command,
+            canonical,
+            mux_source,
+            client_terminal,
+            queue_execution,
+        ) {
+            return handed_off;
+        }
         hook_events::release_input_change_window(self);
-        let split_input = canonical_command(&command.name) == "split-window"
+        let split_input = canonical == "split-window"
             && command_stdin_sink("split-window", &command.args)
                 == Some(CommandStdinSink::PaneInput);
         let streamed_command = if split_input {
@@ -7324,7 +7340,7 @@ impl Shared {
             self.command_with_caller_stdin(client, context, command)?
         };
         if streamed_command.is_none()
-            && command_stdin_sink(canonical_command(&command.name), &command.args).is_some()
+            && command_stdin_sink(canonical, &command.args).is_some()
             && let Some(wait) = self
                 .command_item
                 .as_ref()
@@ -7350,7 +7366,7 @@ impl Shared {
         }
         let command = streamed_command.as_ref().unwrap_or(command);
         if matches!(
-            canonical_command(&command.name),
+            canonical,
             "command-prompt" | "show-prompt-history" | "clear-prompt-history"
         ) {
             self.ensure_prompt_history();
@@ -7449,7 +7465,7 @@ impl Shared {
         let no_hooks = context.no_hooks
             || queue_execution.is_some_and(|execution| execution.suppress_after_hooks.get());
         let original_context = context.clone();
-        let name = canonical_command(&command.name).to_owned();
+        let name = canonical.to_owned();
         let previous_client_terminal = context_client_terminal(context);
         let format_facts_unread = (kind == ClientKind::Command
             && client_terminal == ClientTerminal::Absent
@@ -24932,6 +24948,10 @@ impl Shared {
                     message_id,
                 },
             );
+            return Ok(());
+        }
+        #[cfg(unix)]
+        if self.hand_off_key_commands(client, kind, context, commands, repeat_binding) {
             return Ok(());
         }
         let mut first_error = None;

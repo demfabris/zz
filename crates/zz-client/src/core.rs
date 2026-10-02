@@ -287,6 +287,7 @@ pub struct ClientCore {
     display_panes: Option<DisplayPanesState>,
     popup: Option<PopupState>,
     menu: Option<MenuState>,
+    menu_opened: u64,
     confirm: Option<ConfirmState>,
     outbound: VecDeque<Outbound>,
     events: VecDeque<CoreEvent>,
@@ -640,6 +641,11 @@ impl ClientCore {
     }
 
     #[must_use]
+    pub const fn menu_opened(&self) -> u64 {
+        self.menu_opened
+    }
+
+    #[must_use]
     pub const fn confirm(&self) -> Option<&ConfirmState> {
         self.confirm.as_ref()
     }
@@ -868,6 +874,9 @@ impl ClientCore {
                 self.events.push_back(CoreEvent::PopupChanged);
             }
             EventPayload::Menu { state } => {
+                if self.menu.is_none() && state.is_some() {
+                    self.menu_opened = self.menu_opened.wrapping_add(1);
+                }
                 self.menu = state;
                 self.events.push_back(CoreEvent::MenuChanged);
             }

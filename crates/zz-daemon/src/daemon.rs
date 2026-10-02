@@ -2184,8 +2184,19 @@ struct OutboundState {
     quiet_socket: Option<std::os::fd::OwnedFd>,
     terminals_held: bool,
     attach_batch: bool,
+    #[cfg(unix)]
+    attach_rounds: u64,
+    #[cfg(unix)]
+    attach_settling: Option<AttachSettling>,
     buffered: bool,
     ctrl_collecting: ControlCollection,
+}
+
+#[cfg(unix)]
+struct AttachSettling {
+    round: u64,
+    pending: usize,
+    flush: Option<bool>,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]

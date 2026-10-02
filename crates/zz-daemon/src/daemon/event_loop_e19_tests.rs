@@ -12,38 +12,50 @@ fn discovery_jobs_drain_cancel_limit_and_reap_on_the_loop() {
     let jobs = shared.helpers.jobs.clone();
     let owner = Arc::clone(&shared);
     let worker = thread::spawn(move || {
-        let run = |script: &str, limit, timeout, cancelled: &dyn Fn() -> bool| {
+        let run = |script: &str, limit, timeout, cancel: Arc<AtomicBool>| {
             let mut command = Command::new("/bin/sh");
             command.args(["-c", script]);
-            jobs.output(command, limit, Instant::now() + timeout, cancelled)
+            jobs.output(command, limit, Instant::now() + timeout, cancel)
         };
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let output = run(
                 "i=0; while [ $i -lt 10000 ]; do printf 'error-output-line\\n' >&2; i=$((i + 1)); done; printf ok",
                 1024 * 1024,
                 Duration::from_secs(5),
-                &|| false,
+                Arc::new(AtomicBool::new(false)),
             ).unwrap();
             assert!(output.status.success());
             assert_eq!(output.stdout, b"ok");
             assert_eq!(output.stderr.len(), 180_000);
             let started = Instant::now();
-            let error = run("sleep 20", 1024, Duration::from_secs(5), &|| {
-                started.elapsed() >= Duration::from_millis(50)
-            })
-            .unwrap_err();
+            let cancel = Arc::new(AtomicBool::new(false));
+            let signal = Arc::clone(&cancel);
+            let notifier = jobs.clone();
+            let cancellation = thread::spawn(move || {
+                thread::sleep(Duration::from_millis(50));
+                signal.store(true, Ordering::Release);
+                notifier.notify();
+            });
+            let error = run("sleep 20", 1024, Duration::from_secs(5), cancel).unwrap_err();
+            cancellation.join().unwrap();
             assert!(error.contains("cancelled"), "{error}");
             assert!(started.elapsed() < Duration::from_secs(1));
             let error = run(
                 "head -c 10000 /dev/zero",
                 1024,
                 Duration::from_secs(2),
-                &|| false,
+                Arc::new(AtomicBool::new(false)),
             )
             .unwrap_err();
             assert!(error.contains("output limit"), "{error}");
             let started = Instant::now();
-            let error = run("sleep 20", 1024, Duration::from_millis(50), &|| false).unwrap_err();
+            let error = run(
+                "sleep 20",
+                1024,
+                Duration::from_millis(50),
+                Arc::new(AtomicBool::new(false)),
+            )
+            .unwrap_err();
             assert!(error.contains("timed out"), "{error}");
             assert!(started.elapsed() < Duration::from_secs(1));
         }));

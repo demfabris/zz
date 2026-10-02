@@ -935,8 +935,8 @@ impl Task {
             git_marks_with(
                 &listing.root,
                 &|| stream.cancelled(),
-                &|command, limit, deadline, cancelled| {
-                    jobs.output(command, limit, deadline, cancelled)
+                &|command, limit, deadline, _cancelled| {
+                    jobs.output(command, limit, deadline, Arc::clone(&self.cancel))
                 },
             )
         });

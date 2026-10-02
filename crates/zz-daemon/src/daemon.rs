@@ -30302,32 +30302,17 @@ impl Shared {
             return Vec::new();
         }
         let inner = self.inner.lock();
-        let facts = inner.engine.format_facts();
         inner
             .engine
             .state
             .windows
             .values()
-            .flat_map(|window| {
-                window
-                    .panes
-                    .iter()
-                    .map(move |(pane, state)| (window, pane, state))
-            })
-            .filter_map(|(window, pane, state)| {
+            .flat_map(|window| &window.panes)
+            .filter_map(|(pane, state)| {
                 if !matches!(state.kind, PaneKind::Terminal) {
                     return None;
                 }
                 let target = pane.to_string();
-                if facts.user_option(
-                    &target,
-                    &window.id.to_string(),
-                    &window.session.to_string(),
-                    "@agent-peer-state",
-                ) == Some("off")
-                {
-                    return None;
-                }
                 Some((
                     *pane,
                     target,
@@ -30372,6 +30357,9 @@ impl Shared {
         for (pane, pid, value) in updates {
             let value = {
                 let mut inner = self.inner.lock();
+                if value.is_none() && !inner.claude_peer_states.contains_key(&pane) {
+                    continue;
+                }
                 let Some(window) = inner.engine.state.window_for_pane(pane) else {
                     continue;
                 };

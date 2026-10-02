@@ -6568,7 +6568,7 @@ impl Shared {
             terminal.release_view(view);
         }
         for waiter in popup_waiters {
-            let _ = waiter.wake.try_send(129);
+            waiter.reply.try_send(129);
         }
         for waiter in menu_waiters {
             waiter.complete(false);
@@ -7877,9 +7877,14 @@ impl Shared {
                     DaemonCommandDispatch::PipePane => {
                         self.pipe_pane(context, canonical, &command.args)
                     }
-                    DaemonCommandDispatch::DisplayPopup => {
-                        self.display_popup(client, kind, context, canonical, &command.args)
-                    }
+                    DaemonCommandDispatch::DisplayPopup => self.display_popup(
+                        client,
+                        kind,
+                        context,
+                        canonical,
+                        &command.args,
+                        queue_execution,
+                    ),
                     DaemonCommandDispatch::DisplayMenu => self.display_menu(
                         client,
                         kind,
@@ -8208,6 +8213,7 @@ impl Shared {
                 continuation,
                 #[cfg(unix)]
                 shell: None,
+                popup: None,
                 overlay: commands.map(|commands| OverlayCommands {
                     commands,
                     accepted: Arc::clone(&waiter.0.accepted),
@@ -12431,6 +12437,7 @@ impl Shared {
                     continuation,
                     #[cfg(unix)]
                     shell: None,
+                    popup: None,
                     overlay: None,
                     leaf: None,
                     guard: None,
@@ -14604,6 +14611,9 @@ impl Shared {
                 if let Some(shell) = wait.shell {
                     step.0 = shell.finish(self, &mut frame.context, Some(&frame.execution));
                 }
+                if let Some(popup) = wait.popup {
+                    step.0 = popup.finish();
+                }
                 if let Some(overlay) = wait.overlay {
                     step.0 = if overlay.accepted.load(Ordering::Acquire) {
                         self.run_confirm_commands(
@@ -16096,6 +16106,7 @@ impl Shared {
                     continuation,
                     #[cfg(unix)]
                     shell: None,
+                    popup: None,
                     overlay: None,
                     leaf: None,
                     guard: None,
@@ -16126,6 +16137,7 @@ impl Shared {
                     name: String::new(),
                     continuation: wait.continuation.clone(),
                     shell: Some(wait),
+                    popup: None,
                     overlay: None,
                     leaf: None,
                     guard: None,
@@ -18360,6 +18372,7 @@ impl Shared {
         context: &ExecutionContext,
         command_name: &str,
         args: &[RawText],
+        queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_display_popup_args(args)?;
         if kind == ClientKind::Control {
@@ -18690,7 +18703,12 @@ impl Shared {
         terminal.set_word_separators(word_separators);
         terminal.attach_view(TerminalViewId(target_client.0));
         terminal.set_view_stream(TerminalViewId(target_client.0), ViewStream::Foreground);
-        let (wake, wait) = crossbeam_channel::bounded(1);
+        let (wait, waiter) = if matches!(kind, ClientKind::Command | ClientKind::Control) {
+            let (wait, waiter) = PopupWait::new(self, client);
+            (Some(wait), Some(waiter))
+        } else {
+            (None, None)
+        };
         {
             let mut inner = self.inner.lock();
             if inner
@@ -18724,8 +18742,7 @@ impl Shared {
                         border_style: parsed.border_style.clone(),
                         selected_style: None,
                     },
-                    waiter: matches!(kind, ClientKind::Command | ClientKind::Control)
-                        .then_some(PopupWaiter { client, wake }),
+                    waiter,
                 });
         }
         self.publish_to_client(
@@ -18747,18 +18764,45 @@ impl Shared {
             self.close_popup(target_client, true);
             return Err(error);
         }
-        if !matches!(kind, ClientKind::Command | ClientKind::Control) {
+        let Some(wait) = wait else {
             return Ok(Execution::default());
+        };
+        if let Some(item) = &self.command_item {
+            let mut item = item.lock();
+            #[cfg(unix)]
+            let loop_leaf = item.loop_leaf;
+            #[cfg(not(unix))]
+            let loop_leaf = false;
+            if (item.loop_wait || loop_leaf)
+                && queue_execution.is_some_and(|queue| queue.frame_active.get())
+            {
+                item.pending_wait = Some(Box::new(RegisteredWait {
+                    name: String::new(),
+                    continuation: wait.continuation.clone(),
+                    #[cfg(unix)]
+                    shell: None,
+                    popup: Some(wait),
+                    overlay: None,
+                    leaf: None,
+                    guard: None,
+                    terminal: None,
+                    file: None,
+                }));
+                return Ok(Execution::default());
+            }
         }
-        self.report_command_queue_park();
-        let exit_code = wait.recv().unwrap_or(129);
-        if exit_code == 0 {
-            Ok(Execution::default())
-        } else {
-            Err(DaemonError::CommandExit {
-                output: RawText::default(),
-                exit_code,
-            })
+        #[cfg(any(test, windows))]
+        {
+            wait.continuation.wait();
+            wait.finish()
+        }
+        #[cfg(all(unix, not(test)))]
+        {
+            self.close_popup(target_client, true);
+            Err(
+                ServerError::InvalidCommand("not able to wait outside a command queue".to_owned())
+                    .into(),
+            )
         }
     }
 
@@ -21772,7 +21816,7 @@ impl Shared {
                 }
             }
             if let Some(waiter) = popup.waiter {
-                let _ = waiter.wake.try_send(0);
+                waiter.reply.try_send(0);
             }
             (pane, terminal, geometry)
         };
@@ -23291,6 +23335,7 @@ impl Shared {
                 continuation: continuation.clone(),
                 #[cfg(unix)]
                 shell: None,
+                popup: None,
                 overlay: None,
                 leaf: None,
                 guard: None,
@@ -27107,7 +27152,7 @@ impl Shared {
             }
         }
         if let Some(waiter) = popup.waiter.take() {
-            let _ = waiter.wake.try_send(exit_code.unwrap_or(129));
+            waiter.reply.try_send(exit_code.unwrap_or(129));
         }
     }
 
@@ -34709,6 +34754,7 @@ struct RegisteredWait {
     continuation: cmdq::WaitContinuation,
     #[cfg(unix)]
     shell: Option<ShellWait>,
+    popup: Option<PopupWait>,
     overlay: Option<OverlayCommands>,
     leaf: Option<InsertedLeafContinuation>,
     guard: Option<InsertedControlGuard>,
@@ -37246,8 +37292,67 @@ struct CommandOutputSession {
 
 struct PopupWaiter {
     client: ClientId,
-    wake: crossbeam_channel::Sender<u8>,
+    reply: cmdq::Reply<u8>,
 }
+
+struct PopupWait {
+    continuation: cmdq::WaitContinuation,
+    exit_code: Arc<Mutex<u8>>,
+}
+
+impl PopupWait {
+    fn new(shared: &Arc<Shared>, client: ClientId) -> (Self, PopupWaiter) {
+        let continuation = cmdq::WaitContinuation::new(
+            shared
+                .command_item
+                .as_ref()
+                .and_then(|item| item.lock().wait()),
+            shared
+                .client_writers
+                .lock()
+                .get(&client)
+                .map(Arc::downgrade),
+        );
+        let exit_code = Arc::new(Mutex::new(129));
+        let completed = continuation.clone();
+        let result = Arc::clone(&exit_code);
+        let owner = Arc::downgrade(&shared.server_owner());
+        let waiter = PopupWaiter {
+            client,
+            reply: cmdq::Reply::new(move |code| {
+                *result.lock() = code.unwrap_or(129);
+                if completed.complete()
+                    && let Some(owner) = owner.upgrade()
+                {
+                    owner.accept_wake.wake();
+                }
+            }),
+        };
+        (
+            Self {
+                continuation,
+                exit_code,
+            },
+            waiter,
+        )
+    }
+
+    fn finish(self) -> Result<Execution, DaemonError> {
+        let exit_code = *self.exit_code.lock();
+        if exit_code == 0 {
+            Ok(Execution::default())
+        } else {
+            Err(DaemonError::CommandExit {
+                output: RawText::default(),
+                exit_code,
+            })
+        }
+    }
+}
+
+#[cfg(all(test, unix))]
+#[path = "daemon/popup_queue_e17_tests.rs"]
+mod popup_queue_e17_tests;
 
 struct ClientFileWaiter {
     client: ClientId,

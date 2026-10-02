@@ -614,6 +614,7 @@ impl SourceExecution {
             continuation: original.continuation.clone(),
             #[cfg(unix)]
             shell: None,
+            popup: None,
             overlay: None,
             leaf: None,
             guard: None,

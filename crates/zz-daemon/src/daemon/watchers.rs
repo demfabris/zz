@@ -338,10 +338,7 @@ impl PopupWatcher {
                 self.fanout.diff.release_shared();
                 self.previous = Some(viewport);
                 if let Some(exit_code) = popup_exit_code(terminal) {
-                    let terminal = Arc::clone(terminal);
-                    shared.defer_watcher_effect(move |shared| {
-                        shared.finish_popup(client, &terminal, exit_code);
-                    });
+                    shared.finish_popup(client, terminal, exit_code);
                     return false;
                 }
             }
@@ -868,12 +865,12 @@ impl LoopWatchers {
                         shared.close_exited_terminal(pane, &terminal);
                     }))
                 }
-                Surface::Popup(surface) => popup_exit_code(&terminal).map(|code| {
-                    let client = surface.client;
-                    Box::new(move |shared: &Arc<Shared>| {
-                        shared.finish_popup(client, &terminal, code);
-                    }) as Effect
-                }),
+                Surface::Popup(surface) => {
+                    if let Some(code) = popup_exit_code(&terminal) {
+                        shared.finish_popup(surface.client, &terminal, code);
+                    }
+                    None
+                }
                 _ => None,
             };
             watcher.stopped = true;

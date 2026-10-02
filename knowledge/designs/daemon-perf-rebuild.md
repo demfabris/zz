@@ -3352,6 +3352,14 @@ The first condition capture fixes the scan boundary before reporting the park. U
 Four e10 tests prove 20 parked commands add zero workers and zero scan deadlines, output during registration resumes the wait, marker and echo waits have no deadline without a timeout, and old echo cannot submit a new paste. Exit, respawn, shutdown, and client departure wake parked waits.
 The Mac serial daemon suite passes 1,478 unit and 35 integration tests, with one existing test ignored. The e18 agent waits, Clippy, Windows check, and five selected compat scenarios pass; Linux-only checks remain with the orchestrator.
 
+### e10/e17 Linux integration (2026-10-02)
+
+The picks on `f797df18` keep e09 pane-exit completions beside e10 output notifications, and retain e11 file resumes in popup and source-queue waits. The e18 agent waits still pass.
+The popup thread test compares 20 command popups with 20 interactive popups, including Linux's existing PTY gather threads. It uses a fresh process and waits for Running viewports before counting threads.
+Fmt, daemon Clippy, the focused e10/e17/e09/e11/e18 checks, the CLI build, 35 integration tests, and eight compat groups pass. Compat reports 80 steps with zero divergences; one existing streaming soak remains ignored.
+The final serial daemon suite passes 1,495 unit tests and fails only the allowed `remote_scripts_fall_back_to_the_mac_app_bundle_cli` test. An earlier SOCKS loopback shutdown timeout passes alone and in the final suite; no test runs over 60 seconds.
+This brief runs no perf measurements. The orchestrator owns Mac posix_spawn, kqueue, PTY spin-bridge, and iOS checks; this Linux run does not check Windows.
+
 
 ## W4-DELIVER: frames straight from shards (effort L)
 

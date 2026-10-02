@@ -4,16 +4,17 @@ use std::{
     borrow::Cow,
     collections::{BTreeMap, BTreeSet},
     fmt::Write as _,
-    io::Read as _,
     path::{Path, PathBuf},
-    process::{Child, Command, Stdio},
+    process::{Command, Stdio},
     sync::{
         Arc, LazyLock, Mutex, OnceLock, Weak,
         atomic::{AtomicU64, Ordering},
     },
-    thread,
     time::{SystemTime, UNIX_EPOCH},
 };
+
+#[cfg(test)]
+use std::thread;
 
 use glob::{MatchOptions, Pattern};
 use regex::RegexBuilder;
@@ -45,18 +46,11 @@ struct ShellCacheEntry {
 }
 
 struct ShellJob {
-    child: Option<Child>,
-    output: Arc<Mutex<ShellOutput>>,
+    updates: crossbeam_channel::Receiver<crate::daemon::status_jobs::StatusUpdate>,
+    client: crate::daemon::status_jobs::StatusClient,
     fd: i32,
     pid: u32,
     serial: u64,
-}
-
-#[derive(Default)]
-struct ShellOutput {
-    latest: Option<String>,
-    complete: bool,
-    streamed: bool,
 }
 
 impl ShellCacheEntry {
@@ -65,13 +59,26 @@ impl ShellCacheEntry {
         self.output = Some(output);
     }
 
-    fn poll(&mut self) -> bool {
+    fn poll(&mut self, command: &str) -> bool {
         let Some(job) = self.job.as_mut() else {
             return false;
         };
-        let (output, complete, streamed) = job.poll();
-        let changed = output.is_some() || complete;
-        if let Some(output) = output {
+        let mut latest = None;
+        let mut complete = false;
+        let mut streamed = false;
+        let mut failed = false;
+        for update in job.updates.try_iter() {
+            job.fd = update.fd;
+            job.pid = update.pid;
+            latest = update.latest.or(latest);
+            complete |= update.complete;
+            streamed |= update.streamed;
+            failed |= update.failed;
+        }
+        let changed = latest.is_some() || complete;
+        if failed {
+            self.set_output(format!("<'{command}' didn't start>"));
+        } else if let Some(output) = latest {
             self.set_output(output);
         }
         if streamed {
@@ -84,48 +91,9 @@ impl ShellCacheEntry {
     }
 }
 
-impl ShellJob {
-    fn poll(&mut self) -> (Option<String>, bool, bool) {
-        let (latest, eof, streamed) = {
-            let mut output = self
-                .output
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            (
-                output.latest.take(),
-                output.complete,
-                std::mem::take(&mut output.streamed),
-            )
-        };
-        (latest, self.reaped(eof), streamed)
-    }
-
-    fn reaped(&mut self, eof: bool) -> bool {
-        if !eof {
-            return false;
-        }
-        let Some(child) = self.child.as_mut() else {
-            return true;
-        };
-        if matches!(child.try_wait(), Ok(Some(_))) {
-            self.child = None;
-            true
-        } else {
-            false
-        }
-    }
-}
-
 impl Drop for ShellJob {
     fn drop(&mut self) {
-        if let Some(mut child) = self.child.take() {
-            #[cfg(unix)]
-            let _ = rustix::process::kill_process_group(
-                rustix::process::Pid::from_child(&child),
-                rustix::process::Signal::KILL,
-            );
-            thread::spawn(move || terminate_shell(&mut child));
-        }
+        self.client.cancel(self.serial);
     }
 }
 
@@ -175,6 +143,7 @@ pub(crate) struct StatusRenderer {
     tmux_shim: Option<PathBuf>,
     zz_executable: Option<PathBuf>,
     job_waker: Option<std::task::Waker>,
+    job_client: crate::daemon::status_jobs::StatusClient,
     pending_modes: BTreeSet<ClientId>,
     job_needs: StatusJobNeeds,
     uncovered_jobs: BTreeSet<ClientId>,
@@ -1433,7 +1402,13 @@ pub(crate) struct MessageFormatFacts {
 }
 
 impl StatusRenderer {
+    pub(crate) fn job_client(&self) -> crate::daemon::status_jobs::StatusClient {
+        self.job_client.clone()
+    }
+
     pub(crate) fn set_job_waker(&mut self, waker: std::task::Waker) {
+        #[cfg(windows)]
+        self.job_client.set_notification(waker.clone());
         self.job_waker = Some(waker);
     }
 
@@ -1500,8 +1475,8 @@ impl StatusRenderer {
         self.shell_cache
             .retain(|_, entry| now.saturating_sub(entry.last) < 3600);
         let mut changed = std::mem::take(&mut self.uncovered_jobs);
-        for ((client, _, _), entry) in &mut self.shell_cache {
-            if entry.poll() {
+        for ((client, _, command), entry) in &mut self.shell_cache {
+            if entry.poll(command) {
                 changed.insert(*client);
             }
         }
@@ -1651,6 +1626,7 @@ impl StatusRenderer {
             self.tmux_shim.as_deref(),
             self.zz_executable.as_deref(),
             self.job_waker.as_ref(),
+            &self.job_client,
             parts.as_deref(),
         ));
         let context_bytes = callback_names.as_ref().map_or(0, |_| {
@@ -1907,6 +1883,7 @@ fn render(
     tmux_shim: Option<&std::path::Path>,
     zz_executable: Option<&std::path::Path>,
     job_waker: Option<&std::task::Waker>,
+    job_client: &crate::daemon::status_jobs::StatusClient,
     parts: Option<&StatusParts>,
 ) -> StatusLine {
     let title = request
@@ -1929,6 +1906,7 @@ fn render(
                 tmux_shim,
                 zz_executable,
                 job_waker,
+                job_client,
             );
             clamp_status_text(expand_status(format, &request.context, &mut hooks))
         });
@@ -1948,6 +1926,7 @@ fn render(
             tmux_shim,
             zz_executable,
             job_waker,
+            job_client,
         );
         if let Some(theme) = parts.and_then(|parts| parts.theme.as_ref()) {
             *theme.get_or_init(|| resolve_theme_colours(request, &mut hooks))
@@ -1971,6 +1950,7 @@ fn render(
             tmux_shim,
             zz_executable,
             job_waker,
+            job_client,
         );
         let mut expand = || {
             (
@@ -2008,6 +1988,7 @@ fn render(
                 tmux_shim,
                 zz_executable,
                 job_waker,
+                job_client,
             )
             .with_variables(&variables);
             mode_presentation(mode, &mut hooks)
@@ -2043,6 +2024,7 @@ fn render(
             tmux_shim,
             zz_executable,
             job_waker,
+            job_client,
         );
         (
             expand_status_parts(
@@ -2074,6 +2056,7 @@ fn render(
         tmux_shim,
         zz_executable,
         job_waker,
+        job_client,
     );
     let base_style = expand_base_status_style(&request.formats, &request.context, &mut hooks);
     let lines = usize::from(request.formats.lines).min(MAX_STATUS_ROWS);
@@ -2362,6 +2345,7 @@ pub(crate) struct DaemonFormatHooks<'a> {
     tmux_shim: Option<&'a std::path::Path>,
     zz_executable: Option<&'a std::path::Path>,
     job_waker: Option<&'a std::task::Waker>,
+    job_client: Option<&'a crate::daemon::status_jobs::StatusClient>,
     facts_withheld: bool,
     buffer_override: Option<BufferFormatFacts>,
     pane_in_mode_override: Option<(PaneId, usize)>,
@@ -2395,6 +2379,7 @@ impl<'a> DaemonFormatHooks<'a> {
             tmux_shim: None,
             zz_executable: None,
             job_waker: None,
+            job_client: None,
             facts_withheld: false,
             pane_in_mode_override: None,
         }
@@ -2452,6 +2437,7 @@ impl<'a> DaemonFormatHooks<'a> {
         tmux_shim: Option<&'a std::path::Path>,
         zz_executable: Option<&'a std::path::Path>,
         job_waker: Option<&'a std::task::Waker>,
+        job_client: &'a crate::daemon::status_jobs::StatusClient,
     ) -> Self {
         Self {
             status_client: Some(client),
@@ -2472,6 +2458,7 @@ impl<'a> DaemonFormatHooks<'a> {
             tmux_shim,
             zz_executable,
             job_waker,
+            job_client: Some(job_client),
             facts_withheld: false,
             pane_in_mode_override: None,
         }
@@ -2664,6 +2651,7 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                 self.tmux_shim,
                 self.zz_executable,
                 self.job_waker.cloned(),
+                self.job_client.expect("status job client"),
             );
             if entry.job.is_none() {
                 entry.set_output(format!("<'{command}' didn't start>"));
@@ -3231,9 +3219,10 @@ fn run_shell(
     environment: &[(RawText, Option<RawText>)],
     default_terminal: &str,
     startup: bool,
-    tmux_shim: Option<&std::path::Path>,
-    zz_executable: Option<&std::path::Path>,
+    tmux_shim: Option<&Path>,
+    zz_executable: Option<&Path>,
     job_waker: Option<std::task::Waker>,
+    client: &crate::daemon::status_jobs::StatusClient,
 ) -> Option<ShellJob> {
     let mut process = shell_process(command);
     let socket_path = context.variable("socket_path").unwrap_or_default();
@@ -3249,93 +3238,14 @@ fn run_shell(
         zz_executable,
     );
     process.current_dir(cwd).env("PWD", cwd.as_os_str());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt as _;
-
-        process.process_group(0);
-    }
-    let Ok(mut child) = process
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-    else {
-        log::debug!(
-            target: "zz_daemon::status",
-            "status command failed to start command={command}"
-        );
-        return None;
-    };
-
-    let stdout = child.stdout.take()?;
-    #[cfg(unix)]
-    let fd = std::os::fd::AsRawFd::as_raw_fd(&stdout);
-    #[cfg(not(unix))]
-    let fd = -1;
-    {
-        let mut stdout = stdout;
-        let output = Arc::new(Mutex::new(ShellOutput::default()));
-        let reader_output = output.clone();
-        let reader = thread::Builder::new()
-            .name("zz-status-job".to_owned())
-            .spawn(move || {
-                let mut buffer = [0; 4096];
-                let mut pending = Vec::new();
-                let mut updated = false;
-                loop {
-                    match stdout.read(&mut buffer) {
-                        Ok(0) => break,
-                        Ok(length) => {
-                            for byte in &buffer[..length] {
-                                if *byte == b'\n' {
-                                    if pending.last() == Some(&b'\r') {
-                                        pending.pop();
-                                    }
-                                    let line = String::from_utf8_lossy(&pending).into_owned();
-                                    let mut output = reader_output
-                                        .lock()
-                                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                                    output.latest = Some(line);
-                                    output.streamed = true;
-                                    if let Some(waker) = &job_waker {
-                                        waker.wake_by_ref();
-                                    }
-                                    pending.clear();
-                                    updated = true;
-                                } else {
-                                    pending.push(*byte);
-                                }
-                            }
-                        }
-                        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-                        Err(_) => break,
-                    }
-                }
-                let mut output = reader_output
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                if !pending.is_empty() || !updated {
-                    output.latest = Some(String::from_utf8_lossy(&pending).into_owned());
-                }
-                output.complete = true;
-                if let Some(waker) = &job_waker {
-                    waker.wake_by_ref();
-                }
-            });
-        if reader.is_ok() {
-            Some(ShellJob {
-                pid: child.id(),
-                child: Some(child),
-                output,
-                fd,
-                serial: JOB_SERIAL.fetch_add(1, Ordering::Relaxed),
-            })
-        } else {
-            terminate_shell(&mut child);
-            None
-        }
-    }
+    let serial = JOB_SERIAL.fetch_add(1, Ordering::Relaxed);
+    Some(ShellJob {
+        updates: client.launch(serial, process, job_waker).ok()?,
+        client: client.clone(),
+        fd: -1,
+        pid: 0,
+        serial,
+    })
 }
 
 fn status_working_directory(context: &StatusContext) -> PathBuf {
@@ -3350,29 +3260,15 @@ fn status_working_directory(context: &StatusContext) -> PathBuf {
     }
 }
 
-fn terminate_shell(child: &mut Child) {
-    #[cfg(unix)]
-    let _ = rustix::process::kill_process_group(
-        rustix::process::Pid::from_child(child),
-        rustix::process::Signal::KILL,
-    );
-    #[cfg(windows)]
-    {
-        let pid = child.id().to_string();
-        let _ = std::process::Command::new("taskkill")
-            .args(["/PID", pid.as_str(), "/T", "/F"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
-    let _ = child.kill();
-    let _ = child.wait();
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use crate::daemon::status_jobs::tests::renderer;
+    #[cfg(not(unix))]
+    fn renderer() -> StatusRenderer {
+        StatusRenderer::default()
+    }
     use std::time::{Duration, Instant};
     use zz_mux::{PaneKind, SplitSize, StatusValues, expand_format_values};
     use zz_protocol::Axis;
@@ -4547,7 +4443,7 @@ mod tests {
 
     #[test]
     fn commands_run_once_and_then_come_from_the_cache() {
-        let mut renderer = StatusRenderer::default();
+        let mut renderer = renderer();
         let directory = tempfile::Builder::new()
             .prefix("zz-status-cache-")
             .tempdir_in(".")
@@ -4589,7 +4485,7 @@ mod tests {
         Arc::make_mut(&mut second.context).session_path = second_cwd.to_string_lossy().into_owned();
         Arc::make_mut(&mut second.facts).client = Some(ClientFormatFacts::default());
 
-        let mut renderer = StatusRenderer::default();
+        let mut renderer = renderer();
         let statuses = [
             (first.client, settled(&mut renderer, &first)),
             (second.client, settled(&mut renderer, &second)),
@@ -4613,7 +4509,7 @@ mod tests {
         let mut clientless = request(2, &format, "");
         Arc::make_mut(&mut clientless.context).session_path = cwd.to_string_lossy().into_owned();
         Arc::make_mut(&mut clientless.facts).client = None;
-        let mut renderer = StatusRenderer::default();
+        let mut renderer = renderer();
 
         assert_eq!(settled(&mut renderer, &attached).left, "first");
         assert_eq!(renderer.shell_cache.len(), 1);
@@ -4637,7 +4533,7 @@ mod tests {
         let mut first = request(1, &format, "");
         Arc::make_mut(&mut first.context).session_path = cwd.to_string_lossy().into_owned();
         Arc::make_mut(&mut first.facts).client = Some(ClientFormatFacts::default());
-        let mut renderer = StatusRenderer::default();
+        let mut renderer = renderer();
 
         assert_eq!(settled(&mut renderer, &first).left, "first");
         std::fs::write(&source, "second\n").expect("the second value is written");
@@ -4682,7 +4578,7 @@ mod tests {
             .to_string_lossy()
             .into_owned();
 
-        let status = settled(&mut StatusRenderer::default(), &status_request);
+        let status = settled(&mut renderer(), &status_request);
 
         assert_eq!(
             status.left,
@@ -4758,7 +4654,7 @@ mod tests {
         }
         .into();
         Arc::make_mut(&mut post_startup.context).socket_path = socket.to_owned();
-        let status = settled(&mut StatusRenderer::default(), &post_startup);
+        let status = settled(&mut renderer(), &post_startup);
         assert_eq!(
             status.left,
             format!(
@@ -4782,7 +4678,7 @@ mod tests {
         .into();
         Arc::make_mut(&mut startup.context).socket_path = socket.to_owned();
         startup.startup = true;
-        let status = settled(&mut StatusRenderer::default(), &startup);
+        let status = settled(&mut renderer(), &startup);
         assert_eq!(
             status.left,
             format!(
@@ -4821,7 +4717,7 @@ mod tests {
         let socket = "/tmp/zz-status-shim.sock";
         let mut status_request = request(1, "#(tmux status)", "");
         Arc::make_mut(&mut status_request.context).socket_path = socket.to_owned();
-        let mut renderer = StatusRenderer::default();
+        let mut renderer = renderer();
         renderer.set_tmux_shim(shim, executable);
 
         assert_eq!(
@@ -4832,7 +4728,7 @@ mod tests {
 
     #[test]
     fn strftime_and_shell_failures_degrade_to_text() {
-        let mut renderer = StatusRenderer::default();
+        let mut renderer = renderer();
         let status = renderer.render_initial(&request(1, "%H:%M", "#(exit 3)"));
         assert_eq!(status.left.len(), 5, "a clock renders as HH:MM");
         assert!(
@@ -4844,7 +4740,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn status_job_output_wakes_the_renderer_without_a_periodic_deadline() {
-        let mut renderer = StatusRenderer::default();
+        let mut renderer = renderer();
         struct JobWake(std::sync::mpsc::Sender<()>);
         impl std::task::Wake for JobWake {
             fn wake(self: Arc<Self>) {
@@ -4883,7 +4779,7 @@ mod tests {
     #[test]
     fn status_jobs_keep_the_last_line_and_trailing_spaces() {
         let status = settled(
-            &mut StatusRenderer::default(),
+            &mut renderer(),
             &request(1, "#(printf 'one\\ntwo \\t\\n')", "#(printf 'one\\ntail')"),
         );
         assert_eq!(status.left, "two \t");
@@ -4893,7 +4789,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn status_jobs_preserve_complete_long_lines_in_the_cache() {
-        let mut renderer = StatusRenderer::default();
+        let mut renderer = renderer();
         let expected = format!("{}TAIL", "0".repeat(5000));
         settled(
             &mut renderer,
@@ -4921,7 +4817,7 @@ mod tests {
         );
         let mut request = request(1, &format, "");
         Arc::make_mut(&mut request.facts).client = Some(ClientFormatFacts::default());
-        let mut renderer = StatusRenderer::default();
+        let mut renderer = renderer();
         let started = Instant::now();
         assert!(renderer.render_initial(&request).left.is_empty());
         assert!(started.elapsed() < Duration::from_secs(1));
@@ -4945,10 +4841,7 @@ mod tests {
             .job
             .as_ref()
             .unwrap()
-            .child
-            .as_ref()
-            .unwrap()
-            .id();
+            .pid;
         renderer.forget(request.client);
         assert!(renderer.shell_cache.is_empty());
         let deadline = Instant::now() + Duration::from_secs(3);
@@ -4971,7 +4864,7 @@ mod tests {
         let directory = tempfile::tempdir().expect("job count fixture");
         let count = directory.path().join("count");
         let format = format!("#(echo run >> '{}'; echo value)", count.display());
-        let mut renderer = StatusRenderer::default();
+        let mut renderer = renderer();
         let request = request(1, &format, &format);
         assert_eq!(renderer.render_forced(&request).left, "");
         let status = settled(&mut renderer, &request);

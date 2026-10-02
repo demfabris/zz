@@ -45,6 +45,7 @@ mod helpers;
     reason = "job families move to the loop registry in subsequent slices"
 )]
 mod jobs;
+pub(crate) mod status_jobs;
 mod watchers;
 pub use exec::exec_resume_kind;
 pub(crate) mod path_listing;

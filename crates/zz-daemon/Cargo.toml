@@ -71,6 +71,7 @@ rustix = { workspace = true, features = ["fs", "net"] }
 
 [target.'cfg(windows)'.dependencies]
 sysinfo.workspace = true
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Pipes"] }
 
 [dev-dependencies]
 chrono = { workspace = true, features = ["clock"] }

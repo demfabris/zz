@@ -38,6 +38,7 @@ fn child_signal_reaps_only_registered_children_with_coalesced_exits() {
                 deadline: Some(Instant::now() + Duration::from_secs(5)),
                 process_group: false,
                 output_limit: None,
+                stream: None,
                 complete: Box::new(move |result| {
                     completed.send(result).unwrap();
                     if count.fetch_add(1, Ordering::SeqCst) == 19 {

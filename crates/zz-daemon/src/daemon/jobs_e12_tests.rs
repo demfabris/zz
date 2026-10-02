@@ -26,6 +26,7 @@ fn launch(command: &str, policy: CompletionPolicy, complete: mpsc::Sender<Comple
         deadline: None,
         process_group: false,
         output_limit: None,
+        stream: None,
         complete: Box::new(move |result| complete.send(result).unwrap()),
     }
 }
@@ -215,6 +216,7 @@ fn pipe_backpressure_and_bounded_turns_preserve_output() {
             deadline: None,
             process_group: false,
             output_limit: None,
+            stream: None,
             complete: Box::new(move |result| done.send(result).unwrap()),
         },
     )
@@ -276,6 +278,7 @@ fn socket_input_shutdown_preserves_read_half() {
             deadline: None,
             process_group: false,
             output_limit: None,
+            stream: None,
             complete: Box::new(move |result| done.send(result).unwrap()),
         },
     )

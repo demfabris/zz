@@ -2,11 +2,14 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     io,
     os::fd::{AsRawFd, OwnedFd},
-    process::{Child, ExitStatus},
+    process::{Child, Command, ExitStatus, Stdio},
     time::Instant,
 };
 
 use mio::{Interest, Registry, Token, unix::SourceFd};
+
+use super::status_jobs::StatusOutput;
+pub(super) use super::status_jobs::{StatusClient, StatusRequest};
 
 const IO_BURST: usize = 256 * 1024;
 
@@ -41,6 +44,7 @@ pub(super) struct Launch {
     pub(super) deadline: Option<Instant>,
     pub(super) process_group: bool,
     pub(super) output_limit: Option<usize>,
+    pub(super) stream: Option<StatusOutput>,
     pub(super) complete: Box<dyn FnOnce(Completion) + Send>,
 }
 
@@ -102,6 +106,7 @@ struct Job {
     deadline: Option<Instant>,
     process_group: bool,
     output_limit: Option<usize>,
+    stream: Option<StatusOutput>,
     status: Option<ExitStatus>,
     error: Option<io::Error>,
     cancelled: bool,
@@ -145,18 +150,20 @@ impl Job {
     }
 
     fn cancel(&mut self) {
+        if self.cancelled {
+            return;
+        }
         self.cancelled = true;
         self.deadline = None;
-        if let Some(child) = &mut self.child {
-            if self.process_group {
-                let _ = rustix::process::kill_process_group(
-                    rustix::process::Pid::from_child(child),
-                    rustix::process::Signal::KILL,
-                );
-            }
-            if let Err(error) = child.kill() {
-                self.error.get_or_insert(error);
-            }
+        if self.process_group
+            && let Some(pid) = rustix::process::Pid::from_raw(self.pid as i32)
+        {
+            let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+        }
+        if let Some(child) = &mut self.child
+            && let Err(error) = child.kill()
+        {
+            self.error.get_or_insert(error);
         }
     }
 
@@ -178,12 +185,17 @@ impl Job {
 
 impl Drop for Job {
     fn drop(&mut self) {
-        if self.child.is_some() {
+        if self.child.is_some() || !self.finished() {
             self.cancel();
         }
         if let Some(mut child) = self.child.take() {
             let _ = child.kill();
-            let _ = child.wait();
+            loop {
+                match child.wait() {
+                    Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                    _ => break,
+                }
+            }
         }
     }
 }
@@ -210,6 +222,7 @@ impl JobRegistry {
             deadline,
             process_group,
             output_limit,
+            stream,
             complete,
         } = launch;
         let mut job = Job {
@@ -221,6 +234,7 @@ impl JobRegistry {
             deadline,
             process_group,
             output_limit,
+            stream,
             status: None,
             error: None,
             cancelled: false,
@@ -249,6 +263,9 @@ impl JobRegistry {
             Ok::<_, io::Error>(())
         })();
         if let Err(error) = attached {
+            if let Some(stream) = &mut job.stream {
+                stream.publish(true, true);
+            }
             for port in job.ports.values_mut() {
                 if port.registered {
                     let _ = registry.deregister(&mut SourceFd(&port.descriptor.fd.as_raw_fd()));
@@ -305,6 +322,9 @@ impl JobRegistry {
                 while left != 0 {
                     match rustix::io::read(&port.descriptor.fd, &mut buffer[..left.min(8192)]) {
                         Ok(0) => {
+                            if let Some(stream) = &mut job.stream {
+                                stream.eof();
+                            }
                             port.eof = true;
                             port.drain_left = Some(0);
                             break;
@@ -320,7 +340,11 @@ impl JobRegistry {
                             }) {
                                 return Err(io::Error::other("job output limit exceeded"));
                             }
-                            job.output[port.index].extend_from_slice(&buffer[..count]);
+                            if let Some(stream) = &mut job.stream {
+                                stream.read(&buffer[..count]);
+                            } else {
+                                job.output[port.index].extend_from_slice(&buffer[..count]);
+                            }
                             left -= count;
                             if let Some(remaining) = &mut port.drain_left {
                                 *remaining = remaining.saturating_sub(count);
@@ -418,6 +442,9 @@ impl JobRegistry {
             }
         }
         let complete = job.complete.take().unwrap();
+        if let Some(stream) = &mut job.stream {
+            stream.publish(true, false);
+        }
         complete(Completion {
             id,
             pid: job.pid,
@@ -467,3 +494,41 @@ impl JobRegistry {
 #[cfg(test)]
 #[path = "jobs_e12_tests.rs"]
 mod e12_tests;
+
+pub(super) fn launch_status(mut command: Command, mut output: StatusOutput) -> io::Result<Launch> {
+    use std::os::unix::process::CommandExt as _;
+    command
+        .process_group(0)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = loop {
+        match command.spawn() {
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Ok(child) => break child,
+            Err(error) => {
+                output.publish(true, true);
+                return Err(error);
+            }
+        }
+    };
+    let stdout = child.stdout.take().unwrap();
+    output.fd = stdout.as_raw_fd();
+    output.pid = child.id();
+    output.publish(false, false);
+    Ok(Launch {
+        child,
+        descriptors: vec![Descriptor {
+            fd: stdout.into(),
+            read: true,
+            input: None,
+            socket: false,
+        }],
+        policy: CompletionPolicy::ChildExitAndEof,
+        deadline: None,
+        process_group: true,
+        output_limit: None,
+        stream: Some(output),
+        complete: Box::new(|_| {}),
+    })
+}

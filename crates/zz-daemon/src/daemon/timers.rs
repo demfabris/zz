@@ -140,6 +140,7 @@ pub(super) enum TimerInput {
 pub(super) struct TimerSender {
     sender: crossbeam_channel::Sender<TimerInput>,
     wake: Arc<AcceptWake>,
+    status_jobs_pending: Arc<AtomicBool>,
 }
 
 impl std::fmt::Debug for TimerSender {
@@ -155,6 +156,7 @@ impl TimerSender {
         Self {
             sender,
             wake: Arc::new(AcceptWake::new()),
+            status_jobs_pending: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -174,7 +176,9 @@ impl std::task::Wake for TimerSender {
     }
 
     fn wake_by_ref(self: &Arc<Self>) {
-        let _ = self.send(TimerInput::StatusJobs);
+        if !self.status_jobs_pending.swap(true, Ordering::AcqRel) {
+            let _ = self.send(TimerInput::StatusJobs);
+        }
     }
 }
 
@@ -379,7 +383,13 @@ impl LoopTimers {
             for input in inputs.try_iter().take(TIMER_INPUT_BURST) {
                 match input {
                     TimerInput::ClientTimersChanged => changed = true,
-                    TimerInput::StatusJobs => status_jobs = true,
+                    TimerInput::StatusJobs => {
+                        shared
+                            .timer_tx
+                            .status_jobs_pending
+                            .store(false, Ordering::Release);
+                        status_jobs = true;
+                    }
                     _ => shared.schedule_timer(&mut self.deadlines, &input),
                 }
             }
@@ -549,6 +559,7 @@ impl Shared {
         let Some(inputs) = self.timer_rx.lock().take() else {
             return Ok(());
         };
+        let mut status_jobs = status_jobs::WindowsRegistry::new(self.status.lock().job_client());
         let shared = Arc::downgrade(&self.server_owner());
         thread::Builder::new()
             .name("zz-deadlines".to_owned())
@@ -559,6 +570,13 @@ impl Shared {
                     clients.sync(&shared, &mut deadlines, Instant::now());
                 }
                 loop {
+                    if shared
+                        .upgrade()
+                        .is_none_or(|shared| shared.stopping.load(Ordering::Acquire))
+                    {
+                        return;
+                    }
+                    status_jobs.turn();
                     let now = Instant::now();
                     while let Some(expiry) = deadlines.pop_due(now) {
                         let Some(shared) = shared.upgrade() else {
@@ -570,7 +588,8 @@ impl Shared {
                         shared.run_timer_expiry(expiry, now);
                         clients.sync(&shared, &mut deadlines, Instant::now());
                     }
-                    let input = match deadlines.next() {
+                    let deadline = deadlines.next().into_iter().chain(status_jobs.next()).min();
+                    let input = match deadline {
                         Some(deadline) => match inputs.recv_deadline(deadline) {
                             Ok(input) => input,
                             Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
@@ -597,7 +616,12 @@ impl Shared {
     fn schedule_timer(&self, deadlines: &mut Deadlines, input: &TimerInput) {
         match *input {
             TimerInput::ClientTimersChanged => {}
-            TimerInput::StatusJobs => self.refresh_status_notifications(),
+            TimerInput::StatusJobs => {
+                self.timer_tx
+                    .status_jobs_pending
+                    .store(false, Ordering::Release);
+                self.refresh_status_notifications();
+            }
             TimerInput::DisplayPanes(DisplayPanesDeadlineCommand::Schedule(deadline)) => {
                 if self.read_client(deadline.client, |c| {
                     c.and_then(|c| c.display_panes.as_ref())

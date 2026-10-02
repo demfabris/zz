@@ -148,6 +148,8 @@ const TERMINATION_GRACE: Duration = Duration::from_millis(500);
 const TERMINATION_KILL_WAIT: Duration = Duration::from_millis(500);
 #[cfg(unix)]
 const PANE_EXEC_WAIT: Duration = Duration::from_millis(500);
+#[cfg(target_os = "macos")]
+const SHARD_CHILD_RETRY: Duration = Duration::from_millis(10);
 const MAX_SEARCH_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_WHEEL_REPEAT: u32 = 32;
 const PTY_READ_BUFFER_BYTES: usize = 64 * 1024;
@@ -2065,6 +2067,17 @@ impl TerminalSession {
         let shard = shard::choose();
         #[cfg(not(unix))]
         let shard: Result<Option<shard::ShardHandle>, WorkerError> = Ok(None);
+        Self::spawn_surface_with_shard(title, text, appearance, max_scrollback, frozen, shard)
+    }
+
+    fn spawn_surface_with_shard(
+        title: String,
+        text: String,
+        appearance: Arc<TerminalAppearance>,
+        max_scrollback: usize,
+        frozen: bool,
+        shard: Result<Option<shard::ShardHandle>, WorkerError>,
+    ) -> Self {
         let wake = match &shard {
             Ok(Some(shard)) => shard.wake.for_actor(),
             _ => ActorWake::none(),
@@ -12813,6 +12826,8 @@ struct ChildExitWatch {
     kqueue: Option<std::os::fd::OwnedFd>,
     ready: Option<std::io::Result<ExitStatus>>,
     reaped: bool,
+    #[cfg(target_os = "macos")]
+    retry: Option<Instant>,
 }
 
 #[cfg(all(unix, not(target_os = "linux")))]
@@ -12826,6 +12841,7 @@ impl ChildExitWatch {
             kqueue: None,
             reaped: ready.is_some(),
             ready,
+            retry: None,
         })
     }
 
@@ -12858,6 +12874,8 @@ impl ChildExitWatch {
                     kqueue: ready.is_none().then_some(kqueue),
                     reaped: ready.is_some(),
                     ready,
+                    #[cfg(target_os = "macos")]
+                    retry: None,
                 })
             }
             Err(rustix::io::Errno::SRCH) => {
@@ -12867,6 +12885,8 @@ impl ChildExitWatch {
                     kqueue: None,
                     reaped: ready.is_some(),
                     ready,
+                    #[cfg(target_os = "macos")]
+                    retry: None,
                 })
             }
             Err(error) => Err(WorkerError::Io(error.into())),
@@ -12884,7 +12904,7 @@ impl ChildExitWatch {
     fn on_readable(&mut self) -> Option<std::io::Result<ExitStatus>> {
         use rustix::event::kqueue::Event;
 
-        let exited = self.kqueue.as_ref().is_none_or(|kqueue| {
+        let exited = self.kqueue.as_ref().is_some_and(|kqueue| {
             let mut events = Vec::<Event>::with_capacity(1);
             #[allow(
                 unsafe_code,
@@ -12895,8 +12915,25 @@ impl ChildExitWatch {
             };
             read.is_ok_and(|count| count > 0)
         });
-        let status = reap_child(self.pid, exited)?;
+        let Some(status) = reap_child(self.pid, exited) else {
+            #[cfg(target_os = "macos")]
+            if self.kqueue.is_none() {
+                self.retry = Some(Instant::now() + SHARD_CHILD_RETRY);
+            }
+            return None;
+        };
         self.kqueue = None;
+        self.reaped = true;
+        Some(status)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn retry_due(&mut self) -> Option<std::io::Result<ExitStatus>> {
+        if self.retry.is_none_or(|due| due > Instant::now()) {
+            return None;
+        }
+        self.retry = None;
+        let status = reap_child(self.pid, false)?;
         self.reaped = true;
         Some(status)
     }

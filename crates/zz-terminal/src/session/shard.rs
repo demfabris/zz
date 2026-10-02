@@ -367,6 +367,8 @@ impl Shard {
                             if child {
                                 actor.poll_child()?;
                             }
+                            #[cfg(target_os = "macos")]
+                            actor.retry_child()?;
                             if pty {
                                 actor.on_readable_with_spin(only_ready, || {
                                     self.actors.values().any(|entry| {
@@ -391,7 +393,10 @@ impl Shard {
                         entry.pending,
                         result,
                         #[cfg(target_os = "macos")]
-                        entry.poll_sources,
+                        [
+                            entry.poll_sources[0],
+                            entry.poll_sources[1].filter(|_| !child),
+                        ],
                     );
                     self.cursor = id + 1;
                 }

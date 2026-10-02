@@ -3296,6 +3296,18 @@ Three alternating quick `cli,control,mem` pairs against `loop-b626aa02-cli` put 
 Control latency is red in all six runs; burst throughput is red only in new-2. The runs have zero harness errors; these tmux threshold rows are outside this slice's instruction/thread comparison.
 Shell jobs and other unconverted leaves, registration/startup and hook-capable cleanup still use workers. The Windows/test synchronous adapter remains; macOS, Windows, iOS, full-workspace, TUI and full-bench checks were not run for this slice.
 
+### c01copy as built (2026-10-02)
+
+`Shared::refresh_modes` in `crates/zz-daemon/src/daemon.rs` now applies `status_targets`
+before collecting copy facts and expanding mode formats. Control clients with status subscriptions
+off no longer prepare a presentation they cannot receive. Temporary counters measured about
+0.945 Minstr in that cold expansion; moving watcher work onto the loop made it run before the reply.
+The preliminary quick Mac check measured first entry at 5.006 Minstr versus 5.566 on e122e38d,
+with 2/5 threads at p1/p20. The quick W0 gate passed 36 rows with zero failures or regressions
+(`/tmp/zzpc/loop-c01copy.json`). Terminal and serial daemon tests, clippy, and the requested copy,
+alert, and Control scenarios passed. Final-commit comparison files use
+`/tmp/zzpc/c01copy-{base,new}-{1,2,3}.json`; Linux checks remain with the orchestrator.
+
 ## W4-DELIVER: frames straight from shards (effort L)
 
 Scope: the loop pushes per-pane subscriber sinks (queue handle, stream kind, delivered base,

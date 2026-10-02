@@ -124,6 +124,7 @@ pub(super) struct EventLoop {
     next_token: usize,
     accept_again: bool,
     control_output_deadline: Option<Instant>,
+    terminal_request_deadline: Option<Instant>,
     shutdown_started: bool,
     shutdown_phase: ShutdownPhase,
     shutdown_completed: mpsc::Receiver<()>,
@@ -251,6 +252,7 @@ impl EventLoop {
         let waker = Arc::new(Waker::new(poll.registry(), WAKE)?);
         shared.accept_wake.install(Arc::clone(&waker));
         shared.helpers.install(Arc::clone(&waker));
+        shared.terminal_requests.install(Arc::clone(&waker));
         shared.pipe_jobs.wake.install(Arc::clone(&waker));
         let status_client = shared.status.lock().job_client();
         status_client.install(Arc::clone(&waker));
@@ -287,6 +289,7 @@ impl EventLoop {
             next_token: 4,
             accept_again: false,
             control_output_deadline: None,
+            terminal_request_deadline: None,
             shutdown_started: false,
             shutdown_phase: ShutdownPhase::Running,
             shutdown_completed,
@@ -578,7 +581,10 @@ impl EventLoop {
             .min();
         let control = self
             .control_output_deadline
-            .map(|deadline| deadline.saturating_duration_since(now));
+            .into_iter()
+            .chain(self.terminal_request_deadline)
+            .map(|deadline| deadline.saturating_duration_since(now))
+            .min();
         match (timer, control) {
             (Some(timer), Some(control)) => Some(timer.min(control)),
             (timer, control) => timer.or(control),
@@ -1153,6 +1159,7 @@ impl EventLoop {
 
     #[cfg(test)]
     pub(super) fn pipe_test_turn(&mut self, shared: &Arc<Shared>) {
+        self.terminal_request_deadline = shared.terminal_requests.turn(shared);
         self.turn_pipe_jobs(shared);
         self.jobs.turn(self.poll.registry(), Instant::now());
         self.jobs.child_signal(self.poll.registry());
@@ -1329,6 +1336,13 @@ impl EventLoop {
         self.jobs.child_signal(self.poll.registry());
         #[cfg(feature = "agent")]
         self.agents.turn(shared);
+        if shared.terminal_requests.pending()
+            || self
+                .terminal_request_deadline
+                .is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            self.terminal_request_deadline = shared.terminal_requests.turn(shared);
+        }
         self.turn_helpers(shared);
         self.turn_status_jobs();
         self.turn_pipe_jobs(shared);
@@ -2037,3 +2051,7 @@ mod b5fix_tests;
 #[cfg(test)]
 #[path = "event_loop_e12_tests.rs"]
 mod e12_tests;
+
+#[cfg(test)]
+#[path = "event_loop_e04_tests.rs"]
+mod e04_tests;

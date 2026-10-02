@@ -17,6 +17,7 @@ pub(super) struct Session {
     initializing: bool,
     task: Option<Box<wait_queue::CommandTask>>,
     task_after: TaskAfter,
+    input_wait: Option<cmdq::WaitContinuation>,
 }
 
 #[derive(Default)]
@@ -232,6 +233,7 @@ impl Session {
             initializing: false,
             task: None,
             task_after: TaskAfter::Request,
+            input_wait: None,
         }))
     }
 
@@ -301,11 +303,15 @@ impl Session {
 
     #[cfg(unix)]
     pub(super) fn message_pending(&self) -> bool {
-        self.request.is_some() || self.task.is_some()
+        self.request.is_some() || self.task.is_some() || self.input_wait.is_some()
     }
 
     pub(super) fn command_wait_ready(&self) -> bool {
         self.task.as_ref().is_some_and(|task| task.ready())
+            || self
+                .input_wait
+                .as_ref()
+                .is_some_and(cmdq::WaitContinuation::ready)
     }
 
     #[cfg(unix)]
@@ -315,6 +321,13 @@ impl Session {
         outbound: &Arc<OutboundMailbox>,
         inline: bool,
     ) -> MessageProgress {
+        if let Some(wait) = &self.input_wait {
+            if !wait.ready() {
+                return MessageProgress::Wait;
+            }
+            self.input_wait = None;
+            return MessageProgress::Done;
+        }
         loop {
             if let Some(mut task) = self.task.take() {
                 match task.run(inline) {
@@ -707,7 +720,11 @@ impl Session {
                                 .iter()
                                 .all(|command| inline_query(shared, context, command))
                         } else {
-                            false
+                            matches!(
+                                message,
+                                ProtocolMessage::HistoryRequest { .. }
+                                    | ProtocolMessage::Input(InputMessage::MouseKey { .. })
+                            )
                         };
                         if !ready {
                             self.request = Some(PendingMessage::Message(message));
@@ -715,7 +732,12 @@ impl Session {
                         }
                     }
                     self.message(shared, outbound, message);
-                    return MessageProgress::Done;
+                    return if self.input_wait.as_ref().is_some_and(|wait| !wait.ready()) {
+                        MessageProgress::Wait
+                    } else {
+                        self.input_wait = None;
+                        MessageProgress::Done
+                    };
                 }
             }
         }
@@ -938,7 +960,12 @@ impl Session {
                     ));
                     return;
                 };
-                if let Err(error) = shared.input(client, hello.kind, context, input) {
+                let item = if matches!(&input, InputMessage::MouseKey { .. }) {
+                    shared.command_item(None)
+                } else {
+                    Arc::clone(shared)
+                };
+                if let Err(error) = item.input(client, hello.kind, context, input) {
                     let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(
                         CommandResponse::Error {
                             request_id: 0,
@@ -947,6 +974,12 @@ impl Session {
                         },
                     ));
                 }
+                self.input_wait = item.command_item.as_ref().and_then(|item| {
+                    item.lock()
+                        .pending_wait
+                        .take()
+                        .map(|wait| wait.continuation)
+                });
             }
             ProtocolMessage::GuiResponse(response) => {
                 shared.complete_gui_request(client, response);
@@ -1054,6 +1087,5 @@ pub(super) fn inline_query(
 ) -> bool {
     command.result == PreparedCommandResult::Ready
         && (wait_queue::task_command(&command.invocation)
-            || command.canonical_name.as_deref() != Some("capture-pane")
-                && ctrl::control_query_can_defer_wakeup(&shared.inner.lock(), context, command))
+            || ctrl::control_query_can_defer_wakeup(&shared.inner.lock(), context, command))
 }

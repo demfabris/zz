@@ -3296,6 +3296,11 @@ Three alternating quick `cli,control,mem` pairs against `loop-b626aa02-cli` put 
 Control latency is red in all six runs; burst throughput is red only in new-2. The runs have zero harness errors; these tmux threshold rows are outside this slice's instruction/thread comparison.
 Shell jobs and other unconverted leaves, registration/startup and hook-capable cleanup still use workers. The Windows/test synchronous adapter remains; macOS, Windows, iOS, full-workspace, TUI and full-bench checks were not run for this slice.
 
+**e05 as built (2026-10-02, Linux):** `daemon/terminal_reads.rs` and `daemon/terminal_requests.rs` resume capture, semantic output, send-text, wait-pane and run-pane reads through actor reply tokens and cmdq continuations; synchronous terminal APIs remain for off-loop callers.
+History and mouse pointer reads enter on the mux loop; completions recheck the client and terminal identity. Mouse bindings retain the existing worker adapter after the pointer reply, with connection input ordering preserved.
+Kitty pixel and generation replies resume publication asynchronously; terminal-bound cache entries and atomic delivered-generation checks reject stale respawn and eviction results.
+Checks: 372 terminal tests, 1,456 daemon unit tests and 37 integration tests pass (one soak ignored); seven stale-result/loop-dispatch tests, the three named capture/history/frame tests, fmt, Clippy and five compat scenarios (73 steps, zero divergences) pass. The known macOS-bundle fixture fails on Linux; the cwd fixture passes alone and in the serial rerun.
+macOS, Windows, iOS, full-workspace and full-bench checks were not run; the final six quick instruction/thread measurements remain in `/tmp/zzpc/e05-{base,final}-{1,2,3}.json`.
 ### c01copy as built (2026-10-02)
 
 `Shared::refresh_modes` in `crates/zz-daemon/src/daemon.rs` now applies `status_targets`
@@ -3318,6 +3323,8 @@ Foreground items resume at their saved boundaries. The loop applies ready backgr
 Unix has no shell process worker, foreground result receiver or per-job exit poller. Twenty concurrent jobs add zero job or command workers; admission rejects a command after 256 slots fill.
 The serial daemon suite, focused tests, fmt and daemon Clippy pass. Five compat groups are clean; `if-shell-background-order` has the same pre-lane red where tmux does not reach file order on this Mac.
 
+**e13/e14 pick integration (2026-10-02, Linux, base `42ed7108`):** Terminal acknowledgement and read continuations from e04/e05 share wait records with shell completions; hooks keep their terminal waits and pane-exit worker handoff. The Linux shell wakeup test now launches through the job registry.
+Checks: 1,460 daemon unit tests and 35 integration tests pass; the allowed macOS-bundle fixture fails both in the suite and alone, and one soak stays ignored. All 372 terminal tests pass with one ignored. The focused delay, shell and terminal continuation tests, fmt and Clippy pass; seven compat groups pass 100 steps with zero divergences. No performance runs in this pick step; macOS and Windows checks remain with the orchestrator.
 **e07 as built (2026-10-02, macOS):** `Shared::register_overlay_wait` registers display-panes, command-prompt and confirm-before continuations before publishing their overlays; Unix workers return while the client records own the waits.
 Selection, acceptance, replacement, expiry, cancellation, detach and disconnect complete each wait once. Accepted confirms insert child queue frames; prompt answers retain their wait until the callback finishes, preserving history, freezing and alias timing.
 Six new tests cover twenty parked overlays of each type with zero added workers, child frames and lifecycle completion. The serial daemon suite passes 1,492 tests with one ignored; fmt, daemon Clippy and six compat scenarios pass, with zero divergences across 43 steps.

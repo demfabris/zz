@@ -8,11 +8,16 @@ struct Queue {
     completed: crossbeam_channel::Receiver<LeafCompletion>,
 }
 
-type LeafCompletion = (
+type FinishedLeaf = (
     Box<CommandQueueExecution>,
     ExecutionContext,
     InsertedCommandStep,
 );
+
+enum LeafCompletion {
+    Leaf(Box<FinishedLeaf>),
+    Frames(Vec<InsertedQueueFrame<Box<CommandQueueExecution>>>),
+}
 
 pub(super) struct LoopHooks {
     queues: VecDeque<Queue>,
@@ -102,12 +107,11 @@ impl LoopHooks {
         source: &InsertedCommandSource,
     ) -> bool {
         let shared = shared.command_item(None);
-        shared
-            .command_item
-            .as_ref()
-            .expect("loop hook item")
-            .lock()
-            .loop_leaf = true;
+        {
+            let mut item = shared.command_item.as_ref().expect("loop hook item").lock();
+            item.loop_leaf = true;
+            item.loop_wait = true;
+        }
         let mut execution = shared.inserted_child_execution(None, false, None);
         execution.item.yield_boundary = true;
         match shared.prepare_inserted_queue_frame(
@@ -189,7 +193,7 @@ impl Queue {
         let client = ClientId(u64::MAX);
         let kind = ClientKind::Command;
         if self.waiting {
-            let Ok((execution, context, step)) = self.completed.try_recv() else {
+            let Ok(completion) = self.completed.try_recv() else {
                 return Ok(());
             };
             self.waiting = false;
@@ -199,14 +203,69 @@ impl Queue {
                 .expect("loop hook item")
                 .lock()
                 .loop_leaf = true;
-            let frame = self.frames.last_mut().expect("waiting frame");
-            frame.execution = execution;
-            frame.context = context;
-            let boundary = frame.parked_boundary.take().expect("parked leaf boundary");
-            let child = shared.settle_inserted_frame_step(client, kind, frame, boundary, step);
-            if let Some(child) = child {
-                self.frames.push(child);
+            match completion {
+                LeafCompletion::Frames(frames) => self.frames = frames,
+                LeafCompletion::Leaf(leaf) => {
+                    let (execution, context, step) = *leaf;
+                    let frame = self.frames.last_mut().expect("waiting frame");
+                    frame.execution = execution;
+                    frame.context = context;
+                    let boundary = frame.parked_boundary.take().expect("parked leaf boundary");
+                    if shared
+                        .command_item
+                        .as_ref()
+                        .unwrap()
+                        .lock()
+                        .pending_wait
+                        .is_some()
+                    {
+                        frame.wait_boundary = Some((boundary, step));
+                    } else {
+                        let child =
+                            shared.settle_inserted_frame_step(client, kind, frame, boundary, step);
+                        if let Some(child) = child {
+                            self.frames.push(child);
+                        }
+                    }
+                }
             }
+        }
+        if shared
+            .command_item
+            .as_ref()
+            .unwrap()
+            .lock()
+            .pending_wait
+            .as_ref()
+            .is_some_and(|wait| !wait.continuation.ready())
+        {
+            return Ok(());
+        }
+        if self
+            .frames
+            .last()
+            .and_then(|frame| frame.wait_boundary.as_ref())
+            .is_some_and(|(_, step)| wait_queue::wait_needs_worker(step))
+        {
+            let mut frames = std::mem::take(&mut self.frames);
+            let owner = Arc::clone(&shared);
+            let sender = self.sender.clone();
+            let wake = Arc::clone(waker);
+            shared.connection_threads.run(Box::new(move || {
+                owner.advance_inserted_frames(
+                    client,
+                    kind,
+                    &mut frames,
+                    1,
+                    false,
+                    true,
+                    |_, _, _| unreachable!(),
+                );
+                let _ = sender.send(LeafCompletion::Frames(frames));
+                let _ = wake.wake();
+            }))?;
+            self.waiting = true;
+            return Ok(());
         }
         let sender = self.sender.clone();
         let waiting = &mut self.waiting;
@@ -266,7 +325,7 @@ impl Queue {
                             false,
                         )
                     });
-                    let _ = sender.send((execution, context, step));
+                    let _ = sender.send(LeafCompletion::Leaf(Box::new((execution, context, step))));
                     let _ = wake.wake();
                 })) {
                     spawn_error = Some(error);

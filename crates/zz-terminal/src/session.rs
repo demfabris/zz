@@ -1335,10 +1335,9 @@ struct EventQueueState {
     pending_reliable_bytes: AtomicUsize,
     notification_pending: AtomicBool,
     output_activity_pending: AtomicBool,
-    identity: Mutex<bool>,
+    identity: Box<IdentityLatch>,
     foreground: RwLock<Option<Box<ForegroundSource>>>,
     completion: AtomicU64,
-    identity_ready: parking_lot::Condvar,
     notification_sink: Box<OnceLock<Box<dyn Fn() + Send + Sync>>>,
 }
 
@@ -1349,10 +1348,9 @@ impl EventQueueState {
             pending_reliable_bytes: AtomicUsize::new(0),
             notification_pending: AtomicBool::new(false),
             output_activity_pending: AtomicBool::new(false),
-            identity: Mutex::new(false),
+            identity: Box::new(IdentityLatch::default()),
             foreground: RwLock::new(None),
             completion: AtomicU64::new(0),
-            identity_ready: parking_lot::Condvar::new(),
             notification_sink: Box::new(OnceLock::new()),
         }
     }
@@ -1364,10 +1362,15 @@ impl EventQueueState {
     }
 
     fn resolve_identity(&self) {
-        let mut resolved = self.identity.lock();
-        if !*resolved {
-            *resolved = true;
-            self.identity_ready.notify_all();
+        let mut resolved = self.identity.state.lock();
+        if !resolved.ready {
+            resolved.ready = true;
+            self.identity.ready.notify_all();
+            let replies = std::mem::take(&mut resolved.replies);
+            drop(resolved);
+            for reply in replies {
+                let _ = reply.send(true);
+            }
         }
     }
 }
@@ -1828,11 +1831,15 @@ pub enum RawOutputTapError {
     Unavailable,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ActorRequestError {
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
+pub enum TerminalRequestError {
+    #[error("terminal actor request timed out")]
     TimedOut,
+    #[error("terminal actor stopped")]
     ActorStopped,
 }
+
+type ActorRequestError = TerminalRequestError;
 
 impl From<ActorRequestError> for TerminalCaptureError {
     fn from(error: ActorRequestError) -> Self {
@@ -1905,7 +1912,7 @@ impl TerminalSession {
         let (alive, liveness) = crossbeam_channel::bounded(0);
         let slot = Arc::new(Mutex::new(ControlSlot::default()));
         let commands = CommandSender {
-            queues: Box::new(CommandQueues {
+            queues: Arc::new(CommandQueues {
                 control: command_tx,
                 input: Some(input_tx),
                 liveness,
@@ -2066,7 +2073,7 @@ impl TerminalSession {
         let (alive, liveness) = crossbeam_channel::bounded(0);
         let slot = Arc::new(Mutex::new(ControlSlot::default()));
         let commands = CommandSender {
-            queues: Box::new(CommandQueues {
+            queues: Arc::new(CommandQueues {
                 control: command_tx,
                 input: None,
                 liveness,
@@ -2178,17 +2185,35 @@ impl TerminalSession {
     pub fn wait_for_identity(&self, timeout: Duration) -> bool {
         let state = &self.events.state;
         let deadline = Instant::now() + timeout;
-        let mut resolved = state.identity.lock();
-        while !*resolved {
+        let mut resolved = state.identity.state.lock();
+        debug_assert!(!ROUND_TRIPS_FORBIDDEN.with(Cell::get));
+        while !resolved.ready {
             if state
-                .identity_ready
+                .identity
+                .ready
                 .wait_until(&mut resolved, deadline)
                 .timed_out()
             {
                 break;
             }
         }
-        *resolved
+        resolved.ready
+    }
+
+    pub fn identity_request(
+        &self,
+        timeout: Duration,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    ) -> TerminalRequest<bool> {
+        let (reply, request) = self.commands.reply_token(timeout, notify);
+        let mut identity = self.events.state.identity.state.lock();
+        identity.replies.push(reply);
+        if identity.ready {
+            let reply = identity.replies.pop().unwrap();
+            drop(identity);
+            let _ = reply.send(true);
+        }
+        request
     }
 
     #[must_use]
@@ -2260,8 +2285,9 @@ impl TerminalSession {
     /// `window_copy_clone_screen` runs on the source pane, so the revision a
     /// `copy-mode -s` entry needs has to be built on that pane's own worker.
     pub fn capture_copy_source(&self) -> Result<CapturedCopySource, TerminalCaptureError> {
-        self.commands
-            .request(|reply| Command::CaptureCopySource { reply })?
+        self.commands.request(|reply| Command::CaptureCopySource {
+            reply: reply.into(),
+        })?
     }
 
     /// Hands a retained pane its expanded `remain-on-exit-format` while the
@@ -2378,7 +2404,12 @@ impl TerminalSession {
     /// Copy one stored Kitty image from the actor-owned VT as premultiplied BGRA8.
     pub fn kitty_image(&self, image_id: u32) -> Result<Option<KittyImage>, KittyImageRequestError> {
         self.commands
-            .request(|reply| Command::KittyImage(Box::new(KittyImageRequest { image_id, reply })))
+            .request(|reply| {
+                Command::KittyImage(Box::new(KittyImageRequest {
+                    image_id,
+                    reply: reply.into(),
+                }))
+            })
             .map_err(Into::into)
     }
 
@@ -2391,7 +2422,7 @@ impl TerminalSession {
             .request(|reply| {
                 Command::KittyImageGeneration(Box::new(KittyImageGenerationRequest {
                     image_id,
-                    reply,
+                    reply: reply.into(),
                 }))
             })
             .map_err(Into::into)
@@ -2621,7 +2652,7 @@ impl TerminalSession {
         if self.commands.request(|reply| Command::ArmRawOutputTap {
             token,
             output,
-            reply,
+            reply: reply.into(),
         })? {
             Ok(())
         } else {
@@ -2631,14 +2662,127 @@ impl TerminalSession {
 
     pub fn disarm_raw_output_tap(&self, token: u64) -> Result<(), RawOutputTapError> {
         self.commands
-            .request(|reply| Command::DisarmRawOutputTap { token, reply })
+            .request(|reply| Command::DisarmRawOutputTap {
+                token,
+                reply: reply.into(),
+            })
             .map_err(Into::into)
     }
 
     pub fn settle(&self) -> bool {
         self.commands
-            .request(|reply| Command::Settle { reply })
+            .request(|reply| Command::Settle {
+                reply: reply.into(),
+            })
             .is_ok()
+    }
+
+    pub fn arm_raw_output_tap_request(
+        &self,
+        token: u64,
+        output: RawOutputTapSender,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    ) -> TerminalRequest<bool> {
+        *output.state.capacity_wake.lock() = self.commands.queues.wake.clone();
+        self.commands
+            .request_token(notify, |reply| Command::ArmRawOutputTap {
+                token,
+                output,
+                reply,
+            })
+    }
+
+    pub fn disarm_raw_output_tap_request(
+        &self,
+        token: u64,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    ) -> TerminalRequest<()> {
+        self.commands
+            .request_token(notify, |reply| Command::DisarmRawOutputTap { token, reply })
+    }
+
+    pub fn settle_request(&self, notify: Arc<dyn Fn() + Send + Sync>) -> TerminalRequest<()> {
+        self.commands
+            .request_token(notify, |reply| Command::Settle { reply })
+    }
+
+    pub fn copy_source_request(
+        &self,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    ) -> TerminalRequest<Result<CapturedCopySource, TerminalCaptureError>> {
+        self.commands
+            .request_token(notify, |reply| Command::CaptureCopySource { reply })
+    }
+
+    pub fn capture_request(
+        &self,
+        options: CaptureOptions,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    ) -> TerminalRequest<Result<String, TerminalCaptureError>> {
+        self.commands.request_token(notify, |reply| {
+            Command::Capture(Box::new(CaptureRequest { options, reply }))
+        })
+    }
+
+    pub fn history_request(
+        &self,
+        start: u32,
+        count: u32,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    ) -> TerminalRequest<Result<HistoryCapture, TerminalCaptureError>> {
+        self.commands.request_token(notify, |reply| {
+            Command::History(Box::new(HistoryCommand {
+                start,
+                count,
+                reply,
+            }))
+        })
+    }
+
+    pub fn capture_last_command_request(
+        &self,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    ) -> TerminalRequest<Result<LastCommandCapture, TerminalCaptureError>> {
+        self.commands.request_token(notify, |reply| {
+            Command::SemanticCapture(Box::new(LastCommandRequest { reply }))
+        })
+    }
+
+    pub fn pointer_context_request(
+        &self,
+        view: TerminalViewId,
+        column: u16,
+        row: u16,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    ) -> TerminalRequest<PointerContext> {
+        self.commands.request_token(notify, |reply| {
+            Command::PointerContext(Box::new(PointerContextRequest {
+                view,
+                column,
+                row,
+                reply,
+            }))
+        })
+    }
+
+    pub fn kitty_image_request(
+        &self,
+        image_id: u32,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    ) -> TerminalRequest<Option<KittyImage>> {
+        self.commands.request_token(notify, |reply| {
+            Command::KittyImage(Box::new(KittyImageRequest { image_id, reply }))
+        })
+    }
+
+    pub fn kitty_image_generation_request(
+        &self,
+        image_id: u32,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    ) -> TerminalRequest<Option<u64>> {
+        self.commands.request_token(notify, |reply| {
+            Command::KittyImageGeneration(Box::new(KittyImageGenerationRequest { image_id, reply }))
+        })
     }
 
     /// Open the observation window that binds one pasted image to the next
@@ -2672,28 +2816,36 @@ impl TerminalSession {
                     view,
                     column,
                     row,
-                    reply,
+                    reply: reply.into(),
                 }))
             })
             .map_err(Into::into)
     }
 
     pub fn capture(&self, options: CaptureOptions) -> Result<String, TerminalCaptureError> {
-        self.commands
-            .request(|reply| Command::Capture(Box::new(CaptureRequest { options, reply })))?
+        self.commands.request(|reply| {
+            Command::Capture(Box::new(CaptureRequest {
+                options,
+                reply: reply.into(),
+            }))
+        })?
     }
 
     pub fn capture_frozen_frame(
         &self,
         options: CaptureOptions,
     ) -> Result<String, TerminalCaptureError> {
-        let _round_trips = allow_actor_round_trips();
         match self.capture(options) {
-            Err(TerminalCaptureError::ActorStopped) => {
-                capture_viewport(&self.latest_viewport(), options)
-            }
+            Err(TerminalCaptureError::ActorStopped) => self.capture_retained_frame(options),
             result => result,
         }
+    }
+
+    pub fn capture_retained_frame(
+        &self,
+        options: CaptureOptions,
+    ) -> Result<String, TerminalCaptureError> {
+        capture_viewport(&self.latest_viewport(), options)
     }
 
     /// Copies one absolute span of retained primary-screen history without moving
@@ -2721,7 +2873,7 @@ impl TerminalSession {
             Command::History(Box::new(HistoryCommand {
                 start,
                 count,
-                reply,
+                reply: reply.into(),
             }))
         })?
     }
@@ -2734,8 +2886,11 @@ impl TerminalSession {
     /// [`TerminalCaptureError::NoSemanticMarks`] when the shell emits no OSC 133
     /// marks, plus the same failures as [`Self::capture`].
     pub fn capture_last_command(&self) -> Result<LastCommandCapture, TerminalCaptureError> {
-        self.commands
-            .request(|reply| Command::SemanticCapture(Box::new(LastCommandRequest { reply })))?
+        self.commands.request(|reply| {
+            Command::SemanticCapture(Box::new(LastCommandRequest {
+                reply: reply.into(),
+            }))
+        })?
     }
 
     /// Feed bytes straight into a PTY-free session's parser, as if a child
@@ -2844,7 +2999,7 @@ impl Geometry {
 #[derive(Debug)]
 struct CaptureRequest {
     options: CaptureOptions,
-    reply: Sender<Result<String, TerminalCaptureError>>,
+    reply: ActorReply<Result<String, TerminalCaptureError>>,
 }
 
 #[derive(Debug)]
@@ -2852,7 +3007,7 @@ struct PointerContextRequest {
     view: TerminalViewId,
     column: u16,
     row: u16,
-    reply: Sender<PointerContext>,
+    reply: ActorReply<PointerContext>,
 }
 
 /// What `format_cb_mouse_word`, `format_cb_mouse_line` and
@@ -2868,22 +3023,22 @@ pub struct PointerContext {
 
 #[derive(Debug)]
 struct LastCommandRequest {
-    reply: Sender<Result<LastCommandCapture, TerminalCaptureError>>,
+    reply: ActorReply<Result<LastCommandCapture, TerminalCaptureError>>,
 }
 
 #[derive(Debug)]
 struct KittyImageRequest {
     image_id: u32,
-    reply: Sender<Option<KittyImage>>,
+    reply: ActorReply<Option<KittyImage>>,
 }
 
 #[derive(Debug)]
 struct KittyImageGenerationRequest {
     image_id: u32,
-    reply: Sender<Option<u64>>,
+    reply: ActorReply<Option<u64>>,
 }
 
-type HistoryCapture = (
+pub type HistoryCapture = (
     u32,
     Vec<Vec<PackedCell>>,
     TerminalDictionary,
@@ -2895,7 +3050,7 @@ type HistoryCapture = (
 struct HistoryCommand {
     start: u32,
     count: u32,
-    reply: Sender<Result<HistoryCapture, TerminalCaptureError>>,
+    reply: ActorReply<Result<HistoryCapture, TerminalCaptureError>>,
 }
 
 #[derive(Debug)]
@@ -2915,7 +3070,7 @@ enum Command {
     SetWrapSearch(bool),
     SetEngineKnobs(EngineKnobs),
     CaptureCopySource {
-        reply: Sender<Result<CapturedCopySource, TerminalCaptureError>>,
+        reply: ActorReply<Result<CapturedCopySource, TerminalCaptureError>>,
     },
     SetPendingCopySource(Option<Box<CapturedCopySource>>),
     WriteDeadNotice(Option<Arc<str>>),
@@ -2937,14 +3092,14 @@ enum Command {
     ArmRawOutputTap {
         token: u64,
         output: RawOutputTapSender,
-        reply: Sender<bool>,
+        reply: ActorReply<bool>,
     },
     DisarmRawOutputTap {
         token: u64,
-        reply: Sender<()>,
+        reply: ActorReply<()>,
     },
     Settle {
-        reply: Sender<()>,
+        reply: ActorReply<()>,
     },
     Capture(Box<CaptureRequest>),
     PointerContext(Box<PointerContextRequest>),
@@ -3399,6 +3554,126 @@ fn actor_wake() -> (ActorWake, WakeReceiver) {
     (ActorWake::none(), ())
 }
 
+#[derive(Default)]
+struct IdentityLatch {
+    state: Mutex<IdentityState>,
+    ready: parking_lot::Condvar,
+}
+
+#[derive(Default)]
+struct IdentityState {
+    ready: bool,
+    replies: Vec<ActorReply<bool>>,
+}
+
+pub struct TerminalRequest<T> {
+    response: Receiver<Result<T, TerminalRequestError>>,
+    deadline: Instant,
+    pending: Option<Command>,
+    queues: Arc<CommandQueues>,
+}
+
+impl<T> TerminalRequest<T> {
+    pub fn next_poll(&self) -> Instant {
+        if self.pending.is_some() {
+            self.deadline.min(Instant::now() + Duration::from_millis(1))
+        } else {
+            self.deadline
+        }
+    }
+
+    pub fn poll(&mut self, now: Instant) -> Option<Result<T, TerminalRequestError>> {
+        if let Ok(result) = self.response.try_recv() {
+            return Some(result);
+        }
+        if now >= self.deadline {
+            self.pending.take();
+            return Some(Err(TerminalRequestError::TimedOut));
+        }
+        if let Some(command) = self.pending.take() {
+            let sender = CommandSender {
+                queues: Arc::clone(&self.queues),
+            };
+            match sender.try_send(command) {
+                Ok(()) => {}
+                Err(crossbeam_channel::TrySendError::Full(command)) => self.pending = Some(command),
+                Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
+                    return Some(Err(TerminalRequestError::ActorStopped));
+                }
+            }
+        }
+        if let Err(crossbeam_channel::TryRecvError::Disconnected) = self.queues.liveness.try_recv()
+        {
+            return Some(
+                self.response
+                    .try_recv()
+                    .unwrap_or(Err(TerminalRequestError::ActorStopped)),
+            );
+        }
+        match self.response.try_recv() {
+            Ok(result) => Some(result),
+            Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                Some(Err(TerminalRequestError::ActorStopped))
+            }
+            Err(crossbeam_channel::TryRecvError::Empty) => None,
+        }
+    }
+}
+
+enum ActorReply<T> {
+    Sync(Sender<T>),
+    Async {
+        reply: Option<Sender<Result<T, TerminalRequestError>>>,
+        deadline: Instant,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    },
+}
+
+impl<T> std::fmt::Debug for ActorReply<T> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("ActorReply")
+    }
+}
+
+impl<T> From<Sender<T>> for ActorReply<T> {
+    fn from(reply: Sender<T>) -> Self {
+        Self::Sync(reply)
+    }
+}
+
+impl<T> ActorReply<T> {
+    fn send(mut self, value: T) -> Result<(), ()> {
+        match &mut self {
+            Self::Sync(reply) => reply.send(value).map_err(|_| ()),
+            Self::Async {
+                reply,
+                deadline,
+                notify,
+            } => {
+                let value = if Instant::now() <= *deadline {
+                    Ok(value)
+                } else {
+                    Err(TerminalRequestError::TimedOut)
+                };
+                let result = reply.take().unwrap().try_send(value).map_err(|_| ());
+                notify();
+                result
+            }
+        }
+    }
+}
+
+impl<T> Drop for ActorReply<T> {
+    fn drop(&mut self) {
+        if let Self::Async { reply, notify, .. } = self
+            && let Some(reply) = reply.take()
+        {
+            let _ = reply.try_send(Err(TerminalRequestError::ActorStopped));
+            notify();
+        }
+    }
+}
+
 struct CommandQueues {
     control: Sender<Command>,
     input: Option<InputSender>,
@@ -3408,7 +3683,7 @@ struct CommandQueues {
 }
 
 struct CommandSender {
-    queues: Box<CommandQueues>,
+    queues: Arc<CommandQueues>,
 }
 
 impl CommandSender {
@@ -3507,6 +3782,40 @@ impl CommandSender {
         result
     }
 
+    fn reply_token<T>(
+        &self,
+        timeout: Duration,
+        notify: Arc<dyn Fn() + Send + Sync>,
+    ) -> (ActorReply<T>, TerminalRequest<T>) {
+        let (reply, response) = crossbeam_channel::bounded(1);
+        let deadline = Instant::now() + timeout;
+        (
+            ActorReply::Async {
+                reply: Some(reply),
+                deadline,
+                notify,
+            },
+            TerminalRequest {
+                response,
+                deadline,
+                pending: None,
+                queues: Arc::clone(&self.queues),
+            },
+        )
+    }
+
+    fn request_token<T>(
+        &self,
+        notify: Arc<dyn Fn() + Send + Sync>,
+        command: impl FnOnce(ActorReply<T>) -> Command,
+    ) -> TerminalRequest<T> {
+        let (reply, mut request) = self.reply_token(CAPTURE_TIMEOUT, notify);
+        if let Err(crossbeam_channel::TrySendError::Full(command)) = self.try_send(command(reply)) {
+            request.pending = Some(command);
+        }
+        request
+    }
+
     fn request<T>(
         &self,
         command: impl FnOnce(Sender<T>) -> Command,
@@ -3576,6 +3885,14 @@ impl CommandSender {
             .map_or((0, 0), InputSender::pending)
     }
 }
+
+#[cfg(test)]
+#[path = "session/request_e04_tests.rs"]
+mod request_e04_tests;
+
+#[cfg(test)]
+#[path = "session/request_e05_tests.rs"]
+mod request_e05_tests;
 
 /// Where `recentre-top-bottom` parks the cursor line on its next press.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -16286,7 +16603,7 @@ mod tests {
         let (control, stranded) = command_channel();
         let (alive, liveness) = crossbeam_channel::bounded(0);
         let commands = CommandSender {
-            queues: Box::new(CommandQueues {
+            queues: Arc::new(CommandQueues {
                 control,
                 input: None,
                 liveness,
@@ -16300,7 +16617,7 @@ mod tests {
         assert_eq!(
             commands.request(|reply| Command::Capture(Box::new(CaptureRequest {
                 options: CaptureOptions::default(),
-                reply,
+                reply: reply.into(),
             }))),
             Err(ActorRequestError::ActorStopped)
         );
@@ -16313,7 +16630,7 @@ mod tests {
         let (control, control_rx) = command_channel();
         let (input, input_rx) = input_channel();
         let commands = CommandSender {
-            queues: Box::new(CommandQueues {
+            queues: Arc::new(CommandQueues {
                 control,
                 input: Some(input),
                 liveness: crossbeam_channel::never(),

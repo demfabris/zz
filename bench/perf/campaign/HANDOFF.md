@@ -268,6 +268,9 @@ read "Lane brief rules" before launching anything.
     client's mailbox waiting for an unrelated event; P3 the Windows test build, a peer-scan panic
     that stops peer probes, a client-file waiter leak race. Fix lanes: `hookpanic` and
     `reviewfixes` (with the macOS copy-pipe EPIPE case) on the Mac, `writestall` on Linux.
+  - helperwait (`e3a2a1fd`, Mac): prompt history load/save resume through helper continuations
+    (`daemon/history_io.rs`); no helper reply is awaited on the loop thread (the remaining
+    synchronous callers are off the loop); 1533 daemon tests; 21/21 perf rows pass.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

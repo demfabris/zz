@@ -362,6 +362,30 @@ read "Lane brief rules" before launching anything.
     `mem.copy_wall.scroll180` 1.29/1.42 -> 1.71/2.28 ms with CPU and instructions lower (Linux
     only; Mac -29%); `config.instr.source_1000` +3.7% against loop-00, +5.2% against the wave-2
     JSON. Lanes `perf/attachframes`, `perf/copywall`, `perf/sourceinstr` from `2ea96e66`.
+  - Merged 2026-10-02 (Opus lanes): shardwait `d88f2074` (36 min): W3-SHARDS registers the
+    child watch at the shard's first poll, after exec; for a shell already exiting XNU answers the
+    EVFILT_PROC add with ESRCH (the process is marked dead at the start of exit), the shard took it
+    as "exited" and did a blocking `waitpid` before reading the PTY, and a session leader exiting
+    with unread output waits in exit for the master to drain (the ttywait in `kern_exit.c`): the
+    only reader was the blocked shard. Shard mode now reaps with WNOHANG and re-registers after
+    10 ms (an ESRCH re-add on every poll made kevent return only the changelist errors and starved
+    the shard). C repro in `/tmp/zzpc/shardwait-repro/exitrace.c` at the time; Linux unchanged.
+    sourceinstr `ff7334a6` (71 min): after-command hook context built only when a hook table has
+    commands, parsed commands moved instead of cloned, no state lock or path clone per line; Linux
+    `config.instr.source_1000` 42.18 -> 40.21 Minstr (loop-00 40.66), Mac -6%. attachframes
+    `1ac403a5` (2 h with a follow-up): `send_compact_resync` flushed the attach batch before the
+    panes' async settle callbacks queued their viewports (3 -> 4/7 frames); the batch now waits
+    for the round's settles or a 100 ms loop timer, and a failed settle (actor stopped) still
+    sends the latest viewport as before W3-LOOP; frames 3/3 again, Mac ttfc p4 20.3 -> 16.8 ms.
+    copywall `495bcb89` (96 min): a terminal request that met a full one-slot actor channel
+    (the copy-mode settle right behind its ViewAction) parked and retried on a 1 ms poll, which
+    epoll rounds to a whole extra sleep; it now joins the control slot's deferred list behind the
+    in-flight commands (a Wake when nothing is in flight); Linux `mem.copy_wall.scroll180` 2.03 ->
+    1.05 ms (loop-00 1.06). Its one miss: Mac `mem.copy_footprint.scroll180` +16 KiB (one page,
+    0.547 vs 0.531 MiB, under the 0.5 MiB floor and below wave 2's 0.64), accepted.
+  - Not a bug: a pane whose command prints and exits at once (`new-window 'echo MARK'` with
+    remain-on-exit) shows only "Pane is dead" on macOS for zz and for tmux alike (10 of 10 on
+    pinned tmux): the macOS PTY drops output the reader has not taken when the last slave closes.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

@@ -249,6 +249,10 @@ mod e06_tests;
 #[path = "event_loop_e21_tests.rs"]
 mod e21_tests;
 
+#[cfg(test)]
+#[path = "event_loop_e21fix_tests.rs"]
+mod e21fix_tests;
+
 struct Completion {
     token: Token,
     result: Result<Completed, DaemonError>,
@@ -1343,6 +1347,12 @@ impl EventLoop {
     }
 
     fn turn_lifecycle(&mut self, shared: &Arc<Shared>) -> Result<(), DaemonError> {
+        if !shared.lifecycle.take_pending()
+            && self.lifecycle_shutdown.is_none()
+            && !self.lifecycle_hooks.pending()
+        {
+            return Ok(());
+        }
         if let Some(run_hooks) = shared.lifecycle.turn(shared) {
             self.lifecycle_shutdown = Some(self.lifecycle_shutdown.unwrap_or(false) || run_hooks);
         }
@@ -1751,6 +1761,7 @@ impl EventLoop {
 
     fn remove(&mut self, token: Token, shared: &Arc<Shared>) {
         if let Some(mut connection) = self.connections.remove(&token) {
+            let mut cleanup_pending = false;
             let _ = self
                 .poll
                 .registry()
@@ -1769,15 +1780,24 @@ impl EventLoop {
                     && !released.swap(true, Ordering::AcqRel)
                 {
                     shared.lifecycle.release(client, connection.exec_mode);
+                    cleanup_pending = true;
                 }
             }
             connection.outbound.mark_writer_finished();
-            self.retired.push((
-                connection.session.take(),
-                connection.exec.take(),
-                connection.exec_request.take(),
-            ));
-            self.waker.wake().ok();
+            if connection.session.is_some()
+                || connection.exec.is_some()
+                || connection.exec_request.is_some()
+            {
+                self.retired.push((
+                    connection.session.take(),
+                    connection.exec.take(),
+                    connection.exec_request.take(),
+                ));
+                cleanup_pending = true;
+            }
+            if cleanup_pending {
+                self.waker.wake().ok();
+            }
         }
     }
 }

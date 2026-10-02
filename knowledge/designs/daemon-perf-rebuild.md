@@ -3114,6 +3114,15 @@ The known daemon endpoint test stayed red; four load failures passed alone. Mac 
 
 ## W3-LOOP: single-owner mux loop (effort XL)
 
+As built (e21fix): `EventLoop::remove` retires and wakes only for real cleanup;
+`Inbox::take_pending` skips empty lifecycle locks while parked hooks and shutdown keep advancing.
+The 5,000-display instruction profiles were 361.67 M at bf401683, 373.96 M in e21, and 364.85 M
+with the fix. The pre-final quick gate put all 19 CLI instruction rows within 1.02x of the three
+base medians: display p1/p20 0.0735/0.0781 vs 0.0726/0.0775 Minstr; kill-pane 0.1896 vs 0.1923.
+Idle counters stay zero and threads stay 3/25. Unit tests: 1,498 pass and only the known Mac
+bundle-path case fails; 35 integration tests pass, compat is 101/101, and startup diagnostics are 8/8.
+Hand on the Mac checks and existing split-shell/kill-pane CPU gate failures to the orchestrator.
+
 As built, e19fix (2026-10-02, base `6e7d954e3`): empty peer updates skip format-fact
 snapshots, and drained peer-probe workers exit immediately. Other helpers reuse workers for
 250 ms. Path acknowledgements and discovery output wait for events; the loop owns job

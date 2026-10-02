@@ -2,6 +2,7 @@ use super::*;
 
 #[derive(Default)]
 pub(super) struct Inbox {
+    pending: AtomicBool,
     releases: Mutex<Vec<(ClientId, bool)>>,
     shutdown: Mutex<Option<bool>>,
     hooks: Mutex<Vec<PendingHookEvent>>,
@@ -10,15 +11,22 @@ pub(super) struct Inbox {
 impl Inbox {
     pub(super) fn release(&self, client: ClientId, exec: bool) {
         self.releases.lock().push((client, exec));
+        self.pending.store(true, Ordering::Release);
     }
 
     pub(super) fn shutdown(&self, hooks: bool) {
         let mut pending = self.shutdown.lock();
         *pending = Some(pending.unwrap_or(false) || hooks);
+        self.pending.store(true, Ordering::Release);
     }
 
     pub(super) fn hooks(&self, events: Vec<PendingHookEvent>) {
         self.hooks.lock().extend(events);
+        self.pending.store(true, Ordering::Release);
+    }
+
+    pub(super) fn take_pending(&self) -> bool {
+        self.pending.load(Ordering::Acquire) && self.pending.swap(false, Ordering::AcqRel)
     }
 
     pub(super) fn turn(&self, shared: &Arc<Shared>) -> Option<bool> {

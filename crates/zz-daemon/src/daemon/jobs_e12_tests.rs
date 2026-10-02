@@ -27,6 +27,8 @@ fn launch(command: &str, policy: CompletionPolicy, complete: mpsc::Sender<Comple
         process_group: false,
         output_limit: None,
         stream: None,
+        pipe: None,
+        cancel: None,
         complete: Box::new(move |result| complete.send(result).unwrap()),
     }
 }
@@ -217,6 +219,8 @@ fn pipe_backpressure_and_bounded_turns_preserve_output() {
             process_group: false,
             output_limit: None,
             stream: None,
+            pipe: None,
+            cancel: None,
             complete: Box::new(move |result| done.send(result).unwrap()),
         },
     )
@@ -279,6 +283,8 @@ fn socket_input_shutdown_preserves_read_half() {
             process_group: false,
             output_limit: None,
             stream: None,
+            pipe: None,
+            cancel: None,
             complete: Box::new(move |result| done.send(result).unwrap()),
         },
     )
@@ -330,7 +336,7 @@ fn failed_attachment_reaps_the_owned_child() {
     let poll = Poll::new().unwrap();
     let mut jobs = JobRegistry::default();
     let mut token = usize::MAX - 1;
-    let (done, _) = mpsc::channel();
+    let (done, results) = mpsc::channel();
     let mut job = launch("exec sleep 10", CompletionPolicy::ChildExitAndEof, done);
     let pid = job.child.id();
     let (reader, _writer) = std::os::unix::net::UnixStream::pair().unwrap();
@@ -343,5 +349,9 @@ fn failed_attachment_reaps_the_owned_child() {
     assert!(jobs.register(poll.registry(), &mut token, job).is_err());
     assert!(jobs.jobs.is_empty());
     assert!(jobs.tokens.is_empty());
+    let result = results.try_recv().unwrap();
+    assert!(result.error.is_some());
+    assert_eq!(result.pid, pid);
+    assert!(results.try_recv().is_err());
     assert_reaped(pid);
 }

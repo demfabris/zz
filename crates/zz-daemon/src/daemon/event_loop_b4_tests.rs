@@ -5,12 +5,12 @@ use crate::daemon::tests::{
 };
 
 #[test]
-fn empty_timer_heap_allows_indefinite_poll_and_control_output_keeps_its_timeout() {
+fn empty_timer_heap_allows_indefinite_poll_and_control_output_uses_its_age_deadline() {
     let shared = Arc::new(Shared::new(1));
     let mut event_loop = EventLoop::empty(&shared).unwrap();
     let now = Instant::now();
     assert_eq!(event_loop.poll_timeout(now), None);
-    event_loop.control_output_poll = true;
+    event_loop.control_output_deadline = Some(now + COPY_PIPE_POLL_INTERVAL);
     assert_eq!(event_loop.poll_timeout(now), Some(COPY_PIPE_POLL_INTERVAL));
     let soon = now + Duration::from_micros(1);
     shared

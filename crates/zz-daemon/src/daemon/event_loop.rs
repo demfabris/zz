@@ -123,7 +123,7 @@ pub(super) struct EventLoop {
     turn_tokens: Vec<Token>,
     next_token: usize,
     accept_again: bool,
-    control_output_poll: bool,
+    control_output_deadline: Option<Instant>,
     shutdown_started: bool,
     shutdown_phase: ShutdownPhase,
     shutdown_completed: mpsc::Receiver<()>,
@@ -246,11 +246,12 @@ enum Completed {
 }
 
 impl EventLoop {
-    fn empty(shared: &Shared) -> Result<Self, DaemonError> {
+    pub(super) fn empty(shared: &Shared) -> Result<Self, DaemonError> {
         let poll = Poll::new()?;
         let waker = Arc::new(Waker::new(poll.registry(), WAKE)?);
         shared.accept_wake.install(Arc::clone(&waker));
         shared.helpers.install(Arc::clone(&waker));
+        shared.pipe_jobs.wake.install(Arc::clone(&waker));
         let status_client = shared.status.lock().job_client();
         status_client.install(Arc::clone(&waker));
         let (startup_sender, startup_finished) = mpsc::channel();
@@ -285,7 +286,7 @@ impl EventLoop {
             turn_tokens: Vec::new(),
             next_token: 4,
             accept_again: false,
-            control_output_poll: false,
+            control_output_deadline: None,
             shutdown_started: false,
             shutdown_phase: ShutdownPhase::Running,
             shutdown_completed,
@@ -575,7 +576,9 @@ impl EventLoop {
                     .map(|deadline| deadline.saturating_duration_since(now)),
             )
             .min();
-        let control = self.control_output_poll.then_some(COPY_PIPE_POLL_INTERVAL);
+        let control = self
+            .control_output_deadline
+            .map(|deadline| deadline.saturating_duration_since(now));
         match (timer, control) {
             (Some(timer), Some(control)) => Some(timer.min(control)),
             (timer, control) => timer.or(control),
@@ -1134,6 +1137,54 @@ impl EventLoop {
         }
     }
 
+    fn turn_pipe_jobs(&mut self, shared: &Arc<Shared>) {
+        if !shared.pipe_jobs.take_pending() {
+            return;
+        }
+        for request in shared.pipe_jobs.receiver.try_iter().take(64) {
+            if let Err(error) = self.register_job(request.into_launch()) {
+                log::warn!("pipe job registration failed: {error}");
+            }
+        }
+        if !shared.pipe_jobs.receiver.is_empty() {
+            shared.pipe_jobs.notify();
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn pipe_test_turn(&mut self, shared: &Arc<Shared>) {
+        self.turn_pipe_jobs(shared);
+        self.jobs.turn(self.poll.registry(), Instant::now());
+        self.jobs.child_signal(self.poll.registry());
+        self.poll
+            .poll(&mut self.events, Some(Duration::ZERO))
+            .unwrap();
+        let ready = self
+            .events
+            .iter()
+            .map(|event| {
+                (
+                    event.token(),
+                    event.is_readable() || event.is_read_closed(),
+                    event.is_writable() || event.is_write_closed(),
+                )
+            })
+            .collect::<Vec<_>>();
+        for (token, readable, writable) in ready {
+            self.jobs
+                .ready(self.poll.registry(), token, readable, writable);
+        }
+        shared.drain_control_output_taps();
+        self.watchers.turn(shared).unwrap();
+    }
+
+    #[cfg(test)]
+    pub(super) fn pipe_test_stop(&mut self, shared: &Arc<Shared>) {
+        self.turn_pipe_jobs(shared);
+        self.jobs.cancel_all(self.poll.registry());
+        self.jobs.child_signal(self.poll.registry());
+    }
+
     fn turn_status_jobs(&mut self) {
         if !self.status_client.take_pending() {
             return;
@@ -1233,6 +1284,8 @@ impl EventLoop {
                 process_group: true,
                 output_limit: Some(limit),
                 stream: None,
+                pipe: None,
+                cancel: None,
                 complete: Box::new(move |mut completion| {
                     let result = if let Some(error) = completion.error {
                         Err(error.to_string())
@@ -1269,10 +1322,12 @@ impl EventLoop {
         self.agents.turn(shared)?;
         self.turn_helpers(shared);
         self.turn_status_jobs();
+        self.turn_pipe_jobs(shared);
         self.jobs.turn(self.poll.registry(), Instant::now());
         self.watchers.turn(shared)?;
         self.timers.turn(shared, &self.waker)?;
-        self.control_output_poll = shared.start_ready_control_output_readers();
+        shared.drain_control_output_taps();
+        self.control_output_deadline = shared.control_output_deadline();
         while let Ok(completion) = self.completed.try_recv() {
             if let Ok(Completed::Inserted(task)) = completion.result {
                 self.inserted_queues.push(*task);

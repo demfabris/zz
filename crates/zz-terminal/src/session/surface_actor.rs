@@ -20,7 +20,7 @@ pub(super) struct SurfaceActor<'a, 'b> {
     control_rx: Receiver<Command>,
     slot: Arc<Mutex<ControlSlot>>,
     publisher: Publisher,
-    raw_output_tap: Option<(u64, Sender<Arc<[u8]>>)>,
+    raw_output_tap: Option<(u64, RawOutputTapSender)>,
     engine_filter: EngineFilter,
     mouse_encoder: mouse::Encoder<'static>,
     mouse_event: mouse::Event<'static>,

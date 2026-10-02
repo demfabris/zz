@@ -10,6 +10,7 @@ fn sharded_reader_turn_stops_at_the_byte_limit_and_preserves_eof() {
         vec![0; PTY_DRAIN_TURN_BYTES],
         PTY_DRAIN_TURN_BYTES,
         true,
+        PTY_BUFFER_POOL_SIZE,
         |_, length| consumed += length,
     ));
     assert_eq!(consumed, PTY_DRAIN_TURN_BYTES);
@@ -31,6 +32,7 @@ fn sharded_reader_turn_yields_after_a_slow_batch() {
         vec![1],
         1,
         true,
+        PTY_BUFFER_POOL_SIZE,
         |buffer, _| {
             consumed.push(buffer);
             thread::sleep(PTY_DRAIN_TURN_TIME);
@@ -53,9 +55,16 @@ fn sharded_reader_turn_consumes_eof_after_the_final_batch() {
     let mut consumed = Vec::new();
     let mut buffer = vec![1];
     loop {
-        let eof = drain_pty_output_burst(&queued, buffer, 1, true, |buffer, _| {
-            consumed.push(buffer);
-        });
+        let eof = drain_pty_output_burst(
+            &queued,
+            buffer,
+            1,
+            true,
+            PTY_BUFFER_POOL_SIZE,
+            |buffer, _| {
+                consumed.push(buffer);
+            },
+        );
         if eof {
             break;
         }

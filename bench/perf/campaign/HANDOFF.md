@@ -252,6 +252,13 @@ read "Lane brief rules" before launching anything.
     in production Unix builds (Windows keeps accepts, writers, deferred exec, timers and helper
     dispatch on them); 1497 daemon tests, startup diagnostics 8/8. Short commands +3.5-4.1% user
     instructions (12/19 CLI rows over): fix lane `e21fix` profiles the per-connection lifecycle.
+  - Ultra review of the c/e series (`362c83bc`): codex's cyber filter stopped it after 21 min;
+    before that it confirmed one P1 (helper replies awaited synchronously on the loop:
+    ensure_prompt_history, warm_terminfo, history save, peer sync, HelperPool::read/import_source;
+    two slow source-file reads stall every client) and one candidate (macOS copy-pipe EPIPE
+    cancels the job and force-stops the child, unlike Linux). Fix lane `helperwait` on the Mac;
+    the remaining review areas (wake flags, client-loss cleanup, platform guards, output order) go to
+    an Opus subagent per brief rule 7.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

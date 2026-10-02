@@ -48,6 +48,28 @@ read "Lane brief rules" before launching anything.
 
 ## Wave 3 merge log (from 2026-10-01)
 
+- W3-LOOP (c)/(e) slices, 2026-10-01 evening. Two lanes at a time, one per host, each on the
+  other's latest commit, cherry-picked onto the Mac `perf/loop` (Linux pushes go to
+  `perf/loop-mac` in alienware's repo; its worktree is reused per slice with `git worktree move`, so
+  the build cache comes along). Slices that share daemon.rs but not the same functions run in
+  parallel; each brief names the other lane's area as off limits.
+  - c01 (`5369b274`, Mac): watcher threads relay `DeferredTerminalEvent`s to the loop, 0
+    `inner.lock()` in watcher bodies, 1385 daemon tests green. `chatty.instr_per_s.hidden` 1.09x B
+    (B 78-82, c01 87-96 Minstr/s): every relayed event and effect completion calls
+    `AcceptWake::wake`, one syscall each. Decision: accepted, with the fix folded into c02 (which
+    rewrites that path) instead of a separate fix round; c02's budget is cumulative against B.
+    `cli.instr.select_pane.p20` 1.056x was noise (B itself spans 0.137-0.150).
+  - c03 (`43a32883`, Linux): empty and output panes run on the shard threads; 40 surfaces add
+    only the 4 shard threads; `spawn.instr.split_empty_P` 0.98x. Hidden chatty 1.13x B is
+    within B's spread on alienware (B 38.1-41.8, c03 41.8-45.1) and c03 does not touch that
+    path: accepted, recheck on the combined build. Its 4 serial daemon failures pass alone; the
+    base fails 7 environmental ones on that host (process_info, endpoint, russh_socks).
+  - c02 (`810dd4d3`, Mac): relay threads gone; producers call a notification sink after
+    enqueueing (and on close), the loop drains each surface 8 events per turn with one coalesced
+    wake. Threads p1/p20 3/25 -> 2/5 on the Mac; hidden chatty 0.93x B, all 22 instruction
+    medians at most 1.026x B, idle 0. Linux check rides on the e01 merge.
+  - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-10% per host: judge it on
+    the min/max of three alternating runs, not the median ratio alone.
 - W3-LOOP in progress on `perf/loop` (worktree `~/dev/zz-loop` on the Mac; not merged): e0, a1-a4,
   b1-b6 with fixes, then main merged in (slice 00, `1518f03d`). Step (b) plan:
   `bench/perf/campaign/w3-loop-b-plan.txt`; steps (c)/(d)/(e), 30 slices in order:
@@ -856,6 +878,8 @@ summary in `<out>.cost.json`, `<out>.failed` when no valid answer), `lane-watchd
 
 ## Traps
 
+- Launching a lane over ssh with `nohup ... &` keeps the ssh call open until its timeout (the
+  lane survives). Use `setsid -f lane-run.sh ... > log 2>&1 < /dev/null`.
 - macOS caps PTYs at 511: never run workspace tests and perf runs on the Mac at the same time.
   Overlapping them failed six LOOP b6 perf runs ("tmux PTY allocation failed") and 166
   parallel daemon tests (all passed alone).

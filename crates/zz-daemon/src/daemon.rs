@@ -201,6 +201,7 @@ const STARTUP_CONFIG_PREVIEW_TRUNCATED: &str =
 const AGENT_SEND_WAIT_TIMEOUT: Duration = Duration::from_mins(10);
 const AGENT_STATE_START_GRACE: Duration = Duration::from_secs(15);
 const SEND_TEXT_TIMEOUT: Duration = Duration::from_secs(2);
+#[cfg(test)]
 const SEND_TEXT_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const SEND_TEXT_TAIL_CHARS: usize = 40;
 const PASTE_COLLAPSE_MARKER: &str = "[Pasted text";
@@ -5543,6 +5544,15 @@ impl Shared {
                     }
                 }
             }
+            for pane in inner
+                .pane_read_observations
+                .keys()
+                .copied()
+                .collect::<Vec<_>>()
+            {
+                terminal_reads::pane_changed(&mut inner, pane);
+            }
+            inner.pane_read_observations.clear();
             inner.terminal_spawns.clear();
             inner.terminal_geometries.clear();
             inner.attached.clear();
@@ -6445,6 +6455,13 @@ impl Shared {
                 .client_file_waiters
                 .retain(|_, waiter| waiter.client != client);
             let mut removed_client = inner.clients.remove(&client);
+            if inner
+                .pane_read_observations
+                .values()
+                .any(|observation| observation.strong_count() != 0)
+            {
+                (self.terminal_requests.notifier())();
+            }
             let control = removed_client.as_ref().and_then(|c| c.kind) == Some(ClientKind::Control);
             inner.client_flags.clear(client);
             inner
@@ -6991,6 +7008,7 @@ impl Shared {
                 inner.pane_exit_waits.remove(&pane);
             }
         }
+        terminal_reads::pane_changed(inner, pane);
     }
 
     /// Whether the connection that owns this client's command queue has gone.
@@ -9580,6 +9598,7 @@ impl Shared {
                                 terminal.retire();
                             }
                             inner.last_output.remove(pane);
+                            inner.pane_read_observations.remove(pane);
                             inner.control_activity_pending.remove(pane);
                             #[cfg(all(feature = "agent", unix))]
                             inner.claude_peer_states.remove(pane);
@@ -27634,6 +27653,7 @@ impl Shared {
             let mut silence_schedule = None;
             if output_activity {
                 inner.last_output.insert(pane, Instant::now());
+                terminal_reads::pane_changed(&mut inner, pane);
                 inner.engine.set_format_now(unix_timestamp());
                 for session in inner
                     .clients
@@ -34384,6 +34404,7 @@ struct ServerState {
     deferred_control_refresh: bool,
     terminals: Arc<BTreeMap<PaneId, Arc<TerminalSession>>>,
     last_output: BTreeMap<PaneId, Instant>,
+    pane_read_observations: BTreeMap<PaneId, Weak<terminal_reads::Observation>>,
     control_activity_pending: BTreeSet<PaneId>,
     #[cfg(all(feature = "agent", unix))]
     claude_peer_states: BTreeMap<PaneId, String>,

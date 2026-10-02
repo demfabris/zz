@@ -3341,6 +3341,13 @@ The named functions contain no blocking receive or sleep. Twenty parked native w
 Six new tests, 1,474 daemon unit tests and 35 integration tests pass, with one streaming soak ignored. Fmt, daemon Clippy and the four requested compat groups pass: 59 steps with zero divergences.
 Windows cross-check reaches an unchanged base error: `run_inserted_queue_frames` references the Unix-only `wait_queue` module without a guard. Linux runtime checks were not run on this Mac. Final-commit comparison files use `/tmp/zzpc/e18-{base,new}-{1,2,3}.json`.
 
+### e10 as built (2026-10-02)
+
+`terminal_reads.rs` parks wait-pane conditions, run-pane markers, and paste echo waits on per-pane output generations and timeout or idle-dwell deadlines; its four 20 ms scan scheduling sites are gone.
+The first condition capture fixes the scan boundary before reporting the park. Unchanged history needs no new capture; tail limits, collapsed-paste detection, statuses 124/125, and commands continuing after timeout keep their behavior. Nonempty pastes need a fresh output generation before Enter.
+Four e10 tests prove 20 parked commands add zero workers and zero scan deadlines, output during registration resumes the wait, marker and echo waits have no deadline without a timeout, and old echo cannot submit a new paste. Exit, respawn, shutdown, and client departure wake parked waits.
+The Mac serial daemon suite passes 1,478 unit and 35 integration tests, with one existing test ignored. The e18 agent waits, Clippy, Windows check, and five selected compat scenarios pass; Linux-only checks remain with the orchestrator.
+
 
 ## W4-DELIVER: frames straight from shards (effort L)
 

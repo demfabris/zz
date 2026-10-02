@@ -9,7 +9,7 @@ tags:
 - fork
 - macos
 - handoff
-timestamp: 2026-10-02T06:00:00Z
+timestamp: 2026-10-02T12:00:00Z
 status: open
 ---
 
@@ -24,35 +24,31 @@ status: open
 
 Results and method are in [macOS (Metal)](/research/2026-09-30-gpui-fork-lab.md#macos-metal).
 
-1. `gpui-lab`, rebased onto main `4e7c62acb`, passed clippy and every workspace test on macOS
-   except `zz-daemon` load flakes, which pass alone (its daemon code equals main's). It was not
-   checked by eye on screen; see Still open.
+1. The `gpui-lab` branch, rebased onto main `4e7c62acb` and merged as `eb11056f7`, passed clippy and every workspace test on macOS
+   except `zz-daemon` load flakes, which pass alone (its daemon code equals main's).
 2. Metal yardstick: `bench/gpui/frames.py`. The lab pin `cc9e4d1804` against `e01edb6b1a`:
    main-thread CPU -5.5% stream, -8.5% grid, -4.9% scroll, -12.6% chrome, no repeat overlapping.
    The Linux stream and scroll regression does not appear on Metal.
 3. Retained mode: accessibility is inactive on macOS and views are reused, yet the rebased port
-   (local `lab/retained-mac`) costs +24% in stream, scroll and chrome and saves 1% in grid.
+   (fork commit `33656c6f51`) costs +24% in stream, scroll and chrome and saves 1% in grid.
    Rejected again.
-4. gpui-fast `9b2f43d` ported as local `lab/coretext` (fonts per size, run rendering, plus an
+4. gpui-fast `9b2f43d` ported as fork commits up to `8aa67c753d` (fonts per size, run rendering, plus an
    `accessibility_active` field in the recorder): -10.8% stream, -3.1% grid, -5.1% scroll, -7.7%
-   chrome against `cc9e4d1804`, no repeat overlapping. The font cache alone (`lab/coretext-fonts`)
+   chrome against `cc9e4d1804`, no repeat overlapping. The font cache alone (`ff805a96b0`)
    gives nearly all of it; run rendering is not proven.
 5. Compact scene records, the two Metal-only commits and hot reload: see the lab document.
+6. On 2026-10-02 the font cache went to `zz-patches` as `ff805a96b0` plus the recorder field
+   `5a00ac89a4` (old tip backed up as `zz-patches-2026-10-02`), and zz moved its pin there. The
+   run rendering commit `3aefd2a813` was not carried. Side-by-side screenshots of the old and
+   new pin (bold, italic, colors, emoji, CJK, box drawing, ligatures, wrapping, sidebar) matched.
 
 # Still open
 
-1. **Push the CoreText font cache to `zz-patches`.** `lab/coretext-fonts` holds it plus the
-   recorder field on top of `cc9e4d1804` (`ff805a96b0`, `5a00ac89a4`); `lab/coretext` adds the
-   run rendering commit `3aefd2a813`, which is cleaner code but showed no proven gain. zz built
-   against both (bundles C1 and C). Push with a dated backup of `cc9e4d1804`, then move the pin in
-   the three manifests and both lockfiles. Pushing to the fork goes over ssh with the hardware
-   key, so it needs a person.
-2. **Look at the app.** Nobody has checked rendering on screen on macOS since `cc9e4d1804` or with
-   `lab/coretext`: terminal backgrounds, bold and italic fallback fonts, emoji, wrapped text in
-   the agent pane, sidebar, palette and settings.
-3. **Hot reload on macOS.** Install dioxus-cli 0.7.10 and sort out the bundle, CEF framework
-   layout and codesigning of patch libraries.
-4. **Damage tracking** (zed PR #62455, open). Its present-skip part works on every platform and
+- **Hot reload on macOS.** Install dioxus-cli 0.7.10 and sort out the bundle, CEF framework
+  layout and codesigning of patch libraries. zz refuses to start outside a bundle that has the
+  CEF framework in `../Frameworks` (`macos_cef_framework_is_available` in `crates/zz/src/lib.rs`),
+  so a dx-built binary has to run from a bundle with CEF and its helpers.
+- **Damage tracking** (zed PR #62455, open). Its present-skip part works on every platform and
    would cut GPU work for frames whose scene did not change, which zz produces when chrome
    notifies without visual change. Unmeasured.
 

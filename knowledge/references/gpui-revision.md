@@ -173,6 +173,10 @@ Each is upstream-able as a small Zed PR; if Zed merges an equivalent, drop it. I
     and upstream zed, gpui-ce's accessibility automation APIs, and the `GPUI_FRAME_STATS` frame
     recorder. Each commit body names its source repo and hash. Measured on Linux and on Metal in
     the [GPUI fork lab](/research/2026-09-30-gpui-fork-lab.md).
+36. One CoreText font per size (`ff805a96b0`, from gpui-fast `9b2f43d`). `layout_line` reuses a
+    cached `CTFont` per font and size instead of `clone_with_font_size` for every run, which keeps
+    CoreText's shaping caches alive between lines. `5a00ac89a4` adds `accessibility_active` to
+    the frame recorder.
 
 WGPU window-frame antialiasing (`c8135f5b6b`) applies outer coverage once when a quad and the
 window mask have identical bounds, radii, and corner smoothing. Other intersections retain their

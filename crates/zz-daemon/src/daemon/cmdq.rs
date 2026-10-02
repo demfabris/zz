@@ -28,7 +28,6 @@ pub(super) struct WaitContinuation {
 #[derive(Default)]
 struct WaitCompletion {
     ready: Mutex<bool>,
-    #[cfg(any(test, windows))]
     changed: parking_lot::Condvar,
 }
 
@@ -53,7 +52,6 @@ impl WaitContinuation {
             return false;
         }
         *ready = true;
-        #[cfg(any(test, windows))]
         self.completion.changed.notify_all();
         drop(ready);
         if let Some(owner) = self.owner.as_ref().and_then(Weak::upgrade) {
@@ -66,7 +64,6 @@ impl WaitContinuation {
         *self.completion.ready.lock()
     }
 
-    #[cfg(any(test, windows))]
     pub(super) fn wait(&self) {
         let mut ready = self.completion.ready.lock();
         while !*ready {

@@ -3308,6 +3308,12 @@ with 2/5 threads at p1/p20. The quick W0 gate passed 36 rows with zero failures 
 alert, and Control scenarios passed. Final-commit comparison files use
 `/tmp/zzpc/c01copy-{base,new}-{1,2,3}.json`; Linux checks remain with the orchestrator.
 
+**e13 as built (2026-10-02, macOS):** 12/16 explicit park sites now use loop continuations. `Shared::spawn_delay` posts callbacks to `LoopTimers`; zero delays activate its ready queue, and positive delays add only their launch deadlines.
+Delay-only and foreground `run-shell -C` requests suspend their command frames. Delayed shell launches keep their command formats, retained target environment and selected-client cwd, and sample global/session environment and the default terminal at launch.
+Twenty queued delay-only and command-mode requests add zero threads and exactly twenty deadlines. The named environment and background ordering tests pass; the serial daemon suite passes 1,479 tests, daemon Clippy is clean, and six compat scenarios pass 188 steps with zero divergences.
+Synchronous source-file replay and ordinary zero-delay shell jobs retain their existing workers. Windows cross-check passes with nine existing warnings; Linux-only runtime checks remain with the orchestrator.
+
+
 ## W4-DELIVER: frames straight from shards (effort L)
 
 Scope: the loop pushes per-pane subscriber sinks (queue handle, stream kind, delivered base,

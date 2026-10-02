@@ -1922,6 +1922,7 @@ pub(super) fn write_fixture(
 #[cfg(test)]
 pub(super) fn start_timer_fixture(shared: &Arc<Shared>) -> Result<(), DaemonError> {
     let mut event_loop = EventLoop::empty(shared)?;
+    event_loop.signals = Some(SignalPipes::new(&event_loop.poll)?);
     let shared = Arc::downgrade(shared);
     thread::Builder::new()
         .name("zz-mux-test".to_owned())
@@ -1941,6 +1942,30 @@ pub(super) fn start_timer_fixture(shared: &Arc<Shared>) -> Result<(), DaemonErro
                 if let Err(error) = event_loop.poll_ready() {
                     log::error!("timer fixture poll failed: {error}");
                     return;
+                }
+                let ready = event_loop
+                    .events
+                    .iter()
+                    .map(|event| {
+                        (
+                            event.token(),
+                            event.is_readable() || event.is_read_closed(),
+                            event.is_writable() || event.is_write_closed(),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                for (token, readable, writable) in ready {
+                    if token == CHILD_SIGNAL {
+                        let _ = SignalPipes::drain(&mut event_loop.signals.as_mut().unwrap().child);
+                        event_loop.jobs.child_signal(event_loop.poll.registry());
+                    } else if event_loop.jobs.contains_token(token) {
+                        event_loop.jobs.ready(
+                            event_loop.poll.registry(),
+                            token,
+                            readable,
+                            writable,
+                        );
+                    }
                 }
             }
         })

@@ -4,8 +4,9 @@ pub(super) fn queue_command(command: &CommandInvocation) -> bool {
     MuxEngine::is_command_alias_group(command)
         || canonical_command(&command.name) == "wait-for"
         || canonical_command(&command.name) == "run-shell"
-            && parse_run_shell_args(&command.args)
-                .is_ok_and(|args| args.command_mode && !args.background && args.delay.is_none())
+            && parse_run_shell_args(&command.args).is_ok_and(|args| {
+                args.command_mode || args.positional.is_empty() || args.background
+            })
         || canonical_command(&command.name) == "if-shell"
             && parse_if_shell_args(&command.args).is_ok_and(|args| args.format && !args.background)
 }

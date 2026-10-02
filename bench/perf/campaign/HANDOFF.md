@@ -207,6 +207,10 @@ read "Lane brief rules" before launching anything.
     code Windows compiles while `wait_queue` is `#[cfg(unix)]`); fixed by moving the pure helper
     next to `InsertedCommandStep` (`7a555180`). Briefs on the Mac now include
     `cargo check -p zz-daemon --target x86_64-pc-windows-msvc`.
+  - e10 (`93f06e08`, Mac): wait-pane condition scans, run-pane marker scans and paste_and_submit
+    echo waits resume on output changes and deadlines (`daemon/terminal_reads.rs`); 20 waits add
+    0 workers and 0 scan timers; 19/19 CLI and 6/6 chatty rows pass. Windows check passes with 16
+    warnings (dead code on that target), left for the d steps.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

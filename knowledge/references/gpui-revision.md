@@ -4,7 +4,7 @@ title: GPUI revision pin
 description: Where the patched Zed revision zz builds against is defined, how to read it, and what the carried GPUI patches do. gpui-component is not a dependency.
 resource: Cargo.toml
 tags: [gpui, zed, pin, reference, git-dependency]
-timestamp: 2026-09-25T00:00:00Z
+timestamp: 2026-10-02T00:00:00Z
 ---
 
 # Overview
@@ -167,6 +167,12 @@ Each is upstream-able as a small Zed PR; if Zed merges an equivalent, drop it. I
     caller's WGSL fragment shader over the layer with premultiplied blending (Metal translates it to
     MSL through naga). DirectX, and any backend whose compile fails, draws the content unshaded. The
     wgpu headless renderer now uses Metal on macOS so the layer's pixel tests run there.
+35. The GPUI lab series (27 commits from `337a10612d` to `cc9e4d1804`): per-frame speedups ported
+    from longbridge/gpui-fast (scene bounds grid, cached element path hashes, glyph tile cache,
+    recent native line shapes and others), text fixes from gpui-fast, renderer fixes from gpui-ce
+    and upstream zed, gpui-ce's accessibility automation APIs, and the `GPUI_FRAME_STATS` frame
+    recorder. Each commit body names its source repo and hash. Measured on Linux and on Metal in
+    the [GPUI fork lab](/research/2026-09-30-gpui-fork-lab.md).
 
 WGPU window-frame antialiasing (`c8135f5b6b`) applies outer coverage once when a quad and the
 window mask have identical bounds, radii, and corner smoothing. Other intersections retain their

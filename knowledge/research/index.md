@@ -10,4 +10,6 @@
 * [Interactive bughunt: Agent transcripts, Markdown, and terminal resizing](2026-09-16-interactive-bughunt.md) - Running investigation of disappearing Agent user messages in both providers, inline-code wrapping, and terminal corruption after pane or GUI resizing.
 * [macOS CPU, GPU, and memory investigation](2026-09-23-macos-performance.md) - Measured macOS resource costs, proven improvements, and deferred protocol and renderer designs from the September 2026 performance investigation.
 * [Terminal augmentation survey](2026-09-25-terminal-augmentation-survey.md) - Which tmux plugins, terminal features, and agent-era tools augment the shell with overlays (pickers, hints, command blocks, agent inboxes), how each one works, what zz already has to build them natively, and a ranked idea list with mockups.
+* [GPUI fork lab (gpui-fast, gpui-ce, upstream, hot reload)](2026-09-30-gpui-fork-lab.md) - What zz took from longbridge/gpui-fast, gpui-ce and upstream zed after measuring each candidate on Linux and macOS, what it rejected and why, the combined frame-cost results on both, and the Subsecond hot reload prototype.
+* [GPUI fork lab, macOS handoff](2026-10-01-gpui-mac-handoff.md) - What the macOS session measured after the Linux GPUI lab, which fork changes it took or rejected, and what is still open, with branches and proof rules.
 <!-- okf:listing:end -->

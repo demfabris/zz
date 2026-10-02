@@ -9,6 +9,7 @@ mod diagnostics;
 mod editor;
 #[cfg(any(feature = "agent-pane", feature = "editor-pane"))]
 mod file_picker;
+mod hotreload;
 mod keymap;
 #[cfg(target_os = "macos")]
 mod macos_app;
@@ -266,6 +267,13 @@ fn run_app(
             diagnostics::start_main_thread_watchdog(cx);
             #[cfg(any(target_os = "macos", target_os = "linux"))]
             quit_signal::init(cx);
+            #[cfg(all(
+                feature = "hotreload",
+                debug_assertions,
+                not(target_family = "wasm"),
+                not(target_os = "ios")
+            ))]
+            hotreload::init(cx);
             #[cfg(all(target_os = "linux", target_env = "gnu"))]
             start_heap_trim(cx);
             #[cfg(target_os = "macos")]

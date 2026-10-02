@@ -1,0 +1,23 @@
+[package]
+name = "zz-hotreload"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[features]
+hotreload = ["zz/hotreload"]
+
+[[bin]]
+name = "zz-hotreload"
+path = "src/main.rs"
+required-features = ["hotreload"]
+
+[dependencies]
+mimalloc = { workspace = true, features = ["no_thp"] }
+zz = { path = "../zz" }
+zz-ui = { path = "../zz-ui" }
+
+[lints]
+workspace = true

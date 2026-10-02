@@ -23,7 +23,7 @@ dispatch2 = "0.3.1"
 env_logger.workspace = true
 futures = "0.3"
 gpui.workspace = true
-gpui_wgpu = { git = "https://github.com/demfabris/zed", rev = "e01edb6b1a997d18d4e1c6db62109dd495a4f0db" }
+gpui_wgpu = { git = "https://github.com/demfabris/zed", rev = "cc9e4d1804f1ccc843bfd8b08b2cc3c9ffd827fc" }
 log.workspace = true
 memmap2 = "0.9.11"
 objc = "0.2"

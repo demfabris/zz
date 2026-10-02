@@ -188,6 +188,7 @@ impl RenderOnce for NumberInput {
         h_flex()
             .id(("zz-number-input", self.state.entity_id()))
             .role(Role::SpinButton)
+            .aria_disabled(self.disabled)
             .key_context(CONTEXT)
             .on_action(window.listener_for(&self.state, InputState::on_increment))
             .on_action(window.listener_for(&self.state, InputState::on_decrement))

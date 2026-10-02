@@ -7,21 +7,40 @@ use zz_protocol::{
 
 use super::*;
 
-thread_local! {
-    pub(super) static HOOK_NOTIFICATIONS_ONLY: Cell<bool> = const { Cell::new(false) };
+pub(super) struct HookNotificationsOnlyScope {
+    shared: Option<Arc<Shared>>,
+    previous: bool,
 }
 
-pub(super) struct HookNotificationsOnlyScope(bool);
-
 impl HookNotificationsOnlyScope {
-    pub(super) fn new(enabled: bool) -> Self {
-        Self(HOOK_NOTIFICATIONS_ONLY.with(|slot| slot.replace(slot.get() || enabled)))
+    pub(super) fn new(shared: &Arc<Shared>, enabled: bool) -> Self {
+        if !enabled {
+            return Self {
+                shared: None,
+                previous: false,
+            };
+        }
+        let mut item = shared.command_item.as_ref().expect("command item").lock();
+        let previous = item.hook_notifications_only;
+        item.hook_notifications_only |= enabled;
+        Self {
+            shared: Some(Arc::clone(shared)),
+            previous,
+        }
     }
 }
 
 impl Drop for HookNotificationsOnlyScope {
     fn drop(&mut self) {
-        HOOK_NOTIFICATIONS_ONLY.with(|slot| slot.set(self.0));
+        let Some(shared) = &self.shared else {
+            return;
+        };
+        shared
+            .command_item
+            .as_ref()
+            .expect("command item")
+            .lock()
+            .hook_notifications_only = self.previous;
     }
 }
 

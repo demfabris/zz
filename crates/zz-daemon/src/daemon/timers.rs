@@ -18,26 +18,31 @@ pub(super) static KEY_TABLE_DELTA: LazyLock<bool> =
 pub(super) static PEER_SCAN_ALWAYS: LazyLock<bool> =
     LazyLock::new(|| std::env::var_os("ZZ_PERF_PEER_SCAN").is_some_and(|value| value == "always"));
 
-thread_local! {
-    static KEY_TABLE_PUBLISH_HOLD: Cell<u32> = const { Cell::new(0) };
-}
-
-pub(super) struct KeyTablePublishHold;
+pub(super) struct KeyTablePublishHold(Arc<Shared>);
 
 impl KeyTablePublishHold {
-    pub(super) fn enter() -> Self {
-        KEY_TABLE_PUBLISH_HOLD.with(|hold| hold.set(hold.get() + 1));
-        Self
+    pub(super) fn enter(shared: &Arc<Shared>) -> Self {
+        shared
+            .command_item
+            .as_ref()
+            .expect("command item")
+            .lock()
+            .key_table_publish_hold += 1;
+        Self(Arc::clone(shared))
     }
 
-    pub(super) fn active() -> bool {
-        KEY_TABLE_PUBLISH_HOLD.with(|hold| hold.get() != 0)
+    pub(super) fn active(shared: &Shared) -> bool {
+        shared
+            .command_item
+            .as_ref()
+            .is_some_and(|item| item.lock().key_table_publish_hold != 0)
     }
 }
 
 impl Drop for KeyTablePublishHold {
     fn drop(&mut self) {
-        KEY_TABLE_PUBLISH_HOLD.with(|hold| hold.set(hold.get().saturating_sub(1)));
+        let mut item = self.0.command_item.as_ref().expect("command item").lock();
+        item.key_table_publish_hold = item.key_table_publish_hold.saturating_sub(1);
     }
 }
 

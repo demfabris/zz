@@ -21,6 +21,7 @@ use std::{
 use parking_lot::{Condvar, Mutex};
 
 mod chooser_presentation;
+mod cmdq;
 #[cfg(unix)]
 mod connection;
 mod ctrl;
@@ -4061,7 +4062,7 @@ struct BackgroundInsertions {
 
 struct Shared {
     server: Arc<SharedServer>,
-    command_item: Option<Mutex<CommandItemContext>>,
+    command_item: Option<Mutex<cmdq::CommandItem<CommandItemContext>>>,
     owner: Option<Arc<Shared>>,
     watcher_effects: Option<Mutex<Vec<watchers::Effect>>>,
 }
@@ -4840,13 +4841,23 @@ impl Shared {
     fn command_item(self: &Arc<Self>, park: Option<(ClientId, u64)>) -> Arc<Self> {
         Arc::new(Self {
             server: Arc::clone(&self.server),
-            command_item: Some(Mutex::new(CommandItemContext {
-                park,
-                ..CommandItemContext::default()
-            })),
+            command_item: Some(Mutex::new(cmdq::CommandItem::new(
+                None,
+                CommandItemContext {
+                    park,
+                    ..CommandItemContext::default()
+                },
+            ))),
             owner: Some(self.server_owner()),
             watcher_effects: None,
         })
+    }
+
+    fn command_queue_execution(&self, state: CommandExecutionState) -> CommandQueueExecution {
+        let queue = self.command_item.as_ref().map(|item| item.lock().queue);
+        CommandQueueExecution {
+            item: cmdq::CommandItem::new(queue, state),
+        }
     }
 
     fn execution_item(self: &Arc<Self>) -> Arc<Self> {
@@ -6348,6 +6359,30 @@ impl Shared {
         command: &CommandInvocation,
         prepared: bool,
     ) -> (CommandResponse, bool) {
+        {
+            let item = self.command_item.as_ref().expect("command item").lock();
+            if item.state() == cmdq::State::Done {
+                return item.result.clone().expect("completed command result");
+            }
+        }
+        let result = self
+            .execute_command_request_segment(client, kind, context, request_id, command, prepared);
+        let mut item = self.command_item.as_ref().expect("command item").lock();
+        item.execution_context = Some(context.clone());
+        item.result = Some(result.clone());
+        item.finish();
+        result
+    }
+
+    fn execute_command_request_segment(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        request_id: u64,
+        command: &CommandInvocation,
+        prepared: bool,
+    ) -> (CommandResponse, bool) {
         let stdin_available = kind == ClientKind::Command && command.stdin_available();
         let (command, client_name) = {
             let mut inner = self.inner.lock();
@@ -6566,6 +6601,10 @@ impl Shared {
     /// to block on something that answers later, so tell the client once that
     /// nothing else it queued runs until this request resumes.
     fn report_command_queue_park(&self) {
+        hook_events::release_input_change_window(self);
+        if let Some(item) = &self.command_item {
+            item.lock().wait();
+        }
         #[cfg(windows)]
         self.go_live_current_exec();
         #[cfg(unix)]
@@ -6988,6 +7027,13 @@ impl Shared {
         queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
         let _round_trips = zz_terminal::forbid_actor_round_trips();
+        {
+            let mut item = self.command_item.as_ref().expect("command item").lock();
+            if let cmdq::State::Waiting(token) = item.state() {
+                item.resume(token);
+            }
+            item.execution_context = Some(context.clone());
+        }
         hook_events::release_input_change_window(self);
         let split_input = canonical_command(&command.name) == "split-window"
             && command_stdin_sink("split-window", &command.args)
@@ -7004,7 +7050,7 @@ impl Shared {
             let detached = queue_execution.is_some_and(|execution| execution.detached);
             let shutdown_blocker =
                 queue_execution.and_then(|execution| execution.fork_shutdown_blocker(detached));
-            let alias_execution = CommandQueueExecution {
+            let alias_execution = self.command_queue_execution(CommandExecutionState {
                 draining: queue_execution.is_some_and(CommandQueueExecution::is_draining),
                 wait_yields: queue_execution.is_some_and(|execution| execution.wait_yields),
                 detached,
@@ -7024,7 +7070,7 @@ impl Shared {
                 suppress_output: Cell::new(
                     queue_execution.is_some_and(|execution| execution.suppress_output.get()),
                 ),
-            };
+            });
             let result = self.execute_command_alias_group(
                 client,
                 kind,
@@ -7181,6 +7227,9 @@ impl Shared {
         execution: &CommandQueueExecution,
         parent: Option<&CommandQueueExecution>,
     ) {
+        if !execution.item.finish() {
+            return;
+        }
         if let Some(parent) = parent {
             if let Some(blocker) = execution.shutdown_blocker.borrow_mut().take() {
                 let mut parent_blocker = parent.shutdown_blocker.borrow_mut();
@@ -7275,6 +7324,7 @@ impl Shared {
             }
             self.request_shutdown_after_blockers();
         }
+        execution.shutdown_blocker.borrow_mut().take();
     }
 
     fn execute_with_mux_source_raw(
@@ -7862,7 +7912,7 @@ impl Shared {
             let detached = parent_queue.is_some_and(|execution| execution.detached);
             let shutdown_blocker =
                 parent_queue.and_then(|execution| execution.fork_shutdown_blocker(detached));
-            let queue_execution = CommandQueueExecution {
+            let queue_execution = self.command_queue_execution(CommandExecutionState {
                 draining: initial_draining
                     || parent_queue.is_some_and(CommandQueueExecution::is_draining),
                 wait_yields: parent_queue.is_some_and(|execution| execution.wait_yields),
@@ -7883,7 +7933,7 @@ impl Shared {
                 suppress_output: Cell::new(
                     parent_queue.is_some_and(|execution| execution.suppress_output.get()),
                 ),
-            };
+            });
             let mut hook_context = context.clone();
             let control_target = hook_context
                 .control_command_target()
@@ -8142,7 +8192,11 @@ impl Shared {
                     attached_only,
                 ));
             }
-            if ctrl::HOOK_NOTIFICATIONS_ONLY.with(Cell::get) {
+            if self
+                .command_item
+                .as_ref()
+                .is_some_and(|item| item.lock().hook_notifications_only)
+            {
                 continue;
             }
             let (context, commands) = {
@@ -8231,7 +8285,7 @@ impl Shared {
     ) -> Result<Execution, DaemonError> {
         let mut format_variables = context.format_variables.clone();
         let notifications_only = context.no_hooks && context.format_variables.contains_key("hook");
-        let _notifications_only = ctrl::HookNotificationsOnlyScope::new(notifications_only);
+        let _notifications_only = ctrl::HookNotificationsOnlyScope::new(self, notifications_only);
         let event_hooks_enabled = !context.no_hooks || notifications_only;
         let command_name = canonical_command(&command.name);
         if command_name == "command-prompt" {
@@ -11501,7 +11555,7 @@ impl Shared {
             }
             let generation = inner.engine.keys.generation();
             let publication = if generation == inner.key_tables_generation
-                || timers::KeyTablePublishHold::active()
+                || timers::KeyTablePublishHold::active(self)
                 || inner.clients.values().all(|c| c.subscriber.is_none()) && !*timers::EAGER_PUBLISH
             {
                 None
@@ -13379,7 +13433,7 @@ impl Shared {
         let shutdown_blocker = shutdown_blocker.or_else(|| {
             parent_queue.and_then(|execution| execution.fork_shutdown_blocker(detached))
         });
-        let queue_execution = CommandQueueExecution {
+        let queue_execution = self.command_queue_execution(CommandExecutionState {
             draining: parent_queue.is_some_and(CommandQueueExecution::is_draining),
             wait_yields: parent_queue.is_some_and(|execution| execution.wait_yields),
             detached,
@@ -13399,7 +13453,7 @@ impl Shared {
             suppress_output: Cell::new(
                 parent_queue.is_some_and(|execution| execution.suppress_output.get()),
             ),
-        };
+        });
         let mut result = self.execute_inserted_commands_with_control_target_and_mux_source(
             client,
             kind,
@@ -19078,8 +19132,8 @@ impl Shared {
                 let copy_modes = copy_mode_change.then(|| active_copy_mode_panes(&inner));
                 (hook_events::HookScope::open(&mut inner.engine), copy_modes)
             });
-        let pane_focus_before =
-            (!context.no_hooks).then(|| hook_events::InputFocusScope::open(&mut self.inner.lock()));
+        let pane_focus_before = (!context.no_hooks)
+            .then(|| hook_events::InputFocusScope::open(self, &mut self.inner.lock()));
         let mut resize_report_applied = true;
         let result = (|| -> Result<(), DaemonError> {
             match input {
@@ -20298,7 +20352,7 @@ impl Shared {
         queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
         if queue_execution.is_none() && context.control_command_target().is_some() {
-            let queue_execution = CommandQueueExecution {
+            let queue_execution = self.command_queue_execution(CommandExecutionState {
                 draining: false,
                 wait_yields: false,
                 detached: false,
@@ -20314,7 +20368,7 @@ impl Shared {
                 reported_failures: Cell::new(false),
                 suppress_after_hooks: Cell::new(false),
                 suppress_output: Cell::new(false),
-            };
+            });
             let result =
                 self.run_confirm_commands(client, kind, context, commands, Some(&queue_execution));
             let reported_failure = queue_execution.reported_failures.get();
@@ -25751,7 +25805,7 @@ impl Shared {
                 CommandInvocation::new("rename-window", ["-t", target.as_str(), name]),
             ]
         };
-        let queue = CommandQueueExecution {
+        let queue = self.command_queue_execution(CommandExecutionState {
             draining: false,
             wait_yields: false,
             detached: false,
@@ -25767,7 +25821,7 @@ impl Shared {
             reported_failures: Cell::new(false),
             suppress_after_hooks: Cell::new(true),
             suppress_output: Cell::new(false),
-        };
+        });
         for command in &commands {
             if let Err(error) = self.execute_with_mux_source_in_queue(
                 ClientId(u64::MAX),
@@ -26612,11 +26666,14 @@ impl Shared {
                 | EventPayload::ServerStopping
         ) || matches!(&payload, EventPayload::ControlExit { reason } if reason.is_empty())
         {
-            let capture_key = (client, thread::current().id());
+            let capture_key = self
+                .command_item
+                .as_ref()
+                .map(|item| (client, item.lock().id));
             let mut inner = self.inner.lock();
             if let Some(capture) = inner
                 .control_command_event_captures
-                .get_mut(&capture_key)
+                .get_mut(&capture_key.unwrap_or((client, cmdq::ItemId::NONE)))
                 .and_then(|captures| captures.last_mut())
             {
                 if let Some(callback_parse_event) = callback_parse_event {
@@ -26688,17 +26745,17 @@ impl Shared {
         &self,
         client: ClientId,
     ) -> ControlCommandEventCapture<'_> {
-        let thread_id = thread::current().id();
+        let item_id = self.command_item.as_ref().expect("command item").lock().id;
         self.inner
             .lock()
             .control_command_event_captures
-            .entry((client, thread_id))
+            .entry((client, item_id))
             .or_default()
             .push(CapturedControlCommandEvents::default());
         ControlCommandEventCapture {
             shared: self,
             client,
-            thread_id,
+            item_id,
             active: true,
         }
     }
@@ -26706,9 +26763,9 @@ impl Shared {
     fn pop_control_command_event_capture(
         &self,
         client: ClientId,
-        thread_id: thread::ThreadId,
+        item_id: cmdq::ItemId,
     ) -> Option<CapturedControlCommandEvents> {
-        let capture_key = (client, thread_id);
+        let capture_key = (client, item_id);
         let mut inner = self.inner.lock();
         let captures = inner.control_command_event_captures.get_mut(&capture_key)?;
         let finished = captures.pop();
@@ -26719,11 +26776,14 @@ impl Shared {
     }
 
     fn is_capturing_control_command_events(&self, client: ClientId) -> bool {
-        let capture_key = (client, thread::current().id());
+        let capture_key = self
+            .command_item
+            .as_ref()
+            .map(|item| (client, item.lock().id));
         self.inner
             .lock()
             .control_command_event_captures
-            .get(&capture_key)
+            .get(&capture_key.unwrap_or((client, cmdq::ItemId::NONE)))
             .is_some_and(|captures| !captures.is_empty())
     }
 
@@ -29156,7 +29216,7 @@ impl Shared {
         let detached = parent_queue.is_some_and(|execution| execution.detached);
         let shutdown_blocker =
             parent_queue.and_then(|execution| execution.fork_shutdown_blocker(detached));
-        let queue_execution = CommandQueueExecution {
+        let queue_execution = self.command_queue_execution(CommandExecutionState {
             draining: parent_queue.is_some_and(CommandQueueExecution::is_draining),
             wait_yields: true,
             detached,
@@ -29176,7 +29236,7 @@ impl Shared {
             suppress_output: Cell::new(
                 parent_queue.is_some_and(|execution| execution.suppress_output.get()),
             ),
-        };
+        });
         let result = self.replay_config_file_in_queue(
             path,
             parsed,
@@ -29239,7 +29299,7 @@ impl Shared {
         deferred_control_config_warnings: &mut Vec<DeferredControlConfigWarning>,
         queue_execution: &CommandQueueExecution,
     ) -> Result<(), DaemonError> {
-        let _key_table_hold = timers::KeyTablePublishHold::enter();
+        let _key_table_hold = timers::KeyTablePublishHold::enter(self);
         // cfg.c adds `current_file` to the state every command parsed out of this
         // file inherits. A nested source replays through its own cloned context,
         // so a child overrides its parent for its own commands only.
@@ -31961,7 +32021,7 @@ impl CapturedControlCommandEvents {
 struct ControlCommandEventCapture<'a> {
     shared: &'a Shared,
     client: ClientId,
-    thread_id: thread::ThreadId,
+    item_id: cmdq::ItemId,
     active: bool,
 }
 
@@ -31969,7 +32029,7 @@ impl ControlCommandEventCapture<'_> {
     fn finish(mut self) -> CapturedControlCommandEvents {
         self.active = false;
         self.shared
-            .pop_control_command_event_capture(self.client, self.thread_id)
+            .pop_control_command_event_capture(self.client, self.item_id)
             .expect("control command event capture frame")
     }
 }
@@ -31979,7 +32039,7 @@ impl Drop for ControlCommandEventCapture<'_> {
         if self.active {
             let _ = self
                 .shared
-                .pop_control_command_event_capture(self.client, self.thread_id);
+                .pop_control_command_event_capture(self.client, self.item_id);
         }
     }
 }
@@ -32286,7 +32346,7 @@ struct ServerState {
     terminal_spawns: BTreeMap<PaneId, TerminalSpawn>,
     next_command_output_id: u64,
     control_command_event_captures:
-        HashMap<(ClientId, thread::ThreadId), Vec<CapturedControlCommandEvents>>,
+        HashMap<(ClientId, cmdq::ItemId), Vec<CapturedControlCommandEvents>>,
     client_file_waiters: BTreeMap<u64, ClientFileWaiter>,
     /// `new_wp->wait_item` for `split-window -W`: registered when the pane is
     /// created and woken with the child's status before the pane is retained or
@@ -44475,7 +44535,7 @@ enum InsertedCommandSource {
     Block(String),
 }
 
-struct CommandQueueExecution {
+struct CommandExecutionState {
     draining: bool,
     wait_yields: bool,
     detached: bool,
@@ -44493,7 +44553,19 @@ struct CommandQueueExecution {
     suppress_output: Cell<bool>,
 }
 
-type DeferredShellJob = Box<dyn FnOnce(&Arc<Shared>)>;
+struct CommandQueueExecution {
+    item: cmdq::CommandItem<CommandExecutionState>,
+}
+
+impl std::ops::Deref for CommandQueueExecution {
+    type Target = CommandExecutionState;
+
+    fn deref(&self) -> &Self::Target {
+        &self.item
+    }
+}
+
+type DeferredShellJob = Box<dyn FnOnce(&Arc<Shared>) + Send>;
 
 impl CommandQueueExecution {
     fn is_draining(&self) -> bool {
@@ -47891,6 +47963,11 @@ const PANE_WAIT_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 #[derive(Default)]
 struct CommandItemContext {
+    execution_context: Option<ExecutionContext>,
+    result: Option<(CommandResponse, bool)>,
+    hook_notifications_only: bool,
+    key_table_publish_hold: u32,
+    input_focus: Vec<hook_events::FocusProbeScope>,
     client_key_injection_depth: u32,
     deferred_control_notifications: Option<Vec<DeferredControlNotification>>,
     park: Option<(ClientId, u64)>,
@@ -67328,13 +67405,14 @@ set-option -g @alias-mixed-next yes
     }
 
     #[test]
-    fn control_command_event_capture_does_not_intercept_other_threads() {
+    fn control_command_event_capture_does_not_intercept_other_items() {
         let shared = Arc::new(Shared::new(79));
         let mailbox = OutboundMailbox::new();
         let (control, _) =
             shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
         take_reliable_messages(&mailbox);
 
+        let shared = shared.command_item(None);
         let capture = shared.begin_control_command_event_capture(control);
         shared.publish_control_command_guard(
             Some((control, CONTROL_COMMAND_FRAME_FLAGS_CONTROL)),
@@ -67343,7 +67421,7 @@ set-option -g @alias-mixed-next yes
             false,
         );
         let worker = {
-            let shared = Arc::clone(&shared);
+            let shared = shared.server_owner();
             thread::spawn(move || {
                 shared.publish_to_client(
                     control,

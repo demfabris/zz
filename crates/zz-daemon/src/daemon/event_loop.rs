@@ -102,6 +102,7 @@ pub(super) struct EventLoop {
     waker: Arc<Waker>,
     timers: timers::LoopTimers,
     watchers: watchers::LoopWatchers,
+    jobs: jobs::JobRegistry,
     #[cfg(feature = "agent")]
     agents: agent_inbox::AgentInbox,
     connections: BTreeMap<Token, Connection>,
@@ -241,6 +242,7 @@ impl EventLoop {
             waker,
             timers,
             watchers,
+            jobs: jobs::JobRegistry::default(),
             #[cfg(feature = "agent")]
             agents,
             connections: BTreeMap::new(),
@@ -283,11 +285,16 @@ impl EventLoop {
         }
     }
 
+    #[allow(dead_code, reason = "job families migrate in subsequent slices")]
+    pub(super) fn register_job(&mut self, launch: jobs::Launch) -> io::Result<jobs::JobId> {
+        self.jobs
+            .register(self.poll.registry(), &mut self.next_token, launch)
+    }
+
     fn insert(&mut self, descriptor: OwnedFd) -> Result<Token, DaemonError> {
         let stream = UnixStream::from(descriptor);
         stream.set_nonblocking(true)?;
-        let token = Token(self.next_token);
-        self.next_token += 1;
+        let token = jobs::allocate_token(&mut self.next_token)?;
         self.poll.registry().register(
             &mut SourceFd(&stream.as_raw_fd()),
             token,
@@ -373,6 +380,10 @@ impl EventLoop {
                     }
                 } else if token == CHILD_SIGNAL {
                     SignalPipes::drain(&mut self.signals.as_mut().unwrap().child)?;
+                    self.jobs.child_signal(self.poll.registry());
+                } else if self.jobs.contains_token(token) {
+                    self.jobs
+                        .ready(self.poll.registry(), token, readable, writable);
                 } else if self.connections.contains_key(&token) {
                     if readable {
                         self.read_ready(token, shared);
@@ -432,6 +443,7 @@ impl EventLoop {
     }
 
     fn start_shutdown(&mut self, shared: &Arc<Shared>) {
+        self.jobs.cancel_all(self.poll.registry());
         self.shutdown_started = true;
         shared.response_admissions.lock().frozen = true;
         self.shutdown_phase = ShutdownPhase::Admissions;
@@ -515,6 +527,14 @@ impl EventLoop {
             .timers
             .next(now)
             .map(|deadline| deadline.saturating_duration_since(now));
+        let timer = timer
+            .into_iter()
+            .chain(
+                self.jobs
+                    .next(now)
+                    .map(|deadline| deadline.saturating_duration_since(now)),
+            )
+            .min();
         let control = self.control_output_poll.then_some(COPY_PIPE_POLL_INTERVAL);
         match (timer, control) {
             (Some(timer), Some(control)) => Some(timer.min(control)),
@@ -979,6 +999,7 @@ impl EventLoop {
     fn turn(&mut self, shared: &Arc<Shared>) -> Result<(), DaemonError> {
         #[cfg(feature = "agent")]
         self.agents.turn(shared)?;
+        self.jobs.turn(self.poll.registry(), Instant::now());
         self.watchers.turn(shared)?;
         self.timers.turn(shared, &self.waker)?;
         self.control_output_poll = shared.start_ready_control_output_readers();
@@ -1508,3 +1529,7 @@ mod b5_tests;
 #[cfg(test)]
 #[path = "event_loop_b5fix_tests.rs"]
 mod b5fix_tests;
+
+#[cfg(test)]
+#[path = "event_loop_e12_tests.rs"]
+mod e12_tests;

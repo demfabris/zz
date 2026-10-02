@@ -37,6 +37,12 @@ mod event_loop_tests;
 mod exec;
 #[cfg(test)]
 mod exec_tests;
+#[cfg(unix)]
+#[allow(
+    dead_code,
+    reason = "job families move to the loop registry in subsequent slices"
+)]
+mod jobs;
 mod watchers;
 pub use exec::exec_resume_kind;
 pub(crate) mod path_listing;
@@ -41625,12 +41631,21 @@ fn install_shell_job_process(
     Ok(())
 }
 
+fn try_reap_shell_job_child(child: &mut Child) -> std::io::Result<Option<ExitStatus>> {
+    loop {
+        match child.try_wait() {
+            Err(error) if error.kind() == ErrorKind::Interrupted => {}
+            result => return result,
+        }
+    }
+}
+
 fn reap_shell_job_process(process: &Mutex<Option<Child>>) -> Result<Option<ExitStatus>, ()> {
     let mut process = process.lock();
     let Some(child) = process.as_mut() else {
         return Err(());
     };
-    match child.try_wait() {
+    match try_reap_shell_job_child(child) {
         Ok(Some(status)) => {
             process.take();
             Ok(Some(status))

@@ -14471,7 +14471,7 @@ impl Shared {
                             && frame
                                 .wait_boundary
                                 .as_ref()
-                                .is_some_and(|(_, step)| wait_queue::wait_needs_worker(step))
+                                .is_some_and(|(_, step)| wait_needs_worker(step))
                     {
                         return None;
                     }
@@ -46891,6 +46891,15 @@ type InsertedCommandStep = (
     Option<CallbackParseFailure>,
     bool,
 );
+
+fn wait_needs_worker(step: &InsertedCommandStep) -> bool {
+    step.0.as_ref().is_ok_and(|execution| {
+        execution
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, MuxEffect::PaneWaitForExit { .. }))
+    })
+}
 
 struct InsertedQueueChild {
     context: ExecutionContext,

@@ -245,7 +245,7 @@ impl Queue {
             .frames
             .last()
             .and_then(|frame| frame.wait_boundary.as_ref())
-            .is_some_and(|(_, step)| wait_queue::wait_needs_worker(step))
+            .is_some_and(|(_, step)| wait_needs_worker(step))
         {
             let mut frames = std::mem::take(&mut self.frames);
             let owner = Arc::clone(&shared);

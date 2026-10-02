@@ -71,15 +71,6 @@ pub(super) fn can_run_inline(
     connection::inline_query(shared, context, &prepared)
 }
 
-pub(super) fn wait_needs_worker(step: &InsertedCommandStep) -> bool {
-    step.0.as_ref().is_ok_and(|execution| {
-        execution
-            .effects
-            .iter()
-            .any(|effect| matches!(effect, MuxEffect::PaneWaitForExit { .. }))
-    })
-}
-
 pub(super) enum Progress {
     Done,
     Waiting,

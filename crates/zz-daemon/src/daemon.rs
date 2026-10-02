@@ -7184,6 +7184,24 @@ impl Shared {
         };
         let command = streamed_command.as_ref().unwrap_or(command);
         if MuxEngine::is_command_alias_group(command) {
+            if let Some(parent) = queue_execution.filter(|queue| queue.frame_active.get()) {
+                let body = MuxEngine::command_alias_group_body(command).expect("alias body");
+                parent.insert_foreground_child(InsertedQueueChild {
+                    context: context.clone(),
+                    source: InsertedCommandSource::Block(body.to_owned()),
+                    label: "<command-alias>".to_owned(),
+                    control_target: context.control_command_target(),
+                    mux_source,
+                    kind: InsertedQueueChildKind::Alias {
+                        client_terminal,
+                        stdin: command.stdin().cloned(),
+                    },
+                    leaf: None,
+                    guard: None,
+                    leaf_name: None,
+                });
+                return Ok(Execution::default());
+            }
             let detached = queue_execution.is_some_and(|execution| execution.detached);
             let shutdown_blocker =
                 queue_execution.and_then(|execution| execution.fork_shutdown_blocker(detached));
@@ -7201,6 +7219,8 @@ impl Shared {
                 callback_parse_failures: RefCell::new(Vec::new()),
                 deferred_config_replay_issues: RefCell::new(Vec::new()),
                 reported_failures: Cell::new(false),
+                frame_active: Cell::new(false),
+                child: RefCell::new(None),
                 suppress_after_hooks: Cell::new(
                     queue_execution.is_some_and(|execution| execution.suppress_after_hooks.get()),
                 ),
@@ -7286,6 +7306,48 @@ impl Shared {
             queue_execution,
             format_facts_unread,
         );
+        let mut leaf = InsertedLeafContinuation {
+            original_context,
+            previous_client_terminal,
+            no_hooks,
+            name,
+            command: None,
+        };
+        if let Some(queue) = queue_execution
+            && let Some(child) = queue.child.borrow_mut().as_mut()
+        {
+            leaf.command = Some(command.clone());
+            child.leaf = Some(leaf);
+            return result;
+        }
+        self.finish_inserted_leaf(
+            client,
+            kind,
+            context,
+            result,
+            queue_execution,
+            command,
+            leaf,
+        )
+    }
+
+    fn finish_inserted_leaf(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        result: Result<Execution, DaemonError>,
+        queue_execution: Option<&CommandQueueExecution>,
+        command: &CommandInvocation,
+        leaf: InsertedLeafContinuation,
+    ) -> Result<Execution, DaemonError> {
+        let InsertedLeafContinuation {
+            original_context,
+            previous_client_terminal,
+            no_hooks,
+            name,
+            ..
+        } = leaf;
         let (result, pane_exit_code) = self.wait_for_pane_command(client, kind, result);
         set_context_client_terminal(context, previous_client_terminal);
         context.copy_client_attachment(&original_context);
@@ -8064,6 +8126,8 @@ impl Shared {
                 callback_parse_failures: RefCell::new(Vec::new()),
                 deferred_config_replay_issues: RefCell::new(Vec::new()),
                 reported_failures: Cell::new(false),
+                frame_active: Cell::new(false),
+                child: RefCell::new(None),
                 suppress_after_hooks: Cell::new(
                     parent_queue.is_some_and(|execution| execution.suppress_after_hooks.get()),
                 ),
@@ -13009,6 +13073,12 @@ impl Shared {
                         queue_execution,
                     )?;
                     *context = command_context;
+                    if let Some(queue) = queue_execution
+                        && let Some(child) = queue.child.borrow_mut().as_mut()
+                    {
+                        child.kind = InsertedQueueChildKind::Foreground(Some(route));
+                        return Ok(Execution::default());
+                    }
                     self.finish_inserted_run_shell(route, "run-shell".to_owned(), &result)
                 }
             }
@@ -13418,6 +13488,20 @@ impl Shared {
         label: &str,
         parent_queue: Option<&CommandQueueExecution>,
     ) -> Result<InsertedCommandResult, DaemonError> {
+        if let Some(parent) = parent_queue.filter(|queue| queue.frame_active.get()) {
+            parent.insert_foreground_child(InsertedQueueChild {
+                context: context.clone(),
+                source: source.clone(),
+                label: label.to_owned(),
+                control_target: context.control_command_target(),
+                mux_source: MuxOptionSource::RuntimeCommand,
+                kind: InsertedQueueChildKind::Foreground(None),
+                leaf: None,
+                guard: None,
+                leaf_name: None,
+            });
+            return Ok(InsertedCommandResult::default());
+        }
         let control_target = context.control_command_target();
         let callback_failures_start =
             parent_queue.map(|execution| execution.callback_parse_failures.borrow().len());
@@ -13554,23 +13638,17 @@ impl Shared {
             )
     }
 
-    fn execute_inserted_commands_with_control_target_in_queue_in_item(
-        self: &Arc<Self>,
-        client: ClientId,
-        kind: ClientKind,
-        context: &mut ExecutionContext,
-        source: &InsertedCommandSource,
-        label: &str,
-        control_target: Option<(ClientId, u8)>,
+    fn inserted_child_execution(
+        &self,
         parent_queue: Option<&CommandQueueExecution>,
         detached: bool,
         shutdown_blocker: Option<ShutdownBlocker>,
-    ) -> Result<InsertedCommandResult, DaemonError> {
+    ) -> CommandQueueExecution {
         let detached = parent_queue.map_or(detached, |execution| execution.detached);
         let shutdown_blocker = shutdown_blocker.or_else(|| {
             parent_queue.and_then(|execution| execution.fork_shutdown_blocker(detached))
         });
-        let queue_execution = self.command_queue_execution(CommandExecutionState {
+        self.command_queue_execution(CommandExecutionState {
             draining: parent_queue.is_some_and(CommandQueueExecution::is_draining),
             wait_yields: parent_queue.is_some_and(|execution| execution.wait_yields),
             detached,
@@ -13584,13 +13662,31 @@ impl Shared {
             callback_parse_failures: RefCell::new(Vec::new()),
             deferred_config_replay_issues: RefCell::new(Vec::new()),
             reported_failures: Cell::new(false),
+            frame_active: Cell::new(false),
+            child: RefCell::new(None),
             suppress_after_hooks: Cell::new(
                 parent_queue.is_some_and(|execution| execution.suppress_after_hooks.get()),
             ),
             suppress_output: Cell::new(
                 parent_queue.is_some_and(|execution| execution.suppress_output.get()),
             ),
-        });
+        })
+    }
+
+    fn execute_inserted_commands_with_control_target_in_queue_in_item(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        source: &InsertedCommandSource,
+        label: &str,
+        control_target: Option<(ClientId, u8)>,
+        parent_queue: Option<&CommandQueueExecution>,
+        detached: bool,
+        shutdown_blocker: Option<ShutdownBlocker>,
+    ) -> Result<InsertedCommandResult, DaemonError> {
+        let queue_execution =
+            self.inserted_child_execution(parent_queue, detached, shutdown_blocker);
         let mut result = self.execute_inserted_commands_with_control_target_and_mux_source(
             client,
             kind,
@@ -13632,6 +13728,182 @@ impl Shared {
         mux_source: MuxOptionSource,
         mode: InsertedCommandMode,
     ) -> Result<InsertedCommandResult, DaemonError> {
+        let alias_terminal = match mode {
+            InsertedCommandMode::Standard(_) => None,
+            InsertedCommandMode::CommandAlias {
+                client_terminal, ..
+            } => Some(client_terminal),
+        };
+        let stdin = match mode {
+            InsertedCommandMode::CommandAlias { stdin, .. } => stdin.cloned(),
+            InsertedCommandMode::Standard(_) => None,
+        };
+        let root = self.prepare_inserted_queue_frame(
+            context.clone(),
+            source,
+            label,
+            control_target,
+            mux_source,
+            InsertedFrameExecution::Borrowed(mode.queue_execution()),
+            alias_terminal,
+            stdin,
+        )?;
+        let mut frames = vec![root];
+        loop {
+            let frame = frames.last_mut().expect("inserted queue frame");
+            let stream_client = frame.context.replay_client().unwrap_or(client);
+            let cancelled = frame.execution.has_yielded()
+                || self.command_queue_cancelled(client)
+                || self.command_client_exiting(stream_client)
+                || self.stopping.load(Ordering::Acquire)
+                    && !frame.execution.is_draining()
+                    && !frame.execution.detached;
+            let command = (!cancelled).then(|| frame.commands.next()).flatten();
+            if let Some(mut command) = command {
+                let group = command
+                    .source
+                    .as_ref()
+                    .map_or(InsertedPhysicalGroup::Unlocated, |source| {
+                        InsertedPhysicalGroup::Source(source.source.clone(), source.line)
+                    });
+                if frame.prepared
+                    && let Some(failed) = &frame.failed_group
+                {
+                    if failed == &group {
+                        continue;
+                    }
+                    frame.failed_group = None;
+                }
+                if frame.carried_a_stream
+                    && command_stdin_sink(canonical_command(&command.name), &command.args)
+                        .is_some_and(|sink| sink != CommandStdinSink::ConfigReplay)
+                {
+                    if let Some(stdin) = frame.stdin.take() {
+                        command.set_stdin(stdin);
+                    } else {
+                        command.set_stdin_spent();
+                    }
+                }
+                let callback_failures_start =
+                    frame.execution.callback_parse_failures.borrow().len();
+                let command_control_target = frame.control_target.filter(|(client, _)| {
+                    frame.alias_terminal.is_some()
+                        || frame.execution.detached
+                        || self.is_capturing_control_command_events(*client)
+                        || frame.execution.deferred_shutdown.get() != DeferredShutdown::Force
+                });
+                let stdout_sequence = self.command_stdout_sequence(stream_client);
+                let step = self.execute_inserted_frame_command(
+                    client,
+                    kind,
+                    frame,
+                    &command,
+                    command_control_target,
+                );
+                let boundary = InsertedCommandBoundary {
+                    command,
+                    group,
+                    callback_failures_start,
+                    command_control_target,
+                    stdout_sequence,
+                };
+                let child = frame.execution.child.borrow_mut().take();
+                if let Some(child) = child {
+                    let execution =
+                        self.inserted_child_execution(Some(&frame.execution), false, None);
+                    let (alias_terminal, stdin) = match &child.kind {
+                        InsertedQueueChildKind::Alias {
+                            client_terminal,
+                            stdin,
+                        } => (Some(*client_terminal), stdin.clone()),
+                        InsertedQueueChildKind::Foreground(_) => (None, None),
+                    };
+                    let prepared_child = self.prepare_inserted_queue_frame(
+                        child.context.clone(),
+                        &child.source,
+                        &child.label,
+                        child.control_target,
+                        child.mux_source,
+                        InsertedFrameExecution::Owned(Box::new(execution)),
+                        alias_terminal,
+                        stdin,
+                    );
+                    let mut child = child;
+                    child.leaf_name = step.1;
+                    frame.boundary = Some((boundary, child));
+                    match prepared_child {
+                        Ok(child_frame) => {
+                            frames.push(child_frame);
+                            continue;
+                        }
+                        Err(error) => {
+                            let (boundary, child) =
+                                frame.boundary.take().expect("child continuation");
+                            let step = self.resume_inserted_child(
+                                client,
+                                kind,
+                                frame,
+                                child,
+                                Err(error),
+                                boundary.callback_failures_start,
+                            );
+                            if let InsertedFrameAction::Finish(error) = self
+                                .finish_inserted_frame_command(client, kind, frame, boundary, step)
+                            {
+                                frame.terminal_error = error;
+                                frame.commands = Vec::new().into_iter();
+                            }
+                            continue;
+                        }
+                    }
+                }
+                if let InsertedFrameAction::Finish(error) =
+                    self.finish_inserted_frame_command(client, kind, frame, boundary, step)
+                {
+                    frame.terminal_error = error;
+                    frame.commands = Vec::new().into_iter();
+                }
+                continue;
+            }
+            let mut finished = frames.pop().expect("finished inserted frame");
+            finished.execution.frame_active.set(false);
+            let result = self.finish_inserted_queue_frame(client, kind, &mut finished);
+            if let Some(parent) = frames.last_mut() {
+                let (boundary, child) = parent.boundary.take().expect("parent continuation");
+                self.finish_command_queue_execution(&finished.execution, Some(&parent.execution));
+                parent.context = finished.context.clone();
+                let step = self.resume_inserted_child(
+                    client,
+                    kind,
+                    parent,
+                    child,
+                    result,
+                    boundary.callback_failures_start,
+                );
+                if let InsertedFrameAction::Finish(error) =
+                    self.finish_inserted_frame_command(client, kind, parent, boundary, step)
+                {
+                    parent.terminal_error = error;
+                    parent.commands = Vec::new().into_iter();
+                }
+            } else {
+                *context = finished.context;
+                return result;
+            }
+        }
+    }
+
+    fn prepare_inserted_queue_frame<'a>(
+        self: &Arc<Self>,
+        context: ExecutionContext,
+        source: &InsertedCommandSource,
+        label: &str,
+        control_target: Option<(ClientId, u8)>,
+        mux_source: MuxOptionSource,
+        execution: InsertedFrameExecution<'a>,
+        alias_terminal: Option<ClientTerminal>,
+        stdin: Option<RawText>,
+    ) -> Result<InsertedQueueFrame<'a>, DaemonError> {
         let (input, prepared) = match source {
             InsertedCommandSource::String(input) => (input, false),
             InsertedCommandSource::Block(input) => (input, true),
@@ -13654,374 +13926,452 @@ impl Shared {
                 .engine
                 .prepare_frozen_callback_invocations(&mut parsed.commands, owner)?;
         }
-        let mut result = InsertedCommandResult::default();
-        let mut stdout_claim = StdoutClaim::None;
-        let stream_client = context.replay_client().unwrap_or(client);
-        let alias_stdout = matches!(mode, InsertedCommandMode::CommandAlias { .. })
-            && kind == ClientKind::Command
-            && stream_client != ClientId(u64::MAX);
-        let mut first_error = None;
-        let mut failed_group = None;
-        let mut stdin = match mode {
-            InsertedCommandMode::CommandAlias { stdin, .. } => stdin.cloned(),
-            InsertedCommandMode::Standard(_) => None,
-        };
-        let carried_a_stream = stdin.is_some();
-        for mut command in parsed.commands {
-            if mode.queue_execution().has_yielded()
-                || self.command_queue_cancelled(client)
-                || self.command_client_exiting(stream_client)
-                || self.stopping.load(Ordering::Acquire)
-                    && !mode.queue_execution().is_draining()
-                    && !mode.queue_execution().detached
-            {
-                break;
+        execution.frame_active.set(true);
+        Ok(InsertedQueueFrame {
+            execution,
+            context,
+            commands: parsed.commands.into_iter(),
+            prepared,
+            control_target,
+            mux_source,
+            alias_terminal,
+            carried_a_stream: stdin.is_some(),
+            stdin,
+            label: label.to_owned(),
+            result: InsertedCommandResult::default(),
+            stdout_claim: StdoutClaim::None,
+            first_error: None,
+            failed_group: None,
+            boundary: None,
+            terminal_error: None,
+        })
+    }
+
+    fn execute_inserted_frame_command(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        frame: &mut InsertedQueueFrame,
+        command: &CommandInvocation,
+        command_control_target: Option<(ClientId, u8)>,
+    ) -> InsertedCommandStep {
+        let mode = inserted_frame_mode(&frame.execution, frame.alias_terminal);
+        let prepared = frame.prepared;
+        let mux_source = frame.mux_source;
+        let context = &mut frame.context;
+        let (
+            execution,
+            routed_name,
+            alias_group,
+            direct_callback_failure,
+            direct_command_prepare_error,
+        ) = match command_control_target {
+            Some(target) => self.execute_control_command_with_guard(
+                client, kind, context, command, target, prepared, mux_source, mode,
+            ),
+            None if prepared => {
+                let alias_group = MuxEngine::is_command_alias_group(command);
+                let execution = match mode {
+                    InsertedCommandMode::Standard(queue_execution) => self
+                        .execute_with_mux_source_routed_in_queue(
+                            client,
+                            kind,
+                            context,
+                            command,
+                            mux_source,
+                            Some(queue_execution),
+                        ),
+                    InsertedCommandMode::CommandAlias {
+                        client_terminal,
+                        queue_execution,
+                        ..
+                    } => self.execute_with_mux_source_routed_for_terminal_in_queue(
+                        client,
+                        kind,
+                        context,
+                        command,
+                        mux_source,
+                        client_terminal,
+                        Some(queue_execution),
+                    ),
+                };
+                (
+                    execution,
+                    Some(canonical_command(&command.name).to_owned()),
+                    alias_group,
+                    None,
+                    false,
+                )
             }
-            let group = command
-                .source
-                .as_ref()
-                .map(|source| (source.source.clone(), source.line));
-            if prepared && let Some(failed) = &failed_group {
-                if failed == &group {
-                    continue;
-                }
-                failed_group = None;
-            }
-            if carried_a_stream
-                && command_stdin_sink(canonical_command(&command.name), &command.args)
-                    .is_some_and(|sink| sink != CommandStdinSink::ConfigReplay)
-            {
-                if let Some(stdin) = stdin.take() {
-                    command.set_stdin(stdin);
-                } else {
-                    command.set_stdin_spent();
-                }
-            }
-            let callback_failures_start = mode
-                .queue_execution()
-                .callback_parse_failures
-                .borrow()
-                .len();
-            let command_control_target = control_target.filter(|(client, _)| {
-                !matches!(mode, InsertedCommandMode::Standard(_))
-                    || mode.queue_execution().detached
-                    || self.is_capturing_control_command_events(*client)
-                    || mode.queue_execution().deferred_shutdown.get() != DeferredShutdown::Force
-            });
-            let stdout_sequence = self.command_stdout_sequence(stream_client);
-            let (
-                execution,
-                routed_name,
-                alias_group,
-                direct_callback_failure,
-                direct_command_prepare_error,
-            ) = match command_control_target {
-                Some(target) => self.execute_control_command_with_guard(
-                    client, kind, context, &command, target, prepared, mux_source, mode,
-                ),
-                None if prepared => {
-                    let alias_group = MuxEngine::is_command_alias_group(&command);
-                    let execution = match mode {
-                        InsertedCommandMode::Standard(queue_execution) => self
-                            .execute_with_mux_source_routed_in_queue(
-                                client,
-                                kind,
-                                context,
-                                &command,
-                                mux_source,
-                                Some(queue_execution),
-                            ),
-                        InsertedCommandMode::CommandAlias {
-                            client_terminal,
-                            queue_execution,
-                            ..
-                        } => self.execute_with_mux_source_routed_for_terminal_in_queue(
+            None => {
+                let routed = prepare_config_command(&self.inner.lock().engine, command)
+                    .map(|(command, _)| command);
+                let direct_command_prepare_error = routed.is_err();
+                let alias_group = routed.as_ref().is_ok_and(MuxEngine::is_command_alias_group);
+                let routed_name = routed
+                    .as_ref()
+                    .ok()
+                    .map(|command| canonical_command(&command.name).to_owned());
+                let execution = match mode {
+                    InsertedCommandMode::Standard(queue_execution) => match routed {
+                        Ok(command) => self.execute_with_mux_source_routed_in_queue(
                             client,
                             kind,
                             context,
                             &command,
-                            mux_source,
-                            client_terminal,
+                            MuxOptionSource::RuntimeCommand,
                             Some(queue_execution),
                         ),
-                    };
-                    (
-                        execution,
-                        Some(canonical_command(&command.name).to_owned()),
-                        alias_group,
-                        None,
-                        false,
-                    )
-                }
-                None => {
-                    let routed = prepare_config_command(&self.inner.lock().engine, &command)
-                        .map(|(command, _)| command);
-                    let direct_command_prepare_error = routed.is_err();
-                    let alias_group = routed.as_ref().is_ok_and(MuxEngine::is_command_alias_group);
-                    let routed_name = routed
-                        .as_ref()
-                        .ok()
-                        .map(|command| canonical_command(&command.name).to_owned());
-                    let execution = match mode {
-                        InsertedCommandMode::Standard(queue_execution) => match routed {
-                            Ok(command) => self.execute_with_mux_source_routed_in_queue(
-                                client,
-                                kind,
-                                context,
-                                &command,
-                                MuxOptionSource::RuntimeCommand,
-                                Some(queue_execution),
-                            ),
-                            Err(error) => Err(error.into()),
-                        },
-                        InsertedCommandMode::CommandAlias { .. } => unreachable!(),
-                    };
-                    (
-                        execution,
-                        routed_name,
-                        alias_group,
-                        None,
-                        direct_command_prepare_error,
-                    )
-                }
-            };
-            let routed_name =
-                routed_name.unwrap_or_else(|| canonical_command(&command.name).to_owned());
-            if let Some(failure) = direct_callback_failure {
-                mode.queue_execution()
-                    .callback_parse_failures
-                    .borrow_mut()
-                    .push(failure);
+                        Err(error) => Err(error.into()),
+                    },
+                    InsertedCommandMode::CommandAlias { .. } => unreachable!(),
+                };
+                (
+                    execution,
+                    routed_name,
+                    alias_group,
+                    None,
+                    direct_command_prepare_error,
+                )
             }
-            if command_control_target.is_none()
-                && matches!(mode, InsertedCommandMode::Standard(_))
-                && !direct_command_prepare_error
-                && execution.as_ref().err().is_some_and(command_parse_error)
-            {
-                mode.queue_execution().note_reported_failure();
-                mode.queue_execution()
-                    .callback_parse_failures
-                    .borrow_mut()
-                    .push(CallbackParseFailure::runtime_command(
-                        execution
-                            .as_ref()
-                            .err()
-                            .map_or_else(String::new, daemon_error_text),
-                        label,
-                    ));
+        };
+        (
+            execution,
+            routed_name,
+            alias_group,
+            direct_callback_failure,
+            direct_command_prepare_error,
+        )
+    }
+
+    fn resume_inserted_child(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        parent: &mut InsertedQueueFrame,
+        child: Box<InsertedQueueChild>,
+        result: Result<InsertedCommandResult, DaemonError>,
+        callback_failures_start: usize,
+    ) -> InsertedCommandStep {
+        let alias_group = matches!(child.kind, InsertedQueueChildKind::Alias { .. });
+        let mut execution = match child.kind {
+            InsertedQueueChildKind::Alias { .. } => {
+                result.and_then(|result| inserted_execution(client, kind, result))
             }
-            let callback_parse_depth = execution
-                .as_ref()
-                .err()
-                .map_or(0, post_admission_callback_parse_depth);
-            if callback_parse_depth != 0
-                && mode
-                    .queue_execution()
-                    .callback_parse_failures
-                    .borrow()
-                    .len()
-                    == callback_failures_start
-                && let Some(failure) = CallbackParseFailure::for_command(
+            InsertedQueueChildKind::Foreground(route) => {
+                parent
+                    .execution
+                    .nest_callback_parse_failures_since(callback_failures_start);
+                match result.map_err(post_admission_callback_error) {
+                    Ok(result) => match route {
+                        Some(route) => {
+                            self.finish_inserted_run_shell(route, "run-shell".to_owned(), &result)
+                        }
+                        None => inserted_execution(client, kind, result),
+                    },
+                    Err(error) => Err(error),
+                }
+            }
+        };
+        if let Some(mut leaf) = child.leaf {
+            let command = leaf.command.take().expect("suspended command");
+            execution = self.finish_inserted_leaf(
+                client,
+                kind,
+                &mut parent.context,
+                execution,
+                Some(&parent.execution),
+                &command,
+                leaf,
+            );
+        }
+        if let Some(guard) = child.guard {
+            let mode = inserted_frame_mode(&parent.execution, parent.alias_terminal);
+            self.finish_inserted_control_guard(execution, mode, guard)
+        } else {
+            (execution, child.leaf_name, alias_group, None, false)
+        }
+    }
+
+    fn finish_inserted_frame_command(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        frame: &mut InsertedQueueFrame,
+        boundary: InsertedCommandBoundary,
+        step: InsertedCommandStep,
+    ) -> InsertedFrameAction {
+        let InsertedCommandBoundary {
+            command,
+            group,
+            callback_failures_start,
+            command_control_target,
+            stdout_sequence,
+        } = boundary;
+        let (
+            execution,
+            routed_name,
+            alias_group,
+            direct_callback_failure,
+            direct_command_prepare_error,
+        ) = step;
+        let mode = inserted_frame_mode(&frame.execution, frame.alias_terminal);
+        let prepared = frame.prepared;
+        let label = &frame.label;
+        let stream_client = frame.context.replay_client().unwrap_or(client);
+        let alias_stdout = frame.alias_terminal.is_some()
+            && kind == ClientKind::Command
+            && stream_client != ClientId(u64::MAX);
+        let result = &mut frame.result;
+        let stdout_claim = &mut frame.stdout_claim;
+        let first_error = &mut frame.first_error;
+        let failed_group = &mut frame.failed_group;
+        let routed_name =
+            routed_name.unwrap_or_else(|| canonical_command(&command.name).to_owned());
+        if let Some(failure) = direct_callback_failure {
+            mode.queue_execution()
+                .callback_parse_failures
+                .borrow_mut()
+                .push(failure);
+        }
+        if command_control_target.is_none()
+            && matches!(mode, InsertedCommandMode::Standard(_))
+            && !direct_command_prepare_error
+            && execution.as_ref().err().is_some_and(command_parse_error)
+        {
+            mode.queue_execution().note_reported_failure();
+            mode.queue_execution()
+                .callback_parse_failures
+                .borrow_mut()
+                .push(CallbackParseFailure::runtime_command(
                     execution
                         .as_ref()
                         .err()
                         .map_or_else(String::new, daemon_error_text),
-                    &routed_name,
-                    None,
-                    callback_parse_depth,
-                )
-            {
-                mode.queue_execution()
-                    .callback_parse_failures
-                    .borrow_mut()
-                    .push(failure);
-            }
-            let callback_group_action = mode.queue_execution().callback_group_action_since(
-                callback_failures_start,
+                    label,
+                ));
+        }
+        let callback_parse_depth = execution
+            .as_ref()
+            .err()
+            .map_or(0, post_admission_callback_parse_depth);
+        if callback_parse_depth != 0
+            && mode
+                .queue_execution()
+                .callback_parse_failures
+                .borrow()
+                .len()
+                == callback_failures_start
+            && let Some(failure) = CallbackParseFailure::for_command(
+                execution
+                    .as_ref()
+                    .err()
+                    .map_or_else(String::new, daemon_error_text),
                 &routed_name,
+                None,
                 callback_parse_depth,
-            );
-            let nested_callback_only = callback_parse_depth > 1 && callback_group_action.is_none();
-            let preserve_callback_group_action =
-                alias_group || matches!(mode, InsertedCommandMode::CommandAlias { .. });
-            if let Some((guard_client, flags)) = command_control_target {
-                match execution {
-                    Ok(_) => {}
-                    Err(DaemonError::CommandExit { exit_code, .. }) => {
-                        if flags == CONTROL_COMMAND_FRAME_FLAGS_CONTROL {
-                            self.inner
-                                .lock()
-                                .client_entry(guard_client)
-                                .command_streams
-                                .get_or_insert_default()
-                                .exit_code = exit_code;
-                        }
-                        result.exit_code = exit_code;
-                        if matches!(mode, InsertedCommandMode::CommandAlias { .. }) {
-                            if routed_name == "source-file" {
-                                break;
-                            }
-                            continue;
-                        }
-                        if prepared {
-                            failed_group = Some(group);
-                            continue;
-                        }
-                        break;
+            )
+        {
+            mode.queue_execution()
+                .callback_parse_failures
+                .borrow_mut()
+                .push(failure);
+        }
+        let callback_group_action = mode.queue_execution().callback_group_action_since(
+            callback_failures_start,
+            &routed_name,
+            callback_parse_depth,
+        );
+        let nested_callback_only = callback_parse_depth > 1 && callback_group_action.is_none();
+        let preserve_callback_group_action =
+            alias_group || matches!(mode, InsertedCommandMode::CommandAlias { .. });
+        if let Some((guard_client, flags)) = command_control_target {
+            match execution {
+                Ok(_) => {}
+                Err(DaemonError::CommandExit { exit_code, .. }) => {
+                    if flags == CONTROL_COMMAND_FRAME_FLAGS_CONTROL {
+                        self.inner
+                            .lock()
+                            .client_entry(guard_client)
+                            .command_streams
+                            .get_or_insert_default()
+                            .exit_code = exit_code;
                     }
-                    Err(error) => {
-                        if direct_command_prepare_error {
-                            return Err(error);
+                    result.exit_code = exit_code;
+                    if matches!(mode, InsertedCommandMode::CommandAlias { .. }) {
+                        if routed_name == "source-file" {
+                            return InsertedFrameAction::Finish(None);
                         }
-                        if callback_parse_depth != 0 {
-                            if prepared
-                                || callback_group_action == Some(CallbackGroupAction::Continue)
-                                || nested_callback_only
+                        return InsertedFrameAction::Continue;
+                    }
+                    if prepared {
+                        *failed_group = Some(group);
+                        return InsertedFrameAction::Continue;
+                    }
+                    return InsertedFrameAction::Finish(None);
+                }
+                Err(error) => {
+                    if direct_command_prepare_error {
+                        return InsertedFrameAction::Finish(Some(error));
+                    }
+                    if callback_parse_depth != 0 {
+                        if prepared
+                            || callback_group_action == Some(CallbackGroupAction::Continue)
+                            || nested_callback_only
+                        {
+                            if first_error.is_none() {
+                                *first_error = Some(discard_all_command_output(error));
+                            }
+                            if prepared && callback_group_action == Some(CallbackGroupAction::Fail)
                             {
-                                if first_error.is_none() {
-                                    first_error = Some(discard_all_command_output(error));
-                                }
-                                if prepared
-                                    && callback_group_action == Some(CallbackGroupAction::Fail)
-                                {
-                                    failed_group = Some(group);
-                                }
-                                if callback_group_action.is_some()
-                                    && !preserve_callback_group_action
-                                {
-                                    mode.queue_execution().handle_callback_group_actions_since(
-                                        callback_failures_start,
-                                    );
-                                }
-                                continue;
+                                *failed_group = Some(group);
                             }
                             if callback_group_action.is_some() && !preserve_callback_group_action {
                                 mode.queue_execution()
                                     .handle_callback_group_actions_since(callback_failures_start);
                             }
-                            return Err(error);
-                        }
-                        let (guard_error, sticky_failure, _) = control_command_guard_error(&error);
-                        if !guard_error {
-                            continue;
-                        }
-                        if sticky_failure && flags == CONTROL_COMMAND_FRAME_FLAGS_CONTROL {
-                            self.inner
-                                .lock()
-                                .client_entry(guard_client)
-                                .command_streams
-                                .get_or_insert_default()
-                                .exit_code = 1;
-                            result.exit_code = 1;
-                        }
-                        if prepared {
-                            if matches!(mode, InsertedCommandMode::CommandAlias { .. }) {
-                                if first_error.is_none() {
-                                    first_error = Some(discard_all_command_output(error));
-                                }
-                                break;
-                            }
-                            failed_group = Some(group);
-                            continue;
-                        }
-                        break;
-                    }
-                }
-                continue;
-            }
-            match execution {
-                Ok(execution) if !mode.queue_execution().suppress_output.get() => {
-                    self.append_alias_output(
-                        &mut result,
-                        &execution.output,
-                        &routed_name,
-                        &mut stdout_claim,
-                        alias_stdout.then_some((stream_client, stdout_sequence)),
-                    );
-                }
-                Ok(_) => {}
-                Err(DaemonError::CommandExit { output, exit_code }) => {
-                    if !mode.queue_execution().suppress_output.get() {
-                        self.append_alias_output(
-                            &mut result,
-                            &output,
-                            &routed_name,
-                            &mut stdout_claim,
-                            alias_stdout.then_some((stream_client, stdout_sequence)),
-                        );
-                    }
-                    result.exit_code = exit_code;
-                    if matches!(mode, InsertedCommandMode::CommandAlias { .. }) {
-                        if routed_name == "source-file" {
-                            break;
-                        }
-                        continue;
-                    }
-                    if prepared {
-                        failed_group = Some(group);
-                        continue;
-                    }
-                    break;
-                }
-                Err(error) => {
-                    if callback_parse_depth != 0
-                        && (prepared
-                            || callback_group_action == Some(CallbackGroupAction::Continue)
-                            || nested_callback_only)
-                    {
-                        if first_error.is_none() {
-                            first_error = Some(discard_all_command_output(error));
-                        }
-                        if prepared && callback_group_action == Some(CallbackGroupAction::Fail) {
-                            failed_group = Some(group);
+                            return InsertedFrameAction::Continue;
                         }
                         if callback_group_action.is_some() && !preserve_callback_group_action {
                             mode.queue_execution()
                                 .handle_callback_group_actions_since(callback_failures_start);
                         }
-                        continue;
+                        return InsertedFrameAction::Finish(Some(error));
                     }
-                    if callback_parse_depth != 0
-                        && callback_group_action.is_some()
-                        && !preserve_callback_group_action
-                    {
+                    let (guard_error, sticky_failure, _) = control_command_guard_error(&error);
+                    if !guard_error {
+                        return InsertedFrameAction::Continue;
+                    }
+                    if sticky_failure && flags == CONTROL_COMMAND_FRAME_FLAGS_CONTROL {
+                        self.inner
+                            .lock()
+                            .client_entry(guard_client)
+                            .command_streams
+                            .get_or_insert_default()
+                            .exit_code = 1;
+                        result.exit_code = 1;
+                    }
+                    if prepared {
+                        if matches!(mode, InsertedCommandMode::CommandAlias { .. }) {
+                            if first_error.is_none() {
+                                *first_error = Some(discard_all_command_output(error));
+                            }
+                            return InsertedFrameAction::Finish(None);
+                        }
+                        *failed_group = Some(group);
+                        return InsertedFrameAction::Continue;
+                    }
+                    return InsertedFrameAction::Finish(None);
+                }
+            }
+            return InsertedFrameAction::Continue;
+        }
+        match execution {
+            Ok(execution) if !mode.queue_execution().suppress_output.get() => {
+                self.append_alias_output(
+                    result,
+                    &execution.output,
+                    &routed_name,
+                    stdout_claim,
+                    alias_stdout.then_some((stream_client, stdout_sequence)),
+                );
+            }
+            Ok(_) => {}
+            Err(DaemonError::CommandExit { output, exit_code }) => {
+                if !mode.queue_execution().suppress_output.get() {
+                    self.append_alias_output(
+                        result,
+                        &output,
+                        &routed_name,
+                        stdout_claim,
+                        alias_stdout.then_some((stream_client, stdout_sequence)),
+                    );
+                }
+                result.exit_code = exit_code;
+                if matches!(mode, InsertedCommandMode::CommandAlias { .. }) {
+                    if routed_name == "source-file" {
+                        return InsertedFrameAction::Finish(None);
+                    }
+                    return InsertedFrameAction::Continue;
+                }
+                if prepared {
+                    *failed_group = Some(group);
+                    return InsertedFrameAction::Continue;
+                }
+                return InsertedFrameAction::Finish(None);
+            }
+            Err(error) => {
+                if callback_parse_depth != 0
+                    && (prepared
+                        || callback_group_action == Some(CallbackGroupAction::Continue)
+                        || nested_callback_only)
+                {
+                    if first_error.is_none() {
+                        *first_error = Some(discard_all_command_output(error));
+                    }
+                    if prepared && callback_group_action == Some(CallbackGroupAction::Fail) {
+                        *failed_group = Some(group);
+                    }
+                    if callback_group_action.is_some() && !preserve_callback_group_action {
                         mode.queue_execution()
                             .handle_callback_group_actions_since(callback_failures_start);
                     }
-                    if prepared {
-                        if !mode.queue_execution().suppress_output.get()
-                            && mode.queue_execution().deferred_shutdown.get()
-                                == DeferredShutdown::Force
-                            && kind == ClientKind::Command
-                            && client != ClientId(u64::MAX)
-                        {
-                            self.record_command_stderr(client, &daemon_error_text(&error));
-                        }
-                        if !mode.queue_execution().suppress_output.get()
-                            && let Some(error_output) = daemon_error_output(&error)
-                        {
-                            append_inserted_output(&mut result.output, error_output);
-                        }
-                        if first_error.is_none() {
-                            first_error = Some(discard_all_command_output(error));
-                        }
-                        if matches!(mode, InsertedCommandMode::CommandAlias { .. }) {
-                            break;
-                        }
-                        failed_group = Some(group);
-                        continue;
-                    }
-                    return Err(prepend_command_output(
-                        std::mem::take(&mut result.output),
-                        error,
-                    ));
+                    return InsertedFrameAction::Continue;
                 }
+                if callback_parse_depth != 0
+                    && callback_group_action.is_some()
+                    && !preserve_callback_group_action
+                {
+                    mode.queue_execution()
+                        .handle_callback_group_actions_since(callback_failures_start);
+                }
+                if prepared {
+                    if !mode.queue_execution().suppress_output.get()
+                        && mode.queue_execution().deferred_shutdown.get() == DeferredShutdown::Force
+                        && kind == ClientKind::Command
+                        && client != ClientId(u64::MAX)
+                    {
+                        self.record_command_stderr(client, &daemon_error_text(&error));
+                    }
+                    if !mode.queue_execution().suppress_output.get()
+                        && let Some(error_output) = daemon_error_output(&error)
+                    {
+                        append_inserted_output(&mut result.output, error_output);
+                    }
+                    if first_error.is_none() {
+                        *first_error = Some(discard_all_command_output(error));
+                    }
+                    if matches!(mode, InsertedCommandMode::CommandAlias { .. }) {
+                        return InsertedFrameAction::Finish(None);
+                    }
+                    *failed_group = Some(group);
+                    return InsertedFrameAction::Continue;
+                }
+                return InsertedFrameAction::Finish(Some(prepend_command_output(
+                    std::mem::take(&mut result.output),
+                    error,
+                )));
             }
         }
-        if alias_stdout {
-            self.record_command_stdout_claim(stream_client, stdout_claim);
+        InsertedFrameAction::Continue
+    }
+
+    fn finish_inserted_queue_frame(
+        &self,
+        client: ClientId,
+        kind: ClientKind,
+        frame: &mut InsertedQueueFrame,
+    ) -> Result<InsertedCommandResult, DaemonError> {
+        let stream_client = frame.context.replay_client().unwrap_or(client);
+        if frame.alias_terminal.is_some()
+            && kind == ClientKind::Command
+            && stream_client != ClientId(u64::MAX)
+        {
+            self.record_command_stdout_claim(stream_client, frame.stdout_claim);
         }
-        if mode.queue_execution().deferred_shutdown.get() == DeferredShutdown::Force {
+        let mut result = std::mem::take(&mut frame.result);
+        result.yielded = frame.execution.has_yielded();
+        if frame.execution.deferred_shutdown.get() == DeferredShutdown::Force {
             result.exit_code = 0;
             if client != ClientId(u64::MAX)
                 && let Some(streams) = self
@@ -14034,7 +14384,10 @@ impl Shared {
             }
             return Ok(result);
         }
-        if let Some(error) = first_error {
+        if let Some(error) = frame.terminal_error.take() {
+            return Err(error);
+        }
+        if let Some(error) = frame.first_error.take() {
             return Err(prepend_command_output(result.output, error));
         }
         Ok(result)
@@ -14111,7 +14464,61 @@ impl Shared {
             },
             Err(error) => Err(error.into()),
         };
-        let mut captured_events = capture.finish();
+        let guard = InsertedControlGuard {
+            target,
+            aggregate_forced_shutdown,
+            deferred_shutdown_before,
+            reported_failure_before,
+            early_shell_guard,
+            direct_command_prepare_error,
+            source_command,
+            alias_group,
+            routed_name,
+        };
+        if let Some(child) = mode.queue_execution().child.borrow_mut().as_mut() {
+            let mut capture = capture;
+            capture.active = false;
+            child.guard = Some(guard);
+            return (
+                execution,
+                None,
+                alias_group,
+                None,
+                direct_command_prepare_error,
+            );
+        }
+        let mut capture = capture;
+        capture.active = false;
+        self.finish_inserted_control_guard(execution, mode, guard)
+    }
+
+    fn finish_inserted_control_guard(
+        self: &Arc<Self>,
+        execution: Result<Execution, DaemonError>,
+        mode: InsertedCommandMode,
+        guard: InsertedControlGuard,
+    ) -> (
+        Result<Execution, DaemonError>,
+        Option<String>,
+        bool,
+        Option<CallbackParseFailure>,
+        bool,
+    ) {
+        let InsertedControlGuard {
+            target,
+            aggregate_forced_shutdown,
+            deferred_shutdown_before,
+            reported_failure_before,
+            early_shell_guard,
+            direct_command_prepare_error,
+            source_command,
+            alias_group,
+            routed_name,
+        } = guard;
+        let item_id = self.command_item.as_ref().expect("command item").lock().id;
+        let mut captured_events = self
+            .pop_control_command_event_capture(target.0, item_id)
+            .expect("control command event capture frame");
         let forced_shutdown_transition = aggregate_forced_shutdown
             && deferred_shutdown_before != DeferredShutdown::Force
             && mode.queue_execution().deferred_shutdown.get() == DeferredShutdown::Force;
@@ -20510,6 +20917,8 @@ impl Shared {
                 callback_parse_failures: RefCell::new(Vec::new()),
                 deferred_config_replay_issues: RefCell::new(Vec::new()),
                 reported_failures: Cell::new(false),
+                frame_active: Cell::new(false),
+                child: RefCell::new(None),
                 suppress_after_hooks: Cell::new(false),
                 suppress_output: Cell::new(false),
             });
@@ -25953,6 +26362,8 @@ impl Shared {
             callback_parse_failures: RefCell::new(Vec::new()),
             deferred_config_replay_issues: RefCell::new(Vec::new()),
             reported_failures: Cell::new(false),
+            frame_active: Cell::new(false),
+            child: RefCell::new(None),
             suppress_after_hooks: Cell::new(true),
             suppress_output: Cell::new(false),
         });
@@ -29364,6 +29775,8 @@ impl Shared {
             callback_parse_failures: RefCell::new(Vec::new()),
             deferred_config_replay_issues: RefCell::new(Vec::new()),
             reported_failures: Cell::new(false),
+            frame_active: Cell::new(false),
+            child: RefCell::new(None),
             suppress_after_hooks: Cell::new(
                 parent_queue.is_some_and(|execution| execution.suppress_after_hooks.get()),
             ),
@@ -44681,6 +45094,126 @@ enum InsertedCommandSource {
     Block(String),
 }
 
+#[cfg(test)]
+#[path = "daemon/alias_queue_tests.rs"]
+mod alias_queue_tests;
+
+enum InsertedFrameExecution<'a> {
+    Borrowed(&'a CommandQueueExecution),
+    Owned(Box<CommandQueueExecution>),
+}
+
+impl std::ops::Deref for InsertedFrameExecution<'_> {
+    type Target = CommandQueueExecution;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Borrowed(execution) => execution,
+            Self::Owned(execution) => execution,
+        }
+    }
+}
+
+struct InsertedQueueFrame<'a> {
+    execution: InsertedFrameExecution<'a>,
+    context: ExecutionContext,
+    commands: std::vec::IntoIter<CommandInvocation>,
+    prepared: bool,
+    control_target: Option<(ClientId, u8)>,
+    mux_source: MuxOptionSource,
+    alias_terminal: Option<ClientTerminal>,
+    stdin: Option<RawText>,
+    carried_a_stream: bool,
+    label: String,
+    result: InsertedCommandResult,
+    stdout_claim: StdoutClaim,
+    first_error: Option<DaemonError>,
+    failed_group: Option<InsertedPhysicalGroup>,
+    boundary: Option<(InsertedCommandBoundary, Box<InsertedQueueChild>)>,
+    terminal_error: Option<DaemonError>,
+}
+
+fn inserted_frame_mode(
+    execution: &CommandQueueExecution,
+    terminal: Option<ClientTerminal>,
+) -> InsertedCommandMode<'_> {
+    match terminal {
+        Some(client_terminal) => InsertedCommandMode::CommandAlias {
+            client_terminal,
+            queue_execution: execution,
+            stdin: None,
+        },
+        None => InsertedCommandMode::Standard(execution),
+    }
+}
+
+#[derive(PartialEq, Eq)]
+enum InsertedPhysicalGroup {
+    Unlocated,
+    Source(String, u32),
+}
+
+struct InsertedCommandBoundary {
+    command: CommandInvocation,
+    group: InsertedPhysicalGroup,
+    callback_failures_start: usize,
+    command_control_target: Option<(ClientId, u8)>,
+    stdout_sequence: usize,
+}
+
+enum InsertedFrameAction {
+    Continue,
+    Finish(Option<DaemonError>),
+}
+
+type InsertedCommandStep = (
+    Result<Execution, DaemonError>,
+    Option<String>,
+    bool,
+    Option<CallbackParseFailure>,
+    bool,
+);
+
+struct InsertedQueueChild {
+    context: ExecutionContext,
+    source: InsertedCommandSource,
+    label: String,
+    control_target: Option<(ClientId, u8)>,
+    mux_source: MuxOptionSource,
+    kind: InsertedQueueChildKind,
+    leaf: Option<InsertedLeafContinuation>,
+    guard: Option<InsertedControlGuard>,
+    leaf_name: Option<String>,
+}
+
+enum InsertedQueueChildKind {
+    Alias {
+        client_terminal: ClientTerminal,
+        stdin: Option<RawText>,
+    },
+    Foreground(Option<RunShellRoute>),
+}
+
+struct InsertedLeafContinuation {
+    original_context: ExecutionContext,
+    previous_client_terminal: ClientTerminal,
+    no_hooks: bool,
+    name: String,
+    command: Option<CommandInvocation>,
+}
+
+struct InsertedControlGuard {
+    target: (ClientId, u8),
+    aggregate_forced_shutdown: bool,
+    deferred_shutdown_before: DeferredShutdown,
+    reported_failure_before: bool,
+    early_shell_guard: bool,
+    direct_command_prepare_error: bool,
+    source_command: bool,
+    alias_group: bool,
+    routed_name: Option<String>,
+}
+
 struct CommandExecutionState {
     draining: bool,
     wait_yields: bool,
@@ -44695,6 +45228,8 @@ struct CommandExecutionState {
     callback_parse_failures: RefCell<Vec<CallbackParseFailure>>,
     deferred_config_replay_issues: RefCell<Vec<DeferredConfigReplayIssue>>,
     reported_failures: Cell<bool>,
+    frame_active: Cell<bool>,
+    child: RefCell<Option<Box<InsertedQueueChild>>>,
     suppress_after_hooks: Cell<bool>,
     suppress_output: Cell<bool>,
 }
@@ -44714,6 +45249,13 @@ impl std::ops::Deref for CommandQueueExecution {
 type DeferredShellJob = Box<dyn FnOnce(&Arc<Shared>) + Send>;
 
 impl CommandQueueExecution {
+    fn insert_foreground_child(&self, child: InsertedQueueChild) {
+        assert!(
+            self.child.borrow_mut().replace(Box::new(child)).is_none(),
+            "one child per continuation boundary"
+        );
+    }
+
     fn is_draining(&self) -> bool {
         self.draining || self.deferred_shutdown.get() == DeferredShutdown::Force
     }

@@ -198,6 +198,8 @@ fn duplicate_queue_completion_finishes_hooks_jobs_and_blockers_once() {
         callback_parse_failures: RefCell::new(Vec::new()),
         deferred_config_replay_issues: RefCell::new(Vec::new()),
         reported_failures: Cell::new(false),
+        frame_active: Cell::new(false),
+        child: RefCell::new(None),
         suppress_after_hooks: Cell::new(false),
         suppress_output: Cell::new(false),
     });

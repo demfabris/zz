@@ -166,6 +166,10 @@ read "Lane brief rules" before launching anything.
   - e16 Linux fix Mac leg (`ffcef23e`): 1442 lib tests, the three e16 tests, pipe compat clean.
   - e13 (`326de470`, Mac): run-shell delays and `-C` callbacks on the timer heap with a ready-queue
     activation for zero delay; 20 delays add 0 threads and 20 deadlines; 1479 daemon tests.
+  - e04 (`6dc8d3bb`, Linux): spawn identity, tap arm/disarm, settle and copy-source acquisition
+    resume through loop request tokens (`daemon/terminal_requests.rs`); a respawn rejects stale
+    replies; 1450 daemon and 369 terminal tests. `spawn.instr.new_window` 0.718 -> 0.737 Minstr
+    (1.026x, token registration per spawn); split_shell 1.000x, kill_pane 0.998x: accepted.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

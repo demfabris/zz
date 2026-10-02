@@ -9,6 +9,43 @@ W2-COPY, W2-FMT, W2-CTRL and two CTRL follow-ups); its exit gates are
 in flight, no lane worktree left. Wave 3 (W3-SHARDS, W3-LOOP) starts from "Next session: wave 3";
 read "Lane brief rules" before launching anything.
 
+## Resume point (2026-10-02 19:30, paused by the owner)
+
+`perf/wave3` is at `e9bc174c` plus this commit, local on the Mac and fast-forwarded on
+alienware's `~/dev/zz-perf-int`; not pushed to origin. Every fix lane is merged and its worktree
+removed. Still running when paused, each writing its own log (they need no supervision):
+
+- Mac `/tmp/zzpc/wave3-exit2-mac.sh` (summary `/tmp/zzpc/wave3-exit2/summary.txt`): fmt,
+  clippy, builds pass; workspace 7 load failures (solo results in that summary);
+  attached-client failed on the tmux side again ("command-output view did not show one ordered
+  replay transcript", second run in a row); strict gate done (`wave3-macbook-e9bc174c.json`
+  there: 81 pass, 7 fail, 6 regressed); the full corpus was running.
+- alienware `~/.cache/zz-perf/wave3-exit2-linux.sh` (summary `~/.cache/zz-perf/wave3-exit2/`):
+  gate done (`wave3-alienware-e9bc174c.json`: 75 pass, 13 fail, 1 regressed, the
+  `control.burst_cmds_per_s` baseline outlier); the full corpus was running.
+
+To finish wave 3:
+1. Read both corpus results. Expected reds: Linux `lane2-store`, `show-options-hooks`,
+   `smoke/control-alias-prepare`, `smoke/plugin-runtime-resurrect-restore`, `known/*` x4 (and
+   maybe the debug-only `smoke/format-modifier-client-loop`); Mac the `known/*` rows,
+   `smoke/resurrect-save`, `smoke/plugin-runtime-continuum`, `smoke/status-background-jobs`,
+   `smoke/control-alias-prepare`, `if-shell-background-order`, `census-hooks`,
+   `smoke/plugin-runtime-vim-tmux-navigator`, `smoke/source-file-byte-name`. Anything else:
+   bisect against `/tmp/zzpc/w3/loop-00-cli` (wave-2 end) and fix it in a lane.
+2. Mac, on a quiet host: rerun `compat/attached-client.sh target/debug/zz_cli
+   compat/.cache/tmux-src/tmux` alone; then a full-mode A/B of `--only spawn,chatty,attach`,
+   alternating `/tmp/zzpc/w3/loop-00-cli` and `/tmp/zzpc/w3/wave3-exit2-cli` twice, to settle
+   the Mac gate's regressions: `spawn.wall/cpu.split_shell` +61%/+34% and
+   `spawn.wall.split_empty_P` +25% against the wave-2 JSON (the merge A/Bs had split_shell 22%
+   faster than loop-00), `chatty.cpu_pct.steady` 3.8 -> 6.9% (tmux 6.0 in the same run),
+   `attach.wire_c2s.*` +264 B (the Hello carries the caller's environment; compare in the same
+   shell). A real regression gets a fix lane and a gate rerun.
+3. Copy both gate JSONs to `bench/perf/results/`, replace this section and "Next session: wave 3"
+   with `bench/perf/campaign/wave4-next-draft.md` (then delete the draft), record the exit in
+   the merge log, run `python3 compat/evidence-secrets.py` and a credential scan of
+   `git diff origin/main..perf/wave3`, merge origin/main if it moved, push `perf/wave3` to
+   main (no tags), and remove nothing else.
+
 ## Next session: wave 3
 
 1. Started 2026-10-01: `perf/wave3` on both hosts, lanes `~/dev/zz-loop` (Mac) and

@@ -2,7 +2,7 @@
 type: Design Plan
 title: Daemon performance rebuild
 description: "The campaign to bring the zz daemon to tmux cost per command, per pane and per attach while keeping the 5x output throughput lead - a permanent zz-vs-tmux gate first, then waves that remove unrequested work (one-frame Exec commands, change-driven publication, lazy formats, frames only for watchers, a compact wire under one unreleased protocol version), then one mux loop and PTY shards; the lane brief source with targets, merge order, write zones, gates and rollback switches."
-status: Approved 2026-09-28; wave 0 built; release freeze until W4 exits; wave 1 on main; wave 2 in progress (HOOKS, TERM, COPY and FMT merged on perf/wave2; CTRL review fixes committed on perf/ctrl, COPY/FMT integration checks passed except baseline alias differences, serial latency floor open and merged performance A/B pending); continued on Linux from bench/perf/campaign/HANDOFF.md
+status: Approved 2026-09-28; waves 0-3 on main (wave 3 closed 2026-10-02, exit gates wave3-macbook-e9bc174c.json and wave3-alienware-e9bc174c.json); release freeze until W4 exits; wave 4 (W4-DELIVER, W4-ROWS, W4-BINARY) next; state in bench/perf/campaign/HANDOFF.md
 resource: crates/zz-daemon/src/daemon.rs
 tags:
 - performance
@@ -12,21 +12,18 @@ tags:
 - benchmark
 - campaign
 - design-plan
-timestamp: 2026-10-01T00:54:00Z
+timestamp: 2026-10-02T23:15:00Z
 ---
 
 # Campaign status
 
-2026-09-29: wave 1 (W0, all six wave-1 lanes, three folded side branches) passed its Linux exit
-and is on main (`1e0bfc6a`). Wave 2 runs on `perf/wave2`; W2-HOOKS is merge 1 (`0acd7f2a`,
-`w2-1-hooks-alienware-0acd7f2a.json`) and W2-TERM merge 2 (`d7e3fc95`,
-`w2-2-term-alienware-d7e3fc95.json`). W2-CTRL is built on `perf/ctrl`, with final Mac validation
-ongoing and the serial control latency floor still open. Its `Batch` carries TERM's
-PaneFrames through `encode_terminal_viewport_event_into` and `encode_terminal_patch_event_into`.
-The campaign continues on a Linux host:
-`bench/perf/campaign/HANDOFF.md` has the state, the numbers against tmux at the last gate, the
-next steps in order, the macOS-only checks and the traps; `bench/perf/campaign/attach-review.json`
-has the attach lane's reports; `bench/perf/campaign/scripts/` has the lane workflow template.
+2026-10-02: waves 0 to 3 are on main. Wave 1 exited 2026-09-29 (`1e0bfc6a`), wave 2 on 2026-10-01
+(gates `wave2-<host>-3d0fc1b0.json`), wave 3 (W3-SHARDS, W3-TUI, W3-LOOP and nine fix lanes) on
+2026-10-02 (gates `wave3-macbook-e9bc174c.json`, `wave3-alienware-e9bc174c.json`). Wave 4
+(W4-DELIVER, W4-ROWS, W4-BINARY, gate `--stage final`) is next; W3-LOOP step (d), the Mutex
+removal, is deferred until after W4-DELIVER. `bench/perf/campaign/HANDOFF.md` has the state, the
+numbers against tmux at each exit, the merge logs, the next steps in order, the macOS-only checks
+and the traps; `bench/perf/campaign/scripts/` has the lane brief generator and the merge checks.
 
 2026-09-30: W2-COPY merged as `2cedf6ee` and W2-FMT as `8fa427dd` on `perf/wave2`.
 Their as-built sections below record gate, parity and profile evidence. CTRL review fixes

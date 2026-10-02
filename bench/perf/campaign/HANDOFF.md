@@ -1,87 +1,70 @@
 # Daemon perf campaign: handoff
 
 Entry point for a fresh session continuing the zz daemon performance rebuild. Written 2026-09-29 on
-the macbook, continued the same day on the Linux host alienware (see "Linux leg"). Wave 0 and wave 1
-are on `main` and pushed. State on 2026-10-01: wave 2 is closed and pushed (W2-HOOKS, W2-TERM,
-W2-COPY, W2-FMT, W2-CTRL and two CTRL follow-ups); its exit gates are
-`wave2-macbook-3d0fc1b0.json` and `wave2-alienware-3d0fc1b0.json`. The Ghostty fork pin is
-`67351380` (trim fix `c3941417`, copy snapshots `7823f65d`, used-size active page copies). No lane
-in flight, no lane worktree left. Wave 3 (W3-SHARDS, W3-LOOP) starts from "Next session: wave 3";
-read "Lane brief rules" before launching anything.
+the macbook, continued the same day on the Linux host alienware (see "Linux leg"). State on
+2026-10-02: waves 0 to 3 are on `main` and pushed. Wave 3 (W3-SHARDS, W3-TUI, W3-LOOP and nine
+Opus fix lanes) closed at `e9bc174c`; its exit gates are `wave3-macbook-e9bc174c.json` and
+`wave3-alienware-e9bc174c.json`. The Ghostty fork pin is `67351380` (trim fix `c3941417`, copy
+snapshots `7823f65d`, used-size active page copies). No lane in flight, no lane worktree left.
+Wave 4 starts from "Next session: wave 4"; read "Lane brief rules" before launching anything.
 
-## Resume point (2026-10-02 19:30, paused by the owner)
+## Next session: wave 4
 
-`perf/wave3` is at `e9bc174c` plus this commit, local on the Mac and fast-forwarded on
-alienware's `~/dev/zz-perf-int`; not pushed to origin. Every fix lane is merged and its worktree
-removed. Still running when paused, each writing its own log (they need no supervision):
-
-- Mac `/tmp/zzpc/wave3-exit2-mac.sh` (summary `/tmp/zzpc/wave3-exit2/summary.txt`): fmt,
-  clippy, builds pass; workspace 7 load failures (solo results in that summary);
-  attached-client failed on the tmux side again ("command-output view did not show one ordered
-  replay transcript", second run in a row); strict gate done (`wave3-macbook-e9bc174c.json`
-  there: 81 pass, 7 fail, 6 regressed); the full corpus was running.
-- alienware `~/.cache/zz-perf/wave3-exit2-linux.sh` (summary `~/.cache/zz-perf/wave3-exit2/`):
-  gate done (`wave3-alienware-e9bc174c.json`: 75 pass, 13 fail, 1 regressed, the
-  `control.burst_cmds_per_s` baseline outlier); the full corpus was running.
-
-To finish wave 3:
-1. Read both corpus results. Expected reds: Linux `lane2-store`, `show-options-hooks`,
-   `smoke/control-alias-prepare`, `smoke/plugin-runtime-resurrect-restore`, `known/*` x4 (and
-   maybe the debug-only `smoke/format-modifier-client-loop`); Mac the `known/*` rows,
-   `smoke/resurrect-save`, `smoke/plugin-runtime-continuum`, `smoke/status-background-jobs`,
-   `smoke/control-alias-prepare`, `if-shell-background-order`, `census-hooks`,
-   `smoke/plugin-runtime-vim-tmux-navigator`, `smoke/source-file-byte-name`. Anything else:
-   bisect against `/tmp/zzpc/w3/loop-00-cli` (wave-2 end) and fix it in a lane.
-2. Mac, on a quiet host: rerun `compat/attached-client.sh target/debug/zz_cli
-   compat/.cache/tmux-src/tmux` alone; then a full-mode A/B of `--only spawn,chatty,attach`,
-   alternating `/tmp/zzpc/w3/loop-00-cli` and `/tmp/zzpc/w3/wave3-exit2-cli` twice, to settle
-   the Mac gate's regressions: `spawn.wall/cpu.split_shell` +61%/+34% and
-   `spawn.wall.split_empty_P` +25% against the wave-2 JSON (the merge A/Bs had split_shell 22%
-   faster than loop-00), `chatty.cpu_pct.steady` 3.8 -> 6.9% (tmux 6.0 in the same run),
-   `attach.wire_c2s.*` +264 B (the Hello carries the caller's environment; compare in the same
-   shell). A real regression gets a fix lane and a gate rerun.
-3. Copy both gate JSONs to `bench/perf/results/`, replace this section and "Next session: wave 3"
-   with `bench/perf/campaign/wave4-next-draft.md` (then delete the draft), record the exit in
-   the merge log, run `python3 compat/evidence-secrets.py` and a credential scan of
-   `git diff origin/main..perf/wave3`, merge origin/main if it moved, push `perf/wave3` to
-   main (no tags), and remove nothing else.
-
-## Next session: wave 3
-
-1. Started 2026-10-01: `perf/wave3` on both hosts, lanes `~/dev/zz-loop` (Mac) and
-   `~/dev/zz-shards` (alienware) from `dcf05102`. Create wave and lane branches from
-   `origin/main` after a fetch, never from a local `main`: alienware's clone had a stale local
-   `main` (`fecaaa43`), the first SHARDS slice started on pre-wave-2 code, and its watchdog killed
-   it for touching every wave-2 file.
-2. Lanes and hosts: W3-SHARDS on alienware (the Linux gather fold, epoll and pidfd paths and Linux
-   `bench/run.sh` live there), W3-LOOP on the Mac. Write zones do not overlap (LOOP owns daemon.rs
-   production code, SHARDS owns zz-terminal session code). Merge order SHARDS, then LOOP (LOOP's
-   gate is against the SHARDS JSON). Lane worktrees `~/dev/zz-shards`, `~/dev/zz-loop` from
-   `perf/wave3`.
-3. Slices, one commit each (see "Lane brief rules"). LOOP: e0, a, b, c, d, e as in its plan
-   section. SHARDS: s1 the per-pane state machine (`PaneActor` with `on_readable`, `on_command`,
-   `on_deadline`, keeping 64 KiB reads, turn caps, 16 ms frames and the echo fast path); s2 shard
-   threads and wake fd owning the PTY fds (K = min(parallelism, 4), `ZZ_PTY_SHARDS`); s3 terminal process
-   spawn without allocation in the child; s4 one lazy search thread; s5 one live frame per pane
-   per publish; s6 the Linux gather fold, only if `bench/run.sh` on Linux matches; s7 the ConPTY
-   reader feeding shards (`cargo check` for Windows). The state machine goes first (s1, same
-   thread, no behaviour change), the shard threads second: a pane cannot move onto a shared
-   thread while its loop blocks. Per slice: map, `lane-briefs.py '<spec>'
-   slice`, `lane-run.sh <wt> <brief> <out> high 90 60 <base> <zone-globs>`, rerun its gates, merge
-   into the lane branch, then the next brief. An ultra parity review (source-only) after s2, s3,
-   LOOP b and LOOP d, the risky ones.
-4. Gates: SHARDS against `wave2-<host>-3d0fc1b0.json` (threads = K, `mem.footprint.p20` <= 20 MB,
-   floods, echo p99 under four floods); LOOP against the SHARDS merge JSON (`cli.cpu.display`,
-   `spawn.cpu.*`, idle wakeups, fixed threads, statusjob). Merge checks per lane with
-   `merge-checks-*.sh`, the config rows included; strict gates and the full corpus on both hosts
-   at wave exit.
-5. Inputs: `spawn.instr.split_empty_P` is bimodal on every binary (Mac, about 0.9 or 2.1 Minstr,
-   tmux 1.1): profile a `split-window -d -P` + `kill-pane` loop with `just profile-cpu mac daemon`
-   for LOOP. `mem.threads.p20` 66 on Linux (a gather thread per pane) is SHARDS'. Small follow-ups
-   that fit any slot: FMT's cold template compile (`mem.copy_instr` +5.4%, Linux `attach.instr`
-   +4%); `chatty.client_cpu_pct.visible` 1.08% Mac / 1.28% Linux against 1.0%. `control.latency`
-   1.4-1.7x tmux goes to W4-DELIVER or the stdio handoff in CTRL's as-built notes.
-6. Release freeze until wave 4; protocol stays 107.
+1. Wave 3 closed 2026-10-02 at `e9bc174c` (W3-SHARDS, W3-TUI, W3-LOOP, and nine fix lanes run
+   as Opus subagents; see "Wave 3 merge log"). Exit gates `wave3-macbook-e9bc174c.json` and
+   `wave3-alienware-e9bc174c.json` (strict, full, `--baseline wave2-<host>-3d0fc1b0.json`).
+   Against wave 2: threads p20 25 -> 5 Mac / 45 -> 25 Linux, footprint p20 -36% / -20%,
+   status-job threads 3/s -> 0 and instructions -26% / -46%, kill-pane instructions -26% Mac,
+   copy entry CPU -17 to -44%, control output +18 to +88%. No unexplained regression: see the
+   two exit entries in the merge log for each flagged row. Pushed to main the same day.
+2. Wave 4 in merge order: W4-DELIVER, W4-ROWS, W4-BINARY, gate `--stage final`
+   (`knowledge/designs/daemon-perf-rebuild.md`). What still loses to tmux at wave-3 exit, all
+   W4-DELIVER unless noted: echo p50/p99 1.8-2.6 ms against 0.92-1.13 on Linux (Mac p50 0.59-0.90
+   against 0.26-0.33), `control.latency` 1.2-1.5x, `attach.cpu`/`attach.ttfc`, `chatty.cpu_pct.visible`
+   2.2x on Linux, `mem.threads.p20` 25 on Linux (one gather thread per pane; the final gate wants
+   12 or fewer), `spawn.cpu.*` 1.6-1.8x on Linux (spawn path, not owned yet: give it to
+   W4-BINARY or a spawn lane), `control.burst_cmds_per_s` 0.83x tmux. Watch in W4-DELIVER: Mac
+   `chatty.cpu_pct.steady` (ten hidden printing panes) is about 11% above loop-00 after
+   normalizing by tmux, at +4% instructions, under both tolerances.
+3. Deferred: W3-LOOP step (d), the Mutex removal (570 production lock sites, at most 0.8% of
+   instructions, uncontended after e21). Plan and census in `bench/perf/campaign/w3-loop-d-plan.txt`
+   (10 slices); run it as its own lane after W4-DELIVER, whose shard delivery removes most of
+   the cross-thread locking it would otherwise have to rework.
+4. Open items found in wave 3 (none blocks wave 4):
+   - A command handed off from inside a nested list (an `if-shell -F` body, a prompt template)
+     runs after the rest of that list; tmux runs it in place (`loop_handoff.rs`).
+   - `wait-for` and agent waits (`wait-pane`) bound to a key are not converted to continuations.
+   - Three compat rows fail on every build here against the pinned tmux oracle
+     (`smoke/control-alias-prepare`, `if-shell-background-order`, prompt history): a separate task.
+   - Mac rows red on the wave-2 binary too: `census-hooks`,
+     `smoke/plugin-runtime-vim-tmux-navigator`, `smoke/source-file-byte-name` (plus the known
+     tmux-also-fails rows). Linux: `smoke/format-modifier-client-loop` red with the debug build
+     only.
+   - zz-daemon lib tests: 5-25 timing failures per parallel run on either host, all pass alone;
+     `ZZ_PTY_SHARDS` 4, 16 or 0 makes no difference. zz-terminal `search_worker_tests` counts
+     named threads through /proc and is not isolated like the daemon thread-count tests.
+   - Mac `compat/attached-client.sh` fails on the tmux side under load: the copy-mode position
+     indicator is captured half drawn (`[` with no `N/M]`), so the first transcript line does not
+     match. It passes alone on a quiet Mac. Killing the fixture mid-run leaks its `zzai-*` tmux
+     server; kill those by hand.
+   - Binaries before `writestall` (loop-00 included) hang in a full-history `capture-pane -S -` of
+     a 20-pane session: use `wave3-gate-cli` (`2ea96e66`) or later as an A/B base for that row.
+   - `endpoint::tests::remote_scripts_fall_back_to_the_mac_app_bundle_cli` returns early when a
+     zz sits in /opt/homebrew/bin or /usr/local/bin.
+   - Measurement: `cli.instr.display.p20` and `cli.wall.version.p1` are bimodal on every binary
+     and on tmux; `chatty.tty_kibps.hidden` swings 30-50% between identical runs.
+   - Cheap instruction wins seen and not taken: `after_command_hook`'s binary search (~0.9% of
+     source_1000), repeated `canonical_command` lookups (~3.6% with `resolve_command`), the
+     per-command `format_variables` clone in `execute_with_mux_source_inner`, Linux chain5 and
+     list_keys +1 to +1.6% from `CommandTask::new_with_log`.
+5. Lanes are Opus subagents now (owner decision 2026-10-02): `~/.claude/agents/lane-impl.md`
+   (`model: opus`, `effort: xhigh`) with a `lane-briefs.py` brief, one worktree each, a warm
+   target cloned with `/bin/cp -c -R`, Linux work over ssh. Nine lanes took 14 min to 2 h 12 min.
+   Wall-time measurements on alienware go through `~/.cache/zz-perf/quiet-gate.sh` (pauses other
+   lanes' compiles under ~/dev); a binary copied to tmpfs `/tmp` there inflates the footprint
+   rows. The wave-exit corpus found what 36 merge rows did not (two W3-LOOP parity regressions):
+   run the full corpus before calling a wave done.
+6. Release freeze until wave 4 exits; protocol stays 107.
 
 ## Wave 3 merge log (from 2026-10-01)
 
@@ -441,6 +424,41 @@ To finish wave 3:
     `smoke/format-modifier-client-loop` is red only with the Linux debug build (clean release).
     `census-hooks`, `smoke/plugin-runtime-vim-tmux-navigator` and `smoke/source-file-byte-name`
     are red on the Mac with loop-00 too (pre-existing, not wave 3).
+  - Wave-3 exit run 2 on `e9bc174c` (focusfix merged; `/tmp/zzpc/wave3-exit2`,
+    `~/.cache/zz-perf/wave3-exit2`), the wave-3 close. fmt, clippy, compat-check, debug and
+    release builds pass on both hosts; workspace tests 7 (Mac) and 8 (Linux) load failures, all
+    pass alone. Corpus: only the expected reds. Linux: `lane2-store`, `show-options-hooks`,
+    `smoke/control-alias-prepare`, `smoke/plugin-runtime-resurrect-restore`,
+    `smoke/format-modifier-client-loop` (debug build only) and the four `known/*`. Mac: the four
+    `known/*`, `census-hooks`, `if-shell-background-order`, `smoke/control-alias-prepare`,
+    `smoke/plugin-runtime-continuum`, `smoke/plugin-runtime-vim-tmux-navigator`,
+    `smoke/resurrect-save`, `smoke/source-file-byte-name`, `smoke/status-background-jobs`.
+    `smoke/chooser-kill-keys` and `smoke/hooks-pane-focus-clients` pass on both. Mac
+    attached-client failed on the tmux side in both exit runs under load (the copy-mode position
+    indicator captured half drawn, a lone `[` at column 196 of 200) and passed alone on a quiet
+    Mac with this build and with loop-00.
+  - Gates committed as `bench/perf/results/wave3-<host>-e9bc174c.json`. Linux: 75 pass, 13 fail,
+    1 regressed (`control.burst_cmds_per_s`, the wave-2 outlier). The fails are wave-2 tmux reds
+    that improved (spawn CPU x2, chatty visible, attach CPU x2, `control.latency`), the six echo
+    rows (1.5x rule, W4-DELIVER) and `cli.wall.capture_history.p20` at 1.127x tmux, a new row:
+    six quiet-gate runs alternating `2ea96e66` and this build read 0.96-1.04x tmux for both at
+    the same 138.67 Minstr, so the gate read a noisy sample. Mac: 81 pass, 7 fail, 6 regressed
+    against the wave-2 JSON, all explained by a full-mode spawn/chatty/attach A/B alternating
+    loop-00 and this build twice (`/tmp/zzpc/w3/exit-ab`, about 1.3 cores of desktop load):
+    `spawn.wall.split_shell`, `spawn.cpu.split_shell` and `spawn.wall.split_empty_P` read the
+    same or better than loop-00 (split_shell CPU 1.63/1.75 against 1.58/1.60 ms, wall 9.5/10.5
+    against 9.2/7.8 ms), so the wave-2 JSON came from a quieter Mac; `attach.wire_c2s.p1`/`.p4`
+    +264 B is the caller's environment in the Hello (loop-00 sends 4738/4785 B from the same
+    shell); `chatty.cpu_pct.steady` 6.55/7.40% against loop-00's 5.44/5.81% with tmux at 4.7-6.5%
+    in the same runs is +11% once normalized by tmux, at +4% instructions (66.0/67.9 against
+    63.8/64.6 Minstr/s), under both tolerances: accepted and watched in W4-DELIVER, which
+    rewrites hidden-pane delivery. `echo.p99.idle` shows as drifted against W0 but passes at
+    0.87x tmux.
+  - loop-00 hung on Linux in `capture-pane -p -S -` of the cli group's 20-pane session (the loop
+    idle in `ep_poll`, the client waiting on its reply). That is the `writestall` bug, introduced
+    and fixed inside W3-LOOP (loop-00 already carries the b slices), never on main.
+  - Decision: wave 3 is closed. Both exit gates, the HANDOFF and the design status go to main
+    with the code; no tag (release freeze until wave 4).
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

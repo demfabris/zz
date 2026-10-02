@@ -3318,6 +3318,11 @@ Foreground items resume at their saved boundaries. The loop applies ready backgr
 Unix has no shell process worker, foreground result receiver or per-job exit poller. Twenty concurrent jobs add zero job or command workers; admission rejects a command after 256 slots fill.
 The serial daemon suite, focused tests, fmt and daemon Clippy pass. Five compat groups are clean; `if-shell-background-order` has the same pre-lane red where tmux does not reach file order on this Mac.
 
+**e07 as built (2026-10-02, macOS):** `Shared::register_overlay_wait` registers display-panes, command-prompt and confirm-before continuations before publishing their overlays; Unix workers return while the client records own the waits.
+Selection, acceptance, replacement, expiry, cancellation, detach and disconnect complete each wait once. Accepted confirms insert child queue frames; prompt answers retain their wait until the callback finishes, preserving history, freezing and alias timing.
+Six new tests cover twenty parked overlays of each type with zero added workers, child frames and lifecycle completion. The serial daemon suite passes 1,492 tests with one ignored; fmt, daemon Clippy and six compat scenarios pass, with zero divergences across 43 steps.
+Three alternating quick pairs against `loop-6c163955-cli` pass all 19 CLI instruction rows under the 1.02x-or-baseline-range rule. `chain5.p20` is 0.2910 -> 0.2923 Minstr (1.00447x); idle CPU, instructions and wakeups are zero, and p1/p20 threads stay at 2/5. Linux-only checks were not run on this Mac.
+
 
 ## W4-DELIVER: frames straight from shards (effort L)
 

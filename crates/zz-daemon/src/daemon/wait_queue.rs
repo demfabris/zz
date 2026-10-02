@@ -2,15 +2,27 @@ use super::*;
 
 pub(super) fn queue_command(command: &CommandInvocation) -> bool {
     MuxEngine::is_command_alias_group(command)
-        || canonical_command(&command.name) == "wait-for"
-        || matches!(canonical_command(&command.name), "run-shell" | "if-shell")
+        || matches!(
+            canonical_command(&command.name),
+            "wait-for"
+                | "run-shell"
+                | "if-shell"
+                | "display-panes"
+                | "command-prompt"
+                | "confirm-before"
+        )
 }
 
 pub(super) fn task_command(command: &CommandInvocation) -> bool {
     MuxEngine::is_command_alias_group(command)
         || matches!(
             canonical_command(&command.name),
-            "wait-for" | "run-shell" | "if-shell"
+            "wait-for"
+                | "run-shell"
+                | "if-shell"
+                | "display-panes"
+                | "command-prompt"
+                | "confirm-before"
         )
 }
 
@@ -269,6 +281,7 @@ impl Drop for CommandTask {
             .pending_wait
             .take();
         if let Some(wait) = pending {
+            self.shared.wake_wait_items([wait.continuation.clone()]);
             let next = remove_wait_item(
                 &mut self.shared.inner.lock(),
                 &wait.name,
@@ -400,6 +413,7 @@ impl Drop for InsertedTask {
             .pending_wait
             .take();
         if let Some(wait) = pending {
+            self.shared.wake_wait_items([wait.continuation.clone()]);
             let next = remove_wait_item(
                 &mut self.shared.inner.lock(),
                 &wait.name,

@@ -271,6 +271,10 @@ read "Lane brief rules" before launching anything.
   - helperwait (`e3a2a1fd`, Mac): prompt history load/save resume through helper continuations
     (`daemon/history_io.rs`); no helper reply is awaited on the loop thread (the remaining
     synchronous callers are off the loop); 1533 daemon tests; 21/21 perf rows pass.
+  - writestall (`0ca40354`, Linux): when write_ready stops at its batch limit with data queued, the
+    connection stays scheduled for another pass; the new test stalled at 262 KB of 786 KB on the
+    base and passes 10/10. The base also hung a `capture-pane` over 60 s in a perf run (large
+    output to a CLI client): same bug. Instructions within 1.004x, throughput/attach within range.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

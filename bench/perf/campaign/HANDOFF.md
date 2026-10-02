@@ -117,6 +117,15 @@ read "Lane brief rules" before launching anything.
     also fails on the Mac with the wave-3 start binary: zz answers frozen/sequential as the
     2026-09-06 closure recorded, the fetched tmux oracle now answers broken. Oracle drift, not
     LOOP; handed to a separate task.
+  - e03b (`b626aa02`, Linux): sourced config replay, after-command, event and shutdown hooks run
+    as owned queue frames; 23/23 perf rows at most 1.004x, compat clean.
+  - `plain_input_and_unchanged_selection_need_no_worker` fails on Linux from c01 on (warm runs
+    20/20, the first run after a build passes): pane startup raises hook events, c01 runs
+    `run_event_hooks` as a watcher effect on a worker, and that worker start takes the test's
+    injected failure. A test race plus one worker hop per title/rename event; e20 (event hooks
+    as cmdq work on the loop) owns the fix and must pass it 20/20 on Linux.
+  - Order change: e04 (tap arm/disarm, rearm_pane_pipe) would collide with e16 on the Mac, so
+    alienware took e06 (wait-for continuations) first; e04 follows e16.
   - `chatty.instr_per_s.*` is a rate and its quick-mode spread is 5-15% per host (Mac hidden
     chatty B alone spans 70-84): judge it on the min/max of three alternating runs, or against
     the previous slice's binary, not the median ratio alone. Later briefs compare against the

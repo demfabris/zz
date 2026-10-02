@@ -5754,6 +5754,10 @@ impl Shared {
     fn refresh_modes(&self, clients: &BTreeSet<ClientId>) {
         let updates = {
             let inner = self.inner.lock();
+            let clients = status_targets(&inner, None, Some(clients));
+            if clients.is_empty() {
+                return;
+            }
             let copy_modes = Arc::new(copy_mode_format_facts(&inner));
             clients
                 .iter()

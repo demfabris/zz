@@ -5165,10 +5165,14 @@ enum SnapshotChange {
     Overlay,
 }
 
-#[derive(Debug)]
 #[cfg(any(target_os = "linux", not(unix), test))]
 enum ReaderMessage {
-    Data { buffer: Vec<u8>, length: usize },
+    Data {
+        buffer: Vec<u8>,
+        length: usize,
+    },
+    #[cfg(target_os = "linux")]
+    Home,
     Eof,
 }
 
@@ -13476,6 +13480,7 @@ struct GatherSlot {
     starved: AtomicBool,
     closed: AtomicBool,
     owner: Mutex<ActorWake>,
+    home: Mutex<Option<GatherPane>>,
 }
 
 #[cfg(target_os = "linux")]
@@ -13535,36 +13540,81 @@ impl PtyGather {
         self.thread.is_finished()
     }
 
-    fn add(
-        &self,
-        fd: filedescriptor::FileDescriptor,
-        output: Sender<ReaderMessage>,
-        recycled: Receiver<Vec<u8>>,
-        wake: ActorWake,
-    ) -> Result<GatherLease, WorkerError> {
-        let slot = Arc::new(GatherSlot {
-            starved: AtomicBool::new(false),
-            closed: AtomicBool::new(false),
-            owner: Mutex::new(self.panes.wake.clone()),
-        });
-        self.panes
-            .send(
-                GatherPane::new(GatherSource {
-                    fd,
-                    output,
-                    recycled,
-                    wake,
-                    slot: Arc::clone(&slot),
-                }),
-                &self.panes.wake,
-            )
-            .map_err(|_| WorkerError::Thread("PTY gather stopped".to_owned()))?;
-        Ok(GatherLease { slot })
+    fn lend(&self, mut pane: GatherPane) -> Result<(), GatherPane> {
+        pane.filled = Some(Instant::now());
+        pane.sent = pane.filled;
+        let back = pane.source.wake.clone();
+        self.panes.send(pane, &back)
+    }
+}
+
+#[cfg(target_os = "linux")]
+struct DirectReader {
+    gather: Option<PtyGather>,
+    pane: Option<GatherPane>,
+    last: Instant,
+    bytes: usize,
+}
+
+#[cfg(target_os = "linux")]
+impl DirectReader {
+    fn new(gather: Option<PtyGather>, pane: GatherPane) -> (Self, Vec<u8>) {
+        let mut reader = Self {
+            gather,
+            pane: None,
+            last: Instant::now(),
+            bytes: 0,
+        };
+        let buffer = reader.park(pane);
+        (reader, buffer)
+    }
+
+    fn fd(&self) -> Option<&filedescriptor::FileDescriptor> {
+        self.pane.as_ref().map(|pane| &pane.source.fd)
+    }
+
+    fn park(&mut self, mut pane: GatherPane) -> Vec<u8> {
+        let buffer = pane
+            .buffer
+            .take()
+            .or_else(|| pane.source.recycled.try_recv().ok())
+            .unwrap_or_else(|| vec![0_u8; PTY_READ_BUFFER_BYTES]);
+        self.pane = Some(pane);
+        self.bytes = 0;
+        buffer
+    }
+
+    fn lend_if_busy(&mut self, read: usize, buffer: &mut Vec<u8>, buffers: &BufferReturn) -> bool {
+        if self.gather.is_none() {
+            return false;
+        }
+        let now = Instant::now();
+        if now.saturating_duration_since(self.last) >= PTY_GATHER_LEND_BUSY {
+            self.bytes = 0;
+        }
+        self.last = now;
+        self.bytes += read;
+        if self.bytes < PTY_READ_BUFFER_BYTES {
+            return false;
+        }
+        let (Some(gather), Some(pane)) = (&self.gather, self.pane.take()) else {
+            return false;
+        };
+        buffers.give(std::mem::take(buffer));
+        let Err(pane) = gather.lend(pane) else {
+            return true;
+        };
+        *buffer = self.park(pane);
+        false
     }
 }
 
 #[cfg(target_os = "linux")]
 impl GatherLease {
+    fn take_home(&self) -> Option<GatherPane> {
+        self.slot.home.lock().take()
+    }
+
     fn returned(&self) {
         std::sync::atomic::fence(Ordering::SeqCst);
         if self.slot.starved.load(Ordering::Relaxed)
@@ -13578,7 +13628,12 @@ impl GatherLease {
 #[cfg(target_os = "linux")]
 impl Drop for GatherLease {
     fn drop(&mut self) {
-        self.slot.closed.store(true, Ordering::Release);
+        let parked = {
+            let mut home = self.slot.home.lock();
+            self.slot.closed.store(true, Ordering::Release);
+            home.take()
+        };
+        drop(parked);
         self.slot.notify();
     }
 }
@@ -13611,6 +13666,7 @@ struct GatherPane {
     waiting: bool,
     done: bool,
     filled: Option<Instant>,
+    sent: Option<Instant>,
 }
 
 #[cfg(target_os = "linux")]
@@ -13625,7 +13681,57 @@ impl GatherPane {
             waiting: false,
             done: false,
             filled: None,
+            sent: None,
         }
+    }
+
+    fn open(
+        fd: filedescriptor::FileDescriptor,
+        output: Sender<ReaderMessage>,
+        recycled: Receiver<Vec<u8>>,
+        wake: ActorWake,
+    ) -> (Self, GatherLease) {
+        let slot = Arc::new(GatherSlot {
+            starved: AtomicBool::new(false),
+            closed: AtomicBool::new(false),
+            owner: Mutex::new(wake.clone()),
+            home: Mutex::new(None),
+        });
+        (
+            Self::new(GatherSource {
+                fd,
+                output,
+                recycled,
+                wake,
+                slot: Arc::clone(&slot),
+            }),
+            GatherLease { slot },
+        )
+    }
+
+    fn go_home(mut self) -> Result<(), Self> {
+        self.send();
+        if self.done || self.source.output.is_full() {
+            return Err(self);
+        }
+        self.active = false;
+        self.waiting = false;
+        self.spins = 0;
+        let slot = Arc::clone(&self.source.slot);
+        let output = self.source.output.clone();
+        let wake = self.source.wake.clone();
+        {
+            let mut home = slot.home.lock();
+            if slot.closed.load(Ordering::Acquire) {
+                return Err(self);
+            }
+            slot.move_to(&wake);
+            *home = Some(self);
+        }
+        if output.try_send(ReaderMessage::Home).is_ok() {
+            wake.notify();
+        }
+        Ok(())
     }
 
     fn has_buffer(&mut self) -> bool {
@@ -13706,6 +13812,7 @@ impl GatherPane {
             .try_send(ReaderMessage::Data { buffer, length })
             .is_ok()
         {
+            self.sent = Some(Instant::now());
             self.source.wake.notify();
         } else {
             self.done = true;
@@ -13838,10 +13945,14 @@ impl Gather {
         loop {
             self.accept();
             self.release();
+            let home = match self.role {
+                GatherRole::Home => self.hand_back(),
+                _ => None,
+            };
             let busy = self.panes.iter().any(|pane| pane.active || pane.waiting);
             let idle = match self.role {
                 _ if busy => None,
-                GatherRole::Home => self.retire(),
+                GatherRole::Home => self.retire().into_iter().chain(home).min(),
                 GatherRole::Lent(_) => self.give_back(),
                 GatherRole::Orphaned => None,
             };
@@ -13996,6 +14107,39 @@ impl Gather {
             .min()
     }
 
+    fn hand_back(&mut self) -> Option<Duration> {
+        let now = Instant::now();
+        let mut wait = None::<Duration>;
+        let mut index = 0;
+        while index < self.panes.len() {
+            let pane = &mut self.panes[index];
+            if pane.done || pane.active || pane.waiting {
+                index += 1;
+                continue;
+            }
+            let quiet = pane
+                .sent
+                .map_or(Duration::MAX, |sent| now.saturating_duration_since(sent));
+            if quiet < PTY_GATHER_LEND_IDLE {
+                let left = PTY_GATHER_LEND_IDLE.saturating_sub(quiet);
+                wait = Some(wait.map_or(left, |wait| wait.min(left)));
+                index += 1;
+                continue;
+            }
+            if !pane.has_buffer() {
+                index += 1;
+                continue;
+            }
+            if let Err(pane) = self.panes.swap_remove(index).go_home() {
+                self.panes.push(pane);
+                return Some(
+                    wait.map_or(PTY_GATHER_LEND_BUSY, |wait| wait.min(PTY_GATHER_LEND_BUSY)),
+                );
+            }
+        }
+        wait
+    }
+
     fn give_back(&mut self) -> Option<Duration> {
         let GatherRole::Lent(home) = &self.role else {
             return None;
@@ -14144,7 +14288,7 @@ fn drain_pty_output_burst(
     limit_turn: bool,
     max_chunks: usize,
     mut consume: impl FnMut(Vec<u8>, usize),
-) -> bool {
+) -> Option<ReaderMessage> {
     let started = limit_turn.then(Instant::now);
     let mut bytes = first_length;
     consume(first_buffer, first_length);
@@ -14161,11 +14305,11 @@ fn drain_pty_output_burst(
                 bytes += length;
                 consume(buffer, length);
             }
-            Ok(ReaderMessage::Eof) => return true,
+            Ok(message) => return Some(message),
             Err(_) => break,
         }
     }
-    false
+    None
 }
 
 fn drain_effects(effects: &RefCell<PtyEffects>, writer: &mut dyn Write) -> Result<(), WorkerError> {
@@ -22363,6 +22507,24 @@ mod tests {
         BufferReturn,
         Vec<usize>,
     ) {
+        let (write_fd, pane, output_rx, buffers, allocations) = parked_fixture(pool);
+        assert!(
+            gather.lend(pane).is_ok(),
+            "register the fixture with the gather"
+        );
+        (write_fd, output_rx, buffers, allocations)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn parked_fixture(
+        pool: usize,
+    ) -> (
+        std::os::fd::OwnedFd,
+        GatherPane,
+        Receiver<ReaderMessage>,
+        BufferReturn,
+        Vec<usize>,
+    ) {
         let (read_fd, write_fd) = rustix::pipe::pipe().expect("PTY fixture pipe");
         rustix::io::ioctl_fionbio(&read_fd, true).expect("nonblocking fixture reader");
         let (output_tx, output_rx) = crossbeam_channel::bounded(pool + 1);
@@ -22374,11 +22536,10 @@ mod tests {
             recycle_tx.send(buffer).expect("seed gather pool");
         }
         let fd = filedescriptor::FileDescriptor::dup(&read_fd).expect("fixture reader");
-        let lease = gather
-            .add(fd, output_tx, recycle_rx, ActorWake::none())
-            .expect("register the fixture with the gather");
+        let (pane, lease) = GatherPane::open(fd, output_tx, recycle_rx, ActorWake::none());
         (
             write_fd,
+            pane,
             output_rx,
             BufferReturn {
                 buffers: recycle_tx,
@@ -22389,14 +22550,104 @@ mod tests {
     }
 
     #[cfg(target_os = "linux")]
-    fn gathered(output: &Receiver<ReaderMessage>) -> Option<(Vec<u8>, usize)> {
-        match output
-            .recv_timeout(Duration::from_secs(2))
-            .expect("gather output")
-        {
-            ReaderMessage::Data { buffer, length } => Some((buffer, length)),
-            ReaderMessage::Eof => None,
+    fn write_fixture(write_fd: &std::os::fd::OwnedFd, bytes: &[u8]) {
+        let mut offset = 0;
+        while offset < bytes.len() {
+            match rustix::io::write(write_fd, &bytes[offset..]) {
+                Ok(sent) => offset += sent,
+                Err(rustix::io::Errno::INTR) => {}
+                Err(error) => panic!("fixture write failed: {error}"),
+            }
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_pty_gather_sends_a_quiet_pane_home_after_its_data() {
+        let gather = PtyGather::start("zz-pty-home-t".to_owned()).expect("gather thread");
+        let (write_fd, output_rx, buffers, _) = gather_fixture(&gather, PTY_BUFFER_POOL_SIZE);
+        let first = lend_pattern(0, 3, PTY_READ_BUFFER_BYTES + 100);
+        let writer = {
+            let first = first.clone();
+            let write_fd = write_fd.try_clone().expect("fixture writer");
+            thread::spawn(move || write_fixture(&write_fd, &first))
+        };
+        let mut observed = Vec::new();
+        let pane = loop {
+            match output_rx
+                .recv_timeout(Duration::from_secs(2))
+                .expect("gather output")
+            {
+                ReaderMessage::Data { buffer, length } => {
+                    observed.extend_from_slice(&buffer[..length]);
+                    buffers.give(buffer);
+                }
+                ReaderMessage::Home => break sent_home(&buffers),
+                ReaderMessage::Eof => panic!("the fixture closed"),
+            }
+        };
+        writer.join().expect("fixture writer");
+        assert_eq!(observed, first);
+
+        write_fixture(&write_fd, b"after");
+        assert!(output_rx.recv_timeout(PTY_GATHER_LEND_IDLE * 2).is_err());
+        let mut read = [0_u8; 16];
+        assert_eq!(rustix::io::read(&pane.source.fd, &mut read), Ok(5));
+        assert_eq!(&read[..5], b"after");
+
+        assert!(gather.lend(pane).is_ok());
+        write_fixture(&write_fd, b"again");
+        let (buffer, length) = gathered(&gather, &output_rx, &buffers).expect("lent again");
+        assert_eq!(&buffer[..length], b"again");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_direct_reader_lends_its_pane_after_a_burst_without_a_pause() {
+        let gather = PtyGather::start("zz-pty-direct-t".to_owned()).expect("gather thread");
+        let (write_fd, pane, output_rx, buffers, _) = parked_fixture(PTY_BUFFER_POOL_SIZE);
+        let (mut reader, mut buffer) = DirectReader::new(Some(gather.clone()), pane);
+        assert_eq!(buffer.len(), PTY_READ_BUFFER_BYTES);
+        let half = PTY_READ_BUFFER_BYTES / 2;
+        assert!(!reader.lend_if_busy(half, &mut buffer, &buffers));
+        thread::sleep(PTY_GATHER_LEND_BUSY);
+        assert!(!reader.lend_if_busy(half, &mut buffer, &buffers));
+        assert!(reader.fd().is_some());
+        assert!(reader.lend_if_busy(half, &mut buffer, &buffers));
+        assert!(reader.fd().is_none());
+        assert!(buffer.is_empty());
+
+        write_fixture(&write_fd, b"lent");
+        let (lent, length) =
+            gathered(&gather, &output_rx, &buffers).expect("gathered after the lend");
+        assert_eq!(&lent[..length], b"lent");
+    }
+
+    #[cfg(target_os = "linux")]
+    fn gathered(
+        gather: &PtyGather,
+        output: &Receiver<ReaderMessage>,
+        buffers: &BufferReturn,
+    ) -> Option<(Vec<u8>, usize)> {
+        loop {
+            match output
+                .recv_timeout(Duration::from_secs(2))
+                .expect("gather output")
+            {
+                ReaderMessage::Data { buffer, length } => return Some((buffer, length)),
+                ReaderMessage::Home => assert!(gather.lend(sent_home(buffers)).is_ok()),
+                ReaderMessage::Eof => return None,
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn sent_home(buffers: &BufferReturn) -> GatherPane {
+        buffers
+            .gather
+            .as_ref()
+            .and_then(GatherLease::take_home)
+            .expect("the pane waits at home")
     }
 
     #[cfg(target_os = "linux")]
@@ -22422,7 +22673,7 @@ mod tests {
 
         let mut observed = Vec::with_capacity(expected.len());
         let mut observed_allocations = Vec::new();
-        while let Some((buffer, length)) = gathered(&output_rx) {
+        while let Some((buffer, length)) = gathered(&gather, &output_rx, &buffers) {
             observed.extend_from_slice(&buffer[..length]);
             observed_allocations.push(buffer.as_ptr() as usize);
             buffers.give(buffer);
@@ -22447,12 +22698,13 @@ mod tests {
             rustix::io::write(&write_fd, b"prompt").expect("interactive fixture write"),
             6
         );
-        let (buffer, length) = gathered(&output_rx).expect("interactive gather output");
+        let (buffer, length) =
+            gathered(&gather, &output_rx, &buffers).expect("interactive gather output");
         assert_eq!(&buffer[..length], b"prompt");
         buffers.give(buffer);
 
         drop(write_fd);
-        assert!(gathered(&output_rx).is_none());
+        assert!(gathered(&gather, &output_rx, &buffers).is_none());
     }
 
     #[cfg(target_os = "linux")]
@@ -22460,19 +22712,22 @@ mod tests {
     fn linux_pty_gather_parks_a_starved_pane_without_blocking_its_neighbour() {
         let gather = PtyGather::start("zz-pty-gather".to_owned()).expect("gather thread");
         let (busy_fd, busy_output, busy_buffers, _) = gather_fixture(&gather, 1);
-        let (quiet_fd, quiet_output, _quiet_buffers, _) = gather_fixture(&gather, 1);
+        let (quiet_fd, quiet_output, quiet_buffers, _) = gather_fixture(&gather, 1);
 
         rustix::io::write(&busy_fd, b"first").expect("busy fixture write");
-        let (held, length) = gathered(&busy_output).expect("first busy batch");
+        let (held, length) =
+            gathered(&gather, &busy_output, &busy_buffers).expect("first busy batch");
         assert_eq!(&held[..length], b"first");
         rustix::io::write(&busy_fd, b"second").expect("busy fixture write");
         rustix::io::write(&quiet_fd, b"quiet").expect("quiet fixture write");
-        let (quiet, length) = gathered(&quiet_output).expect("quiet batch");
+        let (quiet, length) =
+            gathered(&gather, &quiet_output, &quiet_buffers).expect("quiet batch");
         assert_eq!(&quiet[..length], b"quiet");
         assert!(busy_output.is_empty());
 
         busy_buffers.give(held);
-        let (resumed, length) = gathered(&busy_output).expect("resumed busy batch");
+        let (resumed, length) =
+            gathered(&gather, &busy_output, &busy_buffers).expect("resumed busy batch");
         assert_eq!(&resumed[..length], b"second");
     }
 
@@ -22481,7 +22736,7 @@ mod tests {
     fn linux_pty_gather_delivers_a_partial_batch_beside_a_busy_neighbour() {
         let gather = PtyGather::start("zz-pty-gather".to_owned()).expect("gather thread");
         let (busy_fd, busy_output, busy_buffers, _) = gather_fixture(&gather, PTY_BUFFER_POOL_SIZE);
-        let (quiet_fd, quiet_output, _quiet_buffers, _) =
+        let (quiet_fd, quiet_output, quiet_buffers, _) =
             gather_fixture(&gather, PTY_BUFFER_POOL_SIZE);
         let writer = thread::spawn(move || {
             let chunk = vec![b'b'; PTY_READ_BUFFER_BYTES];
@@ -22515,7 +22770,8 @@ mod tests {
             rustix::io::write(&quiet_fd, &batch).expect("quiet fixture write"),
             batch.len()
         );
-        let (quiet, length) = gathered(&quiet_output).expect("quiet batch");
+        let (quiet, length) =
+            gathered(&gather, &quiet_output, &quiet_buffers).expect("quiet batch");
         assert_eq!(&quiet[..length], &batch[..]);
         assert!(!writer.is_finished());
         stop.store(true, Ordering::Relaxed);
@@ -22576,22 +22832,27 @@ mod tests {
                 (write_fd, written)
             }));
             let stop = Arc::clone(&stop_readers);
+            let home = gather.clone();
             readers.push(thread::spawn(move || {
                 let mut observed = 0;
-                let mut check = |buffer: Vec<u8>, length: usize| {
-                    assert_eq!(buffer[..length], lend_pattern(observed, seed, length)[..]);
-                    observed += length;
-                    buffers.give(buffer);
+                let mut check = |message: ReaderMessage| match message {
+                    ReaderMessage::Data { buffer, length } => {
+                        assert_eq!(buffer[..length], lend_pattern(observed, seed, length)[..]);
+                        observed += length;
+                        buffers.give(buffer);
+                    }
+                    ReaderMessage::Home => {
+                        assert!(home.lend(sent_home(&buffers)).is_ok());
+                    }
+                    ReaderMessage::Eof => panic!("busy fixture closed"),
                 };
                 while !stop.load(Ordering::Relaxed) {
-                    if let Ok(ReaderMessage::Data { buffer, length }) =
-                        output_rx.recv_timeout(Duration::from_millis(10))
-                    {
-                        check(buffer, length);
+                    if let Ok(message) = output_rx.recv_timeout(Duration::from_millis(10)) {
+                        check(message);
                     }
                 }
-                while let Ok(ReaderMessage::Data { buffer, length }) = output_rx.try_recv() {
-                    check(buffer, length);
+                while let Ok(message) = output_rx.try_recv() {
+                    check(message);
                 }
                 (observed, output_rx, buffers)
             }));
@@ -22627,7 +22888,8 @@ mod tests {
                 rustix::io::write(&write_fd, &batch).expect("returned pane write"),
                 batch.len()
             );
-            let (buffer, length) = gathered(&output_rx).expect("returned pane batch");
+            let (buffer, length) =
+                gathered(&gather, &output_rx, &buffers).expect("returned pane batch");
             assert_eq!(&buffer[..length], &batch[..]);
             buffers.give(buffer);
         }
@@ -22637,9 +22899,9 @@ mod tests {
     fn lent_out(gather: &PtyGather, buffers: &BufferReturn) -> bool {
         let lease = buffers.gather.as_ref().expect("gather lease");
         let owner = lease.slot.owner.lock();
-        !matches!(
+        matches!(
             (&owner.pipe, &gather.panes.wake.pipe),
-            (Some(owner), Some(home)) if Arc::ptr_eq(owner, home)
+            (Some(owner), Some(home)) if !Arc::ptr_eq(owner, home)
         )
     }
 
@@ -22681,24 +22943,23 @@ mod tests {
         while lends < 3 {
             assert!(Instant::now() < deadline, "the bursting pane was not lent");
             let burst = lend_pattern(offset, 7, PTY_READ_BUFFER_BYTES + 100);
-            let mut written = 0;
-            while written < burst.len() {
-                match rustix::io::write(&burst_fd, &burst[written..]) {
-                    Ok(sent) => written += sent,
-                    Err(rustix::io::Errno::INTR) => {}
-                    Err(error) => panic!("burst fixture write failed: {error}"),
-                }
-            }
+            let writer = {
+                let burst = burst.clone();
+                let burst_fd = burst_fd.try_clone().expect("burst writer");
+                thread::spawn(move || write_fixture(&burst_fd, &burst))
+            };
             let mut observed = 0;
             let mut lent = false;
             while observed < burst.len() {
-                let (buffer, length) = gathered(&burst_output).expect("burst batch");
+                let (buffer, length) =
+                    gathered(&gather, &burst_output, &burst_buffers).expect("burst batch");
                 assert_eq!(&buffer[..length], &burst[observed..observed + length]);
                 observed += length;
                 burst_buffers.give(buffer);
                 lent |= lent_out(&gather, &burst_buffers);
                 threads.extend(gather_threads(name));
             }
+            writer.join().expect("burst writer");
             offset += burst.len();
             let back = Instant::now() + Duration::from_secs(2);
             while lent_out(&gather, &burst_buffers) {
@@ -22788,7 +23049,8 @@ mod tests {
             |buffer, length| {
                 consumed.extend_from_slice(&buffer[..length]);
             },
-        );
+        )
+        .is_some();
 
         let burst_limit = u8::try_from(PTY_BUFFER_POOL_SIZE).expect("burst limit fits in a byte");
         assert!(!reached_eof);

@@ -25,7 +25,7 @@ pub(super) struct PaneActor {
     child_watch: ChildExitWatch,
     #[cfg(unix)]
     wake_rx: Option<std::os::fd::OwnedFd>,
-    #[cfg(unix)]
+    #[cfg(all(unix, not(target_os = "linux")))]
     drain_fd: Option<filedescriptor::FileDescriptor>,
     #[cfg(unix)]
     read_buffer: Vec<u8>,
@@ -41,6 +41,8 @@ pub(super) struct PaneActor {
     no_output: Receiver<ReaderMessage>,
     #[cfg(any(target_os = "linux", not(unix)))]
     recycle_tx: BufferReturn,
+    #[cfg(target_os = "linux")]
+    reader: DirectReader,
     #[cfg(windows)]
     master_close_tx: Sender<Box<dyn portable_pty::MasterPty + Send>>,
     effects: Rc<RefCell<PtyEffects>>,
@@ -257,60 +259,38 @@ impl PaneActor {
             tty,
         })));
 
-        #[cfg(target_os = "linux")]
-        let mut drain_fd = Some(drain_fd);
         #[cfg(all(unix, not(target_os = "linux")))]
         let drain_fd = Some(drain_fd);
         #[cfg(any(target_os = "linux", not(unix)))]
-        let (output_rx, recycle_tx) = {
-            #[cfg(not(unix))]
-            let gather = Some(());
-            if let Some(gather) = gather {
-                let (output_tx, output_rx) = crossbeam_channel::bounded(PTY_BUFFER_POOL_SIZE + 1);
-                let (recycle_tx, recycle_rx) = crossbeam_channel::bounded(PTY_BUFFER_POOL_SIZE);
-                for _ in 0..PTY_BUFFER_POOL_SIZE {
-                    recycle_tx
-                        .send(vec![0_u8; PTY_READ_BUFFER_BYTES])
-                        .map_err(|error| WorkerError::Thread(error.to_string()))?;
-                }
-                #[cfg(target_os = "linux")]
-                let lease = gather.add(
-                    drain_fd.take().expect("gather owns the PTY master"),
-                    output_tx,
-                    recycle_rx,
-                    wake.clone(),
-                )?;
-                #[cfg(not(unix))]
-                {
-                    let () = gather;
-                    let pending_output: Box<dyn Fn() -> usize + Send> = Box::new(|| 0);
-                    let output_wake = wake.clone();
-                    thread::Builder::new()
-                        .name("zz-pty-reader".into())
-                        .spawn(move || {
-                            read_pty(reader, pending_output, output_tx, recycle_rx, output_wake);
-                        })
-                        .map_err(WorkerError::Io)?;
-                }
-                (
-                    output_rx,
-                    BufferReturn {
-                        buffers: recycle_tx,
-                        #[cfg(target_os = "linux")]
-                        gather: Some(lease),
-                    },
-                )
-            } else {
-                let (recycle_tx, _) = crossbeam_channel::unbounded();
-                (
-                    crossbeam_channel::never(),
-                    BufferReturn {
-                        buffers: recycle_tx,
-                        #[cfg(target_os = "linux")]
-                        gather: None,
-                    },
-                )
-            }
+        let (output_tx, output_rx) = crossbeam_channel::bounded(PTY_BUFFER_POOL_SIZE + 1);
+        #[cfg(any(target_os = "linux", not(unix)))]
+        let (recycle_tx, recycle_rx) = crossbeam_channel::bounded(PTY_BUFFER_POOL_SIZE);
+        #[cfg(any(target_os = "linux", not(unix)))]
+        for _ in 0..PTY_BUFFER_POOL_SIZE {
+            recycle_tx
+                .send(vec![0_u8; PTY_READ_BUFFER_BYTES])
+                .map_err(|error| WorkerError::Thread(error.to_string()))?;
+        }
+        #[cfg(target_os = "linux")]
+        let (home, lease) = GatherPane::open(drain_fd, output_tx, recycle_rx, wake.clone());
+        #[cfg(target_os = "linux")]
+        let (reader, read_buffer) = DirectReader::new(gather, home);
+        #[cfg(not(unix))]
+        {
+            let pending_output: Box<dyn Fn() -> usize + Send> = Box::new(|| 0);
+            let output_wake = wake.clone();
+            thread::Builder::new()
+                .name("zz-pty-reader".into())
+                .spawn(move || {
+                    read_pty(reader, pending_output, output_tx, recycle_rx, output_wake);
+                })
+                .map_err(WorkerError::Io)?;
+        }
+        #[cfg(any(target_os = "linux", not(unix)))]
+        let recycle_tx = BufferReturn {
+            buffers: recycle_tx,
+            #[cfg(target_os = "linux")]
+            gather: Some(lease),
         };
 
         let effects = Rc::new(RefCell::new(PtyEffects::new()));
@@ -373,12 +353,8 @@ impl PaneActor {
         let no_exit = crossbeam_channel::never();
         #[cfg(not(unix))]
         let no_output = crossbeam_channel::never();
-        #[cfg(unix)]
-        let read_buffer = if drain_fd.is_some() {
-            vec![0_u8; PTY_READ_BUFFER_BYTES]
-        } else {
-            Vec::new()
-        };
+        #[cfg(all(unix, not(target_os = "linux")))]
+        let read_buffer = vec![0_u8; PTY_READ_BUFFER_BYTES];
         #[cfg(unix)]
         let bridge_spins = PTY_BRIDGE_SPIN_MAX;
         let (search_worker, search_results) = SearchWorker::spawn(wake.clone());
@@ -426,7 +402,7 @@ impl PaneActor {
             child_watch,
             #[cfg(unix)]
             wake_rx,
-            #[cfg(unix)]
+            #[cfg(all(unix, not(target_os = "linux")))]
             drain_fd,
             #[cfg(unix)]
             read_buffer,
@@ -442,6 +418,8 @@ impl PaneActor {
             no_output,
             #[cfg(any(target_os = "linux", not(unix)))]
             recycle_tx,
+            #[cfg(target_os = "linux")]
+            reader,
             #[cfg(windows)]
             master_close_tx,
             effects,
@@ -838,7 +816,7 @@ impl PaneActor {
                 return Ok(Some(Wake::ChildExit(status)));
             }
             #[cfg(target_os = "linux")]
-            let reader_thread = self.drain_fd.is_none();
+            let reader_thread = self.reader.pane.is_none();
             #[cfg(not(unix))]
             let reader_thread = true;
             if reader_thread && self.output_read_ahead() {
@@ -882,10 +860,11 @@ impl PaneActor {
             .is_none()
             .then_some(self.child_watch.poll_fd())
             .flatten();
-        (
-            self.drain_fd.as_ref().filter(|_| self.output_read_ahead()),
-            child,
-        )
+        #[cfg(target_os = "linux")]
+        let pty = self.reader.fd();
+        #[cfg(not(target_os = "linux"))]
+        let pty = self.drain_fd.as_ref();
+        (pty.filter(|_| self.output_read_ahead()), child)
     }
 
     #[cfg(unix)]
@@ -1797,6 +1776,10 @@ impl PaneActor {
         only_ready: bool,
         mut should_yield: impl FnMut() -> bool,
     ) {
+        #[cfg(target_os = "linux")]
+        if self.reader.pane.is_none() {
+            return;
+        }
         let mut burst = 0_usize;
         let mut spins = 0_u32;
         let turn_started = Instant::now();
@@ -1805,18 +1788,26 @@ impl PaneActor {
                 break;
             }
             match self.read_pty_buffer() {
-                Ok(0) => {
+                Ok((0, _)) => {
                     self.reader_eof = true;
                     break;
                 }
-                Ok(length) => {
+                Ok((length, drained)) => {
                     self.consume_read_buffer(length);
+                    #[cfg(target_os = "linux")]
+                    if self
+                        .reader
+                        .lend_if_busy(length, &mut self.read_buffer, &self.recycle_tx)
+                    {
+                        break;
+                    }
                     if spins > 0 {
                         self.bridge_spins = (self.bridge_spins * 2).min(PTY_BRIDGE_SPIN_MAX);
                     }
                     burst += length;
                     spins = 0;
-                    if burst >= PTY_DRAIN_TURN_BYTES
+                    if (drained && burst < PTY_BRIDGE_THRESHOLD_BYTES)
+                        || burst >= PTY_DRAIN_TURN_BYTES
                         || turn_started.elapsed() >= PTY_DRAIN_TURN_TIME
                         || should_yield()
                     {
@@ -1847,11 +1838,18 @@ impl PaneActor {
     }
 
     #[cfg(unix)]
-    fn read_pty_buffer(&mut self) -> Result<usize, rustix::io::Errno> {
+    fn read_pty_buffer(&mut self) -> Result<(usize, bool), rustix::io::Errno> {
+        #[cfg(target_os = "linux")]
+        let fd = self.reader.fd().expect("direct PTY reader");
+        #[cfg(not(target_os = "linux"))]
         let fd = self.drain_fd.as_ref().expect("direct PTY reader");
         let length = rustix::io::read(fd, &mut self.read_buffer[..])?;
+        #[cfg(not(target_os = "linux"))]
+        let drained = false;
         #[cfg(target_os = "linux")]
         let mut length = length;
+        #[cfg(target_os = "linux")]
+        let mut drained = false;
         #[cfg(target_os = "linux")]
         {
             let mut reads = 1;
@@ -1863,11 +1861,14 @@ impl PaneActor {
                         reads += 1;
                     }
                     Err(rustix::io::Errno::INTR) => {}
-                    Err(_) => break,
+                    Err(error) => {
+                        drained = error == rustix::io::Errno::AGAIN;
+                        break;
+                    }
                 }
             }
         }
-        Ok(length)
+        Ok((length, drained))
     }
 
     #[cfg(unix)]
@@ -1905,7 +1906,7 @@ impl PaneActor {
             ReaderMessage::Data { buffer, length } => {
                 let mut consumed_output = false;
                 let max_chunks = self.publisher.output_room().min(PTY_BUFFER_POOL_SIZE);
-                self.reader_eof |= drain_pty_output_burst(
+                let last = drain_pty_output_burst(
                     &self.output_rx,
                     buffer,
                     length,
@@ -1933,6 +1934,20 @@ impl PaneActor {
                     },
                 );
                 self.output_pending |= consumed_output;
+                if let Some(message) = last {
+                    self.on_reader_message(message);
+                }
+            }
+            #[cfg(target_os = "linux")]
+            ReaderMessage::Home => {
+                if let Some(pane) = self
+                    .recycle_tx
+                    .gather
+                    .as_ref()
+                    .and_then(GatherLease::take_home)
+                {
+                    self.read_buffer = self.reader.park(pane);
+                }
             }
             ReaderMessage::Eof => self.reader_eof = true,
         }

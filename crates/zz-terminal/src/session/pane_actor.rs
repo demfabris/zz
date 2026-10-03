@@ -80,10 +80,6 @@ pub(super) struct PaneActor {
     last_content_publish: Instant,
     output_pending: bool,
     vt_diagnostics: VtWriteDiagnostics,
-    raw_output_tap: Option<(u64, RawOutputTapSender)>,
-    raw_output_parse_backlog: VecDeque<(Arc<[u8]>, usize)>,
-    raw_output_parse_backlog_bytes: usize,
-    raw_output_parse_buffer: Vec<u8>,
     #[cfg(unix)]
     active_input_permit: Option<InputPermit>,
     published_facts: Option<TerminalFacts>,
@@ -390,10 +386,6 @@ impl PaneActor {
         let last_content_publish = Instant::now();
         let output_pending = false;
         let vt_diagnostics = VtWriteDiagnostics::default();
-        let raw_output_tap = None;
-        let raw_output_parse_backlog = VecDeque::<(Arc<[u8]>, usize)>::new();
-        let raw_output_parse_backlog_bytes = 0_usize;
-        let raw_output_parse_buffer = Vec::new();
         #[cfg(unix)]
         let active_input_permit = None::<InputPermit>;
 
@@ -489,10 +481,6 @@ impl PaneActor {
             last_content_publish,
             output_pending,
             vt_diagnostics,
-            raw_output_tap,
-            raw_output_parse_backlog,
-            raw_output_parse_backlog_bytes,
-            raw_output_parse_buffer,
             #[cfg(unix)]
             active_input_permit,
             published_facts: None,
@@ -658,7 +646,7 @@ impl PaneActor {
             )?;
         }
         self.compression.observe(&self.terminal, now);
-        if !self.output_pending && self.raw_output_parse_backlog.is_empty() {
+        if !self.output_pending {
             self.compression.run(&mut self.terminal);
         }
 
@@ -701,9 +689,6 @@ impl PaneActor {
         if let Some(due) = self.child_watch.retry {
             deadline = deadline.min(due);
         }
-        if !self.raw_output_parse_backlog.is_empty() {
-            deadline = Instant::now();
-        }
         #[cfg(unix)]
         if self.writer.has_pending() {
             deadline = deadline.min(Instant::now() + PTY_WRITE_RETRY);
@@ -716,6 +701,8 @@ impl PaneActor {
         let timeout = self
             .next_deadline()
             .saturating_duration_since(Instant::now());
+        #[cfg(not(target_os = "linux"))]
+        let read_ahead = self.output_read_ahead();
         #[cfg(not(unix))]
         let child_exit = if self.exit_status.is_some() {
             &self.no_exit
@@ -728,24 +715,13 @@ impl PaneActor {
         let available_input = (!self.writer.has_pending()).then_some(&self.input_rx.commands);
         #[cfg(not(unix))]
         let available_input = Some(&self.input_rx.commands);
-        #[cfg(not(target_os = "linux"))]
-        let raw_output_read_ahead = !self.reader_eof
-            && self
-                .raw_output_tap
-                .as_ref()
-                .is_none_or(|(_, tap)| !tap.is_full())
-            && self.raw_output_parse_backlog_bytes
-                <= RAW_OUTPUT_PARSE_BACKLOG_BYTES
-                    .saturating_sub(RAW_OUTPUT_PARSE_READ_RESERVE_BYTES);
         #[cfg(all(unix, not(target_os = "linux")))]
         let wakeup = wait_for_wake(
             &self.control_rx,
             available_input,
             &self.search_results,
             child_exit,
-            self.drain_fd
-                .as_ref()
-                .filter(|_| !self.reader_eof && raw_output_read_ahead),
+            self.drain_fd.as_ref().filter(|_| read_ahead),
             self.wake_rx
                 .as_ref()
                 .expect("per-pane worker has a wake pipe"),
@@ -754,7 +730,7 @@ impl PaneActor {
         #[cfg(target_os = "linux")]
         let wakeup = self.wait_for_wake_linux(timeout)?;
         #[cfg(not(unix))]
-        let available_output = if self.reader_eof || !raw_output_read_ahead {
+        let available_output = if !read_ahead {
             &self.no_output
         } else {
             &self.output_rx
@@ -879,14 +855,7 @@ impl PaneActor {
     }
 
     pub(super) fn output_read_ahead(&self) -> bool {
-        !self.reader_eof
-            && self
-                .raw_output_tap
-                .as_ref()
-                .is_none_or(|(_, tap)| !tap.is_full())
-            && self.raw_output_parse_backlog_bytes
-                <= RAW_OUTPUT_PARSE_BACKLOG_BYTES
-                    .saturating_sub(RAW_OUTPUT_PARSE_READ_RESERVE_BYTES)
+        !self.reader_eof && self.publisher.output_room() != 0
     }
 
     fn shutdown(&mut self) {
@@ -957,8 +926,8 @@ impl PaneActor {
     }
 
     #[cfg(unix)]
-    pub(super) fn on_pty_ready(&mut self, only_ready: bool) -> Result<(), WorkerError> {
-        self.on_readable_with_spin(only_ready, || false)
+    pub(super) fn on_pty_ready(&mut self, only_ready: bool) {
+        self.on_readable_with_spin(only_ready, || false);
     }
 
     pub(super) fn echo_pending(&self) -> bool {
@@ -995,11 +964,11 @@ impl PaneActor {
             }
             Some(Wake::Search(result)) => self.on_search(result)?,
             #[cfg(unix)]
-            Some(Wake::PtyReadable) => self.on_pty_ready(true)?,
+            Some(Wake::PtyReadable) => self.on_pty_ready(true),
             #[cfg(any(target_os = "linux", not(unix)))]
-            Some(Wake::PtyMessage(message)) => self.on_reader_message(message)?,
+            Some(Wake::PtyMessage(message)) => self.on_reader_message(message),
             Some(Wake::ChildExit(status)) => self.on_child_exit(status)?,
-            Some(Wake::Deadline) => self.on_parse_deadline(),
+            Some(Wake::Deadline) => {}
         }
         #[cfg(unix)]
         if input_permit.is_some() && self.writer.has_pending() {
@@ -1120,25 +1089,7 @@ impl PaneActor {
                     self.echo.open();
                 }
             }
-            Command::ArmRawOutputTap {
-                token,
-                output,
-                reply,
-            } => {
-                self.raw_output_tap = Some((token, output));
-                let _ = reply.send(true);
-            }
             Command::Settle { reply } => {
-                let _ = reply.send(());
-            }
-            Command::DisarmRawOutputTap { token, reply } => {
-                if self
-                    .raw_output_tap
-                    .as_ref()
-                    .is_some_and(|(armed, _)| *armed == token)
-                {
-                    self.raw_output_tap = None;
-                }
                 let _ = reply.send(());
             }
             Command::Resize(next) => {
@@ -1779,7 +1730,7 @@ impl PaneActor {
         &mut self,
         only_ready: bool,
         mut should_yield: impl FnMut() -> bool,
-    ) -> Result<(), WorkerError> {
+    ) {
         let mut burst = 0_usize;
         let mut spins = 0_u32;
         let turn_started = Instant::now();
@@ -1793,14 +1744,13 @@ impl PaneActor {
                     break;
                 }
                 Ok(length) => {
-                    self.consume_read_buffer(length)?;
+                    self.consume_read_buffer(length);
                     if spins > 0 {
                         self.bridge_spins = (self.bridge_spins * 2).min(PTY_BRIDGE_SPIN_MAX);
                     }
                     burst += length;
                     spins = 0;
                     if burst >= PTY_DRAIN_TURN_BYTES
-                        || self.raw_output_parse_backlog_bytes >= RAW_OUTPUT_PARSE_BACKLOG_BYTES
                         || turn_started.elapsed() >= PTY_DRAIN_TURN_TIME
                         || should_yield()
                     {
@@ -1828,8 +1778,6 @@ impl PaneActor {
                 }
             }
         }
-
-        Ok(())
     }
 
     #[cfg(unix)]
@@ -1857,54 +1805,40 @@ impl PaneActor {
     }
 
     #[cfg(unix)]
-    fn consume_read_buffer(&mut self, length: usize) -> Result<(), WorkerError> {
+    fn consume_read_buffer(&mut self, length: usize) {
         log::trace!(
             target: "zz_terminal::diagnostics::pty",
             "read length={length} bytes={:?} text={:?}",
             &self.read_buffer[..length],
             String::from_utf8_lossy(&self.read_buffer[..length]),
         );
-        if self.raw_output_tap.is_some() || !self.raw_output_parse_backlog.is_empty() {
-            let bytes = Arc::<[u8]>::from(&self.read_buffer[..length]);
-            if let Some(token) = tap_raw_output_arc(&mut self.raw_output_tap, &bytes) {
-                self.publisher.raw_output_tap_closed(token)?;
-            }
-            self.raw_output_parse_backlog_bytes = self
-                .raw_output_parse_backlog_bytes
-                .saturating_add(bytes.len());
-            self.raw_output_parse_backlog.push_back((bytes, 0));
-        } else {
-            let started = diagnostic_timer();
-            let parsed = feed_pty_output(
-                &mut self.terminal,
-                &mut self.passthrough,
-                &mut EngineOutput {
-                    filter: &mut self.engine_filter,
-                    knobs: self.engine_knobs,
-                    renames: &mut self.engine_renames,
-                    bar: &mut self.engine_bar,
-                    last_command_status: &mut self.engine_last_command_status,
-                },
-                &self.read_buffer[..length],
-            );
-            self.vt_diagnostics.record(parsed, started);
-            self.output_pending |= parsed > 0;
+        if self.publisher.takes_output() {
+            self.publisher
+                .output(&Arc::from(&self.read_buffer[..length]));
         }
-        Ok(())
+        let started = diagnostic_timer();
+        let parsed = feed_pty_output(
+            &mut self.terminal,
+            &mut self.passthrough,
+            &mut EngineOutput {
+                filter: &mut self.engine_filter,
+                knobs: self.engine_knobs,
+                renames: &mut self.engine_renames,
+                bar: &mut self.engine_bar,
+                last_command_status: &mut self.engine_last_command_status,
+            },
+            &self.read_buffer[..length],
+        );
+        self.vt_diagnostics.record(parsed, started);
+        self.output_pending |= parsed > 0;
     }
 
     #[cfg(any(target_os = "linux", not(unix)))]
-    fn on_reader_message(&mut self, message: ReaderMessage) -> Result<(), WorkerError> {
+    fn on_reader_message(&mut self, message: ReaderMessage) {
         match message {
             ReaderMessage::Data { buffer, length } => {
-                let mut closed_tap = None;
                 let mut consumed_output = false;
-                let max_chunks = self
-                    .raw_output_tap
-                    .as_ref()
-                    .map_or(PTY_BUFFER_POOL_SIZE, |(_, tap)| {
-                        RAW_OUTPUT_TAP_PENDING_CHUNKS.saturating_sub(tap.sender.len())
-                    });
+                let max_chunks = self.publisher.output_room().min(PTY_BUFFER_POOL_SIZE);
                 self.reader_eof |= drain_pty_output_burst(
                     &self.output_rx,
                     buffer,
@@ -1912,54 +1846,30 @@ impl PaneActor {
                     cfg!(not(unix)) && self.sharded,
                     max_chunks,
                     |buffer, length| {
-                        if self.raw_output_tap.is_some()
-                            || !self.raw_output_parse_backlog.is_empty()
-                        {
-                            log::trace!(
-                                target: "zz_terminal::diagnostics::pty",
-                                "read length={length} bytes={:?} text={:?}",
-                                &buffer[..length],
-                                String::from_utf8_lossy(&buffer[..length]),
-                            );
-                            let bytes = Arc::<[u8]>::from(&buffer[..length]);
-                            closed_tap = closed_tap
-                                .or_else(|| tap_raw_output_arc(&mut self.raw_output_tap, &bytes));
-                            self.raw_output_parse_backlog_bytes = self
-                                .raw_output_parse_backlog_bytes
-                                .saturating_add(bytes.len());
-                            self.raw_output_parse_backlog.push_back((bytes, 0));
-                            self.recycle_tx.give(buffer);
-                        } else {
-                            let started = diagnostic_timer();
-                            let (closed, parsed) = consume_pty_output(
-                                &mut self.terminal,
-                                &mut self.passthrough,
-                                &mut EngineOutput {
-                                    filter: &mut self.engine_filter,
-                                    knobs: self.engine_knobs,
-                                    renames: &mut self.engine_renames,
-                                    bar: &mut self.engine_bar,
-                                    last_command_status: &mut self.engine_last_command_status,
-                                },
-                                &mut self.raw_output_tap,
-                                buffer,
-                                length,
-                                &self.recycle_tx,
-                            );
-                            closed_tap = closed_tap.or(closed);
-                            self.vt_diagnostics.record(parsed, started);
-                            consumed_output |= parsed > 0;
-                        }
+                        let started = diagnostic_timer();
+                        let parsed = consume_pty_output(
+                            &mut self.terminal,
+                            &mut self.passthrough,
+                            &mut EngineOutput {
+                                filter: &mut self.engine_filter,
+                                knobs: self.engine_knobs,
+                                renames: &mut self.engine_renames,
+                                bar: &mut self.engine_bar,
+                                last_command_status: &mut self.engine_last_command_status,
+                            },
+                            &self.publisher,
+                            buffer,
+                            length,
+                            &self.recycle_tx,
+                        );
+                        self.vt_diagnostics.record(parsed, started);
+                        consumed_output |= parsed > 0;
                     },
                 );
-                if let Some(token) = closed_tap {
-                    self.publisher.raw_output_tap_closed(token)?;
-                }
                 self.output_pending |= consumed_output;
             }
             ReaderMessage::Eof => self.reader_eof = true,
         }
-        Ok(())
     }
 
     fn on_child_exit(&mut self, status: std::io::Result<ExitStatus>) -> Result<(), WorkerError> {
@@ -1972,41 +1882,15 @@ impl PaneActor {
         Ok(())
     }
 
-    pub(super) fn on_parse_deadline(&mut self) {
-        if self.raw_output_parse_backlog.is_empty() {
-            return;
-        }
-        let started = diagnostic_timer();
-        let parsed = drain_raw_output_parse_backlog(
-            &mut self.terminal,
-            &mut self.passthrough,
-            &mut EngineOutput {
-                filter: &mut self.engine_filter,
-                knobs: self.engine_knobs,
-                renames: &mut self.engine_renames,
-                bar: &mut self.engine_bar,
-                last_command_status: &mut self.engine_last_command_status,
-            },
-            &mut self.raw_output_parse_backlog,
-            &mut self.raw_output_parse_backlog_bytes,
-            &mut self.raw_output_parse_buffer,
-        );
-        self.output_pending |= parsed > 0;
-        self.vt_diagnostics.record(parsed, started);
-    }
-
     pub(super) fn ready_to_finish(&self) -> bool {
-        self.exit_status.is_some()
-            && self.reader_eof
-            && self.raw_output_parse_backlog.is_empty()
-            && self.captures.is_empty()
+        self.exit_status.is_some() && self.reader_eof && self.captures.is_empty()
     }
 
     #[cfg(any(target_os = "linux", not(unix)))]
-    fn drain_remaining_output(&mut self) -> Result<bool, WorkerError> {
+    fn drain_remaining_output(&mut self) -> bool {
         let mut had_output = false;
         while let Ok(ReaderMessage::Data { buffer, length }) = self.output_rx.try_recv() {
-            let (closed, parsed) = consume_pty_output(
+            let parsed = consume_pty_output(
                 &mut self.terminal,
                 &mut self.passthrough,
                 &mut EngineOutput {
@@ -2016,24 +1900,21 @@ impl PaneActor {
                     bar: &mut self.engine_bar,
                     last_command_status: &mut self.engine_last_command_status,
                 },
-                &mut self.raw_output_tap,
+                &self.publisher,
                 buffer,
                 length,
                 &self.recycle_tx,
             );
-            if let Some(token) = closed {
-                self.publisher.raw_output_tap_closed(token)?;
-            }
             had_output |= parsed > 0;
         }
-        Ok(had_output)
+        had_output
     }
 
     pub(super) fn finish(mut self) -> Result<DeadPane, WorkerError> {
         #[cfg(all(unix, not(target_os = "linux")))]
         let had_output = false;
         #[cfg(any(target_os = "linux", not(unix)))]
-        let had_output = self.drain_remaining_output()?;
+        let had_output = self.drain_remaining_output();
         #[cfg(unix)]
         drain_effects_if_writer_ready(&self.effects, &mut self.writer)?;
         #[cfg(not(unix))]

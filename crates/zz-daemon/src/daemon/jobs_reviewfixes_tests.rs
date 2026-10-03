@@ -20,7 +20,8 @@ fn closed_job_input_keeps_socket_and_stream_jobs_alive_until_child_exit() {
         child.stdout.take().unwrap().read_exact(&mut ready).unwrap();
         assert_eq!(&ready, b"ready");
         let input = socket_input.unwrap_or_else(|| child.stdin.take().unwrap().into());
-        let (_sender, receiver) = zz_terminal::TerminalSession::raw_output_tap_channel();
+        let feed = super::super::shard_sink::PipeFeed::new(|| {});
+        let receiver = feed.reader();
         let pipe = stream.then(|| {
             PipeIo::new(
                 Arc::new(parking_lot::Mutex::new(Arc::new(

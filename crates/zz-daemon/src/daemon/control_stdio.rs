@@ -651,13 +651,18 @@ impl EventLoop {
             Ok(stdio) => {
                 self.stdio_tokens.insert(stdio.stdin_token, token);
                 self.stdio_tokens.insert(stdio.stdout_token, token);
-                connection.outbound.state.lock().quiet_socket = None;
+                let mut state = connection.outbound.state.lock();
+                state.quiet_socket = None;
+                state.direct_socket = None;
+                drop(state);
                 connection.frames.push(ControlStdio::start_marker());
                 connection.stdio = Some(Box::new(stdio));
             }
             Err(error) => {
                 log::debug!("control stdio refused: {error}");
-                connection.frames.push(ControlStdio::refusal());
+                let _ = connection
+                    .outbound
+                    .enqueue_encoded_reliable(ControlStdio::refusal());
             }
         }
     }

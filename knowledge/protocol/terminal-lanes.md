@@ -4,7 +4,7 @@ title: PaneFrame terminal lane (pane_frame.rs)
 description: The Terminal envelope lane that carries full viewports, span patches, command-output viewports and history chunks as varint headers, changed-metadata fields and rows of style runs with UTF-8 text, decoded by every client straight into PackedCell planes.
 resource: crates/zz-protocol/src/pane_frame.rs
 tags: [protocol, terminal, wire, packing, fanout]
-timestamp: 2026-10-03T00:45:00Z
+timestamp: 2026-10-03T02:00:00Z
 ---
 
 # Overview
@@ -222,8 +222,9 @@ without encoding it, a compact frame cannot, and it is cheap to encode.
 Every attached client holds its own view of a terminal (`TerminalViewId(client.0)`), and the pane
 actor builds one frame per view with that view's generations. Views that are live at the bottom
 still share one cell plane and one dictionary, so each view's frame and its base point at the same
-grids as every other such view. The pane's watcher diffs a view only after it checked that the
-client streams the pane and is not frozen, and `TerminalViewport::diff_shared` keeps the cell diff
+grids as every other such view. A foreground live view is diffed and queued on the shard by the
+pane's `PaneSink`, and any other view by the loop's watcher after it checked that the client streams
+the pane and is not frozen (see [PTY worker](/concepts/pty-worker.md)). `TerminalViewport::diff_shared` keeps the cell diff
 (row shift and spans) for the next view on the same two grids; the changed cells are read from the
 current plane, not copied into the patch. The encoder writes each client's header, fields and
 metadata, and copies the dictionary append and span section (`PatchTail`) from the first client that

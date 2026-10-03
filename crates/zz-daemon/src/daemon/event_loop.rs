@@ -286,6 +286,7 @@ impl EventLoop {
         shared.helpers.install(Arc::clone(&waker));
         shared.terminal_requests.install(Arc::clone(&waker));
         shared.pipe_jobs.wake.install(Arc::clone(&waker));
+        shared.control_wake.install(Arc::clone(&waker));
         let status_client = shared.status.lock().job_client();
         status_client.install(Arc::clone(&waker));
         let (_startup_sender, startup_finished) = mpsc::channel();
@@ -1239,7 +1240,7 @@ impl EventLoop {
                 .ready(self.poll.registry(), token, readable, writable);
         }
         shared.drain_background_insertions();
-        shared.drain_control_output_taps();
+        shared.turn_control_output(false);
         self.watchers.turn(shared);
     }
 
@@ -1441,7 +1442,10 @@ impl EventLoop {
         shared.drain_background_insertions();
         self.watchers.turn(shared);
         self.timers.turn(shared, &self.waker)?;
-        shared.drain_control_output_taps();
+        shared.turn_control_output(
+            self.control_output_deadline
+                .is_some_and(|deadline| Instant::now() >= deadline),
+        );
         self.control_output_deadline = shared.control_output_deadline();
         drop(std::mem::take(&mut self.retired));
         self.turn_lifecycle(shared)?;
@@ -1856,6 +1860,12 @@ impl EventLoop {
     }
 }
 
+impl Drop for Connection {
+    fn drop(&mut self) {
+        self.outbound.state.lock().direct_socket = None;
+    }
+}
+
 impl Connection {
     fn start_command(&mut self) {
         assert!(self.command.is_none());
@@ -1878,6 +1888,16 @@ impl Connection {
                 .filter(|socket| rustix::net::sockopt::set_socket_nosigpipe(socket, true).is_ok());
             self.outbound.state.lock().quiet_socket = socket;
         }
+        let interactive = match message {
+            ProtocolMessage::Hello(hello) => hello.client.kind == ClientKind::Interactive,
+            ProtocolMessage::ClientHello(hello) => hello.kind == ClientKind::Interactive,
+            _ => false,
+        };
+        let socket = interactive.then(|| self.stream.receive_fd().ok()).flatten();
+        #[cfg(target_vendor = "apple")]
+        let socket = socket
+            .filter(|socket| rustix::net::sockopt::set_socket_nosigpipe(socket, true).is_ok());
+        self.outbound.state.lock().direct_socket = socket;
     }
 
     fn write_ready(&mut self) -> io::Result<()> {

@@ -454,6 +454,78 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   loop samples under control output, 10% more decoding them for handed stdio); Mac
   `chatty.instr_per_s.flip`/`.hidden` +7-8% from the wave-4 merge with no client attached
   (NAMES suspected); Linux still wakes 4.83 threads per echoed key (tmux about 2).
+- Four lanes launched 11:15 as one `w4-side-lanes` run `wf_bbdbd956-c4c` (briefs `bytes`,
+  `ctrlcpu`, `namescost`, `echomap` in `wave4-briefs.py`; Mac worktrees `~/dev/zz-<slug>`, detached
+  alienware twins with reflinked targets; base `abe69d02`, base binaries `0d7dabf7` in both
+  integration trees): BYTES (serde byte fields as bytes: postcard's wire is the same, the per-byte
+  serialize goes), CTRLCPU (control-mode CPU per command; owns the burst row), NAMESCOST (attribute
+  and remove the Mac chatty +7-8% instruction rise), ECHOMAP (measure-only: Linux echo stage by
+  stage against tmux, and the slices that reach 1.40 ms; DL4 alone gives -64 us of the -230 us
+  needed). The ATTACH slice and the echo slices wait for DL4 and DL5.
+- ssh to alienware lost at 11:25: `~/.ssh/config` has `ControlPersist 4h` and the key is a
+  YubiKey (`id_ed25519_sk`), so a new master needs the owner's touch. Every Linux step since then
+  is NOT RUN and queued below ("Linux leg owed"). Trap: start a long unattended run only with a
+  fresh master (`ssh -O check alienware`; it lasts 4 h from the touch).
+- DL4/DL5 fixes (workflow finished 12:30, 4 h 13 min in all):
+  - DL4 fix `970ec32a`: `open_stdio` clears the direct socket and sends its refusal through the
+    mailbox; frames queued on the loop thread stay on the loop's write path, so they cannot pass
+    later reliable messages. Mac echo p50 shows no gain over 8 + 6 pairs (instructions per key
+    321k -> 301k, loop busy 16 -> 7/6/6, the p20 tail under load .841 -> .454 ms); Linux before
+    the fix: echo p50 1.61 -> 1.40-1.48 ms against base B, 70 us of it DL4's own.
+  - DL5 fix `d0116461`: the barrier flush is gone. Like tmux's `all_blocks`, a reliable message
+    that arrives while output is pending waits in the feed as a line behind the chunks it must
+    follow, inside the pump's budget (counted against `MAX_RELIABLE_MESSAGES`); replies and
+    `%begin` are ordered lines. Mac probe, 4 busy panes: 110-145 MB/s with every reply answered
+    (12 panes 81 MB/s); `control.output_mbps` 195.7, `control.latency` 0.0119 ms. Linux not
+    rerun (ssh).
+- Merged 12:40: DL3+DL4 (`perf/deliver4` at `970ec32a`) and DL5 (`perf/deliver5` at `d0116461`),
+  both clean, as `3924f8fa`. Decision: DL4 proved the loop-busy and Linux echo gain the hold was
+  for; Mac echo p50 did not move, recorded as not met. Mac batch4 checks running in the snapshot
+  worktree `~/dev/zz-check` (full corpus, wire checks, A/B against `0d7dabf7`). Main is not
+  pushed until the Linux leg owed has run.
+- NAMESCOST finished with no change: there is no instruction rise. DL3 branched at `8b1393a2`, not
+  `421f4918`, so the DL4 review compared across the whole wave-4 line; within-round medians are
+  within -2.1% to +2.6% at every step. Name lookups cost about 2.6-3.5% of flip, and that cost
+  predates wave 4 (`KERN_PROCARGS2` is 37k instructions even for the size-only query, and
+  `pbi_comm` holds a symlink's target, so it is not exact). `chatty.instr_per_s.hidden` tracks
+  client bytes (r = 0.98), which depend on how many automatic renames land in a run: three-run
+  hidden medians cannot carry a 2% claim. Worktree removed.
+- BYTES (`perf/bytes` `312f8923`, not merged): every serde byte field in zz-protocol encodes as a
+  byte string; postcard and JSON bytes are unchanged (`wire_bytes_tests.rs`, both directions, 0 to
+  70000 bytes). Daemon instructions per streamed byte -9%, but on the pre-DL5 tap path throughput
+  fell 21% (181 -> 143 MB/s): the faster encode let the loop go idle between chunks, and every tap
+  `try_recv` woke the loop through `AcceptWake::wake`, which holds a mutex across
+  `mio::Waker::wake` (5x context switches). DL5 removed that tap, so BYTES is re-measured on the
+  merged head (BYTES2).
+- CTRLCPU (`perf/ctrlcpu` `1ce6617e`, in review): a line made only of plain words skips the full
+  config parser, the parser reads `&str` in place, alias lookup by prefix, the canonical name built
+  once, `display-message -p <one arg>` skips the generic option parse. Mac instructions per command
+  -9.5% (`control.instr_per_cmd` 68.8k -> 62.3k, tmux 159k), burst 2.06x -> 2.46x tmux, latency
+  0.018 -> 0.0139 ms. Linux done criterion NOT RUN (base estimate: zz 47k user instructions per
+  command, tmux 44k; a 6k saving would put zz below tmux).
+- Linux leg owed (run in this order once ssh is back; each lane's exact commands are in its report
+  under /tmp/zzpc and the workflow journals):
+  1. Push `perf/wave4` (`3924f8fa` or later), build it in alienware `~/dev/zz-perf-int`, run
+     `merge-checks-linux.sh batch4 <0d7dabf7 cli> echo,attach,chatty,control,mem,throughput`
+     (clippy, tests, compat, A/B), `compat/tui-output-backpressure.sh`, DL5's flood probe
+     (`~/dev/zz-dl5-bin/flood_probe.py <bin> 4|12 4 none|cmds [relay]`), and DL4's
+     `cargo test -p zz-daemon direct_write` (its socket-fill test has only run on macOS).
+  2. A quiet full `--stage final` gate on the merged head.
+  3. Each Mac-only lane's Linux clippy (BYTES, CTRLCPU and later lanes) and CTRLCPU's five-run
+     burst series (`/tmp/zzpc/ctrlcpu/linux-series.sh`, `med.py`).
+  4. ECHOMAP's Linux stages (gather hop).
+  Then push main.
+- Linux clippy without ssh: `bench/perf/campaign/scripts/linux-clippy-from-mac.sh <worktree>
+  <crates>` runs a Linux-target `cargo clippy -D warnings` from the Mac through zig cc (target
+  `x86_64-unknown-linux-gnu`, glibc 2.35, libghostty cross-built). On `3924f8fa`, zz-daemon,
+  zz-terminal, zz-mux, zz-protocol, zz-client, zz-tui and zz-cli: exit 0. It type-checks the
+  Linux cfg paths; it does not run anything, so Linux tests and timings stay owed.
+- BYTES2 and ATTACH launched 13:05 as `w4-side-lanes` run `wf_d7e4fa99-820` (briefs `bytes2`,
+  `attach`; Mac-only, Linux clippy through the script above). BYTES2 merges perf/wave4 into
+  `perf/bytes`, re-measures on top of DL5, and cuts the remaining per-byte cost (bulk `%output`
+  escaping, the per-drain allocation, `AcceptWake::wake` holding its mutex across the mio wake).
+  ATTACH counts daemon syscalls and context switches per attach with `PROC_PIDTASKINFO` against
+  tmux on the Mac and cuts the extra ones (the Linux `attach.cpu.*` excess is kernel time).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

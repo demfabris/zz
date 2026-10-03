@@ -89,13 +89,17 @@ pub(super) struct Watcher {
 struct FrameSnapshot {
     runtime: Arc<TerminalViewport>,
     views: Vec<(TerminalViewId, Arc<TerminalViewport>, Option<u64>)>,
+    sunk: Vec<TerminalViewId>,
 }
 
 impl FrameSnapshot {
     fn capture(terminal: &TerminalSession) -> Self {
+        let runtime = terminal.latest_viewport();
+        let (views, sunk) = terminal.latest_frames();
         Self {
-            runtime: terminal.latest_viewport(),
-            views: terminal.latest_view_frames(),
+            runtime,
+            views,
+            sunk,
         }
     }
 
@@ -310,8 +314,7 @@ impl CommandWatcher {
             | TerminalEvent::Bell
             | TerminalEvent::RenameWindow(_)
             | TerminalEvent::PlaceholderBound { .. }
-            | TerminalEvent::PendingPasteExpired { .. }
-            | TerminalEvent::RawOutputTapClosed { .. } => {}
+            | TerminalEvent::PendingPasteExpired { .. } => {}
         }
         true
     }
@@ -408,8 +411,7 @@ impl PopupWatcher {
             | TerminalEvent::Bell
             | TerminalEvent::RenameWindow(_)
             | TerminalEvent::PlaceholderBound { .. }
-            | TerminalEvent::PendingPasteExpired { .. }
-            | TerminalEvent::RawOutputTapClosed { .. } => {}
+            | TerminalEvent::PendingPasteExpired { .. } => {}
         }
         true
     }
@@ -426,19 +428,9 @@ impl TerminalWatcher {
         let pane = self.pane;
         match event {
             TerminalEvent::ViewportReady { output_activity } => {
-                #[cfg(unix)]
-                if output_activity
-                    && shared
-                        .inner
-                        .lock()
-                        .control_output_taps
-                        .get(&pane)
-                        .is_some_and(|tap| tap.receiver.is_some())
-                {
-                    shared.accept_wake.wake();
-                }
                 let frame = frame.expect("viewport notification frame");
                 let current = frame.views;
+                let sunk = frame.sunk;
                 let runtime_viewport = frame.runtime;
                 let active = current
                     .iter()
@@ -446,22 +438,19 @@ impl TerminalWatcher {
                     .collect::<BTreeSet<_>>();
                 let mut finished = terminal_status_should_close(&runtime_viewport.status);
                 let mut mode_clients = BTreeSet::new();
-                for (view, viewport, epoch) in current {
-                    finished |= terminal_status_should_close(&viewport.status);
-                    let base = epoch.and_then(|epoch| {
-                        self.previous
-                            .get(&view)
-                            .filter(|(seen, _)| *seen == epoch)
-                            .map(|(_, previous)| previous.as_ref())
-                    });
-                    shared.publish_terminal_for_pane(
-                        pane,
-                        ClientId(view.0),
-                        base,
-                        &viewport,
-                        terminal,
-                        &mut self.fanout,
-                    );
+                for frame in current {
+                    finished |= terminal_status_should_close(&frame.1.status);
+                    if !sunk.contains(&frame.0) {
+                        shard_sink::publish_loop_view(
+                            shared,
+                            terminal,
+                            pane,
+                            &frame,
+                            self.previous.get(&frame.0),
+                            &mut self.fanout,
+                        );
+                    }
+                    let (view, viewport, epoch) = frame;
                     let key = (
                         mode_kind(viewport.mode),
                         viewport.scrollbar,
@@ -586,14 +575,6 @@ impl TerminalWatcher {
             }
             TerminalEvent::PendingPasteExpired { token } => {
                 shared.expire_pending_pasted_image(pane, terminal, token);
-            }
-            TerminalEvent::RawOutputTapClosed { token } => {
-                let terminal = Arc::clone(terminal);
-                shared.defer_watcher_effect(move |shared| {
-                    if !shared.control_output_tap_closed(pane, token, &terminal) {
-                        shared.pipe_tap_closed(pane, token, &terminal);
-                    }
-                });
             }
             TerminalEvent::ClipboardSet { target, text } => {
                 shared.deliver_clipboard_write(pane, target, text);

@@ -4,7 +4,7 @@ title: Daemon-owned PTY worker model
 description: How the daemon spawns and owns one PTY-backed terminal session per pane, the thread/ownership boundary between zz-daemon and the zz-terminal worker, and the paths that carry terminal frames out and send-keys in.
 resource: crates/zz-daemon/src/daemon.rs
 tags: [pty, daemon, terminal, threading, send-keys]
-timestamp: 2026-09-06T00:00:00Z
+timestamp: 2026-10-03T14:25:00Z
 ---
 
 # Overview
@@ -112,37 +112,66 @@ non-owning watcher so it can exit. The daemon also publishes `PaneRemoved`. Brow
 
 # Terminal frame fan-out (worker → clients)
 
-Each pane gets a `zz-pane-{n}` watcher thread created by `watch_terminal`. It blocks on the worker's
-event channel without holding a strong session reference. After each event it upgrades its weak
-handle, verifies the pane still maps to that exact session, and then handles the event. One pane runs
-one diff stream per view. The watcher keeps `previous: BTreeMap<TerminalViewId, (epoch,
-Arc<TerminalViewport>)>` and, on every `TerminalEvent::ViewportReady`, walks `latest_view_frames()` in
-view order. `publish_terminal_for_pane` first checks that the view's client is attached, not frozen and
-streams the pane, then diffs the frame against that view's own predecessor to send either a full frame
-or a compact patch. Views live at the bottom share the actor's cell plane and dictionary, so
-`TerminalViewport::diff_shared` computes the row shift and spans once per frame for all of them, and
-the encoder copies the span section after each client's own header (`PatchTail`):
+A foreground live view reaches its client from the shard thread. `watch_terminal` installs a
+`PaneSink` (`crates/zz-daemon/src/daemon/shard_sink.rs`) on the session with
+`TerminalSession::install_frame_sink`, and the loop keeps one sink record per (pane, view) for each
+client that streams the pane as `Foreground`. `apply_view_streams` updates the records on attach,
+detach, window switch, zoom and preview changes. A client in copy mode on the pane keeps its record
+but marks it not live (`enter_copy_session` / `exit_copy_session`). A record holds the client's
+`OutboundMailbox` and the last viewport queued for that view by either path.
+
+`publish_views` hands each frame to the sink before it stores it. Under the sink's lock the sink
+diffs every live record against that last viewport, encodes once per (base, current) through
+`PaneFrameFanout::enqueue`, and queues the same bytes on every matching mailbox. It skips a view
+whose frame is not live, whose client is frozen (`OutboundMailbox::terminals_frozen`, kept in step
+by `sync_terminal_freeze`) or whose client still holds an unwritten frame for the pane (checked
+before the diff, so a backed-up client costs the shard no diff), so a slow client gets the loop's
+latest-frame coalescing instead of a full encode per frame on the shard. It skips the whole pane
+while a frame or its predecessor carries Kitty placements. The views it took are stored as `sunk`
+beside the frame (`TerminalSession::latest_frames`). A record removed under that lock gets no later
+frame, and the mailbox's generation checks drop or widen anything that lands against a stale base.
+When an interactive client's mailbox holds nothing, the loop has no write in flight for it and no
+attach batch, attach settle or control collection is open, `enqueue_terminal_with` called off the
+loop thread writes the frame itself under the mailbox lock with one nonblocking `send` on a duplicate of the client's socket
+(`OutboundState::direct_socket`, set by `Connection::prepare_hello` for `ClientKind::Interactive`
+and dropped when the mailbox closes or the connection goes away). A short write leaves the rest at
+the front of the reliable lane as `OutboundFrame::Partial` and wakes the loop, which owns the socket
+until the mailbox is idle again; an error drops the duplicate and queues the frame for the loop.
+Frames the loop thread enqueues itself keep the slot, so they still go out behind reliable messages
+the same turn queues later. A refused `ControlStdio` is queued on the mailbox like any reply, and an
+accepted one drops both socket duplicates, so the loop stays the only writer while it holds bytes.
+Otherwise the mailbox wakes the loop only when a client's terminal slot goes from empty to
+non-empty, and the sink holds those wakes until the frame is published
+(`TerminalFrameSink::published`): when the same publish also notified the loop, that notification's
+turn writes the frame and the wake is dropped.
+
+Views the sink did not take fall back to the loop. When every streamed view of a pane went to the
+sink, the shard notifies the loop only on an edge: a title, OSC 7 path or status change, a title
+write or progress bar change (`Publisher::set_facts`, `set_progress_bar`), a preview watch, or output
+at most every 100 ms (`Frames::admit_notify`). A pane with a live output watch (`wait-pane`, the
+`send-text` echo check, `run-pane`; `PaneSink::observe` from `terminal_reads`) notifies on every
+output frame instead. Bells, clipboard writes, renames, copy results and placeholder binds are
+reliable events that notify on their own. On the loop, `TerminalWatcher` walks the latest frames and
+hands each view not in `sunk` to `shard_sink::publish_loop_view`, which diffs against the record's
+viewport (or the watcher's own for a view without a record), drops a frame older than the one the
+record holds, and writes the frame back to the record unless the shard moved it meanwhile:
 
 ```rust
-// watch_terminal, per ViewportReady
-for (view, viewport, epoch) in current {              // latest_view_frames(), sorted by view id
-    let base = epoch.and_then(|epoch| previous.get(&view).filter(|(seen, _)| *seen == epoch));
-    shared.publish_terminal_for_pane(pane, ClientId(view.0), base, &viewport, &terminal, &mut fanout);
-    previous.insert(view, (epoch, viewport));
+// shard_sink::publish_loop_view, per view the sink did not take
+let seen = sink.and_then(|sink| sink.tracked(view)).flatten();
+if seen.is_some_and(|(_, newer)| generation(viewport).precedes(generation(newer))) {
+    return;
 }
-fanout.diff.release_shared();                         // lets go of the frames the shared diff held
-previous.retain(|view, _| active.contains(view));     // a view that went away drops its diff base
+let base = epoch.and_then(|epoch| seen.or(watcher_previous).filter(|(known, _)| known == epoch));
+shared.publish_terminal_for_pane(pane, ClientId(view.0), base, viewport, terminal, fanout);
+sink.track(view, seen, epoch.map(|epoch| (epoch, viewport)));
 ```
 
-Before diffing, the watcher calls `synchronize_pane_runtime` to update pane facts. Its
-`terminal_working_directory` lookup queries the foreground PID on each publication: a shell can
-change directory without changing PID. On macOS it calls `proc_pidinfo(PROC_PIDVNODEPATHINFO)` and
-reads the physical cwd from the returned vnode data; Linux reads the `/proc/<pid>/cwd` link.
-`terminal_current_command` names the same PID by its exec path basename on macOS (one
-`KERN_PROCARGS2` sysctl, skipped while the process's exec generation is unchanged) and by
-`/proc/<pid>/comm` on Linux. Neither scans the process table. The physical cwd remains
-separate from the path reported through OSC 7. The wrappers live in
-`crates/zz-daemon/src/daemon.rs`, the lookups in `crates/zz-daemon/src/process_info.rs`.
+Output frames call `note_pane_output` (activity, silence and a 500 ms name check that reads the
+foreground command and path). The physical cwd comes from `proc_pidinfo(PROC_PIDVNODEPATHINFO)` on
+macOS and the `/proc/<pid>/cwd` link on Linux, separate from the path reported through OSC 7. The
+wrappers live in `crates/zz-daemon/src/daemon.rs`, the lookups in
+`crates/zz-daemon/src/process_info.rs`.
 
 Title sync and exit detection ride whichever frames exist. Each frame's title goes through
 `synchronize_pane_title`, and an `Exited` status on any of them closes the pane through

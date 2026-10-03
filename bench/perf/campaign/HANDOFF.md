@@ -555,6 +555,12 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   alphabet is narrow), fix agent running. Same-on-base tmux gaps it found: argument errors lack
   `parse error:`, ambiguous-command candidates sort by name instead of table order,
   `display-message =x` without `-p` prints `%message` after `%end`.
+- CTRLCPU merged 13:06 as `dfdc1d4f` (lane `1ce6617e` + test fix `426a21c5`: the plain-line test
+  now draws from every printable byte plus odd whitespace, NUL and non-ASCII, 100k lines, both
+  expansion contexts and overlay modes; removing the `=` check, letting `#` through or taking
+  non-ASCII as word bytes each fail it). Checks on `dfdc1d4f`: fmt, clippy, Linux-target clippy
+  (zz-mux, zz-daemon, zz-cli) exit 0; zz-mux, zz-daemon and zz-cli tests 2640 passed, 23 failed at
+  Mac load about 25, all 23 pass alone. Linux burst series owed.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

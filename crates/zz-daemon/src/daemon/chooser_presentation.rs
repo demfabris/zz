@@ -697,6 +697,9 @@ pub(super) fn chooser_presentation(
     inner: &ServerState,
     client: ClientId,
 ) -> Option<ChooserPresentation> {
+    if !super::chooser_shown(inner, client) {
+        return None;
+    }
     let styles = Styles { inner };
     if let Some(chooser) = inner.client(client).and_then(|c| c.choose_tree.as_ref()) {
         let selected = usize::try_from(chooser.rendered.selected).unwrap_or(usize::MAX);

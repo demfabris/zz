@@ -1988,7 +1988,13 @@ impl KeyEngine {
                     (KeyDecision::Commands(binding.commands.clone()), false)
                 });
         }
-        self.handle_with_repeat_metadata(
+        let mode_table = if self.mode_table {
+            self.mode_table = false;
+            self.table.take()
+        } else {
+            self.mode_table_after_prefix.take()
+        };
+        let decision = self.handle_with_repeat_metadata(
             tables,
             &key,
             now,
@@ -1996,7 +2002,16 @@ impl KeyEngine {
             initial_repeat_time,
             prefix_timeout,
             root_table,
-        )
+        );
+        if let Some(mode_table) = mode_table {
+            if self.table.is_none() {
+                self.table = Some(mode_table);
+                self.mode_table = true;
+            } else {
+                self.mode_table_after_prefix = Some(mode_table);
+            }
+        }
+        decision
     }
 
     pub fn handle_synthetic_any_with_repeat_metadata(

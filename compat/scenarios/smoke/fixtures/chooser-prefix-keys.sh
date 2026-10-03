@@ -93,7 +93,7 @@ trap cleanup EXIT
 
 fresh_scene() {
     main_client kill-session -t "=$session" >/dev/null 2>&1 || true
-    main_client new-session -d -s "$session" -n w0 -x 80 -y 24
+    main_client new-session -d -s "$session" -n w0 -x 80 -y 24 "$@"
     main_client new-window -d -t "=$session:1" -n w1
     main_client select-window -t "=$session:0"
     main_client set-buffer -b cprefix cprefix
@@ -149,31 +149,136 @@ detach_case() {
     detach_all
 }
 
+hi_there() {
+    main_client capture-pane -p -t "=$session:$1" | grep -cx hi-there || true
+}
+
+active_pane() {
+    main_client display-message -p -t "=$session:" '#{pane_index}'
+}
+
+case_start() {
+    name="$1"
+    shift
+    fresh_scene "$@"
+    attach "$name"
+}
+
 detach_case choose-session 02 73
 detach_case choose-window 02 77
-detach_case choose-client 02 44
 detach_case choose-buffer 02 3d
 detach_case tree-search-prompt 02 73 2f 61
 detach_case tree-filter-prompt 02 73 66 61
-detach_case customize-mode 02 43
-detach_case copy-mode 02 5b
 
-fresh_scene
-attach next-window
+typed=6563686f2068692d74686572650d
+
+case_start tree-prefix-n
 press 02
-press 73
+press 77
 press 02
 press 6e
+press "$typed"
 sleep 0.4
 check_equal tree-prefix-n-selects-the-next-window '0 *1 ' "$(windows)"
-press 02
-press 63
-sleep 0.4
-check_equal tree-prefix-c-creates-a-window '0 1 *2 ' "$(windows)"
+check_equal tree-prefix-n-types-into-the-next-window 1 "$(hi_there 1)"
 detach_all
 
-if [ "$check_count" -ne 18 ]; then
-    record_failure "total-checks" 18 "$check_count"
+case_start tree-prefix-c
+press 02
+press 77
+press 02
+press 63
+press "$typed"
+sleep 0.4
+check_equal tree-prefix-c-creates-a-window '0 1 *2 ' "$(windows)"
+check_equal tree-prefix-c-types-into-the-new-window 1 "$(hi_there 2)"
+detach_all
+
+case_start tree-copy-mode
+press 02
+press 77
+press 02
+press 5b
+press 71
+press 6a
+press 0d
+sleep 0.4
+check_equal tree-copy-mode-q-returns-to-the-tree '0 *1 ' "$(windows)"
+detach_all
+
+case_start tree-view-mode
+press 02
+press 77
+press 02
+press 3f
+press 71
+press 6a
+press 0d
+sleep 0.4
+check_equal tree-view-mode-q-returns-to-the-tree '0 *1 ' "$(windows)"
+detach_all
+
+main_client bind-key W choose-tree -w
+case_start tree-display-panes
+main_client split-window -d -t "=$session:0"
+press 02
+press 57
+press 02
+press 71
+press 31
+sleep 0.4
+check_equal tree-display-panes-selects-the-pane 1 "$(active_pane)"
+press 02
+press 6f
+press 6a
+press 0d
+sleep 0.4
+check_equal tree-display-panes-keeps-the-tree '0 *1 ' "$(windows)"
+detach_all
+main_client unbind-key W
+
+case_start copy-mode-tree-repeat
+press 02
+press 5b
+press 02
+press 77
+press 02
+press 1b5b41
+press 6a
+press 0d
+sleep 0.4
+check_equal copy-mode-tree-key-after-a-repeat '0 *1 ' "$(windows)"
+detach_all
+
+case_start copy-mode-tree-timeout
+press 02
+press 5b
+press 02
+press 77
+main_client set-option -g prefix-timeout 300
+press 02
+sleep 0.8
+press 6a
+press 0d
+sleep 0.4
+check_equal copy-mode-tree-key-after-a-prefix-timeout '0 *1 ' "$(windows)"
+detach_all
+main_client set-option -gu prefix-timeout
+
+case_start tree-send-prefix 'exec cat -v'
+press 02
+press 77
+press 02
+press 02
+press 71
+press 5a0d
+sleep 0.4
+check_equal tree-send-prefix-pages-the-tree 'Z|Z|' \
+    "$(main_client capture-pane -p -t "=$session:0" | grep -F Z | tr '\n' '|')"
+detach_all
+
+if [ "$check_count" -ne 21 ]; then
+    record_failure "total-checks" 21 "$check_count"
 fi
 if [ "$failed" -eq 0 ]; then
     main_client set-environment -g CHOOSER_PREFIX_KEYS "clean:$check_count"

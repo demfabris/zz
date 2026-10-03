@@ -72,6 +72,10 @@ impl Scene {
     }
 
     fn press(&mut self, input: KeyInput, buffer: bool) {
+        self.send(input, buffer).unwrap();
+    }
+
+    fn send(&mut self, input: KeyInput, buffer: bool) -> Result<(), DaemonError> {
         let message = if buffer {
             InputMessage::ChooseBuffer {
                 action: ChooseBufferAction::Key(input),
@@ -81,12 +85,23 @@ impl Scene {
                 action: ChooseTreeAction::Key(input),
             }
         };
+        self.shared.input(
+            self.client,
+            ClientKind::Interactive,
+            &mut self.context,
+            message,
+        )
+    }
+
+    fn search_append(&mut self, text: &str) {
         self.shared
             .input(
                 self.client,
                 ClientKind::Interactive,
                 &mut self.context,
-                message,
+                InputMessage::ChooseTree {
+                    action: ChooseTreeAction::SearchAppend(text.to_owned()),
+                },
             )
             .unwrap();
     }
@@ -167,5 +182,67 @@ fn prefix_bindings_run_while_the_buffer_chooser_is_open() {
     scene.press(key('b', control()), true);
     assert_eq!(scene.active_table().as_deref(), Some("prefix"));
     scene.press(key('d', Modifiers::default()), true);
+    assert!(!scene.attached());
+}
+
+#[test]
+fn a_window_switch_leaves_the_tree_behind_until_the_client_returns() {
+    let mut scene = attached_scene();
+    scene.open("choose-tree", &["-Zw"]);
+    let selected = scene.tree_selected().expect("tree chooser open");
+    scene.press(key('b', control()), false);
+    scene.press(key('n', Modifiers::default()), false);
+    assert_eq!(scene.current_window(), scene.windows[1]);
+    let _ = scene.send(key('j', Modifiers::default()), false);
+    assert_eq!(scene.tree_selected(), Some(selected));
+
+    scene.press(key('b', control()), false);
+    scene.press(key('p', Modifiers::default()), false);
+    assert_eq!(scene.current_window(), scene.windows[0]);
+    scene.press(key('j', Modifiers::default()), false);
+    assert_ne!(scene.tree_selected(), Some(selected));
+}
+
+#[test]
+fn display_panes_raised_in_the_tree_takes_keys_and_leaves_the_tree_open() {
+    let mut scene = attached_scene();
+    scene.open("choose-tree", &["-Zw"]);
+    let selected = scene.tree_selected().expect("tree chooser open");
+    scene.press(key('b', control()), false);
+    scene.press(key('q', Modifiers::default()), false);
+    let display_panes = |scene: &Scene| {
+        scene.shared.inner.lock().clients[&scene.client]
+            .display_panes
+            .is_some()
+    };
+    assert!(display_panes(&scene));
+    assert_eq!(scene.tree_selected(), Some(selected));
+    scene.press(key('0', Modifiers::default()), false);
+    assert!(!display_panes(&scene));
+    assert_eq!(scene.tree_selected(), Some(selected));
+    assert_eq!(scene.current_window(), scene.windows[0]);
+}
+
+#[test]
+fn send_prefix_inside_the_tree_hands_the_prefix_to_the_tree() {
+    let mut scene = attached_scene();
+    scene.open("choose-tree", &["-Zw"]);
+    scene.press(key('j', Modifiers::default()), false);
+    scene.press(key('j', Modifiers::default()), false);
+    let moved = scene.tree_selected().expect("tree chooser open");
+    scene.press(key('b', control()), false);
+    scene.press(key('b', control()), false);
+    assert_eq!(scene.active_table(), None);
+    assert_ne!(scene.tree_selected(), Some(moved));
+}
+
+#[test]
+fn search_text_typed_after_the_prefix_runs_the_prefix_binding() {
+    let mut scene = attached_scene();
+    scene.open("choose-tree", &["-Zs"]);
+    scene.press(key('/', Modifiers::default()), false);
+    scene.press(key('b', control()), false);
+    assert_eq!(scene.active_table().as_deref(), Some("prefix"));
+    scene.search_append("d");
     assert!(!scene.attached());
 }

@@ -25,8 +25,8 @@ use std::{
 
 use gpui::{
     Animation, AnimationExt as _, AnyElement, App, Bounds, Context, Corners, DragMoveEvent, Entity,
-    FocusHandle, Focusable, IntoElement, KeyDownEvent, MouseButton, Pixels, Point, Render,
-    ScrollStrategy, Subscription, UniformListScrollHandle, Window, div, prelude::*, px,
+    FocusHandle, Focusable, IntoElement, KeyDownEvent, KeyUpEvent, MouseButton, Pixels, Point,
+    Render, ScrollStrategy, Subscription, UniformListScrollHandle, Window, div, prelude::*, px,
     uniform_list,
 };
 use zz_client::{
@@ -165,6 +165,7 @@ pub(crate) struct AppShell {
     modal_open: bool,
     chooser_scroll: UniformListScrollHandle,
     chooser_selection: Option<(bool, u32)>,
+    chooser_keys: BTreeSet<String>,
     menu_selection: Option<usize>,
     focused_pane: Option<PaneId>,
     popup_terminal: Option<(PaneId, Entity<TerminalPane>)>,
@@ -380,6 +381,7 @@ impl AppShell {
             modal_open: false,
             chooser_scroll: UniformListScrollHandle::new(),
             chooser_selection: None,
+            chooser_keys: BTreeSet::new(),
             menu_selection: None,
             focused_pane: None,
             popup_terminal: None,
@@ -511,6 +513,29 @@ impl AppShell {
             .cloned()
     }
 
+    fn key_up(&mut self, event: &KeyUpEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if !self.chooser_keys.remove(&event.keystroke.key) {
+            return;
+        }
+        let mut input = crate::terminal::key_input(&KeyDownEvent {
+            keystroke: event.keystroke.clone(),
+            is_held: false,
+            prefer_character_input: false,
+        });
+        input.action = zz_terminal::KeyAction::Release;
+        let message = if self.connection.read(cx).core.choose_buffer().is_some() {
+            InputMessage::ChooseBuffer {
+                action: ChooseBufferAction::Key(input),
+            }
+        } else {
+            InputMessage::ChooseTree {
+                action: ChooseTreeAction::Key(input),
+            }
+        };
+        self.send_input(message, cx);
+        cx.stop_propagation();
+    }
+
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let dialog = window
             .root::<Root>()
@@ -539,26 +564,6 @@ impl AppShell {
             let palette = palette.read(cx);
             palette.is_local() || palette.is_window_chooser()
         }) {
-            return;
-        }
-        let overlay = if core.choose_tree().is_some() {
-            Some(InputMessage::ChooseTree {
-                action: ChooseTreeAction::Key(input.clone()),
-            })
-        } else if core.choose_buffer().is_some() {
-            Some(InputMessage::ChooseBuffer {
-                action: ChooseBufferAction::Key(input.clone()),
-            })
-        } else if core.display_panes().is_some() {
-            Some(InputMessage::DisplayPanes {
-                action: DisplayPanesAction::Key(input.clone()),
-            })
-        } else {
-            None
-        };
-        if let Some(overlay) = overlay {
-            self.send_input(overlay, cx);
-            cx.stop_propagation();
             return;
         }
         if core.command_prompt().is_some() {
@@ -591,6 +596,32 @@ impl AppShell {
                 },
                 cx,
             );
+            cx.stop_propagation();
+            return;
+        }
+        let overlay = if core.choose_tree().is_some() {
+            Some(InputMessage::ChooseTree {
+                action: ChooseTreeAction::Key(input.clone()),
+            })
+        } else if core.choose_buffer().is_some() {
+            Some(InputMessage::ChooseBuffer {
+                action: ChooseBufferAction::Key(input.clone()),
+            })
+        } else if core.display_panes().is_some() {
+            Some(InputMessage::DisplayPanes {
+                action: DisplayPanesAction::Key(input.clone()),
+            })
+        } else {
+            None
+        };
+        if let Some(overlay) = overlay {
+            if matches!(
+                overlay,
+                InputMessage::ChooseTree { .. } | InputMessage::ChooseBuffer { .. }
+            ) {
+                self.chooser_keys.insert(event.keystroke.key.clone());
+            }
+            self.send_input(overlay, cx);
             cx.stop_propagation();
             return;
         }
@@ -2664,6 +2695,7 @@ impl Render for AppShell {
             overlays,
         )
         .track_focus(&self.focus)
+        .on_key_up(cx.listener(Self::key_up))
         .map(|shell| {
             #[cfg(target_os = "ios")]
             let shell = shell

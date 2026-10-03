@@ -10663,8 +10663,12 @@ impl Shared {
                             chooser.rebuild(&inner.engine, attached_session, &facts);
                         }
                         let state = chooser.rendered.clone();
+                        inner.client_entry(client).chooser_under =
+                            chooser_under(&inner, client, *pane);
                         inner.client_entry(client).choose_tree.replace(chooser);
-                        direct_events.push(EventPayload::ChooseTree { state: Some(state) });
+                        direct_events.push(EventPayload::ChooseTree {
+                            state: chooser_shown(&inner, client).then_some(state),
+                        });
                         direct_events.push(EventPayload::ChooserPresentation {
                             presentation: chooser_presentation::chooser_presentation(
                                 &inner, client,
@@ -10727,8 +10731,12 @@ impl Shared {
                             snapshot_changed = true;
                         }
                         let state = chooser.rendered.clone();
+                        inner.client_entry(client).chooser_under =
+                            chooser_under(&inner, client, *pane);
                         inner.client_entry(client).choose_buffer.replace(chooser);
-                        direct_events.push(EventPayload::ChooseBuffer { state: Some(state) });
+                        direct_events.push(EventPayload::ChooseBuffer {
+                            state: chooser_shown(&inner, client).then_some(state),
+                        });
                         direct_events.push(EventPayload::ChooserPresentation {
                             presentation: chooser_presentation::chooser_presentation(
                                 &inner, client,
@@ -22792,13 +22800,16 @@ impl Shared {
     ) -> Result<(), DaemonError> {
         let (choose_tree, choose_buffer, display_panes, read_only) = {
             let inner = self.inner.lock();
+            let chooser = chooser_takes_keys(&inner, client);
             (
-                inner
-                    .client(client)
-                    .is_some_and(|c| c.choose_tree.is_some()),
-                inner
-                    .client(client)
-                    .is_some_and(|c| c.choose_buffer.is_some()),
+                chooser
+                    && inner
+                        .client(client)
+                        .is_some_and(|c| c.choose_tree.is_some()),
+                chooser
+                    && inner
+                        .client(client)
+                        .is_some_and(|c| c.choose_buffer.is_some()),
                 inner
                     .client(client)
                     .is_some_and(|c| c.display_panes.is_some()),
@@ -23509,30 +23520,113 @@ impl Shared {
         context: &mut ExecutionContext,
         source_pane: PaneId,
         input: &zz_terminal::KeyInput,
-    ) -> Result<bool, DaemonError> {
+    ) -> Result<ChooserKey, DaemonError> {
         let key = input_key_name(input);
         let (decision, repeat_binding) = self.overlay_key_decision(client, &key);
         let claimed = decision != KeyDecision::Pass;
         let result = match decision {
-            KeyDecision::Pass | KeyDecision::Prefix | KeyDecision::Ignore => Ok(()),
+            KeyDecision::Pass => Ok(ChooserKey::Pass),
+            KeyDecision::Prefix | KeyDecision::Ignore => Ok(ChooserKey::Claimed),
             KeyDecision::Commands(commands) => {
-                let pane = context.pane.unwrap_or(source_pane);
-                let previous = context.invoking_key().map(str::to_owned);
-                context.set_invoking_key(Some(key.as_str().to_owned()));
-                let dispatched = self.execute_key_commands(
-                    client,
-                    kind,
-                    context,
-                    pane,
-                    &commands,
-                    repeat_binding,
-                );
-                context.set_invoking_key(previous);
-                dispatched
+                if let Some(prefix) = self.chooser_send_prefix(&commands) {
+                    Ok(ChooserKey::Key(prefix))
+                } else {
+                    let pane = context.pane.unwrap_or(source_pane);
+                    let previous = context.invoking_key().map(str::to_owned);
+                    context.set_invoking_key(Some(key.as_str().to_owned()));
+                    let dispatched = self.execute_key_commands(
+                        client,
+                        kind,
+                        context,
+                        pane,
+                        &commands,
+                        repeat_binding,
+                    );
+                    context.set_invoking_key(previous);
+                    dispatched.map(|()| ChooserKey::Claimed)
+                }
             }
         };
         self.sync_key_table(client, claimed);
-        result.map(|()| claimed)
+        result
+    }
+
+    fn chooser_send_prefix(&self, commands: &[CommandInvocation]) -> Option<zz_terminal::KeyInput> {
+        let [command] = commands else {
+            return None;
+        };
+        if command.name != "send-prefix" {
+            return None;
+        }
+        let second = match command.args.as_slice() {
+            [] => false,
+            [flag] if flag.as_bytes() == b"-2" => true,
+            _ => return None,
+        };
+        let inner = self.inner.lock();
+        let key = if second {
+            inner.engine.keys.prefix2()?
+        } else {
+            inner.engine.keys.prefix()
+        };
+        crate::keys::client_key_inputs(&zz_protocol::KeyToken::Named(key.to_owned()))
+            .into_iter()
+            .next()
+    }
+
+    fn chooser_search_key(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        source_pane: PaneId,
+        text: &str,
+    ) -> Result<Option<(Option<zz_terminal::KeyInput>, String)>, DaemonError> {
+        let table_armed = self
+            .inner
+            .lock()
+            .client(client)
+            .and_then(|c| c.key_engine.as_ref())
+            .is_some_and(|engine| engine.shown_table(Instant::now()).is_some());
+        let mut characters = text.chars();
+        let Some(first) = characters.next().filter(|_| table_armed) else {
+            return Ok(None);
+        };
+        let Some(input) =
+            crate::keys::client_key_inputs(&zz_protocol::KeyToken::Literal(first.to_string()))
+                .into_iter()
+                .next()
+        else {
+            return Ok(None);
+        };
+        let rest = characters.as_str().to_owned();
+        Ok(
+            match self.chooser_key_binding(client, kind, context, source_pane, &input)? {
+                ChooserKey::Pass => None,
+                ChooserKey::Key(key) => Some((Some(key), rest)),
+                ChooserKey::Claimed => Some((None, rest)),
+            },
+        )
+    }
+
+    fn chooser_route(
+        &self,
+        client: ClientId,
+        tree: bool,
+    ) -> Option<(PaneId, bool, bool, Option<PaneId>)> {
+        let inner = self.inner.lock();
+        let state = inner.client(client)?;
+        let source_pane = if tree {
+            state.choose_tree.as_ref()?.source_pane
+        } else {
+            state.choose_buffer.as_ref()?.source_pane
+        };
+        Some((
+            source_pane,
+            chooser_shown(&inner, client),
+            chooser_takes_keys(&inner, client),
+            client_context_pane(&inner, client),
+        ))
     }
 
     fn input_choose_tree(
@@ -23548,28 +23642,67 @@ impl Shared {
             )
             .into());
         }
+        let route = self.chooser_route(client, true);
+        if let (ChooseTreeAction::Key(input), Some((source_pane, _, false, pane))) =
+            (&action, route)
+        {
+            return self.input_key(
+                client,
+                kind,
+                context,
+                pane.unwrap_or(source_pane),
+                input.clone(),
+                false,
+            );
+        }
         if let ChooseTreeAction::Key(input) = &action
             && input.action == zz_terminal::KeyAction::Release
         {
             let _ = self.key_decision(client, &input_key_name(input), true);
             return Ok(());
         }
-        let (source_pane, read_only) = {
-            let inner = self.inner.lock();
-            let Some(chooser) = inner.client(client).and_then(|c| c.choose_tree.as_ref()) else {
-                return Ok(());
-            };
-            (chooser.source_pane, inner.client_flags.contains(client))
+        let Some((source_pane, true, _, _)) = route else {
+            return Ok(());
         };
+        let read_only = self.inner.lock().client_flags.contains(client);
         self.note_terminal_input_without_bell(client, source_pane);
         if read_only {
             return Ok(());
         }
-        if let ChooseTreeAction::Key(input) = &action
-            && self.chooser_key_binding(client, kind, context, source_pane, input)?
-        {
-            return Ok(());
-        }
+        let action = match action {
+            ChooseTreeAction::Key(input) => {
+                match self.chooser_key_binding(client, kind, context, source_pane, &input)? {
+                    ChooserKey::Pass => ChooseTreeAction::Key(input),
+                    ChooserKey::Key(key) => ChooseTreeAction::Key(key),
+                    ChooserKey::Claimed => return Ok(()),
+                }
+            }
+            ChooseTreeAction::SearchAppend(text) => {
+                match self.chooser_search_key(client, kind, context, source_pane, &text)? {
+                    None => ChooseTreeAction::SearchAppend(text),
+                    Some((key, rest)) => {
+                        if let Some(key) = key {
+                            self.input_choose_tree(
+                                client,
+                                kind,
+                                context,
+                                ChooseTreeAction::Key(key),
+                            )?;
+                        }
+                        if rest.is_empty() {
+                            return Ok(());
+                        }
+                        return self.input_choose_tree(
+                            client,
+                            kind,
+                            context,
+                            ChooseTreeAction::SearchAppend(rest),
+                        );
+                    }
+                }
+            }
+            action => action,
+        };
         let (result, state, delta, command, runs) = {
             let mut inner = self.inner.lock();
             let Some(mut chooser) = inner.client_mut(client).and_then(|c| c.choose_tree.take())
@@ -23872,28 +24005,67 @@ impl Shared {
             )
             .into());
         }
+        let route = self.chooser_route(client, false);
+        if let (ChooseBufferAction::Key(input), Some((source_pane, _, false, pane))) =
+            (&action, route)
+        {
+            return self.input_key(
+                client,
+                kind,
+                context,
+                pane.unwrap_or(source_pane),
+                input.clone(),
+                false,
+            );
+        }
         if let ChooseBufferAction::Key(input) = &action
             && input.action == zz_terminal::KeyAction::Release
         {
             let _ = self.key_decision(client, &input_key_name(input), true);
             return Ok(());
         }
-        let (source_pane, read_only) = {
-            let inner = self.inner.lock();
-            let Some(chooser) = inner.client(client).and_then(|c| c.choose_buffer.as_ref()) else {
-                return Ok(());
-            };
-            (chooser.source_pane, inner.client_flags.contains(client))
+        let Some((source_pane, true, _, _)) = route else {
+            return Ok(());
         };
+        let read_only = self.inner.lock().client_flags.contains(client);
         self.note_terminal_input_without_bell(client, source_pane);
         if read_only {
             return Ok(());
         }
-        if let ChooseBufferAction::Key(input) = &action
-            && self.chooser_key_binding(client, kind, context, source_pane, input)?
-        {
-            return Ok(());
-        }
+        let action = match action {
+            ChooseBufferAction::Key(input) => {
+                match self.chooser_key_binding(client, kind, context, source_pane, &input)? {
+                    ChooserKey::Pass => ChooseBufferAction::Key(input),
+                    ChooserKey::Key(key) => ChooseBufferAction::Key(key),
+                    ChooserKey::Claimed => return Ok(()),
+                }
+            }
+            ChooseBufferAction::SearchAppend(text) => {
+                match self.chooser_search_key(client, kind, context, source_pane, &text)? {
+                    None => ChooseBufferAction::SearchAppend(text),
+                    Some((key, rest)) => {
+                        if let Some(key) = key {
+                            self.input_choose_buffer(
+                                client,
+                                kind,
+                                context,
+                                ChooseBufferAction::Key(key),
+                            )?;
+                        }
+                        if rest.is_empty() {
+                            return Ok(());
+                        }
+                        return self.input_choose_buffer(
+                            client,
+                            kind,
+                            context,
+                            ChooseBufferAction::SearchAppend(rest),
+                        );
+                    }
+                }
+            }
+            action => action,
+        };
 
         let (outcome, deleted) = {
             let mut inner = self.inner.lock();
@@ -26417,13 +26589,16 @@ impl Shared {
                 snapshot
             });
             let command_prompt = command_prompt_state(&inner, client);
+            let chooser_shown = chooser_shown(&inner, client);
             let choose_tree = inner
                 .client(client)
                 .and_then(|c| c.choose_tree.as_ref())
+                .filter(|_| chooser_shown)
                 .map(|chooser| chooser.rendered.clone());
             let choose_buffer = inner
                 .client(client)
                 .and_then(|c| c.choose_buffer.as_ref())
+                .filter(|_| chooser_shown)
                 .map(|chooser| chooser.rendered.clone());
             let display_panes = inner
                 .client(client)
@@ -26895,13 +27070,7 @@ impl Shared {
         terminal.set_engine_knobs(terminal_options.knobs);
         let view = TerminalViewId(client.0);
 
-        let (
-            replaced,
-            choose_tree_closed,
-            choose_buffer_closed,
-            display_panes_closed,
-            command_prompt_closed,
-        ) = {
+        let (replaced, display_panes_closed, command_prompt_closed) = {
             let mut inner = self.inner.lock();
             if inner.client(client).is_none_or(|c| c.subscriber.is_none()) {
                 return Err(ServerError::InvalidCommand(
@@ -26912,14 +27081,6 @@ impl Shared {
             if inner.engine.state.window_for_pane(pane).is_none() {
                 return Err(ServerError::MissingTarget(pane.to_string()).into());
             }
-            let choose_tree_closed = inner
-                .client_mut(client)
-                .and_then(|c| c.choose_tree.take())
-                .is_some();
-            let choose_buffer_closed = inner
-                .client_mut(client)
-                .and_then(|c| c.choose_buffer.take())
-                .is_some();
             let display_panes_closed = take_display_panes(&mut inner, client).is_some();
             let command_prompt_closed = inner
                 .client_mut(client)
@@ -26971,24 +27132,13 @@ impl Shared {
                     .cloned();
                 (output, subscriber)
             });
-            (
-                replaced,
-                choose_tree_closed,
-                choose_buffer_closed,
-                display_panes_closed,
-                command_prompt_closed,
-            )
+            (replaced, display_panes_closed, command_prompt_closed)
         };
 
         terminal.set_word_separators(word_separators);
         terminal.attach_view(view);
         terminal.set_view_stream(view, ViewStream::Foreground);
-        if choose_tree_closed {
-            self.publish_to_client(client, EventPayload::ChooseTree { state: None });
-        }
-        if choose_buffer_closed {
-            self.publish_to_client(client, EventPayload::ChooseBuffer { state: None });
-        }
+        self.publish_chooser_state(client);
         if display_panes_closed {
             self.publish_to_client(client, EventPayload::DisplayPanes { state: None });
         }
@@ -27338,6 +27488,7 @@ impl Shared {
                 },
             );
         }
+        self.publish_chooser_state(client);
     }
 
     fn retire_command_output(&self, client: ClientId, (output, subscriber): RetiredCommandOutput) {
@@ -27356,6 +27507,7 @@ impl Shared {
                 },
             );
         }
+        self.publish_chooser_state(client);
     }
 
     fn is_current_command_output(&self, client: ClientId, terminal: &Arc<TerminalSession>) -> bool {
@@ -28238,6 +28390,7 @@ impl Shared {
                 .collect::<Vec<_>>();
             let mut updates = Vec::with_capacity(clients.len());
             for client in clients {
+                let shown = chooser_shown(&inner, client);
                 let Some(mut chooser) = inner.client_mut(client).and_then(|c| c.choose_tree.take())
                 else {
                     continue;
@@ -28251,6 +28404,11 @@ impl Shared {
                 if attached_session != Some(chooser.source_session)
                     || source_session != Some(chooser.source_session)
                 {
+                    updates.push((client, None));
+                    continue;
+                }
+                if !shown {
+                    inner.client_entry(client).choose_tree.replace(chooser);
                     updates.push((client, None));
                     continue;
                 }
@@ -28291,6 +28449,7 @@ impl Shared {
                 .collect::<Vec<_>>();
             let mut updates = Vec::with_capacity(clients.len());
             for client in clients {
+                let shown = chooser_shown(&inner, client);
                 let Some(mut chooser) = inner
                     .client_mut(client)
                     .and_then(|c| c.choose_buffer.take())
@@ -28307,6 +28466,11 @@ impl Shared {
                     || source_session != Some(chooser.source_session)
                     || inner.paste_buffers.is_empty()
                 {
+                    updates.push((client, None));
+                    continue;
+                }
+                if !shown {
+                    inner.client_entry(client).choose_buffer.replace(chooser);
                     updates.push((client, None));
                     continue;
                 }
@@ -28690,6 +28854,32 @@ impl Shared {
         for subscriber in subscribers {
             let _ = subscriber.enqueue_reliable_frame(&message, Arc::clone(&encoded).into(), true);
         }
+    }
+
+    fn publish_chooser_state(&self, client: ClientId) {
+        let (tree, buffer) = {
+            let inner = self.inner.lock();
+            let shown = chooser_shown(&inner, client);
+            let state = inner.client(client);
+            (
+                state
+                    .and_then(|c| c.choose_tree.as_ref())
+                    .map(|chooser| shown.then(|| chooser.rendered.clone())),
+                state
+                    .and_then(|c| c.choose_buffer.as_ref())
+                    .map(|chooser| shown.then(|| chooser.rendered.clone())),
+            )
+        };
+        if tree.is_none() && buffer.is_none() {
+            return;
+        }
+        if let Some(state) = tree {
+            self.publish_to_client(client, EventPayload::ChooseTree { state });
+        }
+        if let Some(state) = buffer {
+            self.publish_to_client(client, EventPayload::ChooseBuffer { state });
+        }
+        self.publish_chooser_presentation(client);
     }
 
     fn publish_chooser_presentation(&self, client: ClientId) {
@@ -34676,6 +34866,7 @@ struct Client {
     choose_tree: Option<ChooseTreeSession>,
     choose_buffer: Option<ChooseBufferSession>,
     chooser_zoom: Option<WindowId>,
+    chooser_under: ChooserUnder,
     display_panes: Option<DisplayPanesSession>,
     message: Option<ActiveClientMessage>,
     message_ignore_keys: bool,
@@ -37697,7 +37888,7 @@ fn dismiss_overlays(
         events.push(EventPayload::CommandPrompt { state: None });
         *resume_terminals |= prompt.freezes();
     }
-    if raising != Some(Overlay::ChooseTree)
+    if matches!(raising, None | Some(Overlay::ChooseBuffer))
         && inner
             .client_mut(client)
             .and_then(|c| c.choose_tree.take())
@@ -37705,7 +37896,7 @@ fn dismiss_overlays(
     {
         events.push(EventPayload::ChooseTree { state: None });
     }
-    if raising != Some(Overlay::ChooseBuffer)
+    if matches!(raising, None | Some(Overlay::ChooseTree))
         && inner
             .client_mut(client)
             .and_then(|c| c.choose_buffer.take())
@@ -38675,6 +38866,67 @@ fn enter_copy_session(
 /// terminal view, so the pane carries a mode command exactly while some client
 /// is still in copy mode on it, or while the caller is reading a command
 /// output overlay.
+enum ChooserKey {
+    Pass,
+    Key(zz_terminal::KeyInput),
+    Claimed,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct ChooserUnder {
+    copy: bool,
+    modes: usize,
+}
+
+fn chooser_under(inner: &ServerState, client: ClientId, pane: PaneId) -> ChooserUnder {
+    ChooserUnder {
+        copy: client_in_copy_mode(inner, client),
+        modes: inner.pane_modes.get(&pane).map_or(0, Vec::len),
+    }
+}
+
+fn client_in_copy_mode(inner: &ServerState, client: ClientId) -> bool {
+    inner
+        .client(client)
+        .and_then(|c| c.copy_session.as_ref())
+        .is_some_and(|session| !session.exiting)
+}
+
+fn chooser_shown(inner: &ServerState, client: ClientId) -> bool {
+    let Some(state) = inner.client(client) else {
+        return false;
+    };
+    let Some(pane) = state
+        .choose_tree
+        .as_ref()
+        .map(|chooser| chooser.source_pane)
+        .or_else(|| {
+            state
+                .choose_buffer
+                .as_ref()
+                .map(|chooser| chooser.source_pane)
+        })
+    else {
+        return false;
+    };
+    let current = client_focused_window_for_attachment(inner, client);
+    current.is_some()
+        && inner.engine.state.window_for_pane(pane) == current
+        && (state.chooser_under.copy || !client_in_copy_mode(inner, client))
+        && state
+            .command_output
+            .as_ref()
+            .is_none_or(|output| output.parked)
+        && inner.pane_modes.get(&pane).map_or(0, Vec::len) <= state.chooser_under.modes
+}
+
+fn chooser_takes_keys(inner: &ServerState, client: ClientId) -> bool {
+    chooser_shown(inner, client)
+        && inner
+            .client(client)
+            .is_some_and(|c| c.display_panes.is_none() && c.command_prompt.is_none())
+}
+
 fn command_output_owns_pane(inner: &ServerState, client: ClientId, pane: PaneId) -> bool {
     inner
         .client(client)

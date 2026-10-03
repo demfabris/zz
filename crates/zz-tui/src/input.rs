@@ -518,23 +518,19 @@ fn handle_key(
         return handle_command_prompt(model, client, event);
     }
     if model.choose_tree.is_some() {
-        if event.kind != KeyEventKind::Release {
-            client
-                .send_input(InputMessage::ChooseTree {
-                    action: ChooseTreeAction::Key(key_input(event)),
-                })
-                .map_err(|error| error.to_string())?;
-        }
+        client
+            .send_input(InputMessage::ChooseTree {
+                action: ChooseTreeAction::Key(key_input(event)),
+            })
+            .map_err(|error| error.to_string())?;
         return Ok(InputOutcome::None);
     }
     if model.choose_buffer.is_some() {
-        if event.kind != KeyEventKind::Release {
-            client
-                .send_input(InputMessage::ChooseBuffer {
-                    action: ChooseBufferAction::Key(key_input(event)),
-                })
-                .map_err(|error| error.to_string())?;
-        }
+        client
+            .send_input(InputMessage::ChooseBuffer {
+                action: ChooseBufferAction::Key(key_input(event)),
+            })
+            .map_err(|error| error.to_string())?;
         return Ok(InputOutcome::None);
     }
     if model.display_panes.is_some() {

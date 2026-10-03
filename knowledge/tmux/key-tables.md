@@ -62,7 +62,15 @@ in the daemon), the way the pin's `server_client_key_callback` looks the prefix 
 `window_pane_key` hands a key to the mode: the prefix, an explicit client table, and root bindings
 run first, and only a `Pass` reaches the chooser. That holds while the chooser's own search, filter,
 kill or command prompt is open too, because the pin keeps that prompt inside the mode. A copy-mode
-table under the chooser is suspended for that lookup. Measured in `smoke/chooser-prefix-keys`.
+table under the chooser is suspended for the whole lookup, including when a repeat or a prefix
+timeout ends mid-key, and a `send-prefix [-2]` resolved there hands the prefix key to the chooser
+(the pin's send-prefix goes to the pane's top mode). Search text a GUI client appends while a table
+is armed runs its first character through the same lookup. The pin's tree is a mode on one pane, so
+the daemon draws the chooser and routes keys to it only while the client's current window holds its
+`source_pane`; `prefix n` or `prefix c` leaves it behind, hidden, until the client comes back.
+Surfaces raised after it take keys first: copy mode, view mode and pane modes hide it until they
+end (`ChooserUnder` records what was already there when it opened), and display-panes and the
+command prompt no longer dismiss it. Measured in `smoke/chooser-prefix-keys`.
 
 # Data model
 

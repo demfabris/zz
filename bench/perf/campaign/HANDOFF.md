@@ -386,6 +386,19 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
 - batch3 checks from 03:15 on `52f8e3ab` (everything since batch2): Mac full suite in the snapshot
   worktree `~/dev/zz-check` plus the full corpus, A/B against the wave-3 exit binary; Linux the
   same in alienware `~/dev/zz-perf-int` (`~/.cache/zz-perf/batch3`, no quiet-gate).
+- batch3 Mac (`52f8e3ab` in `~/dev/zz-check`, 03:17-04:29): fmt, clippy, compat-check, iPad, tui-screen-
+  diff, tui-copy-mode, tui-overlays, startup diagnostics pass; 6 load failures pass alone; full
+  corpus only the expected reds (the four `known/*`, census-hooks, if-shell-background-order,
+  control-alias-prepare, plugin-runtime-continuum, plugin-runtime-vim-tmux-navigator,
+  resurrect-save, source-file-byte-name, status-background-jobs); attached-client the tmux-side
+  flake. `just web-build` failed: TUIECHO2 added `foldhash` to zz-client without the excluded
+  `clients/web/Cargo.lock` edge; fixed in `3fd5d250`, web build passes. Quick A/B against the
+  wave-3 exit binary: `attach.instr.p1`/`.p4` -53%/-52%, `chatty.instr_per_s.flip`/`.hidden`
+  -55%/-52%, `spawn.instr.split_empty_P` -66%, `chatty.tty_kibps.hidden` -42%; to watch:
+  `echo.wire_bytes.busy30` 107 -> 149 B (likely DL2's 6-byte stream-sequence varint per frame:
+  the generation starts 2^40 above the previous terminal; idle echo still 31 B against the 64 B
+  rule), and CPU rows `spawn.cpu.kill_pane`/`split_shell`, `echo.p99.idle.p20` failing at flat
+  instructions while DL3 built on the same host (judge in the quiet exit gates).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

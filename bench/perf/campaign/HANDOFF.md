@@ -325,6 +325,18 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   `/tmp` (the wave-3 trap); briefs now say to keep measured binaries on disk.
 - Pushed to main again at 00:45: `2918280f` (SPAWN), after Linux clippy, zz-terminal and the new
   daemon test modules passed on that head.
+- DL2 merged as `8b1393a2` (lane 60 min, `229549e5`): frames carry the pane's stream sequence (the
+  current viewport's `view_generation`; terminals start 2^40 above the previous one, so it grows
+  across respawn); `PaneFrameFanout::enqueue` reuses one encoded patch per (base, current) per
+  frame; `TerminalFrames::full` caches encoded full frames per (pane, generation, cells), at most 16
+  frames and 1 MiB; `PendingTerminal.encoded` is `Arc<[u8]>`. No client reads `Event.sequence` for
+  terminal frames (zz-client ignores it). Second client on a pane 2.36 Minstr/5 s (target 3.0);
+  Mac gate 0 fail, 0 regressed, `attach.cpu.p4` 1.2. Linux: `attach.instr.p4` equal to the base,
+  but `attach.ttfc.p4` failed in 2 of 3 lane runs and 0 of 3 base runs on the loaded host: the
+  row to watch at wave exit. Frames are 1-3 bytes larger (6-byte varint sequence). DL5 must order
+  by per-pane stream sequence, since frame and event sequences no longer compare.
+- DL3 launched 01:15 as workflow `w4-slices` (run `wf_a3e8d9c5-200`): implement -> parity and perf
+  reviews in parallel -> fix; the script takes a list of slices and is reused for DL3b/DL4/DL5.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

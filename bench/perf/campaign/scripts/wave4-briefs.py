@@ -229,9 +229,25 @@ Task: remove those three: encode key input into a reused buffer without intermed
 
 Done criterion: client kinstr per echoed key at most 80 (92 today), medians of three alternating runs against the base build ({lb.INT}/target/release/zz_cli, rebuilt by you from perf/wave4 if older than 08f56d73); `chatty.client_cpu_pct.visible` not above the base (full `--only chatty`, two alternating pairs); `cargo test -p zz-tui -p zz-client -p zz-cli -p zz-protocol -p zz-client-ffi`, clippy -D warnings on touched crates and their dependents (`zz`, `zz-web` included); compat/tui-screen-diff.sh, tui-copy-mode.sh, tui-overlays.sh and attached-client.sh pass with LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 (tui-choosers.sh differs in 25 rows on the base too; compare with the base). {linux_clippy_note('tuiecho2')} One commit on perf/tuiecho2."""
 
+def dl3():
+    wt = f'{lb.ROOT}/zz-deliver'
+    lw = '/home/demfabris/dev/zz-deliver'
+    return header('Wave 4 lane W4-DELIVER slice DL3: shard sinks for foreground live views', wt, 'perf/deliver', 210).replace('from perf/wave4 = origin/main 06ea9cf1 plus a brief-generator commit', 'from perf/wave4 at 8b1393a2: KNOBS, ROWS, TUI-ECHO, CONTROL, DL6, PTYLEAK, TEARDOWN, DL1, SPAWN and DL2 merged') + f"""
+The W4-DELIVER plan (bench/perf/campaign/w4-deliver-plan.txt in the worktree) found this as-is state before wave 4's merges:
+
+{plan_asis()}
+
+Since then: DL1 took name checks off the frame path (`TerminalWatcher::handle` no longer calls `synchronize_pane_runtime`; output frames call `note_pane_output`; a 500 ms `TimerKey::NameCheck`), DL2 made frames carry the pane's stream sequence (the current viewport's `view_generation`) and encodes each patch once per (base, current) generation in `PaneFrameFanout::enqueue` and each full frame once per (pane, generation) in `TerminalFrames::full` (on `SharedServer`; you will need it reachable from the shards), with `PendingTerminal.encoded` an `Arc<[u8]>`; ROWS made `Frames::snapshot` copy whole rows (`CellIteration::copy_into`); DL6 put Linux PTY reads on one gather thread per shard; SETTLE (a side lane running now in ~/dev/zz-settle) may change the unwatched-pane settle snapshot in `publish_views`' fallback branch: keep your sink edits to the live-view branch so the two merge cleanly.
+
+Your slice, verbatim from the plan:
+
+{plan_line('DL3 |')}
+
+Linux leg: the gate's alienware line runs in the detached worktree {lw} (`cd {wt} && git push -q -f ssh://alienware/home/demfabris/dev/zz perf/deliver:perf/deliver && ssh alienware 'cd {lw} && git checkout -q --detach perf/deliver && ulimit -n $(ulimit -Hn) && cargo build --release -j6 -p zz-cli'`; never check out a branch there; each ssh call under 10 minutes; keep measured binaries on disk, not in tmpfs /tmp; no quiet-gate for instruction rows). Run `cargo clippy` for the touched crates on Linux too. Done criterion: the DL3 done criterion above."""
+
 if __name__ == '__main__':
     which = sys.argv[1]
-    text = {'knobs': knobs, 'deliver-plan': deliver_plan, 'binary': binary, 'rows': rows, 'spawn': spawn, 'gather': gather, 'control': control, 'tuiecho': tuiecho, 'dl1': dl1, 'dl2': dl2, 'settle': settle, 'names': names, 'tuiecho2': tuiecho2}[which]()
+    text = {'knobs': knobs, 'deliver-plan': deliver_plan, 'binary': binary, 'rows': rows, 'spawn': spawn, 'gather': gather, 'control': control, 'tuiecho': tuiecho, 'dl1': dl1, 'dl2': dl2, 'settle': settle, 'names': names, 'tuiecho2': tuiecho2, 'dl3': dl3}[which]()
     out = sys.argv[2] if len(sys.argv) > 2 else f'{OUT}/{which}.md'
     os.makedirs(os.path.dirname(out), exist_ok=True)
     open(out, 'w').write(text)

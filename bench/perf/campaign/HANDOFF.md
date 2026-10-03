@@ -363,6 +363,29 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   +67% (86k against 51k), `control.cpu_per_cmd` -39%, `control.instr_per_cmd` +21% (the daemon now
   writes what the client used to). Chatty flip/hidden CPU rows failed on the lane in quick mode at
   39-57% fewer instructions: load, judged at wave exit.
+- Side lanes merged 01:55 (workflow `w4-side-lanes`, 9 agents, 2.9 h):
+  - SETTLE `e703eb64` (lane `99c07f48` + fix `a2bbc675`): an empty pane (`split-window ''`) is now
+    created at its real size with its modes set before the actor starts (`spawn_empty_pane`), so
+    no settle build runs for it; `#{cursor_flag}` is backed by `TerminalFacts::cursor_hidden`
+    (removed from the `formats.terminal-runtime` gap). Fixes a parity bug that predates wave 4:
+    `capture-pane -p` on such a pane printed 24 rows where tmux prints 11, and cursor_flag read 1.
+    Mac `spawn.instr.split_empty_P` -45%, `spawn.cpu.split_empty_P` 0.92-1.00x tmux (rule 1.2x,
+    was 2.1x). Open: the settle after real output in an unwatched pane (needs an async settle
+    before `#{C:}` filters in status.rs `pane_search` and a metadata-only `FrameSnapshot::capture`);
+    remaining split+kill cost is command execution 39% (source pane tcgetpgrp and cwd, automatic
+    rename on kill), loop turn 25%, shard wake 23%.
+  - NAMES `3352c904` (lane `ed3640c8` + fix `14931bf1`): the lane's launch-key guess named sibling
+    symlinks wrongly (`vi` -> `vim`; review blocker) and was dropped; what merged is the exact
+    lookup with a 64-entry cache keyed by (pid, unique_id, id_version), safe against pid reuse.
+    Per-check cost 22.4 us against a 15 us target; the saving is inside run-to-run noise. Kept
+    because the old 4-entry pid-keyed cache could return a stale name after pid reuse.
+  - TUIECHO2 `52f8e3ab` (lane `4ae4b030` + fix `f3af5d52`, done): key input encodes straight into a
+    reused buffer (`zz-protocol/src/key_frame.rs`), prefix keys are canonicalised once, and the
+    client reuses a spare cell buffer instead of copying the 38 KB array per frame (seeded test
+    `reused_cell_buffers_follow_patches_while_clones_are_held`). Client per key 92 -> 76.6 kinstr.
+- batch3 checks from 02:00 on `52f8e3ab` (everything since batch2): Mac full suite in the snapshot
+  worktree `~/dev/zz-check` plus the full corpus, A/B against the wave-3 exit binary; Linux the
+  same in alienware `~/dev/zz-perf-int` (`~/.cache/zz-perf/batch3`, no quiet-gate).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

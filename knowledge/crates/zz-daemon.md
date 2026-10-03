@@ -4,7 +4,7 @@ title: zz-daemon crate
 description: The persistent local daemon. Sole authority for mux state, owner of PTY-backed terminal sessions and Agent-pane ACP adapter children, and the fan-out engine that streams coalesced terminal frames and agent transcripts to attached and short-lived clients over a socket or named pipe.
 resource: crates/zz-daemon/src/daemon.rs
 tags: [crate, daemon, ipc, fanout, transport, agent]
-timestamp: 2026-09-27T00:00:00-03:00
+timestamp: 2026-10-03T02:00:00-03:00
 ---
 
 # Overview
@@ -346,7 +346,9 @@ actor, and lets a reliable close clear any pending frame no newer than that clos
 with the client watermark, so reordered lane priority and mailbox replacement cannot resurrect a
 retired output.
 
-A `zz-pane-{n}` watcher walks the pane's per-view viewports (`TerminalViewId(client.0)`, one per
+A foreground live view gets its frames from the shard through the pane's `PaneSink`; every other
+view goes through the loop's `TerminalWatcher` (see [PTY worker](/concepts/pty-worker.md)). The
+watcher walks the pane's per-view viewports (`TerminalViewId(client.0)`, one per
 attached client), diffs each against that view's previous viewport, and produces either a full
 `EventPayload::TerminalViewport` or a smaller `EventPayload::TerminalPatch`. It calls
 `publish_terminal_for_pane` per view, which delivers **only to a client attached to the session that

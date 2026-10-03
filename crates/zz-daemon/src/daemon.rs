@@ -716,6 +716,7 @@ fn arm_client_message(
             deadline,
             freeze,
         });
+    sync_terminal_freeze(inner, client);
     let schedule = deadline.map(|deadline| ClientMessageDeadline {
         client,
         token,
@@ -725,7 +726,9 @@ fn arm_client_message(
 }
 
 fn take_client_message(inner: &mut ServerState, client: ClientId) -> Option<ActiveClientMessage> {
-    inner.client_mut(client).and_then(|c| c.message.take())
+    let message = inner.client_mut(client).and_then(|c| c.message.take());
+    sync_terminal_freeze(inner, client);
+    message
 }
 
 /// The pin keeps one `TTY_FREEZE` bit and both `status_message_set` and
@@ -2078,6 +2081,7 @@ struct OutboundMailbox {
     ready: Condvar,
     #[cfg(unix)]
     loop_waker: Mutex<Option<(Arc<mio::Waker>, thread::ThreadId)>>,
+    terminals_frozen: AtomicBool,
 }
 
 #[derive(Clone, Debug)]
@@ -2203,6 +2207,8 @@ struct OutboundState {
     writer_batch_reliable: usize,
     #[cfg(unix)]
     quiet_socket: Option<std::os::fd::OwnedFd>,
+    #[cfg(unix)]
+    direct_socket: Option<std::os::fd::OwnedFd>,
     terminals_held: bool,
     attach_batch: bool,
     #[cfg(unix)]
@@ -2538,6 +2544,11 @@ mod pane_frame_tests;
 #[cfg(test)]
 mod encode_once_tests;
 
+mod shard_sink;
+
+#[cfg(test)]
+mod shard_sink_tests;
+
 #[derive(Clone, Copy)]
 enum TerminalDelivery {
     Foreground,
@@ -2613,7 +2624,7 @@ impl OutboundMailbox {
     fn notify_one(&self) {
         #[cfg(unix)]
         if let Some((waker, owner)) = self.loop_waker.lock().as_ref() {
-            if *owner != thread::current().id() {
+            if *owner != thread::current().id() && !shard_sink::hold_loop_wake(waker) {
                 let _ = waker.wake();
             }
             return;
@@ -2637,7 +2648,20 @@ impl OutboundMailbox {
             ready: Condvar::new(),
             #[cfg(unix)]
             loop_waker: Mutex::new(None),
+            terminals_frozen: AtomicBool::new(false),
         })
+    }
+
+    fn terminals_frozen(&self) -> bool {
+        self.terminals_frozen.load(Ordering::Acquire)
+    }
+
+    fn is_closed(&self) -> bool {
+        self.state.lock().closed
+    }
+
+    fn terminal_pending(&self, pane: PaneId) -> bool {
+        self.state.lock().terminals.contains_key(&pane)
     }
 
     fn encode_message(&self, message: &ProtocolMessage) -> Result<Vec<u8>, ProtocolError> {
@@ -3256,6 +3280,12 @@ impl OutboundMailbox {
             log::error!("failed to encode terminal update for {pane}");
             return TerminalEnqueue::Closed;
         };
+        #[cfg(unix)]
+        let off_loop = self
+            .loop_waker
+            .lock()
+            .as_ref()
+            .is_none_or(|(_, owner)| *owner != thread::current().id());
         let mut state = self.state.lock();
         if state.closed {
             return TerminalEnqueue::Closed;
@@ -3315,6 +3345,22 @@ impl OutboundMailbox {
         if matches!(delivery, TerminalDelivery::Preview { .. }) {
             clear_preview_refresh(&mut state, pane);
         }
+        #[cfg(unix)]
+        if off_loop && let Some(written) = write_direct_terminal(&mut state, &encoded) {
+            state.delivered_terminals.insert(pane, transition.current);
+            if written == encoded.len() {
+                return TerminalEnqueue::Queued;
+            }
+            state.queued_bytes += encoded.len() - written;
+            state.reliable.push_back(OutboundFrame::Partial {
+                frame: Box::new(OutboundFrame::Shared(encoded)),
+                offset: written,
+            });
+            drop(state);
+            self.notify_one();
+            return TerminalEnqueue::Queued;
+        }
+        let idle = state.terminals.is_empty();
         state.queued_bytes += encoded.len();
         state.terminals.insert(
             pane,
@@ -3327,7 +3373,9 @@ impl OutboundMailbox {
         );
         state.terminal_order.push_back(pane);
         drop(state);
-        self.notify_one();
+        if idle {
+            self.notify_one();
+        }
         TerminalEnqueue::Queued
     }
 
@@ -3409,6 +3457,7 @@ impl OutboundMailbox {
             .queued_bytes
             .saturating_sub(replaced_len)
             .saturating_add(encoded.len());
+        let idle = state.terminals.is_empty();
         let replaced = state.terminals.insert(
             pane,
             PendingTerminal {
@@ -3424,7 +3473,9 @@ impl OutboundMailbox {
             state.terminal_order.push_back(pane);
         }
         drop(state);
-        self.notify_one();
+        if idle {
+            self.notify_one();
+        }
         true
     }
 
@@ -3595,6 +3646,8 @@ impl OutboundMailbox {
         state.closed = true;
         #[cfg(unix)]
         drop(state.quiet_socket.take());
+        #[cfg(unix)]
+        drop(state.direct_socket.take());
         if matches!(
             state.ctrl_collecting,
             ControlCollection::Quiet | ControlCollection::Attach
@@ -3616,6 +3669,7 @@ impl OutboundMailbox {
             ready: Condvar::new(),
             #[cfg(unix)]
             loop_waker: Mutex::new(None),
+            terminals_frozen: AtomicBool::new(false),
         })
     }
 
@@ -3642,6 +3696,8 @@ impl OutboundMailbox {
         }
         #[cfg(unix)]
         drop(state.quiet_socket.take());
+        #[cfg(unix)]
+        drop(state.direct_socket.take());
         state.discarded_bytes = state
             .discarded_bytes
             .saturating_add(state.writer_inflight_bytes as u64);
@@ -3940,10 +3996,7 @@ fn try_write_quiet_group(state: &mut OutboundState) -> bool {
     if state.queued_bytes != frame.len() {
         return false;
     }
-    let flags = rustix::net::SendFlags::DONTWAIT;
-    #[cfg(not(any(target_vendor = "apple", target_os = "redox", target_os = "vita")))]
-    let flags = flags | rustix::net::SendFlags::NOSIGNAL;
-    let written = match rustix::net::send(socket, frame.as_ref(), flags) {
+    let written = match send_nonblocking(socket, frame) {
         Ok(0) => return false,
         Ok(written) => written,
         Err(error) if error == rustix::io::Errno::INTR || error == rustix::io::Errno::AGAIN => {
@@ -3969,11 +4022,53 @@ fn try_write_quiet_group(state: &mut OutboundState) -> bool {
     }
 }
 
+#[cfg(unix)]
+fn send_nonblocking(socket: &std::os::fd::OwnedFd, bytes: &[u8]) -> rustix::io::Result<usize> {
+    let flags = rustix::net::SendFlags::DONTWAIT;
+    #[cfg(not(any(target_vendor = "apple", target_os = "redox", target_os = "vita")))]
+    let flags = flags | rustix::net::SendFlags::NOSIGNAL;
+    rustix::net::send(socket, bytes, flags)
+}
+
+#[cfg(unix)]
+fn write_direct_terminal(state: &mut OutboundState, frame: &[u8]) -> Option<usize> {
+    if state.queued_bytes != 0
+        || !state.reliable.is_empty()
+        || !state.terminals.is_empty()
+        || state.writer_inflight_bytes != 0
+        || state.writer_finished
+        || state.attach_batch
+        || state.terminals_held
+        || state.attach_settling.is_some()
+        || state.ctrl_collecting != ControlCollection::None
+    {
+        return None;
+    }
+    let socket = state.direct_socket.as_ref()?;
+    match send_nonblocking(socket, frame) {
+        Ok(0) => None,
+        Ok(written) => {
+            state.written_bytes = state.written_bytes.saturating_add(written as u64);
+            Some(written)
+        }
+        Err(error) if error == rustix::io::Errno::INTR || error == rustix::io::Errno::AGAIN => None,
+        Err(_) => {
+            state.direct_socket = None;
+            None
+        }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod direct_write_tests;
+
 fn close_outbound(state: &mut OutboundState) {
     #[cfg(unix)]
     if let Some(socket) = state.quiet_socket.take() {
         let _ = rustix::net::shutdown(&socket, rustix::net::Shutdown::Both);
     }
+    #[cfg(unix)]
+    drop(state.direct_socket.take());
     state.discarded_bytes = state
         .discarded_bytes
         .saturating_add(state.queued_bytes as u64);
@@ -4321,7 +4416,7 @@ struct SharedServer {
     #[cfg(all(feature = "agent", unix))]
     peer_waits: Arc<Mutex<crate::agent::claude_peers::PeerWaits>>,
     kitty_image_frames: Mutex<BTreeMap<KittyImageKey, KittyImageFrames>>,
-    terminal_frames: TerminalFrames,
+    terminal_frames: Arc<TerminalFrames>,
     pasted_images: Mutex<BTreeMap<PaneId, PanePastedImages>>,
     status: Mutex<StatusRenderer>,
     stopping: AtomicBool,
@@ -5282,7 +5377,7 @@ impl Shared {
             #[cfg(all(feature = "agent", unix))]
             peer_waits: Arc::new(Mutex::new(crate::agent::claude_peers::PeerWaits::default())),
             kitty_image_frames: Mutex::new(BTreeMap::new()),
-            terminal_frames: TerminalFrames::default(),
+            terminal_frames: Arc::default(),
             pasted_images: Mutex::new(BTreeMap::new()),
             status: Mutex::new(status),
             stopping: AtomicBool::new(false),
@@ -5658,7 +5753,7 @@ impl Shared {
             let mut terminals = std::mem::take(&mut inner.terminals)
                 .values()
                 .cloned()
-                .inspect(|terminal| terminal.retire())
+                .inspect(|terminal| retire_terminal(terminal))
                 .collect::<Vec<_>>();
             terminals.extend(
                 inner
@@ -6395,6 +6490,15 @@ impl Shared {
         let attached = {
             let mut inner = self.inner.lock();
             inner.client_entry(client).subscriber.replace(outbound);
+            sync_terminal_freeze(&inner, client);
+            let streamed = inner
+                .client(client)
+                .and_then(|c| c.streamed_terminals.as_ref())
+                .map(|streamed| streamed.keys().copied().collect::<Vec<_>>())
+                .unwrap_or_default();
+            for pane in streamed {
+                sync_client_pane_sink(&inner, client, pane);
+            }
             if inner.client(client).and_then(|c| c.kind) == Some(ClientKind::Control) {
                 inner
                     .client_entry(client)
@@ -9523,7 +9627,7 @@ impl Shared {
                         if let Some(previous) =
                             inner.terminals_mut().insert(*pane, Arc::clone(&session))
                         {
-                            previous.retire();
+                            retire_terminal(&previous);
                         }
                         inner.terminal_spawns.insert(*pane, spawn);
                         inner.engine.set_pane_runtime_facts_with_hooks(
@@ -9697,7 +9801,7 @@ impl Shared {
                         if let Some(previous) =
                             inner.terminals_mut().insert(*pane, Arc::clone(&session))
                         {
-                            previous.retire();
+                            retire_terminal(&previous);
                         }
                         inner.terminal_spawns.insert(*pane, spawn);
                         for streamed in inner
@@ -9869,7 +9973,7 @@ impl Shared {
                             }
                             Self::wake_pane_exit_wait(&mut inner, *pane, 0);
                             if let Some(terminal) = inner.terminals_mut().remove(pane) {
-                                terminal.retire();
+                                retire_terminal(&terminal);
                             }
                             inner.name_checks.remove(pane);
                             inner.pane_read_observations.remove(pane);
@@ -10431,6 +10535,7 @@ impl Shared {
                                     }
                                 });
                             inner.client_entry(client).command_prompt.replace(prompt);
+                            sync_terminal_freeze(&inner, client);
                             direct_events.push(EventPayload::CommandPrompt { state: Some(state) });
                             incremental_start = fired;
                         }
@@ -20812,6 +20917,7 @@ impl Shared {
         for pane in &streamed {
             if let Some(terminal) = inner.terminals.get(pane) {
                 terminal.set_view_stream(TerminalViewId(client.0), ViewStream::Off);
+                sync_view_sink(&inner, terminal, client, *pane, None);
             }
         }
         let _ = inner
@@ -22071,7 +22177,7 @@ impl Shared {
             };
             let terminal = Arc::clone(&popup.terminal);
             if let Some(previous) = inner.terminals_mut().insert(pane, Arc::clone(&terminal)) {
-                previous.retire();
+                retire_terminal(&previous);
             }
             let current_path = terminal_working_directory(&terminal)
                 .map(|path| path.to_string_lossy().into_owned())
@@ -27677,6 +27783,22 @@ impl Shared {
             .state
             .pane(pane)
             .is_some_and(|pane| matches!(pane.kind, PaneKind::Agent(_)));
+        terminal.install_frame_sink(Arc::new(shard_sink::PaneSink::new(
+            pane,
+            Arc::clone(&self.terminal_frames),
+        )));
+        {
+            let inner = self.inner.lock();
+            for (client, state) in &inner.clients {
+                if let Some(kind) = state
+                    .streamed_terminals
+                    .as_ref()
+                    .and_then(|streamed| streamed.get(&pane))
+                {
+                    sync_view_sink(&inner, terminal, *client, pane, Some(*kind));
+                }
+            }
+        }
         self.watcher_tx.register(
             watchers::Watcher::terminal(pane, terminal, projects_agent),
             terminal.events(),
@@ -30336,6 +30458,7 @@ impl Shared {
     fn resume_client_terminals(self: &Arc<Self>, client: ClientId) {
         let (outbound, panes) = {
             let inner = self.inner.lock();
+            sync_terminal_freeze(&inner, client);
             if client_terminal_publication_frozen(&inner, client) {
                 return;
             }
@@ -38897,7 +39020,7 @@ fn enter_copy_session(
             .client(client)
             .and_then(|c| c.copy_session.as_ref())
             .is_some_and(|session| session.pane == pane && !session.exiting && session.kill);
-    inner
+    let previous = inner
         .client_entry(client)
         .copy_session
         .replace(CopySession {
@@ -38910,6 +39033,10 @@ fn enter_copy_session(
             sourced: false,
             exiting: false,
         });
+    sync_client_pane_sink(inner, client, pane);
+    if let Some(previous) = previous.filter(|previous| previous.pane != pane) {
+        sync_client_pane_sink(inner, client, previous.pane);
+    }
     Ok(())
 }
 
@@ -39111,7 +39238,9 @@ fn terminal_view_action_arms_scroll_exit(action: &zz_terminal::TerminalViewActio
 }
 
 fn exit_copy_session(inner: &mut ServerState, client: ClientId) {
-    inner.client_mut(client).and_then(|c| c.copy_session.take());
+    if let Some(session) = inner.client_mut(client).and_then(|c| c.copy_session.take()) {
+        sync_client_pane_sink(inner, client, session.pane);
+    }
     inner
         .client_entry(client)
         .key_engine
@@ -45214,24 +45343,79 @@ fn apply_view_streams(
     previous: &BTreeMap<PaneId, TerminalStreamKind>,
     next: &BTreeMap<PaneId, TerminalStreamKind>,
 ) {
+    let client = ClientId(view.0);
     for pane in previous.keys().filter(|pane| !next.contains_key(pane)) {
         if let Some(terminal) = inner.terminals.get(pane) {
             terminal.set_view_stream(view, ViewStream::Off);
+            sync_view_sink(inner, terminal, client, *pane, None);
         }
     }
     for (pane, kind) in next {
+        let Some(terminal) = inner.terminals.get(pane) else {
+            continue;
+        };
+        sync_view_sink(inner, terminal, client, *pane, Some(*kind));
         if previous.contains_key(pane) {
             continue;
         }
-        if let Some(terminal) = inner.terminals.get(pane) {
-            terminal.set_view_stream(
-                view,
-                match kind {
-                    TerminalStreamKind::Foreground => ViewStream::Foreground,
-                    TerminalStreamKind::Preview => ViewStream::Preview,
-                },
-            );
-        }
+        terminal.set_view_stream(
+            view,
+            match kind {
+                TerminalStreamKind::Foreground => ViewStream::Foreground,
+                TerminalStreamKind::Preview => ViewStream::Preview,
+            },
+        );
+    }
+}
+
+fn sync_view_sink(
+    inner: &ServerState,
+    terminal: &TerminalSession,
+    client: ClientId,
+    pane: PaneId,
+    kind: Option<TerminalStreamKind>,
+) {
+    let Some(sink) = shard_sink::PaneSink::of(terminal) else {
+        return;
+    };
+    let record = inner
+        .client(client)
+        .filter(|_| kind == Some(TerminalStreamKind::Foreground))
+        .and_then(|c| {
+            let live = c
+                .copy_session
+                .as_ref()
+                .is_none_or(|session| session.pane != pane);
+            c.subscriber.clone().map(|mailbox| (mailbox, live))
+        });
+    sink.set_view(TerminalViewId(client.0), record);
+}
+
+fn sync_client_pane_sink(inner: &ServerState, client: ClientId, pane: PaneId) {
+    let Some(terminal) = inner.terminals.get(&pane) else {
+        return;
+    };
+    let kind = inner
+        .client(client)
+        .and_then(|c| c.streamed_terminals.as_ref())
+        .and_then(|streamed| streamed.get(&pane))
+        .copied();
+    sync_view_sink(inner, terminal, client, pane, kind);
+}
+
+fn retire_terminal(terminal: &TerminalSession) {
+    terminal.retire();
+    if let Some(sink) = shard_sink::PaneSink::of(terminal) {
+        sink.clear();
+    }
+}
+
+fn sync_terminal_freeze(inner: &ServerState, client: ClientId) {
+    if let Some(subscriber) = inner.client(client).and_then(|c| c.subscriber.as_ref()) {
+        subscriber.terminals_frozen.store(
+            client_terminal_publication_frozen(inner, client),
+            Ordering::Release,
+        );
     }
 }
 

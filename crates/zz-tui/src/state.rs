@@ -108,9 +108,9 @@ pub(crate) struct Model {
     pub snapshot: Arc<MuxSnapshot>,
     pub layout_generation: u64,
     pub attached_session: Option<SessionId>,
-    pub viewports: HashMap<PaneId, TerminalViewport>,
+    pub viewports: HashMap<PaneId, TerminalViewport, foldhash::fast::FixedState>,
     pub appearance: TerminalAppearance,
-    pub status: StatusLine,
+    pub status: Arc<StatusLine>,
     pub prefix_armed: bool,
     pub command_prompt: Option<CommandPromptState>,
     pub command_output_id: Option<u64>,
@@ -236,7 +236,7 @@ impl Model {
                 .into_iter()
                 .collect(),
             appearance: core.appearance().cloned().unwrap_or_default(),
-            status: core.status().clone(),
+            status: Arc::new(core.status().clone()),
             prefix_armed: core.prefix_armed(),
             command_prompt: core.command_prompt().cloned(),
             command_output_id: None,
@@ -299,7 +299,7 @@ impl Model {
         self.attached_session = core.attached_session();
         self.viewports.clear();
         self.appearance = core.appearance().cloned().unwrap_or_default();
-        self.status = core.status().clone();
+        self.status = Arc::new(core.status().clone());
         self.prefix_armed = core.prefix_armed();
         self.command_prompt = core.command_prompt().cloned();
         self.command_output_id = None;
@@ -561,7 +561,7 @@ impl Model {
     /// caller must treat as a layout event.
     pub fn set_status(&mut self, status: StatusLine) -> bool {
         let previous = (self.status_block_rows(), self.status_top());
-        self.status = status;
+        self.status = Arc::new(status);
         let changed = previous != (self.status_block_rows(), self.status_top());
         if changed {
             self.recompute_layout();
@@ -1420,7 +1420,7 @@ mod tests {
         });
         assert_eq!(model.message_row_y(), Some(23));
 
-        model.status.position = StatusPosition::Top;
+        Arc::make_mut(&mut model.status).position = StatusPosition::Top;
         assert_eq!(model.message_row_y(), Some(0));
 
         model.set_status(StatusLine {
@@ -1725,7 +1725,7 @@ mod tests {
         assert_eq!(model.message_row_y(), None);
         model.client_message = Some(ClientMessage::local("hi"));
         assert_eq!(model.message_row_y(), Some(23));
-        model.status.position = StatusPosition::Top;
+        Arc::make_mut(&mut model.status).position = StatusPosition::Top;
         assert_eq!(model.message_row_y(), Some(0));
     }
 

@@ -692,6 +692,19 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
 - Trap again: `ssh host '... pgrep -f "cargo clippy ..."'` matched the remote shell's own command
   line and killed the ssh session (the master survived). Find PIDs with `ps -eo pid,cmd | grep
   "[c]argo clippy"` and kill them by number.
+- ECHOIN merged as `957d6641` (EM3 `c5afe7b8`, EM2 `04e2b776`, EM5 `6e8ba2d2`, perf/wave4 merge
+  `c972aeea`, fixes `78964e65` and `371d5f80`; run `wf_c2135366-8ce`, 2 h 9 min). The merge kept
+  ATTACH's identical short-read drain and dropped EM3's copy. EM2's direct path reopens only when
+  `InputReceiver::is_idle()` (no slot in use and an empty ACFIX overflow), and a direct key inside
+  a wake hold reaches the pane (it needs no actor wake). Review major, fixed: a direct key's echo
+  note never expired on a pane that does not echo (password prompt, `stty -echo`), so neighbours
+  on the shard kept yielding and skipped their spin bridge (40 MB through a busy neighbour: 213-249
+  ms -> 325-351 ms); the note now holds its write time and lapses after `ECHO_WINDOW`. Mac against
+  perf/wave4 `1b3dab69`: daemon unix syscalls per key 16.4 -> 13.3, context switches 4.2 -> 3.4,
+  `echo.p50.idle` -32 to -36% (loaded host), `chatty.instr_per_s.flip` +2.2% over the 2% bar (a
+  profile puts EM2's per-turn checks under 1% of daemon CPU), attach instructions within 2%. Not
+  met: the probe steps (socket read -> dispatch 13.3 us against 8, dispatch -> PTY write 7.3 us
+  against 6), not re-measured after the merge. Linux measured next (batch6).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

@@ -1,9 +1,12 @@
 use std::{
     collections::VecDeque,
     io,
-    os::fd::{AsFd as _, AsRawFd as _, OwnedFd, RawFd},
+    os::fd::{AsFd as _, AsRawFd as _, OwnedFd},
     rc::Rc,
 };
+
+#[cfg(target_os = "macos")]
+use std::os::fd::RawFd;
 
 use super::*;
 use crate::writer::TerminalWriter;

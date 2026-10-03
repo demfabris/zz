@@ -81,6 +81,15 @@ pub(super) struct Observation {
     notify: Arc<dyn Fn() + Send + Sync>,
 }
 
+fn pane_last_output(shared: &Shared, pane: PaneId) -> Option<Instant> {
+    shared
+        .inner
+        .lock()
+        .terminals
+        .get(&pane)
+        .and_then(|terminal| terminal.last_output())
+}
+
 pub(super) fn pane_changed(inner: &mut ServerState, pane: PaneId) {
     if let Some(observation) = inner.pane_read_observations.get(&pane) {
         if let Some(observation) = observation.upgrade() {
@@ -431,12 +440,7 @@ fn poll_wait(shared: &Arc<Shared>, target: Arc<Target>, mut wait: Wait) {
     match wait.parsed.condition {
         PaneWaitCondition::Exit => unreachable!(),
         PaneWaitCondition::Idle(dwell) => {
-            let last_output = shared
-                .inner
-                .lock()
-                .last_output
-                .get(&target.pane)
-                .copied()
+            let last_output = pane_last_output(shared, target.pane)
                 .unwrap_or(wait.started)
                 .max(wait.started);
             if !wait.first && last_output.elapsed() >= dwell {
@@ -521,12 +525,7 @@ fn finish_wait_poll(shared: &Arc<Shared>, target: Arc<Target>, mut wait: Wait, g
         wait.first = false;
         let idle = if let PaneWaitCondition::Idle(dwell) = wait.parsed.condition {
             Some(
-                shared
-                    .inner
-                    .lock()
-                    .last_output
-                    .get(&target.pane)
-                    .copied()
+                pane_last_output(shared, target.pane)
                     .unwrap_or(wait.started)
                     .max(wait.started)
                     + dwell,

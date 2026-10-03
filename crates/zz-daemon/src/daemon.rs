@@ -439,16 +439,35 @@ fn tmux_environment(socket_path: &Path, session: Option<SessionId>) -> String {
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-fn terminal_working_directory(terminal: &TerminalSession) -> Option<PathBuf> {
-    terminal
-        .foreground_process_id()
-        .filter(|pid| *pid != 0)
-        .and_then(crate::process_info::working_directory)
+fn process_working_directory(pid: u32) -> Option<PathBuf> {
+    crate::process_info::working_directory(pid)
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn terminal_working_directory(_terminal: &TerminalSession) -> Option<PathBuf> {
+fn process_working_directory(_pid: u32) -> Option<PathBuf> {
     None
+}
+
+fn terminal_foreground_process(terminal: &TerminalSession) -> Option<u32> {
+    #[cfg(test)]
+    edge_facts_tests::count_lookup();
+    terminal.foreground_process_id().filter(|pid| *pid != 0)
+}
+
+fn terminal_working_directory(terminal: &TerminalSession) -> Option<PathBuf> {
+    terminal_foreground_process(terminal).and_then(process_working_directory)
+}
+
+fn terminal_foreground_facts(terminal: &TerminalSession) -> (String, Option<String>) {
+    terminal_foreground_process(terminal).map_or_else(
+        || (String::new(), None),
+        |pid| {
+            (
+                crate::process_info::command_name(pid).unwrap_or_default(),
+                process_working_directory(pid).map(|path| path.to_string_lossy().into_owned()),
+            )
+        },
+    )
 }
 
 #[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
@@ -466,12 +485,13 @@ fn home_directory_for(engine: &MuxEngine, user: &str) -> Option<String> {
 }
 
 fn terminal_current_command(terminal: &TerminalSession) -> String {
-    terminal
-        .foreground_process_id()
-        .filter(|pid| *pid != 0)
+    terminal_foreground_process(terminal)
         .and_then(crate::process_info::command_name)
         .unwrap_or_default()
 }
+
+#[cfg(test)]
+mod edge_facts_tests;
 
 fn unix_timestamp() -> u64 {
     SystemTime::now()
@@ -634,14 +654,38 @@ fn arm_silence_deadline(
     window: WindowId,
     seconds: u32,
 ) -> SilenceDeadline {
+    arm_silence_deadline_at(
+        inner,
+        window,
+        Instant::now() + Duration::from_secs(u64::from(seconds)),
+    )
+}
+
+fn arm_silence_deadline_at(
+    inner: &mut ServerState,
+    window: WindowId,
+    deadline: Instant,
+) -> SilenceDeadline {
     inner.next_silence_token = inner.next_silence_token.wrapping_add(1);
     let deadline = SilenceDeadline {
         window,
         token: inner.next_silence_token,
-        deadline: Instant::now() + Duration::from_secs(u64::from(seconds)),
+        deadline,
     };
     inner.silence_deadlines.insert(window, deadline);
     deadline
+}
+
+fn window_last_output(inner: &ServerState, window: WindowId) -> Option<Instant> {
+    inner
+        .engine
+        .state
+        .windows
+        .get(&window)?
+        .panes
+        .keys()
+        .filter_map(|pane| inner.terminals.get(pane)?.last_output())
+        .max()
 }
 
 fn schedule_window_silence(inner: &mut ServerState, window: WindowId) -> Option<SilenceDeadline> {
@@ -9692,7 +9736,7 @@ impl Shared {
                             if let Some(terminal) = inner.terminals_mut().remove(pane) {
                                 terminal.retire();
                             }
-                            inner.last_output.remove(pane);
+                            inner.name_checks.remove(pane);
                             inner.pane_read_observations.remove(pane);
                             inner.control_activity_pending.remove(pane);
                             #[cfg(all(feature = "agent", unix))]
@@ -27897,23 +27941,13 @@ impl Shared {
         }
     }
 
-    fn synchronize_pane_runtime(
+    fn note_pane_output(
         self: &Arc<Self>,
         pane: PaneId,
         terminal: &Arc<TerminalSession>,
-        viewport: &TerminalViewport,
-        current_command: &str,
-        output_activity: bool,
+        now: Instant,
     ) {
-        let live_path =
-            terminal_working_directory(terminal).map(|path| path.to_string_lossy().into_owned());
-        let reported_path = viewport.working_directory().unwrap_or_default().to_owned();
-        let pid = terminal.process_id();
-        let tty = terminal
-            .tty()
-            .map(|path| path.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let (changed, events, refresh_activity_choosers, alert_window, silence_schedule) = {
+        let (check, silence_schedule, alert_window, refresh_activity_choosers) = {
             let mut inner = self.inner.lock();
             if !inner
                 .terminals
@@ -27922,35 +27956,145 @@ impl Shared {
             {
                 return;
             }
-            let mut alert_window = None;
             let mut silence_schedule = None;
-            if output_activity {
-                inner.last_output.insert(pane, Instant::now());
-                terminal_reads::pane_changed(&mut inner, pane);
-                inner.engine.set_format_now(unix_timestamp());
-                for session in inner
-                    .clients
-                    .values_mut()
-                    .filter_map(|c| c.copy_session.as_mut())
-                {
-                    if session.pane == pane && !session.exiting {
-                        session.unseen = true;
-                    }
-                }
-                inner.engine.touch_window_activity_for_pane(pane);
-                if let Some(window) = inner.engine.state.window_for_pane(pane) {
-                    silence_schedule = schedule_window_silence(&mut inner, window);
-                    if inner.engine.monitor_activity_for_window(window) {
-                        alert_window = Some(window);
-                    }
+            let mut alert_window = None;
+            terminal_reads::pane_changed(&mut inner, pane);
+            inner.engine.set_format_now(unix_timestamp());
+            for session in inner
+                .clients
+                .values_mut()
+                .filter_map(|c| c.copy_session.as_mut())
+            {
+                if session.pane == pane && !session.exiting {
+                    session.unseen = true;
                 }
             }
-            let refresh_activity_choosers = output_activity
-                && inner
-                    .clients
-                    .values()
-                    .filter_map(|c| c.choose_tree.as_ref())
-                    .any(|chooser| chooser.sort.order() == Some(TmuxSortOrder::Activity));
+            inner.engine.touch_window_activity_for_pane(pane);
+            if let Some(window) = inner.engine.state.window_for_pane(pane) {
+                if !inner.silence_deadlines.contains_key(&window) {
+                    silence_schedule = schedule_window_silence(&mut inner, window);
+                }
+                if inner.control_activity_pending.contains(&pane)
+                    || (inner.engine.monitor_activity_for_window(window)
+                        && !inner
+                            .engine
+                            .state
+                            .windows
+                            .get(&window)
+                            .is_some_and(|state| state.activity_flag))
+                {
+                    alert_window = Some(window);
+                }
+            }
+            let refresh_activity_choosers = inner
+                .clients
+                .values()
+                .filter_map(|c| c.choose_tree.as_ref())
+                .any(|chooser| chooser.sort.order() == Some(TmuxSortOrder::Activity));
+            let check = self.admit_name_check(&mut inner, pane, terminal, now);
+            (
+                check,
+                silence_schedule,
+                alert_window,
+                refresh_activity_choosers,
+            )
+        };
+        if let Some(deadline) = silence_schedule {
+            let _ = self.timer_tx.send(timers::TimerInput::Silence(
+                SilenceDeadlineCommand::Schedule(deadline),
+            ));
+        }
+        if let Some(window) = alert_window {
+            self.raise_window_activity(window, pane);
+        }
+        if refresh_activity_choosers {
+            self.refresh_choose_trees();
+        }
+        if check {
+            self.check_pane_runtime(pane, terminal, true, now);
+        }
+    }
+
+    fn check_pane_runtime(
+        self: &Arc<Self>,
+        pane: PaneId,
+        terminal: &Arc<TerminalSession>,
+        output: bool,
+        now: Instant,
+    ) {
+        terminal.take_output_since_check();
+        let (current_command, live_path) = terminal_foreground_facts(terminal);
+        self.synchronize_pane_runtime(pane, terminal, &current_command, live_path, output, now);
+    }
+
+    fn synchronize_pane_reported_path(
+        self: &Arc<Self>,
+        pane: PaneId,
+        terminal: &Arc<TerminalSession>,
+        reported_path: &str,
+    ) {
+        let changed = {
+            let mut inner = self.inner.lock();
+            if !inner
+                .terminals
+                .get(&pane)
+                .is_some_and(|current| Arc::ptr_eq(current, terminal))
+            {
+                return;
+            }
+            let mut runtime = inner
+                .engine
+                .pane_runtime_facts(pane)
+                .cloned()
+                .unwrap_or_default();
+            if runtime.reported_path == reported_path {
+                return;
+            }
+            reported_path.clone_into(&mut runtime.reported_path);
+            inner.engine.set_pane_runtime_facts(pane, runtime)
+        };
+        if changed {
+            self.request_publish(timers::PublishReason::RuntimeFacts);
+        }
+    }
+
+    fn synchronize_pane_runtime(
+        self: &Arc<Self>,
+        pane: PaneId,
+        terminal: &Arc<TerminalSession>,
+        current_command: &str,
+        live_path: Option<String>,
+        output: bool,
+        now: Instant,
+    ) {
+        let events =
+            self.apply_pane_runtime(pane, terminal, current_command, live_path, output, now);
+        self.run_event_hooks(events);
+    }
+
+    fn apply_pane_runtime(
+        self: &Arc<Self>,
+        pane: PaneId,
+        terminal: &Arc<TerminalSession>,
+        current_command: &str,
+        live_path: Option<String>,
+        output: bool,
+        now: Instant,
+    ) -> Vec<PendingHookEvent> {
+        let pid = terminal.process_id();
+        let tty = terminal
+            .tty()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let (changed, events) = {
+            let mut inner = self.inner.lock();
+            if !inner
+                .terminals
+                .get(&pane)
+                .is_some_and(|current| Arc::ptr_eq(current, terminal))
+            {
+                return Vec::new();
+            }
             let previous = inner
                 .engine
                 .pane_runtime_facts(pane)
@@ -27966,20 +28110,13 @@ impl Shared {
                 current_command,
                 current_path,
                 dead_signal: previous.dead_signal,
-                reported_path,
+                reported_path: previous.reported_path,
                 start_path: previous.start_path,
                 pid,
                 tty,
             };
-            let now = Instant::now();
             let result = if inner.engine.pane_runtime_facts(pane) == Some(&runtime) {
-                (
-                    None,
-                    Vec::new(),
-                    refresh_activity_choosers,
-                    alert_window,
-                    silence_schedule,
-                )
+                (None, Vec::new())
             } else {
                 let rename_due = previous.current_command != runtime.current_command
                     && inner.engine.automatic_rename_due(pane, now);
@@ -28001,34 +28138,21 @@ impl Shared {
                         timers::PublishReason::RuntimeFacts
                     }),
                     events,
-                    refresh_activity_choosers,
-                    alert_window,
-                    silence_schedule,
                 )
             };
-            if output_activity {
+            if output {
                 inner.engine.note_automatic_rename_output(pane, now);
             }
             self.schedule_window_renames(&mut inner);
             result
         };
-        if output_activity || changed.is_some() {
+        if output || changed.is_some() {
             self.request_peer_probe();
-        }
-        if let Some(deadline) = silence_schedule {
-            let _ = self.timer_tx.send(timers::TimerInput::Silence(
-                SilenceDeadlineCommand::Schedule(deadline),
-            ));
-        }
-        if let Some(window) = alert_window {
-            self.raise_window_activity(window, pane);
         }
         if let Some(reason) = changed {
             self.request_publish(reason);
-        } else if refresh_activity_choosers {
-            self.refresh_choose_trees();
         }
-        self.run_event_hooks(events);
+        events
     }
 
     fn detach_removed_sessions(self: &Arc<Self>) {
@@ -30161,6 +30285,17 @@ impl Shared {
             inner.silence_deadlines.remove(&scheduled.window);
             let seconds = inner.engine.monitor_silence_for_window(scheduled.window);
             if seconds == 0 {
+                return;
+            }
+            if let Some(quiet_until) = window_last_output(&inner, scheduled.window)
+                .map(|last| last + Duration::from_secs(u64::from(seconds)))
+                .filter(|quiet_until| *quiet_until > now)
+            {
+                let rearm = arm_silence_deadline_at(&mut inner, scheduled.window, quiet_until);
+                drop(inner);
+                let _ = self.timer_tx.send(timers::TimerInput::Silence(
+                    SilenceDeadlineCommand::Schedule(rearm),
+                ));
                 return;
             }
             let Some(window_state) = inner.engine.state.windows.get(&scheduled.window) else {
@@ -34729,7 +34864,8 @@ struct ServerState {
     deferred_event_hooks: Vec<PendingHookEvent>,
     deferred_control_refresh: bool,
     terminals: Arc<BTreeMap<PaneId, Arc<TerminalSession>>>,
-    last_output: BTreeMap<PaneId, Instant>,
+    name_checks: BTreeMap<PaneId, timers::NameCheck>,
+    scheduled_name_check: Option<Instant>,
     pane_read_observations: BTreeMap<PaneId, Weak<terminal_reads::Observation>>,
     control_activity_pending: BTreeSet<PaneId>,
     #[cfg(all(feature = "agent", unix))]
@@ -74248,7 +74384,9 @@ set-option -g @alias-mixed-next yes
             .engine
             .resolve_pane(Some(&target), None, None)
             .expect("pane");
-        let last_output = shared.inner.lock().last_output[&pane];
+        let last_output = shared.inner.lock().terminals[&pane]
+            .last_output()
+            .expect("the pane printed");
         assert!(last_output > started);
         assert!(last_output.elapsed() >= Duration::from_millis(500));
         let started = Instant::now();
@@ -78458,7 +78596,6 @@ set-option -g @alias-mixed-next yes
         let pane = context.pane.expect("session pane");
         wait_for_pane_runtime_facts(&shared, &[pane]);
         let terminal = Arc::clone(&shared.inner.lock().terminals[&pane]);
-        let viewport = terminal.latest_viewport();
         let (facts, generation) = {
             let inner = shared.inner.lock();
             (
@@ -78471,14 +78608,28 @@ set-option -g @alias-mixed-next yes
             )
         };
 
-        shared.synchronize_pane_runtime(pane, &terminal, &viewport, &facts.current_command, false);
+        shared.synchronize_pane_runtime(
+            pane,
+            &terminal,
+            &facts.current_command,
+            Some(facts.current_path.clone()),
+            false,
+            Instant::now(),
+        );
         {
             let inner = shared.inner.lock();
             assert_eq!(inner.engine.state.generation(), generation);
             assert_eq!(inner.engine.pane_runtime_facts(pane), Some(&facts));
         }
 
-        shared.synchronize_pane_runtime(pane, &terminal, &viewport, "zz-changed", false);
+        shared.synchronize_pane_runtime(
+            pane,
+            &terminal,
+            "zz-changed",
+            Some(facts.current_path.clone()),
+            false,
+            Instant::now(),
+        );
         let inner = shared.inner.lock();
         assert_ne!(inner.engine.pane_runtime_facts(pane), Some(&facts));
     }
@@ -78487,6 +78638,7 @@ set-option -g @alias-mixed-next yes
     #[test]
     fn pane_current_command_follows_an_exec_in_the_same_process() {
         let shared = Arc::new(Shared::new(1));
+        shared.start_timers().expect("start timers");
         let mut context = ExecutionContext::default();
         shared
             .execute(
@@ -88704,6 +88856,7 @@ bind - split-window -v -c "#{pane_current_path}"
             .canonicalize()
             .expect("canonical working directory");
         let shared = Arc::new(Shared::new(1));
+        shared.start_timers().expect("start timers");
         let mut context = ExecutionContext::default();
         shared
             .execute(
@@ -110183,7 +110336,6 @@ bind - split-window -v -c "#{pane_current_path}"
         }
         shared.inner.lock().message_log.clear();
 
-        let viewport = terminal.latest_viewport();
         let (window_activity, window_activity_time, session_activity) = {
             let mut inner = shared.inner.lock();
             inner.engine.set_format_now(1);
@@ -110194,7 +110346,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 inner.engine.state.sessions[&session].sort_activity,
             )
         };
-        shared.synchronize_pane_runtime(pane, &terminal, &viewport, "fish", false);
+        shared.synchronize_pane_runtime(pane, &terminal, "fish", None, false, Instant::now());
         {
             let inner = shared.inner.lock();
             assert_eq!(
@@ -110210,7 +110362,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 session_activity
             );
         }
-        shared.synchronize_pane_runtime(pane, &terminal, &viewport, "fish", true);
+        shared.note_pane_output(pane, &terminal, Instant::now());
         {
             let inner = shared.inner.lock();
             assert!(inner.engine.state.windows[&window].activity > window_activity);

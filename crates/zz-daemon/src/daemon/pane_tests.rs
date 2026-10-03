@@ -486,6 +486,7 @@ fn an_interactive_zsh_pane_runs_jobs_in_the_foreground_of_its_tty() {
         return;
     }
     let shared = Arc::new(Shared::new(1));
+    shared.start_timers().expect("start timers");
     let mut context = ExecutionContext::default();
     run(
         &shared,
@@ -569,7 +570,6 @@ fn a_lookup_that_loses_the_foreground_process_keeps_the_pane_command() {
     );
     let pane = pane_of(&shared, &mut context, "lost-foreground:0.0");
     let terminal = terminal(&shared, pane);
-    let viewport = terminal.latest_viewport();
     let command = || {
         shared
             .inner
@@ -581,11 +581,11 @@ fn a_lookup_that_loses_the_foreground_process_keeps_the_pane_command() {
     };
     wait_until("the watcher's first runtime sync", || !command().is_empty());
     thread::sleep(Duration::from_millis(500));
-    shared.synchronize_pane_runtime(pane, &terminal, &viewport, "sleep", false);
+    shared.synchronize_pane_runtime(pane, &terminal, "sleep", None, false, Instant::now());
     assert_eq!(command(), "sleep");
-    shared.synchronize_pane_runtime(pane, &terminal, &viewport, "", false);
+    shared.synchronize_pane_runtime(pane, &terminal, "", None, false, Instant::now());
     assert_eq!(command(), "sleep");
-    shared.synchronize_pane_runtime(pane, &terminal, &viewport, "bash", false);
+    shared.synchronize_pane_runtime(pane, &terminal, "bash", None, false, Instant::now());
     assert_eq!(command(), "bash");
     shared.request_shutdown();
 }

@@ -96,6 +96,13 @@ fn confirmed_chooser_kill_keeps_the_cursor_row_after_the_queued_kill() {
     );
     shared.attach(client, session).unwrap();
     shared
+        .inner
+        .lock()
+        .engine
+        .state
+        .select_window(session, windows[0])
+        .unwrap();
+    shared
         .execute(
             client,
             ClientKind::Interactive,

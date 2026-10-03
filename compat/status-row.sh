@@ -23,7 +23,7 @@ usage() {
 
 COMPAT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd -- "$COMPAT_DIR/.." && pwd)"
-ZZ_INPUT="${1:-${ZZ_BIN:-$REPO_DIR/target/debug/zz}}"
+ZZ_INPUT="${1:-${ZZ_BIN:-$REPO_DIR/target/debug/zz_cli}}"
 TMUX_INPUT="${2:-${TMUX_BIN:-${ZZ_COMPAT_TMUX:-$COMPAT_DIR/.cache/tmux-src/tmux}}}"
 [ "$#" -le 2 ] || { usage; exit 2; }
 

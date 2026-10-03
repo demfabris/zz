@@ -214,13 +214,11 @@ fn expand_row(
     engine: &MuxEngine,
     format: &str,
     context: &ExecutionContext,
-    variables: &BTreeMap<String, String>,
     attached_session: Option<SessionId>,
     facts: &dyn crate::status::FormatFactSource,
 ) -> String {
-    let mut hooks =
-        DaemonFormatHooks::command_with_variables(facts, variables).with_option_engine(engine);
-    engine.expand_pane_format(
+    let mut hooks = DaemonFormatHooks::command(facts).with_option_engine(engine);
+    engine.expand_target_format(
         format,
         context,
         attached_session,
@@ -352,14 +350,13 @@ pub(super) fn tree_rows(
                     align: false,
                 };
             }
-            let (name, context, variables, align) = match item.target {
+            let (name, context, align) = match item.target {
                 ChooseTreeTarget::Session(session) => (
                     state
                         .sessions
                         .get(&session)
                         .map_or_else(String::new, |session| session.name.clone()),
                     Some(ExecutionContext::new(Some(session), None, None)),
-                    scope_variables(true, false, false),
                     false,
                 ),
                 ChooseTreeTarget::Window(window) => (
@@ -370,7 +367,6 @@ pub(super) fn tree_rows(
                     state.windows.get(&window).map(|entry| {
                         ExecutionContext::new(Some(entry.session), Some(window), None)
                     }),
-                    scope_variables(false, true, false),
                     true,
                 ),
                 ChooseTreeTarget::Pane(pane) => (
@@ -379,7 +375,6 @@ pub(super) fn tree_rows(
                         .and_then(|window| engine.pane_index(window, pane))
                         .map_or_else(String::new, |index| index.to_string()),
                     ExecutionContext::for_pane(state, pane),
-                    scope_variables(false, false, true),
                     true,
                 ),
                 ChooseTreeTarget::Client(_) => unreachable!("client rows return early"),
@@ -392,7 +387,6 @@ pub(super) fn tree_rows(
                         engine,
                         WINDOW_TREE_DEFAULT_FORMAT,
                         &context,
-                        &variables,
                         attached_session,
                         facts,
                     )
@@ -593,7 +587,6 @@ pub(super) fn switch_matches(
                     engine,
                     format,
                     &ExecutionContext::new(Some(session), Some(window), None),
-                    &scope_variables(false, true, false),
                     None,
                     &facts,
                 );
@@ -619,7 +612,6 @@ pub(super) fn switch_matches(
                     engine,
                     format,
                     &ExecutionContext::new(Some(session), None, None),
-                    &scope_variables(true, false, false),
                     None,
                     &facts,
                 );
@@ -697,6 +689,9 @@ pub(super) fn chooser_presentation(
     inner: &ServerState,
     client: ClientId,
 ) -> Option<ChooserPresentation> {
+    if !super::chooser_shown(inner, client) {
+        return None;
+    }
     let styles = Styles { inner };
     if let Some(chooser) = inner.client(client).and_then(|c| c.choose_tree.as_ref()) {
         let selected = usize::try_from(chooser.rendered.selected).unwrap_or(usize::MAX);

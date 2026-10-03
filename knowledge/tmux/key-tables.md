@@ -56,7 +56,22 @@ presses (`ChooseTreeAction::Key` / `ChooseBufferAction::Key`) and the daemon map
 character (`?` from shift+`/`) over the folded physical key name. Search-mode editing keys
 (Escape/Enter/BSpace/arrows, printable text append) stay fixed, like other search prompts. Chooser
 vim navigation is therefore rebindable with `bind-key -T choose-tree …` and identical in the GPUI
-app and the TUI, which contain no chooser key maps at all.
+app and the TUI, which contain no chooser key maps at all. Before a key reaches those tables it goes
+through the client's `KeyEngine` (`handle_overlay_with_repeat_metadata`, from `chooser_key_binding`
+in the daemon), the way the pin's `server_client_key_callback` looks the prefix up before
+`window_pane_key` hands a key to the mode: the prefix, an explicit client table, and root bindings
+run first, and only a `Pass` reaches the chooser. That holds while the chooser's own search, filter,
+kill or command prompt is open too, because the pin keeps that prompt inside the mode. A copy-mode
+table under the chooser is suspended for the whole lookup, including when a repeat or a prefix
+timeout ends mid-key, and a `send-prefix [-2]` resolved there hands the prefix key to the chooser
+(the pin's send-prefix goes to the pane's top mode). Search text a GUI client appends while a table
+is armed runs its first character through the same lookup. The pin's tree is a mode on one pane, so
+the daemon draws the chooser and routes keys to it only while its `source_pane` is the active pane
+of the client's current window; `prefix n`, `prefix c` or `prefix o` leaves it behind, hidden, and
+keys reach the pane the client moved to until the tree's pane is active again. Surfaces raised after
+it take keys first: copy mode, view mode and pane modes hide it until they end (`ChooserUnder`
+records what was already there when it opened), and display-panes and the command prompt no longer
+dismiss it. Measured in `smoke/chooser-prefix-keys`.
 
 # Data model
 

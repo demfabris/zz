@@ -162,10 +162,10 @@ def run_fixtures(ids, items, problems, zz=None, output_dir=None, timeout=1800):
     env.setdefault("ZZ_COMPAT_TMUX", str(ROOT / "compat/.cache/tmux-src/tmux"))
     env.setdefault("ZZ_COMPAT_CORPUS", str(ROOT / "compat/.cache/plugins"))
     env.setdefault("TMUX_BIN", str(ROOT / "compat/.cache/tmux-src/tmux"))
-    binary = Path(zz) if zz else ROOT / "target/debug/zz"
+    binary = Path(zz) if zz else ROOT / "target/debug/zz_cli"
     if not binary.exists():
         problems.append(f"no zz binary to compare: {binary} does not exist. The fixtures default "
-                        f"to REPO/target/debug/zz and ignore ZZ_COMPAT_ZZ; pass --zz with a build "
+                        f"to REPO/target/debug/zz_cli and ignore ZZ_COMPAT_ZZ; pass --zz with a build "
                         f"of the revision under test.")
         return
     env["ZZ_BIN"] = str(binary)
@@ -228,7 +228,7 @@ def main(argv):
     ap.add_argument("--run", nargs="*", metavar="ID",
                     help="also execute these obligations' fixtures and read their tally")
     ap.add_argument("--zz", metavar="PATH",
-                    help="the zz binary to compare (the fixtures default to REPO/target/debug/zz "
+                    help="the zz binary to compare (the fixtures default to REPO/target/debug/zz_cli "
                          "and ignore ZZ_COMPAT_ZZ, so an orchestrator worktree with no target "
                          "directory must pass this)")
     ap.add_argument("--output-dir", type=Path,

@@ -173,7 +173,7 @@ for argument in "$@"; do
   esac
 done
 [ "${#POSITIONAL[@]}" -le 2 ] || { usage; exit 2; }
-ZZ_INPUT="${POSITIONAL[0]:-${ZZ_BIN:-$REPO_DIR/target/debug/zz}}"
+ZZ_INPUT="${POSITIONAL[0]:-${ZZ_BIN:-$REPO_DIR/target/debug/zz_cli}}"
 TMUX_INPUT="${POSITIONAL[1]:-${TMUX_BIN:-${ZZ_COMPAT_TMUX:-$COMPAT_DIR/.cache/tmux-src/tmux}}}"
 
 resolve_binary() {
@@ -253,7 +253,7 @@ cleanup() {
     kill "$ZZ_PID" >/dev/null 2>&1
     wait "$ZZ_PID" >/dev/null 2>&1
   fi
-  rm -f -- "$ZZ_SOCKET" "/tmp/tmux-$(id -u)/$OUTER_SOCKET_NAME" "/tmp/tmux-$(id -u)/$INNER_SOCKET_NAME"
+  rm -f -- "$ZZ_SOCKET" "$ZZ_SOCKET.lock" "/tmp/tmux-$(id -u)/$OUTER_SOCKET_NAME" "/tmp/tmux-$(id -u)/$INNER_SOCKET_NAME"
   rm -rf -- "$SCRATCH_DIR"
   exit "$status"
 }

@@ -1,0 +1,16 @@
+corpus: none
+# server_client_key_callback looks the prefix up before window_pane_key hands a
+# key to the mode, and a mode tree has no key_table of its own, so the prefix
+# table still runs inside choose-tree and choose-buffer and inside the tree's
+# own search and filter prompts. The tree is a mode on one pane: a prefix n, c
+# or o leaves it behind and the typed text lands in the window or pane the
+# client moved to, the tree taking keys again once its pane is active, while
+# copy mode, view mode and display-panes stack on top of it and hand it the keys
+# back when they end. A tree raised over copy mode keeps the key after a repeat
+# binding or a prefix timeout, and a send-prefix inside the tree pages the tree
+# instead of writing the prefix into the pane.
+stage: fixtures/chooser-prefix-keys.sh ~/chooser-prefix-keys.sh
+stage: fixtures/chooser-drive.py ~/chooser-drive.py
+out: set-environment -gu CHOOSER_PREFIX_KEYS
+run-shell 'sh ~/chooser-prefix-keys.sh'
+out: show-environment -g CHOOSER_PREFIX_KEYS

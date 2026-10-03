@@ -1318,6 +1318,9 @@ const PANE_MENU_BLOCK: &str = "{ display-menu -T \"#[align=centre]#{pane_index} 
 #[cfg(test)]
 mod generation_tests;
 
+#[cfg(test)]
+mod overlay_tests;
+
 impl KeyTables {
     /// Tables with no bindings at all, for key surfaces that seed their own
     /// defaults (client-local chrome tables) instead of the tmux set.
@@ -1964,6 +1967,51 @@ impl KeyEngine {
         }
         let commands = binding.commands.clone();
         self.decide(commands, binding.repeat)
+    }
+
+    pub fn handle_overlay_with_repeat_metadata(
+        &mut self,
+        tables: &KeyTables,
+        key: &str,
+        now: Instant,
+        repeat_time: Duration,
+        initial_repeat_time: Duration,
+        prefix_timeout: Duration,
+        root_table: &str,
+    ) -> (KeyDecision, bool) {
+        let key = canonical_key(key);
+        if self.mode_table && !tables.is_prefix(&key) {
+            return tables
+                .get(root_table, &key)
+                .or_else(|| tables.get(root_table, "Any"))
+                .map_or((KeyDecision::Pass, false), |binding| {
+                    (KeyDecision::Commands(binding.commands.clone()), false)
+                });
+        }
+        let mode_table = if self.mode_table {
+            self.mode_table = false;
+            self.table.take()
+        } else {
+            self.mode_table_after_prefix.take()
+        };
+        let decision = self.handle_with_repeat_metadata(
+            tables,
+            &key,
+            now,
+            repeat_time,
+            initial_repeat_time,
+            prefix_timeout,
+            root_table,
+        );
+        if let Some(mode_table) = mode_table {
+            if self.table.is_none() {
+                self.table = Some(mode_table);
+                self.mode_table = true;
+            } else {
+                self.mode_table_after_prefix = Some(mode_table);
+            }
+        }
+        decision
     }
 
     pub fn handle_synthetic_any_with_repeat_metadata(

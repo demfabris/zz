@@ -185,6 +185,27 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   (600 s including compile) timed out (KNOBS: `an_attach_repaints_a_dead_pane_kept_by_remain_on_exit`,
   `formatted_split_wait_resumes_its_pane_wait_on_the_loop`) and my CONTROL release build died.
   Instruction rows do not need quiet-gate; use it only for wall rows, one at a time.
+- CONTROL parity review (Opus, 42 min): block integrity, escaping, kill-server, detach,
+  pause-after, 17 EOF/blank-Return inputs and the relay fallbacks match; 2 majors (a SIGKILLed
+  client with a full stdout pipe blocks the loop up to 1 s in `ControlStdio::close` ->
+  `flush_blocking`; after a client is killed the daemon keeps its fds and keeps writing
+  `%output`, so the reader never sees EOF) and 5 minors (O_NONBLOCK left on the client's stdio if
+  the daemon dies, a 5 s ack deadline, stderr diagnostic order, a new client against an older 107
+  daemon fails instead of falling back, stdout WRITABLE left registered). Fix round launched.
+  Two bugs found that predate wave 4: `kill-window` from a control client leaks the pane's PTY
+  (3 ptmx fds per pane; this is what took the 462 PTYs) -> lane PTYLEAK (`~/dev/zz-ptyleak`);
+  `refresh-client -f wait-exit`, blank line, EOF hangs (tmux exits 0) -> the CONTROL fix round.
+- SPAWN (lane 141 min, `4d79a6d2`, done=false): Linux panes start with `clone(CLONE_VM |
+  CLONE_VFORK)` on a 64 KiB stack instead of `fork()` from the multithreaded daemon (copy-on-write
+  faults on the shard per pane 250 -> 4), the exec fence pipe is gone on Linux, `TIOCGPTPEER` for
+  the slave, empty panes skip the spawn environment. alienware: `spawn.cpu.split_shell` 2.23-2.35
+  -> 1.80-1.83 ms (tmux 1.29-1.35), `new_window` 2.40-2.52 -> 1.61-1.69 (tmux 1.20-1.40),
+  `split_empty_P` 0.85-0.91 -> 0.82-0.87 (tmux 0.63-0.71); kernel time, not instructions
+  (`split_shell` user instructions +7%, unexplained). Left outside its zone: the per-pane gather
+  thread (DL6), `terminal_current_command` per publish (DL1), and `settle_unwatched`, which builds a
+  full snapshot about 100 ms after spawn: about 50% of `split_empty_P` instructions (0.9 Minstr,
+  214 us per split), owner DL3 (sinks) unless a smaller slice takes it first. A safety review of
+  the CLONE_VM child (Opus: codex's cyber filter stops process-spawn reviews) runs before merging.
 
 ## Wave 3 merge log (from 2026-10-01)
 

@@ -2121,7 +2121,7 @@ impl OutboundFrame {
         Self::Grouped { encoded, frames }
     }
 
-    #[cfg(any(windows, test))]
+    #[cfg(test)]
     fn into_vec(self) -> Vec<u8> {
         match self.materialize() {
             Self::Owned(frame) => frame,

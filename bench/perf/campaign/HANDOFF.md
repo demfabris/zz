@@ -241,6 +241,21 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   release build with `pkill -f "cargo build --release -j6 -p zz-cli"` (briefs now forbid broad
   pkill patterns). Merging it landed under the running batch2 Mac checks (mostly Linux-only
   code); merge checks now take `WT=<worktree>` so they run on a fixed snapshot.
+- PTYLEAK (lane 46 min, `d492c144`, done): the leak was a lost `Shutdown`, not a held session.
+  `TerminalSession::drop` sends `Shutdown` with `try_send` into the actor's one-slot mailbox;
+  with a control client attached, `stop_control_output_tap` queues `DisarmRawOutputTap` just
+  before, the slot is full and the shutdown was dropped, so the child and 3 ptmx fds lived on
+  (kill-window/kill-pane 3 -> 63 fds after 20 pairs, respawn-pane -k 3 -> 87, kill-session 3 ->
+  60). Now `Drop` defers `Shutdown` behind the queued command; `ptyleak_tests.rs` fails on the
+  base. Merges after batch2's Mac checks finish (they run in `zz-perf-int`).
+- TEARDOWN (launched 23:40 from `perf/ptyleak`): `mode_keys_scope_visible_command_output_
+  separately_from_underlying_copy_mode` takes 30 s on both hosts because teardown waits for its
+  `sleep 30` pane to exit on its own (3.08 s with `sleep 3`): a shard actor is not woken when its
+  terminal is dropped. The lane makes a kill reach an idle silent child within 100 ms.
+- Linux checks of the merged tree run in alienware `~/dev/zz-control` (`~/.cache/zz-perf/batch2`);
+  the old KNOBS Linux check was stopped after its release build timed out at 40 min on the loaded
+  host (its fmt, clippy, 44 solos and compat 99/101 stand; the three solo stragglers pass alone,
+  `formatted_split_wait_resumes_its_pane_wait_on_the_loop` 2 of 3).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

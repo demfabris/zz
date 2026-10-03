@@ -432,6 +432,28 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   `control.burst_cmds_per_s` 0.776x (lane BURST, launched 08:27 as a one-lane `w4-side-lanes` run
   `wf_09d4e458-9a5`, `~/dev/zz-burst`), and two marginal rows (`attach.ttfc.p4` 1.11 vs 1.1,
   `cli.wall.capture_history.p20` 1.06 vs 1.05).
+- BURST merged 10:53 as `0d7dabf7` (lane `91d29019` + test fix `a361123a`; 2 h 25 min, done
+  criterion not met): the handed stdout used to flush per reply while a line was in flight, so a
+  200-line burst cost 200 writes; it now writes once per 1 KiB of replies (10 writes, tmux 2),
+  skips read lines by offset instead of cutting the buffer per line, and decodes grouped replies'
+  inner frames directly. alienware quiet series, 5 alternating runs: burst 0.755x -> 0.876x tmux
+  (rule 0.9x), `control.latency` 0.0163 -> 0.0136 ms, `control.cpu_per_cmd` 0.0130 -> 0.0103 ms
+  (tmux 0.0101); Mac burst 1.70x -> 1.97x. Merged as a strict improvement. The rest of the gap is
+  CPU per command (Mac profile: `execute_compact_command` 53%, `prepare_compact_request` 15% of
+  main-thread busy, mostly the per-line `ConfigBuilder` parse and a `Vec<char>` collect; plus the
+  batch encode in `enqueue_control_group` and `try_recv_batch`'s materialize step). Checks on
+  `0d7dabf7`: clippy, control_stdio (10) and zz-cli (282 Mac / 281 Linux) pass on both hosts.
+  `~/dev/zz-burst` and the DL3 worktree `~/dev/zz-deliver` removed on both hosts (branch
+  `perf/deliver` kept; DL4 and DL5 sit on it).
+- DL4/DL5 reviews (10:50): DL5 has a Linux blocker: the per-client barrier flush pushes every
+  pane's queued output (about 1 MB in 8 KB messages with 4 busy panes) past
+  `MAX_RELIABLE_MESSAGES`, so automatic-rename's window-renamed hook drops the control client
+  ("too far behind") and command replies starve. DL4's Mac echo gain does not reproduce on a calm
+  host; Linux echo -64 us from DL4 alone; loop busy 15/9/11 -> 4/4/5 holds. Fix agents running.
+  Review leads for new lanes: postcard encodes `Vec<u8>` fields one element at a time (39% of
+  loop samples under control output, 10% more decoding them for handed stdio); Mac
+  `chatty.instr_per_s.flip`/`.hidden` +7-8% from the wave-4 merge with no client attached
+  (NAMES suspected); Linux still wakes 4.83 threads per echoed key (tmux about 2).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

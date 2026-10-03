@@ -51030,6 +51030,9 @@ fn handle_connection_message<S: TransportStream>(
             ProtocolMessage::TreeSync => {
                 shared.send_compact_state(client, &outbound, true);
             }
+            ProtocolMessage::ControlStdio => {
+                let _ = outbound.enqueue_reliable(&ProtocolMessage::ControlStdioClosed);
+            }
             ProtocolMessage::GetKeyTables => {
                 let tables = shared.inner.lock().engine.keys.snapshot();
                 Shared::send_event(&outbound, EventPayload::KeyTablesChanged { tables });

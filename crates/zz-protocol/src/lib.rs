@@ -32,9 +32,9 @@ pub use catalog::{
     unimplemented_tmux_command_spec,
 };
 pub use control::{
-    AttachOperation, Batch, CAPABILITY_NAMES, CONTROL_CAPABILITY, ClientView, ClientViewport,
-    Hello, KeySubscription, MAX_BATCH_FRAMES, MouseBindings, Subscriptions, TreeSubscription,
-    Welcome, key_tables_hash,
+    AttachOperation, Batch, CAPABILITY_NAMES, CONTROL_CAPABILITY, CONTROL_STDIO_CAPABILITY,
+    ClientView, ClientViewport, Hello, KeySubscription, MAX_BATCH_FRAMES, MouseBindings,
+    Subscriptions, TreeSubscription, Welcome, key_tables_hash,
 };
 pub use exec::{
     ClientEnvironmentBlob, EXEC_CAPABILITY, ExecExit, ExecFlags, ExecOutcome, ExecRequest,

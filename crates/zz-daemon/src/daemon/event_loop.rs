@@ -9,6 +9,9 @@ use zz_protocol::decode_protocol_frame;
 
 use super::*;
 
+#[path = "control_stdio.rs"]
+mod control_stdio;
+
 #[cfg(test)]
 #[path = "event_loop_e19_tests.rs"]
 mod e19_tests;
@@ -127,6 +130,7 @@ pub(super) struct EventLoop {
     #[cfg(feature = "agent")]
     agents: agent_inbox::AgentInbox,
     connections: BTreeMap<Token, Box<Connection>>,
+    stdio_tokens: BTreeMap<Token, Token>,
     inserted_queues: Vec<wait_queue::InsertedTask>,
     completed: mpsc::Receiver<Completion>,
     completion_sender: mpsc::Sender<Completion>,
@@ -236,6 +240,9 @@ struct Connection {
     cancel: Arc<AtomicBool>,
     cleanup_started: bool,
     released: Option<Arc<AtomicBool>>,
+    ancillary: bool,
+    received_fds: Vec<OwnedFd>,
+    stdio: Option<Box<control_stdio::ControlStdio>>,
 }
 
 #[cfg(test)]
@@ -312,6 +319,7 @@ impl EventLoop {
             #[cfg(feature = "agent")]
             agents,
             connections: BTreeMap::new(),
+            stdio_tokens: BTreeMap::new(),
             inserted_queues: Vec::new(),
             completed,
             completion_sender,
@@ -420,6 +428,9 @@ impl EventLoop {
                 cancel: Arc::new(AtomicBool::new(false)),
                 cleanup_started: false,
                 released: None,
+                ancillary: false,
+                received_fds: Vec::new(),
+                stdio: None,
             }),
         );
         Ok(token)
@@ -494,6 +505,8 @@ impl EventLoop {
                 } else if self.jobs.contains_token(token) {
                     self.jobs
                         .ready(self.poll.registry(), token, readable, writable);
+                } else if let Some(&owner) = self.stdio_tokens.get(&token) {
+                    self.stdio_ready(owner, token);
                 } else if self.connections.contains_key(&token) {
                     if readable {
                         self.read_ready(token, shared);
@@ -719,7 +732,15 @@ impl EventLoop {
             if connection.read_closed {
                 return;
             }
-            let read = connection.stream.read(&mut self.read_buffer);
+            let read = if connection.ancillary {
+                control_stdio::receive(
+                    &connection.stream,
+                    &mut self.read_buffer,
+                    &mut connection.received_fds,
+                )
+            } else {
+                connection.stream.read(&mut self.read_buffer)
+            };
             match read {
                 Ok(0) => {
                     let clean = connection.inbound.eof().is_ok();
@@ -728,7 +749,9 @@ impl EventLoop {
                         && connection.kind == Some(ClientKind::Interactive)
                         && connection.initialized
                         && !connection.initializing;
-                    if !connection.drain_input {
+                    let drain_input = connection.drain_input;
+                    self.drop_stdio(token);
+                    if !drain_input {
                         self.disconnect(token, shared);
                     }
                     return;
@@ -765,6 +788,19 @@ impl EventLoop {
         bytes: usize,
     ) -> bool {
         let connection = self.connections.get_mut(&token).unwrap();
+        match message {
+            ProtocolMessage::ControlStdio => {
+                self.open_stdio(token);
+                return true;
+            }
+            ProtocolMessage::ControlWrite { bytes, idle, close } => {
+                if let Some(stdio) = connection.stdio.as_mut() {
+                    stdio.client_write(&bytes, idle, close);
+                }
+                return true;
+            }
+            _ => {}
+        }
         if connection.exec_mode {
             return match message {
                 ProtocolMessage::GuiResponse(response) => {
@@ -1677,6 +1713,9 @@ impl EventLoop {
                 self.remove(token, shared);
                 continue;
             }
+            if self.connections[&token].stdio.is_some() && !self.pump_stdio(token, shared) {
+                continue;
+            }
             let connection = self.connections.get_mut(&token).unwrap();
             #[cfg(target_os = "linux")]
             if self.control_output_deadline.is_some()
@@ -1721,7 +1760,13 @@ impl EventLoop {
                 let state = connection.outbound.state.lock();
                 state.closed && state.queued_bytes == 0
             };
-            if drained && !writing {
+            if drained
+                && !writing
+                && connection
+                    .stdio
+                    .as_ref()
+                    .is_none_or(|stdio| !stdio.holds_connection() || connection.read_closed)
+            {
                 self.remove(token, shared);
             }
         }
@@ -1767,6 +1812,9 @@ impl EventLoop {
 
     fn remove(&mut self, token: Token, shared: &Arc<Shared>) {
         if let Some(mut connection) = self.connections.remove(&token) {
+            if let Some(stdio) = connection.stdio.take() {
+                self.close_stdio(stdio);
+            }
             let mut cleanup_pending = false;
             let _ = self
                 .poll
@@ -1823,6 +1871,7 @@ impl Connection {
         self.send_buffer_ready = true;
         if matches!(message, ProtocolMessage::Hello(hello) if hello.client.kind == ClientKind::Control)
         {
+            self.ancillary = true;
             let socket = self.stream.receive_fd().ok();
             #[cfg(target_vendor = "apple")]
             let socket = socket
@@ -1832,6 +1881,9 @@ impl Connection {
     }
 
     fn write_ready(&mut self) -> io::Result<()> {
+        if self.stdio.is_some() {
+            return self.write_stdio_ready();
+        }
         let mut sent = 0;
         loop {
             if self.frames.is_empty() {

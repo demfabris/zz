@@ -187,8 +187,8 @@ fn a_closed_path_sends_the_key_to_the_actor() {
     writer.direct.reopen(|| true);
     assert!(matches!(writer.direct.write(b"a"), DirectWrite::Written));
     assert_eq!(read_all(&read), b"a");
-    assert!(writer.direct.take_echo());
-    assert!(!writer.direct.take_echo());
+    assert!(writer.direct.take_echo().is_some());
+    assert!(writer.direct.take_echo().is_none());
 }
 
 #[test]
@@ -614,6 +614,30 @@ fn pump_until_open(bare: &mut BareActor) {
         assert!(bare.actor.on_wake(wake).expect("turn"));
         bare.actor.on_deadline().expect("deadline");
     }
+}
+
+#[test]
+fn a_direct_key_with_no_echo_stops_asking_for_priority_after_the_echo_window() {
+    let mut bare = bare_actor("stty raw -echo; exec cat >/dev/null");
+    pump_until_open(&mut bare);
+    let typed = key('a', false, KeyAction::Press);
+    let written = Instant::now();
+    assert!(bare.commands.write_direct_key(&typed));
+    assert!(bare.actor.echo_pending() || written.elapsed() >= ECHO_WINDOW);
+    thread::sleep(ECHO_WINDOW + Duration::from_millis(10));
+    assert!(!bare.actor.echo_pending());
+    bare.actor.begin_turn();
+    assert!(!bare.actor.echo_pending());
+    bare.actor.end_turn();
+
+    pump_until_open(&mut bare);
+    let written = Instant::now();
+    assert!(bare.commands.write_direct_key(&typed));
+    bare.actor.begin_turn();
+    assert!(bare.actor.writer.direct.take_echo().is_none());
+    assert!(bare.actor.echo_pending() || written.elapsed() >= ECHO_WINDOW);
+    thread::sleep(ECHO_WINDOW + Duration::from_millis(10));
+    assert!(!bare.actor.echo_pending());
 }
 
 #[test]

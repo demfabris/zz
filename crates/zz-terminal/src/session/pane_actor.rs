@@ -952,8 +952,8 @@ impl PaneActor {
     #[cfg(unix)]
     pub(super) fn begin_turn(&mut self) {
         self.writer.direct.close();
-        if self.writer.direct.take_echo() {
-            self.echo.open();
+        if let Some(written) = self.writer.direct.take_echo() {
+            self.echo.open_at(written);
         }
     }
 

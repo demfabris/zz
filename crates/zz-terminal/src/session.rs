@@ -12764,7 +12764,7 @@ enum Wake {
 #[derive(Default)]
 struct DirectInput {
     state: Mutex<PtyWriteState>,
-    echo: AtomicBool,
+    echo: AtomicU64,
 }
 
 #[cfg(unix)]
@@ -12799,12 +12799,15 @@ impl DirectInput {
         self.state.lock().open
     }
 
-    fn take_echo(&self) -> bool {
-        self.echo.load(Ordering::Acquire) && self.echo.swap(false, Ordering::AcqRel)
+    fn take_echo(&self) -> Option<Instant> {
+        if self.echo.load(Ordering::Acquire) == 0 {
+            return None;
+        }
+        echo_note_instant(self.echo.swap(0, Ordering::AcqRel))
     }
 
     fn echo_noted(&self) -> bool {
-        self.echo.load(Ordering::Acquire)
+        echo_note_instant(self.echo.load(Ordering::Acquire)).is_some()
     }
 
     fn write(&self, bytes: &[u8]) -> DirectWrite {
@@ -12812,7 +12815,9 @@ impl DirectInput {
         if !state.open || state.has_pending() {
             return DirectWrite::Closed;
         }
-        self.echo.store(true, Ordering::Release);
+        let written = u64::try_from(OUTPUT_CLOCK.elapsed().as_nanos()).unwrap_or(u64::MAX);
+        self.echo
+            .store(written.saturating_add(1), Ordering::Release);
         state.compact_for(bytes.len());
         state.pending.extend_from_slice(bytes);
         if state.flush_pending().is_err() || state.has_pending() {
@@ -12821,6 +12826,12 @@ impl DirectInput {
         }
         DirectWrite::Written
     }
+}
+
+#[cfg(unix)]
+fn echo_note_instant(note: u64) -> Option<Instant> {
+    let written = OUTPUT_CLOCK.checked_add(Duration::from_nanos(note.checked_sub(1)?))?;
+    (written.elapsed() < ECHO_WINDOW).then_some(written)
 }
 
 #[cfg(unix)]
@@ -14363,7 +14374,11 @@ struct EchoWindow {
 
 impl EchoWindow {
     fn open(&mut self) {
-        self.opened = Some(Instant::now());
+        self.open_at(Instant::now());
+    }
+
+    fn open_at(&mut self, opened: Instant) {
+        self.opened = Some(opened);
         self.publishes = ECHO_PUBLISHES;
     }
 

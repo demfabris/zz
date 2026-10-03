@@ -139,7 +139,9 @@ Before diffing, the watcher calls `synchronize_pane_runtime` to update pane fact
 change directory without changing PID. On macOS it calls `proc_pidinfo(PROC_PIDVNODEPATHINFO)` and
 reads the physical cwd from the returned vnode data; Linux reads the `/proc/<pid>/cwd` link.
 `terminal_current_command` names the same PID by its exec path basename on macOS (one
-`KERN_PROCARGS2` sysctl, skipped while the process's exec generation is unchanged) and by
+`KERN_PROCARGS2` sysctl, skipped while the process's exec generation is unchanged; a new child
+running the same image as an earlier child of the same parent first gets that child's name, and its
+own sysctl runs only if it is looked up again) and by
 `/proc/<pid>/comm` on Linux. Neither scans the process table. The physical cwd remains
 separate from the path reported through OSC 7. The wrappers live in
 `crates/zz-daemon/src/daemon.rs`, the lookups in `crates/zz-daemon/src/process_info.rs`.

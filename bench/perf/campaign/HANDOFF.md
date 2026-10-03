@@ -673,6 +673,25 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   chooser (tmux sends it to the tree). Minors: a chooser over copy mode swallows the first key
   after a repeat or prefix timeout, a GUI search-prompt race on PrefixArmed, stale swallowed-key
   records, weak scenario cases. Fix agent from 18:05.
+- ssh back 18:31 (owner touched the key; master good until about 22:30). Quiet full `--stage
+  final` gate on alienware, `a486069e` (everything through ATTACH, ACFIX, BYTES2, CTRLCPU, DL3-DL5,
+  BURST), 18:35-18:43, load 1.1 (`~/.cache/zz-perf/batch5/final-a486069e.json`): 96 pass, 9 fail,
+  1 regressed (`mem.copy_cpu.scroll180` 0.96 ms against 0.68 at wave 3, under the 5 ms rule; it
+  was 1.07 at 52f8e3ab). Against the 52f8e3ab gate:
+  - now passing: `control.burst_cmds_per_s` 56.3k against tmux 53.6k (1.05x; was 0.776x),
+    `cli.wall.capture_history.p20`, `attach.ttfc.p4`, `echo.p99.idle.p20`;
+  - better, still failing: `echo.p50.idle` 1.47 ms against 0.929 (1.58x; was 1.63, 1.75x),
+    `echo.p99.idle` 1.52x, `echo.p50.busy30` 1.66x, `echo.p99.busy30` 1.63x,
+    `echo.p99.idle.p20.k1` 1.50x (was 1.80x), `attach.cpu.p4` 3.02 ms against 2.40 (1.26x, rule
+    1.25x; was 1.53x);
+  - new fails, one sample each: `spawn.cpu.kill_pane` 1.00 ms against 0.843 (rule plus 0.1),
+    `chatty.cpu_pct.flip` 3.21% against 2.16 (1.49x, rule 1.2x+0.5; passed at 52f8e3ab),
+    `attach.ttfc.p1` 1.12x (wall, rule 1.1x).
+  Three alternating A/B pairs of `0d7dabf7` (before DL3-DL5) against `a486069e` (spawn, chatty,
+  attach, echo) run next on the idle host, then the batch checks (`batch5b-linux.sh`).
+- Trap again: `ssh host '... pgrep -f "cargo clippy ..."'` matched the remote shell's own command
+  line and killed the ssh session (the master survived). Find PIDs with `ps -eo pid,cmd | grep
+  "[c]argo clippy"` and kill them by number.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

@@ -120,6 +120,92 @@ impl Drop for RoundTripGuard {
     }
 }
 
+#[cfg(unix)]
+type HeldWake = (Arc<std::os::fd::OwnedFd>, Option<Arc<AtomicBool>>);
+
+#[cfg(unix)]
+thread_local! {
+    static HELD_WAKES: RefCell<Option<Vec<HeldWake>>> = const { RefCell::new(None) };
+}
+
+#[must_use]
+pub fn hold_actor_wakes() -> WakeHold {
+    #[cfg(unix)]
+    {
+        WakeHold(
+            HELD_WAKES.with_borrow_mut(|held| {
+                if held.is_some() {
+                    return false;
+                }
+                *held = Some(Vec::new());
+                true
+            }),
+            std::marker::PhantomData,
+        )
+    }
+    #[cfg(not(unix))]
+    WakeHold(std::marker::PhantomData)
+}
+
+pub struct WakeHold(#[cfg(unix)] bool, std::marker::PhantomData<*const ()>);
+
+#[cfg(unix)]
+impl Drop for WakeHold {
+    fn drop(&mut self) {
+        if self.0 {
+            let held = HELD_WAKES.with_borrow_mut(Option::take);
+            write_held_wakes(held.unwrap_or_default());
+        }
+    }
+}
+
+#[cfg(unix)]
+fn hold_wake(pipe: &Arc<std::os::fd::OwnedFd>, pending: Option<&Arc<AtomicBool>>) -> bool {
+    HELD_WAKES
+        .try_with(|held| {
+            let mut held = held.borrow_mut();
+            let Some(held) = held.as_mut() else {
+                return false;
+            };
+            if !held.iter().any(|(seen, _)| Arc::ptr_eq(seen, pipe)) {
+                held.push((Arc::clone(pipe), pending.cloned()));
+            }
+            true
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(unix)]
+fn release_held_wakes() {
+    let held = HELD_WAKES
+        .try_with(|held| held.borrow_mut().as_mut().map(std::mem::take))
+        .ok()
+        .flatten();
+    write_held_wakes(held.unwrap_or_default());
+}
+
+#[cfg(unix)]
+fn write_held_wakes(held: Vec<HeldWake>) {
+    for (pipe, pending) in held {
+        wake_pipe(&pipe, pending.as_ref());
+    }
+}
+
+#[cfg(unix)]
+fn wake_pipe(pipe: &std::os::fd::OwnedFd, pending: Option<&Arc<AtomicBool>>) {
+    if pending.is_some_and(|pending| pending.swap(true, Ordering::AcqRel)) {
+        return;
+    }
+    match write_actor_wake(|| rustix::io::write(pipe, &[1_u8])) {
+        Ok(()) | Err(rustix::io::Errno::PIPE) => {}
+        Err(error) => log::error!("failed to wake terminal actor: {error}"),
+    }
+}
+
+#[cfg(all(test, unix))]
+#[path = "session/wake_hold_tests.rs"]
+mod wake_hold_tests;
+
 use mode_revision::{ModeRevision, ModeSelection};
 use pane_actor::PaneActor;
 
@@ -3549,18 +3635,10 @@ impl ActorWake {
             let _ = channel.try_send(());
         }
         #[cfg(unix)]
-        if let Some(pipe) = &self.pipe {
-            if self
-                .pending
-                .as_ref()
-                .is_some_and(|pending| pending.swap(true, Ordering::AcqRel))
-            {
-                return;
-            }
-            match write_actor_wake(|| rustix::io::write(&**pipe, &[1_u8])) {
-                Ok(()) | Err(rustix::io::Errno::PIPE) => {}
-                Err(error) => log::error!("failed to wake terminal actor: {error}"),
-            }
+        if let Some(pipe) = &self.pipe
+            && !hold_wake(pipe, self.pending.as_ref())
+        {
+            wake_pipe(pipe, self.pending.as_ref());
         }
     }
 }
@@ -3777,11 +3855,17 @@ impl CommandSender {
             input.try_send(command)
         } else {
             let counted = self.counts_in_flight(&command);
-            let result = self
-                .queues
-                .control
-                .send(command)
-                .map_err(|error| crossbeam_channel::TrySendError::Disconnected(error.0));
+            let result = match self.queues.control.try_send(command) {
+                Err(crossbeam_channel::TrySendError::Full(command)) => {
+                    #[cfg(unix)]
+                    release_held_wakes();
+                    self.queues
+                        .control
+                        .send(command)
+                        .map_err(|error| crossbeam_channel::TrySendError::Disconnected(error.0))
+                }
+                result => result,
+            };
             if counted && result.is_err() {
                 self.abandon_in_flight();
             }
@@ -3811,7 +3895,17 @@ impl CommandSender {
             })
         } else {
             let counted = self.counts_in_flight(&command);
-            let result = self.queues.control.send_timeout(command, timeout);
+            let result = match self.queues.control.try_send(command) {
+                Ok(()) => Ok(()),
+                Err(crossbeam_channel::TrySendError::Full(command)) => {
+                    #[cfg(unix)]
+                    release_held_wakes();
+                    self.queues.control.send_timeout(command, timeout)
+                }
+                Err(crossbeam_channel::TrySendError::Disconnected(command)) => {
+                    Err(crossbeam_channel::SendTimeoutError::Disconnected(command))
+                }
+            };
             if counted && result.is_err() {
                 self.abandon_in_flight();
             }
@@ -3886,6 +3980,8 @@ impl CommandSender {
                     ActorRequestError::ActorStopped
                 }
             })?;
+        #[cfg(unix)]
+        release_held_wakes();
         crossbeam_channel::select_biased! {
             recv(response) -> reply => reply.map_err(|_| ActorRequestError::ActorStopped),
             recv(self.queues.liveness) -> _ => {
@@ -13071,6 +13167,7 @@ fn drain_wake_pipe(wake_rx: &std::os::fd::OwnedFd) -> Result<(), WorkerError> {
     loop {
         match rustix::io::read(wake_rx, &mut drained) {
             Ok(0) | Err(rustix::io::Errno::AGAIN) => return Ok(()),
+            Ok(read) if read < drained.len() => return Ok(()),
             Ok(_) | Err(rustix::io::Errno::INTR) => {}
             Err(error) => return Err(WorkerError::Io(error.into())),
         }

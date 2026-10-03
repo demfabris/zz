@@ -317,6 +317,16 @@ a backlog, while PTY reads, resize, capture, and pure view actions keep running.
 an echoing terminal or a full-duplex child consume input without deadlocking behind its own output.
 Output views and non-Unix targets use `ActorWake::none()`: the same call sites, zero cfg noise.
 
+A daemon path can hold these bytes with `hold_actor_wakes()`. Inside the hold, a notify marks its
+pipe and returns, and the hold writes one byte per pipe when it ends. A send that finds the
+one-command control queue full writes the held bytes before it blocks, and a `request` writes them
+after its own command is queued and before it waits for the reply, so neither sleeps behind a wake
+its own hold kept back. A hold never
+touches the shard's pending flag, so wakes from other threads still go out at once. Attach
+(`attach_collect_event_hooks`) and detach (`detach_client_state`) hold, so a shard wakes once for the
+resize, view, and stream commands of its pane instead of once per command. The drain stops at the
+first short read: a pipe returns every queued byte, so the second read could only return `EAGAIN`.
+
 ## The 16 ms gate (bookkeeping moved out of the hot loop)
 
 v2's other mistake was running per-burst bookkeeping per kilobyte. Now `output_pending`

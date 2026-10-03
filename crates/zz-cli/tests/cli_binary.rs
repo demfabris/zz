@@ -5570,6 +5570,98 @@ tmux set-option -g @plugin loaded
             assert_attached_startup(&stream.outside, "chain");
         }
 
+        fn control_handoff_transcript(relay: Option<&str>) -> Option<(Vec<String>, Option<i32>)> {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return None;
+            }
+            let mut command = fixture.command();
+            if let Some(relay) = relay {
+                command.env("ZZ_CONTROL_RELAY", relay);
+            }
+            let mut child = command
+                .args([
+                    "-C",
+                    "new-session",
+                    "-s",
+                    "handoff",
+                    "-n",
+                    "fixed",
+                    "exec /bin/cat",
+                ])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("spawn control client");
+            let mut stdin = child.stdin.take().expect("piped stdin");
+            let stdout = child.stdout.take().expect("piped stdout");
+            let (lines, received) = mpsc::channel();
+            let reader = thread::spawn(move || {
+                for line in std::io::BufRead::lines(std::io::BufReader::new(stdout)) {
+                    let Ok(line) = line else {
+                        break;
+                    };
+                    if lines.send(line).is_err() {
+                        break;
+                    }
+                }
+            });
+            let mut transcript = Vec::new();
+            let mut read_until = |prefixes: &[&str]| loop {
+                let line = received
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("control output line");
+                let mut fields = line.split(' ').collect::<Vec<_>>();
+                if fields.len() == 4 && matches!(fields[0], "%begin" | "%end" | "%error") {
+                    fields[1] = "T";
+                }
+                if !line.starts_with("%window-renamed ") && !line.starts_with("%output ") {
+                    transcript.push(fields.join(" "));
+                }
+                if prefixes.iter().any(|prefix| line.starts_with(prefix)) {
+                    break;
+                }
+            };
+            read_until(&["%session-changed "]);
+            for line in [
+                "display-message -p A",
+                "bogus-command",
+                "display-message -p B",
+                "list-windows -F '#{window_index}'",
+            ] {
+                writeln!(stdin, "{line}").expect("write control line");
+                stdin.flush().expect("flush control line");
+                read_until(&["%end ", "%error "]);
+            }
+            writeln!(stdin).expect("write control return");
+            stdin.flush().expect("flush control return");
+            read_until(&["%exit"]);
+            drop(stdin);
+            let status = child.wait().expect("wait for control client");
+            reader.join().expect("join control reader");
+            Some((transcript, status.code()))
+        }
+
+        #[test]
+        fn control_stdio_handoff_frames_like_the_relay_rollback() {
+            let Some(handoff) = control_handoff_transcript(None) else {
+                return;
+            };
+            let Some(relay) = control_handoff_transcript(Some("1")) else {
+                return;
+            };
+            assert_eq!(handoff, relay);
+            assert!(handoff.0.iter().any(|line| line == "A"));
+            assert!(handoff.0.iter().any(|line| line == "B"));
+            assert!(
+                handoff
+                    .0
+                    .iter()
+                    .any(|line| line.starts_with("%error T 3 1"))
+            );
+        }
+
         #[test]
         fn control_parse_and_generic_nonzero_results_do_not_set_retval() {
             let cases: &[(&str, &[u8], i32, &[&str], bool)] = &[

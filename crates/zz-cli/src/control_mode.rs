@@ -97,11 +97,49 @@ impl ControlReceiver {
     }
 
     #[cfg(unix)]
-    fn direct(client: Arc<InteractiveClient>) -> io::Result<Self> {
+    fn direct(
+        client: Arc<InteractiveClient>,
+        stdio: bool,
+        pending: VecDeque<ProtocolMessage>,
+    ) -> io::Result<Self> {
         Ok(Self {
-            source: ControlSource::Direct(DirectControl::new(client)?),
-            pending: VecDeque::new(),
+            source: ControlSource::Direct(DirectControl::new(client, stdio)?),
+            pending,
         })
+    }
+
+    #[cfg(unix)]
+    fn take_sync(&mut self) -> Option<u64> {
+        match &mut self.source {
+            ControlSource::Direct(direct) => direct.sync.take(),
+            #[cfg(test)]
+            ControlSource::Channel(_) => None,
+        }
+    }
+
+    #[cfg(unix)]
+    fn take_submitted(&mut self) -> usize {
+        match &mut self.source {
+            ControlSource::Direct(direct) => std::mem::take(&mut direct.input.submitted_taken),
+            #[cfg(test)]
+            ControlSource::Channel(_) => 0,
+        }
+    }
+
+    #[cfg(unix)]
+    fn idle_received(&self) -> Option<u64> {
+        match &self.source {
+            ControlSource::Direct(direct) => (direct.stdio
+                && self.pending.is_empty()
+                && direct.pending_protocol.is_none()
+                && direct.sync.is_none()
+                && direct.input.submitted_taken == 0
+                && direct.input.bytes.is_empty()
+                && !direct.input.has_event())
+            .then_some(direct.received),
+            #[cfg(test)]
+            ControlSource::Channel(_) => None,
+        }
     }
 
     fn receive(&mut self, timeout: Option<std::time::Duration>) -> io::Result<Option<MainEvent>> {
@@ -172,13 +210,18 @@ struct DirectControl {
     pending_protocol: Option<MainEvent>,
     disconnected: bool,
     prefer_stdin: bool,
+    stdio: bool,
+    received: u64,
+    sync: Option<u64>,
 }
 
 #[cfg(unix)]
 impl DirectControl {
-    fn new(client: Arc<InteractiveClient>) -> io::Result<Self> {
+    fn new(client: Arc<InteractiveClient>, stdio: bool) -> io::Result<Self> {
         let mut direct = Self::with_input(client, io::stdin().as_fd().try_clone_to_owned()?)?;
         direct.input.enabled = false;
+        direct.input.remote = stdio;
+        direct.stdio = stdio;
         Ok(direct)
     }
 
@@ -197,11 +240,14 @@ impl DirectControl {
             pending_protocol: None,
             disconnected: false,
             prefer_stdin: false,
+            stdio: false,
+            received: 0,
+            sync: None,
         })
     }
 
     fn read_protocol(&mut self, read_socket: bool) {
-        if self.pending_protocol.is_none() && !self.disconnected {
+        while self.pending_protocol.is_none() && !self.disconnected {
             let result = if read_socket {
                 self.client.try_recv()
             } else {
@@ -209,9 +255,36 @@ impl DirectControl {
             };
             match result {
                 Ok(Some(message)) => {
-                    self.pending_protocol = Some(MainEvent::Protocol(message));
+                    if self.stdio {
+                        self.received += 1;
+                        match *message {
+                            ProtocolMessage::ControlStdin {
+                                bytes,
+                                submitted,
+                                closed,
+                                error,
+                            } => {
+                                self.input.bytes.extend_from_slice(&bytes);
+                                self.input.presubmitted += usize::from(submitted);
+                                self.input.closed |= closed || error.is_some();
+                                if error.is_some() {
+                                    self.input.error = error;
+                                }
+                                return;
+                            }
+                            ProtocolMessage::ControlStdioSync { next_number } => {
+                                self.sync = Some(next_number);
+                            }
+                            message => {
+                                self.pending_protocol =
+                                    Some(MainEvent::Protocol(Box::new(message)));
+                            }
+                        }
+                    } else {
+                        self.pending_protocol = Some(MainEvent::Protocol(message));
+                    }
                 }
-                Ok(None) => {}
+                Ok(None) => return,
                 Err(_) => {
                     self.disconnected = true;
                     self.pending_protocol = Some(MainEvent::Disconnected);
@@ -299,6 +372,9 @@ impl DirectControl {
 #[cfg(unix)]
 struct ControlInput {
     enabled: bool,
+    remote: bool,
+    presubmitted: usize,
+    submitted_taken: usize,
     fd: OwnedFd,
     bytes: Vec<u8>,
     closed: bool,
@@ -311,6 +387,9 @@ impl ControlInput {
     fn new(fd: OwnedFd) -> Self {
         Self {
             enabled: true,
+            remote: false,
+            presubmitted: 0,
+            submitted_taken: 0,
             fd,
             bytes: Vec::new(),
             closed: false,
@@ -320,7 +399,7 @@ impl ControlInput {
     }
 
     fn can_read(&self) -> bool {
-        self.enabled && !self.closed
+        self.enabled && !self.closed && !self.remote
     }
 
     fn has_event(&self) -> bool {
@@ -362,7 +441,13 @@ impl ControlInput {
             return None;
         };
         Some(match String::from_utf8(bytes) {
-            Ok(line) => StdinEvent::Line(line),
+            Ok(line) => {
+                if self.presubmitted != 0 {
+                    self.presubmitted -= 1;
+                    self.submitted_taken += 1;
+                }
+                StdinEvent::Line(line)
+            }
             Err(error) => {
                 self.bytes.clear();
                 self.closed = true;
@@ -403,7 +488,7 @@ fn receive_buffered_control_event<W: Write>(
     if TERMINATION_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
         return Err(io::Error::from(io::ErrorKind::Interrupted));
     }
-    if let Some(event) = receiver.receive_with_probe(None, output.block_open, false)? {
+    let event = if let Some(event) = receiver.receive_with_probe(None, output.block_open, false)? {
         if !matches!(
             &event,
             MainEvent::Protocol(message)
@@ -411,11 +496,16 @@ fn receive_buffered_control_event<W: Write>(
         ) {
             output.output.flush()?;
         }
-        Ok(event)
+        event
     } else {
         output.output.flush()?;
-        receive_control_event_with_probe(receiver, false)
+        receive_control_event_with_probe(receiver, false)?
+    };
+    #[cfg(unix)]
+    if let Some(next_number) = receiver.take_sync() {
+        output.next_number = next_number;
     }
+    Ok(event)
 }
 
 pub(crate) fn run(
@@ -470,6 +560,16 @@ pub(crate) fn run(
             return ExitCode::FAILURE;
         }
     };
+    #[cfg(unix)]
+    let (stdio, stash) = match start_stdio(&client) {
+        Ok(started) => started,
+        Err(error) => {
+            eprintln!("{}", format_local_command_error(socket_path, error.into()));
+            return ExitCode::FAILURE;
+        }
+    };
+    #[cfg(not(unix))]
+    let (stdio, stash) = (false, VecDeque::new());
     let terminal = match ControlTerminal::enter(level >= 2) {
         Ok(terminal) => terminal,
         Err(error) => {
@@ -477,19 +577,32 @@ pub(crate) fn run(
             return ExitCode::FAILURE;
         }
     };
-    let stdout = io::stdout();
-    let mut output = ControlWriter::new(io::BufWriter::new(stdout.lock()), level >= 2);
+    let sink = if stdio {
+        ControlOutput::daemon(Arc::clone(&client))
+    } else {
+        ControlOutput::Stdout(io::BufWriter::new(io::stdout().lock()))
+    };
+    let mut output = ControlWriter::new(sink, level >= 2);
     let result = output
         .start()
-        .and_then(|()| drive(&client, commands, &mut output));
+        .and_then(|()| drive(&client, commands, &mut output, stdio, stash));
     let result = if TERMINATION_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
         #[cfg(unix)]
-        let _ = client.shutdown();
-        output.terminate().map(|()| 0)
+        if !stdio {
+            let _ = client.shutdown();
+        }
+        let terminated = output.terminate().map(|()| 0);
+        #[cfg(unix)]
+        if stdio {
+            output.output.close();
+            let _ = client.shutdown();
+        }
+        terminated
     } else {
         result
     };
     drop(terminal);
+    output.close();
     match result {
         Ok(code) => ExitCode::from(code),
         Err(error) => {
@@ -499,13 +612,17 @@ pub(crate) fn run(
     }
 }
 
-fn drive<W: Write>(
+fn drive(
     client: &Arc<InteractiveClient>,
     initial: Vec<CommandInvocation>,
-    output: &mut ControlWriter<W>,
+    output: &mut ControlWriter<ControlOutput>,
+    stdio: bool,
+    stash: VecDeque<ProtocolMessage>,
 ) -> io::Result<u8> {
     #[cfg(unix)]
-    let mut receiver = ControlReceiver::direct(Arc::clone(client))?;
+    let mut receiver = ControlReceiver::direct(Arc::clone(client), stdio, stash)?;
+    #[cfg(not(unix))]
+    let _ = (stdio, stash);
     #[cfg(not(unix))]
     let (events, channel) = mpsc::sync_channel(32);
     #[cfg(not(unix))]
@@ -578,6 +695,17 @@ fn drive<W: Write>(
             client.request_tree_sync().map_err(io::Error::other)?;
             state.tree_sync_required = false;
         }
+        #[cfg(unix)]
+        if pending_stdin.is_empty()
+            && state.pending_return.is_none()
+            && !state.tree_sync_required
+            && state.submitted_lines == 0
+            && !output.block_open
+            && output.deferred.is_empty()
+            && let Some(received) = receiver.idle_received()
+        {
+            output.output.report_idle(received, output.next_number);
+        }
         let event = pending_stdin.pop_front().map_or_else(
             || receive_control_event(&mut receiver),
             |stdin| {
@@ -587,6 +715,15 @@ fn drive<W: Write>(
                 Ok(MainEvent::Stdin(stdin))
             },
         )?;
+        #[cfg(unix)]
+        {
+            if let Some(next_number) = receiver.take_sync() {
+                output.next_number = next_number;
+            }
+            if matches!(event, MainEvent::Stdin(StdinEvent::Line(_))) {
+                state.submitted_lines += receiver.take_submitted();
+            }
+        }
         match event {
             MainEvent::Stdin(StdinEvent::Line(line)) => {
                 if line.is_empty() {
@@ -1840,6 +1977,216 @@ fn parse_line(
     }
 }
 
+#[cfg(unix)]
+fn stdio_passable() -> bool {
+    use std::os::unix::fs::{FileTypeExt as _, MetadataExt as _};
+    let Ok(stdin) = io::stdin().as_fd().try_clone_to_owned() else {
+        return false;
+    };
+    std::fs::File::from(stdin).metadata().is_ok_and(|metadata| {
+        let kind = metadata.file_type();
+        kind.is_socket() || (kind.is_fifo() && (cfg!(target_os = "linux") || metadata.nlink() == 0))
+    })
+}
+
+#[cfg(unix)]
+fn start_stdio(client: &InteractiveClient) -> io::Result<(bool, VecDeque<ProtocolMessage>)> {
+    let mut stash = VecDeque::new();
+    if std::env::var_os("ZZ_CONTROL_RELAY").is_some_and(|value| value == "1") || !stdio_passable() {
+        return Ok((false, stash));
+    }
+    let frame = zz_protocol::encode_protocol_message(&ProtocolMessage::ControlStdio)
+        .map_err(io::Error::other)?;
+    let socket = client.receive_fd()?;
+    let stdin = io::stdin();
+    let stdout = io::stdout();
+    let fds = [stdin.as_fd(), stdout.as_fd()];
+    let mut space = [std::mem::MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(2))];
+    let mut ancillary = rustix::net::SendAncillaryBuffer::new(&mut space);
+    ancillary.push(rustix::net::SendAncillaryMessage::ScmRights(&fds));
+    let mut sent = rustix::net::sendmsg(
+        &socket,
+        &[io::IoSlice::new(&frame)],
+        &mut ancillary,
+        rustix::net::SendFlags::empty(),
+    )?;
+    while sent < frame.len() {
+        sent += rustix::io::write(&socket, &frame[sent..])?;
+    }
+    loop {
+        match client.recv().map_err(io::Error::other)? {
+            ProtocolMessage::ControlStdioSync { next_number: 0 } => return Ok((true, stash)),
+            ProtocolMessage::ControlStdioClosed => return Ok((false, stash)),
+            ProtocolMessage::Batch(batch) => stash.extend(
+                batch
+                    .messages()
+                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?,
+            ),
+            message => stash.push_back(message),
+        }
+    }
+}
+
+enum ControlOutput {
+    Stdout(io::BufWriter<io::StdoutLock<'static>>),
+    #[cfg(unix)]
+    Daemon {
+        client: Arc<InteractiveClient>,
+        buffer: Vec<u8>,
+        reported: Option<(u64, u64)>,
+        direct: Option<io::BufWriter<io::StdoutLock<'static>>>,
+    },
+}
+
+impl ControlOutput {
+    #[cfg(unix)]
+    fn daemon(client: Arc<InteractiveClient>) -> Self {
+        Self::Daemon {
+            client,
+            buffer: Vec::new(),
+            reported: None,
+            direct: None,
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn daemon(_client: Arc<InteractiveClient>) -> Self {
+        Self::Stdout(io::BufWriter::new(io::stdout().lock()))
+    }
+
+    #[cfg(unix)]
+    fn send(&mut self, idle: Option<(u64, u64)>, close: bool) -> io::Result<()> {
+        let Self::Daemon {
+            client,
+            buffer,
+            direct,
+            ..
+        } = self
+        else {
+            return Ok(());
+        };
+        if let Some(direct) = direct {
+            direct.write_all(buffer)?;
+            buffer.clear();
+            return direct.flush();
+        }
+        let message = ProtocolMessage::ControlWrite {
+            bytes: std::mem::take(buffer),
+            idle,
+            close,
+        };
+        if client.send(&message).is_err() {
+            let ProtocolMessage::ControlWrite { bytes, .. } = message else {
+                unreachable!();
+            };
+            let mut stdout = io::BufWriter::new(io::stdout().lock());
+            stdout.write_all(&bytes)?;
+            stdout.flush()?;
+            *direct = Some(stdout);
+        }
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    fn report_idle(&mut self, received: u64, next_number: u64) {
+        let Self::Daemon {
+            buffer, reported, ..
+        } = self
+        else {
+            return;
+        };
+        if *reported == Some((received, next_number)) && buffer.is_empty() {
+            return;
+        }
+        *reported = Some((received, next_number));
+        let _ = self.send(Some((received, next_number)), false);
+    }
+
+    #[cfg(unix)]
+    fn close(&mut self) {
+        let Self::Daemon { client, direct, .. } = self else {
+            return;
+        };
+        if direct.is_some() {
+            let _ = self.flush();
+            return;
+        }
+        let client = Arc::clone(client);
+        if self.send(None, true).is_ok()
+            && let Self::Daemon { direct: None, .. } = self
+            && let Ok(socket) = client.receive_fd()
+        {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                match client.try_recv() {
+                    Ok(Some(message))
+                        if matches!(*message, ProtocolMessage::ControlStdioClosed) =>
+                    {
+                        break;
+                    }
+                    Ok(Some(_)) if std::time::Instant::now() < deadline => {}
+                    Ok(Some(_)) | Err(_) => break,
+                    Ok(None) => {
+                        let remaining =
+                            deadline.saturating_duration_since(std::time::Instant::now());
+                        if remaining.is_zero() {
+                            break;
+                        }
+                        let mut poll = [rustix::event::PollFd::new(
+                            &socket,
+                            rustix::event::PollFlags::IN,
+                        )];
+                        let timeout = rustix::event::Timespec {
+                            tv_sec: 0,
+                            tv_nsec: 50_000_000,
+                        };
+                        let _ = rustix::event::poll(&mut poll, Some(&timeout));
+                    }
+                }
+            }
+        }
+        if let Self::Daemon { direct, .. } = self
+            && direct.is_none()
+        {
+            *direct = Some(io::BufWriter::new(io::stdout().lock()));
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn close(&mut self) {}
+}
+
+impl Write for ControlOutput {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        match self {
+            Self::Stdout(stdout) => stdout.write(bytes),
+            #[cfg(unix)]
+            Self::Daemon {
+                direct: Some(direct),
+                ..
+            } => direct.write(bytes),
+            #[cfg(unix)]
+            Self::Daemon { buffer, .. } => {
+                buffer.extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Self::Stdout(stdout) => stdout.flush(),
+            #[cfg(unix)]
+            Self::Daemon { buffer, direct, .. } => {
+                if direct.is_none() && buffer.is_empty() {
+                    return Ok(());
+                }
+                self.send(None, false)
+            }
+        }
+    }
+}
+
 fn unix_timestamp() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1863,6 +2210,16 @@ enum DeferredOutput {
     },
     ControlSourceFile(ControlSourceFileEvent),
     ControlCommandOutput(String),
+}
+
+trait ControlClose {
+    fn close_sink(&mut self);
+}
+
+impl ControlClose for ControlOutput {
+    fn close_sink(&mut self) {
+        self.close();
+    }
 }
 
 struct ControlWriter<W: Write> {
@@ -2225,6 +2582,18 @@ impl<W: Write> ControlWriter<W> {
             None => self.output.write_all(b"%exit\n")?,
         }
         Ok(())
+    }
+
+    fn close(&mut self)
+    where
+        W: ControlClose,
+    {
+        if self.double && !self.st_sent {
+            let _ = self.output.write_all(ST);
+            self.st_sent = true;
+        }
+        let _ = self.output.flush();
+        self.output.close_sink();
     }
 
     fn terminate(&mut self) -> io::Result<()> {

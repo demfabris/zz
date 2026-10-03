@@ -89495,7 +89495,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 &mut command_context,
                 &CommandInvocation::new(
                     "new-window",
-                    ["-d", "-n", "output-scope", "--", "sleep", "30"],
+                    ["-d", "-n", "output-scope", "--", "sleep", "300"],
                 ),
             )
             .expect("create output window");

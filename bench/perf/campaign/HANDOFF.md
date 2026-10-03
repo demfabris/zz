@@ -747,6 +747,17 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   hosts): an idle pane is read by its shard, a busy one moves to the gather path and back, one
   reader per fd at a time; target `echo.p50.idle` and `.busy30` down 100 us or more on Linux with
   throughput within 2%. It builds on alienware only after batch6's workspace tests.
+- `fix/choose-detach` round 3 (`9d3f8e3f`) merged as `ce2b2c75`: a chooser is drawn and takes keys
+  only while its source pane is the active pane of the client's current window (`C-b o` now
+  types into the other pane); tree, switch, `-F` and `-K` rows expand with the format type of
+  their target (`MuxEngine::expand_target_format`, as tmux's `format_defaults`), which fixes the
+  session and window rows that rendered the pane line since `14b6e796` (the daemon half of
+  `824f7c03`): `compat/tui-choosers.sh` 25 of 78 differing -> 0 of 78 (rechecked by hand on a
+  fresh zz_cli). Every compat script that defaulted to the stale `target/debug/zz` now defaults
+  to `target/debug/zz_cli`. Scenario `smoke/chooser-prefix-keys` 24 checks, clean against the
+  pin (15 fail on the base). Open: switching session and back drops the chooser (base too);
+  `choose-tree -Zw` with no client and a chooser started from a hook do nothing (base too).
+- Linux batch6 workspace tests on `86e721ad`: 5133 passed, the 2 failures pass alone.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

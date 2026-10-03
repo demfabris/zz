@@ -13144,7 +13144,9 @@ struct GatherPane {
     source: GatherSource,
     buffer: Option<Vec<u8>>,
     length: usize,
-    served: bool,
+    spins: u32,
+    active: bool,
+    waiting: bool,
     done: bool,
 }
 
@@ -13165,26 +13167,30 @@ impl GatherPane {
         self.buffer.is_some()
     }
 
-    fn step(&mut self) -> Option<bool> {
-        let buffer = self.buffer.as_mut()?;
+    fn step(&mut self) -> bool {
+        let Some(buffer) = self.buffer.as_mut() else {
+            return false;
+        };
         debug_assert_eq!(buffer.len(), PTY_READ_BUFFER_BYTES);
         match rustix::io::read(&self.source.fd, &mut buffer[self.length..]) {
             Ok(0) | Err(rustix::io::Errno::IO) => {}
             Ok(read) => {
                 self.length += read;
+                self.spins = 0;
+                self.waiting = false;
                 if self.length < buffer.len() {
-                    return Some(true);
+                    return true;
                 }
                 self.send();
-                return None;
+                return !self.done && self.has_buffer();
             }
-            Err(rustix::io::Errno::INTR) => return Some(false),
+            Err(rustix::io::Errno::INTR) => return true,
             Err(rustix::io::Errno::AGAIN) => {
-                if self.length >= PTY_BRIDGE_THRESHOLD_BYTES {
-                    return Some(false);
+                self.waiting = self.length >= PTY_BRIDGE_THRESHOLD_BYTES;
+                if !self.waiting {
+                    self.send();
                 }
-                self.send();
-                return None;
+                return false;
             }
             Err(error) => log::debug!("Linux PTY gather stopped: {error}"),
         }
@@ -13194,7 +13200,19 @@ impl GatherPane {
             self.source.wake.notify();
         }
         self.done = true;
-        None
+        false
+    }
+
+    fn missed(&mut self) {
+        if !self.waiting {
+            return;
+        }
+        self.spins += 1;
+        if self.spins > PTY_GATHER_BRIDGE_SPIN_MAX {
+            self.waiting = false;
+            self.spins = 0;
+            self.send();
+        }
     }
 
     fn send(&mut self) {
@@ -13220,9 +13238,8 @@ impl GatherPane {
 
 #[cfg(target_os = "linux")]
 fn poll_gather(
-    wake_rx: Option<&std::os::fd::OwnedFd>,
+    wake_rx: &std::os::fd::OwnedFd,
     panes: &mut [GatherPane],
-    active: &[usize],
     timeout: Option<&rustix::event::Timespec>,
 ) -> rustix::io::Result<(bool, SmallVec<[usize; 8]>)> {
     use rustix::event::{PollFd, PollFlags};
@@ -13230,12 +13247,11 @@ fn poll_gather(
     let polled = panes
         .iter_mut()
         .enumerate()
-        .filter(|(index, pane)| !pane.done && !pane.served && !active.contains(index))
+        .filter(|(_, pane)| !pane.done && !pane.active)
         .filter_map(|(index, pane)| pane.has_buffer().then_some(index))
         .collect::<SmallVec<[usize; 8]>>();
     let mut fds = SmallVec::<[PollFd<'_>; 9]>::new();
-    fds.extend(wake_rx.map(|fd| PollFd::new(fd, PollFlags::IN)));
-    let offset = fds.len();
+    fds.push(PollFd::new(wake_rx, PollFlags::IN));
     fds.extend(
         polled
             .iter()
@@ -13247,10 +13263,10 @@ fn poll_gather(
         Err(error) => return Err(error),
     }
     Ok((
-        offset > 0 && !fds[0].revents().is_empty(),
+        !fds[0].revents().is_empty(),
         polled
             .iter()
-            .zip(&fds[offset..])
+            .zip(&fds[1..])
             .filter(|(_, fd)| !fd.revents().is_empty())
             .map(|(&index, _)| index)
             .collect(),
@@ -13258,37 +13274,16 @@ fn poll_gather(
 }
 
 #[cfg(target_os = "linux")]
-fn read_gather_round(panes: &mut [GatherPane], mut active: SmallVec<[usize; 8]>) {
-    let now = rustix::event::Timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
-    let mut idle = 0_u32;
-    let mut passes = 0_u32;
-    while !active.is_empty() && idle <= PTY_GATHER_BRIDGE_SPIN_MAX {
-        passes += 1;
-        if passes.is_multiple_of(PTY_GATHER_ADMIT_PASSES)
-            && let Ok((_, ready)) = poll_gather(None, panes, &active, Some(&now))
-        {
-            active.extend(ready);
+fn read_gather_passes(panes: &mut [GatherPane]) {
+    for _ in 0..PTY_GATHER_ADMIT_PASSES {
+        let mut active = false;
+        for pane in panes.iter_mut().filter(|pane| pane.active) {
+            pane.active = pane.step();
+            active |= pane.active;
         }
-        let mut progress = false;
-        active.retain(|index| {
-            let pane = &mut panes[*index];
-            let stay = pane.step().is_some_and(|moved| {
-                progress |= moved;
-                true
-            });
-            pane.served |= !stay;
-            stay
-        });
-        idle = if progress { 0 } else { idle + 1 };
-    }
-    for index in active {
-        panes[index].send();
-    }
-    for pane in panes.iter_mut() {
-        pane.served = false;
+        if !active {
+            return;
+        }
     }
 }
 
@@ -13298,6 +13293,10 @@ fn gather_pty_linux(
     pending: &AtomicBool,
     incoming: &Receiver<GatherSource>,
 ) {
+    let now = rustix::event::Timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
     let mut panes = Vec::<GatherPane>::new();
     let mut accepting = true;
     loop {
@@ -13307,18 +13306,21 @@ fn gather_pty_linux(
                     source,
                     buffer: None,
                     length: 0,
-                    served: false,
+                    spins: 0,
+                    active: false,
+                    waiting: false,
                     done: false,
                 }),
                 Err(crossbeam_channel::TryRecvError::Empty) => break,
                 Err(crossbeam_channel::TryRecvError::Disconnected) => accepting = false,
             }
         }
-        panes.retain(|pane| !pane.source.slot.closed.load(Ordering::Acquire));
+        panes.retain(|pane| !pane.done && !pane.source.slot.closed.load(Ordering::Acquire));
         if !accepting && panes.is_empty() {
             return;
         }
-        let (woken, ready) = match poll_gather(Some(wake_rx), &mut panes, &[], None) {
+        let busy = panes.iter().any(|pane| pane.active || pane.waiting);
+        let (woken, ready) = match poll_gather(wake_rx, &mut panes, busy.then_some(&now)) {
             Ok(polled) => polled,
             Err(error) => {
                 log::error!("Linux PTY gather poll stopped: {error}");
@@ -13333,8 +13335,13 @@ fn gather_pty_linux(
             let _ = drain_wake_pipe(wake_rx);
             pending.store(false, Ordering::SeqCst);
         }
-        read_gather_round(&mut panes, ready);
-        panes.retain(|pane| !pane.done);
+        for index in ready {
+            panes[index].active = true;
+        }
+        for pane in panes.iter_mut().filter(|pane| !pane.active) {
+            pane.missed();
+        }
+        read_gather_passes(&mut panes);
     }
 }
 
@@ -21728,6 +21735,53 @@ mod tests {
         busy_buffers.give(held);
         let (resumed, length) = gathered(&busy_output).expect("resumed busy batch");
         assert_eq!(&resumed[..length], b"second");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_pty_gather_delivers_a_partial_batch_beside_a_busy_neighbour() {
+        let gather = PtyGather::start("zz-pty-gather".to_owned()).expect("gather thread");
+        let (busy_fd, busy_output, busy_buffers, _) = gather_fixture(&gather, PTY_BUFFER_POOL_SIZE);
+        let (quiet_fd, quiet_output, _quiet_buffers, _) =
+            gather_fixture(&gather, PTY_BUFFER_POOL_SIZE);
+        let writer = thread::spawn(move || {
+            let chunk = vec![b'b'; PTY_READ_BUFFER_BYTES];
+            loop {
+                match rustix::io::write(&busy_fd, &chunk) {
+                    Ok(_) | Err(rustix::io::Errno::INTR) => {}
+                    Err(rustix::io::Errno::PIPE) => return,
+                    Err(error) => panic!("busy fixture write failed: {error}"),
+                }
+            }
+        });
+        let stop = Arc::new(AtomicBool::new(false));
+        let consumer_stop = Arc::clone(&stop);
+        let (streaming_tx, streaming_rx) = crossbeam_channel::bounded(1);
+        let consumer = thread::spawn(move || {
+            while !consumer_stop.load(Ordering::Relaxed) {
+                if let Ok(ReaderMessage::Data { buffer, .. }) =
+                    busy_output.recv_timeout(Duration::from_millis(10))
+                {
+                    let _ = streaming_tx.try_send(());
+                    busy_buffers.give(buffer);
+                }
+            }
+        });
+        streaming_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("the busy pane streams");
+
+        let batch = vec![b'q'; PTY_BRIDGE_THRESHOLD_BYTES * 2];
+        assert_eq!(
+            rustix::io::write(&quiet_fd, &batch).expect("quiet fixture write"),
+            batch.len()
+        );
+        let (quiet, length) = gathered(&quiet_output).expect("quiet batch");
+        assert_eq!(&quiet[..length], &batch[..]);
+        assert!(!writer.is_finished());
+        stop.store(true, Ordering::Relaxed);
+        consumer.join().expect("busy consumer");
+        writer.join().expect("busy writer");
     }
 
     #[cfg(target_os = "linux")]

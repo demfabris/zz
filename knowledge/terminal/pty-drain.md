@@ -155,10 +155,14 @@ channels. Each shard starts one `zz-pty-gather-N` thread with its first PTY pane
 launches, exits and buffer returns. The actor consumes at most four batches per turn and
 returns each buffer to the pool. A pane whose four buffers are all with its actor leaves the
 poll set until one comes back, so a stalled pane does not hold up the others on the shard,
-and a full ring still lets kernel flow control backpressure the child. One poll round reads
-every ready pane in turn, one read per pane per pass, until each has filled its buffer or gone
-quiet, so several busy panes keep their PTY queues refilling in parallel. `ZZ_PTY_GATHER=0`
-reads on the shard thread instead.
+and a full ring still lets kernel flow control backpressure the child. The thread reads every
+ready pane in turn, one read per pane per pass, so several busy panes keep their PTY queues
+refilling in parallel. A pane that fills a buffer goes on into its next free one. A pane whose
+read comes back empty while it holds at least 1 KiB waits in the next zero-timeout poll instead
+of being read again, and sends its partial batch after 16 polls that miss it, so a busy pane
+neither waits for its neighbours nor holds back their partial batches. Every eight passes that
+poll also admits newly ready panes and picks up launches, exits and buffer returns; the thread
+blocks in `poll` only when no pane is reading or waiting. `ZZ_PTY_GATHER=0` reads on the shard thread instead.
 
 ```mermaid
 flowchart LR

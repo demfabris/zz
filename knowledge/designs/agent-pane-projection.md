@@ -29,7 +29,7 @@ grammar work on an Agent pane too.
   pane; `kill-pane` removes it with the pane like any terminal.
 - **The feed.** `TerminalSession::feed(bytes)` (`resource: crates/zz-terminal/src/session.rs`) is
   a control-queue `Command::Output`; the empty-pane worker writes it to the VT, marks output
-  activity, publishes a content frame, forwards it to an armed raw-output tap, and — because the
+  activity, publishes a content frame, hands the bytes to the pane's shard sink, and — because the
   worker now registers the bell callback — a fed BEL raises `TerminalEvent::Bell`. Sessions with
   a real child ignore the command.
 - **The projection.** `PaneLane::project` in `AgentFanout::accept`
@@ -51,7 +51,7 @@ grammar work on an Agent pane too.
 | `show-agent-permission`, `#{agent_state}`, `#{agent_pending_permission}` | Read the daemon's agent state directly; permission JSON comes from `AgentPaneWire`. |
 | `monitor-activity`, `monitor-silence`, `alert-activity` | Works via `mark_output_activity` |
 | `alert-bell` | Works — BEL at turn end and on permission requests |
-| `pipe-pane` | Works — the surface worker now arms taps; `-I` has nothing to write to |
+| `pipe-pane` | Works: the surface worker feeds the pane sink's pipe route; `-I` has nothing to write to |
 | `send-keys` / `send-text` into an agent pane | Refused as before (`resolve_input_sinks` checks kind before the terminal map; `send-text` keeps its Terminal-only guard) |
 
 # Hazards and how they were closed
@@ -60,8 +60,8 @@ grammar work on an Agent pane too.
    receive `TerminalViewport`/`TerminalPatch` frames for the shadow and never attach a view to it.
 2. **Geometry.** The daemon resizes the shadow from `pane_geometry` at creation and before each
    feed when the cell changed; pixel sizes are zero (only kitty graphics care).
-3. **Control mode.** `refresh_control_output_taps` skips Agent panes, so unadorned `-C`/`-CC`
-   output does not grow.
+3. **Control mode.** `control_route_panes` skips Agent panes, so their shard sinks never feed
+   `%output` to unadorned `-C`/`-CC` clients.
 4. **Memory.** One libghostty grid plus the session's `history-limit` per agent pane, holding
    only assistant text — small next to the replay ring and journal. The standing decision in
    [session persistence](/concepts/session-persistence.md) stands: the daemon keeps raw items; the

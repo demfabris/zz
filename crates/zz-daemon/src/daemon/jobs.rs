@@ -49,14 +49,14 @@ pub(super) struct Descriptor {
 
 pub(super) struct PipeIo {
     terminal: Arc<parking_lot::Mutex<Arc<zz_terminal::TerminalSession>>>,
-    input: Option<zz_terminal::RawOutputTapReceiver>,
+    input: Option<super::shard_sink::PipeReader>,
     waker: std::task::Waker,
 }
 
 impl PipeIo {
     pub(super) fn new(
         terminal: Arc<parking_lot::Mutex<Arc<zz_terminal::TerminalSession>>>,
-        input: Option<zz_terminal::RawOutputTapReceiver>,
+        input: Option<super::shard_sink::PipeReader>,
         waker: std::task::Waker,
     ) -> Self {
         Self {

@@ -20,7 +20,6 @@ pub(super) struct SurfaceActor<'a, 'b> {
     control_rx: Receiver<Command>,
     slot: Arc<Mutex<ControlSlot>>,
     publisher: Publisher,
-    raw_output_tap: Option<(u64, RawOutputTapSender)>,
     engine_filter: EngineFilter,
     mouse_encoder: mouse::Encoder<'static>,
     mouse_event: mouse::Event<'static>,
@@ -80,7 +79,6 @@ impl<'a, 'b> SurfaceActor<'a, 'b> {
             control_rx,
             slot,
             publisher,
-            raw_output_tap: None,
             engine_filter: EngineFilter::default(),
             mouse_encoder: mouse::Encoder::new()?,
             mouse_event: mouse::Event::new()?,
@@ -580,9 +578,7 @@ impl<'a, 'b> SurfaceActor<'a, 'b> {
                 );
             }
             Command::Output(bytes) => {
-                if let Some(token) = tap_raw_output_arc(&mut self.raw_output_tap, &bytes) {
-                    self.publisher.raw_output_tap_closed(token)?;
-                }
+                self.publisher.output(&bytes);
                 let mut bar = None;
                 let mut last_command_status = None;
                 self.engine_filter.write(
@@ -613,25 +609,7 @@ impl<'a, 'b> SurfaceActor<'a, 'b> {
                     self.status.clone(),
                 )?;
             }
-            Command::ArmRawOutputTap {
-                token,
-                output,
-                reply,
-            } => {
-                self.raw_output_tap = Some((token, output));
-                let _ = reply.send(true);
-            }
             Command::Settle { reply } => {
-                let _ = reply.send(());
-            }
-            Command::DisarmRawOutputTap { token, reply } => {
-                if self
-                    .raw_output_tap
-                    .as_ref()
-                    .is_some_and(|(armed, _)| *armed == token)
-                {
-                    self.raw_output_tap = None;
-                }
                 let _ = reply.send(());
             }
             Command::Terminate | Command::Shutdown => return Ok(false),

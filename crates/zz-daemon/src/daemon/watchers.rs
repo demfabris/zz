@@ -314,8 +314,7 @@ impl CommandWatcher {
             | TerminalEvent::Bell
             | TerminalEvent::RenameWindow(_)
             | TerminalEvent::PlaceholderBound { .. }
-            | TerminalEvent::PendingPasteExpired { .. }
-            | TerminalEvent::RawOutputTapClosed { .. } => {}
+            | TerminalEvent::PendingPasteExpired { .. } => {}
         }
         true
     }
@@ -412,8 +411,7 @@ impl PopupWatcher {
             | TerminalEvent::Bell
             | TerminalEvent::RenameWindow(_)
             | TerminalEvent::PlaceholderBound { .. }
-            | TerminalEvent::PendingPasteExpired { .. }
-            | TerminalEvent::RawOutputTapClosed { .. } => {}
+            | TerminalEvent::PendingPasteExpired { .. } => {}
         }
         true
     }
@@ -430,17 +428,6 @@ impl TerminalWatcher {
         let pane = self.pane;
         match event {
             TerminalEvent::ViewportReady { output_activity } => {
-                #[cfg(unix)]
-                if output_activity
-                    && shared
-                        .inner
-                        .lock()
-                        .control_output_taps
-                        .get(&pane)
-                        .is_some_and(|tap| tap.receiver.is_some())
-                {
-                    shared.accept_wake.wake();
-                }
                 let frame = frame.expect("viewport notification frame");
                 let current = frame.views;
                 let sunk = frame.sunk;
@@ -588,14 +575,6 @@ impl TerminalWatcher {
             }
             TerminalEvent::PendingPasteExpired { token } => {
                 shared.expire_pending_pasted_image(pane, terminal, token);
-            }
-            TerminalEvent::RawOutputTapClosed { token } => {
-                let terminal = Arc::clone(terminal);
-                shared.defer_watcher_effect(move |shared| {
-                    if !shared.control_output_tap_closed(pane, token, &terminal) {
-                        shared.pipe_tap_closed(pane, token, &terminal);
-                    }
-                });
             }
             TerminalEvent::ClipboardSet { target, text } => {
                 shared.deliver_clipboard_write(pane, target, text);

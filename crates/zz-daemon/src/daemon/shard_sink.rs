@@ -2,7 +2,7 @@ use std::any::Any;
 #[cfg(unix)]
 use std::cell::RefCell;
 
-use zz_terminal::{TerminalFrameSink, ViewFrame};
+use zz_terminal::{OutputWake, TerminalFrameSink, ViewFrame};
 
 use super::*;
 
@@ -10,6 +10,8 @@ pub(super) struct PaneSink {
     pane: PaneId,
     frames: Arc<TerminalFrames>,
     state: Mutex<PaneSinkState>,
+    takes: AtomicBool,
+    wake: OutputWake,
 }
 
 struct PaneSinkState {
@@ -17,6 +19,8 @@ struct PaneSinkState {
     fanout: PaneFrameFanout,
     placements: bool,
     observer: Weak<dyn Any + Send + Sync>,
+    controls: Vec<Arc<OutboundMailbox>>,
+    pipe: Option<Arc<PipeFeed>>,
 }
 
 struct SinkView {
@@ -72,7 +76,7 @@ fn hold_wakes() {}
 fn release_wakes(_: bool) {}
 
 impl PaneSink {
-    pub(super) fn new(pane: PaneId, frames: Arc<TerminalFrames>) -> Self {
+    pub(super) fn new(pane: PaneId, frames: Arc<TerminalFrames>, wake: OutputWake) -> Self {
         Self {
             pane,
             frames,
@@ -81,8 +85,36 @@ impl PaneSink {
                 fanout: PaneFrameFanout::new(),
                 placements: false,
                 observer: Weak::<()>::new(),
+                controls: Vec::new(),
+                pipe: None,
             }),
+            takes: AtomicBool::new(false),
+            wake,
         }
+    }
+
+    pub(super) fn set_control(&self, mailbox: &Arc<OutboundMailbox>, routed: bool) {
+        let mut state = self.state.lock();
+        state
+            .controls
+            .retain(|known| !Arc::ptr_eq(known, mailbox) && !known.is_closed());
+        if routed && !mailbox.is_closed() {
+            state.controls.push(Arc::clone(mailbox));
+        }
+        self.retake(&state);
+    }
+
+    pub(super) fn set_pipe(&self, pipe: Option<Arc<PipeFeed>>) {
+        let mut state = self.state.lock();
+        state.pipe = pipe;
+        self.retake(&state);
+    }
+
+    fn retake(&self, state: &PaneSinkState) {
+        self.takes.store(
+            !state.controls.is_empty() || state.pipe.is_some(),
+            Ordering::Release,
+        );
     }
 
     pub(super) fn of(terminal: &TerminalSession) -> Option<&Self> {
@@ -116,7 +148,11 @@ impl PaneSink {
     }
 
     pub(super) fn clear(&self) {
-        self.state.lock().views.clear();
+        let mut state = self.state.lock();
+        state.views.clear();
+        state.controls.clear();
+        state.pipe = None;
+        self.retake(&state);
     }
 
     pub(super) fn observe<T: Any + Send + Sync>(&self, observer: &Arc<T>) {
@@ -178,6 +214,7 @@ impl TerminalFrameSink for PaneSink {
             fanout,
             placements,
             observer,
+            ..
         } = &mut *state;
         let urgent = observer.strong_count() != 0;
         if views.is_empty() {
@@ -236,6 +273,44 @@ impl TerminalFrameSink for PaneSink {
         release_wakes(notified);
     }
 
+    fn takes_output(&self) -> bool {
+        self.takes.load(Ordering::Acquire)
+    }
+
+    fn output_room(&self) -> usize {
+        let state = self.state.lock();
+        let controls = state.controls.iter().filter_map(|mailbox| {
+            mailbox
+                .control_feed()
+                .map(|feed| feed.room(self.pane, &self.wake))
+        });
+        let pipe = state.pipe.iter().map(|pipe| pipe.room(&self.wake));
+        controls.chain(pipe).min().unwrap_or(usize::MAX)
+    }
+
+    fn output(&self, bytes: &Arc<[u8]>) {
+        let mut state = self.state.lock();
+        let mut closed = false;
+        for mailbox in &state.controls {
+            if let Some(feed) = mailbox.control_feed() {
+                closed |= !feed.push(self.pane, bytes, Some(&self.wake));
+            }
+        }
+        if closed {
+            state.controls.retain(|mailbox| !mailbox.is_closed());
+        }
+        if state
+            .pipe
+            .as_ref()
+            .is_some_and(|pipe| !pipe.push(bytes, &self.wake))
+        {
+            state.pipe = None;
+        }
+        if closed || state.pipe.is_none() {
+            self.retake(&state);
+        }
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -273,5 +348,694 @@ pub(super) fn publish_loop_view(
             seen.as_ref().map(|(_, seen)| seen),
             epoch.map(|epoch| (epoch, Arc::clone(viewport))),
         );
+    }
+}
+
+pub(super) struct ControlWake {
+    pending: AtomicBool,
+    wake: AcceptWake,
+    #[cfg(windows)]
+    pump: std::sync::OnceLock<Box<dyn Fn() + Send + Sync>>,
+}
+
+impl ControlWake {
+    pub(super) fn new() -> Self {
+        Self {
+            pending: AtomicBool::new(false),
+            wake: AcceptWake::new(),
+            #[cfg(windows)]
+            pump: std::sync::OnceLock::new(),
+        }
+    }
+
+    #[cfg(unix)]
+    pub(super) fn install(&self, waker: Arc<mio::Waker>) {
+        self.wake.install(waker);
+    }
+
+    #[cfg(windows)]
+    pub(super) fn install_pump(&self, pump: impl Fn() + Send + Sync + 'static) {
+        let _ = self.pump.set(Box::new(pump));
+    }
+
+    fn notify(&self) {
+        if self.pending.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        self.wake.wake();
+        #[cfg(windows)]
+        if let Some(pump) = self.pump.get() {
+            pump();
+        }
+    }
+
+    fn kick(&self) {
+        self.pending.store(true, Ordering::Release);
+        self.wake.wake();
+        #[cfg(windows)]
+        if let Some(pump) = self.pump.get() {
+            pump();
+        }
+    }
+
+    pub(super) fn take(&self) -> bool {
+        self.pending.swap(false, Ordering::AcqRel)
+    }
+
+    pub(super) fn again(&self, progressed: bool) {
+        self.pending.store(true, Ordering::Release);
+        if progressed {
+            self.wake.wake();
+        }
+    }
+}
+
+pub(super) struct ControlFeed {
+    state: Mutex<FeedState>,
+    delivery: Mutex<()>,
+    wake: Arc<ControlWake>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ControlOrder {
+    AfterOutput,
+    AfterLines,
+}
+
+pub(super) fn control_order(message: &ProtocolMessage) -> Option<ControlOrder> {
+    match message {
+        ProtocolMessage::Event(Event {
+            payload:
+                EventPayload::PaneOutput { .. }
+                | EventPayload::PaneOutputAged { .. }
+                | EventPayload::PaneOutputState { .. },
+            ..
+        }) => None,
+        ProtocolMessage::TreeSync
+        | ProtocolMessage::Event(Event {
+            payload: EventPayload::TreeDelta(_) | EventPayload::Snapshot(_),
+            ..
+        }) => Some(ControlOrder::AfterLines),
+        _ => Some(ControlOrder::AfterOutput),
+    }
+}
+
+type ControlLine = Box<dyn FnOnce(&OutboundMailbox) -> bool + Send>;
+
+struct FeedLine {
+    after: u64,
+    send: ControlLine,
+}
+
+enum FeedDelivery {
+    Output {
+        pane: PaneId,
+        pause_after_ms: Option<u64>,
+        age_ms: u64,
+        bytes: Vec<u8>,
+    },
+    Paused(PaneId),
+    Line(ControlLine),
+}
+
+impl FeedDelivery {
+    fn send(self, mailbox: &OutboundMailbox) -> bool {
+        let payload = match self {
+            Self::Output {
+                pane,
+                pause_after_ms,
+                age_ms,
+                bytes,
+            } => control_output_payload(pane, pause_after_ms, age_ms, bytes),
+            Self::Paused(pane) => EventPayload::PaneOutputState { pane, paused: true },
+            Self::Line(send) => return send(mailbox),
+        };
+        mailbox.enqueue_reliable(&Shared::event(payload))
+    }
+}
+
+#[derive(Default)]
+struct FeedState {
+    panes: BTreeMap<PaneId, FeedPane>,
+    lines: VecDeque<FeedLine>,
+    next: u64,
+    muted: BTreeSet<PaneId>,
+    no_output: bool,
+    pause_after_ms: Option<u64>,
+    closed: bool,
+}
+
+#[derive(Default)]
+struct FeedPane {
+    pending: VecDeque<PendingControlOutput>,
+    waiter: Option<OutputWake>,
+}
+
+impl FeedPane {
+    fn release(&mut self) {
+        if self.pending.len() < CONTROL_PENDING_CHUNKS_PER_PANE
+            && let Some(waiter) = self.waiter.take()
+        {
+            waiter.wake();
+        }
+    }
+
+    fn clear(&mut self) {
+        self.pending.clear();
+        self.release();
+    }
+
+    fn discard(&mut self, before: u64) {
+        while self.pending.back().is_some_and(|chunk| chunk.seq >= before) {
+            self.pending.pop_back();
+        }
+        self.release();
+    }
+}
+
+impl FeedState {
+    fn clear(&mut self) {
+        for pane in self.panes.values_mut() {
+            pane.clear();
+        }
+    }
+
+    fn close(&mut self) {
+        self.closed = true;
+        self.clear();
+        self.lines.clear();
+    }
+
+    fn committed(&self) -> u64 {
+        self.lines.back().map_or(0, |line| line.after)
+    }
+
+    fn discard(&mut self) {
+        let before = self.committed();
+        for pane in self.panes.values_mut() {
+            pane.discard(before);
+        }
+    }
+
+    fn settle(&mut self, now: Instant) -> Vec<FeedDelivery> {
+        let mut deliveries = Vec::new();
+        while let Some(line) = self.lines.pop_front() {
+            for (pane, entry) in &mut self.panes {
+                let limit = entry
+                    .pending
+                    .iter()
+                    .take_while(|chunk| chunk.seq < line.after)
+                    .map(|chunk| chunk.bytes.len() - chunk.offset)
+                    .sum::<usize>();
+                if limit == 0 {
+                    continue;
+                }
+                let (age_ms, bytes) =
+                    drain_control_pane_output(&mut entry.pending, limit, line.after, now);
+                deliveries.push(FeedDelivery::Output {
+                    pane: *pane,
+                    pause_after_ms: self.pause_after_ms,
+                    age_ms,
+                    bytes,
+                });
+            }
+            deliveries.push(FeedDelivery::Line(line.send));
+        }
+        deliveries
+    }
+
+    fn pending(&self) -> bool {
+        self.panes.values().any(|pane| !pane.pending.is_empty())
+    }
+
+    fn busy(&self) -> bool {
+        !self.lines.is_empty() || self.pending()
+    }
+
+    fn queue(&mut self, pane: PaneId, bytes: Arc<[u8]>, enqueued_at: Instant) -> &mut FeedPane {
+        let seq = self.next;
+        self.next += 1;
+        let entry = self.panes.entry(pane).or_default();
+        entry.pending.push_back(PendingControlOutput {
+            bytes,
+            offset: 0,
+            enqueued_at,
+            seq,
+        });
+        entry
+    }
+
+    fn ready_lines(&mut self, deliveries: &mut Vec<FeedDelivery>) {
+        let oldest = self
+            .panes
+            .values()
+            .filter_map(|pane| pane.pending.front().map(|chunk| chunk.seq))
+            .min()
+            .unwrap_or(u64::MAX);
+        while self.lines.front().is_some_and(|line| line.after <= oldest) {
+            let line = self.lines.pop_front().expect("ready line");
+            deliveries.push(FeedDelivery::Line(line.send));
+        }
+    }
+}
+
+#[derive(Default)]
+pub(super) struct FeedPump {
+    pub(super) paused: Vec<PaneId>,
+    pub(super) kill: bool,
+    pub(super) pending: bool,
+    pub(super) progressed: bool,
+}
+
+impl ControlFeed {
+    pub(super) fn new(wake: Arc<ControlWake>) -> Self {
+        Self {
+            state: Mutex::new(FeedState::default()),
+            delivery: Mutex::new(()),
+            wake,
+        }
+    }
+
+    pub(super) fn push(
+        &self,
+        pane: PaneId,
+        bytes: &Arc<[u8]>,
+        waiter: Option<&OutputWake>,
+    ) -> bool {
+        let mut state = self.state.lock();
+        if state.closed {
+            return false;
+        }
+        if state.no_output || state.muted.contains(&pane) {
+            return true;
+        }
+        let idle = !state.busy();
+        let entry = state.queue(pane, Arc::clone(bytes), Instant::now());
+        if entry.pending.len() >= CONTROL_PENDING_CHUNKS_PER_PANE
+            && let Some(waiter) = waiter
+        {
+            entry.waiter = Some(waiter.clone());
+        }
+        drop(state);
+        if idle {
+            self.wake.notify();
+        }
+        true
+    }
+
+    fn room(&self, pane: PaneId, waiter: &OutputWake) -> usize {
+        let mut state = self.state.lock();
+        if state.closed || state.no_output || state.muted.contains(&pane) {
+            return usize::MAX;
+        }
+        let Some(entry) = state.panes.get_mut(&pane) else {
+            return CONTROL_PENDING_CHUNKS_PER_PANE;
+        };
+        let room = CONTROL_PENDING_CHUNKS_PER_PANE.saturating_sub(entry.pending.len());
+        if room == 0 {
+            entry.waiter = Some(waiter.clone());
+        }
+        room
+    }
+
+    pub(super) fn order(
+        &self,
+        mailbox: &OutboundMailbox,
+        order: ControlOrder,
+        line: impl FnOnce(&OutboundMailbox) -> bool + Send + 'static,
+    ) -> bool {
+        let _delivery = self.delivery.lock();
+        let mut state = self.state.lock();
+        let after = match order {
+            ControlOrder::AfterOutput => state.busy().then_some(state.next),
+            ControlOrder::AfterLines => state.lines.back().map(|line| line.after),
+        };
+        let Some(after) = after.filter(|_| !state.closed) else {
+            drop(state);
+            return line(mailbox);
+        };
+        if state.lines.len() >= MAX_RELIABLE_MESSAGES {
+            drop(state);
+            mailbox.close_too_far_behind();
+            return false;
+        }
+        state.lines.push_back(FeedLine {
+            after,
+            send: Box::new(line),
+        });
+        true
+    }
+
+    fn unblock(&self, state: parking_lot::MutexGuard<'_, FeedState>) {
+        let waiting = !state.lines.is_empty();
+        drop(state);
+        if waiting {
+            self.wake.kick();
+        }
+    }
+
+    pub(super) fn configure(
+        &self,
+        no_output: bool,
+        pause_after_ms: Option<u64>,
+        muted: BTreeSet<PaneId>,
+    ) {
+        let mut state = self.state.lock();
+        state.no_output = no_output;
+        state.pause_after_ms = pause_after_ms;
+        if no_output {
+            state.discard();
+        }
+        let before = state.committed();
+        for pane in &muted {
+            if let Some(entry) = state.panes.get_mut(pane) {
+                entry.discard(before);
+            }
+        }
+        state.muted = muted;
+        self.unblock(state);
+    }
+
+    pub(super) fn clear(&self) {
+        let mut state = self.state.lock();
+        state.discard();
+        self.unblock(state);
+    }
+
+    pub(super) fn clear_pane(&self, pane: PaneId) {
+        let mut state = self.state.lock();
+        let before = state.committed();
+        if let Some(entry) = state.panes.get_mut(&pane) {
+            entry.discard(before);
+        }
+        self.unblock(state);
+    }
+
+    pub(super) fn close(&self) {
+        self.state.lock().close();
+    }
+
+    pub(super) fn finish(&self, mailbox: &OutboundMailbox) {
+        let _delivery = self.delivery.lock();
+        let mut deliveries = {
+            let mut state = self.state.lock();
+            let deliveries = state.settle(Instant::now());
+            state.close();
+            deliveries
+        };
+        let queued = mailbox
+            .queued_reliable()
+            .map_or(0, |(_, messages)| messages);
+        if queued.saturating_add(deliveries.len()) >= MAX_RELIABLE_MESSAGES {
+            deliveries.retain(|delivery| matches!(delivery, FeedDelivery::Line(_)));
+        }
+        for delivery in deliveries {
+            if !delivery.send(mailbox) && mailbox.is_closed() {
+                return;
+            }
+        }
+    }
+
+    pub(super) fn pending_panes(&self) -> Vec<PaneId> {
+        self.state
+            .lock()
+            .panes
+            .iter()
+            .filter_map(|(pane, entry)| (!entry.pending.is_empty()).then_some(*pane))
+            .collect()
+    }
+
+    #[cfg(unix)]
+    pub(super) fn oldest(&self) -> Option<Instant> {
+        self.state
+            .lock()
+            .panes
+            .values()
+            .filter_map(|pane| pane.pending.front().map(|chunk| chunk.enqueued_at))
+            .min()
+    }
+
+    #[cfg(test)]
+    pub(super) fn queued(&self, pane: PaneId) -> usize {
+        self.state
+            .lock()
+            .panes
+            .get(&pane)
+            .map_or(0, |entry| entry.pending.len())
+    }
+
+    #[cfg(test)]
+    pub(super) fn queued_lines(&self) -> usize {
+        self.state.lock().lines.len()
+    }
+
+    #[cfg(test)]
+    pub(super) fn queued_bytes(&self, pane: PaneId) -> Vec<u8> {
+        self.state
+            .lock()
+            .panes
+            .get(&pane)
+            .map_or_else(Vec::new, |entry| {
+                entry
+                    .pending
+                    .iter()
+                    .flat_map(|chunk| chunk.bytes[chunk.offset..].iter().copied())
+                    .collect()
+            })
+    }
+
+    #[cfg(test)]
+    pub(super) fn queue_at(&self, pane: PaneId, bytes: &[u8], enqueued_at: Instant) {
+        self.state.lock().queue(pane, Arc::from(bytes), enqueued_at);
+    }
+
+    pub(super) fn pump(
+        &self,
+        mailbox: &OutboundMailbox,
+        pause_after_ms: Option<u64>,
+        now: Instant,
+    ) -> FeedPump {
+        let _delivery = self.delivery.lock();
+        let mut outcome = FeedPump::default();
+        loop {
+            let Some((queued_bytes, queued_messages)) = mailbox.queued_reliable() else {
+                self.state.lock().close();
+                return outcome;
+            };
+            let mut deliveries = Vec::new();
+            {
+                let mut state = self.state.lock();
+                let pending = state
+                    .panes
+                    .iter()
+                    .filter_map(|(pane, entry)| (!entry.pending.is_empty()).then_some(*pane))
+                    .collect::<Vec<_>>();
+                for pane in pending {
+                    let entry = state.panes.get_mut(&pane).expect("pending pane");
+                    let enqueued_at = entry.pending.front().expect("pending chunk").enqueued_at;
+                    match control_output_age_action(pause_after_ms, enqueued_at, now) {
+                        ControlOutputAgeAction::Output(_) => {}
+                        ControlOutputAgeAction::Pause => {
+                            entry.clear();
+                            state.muted.insert(pane);
+                            outcome.paused.push(pane);
+                            deliveries.push(FeedDelivery::Paused(pane));
+                        }
+                        ControlOutputAgeAction::Kill => {
+                            outcome.kill = true;
+                            break;
+                        }
+                    }
+                }
+                if outcome.kill {
+                    state.close();
+                    return outcome;
+                }
+                state.ready_lines(&mut deliveries);
+                let before = state.lines.front().map_or(u64::MAX, |line| line.after);
+                let pending = state
+                    .panes
+                    .iter()
+                    .filter_map(|(pane, entry)| {
+                        entry
+                            .pending
+                            .front()
+                            .is_some_and(|chunk| chunk.seq < before)
+                            .then_some(*pane)
+                    })
+                    .collect::<Vec<_>>();
+                if !pending.is_empty()
+                    && queued_bytes < CONTROL_BUFFER_HIGH
+                    && queued_messages < CONTROL_PENDING_MESSAGE_LIMIT
+                {
+                    let limit = ((CONTROL_BUFFER_HIGH - queued_bytes) / pending.len() / 3)
+                        .max(CONTROL_WRITE_MINIMUM);
+                    for pane in pending {
+                        let entry = state.panes.get_mut(&pane).expect("pending pane");
+                        let (age_ms, bytes) =
+                            drain_control_pane_output(&mut entry.pending, limit, before, now);
+                        entry.release();
+                        deliveries.push(FeedDelivery::Output {
+                            pane,
+                            pause_after_ms,
+                            age_ms,
+                            bytes,
+                        });
+                    }
+                    state.ready_lines(&mut deliveries);
+                }
+                outcome.pending = state.busy();
+            }
+            if deliveries.is_empty() {
+                break;
+            }
+            outcome.progressed = true;
+            for delivery in deliveries {
+                if !delivery.send(mailbox) && mailbox.is_closed() {
+                    self.state.lock().close();
+                    outcome.pending = false;
+                    return outcome;
+                }
+            }
+        }
+        outcome
+    }
+}
+
+fn control_output_payload(
+    pane: PaneId,
+    pause_after_ms: Option<u64>,
+    age_ms: u64,
+    bytes: Vec<u8>,
+) -> EventPayload {
+    if pause_after_ms.is_some() {
+        EventPayload::PaneOutputAged {
+            pane,
+            age_ms,
+            bytes,
+        }
+    } else {
+        EventPayload::PaneOutput { pane, bytes }
+    }
+}
+
+pub(super) struct PipeFeed {
+    state: Mutex<PipeState>,
+    ready: Condvar,
+    notify: Box<dyn Fn() + Send + Sync>,
+}
+
+#[derive(Default)]
+struct PipeState {
+    chunks: VecDeque<Arc<[u8]>>,
+    waiter: Option<OutputWake>,
+    closed: bool,
+    ended: bool,
+}
+
+impl PipeState {
+    fn release(&mut self) {
+        if self.chunks.len() < CONTROL_PENDING_CHUNKS_PER_PANE
+            && let Some(waiter) = self.waiter.take()
+        {
+            waiter.wake();
+        }
+    }
+}
+
+impl PipeFeed {
+    pub(super) fn new(notify: impl Fn() + Send + Sync + 'static) -> Arc<Self> {
+        Arc::new(Self {
+            state: Mutex::new(PipeState::default()),
+            ready: Condvar::new(),
+            notify: Box::new(notify),
+        })
+    }
+
+    pub(super) fn reader(self: &Arc<Self>) -> PipeReader {
+        PipeReader(Arc::clone(self))
+    }
+
+    fn push(&self, bytes: &Arc<[u8]>, waiter: &OutputWake) -> bool {
+        let mut state = self.state.lock();
+        if state.closed || state.ended {
+            return false;
+        }
+        state.chunks.push_back(Arc::clone(bytes));
+        if state.chunks.len() >= CONTROL_PENDING_CHUNKS_PER_PANE {
+            state.waiter = Some(waiter.clone());
+        }
+        drop(state);
+        self.ready.notify_one();
+        (self.notify)();
+        true
+    }
+
+    fn room(&self, waiter: &OutputWake) -> usize {
+        let mut state = self.state.lock();
+        if state.closed || state.ended {
+            return usize::MAX;
+        }
+        let room = CONTROL_PENDING_CHUNKS_PER_PANE.saturating_sub(state.chunks.len());
+        if room == 0 {
+            state.waiter = Some(waiter.clone());
+        }
+        room
+    }
+
+    pub(super) fn end(&self) {
+        let mut state = self.state.lock();
+        state.ended = true;
+        state.release();
+        drop(state);
+        self.ready.notify_all();
+        (self.notify)();
+    }
+}
+
+pub(super) struct PipeReader(Arc<PipeFeed>);
+
+impl PipeReader {
+    #[cfg(unix)]
+    pub(super) fn try_recv(&self) -> Result<Arc<[u8]>, crossbeam_channel::TryRecvError> {
+        let mut state = self.0.state.lock();
+        if let Some(bytes) = state.chunks.pop_front() {
+            state.release();
+            return Ok(bytes);
+        }
+        Err(if state.ended {
+            crossbeam_channel::TryRecvError::Disconnected
+        } else {
+            crossbeam_channel::TryRecvError::Empty
+        })
+    }
+
+    #[cfg(windows)]
+    pub(super) fn recv_timeout(
+        &self,
+        timeout: Duration,
+    ) -> Result<Arc<[u8]>, crossbeam_channel::RecvTimeoutError> {
+        let mut state = self.0.state.lock();
+        if state.chunks.is_empty() && !state.ended {
+            let _ = self.0.ready.wait_for(&mut state, timeout);
+        }
+        if let Some(bytes) = state.chunks.pop_front() {
+            state.release();
+            return Ok(bytes);
+        }
+        Err(if state.ended {
+            crossbeam_channel::RecvTimeoutError::Disconnected
+        } else {
+            crossbeam_channel::RecvTimeoutError::Timeout
+        })
+    }
+}
+
+impl Drop for PipeReader {
+    fn drop(&mut self) {
+        let mut state = self.0.state.lock();
+        state.closed = true;
+        state.chunks.clear();
+        state.release();
     }
 }

@@ -59,7 +59,14 @@ fn twenty_active_pipes_deliver_on_the_loop_without_reader_threads() {
     {
         let inner = shared.inner.lock();
         assert_eq!(inner.pane_pipes.len(), 20);
-        assert_eq!(inner.control_output_taps.len(), 20);
+        assert_eq!(
+            inner
+                .terminals
+                .keys()
+                .filter(|pane| output_routed(&inner, **pane))
+                .count(),
+            20
+        );
     }
     assert!(
         crate::process_info::sample(std::process::id())

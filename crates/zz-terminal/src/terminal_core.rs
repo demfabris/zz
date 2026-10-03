@@ -50,11 +50,10 @@ pub use session::disable_transparent_huge_pages;
 pub use session::{
     CaptureBoundary, CaptureOptions, CapturedCopySource, CopyModeFacts, CopyModeSelectionFacts,
     DeferredTerminalEvent, EngineKnobs, KittyImage, KittyImageRequestError, LastCommandCapture,
-    MAX_LAST_COMMAND_BYTES, MAX_LAST_COMMAND_LINES, PointerContext, ProgressBar, ProgressBarState,
-    RawOutputTapError, RawOutputTapReceiver, RawOutputTapSender, RoundTripGuard,
-    TerminalCaptureError, TerminalCopyReady, TerminalEvent, TerminalEvents, TerminalFacts,
-    TerminalFrameSink, TerminalProcessExit, TerminalRequest, TerminalRequestError, TerminalSession,
-    TerminalSessionDiagnostics, TerminalSize, TerminalSpawn, ViewFrame, ViewStream,
-    allow_actor_round_trips, forbid_actor_round_trips, run_pty_exec_mode,
+    MAX_LAST_COMMAND_BYTES, MAX_LAST_COMMAND_LINES, OutputWake, PointerContext, ProgressBar,
+    ProgressBarState, RoundTripGuard, TerminalCaptureError, TerminalCopyReady, TerminalEvent,
+    TerminalEvents, TerminalFacts, TerminalFrameSink, TerminalProcessExit, TerminalRequest,
+    TerminalRequestError, TerminalSession, TerminalSessionDiagnostics, TerminalSize, TerminalSpawn,
+    ViewFrame, ViewStream, allow_actor_round_trips, forbid_actor_round_trips, run_pty_exec_mode,
 };
 pub use word::{DEFAULT_WORD_SEPARATORS, WordSeparators};

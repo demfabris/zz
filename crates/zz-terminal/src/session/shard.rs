@@ -177,7 +177,6 @@ impl Actor {
                 if !actor.on_deadline()? {
                     return Ok(None);
                 }
-                actor.on_parse_deadline();
             }
             Self::Dead(actor) => {
                 if !actor.on_wake(Wake::Deadline)? {
@@ -400,7 +399,7 @@ impl Shard {
                                                 || (entry.pending.load(Ordering::Acquire)
                                                     && actor.queued_input_ready()))
                                     })
-                                })?;
+                                });
                             }
                         }
                         #[cfg(not(unix))]

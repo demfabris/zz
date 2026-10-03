@@ -436,16 +436,22 @@ fn control_output_loop_delivers_bytes_without_readers() {
     peer.write_all(&encode_protocol_message(&ProtocolMessage::CommandRequest(request)).unwrap())
         .unwrap();
     event_loop.read_ready(token, &shared);
-    until(&mut event_loop, &shared, |event_loop| {
-        shared.inner.lock().control_output_taps.contains_key(&pane)
-            && !event_loop.connections[&token].busy
-    });
-    let terminal = {
-        let inner = shared.inner.lock();
-        assert!(inner.control_output_taps[&pane].receiver.is_some());
-        assert!(inner.control_output_taps[&pane].receiver.is_some());
-        Arc::clone(&inner.terminals[&pane])
+    let routed = || {
+        shared
+            .inner
+            .lock()
+            .control_routes
+            .values()
+            .any(|route| route.panes.contains(&pane))
     };
+    until(&mut event_loop, &shared, |event_loop| {
+        routed() && !event_loop.connections[&token].busy
+    });
+    let terminal = Arc::clone(&shared.inner.lock().terminals[&pane]);
+    assert!(
+        shard_sink::PaneSink::of(&terminal)
+            .is_some_and(zz_terminal::TerminalFrameSink::takes_output)
+    );
     let threads = crate::process_info::sample(std::process::id())
         .unwrap()
         .threads;
@@ -499,11 +505,7 @@ fn control_output_loop_delivers_bytes_without_readers() {
             .threads
             <= threads
     );
-    assert!(
-        shared.inner.lock().control_output_taps[&pane]
-            .receiver
-            .is_some()
-    );
+    assert!(routed());
     event_loop.remove(token, &shared);
     shared
         .execute(

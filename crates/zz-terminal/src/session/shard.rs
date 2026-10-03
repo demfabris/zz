@@ -62,7 +62,7 @@ pub(super) enum LaunchKind {
 }
 
 impl ShardHandle {
-    fn start(index: usize) -> Result<Self, WorkerError> {
+    pub(super) fn start(index: usize) -> Result<Self, WorkerError> {
         let (requests, incoming) = crossbeam_channel::unbounded();
         #[cfg(unix)]
         let (wake_rx, wake) = {

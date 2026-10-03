@@ -141,14 +141,14 @@ pub fn hold_actor_wakes() -> WakeHold {
         }))
     }
     #[cfg(not(unix))]
-    WakeHold(false)
+    WakeHold()
 }
 
-pub struct WakeHold(bool);
+pub struct WakeHold(#[cfg(unix)] bool);
 
+#[cfg(unix)]
 impl Drop for WakeHold {
     fn drop(&mut self) {
-        #[cfg(unix)]
         if self.0 {
             let held = HELD_WAKES.with_borrow_mut(Option::take);
             write_held_wakes(held.unwrap_or_default());
@@ -3779,11 +3779,17 @@ impl CommandSender {
             input.try_send(command)
         } else {
             let counted = self.counts_in_flight(&command);
-            let result = self
-                .queues
-                .control
-                .send(command)
-                .map_err(|error| crossbeam_channel::TrySendError::Disconnected(error.0));
+            let result = match self.queues.control.try_send(command) {
+                Err(crossbeam_channel::TrySendError::Full(command)) => {
+                    #[cfg(unix)]
+                    release_held_wakes();
+                    self.queues
+                        .control
+                        .send(command)
+                        .map_err(|error| crossbeam_channel::TrySendError::Disconnected(error.0))
+                }
+                result => result,
+            };
             if counted && result.is_err() {
                 self.abandon_in_flight();
             }
@@ -3813,7 +3819,17 @@ impl CommandSender {
             })
         } else {
             let counted = self.counts_in_flight(&command);
-            let result = self.queues.control.send_timeout(command, timeout);
+            let result = match self.queues.control.try_send(command) {
+                Ok(()) => Ok(()),
+                Err(crossbeam_channel::TrySendError::Full(command)) => {
+                    #[cfg(unix)]
+                    release_held_wakes();
+                    self.queues.control.send_timeout(command, timeout)
+                }
+                Err(crossbeam_channel::TrySendError::Disconnected(command)) => {
+                    Err(crossbeam_channel::SendTimeoutError::Disconnected(command))
+                }
+            };
             if counted && result.is_err() {
                 self.abandon_in_flight();
             }
@@ -3873,8 +3889,6 @@ impl CommandSender {
         &self,
         command: impl FnOnce(Sender<T>) -> Command,
     ) -> Result<T, ActorRequestError> {
-        #[cfg(unix)]
-        release_held_wakes();
         let (reply, response) = crossbeam_channel::bounded(1);
         let command = command(reply);
         debug_assert!(
@@ -3890,6 +3904,8 @@ impl CommandSender {
                     ActorRequestError::ActorStopped
                 }
             })?;
+        #[cfg(unix)]
+        release_held_wakes();
         crossbeam_channel::select_biased! {
             recv(response) -> reply => reply.map_err(|_| ActorRequestError::ActorStopped),
             recv(self.queues.liveness) -> _ => {

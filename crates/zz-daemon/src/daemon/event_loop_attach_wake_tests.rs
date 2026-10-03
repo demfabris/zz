@@ -1,7 +1,15 @@
+use std::sync::{Arc, mpsc};
+use std::thread;
 use std::time::Duration;
 
 use mio::{Events, Poll, Token, Waker};
+use zz_protocol::ClientHello;
 
+use crate::daemon::tests::QUIET_PANE_COMMAND;
+use crate::daemon::{
+    ClientId, ClientKind, CommandInvocation, ExecutionContext, OutboundMailbox, Shared, attach,
+    client_size_fact,
+};
 use crate::transport::{LoopThread, clear_loop_again, wake_loop};
 
 const WAKE: Token = Token(7);
@@ -64,4 +72,75 @@ fn leaving_the_loop_restores_real_wakes() {
     assert_eq!(woken(&mut poll, &mut events), 1);
     wake_loop(&waker).expect("second wake after the loop");
     assert_eq!(woken(&mut poll, &mut events), 1);
+}
+
+fn run(shared: &Arc<Shared>, client: ClientId, kind: ClientKind, args: &[&str]) {
+    shared
+        .execute(
+            client,
+            kind,
+            &mut ExecutionContext::default(),
+            &CommandInvocation::new(args[0], args[1..].iter().copied()),
+        )
+        .unwrap_or_else(|error| panic!("{args:?}: {error:?}"));
+}
+
+fn idle_in_copy_mode(sessions: &[&str]) -> (Arc<Shared>, ClientId, Arc<OutboundMailbox>) {
+    let shared = Arc::new(Shared::new(1));
+    for name in sessions {
+        run(
+            &shared,
+            ClientId(u64::MAX),
+            ClientKind::Command,
+            &["new-session", "-d", "-s", name, QUIET_PANE_COMMAND],
+        );
+    }
+    let mailbox = OutboundMailbox::new();
+    let (client, _) =
+        shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+    let capabilities = [
+        format!("{}100x30", ClientHello::CLIENT_SIZE_CAPABILITY_PREFIX),
+        format!("{}8x16", ClientHello::CLIENT_CELL_CAPABILITY_PREFIX),
+    ];
+    {
+        let mut inner = shared.inner.lock();
+        inner.client_entry(client).size = client_size_fact(&capabilities);
+        inner.client_entry(client).cell_pixels = attach::client_cell_fact(&capabilities);
+    }
+    run(
+        &shared,
+        client,
+        ClientKind::Interactive,
+        &["attach-session", "-t", sessions[0]],
+    );
+    run(&shared, client, ClientKind::Interactive, &["copy-mode"]);
+    thread::sleep(Duration::from_millis(1500));
+    (shared, client, mailbox)
+}
+
+fn returns_promptly(shared: &Arc<Shared>, client: ClientId, args: &'static [&'static str]) {
+    let shared = Arc::clone(shared);
+    let (done, finished) = mpsc::channel();
+    thread::spawn(move || {
+        run(&shared, client, ClientKind::Interactive, args);
+        let _ = done.send(());
+    });
+    assert!(
+        finished.recv_timeout(Duration::from_secs(5)).is_ok(),
+        "{args:?} waited on a shard wake its own hold kept back"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn detaching_from_copy_mode_on_an_idle_pane_returns_at_once() {
+    let (shared, client, _mailbox) = idle_in_copy_mode(&["a"]);
+    returns_promptly(&shared, client, &["detach-client"]);
+}
+
+#[cfg(unix)]
+#[test]
+fn switching_away_from_copy_mode_on_an_idle_pane_returns_at_once() {
+    let (shared, client, _mailbox) = idle_in_copy_mode(&["a", "b"]);
+    returns_promptly(&shared, client, &["switch-client", "-t", "b"]);
 }

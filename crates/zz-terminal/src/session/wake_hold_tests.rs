@@ -75,7 +75,7 @@ fn nested_holds_flush_only_when_the_outer_hold_ends() {
 }
 
 #[test]
-fn a_blocking_request_releases_held_wakes_and_keeps_holding_later_ones() {
+fn releasing_held_wakes_keeps_holding_later_ones() {
     let (wake, read) = shard_wake();
     let hold = hold_actor_wakes();
     wake.notify();
@@ -100,4 +100,65 @@ fn wake_drain_stops_after_a_short_read() {
     rustix::io::write(&write, &[1_u8; 100]).expect("fill wake pipe");
     drain_wake_pipe(&read).expect("drain wake pipe");
     assert_eq!(queued(&read), 0);
+}
+
+fn idle_pane(shard: &shard::ShardHandle) -> TerminalSession {
+    let session = TerminalSession::spawn_with_shard(
+        100,
+        Arc::new(TerminalAppearance::default()),
+        TerminalSpawn {
+            command: Some(vec![
+                "stty -echo; printf 'ready\\r\\n'; exec cat".to_owned(),
+            ]),
+            ..TerminalSpawn::default()
+        },
+        Ok(Some(shard.clone())),
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !session
+        .capture(CaptureOptions::default())
+        .is_ok_and(|output| output.contains("ready"))
+    {
+        assert!(
+            Instant::now() < deadline,
+            "the pane never printed its marker"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    std::thread::sleep(Duration::from_secs(1));
+    session
+}
+
+fn returns_within_a_second(what: &str, work: impl FnOnce() + Send + 'static) {
+    let (done, finished) = crossbeam_channel::bounded(1);
+    std::thread::spawn(move || {
+        work();
+        let _ = done.send(());
+    });
+    assert!(
+        finished.recv_timeout(Duration::from_secs(1)).is_ok(),
+        "{what} waited on a wake its own hold kept back"
+    );
+}
+
+#[test]
+fn a_send_into_a_full_queue_under_a_hold_writes_the_held_wake_first() {
+    let shard = shard::ShardHandle::start(110).expect("shard");
+    let session = idle_pane(&shard);
+    returns_within_a_second("a view action after attach_view", move || {
+        let view = TerminalViewId(1);
+        let _hold = hold_actor_wakes();
+        session.attach_view(view);
+        session.view_action(view, TerminalViewAction::ScrollBottom);
+    });
+}
+
+#[test]
+fn a_request_under_a_hold_wakes_the_actor_for_its_own_command() {
+    let shard = shard::ShardHandle::start(111).expect("shard");
+    let session = idle_pane(&shard);
+    returns_within_a_second("a fresh viewport request", move || {
+        let _hold = hold_actor_wakes();
+        session.fresh_viewport();
+    });
 }

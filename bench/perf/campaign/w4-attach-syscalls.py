@@ -35,8 +35,10 @@ def task(pid):
 
 
 def counts(directory, pid):
+    if not directory:
+        return {}
     path = os.path.join(directory, f"{pid}.bin")
-    if not directory or not os.path.exists(path):
+    if not os.path.exists(path):
         return {}
     with open(path, "rb") as f:
         data = f.read()

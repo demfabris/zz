@@ -150,7 +150,8 @@ impl ConfigInputKind {
     }
 }
 
-struct ConfigCharacters {
+struct ConfigCharacters<'a> {
+    text: &'a str,
     characters: Vec<char>,
     offset: usize,
     escapes: usize,
@@ -158,21 +159,33 @@ struct ConfigCharacters {
     input_kind: ConfigInputKind,
 }
 
-impl ConfigCharacters {
-    fn new(characters: impl Iterator<Item = char>, input_kind: ConfigInputKind) -> Self {
+impl<'a> ConfigCharacters<'a> {
+    fn text(text: &'a str) -> Self {
         Self {
+            text,
+            characters: Vec::new(),
+            offset: 0,
+            escapes: 0,
+            skipped_lines: 0,
+            input_kind: ConfigInputKind::String,
+        }
+    }
+
+    fn encoded(characters: impl Iterator<Item = char>) -> Self {
+        Self {
+            text: "",
             characters: characters.collect(),
             offset: 0,
             escapes: 0,
             skipped_lines: 0,
-            input_kind,
+            input_kind: ConfigInputKind::Bytes,
         }
     }
 
     fn getc(&mut self) -> Option<char> {
         if self.input_kind == ConfigInputKind::String {
-            let character = self.characters.get(self.offset).copied()?;
-            self.offset += 1;
+            let character = self.text[self.offset..].chars().next()?;
+            self.offset += character.len_utf8();
             return Some(character);
         }
         if self.escapes != 0 {
@@ -205,6 +218,12 @@ impl ConfigCharacters {
     }
 
     fn ungetc(&mut self, character: char) {
+        if self.input_kind == ConfigInputKind::String {
+            if let Some(previous) = self.text[..self.offset].chars().next_back() {
+                self.offset -= previous.len_utf8();
+            }
+            return;
+        }
         if !self.input_kind.is_eof(character) && self.offset != 0 {
             self.offset -= 1;
         }
@@ -473,7 +492,7 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
             percent_words.clear();
             return;
         }
-        let tokens = std::mem::take(words);
+        let mut tokens = std::mem::take(words);
         let command_block_tokens = std::mem::take(command_block_words);
         let percent_tokens = std::mem::take(percent_words);
         if percent_tokens.iter().any(|index| {
@@ -521,7 +540,7 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
                         line,
                         column,
                         completion_line,
-                        &tokens[start..end],
+                        &mut tokens[start..end],
                         &command_blocks,
                         start == 0 && *eager_assignment,
                     );
@@ -616,11 +635,11 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
         line: u32,
         column: u32,
         completion_line: u32,
-        tokens: &[String],
+        tokens: &mut [String],
         command_block_tokens: &[usize],
         assignment_recorded: bool,
     ) {
-        let mut tokens = tokens.iter().cloned();
+        let mut tokens = tokens.iter_mut().map(std::mem::take);
         let mut command_name = tokens.next().expect("command has a name");
         let mut command_args = tokens.collect::<Vec<_>>();
         let mut argument_start = 1;
@@ -941,14 +960,57 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
     context: &mut C,
     assignment_overlay: bool,
 ) -> ParsedConfig {
+    let source = source.into();
+    if is_plain_config_line(input) {
+        return parse_plain_config_line(source, input);
+    }
     parse_config_characters(
         source,
-        input.chars(),
+        ConfigCharacters::text(input),
         context,
         assignment_overlay,
-        ConfigInputKind::String,
     )
 }
+
+fn is_plain_config_line(input: &str) -> bool {
+    let mut words = 0_usize;
+    let mut in_word = false;
+    for byte in input.bytes() {
+        match byte {
+            b' ' | b'\t' => in_word = false,
+            b'\\' | b'$' | b'~' | b'\'' | b'"' | b'#' | b'{' | b'}' | b';' | b'%' => return false,
+            b'=' if words <= 1 && (in_word || words == 0) => return false,
+            b'!'..=b'~' => {
+                if !in_word {
+                    words += 1;
+                    in_word = true;
+                }
+            }
+            _ => return false,
+        }
+    }
+    u32::try_from(input.len()).is_ok()
+}
+
+fn parse_plain_config_line(source: String, input: &str) -> ParsedConfig {
+    let mut words = input.split_ascii_whitespace();
+    let Some(name) = words.next() else {
+        return ParsedConfig::default();
+    };
+    let column = input.len() - input.trim_ascii_start().len() + 1;
+    let column = u32::try_from(column).expect("plain config line length fits u32");
+    ParsedConfig {
+        commands: vec![CommandInvocation::new(name, words).with_source(SourceSpan {
+            source,
+            line: 1,
+            column,
+        })],
+        ..ParsedConfig::default()
+    }
+}
+
+#[cfg(test)]
+mod plain_line_tests;
 
 pub(crate) fn parse_config_file_bytes_with_assignment_overlay<C: ConfigContext>(
     source: impl Into<String>,
@@ -988,29 +1050,25 @@ fn parse_config_bytes_with_assignment_overlay<C: ConfigContext>(
     byte_input: ConfigByteInput,
 ) -> ParsedConfigBytes {
     ParsedConfigBytes::from_encoded(parse_config_characters(
-        source,
-        input
-            .iter()
-            .copied()
-            .map(|byte| encode_config_byte(byte, byte_input)),
+        source.into(),
+        ConfigCharacters::encoded(
+            input
+                .iter()
+                .copied()
+                .map(|byte| encode_config_byte(byte, byte_input)),
+        ),
         context,
         assignment_overlay,
-        ConfigInputKind::Bytes,
     ))
 }
 
-fn parse_config_characters<C, I>(
-    source: impl Into<String>,
-    characters: I,
+fn parse_config_characters<C: ConfigContext>(
+    source: String,
+    mut characters: ConfigCharacters<'_>,
     context: &mut C,
     assignment_overlay: bool,
-    input_kind: ConfigInputKind,
-) -> ParsedConfig
-where
-    C: ConfigContext,
-    I: Iterator<Item = char>,
-{
-    let source = source.into();
+) -> ParsedConfig {
+    let input_kind = characters.input_kind;
     let mut builder = ConfigBuilder {
         source,
         parsed: ParsedConfig::default(),
@@ -1037,7 +1095,6 @@ where
     let mut command_line = 1_u32;
     let mut command_column = 1_u32;
 
-    let mut characters = ConfigCharacters::new(characters, input_kind);
     let mut reprocess: Option<char> = None;
     let mut tilde: Option<Tilde> = None;
     let mut last_state: Option<Quote> = None;
@@ -1544,7 +1601,7 @@ fn finish_word(
 }
 
 fn scan_condition_format(
-    characters: &mut ConfigCharacters,
+    characters: &mut ConfigCharacters<'_>,
     word: &mut String,
     line: &mut u32,
     column: &mut u32,
@@ -1642,7 +1699,7 @@ enum ConfigEscape {
 }
 
 fn parse_escape(
-    characters: &mut ConfigCharacters,
+    characters: &mut ConfigCharacters<'_>,
     line: &mut u32,
     column: &mut u32,
     input_kind: ConfigInputKind,
@@ -1728,7 +1785,7 @@ fn parse_escape(
 }
 
 fn expand_variable<C>(
-    characters: &mut ConfigCharacters,
+    characters: &mut ConfigCharacters<'_>,
     line: &mut u32,
     column: &mut u32,
     builder: &mut ConfigBuilder<'_, C>,
@@ -1787,7 +1844,7 @@ where
 }
 
 fn take_character(
-    characters: &mut ConfigCharacters,
+    characters: &mut ConfigCharacters<'_>,
     line: &mut u32,
     column: &mut u32,
 ) -> Option<char> {
@@ -1802,7 +1859,7 @@ fn take_character(
 }
 
 fn peek_character(
-    characters: &mut ConfigCharacters,
+    characters: &mut ConfigCharacters<'_>,
     line: &mut u32,
     column: &mut u32,
 ) -> Option<char> {
@@ -1817,7 +1874,7 @@ fn peek_character(
 }
 
 fn strip_quoted_line_prefix(
-    characters: &mut ConfigCharacters,
+    characters: &mut ConfigCharacters<'_>,
     reprocess: &mut Option<char>,
     word: &mut String,
     line: &mut u32,

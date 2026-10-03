@@ -1336,7 +1336,7 @@ impl Shared {
         client: ClientId,
         kind: ClientKind,
         context: &mut ExecutionContext,
-        prepared: PreparedCommand,
+        mut prepared: PreparedCommand,
         position: (u64, bool),
         outbound: &Arc<OutboundMailbox>,
     ) -> bool {
@@ -1352,7 +1352,7 @@ impl Shared {
                 } else {
                     CONTROL_COMMAND_FRAME_FLAGS_NONE
                 }),
-                canonical_name: prepared.canonical_name.clone(),
+                canonical_name: prepared.canonical_name.take(),
                 guard: !MuxEngine::is_command_alias_group(&prepared.invocation),
             });
             let _ = outbound.enqueue_reliable_with_wakeup(&started, wakeup);

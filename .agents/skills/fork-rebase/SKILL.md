@@ -128,14 +128,15 @@ Current forks and why:
 ## Native Ghostty fork
 
 `libghostty-vt-sys/build.rs` fetches `demfabris/ghostty`. The published pin is
-`67351380b6dc30124938d809809ac0aa42813283` on `zz-2026-09-30`, based on copy snapshots
+`189df4a1f6403f5bdc349fe44d1d2809741a4c1d` on `zz-2026-10-02` (the one-call row cell copy for frame build), on
+`67351380b6dc30124938d809809ac0aa42813283` from `zz-2026-09-30`, based on copy snapshots
 `7823f65dd55fc9ff420d5eb5cae761cbd1995994` and trim fix `c39414175ca2aad564b74b3f52196355f2671774`, upstream base
 `6301810a48aaa3426887a4316668f18833a40138`. It adds owned active-screen C ABI snapshots,
 shared resident and compressed history backing, snapshot regression tests, and active-page
 copies sized to their used rows to the three existing signal-stack, spare-page and trim
-commits. The fast-forwards keep the earlier pins in `zz-2026-09-30` history. The safe wrapper's copy API lives in published
-`demfabris/libghostty-rs` commit `8e40135fb20e9ed91c37c374fe1d14570c386d06` on new branch
-`zz-2026-09-30`, based on `359ef751c189540eafb9110b2de89ad95ce48fc3`.
+commits. The fast-forwards keep the earlier pins in `zz-2026-09-30` history. The safe wrapper's copy APIs live in published
+`demfabris/libghostty-rs` commit `f5f826018e290e776c8bc4e5969c562efe530846` on new branch
+`zz-2026-10-02` (row copies and the iteration lifetime fix on `8e40135f` from `zz-2026-09-30`), based on `359ef751c189540eafb9110b2de89ad95ce48fc3`.
 zz vendors only the sys snapshot, without native
 source rewriting or a safe-wrapper path patch.
 
@@ -143,6 +144,8 @@ Published branches retain these pins:
 
 | Fork | Branch | Pin |
 |---|---|---|
+| `demfabris/ghostty` | `zz-2026-10-02` | `189df4a1f6403f5bdc349fe44d1d2809741a4c1d`, row cell copy |
+| `demfabris/libghostty-rs` | `zz-2026-10-02` | `f5f826018e290e776c8bc4e5969c562efe530846`, row copies and iteration lifetimes |
 | `demfabris/ghostty` | `zz-2026-09-30` | `67351380b6dc30124938d809809ac0aa42813283`; copy snapshots `7823f65dd55fc9ff420d5eb5cae761cbd1995994` and trim fix `c39414175ca2aad564b74b3f52196355f2671774` remain in its history |
 | `demfabris/ghostty` | `zz-2026-09-29` | `713374af`, spare-page reuse |
 | `demfabris/ghostty` | `zz-2026-09-25` | `6fce227c`, C ABI signal-stack option |

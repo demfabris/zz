@@ -8,12 +8,13 @@ This directory is a source snapshot of `libghostty-vt-sys` from
 - Upstream crate version: `0.2.1` (no newer release exists; the stack is unreleased)
 - Upstream wrapper Ghostty pin: `56dbc4a768778753737a3b9cbe0a3f9b4e434553`
 - Upstream Ghostty base: `6301810a48aaa3426887a4316668f18833a40138` (main, 2026-09-25)
-- Published Ghostty pin: `67351380b6dc30124938d809809ac0aa42813283` on `demfabris/ghostty` branch `zz-2026-09-30`, pinned in `build.rs`. The branch fast-forwards retain copy snapshots `7823f65dd55fc9ff420d5eb5cae761cbd1995994` and trim fix `c39414175ca2aad564b74b3f52196355f2671774` in its history.
-- Fork history: five commits on upstream: the C ABI signal-stack option (`6fce227c`, still on `zz-2026-09-25`), the PageList spare-page reuse (`713374af`: line-limit pruning keeps the last pruned pool page resident for the next grow instead of decommitting and refaulting it; `compress` releases it and trims the last page), the trim fix (`c3941417`: preserves live cell blocks after history erase), owned copy snapshots (`7823f65d`), and copied active pages at their used size (`67351380`). `zz-2026-09-29` keeps `713374af`; the previous pin `fa7986a9` stays on `codex/cabi-signal-stack`
+- Published Ghostty pin: `189df4a1f6403f5bdc349fe44d1d2809741a4c1d` on `demfabris/ghostty` branch `zz-2026-10-02` (one commit, the row cell copy, on `67351380b6dc30124938d809809ac0aa42813283`), pinned in `build.rs`. `zz-2026-09-30` keeps `67351380`. The branch fast-forwards retain copy snapshots `7823f65dd55fc9ff420d5eb5cae761cbd1995994` and trim fix `c39414175ca2aad564b74b3f52196355f2671774` in its history.
+- Fork history: six commits on upstream: the C ABI signal-stack option (`6fce227c`, still on `zz-2026-09-25`), the PageList spare-page reuse (`713374af`: line-limit pruning keeps the last pruned pool page resident for the next grow instead of decommitting and refaulting it; `compress` releases it and trims the last page), the trim fix (`c3941417`: preserves live cell blocks after history erase), owned copy snapshots (`7823f65d`), copied active pages at their used size (`67351380`), and the one-call row cell copy (`189df4a1`, `ghostty_render_state_row_cells_copy`). `zz-2026-09-29` keeps `713374af`; the previous pin `fa7986a9` stays on `codex/cabi-signal-stack`
 - License: MIT OR Apache-2.0; the upstream MIT license is retained here.
 - Wrapper source: [`demfabris/libghostty-rs`](https://github.com/demfabris/libghostty-rs),
-  published commit `8e40135fb20e9ed91c37c374fe1d14570c386d06` on new branch
-  `zz-2026-09-30`, pinned in the workspace manifest. Its parent
+  published commit `f5f826018e290e776c8bc4e5969c562efe530846` on new branch
+  `zz-2026-10-02` (row copies `d975339f` plus the row and cell iteration lifetime fix),
+  pinned in the workspace manifest. `8e40135f` stays on `zz-2026-09-30`. Its parent
   `359ef751c189540eafb9110b2de89ad95ce48fc3` remains on `zz-2026-09-25`.
 - Local override: the workspace patches the git-sourced sys package to this adjacent
   snapshot. The safe wrapper comes from the dependency fork, with owned copy
@@ -31,7 +32,7 @@ overscan and row ids), so the wrapper at #99 builds unchanged and its 22 unit te
 tests, and 20 doctests pass against `6301810a` with bindings regenerated from its headers.
 
 The base wrapper commit lives on a PR branch that Uzaaft rebases, so the workspace fetches
-the copy API from the `demfabris/libghostty-rs` fork's `zz-2026-09-30` branch.
+the copy API from the `demfabris/libghostty-rs` fork's `zz-2026-10-02` branch.
 Branch `zz-2026-09-25` keeps the base commit reachable.
 Move back to upstream at the first libghostty-rs release that contains this stack (likely
 0.3.0), and change both the dependency URL and the `[patch]` key in `Cargo.toml`.
@@ -176,6 +177,37 @@ default suite passes (30 wrapper and 3 sys tests, 19 doctests, 3 doctests ignore
 Native exports include all 205 `ghostty_*` symbols, and all 199 generated function
 declarations resolve in a C client that links and runs. Standalone Debug fixtures bound
 rich metadata and mutation work; separate 1000-row and 10k ownership regressions remain.
+
+## Row cell copy
+
+Frame build used to read every cell through about nine C calls (`row_cells_next`, the style,
+foreground, background, UTF-8 grapheme and raw cell getters, then the raw cell's content tag,
+width and hyperlink). Native fork commit `189df4a1f6403f5bdc349fe44d1d2809741a4c1d` adds
+`ghostty_render_state_row_cells_copy`, which writes a column range of the current row into
+packed `GhosttyRenderStateCell` entries in one call. Each cell carries its content (codepoint,
+background palette index or packed RGB, by content tag), width, hyperlink and protection flags,
+semantic content, a style table index and a grapheme table index. The style table writes each
+distinct style once after the default style at index 0, deduplicated by runs and a 256-slot
+direct-mapped hash cache, so a collision only adds a duplicate entry. Multi-codepoint graphemes
+are UTF-8 spans in a byte buffer. Short buffers return `GHOSTTY_OUT_OF_SPACE` with every needed
+length, as `GhosttyBuffer` does; the call allocates nothing and starts no thread. Its tests
+compare the copy with the per-cell getters on styled, grapheme, wide, hyperlink and
+background-only rows, and check short buffers and clamped ranges; the full native suite passes
+(6510 passed, 52 skipped).
+
+Wrapper commit `d975339f7144b0c57c178c0eeb1ea411a99b554e` exposes it as
+`CellIteration::copy_into` filling a reusable `CellsCopy`, pins its own sys crate to the native
+commit, and regenerates its bindings; its suite passes (31 unit tests, 19 doctests) with a test
+against the per-cell getters. This snapshot's `src/bindings.rs` is regenerated from the same
+headers (additive only). Both commits sit on new local branches `zz-2026-10-02`, on top of
+`67351380` and `8e40135` respectively, and are not published yet: the workspace manifest already
+names the wrapper commit, and `build.rs` keeps the published native pin until the native branch
+is pushed, so build with `GHOSTTY_SOURCE_DIR` pointing at the native commit until then. To
+publish: push both branches, set `GHOSTTY_COMMIT` to `189df4a1`, and update the pins above.
+Rebase note: the native change touches only `src/terminal/c/render.zig`, `main.zig`,
+`types.zig`, `src/lib_vt.zig` and `include/ghostty/vt/render.h`, and the wrapper change only
+`render.rs` plus the regenerated sys bindings and pin, so both replay on any base that keeps the
+render state row cells API.
 
 ## Earlier grid patches
 

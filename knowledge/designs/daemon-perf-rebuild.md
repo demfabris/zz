@@ -3773,11 +3773,63 @@ Scope: first profile `throughput.attached.*`, `chatty.cpu_pct.visible` and
 `chatty.client_cpu_pct.visible` after W4-DELIVER. If row extraction shows in any of them, add a
 fork API that copies a row range into packed cells in one call (styles and graphemes as dictionary
 indexes), carried in the Ghostty fork pinned in
-`third_party/rust/libghostty-vt-sys/build.rs` and the libghostty-rs fork (`scripts/forks.conf`,
-`just forks`). If it does not show, record the profile in this doc and close the lane.
+`third_party/rust/libghostty-vt-sys/build.rs` and the libghostty-rs fork pinned by `rev` in the
+workspace `Cargo.toml`. If it does not show, record the profile in this doc and close the lane.
 
-Gate: attached throughput and visible chatty CPU improve on the W4-DELIVER merge; fork patch
-listed in forks.conf with a rebase note.
+Gate: attached throughput and visible chatty CPU improve on the W4-DELIVER merge; both fork
+commits recorded with a rebase note in `third_party/rust/libghostty-vt-sys/UPSTREAM.md`.
+
+As built (branch `perf/rows`, 2026-10-02, profiled on the wave-4 base `4a695672` instead of the
+DELIVER merge, which changes routing and not how a frame reads cells):
+
+- Correction: `scripts/forks.conf` lists only the zed fork, and `just forks` compares a pushed
+  branch against upstream main. Neither fork goes there: the wrapper sits on a stacked PR base,
+  and the native fork is outside the Cargo workflow. `UPSTREAM.md` ("Row cell copy") carries both
+  commits and the rebase note.
+- Profile: Instruments Time Profiler attached to the isolated daemon for 8 s per workload,
+  release code with line tables (`--profile profiling`), on-CPU samples only. Frame build
+  (`build_snapshot`) took 53.9% of daemon samples under the `chatty` visible setup (four tiled
+  panes scrolling, one attached client), 48.8% in its cell loop;
+  `ghostty_render_state_row_cells_get` alone was the top leaf at 12.1% and `ghostty_cell_get`
+  7.1%. Echo `busy30`: 25.3%. Attached
+  ASCII throughput: 1.3% (the PTY `read` is 68% and VT printing most of the rest). The attached
+  TUI client spends no time in extraction (its CPU is painting, 53%, and receiving, 47%).
+- Built: native fork commit `189df4a1` adds `ghostty_render_state_row_cells_copy`, which writes a
+  column range of the current render-state row into packed 12-byte cells (content, style index,
+  grapheme index, content tag, width, hyperlink and protection flags, semantic content) with each
+  distinct style written once to a table and multi-codepoint graphemes as UTF-8 spans; no
+  allocation, no thread. Wrapper commit `d975339f` exposes it as `CellIteration::copy_into` with a
+  reusable `CellsCopy`. `build_snapshot` copies each dirty row in one call and resolves each style
+  table entry into a `PackedStyle` once per row; cells with a content-tag background or a
+  hyperlink reuse the previous cell's resolution when their key repeats. Output is unchanged, so
+  there is no rollback variable: `session/row_copy_tests.rs` builds frames through the copy and
+  compares every cell's text, style and width with the old per-cell reads over styled, inverse,
+  underline-colour, background-erase, hyperlink, wide, combining and ZWJ rows, a partial redraw, a
+  scroll, and a 64-colour rainbow row.
+- C calls per frame: before, nine per cell (ten for a palette background) plus five per row, 81,250
+  for a full 180x50 frame; after, none per cell and five per row (six when only some rows are
+  dirty), 250 for the same frame (325x fewer).
+- Profile after: chatty visible frame build 24.7% of daemon samples (cell loop 18.0%, daemon CPU
+  in the window 297 to 194 ms); `busy30` 6.3%; attached throughput 0.3%.
+- Gate, macbook under load 22 to 32 from parallel lane builds, base binary vs lane binary
+  alternating: three quick runs: `chatty.instr_per_s.flip` 0.72x, `.hidden` 0.74x, throughput rows
+  within noise. Three full `throughput,chatty` runs: `chatty.cpu_pct.visible` 3.48 to 2.18 %
+  (0.63x; the base fails the final-stage row in all three, the lane passes it in all three),
+  `chatty.instr_per_s.visible` 386 to 129 Minstr/s (0.33x), `.steady` 0.78x, `.flip` 0.75x,
+  `.hidden` 0.81x, `chatty.client_cpu_pct.visible` 1.08 to 0.89 %. The gate's attached ASCII
+  row was load-bound (lane 709, 1600, 552, 710, 537 ms against base 708, 550, 568, 617, 586 over
+  five alternating pairs, with tmux up to 60% slower in the same runs), so a zz-only A/B of nine
+  alternating attached runs per binary settled it: 618 to 562 ms median, daemon instructions
+  6.35 to 6.17 G per 150 MiB (0.97x), client instructions 0.069 to 0.063 G. The `busy30`
+  frame-build p99 was not measured: the isolated daemon writes no log file under `ZZ_LOG_DIR`,
+  so the snapshot trace lines were not reachable; its profile share above is the evidence.
+- Handed on: publish both `zz-2026-10-02` branches (the workspace already names the wrapper
+  commit), then set `GHOSTTY_COMMIT` to `189df4a1`; until then build with `GHOSTTY_SOURCE_DIR` at
+  the native commit and with the wrapper commit in the local Cargo git cache. Copy-mode history
+  capture (`ModeRevision::capture_flat`) still reads per cell and can use the same copy, which
+  already carries semantic content. `knowledge/concepts/terminal-frame.md` and
+  `knowledge/terminal/libghostty-vt.md` still describe the per-cell `CellIterator` walk (outside
+  this lane's write zone). Linux numbers come from the orchestrator's run.
 
 ## W4-BINARY: daemon-only executable (closed 2026-10-02, not merged)
 

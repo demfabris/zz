@@ -25,7 +25,7 @@ use libghostty_vt::{
     focus, key,
     kitty::graphics::{self, DecodedImage, ImageFormat, PlacementIterator},
     mouse::{self, EncoderSize},
-    render::{CellIterator, CursorVisualStyle, Dirty, RowIterator},
+    render::{CellIterator, CellsCopy, Colors, CursorVisualStyle, Dirty, RowIterator},
     screen::{
         CellContentTag, CellSemanticContent, CellWide, RowSemanticPrompt, Screen, TrackedGridRef,
     },
@@ -4261,7 +4261,8 @@ struct ViewportDictionary {
     shared_presentation: Arc<TerminalPresentation>,
     shared_overlays: Arc<[OverlaySpan]>,
     overlay_pool: SmallVec<[Arc<[OverlaySpan]>; RETAINED_OVERLAY_PLANES]>,
-    grapheme_scratch: String,
+    row_copy: CellsCopy,
+    row_styles: Vec<Option<u16>>,
     overlay_scratch: Vec<OverlaySpan>,
     shared_dirty: u8,
     style_compaction_limit: usize,
@@ -4378,7 +4379,8 @@ impl ViewportDictionary {
     fn release_pools(&mut self) {
         self.cell_pool.clear();
         self.overlay_pool.clear();
-        self.grapheme_scratch = String::new();
+        self.row_copy = CellsCopy::new();
+        self.row_styles = Vec::new();
         self.overlay_scratch = Vec::new();
     }
 
@@ -14568,6 +14570,10 @@ fn reported_working_directory(value: &str) -> Option<String> {
     Some(value.to_owned())
 }
 
+#[cfg(test)]
+#[path = "session/row_copy_tests.rs"]
+mod row_copy_tests;
+
 fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
     terminal: &Terminal<'alloc, 'callbacks>,
     render_state: &mut RenderState<'alloc>,
@@ -14649,10 +14655,8 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
     }
     let dictionary_reset = dictionary.generation != previous_dictionary_generation;
     let dimensions_changed = dictionary.shared_cells.len() != cell_count;
-    let mut grapheme_scratch = std::mem::take(&mut dictionary.grapheme_scratch);
-    if grapheme_scratch.capacity() < 8 {
-        grapheme_scratch.reserve(8 - grapheme_scratch.capacity());
-    }
+    let mut row_copy = std::mem::take(&mut dictionary.row_copy);
+    let mut row_styles = std::mem::take(&mut dictionary.row_styles);
     let mut overlays = std::mem::take(&mut dictionary.overlay_scratch);
     let overlay_only = matches!(change, SnapshotChange::Overlay);
     let cell_plane_dirty =
@@ -14693,70 +14697,56 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
                     .and_then(|cells| cells.get_mut(row_start..row_end))
                     .ok_or(WorkerError::ViewportMetadataTooLarge)?;
                 output_row.fill(PackedCell::EMPTY);
-                let mut cell_iteration = cells.update(row)?;
-                let mut column = 0_usize;
-                while let Some(cell) = cell_iteration.next() {
-                    if column >= usize::from(columns) {
-                        break;
-                    }
-                    let raw_style = cell.style()?;
-                    let mut cell_foreground = color(cell.fg_color()?.unwrap_or(colors.foreground));
-                    let mut cell_background = color(cell.bg_color()?.unwrap_or(colors.background));
-                    if raw_style.inverse {
-                        std::mem::swap(&mut cell_foreground, &mut cell_background);
-                    }
-
-                    grapheme_scratch.clear();
-                    cell.graphemes_utf8(&mut grapheme_scratch)?;
-                    let raw_cell = cell.raw_cell()?;
-                    let classes = if raw_style.inverse {
-                        (ColourClass::Resolved, ColourClass::Resolved)
+                cells.update(row)?.copy_into(0, columns, &mut row_copy)?;
+                row_styles.clear();
+                row_styles.resize(row_copy.style_count(), None);
+                let mut previous = None;
+                for (slot, cell) in output_row.iter_mut().zip(row_copy.cells().iter().copied()) {
+                    let background = if let Some(index) = cell.bg_color_palette() {
+                        CellBackground::Palette(index.0)
+                    } else if let Some(value) = cell.bg_color_rgb() {
+                        CellBackground::Rgb(value)
                     } else {
-                        (
-                            classes.ground(raw_style.fg_color, 0),
-                            match raw_cell.content_tag()? {
-                                CellContentTag::BgColorPalette => {
-                                    classes.entry(raw_cell.bg_color_palette()?.0)
-                                }
-                                CellContentTag::BgColorRgb => ColourClass::Rgb,
-                                CellContentTag::Codepoint | CellContentTag::CodepointGrapheme => {
-                                    classes.ground(raw_style.bg_color, 1)
-                                }
-                            },
-                        )
+                        CellBackground::Style
                     };
-                    let width = match raw_cell.wide()? {
+                    let hyperlink = cell.has_hyperlink();
+                    let style_index = cell.style_index();
+                    let plain = background == CellBackground::Style && !hyperlink;
+                    let cached = if plain {
+                        row_styles.get(style_index).copied().flatten()
+                    } else {
+                        previous
+                            .filter(|(key, _)| *key == (style_index, background, hyperlink))
+                            .map(|(_, id)| id)
+                    };
+                    let style_id = if let Some(id) = cached {
+                        id
+                    } else {
+                        let id = dictionary.intern_style(copied_cell_style(
+                            &row_copy.style(style_index)?,
+                            background,
+                            hyperlink,
+                            &colors,
+                            &classes,
+                        ));
+                        if plain {
+                            row_styles[style_index] = Some(id);
+                        } else {
+                            previous = Some(((style_index, background, hyperlink), id));
+                        }
+                        id
+                    };
+                    let glyph = match row_copy.grapheme(cell)? {
+                        Some(text) => dictionary.encode_glyph(text),
+                        None => cell.codepoint().map_or(0, u32::from),
+                    };
+                    let width = match cell.wide()? {
                         CellWide::Narrow => CellWidth::Narrow,
                         CellWide::Wide => CellWidth::Wide,
                         CellWide::SpacerTail => CellWidth::SpacerTail,
                         CellWide::SpacerHead => CellWidth::SpacerHead,
                     };
-                    let underline_color =
-                        resolve_style_color(raw_style.underline_color, &colors.palette);
-                    let foreground_explicit_rgb = matches!(
-                        if raw_style.inverse {
-                            raw_style.bg_color
-                        } else {
-                            raw_style.fg_color
-                        },
-                        StyleColor::Rgb(_)
-                    );
-                    let style = PackedStyle::new(
-                        cell_foreground,
-                        cell_background,
-                        underline_color,
-                        style_attributes(
-                            &raw_style,
-                            foreground_explicit_rgb,
-                            raw_cell.has_hyperlink()?,
-                        ),
-                        underline_style(raw_style.underline),
-                    )
-                    .with_classes(classes.0, classes.1);
-                    let style_id = dictionary.intern_style(style);
-                    let glyph = dictionary.encode_glyph(&grapheme_scratch);
-                    output_row[column] = PackedCell::new(glyph, style_id, width);
-                    column += 1;
+                    *slot = PackedCell::new(glyph, style_id, width);
                 }
                 row.set_dirty(false)?;
             }
@@ -14764,7 +14754,8 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
         }
         Ok(())
     })();
-    dictionary.grapheme_scratch = grapheme_scratch;
+    dictionary.row_copy = row_copy;
+    dictionary.row_styles = row_styles;
     if let Err(error) = extraction_result {
         if let Some(cells) = next_cells {
             dictionary.retain_cell_plane(cells);
@@ -15082,6 +15073,60 @@ fn style_attributes(
     attributes |= u16::from(foreground_explicit_rgb) * ATTR_EXPLICIT_RGB;
     attributes |= u16::from(hyperlink) * ATTR_HYPERLINK;
     attributes
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CellBackground {
+    Style,
+    Palette(u8),
+    Rgb(RgbColor),
+}
+
+fn copied_cell_style(
+    style: &libghostty_vt::style::Style,
+    background: CellBackground,
+    hyperlink: bool,
+    colors: &Colors,
+    classes: &Classifier<'_>,
+) -> PackedStyle {
+    let palette = &colors.palette;
+    let mut cell_foreground =
+        resolve_style_color(style.fg_color, palette).unwrap_or(color(colors.foreground));
+    let mut cell_background = match background {
+        CellBackground::Style => resolve_style_color(style.bg_color, palette),
+        CellBackground::Palette(index) => Some(color(palette[usize::from(index)])),
+        CellBackground::Rgb(value) => Some(color(value)),
+    }
+    .unwrap_or(color(colors.background));
+    let (foreground_class, background_class) = if style.inverse {
+        std::mem::swap(&mut cell_foreground, &mut cell_background);
+        (ColourClass::Resolved, ColourClass::Resolved)
+    } else {
+        (
+            classes.ground(style.fg_color, 0),
+            match background {
+                CellBackground::Style => classes.ground(style.bg_color, 1),
+                CellBackground::Palette(index) => classes.entry(index),
+                CellBackground::Rgb(_) => ColourClass::Rgb,
+            },
+        )
+    };
+    let foreground_explicit_rgb = matches!(
+        if style.inverse {
+            style.bg_color
+        } else {
+            style.fg_color
+        },
+        StyleColor::Rgb(_)
+    );
+    PackedStyle::new(
+        cell_foreground,
+        cell_background,
+        resolve_style_color(style.underline_color, palette),
+        style_attributes(style, foreground_explicit_rgb, hyperlink),
+        underline_style(style.underline),
+    )
+    .with_classes(foreground_class, background_class)
 }
 
 const fn underline_style(underline: Underline) -> UnderlineStyle {
@@ -17975,8 +18020,8 @@ mod tests {
             SessionStatus::Running,
         )
         .expect("first snapshot");
-        let grapheme_allocation = dictionary.grapheme_scratch.as_ptr();
-        let grapheme_capacity = dictionary.grapheme_scratch.capacity();
+        let style_allocation = dictionary.row_styles.as_ptr();
+        let style_capacity = dictionary.row_styles.capacity();
         let overlay_only = snapshot(
             &terminal,
             &mut render_state,
@@ -17997,8 +18042,8 @@ mod tests {
         assert!(Arc::ptr_eq(&first.cells, &overlay_only.cells));
         assert!(Arc::ptr_eq(&first.overlays, &overlay_only.overlays));
         assert!(Arc::ptr_eq(&first.dictionary, &overlay_only.dictionary));
-        assert_eq!(dictionary.grapheme_scratch.as_ptr(), grapheme_allocation);
-        assert_eq!(dictionary.grapheme_scratch.capacity(), grapheme_capacity);
+        assert_eq!(dictionary.row_styles.as_ptr(), style_allocation);
+        assert_eq!(dictionary.row_styles.capacity(), style_capacity);
 
         terminal.vt_write(b"two");
         let changed = snapshot(
@@ -18023,8 +18068,8 @@ mod tests {
         ));
         assert!(!Arc::ptr_eq(&overlay_only.cells, &changed.cells));
         assert!(Arc::ptr_eq(&overlay_only.dictionary, &changed.dictionary));
-        assert_eq!(dictionary.grapheme_scratch.as_ptr(), grapheme_allocation);
-        assert_eq!(dictionary.grapheme_scratch.capacity(), grapheme_capacity);
+        assert_eq!(dictionary.row_styles.as_ptr(), style_allocation);
+        assert_eq!(dictionary.row_styles.capacity(), style_capacity);
 
         terminal.vt_write(b"\x1b]0;renamed\x07");
         let renamed = snapshot(
@@ -18045,8 +18090,8 @@ mod tests {
             &renamed.presentation.title
         ));
         assert!(!Arc::ptr_eq(&changed.presentation, &renamed.presentation));
-        assert_eq!(dictionary.grapheme_scratch.as_ptr(), grapheme_allocation);
-        assert_eq!(dictionary.grapheme_scratch.capacity(), grapheme_capacity);
+        assert_eq!(dictionary.row_styles.as_ptr(), style_allocation);
+        assert_eq!(dictionary.row_styles.capacity(), style_capacity);
     }
 
     #[test]

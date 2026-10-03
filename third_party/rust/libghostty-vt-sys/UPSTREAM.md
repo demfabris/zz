@@ -177,6 +177,37 @@ Native exports include all 205 `ghostty_*` symbols, and all 199 generated functi
 declarations resolve in a C client that links and runs. Standalone Debug fixtures bound
 rich metadata and mutation work; separate 1000-row and 10k ownership regressions remain.
 
+## Row cell copy
+
+Frame build used to read every cell through about nine C calls (`row_cells_next`, the style,
+foreground, background, UTF-8 grapheme and raw cell getters, then the raw cell's content tag,
+width and hyperlink). Native fork commit `189df4a1f6403f5bdc349fe44d1d2809741a4c1d` adds
+`ghostty_render_state_row_cells_copy`, which writes a column range of the current row into
+packed `GhosttyRenderStateCell` entries in one call. Each cell carries its content (codepoint,
+background palette index or packed RGB, by content tag), width, hyperlink and protection flags,
+semantic content, a style table index and a grapheme table index. The style table writes each
+distinct style once after the default style at index 0, deduplicated by runs and a 256-slot
+direct-mapped hash cache, so a collision only adds a duplicate entry. Multi-codepoint graphemes
+are UTF-8 spans in a byte buffer. Short buffers return `GHOSTTY_OUT_OF_SPACE` with every needed
+length, as `GhosttyBuffer` does; the call allocates nothing and starts no thread. Its tests
+compare the copy with the per-cell getters on styled, grapheme, wide, hyperlink and
+background-only rows, and check short buffers and clamped ranges; the full native suite passes
+(6510 passed, 52 skipped).
+
+Wrapper commit `d975339f7144b0c57c178c0eeb1ea411a99b554e` exposes it as
+`CellIteration::copy_into` filling a reusable `CellsCopy`, pins its own sys crate to the native
+commit, and regenerates its bindings; its suite passes (31 unit tests, 19 doctests) with a test
+against the per-cell getters. This snapshot's `src/bindings.rs` is regenerated from the same
+headers (additive only). Both commits sit on new local branches `zz-2026-10-02`, on top of
+`67351380` and `8e40135` respectively, and are not published yet: the workspace manifest already
+names the wrapper commit, and `build.rs` keeps the published native pin until the native branch
+is pushed, so build with `GHOSTTY_SOURCE_DIR` pointing at the native commit until then. To
+publish: push both branches, set `GHOSTTY_COMMIT` to `189df4a1`, and update the pins above.
+Rebase note: the native change touches only `src/terminal/c/render.zig`, `main.zig`,
+`types.zig`, `src/lib_vt.zig` and `include/ghostty/vt/render.h`, and the wrapper change only
+`render.rs` plus the regenerated sys bindings and pin, so both replay on any base that keeps the
+render state row cells API.
+
 ## Earlier grid patches
 
 On 2026-09-18 fabrico removed the terminal grid patches; the corresponding

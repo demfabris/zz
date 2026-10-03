@@ -672,7 +672,7 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   stack on top of it), and `C-b C-b` (send-prefix) now types a raw C-b into the pane under the
   chooser (tmux sends it to the tree). Minors: a chooser over copy mode swallows the first key
   after a repeat or prefix timeout, a GUI search-prompt race on PrefixArmed, stale swallowed-key
-  records, weak scenario cases. Fix agent from 17:35.
+  records, weak scenario cases. Fix agent from 18:05.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

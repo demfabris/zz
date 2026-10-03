@@ -19,7 +19,7 @@ use zz_protocol::{
     MAX_CLIENT_WORKING_DIRECTORY_BYTES, MAX_PASTE_UPLOAD_CHUNK_BYTES, PANE_FRAME_CAPABILITY,
     PROTOCOL_VERSION, PaneId, PasteUploadPurpose, PreparedCommand, PreparedCommandResult,
     ProtocolError, ProtocolMessage, RawText, ServerError, ServerHello, StdoutClaim,
-    encode_protocol_message_into, read_protocol_message_into,
+    encode_key_input_into, encode_protocol_message_into, read_protocol_message_into,
 };
 use zz_protocol::{
     ClientEnvironmentBlob, EXEC_CAPABILITY, ExecFlags, ExecOutcome, ExecRequest, ExecResume,
@@ -1706,6 +1706,14 @@ impl InteractiveClient {
     }
 
     pub fn send_input(&self, input: InputMessage) -> Result<(), DaemonError> {
+        if let InputMessage::Key {
+            pane,
+            input,
+            text_follows,
+        } = &input
+        {
+            return self.writer.lock().send_key(*pane, input, *text_follows);
+        }
         self.send(&ProtocolMessage::Input(input))
     }
 
@@ -2227,6 +2235,23 @@ impl<S: TransportStream> ProtocolSender<S> {
             stream,
             frame: Vec::new(),
         }
+    }
+
+    fn send_key(
+        &mut self,
+        pane: PaneId,
+        input: &zz_terminal::KeyInput,
+        text_follows: bool,
+    ) -> Result<(), DaemonError> {
+        encode_key_input_into(pane, input, text_follows, &mut self.frame)?;
+        self.stream.write_all(&self.frame)?;
+        self.stream.flush()?;
+        log::trace!(
+            target: "zz_daemon::diagnostics::protocol",
+            "send key bytes={} pane={pane} input={input:?} text_follows={text_follows}",
+            self.frame.len(),
+        );
+        Ok(())
     }
 
     fn send(&mut self, message: &ProtocolMessage) -> Result<(), DaemonError> {

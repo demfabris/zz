@@ -239,6 +239,38 @@ pub enum CoreEvent {
     Message(Box<ProtocolMessage>),
 }
 
+type PaneMap<V> = HashMap<PaneId, V, foldhash::fast::FixedState>;
+
+#[derive(Debug)]
+struct PrefixKeys([Option<String>; 2]);
+
+impl PrefixKeys {
+    fn from_options(options: &MuxOptions) -> Self {
+        Self(
+            [
+                zz_protocol::MuxOptionKey::Prefix,
+                zz_protocol::MuxOptionKey::Prefix2,
+            ]
+            .map(|key| {
+                options
+                    .get(key)
+                    .filter(|option| !option.value.eq_ignore_ascii_case("none"))
+                    .map(|option| zz_protocol::canonical_key(&option.value))
+            }),
+        )
+    }
+
+    fn matches(&self, key: &str) -> bool {
+        self.0.iter().flatten().any(|prefix| prefix == key)
+    }
+}
+
+impl Default for PrefixKeys {
+    fn default() -> Self {
+        Self::from_options(&MuxOptions::default())
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CoreDetachReason {
     Requested,
@@ -258,6 +290,7 @@ pub struct ClientCore {
     appearance: Option<Box<TerminalAppearance>>,
     appearance_provenance: AppearanceProvenance,
     mux_options: MuxOptions,
+    prefix_keys: PrefixKeys,
     key_tables: Vec<KeyTableSnapshot>,
     key_tables_hash: u64,
     mouse_bindings: MouseBindings,
@@ -273,7 +306,8 @@ pub struct ClientCore {
     attached_read_only: bool,
     attached_client_flags: String,
     last_detach_reason: Option<CoreDetachReason>,
-    viewports: HashMap<PaneId, TerminalViewport>,
+    viewports: PaneMap<TerminalViewport>,
+    spare_cells: PaneMap<SpareCells>,
     agent_states: HashMap<PaneId, AgentPaneWire>,
     full_pending: HashSet<PaneId>,
     prefix_armed: bool,
@@ -309,6 +343,7 @@ impl ClientCore {
                 self.reset_session();
                 self.appearance = None;
                 self.mux_options = MuxOptions::default();
+                self.refresh_prefix_keys();
                 self.key_tables.clear();
                 self.key_tables_hash = 0;
                 self.mouse_bindings = MouseBindings::default();
@@ -341,6 +376,7 @@ impl ClientCore {
                 self.client_view = ClientView::default();
                 self.tree_sync_pending = false;
                 self.viewports.clear();
+                self.spare_cells.clear();
                 self.full_pending.clear();
                 let prefix_changed = self.prefix_armed;
                 let key_table_changed = self.key_table.is_some();
@@ -577,18 +613,12 @@ impl ClientCore {
         if self.prefix_armed || self.key_table.is_some() {
             return true;
         }
-        let key = zz_protocol::input_key_name(input);
-        [
-            zz_protocol::MuxOptionKey::Prefix,
-            zz_protocol::MuxOptionKey::Prefix2,
-        ]
-        .into_iter()
-        .any(|option| {
-            self.mux_options.get(option).is_some_and(|option| {
-                !option.value.eq_ignore_ascii_case("none")
-                    && zz_protocol::canonical_key(&option.value) == key.as_str()
-            })
-        })
+        self.prefix_keys
+            .matches(zz_protocol::input_key_name(input).as_str())
+    }
+
+    fn refresh_prefix_keys(&mut self) {
+        self.prefix_keys = PrefixKeys::from_options(&self.mux_options);
     }
 
     #[must_use]
@@ -676,6 +706,7 @@ impl ClientCore {
         self.appearance = Some(Box::new(appearance));
         self.appearance_provenance = appearance_provenance;
         self.mux_options = mux_options;
+        self.refresh_prefix_keys();
         self.key_tables = key_tables;
         self.refresh_key_tables_metadata();
         self.status = status;
@@ -719,6 +750,7 @@ impl ClientCore {
         self.client_view = ClientView::default();
         self.tree_sync_pending = false;
         self.viewports.clear();
+        self.spare_cells.clear();
         self.agent_states.clear();
         self.full_pending.clear();
     }
@@ -759,6 +791,7 @@ impl ClientCore {
                 if changed_attachment {
                     let reset_events = self.reset_session_events();
                     self.viewports.clear();
+                    self.spare_cells.clear();
                     self.full_pending.clear();
                     if let Some(session) = self.attached_session {
                         self.events.push_back(CoreEvent::Attached { session });
@@ -777,10 +810,12 @@ impl ClientCore {
             }
             EventPayload::MuxOptionsChanged { options } => {
                 self.mux_options = options;
+                self.refresh_prefix_keys();
                 self.events.push_back(CoreEvent::MuxOptionsChanged);
             }
             EventPayload::MuxOptionsPatched { options } => {
                 self.mux_options.merge(options);
+                self.refresh_prefix_keys();
                 self.events.push_back(CoreEvent::MuxOptionsChanged);
             }
             EventPayload::StatusChanged { status } => {
@@ -819,6 +854,7 @@ impl ClientCore {
             }
             EventPayload::TerminalViewport { pane, viewport } => {
                 self.full_pending.remove(&pane);
+                self.spare_cells.remove(&pane);
                 self.viewports.insert(pane, viewport);
                 self.events.push_back(CoreEvent::ViewportChanged {
                     pane,
@@ -868,6 +904,7 @@ impl ClientCore {
                     && state.as_ref().is_none_or(|next| next.pane != previous.pane)
                 {
                     self.viewports.remove(&previous.pane);
+                    self.spare_cells.remove(&previous.pane);
                     self.full_pending.remove(&previous.pane);
                 }
                 self.popup = state;
@@ -898,6 +935,7 @@ impl ClientCore {
             }
             EventPayload::PaneRemoved(pane) => {
                 self.viewports.remove(&pane);
+                self.spare_cells.remove(&pane);
                 self.agent_states.remove(&pane);
                 self.full_pending.remove(&pane);
                 if self
@@ -1173,7 +1211,21 @@ impl ClientCore {
             return;
         };
         let damage = patch_damage(viewport, &patch);
+        let retired = adopt_spare_cells(viewport, self.spare_cells.remove(&pane));
+        let stale = (patch.scroll == 0).then(|| patch.changed_rows.row_indices().collect());
         if viewport.apply_patch(patch).is_ok() {
+            if let (Some(cells), Some(stale)) = (retired, stale)
+                && !Arc::ptr_eq(&cells, &viewport.cells)
+            {
+                self.spare_cells.insert(
+                    pane,
+                    SpareCells {
+                        cells,
+                        stale,
+                        generation: (viewport.generation, viewport.view_generation),
+                    },
+                );
+            }
             self.events
                 .push_back(CoreEvent::ViewportChanged { pane, damage });
         } else {
@@ -1241,6 +1293,8 @@ impl ClientCore {
         let popup = self.popup.as_ref().map(|popup| popup.pane);
         self.viewports
             .retain(|pane, _| live.contains(pane) || popup == Some(*pane));
+        self.spare_cells
+            .retain(|pane, _| live.contains(pane) || popup == Some(*pane));
         self.agent_states.retain(|pane, _| live.contains(pane));
         self.full_pending
             .retain(|pane| live.contains(pane) || popup == Some(*pane));
@@ -1268,6 +1322,40 @@ impl ClientCore {
 /// the two sides disagree; parking on the last row beats pointing past the end.
 fn clamp_selected(selected: u32, items: usize) -> u32 {
     selected.min(u32::try_from(items.saturating_sub(1)).unwrap_or(u32::MAX))
+}
+
+#[derive(Debug)]
+struct SpareCells {
+    cells: Arc<[PackedCell]>,
+    stale: Vec<u16>,
+    generation: (u64, u64),
+}
+
+fn adopt_spare_cells(
+    viewport: &mut TerminalViewport,
+    spare: Option<SpareCells>,
+) -> Option<Arc<[PackedCell]>> {
+    if Arc::get_mut(&mut viewport.cells).is_some() {
+        return None;
+    }
+    let retired = Arc::clone(&viewport.cells);
+    if let Some(mut spare) = spare
+        && spare.generation == (viewport.generation, viewport.view_generation)
+        && spare.cells.len() == retired.len()
+        && let Some(cells) = Arc::get_mut(&mut spare.cells)
+    {
+        let columns = usize::from(viewport.columns);
+        for row in spare.stale.iter().map(|row| usize::from(*row) * columns) {
+            if let (Some(target), Some(source)) = (
+                cells.get_mut(row..row + columns),
+                retired.get(row..row + columns),
+            ) {
+                target.copy_from_slice(source);
+            }
+        }
+        viewport.cells = spare.cells;
+    }
+    Some(retired)
 }
 
 /// Which rows a patch will touch, computed against the pre-apply viewport.
@@ -2248,6 +2336,7 @@ mod tests {
         let set = |core: &mut ClientCore, key, value: &str| {
             core.mux_options
                 .set(key, value, zz_protocol::MuxOptionSource::RuntimeCommand);
+            core.refresh_prefix_keys();
         };
         set(&mut core, zz_protocol::MuxOptionKey::Prefix, "Ctrl-a");
         set(&mut core, zz_protocol::MuxOptionKey::Prefix2, "Alt-Space");

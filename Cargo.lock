@@ -11848,6 +11848,7 @@ version = "0.14.0"
 dependencies = [
  "agent-client-protocol-schema",
  "base64 0.23.1",
+ "foldhash",
  "log",
  "neo_frizbee",
  "serde",
@@ -12037,6 +12038,7 @@ name = "zz-tui"
 version = "0.14.0"
 dependencies = [
  "base64 0.23.1",
+ "foldhash",
  "log",
  "miniz_oxide 0.9.1",
  "rustix",

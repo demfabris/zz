@@ -192,7 +192,7 @@ fn parse_frame_transport_override(value: &str) -> Option<FrameTransport> {
 
 #[derive(Default)]
 struct FrameState {
-    pending: HashMap<PaneId, PendingFrame>,
+    pending: HashMap<PaneId, PendingFrame, foldhash::fast::FixedState>,
     wake_pending: bool,
 }
 
@@ -235,13 +235,13 @@ impl FrameInbox {
         }
     }
 
-    fn take(&self) -> HashMap<PaneId, PendingFrame> {
+    fn take(&self) -> HashMap<PaneId, PendingFrame, foldhash::fast::FixedState> {
         let mut state = self.0.lock().expect("frame inbox poisoned");
         state.wake_pending = false;
         mem::take(&mut state.pending)
     }
 
-    fn recycle(&self, mut completed: HashMap<PaneId, PendingFrame>) {
+    fn recycle(&self, mut completed: HashMap<PaneId, PendingFrame, foldhash::fast::FixedState>) {
         debug_assert!(completed.is_empty());
         let mut state = self.0.lock().expect("frame inbox poisoned");
         if completed.capacity() > state.pending.capacity() {
@@ -618,6 +618,7 @@ pub(crate) fn run(
             None
         } else {
             event_loop.receive(
+                now,
                 click_wait(&model, message_wait(&model, browser.wait(now), now), now),
                 &incoming,
                 &events,
@@ -812,7 +813,7 @@ pub(crate) fn run(
                     continue;
                 }
                 let prefix = if let TerminalEvent::Key(event) = &event {
-                    let input = input::key_input(*event);
+                    let input = input::key_chord(*event);
                     let core = lock_core(&core);
                     PrefixView {
                         armed: core.prefix_armed(),

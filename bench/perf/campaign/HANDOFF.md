@@ -68,7 +68,7 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
 
 ## Wave 4 merge log (from 2026-10-02)
 
-- Start, 2026-10-02 20:45. `perf/wave4` from main `06ea9cf1` in `~/dev/zz-perf-int` on both hosts
+- Start, 2026-10-02 20:15. `perf/wave4` from main `06ea9cf1` in `~/dev/zz-perf-int` on both hosts
   (alienware gets it through `perf/wave4-mac`, then `--ff-only`: pushing a branch that a worktree
   has checked out is refused). `lane-briefs.py` points at wave 4 (`--stage final`, base
   `wave3-<host>-e9bc174c.json`, wave-3 reds listed, plain rollback switches instead of
@@ -113,12 +113,12 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   kinstr and 70 us per key; DELIVER alone gives 60-100 us of the 196 us the Mac echo p50 needs).
   Order: DL1, DL2 and DL4 start after KNOBS merges (it deletes knobs inside their functions); DL3
   and DL3b rebase on W4-ROWS; DL6 merges after SPAWN.
-- Launched at 21:15: DL6 (`~/dev/zz-gather`, Mac edits, detached alienware worktree for builds),
+- Launched at 20:50: DL6 (`~/dev/zz-gather`, Mac edits, detached alienware worktree for builds),
   CONTROL (`~/dev/zz-control`, Mac; decision: relay variant first, the SCM_RIGHTS stdio variant
   allowed if the relay misses, behind `ZZ_CONTROL_RELAY=1`, since DL5 has not started and will
   rebase on it) and TUI-ECHO (`~/dev/zz-tuiecho`, Mac). Seven lanes in flight: five compiling on
   the Mac (load about 28 on 16 cores, 64% memory free), two building on alienware.
-- KNOBS merged 2026-10-02 22:40 as `bce8d6a5` (lane 82 min, `539b41f9`, plus my `339d3c4a`):
+- KNOBS merged 2026-10-02 21:45 as `bce8d6a5` (lane 82 min, `539b41f9`, plus my `339d3c4a`):
   every `ZZ_PERF_*` knob gone, 49 files, +522/-1739. Kept on purpose: the daemon's legacy
   command path (gpui-shared `connection.rs` and `InteractiveClient` still send ClientHello,
   PrepareCommandList and CommandRequest, and the CLI falls back to it when a daemon refuses
@@ -133,7 +133,7 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   base. The lane's quick gate ran at load 25-30: `chatty.instr_per_s.hidden` 1.075x raw, 1.013x
   normalized by tmux over nine pairs; every cli, control and attach instruction row <= 1.017 at
   the minimum of three. Merge checks on both hosts follow (Linux A/B through quiet-gate).
-- DL1 launched 22:45 on `perf/deliver` from `bce8d6a5` (`~/dev/zz-deliver` on the Mac, detached
+- DL1 launched 21:50 on `perf/deliver` from `bce8d6a5` (`~/dev/zz-deliver` on the Mac, detached
   worktree of the same name on alienware).
 - W4-BINARY closed, not merged (lane 93 min, `perf/binary` `b08a3565`, branch and worktree
   removed; the commit stays in the Mac reflog). The split works but moves `mem.rss.p1` only 12.20

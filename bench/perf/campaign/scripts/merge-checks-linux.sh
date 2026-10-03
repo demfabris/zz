@@ -2,7 +2,7 @@
 set -u
 STAGE=${STAGE:-final}
 ulimit -n "$(ulimit -Hn)"
-cd ~/dev/zz-perf-int
+cd ${WT:-~/dev/zz-perf-int}
 unset GHOSTTY_SOURCE_DIR
 O=~/.cache/zz-perf/merge-$1; mkdir -p $O; shift
 PRE=$1; shift; GROUPS_AB=$1; shift

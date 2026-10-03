@@ -515,6 +515,17 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
      burst series (`/tmp/zzpc/ctrlcpu/linux-series.sh`, `med.py`).
   4. ECHOMAP's Linux stages (gather hop).
   Then push main.
+- Linux clippy without ssh: `bench/perf/campaign/scripts/linux-clippy-from-mac.sh <worktree>
+  <crates>` runs a Linux-target `cargo clippy -D warnings` from the Mac through zig cc (target
+  `x86_64-unknown-linux-gnu`, glibc 2.35, libghostty cross-built). On `3924f8fa`, zz-daemon,
+  zz-terminal, zz-mux, zz-protocol, zz-client, zz-tui and zz-cli: exit 0. It type-checks the
+  Linux cfg paths; it does not run anything, so Linux tests and timings stay owed.
+- BYTES2 and ATTACH launched 13:05 as `w4-side-lanes` run `wf_d7e4fa99-820` (briefs `bytes2`,
+  `attach`; Mac-only, Linux clippy through the script above). BYTES2 merges perf/wave4 into
+  `perf/bytes`, re-measures on top of DL5, and cuts the remaining per-byte cost (bulk `%output`
+  escaping, the per-drain allocation, `AcceptWake::wake` holding its mutex across the mio wake).
+  ATTACH counts daemon syscalls and context switches per attach with `PROC_PIDTASKINFO` against
+  tmux on the Mac and cuts the extra ones (the Linux `attach.cpu.*` excess is kernel time).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

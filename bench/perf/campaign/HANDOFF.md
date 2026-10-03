@@ -313,6 +313,18 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   huge pages and every pane THP-off in 8/8. Still red against tmux on Linux: the three
   `spawn.cpu.*` rows (SETTLE takes `split_empty_P`); on the Mac `split_empty_P`. Flaky on Linux on
   base and lane alike: `an_attach_repaints_a_dead_pane_kept_by_remain_on_exit` (5 of 10 alone).
+- DL6b (lane 76 min, `4ac0a4c5` on `perf/gather2`, done=false, not merged): busy panes read on into
+  their next buffer and refills are bridged with a shared zero-timeout poll; 1 busy pane +3%, but 4
+  busy ascii panes on one shard still 169 MB/s against 221 on the pre-DL6 per-pane readers (the
+  DL6 probe's 120 -> 105 was a loaded run). Cause, from `/proc/<tid>/io` and `wchan`: one gather
+  thread now does every pane's n_tty reads (435k reads/s at 414 B) and spends 13% in `flush_work`
+  waiting for the kernel to refill an empty 4 KiB tty buffer, even on a nonblocking fd, starving
+  the shard (68% vs 95% before). DL6c (01:00, same branch): skip panes with nothing queued
+  (`TIOCINQ`), or a second gather thread only while two or more panes of a shard are busy; target
+  0.9x pre-DL6 at 4 busy panes. Its footprint rows "failed" only because binaries sat on tmpfs
+  `/tmp` (the wave-3 trap); briefs now say to keep measured binaries on disk.
+- Pushed to main again at 00:45: `2918280f` (SPAWN), after Linux clippy, zz-terminal and the new
+  daemon test modules passed on that head.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

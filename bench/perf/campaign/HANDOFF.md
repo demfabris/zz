@@ -623,6 +623,20 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   Linux-target clippy (zz-terminal, zz-daemon, zz-protocol, zz-client), web-build pass; tests of
   those crates 2458 passed, 19 load failures, all 19 pass alone; attached-client 0 rejected keys,
   only the known tmux-side flake.
+- ATTACH (`perf/attach`: `bebe7ffc` + fix `2ac0d8dd`, workflow `wf_d7e4fa99-820` done 15:55):
+  the loop makes one waker call per turn for its own wakes (`wake_loop`, `LoopThread` in
+  transport.rs); `zz_terminal::hold_actor_wakes()` in `attach_collect_event_hooks` and
+  `detach_client_state` defers shard wakes so a shard wakes once per pane for its resize, view and
+  stream commands; `drain_wake_pipe` stops at the first short read (ECHOIN's EM3 makes the same
+  change). Mac, medians of 10 interleaved attach+detach: daemon unix syscalls p1 75 -> 58, p4 163
+  -> 111 (tmux 212 and 220), context switches p4 29 -> 23.5; quick gate `attach.cpu` p1 -39%, p4
+  -10%, `attach.instr` -2%/-5%, wire bytes unchanged. Probe `bench/perf/campaign/w4-attach-
+  syscalls.py` + interposer `w4-attach-syscount.c`. The review found a blocker: inside a hold a
+  blocking send into a pane's one-slot control channel waited for a shard that never got its wake,
+  so detach or switch-client from copy mode on an idle pane hung the daemon (reproduced); fixed by
+  releasing held wakes before any blocking send and before a request's wait, with three tests that
+  fail on the lane head. Because a hold can hang the daemon, a second review focused only on hangs
+  runs before the merge (15:57).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

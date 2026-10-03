@@ -2335,7 +2335,7 @@ fn forget_delivered_terminals_state(state: &mut OutboundState) {
 }
 
 struct PendingTerminal {
-    encoded: Vec<u8>,
+    encoded: Arc<[u8]>,
     current: TerminalGeneration,
     preview: bool,
     full: bool,
@@ -2357,7 +2357,7 @@ struct PendingAgent {
     bytes: usize,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 struct TerminalTransition {
     base: Option<TerminalGeneration>,
     current: TerminalGeneration,
@@ -2366,6 +2366,8 @@ struct TerminalTransition {
 struct PaneFrameFanout {
     diff: TerminalDiffScratch,
     tail: PatchTail,
+    scratch: Vec<u8>,
+    patches: Vec<(TerminalTransition, Arc<[u8]>)>,
 }
 
 impl PaneFrameFanout {
@@ -2373,12 +2375,168 @@ impl PaneFrameFanout {
         Self {
             diff: TerminalDiffScratch::default(),
             tail: PatchTail::default(),
+            scratch: Vec::new(),
+            patches: Vec::new(),
         }
+    }
+
+    fn release(&mut self) {
+        self.diff.release_shared();
+        self.patches.clear();
+    }
+
+    fn enqueue(
+        &mut self,
+        subscriber: &OutboundMailbox,
+        frames: &TerminalFrames,
+        pane: PaneId,
+        base: Option<&TerminalViewport>,
+        current: &TerminalViewport,
+        delivery: TerminalDelivery,
+    ) -> TerminalEnqueue {
+        let Some(base) = base else {
+            return subscriber.enqueue_terminal_viewport(pane, current, delivery, frames);
+        };
+        let transition = TerminalTransition {
+            base: Some(viewport_generation(base)),
+            current: viewport_generation(current),
+        };
+        if let Some((_, frame)) = self.patches.iter().find(|(seen, _)| *seen == transition) {
+            let frame = Arc::clone(frame);
+            return subscriber.enqueue_terminal_with(pane, transition, delivery, || Ok(frame));
+        }
+        let Self {
+            diff,
+            tail,
+            scratch,
+            patches,
+        } = self;
+        let Some(patch) = TerminalViewport::diff_shared(base, current, diff) else {
+            return subscriber.enqueue_terminal_viewport(pane, current, delivery, frames);
+        };
+        subscriber.enqueue_terminal_with(pane, transition, delivery, || {
+            let frame = encode_terminal_patch_frame(pane, &patch, tail, scratch)?;
+            patches.push((transition, Arc::clone(&frame)));
+            Ok(frame)
+        })
+    }
+}
+
+const MAX_CACHED_FULL_FRAMES: usize = 16;
+const MAX_CACHED_FULL_FRAME_BYTES: usize = 1024 * 1024;
+
+struct CachedFullFrame {
+    pane: PaneId,
+    generation: TerminalGeneration,
+    cells: usize,
+    frame: Arc<[u8]>,
+}
+
+#[derive(Default)]
+struct CachedFullFrames {
+    frames: VecDeque<CachedFullFrame>,
+    bytes: usize,
+}
+
+#[derive(Default)]
+struct TerminalFrames {
+    full: Mutex<CachedFullFrames>,
+}
+
+impl TerminalFrames {
+    fn full(&self, pane: PaneId, viewport: &TerminalViewport) -> Result<Arc<[u8]>, ProtocolError> {
+        let generation = viewport_generation(viewport);
+        let cells = Arc::as_ptr(&viewport.cells).cast::<u8>().addr();
+        let cached = self.full.lock().frames.iter().find_map(|cached| {
+            (cached.pane == pane && cached.generation == generation && cached.cells == cells)
+                .then(|| Arc::clone(&cached.frame))
+        });
+        if let Some(frame) = cached {
+            return Ok(frame);
+        }
+        let frame = encode_terminal_viewport_frame(pane, viewport)?;
+        let mut full = self.full.lock();
+        let CachedFullFrames { frames, bytes } = &mut *full;
+        if let Some(index) = frames.iter().position(|cached| cached.pane == pane)
+            && let Some(replaced) = frames.remove(index)
+        {
+            *bytes -= replaced.frame.len();
+        }
+        if frame.len() > MAX_CACHED_FULL_FRAME_BYTES {
+            return Ok(frame);
+        }
+        while frames.len() >= MAX_CACHED_FULL_FRAMES
+            || *bytes + frame.len() > MAX_CACHED_FULL_FRAME_BYTES
+        {
+            let Some(evicted) = frames.pop_front() else {
+                break;
+            };
+            *bytes -= evicted.frame.len();
+        }
+        *bytes += frame.len();
+        frames.push_back(CachedFullFrame {
+            pane,
+            generation,
+            cells,
+            frame: Arc::clone(&frame),
+        });
+        Ok(frame)
     }
 }
 
 #[cfg(test)]
+thread_local! {
+    static TERMINAL_ENCODES: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
+}
+
+#[cfg(test)]
+fn terminal_encodes() -> (usize, usize) {
+    TERMINAL_ENCODES.with(std::cell::Cell::get)
+}
+
+fn terminal_stream_sequence(viewport: &TerminalViewport) -> u64 {
+    viewport.view_generation
+}
+
+fn encode_terminal_patch_frame(
+    pane: PaneId,
+    patch: &TerminalPatchRef<'_>,
+    tail: &mut PatchTail,
+    scratch: &mut Vec<u8>,
+) -> Result<Arc<[u8]>, ProtocolError> {
+    #[cfg(test)]
+    TERMINAL_ENCODES.with(|count| count.update(|(patches, fulls)| (patches + 1, fulls)));
+    encode_terminal_patch_event_into(
+        pane,
+        terminal_stream_sequence(patch.current),
+        patch,
+        tail,
+        scratch,
+    )?;
+    Ok(Arc::from(scratch.as_slice()))
+}
+
+fn encode_terminal_viewport_frame(
+    pane: PaneId,
+    viewport: &TerminalViewport,
+) -> Result<Arc<[u8]>, ProtocolError> {
+    #[cfg(test)]
+    TERMINAL_ENCODES.with(|count| count.update(|(patches, fulls)| (patches, fulls + 1)));
+    let mut frame = Vec::new();
+    encode_terminal_viewport_event_into(
+        pane,
+        terminal_stream_sequence(viewport),
+        viewport,
+        &mut frame,
+    )?;
+    Ok(frame.into())
+}
+
+#[cfg(test)]
 mod pane_frame_tests;
+
+#[cfg(test)]
+mod encode_once_tests;
 
 #[derive(Clone, Copy)]
 enum TerminalDelivery {
@@ -2410,6 +2568,7 @@ fn viewport_generation(viewport: &TerminalViewport) -> TerminalGeneration {
     }
 }
 
+#[cfg(test)]
 fn patch_transition(patch: &zz_terminal::TerminalViewportPatch) -> TerminalTransition {
     TerminalTransition {
         base: Some(TerminalGeneration {
@@ -2429,6 +2588,7 @@ fn patch_transition(patch: &zz_terminal::TerminalViewportPatch) -> TerminalTrans
     }
 }
 
+#[cfg(test)]
 fn terminal_transition(pane: PaneId, message: &ProtocolMessage) -> Option<TerminalTransition> {
     let ProtocolMessage::Event(Event { payload, .. }) = message else {
         return None;
@@ -3001,16 +3161,18 @@ impl OutboundMailbox {
         clear_pending_agent(&mut state, pane);
     }
 
+    #[cfg(test)]
     fn enqueue_terminal(&self, pane: PaneId, message: &ProtocolMessage) -> TerminalEnqueue {
         let Some(transition) = terminal_transition(pane, message) else {
             log::error!("refusing a non-terminal update in the terminal mailbox for {pane}");
             return TerminalEnqueue::Closed;
         };
-        self.enqueue_terminal_with(pane, transition, TerminalDelivery::Foreground, |frame| {
-            encode_protocol_message_into(message, frame)
+        self.enqueue_terminal_with(pane, transition, TerminalDelivery::Foreground, || {
+            zz_protocol::encode_protocol_message(message).map(Arc::from)
         })
     }
 
+    #[cfg(test)]
     fn enqueue_terminal_preview(
         &self,
         pane: PaneId,
@@ -3025,32 +3187,16 @@ impl OutboundMailbox {
             pane,
             transition,
             TerminalDelivery::Preview { foreground_panes },
-            |frame| encode_protocol_message_into(message, frame),
+            || zz_protocol::encode_protocol_message(message).map(Arc::from),
         )
-    }
-
-    fn enqueue_terminal_patch(
-        &self,
-        pane: PaneId,
-        sequence: u64,
-        patch: &TerminalPatchRef<'_>,
-        delivery: TerminalDelivery,
-        tail: &mut PatchTail,
-    ) -> TerminalEnqueue {
-        let transition = TerminalTransition {
-            base: Some(viewport_generation(patch.base)),
-            current: viewport_generation(patch.current),
-        };
-        self.enqueue_terminal_with(pane, transition, delivery, |frame| {
-            encode_terminal_patch_event_into(pane, sequence, patch, tail, frame)
-        })
     }
 
     fn enqueue_terminal_viewport(
         &self,
         pane: PaneId,
-        sequence: u64,
         viewport: &TerminalViewport,
+        delivery: TerminalDelivery,
+        frames: &TerminalFrames,
     ) -> TerminalEnqueue {
         self.enqueue_terminal_with(
             pane,
@@ -3058,26 +3204,8 @@ impl OutboundMailbox {
                 base: None,
                 current: viewport_generation(viewport),
             },
-            TerminalDelivery::Foreground,
-            |frame| encode_terminal_viewport_event_into(pane, sequence, viewport, frame),
-        )
-    }
-
-    fn enqueue_terminal_viewport_preview(
-        &self,
-        pane: PaneId,
-        sequence: u64,
-        viewport: &TerminalViewport,
-        foreground_panes: usize,
-    ) -> TerminalEnqueue {
-        self.enqueue_terminal_with(
-            pane,
-            TerminalTransition {
-                base: None,
-                current: viewport_generation(viewport),
-            },
-            TerminalDelivery::Preview { foreground_panes },
-            |frame| encode_terminal_viewport_event_into(pane, sequence, viewport, frame),
+            delivery,
+            || frames.full(pane, viewport),
         )
     }
 
@@ -3086,7 +3214,7 @@ impl OutboundMailbox {
         pane: PaneId,
         transition: TerminalTransition,
         delivery: TerminalDelivery,
-        encode: impl FnOnce(&mut Vec<u8>) -> Result<(), ProtocolError>,
+        encode: impl FnOnce() -> Result<Arc<[u8]>, ProtocolError>,
     ) -> TerminalEnqueue {
         {
             let mut state = self.state.lock();
@@ -3124,7 +3252,7 @@ impl OutboundMailbox {
                 return TerminalEnqueue::Dropped;
             }
         }
-        let Ok(encoded) = self.encode_with(encode) else {
+        let Ok(encoded) = encode() else {
             log::error!("failed to encode terminal update for {pane}");
             return TerminalEnqueue::Closed;
         };
@@ -3137,11 +3265,9 @@ impl OutboundMailbox {
         }
         let preview = matches!(delivery, TerminalDelivery::Preview { .. });
         if terminal_update_redundant(&state, pane, transition, preview) {
-            recycle_outbound_frame(&mut state, encoded);
             return TerminalEnqueue::Dropped;
         }
         if state.terminals.contains_key(&pane) {
-            recycle_outbound_frame(&mut state, encoded);
             return match delivery {
                 TerminalDelivery::Foreground => TerminalEnqueue::NeedsFull,
                 TerminalDelivery::Preview { .. } => {
@@ -3153,7 +3279,6 @@ impl OutboundMailbox {
         if transition.base.is_some()
             && transition.base != state.delivered_terminals.get(&pane).copied()
         {
-            recycle_outbound_frame(&mut state, encoded);
             return TerminalEnqueue::NeedsFull;
         }
         match delivery {
@@ -3183,7 +3308,6 @@ impl OutboundMailbox {
                     {
                         mark_preview_refresh(&mut state, pane);
                     }
-                    recycle_outbound_frame(&mut state, encoded);
                     return TerminalEnqueue::Dropped;
                 }
             }
@@ -3207,21 +3331,22 @@ impl OutboundMailbox {
         TerminalEnqueue::Queued
     }
 
+    #[cfg(test)]
     fn replace_terminal(&self, pane: PaneId, message: &ProtocolMessage) -> bool {
         let Some(transition) = terminal_transition(pane, message) else {
             log::error!("refusing a non-terminal update in the terminal mailbox for {pane}");
             return false;
         };
-        self.replace_terminal_with(pane, transition, |frame| {
-            encode_protocol_message_into(message, frame)
+        self.replace_terminal_with(pane, transition, || {
+            zz_protocol::encode_protocol_message(message).map(Arc::from)
         })
     }
 
     fn replace_terminal_viewport(
         &self,
         pane: PaneId,
-        sequence: u64,
         viewport: &TerminalViewport,
+        frames: &TerminalFrames,
     ) -> bool {
         self.replace_terminal_with(
             pane,
@@ -3229,7 +3354,7 @@ impl OutboundMailbox {
                 base: None,
                 current: viewport_generation(viewport),
             },
-            |frame| encode_terminal_viewport_event_into(pane, sequence, viewport, frame),
+            || frames.full(pane, viewport),
         )
     }
 
@@ -3237,7 +3362,7 @@ impl OutboundMailbox {
         &self,
         pane: PaneId,
         transition: TerminalTransition,
-        encode: impl FnOnce(&mut Vec<u8>) -> Result<(), ProtocolError>,
+        encode: impl FnOnce() -> Result<Arc<[u8]>, ProtocolError>,
     ) -> bool {
         {
             let state = self.state.lock();
@@ -3248,7 +3373,7 @@ impl OutboundMailbox {
                 return false;
             }
         }
-        let Ok(encoded) = self.encode_with(encode) else {
+        let Ok(encoded) = encode() else {
             log::error!("failed to encode coalesced terminal update for {pane}");
             return false;
         };
@@ -3257,7 +3382,6 @@ impl OutboundMailbox {
             return false;
         }
         if terminal_update_redundant(&state, pane, transition, false) {
-            recycle_outbound_frame(&mut state, encoded);
             return false;
         }
         clear_preview_refresh(&mut state, pane);
@@ -3621,7 +3745,7 @@ impl OutboundMailbox {
                 .command_output
                 .as_ref()
                 .map(|pending| pending.encoded.capacity()),
-            state.terminals.iter().map(|(pane, pending)| (*pane, pending.encoded.len(), pending.encoded.capacity(), pending.current)).collect::<Vec<_>>(),
+            state.terminals.iter().map(|(pane, pending)| (*pane, pending.encoded.len(), pending.current)).collect::<Vec<_>>(),
             state.delivered_terminals,
             state.terminal_order,
             state.preview_refresh_order,
@@ -4197,6 +4321,7 @@ struct SharedServer {
     #[cfg(all(feature = "agent", unix))]
     peer_waits: Arc<Mutex<crate::agent::claude_peers::PeerWaits>>,
     kitty_image_frames: Mutex<BTreeMap<KittyImageKey, KittyImageFrames>>,
+    terminal_frames: TerminalFrames,
     pasted_images: Mutex<BTreeMap<PaneId, PanePastedImages>>,
     status: Mutex<StatusRenderer>,
     stopping: AtomicBool,
@@ -5153,6 +5278,7 @@ impl Shared {
             #[cfg(all(feature = "agent", unix))]
             peer_waits: Arc::new(Mutex::new(crate::agent::claude_peers::PeerWaits::default())),
             kitty_image_frames: Mutex::new(BTreeMap::new()),
+            terminal_frames: TerminalFrames::default(),
             pasted_images: Mutex::new(BTreeMap::new()),
             status: Mutex::new(status),
             stopping: AtomicBool::new(false),
@@ -18877,8 +19003,8 @@ impl Shared {
         }) {
             let _ = subscriber.replace_terminal_viewport(
                 state.pane,
-                Self::next_sequence(),
                 terminal.latest_viewport().as_ref(),
+                &self.terminal_frames,
             );
         }
         if let Err(error) = self.watch_popup(target_client, &terminal) {
@@ -26631,9 +26757,7 @@ impl Shared {
                                                 &inner, *pane, viewport,
                                             )
                                     })
-                                    .map(|(terminal, viewport)| {
-                                        (*pane, *kind, terminal, (*viewport).clone())
-                                    })
+                                    .map(|(terminal, viewport)| (*pane, *kind, terminal, viewport))
                             })
                             .collect()
                     })
@@ -26715,15 +26839,26 @@ impl Shared {
             {
                 continue;
             }
-            let message = Self::event(EventPayload::TerminalViewport { pane, viewport });
+            let frames = &self.terminal_frames;
             match kind {
                 TerminalStreamKind::Foreground => {
-                    if outbound.enqueue_terminal(pane, &message) == TerminalEnqueue::NeedsFull {
-                        let _ = outbound.replace_terminal(pane, &message);
+                    if outbound.enqueue_terminal_viewport(
+                        pane,
+                        &viewport,
+                        TerminalDelivery::Foreground,
+                        frames,
+                    ) == TerminalEnqueue::NeedsFull
+                    {
+                        let _ = outbound.replace_terminal_viewport(pane, &viewport, frames);
                     }
                 }
                 TerminalStreamKind::Preview => {
-                    let _ = outbound.enqueue_terminal_preview(pane, &message, foreground_panes);
+                    let _ = outbound.enqueue_terminal_viewport(
+                        pane,
+                        &viewport,
+                        TerminalDelivery::Preview { foreground_panes },
+                        frames,
+                    );
                 }
             }
         }
@@ -26735,8 +26870,8 @@ impl Shared {
             }
             let _ = outbound.replace_terminal_viewport(
                 state.pane,
-                Self::next_sequence(),
                 viewport.as_ref(),
+                &self.terminal_frames,
             );
         }
         #[cfg(feature = "agent")]
@@ -26795,7 +26930,7 @@ impl Shared {
                 return;
             }
             let _ =
-                outbound.replace_terminal_viewport(pane, Self::next_sequence(), viewport.as_ref());
+                outbound.replace_terminal_viewport(pane, viewport.as_ref(), &self.terminal_frames);
             return;
         }
         let viewport = {
@@ -26829,17 +26964,17 @@ impl Shared {
                     }
                     let _ = outbound.replace_terminal_viewport(
                         pane,
-                        Self::next_sequence(),
                         viewport.as_ref(),
+                        &self.terminal_frames,
                     );
                 }
                 TerminalStreamKind::Preview => {
                     outbound.suspend_terminal(pane);
-                    let _ = outbound.enqueue_terminal_viewport_preview(
+                    let _ = outbound.enqueue_terminal_viewport(
                         pane,
-                        Self::next_sequence(),
                         viewport.as_ref(),
-                        foreground_panes,
+                        TerminalDelivery::Preview { foreground_panes },
+                        &self.terminal_frames,
                     );
                 }
             }
@@ -27230,21 +27365,11 @@ impl Shared {
         if !self.enqueue_kitty_images_for_viewport(&subscriber, pane, terminal, viewport) {
             return;
         }
-        let sequence = Self::next_sequence();
-        let patch =
-            base.and_then(|base| TerminalViewport::diff_shared(base, viewport, &mut fanout.diff));
-        let result = match patch {
-            Some(patch) => subscriber.enqueue_terminal_patch(
-                pane,
-                sequence,
-                &patch,
-                TerminalDelivery::Foreground,
-                &mut fanout.tail,
-            ),
-            None => subscriber.enqueue_terminal_viewport(pane, sequence, viewport),
-        };
+        let frames = &self.terminal_frames;
+        let delivery = TerminalDelivery::Foreground;
+        let result = fanout.enqueue(&subscriber, frames, pane, base, viewport, delivery);
         if result == TerminalEnqueue::NeedsFull {
-            let _ = subscriber.replace_terminal_viewport(pane, Self::next_sequence(), viewport);
+            let _ = subscriber.replace_terminal_viewport(pane, viewport, frames);
         }
     }
 
@@ -28627,7 +28752,7 @@ impl Shared {
                 apply_view_streams(&inner, view, &previous_streamed, &next_streamed);
                 let viewport_for = |pane: &PaneId| {
                     terminal_viewport_for_pane(&inner, *pane, view)
-                        .map(|(terminal, viewport)| (*pane, terminal, (*viewport).clone()))
+                        .map(|(terminal, viewport)| (*pane, terminal, viewport))
                 };
                 let newly_streamed = next_streamed
                     .iter()
@@ -28682,9 +28807,15 @@ impl Shared {
                 {
                     continue;
                 }
-                let message = Self::event(EventPayload::TerminalViewport { pane, viewport });
-                if subscriber.enqueue_terminal(pane, &message) == TerminalEnqueue::NeedsFull {
-                    let _ = subscriber.replace_terminal(pane, &message);
+                let frames = &self.terminal_frames;
+                if subscriber.enqueue_terminal_viewport(
+                    pane,
+                    &viewport,
+                    TerminalDelivery::Foreground,
+                    frames,
+                ) == TerminalEnqueue::NeedsFull
+                {
+                    let _ = subscriber.replace_terminal_viewport(pane, &viewport, frames);
                 }
             }
             for (pane, kind, terminal, viewport) in newly_streamed {
@@ -28698,17 +28829,26 @@ impl Shared {
                 {
                     continue;
                 }
-                let message = Self::event(EventPayload::TerminalViewport { pane, viewport });
+                let frames = &self.terminal_frames;
                 match kind {
                     TerminalStreamKind::Foreground => {
-                        if subscriber.enqueue_terminal(pane, &message) == TerminalEnqueue::NeedsFull
+                        if subscriber.enqueue_terminal_viewport(
+                            pane,
+                            &viewport,
+                            TerminalDelivery::Foreground,
+                            frames,
+                        ) == TerminalEnqueue::NeedsFull
                         {
-                            let _ = subscriber.replace_terminal(pane, &message);
+                            let _ = subscriber.replace_terminal_viewport(pane, &viewport, frames);
                         }
                     }
                     TerminalStreamKind::Preview => {
-                        let _ =
-                            subscriber.enqueue_terminal_preview(pane, &message, foreground_panes);
+                        let _ = subscriber.enqueue_terminal_viewport(
+                            pane,
+                            &viewport,
+                            TerminalDelivery::Preview { foreground_panes },
+                            frames,
+                        );
                     }
                 }
             }
@@ -29885,43 +30025,20 @@ impl Shared {
             {
                 return;
             }
-            let sequence = Self::next_sequence();
             let delivery = match kind {
                 TerminalStreamKind::Foreground => TerminalDelivery::Foreground,
                 TerminalStreamKind::Preview => TerminalDelivery::Preview { foreground_panes },
             };
-            let patch = base
-                .and_then(|base| TerminalViewport::diff_shared(base, current, &mut fanout.diff));
-            let result = match (kind, patch) {
-                (_, Some(patch)) => subscriber.enqueue_terminal_patch(
-                    pane,
-                    sequence,
-                    &patch,
-                    delivery,
-                    &mut fanout.tail,
-                ),
-                (TerminalStreamKind::Foreground, None) => {
-                    subscriber.enqueue_terminal_viewport(pane, sequence, current)
-                }
-                (TerminalStreamKind::Preview, None) => subscriber
-                    .enqueue_terminal_viewport_preview(pane, sequence, current, foreground_panes),
-            };
+            let frames = &self.terminal_frames;
+            let result = fanout.enqueue(&subscriber, frames, pane, base, current, delivery);
             if result == TerminalEnqueue::NeedsFull {
                 match kind {
                     TerminalStreamKind::Foreground => {
-                        let _ = subscriber.replace_terminal_viewport(
-                            pane,
-                            Self::next_sequence(),
-                            current,
-                        );
+                        let _ = subscriber.replace_terminal_viewport(pane, current, frames);
                     }
                     TerminalStreamKind::Preview => {
-                        let _ = subscriber.enqueue_terminal_viewport_preview(
-                            pane,
-                            Self::next_sequence(),
-                            current,
-                            foreground_panes,
-                        );
+                        let _ =
+                            subscriber.enqueue_terminal_viewport(pane, current, delivery, frames);
                     }
                 }
             }
@@ -90266,10 +90383,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 TerminalDelivery::Preview {
                     foreground_panes: 1,
                 },
-                |frame| {
-                    frame.resize(MAX_PREVIEW_OUTBOUND_BYTES + 1, 0);
-                    Ok(())
-                },
+                || Ok(Arc::from(vec![0; MAX_PREVIEW_OUTBOUND_BYTES + 1])),
             ),
             TerminalEnqueue::Dropped
         );
@@ -90593,12 +90707,15 @@ bind - split-window -v -c "#{pane_current_path}"
     fn outbound_mailbox_reuses_completed_frame_buffers() {
         let mailbox = OutboundMailbox::new();
         let pane = PaneId(9);
-        let first = terminal_test_message(pane, 1, 1);
-        assert_eq!(
-            mailbox.enqueue_terminal(pane, &first),
-            TerminalEnqueue::Queued
-        );
-        let first_frame = mailbox.recv().expect("first terminal update");
+        let bell = |sequence| {
+            ProtocolMessage::Event(Event {
+                sequence,
+                payload: EventPayload::Bell { pane },
+            })
+        };
+        let first = bell(1);
+        assert!(mailbox.enqueue_reliable(&first));
+        let first_frame = mailbox.recv().expect("first reliable message");
         let allocation = first_frame.as_ptr();
         let capacity = first_frame.capacity();
         assert_eq!(decode_protocol_frame(&first_frame).expect("decode"), first);
@@ -90610,12 +90727,9 @@ bind - split-window -v -c "#{pane_current_path}"
             assert_eq!(state.recycled_capacity, capacity);
         }
 
-        let second = terminal_test_message(pane, 2, 2);
-        assert_eq!(
-            mailbox.enqueue_terminal(pane, &second),
-            TerminalEnqueue::Queued
-        );
-        let second_frame = mailbox.recv().expect("second terminal update");
+        let second = bell(2);
+        assert!(mailbox.enqueue_reliable(&second));
+        let second_frame = mailbox.recv().expect("second reliable message");
         assert_eq!(second_frame.as_ptr(), allocation);
         assert_eq!(second_frame.capacity(), capacity);
         assert_eq!(

@@ -17,7 +17,7 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
    status-job threads 3/s -> 0 and instructions -26% / -46%, kill-pane instructions -26% Mac,
    copy entry CPU -17 to -44%, control output +18 to +88%. No unexplained regression: see the
    two exit entries in the merge log for each flagged row. Pushed to main the same day.
-2. Wave 4 in merge order: W4-DELIVER, W4-ROWS, W4-BINARY, gate `--stage final`
+2. Wave 4 in merge order: W4-DELIVER, W4-ROWS, W4-BINARY (closed unmerged, see the wave-4 merge log), gate `--stage final`
    (`knowledge/designs/daemon-perf-rebuild.md`). What still loses to tmux at wave-3 exit, all
    W4-DELIVER unless noted: echo p50/p99 1.8-2.6 ms against 0.92-1.13 on Linux (Mac p50 0.59-0.90
    against 0.26-0.33), `control.latency` 1.2-1.5x, `attach.cpu`/`attach.ttfc`, `chatty.cpu_pct.visible`
@@ -135,6 +135,13 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   the minimum of three. Merge checks on both hosts follow (Linux A/B through quiet-gate).
 - DL1 launched 22:45 on `perf/deliver` from `bce8d6a5` (`~/dev/zz-deliver` on the Mac, detached
   worktree of the same name on alienware).
+- W4-BINARY closed, not merged (lane 93 min, `perf/binary` `b08a3565`, branch and worktree
+  removed; the commit stays in the Mac reflog). The split works but moves `mem.rss.p1` only 12.20
+  -> 11.72 MiB (2.87x tmux; gate 2x): the CLI-only code is 1.3 MB, the resident text is the
+  daemon's own. Decision: about 1,000 net lines in 39 files (two executables in every recipe, a
+  build-id handshake, a `/proc` fd pin for the tmux wrapper) is not worth 0.48 MiB of clean text
+  pages while the footprint rows pass; `mem.rss.*` stays informational. The design doc's W4-BINARY
+  section has the numbers and the order-file lever (8.3 MB idle, 2.10x) if RSS ever matters.
 
 ## Wave 3 merge log (from 2026-10-01)
 

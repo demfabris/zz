@@ -2,7 +2,7 @@
 type: Design Plan
 title: Daemon performance rebuild
 description: "The campaign to bring the zz daemon to tmux cost per command, per pane and per attach while keeping the 5x output throughput lead - a permanent zz-vs-tmux gate first, then waves that remove unrequested work (one-frame Exec commands, change-driven publication, lazy formats, frames only for watchers, a compact wire under one unreleased protocol version), then one mux loop and PTY shards; the lane brief source with targets, merge order, write zones, gates and rollback switches."
-status: Approved 2026-09-28; waves 0-3 on main (wave 3 closed 2026-10-02, exit gates wave3-macbook-e9bc174c.json and wave3-alienware-e9bc174c.json); release freeze until W4 exits; wave 4 (W4-DELIVER, W4-ROWS, W4-BINARY) next; state in bench/perf/campaign/HANDOFF.md
+status: Approved 2026-09-28; waves 0-3 on main (wave 3 closed 2026-10-02, exit gates wave3-macbook-e9bc174c.json and wave3-alienware-e9bc174c.json); release freeze until W4 exits; wave 4 (W4-DELIVER, W4-ROWS, KNOBS, SPAWN, CONTROL, TUI-ECHO; W4-BINARY closed unmerged) in progress; state in bench/perf/campaign/HANDOFF.md
 resource: crates/zz-daemon/src/daemon.rs
 tags:
 - performance
@@ -20,7 +20,8 @@ timestamp: 2026-10-02T23:15:00Z
 2026-10-02: waves 0 to 3 are on main. Wave 1 exited 2026-09-29 (`1e0bfc6a`), wave 2 on 2026-10-01
 (gates `wave2-<host>-3d0fc1b0.json`), wave 3 (W3-SHARDS, W3-TUI, W3-LOOP and nine fix lanes) on
 2026-10-02 (gates `wave3-macbook-e9bc174c.json`, `wave3-alienware-e9bc174c.json`). Wave 4
-(W4-DELIVER, W4-ROWS, W4-BINARY, gate `--stage final`) is next; W3-LOOP step (d), the Mutex
+(W4-DELIVER, W4-ROWS and the KNOBS, SPAWN, CONTROL and TUI-ECHO lanes, gate `--stage final`) is
+in progress, W4-BINARY closed unmerged; W3-LOOP step (d), the Mutex
 removal, is deferred until after W4-DELIVER. `bench/perf/campaign/HANDOFF.md` has the state, the
 numbers against tmux at each exit, the merge logs, the next steps in order, the macOS-only checks
 and the traps; `bench/perf/campaign/scripts/` has the lane brief generator and the merge checks.
@@ -3778,21 +3779,41 @@ indexes), carried in the Ghostty fork pinned in
 Gate: attached throughput and visible chatty CPU improve on the W4-DELIVER merge; fork patch
 listed in forks.conf with a rebase note.
 
-## W4-BINARY: daemon-only executable (effort M)
+## W4-BINARY: daemon-only executable (closed 2026-10-02, not merged)
 
-Reinstated under the no-compromise rule. The daemon runs from the multi-role `zz_cli`
-(CLI, TUI, daemon, libghostty, russh, ureq), so about 9.6 MB of RSS is file-backed pages of code
-the daemon never runs.
+The plan: run the daemon from its own `zz-daemon` executable instead of the multi-role `zz_cli`,
+on the guess that about 9.6 MB of daemon RSS was file-backed pages of CLI code it never runs.
+Gate `--stage final`: `mem.rss.p1` <= 2x tmux, cold start not slower, remote start working.
 
-Scope: a `zz-daemon` binary target holding only the daemon, mux and terminal engine. `zz_cli`
-execs it for `zz daemon` and for cold start (fall back to the in-process daemon when it is
-missing, for dev runs); the in-pane `tmux` wrapper keeps pointing at the CLI clone. Package it in
-`cargo xtask` bundles, `install.sh`, the cask and AUR/deb/pacman recipes, and the remote ssh start
-script (`endpoint.rs` daemon start). Measure `mem.rss.*` and `mem.footprint.*` and dyld image
-count before and after; strip unused features (TLS, http, russh client) from the daemon graph.
+Measured, the guess is wrong. A lane built the split (`perf/binary` `b08a3565`: a `[[bin]]` in
+`crates/zz-daemon` whose graph is 171 crates against 218 and has no rustls, ureq, http,
+`zz-tui`, `zz-config` or `zz-client`; `zz daemon` and cold start exec it with an in-process
+fallback; a source-hash build id so a stale `target/debug/zz-daemon` never runs; packaging in
+every recipe) and measured it on the M4 Max against the wave-3 binary:
 
-Gate `--stage final`: `mem.rss.p1` <= 2x tmux (informational metric promoted to gated for this
-lane); cold start not slower; remote start works against an ssh host in the fleet tests.
+| metric | `zz_cli` | `zz-daemon` | tmux |
+| --- | ---: | ---: | ---: |
+| `mem.rss.p1` MiB | 12.20 | 11.72 | 4.09 |
+| `mem.footprint.p1` MiB | 4.70 | 4.66 | 2.69 |
+| `mem.rss.p20` MiB | 19.14 | 18.66 | 4.22 |
+| executable bytes | 18,153,120 | 16,580,624 | |
+| idle resident text | 7216K of 16.7M | 6848K of 15.2M | |
+| dyld images | 81 | 81 | |
+
+The CLI-only code is 1.3 MB of `__text`. The rest of the 6.8 MB the idle daemon keeps resident
+is daemon, mux and terminal code that startup touches, spread over about 45% of the 16 KB text
+pages; `MADV_RANDOM`, `MADV_DONTNEED` and `MADV_FREE` on `__TEXT` change nothing. Cold start was
+flat within noise and the daemon retired 1.4% fewer instructions to idle.
+
+Decision: not merged. The split costs about 1,000 net lines across 39 files (two executables in
+every package recipe, a build-id handshake, a Linux `/proc/<pid>/fd` pin for the in-pane `tmux`
+wrapper) for 0.48 MiB of clean, evictable text pages, while `mem.footprint.*`, the gated memory
+rows, already pass. `mem.rss.*` stays informational. If RSS ever matters, the lever is code
+layout, not the split: an order file from an lldb trace (startup, one `new-session -d`, 5 s idle:
+1448 functions, 1.94 MB over 390 pages) relinked with `-Wl,-order_file` idled at 8.3 MB against
+12.1, and the quick mem gate read `mem.rss.p1` 8.64 MiB (2.10x tmux). It needs the list
+regenerated by every release build (symbol names carry crate hashes that move with the version,
+toolchain and lockfile) and a trace that covers the gate's mem phase.
 
 # Rollback switches
 

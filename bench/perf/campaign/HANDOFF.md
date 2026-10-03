@@ -357,6 +357,12 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   spawn, and a lent thread that cannot hand back no longer acts as a home. One busy pane read
   0.974x pre-DL6 against 0.98 in that round, with the untouched DL6c build at 0.982 in the same
   minutes: noise, accepted.
+- Linux quick A/B of `59db7c3e` (KNOBS+ROWS+TUI-ECHO+CONTROL) against the pre-KNOBS binary, three
+  pairs on the loaded host (`~/.cache/zz-perf/batch2`): `attach.instr.p1`/`.p4` -50%/-47%,
+  `chatty.instr_per_s.flip`/`.hidden` -57%/-39%, `control.latency` -59%, `control.burst_cmds_per_s`
+  +67% (86k against 51k), `control.cpu_per_cmd` -39%, `control.instr_per_cmd` +21% (the daemon now
+  writes what the client used to). Chatty flip/hidden CPU rows failed on the lane in quick mode at
+  39-57% fewer instructions: load, judged at wave exit.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

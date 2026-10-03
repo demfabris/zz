@@ -206,6 +206,19 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   full snapshot about 100 ms after spawn: about 50% of `split_empty_P` instructions (0.9 Minstr,
   214 us per split), owner DL3 (sinks) unless a smaller slice takes it first. A safety review of
   the CLONE_VM child (Opus: codex's cyber filter stops process-spawn reviews) runs before merging.
+- batch1 Mac merge checks (ROWS + TUI-ECHO on `127f09b1`, A/B against the post-KNOBS binary): fmt,
+  clippy, compat-check, web, iPad, tui-screen-diff, tui-copy-mode, tui-overlays pass; 5 workspace
+  load failures pass alone; compat 31/35 (the four `known/*`); attached-client failed on the tmux
+  side again (the load flake, load 25). Quick A/B: `attach.instr.p1`/`.p4` -50.6%/-44.6%,
+  `chatty.instr_per_s.flip`/`.hidden` -28.7%/-26.4%, `chatty.tty_kibps.hidden` -23%; echo rows
+  lower but the base runs were load spikes (p50 idle 1.27 ms), so they are not evidence.
+- KNOBS on Linux (`bce8d6a5`): 44 solo reruns pass; compat 99/101 (`show-options-hooks`,
+  `smoke/control-alias-prepare`, both red on wave 3); one solo failure to settle:
+  `mode_keys_scope_visible_command_output_separately_from_underlying_copy_mode` ("output view 1
+  did not close" at 30 s, alone, at load 6-7).
+- Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
+  notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
+  was already merged).
 
 ## Wave 3 merge log (from 2026-10-01)
 

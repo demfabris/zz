@@ -36676,7 +36676,7 @@ impl ChooseTreeSession {
             item.key = context.map_or_else(String::new, |context| {
                 let variables = chooser_row_variables(line);
                 let mut hooks = DaemonFormatHooks::command_with_variables(facts, &variables);
-                parsed_chooser_row_key(&engine.expand_pane_format(
+                parsed_chooser_row_key(&engine.expand_target_format(
                     format,
                     &context,
                     attached_session,
@@ -36712,7 +36712,7 @@ impl ChooseTreeSession {
             };
             item.text = context.map_or_else(String::new, |context| {
                 let mut hooks = DaemonFormatHooks::command(facts);
-                bounded_choose_item_text(&engine.expand_pane_format(
+                bounded_choose_item_text(&engine.expand_target_format(
                     format,
                     &context,
                     attached_session,
@@ -38859,13 +38859,6 @@ fn enter_copy_session(
     Ok(())
 }
 
-/// `cmd_send_keys_exec` answers `not in a mode` at status 1 whenever the target
-/// pane has no mode entry whose mode carries a command, which is the only
-/// guard `send-keys -X` runs before handing the arguments to that command.
-/// tmux keeps the mode entry on the pane; zz keeps copy mode on the client's
-/// terminal view, so the pane carries a mode command exactly while some client
-/// is still in copy mode on it, or while the caller is reading a command
-/// output overlay.
 enum ChooserKey {
     Pass,
     Key(zz_terminal::KeyInput),
@@ -38909,9 +38902,9 @@ fn chooser_shown(inner: &ServerState, client: ClientId) -> bool {
     else {
         return false;
     };
-    let current = client_focused_window_for_attachment(inner, client);
-    current.is_some()
-        && inner.engine.state.window_for_pane(pane) == current
+    client_focused_window_for_attachment(inner, client)
+        .and_then(|window| inner.engine.state.windows.get(&window))
+        .is_some_and(|window| window.active_pane == pane)
         && (state.chooser_under.copy || !client_in_copy_mode(inner, client))
         && state
             .command_output
@@ -38927,6 +38920,13 @@ fn chooser_takes_keys(inner: &ServerState, client: ClientId) -> bool {
             .is_some_and(|c| c.display_panes.is_none() && c.command_prompt.is_none())
 }
 
+/// `cmd_send_keys_exec` answers `not in a mode` at status 1 whenever the target
+/// pane has no mode entry whose mode carries a command, which is the only
+/// guard `send-keys -X` runs before handing the arguments to that command.
+/// tmux keeps the mode entry on the pane; zz keeps copy mode on the client's
+/// terminal view, so the pane carries a mode command exactly while some client
+/// is still in copy mode on it, or while the caller is reading a command
+/// output overlay.
 fn command_output_owns_pane(inner: &ServerState, client: ClientId, pane: PaneId) -> bool {
     inner
         .client(client)
@@ -111932,6 +111932,7 @@ bind - split-window -v -c "#{pane_current_path}"
                         .state
                         .split_pane(pane, zz_protocol::Axis::Horizontal, PaneKind::Terminal)
                         .expect("split pane");
+                    inner.engine.state.select_pane(pane).expect("select pane");
                     if initially_zoomed {
                         inner.engine.state.toggle_zoom(pane).expect("zoom pane");
                     }

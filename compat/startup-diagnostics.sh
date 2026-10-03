@@ -19,7 +19,7 @@ if [ "$#" -gt 2 ]; then
   exit 2
 fi
 
-ZZ_INPUT="${1:-$ROOT_DIR/target/debug/zz}"
+ZZ_INPUT="${1:-$ROOT_DIR/target/debug/zz_cli}"
 TMUX_INPUT="${2:-$ROOT_DIR/compat/.cache/tmux-src/tmux}"
 
 resolve_binary() {

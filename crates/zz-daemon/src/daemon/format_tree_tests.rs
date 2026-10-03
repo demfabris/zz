@@ -677,3 +677,59 @@ fn selected_status_modes_capture_their_own_detached_fact_dependencies() {
         StatusRenderer::default().render_initial(&complete)
     );
 }
+
+#[test]
+fn tree_rows_expand_each_row_with_its_own_format_type() {
+    let (shared, client, context) = fixture();
+    let (session, window) = (context.session.unwrap(), context.window.unwrap());
+    shared
+        .inner
+        .lock()
+        .engine
+        .state
+        .rename_window(window, "m00")
+        .unwrap();
+    let inner = shared.inner.lock();
+    let facts = borrowed(&inner, client, &context);
+    let item = |target| ChooseTreeItem {
+        label: String::new(),
+        detail: String::new(),
+        target,
+        depth: 0,
+        flags: 0,
+        pane_kind: None,
+        key: String::new(),
+        text: String::new(),
+    };
+    let rows = chooser_presentation::tree_rows(
+        &inner.engine,
+        &[
+            item(ChooseTreeTarget::Session(session)),
+            item(ChooseTreeTarget::Window(window)),
+        ],
+        false,
+        Some(session),
+        &facts,
+    );
+    assert_eq!(rows[0].text, "#[fg=themelightgrey]1 windows (attached)");
+    assert!(rows[1].text.starts_with("m00#[fg=themelightgrey]*"));
+    let types = "#{session_format}#{window_format}#{pane_format}";
+    let expand = |target: ExecutionContext| {
+        inner.engine.expand_target_format(
+            types,
+            &target,
+            Some(session),
+            FormatClient::NoClient,
+            &mut DaemonFormatHooks::command(&facts),
+        )
+    };
+    assert_eq!(
+        expand(ExecutionContext::new(Some(session), None, None)),
+        "100"
+    );
+    assert_eq!(
+        expand(ExecutionContext::new(Some(session), Some(window), None)),
+        "010"
+    );
+    assert_eq!(expand(context.clone()), "001");
+}

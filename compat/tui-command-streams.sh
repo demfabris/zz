@@ -89,7 +89,7 @@ for argument in "$@"; do
   esac
 done
 [ "${#POSITIONAL[@]}" -le 2 ] || { usage; exit 2; }
-ZZ_INPUT="${POSITIONAL[0]:-${ZZ_BIN:-$REPO_DIR/target/debug/zz}}"
+ZZ_INPUT="${POSITIONAL[0]:-${ZZ_BIN:-$REPO_DIR/target/debug/zz_cli}}"
 TMUX_INPUT="${POSITIONAL[1]:-${TMUX_BIN:-${ZZ_COMPAT_TMUX:-$COMPAT_DIR/.cache/tmux-src/tmux}}}"
 
 resolve_binary() {

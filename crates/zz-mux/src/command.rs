@@ -4130,6 +4130,39 @@ impl MuxEngine {
             .into()
     }
 
+    pub fn expand_target_format(
+        &self,
+        format: &str,
+        target: &ExecutionContext,
+        active_session: Option<SessionId>,
+        format_client: FormatClient,
+        hooks: &mut impl StatusHooks,
+    ) -> String {
+        let format_type = if target.pane.is_some() {
+            FormatType::Pane
+        } else if target.window.is_some() {
+            FormatType::Window
+        } else if target.session.is_some() {
+            FormatType::Session
+        } else {
+            FormatType::None
+        };
+        expand_format_with_hooks(
+            format,
+            self,
+            FormatContext {
+                session: target.session,
+                window: target.window,
+                pane: target.pane,
+                active_session,
+                format_client,
+                format_type,
+            },
+            hooks,
+        )
+        .into()
+    }
+
     /// [`Self::expand_pane_format`] for a consumer that opens what it gets: a
     /// path is bytes on Unix, and `#{...}` can hand it a value the environment
     /// store keeps as bytes.

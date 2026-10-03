@@ -1,5 +1,6 @@
 use zz_terminal::{KeyCode, KeyInput, Modifiers};
 
+use super::tests::take_reliable_messages;
 use super::*;
 
 fn key(character: char, modifiers: Modifiers) -> KeyInput {
@@ -21,6 +22,7 @@ struct Scene {
     context: ExecutionContext,
     session: SessionId,
     windows: [WindowId; 2],
+    outbound: Arc<OutboundMailbox>,
 }
 
 fn attached_scene() -> Scene {
@@ -36,11 +38,12 @@ fn attached_scene() -> Scene {
         (session, [first, second], pane)
     };
     let context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane).unwrap();
+    let outbound = OutboundMailbox::new();
     let (client, _) = shared.register_subscribed(
         ClientKind::Interactive,
         Some("chooser".to_owned()),
         None,
-        OutboundMailbox::new(),
+        Arc::clone(&outbound),
     );
     shared.attach(client, session).unwrap();
     shared
@@ -56,6 +59,7 @@ fn attached_scene() -> Scene {
         context,
         session,
         windows,
+        outbound,
     }
 }
 
@@ -120,6 +124,35 @@ impl Scene {
             .as_ref()
             .and_then(KeyEngine::active_table)
             .map(str::to_owned)
+    }
+
+    fn split(&self) -> (PaneId, PaneId) {
+        let mut inner = self.shared.inner.lock();
+        let source = inner.engine.state.windows[&self.windows[0]].active_pane;
+        let other = inner
+            .engine
+            .state
+            .split_pane(source, zz_protocol::Axis::Vertical, PaneKind::Terminal)
+            .unwrap();
+        inner.engine.state.select_pane(source).unwrap();
+        (source, other)
+    }
+
+    fn active_pane(&self) -> PaneId {
+        self.shared.inner.lock().engine.state.windows[&self.windows[0]].active_pane
+    }
+
+    fn tree_events(&self) -> Vec<Option<ChooseTreeState>> {
+        take_reliable_messages(&self.outbound)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ChooseTree { state },
+                    ..
+                }) => Some(state),
+                _ => None,
+            })
+            .collect()
     }
 
     fn tree_selected(&self) -> Option<u32> {
@@ -199,6 +232,40 @@ fn a_window_switch_leaves_the_tree_behind_until_the_client_returns() {
     scene.press(key('b', control()), false);
     scene.press(key('p', Modifiers::default()), false);
     assert_eq!(scene.current_window(), scene.windows[0]);
+    scene.press(key('j', Modifiers::default()), false);
+    assert_ne!(scene.tree_selected(), Some(selected));
+}
+
+#[test]
+fn another_pane_in_the_window_takes_keys_until_the_tree_pane_is_back() {
+    let mut scene = attached_scene();
+    let (source, other) = scene.split();
+    scene.open("choose-tree", &["-Zw"]);
+    let selected = scene.tree_selected().expect("tree chooser open");
+    scene.tree_events();
+    scene.press(key('b', control()), false);
+    scene.press(key('o', Modifiers::default()), false);
+    assert_eq!(scene.active_pane(), other);
+    assert_eq!(scene.tree_events().last(), Some(&None));
+    let _ = scene.send(key('x', Modifiers::default()), false);
+    let _ = scene.send(key('y', Modifiers::default()), false);
+    {
+        let inner = scene.shared.inner.lock();
+        assert!(inner.clients[&scene.client].command_prompt.is_none());
+        assert_eq!(inner.engine.state.sessions[&scene.session].windows.len(), 2);
+        assert_eq!(
+            inner.engine.state.windows[&scene.windows[0]]
+                .pane_order()
+                .len(),
+            2
+        );
+    }
+    assert_eq!(scene.tree_selected(), Some(selected));
+
+    scene.press(key('b', control()), false);
+    scene.press(key('o', Modifiers::default()), false);
+    assert_eq!(scene.active_pane(), source);
+    assert!(matches!(scene.tree_events().last(), Some(Some(_))));
     scene.press(key('j', Modifiers::default()), false);
     assert_ne!(scene.tree_selected(), Some(selected));
 }

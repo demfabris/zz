@@ -218,6 +218,24 @@ sleep 0.4
 check_equal tree-view-mode-q-returns-to-the-tree '0 *1 ' "$(windows)"
 detach_all
 
+case_start tree-other-pane
+main_client split-window -d -t "=$session:0"
+press 02
+press 77
+press 02
+press 6f
+press "$typed"
+sleep 0.4
+check_equal tree-other-pane-types-into-the-pane 1 "$(hi_there 0.1)"
+check_equal tree-other-pane-keeps-the-windows '*0 1 ' "$(windows)"
+press 02
+press 1b5b41
+press 6a
+press 0d
+sleep 0.4
+check_equal tree-other-pane-up-returns-to-the-tree '0 *1 ' "$(windows)"
+detach_all
+
 main_client bind-key W choose-tree -w
 case_start tree-display-panes
 main_client split-window -d -t "=$session:0"
@@ -277,8 +295,8 @@ check_equal tree-send-prefix-pages-the-tree 'Z|Z|' \
     "$(main_client capture-pane -p -t "=$session:0" | grep -F Z | tr '\n' '|')"
 detach_all
 
-if [ "$check_count" -ne 21 ]; then
-    record_failure "total-checks" 21 "$check_count"
+if [ "$check_count" -ne 24 ]; then
+    record_failure "total-checks" 24 "$check_count"
 fi
 if [ "$failed" -eq 0 ]; then
     main_client set-environment -g CHOOSER_PREFIX_KEYS "clean:$check_count"

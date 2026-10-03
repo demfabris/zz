@@ -429,7 +429,7 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   `control.latency` (0.0182 vs tmux 0.0196). Left: six echo rows at 1.64-1.80x (rule 1.5x; DL4),
   `attach.cpu.p4` 1.53x (instructions are half of tmux's; the excess is syscalls: the loop does
   23-44 writes per attach; a slice after DL4, which owns the mailbox write path),
-  `control.burst_cmds_per_s` 0.776x (lane BURST, launched 08:35 as a one-lane `w4-side-lanes` run
+  `control.burst_cmds_per_s` 0.776x (lane BURST, launched 08:27 as a one-lane `w4-side-lanes` run
   `wf_09d4e458-9a5`, `~/dev/zz-burst`), and two marginal rows (`attach.ttfc.p4` 1.11 vs 1.1,
   `cli.wall.capture_history.p20` 1.06 vs 1.05).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion

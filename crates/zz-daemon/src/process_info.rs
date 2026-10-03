@@ -108,8 +108,8 @@ mod platform {
 
     use super::{ProcessRecord, ProcessSample};
 
-    const PROC_PIDT_BSDINFOWITHUNIQID: libc::c_int = 18;
-    const NAME_CACHE_CAPACITY: usize = 64;
+    const PROC_PIDUNIQIDENTIFIERINFO: libc::c_int = 17;
+    const RECENT_NAME_CAPACITY: usize = 64;
     const ARGUMENTS_BUFFER_BYTES: usize = 16 * 1024;
 
     #[repr(C)]
@@ -122,15 +122,7 @@ mod platform {
         reserved: [u32; 5],
     }
 
-    #[repr(C)]
-    #[derive(Clone, Copy)]
-    struct BsdInfoWithUniqueId {
-        bsd: libc::proc_bsdinfo,
-        unique: UniqueIdentifierInfo,
-    }
-
     const _: () = assert!(std::mem::size_of::<UniqueIdentifierInfo>() == 56);
-    const _: () = assert!(std::mem::size_of::<BsdInfoWithUniqueId>() == 192);
 
     #[derive(Clone, Copy, PartialEq, Eq)]
     struct ImageKey {
@@ -139,31 +131,9 @@ mod platform {
         id_version: i32,
     }
 
-    #[derive(Clone, Copy, PartialEq, Eq)]
-    struct LaunchKey {
-        parent_unique_id: u64,
-        executable_uuid: [u8; 16],
-        kernel_name: [libc::c_char; 32],
-    }
-
-    struct NamedImage {
-        key: ImageKey,
-        name: String,
-        verified: bool,
-    }
-
-    struct NameCache {
-        images: VecDeque<NamedImage>,
-        launches: VecDeque<(LaunchKey, String)>,
-    }
-
     thread_local! {
-        static NAMES: RefCell<NameCache> = const {
-            RefCell::new(NameCache {
-                images: VecDeque::new(),
-                launches: VecDeque::new(),
-            })
-        };
+        static RECENT_NAMES: RefCell<VecDeque<(ImageKey, String)>> =
+            const { RefCell::new(VecDeque::new()) };
     }
 
     #[cfg(test)]
@@ -171,51 +141,32 @@ mod platform {
         static ARGUMENT_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     }
 
-    impl NameCache {
-        fn name(&mut self, key: ImageKey, launch: LaunchKey, raw: libc::pid_t) -> Option<String> {
-            match self.images.iter().position(|image| image.key == key) {
-                Some(index) if self.images[index].verified => {
-                    return Some(self.images[index].name.clone());
-                }
-                Some(index) => {
-                    self.images.remove(index);
-                }
-                None => {
-                    let exec_in_place = self.images.iter().any(|image| {
-                        image.key.pid == key.pid && image.key.unique_id == key.unique_id
-                    });
-                    if !exec_in_place
-                        && let Some((_, name)) =
-                            self.launches.iter().find(|(seen, _)| *seen == launch)
-                    {
-                        let name = name.clone();
-                        self.remember(key, name.clone(), false);
-                        return Some(name);
-                    }
-                }
-            }
-            let Some(name) = invoked_name(raw) else {
-                return image_path(raw).as_deref().and_then(basename);
-            };
-            self.remember(key, name.clone(), true);
-            self.launches.retain(|(seen, _)| *seen != launch);
-            if self.launches.len() == NAME_CACHE_CAPACITY {
-                self.launches.pop_back();
-            }
-            self.launches.push_front((launch, name.clone()));
-            Some(name)
-        }
+    fn image_key(pid: u32, raw: libc::pid_t) -> Option<ImageKey> {
+        let info: UniqueIdentifierInfo = pid_info(raw, PROC_PIDUNIQIDENTIFIERINFO)?;
+        Some(ImageKey {
+            pid,
+            unique_id: info.unique_id,
+            id_version: info.id_version,
+        })
+    }
 
-        fn remember(&mut self, key: ImageKey, name: String, verified: bool) {
-            if self.images.len() == NAME_CACHE_CAPACITY {
-                self.images.pop_back();
+    fn recent_name(key: ImageKey) -> Option<String> {
+        RECENT_NAMES.with_borrow_mut(|recent| {
+            let index = recent.iter().position(|(seen, _)| *seen == key)?;
+            let entry = recent.remove(index)?;
+            let name = entry.1.clone();
+            recent.push_front(entry);
+            Some(name)
+        })
+    }
+
+    fn remember_name(key: ImageKey, name: String) {
+        RECENT_NAMES.with_borrow_mut(|recent| {
+            if recent.len() == RECENT_NAME_CAPACITY {
+                recent.pop_back();
             }
-            self.images.push_front(NamedImage {
-                key,
-                name,
-                verified,
-            });
-        }
+            recent.push_front((key, name));
+        });
     }
 
     fn raw_pid(pid: u32) -> Option<libc::pid_t> {
@@ -388,20 +339,17 @@ mod platform {
 
     pub(super) fn command_name(pid: u32) -> Option<String> {
         let raw = raw_pid(pid)?;
-        let Some(info) = pid_info::<BsdInfoWithUniqueId>(raw, PROC_PIDT_BSDINFOWITHUNIQID) else {
-            return invoked_name(raw).or_else(|| image_path(raw).as_deref().and_then(basename));
+        let key = image_key(pid, raw);
+        if let Some(name) = key.and_then(recent_name) {
+            return Some(name);
+        }
+        let Some(name) = invoked_name(raw) else {
+            return image_path(raw).as_deref().and_then(basename);
         };
-        let key = ImageKey {
-            pid,
-            unique_id: info.unique.unique_id,
-            id_version: info.unique.id_version,
-        };
-        let launch = LaunchKey {
-            parent_unique_id: info.unique.parent_unique_id,
-            executable_uuid: info.unique.executable_uuid,
-            kernel_name: info.bsd.pbi_name,
-        };
-        NAMES.with_borrow_mut(|cache| cache.name(key, launch, raw))
+        if let Some(key) = key {
+            remember_name(key, name.clone());
+        }
+        Some(name)
     }
 
     #[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
@@ -579,81 +527,82 @@ mod platform {
             ARGUMENT_READS.with(std::cell::Cell::get)
         }
 
-        fn facts(pid: u32) -> (ImageKey, LaunchKey) {
-            let info: BsdInfoWithUniqueId =
-                pid_info(raw_pid(pid).expect("pid"), PROC_PIDT_BSDINFOWITHUNIQID).expect("info");
-            (
-                ImageKey {
-                    pid,
-                    unique_id: info.unique.unique_id,
-                    id_version: info.unique.id_version,
-                },
-                LaunchKey {
-                    parent_unique_id: info.unique.parent_unique_id,
-                    executable_uuid: info.unique.executable_uuid,
-                    kernel_name: info.bsd.pbi_name,
-                },
-            )
+        fn key(pid: u32) -> ImageKey {
+            image_key(pid, raw_pid(pid).expect("pid")).expect("image key")
         }
 
         #[test]
-        fn a_second_child_through_the_same_link_skips_the_argument_read() {
-            let directory = tempfile::tempdir().expect("fixture directory");
-            let link = directory.path().join("claude");
-            symlink("/bin/sleep", &link).expect("symlink");
-            let first = run(&link);
-            assert_eq!(command_name(first.0.id()).as_deref(), Some("claude"));
+        fn a_known_image_answers_without_reading_its_arguments_again() {
+            let child = run(Path::new("/bin/sleep"));
             let before = reads();
-            let second = run(&link);
-            assert_eq!(command_name(second.0.id()).as_deref(), Some("claude"));
-            assert_eq!(reads(), before);
-            assert_eq!(command_name(second.0.id()).as_deref(), Some("claude"));
+            assert_eq!(command_name(child.0.id()).as_deref(), Some("sleep"));
             assert_eq!(reads(), before + 1);
-            assert_eq!(command_name(second.0.id()).as_deref(), Some("claude"));
+            assert_eq!(command_name(child.0.id()).as_deref(), Some("sleep"));
             assert_eq!(reads(), before + 1);
         }
 
         #[test]
-        fn a_child_run_under_another_name_is_read_again_on_the_next_lookup() {
+        fn children_run_through_sibling_links_each_get_their_own_name() {
+            let directory = tempfile::tempdir().expect("fixture directory");
+            for name in ["vim", "vi", "view"] {
+                symlink("/bin/sleep", directory.path().join(name)).expect("symlink");
+            }
+            for name in ["vim", "vi", "vim", "view", "vi"] {
+                let child = run(&directory.path().join(name));
+                assert_eq!(command_name(child.0.id()).as_deref(), Some(name));
+            }
+        }
+
+        #[test]
+        fn a_child_run_under_another_name_reads_its_own_name_at_once() {
             let directory = tempfile::tempdir().expect("fixture directory");
             let link = directory.path().join("claude");
             symlink("/bin/sleep", &link).expect("symlink");
             let linked = run(&link);
             assert_eq!(command_name(linked.0.id()).as_deref(), Some("claude"));
             let direct = run(Path::new("/bin/sleep"));
-            command_name(direct.0.id());
             assert_eq!(command_name(direct.0.id()).as_deref(), Some("sleep"));
-            let again = run(Path::new("/bin/sleep"));
-            assert_eq!(command_name(again.0.id()).as_deref(), Some("sleep"));
-        }
-
-        #[test]
-        fn a_guess_never_outlives_one_lookup() {
-            let child = run(Path::new("/bin/sleep"));
-            let pid = child.0.id();
-            let (_, launch) = facts(pid);
-            NAMES.with_borrow_mut(|cache| cache.launches.push_front((launch, "guess".to_owned())));
-            assert_eq!(command_name(pid).as_deref(), Some("guess"));
-            assert_eq!(command_name(pid).as_deref(), Some("sleep"));
-            assert_eq!(command_name(pid).as_deref(), Some("sleep"));
+            let again = run(&link);
+            assert_eq!(command_name(again.0.id()).as_deref(), Some("claude"));
         }
 
         #[test]
         fn a_reused_pid_never_answers_the_previous_process_name() {
             let child = run(Path::new("/bin/sleep"));
             let pid = child.0.id();
-            let (key, _) = facts(pid);
-            NAMES.with_borrow_mut(|cache| {
-                cache.remember(
-                    ImageKey {
-                        unique_id: key.unique_id.wrapping_add(1),
-                        ..key
-                    },
-                    "stale".to_owned(),
-                    true,
-                );
-            });
+            let key = key(pid);
+            remember_name(
+                ImageKey {
+                    unique_id: key.unique_id.wrapping_add(1),
+                    ..key
+                },
+                "stale".to_owned(),
+            );
             assert_eq!(command_name(pid).as_deref(), Some("sleep"));
+        }
+
+        #[test]
+        fn a_name_in_use_outlasts_a_stream_of_one_shot_children() {
+            let child = run(Path::new("/bin/sleep"));
+            let pid = child.0.id();
+            assert_eq!(command_name(pid).as_deref(), Some("sleep"));
+            let before = reads();
+            let mut unique_id = u64::MAX;
+            for _ in 0..4 {
+                for _ in 1..RECENT_NAME_CAPACITY {
+                    unique_id -= 1;
+                    remember_name(
+                        ImageKey {
+                            pid: u32::MAX,
+                            unique_id,
+                            id_version: 0,
+                        },
+                        "one-shot".to_owned(),
+                    );
+                }
+                assert_eq!(command_name(pid).as_deref(), Some("sleep"));
+            }
+            assert_eq!(reads(), before);
         }
 
         #[test]
@@ -676,10 +625,10 @@ mod platform {
             );
             let pid = child.0.id();
             assert_eq!(command_name(pid).as_deref(), Some("bash"));
-            let (before, _) = facts(pid);
+            let before = key(pid);
             drop(child.0.stdin.take());
             let deadline = Instant::now() + Duration::from_secs(10);
-            while facts(pid).0 == before {
+            while key(pid) == before {
                 assert!(Instant::now() < deadline, "the exec never happened");
                 std::thread::sleep(Duration::from_millis(5));
             }
@@ -717,10 +666,18 @@ mod platform {
             );
             let stdio =
                 || Stdio::from(unsafe { std::os::fd::OwnedFd::from_raw_fd(libc::dup(slave)) });
+            let links = tempfile::tempdir().expect("link directory");
+            for name in ["vim", "vi"] {
+                symlink("/bin/sleep", links.path().join(name)).expect("symlink");
+            }
+            let mut path = std::ffi::OsString::from(links.path());
+            path.push(":");
+            path.push(std::env::var_os("PATH").unwrap_or_default());
             let mut command = Command::new("/bin/bash");
             command
                 .args(["--norc", "--noprofile", "-i"])
                 .env("PS1", "")
+                .env("PATH", path)
                 .stdin(stdio())
                 .stdout(stdio())
                 .stderr(stdio());
@@ -741,7 +698,7 @@ mod platform {
             });
             std::thread::sleep(Duration::from_millis(300));
             writer
-                .write_all(b"while :; do sleep 0.02; done\n")
+                .write_all(b"while :; do vim 0.02; vi 0.02; done\n")
                 .expect("type loop");
             std::thread::sleep(Duration::from_millis(300));
             let samples = std::env::var("ZZ_NAMES_PROBE_SAMPLES")

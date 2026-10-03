@@ -451,24 +451,19 @@ impl TerminalWatcher {
                     .collect::<BTreeSet<_>>();
                 let mut finished = terminal_status_should_close(&runtime_viewport.status);
                 let mut mode_clients = BTreeSet::new();
-                for (view, viewport, epoch) in current {
-                    finished |= terminal_status_should_close(&viewport.status);
-                    if !sunk.contains(&view) {
-                        let base = epoch.and_then(|epoch| {
-                            self.previous
-                                .get(&view)
-                                .filter(|(seen, _)| *seen == epoch)
-                                .map(|(_, previous)| previous.as_ref())
-                        });
-                        shared.publish_terminal_for_pane(
-                            pane,
-                            ClientId(view.0),
-                            base,
-                            &viewport,
+                for frame in current {
+                    finished |= terminal_status_should_close(&frame.1.status);
+                    if !sunk.contains(&frame.0) {
+                        shard_sink::publish_loop_view(
+                            shared,
                             terminal,
+                            pane,
+                            &frame,
+                            self.previous.get(&frame.0),
                             &mut self.fanout,
                         );
                     }
+                    let (view, viewport, epoch) = frame;
                     let key = (
                         mode_kind(viewport.mode),
                         viewport.scrollbar,

@@ -62,6 +62,7 @@ impl Fixture {
     fn deliver(&self, frames: &[ViewFrame]) -> Vec<TerminalViewId> {
         let mut sunk = Vec::new();
         self.sink().deliver(frames, &mut sunk);
+        self.sink().published(false);
         sunk
     }
 }
@@ -124,6 +125,7 @@ fn a_detach_racing_a_shard_publish_never_leaves_a_frame_behind() {
                     &[(view, frame(&base, (1 << 40) + offset), Some(1))],
                     &mut taken,
                 );
+                sink.published(false);
                 offset += 1;
             }
         }
@@ -557,4 +559,268 @@ fn a_retired_terminal_stops_delivering_to_its_clients() {
             .is_empty()
     );
     assert_eq!(pending(&mailbox, fixture.pane), None);
+}
+
+fn copy_frame(base: &TerminalViewport, generation: u64) -> Arc<TerminalViewport> {
+    let mut viewport = (*frame(base, generation)).clone();
+    viewport.mode = TerminalMode::Copy {
+        position: 1,
+        total: 1,
+        hide_position: false,
+    };
+    Arc::new(viewport)
+}
+
+fn publish_on_loop(fixture: &Fixture, view: TerminalViewId, viewport: &Arc<TerminalViewport>) {
+    let mut fanout = PaneFrameFanout::new();
+    shard_sink::publish_loop_view(
+        &fixture.shared,
+        &fixture.terminal,
+        fixture.pane,
+        &(view, Arc::clone(viewport), Some(1)),
+        None,
+        &mut fanout,
+    );
+}
+
+#[test]
+fn a_copy_mode_round_trip_keeps_patching_across_the_sink_and_the_loop() {
+    let fixture = Fixture::new(4110, "exec sleep 1000000");
+    let (client, mailbox) = fixture.client(9110);
+    let view = view_of(client);
+    let pane = fixture.pane;
+    let base = blank();
+    let generation = 1 << 49;
+    let first = frame(&base, generation);
+    assert_eq!(fixture.deliver(&[(view, first, Some(1))]), vec![view]);
+    pop_event(&mailbox).expect("first full frame");
+    let live = frame(&base, generation + 1);
+    assert_eq!(
+        fixture.deliver(&[(view, Arc::clone(&live), Some(1))]),
+        vec![view]
+    );
+    pop_event(&mailbox).expect("live patch");
+
+    {
+        let mut inner = fixture.shared.inner.lock();
+        enter_copy_session(&mut inner, client, pane).expect("enter copy session");
+    }
+    let copy = copy_frame(&base, generation + 2);
+    assert!(
+        fixture
+            .deliver(&[(view, Arc::clone(&copy), Some(1))])
+            .is_empty()
+    );
+    publish_on_loop(&fixture, view, &copy);
+    assert_eq!(
+        pending(&mailbox, pane),
+        Some((viewport_generation(&copy), false))
+    );
+    assert!(
+        fixture
+            .sink()
+            .previous(view)
+            .is_some_and(|previous| Arc::ptr_eq(&previous, &copy))
+    );
+    pop_event(&mailbox).expect("copy patch");
+
+    {
+        let mut inner = fixture.shared.inner.lock();
+        exit_copy_session(&mut inner, client);
+    }
+    let after = frame(&base, generation + 3);
+    assert_eq!(
+        fixture.deliver(&[(view, Arc::clone(&after), Some(1))]),
+        vec![view]
+    );
+    assert_eq!(
+        pending(&mailbox, pane),
+        Some((viewport_generation(&after), false))
+    );
+}
+
+#[test]
+fn a_frame_the_loop_took_while_the_slot_was_full_keeps_the_patch_chain() {
+    let fixture = Fixture::new(4111, "exec sleep 1000000");
+    let (client, mailbox) = fixture.client(9111);
+    let view = view_of(client);
+    let pane = fixture.pane;
+    let base = blank();
+    let generation = 1 << 50;
+    assert_eq!(
+        fixture.deliver(&[(view, frame(&base, generation), Some(1))]),
+        vec![view]
+    );
+    pop_event(&mailbox).expect("first full frame");
+    let queued = frame(&base, generation + 1);
+    assert_eq!(
+        fixture.deliver(&[(view, Arc::clone(&queued), Some(1))]),
+        vec![view]
+    );
+    let held = frame(&base, generation + 2);
+    assert!(
+        fixture
+            .deliver(&[(view, Arc::clone(&held), Some(1))])
+            .is_empty()
+    );
+    assert!(
+        fixture
+            .sink()
+            .previous(view)
+            .is_some_and(|previous| Arc::ptr_eq(&previous, &queued))
+    );
+    pop_event(&mailbox).expect("queued patch");
+    publish_on_loop(&fixture, view, &held);
+    assert_eq!(
+        pending(&mailbox, pane),
+        Some((viewport_generation(&held), false))
+    );
+    pop_event(&mailbox).expect("loop patch");
+    let next = frame(&base, generation + 3);
+    assert_eq!(
+        fixture.deliver(&[(view, Arc::clone(&next), Some(1))]),
+        vec![view]
+    );
+    assert_eq!(
+        pending(&mailbox, pane),
+        Some((viewport_generation(&next), false))
+    );
+}
+
+#[test]
+fn a_frozen_frame_still_moves_the_base_the_sink_resumes_from() {
+    let fixture = Fixture::new(4112, "exec sleep 1000000");
+    let (client, mailbox) = fixture.client(9112);
+    let view = view_of(client);
+    let pane = fixture.pane;
+    let base = blank();
+    let generation = 1 << 51;
+    assert_eq!(
+        fixture.deliver(&[(view, frame(&base, generation), Some(1))]),
+        vec![view]
+    );
+    pop_event(&mailbox).expect("first full frame");
+    {
+        let mut inner = fixture.shared.inner.lock();
+        let _ = arm_client_message(&mut inner, client, 1, 0, true);
+    }
+    let frozen = frame(&base, generation + 1);
+    assert!(
+        fixture
+            .deliver(&[(view, Arc::clone(&frozen), Some(1))])
+            .is_empty()
+    );
+    publish_on_loop(&fixture, view, &frozen);
+    assert_eq!(pending(&mailbox, pane), None);
+    {
+        let mut inner = fixture.shared.inner.lock();
+        take_client_message(&mut inner, client).expect("armed message");
+    }
+    assert!(mailbox.replace_terminal_viewport(pane, &frozen, &fixture.shared.terminal_frames));
+    pop_event(&mailbox).expect("resume full frame");
+    let resumed = frame(&base, generation + 2);
+    assert_eq!(
+        fixture.deliver(&[(view, Arc::clone(&resumed), Some(1))]),
+        vec![view]
+    );
+    assert_eq!(
+        pending(&mailbox, pane),
+        Some((viewport_generation(&resumed), false))
+    );
+}
+
+#[test]
+fn a_loop_frame_older_than_the_sink_frame_is_never_delivered() {
+    let fixture = Fixture::new(4113, "exec sleep 1000000");
+    let (client, mailbox) = fixture.client(9113);
+    let view = view_of(client);
+    let pane = fixture.pane;
+    let base = blank();
+    let generation = 1 << 52;
+    assert_eq!(
+        fixture.deliver(&[(view, frame(&base, generation), Some(1))]),
+        vec![view]
+    );
+    pop_event(&mailbox).expect("first full frame");
+    let newer = frame(&base, generation + 2);
+    assert_eq!(
+        fixture.deliver(&[(view, Arc::clone(&newer), Some(1))]),
+        vec![view]
+    );
+    pop_event(&mailbox).expect("newer patch");
+    publish_on_loop(&fixture, view, &frame(&base, generation + 1));
+    assert_eq!(pending(&mailbox, pane), None);
+    assert!(
+        fixture
+            .sink()
+            .previous(view)
+            .is_some_and(|previous| Arc::ptr_eq(&previous, &newer))
+    );
+}
+
+#[test]
+fn an_output_watcher_makes_every_sunk_frame_urgent() {
+    let fixture = Fixture::new(4114, "exec sleep 1000000");
+    let (client, _mailbox) = fixture.client(9114);
+    let view = view_of(client);
+    let base = blank();
+    let mut sunk = Vec::new();
+    assert!(!fixture.sink().deliver(&[], &mut sunk));
+    fixture.sink().published(false);
+    let observer = Arc::new(());
+    fixture.sink().observe(&observer);
+    assert!(
+        fixture
+            .sink()
+            .deliver(&[(view, frame(&base, 1 << 53), Some(1))], &mut sunk)
+    );
+    fixture.sink().published(false);
+    assert_eq!(sunk, vec![view]);
+    drop(observer);
+    assert!(!fixture.sink().deliver(&[], &mut sunk));
+    fixture.sink().published(false);
+}
+
+#[cfg(unix)]
+#[test]
+fn the_loop_wake_waits_for_the_publish_and_skips_a_notified_one() {
+    let fixture = Fixture::new(4115, "exec sleep 1000000");
+    let (client, mailbox) = fixture.client(9115);
+    let view = view_of(client);
+    let pane = fixture.pane;
+    let mut poll = mio::Poll::new().expect("poll");
+    let waker = Arc::new(mio::Waker::new(poll.registry(), mio::Token(7)).expect("waker"));
+    let owner = thread::spawn(|| thread::current().id())
+        .join()
+        .expect("owner thread");
+    *mailbox.loop_waker.lock() = Some((Arc::clone(&waker), owner));
+    let mut events = mio::Events::with_capacity(4);
+    let mut woke = || {
+        poll.poll(&mut events, Some(Duration::ZERO)).expect("poll");
+        !events.is_empty()
+    };
+    let base = blank();
+    let generation = 1 << 54;
+    let mut sunk = Vec::new();
+    assert!(
+        !fixture
+            .sink()
+            .deliver(&[(view, frame(&base, generation), Some(1))], &mut sunk)
+    );
+    assert_eq!(sunk, vec![view]);
+    assert!(pending(&mailbox, pane).is_some());
+    assert!(!woke());
+    fixture.sink().published(false);
+    assert!(woke());
+    pop_event(&mailbox).expect("first frame");
+
+    sunk.clear();
+    fixture
+        .sink()
+        .deliver(&[(view, frame(&base, generation + 1), Some(1))], &mut sunk);
+    assert_eq!(sunk, vec![view]);
+    fixture.sink().published(true);
+    assert!(!woke());
+    mailbox.notify_one();
+    assert!(woke());
 }

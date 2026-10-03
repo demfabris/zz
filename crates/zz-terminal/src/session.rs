@@ -1301,7 +1301,9 @@ pub enum TerminalEvent {
 pub type ViewFrame = (TerminalViewId, Arc<TerminalViewport>, Option<u64>);
 
 pub trait TerminalFrameSink: Send + Sync {
-    fn deliver(&self, frames: &[ViewFrame], sunk: &mut Vec<TerminalViewId>);
+    fn deliver(&self, frames: &[ViewFrame], sunk: &mut Vec<TerminalViewId>) -> bool;
+
+    fn published(&self, notified: bool);
 
     fn as_any(&self) -> &dyn std::any::Any;
 }
@@ -5191,7 +5193,7 @@ impl Publisher {
         copy_facts: HashMap<TerminalViewId, Arc<CopyModeFacts>>,
         sunk: Vec<TerminalViewId>,
         notify: bool,
-    ) {
+    ) -> bool {
         let mut by_view = HashMap::with_capacity(viewports.len());
         let mut epochs = HashMap::with_capacity(viewports.len());
         let mut first_streamed = None;
@@ -5220,9 +5222,7 @@ impl Publisher {
             latest.copy_facts = copy_facts;
             latest.sunk = sunk;
         }
-        if notify {
-            self.notify_viewports(&fallback, view_count);
-        }
+        notify && self.notify_viewports(&fallback, view_count)
     }
 
     fn refresh_fallback(
@@ -5289,22 +5289,25 @@ impl Publisher {
         }
     }
 
-    fn notify_viewports(&self, viewport: &TerminalViewport, view_count: usize) {
+    fn notify_viewports(&self, viewport: &TerminalViewport, view_count: usize) -> bool {
         let notification_was_pending = self.state.notification_pending.swap(true, Ordering::AcqRel);
-        if !notification_was_pending {
-            match self.event_tx.try_send(TerminalEvent::ViewportReady {
+        let notified = notification_was_pending
+            || match self.event_tx.try_send(TerminalEvent::ViewportReady {
                 output_activity: false,
             }) {
-                Ok(()) => self.state.notify_consumer(),
-                Err(async_channel::TrySendError::Closed(_)) => {}
+                Ok(()) => {
+                    self.state.notify_consumer();
+                    true
+                }
+                Err(async_channel::TrySendError::Closed(_)) => false,
                 Err(async_channel::TrySendError::Full(_)) => {
                     self.state
                         .notification_pending
                         .store(false, Ordering::Release);
                     log::error!("terminal viewport notification queue overflow");
+                    false
                 }
-            }
-        }
+            };
         if log::log_enabled!(
             target: "zz_terminal::diagnostics::publisher",
             log::Level::Trace
@@ -5325,6 +5328,7 @@ impl Publisher {
                 self.state.pending_reliable_bytes.load(Ordering::Acquire),
             );
         }
+        notified
     }
 
     fn set_status(&self, status: &SessionStatus) {
@@ -14307,9 +14311,8 @@ fn publish_views<'alloc: 'callbacks, 'callbacks>(
         viewports.push((view_id, viewport, streaming.then(|| frames.epoch(view_id))));
     }
     let mut sunk = Vec::new();
-    if streamed_any && let Some(sink) = publisher.frame_sink() {
-        sink.deliver(&viewports, &mut sunk);
-    }
+    let frame_sink = publisher.frame_sink().filter(|_| streamed_any);
+    let urgent = frame_sink.is_some_and(|sink| sink.deliver(&viewports, &mut sunk));
     let refreshed = if streamed_any || force_fallback || frames.preview {
         None
     } else {
@@ -14329,7 +14332,7 @@ fn publish_views<'alloc: 'callbacks, 'callbacks>(
                 .map(|(_, viewport, _)| SinkEdge::of(viewport));
             let changed = frames.sink_edge != edge;
             frames.sink_edge = edge;
-            notify = frames.admit_notify(changed);
+            notify = frames.admit_notify(changed || urgent);
         }
         FallbackFrame::FirstStreamed
     } else if let Some((viewport, metadata_changed)) = refreshed {
@@ -14353,7 +14356,10 @@ fn publish_views<'alloc: 'callbacks, 'callbacks>(
     frames
         .published
         .extend(viewports.iter().map(|(view, _, _)| *view));
-    publisher.publish_frame(fallback, viewports, copy_facts, sunk, notify);
+    let notified = publisher.publish_frame(fallback, viewports, copy_facts, sunk, notify);
+    if let Some(sink) = frame_sink {
+        sink.published(notified);
+    }
     frames.release_unused(active);
     Ok(())
 }

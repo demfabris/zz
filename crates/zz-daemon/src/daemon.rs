@@ -2622,7 +2622,7 @@ impl OutboundMailbox {
     fn notify_one(&self) {
         #[cfg(unix)]
         if let Some((waker, owner)) = self.loop_waker.lock().as_ref() {
-            if *owner != thread::current().id() {
+            if *owner != thread::current().id() && !shard_sink::hold_loop_wake(waker) {
                 let _ = waker.wake();
             }
             return;
@@ -45310,16 +45310,17 @@ fn sync_view_sink(
     let Some(sink) = shard_sink::PaneSink::of(terminal) else {
         return;
     };
-    let mailbox = inner
+    let record = inner
         .client(client)
         .filter(|_| kind == Some(TerminalStreamKind::Foreground))
-        .filter(|c| {
-            c.copy_session
+        .and_then(|c| {
+            let live = c
+                .copy_session
                 .as_ref()
-                .is_none_or(|session| session.pane != pane)
-        })
-        .and_then(|c| c.subscriber.clone());
-    sink.set_view(TerminalViewId(client.0), mailbox);
+                .is_none_or(|session| session.pane != pane);
+            c.subscriber.clone().map(|mailbox| (mailbox, live))
+        });
+    sink.set_view(TerminalViewId(client.0), record);
 }
 
 fn sync_client_pane_sink(inner: &ServerState, client: ClientId, pane: PaneId) {

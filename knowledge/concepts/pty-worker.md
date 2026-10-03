@@ -4,7 +4,7 @@ title: Daemon-owned PTY worker model
 description: How the daemon spawns and owns one PTY-backed terminal session per pane, the thread/ownership boundary between zz-daemon and the zz-terminal worker, and the paths that carry terminal frames out and send-keys in.
 resource: crates/zz-daemon/src/daemon.rs
 tags: [pty, daemon, terminal, threading, send-keys]
-timestamp: 2026-10-03T02:00:00Z
+timestamp: 2026-10-03T09:00:00Z
 ---
 
 # Overview
@@ -115,39 +115,45 @@ non-owning watcher so it can exit. The daemon also publishes `PaneRemoved`. Brow
 A foreground live view reaches its client from the shard thread. `watch_terminal` installs a
 `PaneSink` (`crates/zz-daemon/src/daemon/shard_sink.rs`) on the session with
 `TerminalSession::install_frame_sink`, and the loop keeps one sink record per (pane, view) for each
-client that streams the pane as `Foreground` and holds no copy session on it. `apply_view_streams`
-updates the records on attach, detach, window switch, zoom and preview changes, and
-`enter_copy_session` / `exit_copy_session` take a view off the sink and put it back. A record holds
-the client's `OutboundMailbox` and the last viewport the sink delivered for that view.
+client that streams the pane as `Foreground`. `apply_view_streams` updates the records on attach,
+detach, window switch, zoom and preview changes. A client in copy mode on the pane keeps its record
+but marks it not live (`enter_copy_session` / `exit_copy_session`). A record holds the client's
+`OutboundMailbox` and the last viewport queued for that view by either path.
 
 `publish_views` hands each frame to the sink before it stores it. Under the sink's lock the sink
-diffs every recorded view against its own predecessor, encodes once per (base, current) through
+diffs every live record against that last viewport, encodes once per (base, current) through
 `PaneFrameFanout::enqueue`, and queues the same bytes on every matching mailbox. It skips a view
 whose frame is not live, whose client is frozen (`OutboundMailbox::terminals_frozen`, kept in step
-by `sync_terminal_freeze`) or whose client still holds an unwritten frame for the pane, so a slow
-client gets the loop's latest-frame coalescing instead of a full encode per frame on the shard. It
-skips the whole pane while a frame or its predecessor carries Kitty placements. The views it took are stored as `sunk` beside the frame (`TerminalSession::latest_frames`).
-A record removed under that lock gets no later frame, and the mailbox's generation checks drop or
-widen anything that lands against a stale base.
+by `sync_terminal_freeze`) or whose client still holds an unwritten frame for the pane (checked
+before the diff, so a backed-up client costs the shard no diff), so a slow client gets the loop's
+latest-frame coalescing instead of a full encode per frame on the shard. It skips the whole pane
+while a frame or its predecessor carries Kitty placements. The views it took are stored as `sunk`
+beside the frame (`TerminalSession::latest_frames`). A record removed under that lock gets no later
+frame, and the mailbox's generation checks drop or widen anything that lands against a stale base.
+The mailbox wakes the loop only when a client's terminal slot goes from empty to non-empty, and the
+sink holds those wakes until the frame is published (`TerminalFrameSink::published`): when the same
+publish also notified the loop, that notification's turn writes the frame and the wake is dropped.
 
 Views the sink did not take fall back to the loop. When every streamed view of a pane went to the
 sink, the shard notifies the loop only on an edge: a title, OSC 7 path or status change, a title
 write or progress bar change (`Publisher::set_facts`, `set_progress_bar`), a preview watch, or output
-at most every 100 ms (`Frames::admit_notify`). Bells, clipboard writes, renames, copy results and
-placeholder binds are reliable events that notify on their own. On the loop, `TerminalWatcher` walks
-the latest frames, calls `publish_terminal_for_pane` only for views not in `sunk`, and keeps each
-view's previous frame either way, so a view that moves between the two paths diffs against the frame
-its client last got:
+at most every 100 ms (`Frames::admit_notify`). A pane with a live output watch (`wait-pane`, the
+`send-text` echo check, `run-pane`; `PaneSink::observe` from `terminal_reads`) notifies on every
+output frame instead. Bells, clipboard writes, renames, copy results and placeholder binds are
+reliable events that notify on their own. On the loop, `TerminalWatcher` walks the latest frames and
+hands each view not in `sunk` to `shard_sink::publish_loop_view`, which diffs against the record's
+viewport (or the watcher's own for a view without a record), drops a frame older than the one the
+record holds, and writes the frame back to the record unless the shard moved it meanwhile:
 
 ```rust
-// TerminalWatcher::handle, per ViewportReady
-for (view, viewport, epoch) in current {              // latest_frames(), sorted by view id
-    if !sunk.contains(&view) {
-        let base = epoch.and_then(|epoch| previous.get(&view).filter(|(seen, _)| *seen == epoch));
-        shared.publish_terminal_for_pane(pane, ClientId(view.0), base, &viewport, &terminal, &mut fanout);
-    }
-    previous.insert(view, (epoch, viewport));
+// shard_sink::publish_loop_view, per view the sink did not take
+let seen = sink.and_then(|sink| sink.tracked(view)).flatten();
+if seen.is_some_and(|(_, newer)| generation(viewport).precedes(generation(newer))) {
+    return;
 }
+let base = epoch.and_then(|epoch| seen.or(watcher_previous).filter(|(known, _)| known == epoch));
+shared.publish_terminal_for_pane(pane, ClientId(view.0), base, viewport, terminal, fanout);
+sink.track(view, seen, epoch.map(|epoch| (epoch, viewport)));
 ```
 
 Output frames call `note_pane_output` (activity, silence and a 500 ms name check that reads the

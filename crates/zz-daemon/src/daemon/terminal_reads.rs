@@ -34,6 +34,9 @@ impl Target {
                     .insert(pane, Arc::downgrade(&observation));
                 observation
             });
+        if let Some(sink) = shard_sink::PaneSink::of(&terminal) {
+            sink.observe(&observation);
+        }
         #[cfg(unix)]
         let registered = registered || shared.loop_active.load(Ordering::Acquire);
         Arc::new(Self {

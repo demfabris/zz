@@ -4,8 +4,9 @@ Entry point for a fresh session continuing the zz daemon performance rebuild. Wr
 the macbook, continued the same day on the Linux host alienware (see "Linux leg"). State on
 2026-10-02: waves 0 to 3 are on `main` and pushed. Wave 3 (W3-SHARDS, W3-TUI, W3-LOOP and nine
 Opus fix lanes) closed at `e9bc174c`; its exit gates are `wave3-macbook-e9bc174c.json` and
-`wave3-alienware-e9bc174c.json`. The Ghostty fork pin is `67351380` (trim fix `c3941417`, copy
-snapshots `7823f65d`, used-size active page copies). No lane in flight, no lane worktree left.
+`wave3-alienware-e9bc174c.json`. The Ghostty fork pin is `189df4a1` (row cell copy, branch
+`zz-2026-10-02`, on `67351380`: trim fix `c3941417`, copy snapshots `7823f65d`, used-size active
+page copies); the libghostty-rs pin is `f5f82601`. No lane in flight, no lane worktree left.
 Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" before launching anything.
 
 ## Next session: wave 4
@@ -142,6 +143,48 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   build-id handshake, a `/proc` fd pin for the tmux wrapper) is not worth 0.48 MiB of clean text
   pages while the footprint rows pass; `mem.rss.*` stays informational. The design doc's W4-BINARY
   section has the numbers and the order-file lever (8.3 MB idle, 2.10x) if RSS ever matters.
+- W4-ROWS merged 2026-10-02 23:00 as `ebf23f86` (lane 102 min, `2a0e7d72`, plus my repin
+  `15643e1b`). Row extraction was 54% of daemon samples in chatty visible, 25% in echo busy30:
+  the fork call `ghostty_render_state_row_cells_copy` (Ghostty `189df4a1`, new branch
+  `zz-2026-10-02` on `67351380`) copies a row into packed 12-byte cells with a style table and
+  UTF-8 grapheme spans, no allocation, no thread; the wrapper exposes `CellIteration::copy_into`
+  (libghostty-rs `zz-2026-10-02`: `d975339f` plus `f5f82601`). FFI calls per 180x50 frame 81,250
+  -> 250; frame build 53.9% -> 24.7% of chatty-visible samples; `chatty.cpu_pct.visible` 3.48 ->
+  2.18% on the Mac (now passes the final rule), `chatty.instr_per_s.visible` 0.33x, flip/hidden/
+  steady 0.75-0.81x. Fork review (codex ultra, 13 min after a watchdog false start: pass the lane
+  head, not the lane base, as the review's base): the C ABI is clean (6510 native tests, 73
+  ReleaseSafe probes on limits, buffers and bad input); one blocker in the wrapper, inherited from
+  `8e40135`: `RowIterator::update` and `CellIterator::update` did not tie their return lifetimes
+  to the snapshot and row, so safe Rust could copy from freed render state (reproduced). Fixed in
+  `f5f82601` (`'s` on both), then both branches published and repinned; zz-terminal 375 pass on
+  the fetched pins. Open: copy-mode history capture (`ModeRevision::capture_flat`) still reads per
+  cell and could use the same copy.
+- TUI-ECHO merged as `127f09b1` in one batch with ROWS (lane 105 min, `ffcfc2c4`; done=false): the
+  client waits on kqueue on macOS (select elsewhere and as the fallback), reads the socket once per
+  wake, and the renderer tracks the terminal cursor and default style so an echoed key is 5 bytes
+  instead of 63 (tmux writes 5). Per key 108.6 -> 92.1 kinstr and 64.5 -> 56.8 us; the 40 kinstr
+  target is below the OS floor here (a minimal relay with the six syscalls per key costs 55.5
+  kinstr, 25-29 us; the counter includes kernel work). echo.p50.idle did not move beyond noise.
+  Out of its zone, left open: key message encoding in zz-protocol (12-15% of client user CPU per
+  key), `ClientCore::claims_prefix_input` allocating a String per key (6%), and each frame copying
+  the full 38 KB cell array (8%). Going below the floor needs tmux's shape (the server writes the
+  client's terminal), the TUI analogue of CONTROL's stdio handoff.
+- Merge checks run per batch from here (ROWS + TUI-ECHO as `batch1`): serial 35-minute suites
+  per lane were the bottleneck with seven lanes; each lane already carries its own A/B.
+- CONTROL (lane 73 min, `986abe33`, done for the Mac): `zz_cli -C` hands its stdin/stdout to the
+  daemon over SCM_RIGHTS and the daemon writes plain command replies and `%output` straight to
+  them; everything else goes back through the client's renderer. Mac `control.latency` 0.0338 ->
+  0.0113 ms (0.81x tmux), burst 291k (1.69x), client 0 kinstr per command. A zero-work relay alone
+  costs 47 kinstr, so the relay variant was skipped. Parity review running; Linux leg: cli tests
+  280 pass, control_stdio tests and startup diagnostics pass, compat 6 of 7 (the known red).
+- Incident 22:05-22:32: the CONTROL reviewer's probe daemon held 462 of the Mac's 511 PTYs (`cat`
+  panes), so every other lane's tests failed with "PTY error: Device not configured"; stopped by
+  message, lanes told to rerun. Lane briefs should cap probes at 50 panes.
+- Incident on alienware: quiet-gate pauses every foreign compile, and a paused cargo holds the
+  shared package-cache lock, so with four lanes plus my checks the solo reruns of merge checks
+  (600 s including compile) timed out (KNOBS: `an_attach_repaints_a_dead_pane_kept_by_remain_on_exit`,
+  `formatted_split_wait_resumes_its_pane_wait_on_the_loop`) and my CONTROL release build died.
+  Instruction rows do not need quiet-gate; use it only for wall rows, one at a time.
 
 ## Wave 3 merge log (from 2026-10-01)
 

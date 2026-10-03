@@ -125,6 +125,10 @@ use pane_actor::PaneActor;
 
 const INITIAL_COLUMNS: u16 = 80;
 const INITIAL_ROWS: u16 = 24;
+/// `spawn_pane`'s `SPAWN_EMPTY` branch in the pin (spawn.c) gives a pane with no
+/// process newline mode and no cursor, so a stream written into it starts each
+/// line at column 0 and nothing blinks where nobody can type.
+const EMPTY_PANE_MODES: &str = "\x1b[20h\x1b[?25l";
 const INITIAL_CELL_WIDTH: u32 = 8;
 const INITIAL_CELL_HEIGHT: u32 = 18;
 const MAX_LINK_URI_BYTES: usize = 16 * 1024;
@@ -375,6 +379,7 @@ impl EngineFilter {
             cursor_y: terminal.cursor_y()?,
             alternate_on,
             mouse_tracking: terminal.is_mouse_tracking()?,
+            cursor_hidden: !terminal.is_cursor_visible()?,
             program_title_writes: self.program_title_writes,
         })
     }
@@ -1544,6 +1549,7 @@ pub struct TerminalFacts {
     /// reads off `wp->base.mode`, which is what every stock pane-body row
     /// guards its `send -M` branch on.
     pub mouse_tracking: bool,
+    pub cursor_hidden: bool,
     pub program_title_writes: u64,
 }
 
@@ -2061,6 +2067,7 @@ impl TerminalSession {
             appearance,
             MAX_OUTPUT_VIEW_SCROLLBACK,
             true,
+            None,
         )
     }
 
@@ -2076,6 +2083,7 @@ impl TerminalSession {
             appearance,
             MAX_STARTUP_OUTPUT_VIEW_SCROLLBACK,
             true,
+            None,
         )
     }
 
@@ -2090,6 +2098,23 @@ impl TerminalSession {
             appearance,
             max_scrollback.min(MAX_HISTORY_LIMIT),
             false,
+            None,
+        )
+    }
+
+    #[must_use]
+    pub fn spawn_empty_pane(
+        max_scrollback: usize,
+        appearance: Arc<TerminalAppearance>,
+        size: Option<TerminalSize>,
+    ) -> Self {
+        Self::spawn_surface_with_appearance(
+            String::new(),
+            EMPTY_PANE_MODES.to_owned(),
+            appearance,
+            max_scrollback.min(MAX_HISTORY_LIMIT),
+            false,
+            size,
         )
     }
 
@@ -2099,12 +2124,13 @@ impl TerminalSession {
         appearance: Arc<TerminalAppearance>,
         max_scrollback: usize,
         frozen: bool,
+        size: Option<TerminalSize>,
     ) -> Self {
         #[cfg(unix)]
         let shard = shard::choose();
         #[cfg(not(unix))]
         let shard: Result<Option<shard::ShardHandle>, WorkerError> = Ok(None);
-        Self::spawn_surface_with_shard(title, text, appearance, max_scrollback, frozen, shard)
+        Self::spawn_surface_with_shard(title, text, appearance, max_scrollback, frozen, size, shard)
     }
 
     fn spawn_surface_with_shard(
@@ -2113,6 +2139,7 @@ impl TerminalSession {
         appearance: Arc<TerminalAppearance>,
         max_scrollback: usize,
         frozen: bool,
+        size: Option<TerminalSize>,
         shard: Result<Option<shard::ShardHandle>, WorkerError>,
     ) -> Self {
         let wake = match &shard {
@@ -2134,10 +2161,11 @@ impl TerminalSession {
         let event_state = Arc::new(EventQueueState::new());
         event_state.resolve_identity();
         let (event_tx, events) = terminal_event_channel(&event_state);
+        let geometry = size.map(Geometry::from_size).unwrap_or_default();
         let latest = Arc::new(RwLock::new(PublishedViewports::new(
             TerminalViewport::blank_with_appearance(
-                INITIAL_COLUMNS,
-                INITIAL_ROWS,
+                geometry.columns,
+                geometry.rows,
                 SessionStatus::Starting,
                 &appearance,
             ),
@@ -2162,6 +2190,7 @@ impl TerminalSession {
                         title,
                         text,
                         frozen,
+                        geometry,
                     },
                     alive,
                     wake,
@@ -2186,6 +2215,7 @@ impl TerminalSession {
                             appearance,
                             max_scrollback,
                             frozen,
+                            geometry,
                         );
                         drop(alive);
                     })
@@ -5506,6 +5536,7 @@ fn output_view_worker(
     appearance: Arc<TerminalAppearance>,
     max_scrollback: usize,
     frozen: bool,
+    geometry: Geometry,
 ) {
     let result = (|| {
         let mut actor = new_output_view(
@@ -5517,6 +5548,7 @@ fn output_view_worker(
             &appearance,
             max_scrollback,
             frozen,
+            geometry,
             &ActorWake::none(),
         )?;
         loop {
@@ -5690,10 +5722,10 @@ fn new_output_view(
     appearance: &TerminalAppearance,
     max_scrollback: usize,
     frozen: bool,
+    geometry: Geometry,
     wake: &ActorWake,
 ) -> Result<surface_actor::SurfaceActor<'static, 'static>, WorkerError> {
     install_kitty_png_decoder();
-    let geometry = Geometry::default();
     let mut terminal = new_terminal(geometry.columns, geometry.rows, max_scrollback)?;
     let reported_color_scheme = Rc::new(Cell::new(ghostty_color_scheme(appearance.color_scheme)));
     let color_scheme_source = Rc::clone(&reported_color_scheme);
@@ -5702,8 +5734,10 @@ fn new_output_view(
     register_bell(&mut terminal, publisher.clone())?;
     if frozen {
         write_output_view_content(&mut terminal, title, text);
+    } else {
+        terminal.vt_write(text.as_bytes());
     }
-    surface_actor::SurfaceActor::new(
+    let mut actor = surface_actor::SurfaceActor::new(
         command_rx,
         slot,
         publisher,
@@ -5726,7 +5760,11 @@ fn new_output_view(
             search: Some(SearchWorker::spawn(wake.clone())),
         },
         frozen,
-    )
+    )?;
+    if !frozen {
+        actor.publish_started()?;
+    }
+    Ok(actor)
 }
 
 struct SurfaceTerminal<'a, 'b> {
@@ -14581,6 +14619,10 @@ fn publish_views<'alloc: 'callbacks, 'callbacks>(
     Ok(())
 }
 
+#[cfg(test)]
+#[path = "session/settle_tests.rs"]
+mod settle_tests;
+
 fn settle_unwatched<'alloc: 'callbacks, 'callbacks>(
     terminal: &mut Terminal<'alloc, 'callbacks>,
     publisher: &Publisher,
@@ -15821,6 +15863,7 @@ mod tests {
                     cursor_y: 23,
                     alternate_on: true,
                     mouse_tracking: false,
+                    cursor_hidden: false,
                     program_title_writes: 0,
                 }
             );
@@ -15848,6 +15891,7 @@ mod tests {
                     cursor_y: 23,
                     alternate_on: false,
                     mouse_tracking: false,
+                    cursor_hidden: false,
                     program_title_writes: 0,
                 }
             );

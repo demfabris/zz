@@ -5069,6 +5069,10 @@ fn prepare_config_command(
 #[path = "daemon/loop_reviewfixes_tests.rs"]
 mod loop_reviewfixes_tests;
 
+#[cfg(test)]
+#[path = "daemon/empty_pane_tests.rs"]
+mod empty_pane_tests;
+
 impl Shared {
     #[inline]
     fn read_client<T>(&self, id: ClientId, read: impl FnOnce(Option<&Client>) -> T) -> T {
@@ -9496,12 +9500,11 @@ impl Shared {
                             wrap_search: Some(terminal_options.wrap_search),
                         };
                         let session = Arc::new(if empty {
-                            let session = TerminalSession::spawn_empty_with_appearance(
+                            TerminalSession::spawn_empty_pane(
                                 history_limit,
                                 appearance,
-                            );
-                            session.feed(Arc::from(EMPTY_PANE_SCREEN_MODE.as_bytes()));
-                            session
+                                spawn.initial_size,
+                            )
                         } else {
                             TerminalSession::spawn(history_limit, appearance, spawn.clone())
                         });
@@ -9665,12 +9668,11 @@ impl Shared {
                             wrap_search: Some(terminal_options.wrap_search),
                         };
                         let session = Arc::new(if *empty {
-                            let session = TerminalSession::spawn_empty_with_appearance(
+                            TerminalSession::spawn_empty_pane(
                                 history_limit,
                                 appearance,
-                            );
-                            session.feed(Arc::from(EMPTY_PANE_SCREEN_MODE.as_bytes()));
-                            session
+                                spawn.initial_size,
+                            )
                         } else {
                             TerminalSession::spawn(history_limit, appearance, spawn.clone())
                         });
@@ -46822,6 +46824,7 @@ impl StatusFactSelection {
                 | "cursor_y"
                 | "alternate_on"
                 | "mouse_any_flag"
+                | "cursor_flag"
                 | "pane_last_command_status"
                 | "pane_pb_progress"
                 | "pane_pb_state" => selection.terminals = true,
@@ -51965,11 +51968,6 @@ struct SourceGlobMatches {
     paths: Vec<PathBuf>,
     errors: Vec<String>,
 }
-
-/// `spawn_pane`'s `SPAWN_EMPTY` branch in the pin (spawn.c) gives a pane with no
-/// process newline mode and no cursor, so a stream written into it starts each
-/// line at column 0 and nothing blinks where nobody can type.
-const EMPTY_PANE_SCREEN_MODE: &str = "\x1b[20h\x1b[?25l";
 
 const STANDARD_INPUT_SOURCE_WARNING: &str = "source-file from standard input is not supported";
 

@@ -25216,7 +25216,7 @@ mod tests {
                 )
                 .unwrap()
                 .output,
-            "fish|/work/live|/work/reported|/work/start|4242|/dev/ttys007|55|1|1|41|501|fab"
+            "fish|/work/live|/work/reported|/work/start|4242|/dev/ttys007|55||1|41|501|fab"
         );
     }
 

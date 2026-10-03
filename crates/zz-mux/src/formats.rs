@@ -1178,7 +1178,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("cursor_blinking", Terminal, Zero),
     variable!("cursor_character", Terminal, Empty),
     variable!("cursor_colour", Terminal, Empty),
-    variable!("cursor_flag", Terminal, One),
+    variable!("cursor_flag", Terminal, StatusHook),
     variable!("cursor_shape", Terminal, Zero),
     variable!("cursor_very_visible", Terminal, Zero),
     variable!("cursor_x", Terminal, StatusHook),

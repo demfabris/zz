@@ -344,20 +344,23 @@ fn twenty_panes_select_direct_or_gather_readers() {
 }
 
 #[test]
-fn a_full_raw_tap_parks_its_pane_without_blocking_a_neighbour() {
+fn a_full_output_sink_parks_its_pane_without_blocking_a_neighbour() {
     let shard = ShardHandle::start(109).expect("shard");
     let flood = session(&shard, "exec yes flood");
-    let (tap, tapped) = TerminalSession::raw_output_tap_channel();
-    flood.arm_raw_output_tap(1, tap).expect("arm the flood tap");
-    wait(|| tapped.receiver.as_ref().is_some_and(Receiver::is_full));
+    let (sink, tapped) = TestOutputSink::install(&flood);
+    sink.set_room(4);
+    wait(|| tapped.len() >= 4);
     let quiet = session(&shard, "stty -echo; printf 'ready\\r\\n'; exec cat");
     wait(|| captured(&quiet, "ready"));
     quiet.send_text("quiet echo\n");
     wait(|| captured(&quiet, "quiet echo"));
+    assert_eq!(tapped.len(), 4);
+    sink.set_room(usize::MAX);
+    flood.output_wake().wake();
     for _ in 0..64 {
         tapped
             .recv_timeout(Duration::from_secs(2))
-            .expect("the tapped flood resumes once drained");
+            .expect("the parked flood resumes once it has room");
     }
 }
 

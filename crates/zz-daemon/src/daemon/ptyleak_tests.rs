@@ -59,7 +59,7 @@ fn probe(shared: &Shared, pane: PaneId) -> Probe {
 }
 
 fn assert_tapped(shared: &Shared, pane: PaneId) {
-    assert!(shared.inner.lock().control_output_taps.contains_key(&pane));
+    assert!(output_routed(&shared.inner.lock(), pane));
 }
 
 fn created(shared: &Shared, before: &BTreeSet<PaneId>) -> (PaneId, Probe) {
@@ -89,7 +89,7 @@ fn assert_released(shared: &Arc<Shared>, probes: &[Probe]) {
             probes.len()
         );
         shared.terminal_requests.turn(shared);
-        shared.drain_control_output_taps();
+        shared.turn_control_output(true);
         thread::sleep(Duration::from_millis(5));
     }
 }

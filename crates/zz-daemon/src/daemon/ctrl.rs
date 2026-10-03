@@ -403,7 +403,7 @@ impl OutboundMailbox {
             log::error!("failed to encode subscribed tree group: {error}");
             return false;
         }
-        self.enqueue_encoded_reliable(OutboundFrame::Grouped { encoded, frames })
+        self.enqueue_encoded_reliable_with(OutboundFrame::Grouped { encoded, frames }, |_| {})
     }
 
     pub(super) fn flush_control_batch(&self, preserve_welcome: bool) -> bool {
@@ -1403,6 +1403,7 @@ impl Shared {
             } else {
                 Ok(vec![response_frame.into(), exit_frame.into()])
             };
+            outbound.control_barrier();
             if !frames.is_ok_and(|frames| outbound.enqueue_control_group(frames)) {
                 for message in &completion {
                     let _ = outbound.enqueue_reliable(message);

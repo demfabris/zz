@@ -846,9 +846,6 @@ impl SourceExecution {
         if !self.pending_hook_events.is_empty() {
             shared.wake_control_queue(self.client, self.kind);
         }
-        if std::mem::take(&mut shared.inner.lock().deferred_control_refresh) {
-            shared.refresh_control_output_taps();
-        }
         if self.notifications_only {
             shared.run_event_hooks(self.pending_hook_events);
         } else if let Some(queue_execution) = queue_execution {

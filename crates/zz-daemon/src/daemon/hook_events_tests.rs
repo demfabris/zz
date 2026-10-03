@@ -78,7 +78,7 @@ fn read_only_after_hook_still_publishes_keys_and_retires_control_taps() {
     let (client, _) =
         shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
     shared.attach(client, session).expect("control attach");
-    assert!(shared.inner.lock().control_output_taps.contains_key(&pane));
+    assert!(output_routed(&shared.inner.lock(), pane));
     let name = client_format_name(&shared.inner.lock(), client);
     let commands =
         format!("bind-key -T readonly-after x display-message changed ; detach-client -t {name}");
@@ -98,7 +98,7 @@ fn read_only_after_hook_still_publishes_keys_and_retires_control_taps() {
         )
         .expect("read-only command with hook");
     let inner = shared.inner.lock();
-    assert!(!inner.control_output_taps.contains_key(&pane));
+    assert!(!output_routed(&inner, pane));
     assert!(client_attached_session(&inner, client).is_none());
     drop(inner);
     assert!(take_reliable_messages(&mailbox).iter().any(|message| {

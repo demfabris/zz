@@ -142,24 +142,3 @@ fn replaced_copy_destination_discards_the_remaining_effects() {
     assert!(shared.delivered_wrap_search_commands.lock().is_empty());
     shared.request_shutdown();
 }
-
-#[test]
-fn tap_acknowledgements_park_without_a_synchronous_actor_wait() {
-    let shared = Arc::new(Shared::new(407));
-    let item = queued(&shared);
-    let ack = TapAck::default();
-    let wait = CommandWait::new(&item);
-    let state = Arc::clone(&wait.state);
-    {
-        let _round_trips = zz_terminal::forbid_actor_round_trips();
-        wait.tap(&ack);
-        wait.finish(&item, Execution::default()).unwrap();
-        assert!(!state.continuation.ready());
-    }
-    ack.complete(Ok(()));
-    assert!(state.continuation.ready());
-    assert!(ack.ready());
-    let mut result = Ok(Execution::default());
-    state.apply(&mut result);
-    assert!(result.is_ok());
-}

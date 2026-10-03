@@ -7461,10 +7461,10 @@ impl Shared {
                     };
                 }
                 match resolution {
-                    CommandResolution::Canonical(name) | CommandResolution::Unimplemented(name) => {
+                    CommandResolution::Canonical(_) | CommandResolution::Unimplemented(_) => {
                         PreparedCommand {
                             invocation,
-                            canonical_name: Some(name.to_owned()),
+                            canonical_name,
                             alias_matched,
                             result: PreparedCommandResult::Ready,
                         }

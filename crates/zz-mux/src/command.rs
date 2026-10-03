@@ -5252,13 +5252,15 @@ impl MuxEngine {
 
     #[must_use]
     pub fn resolve_command_alias(&self, command: &CommandInvocation) -> CommandAliasResolution {
+        if command.name.contains('=') {
+            return CommandAliasResolution::Miss;
+        }
         let Some(alias) = self
             .array_option(TmuxOptionTarget::Server, "command-alias")
             .and_then(|aliases| {
-                aliases.values().find_map(|entry| {
-                    let (name, expansion) = entry.split_once('=')?;
-                    (name == command.name).then_some(expansion)
-                })
+                aliases
+                    .values()
+                    .find_map(|entry| entry.strip_prefix(command.name.as_str())?.strip_prefix('='))
             })
         else {
             return CommandAliasResolution::Miss;
@@ -9532,7 +9534,7 @@ impl MuxEngine {
         stdin: Option<&RawText>,
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
-        let (options, positional) = parse_command_options("display-message", args)?;
+        let (options, positional) = parse_display_message_options(args)?;
         let target = self.resolve_display_message_context(context, &options)?;
         let pane = target.as_ref().and_then(|target| target.pane);
         if options.has("-I") {
@@ -16825,6 +16827,22 @@ fn parse_command_options(
     validate_options(command, spec, &options)?;
     Ok((options, positional))
 }
+
+fn parse_display_message_options(args: &[RawText]) -> Result<(Options, Vec<RawText>), ServerError> {
+    match args {
+        [print, payload] if print == "-p" && !payload.starts_with('-') => Ok((
+            Options {
+                flags: vec!["-p".to_owned()],
+                values: Vec::new(),
+            },
+            vec![payload.clone()],
+        )),
+        _ => parse_command_options("display-message", args),
+    }
+}
+
+#[cfg(test)]
+mod display_message_options_tests;
 
 fn parse_new_session_attach_options(
     args: &[RawText],

@@ -743,6 +743,10 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   plus 0.1; fails on `0d7dabf7` too), `control.latency` 0.0166 against 0.0128 ms (1.3x; tmux's
   sample is fast against its 0.0156 at a486069e: recheck with pairs). `chatty.cpu_pct.steady`
   passed in this gate. Next: EM1 (idle panes read on the shard, no gather hop) for echo margin.
+- EM1 launched 19:40 (run `wf_20e4f8b2-a76`, brief `/tmp/zzpc/w4/em1.md`, `~/dev/zz-em1` on both
+  hosts): an idle pane is read by its shard, a busy one moves to the gather path and back, one
+  reader per fd at a time; target `echo.p50.idle` and `.busy30` down 100 us or more on Linux with
+  throughput within 2%. It builds on alienware only after batch6's workspace tests.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

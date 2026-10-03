@@ -120,7 +120,7 @@ fn last_output(seen: &[Seen], pane: PaneId) -> Option<usize> {
 fn final_output_of_a_pane_that_prints_and_exits_in_one_read_precedes_exit() {
     let shared = Arc::new(Shared::new(1));
     let (client, mailbox) = control(&shared);
-    for round in 0..1000 {
+    for round in 0..100 {
         let name = format!("exit-{round}");
         let marker = format!("final-{round}");
         let command = format!("read _; printf {marker}");

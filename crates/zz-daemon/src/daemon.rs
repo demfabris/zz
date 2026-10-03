@@ -4123,6 +4123,9 @@ fn write_direct_terminal(state: &mut OutboundState, frame: &[u8]) -> Option<usiz
 #[cfg(all(test, unix))]
 mod direct_write_tests;
 
+#[cfg(all(test, unix))]
+mod typed_burst_tests;
+
 fn close_outbound(state: &mut OutboundState) {
     #[cfg(unix)]
     if let Some(socket) = state.quiet_socket.take() {
@@ -7465,10 +7468,10 @@ impl Shared {
                     };
                 }
                 match resolution {
-                    CommandResolution::Canonical(name) | CommandResolution::Unimplemented(name) => {
+                    CommandResolution::Canonical(_) | CommandResolution::Unimplemented(_) => {
                         PreparedCommand {
                             invocation,
-                            canonical_name: Some(name.to_owned()),
+                            canonical_name,
                             alias_matched,
                             result: PreparedCommandResult::Ready,
                         }
@@ -19895,6 +19898,7 @@ impl Shared {
         session: SessionId,
         event_hooks_enabled: bool,
     ) -> Result<(MuxSnapshot, Vec<PendingHookEvent>), ServerError> {
+        let _wakes = zz_terminal::hold_actor_wakes();
         let mut inner = self.inner.lock();
         if !inner.engine.state.sessions.contains_key(&session)
             || inner.destroying_unattached.contains(&session)
@@ -20396,6 +20400,7 @@ impl Shared {
         client: ClientId,
         event_hooks_enabled: bool,
     ) -> (bool, Vec<PendingHookEvent>) {
+        let _wakes = zz_terminal::hold_actor_wakes();
         let mut inner = self.inner.lock();
         let sessions = inner
             .attached
@@ -34957,7 +34962,7 @@ struct ControlPaneOutput {
 }
 
 struct PendingControlOutput {
-    bytes: Arc<[u8]>,
+    bytes: shard_sink::ControlBytes,
     offset: usize,
     enqueued_at: Instant,
     seq: u64,
@@ -44523,6 +44528,7 @@ fn drain_control_pane_output(
     limit: usize,
     before: u64,
     now: Instant,
+    mut bytes: Vec<u8>,
 ) -> (u64, Vec<u8>) {
     let enqueued_at = pending
         .front()
@@ -44530,7 +44536,8 @@ fn drain_control_pane_output(
         .enqueued_at;
     let age_ms =
         u64::try_from(now.saturating_duration_since(enqueued_at).as_millis()).unwrap_or(u64::MAX);
-    let mut bytes = Vec::with_capacity(limit);
+    bytes.clear();
+    bytes.reserve(limit);
     while bytes.len() < limit {
         let Some(chunk) = pending.front_mut().filter(|chunk| chunk.seq < before) else {
             break;

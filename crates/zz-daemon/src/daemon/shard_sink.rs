@@ -351,8 +351,14 @@ pub(super) fn publish_loop_view(
     }
 }
 
+#[cfg(test)]
+#[path = "shard_sink_bytes2_tests.rs"]
+mod bytes2_tests;
+
 pub(super) struct ControlWake {
     pending: AtomicBool,
+    urgent: AtomicBool,
+    awake: AtomicBool,
     wake: AcceptWake,
     #[cfg(windows)]
     pump: std::sync::OnceLock<Box<dyn Fn() + Send + Sync>>,
@@ -362,9 +368,29 @@ impl ControlWake {
     pub(super) fn new() -> Self {
         Self {
             pending: AtomicBool::new(false),
+            urgent: AtomicBool::new(false),
+            awake: AtomicBool::new(false),
             wake: AcceptWake::new(),
             #[cfg(windows)]
             pump: std::sync::OnceLock::new(),
+        }
+    }
+
+    #[cfg(unix)]
+    pub(super) fn park(&self) -> bool {
+        self.awake.store(false, Ordering::SeqCst);
+        self.urgent.load(Ordering::SeqCst)
+    }
+
+    #[cfg(unix)]
+    pub(super) fn unpark(&self) {
+        self.awake.store(true, Ordering::SeqCst);
+    }
+
+    fn hurry(&self) {
+        self.urgent.store(true, Ordering::SeqCst);
+        if !self.awake.load(Ordering::SeqCst) {
+            self.wake.wake();
         }
     }
 
@@ -382,7 +408,7 @@ impl ControlWake {
         if self.pending.swap(true, Ordering::AcqRel) {
             return;
         }
-        self.wake.wake();
+        self.hurry();
         #[cfg(windows)]
         if let Some(pump) = self.pump.get() {
             pump();
@@ -391,7 +417,7 @@ impl ControlWake {
 
     fn kick(&self) {
         self.pending.store(true, Ordering::Release);
-        self.wake.wake();
+        self.hurry();
         #[cfg(windows)]
         if let Some(pump) = self.pump.get() {
             pump();
@@ -399,21 +425,41 @@ impl ControlWake {
     }
 
     pub(super) fn take(&self) -> bool {
+        self.urgent.store(false, Ordering::SeqCst);
         self.pending.swap(false, Ordering::AcqRel)
     }
 
     pub(super) fn again(&self, progressed: bool) {
         self.pending.store(true, Ordering::Release);
         if progressed {
-            self.wake.wake();
+            self.hurry();
         }
     }
 }
 
 pub(super) struct ControlFeed {
     state: Mutex<FeedState>,
-    delivery: Mutex<()>,
+    delivery: Mutex<Vec<Vec<u8>>>,
     wake: Arc<ControlWake>,
+}
+
+const SPARE_OUTPUT_BUFFERS: usize = 4;
+const MERGED_CHUNK_BYTES: usize = 8 * 1024;
+
+pub(super) enum ControlBytes {
+    Shared(Arc<[u8]>),
+    Merged(Vec<u8>),
+}
+
+impl std::ops::Deref for ControlBytes {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        match self {
+            Self::Shared(bytes) => bytes,
+            Self::Merged(bytes) => bytes,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -459,7 +505,7 @@ enum FeedDelivery {
 }
 
 impl FeedDelivery {
-    fn send(self, mailbox: &OutboundMailbox) -> bool {
+    fn send(self, mailbox: &OutboundMailbox, spare: &mut Vec<Vec<u8>>) -> bool {
         let payload = match self {
             Self::Output {
                 pane,
@@ -470,7 +516,18 @@ impl FeedDelivery {
             Self::Paused(pane) => EventPayload::PaneOutputState { pane, paused: true },
             Self::Line(send) => return send(mailbox),
         };
-        mailbox.enqueue_reliable(&Shared::event(payload))
+        let message = Shared::event(payload);
+        let sent = mailbox.enqueue_reliable(&message);
+        if let ProtocolMessage::Event(Event {
+            payload:
+                EventPayload::PaneOutput { bytes, .. } | EventPayload::PaneOutputAged { bytes, .. },
+            ..
+        }) = message
+            && spare.len() < SPARE_OUTPUT_BUFFERS
+        {
+            spare.push(bytes);
+        }
+        sent
     }
 }
 
@@ -550,8 +607,13 @@ impl FeedState {
                 if limit == 0 {
                     continue;
                 }
-                let (age_ms, bytes) =
-                    drain_control_pane_output(&mut entry.pending, limit, line.after, now);
+                let (age_ms, bytes) = drain_control_pane_output(
+                    &mut entry.pending,
+                    limit,
+                    line.after,
+                    now,
+                    Vec::new(),
+                );
                 deliveries.push(FeedDelivery::Output {
                     pane: *pane,
                     pause_after_ms: self.pause_after_ms,
@@ -572,12 +634,45 @@ impl FeedState {
         !self.lines.is_empty() || self.pending()
     }
 
+    fn merge(&mut self, pane: PaneId, bytes: &[u8]) -> bool {
+        let Some(last) = self.next.checked_sub(1) else {
+            return false;
+        };
+        if self.pause_after_ms.is_some() || self.lines.back().is_some_and(|line| line.after > last)
+        {
+            return false;
+        }
+        let Some(chunk) = self
+            .panes
+            .get_mut(&pane)
+            .and_then(|entry| entry.pending.back_mut())
+        else {
+            return false;
+        };
+        if chunk.seq != last
+            || chunk.offset != 0
+            || chunk.bytes.len() + bytes.len() > MERGED_CHUNK_BYTES
+        {
+            return false;
+        }
+        match &mut chunk.bytes {
+            ControlBytes::Merged(tail) => tail.extend_from_slice(bytes),
+            ControlBytes::Shared(shared) => {
+                let mut tail = Vec::with_capacity(MERGED_CHUNK_BYTES);
+                tail.extend_from_slice(shared);
+                tail.extend_from_slice(bytes);
+                chunk.bytes = ControlBytes::Merged(tail);
+            }
+        }
+        true
+    }
+
     fn queue(&mut self, pane: PaneId, bytes: Arc<[u8]>, enqueued_at: Instant) -> &mut FeedPane {
         let seq = self.next;
         self.next += 1;
         let entry = self.panes.entry(pane).or_default();
         entry.pending.push_back(PendingControlOutput {
-            bytes,
+            bytes: ControlBytes::Shared(bytes),
             offset: 0,
             enqueued_at,
             seq,
@@ -611,7 +706,7 @@ impl ControlFeed {
     pub(super) fn new(wake: Arc<ControlWake>) -> Self {
         Self {
             state: Mutex::new(FeedState::default()),
-            delivery: Mutex::new(()),
+            delivery: Mutex::new(Vec::new()),
             wake,
         }
     }
@@ -630,7 +725,11 @@ impl ControlFeed {
             return true;
         }
         let idle = !state.busy();
-        let entry = state.queue(pane, Arc::clone(bytes), Instant::now());
+        let entry = if state.merge(pane, bytes) {
+            state.panes.get_mut(&pane).expect("merged pane")
+        } else {
+            state.queue(pane, Arc::clone(bytes), Instant::now())
+        };
         if entry.pending.len() >= CONTROL_PENDING_CHUNKS_PER_PANE
             && let Some(waiter) = waiter
         {
@@ -736,7 +835,7 @@ impl ControlFeed {
     }
 
     pub(super) fn finish(&self, mailbox: &OutboundMailbox) {
-        let _delivery = self.delivery.lock();
+        let mut spare = self.delivery.lock();
         let mut deliveries = {
             let mut state = self.state.lock();
             let deliveries = state.settle(Instant::now());
@@ -750,7 +849,7 @@ impl ControlFeed {
             deliveries.retain(|delivery| matches!(delivery, FeedDelivery::Line(_)));
         }
         for delivery in deliveries {
-            if !delivery.send(mailbox) && mailbox.is_closed() {
+            if !delivery.send(mailbox, &mut spare) && mailbox.is_closed() {
                 return;
             }
         }
@@ -815,7 +914,7 @@ impl ControlFeed {
         pause_after_ms: Option<u64>,
         now: Instant,
     ) -> FeedPump {
-        let _delivery = self.delivery.lock();
+        let mut spare = self.delivery.lock();
         let mut outcome = FeedPump::default();
         loop {
             let Some((queued_bytes, queued_messages)) = mailbox.queued_reliable() else {
@@ -872,8 +971,13 @@ impl ControlFeed {
                         .max(CONTROL_WRITE_MINIMUM);
                     for pane in pending {
                         let entry = state.panes.get_mut(&pane).expect("pending pane");
-                        let (age_ms, bytes) =
-                            drain_control_pane_output(&mut entry.pending, limit, before, now);
+                        let (age_ms, bytes) = drain_control_pane_output(
+                            &mut entry.pending,
+                            limit,
+                            before,
+                            now,
+                            spare.pop().unwrap_or_default(),
+                        );
                         entry.release();
                         deliveries.push(FeedDelivery::Output {
                             pane,
@@ -891,7 +995,7 @@ impl ControlFeed {
             }
             outcome.progressed = true;
             for delivery in deliveries {
-                if !delivery.send(mailbox) && mailbox.is_closed() {
+                if !delivery.send(mailbox, &mut spare) && mailbox.is_closed() {
                     self.state.lock().close();
                     outcome.pending = false;
                     return outcome;

@@ -466,7 +466,7 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   YubiKey (`id_ed25519_sk`), so a new master needs the owner's touch. Every Linux step since then
   is NOT RUN and queued below ("Linux leg owed"). Trap: start a long unattended run only with a
   fresh master (`ssh -O check alienware`; it lasts 4 h from the touch).
-- DL4/DL5 fixes (workflow finished 12:30, 4 h 13 min in all):
+- DL4/DL5 fixes (workflow finished 12:30, 4 h 13 min in all; DL5 fix 11:07, DL4 fix 11:24):
   - DL4 fix `970ec32a`: `open_stdio` clears the direct socket and sends its refusal through the
     mailbox; frames queued on the loop thread stay on the loop's write path, so they cannot pass
     later reliable messages. Mac echo p50 shows no gain over 8 + 6 pairs (instructions per key
@@ -478,7 +478,7 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
     `%begin` are ordered lines. Mac probe, 4 busy panes: 110-145 MB/s with every reply answered
     (12 panes 81 MB/s); `control.output_mbps` 195.7, `control.latency` 0.0119 ms. Linux not
     rerun (ssh).
-- Merged 12:40: DL3+DL4 (`perf/deliver4` at `970ec32a`) and DL5 (`perf/deliver5` at `d0116461`),
+- Merged 12:31: DL3+DL4 (`perf/deliver4` at `970ec32a`) and DL5 (`perf/deliver5` at `d0116461`),
   both clean, as `3924f8fa`. Decision: DL4 proved the loop-busy and Linux echo gain the hold was
   for; Mac echo p50 did not move, recorded as not met. Mac batch4 checks running in the snapshot
   worktree `~/dev/zz-check` (full corpus, wire checks, A/B against `0d7dabf7`). Main is not
@@ -520,12 +520,144 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   `x86_64-unknown-linux-gnu`, glibc 2.35, libghostty cross-built). On `3924f8fa`, zz-daemon,
   zz-terminal, zz-mux, zz-protocol, zz-client, zz-tui and zz-cli: exit 0. It type-checks the
   Linux cfg paths; it does not run anything, so Linux tests and timings stay owed.
-- BYTES2 and ATTACH launched 13:05 as `w4-side-lanes` run `wf_d7e4fa99-820` (briefs `bytes2`,
+- BYTES2 and ATTACH launched 12:43 as `w4-side-lanes` run `wf_d7e4fa99-820` (briefs `bytes2`,
   `attach`; Mac-only, Linux clippy through the script above). BYTES2 merges perf/wave4 into
   `perf/bytes`, re-measures on top of DL5, and cuts the remaining per-byte cost (bulk `%output`
   escaping, the per-drain allocation, `AcceptWake::wake` holding its mutex across the mio wake).
   ATTACH counts daemon syscalls and context switches per attach with `PROC_PIDTASKINFO` against
   tmux on the Mac and cuts the extra ones (the Linux `attach.cpu.*` excess is kernel time).
+- ECHOMAP (`perf/echomap` `5a4fc6a6`, map `bench/perf/campaign/w4-echo-map.txt` plus probe
+  scripts, in review): Mac stage table at DL4's head: zz echo 192.9 us p50 against tmux 147.6.
+  zz's daemon work equals tmux's (PTY write to output write 54 us against 58, input path 45
+  against 42); the 45 us zz pays more is the attach client relay (32.5 us of client CPU and two
+  socket hops of about 9 us). tmux's client hands its tty to the server and sleeps through every
+  key. Per key: zz daemon 17.06 unix syscalls and 4.74 context switches, tmux server 11.68 and
+  3.70. On alienware the idle states exit slowly (C2 253 us, C3 1048 us; keys come 20-50 ms
+  apart), so quiet Linux echo measures serial wakes of sleeping threads: zz 8 (client, loop, shard,
+  pane, gather, shard, client, bench), tmux 4; loaded-host tmux echo is 0.273 ms against 0.931
+  quiet. Slices: EM1 idle panes read on the shard, no gather hop (Linux only, waits for ssh); EM2
+  the loop writes plain keys to the PTY itself; EM3 one wake-pipe read per drain; EM4 pinning or a
+  brief client spin (Linux experiment); EM5 a fast loop input path. EM1 + EM2 model at about
+  1.23-1.31 ms on Linux, under the 1.40 target only if the gather wake is worth 110 us or more.
+  Larger lever, not planned: the tmux model, where the daemon reads the attach client's tty
+  itself (removes the client's long-sleep wake and a socket hop per key).
+- ECHOIN launched 12:49 (run `wf_86fcf37c-003`, brief `echoin`, `~/dev/zz-echoin`): EM3, EM2 and
+  EM5 on the Mac, one commit each.
+- Trap: a SendMessage to an agent a workflow is still running starts a second copy of it from the
+  transcript (no StructuredOutput tool), and the workflow never records that agent's result. Both
+  copies wrote to `/tmp/zzpc/review-ctrlcpu`, and run `wf_bbdbd956-c4c` hung on ECHOMAP and the
+  CTRLCPU review; stopped at 13:00. Tell a running workflow agent nothing: wait for it, or stop the
+  workflow and continue by hand.
+- From that run by hand: ECHOMAP merged unreviewed as `7346e208` (bench/perf/campaign scripts and
+  the map only; ECHOIN checks EM2, EM3 and EM5 with numbers). CTRLCPU review (the copy's report):
+  no correctness or parity defect; Mac `control.instr_per_cmd` 68.9k -> 62.5k over 6 alternating
+  runs (tmux 159k), burst +20%, Linux-target clippy exit 0; one minor (the plain-line fuzz test's
+  alphabet is narrow), fix agent running. Same-on-base tmux gaps it found: argument errors lack
+  `parse error:`, ambiguous-command candidates sort by name instead of table order,
+  `display-message =x` without `-p` prints `%message` after `%end`.
+- CTRLCPU merged 13:06 as `dfdc1d4f` (lane `1ce6617e` + test fix `426a21c5`: the plain-line test
+  now draws from every printable byte plus odd whitespace, NUL and non-ASCII, 100k lines, both
+  expansion contexts and overlay modes; removing the `=` check, letting `#` through or taking
+  non-ASCII as word bytes each fail it). Checks on `dfdc1d4f`: fmt, clippy, Linux-target clippy
+  (zz-mux, zz-daemon, zz-cli) exit 0; zz-mux, zz-daemon and zz-cli tests 2640 passed, 23 failed at
+  Mac load about 25, all 23 pass alone. Linux burst series owed.
+- batch4 Mac (`3924f8fa`, DL3-DL5 merged, in `~/dev/zz-check`, 12:33-13:46, load 25-29 from
+  lanes): fmt, clippy, compat-check, web-build, iPad build, tui-screen-diff pass; workspace tests
+  5087 passed, the 2 failures pass alone; full corpus only the expected Mac reds (the four
+  `known/*`, census-hooks, if-shell-background-order, control-alias-prepare,
+  plugin-runtime-continuum, plugin-runtime-vim-tmux-navigator, resurrect-save,
+  source-file-byte-name, status-background-jobs), 245 clean. **attached-client fails on the zz
+  side, twice: typed input is dropped.** The popup-underlay step types a long `bash -c` script
+  through the attach client; the pane receives it with characters missing and the daemon logs
+  about 410 `rejected terminal PTY input command=key ... pending_commands=256` lines. The base
+  `0d7dabf7` passes that step with 0 rejections (it fails later at the known tmux-side flake), so
+  DL3, DL4 or DL5 introduced it. Lane ACFIX (`~/dev/zz-acfix`, `perf/acfix`, background agent
+  from 13:58) bisects and fixes; no main push until it lands. Quick A/B against `0d7dabf7`
+  (loaded, three pairs): `chatty.instr_per_s.flip` -5.5%, `echo.p99.idle` -53%; `control.output_mbps` per run pre
+  182/198/200, post 87/5/212 MB/s with tmux 37/9/44 in the post runs (host load: the third pair
+  is the clean one, 212 against 200); to watch: `chatty.instr_per_s.hidden` +22% with `chatty.tty_kibps.hidden` +56% (client
+  bytes, the rename luck NAMESCOST found).
+- ACFIX (`perf/acfix` `b05f2949`, 87 min, in review): the cause is DL4's first commit `4f74b200`
+  (bisect: DL3 alone, DL3 + wave4 and the DL5 tip pass with 0 rejections; `4f74b200` and the DL4
+  tip fail with 414-415). Before DL4 the sink skipped encoding while the client still had an
+  unwritten frame for that pane (`terminal_pending`), which coalesced frames for free; the direct
+  write drains at once, so the shard sent a frame after every echoed key (repro: about 500 frames
+  sent and 600 skipped before, 800+ sent and 0 skipped with DL4), and the actor took one queued
+  input per wake, so its drain rate fell below the typing rate and the 256-command cap (each
+  command charged its payload plus a 4096-byte floor) refused about 440 keys. Fix: `on_wake`
+  writes up to 256 queued inputs per wake inside a 1 ms turn (early stop on a PTY writer backlog
+  or a waiting control command); inputs past the 256 slots wait in order in an overflow in the
+  admission state (payload plus 256 bytes each), so only the 64 MiB budget refuses input. Not
+  backpressure: pausing the client socket would freeze that client's prefix keys and detach when
+  a pane stops reading, and tmux keeps reading the client and buffers pane input. Test
+  `typed_burst_tests.rs` (2400 keys; 1278 arrive on the merged head). attached-client popup step
+  passes 3 of 3 with 0 rejections; chatty instruction rows within 2% over three full rounds.
+  Note for ECHOIN's EM2 at merge: the loop's direct key write must also wait while the overflow
+  holds entries.
+- `97f123cb`: DL5's `final_output_of_a_pane_that_prints_and_exits_in_one_read_precedes_exit` runs
+  100 rounds instead of 1000 (1 s instead of 12.5 s alone; 60-100 s inside the full suite, where it
+  pushed 15-25 other daemon tests past their deadlines: the bimodal daemon suite since DL5). The
+  1000- and 4000-round runs belong in reviews.
+- ACFIX review (no blocker or major): a pane that never reads accepted 262,145 keys in 66 ms and
+  refused 3 at the 64 MiB budget (about 31 MB real); 7,000 mixed commands (keys, text, pastes,
+  prepared pastes, resizes, DSR replies) arrived in exact order; respawn gets a fresh admission
+  state; one shard with a 3,000-key flood moves a neighbour's echo p50 0.61 -> 0.98 ms (the 1 ms
+  turn). Three minors fixed by hand in `d276b12c`: an emptied overflow frees its allocation (it
+  kept the burst's peak, up to 16 MiB per pane), the refusal log prints the payload and the byte
+  limit (the slot count no longer limits), the docs say an overflow entry keeps its 256-byte
+  charge in a slot. Merged as `4e32204d`. Behaviour change worth knowing: a pane that stops
+  reading now holds up to about 262k typed keys and a later Ctrl-C waits behind them, as tmux's
+  unbounded buffer does; before, zz dropped everything past 256.
+- BYTES2 merged as `537575b6` (`perf/bytes`: `312f8923` byte fields, a perf/wave4 merge,
+  `30de86ba` the per-byte cuts, review fix `c14ca7ee`): `%output` escapes rendered in bulk, the
+  per-drain allocation gone, `AcceptWake::wake` no longer holds its mutex across the mio wake, the
+  control feed skips the waker while the loop is awake, and small chunks merge into one growable
+  tail (one copy per byte). Mac, alternating against perf/wave4 `30a64536`: daemon instructions per
+  streamed byte 94.7 -> 55.8 (-41%), stream probe 201 -> 239 MB/s, `control.output_mbps` 197.6 ->
+  211.5 over six pairs, `control.latency` 0.0142 -> 0.0136 ms. ATTACH rewrites the same lines in
+  `AcceptWake::wake` and `EventLoop::poll_ready`: keep both (the waker cloned out of the mutex and
+  woken through ATTACH's `wake_loop`; `clear_loop_again()` first in poll_ready, then park, poll,
+  unpark). Checks on `537575b6` (ACFIX + BYTES) running in the snapshot `~/dev/zz-check` (the first
+  ACFIX quick check was stopped: the BYTES merge landed in its tree mid-run, the recorded trap).
+- Checks on `537575b6` (ACFIX + BYTES2, snapshot `~/dev/zz-check`, 15:44-15:52): fmt, clippy,
+  Linux-target clippy (zz-terminal, zz-daemon, zz-protocol, zz-client), web-build pass; tests of
+  those crates 2458 passed, 19 load failures, all 19 pass alone; attached-client 0 rejected keys,
+  only the known tmux-side flake.
+- ATTACH (`perf/attach`: `bebe7ffc` + fix `2ac0d8dd`, workflow `wf_d7e4fa99-820` done 15:55):
+  the loop makes one waker call per turn for its own wakes (`wake_loop`, `LoopThread` in
+  transport.rs); `zz_terminal::hold_actor_wakes()` in `attach_collect_event_hooks` and
+  `detach_client_state` defers shard wakes so a shard wakes once per pane for its resize, view and
+  stream commands; `drain_wake_pipe` stops at the first short read (ECHOIN's EM3 makes the same
+  change). Mac, medians of 10 interleaved attach+detach: daemon unix syscalls p1 75 -> 58, p4 163
+  -> 111 (tmux 212 and 220), context switches p4 29 -> 23.5; quick gate `attach.cpu` p1 -39%, p4
+  -10%, `attach.instr` -2%/-5%, wire bytes unchanged. Probe `bench/perf/campaign/w4-attach-
+  syscalls.py` + interposer `w4-attach-syscount.c`. The review found a blocker: inside a hold a
+  blocking send into a pane's one-slot control channel waited for a shard that never got its wake,
+  so detach or switch-client from copy mode on an idle pane hung the daemon (reproduced); fixed by
+  releasing held wakes before any blocking send and before a request's wait, with three tests that
+  fail on the lane head. Because a hold can hang the daemon, a second review focused only on hangs
+  runs before the merge (15:57).
+- ATTACH hang review: safe. Both holds run on the loop thread, hooks run after the hold drops,
+  every wait inside a hold either never needs the shard or now writes the held wakes first; a
+  20-pane probe set (flooding pane, a pane that never reads, pipe-pane and control clients that
+  never read, hooks with run-shell, display-message and capture-pane, copy mode, choose-tree, two
+  clients, kill-pane during attach) never hung, and the pre-fix build hangs on the idle-pane
+  scenarios. Minor fixed in `61a1f794`: `WakeHold` is `!Send` (a hold dropped on another thread
+  would leave its creator deferring wakes for good). Latent, not fixed: `wait_for_identity` (tests
+  only) polls without releasing held wakes. Parity note from the probe: in zz `C-b d` inside
+  choose-tree does not detach; tmux does (key routing, not wakes; check on main).
+- ATTACH merged as `daf82ee6`; conflicts with BYTES2 resolved as planned (`AcceptWake::wake`
+  clones the waker out of the mutex and wakes through `wake_loop`; `poll_ready` runs
+  `clear_loop_again()`, then park, poll, unpark). Checks in `~/dev/zz-check` running.
+- ECHOIN stalled: the agent's transcript stopped at 14:26 (no processes, no report) with its three
+  commits in place (`c5afe7b8` EM3, `04e2b776` EM2, `6e8ba2d2` EM5). Mac numbers it left: daemon
+  unix syscalls per key 17.4 -> 13.3, context switches 4.2 -> 3.2, shard wakes per key 1.0, socket
+  read -> dispatch 13.3 us, dispatch -> PTY write 7.3 us; four alternating pairs: echo.p50.idle
+  -3.5%, chatty.instr_per_s.flip +2.7%; compat 48 clean, smoke/copy-mode-resize-freeze red (not in
+  the base log). Workflow stopped at 16:45 and relaunched as run `wf_c2135366-8ce` with brief
+  `/tmp/zzpc/w4/echoin2.md`: merge perf/wave4 (ACFIX's overflow and ATTACH's hold and
+  short-read drain touch the same code; EM2 must wait behind the overflow and stay correct inside
+  a hold), then the remaining gates, review and fix.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

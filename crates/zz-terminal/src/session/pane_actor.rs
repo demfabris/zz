@@ -920,6 +920,17 @@ impl PaneActor {
             .then_some(self.child_watch.pid)
     }
 
+    fn next_batched_input(&self) -> Option<QueuedInput> {
+        #[cfg(unix)]
+        if self.writer.has_pending() {
+            return None;
+        }
+        if !self.control_rx.is_empty() {
+            return None;
+        }
+        self.input_rx.commands.try_recv().ok()
+    }
+
     #[cfg(unix)]
     pub(super) fn queued_input_ready(&self) -> bool {
         !self.writer.has_pending() && !self.input_rx.commands.is_empty()
@@ -973,9 +984,11 @@ impl PaneActor {
 
     pub(super) fn on_wake(&mut self, wakeup: Wake) -> Result<bool, WorkerError> {
         let mut input_permit = None;
+        let mut input_started = None;
         let (commands, wakeup) = match wakeup {
             Wake::Input(QueuedInput { command, permit }) => {
                 input_permit = Some(permit);
+                input_started = Some(Instant::now());
                 self.echo.open();
                 (take_control_slot(&self.slot, Some(command), false), None)
             }
@@ -985,6 +998,22 @@ impl PaneActor {
         for command in commands {
             if !self.on_command(command)? {
                 return Ok(false);
+            }
+        }
+        if let Some(started) = input_started {
+            let mut batched = 1;
+            while batched < MAX_PENDING_PTY_INPUT_COMMANDS
+                && started.elapsed() < PTY_DRAIN_TURN_TIME
+                && let Some(QueuedInput { command, permit }) = self.next_batched_input()
+            {
+                input_permit = Some(permit);
+                batched += 1;
+                self.echo.open();
+                for command in take_control_slot(&self.slot, Some(command), false) {
+                    if !self.on_command(command)? {
+                        return Ok(false);
+                    }
+                }
             }
         }
         match wakeup {

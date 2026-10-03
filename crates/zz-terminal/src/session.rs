@@ -120,6 +120,92 @@ impl Drop for RoundTripGuard {
     }
 }
 
+#[cfg(unix)]
+type HeldWake = (Arc<std::os::fd::OwnedFd>, Option<Arc<AtomicBool>>);
+
+#[cfg(unix)]
+thread_local! {
+    static HELD_WAKES: RefCell<Option<Vec<HeldWake>>> = const { RefCell::new(None) };
+}
+
+#[must_use]
+pub fn hold_actor_wakes() -> WakeHold {
+    #[cfg(unix)]
+    {
+        WakeHold(
+            HELD_WAKES.with_borrow_mut(|held| {
+                if held.is_some() {
+                    return false;
+                }
+                *held = Some(Vec::new());
+                true
+            }),
+            std::marker::PhantomData,
+        )
+    }
+    #[cfg(not(unix))]
+    WakeHold(std::marker::PhantomData)
+}
+
+pub struct WakeHold(#[cfg(unix)] bool, std::marker::PhantomData<*const ()>);
+
+#[cfg(unix)]
+impl Drop for WakeHold {
+    fn drop(&mut self) {
+        if self.0 {
+            let held = HELD_WAKES.with_borrow_mut(Option::take);
+            write_held_wakes(held.unwrap_or_default());
+        }
+    }
+}
+
+#[cfg(unix)]
+fn hold_wake(pipe: &Arc<std::os::fd::OwnedFd>, pending: Option<&Arc<AtomicBool>>) -> bool {
+    HELD_WAKES
+        .try_with(|held| {
+            let mut held = held.borrow_mut();
+            let Some(held) = held.as_mut() else {
+                return false;
+            };
+            if !held.iter().any(|(seen, _)| Arc::ptr_eq(seen, pipe)) {
+                held.push((Arc::clone(pipe), pending.cloned()));
+            }
+            true
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(unix)]
+fn release_held_wakes() {
+    let held = HELD_WAKES
+        .try_with(|held| held.borrow_mut().as_mut().map(std::mem::take))
+        .ok()
+        .flatten();
+    write_held_wakes(held.unwrap_or_default());
+}
+
+#[cfg(unix)]
+fn write_held_wakes(held: Vec<HeldWake>) {
+    for (pipe, pending) in held {
+        wake_pipe(&pipe, pending.as_ref());
+    }
+}
+
+#[cfg(unix)]
+fn wake_pipe(pipe: &std::os::fd::OwnedFd, pending: Option<&Arc<AtomicBool>>) {
+    if pending.is_some_and(|pending| pending.swap(true, Ordering::AcqRel)) {
+        return;
+    }
+    match write_actor_wake(|| rustix::io::write(pipe, &[1_u8])) {
+        Ok(()) | Err(rustix::io::Errno::PIPE) => {}
+        Err(error) => log::error!("failed to wake terminal actor: {error}"),
+    }
+}
+
+#[cfg(all(test, unix))]
+#[path = "session/wake_hold_tests.rs"]
+mod wake_hold_tests;
+
 use mode_revision::{ModeRevision, ModeSelection};
 use pane_actor::PaneActor;
 
@@ -196,6 +282,7 @@ const PTY_WRITE_RETAIN_BYTES: usize = 64 * 1024;
 const MAX_PENDING_PTY_INPUT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_PENDING_PTY_INPUT_COMMANDS: usize = 256;
 const PTY_INPUT_COMMAND_FLOOR_BYTES: usize = 4 * 1024;
+const PTY_INPUT_OVERFLOW_ENTRY_BYTES: usize = 256;
 const PENDING_PASTE_WINDOW: Duration = Duration::from_secs(5);
 const IDLE_SLEEP: Duration = Duration::from_hours(1);
 const MAX_PTY_RESPONSE_BYTES: usize = 1024 * 1024;
@@ -2915,12 +3002,11 @@ impl TerminalSession {
         if let Err(crossbeam_channel::TrySendError::Full(command)) = &result {
             let (pending_commands, pending_bytes) = self.commands.pending_input();
             log::warn!(
-                "rejected terminal PTY input command={} charge_bytes={} pending_commands={} pending_bytes={} limits_commands={} limits_bytes={}",
+                "rejected terminal PTY input command={} payload_bytes={} pending_commands={} pending_bytes={} limit_bytes={}",
                 command.name(),
-                command.pty_input_bytes().unwrap_or(0),
+                command.pty_input_payload().unwrap_or(0),
                 pending_commands,
                 pending_bytes,
-                MAX_PENDING_PTY_INPUT_COMMANDS,
                 MAX_PENDING_PTY_INPUT_BYTES,
             );
         }
@@ -3296,8 +3382,8 @@ impl Command {
         }
     }
 
-    fn pty_input_bytes(&self) -> Option<usize> {
-        let payload = match self {
+    fn pty_input_payload(&self) -> Option<usize> {
+        Some(match self {
             Self::Text { text, .. } => text.len(),
             Self::Key { input, .. } => input.text.as_deref().map_or(0, str::len),
             Self::ViewAction { action, .. } => match action {
@@ -3310,8 +3396,12 @@ impl Command {
             Self::PastePreparedBytes { bytes, .. } => bytes.len(),
             Self::PendingPasteOpened { .. } => 0,
             _ => return None,
-        };
-        Some(payload.saturating_add(PTY_INPUT_COMMAND_FLOOR_BYTES))
+        })
+    }
+
+    fn pty_input_bytes(&self) -> Option<usize> {
+        self.pty_input_payload()
+            .map(|payload| payload.saturating_add(PTY_INPUT_COMMAND_FLOOR_BYTES))
     }
 }
 
@@ -3324,18 +3414,71 @@ struct InputAdmission {
     commands: usize,
     bytes: usize,
     closed: bool,
+    overflow: VecDeque<(Command, usize)>,
+    refill: Option<Sender<QueuedInput>>,
+}
+
+impl InputAdmission {
+    fn refill(&mut self, admission: &Arc<Mutex<Self>>) {
+        if self.closed {
+            self.close();
+            return;
+        }
+        let Some((command, bytes)) = self.overflow.pop_front() else {
+            return;
+        };
+        let queued = QueuedInput {
+            command,
+            permit: InputPermit {
+                admission: Some(Arc::clone(admission)),
+                bytes,
+            },
+        };
+        let sender = self
+            .refill
+            .as_ref()
+            .expect("an input overflow keeps its refill sender");
+        match sender.try_send(queued) {
+            Ok(()) => self.commands += 1,
+            Err(error) => {
+                let mut queued = error.into_inner();
+                queued.permit.admission = None;
+                self.bytes = self.bytes.saturating_sub(bytes);
+                log::warn!(
+                    "rejected terminal PTY input command={} from the overflow",
+                    queued.command.name()
+                );
+            }
+        }
+        if self.overflow.is_empty() {
+            self.overflow = VecDeque::new();
+            self.refill = None;
+        }
+    }
+
+    fn close(&mut self) {
+        self.closed = true;
+        for (_, bytes) in self.overflow.drain(..) {
+            self.bytes = self.bytes.saturating_sub(bytes);
+        }
+        self.refill = None;
+    }
 }
 
 struct InputPermit {
-    admission: Arc<Mutex<InputAdmission>>,
+    admission: Option<Arc<Mutex<InputAdmission>>>,
     bytes: usize,
 }
 
 impl Drop for InputPermit {
     fn drop(&mut self) {
-        let mut admission = self.admission.lock();
-        admission.commands = admission.commands.saturating_sub(1);
-        admission.bytes = admission.bytes.saturating_sub(self.bytes);
+        let Some(admission) = self.admission.take() else {
+            return;
+        };
+        let mut state = admission.lock();
+        state.commands = state.commands.saturating_sub(1);
+        state.bytes = state.bytes.saturating_sub(self.bytes);
+        state.refill(&admission);
     }
 }
 
@@ -3361,7 +3504,7 @@ impl std::ops::Deref for InputReceiver {
 
 impl Drop for InputReceiver {
     fn drop(&mut self) {
-        self.admission.lock().closed = true;
+        self.admission.lock().close();
         while self.commands.try_recv().is_ok() {}
     }
 }
@@ -3385,9 +3528,22 @@ impl InputSender {
             if admission.closed {
                 return Err(crossbeam_channel::TrySendError::Disconnected(command));
             }
-            if admission.commands >= self.max_commands
-                || bytes > self.max_bytes.saturating_sub(admission.bytes)
-            {
+            if admission.commands >= self.max_commands || !admission.overflow.is_empty() {
+                let charge = command
+                    .pty_input_payload()
+                    .unwrap_or(0)
+                    .saturating_add(PTY_INPUT_OVERFLOW_ENTRY_BYTES);
+                if charge > self.max_bytes.saturating_sub(admission.bytes) {
+                    return Err(crossbeam_channel::TrySendError::Full(command));
+                }
+                admission.bytes += charge;
+                admission.overflow.push_back((command, charge));
+                admission
+                    .refill
+                    .get_or_insert_with(|| self.commands.clone());
+                return Ok(());
+            }
+            if bytes > self.max_bytes.saturating_sub(admission.bytes) {
                 return Err(crossbeam_channel::TrySendError::Full(command));
             }
             admission.commands += 1;
@@ -3395,7 +3551,7 @@ impl InputSender {
             let queued = QueuedInput {
                 command,
                 permit: InputPermit {
-                    admission: Arc::clone(&self.admission),
+                    admission: Some(Arc::clone(&self.admission)),
                     bytes,
                 },
             };
@@ -3421,7 +3577,10 @@ impl InputSender {
 
     fn pending(&self) -> (usize, usize) {
         let admission = self.admission.lock();
-        (admission.commands, admission.bytes)
+        (
+            admission.commands + admission.overflow.len(),
+            admission.bytes,
+        )
     }
 }
 
@@ -3495,18 +3654,10 @@ impl ActorWake {
             let _ = channel.try_send(());
         }
         #[cfg(unix)]
-        if let Some(pipe) = &self.pipe {
-            if self
-                .pending
-                .as_ref()
-                .is_some_and(|pending| pending.swap(true, Ordering::AcqRel))
-            {
-                return;
-            }
-            match write_actor_wake(|| rustix::io::write(&**pipe, &[1_u8])) {
-                Ok(()) | Err(rustix::io::Errno::PIPE) => {}
-                Err(error) => log::error!("failed to wake terminal actor: {error}"),
-            }
+        if let Some(pipe) = &self.pipe
+            && !hold_wake(pipe, self.pending.as_ref())
+        {
+            wake_pipe(pipe, self.pending.as_ref());
         }
     }
 }
@@ -3751,11 +3902,17 @@ impl CommandSender {
             input.try_send(command)
         } else {
             let counted = self.counts_in_flight(&command);
-            let result = self
-                .queues
-                .control
-                .send(command)
-                .map_err(|error| crossbeam_channel::TrySendError::Disconnected(error.0));
+            let result = match self.queues.control.try_send(command) {
+                Err(crossbeam_channel::TrySendError::Full(command)) => {
+                    #[cfg(unix)]
+                    release_held_wakes();
+                    self.queues
+                        .control
+                        .send(command)
+                        .map_err(|error| crossbeam_channel::TrySendError::Disconnected(error.0))
+                }
+                result => result,
+            };
             if counted && result.is_err() {
                 self.abandon_in_flight();
             }
@@ -3786,7 +3943,17 @@ impl CommandSender {
             })
         } else {
             let counted = self.counts_in_flight(&command);
-            let result = self.queues.control.send_timeout(command, timeout);
+            let result = match self.queues.control.try_send(command) {
+                Ok(()) => Ok(()),
+                Err(crossbeam_channel::TrySendError::Full(command)) => {
+                    #[cfg(unix)]
+                    release_held_wakes();
+                    self.queues.control.send_timeout(command, timeout)
+                }
+                Err(crossbeam_channel::TrySendError::Disconnected(command)) => {
+                    Err(crossbeam_channel::SendTimeoutError::Disconnected(command))
+                }
+            };
             if counted && result.is_err() {
                 self.abandon_in_flight();
             }
@@ -3863,6 +4030,8 @@ impl CommandSender {
                     ActorRequestError::ActorStopped
                 }
             })?;
+        #[cfg(unix)]
+        release_held_wakes();
         crossbeam_channel::select_biased! {
             recv(response) -> reply => reply.map_err(|_| ActorRequestError::ActorStopped),
             recv(self.queues.liveness) -> _ => {
@@ -13164,27 +13333,16 @@ fn watch_child_linux(
 
 #[cfg(unix)]
 fn drain_wake_pipe(wake_rx: &std::os::fd::OwnedFd) -> Result<(), WorkerError> {
-    drain_wake_reads(|drained| rustix::io::read(wake_rx, drained))
-}
-
-#[cfg(unix)]
-fn drain_wake_reads(
-    mut read: impl FnMut(&mut [u8]) -> Result<usize, rustix::io::Errno>,
-) -> Result<(), WorkerError> {
     let mut drained = [0_u8; 64];
     loop {
-        match read(&mut drained) {
-            Ok(count) if count < drained.len() => return Ok(()),
-            Err(rustix::io::Errno::AGAIN) => return Ok(()),
+        match rustix::io::read(wake_rx, &mut drained) {
+            Ok(0) | Err(rustix::io::Errno::AGAIN) => return Ok(()),
+            Ok(read) if read < drained.len() => return Ok(()),
             Ok(_) | Err(rustix::io::Errno::INTR) => {}
             Err(error) => return Err(WorkerError::Io(error.into())),
         }
     }
 }
-
-#[cfg(all(test, unix))]
-#[path = "session/wake_drain_echoin_tests.rs"]
-mod wake_drain_echoin_tests;
 
 #[cfg(not(unix))]
 fn wait_for_wake(
@@ -17521,20 +17679,67 @@ mod tests {
     }
 
     #[test]
-    fn pty_input_admission_is_count_and_byte_bounded() {
+    fn pty_input_past_the_slot_cap_waits_in_order_and_stays_byte_bounded() {
+        assert!(
+            std::mem::size_of::<(Command, usize)>() + std::mem::size_of::<KeyInput>()
+                <= PTY_INPUT_OVERFLOW_ENTRY_BYTES
+        );
         let (input, pending) = input_channel_with_limits(2, PTY_INPUT_COMMAND_FLOOR_BYTES * 4);
-        let small = || Command::PendingPasteOpened { token: 1 };
-        input.try_send(small()).expect("first input");
-        input.try_send(small()).expect("second input");
+        for token in 1..=5 {
+            input
+                .try_send(Command::PendingPasteOpened { token })
+                .expect("input past the slot cap");
+        }
+        assert_eq!(pending.len(), 2);
+        assert_eq!(
+            input.pending(),
+            (
+                5,
+                PTY_INPUT_COMMAND_FLOOR_BYTES * 2 + PTY_INPUT_OVERFLOW_ENTRY_BYTES * 3
+            )
+        );
+        let mut order = Vec::new();
+        while let Ok(queued) = pending.try_recv() {
+            let Command::PendingPasteOpened { token } = queued.command else {
+                panic!("unexpected input");
+            };
+            order.push(token);
+            if token == 4 {
+                input
+                    .try_send(Command::PendingPasteOpened { token: 6 })
+                    .expect("input behind the overflow");
+            }
+        }
+        assert_eq!(order, [1, 2, 3, 4, 5, 6]);
+        assert_eq!(input.pending(), (0, 0));
+        input
+            .try_send(Command::PendingPasteOpened { token: 7 })
+            .expect("drained overflow returns to the slots");
+        assert_eq!(pending.len(), 1);
+        drop(pending);
+        assert_eq!(input.pending(), (0, 0));
+
+        let (input, pending) = input_channel_with_limits(
+            1,
+            PTY_INPUT_COMMAND_FLOOR_BYTES + PTY_INPUT_OVERFLOW_ENTRY_BYTES * 2,
+        );
+        for token in 1..=3 {
+            input
+                .try_send(Command::PendingPasteOpened { token })
+                .expect("input within the byte budget");
+        }
         assert!(matches!(
-            input.try_send(small()),
+            input.try_send(Command::PendingPasteOpened { token: 4 }),
             Err(crossbeam_channel::TrySendError::Full(
-                Command::PendingPasteOpened { .. }
+                Command::PendingPasteOpened { token: 4 }
             ))
         ));
-        assert_eq!(input.pending(), (2, PTY_INPUT_COMMAND_FLOOR_BYTES * 2));
-        drop(pending.recv().expect("release first input"));
-        input.try_send(small()).expect("count released");
+        drop(pending);
+        assert_eq!(input.pending(), (0, 0));
+        assert!(matches!(
+            input.try_send(Command::PendingPasteOpened { token: 5 }),
+            Err(crossbeam_channel::TrySendError::Disconnected(_))
+        ));
 
         let (input, pending) = input_channel_with_limits(8, PTY_INPUT_COMMAND_FLOOR_BYTES * 2);
         assert!(matches!(

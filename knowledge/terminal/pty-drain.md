@@ -4,7 +4,7 @@ title: PTY drain topology (the IO fast path)
 description: How macOS keeps its tuned inline PTY actor while Linux overlaps a bounded gather stage with VT parsing; includes the probe and benchmark results behind each platform choice.
 resource: crates/zz-terminal/src/session.rs
 tags: [pty, throughput, drain, spin-bridge, poll, benchmark, session]
-timestamp: 2026-10-02T00:00:00Z
+timestamp: 2026-10-03T00:00:00Z
 ---
 
 # Overview
@@ -317,6 +317,16 @@ a backlog, while PTY reads, resize, capture, and pure view actions keep running.
 an echoing terminal or a full-duplex child consume input without deadlocking behind its own output.
 Output views and non-Unix targets use `ActorWake::none()`: the same call sites, zero cfg noise.
 
+A daemon path can hold these bytes with `hold_actor_wakes()`. Inside the hold, a notify marks its
+pipe and returns, and the hold writes one byte per pipe when it ends. A send that finds the
+one-command control queue full writes the held bytes before it blocks, and a `request` writes them
+after its own command is queued and before it waits for the reply, so neither sleeps behind a wake
+its own hold kept back. A hold never
+touches the shard's pending flag, so wakes from other threads still go out at once. Attach
+(`attach_collect_event_hooks`) and detach (`detach_client_state`) hold, so a shard wakes once for the
+resize, view, and stream commands of its pane instead of once per command. The drain stops at the
+first short read: a pipe returns every queued byte, so the second read could only return `EAGAIN`.
+
 ## The 16 ms gate (bookkeeping moved out of the hot loop)
 
 v2's other mistake was running per-burst bookkeeping per kilobyte. Now `output_pending`
@@ -358,9 +368,12 @@ it . so making the drain fd nonblocking makes the *writer* nonblocking too. `Pty
 wraps a second dup and keeps a FIFO byte buffer. Each `Write` queues the complete slice, tries up to
 1 MiB per flush attempt, and retains the remainder on `EAGAIN`; it never reports a silent partial write.
 While bytes remain, the actor stops consuming further PTY input but continues PTY output and control work.
-The input sender reserves each whole command before enqueueing it, with caps of 256 commands and 64
-MiB including a 4 KiB per-command floor, so producers never block behind the writer and a rejected
-command contributes no bytes. The actor also leaves libghostty-generated replies in the bounded
+The input sender reserves each whole command before enqueueing it, so producers never block behind
+the writer. The first 256 commands take channel slots charged at their payload plus a 4 KiB floor;
+later ones wait in order in an overflow charged at their payload plus 256 bytes (kept when they reach a slot), and each freed slot
+pulls the oldest one in. Only the 64 MiB budget rejects a command, and a rejected command contributes
+no bytes. Each input wake writes up to 256 queued commands within the 1 ms drain turn, so a typed
+burst costs one read and one published frame per turn rather than one per key. The actor also leaves libghostty-generated replies in the bounded
 `PtyEffects` buffer until the writer drains. Symmetric gotcha to remember: you cannot make the reader
 nonblocking "privately".
 

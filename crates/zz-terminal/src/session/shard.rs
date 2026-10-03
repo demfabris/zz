@@ -429,7 +429,7 @@ impl Shard {
         if !pty_gather_enabled() {
             return Ok(None);
         }
-        if self.gather.is_none() {
+        if self.gather.as_ref().is_none_or(PtyGather::stopped) {
             self.gather = Some(PtyGather::start(format!("zz-pty-gather-{}", self.index))?);
         }
         Ok(self.gather.clone())

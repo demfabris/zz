@@ -174,10 +174,13 @@ reads reached 124–152 MB/s, the plain gather 169–205, and one blocking reade
 the shard filled one in the last 10 ms, the gather lends every busy pane but one to a thread of
 its own, at most three per shard, named like the gather. A lent pane takes its buffers, its
 partial batch and its bridge state along, and its lease wakes whichever thread holds it, so
-buffer returns and exits still land. The helper hands the pane back and exits after 100 ms
-without a full buffer, so a quiet shard runs one gather thread. Single-shard probe, four busy
-ASCII panes: 242.5 MB/s, against 247.4 for the per-pane readers before the gather and 177.3
-for the gather alone.
+buffer returns and exits still land. The helper hands the pane back after 100 ms without a full
+buffer and stays for one more second, so a pane that bursts beside a busy one goes back to the
+same thread instead of a new one each burst; only then does it exit, so a quiet shard runs one
+gather thread. A helper never lends panes itself, even when its home gather is gone, and a shard
+whose home gather stopped starts a new one for its next pane. Single-shard probe, four busy
+ASCII panes: 242.5 MB/s, against 247.4 for the per-pane readers before the gather and 177.3 for
+the gather alone.
 
 ```mermaid
 flowchart LR

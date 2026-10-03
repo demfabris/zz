@@ -14,6 +14,10 @@ mod tests;
 #[path = "control_stdio_burst_tests.rs"]
 mod burst_tests;
 
+#[cfg(test)]
+#[path = "control_stdio_bytes2_tests.rs"]
+mod bytes2_tests;
+
 const STDOUT_HIGH: usize = 256 * 1024;
 const INPUT_READ_LIMIT: usize = 256 * 1024;
 const DEFERRED_OUTPUT: usize = 1024;
@@ -97,18 +101,43 @@ fn messages(frame: &OutboundFrame) -> Option<Vec<ProtocolMessage>> {
     }
 }
 
-fn append_output_bytes(line: &mut Vec<u8>, bytes: &[u8]) {
-    for byte in bytes {
-        if *byte < 0x20 || *byte == b'\\' {
-            line.extend([
-                b'\\',
-                b'0' + (byte >> 6),
-                b'0' + ((byte >> 3) & 7),
-                b'0' + (byte & 7),
-            ]);
-        } else {
-            line.push(*byte);
+const fn escapes(byte: u8) -> bool {
+    byte < 0x20 || byte == b'\\'
+}
+
+fn plain_run(bytes: &[u8]) -> usize {
+    let mut run = 0;
+    for block in bytes.chunks_exact(16) {
+        if block
+            .iter()
+            .fold(false, |found, byte| found | escapes(*byte))
+        {
+            break;
         }
+        run += 16;
+    }
+    run + bytes[run..]
+        .iter()
+        .position(|byte| escapes(*byte))
+        .unwrap_or(bytes.len() - run)
+}
+
+fn append_output_bytes(line: &mut Vec<u8>, bytes: &[u8]) {
+    line.reserve(bytes.len());
+    let mut rest = bytes;
+    loop {
+        let run = plain_run(rest);
+        line.extend_from_slice(&rest[..run]);
+        let Some(&byte) = rest.get(run) else {
+            return;
+        };
+        line.extend_from_slice(&[
+            b'\\',
+            b'0' + (byte >> 6),
+            b'0' + ((byte >> 3) & 7),
+            b'0' + (byte & 7),
+        ]);
+        rest = &rest[run + 1..];
     }
 }
 

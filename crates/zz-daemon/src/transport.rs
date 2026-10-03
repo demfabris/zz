@@ -77,10 +77,13 @@ impl AcceptWake {
 
     pub(crate) fn wake(&self) {
         #[cfg(all(unix, feature = "daemon"))]
-        if let Some(waker) = self.waker.lock().as_ref()
-            && let Err(error) = waker.wake()
         {
-            log::warn!("could not wake the mux loop: {error}");
+            let waker = self.waker.lock().clone();
+            if let Some(waker) = waker
+                && let Err(error) = waker.wake()
+            {
+                log::warn!("could not wake the mux loop: {error}");
+            }
         }
     }
 }

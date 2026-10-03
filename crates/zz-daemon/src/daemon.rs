@@ -44432,6 +44432,7 @@ fn drain_control_pane_output(
     limit: usize,
     before: u64,
     now: Instant,
+    mut bytes: Vec<u8>,
 ) -> (u64, Vec<u8>) {
     let enqueued_at = pending
         .front()
@@ -44439,7 +44440,8 @@ fn drain_control_pane_output(
         .enqueued_at;
     let age_ms =
         u64::try_from(now.saturating_duration_since(enqueued_at).as_millis()).unwrap_or(u64::MAX);
-    let mut bytes = Vec::with_capacity(limit);
+    bytes.clear();
+    bytes.reserve(limit);
     while bytes.len() < limit {
         let Some(chunk) = pending.front_mut().filter(|chunk| chunk.seq < before) else {
             break;

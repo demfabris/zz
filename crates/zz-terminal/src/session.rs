@@ -3502,6 +3502,14 @@ impl std::ops::Deref for InputReceiver {
     }
 }
 
+impl InputReceiver {
+    #[cfg(unix)]
+    fn is_idle(&self) -> bool {
+        let admission = self.admission.lock();
+        admission.commands == 0 && admission.overflow.is_empty()
+    }
+}
+
 impl Drop for InputReceiver {
     fn drop(&mut self) {
         self.admission.lock().close();

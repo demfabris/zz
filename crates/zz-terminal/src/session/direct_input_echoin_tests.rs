@@ -491,13 +491,18 @@ fn a_selection_or_copy_mode_keeps_keys_on_the_actor() {
 
 struct BareActor {
     actor: PaneActor,
-    _commands: CommandSender,
+    commands: CommandSender,
+    queued: Receiver<QueuedInput>,
     _events: TerminalEvents,
 }
 
 fn bare_actor(script: &str) -> BareActor {
+    bare_actor_with(script, input_channel())
+}
+
+fn bare_actor_with(script: &str, (input, input_rx): (InputSender, InputReceiver)) -> BareActor {
     let (control, control_rx) = command_channel();
-    let (input, input_rx) = input_channel();
+    let queued = input_rx.commands.clone();
     let (wake, wake_rx) = actor_wake();
     let slot = Arc::new(Mutex::new(ControlSlot::default()));
     let event_state = Arc::new(EventQueueState::new());
@@ -534,7 +539,7 @@ fn bare_actor(script: &str) -> BareActor {
     .expect("pane actor");
     BareActor {
         actor,
-        _commands: CommandSender {
+        commands: CommandSender {
             queues: Arc::new(CommandQueues {
                 control,
                 input: Some(input),
@@ -543,6 +548,7 @@ fn bare_actor(script: &str) -> BareActor {
                 wake,
             }),
         },
+        queued,
         _events: events,
     }
 }
@@ -593,4 +599,103 @@ fn a_key_after_a_bracketed_paste_follows_the_closing_wrapper() {
         flat.contains("<1b><5b><32><30><30><7e><70><1b><5b><32><30><31><7e><61>"),
         "{flat:?}"
     );
+}
+
+fn pump_until_open(bare: &mut BareActor) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        bare.actor.end_turn();
+        if bare.actor.writer.direct.is_open() {
+            return;
+        }
+        assert!(Instant::now() < deadline, "the actor never opened the path");
+        bare.actor.begin_turn();
+        let wake = bare.actor.wait_for_wake().expect("wake");
+        assert!(bare.actor.on_wake(wake).expect("turn"));
+        bare.actor.on_deadline().expect("deadline");
+    }
+}
+
+#[test]
+fn a_key_typed_while_the_overflow_holds_input_waits_behind_it() {
+    let mut bare = bare_actor_with(
+        "stty raw -echo; exec cat >/dev/null",
+        input_channel_with_limits(1, 1 << 16),
+    );
+    pump_until_open(&mut bare);
+    let text = |text: &str| Command::Text {
+        view: None,
+        text: Arc::from(text),
+    };
+    bare.commands.send(text("x")).expect("queue x");
+    let in_flight = bare.queued.try_recv().expect("x takes the only slot");
+    bare.commands
+        .send(text("y"))
+        .expect("y waits in the overflow");
+    assert!(bare.queued.is_empty());
+    bare.actor.end_turn();
+    assert!(!bare.actor.writer.direct.is_open());
+    let typed = key('a', false, KeyAction::Press);
+    assert!(!bare.commands.write_direct_key(&typed));
+    bare.commands
+        .send(Command::Key {
+            view: None,
+            input: Box::new(typed),
+        })
+        .expect("the key queues behind y");
+    drop(in_flight);
+    let mut order = Vec::new();
+    while let Ok(queued) = bare.queued.try_recv() {
+        order.push(match queued.command {
+            Command::Text { text, .. } => text.to_string(),
+            Command::Key { input, .. } => input.text.unwrap_or_default().into_string(),
+            other => panic!("unexpected input {}", other.name()),
+        });
+    }
+    assert_eq!(order, ["y", "a"]);
+}
+
+#[test]
+fn a_direct_key_inside_a_wake_hold_reaches_the_pane() {
+    let path = std::env::temp_dir().join(format!("zz-direct-hold-{}", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let shard = shard::ShardHandle::start(112).expect("shard");
+    let session = TerminalSession::spawn_with_shard(
+        1000,
+        Arc::new(TerminalAppearance::default()),
+        TerminalSpawn {
+            shell: Some("/bin/sh".to_owned()),
+            command: Some(vec![format!(
+                "stty raw -echo; printf READY; exec dd bs=1 of='{}' 2>/dev/null",
+                path.display()
+            )]),
+            initial_size: Some(TerminalSize::cells(60, 8)),
+            ..TerminalSpawn::default()
+        },
+        Ok(Some(shard.clone())),
+    );
+    wait_for(&session, "the pane to start", |text| text.contains("READY"));
+    wait_open(&session);
+    let received = |expected: &[u8]| {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let seen = std::fs::read(&path).unwrap_or_default();
+            if seen == expected {
+                return;
+            }
+            assert!(Instant::now() < deadline, "the pane read {seen:?}");
+            thread::sleep(Duration::from_millis(2));
+        }
+    };
+    let view = TerminalViewId(1);
+    let hold = hold_actor_wakes();
+    session.send_key_for_view(view, key('a', false, KeyAction::Press));
+    assert_eq!(session.commands.pending_input().0, 0);
+    received(b"a");
+    session.send_text("x");
+    session.send_key_for_view(view, key('b', false, KeyAction::Press));
+    assert_eq!(session.commands.pending_input().0, 2);
+    drop(hold);
+    received(b"axb");
+    let _ = std::fs::remove_file(&path);
 }

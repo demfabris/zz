@@ -977,7 +977,7 @@ impl PaneActor {
         self.writer.direct.reopen(|| {
             direct
                 && self.control_rx.is_empty()
-                && self.input_rx.commands.is_empty()
+                && self.input_rx.is_idle()
                 && slot_is_idle(&self.slot.lock())
         });
     }

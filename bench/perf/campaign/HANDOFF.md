@@ -422,6 +422,16 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   (`~/dev/zz-deliver4`, `~/dev/zz-deliver5`, both first merge perf/wave4). DL4 owns loop busy <= 10
   in addition to its echo criterion; DL5 replaces the control output taps with a sink kind and adds
   the per-pane stream barrier.
+- Quiet full `--stage final` gate on alienware, 08:20, binary `52f8e3ab` (all merges up to TUIECHO2;
+  `~/.cache/zz-perf/gate-head/final-52f8e3ab.json`): 95 pass, 10 fail (wave-3 exit: 20), 1
+  regressed (`mem.copy_cpu.scroll180` 1.07 ms against 0.68 at wave 3, under the 5 ms rule: one
+  sample, recheck at exit). Passing now: all `spawn.cpu.*`, all chatty rows, all `mem.threads.*`,
+  `control.latency` (0.0182 vs tmux 0.0196). Left: six echo rows at 1.64-1.80x (rule 1.5x; DL4),
+  `attach.cpu.p4` 1.53x (instructions are half of tmux's; the excess is syscalls: the loop does
+  23-44 writes per attach; a slice after DL4, which owns the mailbox write path),
+  `control.burst_cmds_per_s` 0.776x (lane BURST, launched 08:35 as a one-lane `w4-side-lanes` run
+  `wf_09d4e458-9a5`, `~/dev/zz-burst`), and two marginal rows (`attach.ttfc.p4` 1.11 vs 1.1,
+  `cli.wall.capture_history.p20` 1.06 vs 1.05).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

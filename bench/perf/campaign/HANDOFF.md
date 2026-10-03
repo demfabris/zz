@@ -337,6 +337,18 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   by per-pane stream sequence, since frame and event sequences no longer compare.
 - DL3 launched 01:05 as workflow `w4-slices` (run `wf_a3e8d9c5-200`): implement -> parity and perf
   reviews in parallel -> fix; the script takes a list of slices and is reused for DL3b/DL4/DL5.
+- DL6b/DL6c merged as `d548f3c8` (DL6c lane 55 min, `5b75f2e7`): FIONREAD gating was measured in a C
+  model (`/tmp/zzpc/gather3/ptybench.c`): the ioctl never waits, but it spins about 2.5M ioctls/s
+  and reads shrink, 124-152 MB/s; one reader thread tops out near 200 MB/s whatever the strategy
+  (2 threads 194-215, 4 threads 230-244, per-pane readers 235-284). So the gather lends every busy
+  pane but one to a thread of its own (up to three per shard) when two panes filled a 64 KiB
+  buffer within 10 ms; the pane keeps its buffers, partial batch and bridge state, buffer returns
+  and exits follow it through a swappable wake target, and it goes back after 100 ms without a
+  full buffer. Single-shard probe: 4 busy ascii 240.5 MB/s vs pre-DL6 247.6 (0.97x; DL6 174.9),
+  1 busy 1.02x, 4 busy unicode 1.00x; default shards over 8 pairs `throughput.detached.ascii`
+  0.987x; `mem.threads.*` 9. Open: thread churn at the lending threshold (each hand-off spawns a
+  thread). Race and parity review of the merged gather runs as workflow `w4-review-fix`
+  (`wf_5b1b76de-3cc`).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

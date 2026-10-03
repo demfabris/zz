@@ -10,9 +10,13 @@ use super::*;
 #[path = "control_stdio_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "control_stdio_burst_tests.rs"]
+mod burst_tests;
+
 const STDOUT_HIGH: usize = 256 * 1024;
 const INPUT_READ_LIMIT: usize = 256 * 1024;
-const DEFERRED_OUTPUT: usize = 64 * 1024;
+const DEFERRED_OUTPUT: usize = 1024;
 
 pub(super) fn receive(
     stream: &UnixStream,
@@ -48,10 +52,12 @@ pub(super) struct ControlStdio {
     reading: bool,
     stdout_registered: bool,
     input: Vec<u8>,
+    consumed: usize,
     input_closed: bool,
     input_error: Option<String>,
     output: Vec<u8>,
     output_offset: usize,
+    batch: Vec<OutboundFrame>,
     direct: bool,
     forwarded: u64,
     next_number: u64,
@@ -78,7 +84,13 @@ fn encode(message: &ProtocolMessage) -> OutboundFrame {
     OutboundFrame::Owned(encode_protocol_message(message).expect("control stdio frames encode"))
 }
 
-fn messages(frame: &[u8]) -> Option<Vec<ProtocolMessage>> {
+fn messages(frame: &OutboundFrame) -> Option<Vec<ProtocolMessage>> {
+    if let OutboundFrame::Grouped { frames, .. } = frame {
+        return frames
+            .iter()
+            .map(|frame| zz_protocol::decode_protocol_frame(frame).ok())
+            .collect();
+    }
     match zz_protocol::decode_protocol_frame(frame).ok()? {
         ProtocolMessage::Batch(batch) => batch.messages().ok(),
         message => Some(vec![message]),
@@ -156,7 +168,7 @@ impl Unit {
                     output,
                     ..
                 }) if self.begin.is_some() && self.body.is_none() => {
-                    self.body = Some(output.as_bytes().to_vec());
+                    self.body = Some(output.into_bytes());
                 }
                 ProtocolMessage::ExecExit(zz_protocol::ExecExit {
                     outcome: zz_protocol::ExecOutcome::Ran,
@@ -209,10 +221,12 @@ impl ControlStdio {
             reading: true,
             stdout_registered: false,
             input: Vec::new(),
+            consumed: 0,
             input_closed: false,
             input_error: None,
             output: Vec::new(),
             output_offset: 0,
+            batch: Vec::new(),
             direct: false,
             forwarded: 0,
             next_number: 1,
@@ -235,7 +249,12 @@ impl ControlStdio {
         frames.push(frame);
     }
 
+    fn compact_input(&mut self) {
+        self.input.drain(..std::mem::take(&mut self.consumed));
+    }
+
     fn forward_input(&mut self, frames: &mut Vec<OutboundFrame>) {
+        self.compact_input();
         if self.input.is_empty() && !self.input_closed && self.input_error.is_none() {
             return;
         }
@@ -262,6 +281,7 @@ impl ControlStdio {
     pub(super) fn read_input(&mut self) {
         let mut buffer = [0_u8; 8192];
         let mut read = 0;
+        self.compact_input();
         while self.reading && read < INPUT_READ_LIMIT {
             match rustix::io::read(&self.stdin, &mut buffer) {
                 Ok(0) => {
@@ -307,20 +327,16 @@ impl ControlStdio {
             && !self.close_requested
             && self.unit.is_none()
             && self.output.len() < STDOUT_HIGH
-            && (!self.input.is_empty() || self.input_closed || self.input_error.is_some())
+            && (self.consumed < self.input.len() || self.input_closed || self.input_error.is_some())
     }
 
-    fn next_input(&mut self) -> NextInput {
-        if let Some(end) = self.input.iter().position(|byte| *byte == b'\n') {
-            let line = &self.input[..end];
-            let plain = std::str::from_utf8(line)
+    fn next_input(&self) -> NextInput {
+        let input = &self.input[self.consumed..];
+        if let Some(end) = input.iter().position(|byte| *byte == b'\n') {
+            return std::str::from_utf8(&input[..end])
                 .ok()
-                .filter(|line| !line.trim().is_empty() && !line.trim_start().starts_with('#'));
-            let Some(line) = plain.map(str::to_owned) else {
-                return NextInput::Forward;
-            };
-            self.input.drain(..=end);
-            return NextInput::Line(line);
+                .filter(|line| !line.trim().is_empty() && !line.trim_start().starts_with('#'))
+                .map_or(NextInput::Forward, |line| NextInput::Line(line.to_owned()));
         }
         if self.input_closed || self.input_error.is_some() {
             NextInput::Forward
@@ -337,6 +353,7 @@ impl ControlStdio {
         match self.next_input() {
             NextInput::Wait => None,
             NextInput::Line(line) if eligible => {
+                self.consumed += line.len() + 1;
                 self.unit = Some(Unit {
                     line: line.clone(),
                     frames: Vec::new(),
@@ -346,16 +363,7 @@ impl ControlStdio {
                 });
                 Some(line)
             }
-            NextInput::Line(line) => {
-                let mut bytes = line.into_bytes();
-                bytes.push(b'\n');
-                bytes.append(&mut self.input);
-                self.input = bytes;
-                self.enter_forward(frames);
-                self.forward_input(frames);
-                None
-            }
-            NextInput::Forward => {
+            NextInput::Line(_) | NextInput::Forward => {
                 self.enter_forward(frames);
                 self.forward_input(frames);
                 None
@@ -389,14 +397,17 @@ impl ControlStdio {
         };
         let number = self.next_number;
         self.next_number = self.next_number.saturating_add(1);
+        let start = self.output.len() + "%begin".len();
         let _ = writeln!(self.output, "%begin {time} {number} {flags}");
+        let tail = start..self.output.len();
         if !body.is_empty() {
             self.output.extend_from_slice(&body);
             if body.last() != Some(&b'\n') {
                 self.output.push(b'\n');
             }
         }
-        let _ = writeln!(self.output, "%end {time} {number} {flags}");
+        self.output.extend_from_slice(b"%end");
+        self.output.extend_from_within(tail);
     }
 
     fn accept(&mut self, frame: OutboundFrame, frames: &mut Vec<OutboundFrame>) -> Option<usize> {
@@ -455,9 +466,8 @@ impl ControlStdio {
     fn defer_flush(&self) -> bool {
         self.direct
             && !self.close_requested
-            && self.unit.is_none()
             && self.output.len() < DEFERRED_OUTPUT
-            && self.input.contains(&b'\n')
+            && (self.unit.is_some() || self.input[self.consumed..].contains(&b'\n'))
     }
 
     fn flush(&mut self) -> io::Result<bool> {
@@ -582,23 +592,25 @@ impl Connection {
                     return Ok(());
                 }
             }
-            let mut batch = Vec::new();
+            let mut batch = std::mem::take(&mut stdio.batch);
             self.outbound
                 .try_recv_batch(&mut batch, attach::MAX_BATCHED_WRITE_BYTES);
             if batch.is_empty() {
+                stdio.batch = batch;
                 if stdio.unit.is_some() {
                     stdio.abort_unit(&mut self.frames);
                     continue;
                 }
-                self.outbound.recycle_written_batch(&mut batch);
+                self.outbound.recycle_written_batch(&mut stdio.batch);
                 return Ok(());
             }
             let mut consumed = 0;
-            for frame in batch {
+            for frame in batch.drain(..) {
                 if let Some(length) = stdio.accept(frame, &mut self.frames) {
                     consumed += length;
                 }
             }
+            stdio.batch = batch;
             if consumed != 0 {
                 self.outbound.record_write(consumed);
             }

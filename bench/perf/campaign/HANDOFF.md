@@ -349,6 +349,14 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   0.987x; `mem.threads.*` 9. Open: thread churn at the lending threshold (each hand-off spawns a
   thread). Race and parity review of the merged gather runs as workflow `w4-review-fix`
   (`wf_5b1b76de-3cc`).
+- Gather review (two Opus lenses, 78 min): no blocker or major; fd lifetime, wakeups, byte order
+  across hand-offs, the thread bound and respawn during floods all held under scratch stress
+  tests (707 spawn/kill cycles, 200 respawn rounds). Four minors fixed in `7bc80444` (merged): a
+  lent thread lingers 1 s and is reused (distinct gather threads in 10 s at the threshold 91 -> 2),
+  dropping the last `PtyGather` wakes and stops the home, a stopped gather is replaced on the next
+  spawn, and a lent thread that cannot hand back no longer acts as a home. One busy pane read
+  0.974x pre-DL6 against 0.98 in that round, with the untouched DL6c build at 0.982 in the same
+  minutes: noise, accepted.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

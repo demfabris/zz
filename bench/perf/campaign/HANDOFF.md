@@ -287,7 +287,7 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   rename-timing.sh matches tmux. Open: a macOS name check costs about 60 us because the 4-entry
   name cache in `process_info.rs` misses whenever the foreground pid changes (`KERN_PROCARGS2`);
   the choose-tree activity sort still refreshes per output frame while such a chooser is open.
-- DL2 launched 00:15 on `perf/deliver` reset to `37822fbf` (same worktrees as DL1).
+- DL2 launched 00:05 (10-03) on `perf/deliver` reset to `37822fbf` (same worktrees as DL1).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

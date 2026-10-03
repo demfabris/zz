@@ -118,6 +118,23 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   allowed if the relay misses, behind `ZZ_CONTROL_RELAY=1`, since DL5 has not started and will
   rebase on it) and TUI-ECHO (`~/dev/zz-tuiecho`, Mac). Seven lanes in flight: five compiling on
   the Mac (load about 28 on 16 cores, 64% memory free), two building on alienware.
+- KNOBS merged 2026-10-02 22:40 as `bce8d6a5` (lane 82 min, `539b41f9`, plus my `339d3c4a`):
+  every `ZZ_PERF_*` knob gone, 49 files, +522/-1739. Kept on purpose: the daemon's legacy
+  command path (gpui-shared `connection.rs` and `InteractiveClient` still send ClientHello,
+  PrepareCommandList and CommandRequest, and the CLI falls back to it when a daemon refuses
+  Exec), the format interpreter (format tracing uses it) and three test-only oracle switches with
+  no env var (`with_eager_universe`, `with_borrowed_formats`, `compiled::with_enabled`), the mux
+  engine's `set_automatic_rename_throttle` (the daemon always sets it on), `KeyTablesChanged`.
+  Deleted fallbacks include the flat copy-mode capture (a paged grid always), whole-row diffs
+  (`TerminalDiffScratch` 136 -> 128 bytes), `FormatHookFactsView`, the TUI waiting card and the
+  per-connection threads on Windows; `run.py` no longer writes `meta.knobs`. Windows check:
+  `DOCS_RS=1 cargo check -p zz-daemon --target x86_64-pc-windows-msvc` (skips the zig build) gave
+  one new dead-code warning, `OutboundFrame::into_vec`, now `cfg(test)`: 17 warnings, as on the
+  base. The lane's quick gate ran at load 25-30: `chatty.instr_per_s.hidden` 1.075x raw, 1.013x
+  normalized by tmux over nine pairs; every cli, control and attach instruction row <= 1.017 at
+  the minimum of three. Merge checks on both hosts follow (Linux A/B through quiet-gate).
+- DL1 launched 22:45 on `perf/deliver` from `bce8d6a5` (`~/dev/zz-deliver` on the Mac, detached
+  worktree of the same name on alienware).
 
 ## Wave 3 merge log (from 2026-10-01)
 

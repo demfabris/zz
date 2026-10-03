@@ -339,7 +339,7 @@ impl PopupWatcher {
                     &viewport,
                     &mut self.fanout,
                 );
-                self.fanout.diff.release_shared();
+                self.fanout.release();
                 self.previous = Some(viewport);
                 if let Some(exit_code) = popup_exit_code(terminal) {
                     shared.finish_popup(client, terminal, exit_code);
@@ -482,7 +482,7 @@ impl TerminalWatcher {
                         }
                     }
                 }
-                self.fanout.diff.release_shared();
+                self.fanout.release();
                 self.mode_memo.retain(|view, _| active.contains(view));
                 self.previous.retain(|view, _| active.contains(view));
                 if !terminal_status_should_close(&runtime_viewport.status) {

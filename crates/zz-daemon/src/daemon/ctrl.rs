@@ -995,8 +995,8 @@ impl Shared {
                         ) {
                             let _ = outbound.replace_terminal_viewport(
                                 pane,
-                                Shared::next_sequence(),
                                 &viewport,
+                                &shared.terminal_frames,
                             );
                         }
                     }
@@ -1162,7 +1162,7 @@ impl Shared {
                     .latest_viewport_for(TerminalViewId(client.0))
                     .unwrap_or(fresh);
                 self.enqueue_kitty_images_for_viewport(outbound, pane, &terminal, &viewport);
-                let _ = outbound.replace_terminal_viewport(pane, Self::next_sequence(), &viewport);
+                let _ = outbound.replace_terminal_viewport(pane, &viewport, &self.terminal_frames);
             }
         }
         #[cfg(feature = "agent")]

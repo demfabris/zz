@@ -4,7 +4,7 @@ title: PaneFrame terminal lane (pane_frame.rs)
 description: The Terminal envelope lane that carries full viewports, span patches, command-output viewports and history chunks as varint headers, changed-metadata fields and rows of style runs with UTF-8 text, decoded by every client straight into PackedCell planes.
 resource: crates/zz-protocol/src/pane_frame.rs
 tags: [protocol, terminal, wire, packing, fanout]
-timestamp: 2026-09-29T18:00:00Z
+timestamp: 2026-10-03T00:45:00Z
 ---
 
 # Overview
@@ -51,12 +51,15 @@ The first payload byte after the 8-byte envelope:
 | `2` | command-output viewport | `EventPayload::CommandOutput { viewport: Some(..) }` |
 | `3` | history chunk | `EventPayload::HistoryChunk` |
 
-Then every kind has `pane` (varint) and `sequence` (varint). The sequence is the daemon's event
-sequence (`Shared::next_sequence`), the one counter every event takes, so a pane's frames only
-ever count up, also across `respawn-pane`, and any later event about the pane carries a larger
-number than the frames sent before it. Each client's frame takes its own number. Clients do not
-read it today; W4-DELIVER orders pane notifications after the pane's frames with it. A
-command-output frame then has a nonzero `output_id` varint.
+Then every kind has `pane` (varint) and `sequence` (varint). A full viewport or a patch carries
+the pane's stream sequence: the `view_generation` of the viewport it brings the client to. Every
+client streaming a pane gets the same bytes for one (pane, base, current), so the daemon encodes
+each frame once and queues the same buffer for all of them (`PaneFrameFanout::enqueue` and
+`TerminalFrames::full` in zz-daemon). The sequence only grows for a pane, also across
+`respawn-pane`, because each terminal starts its generations 2^40 above the previous terminal's.
+Command-output frames and history chunks keep the daemon's event sequence
+(`Shared::next_sequence`). Clients do not read it. A command-output frame then has a nonzero
+`output_id` varint.
 
 All integers are LEB128 varints unless the table says otherwise. A signed or wrapping value is a
 zigzag varint of the wrapping difference, so any `u64` pair round-trips.

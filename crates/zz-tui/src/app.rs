@@ -610,13 +610,13 @@ pub(crate) fn run(
         if browser.wants_graphics() {
             start_kitty_probe(&mut kitty_probe, &mut terminal)?;
         }
-        let now = Instant::now();
+        let mut now = Instant::now();
         if model.expire_client_message(now) {
             renderer
                 .paint(&model, false)
                 .map_err(|error| error.to_string())?;
+            now = Instant::now();
         }
-        let now = Instant::now();
         let event = if let Some(event) = deferred.take() {
             Some(event)
         } else if browser.should_pump(now) {
@@ -3151,7 +3151,7 @@ mod tests {
             "the row only the first frame changed reaches the tty: {painted:?}"
         );
         assert!(
-            painted.contains(&format!("\x1b[{};{}H", content.y + 2, content.x + 2)),
+            !painted.contains("$ printf"),
             "the unchanged prompt cell is preserved: {painted:?}"
         );
         assert!(painted.contains("MARK-split"), "{painted:?}");

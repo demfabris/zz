@@ -589,6 +589,7 @@ impl<'a, 'b> SurfaceActor<'a, 'b> {
                 self.publisher
                     .set_facts(self.engine_filter.facts(&self.terminal)?);
                 self.publisher.mark_output_activity();
+                self.frames.mode_only_write = writes_only_modes(&bytes);
                 publish_active_views(
                     &mut self.terminal,
                     &self.publisher,

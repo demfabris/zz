@@ -4995,7 +4995,7 @@ fn decode_kitty_png<'alloc>(
 enum FallbackFrame {
     FirstStreamed,
     Built(TerminalViewport),
-    Metadata(TerminalViewport),
+    Metadata(TerminalViewport, bool),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -5157,7 +5157,7 @@ impl Publisher {
                 true,
             ),
             FallbackFrame::Built(viewport) => (Arc::new(viewport), true),
-            FallbackFrame::Metadata(viewport) => (Arc::new(viewport), false),
+            FallbackFrame::Metadata(viewport, current) => (Arc::new(viewport), current),
         };
         {
             let mut latest = self.latest.write();
@@ -5222,6 +5222,10 @@ impl Publisher {
 
     fn latest_fallback(&self) -> Arc<TerminalViewport> {
         Arc::clone(&self.latest.read().fallback)
+    }
+
+    fn fallback_current(&self) -> bool {
+        self.latest.read().fallback_current
     }
 
     fn notify_latest(&self) {
@@ -13859,6 +13863,40 @@ impl IdleCompression {
 const UNWATCHED_SETTLE_QUIET: Duration = Duration::from_millis(100);
 const UNWATCHED_SETTLE_MAX: Duration = Duration::from_secs(1);
 const UNWATCHED_NOTIFY_INTERVAL: Duration = Duration::from_millis(100);
+const CELL_NEUTRAL_ANSI_MODES: [u16; 2] = [4, 20];
+const CELL_NEUTRAL_DEC_MODES: [u16; 11] =
+    [1, 25, 1000, 1002, 1003, 1004, 1005, 1006, 1015, 1016, 2004];
+
+fn writes_only_modes(bytes: &[u8]) -> bool {
+    let mut rest = bytes;
+    while let Some(sequence) = rest.strip_prefix(b"\x1b[") {
+        let (modes, sequence) = match sequence.strip_prefix(b"?") {
+            Some(sequence) => (&CELL_NEUTRAL_DEC_MODES[..], sequence),
+            None => (&CELL_NEUTRAL_ANSI_MODES[..], sequence),
+        };
+        let Some(end) = sequence
+            .iter()
+            .position(|byte| !byte.is_ascii_digit() && *byte != b';')
+        else {
+            return false;
+        };
+        let (parameters, tail) = sequence.split_at(end);
+        if parameters.is_empty() || !matches!(tail[0], b'h' | b'l') {
+            return false;
+        }
+        let neutral = parameters.split(|byte| *byte == b';').all(|parameter| {
+            std::str::from_utf8(parameter)
+                .ok()
+                .and_then(|parameter| parameter.parse::<u16>().ok())
+                .is_some_and(|mode| modes.contains(&mode))
+        });
+        if !neutral {
+            return false;
+        }
+        rest = &tail[1..];
+    }
+    rest.is_empty() && !bytes.is_empty()
+}
 
 struct RenderResources<'alloc> {
     state: RenderState<'alloc>,
@@ -13902,6 +13940,8 @@ struct Frames<'alloc> {
     synchronized_output_deadline: Option<Instant>,
     retain_render_until: Option<Instant>,
     last_settle: Option<Instant>,
+    blank: bool,
+    mode_only_write: bool,
 }
 
 impl<'alloc> Frames<'alloc> {
@@ -13927,6 +13967,8 @@ impl<'alloc> Frames<'alloc> {
             synchronized_output_deadline: None,
             retain_render_until: None,
             last_settle: None,
+            blank: true,
+            mode_only_write: false,
         })
     }
 
@@ -14183,6 +14225,10 @@ fn publish_views<'alloc: 'callbacks, 'callbacks>(
     status: SessionStatus,
     notify: bool,
 ) -> Result<(), WorkerError> {
+    let mode_only = std::mem::take(&mut frames.mode_only_write);
+    if matches!(change, SnapshotChange::Content) && !mode_only {
+        frames.blank = false;
+    }
     if frames.defer_synchronized_output(terminal, &status)? {
         return Ok(());
     }
@@ -14244,13 +14290,17 @@ fn publish_views<'alloc: 'callbacks, 'callbacks>(
         frames.last_unbuilt = None;
         FallbackFrame::FirstStreamed
     } else if let Some((viewport, metadata_changed)) = refreshed {
-        if matches!(change, SnapshotChange::Content) {
+        let cells_kept = mode_only
+            && frames.blank
+            && viewport.cursor.is_some_and(Cursor::visible) == terminal.is_cursor_visible()?;
+        if matches!(change, SnapshotChange::Content) && !cells_kept {
             let now = Instant::now();
             frames.unbuilt_since.get_or_insert(now);
             frames.last_unbuilt = Some(now);
         }
         notify = notify && frames.admit_notify(metadata_changed);
-        FallbackFrame::Metadata(viewport)
+        let current = cells_kept && frames.unbuilt_since.is_none() && publisher.fallback_current();
+        FallbackFrame::Metadata(viewport, current)
     } else {
         if !active.is_empty() {
             terminal.set_selection(None)?;
@@ -14268,6 +14318,10 @@ fn publish_views<'alloc: 'callbacks, 'callbacks>(
     frames.release_unused(active);
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "session/settle_tests.rs"]
+mod settle_tests;
 
 fn settle_unwatched<'alloc: 'callbacks, 'callbacks>(
     terminal: &mut Terminal<'alloc, 'callbacks>,

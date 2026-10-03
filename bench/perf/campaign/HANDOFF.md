@@ -276,6 +276,18 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   pane (0.07 s) and the pane sleeps 300 s, so a regression fails at the deadline instead of
   passing by luck. Noted, not fixed: a sharded actor whose session drops after `terminate()` gets
   no wake when its channel closes; its own grace and SIGKILL timers cover the child.
+- DL1 merged as `37822fbf` (lane 135 min, `dd322400`): `TerminalWatcher::handle` stops calling
+  `terminal_current_command`/`synchronize_pane_runtime` per frame; the shard keeps a last-output
+  instant (`AtomicU32` ms, `EventQueueState` stays 8 words) and an output-since-check bit; one name
+  check per pane per 500 ms (`TimerKey::NameCheck`, `run_due_name_checks`) reads the foreground pid,
+  command and cwd once and feeds `set_pane_runtime_facts_at`, automatic-rename and the peer probe;
+  silence re-arms from the last output; `wait-pane` idle reads the instant. Mac
+  `chatty.instr_per_s.flip` 59.5-67.1 -> 43.1-46.4, `chatty.cpu_pct.visible` 3.14-3.52 -> 2.35-3.31;
+  Linux `chatty.cpu_pct.flip` -0.6 pt; loop busy samples in visible 36 -> 13, the lookups at 0.
+  rename-timing.sh matches tmux. Open: a macOS name check costs about 60 us because the 4-entry
+  name cache in `process_info.rs` misses whenever the foreground pid changes (`KERN_PROCARGS2`);
+  the choose-tree activity sort still refreshes per output frame while such a chooser is open.
+- DL2 launched 00:15 on `perf/deliver` reset to `37822fbf` (same worktrees as DL1).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

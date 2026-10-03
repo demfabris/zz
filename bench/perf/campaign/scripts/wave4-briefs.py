@@ -169,9 +169,39 @@ Task: profile the zz TUI client (not the daemon) per keystroke on the Mac: `pyth
 
 Done criterion: zz TUI client instructions per echoed key at most 40 kinstr (105 today) and CPU per key at most 30 us (70 today), from w4-deliver-echo.py medians over three runs against the base binary in the same session; echo.p50.idle on the Mac at least 30 us lower than the base in three alternating quick pairs (`python3 bench/perf/run.py --zz <bin> --stage final --quick --only echo --w0 none --json ...`, then `python3 bench/perf/campaign/scripts/ab-compare.py <dir>` with ab-pre-N/ab-post-N names); `chatty.client_cpu_pct.visible` not regressed; `cargo test -p zz-tui -p zz-client -p zz-cli`, clippy -D warnings on touched crates, and compat/tui-screen-diff.sh, compat/tui-copy-mode.sh, compat/tui-overlays.sh, compat/tui-choosers.sh and compat/attached-client.sh pass (`/opt/homebrew/bin/bash compat/<f>.sh $PWD/target/debug/zz_cli $PWD/compat/.cache/tmux-src/tmux`); Linux is NOT RUN here (the orchestrator measures it).'''
 
+def dl1():
+    wt = f'{lb.ROOT}/zz-deliver'
+    lw = '/home/demfabris/dev/zz-deliver'
+    return header('Wave 4 lane W4-DELIVER slice DL1: current command, cwd and activity off the frame path', wt, 'perf/deliver', 180).replace('from perf/wave4 = origin/main 06ea9cf1 plus a brief-generator commit', 'from perf/wave4 at bce8d6a5, the KNOBS merge: every ZZ_PERF_* knob is gone') + f"""
+The W4-DELIVER plan (bench/perf/campaign/w4-deliver-plan.txt in the worktree) found this as-is state:
+
+{plan_asis()}
+
+Your slice, verbatim from the plan:
+
+{plan_line('DL1 |')}
+
+Linux leg: the slice changes the Linux /proc readers too. Build and measure there in the detached worktree {lw} on alienware: `cd {wt} && git push -q -f ssh://alienware/home/demfabris/dev/zz perf/deliver:perf/deliver && ssh alienware 'cd {lw} && git checkout -q --detach perf/deliver && ulimit -n $(ulimit -Hn) && cargo build --release -j6 -p zz-cli'` (never check out a branch there), each ssh call under 10 minutes (`setsid -f ... > log 2>&1 < /dev/null` for long runs, then poll), timing runs through `OWN={lw} ~/.cache/zz-perf/quiet-gate.sh --exec <cmd>`, Linux base binary /home/demfabris/dev/zz-perf-int/target/release/zz_cli, scratch /tmp/zzpc/deliver on alienware. Push your final commit there too.
+
+DL2 starts on top of your commit as soon as you finish, so keep the slice to its write zone. Done criterion: the DL1 done criterion above (Mac and Linux rows), with the rows that move only on a quiet host judged in three alternating runs against the base binary in the same session."""
+
+def dl2():
+    wt = f'{lb.ROOT}/zz-deliver'
+    lw = '/home/demfabris/dev/zz-deliver'
+    return header('Wave 4 lane W4-DELIVER slice DL2: per-pane stream sequence, one encode per frame', wt, 'perf/deliver', 150).replace('from perf/wave4 = origin/main 06ea9cf1 plus a brief-generator commit', 'from perf/wave4 at 37822fbf: KNOBS, ROWS, TUI-ECHO, CONTROL, DL6, PTYLEAK, TEARDOWN and DL1 merged') + f"""
+The W4-DELIVER plan (bench/perf/campaign/w4-deliver-plan.txt in the worktree) found this as-is state (DL1 has since taken name checks off the frame path, DL6 folded the Linux gather threads, CONTROL hands control clients' stdio to the daemon in daemon/control_stdio.rs, and ROWS made frame build copy whole rows):
+
+{plan_asis()}
+
+Your slice, verbatim from the plan:
+
+{plan_line('DL2 |')}
+
+Before changing Event.sequence semantics, list every reader of `Event.sequence` for TerminalPatch and TerminalViewport in crates/zz-client, crates/zz-tui, crates/zz, clients/gpui-shared, clients/web, crates/zz-client-ffi and crates/zz-gpui-ios (rg) and put the list in the report; if any reader relies on the global order, keep that reader working. Linux leg: build and run the gate's Linux line in the detached worktree {lw} on alienware (`cd {wt} && git push -q -f ssh://alienware/home/demfabris/dev/zz perf/deliver:perf/deliver && ssh alienware 'cd {lw} && git checkout -q --detach perf/deliver && ulimit -n $(ulimit -Hn) && cargo build --release -j6 -p zz-cli'`; never check out a branch there; each ssh call under 10 minutes; no quiet-gate for instruction rows). DL3 starts on top of your commit, so keep to the write zone. Done criterion: the DL2 done criterion above."""
+
 if __name__ == '__main__':
     which = sys.argv[1]
-    text = {'knobs': knobs, 'deliver-plan': deliver_plan, 'binary': binary, 'rows': rows, 'spawn': spawn, 'gather': gather, 'control': control, 'tuiecho': tuiecho}[which]()
+    text = {'knobs': knobs, 'deliver-plan': deliver_plan, 'binary': binary, 'rows': rows, 'spawn': spawn, 'gather': gather, 'control': control, 'tuiecho': tuiecho, 'dl1': dl1, 'dl2': dl2}[which]()
     out = sys.argv[2] if len(sys.argv) > 2 else f'{OUT}/{which}.md'
     os.makedirs(os.path.dirname(out), exist_ok=True)
     open(out, 'w').write(text)

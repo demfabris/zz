@@ -295,6 +295,14 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   `300a2f7d` after one fix (`RawFd` imported only for the macOS kqueue loop: TUI-ECHO never ran a
   Linux build). Rule from this: every Mac lane's merge waits for a Linux `cargo clippy` of the
   merged head. Wave-exit gates and the full corpus still to come.
+- Side lanes as one workflow from 00:25 (ultracode is on; workflow `w4-side-lanes`, run
+  `wf_602a147e-e5e`, script under the session's `workflows/scripts/`): each lane implement ->
+  Opus review (structured findings) -> fix when there are findings. SETTLE (`~/dev/zz-settle`:
+  no full settle snapshot for an unwatched pane, the `split_empty_P` lever), NAMES
+  (`~/dev/zz-names`: cheap macOS foreground names, 60 us -> 15 us per check), TUIECHO2
+  (`~/dev/zz-tuiecho2`: key encode, prefix canonicalisation and the per-frame cell copy in the TUI
+  client). Every brief now ends with a Linux clippy on a detached alienware worktree of the same
+  name. Briefs in `wave4-briefs.py`.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

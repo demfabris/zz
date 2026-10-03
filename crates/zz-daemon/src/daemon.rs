@@ -34866,7 +34866,7 @@ struct ControlPaneOutput {
 }
 
 struct PendingControlOutput {
-    bytes: Arc<[u8]>,
+    bytes: shard_sink::ControlBytes,
     offset: usize,
     enqueued_at: Instant,
     seq: u64,

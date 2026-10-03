@@ -351,7 +351,7 @@ pub(super) fn publish_loop_view(
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 #[path = "shard_sink_bytes2_tests.rs"]
 mod bytes2_tests;
 
@@ -445,6 +445,22 @@ pub(super) struct ControlFeed {
 
 const SPARE_OUTPUT_BUFFERS: usize = 4;
 const MERGED_CHUNK_BYTES: usize = 8 * 1024;
+
+pub(super) enum ControlBytes {
+    Shared(Arc<[u8]>),
+    Merged(Vec<u8>),
+}
+
+impl std::ops::Deref for ControlBytes {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        match self {
+            Self::Shared(bytes) => bytes,
+            Self::Merged(bytes) => bytes,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ControlOrder {
@@ -639,10 +655,15 @@ impl FeedState {
         {
             return false;
         }
-        let mut merged = Vec::with_capacity(chunk.bytes.len() + bytes.len());
-        merged.extend_from_slice(&chunk.bytes);
-        merged.extend_from_slice(bytes);
-        chunk.bytes = Arc::from(merged);
+        match &mut chunk.bytes {
+            ControlBytes::Merged(tail) => tail.extend_from_slice(bytes),
+            ControlBytes::Shared(shared) => {
+                let mut tail = Vec::with_capacity(MERGED_CHUNK_BYTES);
+                tail.extend_from_slice(shared);
+                tail.extend_from_slice(bytes);
+                chunk.bytes = ControlBytes::Merged(tail);
+            }
+        }
         true
     }
 
@@ -651,7 +672,7 @@ impl FeedState {
         self.next += 1;
         let entry = self.panes.entry(pane).or_default();
         entry.pending.push_back(PendingControlOutput {
-            bytes,
+            bytes: ControlBytes::Shared(bytes),
             offset: 0,
             enqueued_at,
             seq,

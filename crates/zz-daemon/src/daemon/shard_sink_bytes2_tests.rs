@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(unix)]
 #[test]
 fn the_control_wake_skips_the_waker_while_the_loop_is_awake() {
     let mut poll = mio::Poll::new().expect("poll");
@@ -49,13 +50,13 @@ fn a_reused_drain_buffer_carries_only_the_drained_bytes() {
     let now = Instant::now();
     let mut pending = VecDeque::from([
         PendingControlOutput {
-            bytes: Arc::from(&b"hello"[..]),
+            bytes: ControlBytes::Shared(Arc::from(&b"hello"[..])),
             offset: 0,
             enqueued_at: now,
             seq: 0,
         },
         PendingControlOutput {
-            bytes: Arc::from(&b"world"[..]),
+            bytes: ControlBytes::Shared(Arc::from(&b"world"[..])),
             offset: 0,
             enqueued_at: now,
             seq: 1,

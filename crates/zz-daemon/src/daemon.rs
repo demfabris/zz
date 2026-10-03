@@ -23502,6 +23502,39 @@ impl Shared {
         Ok(())
     }
 
+    fn chooser_key_binding(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        source_pane: PaneId,
+        input: &zz_terminal::KeyInput,
+    ) -> Result<bool, DaemonError> {
+        let key = input_key_name(input);
+        let (decision, repeat_binding) = self.overlay_key_decision(client, &key);
+        let claimed = decision != KeyDecision::Pass;
+        let result = match decision {
+            KeyDecision::Pass | KeyDecision::Prefix | KeyDecision::Ignore => Ok(()),
+            KeyDecision::Commands(commands) => {
+                let pane = context.pane.unwrap_or(source_pane);
+                let previous = context.invoking_key().map(str::to_owned);
+                context.set_invoking_key(Some(key.as_str().to_owned()));
+                let dispatched = self.execute_key_commands(
+                    client,
+                    kind,
+                    context,
+                    pane,
+                    &commands,
+                    repeat_binding,
+                );
+                context.set_invoking_key(previous);
+                dispatched
+            }
+        };
+        self.sync_key_table(client, claimed);
+        result.map(|()| claimed)
+    }
+
     fn input_choose_tree(
         self: &Arc<Self>,
         client: ClientId,
@@ -23515,10 +23548,10 @@ impl Shared {
             )
             .into());
         }
-        if matches!(
-            &action,
-            ChooseTreeAction::Key(input) if input.action == zz_terminal::KeyAction::Release
-        ) {
+        if let ChooseTreeAction::Key(input) = &action
+            && input.action == zz_terminal::KeyAction::Release
+        {
+            let _ = self.key_decision(client, &input_key_name(input), true);
             return Ok(());
         }
         let (source_pane, read_only) = {
@@ -23530,6 +23563,11 @@ impl Shared {
         };
         self.note_terminal_input_without_bell(client, source_pane);
         if read_only {
+            return Ok(());
+        }
+        if let ChooseTreeAction::Key(input) = &action
+            && self.chooser_key_binding(client, kind, context, source_pane, input)?
+        {
             return Ok(());
         }
         let (result, state, delta, command, runs) = {
@@ -23834,10 +23872,10 @@ impl Shared {
             )
             .into());
         }
-        if matches!(
-            &action,
-            ChooseBufferAction::Key(input) if input.action == zz_terminal::KeyAction::Release
-        ) {
+        if let ChooseBufferAction::Key(input) = &action
+            && input.action == zz_terminal::KeyAction::Release
+        {
+            let _ = self.key_decision(client, &input_key_name(input), true);
             return Ok(());
         }
         let (source_pane, read_only) = {
@@ -23849,6 +23887,11 @@ impl Shared {
         };
         self.note_terminal_input_without_bell(client, source_pane);
         if read_only {
+            return Ok(());
+        }
+        if let ChooseBufferAction::Key(input) = &action
+            && self.chooser_key_binding(client, kind, context, source_pane, input)?
+        {
             return Ok(());
         }
 
@@ -25875,6 +25918,25 @@ impl Shared {
         key: &str,
         release: bool,
     ) -> (KeyDecision, bool) {
+        self.resolve_key_decision(client, key, release, KeyEngine::handle_with_repeat_metadata)
+    }
+
+    fn overlay_key_decision(&self, client: ClientId, key: &str) -> (KeyDecision, bool) {
+        self.resolve_key_decision(
+            client,
+            key,
+            false,
+            KeyEngine::handle_overlay_with_repeat_metadata,
+        )
+    }
+
+    fn resolve_key_decision(
+        &self,
+        client: ClientId,
+        key: &str,
+        release: bool,
+        handle: KeyEngineHandler,
+    ) -> (KeyDecision, bool) {
         let mut inner = self.inner.lock();
         if release {
             return if inner
@@ -25903,7 +25965,8 @@ impl Shared {
                 inner.engine.key_table_for_session(session),
             )
         });
-        let (decision, repeat_binding) = key_engine.handle_with_repeat_metadata(
+        let (decision, repeat_binding) = handle(
+            &mut key_engine,
             &inner.engine.keys,
             key,
             Instant::now(),
@@ -32282,6 +32345,9 @@ impl Shared {
 #[path = "daemon/source_hook_queue_tests.rs"]
 mod source_hook_queue_tests;
 
+#[cfg(all(test, unix))]
+mod chooser_keys_tests;
+
 /// Everything the daemon owns on behalf of agent panes. Nothing in here may be
 /// reached while the daemon's own state lock is held: the runtime calls back
 /// into it from its pane threads.
@@ -37591,6 +37657,16 @@ fn current_command_output_subscriber(
 }
 
 type RetiredCommandOutput = (CommandOutputSession, Option<Arc<OutboundMailbox>>);
+type KeyEngineHandler = fn(
+    &mut KeyEngine,
+    &KeyTables,
+    &str,
+    Instant,
+    Duration,
+    Duration,
+    Duration,
+    &str,
+) -> (KeyDecision, bool);
 type RetiredPopup = (PopupSession, Option<Arc<OutboundMailbox>>, bool);
 
 #[derive(Clone, Copy, PartialEq, Eq)]

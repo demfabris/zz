@@ -1,0 +1,13 @@
+corpus: none
+# server_client_key_callback looks the prefix up before window_pane_key hands a
+# key to the mode, and a mode tree has no key_table of its own, so the prefix
+# table still runs inside choose-tree, choose-client and choose-buffer, inside
+# the mode's own search and filter prompts, and over customize-mode and copy
+# mode. Each case attaches a fresh client on a real pty, opens the mode, and
+# types the prefix and d, then reads whether the client detached; two more
+# cases type the prefix and n or c inside the tree and read the window list.
+stage: fixtures/chooser-prefix-keys.sh ~/chooser-prefix-keys.sh
+stage: fixtures/chooser-drive.py ~/chooser-drive.py
+out: set-environment -gu CHOOSER_PREFIX_KEYS
+run-shell 'sh ~/chooser-prefix-keys.sh'
+out: show-environment -g CHOOSER_PREFIX_KEYS

@@ -56,7 +56,13 @@ presses (`ChooseTreeAction::Key` / `ChooseBufferAction::Key`) and the daemon map
 character (`?` from shift+`/`) over the folded physical key name. Search-mode editing keys
 (Escape/Enter/BSpace/arrows, printable text append) stay fixed, like other search prompts. Chooser
 vim navigation is therefore rebindable with `bind-key -T choose-tree …` and identical in the GPUI
-app and the TUI, which contain no chooser key maps at all.
+app and the TUI, which contain no chooser key maps at all. Before a key reaches those tables it goes
+through the client's `KeyEngine` (`handle_overlay_with_repeat_metadata`, from `chooser_key_binding`
+in the daemon), the way the pin's `server_client_key_callback` looks the prefix up before
+`window_pane_key` hands a key to the mode: the prefix, an explicit client table, and root bindings
+run first, and only a `Pass` reaches the chooser. That holds while the chooser's own search, filter,
+kill or command prompt is open too, because the pin keeps that prompt inside the mode. A copy-mode
+table under the chooser is suspended for that lookup. Measured in `smoke/chooser-prefix-keys`.
 
 # Data model
 

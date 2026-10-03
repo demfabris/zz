@@ -2912,12 +2912,11 @@ impl TerminalSession {
         if let Err(crossbeam_channel::TrySendError::Full(command)) = &result {
             let (pending_commands, pending_bytes) = self.commands.pending_input();
             log::warn!(
-                "rejected terminal PTY input command={} charge_bytes={} pending_commands={} pending_bytes={} limits_commands={} limits_bytes={}",
+                "rejected terminal PTY input command={} payload_bytes={} pending_commands={} pending_bytes={} limit_bytes={}",
                 command.name(),
-                command.pty_input_bytes().unwrap_or(0),
+                command.pty_input_payload().unwrap_or(0),
                 pending_commands,
                 pending_bytes,
-                MAX_PENDING_PTY_INPUT_COMMANDS,
                 MAX_PENDING_PTY_INPUT_BYTES,
             );
         }
@@ -3357,6 +3356,7 @@ impl InputAdmission {
             }
         }
         if self.overflow.is_empty() {
+            self.overflow = VecDeque::new();
             self.refill = None;
         }
     }

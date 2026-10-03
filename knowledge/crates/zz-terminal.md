@@ -39,7 +39,7 @@ command sender + frame subscriber, while all mutable state lives behind one work
 capture, copy-mode, and pure view operations. An ordered PTY-input lane carries text, keys,
 mouse/focus/paste operations, and pending-paste markers. It holds 256 commands in channel slots,
 charged at their payload plus a 4 KiB floor, and queues the rest in order in an overflow charged at
-their payload plus 256 bytes; each slot that frees pulls the oldest overflow entry in, so typed keys
+their payload plus 256 bytes (an entry keeps that charge when it reaches a slot); each slot that frees pulls the oldest overflow entry in, so typed keys
 are never dropped at the slot count. Producers use nonblocking input admission and reject a whole
 command only when the 64 MiB byte budget is full. The actor writes up to 256 queued commands per
 wake, within the 1 ms drain turn, and stops early for a writer backlog or a waiting control command.

@@ -360,7 +360,7 @@ wraps a second dup and keeps a FIFO byte buffer. Each `Write` queues the complet
 While bytes remain, the actor stops consuming further PTY input but continues PTY output and control work.
 The input sender reserves each whole command before enqueueing it, so producers never block behind
 the writer. The first 256 commands take channel slots charged at their payload plus a 4 KiB floor;
-later ones wait in order in an overflow charged at their payload plus 256 bytes, and each freed slot
+later ones wait in order in an overflow charged at their payload plus 256 bytes (kept when they reach a slot), and each freed slot
 pulls the oldest one in. Only the 64 MiB budget rejects a command, and a rejected command contributes
 no bytes. Each input wake writes up to 256 queued commands within the 1 ms drain turn, so a typed
 burst costs one read and one published frame per turn rather than one per key. The actor also leaves libghostty-generated replies in the bounded

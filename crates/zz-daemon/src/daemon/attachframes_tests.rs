@@ -2,6 +2,7 @@ use super::*;
 use zz_protocol::decode_protocol_frame;
 
 const MARK: &str = "ATTACHFRAMESMARK";
+const NOTICE: &str = "ATTACHFRAMESDEAD";
 
 fn run(shared: &Arc<Shared>, context: &mut ExecutionContext, name: &str, args: &[&str]) {
     shared
@@ -22,22 +23,29 @@ fn viewport_text(viewport: &TerminalViewport) -> String {
         .collect()
 }
 
-fn wait_for_marks(shared: &Shared, panes: usize) {
+fn wait_for_panes(shared: &Shared, live: usize, dead: usize) {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        let marked = shared
-            .inner
-            .lock()
-            .terminals
-            .values()
-            .filter(|terminal| viewport_text(&terminal.latest_viewport()).contains(MARK))
-            .count();
-        if marked == panes {
+        let (printed, noticed) = {
+            let inner = shared.inner.lock();
+            inner
+                .terminals
+                .iter()
+                .fold((0, 0), |(printed, noticed), (pane, terminal)| {
+                    let text = viewport_text(&terminal.latest_viewport());
+                    if inner.engine.state.pane(*pane).is_some_and(|pane| pane.dead) {
+                        (printed, noticed + usize::from(text.contains(NOTICE)))
+                    } else {
+                        (printed + usize::from(text.contains(MARK)), noticed)
+                    }
+                })
+        };
+        if (printed, noticed) == (live, dead) {
             return;
         }
         assert!(
             Instant::now() < deadline,
-            "{marked} of {panes} panes printed"
+            "{printed} of {live} panes printed, {noticed} of {dead} died"
         );
         thread::sleep(Duration::from_millis(5));
     }
@@ -170,6 +178,12 @@ fn frames_session(
     run(
         shared,
         context,
+        "set-option",
+        &["-g", "remain-on-exit-format", NOTICE],
+    );
+    run(
+        shared,
+        context,
         "new-session",
         &["-d", "-s", name, "-x", "180", "-y", "50", &hold],
     );
@@ -184,26 +198,7 @@ fn frames_session(
         );
         run(shared, context, "select-layout", &["-t", &target, "tiled"]);
     }
-    wait_for_marks(shared, live + dead);
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while {
-        let inner = shared.inner.lock();
-        inner
-            .terminals
-            .keys()
-            .filter(|pane| {
-                inner
-                    .engine
-                    .state
-                    .pane(**pane)
-                    .is_some_and(|pane| pane.dead)
-            })
-            .count()
-            < dead
-    } {
-        assert!(Instant::now() < deadline, "panes never died");
-        thread::sleep(Duration::from_millis(5));
-    }
+    wait_for_panes(shared, live, dead);
 }
 
 fn register(shared: &Arc<Shared>, session: &str) -> (connection::Session, Arc<OutboundMailbox>) {

@@ -120,11 +120,7 @@ fn an_exited_child_answers_copy_reads_before_the_retention_decision() {
         );
         thread::sleep(Duration::from_millis(10));
     }
-    let expected_geometry = if super::super::mode_revision::ModeRevision::clone_enabled() {
-        (40, 4)
-    } else {
-        (32, 6)
-    };
+    let expected_geometry = (32, 6);
     session.resize(32, 6, 8, 18);
     assert!(session.settle());
     let deadline = Instant::now() + Duration::from_secs(30);

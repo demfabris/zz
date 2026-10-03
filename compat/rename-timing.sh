@@ -8,9 +8,9 @@
 # the foreground command between perl and sh about every 200 ms, both printing,
 # counts the window-renamed hooks each server fires, and checks that the window
 # settles on the same name once the loop stops. MEASURED 2026-09-28 on macOS: the
-# pin fires 0-1 hooks over 3 s here, zz with its throttle 0-3, and zz with
-# ZZ_PERF_RENAME_THROTTLE=0 about 14, one per flip. One that never catches up
-# ends on a different name. Counts are timing, so they are compared with a
+# pin fires 0-1 hooks over 3 s here and zz with its throttle 0-3; a zz without
+# the throttle fired about 14, one per flip. One that never catches up ends on
+# a different name. Counts are timing, so they are compared with a
 # tolerance, not for equality.
 set -eEuo pipefail
 

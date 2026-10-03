@@ -1,21 +1,7 @@
-use std::sync::LazyLock;
-
 #[cfg(any(windows, test))]
 use std::io::{self, IoSlice, Write};
 
 use super::*;
-
-pub(super) static ATTACH_DEDUP: LazyLock<bool> =
-    LazyLock::new(|| std::env::var_os("ZZ_PERF_ATTACH_DEDUP").is_none_or(|value| value != "0"));
-
-pub(super) static ATTACH_PRESIZE: LazyLock<bool> =
-    LazyLock::new(|| std::env::var_os("ZZ_PERF_ATTACH_PRESIZE").is_none_or(|value| value != "0"));
-
-pub(super) static ATTACH_BATCH: LazyLock<bool> =
-    LazyLock::new(|| std::env::var_os("ZZ_PERF_ATTACH_BATCH").is_none_or(|value| value != "0"));
-
-pub(super) static BATCHED_WRITES: LazyLock<bool> =
-    LazyLock::new(|| std::env::var_os("ZZ_PERF_WRITEV").is_none_or(|value| value != "0"));
 
 pub(super) const MAX_BATCHED_WRITE_BYTES: usize = 256 * 1024;
 
@@ -24,25 +10,7 @@ const INBOUND_BUFFER_BYTES: usize = 8 * 1024;
 
 #[cfg(windows)]
 pub(super) fn inbound_reader<S: io::Read>(stream: S) -> io::BufReader<S> {
-    io::BufReader::with_capacity(
-        if *BATCHED_WRITES {
-            INBOUND_BUFFER_BYTES
-        } else {
-            0
-        },
-        stream,
-    )
-}
-
-pub(super) fn log_knobs() {
-    log::info!(
-        target: "zz_daemon::perf",
-        "attach knobs: ZZ_PERF_ATTACH_DEDUP={} ZZ_PERF_ATTACH_BATCH={} ZZ_PERF_ATTACH_PRESIZE={} ZZ_PERF_WRITEV={}",
-        u8::from(*ATTACH_DEDUP),
-        u8::from(*ATTACH_BATCH),
-        u8::from(*ATTACH_PRESIZE),
-        u8::from(*BATCHED_WRITES),
-    );
+    io::BufReader::with_capacity(INBOUND_BUFFER_BYTES, stream)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,7 +21,7 @@ pub(super) enum ResyncScope {
 
 impl ResyncScope {
     pub(super) fn sends_everything(self) -> bool {
-        self == Self::Full || !*ATTACH_DEDUP
+        self == Self::Full
     }
 }
 
@@ -86,8 +54,7 @@ pub(super) fn presize_client_terminals(
     session: SessionId,
 ) -> BTreeSet<PaneId> {
     let mut seeded = BTreeSet::new();
-    if !*ATTACH_PRESIZE
-        || inner.client(client).and_then(|c| c.kind) != Some(ClientKind::Interactive)
+    if inner.client(client).and_then(|c| c.kind) != Some(ClientKind::Interactive)
         || !inner.client(client).is_some_and(|c| c.has_terminal)
     {
         return seeded;
@@ -224,20 +191,12 @@ impl WriterThread {
 #[cfg(windows)]
 pub(super) fn spawn_writer(
     threads: &Arc<exec::ConnectionThreads>,
-    client: ClientId,
     write: impl FnOnce() + Send + 'static,
 ) -> std::io::Result<WriterThread> {
     let (done, finished) = crossbeam_channel::bounded(1);
-    let job = move || {
+    threads.run(Box::new(move || {
         write();
         let _ = done.send(());
-    };
-    if *BATCHED_WRITES {
-        threads.run(Box::new(job))?;
-    } else {
-        thread::Builder::new()
-            .name(format!("zz-client-writer-{}", client.0))
-            .spawn(job)?;
-    }
+    }))?;
     Ok(WriterThread(finished))
 }

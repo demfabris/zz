@@ -21,7 +21,6 @@ use std::{
     fmt,
     io::{self, IsTerminal as _, Write as _},
     path::{Path, PathBuf},
-    sync::LazyLock,
 };
 
 use zz_daemon::{
@@ -36,9 +35,6 @@ use zz_protocol::{
 use crate::browser::BrowserFrameProvider;
 
 const MANUAL_RESTART_HINT: &str = "run 'zz kill-server' to restart it (sessions will be lost)";
-
-pub(crate) static COALESCE: LazyLock<bool> =
-    LazyLock::new(|| std::env::var_os("ZZ_PERF_TUI_COALESCE").is_none_or(|value| value != "0"));
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunOptions {

@@ -406,10 +406,6 @@ fn quiet_control_query_sends_one_flat_completion_batch() {
         &mailbox,
     );
     let messages = tests::take_reliable_messages(&mailbox);
-    if !*hook_events::READONLY_SKIP {
-        assert_eq!(messages.len(), 2);
-        return;
-    }
     let [ProtocolMessage::Batch(batch)] = messages.as_slice() else {
         panic!("expected one completion batch: {messages:?}")
     };
@@ -583,20 +579,19 @@ fn control_query_wakeup_excludes_hooks_and_pending_events() {
         "show-window-options",
         "start-server",
     ] {
-        assert_eq!(
+        assert!(
             ctrl::control_query_can_defer_wakeup(&inner, &context, &command(name, &[])),
-            *hook_events::READONLY_SKIP,
             "{name}"
         );
     }
-    assert_eq!(
-        ctrl::control_query_can_defer_wakeup(&inner, &context, &query),
-        *hook_events::READONLY_SKIP
-    );
-    assert_eq!(
-        ctrl::control_query_can_defer_wakeup(&inner, &context, &command("capture-pane", &["-p"]),),
-        *hook_events::READONLY_SKIP
-    );
+    assert!(ctrl::control_query_can_defer_wakeup(
+        &inner, &context, &query
+    ));
+    assert!(ctrl::control_query_can_defer_wakeup(
+        &inner,
+        &context,
+        &command("capture-pane", &["-p"]),
+    ));
     for (name, args) in [
         ("display-message", &["-I"][..]),
         ("display-message", &["-d", "100", "x"][..]),
@@ -898,14 +893,7 @@ fn compact_resize_validates_generation_before_skipping_its_exact_report() {
     };
     let normalized = ctrl::normalize_resize(&mut inner, client, input);
     assert_eq!(inner.clients[&client].ctrl_layout.as_ref().unwrap().1, 1);
-    if *attach::ATTACH_PRESIZE {
-        assert!(normalized.is_none());
-    } else {
-        assert!(matches!(
-            normalized,
-            Some(InputMessage::ResizeTerminal { .. })
-        ));
-    }
+    assert!(normalized.is_none());
     assert_eq!(inner.terminal_geometries[&pane][&client], geometry);
     assert!(matches!(
         ctrl::normalize_resize(
@@ -2427,7 +2415,7 @@ fn compact_raw_control_preflights_line_and_resolves_daemon_environment() {
     );
     assert!(matches!(
         mailbox.state.lock().reliable.back(),
-        Some(OutboundFrame::Grouped { frames, .. }) if frames.len() == if *hook_events::READONLY_SKIP { 3 } else { 2 }
+        Some(OutboundFrame::Grouped { frames, .. }) if frames.len() == 3
     ));
     let messages = reliable_children(&mailbox);
     let started = messages.iter().position(|message| matches!(message, ProtocolMessage::Event(Event { payload: EventPayload::ControlCommandStarted { request_id: 1, flags: 1, guard: true, canonical_name: Some(name) }, .. }) if name == "display-message")).unwrap_or_else(|| panic!("command start missing: {messages:?}"));
@@ -2984,7 +2972,6 @@ mod quiet_socket {
 
     #[test]
     fn full_completion_keeps_exact_wire_raw_output_and_recycled_buffers() {
-        assert!(*attach::BATCHED_WRITES);
         let mailbox = OutboundMailbox::new();
         let outer = Vec::with_capacity(4096);
         let allocation = outer.as_ptr();
@@ -3022,7 +3009,6 @@ mod quiet_socket {
 
     #[test]
     fn would_block_keeps_the_complete_group_for_the_normal_writer() {
-        assert!(*attach::BATCHED_WRITES);
         let mailbox = OutboundMailbox::new();
         let (mut reader, server) = socket_pair(&mailbox);
         let flags = rustix::fs::fcntl_getfl(&server).expect("blocking flags");
@@ -3076,7 +3062,6 @@ mod quiet_socket {
 
     #[test]
     fn partial_tail_precedes_quiet_attach_and_sync_without_child_replay() {
-        assert!(*attach::BATCHED_WRITES);
         let mailbox = OutboundMailbox::new();
         let (mut reader, mut server) = socket_pair(&mailbox);
         let flags = rustix::fs::fcntl_getfl(&server).expect("blocking flags");
@@ -3180,7 +3165,6 @@ mod quiet_socket {
 
     #[test]
     fn closing_a_partial_frame_accounts_only_its_remaining_bytes() {
-        assert!(*attach::BATCHED_WRITES);
         let mailbox = OutboundMailbox::new();
         let (mut reader, mut server) = socket_pair(&mailbox);
         let messages = completion(vec![b'c'; 256 * 1024]);
@@ -3208,7 +3192,6 @@ mod quiet_socket {
 
     #[test]
     fn overflow_preserves_a_partial_tail_before_its_exit_marker() {
-        assert!(*attach::BATCHED_WRITES);
         let mailbox = OutboundMailbox::new();
         let (mut reader, server) = socket_pair(&mailbox);
         let messages = completion(vec![b'o'; 256 * 1024]);
@@ -3285,7 +3268,7 @@ mod quiet_socket {
     #[test]
     fn disabled_buffered_and_unsupported_sockets_keep_existing_drains() {
         for (buffered, socket) in [(true, true), (false, false), (false, true)] {
-            if !buffered && socket && *attach::BATCHED_WRITES {
+            if !buffered && socket {
                 continue;
             }
             let mailbox = if buffered {
@@ -3329,7 +3312,6 @@ mod quiet_socket {
 
     #[test]
     fn a_writer_error_releases_a_partial_frame_without_counting_its_prefix_twice() {
-        assert!(*attach::BATCHED_WRITES);
         let mailbox = OutboundMailbox::new();
         let (reader, mut server) = socket_pair(&mailbox);
         let messages = completion(vec![b'e'; 256 * 1024]);
@@ -3351,7 +3333,6 @@ mod quiet_socket {
 
     #[test]
     fn panic_after_writer_dequeue_closes_the_socket_and_releases_ownership() {
-        assert!(*attach::BATCHED_WRITES);
         let mailbox = OutboundMailbox::new();
         let (mut reader, _server) = socket_pair(&mailbox);
         let messages = completion(vec![b'p'; 256 * 1024]);

@@ -375,8 +375,8 @@ per-caller reuse).
   base; every wire-changing merge is noted in the campaign log.
 - A pre-campaign 107 daemon cannot decode `Exec`. On a same-version first-frame decode failure or
   EOF, the CLI opens a hello connection and reruns the chain there only when that hello lacks
-  `exec-v1`, so a chain an Exec daemon took is never run twice (the legacy path stays behind
-  `ZZ_PERF_LEGACY_COMMAND` anyway). A released 106 daemon rejects at the envelope check with
+  `exec-v1`, so a chain an Exec daemon took is never run twice (the legacy path stayed behind
+  a rollback knob until wave 4). A released 106 daemon rejects at the envelope check with
   `CommandResponse::Error(ProtocolMismatch)`, which `classify_local_connect_error` already turns
   into today's mismatch prompt.
 - **No release tags mid-campaign.** A tag freezes 107; the next wire change must then bump to 108
@@ -649,7 +649,7 @@ defines `MI_NO_THP`, which in mimalloc v3 only skips `MADV_HUGEPAGE`, while mima
 also sets `MI_DEFAULT_ALLOW_THP=0`. `zz_cli` now registers a constructor in `.init_array.00100`,
 ahead of mimalloc's (priority 101), that sets `PR_SET_THP_DISABLE` for the process, and the Linux
 pane fork clears it again before exec, so pane programs keep the system setting (`run-shell` and
-status job children still inherit it). Same-binary A/B with `ZZ_PERF_THP=1`: footprint p1
+status job children still inherit it). Same-binary A/B with the THP knob (deleted in wave 4): footprint p1
 15.2 -> 3.1 MiB, p20 99-100 -> 18 MiB, detached throughput 90.6 -> 88-90 MB/s (unchanged within
 noise), spawn instructions unchanged.
 
@@ -894,8 +894,8 @@ As built (branch `perf/format`):
   as `Arc`s; `update-environment` patterns compile once per array (`GlobPattern`); the option
   index hashes with foldhash; a status refresh with no matching subscriber returns before it
   builds the snapshot, the facts and `format_option_snapshot`.
-- `ZZ_PERF_EAGER_UNIVERSE=1` fills every part on creation and detach; `with_eager_universe`
-  flips it per thread and is the oracle of the differential tests in
+- The eager universe fills every part on creation and detach; `with_eager_universe`
+  turns it on per thread and is the oracle of the differential tests in
   `crates/zz-mux/src/format_universe_tests.rs` and
   `crates/zz-daemon/src/daemon/format_universe_tests.rs` (loop compositions inside `S`/`W`,
   status requests with partial needs, and a status job whose output needs a part the templates
@@ -1072,7 +1072,7 @@ departs from the scope above:
   to about eight combining marks a cell; a test fills wide and narrow panes with combining marks. Measured restore: after idle
   compression, `capture-pane -S - -E -` of a 180x50 pane holding 9.9k lines of `seq` costs 74.8
   Minstr (5.3 ms daemon CPU) the first time and 64.6 Minstr after, against 64.2 Minstr with
-  `ZZ_PERF_NO_COMPRESS=1`, so restoring about 46 pages is 10 Minstr (about 30 us a page).
+  compression off, so restoring about 46 pages is 10 Minstr (about 30 us a page).
 - Item 6: the macOS child exit is a kqueue with `EVFILT_PROC NOTE_EXIT` in `wait_for_wake`'s poll
   set (`ChildExitWatch`). `NOTE_EXIT` can fire before the child is reapable, so after the event
   the actor waits for it with a blocking `waitpid` on that pid; `ESRCH` at registration goes
@@ -1466,7 +1466,7 @@ merged) after review. Where the build departs from the scope above:
 - Connection threads: W1-FOOTPRINT handed over the per-connection thread cost (the heap purge at
   thread exit). Each connection still gets a thread of its own and nothing waits for one, but a
   finished connection thread parks for up to 1 s (at most two parked) and serves the next
-  connection. Knob `ZZ_PERF_CONNECTION_THREADS=0`.
+  connection.
 - Unregister: `detach_is_inert` (no session, copy mode, focus, visible views, control kind or
   latest-client mark) skips the `MuxHookSnapshot`, copy-mode and focus captures in
   `detach_client_state`, and an inert exec client skips `detach` entirely. Control output taps
@@ -1488,7 +1488,7 @@ merged) after review. Where the build departs from the scope above:
   mismatch message.
 - `CommandClient`: `connect` opens the socket only; `server_id()` is lazy; `server_hello()` is gone
   (the one daemon test that read it probes instead); `execute_on_server` is the settings file
-  path (`expect_server_id`). `ZZ_PERF_LEGACY_COMMAND=1` runs the hello path with the old prepare
+  path (`expect_server_id`). A rollback knob (deleted in wave 4) ran the hello path with the old prepare
   and per-command loop, including the cold-start abort pseudo-command. The automatic fallback is
   narrower than first built: with one reply write per Exec, an EOF before the first frame also
   means "the daemon ran the chain and died before writing", and the first build then reran the
@@ -1549,7 +1549,7 @@ after 1 s). Thread reuse alone is 2.95 -> 2.75 Minstr per `display-message` (A/B
 
 Review fixes, checked on the rebased branch: `cargo test` for zz-protocol, zz-terminal, zz-mux,
 zz-daemon (lib and every test target; one russh port test failed under load and passes alone),
-zz-cli (also with `ZZ_PERF_LEGACY_COMMAND=1`), zz-client, zz-tui, zz-web, zz-client-ffi; clippy
+zz-cli (also with the legacy-command knob), zz-client, zz-tui, zz-web, zz-client-ffi; clippy
 `-D warnings` on those and `zz`; `compat/wire-version.py`; `compat/run.sh` full corpus on a pinned
 copy (red twice: the nine host rows below plus the two `known/` rows with their documented
 divergences; `if-shell-background-order` was red once under load and passed alone;
@@ -1564,7 +1564,7 @@ hiding `exec-v1` (one rerun over hello), and a `LAST` Exec closed by the daemon.
 (the `/proc/self/exe` fallback is compile-checked only), `packaged-cli.sh`.
 
 Checks before review: `cargo test` for zz-protocol, zz-mux, zz-daemon (lib and every test target),
-zz-cli (also with `ZZ_PERF_LEGACY_COMMAND=1`), zz-tui, zz-client, zz-client-ffi, zz-web and
+zz-cli (also with the legacy-command knob), zz-tui, zz-client, zz-client-ffi, zz-web and
 zz-config; clippy `-D warnings` on those and `zz`; Linux `cargo check` of zz-daemon and zz-cli,
 Windows of the client half; `just web-build`; `just ios-gpui iPad build`. `compat/run.sh` (316
 rows) on this macbook: nine rows fail on both passes here, and the same nine fail with the
@@ -1760,10 +1760,8 @@ where the build departs from the scope above:
   `CommandClient` reads for a daemon that sends neither and for a new-session chain of more than
   one command, whose later commands may set them. A TUI on a remote host now arms from that
   host's options (before, the reads were local only and a remote TUI never armed).
-- Knobs: `ZZ_PERF_ATTACH_DEDUP=0`, `ZZ_PERF_ATTACH_BATCH=0`, `ZZ_PERF_ATTACH_PRESIZE=0` and
-  `ZZ_PERF_WRITEV=0` in the daemon (logged at startup next to the publication knobs; the client
-  also reads `ZZ_PERF_WRITEV` for its buffered reads), `ZZ_PERF_TUI_COALESCE=0` in the CLI. What
-  each restores is in the Rollback switches table.
+- Knobs: dedup, batch, presize and writev in the daemon (the client read writev for its
+  buffered reads) and TUI coalescing in the CLI, all deleted at the start of wave 4.
 - Tests: `daemon/attach_tests.rs` (18: switch away and back and re-attach, RequestFull at the
   delivered generation, first frame at the final size and none before `Attached`, kitty chunks
   before the placing frame in one `writev` and a short write, the hold and the batch, the dedup
@@ -2019,8 +2017,8 @@ above:
   fingerprints in four lanes, searches row shifts nearest first and stops once no shift can win
   (it scanned all `2 x rows` shifts), and skips the dictionary prefix checks when both frames share
   one dictionary; these cut the watchers' diff share of the visible chatty profile.
-- Knob `ZZ_PERF_ROW_PATCHES=1` widens every span to its whole row (the pre-W2 granularity) on the
-  same wire, for bisecting a span-apply bug (`TerminalDiffScratch::set_whole_rows`). It fails
+- A row-patches knob (deleted in wave 4) widened every span to its whole row (the pre-W2
+  granularity) on the same wire, for bisecting a span-apply bug. It fails
   `echo.wire_bytes.idle` by design (about 80 B, the whole prompt row). The 8-byte frames have no
   knob.
 - Mixed builds inside 107: the daemon's `ServerHello` names `pane-frame-v1`. An interactive
@@ -2149,7 +2147,7 @@ zz-terminal (313), zz-protocol (252), zz-client (167 and the daemon-backed simul
 zz-mux (586), zz-client-ffi, zz-web, zz-cli and zz (583) pass; zz-daemon 1129 of 1133, the known
 `remote_scripts_fall_back_to_the_mac_app_bundle_cli` plus two `process_info` exec-name tests and
 the russh port test, which pass alone 3 of 3. The two-client daemon test passes three times plain
-and twice with `ZZ_PERF_ROW_PATCHES=1` (the knob reads 80.5 B on `echo.wire_bytes.idle`, as the
+and twice with the row-patches knob (the knob reads 80.5 B on `echo.wire_bytes.idle`, as the
 rollback table says). Release build, with other trees' compiles paused: `tui-screen-diff.sh`
 147/147 three times, `attached-client.sh` PASS, choosers 78/78, overlays 48/48,
 output-backpressure 9/9, copy-mode 141/147 (the six fresh-entry search prompt cases of the base);
@@ -2278,7 +2276,7 @@ As built on `perf/ctrl`, 2026-09-30:
   revision. Control requests no keys because its frontend does not use them; TUI requests
   Hash, and desktop, web, iOS, and FFI request Full.
 - `InteractiveClient` attaches with Hello; `CommandClient::into_interactive` retains its
-  existing transport after `ExecResume`. With `ZZ_PERF_LEGACY_COMMAND=1`, it closes the
+  existing transport after `ExecResume`. With the legacy-command knob, it closed the
   command transport and reconnects through the saved route before sending interactive
   Hello. It preserves endpoint facts and transfers the existing SSH forward to the
   interactive client. The rollback test checks the old connection closes, the new
@@ -2354,7 +2352,7 @@ As built on `perf/ctrl`, 2026-09-30:
   of later traffic, and remains outside later Batch collectors. Overflow preserves
   that remainder before ControlExit within the queue bounds, or closes the transport.
   Writer cleanup tracks dequeued bytes through success, error and panic.
-  `ZZ_PERF_WRITEV=0` disables this completion path; hook and park releases retain
+  The writev knob disabled this completion path; hook and park releases retain
   their ordinary writer wake.
   The retained `ServerHello` payload is boxed, reducing `ProtocolMessage` from
   1,432 to 312 bytes on this host. Its encoded greeting is unchanged; a saved
@@ -2414,10 +2412,8 @@ As built on `perf/ctrl`, 2026-09-30:
   turn and clears it on explicit restart or reclaim. The original capture assertion and
   new cold/reset/reclaim/restart proofs pass.
 
-`ZZ_PERF_TREE_DELTA=0` publishes full scoped trees on the new wire. The existing
-`ZZ_PERF_EAGER_FACTS=1` restores eager facts for the literal-output optimization.
-`ZZ_PERF_READONLY_SKIP=0` restores read-only key/tap work and eager Started wakes.
-`ZZ_PERF_TUI_COALESCE=0` restores eager full-row paints and uncached border/status work.
+The tree-delta, eager-facts, read-only-skip and TUI-coalesce knobs that rolled these back
+were deleted at the start of wave 4.
 Full wire rollback requires reverting matching daemon and clients.
 
 
@@ -2480,7 +2476,7 @@ Exact review/integration commands, exits and captured output stay in scratch JSO
 | PRE alias comparison | `timeout 1800 env PATH=/opt/homebrew/opt/coreutils/libexec/gnubin:/opt/homebrew/opt/gnu-sed/libexec/gnubin:/opt/homebrew/opt/grep/libexec/gnubin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin ZZ_COMPAT_TMUX=/Users/demfabris/dev/zz/compat/.cache/tmux-src/tmux ZZ_COMPAT_ZZ=/tmp/zzpc/ctrl-base/zz_cli /opt/homebrew/bin/bash /tmp/zzpc/ctrl-fix-harness/compat/run.sh smoke/control-alias-prepare` | 1 | `/tmp/zzpc/ctrl-fix-compat-alias-pre.json` |
 | Attached-client parity | `timeout 1800 env PATH=/opt/homebrew/opt/coreutils/libexec/gnubin:/opt/homebrew/opt/gnu-sed/libexec/gnubin:/opt/homebrew/opt/grep/libexec/gnubin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin /opt/homebrew/bin/bash /tmp/zzpc/ctrl-fix-harness/compat/attached-client.sh /Users/demfabris/dev/zz-ctrl/target/debug/zz_cli /Users/demfabris/dev/zz/compat/.cache/tmux-src/tmux` | 0 | `/tmp/zzpc/ctrl-fix-attached-client.json` |
 | TUI screen parity | `timeout 1800 env PATH=/opt/homebrew/opt/coreutils/libexec/gnubin:/opt/homebrew/opt/gnu-sed/libexec/gnubin:/opt/homebrew/opt/grep/libexec/gnubin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin /opt/homebrew/bin/bash /tmp/zzpc/ctrl-fix-harness/compat/tui-screen-diff.sh /Users/demfabris/dev/zz-ctrl/target/debug/zz_cli /Users/demfabris/dev/zz/compat/.cache/tmux-src/tmux` | 0 | `/tmp/zzpc/ctrl-fix-tui-screen.json` |
-| TUI screen rollback | `timeout 1800 env ZZ_PERF_TUI_COALESCE=0 PATH=/opt/homebrew/opt/coreutils/libexec/gnubin:/opt/homebrew/opt/gnu-sed/libexec/gnubin:/opt/homebrew/opt/grep/libexec/gnubin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin /opt/homebrew/bin/bash /tmp/zzpc/ctrl-fix-harness/compat/tui-screen-diff.sh /Users/demfabris/dev/zz-ctrl/target/debug/zz_cli /Users/demfabris/dev/zz/compat/.cache/tmux-src/tmux` | 0 | `/tmp/zzpc/ctrl-fix-tui-screen-rollback.json` |
+| TUI screen rollback (coalesce knob off, deleted in wave 4) | `timeout 1800 env PATH=/opt/homebrew/opt/coreutils/libexec/gnubin:/opt/homebrew/opt/gnu-sed/libexec/gnubin:/opt/homebrew/opt/grep/libexec/gnubin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin /opt/homebrew/bin/bash /tmp/zzpc/ctrl-fix-harness/compat/tui-screen-diff.sh /Users/demfabris/dev/zz-ctrl/target/debug/zz_cli /Users/demfabris/dev/zz/compat/.cache/tmux-src/tmux` | 0 | `/tmp/zzpc/ctrl-fix-tui-screen-rollback.json` |
 | Knowledge validation | `python3 .agents/skills/okf/scripts/okf.py validate` | 0 | `/tmp/zzpc/ctrl-fix-final-okf.json` |
 | Initial focused test: type correction | `timeout 1800 cargo test -p zz-daemon legacy_command_attach_reconnects_with_the_original_route -- --test-threads=1` | 101 | `/tmp/zzpc/ctrl-fix-legacy-unit.json` |
 | Initial focused test: EOF correction | `timeout 1800 cargo test -p zz-daemon legacy_command_attach_reconnects_with_the_original_route -- --test-threads=1` | 101 | `/tmp/zzpc/ctrl-fix-legacy-unit-rerun.json` |
@@ -2548,7 +2544,7 @@ The preceding eight-thread command stopped at the daemon with 24 failures; all
 recorded, and the solos and serial pass do not establish its cause. The 16-package
 all-target/all-feature lint exits 0. Shared host capability runs one actual test,
 its full library passes 58, and its lint exits 0. The linked C rollback integration
-passes with `ZZ_PERF_TREE_DELTA=0`; one Rust test launches both C clients. Web and
+passed with the tree-delta knob; one Rust test launches both C clients. Web and
 iPad build recipes exit 0. Those builds establish compilation rather than physical
 iPad or packaged desktop behavior. Detailed commands and exits are retained in
 `bench/perf/results/w2-3-ctrl-validation-macbook-8c49034f.md` and its raw JSON.
@@ -2634,7 +2630,7 @@ departs from the scope above:
   option maps, and `set -g @x` stopped cloning the whole map and dropping the copy (27% of a
   1000-line `source-file` with 400 `@options`). `DaemonFormatHooks::withhold_facts` makes every
   fact-reading `StatusHooks` method debug-assert. `synchronize_pane_runtime` uses the same empty
-  facts when no rename is due. Knob `ZZ_PERF_EAGER_FACTS=1`.
+  facts when no rename is due.
 - Item 2 is a journal of pre-images, not of semantic events. `MuxState.sessions` and `.windows`
   are `Tracked` maps (zz-mux `journal.rs`): reads go through `Deref` to the `BTreeMap`, and the
   only mutable accessors (`get_mut`, `insert`, `remove` inside zz-mux; `session_mut`,
@@ -2657,8 +2653,7 @@ departs from the scope above:
   event enum: the current diff's order is what the compat corpus pins against tmux, and events
   derived from the same diff over pre-images keep that order exactly; option, key-table,
   environment and client changes raise their hooks through effects today and needed no entries.
-- `MuxHookSnapshot` and the full diff stay as the rollback path (`ZZ_PERF_HOOK_JOURNAL=0`) and
-  as the oracle: debug builds capture both and assert the journal gives the same events, the
+- `MuxHookSnapshot` and the full diff stay as the oracle: debug builds capture both and assert the journal gives the same events, the
   same focus candidates and the same moved active windows, panes and bells. That replaces the
   "generation moved implies journal entry" assert, which could not see a missed pre-image.
   Delete both with the wave-2 knobs.
@@ -2677,8 +2672,7 @@ departs from the scope above:
     subscriber nothing is built and the change stays pending for the next publication; the first
     version of the skip also left the published content stale, so a subscriber that arrived
     after an unbind and then saw the binding restored was never told (parity review, now a
-    test). The hello always snapshots fresh. `ZZ_PERF_EAGER_PUBLISH=1` covers the skip,
-    `ZZ_PERF_KEY_TABLE_DELTA=0` sends every table in `KeyTablesChanged`.
+    test). The hello always snapshots fresh.
   - `MuxEngine::execute_without_alias_expansion_inner` swept 37 session, window and pane keyed
     maps after every command, read-only ones included, with a scan of every window per pane
     entry (18.6% of config replay at 20 windows, 36% of `has-session` at 100). The sweep now
@@ -2848,12 +2842,9 @@ Frozen backing survives source output, pruning, ED3 and source destruction. It u
 backing with unlimited snapshot pruning, wrapping and history pulling enabled, and shell
 prompt redraw disabled; source screen identity stays separate. Resize maps the logical cursor,
 clears selection and rebuilds search marks. Appearance changes recolor frozen content, while
-an enabled refresh captures the current source. `ZZ_PERF_COPY_CLONE=1` restores flat
-mode/search snapshots and their original entry-geometry limit; retained actor behavior applies
-with either choice. A test-only search gate now covers pending retained search direction in
+an enabled refresh captures the current source. A test-only search gate now covers pending retained search direction in
 both backends without unwrapping absent native state. Resize tests assert the supported
 backend geometry while still checking the live terminal resize.
-`ZZ_PERF_NO_COMPRESS=1` also suppresses copy/search recompression.
 
 Retained dead panes keep their compressed terminal actor instead of `FrozenHistory`. The actor
 answers copy reads immediately during the five-second retention decision and completes their
@@ -2898,7 +2889,7 @@ The three COPY floors pass, including every sample below their bounds. The presc
 informational rows, with no errors, strays or killed orphans. The failure is unchanged
 `mem.threads.p20`: 66 against 51, owned by W3-SHARDS. Detached throughput is 0.987x the lane
 base and passes the Linux cooked-PTY/W0 bounds. Final load was `[0.28, 1.03, 0.93]` before and
-`[0.58, 1.01, 0.93]` after. Rollback explicitly records `ZZ_PERF_COPY_CLONE=1` and intentionally
+`[0.58, 1.01, 0.93]` after. Rollback with the copy-clone knob (deleted in wave 4) intentionally
 fails the three COPY floors; retained actor fixes remain active. Artifacts are
 `/home/demfabris/.cache/zz-perf/copy/{before,after,rollback-copy-clone}.json` and matching logs.
 The final gate records dirty documentation only; the measured production code is committed.
@@ -3565,14 +3556,8 @@ and stable status expansion while preserving the full formatter and its rollback
   completion routing is unchanged. Non-control clients return before an unused query.
   Detach names are captured before removal only when attached event hooks can use them. No persistent execution-context memo was added.
 
-Rollback is independent and read once at startup:
-
-| Setting | Restores |
-|---|---|
-| `ZZ_PERF_COMPILED_FORMATS=0` | W1 interpretation; no segmented status rendering |
-| `ZZ_PERF_BORROWED_FORMATS=0` | Legacy owned values/universe with provider engine preserved |
-| `ZZ_PERF_BORROWED_FACTS=0` | Complete owned daemon fact snapshots |
-| `ZZ_PERF_FORMAT_CACHE=0` | Fresh compiled templates, options/dependencies and result captures |
+Its four rollback switches (compiled formats, borrowed formats, borrowed facts, format cache)
+were deleted at the start of wave 4.
 
 Current source verification, all completed exits 0:
 
@@ -3584,7 +3569,7 @@ Current source verification, all completed exits 0:
 | 4c5b formatting, diff and independent audit | Passed; no findings | Root pipeline |
 | 4c5b nine-crate serial suite | 3,359 distinct passed, 2 ignored, 0 failed | `/tmp/zzpc/fmt-tests-final-unused-final.log` |
 | 4c5b normal/all-four format sweeps | 299 each (149 daemon, 150 mux) | `/tmp/zzpc/fmt-final-unused-{format,rollback}-tests.log` |
-| 4c5b each independent rollback switch | 127 each | `/tmp/zzpc/fmt-final-unused-ZZ_PERF_*-tests.log` |
+| 4c5b each independent rollback switch | 127 each | `/tmp/zzpc/fmt-final-unused-<switch>-tests.log` |
 | 4c5b profiling CLI build and identity | 4m49s; validated | `/tmp/zzpc/fmt-profile-build-4c5b0b39.log` |
 | 4c5b debug / release CLI / release headless client | 37.23s / 3m32s / 1m16s | `/tmp/zzpc/fmt-{debug,release,headless}-build-4c5b0b39.log` |
 
@@ -3811,47 +3796,7 @@ lane); cold start not slower; remote start works against an ssh host in the flee
 
 # Rollback switches
 
-One environment knob per behaviour change, read once at daemon start (the CLI one at CLI start),
-logged at startup, so a parity regression can be bisected on a live build without a revert. Each
-knob is a `static LazyLock<bool>` next to the code it guards. Check `spawn_daemon` passes
-`ZZ_PERF_*` through to the daemon. Knobs from wave N are deleted when wave N+2 starts (W3-LOOP
-deletes most wave-1 fallback paths anyway).
-
-| Knob | Lane | Set, restores |
-|---|---|---|
-| `ZZ_PERF_LEGACY_COMMAND=1` | EXEC | CLI uses ClientHello + PrepareCommandList + CommandRequest (daemon keeps that path through W2) |
-| `ZZ_PERF_CONNECTION_THREADS=0` | EXEC | a new thread per connection, none kept idle for reuse |
-| `ZZ_PERF_EAGER_FRAMES=1` | PANE | frames for every attached view plus the no-view fallback |
-| `ZZ_PERF_NO_COMPRESS=1` | PANE | no idle history compression |
-| `ZZ_PERF_ECHO_FASTPATH=0` | PANE | always wait `CONTENT_PUBLISH_STALENESS` |
-| `ZZ_PERF_EAGER_PUBLISH=1` | PUBLISH | runtime-fact and title changes publish synchronously; no subscriber early returns (key tables included); every Snapshot is sent even when a client already has it |
-| `ZZ_PERF_RENAME_THROTTLE=0` | PUBLISH | no 500 ms automatic-rename throttle |
-| `ZZ_PERF_PEER_SCAN=always` | PUBLISH | 1 Hz Claude peer scan as today, reading every record each tick; the status sampler ticks with no client |
-| `ZZ_PERF_EAGER_UNIVERSE=1` | FORMAT | full universe per expansion (also the differential oracle) |
-| `ZZ_PERF_COMPILED_FORMATS=0` | FMT | parse and evaluate templates through the interpreter |
-| `ZZ_PERF_BORROWED_FORMATS=0` | FMT | build the full owned table values for contexts and loop items |
-| `ZZ_PERF_BORROWED_FACTS=0` | FMT | build owned command facts before engine execution |
-| `ZZ_PERF_FORMAT_CACHE=0` | FMT | rebuild compiled templates, option snapshots, needs, reference closures and unions, detached contexts, default key listings, status parameters, prepared requests, border presentations and completed status output |
-| `ZZ_PERF_ATTACH_DEDUP=0` | ATTACH | resync and Full enqueue as today: an attach resends the Snapshot and every overlay, frames are not held until `Attached`, no update is dropped for a generation already queued or written, and the publish after a detach renders the detaching client's status |
-| `ZZ_PERF_ATTACH_BATCH=0` | ATTACH | an attach holds only its terminal frames until `Attached`; `Attached`, the status and the other reliable messages are written as they are queued instead of as one batch after the publish that follows the attach, and the hello of a raw-terminal or browser client carries a status rendered before it attached |
-| `ZZ_PERF_ATTACH_PRESIZE=0` | ATTACH | an attaching raw-terminal client's panes keep their size until its first `ResizeTerminal` |
-| `ZZ_PERF_WRITEV=0` | ATTACH | one write per outbound frame, a writer thread of its own per connection, the default socket send buffer, and unbuffered protocol reads in the daemon and in the client (the client reads it at start) |
-| `ZZ_PERF_TUI_COALESCE=0` | ATTACH | the TUI (read at CLI start) disables event-paint coalescing and retained-row and narrow-column skips, repaints on every snapshot and unchanged resize, paints before draining queued events and draws a waiting card in a pane with no frame, writes cursor-only paints, clears to the theme colour and erases blank pane rows, performs uncached border/status work, sends the initial Kitty graphics probe regardless of terminal-support detection, reports client grid size for a cell-size reply, and uses absolute cursor positioning for successive vertical border cells. Terminal options come from Hello and attachment uses the same single connection |
-| `ZZ_PERF_ROW_PATCHES=1` | TERM | patches replace every changed row whole (from column 0, the rest of the row cleared), the pre-W2 row granularity; the frames stay PaneFrames. Fails `echo.wire_bytes.idle` (about 80 B against the 64 B rule) by design: a key echo resends its whole prompt row |
-| `ZZ_PERF_READONLY_SKIP=0` | HOOKS, CTRL | read-only commands take the before/after captures and perform key-table publication checks and control tap refresh |
-| `ZZ_PERF_EAGER_FACTS=1` | HOOKS, CTRL | every command builds format hook facts, literal display commands resolve format targets before execution, and a pane runtime fact change builds facts with no rename due |
-| `ZZ_PERF_HOOK_JOURNAL=0` | HOOKS | hook events come from whole-mux snapshots before and after, the command path captures every active window, active pane and bell, and the focus probe captures every window and session |
-| `ZZ_PERF_KEY_TABLE_DELTA=0` | HOOKS | Full subscribers receive every key table instead of the changed and removed tables; Hash subscribers retain their compact revision and mouse bindings |
-| `ZZ_PERF_TREE_DELTA=0` | CTRL | compact subscribers receive full scoped trees for changes instead of TreeDelta; Hello, Welcome and Batch stay on the new wire |
-| `ZZ_PERF_COPY_CLONE=1` | COPY | flat `ModeRevision` clone |
-| `ZZ_PERF_THP=1` | FOOTPRINT (Linux) | the daemon keeps transparent huge pages as the system sets them |
-
-Wire changes (W2-TERM, W2-CTRL) and the thread model (W3, W4) require a revert for rollback.
-`ZZ_PERF_TREE_DELTA=0` changes tree publication within the new wire only. The 8-byte-a-cell frames cannot come back behind a knob: both ends speak one format. `ZZ_PTY_SHARDS=N` is a tuning knob, not a rollback. W2-HOOKS changes that keep behaviour
-have no knob either: the catalogue name index, the skipped lookup for empty hook arrays, the sweep
-that runs only after a removal (debug builds assert a skipped one would remove nothing), the
-focus early return and the shared change window (debug builds diff the focus candidates against
-whole-state probes), and the blocking run-shell wait.
+Waves 1 and 2 put each behaviour change behind a `ZZ_PERF_*` environment knob, read once at start, so a parity regression could be bisected without a revert. Every one of them, with the fallback path that only the knob reached, was deleted at the start of wave 4 (perf/knobs, "Delete the wave-1 and wave-2 rollback knobs and the paths only they reached"). What remains: the wave-3 tuning switches `ZZ_PTY_SHARDS` and `ZZ_PTY_GATHER`; the daemon's ClientHello, PrepareCommandList and CommandRequest path, which interactive clients and gpui-shared still send and which the CLI falls back to for a daemon without Exec; and the test oracles `with_eager_universe`, `with_borrowed_formats` and the compiled-format interpreter switch. Wire changes and the thread model need a revert to roll back.
 
 # Tests and fixtures to add
 

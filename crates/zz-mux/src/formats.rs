@@ -31,7 +31,6 @@ mod tree;
 mod tree_tests;
 
 use tree::FormatTree;
-pub use tree::borrowed_formats_knob;
 pub use tree::with_borrowed_formats;
 
 mod compiled;
@@ -67,19 +66,6 @@ pub fn cloned_raw_text_bytes(value: &RawText) -> usize {
     } else {
         text.saturating_add(value.as_bytes().len())
     }
-}
-
-#[must_use]
-pub fn compiled_formats_knob() -> bool {
-    compiled::enabled()
-}
-
-static FORMAT_CACHE: LazyLock<bool> =
-    LazyLock::new(|| std::env::var_os("ZZ_PERF_FORMAT_CACHE").is_none_or(|value| value != "0"));
-
-#[must_use]
-pub fn format_cache_knob() -> bool {
-    *FORMAT_CACHE
 }
 
 pub fn borrowed_formats_enabled() -> bool {
@@ -624,20 +610,12 @@ fn apply_context_value(values: &mut StatusValues, name: &str, value: &str) {
     }
 }
 
-static EAGER_UNIVERSE: LazyLock<bool> =
-    LazyLock::new(|| std::env::var_os("ZZ_PERF_EAGER_UNIVERSE").is_some_and(|value| value == "1"));
-
 thread_local! {
     static EAGER_UNIVERSE_OVERRIDE: Cell<bool> = const { Cell::new(false) };
 }
 
 fn eager_universe() -> bool {
-    *EAGER_UNIVERSE || EAGER_UNIVERSE_OVERRIDE.with(Cell::get)
-}
-
-#[must_use]
-pub fn eager_universe_knob() -> bool {
-    *EAGER_UNIVERSE
+    EAGER_UNIVERSE_OVERRIDE.with(Cell::get)
 }
 
 #[doc(hidden)]
@@ -1862,7 +1840,7 @@ impl StatusContext<'_> {
         shared: Option<&Arc<BTreeSet<String>>>,
     ) -> Option<StatusContext<'static>> {
         let tree = self.tree.as_ref()?;
-        if !format_cache_knob() || !tree::borrowed_formats() || self.values.get().is_some() {
+        if !tree::borrowed_formats() || self.values.get().is_some() {
             return None;
         }
         let mut cache = tree.engine.format_context_cache.lock();
@@ -1931,9 +1909,7 @@ impl StatusContext<'_> {
         let cache_key = self
             .tree
             .as_ref()
-            .filter(|_| {
-                format_cache_knob() && tree::borrowed_formats() && self.values.get().is_none()
-            })
+            .filter(|_| tree::borrowed_formats() && self.values.get().is_none())
             .map(|tree| {
                 (
                     tree.engine,
@@ -2575,16 +2551,14 @@ impl NeedsScan<'_> {
 
 impl MuxEngine {
     #[must_use]
-    pub fn format_cache_revision(&self) -> Option<(u64, u64, u64, u64)> {
-        format_cache_knob().then(|| {
-            let revision = FormatCaptureRevision::new(self);
-            (
-                revision.state,
-                revision.options,
-                revision.data,
-                revision.now,
-            )
-        })
+    pub fn format_cache_revision(&self) -> (u64, u64, u64, u64) {
+        let revision = FormatCaptureRevision::new(self);
+        (
+            revision.state,
+            revision.options,
+            revision.data,
+            revision.now,
+        )
     }
 
     #[must_use]
@@ -2634,7 +2608,7 @@ impl MuxEngine {
         shared: Option<&Arc<BTreeSet<String>>>,
         sorted_overrides: impl IntoIterator<Item = (&'a str, &'a str)>,
     ) -> Option<StatusContext<'static>> {
-        if !format_cache_knob() || !tree::borrowed_formats() {
+        if !tree::borrowed_formats() {
             return None;
         }
         let target_ids = self.format_target(target.0, target.1, target.2);
@@ -2675,8 +2649,7 @@ impl MuxEngine {
     #[must_use]
     pub fn cached_format_references(&self, template: &str) -> Arc<BTreeSet<String>> {
         let generation = self.format_options_generation();
-        let cached = format_cache_knob();
-        if cached {
+        {
             let cache = self.format_reference_cache.lock();
             if let Some((cached_generation, entries)) = cache.as_ref()
                 && *cached_generation == generation
@@ -2710,9 +2683,6 @@ impl MuxEngine {
             }
         }
         let references = Arc::new(references);
-        if !cached {
-            return references;
-        }
         let mut cache = self.format_reference_cache.lock();
         if cache
             .as_ref()
@@ -2735,8 +2705,7 @@ impl MuxEngine {
     ) -> Arc<BTreeSet<String>> {
         let sources = templates.into_iter().collect::<Vec<_>>();
         let generation = self.format_options_generation();
-        let cached = format_cache_knob();
-        if cached {
+        {
             let cache = self.format_reference_union_cache.lock();
             if let Some(cache) = cache.as_ref()
                 && cache.generation == generation
@@ -2762,14 +2731,12 @@ impl MuxEngine {
                     .saturating_add(source.len())
             },
         ));
-        if cached {
-            *self.format_reference_union_cache.lock() =
-                (bytes <= FORMAT_CAPTURE_CACHE_BYTES).then(|| FormatReferenceUnionCache {
-                    generation,
-                    sources: sources.into_iter().map(str::to_owned).collect(),
-                    references: Arc::clone(&references),
-                });
-        }
+        *self.format_reference_union_cache.lock() =
+            (bytes <= FORMAT_CAPTURE_CACHE_BYTES).then(|| FormatReferenceUnionCache {
+                generation,
+                sources: sources.into_iter().map(str::to_owned).collect(),
+                references: Arc::clone(&references),
+            });
         references
     }
 

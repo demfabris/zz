@@ -108,14 +108,10 @@ static THP_DISABLED_HERE: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "linux")]
 #[allow(
     unsafe_code,
-    reason = "getenv and prctl run in a constructor before the allocator starts and touch no memory the process owns"
+    reason = "prctl runs in a constructor before the allocator starts and touches no memory the process owns"
 )]
 pub(super) fn disable_transparent_huge_pages() {
     unsafe {
-        let knob = libc::getenv(c"ZZ_PERF_THP".as_ptr());
-        if !knob.is_null() && *knob == b'1'.cast_signed() {
-            return;
-        }
         if libc::prctl(libc::PR_GET_THP_DISABLE, 0, 0, 0, 0) == 0
             && libc::prctl(libc::PR_SET_THP_DISABLE, 1, 0, 0, 0) == 0
         {

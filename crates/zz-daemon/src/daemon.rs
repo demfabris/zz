@@ -1131,18 +1131,12 @@ fn key_table_publication(
             published.insert((*name).to_owned(), *generation);
         }
     }
-    Some(if *timers::KEY_TABLE_DELTA {
-        EventPayload::KeyTablesPatched {
-            tables: changed
-                .into_iter()
-                .filter_map(|(name, _)| keys.snapshot_table(name))
-                .collect(),
-            removed,
-        }
-    } else {
-        EventPayload::KeyTablesChanged {
-            tables: keys.snapshot(),
-        }
+    Some(EventPayload::KeyTablesPatched {
+        tables: changed
+            .into_iter()
+            .filter_map(|(name, _)| keys.snapshot_table(name))
+            .collect(),
+        removed,
     })
 }
 
@@ -1607,8 +1601,6 @@ impl Daemon {
         T::Listener: Send + 'static,
     {
         let (mut socket_guard, identity_guard) = socket_guards;
-        #[cfg(windows)]
-        exec::ConnectionThreads::log_knob();
         let color_scheme = daemon_color_scheme();
         let load = AppearanceLoad::defaults_for(color_scheme);
         log_appearance_load("startup", &load);
@@ -1651,22 +1643,7 @@ impl Daemon {
         };
         let complete_startup = || {
             shared.log_diagnostic_snapshot("startup");
-            if zz_mux::eager_universe_knob() {
-                log::info!("ZZ_PERF_EAGER_UNIVERSE=1: format universes are built eagerly");
-            }
-            if !zz_mux::compiled_formats_knob() {
-                log::info!("ZZ_PERF_COMPILED_FORMATS=0: format templates use the interpreter");
-            }
-            if !zz_mux::borrowed_formats_knob() {
-                log::info!("ZZ_PERF_BORROWED_FORMATS=0: format contexts build all values");
-            }
-            if !zz_mux::format_cache_knob() {
-                log::info!(
-                    "ZZ_PERF_FORMAT_CACHE=0: format option snapshots and dependencies rebuild"
-                );
-            }
             log::info!("zz daemon listening at {endpoint}");
-            log_pane_perf_knobs();
             shared.finish_startup();
             let ready_guard = ready(shared.server_id);
             #[cfg(all(feature = "agent", unix))]
@@ -2144,7 +2121,7 @@ impl OutboundFrame {
         Self::Grouped { encoded, frames }
     }
 
-    #[cfg(any(windows, test))]
+    #[cfg(test)]
     fn into_vec(self) -> Vec<u8> {
         match self.materialize() {
             Self::Owned(frame) => frame,
@@ -2282,12 +2259,12 @@ fn terminal_update_redundant(
 ) -> bool {
     let current = transition.current;
     transition.base.is_none() && newer_terminal_delivered(state, pane, current)
-        || *attach::ATTACH_DEDUP
-            && (state.terminals.get(&pane).is_some_and(|pending| {
-                pending.current == current
-                    && (preview || !pending.preview)
-                    && (pending.full || transition.base.is_some())
-            }) || state.delivered_terminals.get(&pane) == Some(&current))
+        || state.terminals.get(&pane).is_some_and(|pending| {
+            pending.current == current
+                && (preview || !pending.preview)
+                && (pending.full || transition.base.is_some())
+        })
+        || state.delivered_terminals.get(&pane) == Some(&current)
 }
 
 fn forget_delivered_terminal_state(state: &mut OutboundState, pane: PaneId) {
@@ -2342,9 +2319,6 @@ struct TerminalTransition {
     current: TerminalGeneration,
 }
 
-static ROW_PATCHES: LazyLock<bool> =
-    LazyLock::new(|| std::env::var_os("ZZ_PERF_ROW_PATCHES").is_some_and(|value| value == "1"));
-
 struct PaneFrameFanout {
     diff: TerminalDiffScratch,
     tail: PatchTail,
@@ -2352,10 +2326,8 @@ struct PaneFrameFanout {
 
 impl PaneFrameFanout {
     fn new() -> Self {
-        let mut diff = TerminalDiffScratch::default();
-        diff.set_whole_rows(*ROW_PATCHES);
         Self {
-            diff,
+            diff: TerminalDiffScratch::default(),
             tail: PatchTail::default(),
         }
     }
@@ -2626,19 +2598,15 @@ impl OutboundMailbox {
             }
         };
         self.enqueue_encoded_reliable_with(encoded.into(), |state| {
-            if *attach::ATTACH_DEDUP {
-                forget_delivered_terminals_state(state);
-            }
+            forget_delivered_terminals_state(state);
             state.terminals_held = false;
         })
     }
 
     fn hold_terminals(&self) {
-        if *attach::ATTACH_DEDUP {
-            let mut state = self.state.lock();
-            state.terminals_held = true;
-            state.attach_batch = *attach::ATTACH_BATCH;
-        }
+        let mut state = self.state.lock();
+        state.terminals_held = true;
+        state.attach_batch = true;
     }
 
     fn release_terminals(&self) {
@@ -3352,7 +3320,7 @@ impl OutboundMailbox {
         true
     }
 
-    #[cfg(any(windows, test))]
+    #[cfg(test)]
     fn recv(&self) -> Option<Vec<u8>> {
         let mut state = self.state.lock();
         loop {
@@ -3783,8 +3751,7 @@ fn reserve_outbound_bytes(state: &mut OutboundState, incoming: usize, replaced: 
 
 #[cfg(unix)]
 fn try_write_quiet_group(state: &mut OutboundState) -> bool {
-    if !*attach::BATCHED_WRITES
-        || state.closed
+    if state.closed
         || state.buffered
         || state.writer_finished
         || state.writer_inflight_bytes != 0
@@ -5071,9 +5038,7 @@ impl Shared {
                 .set_default_status_keys(keys)
                 .expect("daemon status-keys default is valid");
         }
-        state
-            .engine
-            .set_automatic_rename_throttle(*timers::RENAME_THROTTLE);
+        state.engine.set_automatic_rename_throttle(true);
         state.engine.initialize_default_editor(default_editor);
         state.engine.initialize_default_shell(default_shell);
         state.engine.seed_global_environment(environment);
@@ -5239,7 +5204,6 @@ impl Shared {
         mux_config_files: Option<&[PathBuf]>,
         initial_client_working_directory: Option<&Path>,
     ) -> Result<(), DaemonError> {
-        self.log_initialization_knobs();
         #[cfg(any(windows, test))]
         self.start_timers()?;
         let mut context = ExecutionContext::default();
@@ -5262,25 +5226,6 @@ impl Shared {
         *self.startup_config_causes.lock() = report.take_startup_causes();
         self.finish_initialization();
         Ok(())
-    }
-
-    fn log_initialization_knobs(&self) {
-        log::info!(
-            target: "zz_daemon::perf",
-            "publication knobs: ZZ_PERF_EAGER_PUBLISH={} ZZ_PERF_RENAME_THROTTLE={} ZZ_PERF_PEER_SCAN={} ZZ_PERF_KEY_TABLE_DELTA={}",
-            u8::from(*timers::EAGER_PUBLISH),
-            u8::from(*timers::RENAME_THROTTLE),
-            if *timers::PEER_SCAN_ALWAYS { "always" } else { "changes" },
-            u8::from(*timers::KEY_TABLE_DELTA),
-        );
-        attach::log_knobs();
-        log::info!(
-            target: "zz_daemon::perf",
-            "terminal knobs: ZZ_PERF_ROW_PATCHES={}",
-            u8::from(*ROW_PATCHES),
-        );
-        hook_events::log_knobs();
-        log::info!(target: "zz_daemon::perf", "format facts knob: ZZ_PERF_BORROWED_FACTS={}", u8::from(*BORROWED_FORMAT_FACTS));
     }
 
     fn finish_initialization(self: &Arc<Self>) {
@@ -5783,7 +5728,7 @@ impl Shared {
                 targets
                     .retain(|client| !inner.client(*client).is_some_and(|c| c.ctrl_initializing));
             }
-            if targets.is_empty() && !*timers::EAGER_PUBLISH {
+            if targets.is_empty() {
                 return;
             }
             inner.engine.set_format_now(unix_timestamp());
@@ -5877,7 +5822,7 @@ impl Shared {
                     .map(|output| std::mem::take(&mut output.subscriptions))
                     .unwrap_or_default();
                 let mut facts = borrowed_format_hook_facts(&inner);
-                facts.set_client(Some(client_facts));
+                facts.seed.client = Some(client_facts);
                 let contexts = inner
                     .engine
                     .format_context_snapshot(FormatClient::Attached(session));
@@ -6248,7 +6193,7 @@ impl Shared {
             status: StatusLine::default(),
             key_tables: inner.engine.keys.snapshot(),
         };
-        if kind == ClientKind::Interactive && client_has_terminal && *attach::ATTACH_BATCH {
+        if kind == ClientKind::Interactive && client_has_terminal {
             return Some((client, hello));
         }
         let option_snapshot = Arc::new(inner.engine.format_option_snapshot());
@@ -8900,13 +8845,11 @@ impl Shared {
             let mut inner = self.inner.lock();
             format_variables.insert("config_files".to_owned(), inner.config_files.clone());
             let captures = !read_only || cfg!(debug_assertions);
-            let journal = *hook_events::HOOK_JOURNAL;
             let generation_before = inner.engine.state.generation();
             let monitors_before = inner.engine.has_format_monitors();
             let refresh_before = (!read_only).then(|| copy_mode_refresh_needed(&inner));
             let clock_before = (!read_only).then(|| clock_mode_timer_needed(&inner));
-            let hook_scope = (captures && (event_hooks_enabled || journal))
-                .then(|| hook_events::HookScope::open(&mut inner.engine));
+            let hook_scope = captures.then(|| hook_events::HookScope::open(&mut inner.engine));
             let pane_focus_before = (event_hooks_enabled && captures).then(|| {
                 hook_events::FocusProbeScope::open_within(
                     &mut inner,
@@ -8917,7 +8860,7 @@ impl Shared {
             });
             let copy_modes_before =
                 (event_hooks_enabled && captures).then(|| active_copy_mode_panes(&inner));
-            let captured_active = (captures && (!journal || cfg!(debug_assertions))).then(|| {
+            let captured_active = (captures && cfg!(debug_assertions)).then(|| {
                 (
                     inner
                         .engine
@@ -8958,14 +8901,12 @@ impl Shared {
             }
             let facts_unread = format_facts_unread
                 .unwrap_or_else(|| hook_events::format_facts_unread(command_name, &command.args));
-            let borrow_facts = *BORROWED_FORMAT_FACTS && !facts_unread;
             let mut command_seed =
-                borrow_facts.then(|| command_format_seed(&inner, client, context));
+                (!facts_unread).then(|| command_format_seed(&inner, client, context));
             let mut built_facts = (!facts_unread
-                && (!borrow_facts
-                    || (command_name == "new-session"
-                        && kind != ClientKind::Control
-                        && nested_attach_refusal(&inner, client).is_some())))
+                && command_name == "new-session"
+                && kind != ClientKind::Control
+                && nested_attach_refusal(&inner, client).is_some())
             .then(|| format_hook_facts_for_client(&inner, client, context));
             // cmd-list-windows.c, cmd-list-sessions.c and cmd-list-panes.c all
             // call `format_defaults(ft, NULL, ...)`, so a row answers null for
@@ -12225,7 +12166,7 @@ impl Shared {
             let generation = inner.engine.keys.generation();
             let publication = if generation == inner.key_tables_generation
                 || timers::KeyTablePublishHold::active(self)
-                || inner.clients.values().all(|c| c.subscriber.is_none()) && !*timers::EAGER_PUBLISH
+                || inner.clients.values().all(|c| c.subscriber.is_none())
             {
                 None
             } else {
@@ -17854,7 +17795,7 @@ impl Shared {
             let mut client_facts = client_format_facts(&inner, client, session_id);
             client_facts.line = line;
             let mut facts = borrowed_format_hook_facts(&inner);
-            facts.set_client(Some(client_facts));
+            facts.seed.client = Some(client_facts);
             let variables = context.format_variables().cloned().unwrap_or_default();
             if let Some(filter) = parsed.value('f') {
                 let mut hooks =
@@ -27627,7 +27568,8 @@ impl Shared {
                 .retain_exited_pane(pane, failed)
                 .unwrap_or(false);
             let changed = if retained {
-                let (engine, facts) = split_format_hook_facts(&mut inner, true);
+                let (engine, facts) =
+                    split_borrowed_format_hook_facts(&mut inner, CommandFormatSeed::default());
                 let mut hooks = DaemonFormatHooks::command(&facts);
                 engine
                     .mark_pane_dead_with_hooks(
@@ -28041,7 +27983,8 @@ impl Shared {
             } else {
                 let rename_due = previous.current_command != runtime.current_command
                     && inner.engine.automatic_rename_due(pane, now);
-                let (engine, facts) = split_format_hook_facts(&mut inner, rename_due);
+                let (engine, facts) =
+                    split_borrowed_format_hook_facts(&mut inner, CommandFormatSeed::default());
                 let mut hooks = DaemonFormatHooks::command(&facts).withhold_facts(!rename_due);
                 let scope = rename_due.then(|| hook_events::HookScope::open(engine));
                 let generation = engine.state.generation();
@@ -28189,10 +28132,6 @@ impl Shared {
 
     fn publish_snapshot_after_detach(self: &Arc<Self>, client: ClientId) {
         self.detach_removed_sessions();
-        if !*attach::ATTACH_DEDUP {
-            self.publish_snapshot_state();
-            return;
-        }
         self.status.lock().forget(client);
         self.publish_snapshot_state_except(Some(client));
     }
@@ -28254,7 +28193,7 @@ impl Shared {
                 Some(*client) != detached
                     && !inner.client(*client).is_some_and(|c| c.ctrl_initializing)
             });
-            if inner.clients.values().all(|c| c.subscriber.is_none()) && !*timers::EAGER_PUBLISH {
+            if inner.clients.values().all(|c| c.subscriber.is_none()) {
                 (Vec::new(), appearance_updates, Vec::new())
             } else {
                 if !targets.is_empty() {
@@ -32623,7 +32562,6 @@ impl Shared {
         if self.helpers.on_loop_thread() {
             if let Err(error) = self.submit_helper(helpers::Task::Peers {
                 panes: self.peer_scan_inputs(),
-                always: *timers::PEER_SCAN_ALWAYS,
                 reply: None,
                 completed: None,
             }) {
@@ -32634,7 +32572,6 @@ impl Shared {
         let (reply, result) = mpsc::sync_channel(1);
         if let Err(error) = self.helpers.submit_wait(helpers::Task::Peers {
             panes: self.peer_scan_inputs(),
-            always: *timers::PEER_SCAN_ALWAYS,
             reply: Some(reply),
             completed: None,
         }) {
@@ -41178,16 +41115,6 @@ fn status_requests_with_selected_facts(
     startup_ready: bool,
     job_needs: &crate::status::StatusJobNeeds,
 ) -> Vec<StatusRequest> {
-    if !*BORROWED_FORMAT_FACTS {
-        return status_requests(
-            inner,
-            targets,
-            &inner.engine.state.snapshot(),
-            &format_hook_facts(inner),
-            startup_ready,
-            job_needs,
-        );
-    }
     let snapshot = targets
         .iter()
         .any(|client| inner.client(*client).and_then(|c| c.kind) == Some(ClientKind::Control))
@@ -41248,8 +41175,7 @@ fn status_request_with_selected_options(
     startup_ready: bool,
     job_needs: FormatNeeds,
 ) -> Arc<StatusRequest> {
-    let revision = (*BORROWED_FORMAT_FACTS
-        && zz_mux::borrowed_formats_enabled()
+    let revision = (zz_mux::borrowed_formats_enabled()
         && inner.client(client).and_then(|c| c.kind) != Some(ClientKind::Control)
         && job_needs.is_empty()
         && inner
@@ -41258,8 +41184,7 @@ fn status_request_with_selected_options(
         && inner
             .client(client)
             .is_none_or(|c| c.command_output.is_none()))
-    .then(|| inner.engine.format_cache_revision())
-    .flatten();
+    .then(|| inner.engine.format_cache_revision());
     let attached = client_attached_session(inner, client);
     let window = attached
         .and_then(|session| inner.engine.state.sessions.get(&session))
@@ -41387,9 +41312,8 @@ fn status_request_with_selected_options(
     }
     let option_snapshot =
         option_snapshot.unwrap_or_else(|| inner.engine.cached_format_option_snapshot());
-    let facts = (!*BORROWED_FORMAT_FACTS
-        || inner.client(client).and_then(|c| c.kind) == Some(ClientKind::Control))
-    .then(|| format_hook_facts(inner));
+    let facts = (inner.client(client).and_then(|c| c.kind) == Some(ClientKind::Control))
+        .then(|| format_hook_facts(inner));
     let snapshot = facts.is_some().then(|| inner.engine.state.snapshot());
     let request = Arc::new(status_request_with_facts(
         inner,
@@ -41475,10 +41399,7 @@ impl CachedStatusPreparation {
                     "window_bigger" | "window_offset_x" | "window_offset_y"
                 )
         });
-        let config_files_requested = !*BORROWED_FORMAT_FACTS
-            || !zz_mux::borrowed_formats_enabled()
-            || !zz_mux::format_cache_knob()
-            || !zz_mux::compiled_formats_knob()
+        let config_files_requested = !zz_mux::borrowed_formats_enabled()
             || !request.modes.is_empty()
             || request.references.contains("*")
             || request.references.contains("config_files")
@@ -41721,12 +41642,9 @@ fn status_parameters(
     attached: Option<SessionId>,
     option_snapshot: &Arc<zz_mux::StatusRowVariables>,
 ) -> Arc<StatusParameters> {
-    let key = inner
-        .engine
-        .format_cache_revision()
-        .map(|(state, options, data, _)| (attached, state, options, data));
-    if let Some(key) = key
-        && let Some(cached) = inner.status_parameters_cache.lock().as_ref()
+    let (state, options, data, _) = inner.engine.format_cache_revision();
+    let key = (attached, state, options, data);
+    if let Some(cached) = inner.status_parameters_cache.lock().as_ref()
         && cached.key == key
         && Arc::ptr_eq(&cached.option_snapshot, option_snapshot)
     {
@@ -41746,10 +41664,7 @@ fn status_parameters(
         title_format.as_deref(),
         &message_styles,
     );
-    let (references, client_references) = if *BORROWED_FORMAT_FACTS
-        || zz_mux::borrowed_formats_enabled()
-        || zz_mux::format_cache_knob()
-    {
+    let (references, client_references) = {
         let references = inner.engine.cached_format_references_for_templates(
             crate::status::status_line_templates(
                 &formats,
@@ -41770,9 +41685,6 @@ fn status_parameters(
                 .collect(),
         );
         (references, client_references)
-    } else {
-        let references = Arc::new(BTreeSet::from(["*".to_owned()]));
-        (Arc::clone(&references), references)
     };
     let fact_selection = StatusFactSelection::from_references(&references);
     let client_fact_selection = ClientFactSelection::from_references(&client_references);
@@ -41791,17 +41703,15 @@ fn status_parameters(
         fact_selection,
         client_fact_selection,
     });
-    if let Some(key) = key {
-        *inner.status_parameters_cache.lock() = (parameters
-            .retained_bytes()
-            .saturating_add(option_snapshot.retained_bytes())
-            <= 1024 * 1024)
-            .then(|| CachedStatusParameters {
-                key,
-                parameters: Arc::clone(&parameters),
-                option_snapshot: Arc::clone(option_snapshot),
-            });
-    }
+    *inner.status_parameters_cache.lock() = (parameters
+        .retained_bytes()
+        .saturating_add(option_snapshot.retained_bytes())
+        <= 1024 * 1024)
+        .then(|| CachedStatusParameters {
+            key,
+            parameters: Arc::clone(&parameters),
+            option_snapshot: Arc::clone(option_snapshot),
+        });
     parameters
 }
 
@@ -41871,10 +41781,7 @@ fn status_request_with_facts(
         || facts.is_some()
         || !modes.is_empty()
         || !job_needs.is_empty()
-        || !*BORROWED_FORMAT_FACTS
         || !zz_mux::borrowed_formats_enabled()
-        || !zz_mux::format_cache_knob()
-        || !zz_mux::compiled_formats_knob()
         || parameters.client_references.contains("*")
         || parameters.client_references.contains("config_files");
     let cached_context = snapshot
@@ -42280,9 +42187,7 @@ fn border_presentations_at(
     facts: &dyn crate::status::FormatFactSource,
     second: u64,
 ) -> Arc<Vec<zz_protocol::PaneBorderPresentation>> {
-    let Some(revision) = inner.engine.format_cache_revision() else {
-        return uncached_border_presentations(inner, client, session, facts);
-    };
+    let revision = inner.engine.format_cache_revision();
     let Some(session_state) = inner.engine.state.sessions.get(&session) else {
         return Arc::default();
     };
@@ -42966,7 +42871,7 @@ fn stamped_snapshot_sends(
             .client(*client)
             .and_then(|c| c.published_snapshot.as_ref())
             .copied();
-        if !*timers::EAGER_PUBLISH && sent == Some((digest, snapshot.generation)) {
+        if sent == Some((digest, snapshot.generation)) {
             unchanged.push(*client);
             continue;
         }
@@ -45038,12 +44943,6 @@ fn streamed_terminal_panes(
 #[cfg(test)]
 mod pane_tests;
 
-fn log_pane_perf_knobs() {
-    for (knob, active) in zz_terminal::perf_knobs() {
-        log::info!(target: "zz_daemon::perf_knobs", "{knob} {}", if active { "on" } else { "off" });
-    }
-}
-
 fn apply_view_streams(
     inner: &ServerState,
     view: TerminalViewId,
@@ -46208,9 +46107,6 @@ fn pane_mode_format_facts(inner: &ServerState) -> BTreeMap<PaneId, (usize, &'sta
 #[cfg(test)]
 mod format_tree_tests;
 
-pub(crate) static BORROWED_FORMAT_FACTS: LazyLock<bool> =
-    LazyLock::new(|| std::env::var_os("ZZ_PERF_BORROWED_FACTS").is_none_or(|value| value != "0"));
-
 #[derive(Clone, Copy)]
 struct ClientFormatFields<'a> {
     clients: &'a BTreeMap<ClientId, Box<Client>>,
@@ -46569,78 +46465,6 @@ fn split_borrowed_format_hook_facts(
     (engine, facts)
 }
 
-struct FormatHookFactsView<'a> {
-    borrowed: BorrowedFormatHookFacts<'a>,
-    owned: Option<FormatHookFacts>,
-}
-
-impl FormatHookFactsView<'_> {
-    fn source(&self) -> &dyn crate::status::FormatFactSource {
-        match &self.owned {
-            Some(facts) => facts,
-            None => &self.borrowed,
-        }
-    }
-
-    fn set_client(&mut self, client: Option<ClientFormatFacts>) {
-        match &mut self.owned {
-            Some(facts) => facts.client = client,
-            None => self.borrowed.seed.client = client,
-        }
-    }
-}
-
-impl crate::status::FormatFactSource for FormatHookFactsView<'_> {
-    fn agent_states(&self) -> &BTreeMap<PaneId, zz_protocol::AgentPaneWire> {
-        self.source().agent_states()
-    }
-    fn terminals(&self) -> &BTreeMap<PaneId, Arc<TerminalSession>> {
-        self.source().terminals()
-    }
-    fn pane_pipes(&self) -> &BTreeMap<PaneId, u32> {
-        self.source().pane_pipes()
-    }
-    fn session_attachments(&self) -> &BTreeMap<SessionId, (usize, String)> {
-        self.source().session_attachments()
-    }
-    fn session_last_attached(&self) -> &BTreeMap<SessionId, u64> {
-        self.source().session_last_attached()
-    }
-    fn unseen_changes(&self) -> &BTreeSet<PaneId> {
-        self.source().unseen_changes()
-    }
-    fn window_clients(&self, context: &zz_mux::StatusContext) -> &BTreeMap<WindowId, Vec<String>> {
-        self.source().window_clients(context)
-    }
-    fn buffer(&self) -> Option<&BufferFormatFacts> {
-        self.source().buffer()
-    }
-    fn client(&self) -> Option<&ClientFormatFacts> {
-        self.source().client()
-    }
-    fn clients(&self, context: &zz_mux::StatusContext) -> &[zz_mux::FormatClientRow] {
-        self.source().clients(context)
-    }
-    fn client_environment(&self) -> Option<&Arc<ClientEnvironmentBlob>> {
-        self.source().client_environment()
-    }
-    fn message(&self) -> Option<&MessageFormatFacts> {
-        self.source().message()
-    }
-    fn mux(&self) -> &zz_mux::FormatFacts {
-        self.source().mux()
-    }
-    fn copy_modes(&self) -> &BTreeMap<PaneId, Vec<(String, Arc<zz_terminal::CopyModeFacts>)>> {
-        self.source().copy_modes()
-    }
-    fn pane_modes(&self) -> &BTreeMap<PaneId, (usize, &'static str)> {
-        self.source().pane_modes()
-    }
-    fn pane_in_mode_count(&self, pane: PaneId) -> usize {
-        self.source().pane_in_mode_count(pane)
-    }
-}
-
 fn readonly_borrowed_format_hook_facts(
     inner: &ServerState,
     seed: CommandFormatSeed,
@@ -46660,43 +46484,16 @@ fn readonly_borrowed_format_hook_facts(
     }
 }
 
-fn borrowed_format_hook_facts(inner: &ServerState) -> FormatHookFactsView<'_> {
-    FormatHookFactsView {
-        borrowed: readonly_borrowed_format_hook_facts(inner, CommandFormatSeed::default()),
-        owned: (!*BORROWED_FORMAT_FACTS).then(|| format_hook_facts(inner)),
-    }
+fn borrowed_format_hook_facts(inner: &ServerState) -> BorrowedFormatHookFacts<'_> {
+    readonly_borrowed_format_hook_facts(inner, CommandFormatSeed::default())
 }
 
 fn borrowed_format_hook_facts_for_client<'a>(
     inner: &'a ServerState,
     client: ClientId,
     context: &ExecutionContext,
-) -> FormatHookFactsView<'a> {
-    let seed = if *BORROWED_FORMAT_FACTS {
-        command_format_seed(inner, client, context)
-    } else {
-        CommandFormatSeed::default()
-    };
-    FormatHookFactsView {
-        borrowed: readonly_borrowed_format_hook_facts(inner, seed),
-        owned: (!*BORROWED_FORMAT_FACTS)
-            .then(|| format_hook_facts_for_client(inner, client, context)),
-    }
-}
-
-fn split_format_hook_facts(
-    inner: &mut ServerState,
-    needed: bool,
-) -> (&mut MuxEngine, FormatHookFactsView<'_>) {
-    let owned = (!*BORROWED_FORMAT_FACTS).then(|| {
-        if needed {
-            format_hook_facts(inner)
-        } else {
-            FormatHookFacts::default()
-        }
-    });
-    let (engine, borrowed) = split_borrowed_format_hook_facts(inner, CommandFormatSeed::default());
-    (engine, FormatHookFactsView { borrowed, owned })
+) -> BorrowedFormatHookFacts<'a> {
+    readonly_borrowed_format_hook_facts(inner, command_format_seed(inner, client, context))
 }
 
 fn command_format_seed(
@@ -49639,10 +49436,8 @@ fn expand_command_format(
 ) -> String {
     let mut facts = borrowed_format_hook_facts(inner);
     if let Some(client) = target_client {
-        facts.set_client(
-            client_attached_session(inner, client)
-                .map(|session| client_format_facts(inner, client, session)),
-        );
+        facts.seed.client = client_attached_session(inner, client)
+            .map(|session| client_format_facts(inner, client, session));
     }
     let mut variables = target.format_variables.clone();
     variables.insert("config_files".to_owned(), inner.config_files.clone());
@@ -51058,11 +50853,9 @@ fn handle_connection_message<S: TransportStream>(
         hello.kind,
     );
     let mut writer = stream.try_clone()?;
-    if *attach::BATCHED_WRITES {
-        let _ = writer.set_send_buffer_size(attach::MAX_BATCHED_WRITE_BYTES);
-    }
+    let _ = writer.set_send_buffer_size(attach::MAX_BATCHED_WRITE_BYTES);
     #[cfg(unix)]
-    if compact_hello.is_some() && hello.kind == ClientKind::Control && *attach::BATCHED_WRITES {
+    if compact_hello.is_some() && hello.kind == ClientKind::Control {
         let socket = stream.receive_fd().ok();
         #[cfg(target_vendor = "apple")]
         let socket = socket
@@ -51071,7 +50864,7 @@ fn handle_connection_message<S: TransportStream>(
     }
     let writer_mailbox = Arc::clone(&outbound);
     let writer_shared = Arc::downgrade(shared);
-    let writer_thread = attach::spawn_writer(&shared.connection_threads, client, move || {
+    let writer_thread = attach::spawn_writer(&shared.connection_threads, move || {
         write_outbound(&mut writer, &writer_mailbox, &writer_shared, client);
     })
     .map_err(|error| DaemonError::Thread(error.to_string()))?;
@@ -51618,15 +51411,7 @@ fn write_outbound(
     let _finished = OutboundWriterGuard(outbound);
     let mut batch = Vec::new();
     loop {
-        let ready = if *attach::BATCHED_WRITES {
-            outbound.recv_batch(&mut batch, attach::MAX_BATCHED_WRITE_BYTES)
-        } else {
-            outbound
-                .recv()
-                .map(|frame| batch.push(frame.into()))
-                .is_some()
-        };
-        if !ready {
+        if !outbound.recv_batch(&mut batch, attach::MAX_BATCHED_WRITE_BYTES) {
             break;
         }
         let started = diagnostic_timer();

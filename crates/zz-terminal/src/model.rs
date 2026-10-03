@@ -1290,7 +1290,6 @@ pub struct TerminalDiffScratch {
     row_fingerprints: Vec<u64>,
     spans: Vec<TerminalPatchSpan>,
     shared: Option<SharedCellDiff>,
-    whole_rows: bool,
 }
 
 #[derive(Debug)]
@@ -1335,11 +1334,6 @@ impl TerminalDiffScratch {
         self.shared = None;
     }
 
-    pub fn set_whole_rows(&mut self, whole_rows: bool) {
-        self.whole_rows = whole_rows;
-        self.shared = None;
-    }
-
     pub fn release_shared(&mut self) {
         self.shared = None;
     }
@@ -1357,13 +1351,7 @@ impl TerminalDiffScratch {
                 .filter(|source| *source < previous.rows)
                 .and_then(|source| previous.row(source));
             let after = current.row(row).unwrap_or_default();
-            let changed = changed_span(row, before, after);
-            let changed = if self.whole_rows {
-                changed.and_then(|_| changed_span(row, None, after))
-            } else {
-                changed
-            };
-            self.spans.extend(changed);
+            self.spans.extend(changed_span(row, before, after));
         }
         scroll
     }
@@ -2153,7 +2141,7 @@ mod tests {
             assert_eq!(size_of::<TerminalPresentation>(), 48);
             assert_eq!(size_of::<Arc<TerminalPresentation>>(), 8);
             assert_eq!(size_of::<TerminalViewport>(), 160);
-            assert_eq!(size_of::<TerminalDiffScratch>(), 136);
+            assert_eq!(size_of::<TerminalDiffScratch>(), 128);
             assert_eq!(size_of::<TerminalPatchRows>(), 8);
             assert!(size_of::<TerminalPatchSpans>() <= 48);
             assert_eq!(
@@ -2567,7 +2555,7 @@ mod tests {
     }
 
     #[test]
-    fn patches_carry_changed_spans_and_widen_to_whole_rows() {
+    fn patches_carry_changed_spans() {
         let mut previous = TerminalViewport::blank(8, 2, SessionStatus::Running);
         previous.generation = 1;
         let cells = Arc::make_mut(&mut previous.cells);
@@ -2607,22 +2595,6 @@ mod tests {
         applied
             .apply_patch(patch.clone())
             .expect("span patch applies");
-        assert_eq!(applied, current);
-
-        let mut whole_rows = TerminalDiffScratch::default();
-        whole_rows.set_whole_rows(true);
-        let widened = TerminalViewport::diff_with_scratch(&previous, &current, &mut whole_rows)
-            .expect("compatible frames");
-        assert!(
-            widened
-                .changed_rows
-                .spans()
-                .iter()
-                .all(|span| span.covers_row(8))
-        );
-        assert_eq!(widened.changed_rows.cells().len(), 6);
-        let mut applied = previous.clone();
-        applied.apply_patch(widened).expect("widened patch applies");
         assert_eq!(applied, current);
     }
 

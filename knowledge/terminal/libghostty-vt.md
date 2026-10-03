@@ -129,8 +129,7 @@ skip the general iterator. Captures append glyphs to the destination without per
 Frozen resize reflows owned backing, maps the copy cursor, clears selection and rebuilds
 search marks. Appearance updates recolor frozen content; an enabled refresh replaces it with
 a new source snapshot. Retained dead panes keep the terminal actor and frozen search state
-while releasing PTY and input resources. `ZZ_PERF_COPY_CLONE=1` selects the old flat snapshot
-and its entry-geometry limit; `ZZ_PERF_NO_COMPRESS=1` suppresses snapshot recompression.
+while releasing PTY and input resources.
 
 # Related
 

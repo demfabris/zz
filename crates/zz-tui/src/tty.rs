@@ -264,7 +264,7 @@ impl TerminalGuard {
     #[cfg(unix)]
     pub fn enter(mouse: MouseArming, extended_keys: bool, focus_events: bool) -> io::Result<Self> {
         let original = rustix::termios::tcgetattr(io::stdin())?;
-        let file_probe = (!*crate::COALESCE || supports_kitty_graphics())
+        let file_probe = supports_kitty_graphics()
             .then(create_probe_file)
             .transpose()?;
         let writer = std::rc::Rc::new(std::cell::RefCell::new(

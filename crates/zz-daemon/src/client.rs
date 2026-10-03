@@ -5,7 +5,7 @@ use std::{
     io::{self, IsTerminal, Read, Write},
     path::{Path, PathBuf},
     sync::{
-        Arc, LazyLock, OnceLock, Weak,
+        Arc, OnceLock, Weak,
         atomic::{AtomicU32, AtomicU64, Ordering},
     },
 };
@@ -167,16 +167,6 @@ pub struct CommandOutcome {
     /// rest of its command chain runs.
     pub client_exit: bool,
 }
-
-static LEGACY_COMMAND: LazyLock<bool> = LazyLock::new(|| {
-    let legacy = std::env::var_os("ZZ_PERF_LEGACY_COMMAND").is_some_and(|value| value == "1");
-    if legacy {
-        log::debug!(
-            "ZZ_PERF_LEGACY_COMMAND=1: command clients use ClientHello, PrepareCommandList and CommandRequest"
-        );
-    }
-    legacy
-});
 
 pub type ExecClassifier<'a> =
     &'a dyn Fn(&[CommandInvocation], &[PreparedCommand]) -> Option<ExecResumeKind>;
@@ -426,9 +416,6 @@ impl CommandRoute {
     }
 
     fn connect(&self) -> Result<CommandLink, DaemonError> {
-        if *LEGACY_COMMAND {
-            return self.connect_legacy().map(|(link, _)| link);
-        }
         let stream = LocalTransport::connect(&self.socket)?;
         Ok(CommandLink::Exec {
             reader: ProtocolReceiver::new(stream.try_clone()?),
@@ -2096,20 +2083,10 @@ impl ReadyFrames {
         scratch: &mut Vec<u8>,
         read: impl FnOnce(&mut [u8]) -> io::Result<usize>,
     ) -> io::Result<usize> {
-        let remaining = &self.bytes[self.consumed..];
-        let count = if *BUFFERED_READS {
-            RECEIVE_BUFFER_BYTES
-        } else if remaining.len() < 4 {
-            4 - remaining.len()
-        } else {
-            let length =
-                u32::from_le_bytes(remaining[..4].try_into().expect("four-byte prefix")) as usize;
-            (length + 4 - remaining.len()).min(RECEIVE_BUFFER_BYTES)
-        };
-        if scratch.len() < count {
-            scratch.resize(count, 0);
+        if scratch.len() < RECEIVE_BUFFER_BYTES {
+            scratch.resize(RECEIVE_BUFFER_BYTES, 0);
         }
-        let read = read(&mut scratch[..count])?;
+        let read = read(&mut scratch[..RECEIVE_BUFFER_BYTES])?;
         if read != 0 {
             if self.consumed != 0 {
                 self.bytes.drain(..self.consumed);
@@ -2121,10 +2098,6 @@ impl ReadyFrames {
     }
 }
 
-static BUFFERED_READS: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| {
-    std::env::var_os("ZZ_PERF_WRITEV").is_none_or(|value| value != "0")
-});
-
 const RECEIVE_BUFFER_BYTES: usize = 64 * 1024;
 
 type Connected<S> = (ProtocolReceiver<S>, ProtocolSender<S>, ServerHello);
@@ -2132,14 +2105,7 @@ type Connected<S> = (ProtocolReceiver<S>, ProtocolSender<S>, ServerHello);
 impl<S: TransportStream> ProtocolReceiver<S> {
     fn new(stream: S) -> Self {
         Self {
-            stream: io::BufReader::with_capacity(
-                if *BUFFERED_READS {
-                    RECEIVE_BUFFER_BYTES
-                } else {
-                    0
-                },
-                stream,
-            ),
+            stream: io::BufReader::with_capacity(RECEIVE_BUFFER_BYTES, stream),
             frame: Vec::new(),
             pending: VecDeque::new(),
             #[cfg(unix)]

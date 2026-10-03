@@ -40,10 +40,7 @@ Flags of `run.py`:
 | `--keep` | keep the temp root (logs, configs) for inspection |
 | `--rescore JSON` | measure nothing; re-evaluate an earlier result at `--stage` (with `--baseline`, `--w0`, `--strict`), write it to `--json` if given |
 
-The servers get a scrubbed environment, except that every `ZZ_PERF_*` rollback
-knob set in the caller's environment is passed to both muxes (tmux ignores
-them) and listed in `meta.knobs`, so `ZZ_PERF_ATTACH_DEDUP=0 python3
-bench/perf/run.py ...` measures the knob-off path on the same binary.
+The servers get a scrubbed environment.
 | `--targets` | measure nothing; print the gated metrics with their W0 values and per-stage rules as a Markdown table |
 
 The table goes to stdout, the JSON to `--json`. Exit status is 0 when nothing

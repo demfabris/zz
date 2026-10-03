@@ -11204,22 +11204,10 @@ struct SearchCellOffset {
     width: u16,
 }
 
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-struct HistorySearchRow {
-    text_start: u32,
-    text_end: u32,
-    offset_start: u32,
-    offset_end: u32,
-}
-
 #[derive(Debug)]
 struct HistorySearchSnapshot {
     columns: u16,
-    text: String,
-    rows: Vec<HistorySearchRow>,
-    offsets: Vec<SearchCellOffset>,
-    terminal: Option<Arc<Mutex<libghostty_vt::terminal::ScreenSnapshot>>>,
+    terminal: Arc<Mutex<libghostty_vt::terminal::ScreenSnapshot>>,
     total_rows: u32,
     #[cfg(test)]
     search_gate: Mutex<()>,
@@ -11747,87 +11735,19 @@ struct SearchSnapshotCompression<'a>(&'a HistorySearchSnapshot);
 
 impl Drop for SearchSnapshotCompression<'_> {
     fn drop(&mut self) {
-        if !*NO_COMPRESS && let Some(terminal) = &self.0.terminal {
-            let _ = terminal.lock().compress(CompressionMode::Full);
-        }
+        let _ = self.0.terminal.lock().compress(CompressionMode::Full);
     }
 }
 
 impl HistorySearchSnapshot {
     fn capture(terminal: &Terminal<'_, '_>) -> Result<Self, WorkerError> {
-        if ModeRevision::clone_enabled() {
-            return Self::capture_flat(terminal);
-        }
         Ok(Self {
             columns: terminal.cols()?,
-            text: String::new(),
-            rows: Vec::new(),
-            offsets: Vec::new(),
             total_rows: u32::try_from(terminal.total_rows()?)
                 .map_err(|_| WorkerError::ViewportMetadataTooLarge)?,
-            terminal: Some(Arc::new(Mutex::new(terminal.clone_screen()?))),
+            terminal: Arc::new(Mutex::new(terminal.clone_screen()?)),
             #[cfg(test)]
             search_gate: Mutex::new(()),
-        })
-    }
-
-    fn capture_flat(terminal: &Terminal<'_, '_>) -> Result<Self, WorkerError> {
-        let row_count = terminal.total_rows()?;
-        let columns = terminal.cols()?;
-        let mut rows = Vec::with_capacity(row_count);
-        let cell_capacity = row_count.saturating_mul(usize::from(columns)).min(
-            MAX_SEARCH_SNAPSHOT_BYTES
-                / (std::mem::size_of::<SearchCellOffset>() + std::mem::size_of::<u8>()),
-        );
-        let mut text = String::with_capacity(cell_capacity);
-        let mut offsets = Vec::with_capacity(cell_capacity);
-        let mut grapheme_scratch = Vec::new();
-        for row in 0..row_count {
-            let row = u32::try_from(row).unwrap_or(u32::MAX);
-            let text_start =
-                u32::try_from(text.len()).map_err(|_| WorkerError::SearchSnapshotTooLarge)?;
-            let offset_start =
-                u32::try_from(offsets.len()).map_err(|_| WorkerError::SearchSnapshotTooLarge)?;
-            append_history_row(
-                terminal,
-                row,
-                columns,
-                &mut text,
-                &mut offsets,
-                &mut grapheme_scratch,
-            )?;
-            rows.push(HistorySearchRow {
-                text_start,
-                text_end: u32::try_from(text.len())
-                    .map_err(|_| WorkerError::SearchSnapshotTooLarge)?,
-                offset_start,
-                offset_end: u32::try_from(offsets.len())
-                    .map_err(|_| WorkerError::SearchSnapshotTooLarge)?,
-            });
-            let used = text
-                .len()
-                .saturating_add(
-                    offsets
-                        .len()
-                        .saturating_mul(std::mem::size_of::<SearchCellOffset>()),
-                )
-                .saturating_add(
-                    rows.len()
-                        .saturating_mul(std::mem::size_of::<HistorySearchRow>()),
-                );
-            if used > MAX_SEARCH_SNAPSHOT_BYTES {
-                return Err(WorkerError::SearchSnapshotTooLarge);
-            }
-        }
-        Ok(Self {
-            columns,
-            text,
-            rows,
-            offsets,
-            terminal: None,
-            #[cfg(test)]
-            search_gate: Mutex::new(()),
-            total_rows: u32::try_from(row_count).unwrap_or(u32::MAX),
         })
     }
 
@@ -11895,9 +11815,9 @@ impl HistorySearchSnapshot {
             if cancelled() {
                 return None;
             }
-            let (row_text, row_offsets) = if let Some(terminal) = &self.terminal {
-                let mut terminal = terminal.lock();
-                if !*NO_COMPRESS && row > 0 && row % 512 == 0 {
+            {
+                let mut terminal = self.terminal.lock();
+                if row > 0 && row % 512 == 0 {
                     terminal.compress(CompressionMode::Full).ok()?;
                 }
                 let text_start = u32::try_from(text.len()).ok()?;
@@ -11919,36 +11839,23 @@ impl HistorySearchSnapshot {
                 if wrapped && row.saturating_add(1) < self.total_rows {
                     continue;
                 }
-                (text.as_str(), offsets.as_slice())
-            } else {
-                let captured = self.rows.get(usize::try_from(row).ok()?)?;
-                let text_start = usize::try_from(captured.text_start).ok()?;
-                let text_end = usize::try_from(captured.text_end).ok()?;
-                let offset_start = usize::try_from(captured.offset_start).ok()?;
-                let offset_end = usize::try_from(captured.offset_end).ok()?;
-                (
-                    self.text.get(text_start..text_end)?,
-                    self.offsets.get(offset_start..offset_end)?,
-                )
-            };
-            for found in expression.find_iter(row_text) {
+            }
+            for found in expression.find_iter(&text) {
                 let Some((start, end)) =
-                    search_match_span(row_offsets, found.start(), found.end(), self.columns)
+                    search_match_span(&offsets, found.start(), found.end(), self.columns)
                 else {
                     continue;
                 };
-                let (start_row, end_row) = if self.terminal.is_some() {
-                    let first = row_offsets.partition_point(|cell| {
+                let (start_row, end_row) = {
+                    let first = offsets.partition_point(|cell| {
                         usize::try_from(cell.end).is_ok_and(|end| end <= found.start())
                     });
-                    let after_last = row_offsets.partition_point(|cell| {
+                    let after_last = offsets.partition_point(|cell| {
                         usize::try_from(cell.start).is_ok_and(|start| start < found.end())
                     });
                     let start = wrapped_rows.partition_point(|(_, end)| *end <= first);
                     let end = wrapped_rows.partition_point(|(_, end)| *end < after_last);
                     (wrapped_rows.get(start)?.0, wrapped_rows.get(end)?.0)
-                } else {
-                    (row, row)
                 };
                 match_scratch.push(SearchMatch {
                     row: start_row,
@@ -13596,25 +13503,6 @@ fn ghostty_key(key: KeyCode) -> key::Key {
     }
 }
 
-static EAGER_FRAMES: LazyLock<bool> = LazyLock::new(|| perf_flag("ZZ_PERF_EAGER_FRAMES", "1"));
-
-fn perf_flag(name: &str, value: &str) -> bool {
-    std::env::var_os(name).is_some_and(|set| set == value)
-}
-
-#[must_use]
-pub fn perf_knobs() -> [(&'static str, bool); 4] {
-    [
-        ("ZZ_PERF_COPY_CLONE=1", ModeRevision::clone_enabled()),
-        ("ZZ_PERF_EAGER_FRAMES=1", *EAGER_FRAMES),
-        ("ZZ_PERF_NO_COMPRESS=1", *NO_COMPRESS),
-        ("ZZ_PERF_ECHO_FASTPATH=0", *NO_ECHO_FASTPATH),
-    ]
-}
-
-static NO_COMPRESS: LazyLock<bool> = LazyLock::new(|| perf_flag("ZZ_PERF_NO_COMPRESS", "1"));
-static NO_ECHO_FASTPATH: LazyLock<bool> = LazyLock::new(|| perf_flag("ZZ_PERF_ECHO_FASTPATH", "0"));
-
 const ECHO_WINDOW: Duration = Duration::from_millis(50);
 const ECHO_PUBLISHES: u8 = 4;
 
@@ -13631,8 +13519,7 @@ impl EchoWindow {
     }
 
     fn due(&self) -> bool {
-        !*NO_ECHO_FASTPATH
-            && self.publishes > 0
+        self.publishes > 0
             && self
                 .opened
                 .is_some_and(|opened| opened.elapsed() < ECHO_WINDOW)
@@ -13655,7 +13542,7 @@ struct IdleCompression {
 
 impl IdleCompression {
     fn enabled(&self) -> bool {
-        !self.unsupported && !*NO_COMPRESS
+        !self.unsupported
     }
 
     fn observe(&mut self, terminal: &Terminal<'_, '_>, now: Instant) {
@@ -13824,11 +13711,9 @@ impl<'alloc> Frames<'alloc> {
     }
 
     fn streaming(&self, view: TerminalViewId) -> bool {
-        *EAGER_FRAMES
-            || self
-                .streams
-                .get(&view)
-                .is_some_and(|state| state.stream.is_on())
+        self.streams
+            .get(&view)
+            .is_some_and(|state| state.stream.is_on())
     }
 
     fn epoch(&self, view: TerminalViewId) -> u64 {
@@ -13922,7 +13807,7 @@ impl<'alloc> Frames<'alloc> {
     }
 
     fn needs_cells(&self, active: &ActiveTerminalViews) -> bool {
-        *EAGER_FRAMES || self.preview || active.keys().any(|view| self.streaming(*view))
+        self.preview || active.keys().any(|view| self.streaming(*view))
     }
 
     fn release_unused(&mut self, active: &ActiveTerminalViews) {
@@ -14101,7 +13986,7 @@ fn publish_views<'alloc: 'callbacks, 'callbacks>(
         streamed_any |= streaming;
         viewports.push((view_id, viewport, streaming.then(|| frames.epoch(view_id))));
     }
-    let refreshed = if streamed_any || force_fallback || *EAGER_FRAMES || frames.preview {
+    let refreshed = if streamed_any || force_fallback || frames.preview {
         None
     } else {
         publisher.refresh_fallback(terminal, &mut frames.dictionary, &status)?
@@ -15595,7 +15480,7 @@ mod tests {
                 &mut None,
             );
         }
-        let revision = ModeRevision::capture(&mut terminal).expect("revision");
+        let revision = ModeRevision::capture(&terminal).expect("revision");
         let rows = revision.total_rows();
         (
             revision.capture_rows(0, rows.saturating_sub(1), false, false, false),
@@ -15976,7 +15861,7 @@ mod tests {
             );
         }
         assert_eq!(terminal.cursor_x().expect("cursor"), 6);
-        let revision = ModeRevision::capture(&mut terminal).expect("revision");
+        let revision = ModeRevision::capture(&terminal).expect("revision");
         assert_eq!(revision.capture_rows(0, 0, false, false, false), "abcd");
         assert!(revision.cell_matches_text(PointCoordinate { x: 5, y: 0 }, "d"));
     }
@@ -19333,8 +19218,6 @@ mod tests {
         assert_eq!(search.matches[0].end, 11);
         assert_eq!(std::mem::size_of::<SearchCellOffset>(), 12);
         assert_eq!(std::mem::align_of::<SearchCellOffset>(), 4);
-        assert_eq!(std::mem::size_of::<HistorySearchRow>(), 16);
-        assert_eq!(std::mem::align_of::<HistorySearchRow>(), 4);
     }
 
     #[test]
@@ -19555,15 +19438,10 @@ mod tests {
             view_id: view,
             screen: Screen::Primary,
             query: SearchQuery::literal("queued"),
-            snapshot: Arc::new(HistorySearchSnapshot {
-                columns: 1,
-                text: String::new(),
-                rows: Vec::new(),
-                offsets: Vec::new(),
-                terminal: None,
-                search_gate: Mutex::new(()),
-                total_rows: 0,
-            }),
+            snapshot: Arc::new(
+                HistorySearchSnapshot::capture(&new_terminal(1, 1, 1).expect("terminal"))
+                    .expect("snapshot"),
+            ),
             selection: SearchSelectionPolicy::Last,
             match_scratch: matches,
             latest_request,
@@ -20671,7 +20549,7 @@ mod tests {
     fn frozen_copy_formatter_preserves_code_whitespace_and_line_structure() {
         let mut terminal = new_terminal(16, 4, 16).expect("terminal");
         terminal.vt_write(b"  one\r\n\r\n    two");
-        let revision = ModeRevision::capture(&mut terminal).expect("revision");
+        let revision = ModeRevision::capture(&terminal).expect("revision");
         let row_with = |needle| {
             (0..revision.total_rows())
                 .find(|row| {
@@ -20717,7 +20595,7 @@ mod tests {
     fn frozen_copy_formatter_preserves_wrapped_and_rectangular_columns() {
         let mut wrapped = new_terminal(5, 3, 16).expect("wrapped terminal");
         wrapped.vt_write(b"ab  cdef");
-        let revision = ModeRevision::capture(&mut wrapped).expect("wrapped revision");
+        let revision = ModeRevision::capture(&wrapped).expect("wrapped revision");
         let first = (0..revision.total_rows())
             .find(|row| revision.first_char(PointCoordinate { x: 0, y: *row }) == Some('a'))
             .expect("wrapped row");
@@ -20737,7 +20615,7 @@ mod tests {
 
         let mut rectangle = new_terminal(8, 2, 16).expect("rectangle terminal");
         rectangle.vt_write(b"ab  z\r\nc   y");
-        let revision = ModeRevision::capture(&mut rectangle).expect("rectangle revision");
+        let revision = ModeRevision::capture(&rectangle).expect("rectangle revision");
         let first = (0..revision.total_rows())
             .find(|row| revision.first_char(PointCoordinate { x: 0, y: *row }) == Some('a'))
             .expect("first rectangle row");
@@ -20774,7 +20652,7 @@ mod tests {
     fn vi_copy_keeps_the_final_newline_when_the_right_edge_passes_the_last_line() {
         let mut terminal = new_terminal(12, 4, 16).expect("terminal");
         terminal.vt_write(b"abc\r\ndef\r\n\r\nghi");
-        let revision = ModeRevision::capture(&mut terminal).expect("revision");
+        let revision = ModeRevision::capture(&terminal).expect("revision");
         let first = (0..revision.total_rows())
             .find(|row| revision.first_char(PointCoordinate { x: 0, y: *row }) == Some('a'))
             .expect("first row");

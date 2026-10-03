@@ -403,9 +403,7 @@ fn expand_status_parts(
 }
 
 fn status_parts_enabled() -> bool {
-    zz_mux::format_cache_knob()
-        && zz_mux::compiled_formats_knob()
-        && zz_mux::borrowed_formats_enabled()
+    zz_mux::borrowed_formats_enabled()
 }
 
 pub(crate) fn completed_status_bytes(
@@ -590,8 +588,7 @@ impl CompletedStatus {
 }
 
 pub(crate) fn status_cache_callbacks(request: &StatusRequest) -> Option<Vec<String>> {
-    if !zz_mux::format_cache_knob()
-        || !request.modes.is_empty()
+    if !request.modes.is_empty()
         || request.references.contains("*")
         || status_line_templates(
             &request.formats,

@@ -1,46 +1,74 @@
 use super::*;
 
-fn full_parse(input: &str) -> ParsedConfig {
+fn walk<C: ConfigContext>(input: &str, context: &mut C, assignment_overlay: bool) -> ParsedConfig {
     parse_config_characters(
         "<control>".to_owned(),
         ConfigCharacters::text(input),
-        &mut LiteralVariableContext,
-        true,
+        context,
+        assignment_overlay,
     )
+}
+
+fn full_parse(input: &str) -> ParsedConfig {
+    walk(input, &mut LiteralVariableContext, true)
 }
 
 #[test]
 fn plain_lines_parse_exactly_like_the_character_walk() {
-    const ALPHABET: [char; 24] = [
-        'a', 'z', '-', '_', '=', ' ', ' ', '\t', '%', '#', '{', '}', '$', '~', ';', '"', '\'',
-        '\\', '\n', '\r', '|', ':', '\u{e9}', '\u{a0}',
-    ];
+    let alphabet = (b'!'..=b'~')
+        .map(char::from)
+        .chain(" \t\n\r\u{b}\u{c}\0\u{85}\u{a0}\u{e9}\u{2028}\u{3000}\u{4e2d}\u{1f600}".chars())
+        .collect::<Vec<_>>();
+    let homes = BTreeMap::from([(String::new(), "/home/u".to_owned())]);
+    let variables = BTreeMap::from([("X".to_owned(), "1".to_owned())]);
     let mut seed = 0x2545_f491_4f6c_dd1d_u64;
-    let mut plain = 0;
-    for _ in 0..40_000 {
+    let mut next = || {
         seed ^= seed << 13;
         seed ^= seed >> 7;
         seed ^= seed << 17;
-        let length = (seed % 11) as usize;
-        let mut state = seed;
+        seed
+    };
+    let mut covered = BTreeSet::new();
+    let mut plain = 0;
+    for _ in 0..100_000 {
+        let palette = (0..=next() % 6)
+            .map(|_| alphabet[(next() % alphabet.len() as u64) as usize])
+            .chain([' '])
+            .collect::<Vec<_>>();
+        let length = (next() % 65) as usize;
         let input = (0..length)
-            .map(|_| {
-                state = state
-                    .wrapping_mul(6_364_136_223_846_793_005)
-                    .wrapping_add(1);
-                ALPHABET[(state >> 33) as usize % ALPHABET.len()]
-            })
+            .map(|_| palette[(next() % palette.len() as u64) as usize])
             .collect::<String>();
-        if is_plain_config_line(&input) {
-            plain += 1;
-            assert_eq!(
-                parse_plain_config_line("<control>".to_owned(), &input),
-                full_parse(&input),
-                "{input:?}"
-            );
+        if !is_plain_config_line(&input) {
+            continue;
+        }
+        plain += 1;
+        covered.extend(input.chars());
+        let fast = parse_plain_config_line("<control>".to_owned(), &input);
+        for overlay in [true, false] {
+            let walked = [
+                walk(&input, &mut LiteralVariableContext, overlay),
+                walk(
+                    &input,
+                    &mut ResolvedExpansionContext {
+                        homes: &homes,
+                        variables: &variables,
+                    },
+                    overlay,
+                ),
+            ];
+            for walked in walked {
+                assert_eq!(fast, walked, "{input:?} overlay {overlay}");
+            }
         }
     }
-    assert!(plain > 1_000, "{plain}");
+    assert!(plain > 40_000, "{plain}");
+    for character in alphabet {
+        assert!(
+            covered.contains(&character) || !is_plain_config_line(&format!("x {character}")),
+            "{character:?}"
+        );
+    }
 }
 
 #[test]

@@ -598,6 +598,16 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   100 rounds instead of 1000 (1 s instead of 12.5 s alone; 60-100 s inside the full suite, where it
   pushed 15-25 other daemon tests past their deadlines: the bimodal daemon suite since DL5). The
   1000- and 4000-round runs belong in reviews.
+- ACFIX review (no blocker or major): a pane that never reads accepted 262,145 keys in 66 ms and
+  refused 3 at the 64 MiB budget (about 31 MB real); 7,000 mixed commands (keys, text, pastes,
+  prepared pastes, resizes, DSR replies) arrived in exact order; respawn gets a fresh admission
+  state; one shard with a 3,000-key flood moves a neighbour's echo p50 0.61 -> 0.98 ms (the 1 ms
+  turn). Three minors fixed by hand in `d276b12c`: an emptied overflow frees its allocation (it
+  kept the burst's peak, up to 16 MiB per pane), the refusal log prints the payload and the byte
+  limit (the slot count no longer limits), the docs say an overflow entry keeps its 256-byte
+  charge in a slot. Merged as `4e32204d`. Behaviour change worth knowing: a pane that stops
+  reading now holds up to about 262k typed keys and a later Ctrl-C waits behind them, as tmux's
+  unbounded buffer does; before, zz dropped everything past 256.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

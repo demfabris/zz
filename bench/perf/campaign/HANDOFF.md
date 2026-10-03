@@ -785,6 +785,16 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   (merge-checks-mac.sh exports it); without it the pinned tmux prints `_` for characters it
   cannot encode, and those three rows go red on the tmux side. The same cause explains the
   "newline vs `_`" copy-mode-resize-freeze reports from ECHOIN and the chooser lane.
+- DEADPANE: a test bug, merged as `4320b601` (test only, `1c03db7b`). The dead pane's "Pane is
+  dead" notice scrolls the marker into history (tmux does the same); the test only saw the marker
+  in a 2 ms gap between the exit frame and the notice frame, and on Linux the shell starts fast
+  enough that the exit lands on the unwatched pane's 200 ms first rebuild. Real daemon against the
+  pin, seven print-and-exit variants: capture-pane, history and an attach all match tmux. The test
+  now waits for each dead pane's notice; 20/20 alone on Linux.
+- **Pushed to main 2026-10-03 21:00: `421f4918..4320b601`, 80 commits** (BURST, DL3-DL5, CTRLCPU,
+  ECHOMAP, ACFIX, BYTES2, ATTACH, ECHOIN, the chooser fix, DEADPANE, docs). evidence-secrets clean,
+  credential scan of the outgoing diff clean, no attribution lines. Both hosts' main checkouts
+  fast-forwarded. No tag (the freeze holds until the wave-4 exit).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

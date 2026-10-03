@@ -565,6 +565,9 @@ impl ChromeKeymap {
     /// Chrome names a press under its most specific spelling first, so a
     /// binding written without `S-` still catches a chord the user shifts.
     fn binding_for(&self, table: &str, input: &KeyInput) -> Option<&Binding> {
+        if !self.tables.has_table(table) {
+            return None;
+        }
         if input.modifiers.shift()
             && let Some(binding) = self
                 .tables

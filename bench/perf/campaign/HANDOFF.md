@@ -325,6 +325,103 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   `/tmp` (the wave-3 trap); briefs now say to keep measured binaries on disk.
 - Pushed to main again at 00:45: `2918280f` (SPAWN), after Linux clippy, zz-terminal and the new
   daemon test modules passed on that head.
+- DL2 merged as `8b1393a2` (lane 60 min, `229549e5`): frames carry the pane's stream sequence (the
+  current viewport's `view_generation`; terminals start 2^40 above the previous one, so it grows
+  across respawn); `PaneFrameFanout::enqueue` reuses one encoded patch per (base, current) per
+  frame; `TerminalFrames::full` caches encoded full frames per (pane, generation, cells), at most 16
+  frames and 1 MiB; `PendingTerminal.encoded` is `Arc<[u8]>`. No client reads `Event.sequence` for
+  terminal frames (zz-client ignores it). Second client on a pane 2.36 Minstr/5 s (target 3.0);
+  Mac gate 0 fail, 0 regressed, `attach.cpu.p4` 1.2. Linux: `attach.instr.p4` equal to the base,
+  but `attach.ttfc.p4` failed in 2 of 3 lane runs and 0 of 3 base runs on the loaded host: the
+  row to watch at wave exit. Frames are 1-3 bytes larger (6-byte varint sequence). DL5 must order
+  by per-pane stream sequence, since frame and event sequences no longer compare.
+- DL3 launched 01:05 as workflow `w4-slices` (run `wf_a3e8d9c5-200`): implement -> parity and perf
+  reviews in parallel -> fix; the script takes a list of slices and is reused for DL3b/DL4/DL5.
+- DL6b/DL6c merged as `d548f3c8` (DL6c lane 55 min, `5b75f2e7`): FIONREAD gating was measured in a C
+  model (`/tmp/zzpc/gather3/ptybench.c`): the ioctl never waits, but it spins about 2.5M ioctls/s
+  and reads shrink, 124-152 MB/s; one reader thread tops out near 200 MB/s whatever the strategy
+  (2 threads 194-215, 4 threads 230-244, per-pane readers 235-284). So the gather lends every busy
+  pane but one to a thread of its own (up to three per shard) when two panes filled a 64 KiB
+  buffer within 10 ms; the pane keeps its buffers, partial batch and bridge state, buffer returns
+  and exits follow it through a swappable wake target, and it goes back after 100 ms without a
+  full buffer. Single-shard probe: 4 busy ascii 240.5 MB/s vs pre-DL6 247.6 (0.97x; DL6 174.9),
+  1 busy 1.02x, 4 busy unicode 1.00x; default shards over 8 pairs `throughput.detached.ascii`
+  0.987x; `mem.threads.*` 9. Open: thread churn at the lending threshold (each hand-off spawns a
+  thread). Race and parity review of the merged gather runs as workflow `w4-review-fix`
+  (`wf_5b1b76de-3cc`).
+- Gather review (two Opus lenses, 78 min): no blocker or major; fd lifetime, wakeups, byte order
+  across hand-offs, the thread bound and respawn during floods all held under scratch stress
+  tests (707 spawn/kill cycles, 200 respawn rounds). Four minors fixed in `7bc80444` (merged): a
+  lent thread lingers 1 s and is reused (distinct gather threads in 10 s at the threshold 91 -> 2),
+  dropping the last `PtyGather` wakes and stops the home, a stopped gather is replaced on the next
+  spawn, and a lent thread that cannot hand back no longer acts as a home. One busy pane read
+  0.974x pre-DL6 against 0.98 in that round, with the untouched DL6c build at 0.982 in the same
+  minutes: noise, accepted.
+- Linux quick A/B of `59db7c3e` (KNOBS+ROWS+TUI-ECHO+CONTROL) against the pre-KNOBS binary, three
+  pairs on the loaded host (`~/.cache/zz-perf/batch2`): `attach.instr.p1`/`.p4` -50%/-47%,
+  `chatty.instr_per_s.flip`/`.hidden` -57%/-39%, `control.latency` -59%, `control.burst_cmds_per_s`
+  +67% (86k against 51k), `control.cpu_per_cmd` -39%, `control.instr_per_cmd` +21% (the daemon now
+  writes what the client used to). Chatty flip/hidden CPU rows failed on the lane in quick mode at
+  39-57% fewer instructions: load, judged at wave exit.
+- Side lanes merged 03:10 (workflow `w4-side-lanes`, 9 agents, 2.9 h):
+  - SETTLE `e703eb64` (lane `99c07f48` + fix `a2bbc675`): an empty pane (`split-window ''`) is now
+    created at its real size with its modes set before the actor starts (`spawn_empty_pane`), so
+    no settle build runs for it; `#{cursor_flag}` is backed by `TerminalFacts::cursor_hidden`
+    (removed from the `formats.terminal-runtime` gap). Fixes a parity bug that predates wave 4:
+    `capture-pane -p` on such a pane printed 24 rows where tmux prints 11, and cursor_flag read 1.
+    Mac `spawn.instr.split_empty_P` -45%, `spawn.cpu.split_empty_P` 0.92-1.00x tmux (rule 1.2x,
+    was 2.1x). Open: the settle after real output in an unwatched pane (needs an async settle
+    before `#{C:}` filters in status.rs `pane_search` and a metadata-only `FrameSnapshot::capture`);
+    remaining split+kill cost is command execution 39% (source pane tcgetpgrp and cwd, automatic
+    rename on kill), loop turn 25%, shard wake 23%.
+  - NAMES `3352c904` (lane `ed3640c8` + fix `14931bf1`): the lane's launch-key guess named sibling
+    symlinks wrongly (`vi` -> `vim`; review blocker) and was dropped; what merged is the exact
+    lookup with a 64-entry cache keyed by (pid, unique_id, id_version), safe against pid reuse.
+    Per-check cost 22.4 us against a 15 us target; the saving is inside run-to-run noise. Kept
+    because the old 4-entry pid-keyed cache could return a stale name after pid reuse.
+  - TUIECHO2 `52f8e3ab` (lane `4ae4b030` + fix `f3af5d52`, done): key input encodes straight into a
+    reused buffer (`zz-protocol/src/key_frame.rs`), prefix keys are canonicalised once, and the
+    client reuses a spare cell buffer instead of copying the 38 KB array per frame (seeded test
+    `reused_cell_buffers_follow_patches_while_clones_are_held`). Client per key 92 -> 76.6 kinstr.
+- batch3 checks from 03:15 on `52f8e3ab` (everything since batch2): Mac full suite in the snapshot
+  worktree `~/dev/zz-check` plus the full corpus, A/B against the wave-3 exit binary; Linux the
+  same in alienware `~/dev/zz-perf-int` (`~/.cache/zz-perf/batch3`, no quiet-gate).
+- batch3 Mac (`52f8e3ab` in `~/dev/zz-check`, 03:17-04:29): fmt, clippy, compat-check, iPad, tui-screen-
+  diff, tui-copy-mode, tui-overlays, startup diagnostics pass; 6 load failures pass alone; full
+  corpus only the expected reds (the four `known/*`, census-hooks, if-shell-background-order,
+  control-alias-prepare, plugin-runtime-continuum, plugin-runtime-vim-tmux-navigator,
+  resurrect-save, source-file-byte-name, status-background-jobs); attached-client the tmux-side
+  flake. `just web-build` failed: TUIECHO2 added `foldhash` to zz-client without the excluded
+  `clients/web/Cargo.lock` edge; fixed in `3fd5d250`, web build passes. Quick A/B against the
+  wave-3 exit binary: `attach.instr.p1`/`.p4` -53%/-52%, `chatty.instr_per_s.flip`/`.hidden`
+  -55%/-52%, `spawn.instr.split_empty_P` -66%, `chatty.tty_kibps.hidden` -42%; to watch:
+  `echo.wire_bytes.busy30` 107 -> 149 B (likely DL2's 6-byte stream-sequence varint per frame:
+  the generation starts 2^40 above the previous terminal; idle echo still 31 B against the 64 B
+  rule), and CPU rows `spawn.cpu.kill_pane`/`split_shell`, `echo.p99.idle.p20` failing at flat
+  instructions while DL3 built on the same host (judge in the quiet exit gates).
+- batch3 Linux (`52f8e3ab`, 03:17-04:12): clippy, compat-check, backpressure pass; 6 load failures
+  pass alone; full corpus only the expected Linux reds (the four `known/*`, lane2-store,
+  show-options-hooks, control-alias-prepare, format-modifier-client-loop with the debug build,
+  plugin-runtime-resurrect-restore). A/B against the wave-3 exit binary: attach instructions
+  -50%/-48%, `chatty.instr_per_s.flip`/`.hidden` -59%/-55%, `spawn.instr.split_empty_P` -86%,
+  `echo.wire_bytes.busy30` 137 -> 149 B. `attach.ttfc.p4` failed its ratio in the lane runs but
+  reads 8.2-9.3 ms against the base's 8.3-10.0 in the same pairs: noise. Pushed to main after.
+- DL3 (workflow `wf_a3e8d9c5-200`, 7 h: impl, two reviews, fix; `perf/deliver` `443939fa` +
+  `41dce0ce`, not merged yet): `PaneSink` per pane (`daemon/shard_sink.rs`) with per (pane, view)
+  records; foreground live frames are diffed, encoded once and queued on every mailbox from the
+  shard; non-live views, frozen clients, kitty frames and full slots fall back to the loop for that
+  frame and keep the record's base (review fix: a fallback used to force two full frames); sunk
+  panes notify the loop only on edges or every 100 ms of output (every frame while an output watch
+  is alive); the mailbox wakes the loop only on an empty -> non-empty slot. Mac `--stage final`
+  100 pass, 0 fail, 0 regressed; footprint p1 4.69, p20 11.5 MiB. Not met: loop busy in visible
+  15-17 against base 13-24 (the loop still wakes and calls writev per frame), and the visible
+  CPU/instruction rows equal the DL3 base (the wave-4 gain there is DL1, DL2 and ROWS). Decision:
+  hold DL3 until DL4 (the shard writes an idle socket directly, removing that loop wake and
+  writev, and the echo hop) proves the gain on top of it; merge both together then.
+- DL4 and DL5 launched 08:15 on top of DL3 as workflow `w4-slices` run `wf_3436d1b8-110`
+  (`~/dev/zz-deliver4`, `~/dev/zz-deliver5`, both first merge perf/wave4). DL4 owns loop busy <= 10
+  in addition to its echo criterion; DL5 replaces the control output taps with a sink kind and adds
+  the per-pane stream barrier.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

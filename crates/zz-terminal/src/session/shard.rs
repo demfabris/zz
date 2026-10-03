@@ -57,6 +57,7 @@ pub(super) enum LaunchKind {
         title: String,
         text: String,
         frozen: bool,
+        geometry: Geometry,
     },
 }
 
@@ -298,6 +299,7 @@ impl Shard {
                         title,
                         text,
                         frozen,
+                        geometry,
                     } => new_output_view(
                         launch.control_rx,
                         launch.slot,
@@ -307,6 +309,7 @@ impl Shard {
                         &launch.appearance,
                         launch.max_scrollback,
                         frozen,
+                        geometry,
                         &launch.wake,
                     )
                     .map(|actor| Actor::Surface(Box::new(actor))),
@@ -429,7 +432,7 @@ impl Shard {
         if !pty_gather_enabled() {
             return Ok(None);
         }
-        if self.gather.is_none() {
+        if self.gather.as_ref().is_none_or(PtyGather::stopped) {
             self.gather = Some(PtyGather::start(format!("zz-pty-gather-{}", self.index))?);
         }
         Ok(self.gather.clone())

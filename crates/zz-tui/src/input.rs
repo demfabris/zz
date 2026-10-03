@@ -2158,17 +2158,22 @@ const fn mouse_button(button: MouseButton) -> TerminalMouseButton {
 }
 
 pub(crate) fn key_input(event: KeyEvent) -> KeyInput {
+    let mut input = key_chord(event);
+    input.text = match event.code {
+        TerminalKeyCode::Char(character) if !character.is_control() => {
+            Some(character.to_string().into_boxed_str())
+        }
+        _ => None,
+    };
+    input
+}
+
+pub(crate) fn key_chord(event: KeyEvent) -> KeyInput {
     let key = key_code(event.code);
     let event_modifiers = if matches!(event.code, TerminalKeyCode::BackTab) {
         event.modifiers | KeyModifiers::SHIFT
     } else {
         event.modifiers
-    };
-    let text = match event.code {
-        TerminalKeyCode::Char(character) if !character.is_control() => {
-            Some(character.to_string().into_boxed_str())
-        }
-        _ => None,
     };
     let unshifted_codepoint = match key {
         KeyCode::Character(character) => Some(character),
@@ -2182,7 +2187,7 @@ pub(crate) fn key_input(event: KeyEvent) -> KeyInput {
         },
         key,
         modifiers: modifiers(event_modifiers),
-        text,
+        text: None,
         unshifted_codepoint,
     }
 }

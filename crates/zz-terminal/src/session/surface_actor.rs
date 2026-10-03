@@ -107,6 +107,20 @@ impl<'a, 'b> SurfaceActor<'a, 'b> {
         Ok(actor)
     }
 
+    pub(super) fn publish_started(&mut self) -> Result<(), WorkerError> {
+        self.publisher
+            .set_facts(self.engine_filter.facts(&self.terminal)?);
+        publish_active_views(
+            &mut self.terminal,
+            &self.publisher,
+            &mut self.frames,
+            SnapshotChange::View,
+            &mut self.active_views,
+            &self.word_separators,
+            self.status.clone(),
+        )
+    }
+
     pub(super) fn next_deadline(&self) -> Instant {
         let mut due = Instant::now() + IDLE_SLEEP;
         if !self.captures.is_empty() {

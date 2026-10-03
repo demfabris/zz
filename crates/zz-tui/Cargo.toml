@@ -11,6 +11,7 @@ publish = false
 
 [dependencies]
 base64.workspace = true
+foldhash.workspace = true
 log.workspace = true
 miniz_oxide = "0.9.1"
 rustix = { workspace = true, features = ["fs"] }

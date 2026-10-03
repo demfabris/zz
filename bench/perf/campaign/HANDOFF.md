@@ -543,6 +543,18 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   itself (removes the client's long-sleep wake and a socket hop per key).
 - ECHOIN launched 12:49 (run `wf_86fcf37c-003`, brief `echoin`, `~/dev/zz-echoin`): EM3, EM2 and
   EM5 on the Mac, one commit each.
+- Trap: a SendMessage to an agent a workflow is still running starts a second copy of it from the
+  transcript (no StructuredOutput tool), and the workflow never records that agent's result. Both
+  copies wrote to `/tmp/zzpc/review-ctrlcpu`, and run `wf_bbdbd956-c4c` hung on ECHOMAP and the
+  CTRLCPU review; stopped at 13:00. Tell a running workflow agent nothing: wait for it, or stop the
+  workflow and continue by hand.
+- From that run by hand: ECHOMAP merged unreviewed as `7346e208` (bench/perf/campaign scripts and
+  the map only; ECHOIN checks EM2, EM3 and EM5 with numbers). CTRLCPU review (the copy's report):
+  no correctness or parity defect; Mac `control.instr_per_cmd` 68.9k -> 62.5k over 6 alternating
+  runs (tmux 159k), burst +20%, Linux-target clippy exit 0; one minor (the plain-line fuzz test's
+  alphabet is narrow), fix agent running. Same-on-base tmux gaps it found: argument errors lack
+  `parse error:`, ambiguous-command candidates sort by name instead of table order,
+  `display-message =x` without `-p` prints `%message` after `%end`.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

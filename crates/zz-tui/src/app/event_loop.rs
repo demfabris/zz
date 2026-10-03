@@ -1,7 +1,7 @@
 use std::{
     collections::VecDeque,
     io,
-    os::fd::{AsFd as _, AsRawFd as _, OwnedFd},
+    os::fd::{AsFd as _, AsRawFd as _, OwnedFd, RawFd},
     rc::Rc,
 };
 
@@ -102,6 +102,94 @@ impl Drop for SignalInbox {
     }
 }
 
+#[cfg(target_os = "macos")]
+struct Queue {
+    fd: OwnedFd,
+    armed: [Option<(RawFd, bool)>; 4],
+}
+
+#[cfg(target_os = "macos")]
+impl Queue {
+    fn new() -> io::Result<Self> {
+        let fd = rustix::event::kqueue::kqueue()?;
+        rustix::io::fcntl_setfd(&fd, rustix::io::FdFlags::CLOEXEC)?;
+        Ok(Self {
+            fd,
+            armed: [None; 4],
+        })
+    }
+
+    #[allow(
+        unsafe_code,
+        reason = "kevent registers descriptors the loop and terminal writer keep open"
+    )]
+    fn wait(
+        &mut self,
+        wanted: [Option<RawFd>; 4],
+        timeout: Option<Duration>,
+    ) -> io::Result<Option<[bool; 4]>> {
+        use rustix::event::kqueue::{Event, EventFilter, EventFlags, kevent};
+        let filter = |slot: usize, fd: RawFd| {
+            if slot == 3 {
+                EventFilter::Write(fd)
+            } else {
+                EventFilter::Read(fd)
+            }
+        };
+        let mut changes = [Event::new(
+            EventFilter::Read(0),
+            EventFlags::empty(),
+            std::ptr::null_mut(),
+        ); 8];
+        let mut count = 0;
+        for (slot, want) in wanted.into_iter().enumerate() {
+            let change = match (self.armed[slot], want) {
+                (Some((fd, true)), Some(want)) if fd == want => None,
+                (Some((fd, false)), Some(want)) if fd == want => {
+                    Some((filter(slot, fd), EventFlags::ENABLE))
+                }
+                (_, Some(want)) => Some((filter(slot, want), EventFlags::ADD | EventFlags::ENABLE)),
+                (Some((fd, true)), None) => Some((filter(slot, fd), EventFlags::DISABLE)),
+                (_, None) => None,
+            };
+            if let Some((event_filter, flags)) = change {
+                changes[count] = Event::new(event_filter, flags, std::ptr::null_mut());
+                count += 1;
+                self.armed[slot] = match want {
+                    Some(fd) => Some((fd, true)),
+                    None => self.armed[slot].map(|(fd, _)| (fd, false)),
+                };
+            }
+        }
+        let mut events = [std::mem::MaybeUninit::<Event>::uninit(); 8];
+        let ready = match unsafe { kevent(&self.fd, &changes[..count], &mut events, timeout) } {
+            Ok((ready, _)) => ready,
+            Err(rustix::io::Errno::INTR) => return Ok(Some([false; 4])),
+            Err(error) => return Err(error.into()),
+        };
+        let mut result = [false; 4];
+        for event in ready.iter() {
+            if event.flags().contains(EventFlags::ERROR) {
+                if event.data() != 0 {
+                    return Ok(None);
+                }
+                continue;
+            }
+            let (fd, write) = match event.filter() {
+                EventFilter::Read(fd) => (fd, false),
+                EventFilter::Write(fd) => (fd, true),
+                _ => continue,
+            };
+            for (slot, armed) in self.armed.iter().enumerate() {
+                if *armed == Some((fd, true)) && (slot == 3) == write {
+                    result[slot] = true;
+                }
+            }
+        }
+        Ok(Some(result))
+    }
+}
+
 pub(super) struct EventLoop {
     socket: OwnedFd,
     stdin: OwnedFd,
@@ -112,6 +200,9 @@ pub(super) struct EventLoop {
     prefer_terminal: bool,
     pending_main: Option<MainEvent>,
     disconnected: bool,
+    buffered: bool,
+    #[cfg(target_os = "macos")]
+    queue: Option<Queue>,
     readable: Vec<rustix::event::FdSetElement>,
     writable: Vec<rustix::event::FdSetElement>,
 }
@@ -128,6 +219,9 @@ impl EventLoop {
             prefer_terminal: false,
             pending_main: None,
             disconnected: false,
+            buffered: true,
+            #[cfg(target_os = "macos")]
+            queue: Queue::new().ok(),
             readable: Vec::new(),
             writable: Vec::new(),
         })
@@ -136,6 +230,11 @@ impl EventLoop {
     pub fn replace(&mut self, client: &InteractiveClient) -> io::Result<()> {
         self.socket = client.receive_fd()?;
         self.disconnected = false;
+        self.buffered = true;
+        #[cfg(target_os = "macos")]
+        if let Some(queue) = self.queue.as_mut() {
+            queue.armed[1] = None;
+        }
         Ok(())
     }
 
@@ -185,8 +284,10 @@ impl EventLoop {
         if self.disconnected {
             return;
         }
-        let started = Instant::now();
-        for _ in 0..MAX_COALESCED_EVENTS {
+        let mut started = None;
+        let mut read_socket = read_socket;
+        self.buffered = true;
+        for handled in 0..MAX_COALESCED_EVENTS {
             let received = if read_socket {
                 client.try_recv()
             } else {
@@ -194,6 +295,7 @@ impl EventLoop {
             };
             match received {
                 Ok(Some(message)) => {
+                    read_socket = false;
                     forward_protocol_message(
                         core,
                         *message,
@@ -208,7 +310,10 @@ impl EventLoop {
                         },
                     );
                 }
-                Ok(None) => break,
+                Ok(None) => {
+                    self.buffered = false;
+                    break;
+                }
                 Err(error) => {
                     self.disconnected = true;
                     let _ = events.send(MainEvent::Disconnected {
@@ -218,17 +323,44 @@ impl EventLoop {
                     break;
                 }
             }
-            if started.elapsed() >= Duration::from_millis(1) {
+            if handled > 0
+                && started.get_or_insert_with(Instant::now).elapsed() >= Duration::from_millis(1)
+            {
                 break;
             }
         }
+    }
+
+    fn wait(
+        &mut self,
+        output: &TerminalWriter,
+        timeout: Option<Duration>,
+    ) -> io::Result<(bool, bool, bool)> {
+        #[cfg(target_os = "macos")]
+        {
+            let wanted = [
+                self.terminal_events
+                    .is_empty()
+                    .then(|| self.stdin.as_raw_fd()),
+                (!self.disconnected).then(|| self.socket.as_raw_fd()),
+                Some(self.signals.fd.as_raw_fd()),
+                output.pending_fd().map(|fd| fd.as_raw_fd()),
+            ];
+            if let Some(queue) = self.queue.as_mut() {
+                if let Some([terminal, socket, signal, _]) = queue.wait(wanted, timeout)? {
+                    return Ok((terminal, socket, signal));
+                }
+                self.queue = None;
+            }
+        }
+        self.select(output, timeout)
     }
 
     #[allow(
         unsafe_code,
         reason = "select borrows descriptors owned by the loop and terminal writer"
     )]
-    fn wait(
+    fn select(
         &mut self,
         output: &TerminalWriter,
         timeout: Option<Duration>,
@@ -311,16 +443,18 @@ impl EventLoop {
                 return Ok(Some(MainEvent::Repaint));
             }
         }
-        self.read_protocol(
-            client,
-            core,
-            connection,
-            events,
-            frames,
-            kitty_images,
-            kitty_gate,
-            false,
-        );
+        if self.buffered {
+            self.read_protocol(
+                client,
+                core,
+                connection,
+                events,
+                frames,
+                kitty_images,
+                kitty_gate,
+                false,
+            );
+        }
         if self.pending_main.is_none() {
             self.pending_main = incoming.try_recv().ok();
         }
@@ -362,7 +496,9 @@ impl EventLoop {
                 true,
             );
         }
-        self.expire_escape(Instant::now());
+        if self.escape_deadline.is_some() {
+            self.expire_escape(Instant::now());
+        }
         if self.prefer_terminal
             && let Some(event) = self.terminal_events.pop_front()
         {
@@ -408,6 +544,9 @@ mod tests {
                 prefer_terminal: false,
                 pending_main: None,
                 disconnected: false,
+                buffered: true,
+                #[cfg(target_os = "macos")]
+                queue: Queue::new().ok(),
                 readable: Vec::new(),
                 writable: Vec::new(),
             },

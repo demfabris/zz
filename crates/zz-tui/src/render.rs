@@ -226,6 +226,8 @@ type TerminalStyleKey = (
     Option<u32>,
 );
 
+type PaneMap<V> = HashMap<PaneId, V, foldhash::fast::FixedState>;
+
 pub(crate) struct Renderer {
     output: Vec<u8>,
     queued_control: Vec<u8>,
@@ -235,27 +237,26 @@ pub(crate) struct Renderer {
     selection_mask: Vec<bool>,
     selection_style: Option<TmuxStyle>,
     selection_trim: Option<(u16, u16)>,
-    painted: HashMap<PaneId, PaintedPane>,
-    headers: HashMap<PaneId, String>,
-    picker_cards: HashMap<PaneId, (Rect, usize)>,
-    cards: HashMap<PaneId, (Rect, &'static str, String, String)>,
+    painted: PaneMap<PaintedPane>,
+    headers: PaneMap<String>,
+    picker_cards: PaneMap<(Rect, usize)>,
+    cards: PaneMap<(Rect, &'static str, String, String)>,
     sidebar_rows: Vec<PaintedSidebarRow>,
     status_rows: Vec<StyledLine>,
     status_geometry: Option<(u16, u16, u16)>,
-    status_source: Option<zz_protocol::StatusLine>,
-    damage: HashMap<PaneId, FrameDamage>,
-    browser_placements: HashMap<PaneId, KittyPlacement>,
-    browser_painted: HashMap<PaneId, bool>,
+    status_source: Option<Arc<zz_protocol::StatusLine>>,
+    damage: PaneMap<FrameDamage>,
+    browser_placements: PaneMap<KittyPlacement>,
+    browser_painted: PaneMap<bool>,
     last_title: String,
     border_chrome: Option<(
         PaneBorderStatus,
         PaneBorderLines,
         PaneBorderIndicators,
-        Vec<zz_protocol::PaneBorderPresentation>,
-        zz_protocol::ThemeColours,
+        Arc<zz_protocol::StatusLine>,
     )>,
     mode_tree: chooser::ModeTree,
-    pane_modes_painted: HashMap<PaneId, bool>,
+    pane_modes_painted: PaneMap<bool>,
     kitty: KittyBridge,
     writer: std::rc::Rc<std::cell::RefCell<TerminalWriter>>,
     control_replay: Vec<u8>,
@@ -264,7 +265,7 @@ pub(crate) struct Renderer {
     terminal_defaults: TmuxStyle,
     terminal_sgr: Option<(TerminalStyleKey, Vec<u8>)>,
     blank_is_default: bool,
-    default_blank: HashMap<PaneId, Rect>,
+    default_blank: PaneMap<Rect>,
     tty: Option<(TtyState, usize)>,
     settled: Option<TtyState>,
 }
@@ -292,21 +293,21 @@ impl Renderer {
             selection_mask: Vec::new(),
             selection_style: None,
             selection_trim: None,
-            painted: HashMap::new(),
-            headers: HashMap::new(),
-            picker_cards: HashMap::new(),
-            cards: HashMap::new(),
+            painted: PaneMap::default(),
+            headers: PaneMap::default(),
+            picker_cards: PaneMap::default(),
+            cards: PaneMap::default(),
             sidebar_rows: Vec::new(),
             status_rows: Vec::new(),
             status_geometry: None,
             status_source: None,
-            damage: HashMap::new(),
-            browser_placements: HashMap::new(),
-            browser_painted: HashMap::new(),
+            damage: PaneMap::default(),
+            browser_placements: PaneMap::default(),
+            browser_painted: PaneMap::default(),
             last_title: String::new(),
             border_chrome: None,
             mode_tree: chooser::ModeTree::default(),
-            pane_modes_painted: HashMap::new(),
+            pane_modes_painted: PaneMap::default(),
             kitty: KittyBridge::default(),
             writer,
             control_replay: Vec::new(),
@@ -315,7 +316,7 @@ impl Renderer {
             terminal_defaults: TmuxStyle::default(),
             terminal_sgr: None,
             blank_is_default: false,
-            default_blank: HashMap::new(),
+            default_blank: PaneMap::default(),
             tty: None,
             settled: None,
         }
@@ -729,12 +730,17 @@ impl Renderer {
     fn paint_workspace(&mut self, model: &Model, force: bool, cleared_to_default: bool) {
         let lines = model.pane_border_lines();
         let indicators = model.pane_border_indicators();
-        let border_changed = self.border_chrome.as_ref().is_none_or(|cached| {
-            cached.0 != model.pane_border_status()
+        let border_changed = self.border_chrome.as_mut().is_none_or(|cached| {
+            let changed = cached.0 != model.pane_border_status()
                 || cached.1 != lines
                 || cached.2 != indicators
-                || cached.3 != model.status.pane_borders
-                || cached.4 != model.status.theme
+                || !Arc::ptr_eq(&cached.3, &model.status)
+                    && (cached.3.pane_borders != model.status.pane_borders
+                        || cached.3.theme != model.status.theme);
+            if !changed {
+                cached.3 = Arc::clone(&model.status);
+            }
+            changed
         });
         let force = force || border_changed;
         if border_changed {
@@ -742,8 +748,7 @@ impl Renderer {
                 model.pane_border_status(),
                 lines,
                 indicators,
-                model.status.pane_borders.clone(),
-                model.status.theme,
+                Arc::clone(&model.status),
             ));
         }
         if force {
@@ -1294,8 +1299,9 @@ impl Renderer {
                     Ground::Background,
                 );
             }
-            write!(self.output, "\x1b[{}X", rect.width - start)
-                .expect("writing to Vec cannot fail");
+            self.output.extend_from_slice(b"\x1b[");
+            write_decimal(&mut self.output, rect.width - start);
+            self.output.push(b'X');
             terminal_column = start;
         }
         if reset {
@@ -1950,11 +1956,13 @@ impl Renderer {
         if !force
             && overlay.is_none()
             && self.status_geometry == Some(geometry)
-            && self.status_source.as_ref() == Some(&model.status)
+            && let Some(source) = self.status_source.as_mut()
+            && (Arc::ptr_eq(source, &model.status) || **source == *model.status)
         {
+            *source = Arc::clone(&model.status);
             return;
         }
-        self.status_source = overlay.is_none().then(|| model.status.clone());
+        self.status_source = overlay.is_none().then(|| Arc::clone(&model.status));
         let mut lines = Vec::with_capacity(block);
         for index in 0..block {
             let row = model.status.rows.get(index).map_or("", String::as_str);
@@ -2533,9 +2541,9 @@ fn changed_columns(
         return Some(0..width);
     }
     let mut cells = before.iter().zip(after);
-    let start = cells.position(|(before, after)| before != after)?;
+    let start = cells.position(|(before, after)| before.bits() != after.bits())?;
     let end = cells
-        .rposition(|(before, after)| before != after)
+        .rposition(|(before, after)| before.bits() != after.bits())
         .map_or(start + 1, |last| start + last + 2);
     if before[start..end]
         .iter()
@@ -3304,13 +3312,26 @@ fn clear_screen(output: &mut Vec<u8>, background: Color) {
 }
 
 fn write_cursor_position(output: &mut Vec<u8>, column: u16, row: u16) {
-    write!(
-        output,
-        "\x1b[{};{}H",
-        row.saturating_add(1),
-        column.saturating_add(1)
-    )
-    .expect("writing to Vec cannot fail");
+    output.extend_from_slice(b"\x1b[");
+    write_decimal(output, row.saturating_add(1));
+    output.push(b';');
+    write_decimal(output, column.saturating_add(1));
+    output.push(b'H');
+}
+
+fn write_decimal(output: &mut Vec<u8>, value: u16) {
+    let mut digits = [0_u8; 5];
+    let mut start = digits.len();
+    let mut rest = value;
+    loop {
+        start -= 1;
+        digits[start] = b"0123456789"[usize::from(rest % 10)];
+        rest /= 10;
+        if rest == 0 {
+            break;
+        }
+    }
+    output.extend_from_slice(&digits[start..]);
 }
 
 fn write_colored_text(
@@ -5468,8 +5489,8 @@ mod tests {
     #[test]
     fn forced_repaints_preserve_a_chooser_until_its_presentation_arrives() {
         let mut model = block_model(60, 12);
-        model.status.rows = vec!["CHOOSER-STATUS".to_owned()];
-        model.status.customized = true;
+        Arc::make_mut(&mut model.status).rows = vec!["CHOOSER-STATUS".to_owned()];
+        Arc::make_mut(&mut model.status).customized = true;
         model.choose_tree = Some(zz_protocol::ChooseTreeState {
             items: ["alpha", "beta"]
                 .into_iter()

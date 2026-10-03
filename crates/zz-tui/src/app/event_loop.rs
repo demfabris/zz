@@ -424,6 +424,7 @@ impl EventLoop {
 
     pub fn receive(
         &mut self,
+        now: Instant,
         wait: BrowserWait,
         incoming: &mpsc::Receiver<MainEvent>,
         events: &mpsc::Sender<MainEvent>,
@@ -436,7 +437,6 @@ impl EventLoop {
         escape_time: &AtomicU64,
         output: &Rc<std::cell::RefCell<TerminalWriter>>,
     ) -> Result<Option<MainEvent>, String> {
-        let now = Instant::now();
         self.expire_escape(now);
         {
             let mut output = output.borrow_mut();

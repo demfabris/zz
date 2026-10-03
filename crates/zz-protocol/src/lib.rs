@@ -8,6 +8,7 @@ mod exec;
 mod framing;
 mod id;
 mod key;
+mod key_frame;
 pub mod layout;
 mod menu;
 mod message;
@@ -46,6 +47,7 @@ pub use key::{
     Binding, KeyDecision, KeyEngine, KeyName, KeyTables, canonical_key, input_key_name,
     input_typed_text, is_key_name,
 };
+pub use key_frame::encode_key_input_into;
 pub use menu::{
     MENU_ROW_MARGIN, MenuRowLayout, layout_menu_row, menu_row_cells, menu_row_width, trim_menu_row,
 };

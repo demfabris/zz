@@ -8670,6 +8670,7 @@ version = "0.14.0"
 dependencies = [
  "agent-client-protocol-schema",
  "base64 0.23.1",
+ "foldhash",
  "neo_frizbee",
  "serde",
  "serde_json",

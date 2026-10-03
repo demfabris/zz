@@ -229,9 +229,58 @@ Task: remove those three: encode key input into a reused buffer without intermed
 
 Done criterion: client kinstr per echoed key at most 80 (92 today), medians of three alternating runs against the base build ({lb.INT}/target/release/zz_cli, rebuilt by you from perf/wave4 if older than 08f56d73); `chatty.client_cpu_pct.visible` not above the base (full `--only chatty`, two alternating pairs); `cargo test -p zz-tui -p zz-client -p zz-cli -p zz-protocol -p zz-client-ffi`, clippy -D warnings on touched crates and their dependents (`zz`, `zz-web` included); compat/tui-screen-diff.sh, tui-copy-mode.sh, tui-overlays.sh and attached-client.sh pass with LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 (tui-choosers.sh differs in 25 rows on the base too; compare with the base). {linux_clippy_note('tuiecho2')} One commit on perf/tuiecho2."""
 
+def dl3():
+    wt = f'{lb.ROOT}/zz-deliver'
+    lw = '/home/demfabris/dev/zz-deliver'
+    return header('Wave 4 lane W4-DELIVER slice DL3: shard sinks for foreground live views', wt, 'perf/deliver', 210).replace('from perf/wave4 = origin/main 06ea9cf1 plus a brief-generator commit', 'from perf/wave4 at 8b1393a2: KNOBS, ROWS, TUI-ECHO, CONTROL, DL6, PTYLEAK, TEARDOWN, DL1, SPAWN and DL2 merged') + f"""
+The W4-DELIVER plan (bench/perf/campaign/w4-deliver-plan.txt in the worktree) found this as-is state before wave 4's merges:
+
+{plan_asis()}
+
+Since then: DL1 took name checks off the frame path (`TerminalWatcher::handle` no longer calls `synchronize_pane_runtime`; output frames call `note_pane_output`; a 500 ms `TimerKey::NameCheck`), DL2 made frames carry the pane's stream sequence (the current viewport's `view_generation`) and encodes each patch once per (base, current) generation in `PaneFrameFanout::enqueue` and each full frame once per (pane, generation) in `TerminalFrames::full` (on `SharedServer`; you will need it reachable from the shards), with `PendingTerminal.encoded` an `Arc<[u8]>`; ROWS made `Frames::snapshot` copy whole rows (`CellIteration::copy_into`); DL6 put Linux PTY reads on one gather thread per shard; SETTLE (a side lane running now in ~/dev/zz-settle) may change the unwatched-pane settle snapshot in `publish_views`' fallback branch: keep your sink edits to the live-view branch so the two merge cleanly.
+
+Your slice, verbatim from the plan:
+
+{plan_line('DL3 |')}
+
+Linux leg: the gate's alienware line runs in the detached worktree {lw} (`cd {wt} && git push -q -f ssh://alienware/home/demfabris/dev/zz perf/deliver:perf/deliver && ssh alienware 'cd {lw} && git checkout -q --detach perf/deliver && ulimit -n $(ulimit -Hn) && cargo build --release -j6 -p zz-cli'`; never check out a branch there; each ssh call under 10 minutes; keep measured binaries on disk, not in tmpfs /tmp; no quiet-gate for instruction rows). Run `cargo clippy` for the touched crates on Linux too. Done criterion: the DL3 done criterion above."""
+
+DL3_STATE = """DL3 (on this branch, not merged into perf/wave4 yet: `443939fa` + review fixes `41dce0ce`) delivers foreground live frames from the shard: `watch_terminal` installs a `PaneSink` per pane (crates/zz-daemon/src/daemon/shard_sink.rs) holding per (pane, view) records with the mailbox and the view's last frame, kept current by `apply_view_streams`, detach, subscribe, `enter_copy_session`/`exit_copy_session` and `retire_terminal`; the frozen flag lives on the mailbox; `publish_views` hands each frame to the sink, which diffs, encodes once per (base, current) and queues on every matching mailbox under the sink's lock; non-live views, frozen clients, kitty frames and clients whose slot still holds an unwritten frame take the loop path for that frame (`shard_sink::publish_loop_view` from `TerminalWatcher::handle`), keeping the record's base; a pane whose views all went to the sink notifies the loop only on edges (title, OSC 7 path, status, progress bar, preview) or output at most every 100 ms (every frame while an output watch from terminal_reads is alive); sink wakes ride the frame's publish and the mailbox wakes the loop only when a client's terminal slot goes from empty to non-empty. Its one miss: loop busy samples in chatty visible stayed at 15-17 (base 13-24): the loop still wakes and calls writev once per pane frame; about half the loop samples are writev, the rest per-wake turn overhead. Tests: shard_sink_tests.rs (detach during publish, window switch, freeze, NeedsFull, kitty fallback, copy mode, one encode with 2 clients, retire, title sync, the fallback base cases)."""
+
+def dl45_common(slug, n):
+    wt = f'{lb.ROOT}/zz-deliver{n}'
+    lw = f'/home/demfabris/dev/zz-deliver{n}'
+    return wt, lw, f"""Start by merging the integration branch into yours: `cd {wt} && git merge perf/wave4` (it adds SETTLE, NAMES, TUIECHO2, the gather fixes and doc commits that landed after DL3's base; resolve conflicts keeping both sides; commit the merge). The DL3 commits are already on your branch.
+
+{DL3_STATE}
+
+Linux leg: build and measure in the detached worktree {lw} on alienware (`cd {wt} && git push -q -f ssh://alienware/home/demfabris/dev/zz perf/{slug}:perf/{slug} && ssh alienware 'cd {lw} && git checkout -q --detach perf/{slug} && ulimit -n $(ulimit -Hn) && cargo build --release -j6 -p zz-cli'`; never check out a branch there; each ssh call under 10 minutes; measured binaries on disk, not tmpfs /tmp; no quiet-gate for instruction rows). Run Linux clippy for the touched crates too. The base for every A/B is DL3's head 41dce0ce built as release (Mac: build it in a scratch detached worktree with a cloned target; Linux: the same under ~/dev)."""
+
+def dl4():
+    wt, lw, common = dl45_common('deliver4', 4)
+    return header('Wave 4 lane W4-DELIVER slice DL4: the shard writes an idle client socket directly', wt, 'perf/deliver4', 210).replace('from perf/wave4 = origin/main 06ea9cf1 plus a brief-generator commit', 'from perf/deliver (DL3, 41dce0ce, on perf/wave4 8b1393a2)') + f"""
+{common}
+
+Your slice, verbatim from the plan (bench/perf/campaign/w4-deliver-plan.txt):
+
+{plan_line('DL4 |')}
+
+Notes for this run: CONTROL (merged) hands a control client's stdin/stdout to the daemon (crates/zz-daemon/src/daemon/control_stdio.rs, `Connection::write_stdio_ready` in event_loop.rs); control clients do not receive terminal frames, so the direct path is for interactive (GUI, TUI, web, iOS) connections; leave control connections on the loop path unless it is trivial and covered by tests. DL3 left loop busy at 15-17 in visible: this slice owns that item too: the done criterion adds `w4-deliver-profile.py` loop busy samples in visible at or under 10 on the final code (three runs). Done criterion: the DL4 done criterion above plus that loop-busy item."""
+
+def dl5():
+    wt, lw, common = dl45_common('deliver5', 5)
+    return header('Wave 4 lane W4-DELIVER slice DL5: control output as a shard sink, the per-pane stream barrier', wt, 'perf/deliver5', 210).replace('from perf/wave4 = origin/main 06ea9cf1 plus a brief-generator commit', 'from perf/deliver (DL3, 41dce0ce, on perf/wave4 8b1393a2)') + f"""
+{common}
+
+Your slice, verbatim from the plan (bench/perf/campaign/w4-deliver-plan.txt):
+
+{plan_line('DL5 |')}
+
+Notes for this run: CONTROL (merged) hands a control client's stdin/stdout to the daemon; the daemon writes plain command replies and `%output` straight to the handed stdout when the client is idle (crates/zz-daemon/src/daemon/control_stdio.rs), and the client renders the rest; `pump_control_output_at` still renders `%output`/`%extended-output`. DL2 (merged) made terminal frames carry the pane's stream sequence (the current viewport's `view_generation`), so frame and event sequences no longer compare: the barrier must use a per-pane sequence assigned where bytes are read, keyed by the terminal session (not the pane id: respawn reuses PaneId). PTYLEAK (merged) found that the tap's `DisarmRawOutputTap` could fill the actor's one-slot mailbox and drop `Shutdown` (`TerminalSession::drop` now defers it); deleting the taps removes that path, keep the deferral. DL4 runs in parallel in ~/dev/zz-deliver4 on the mailbox write path: stay off `OutboundMailbox::enqueue_terminal_with`, `notify_one` and `Connection::write_ready`. Windows: `DOCS_RS=1 cargo check -p zz-daemon --target x86_64-pc-windows-msvc` (skips the zig build) must give no new warnings against the base and no errors. Done criterion: the DL5 done criterion above."""
+
 if __name__ == '__main__':
     which = sys.argv[1]
-    text = {'knobs': knobs, 'deliver-plan': deliver_plan, 'binary': binary, 'rows': rows, 'spawn': spawn, 'gather': gather, 'control': control, 'tuiecho': tuiecho, 'dl1': dl1, 'dl2': dl2, 'settle': settle, 'names': names, 'tuiecho2': tuiecho2}[which]()
+    text = {'knobs': knobs, 'deliver-plan': deliver_plan, 'binary': binary, 'rows': rows, 'spawn': spawn, 'gather': gather, 'control': control, 'tuiecho': tuiecho, 'dl1': dl1, 'dl2': dl2, 'settle': settle, 'names': names, 'tuiecho2': tuiecho2, 'dl3': dl3, 'dl4': dl4, 'dl5': dl5}[which]()
     out = sys.argv[2] if len(sys.argv) > 2 else f'{OUT}/{which}.md'
     os.makedirs(os.path.dirname(out), exist_ok=True)
     open(out, 'w').write(text)

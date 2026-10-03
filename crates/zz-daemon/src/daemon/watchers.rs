@@ -123,6 +123,8 @@ struct TerminalWatcher {
     fanout: PaneFrameFanout,
     mode_memo: BTreeMap<TerminalViewId, (u8, ScrollbarState, Option<SearchStatus>)>,
     completion_handled: bool,
+    runtime_checked: bool,
+    previous_reported_path: Option<String>,
 }
 
 struct CommandWatcher {
@@ -173,6 +175,8 @@ impl Watcher {
                 fanout: PaneFrameFanout::new(),
                 mode_memo: BTreeMap::new(),
                 completion_handled: false,
+                runtime_checked: false,
+                previous_reported_path: None,
             })),
         )
     }
@@ -482,20 +486,23 @@ impl TerminalWatcher {
                 self.mode_memo.retain(|view, _| active.contains(view));
                 self.previous.retain(|view, _| active.contains(view));
                 if !terminal_status_should_close(&runtime_viewport.status) {
-                    let current_command = terminal_current_command(terminal);
-                    shared.synchronize_pane_runtime(
-                        pane,
-                        terminal,
-                        &runtime_viewport,
-                        &current_command,
-                        output_activity,
-                    );
+                    if output_activity {
+                        shared.note_pane_output(pane, terminal, Instant::now());
+                    } else if !self.runtime_checked {
+                        shared.check_pane_runtime(pane, terminal, false, Instant::now());
+                    }
+                    self.runtime_checked = true;
+                    let reported_path = runtime_viewport.working_directory().unwrap_or_default();
+                    if self.previous_reported_path.as_deref() != Some(reported_path) {
+                        shared.synchronize_pane_reported_path(pane, terminal, reported_path);
+                        self.previous_reported_path = Some(reported_path.to_owned());
+                    }
                     let bar_state = terminal.progress_bar().state;
                     if !self.projects_agent && self.previous_bar_state != bar_state {
                         self.previous_bar_state = bar_state;
                         let terminal = Arc::clone(terminal);
-                        let current_command = current_command.clone();
                         shared.defer_watcher_effect(move |shared| {
+                            let current_command = terminal_current_command(&terminal);
                             shared.synchronize_pane_progress(
                                 pane,
                                 &terminal,

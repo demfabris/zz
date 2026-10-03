@@ -9,7 +9,7 @@ use std::{
     rc::Rc,
     sync::{
         Arc, LazyLock, OnceLock,
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
     },
     thread,
     time::{Duration, Instant},
@@ -1331,12 +1331,16 @@ impl ForegroundSource {
     }
 }
 
+static OUTPUT_CLOCK: LazyLock<Instant> = LazyLock::new(Instant::now);
+
 #[repr(C)]
 struct EventQueueState {
     pending_reliable: AtomicUsize,
     pending_reliable_bytes: AtomicUsize,
     notification_pending: AtomicBool,
     output_activity_pending: AtomicBool,
+    output_since_check: AtomicBool,
+    last_output: AtomicU32,
     identity: Box<IdentityLatch>,
     foreground: RwLock<Option<Box<ForegroundSource>>>,
     completion: AtomicU64,
@@ -1350,6 +1354,8 @@ impl EventQueueState {
             pending_reliable_bytes: AtomicUsize::new(0),
             notification_pending: AtomicBool::new(false),
             output_activity_pending: AtomicBool::new(false),
+            output_since_check: AtomicBool::new(false),
+            last_output: AtomicU32::new(0),
             identity: Box::new(IdentityLatch::default()),
             foreground: RwLock::new(None),
             completion: AtomicU64::new(0),
@@ -1361,6 +1367,27 @@ impl EventQueueState {
         if let Some(sink) = self.notification_sink.get() {
             sink();
         }
+    }
+
+    fn mark_output(&self) {
+        let millis = OUTPUT_CLOCK.elapsed().as_millis() as u32;
+        self.last_output.store(millis.max(1), Ordering::Release);
+        self.output_since_check.store(true, Ordering::Release);
+    }
+
+    fn last_output(&self) -> Option<Instant> {
+        let stored = self.last_output.load(Ordering::Acquire);
+        if stored == 0 {
+            return None;
+        }
+        let now = OUTPUT_CLOCK.elapsed().as_millis() as u64;
+        let ago = (now as u32).wrapping_sub(stored);
+        Some(*OUTPUT_CLOCK + Duration::from_millis(now.saturating_sub(u64::from(ago))))
+    }
+
+    fn take_output_since_check(&self) -> bool {
+        self.output_since_check.load(Ordering::Acquire)
+            && self.output_since_check.swap(false, Ordering::AcqRel)
     }
 
     fn resolve_identity(&self) {
@@ -2183,6 +2210,15 @@ impl TerminalSession {
     #[must_use]
     pub fn foreground_process_id(&self) -> Option<u32> {
         self.events.state.foreground.read().as_ref()?.process_id()
+    }
+
+    #[must_use]
+    pub fn last_output(&self) -> Option<Instant> {
+        self.events.state.last_output()
+    }
+
+    pub fn take_output_since_check(&self) -> bool {
+        self.events.state.take_output_since_check()
     }
 
     #[must_use]
@@ -5257,6 +5293,7 @@ impl Publisher {
         self.state
             .output_activity_pending
             .store(true, Ordering::Release);
+        self.state.mark_output();
     }
 
     fn fail(&self, error: &WorkerError) {

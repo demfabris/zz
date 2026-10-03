@@ -4,6 +4,14 @@ pub(super) const PUBLISH_FLUSH_INTERVAL: Duration = Duration::from_millis(16);
 
 pub(super) const PEER_PROBE_INTERVAL: Duration = Duration::from_secs(1);
 
+pub(super) const NAME_INTERVAL: Duration = Duration::from_millis(500);
+
+pub(super) struct NameCheck {
+    terminal: usize,
+    last: Instant,
+    due: Option<Instant>,
+}
+
 pub(super) struct KeyTablePublishHold(Arc<Shared>);
 
 impl KeyTablePublishHold {
@@ -34,6 +42,7 @@ impl Drop for KeyTablePublishHold {
 
 pub(super) enum TimerCommand {
     Rename(Instant),
+    NameCheck(Instant),
     PublishFlush(Instant),
 }
 
@@ -77,6 +86,7 @@ enum TimerKey {
     Silence(WindowId),
     ClientMessage(ClientId),
     Rename,
+    NameCheck,
     PublishFlush,
     Status(SessionId),
     Subscriptions,
@@ -98,6 +108,7 @@ enum Expiry {
     Silence(SilenceDeadline),
     ClientMessage(ClientMessageDeadline),
     Rename,
+    NameCheck,
     PublishFlush,
     Status(SessionId),
     Subscriptions,
@@ -773,6 +784,9 @@ impl Shared {
             TimerInput::Timer(TimerCommand::Rename(deadline)) => {
                 deadlines.insert_earliest(TimerKey::Rename, deadline, Expiry::Rename);
             }
+            TimerInput::Timer(TimerCommand::NameCheck(deadline)) => {
+                deadlines.insert_earliest(TimerKey::NameCheck, deadline, Expiry::NameCheck);
+            }
             TimerInput::Timer(TimerCommand::PublishFlush(deadline)) => {
                 deadlines.insert_earliest(TimerKey::PublishFlush, deadline, Expiry::PublishFlush);
             }
@@ -799,6 +813,7 @@ impl Shared {
             Expiry::Silence(deadline) => self.expire_window_silence(deadline, now),
             Expiry::ClientMessage(deadline) => self.expire_client_message(deadline, now),
             Expiry::Rename => self.apply_due_window_renames(now),
+            Expiry::NameCheck => self.run_due_name_checks(now),
             Expiry::PublishFlush => self.flush_publish(),
             Expiry::Status(session) => {
                 self.refresh_status_for_sessions(Some(&BTreeSet::from([session])));
@@ -914,6 +929,90 @@ impl Shared {
         let _ = self
             .timer_tx
             .send(TimerInput::Timer(TimerCommand::Rename(deadline)));
+    }
+
+    pub(super) fn admit_name_check(
+        &self,
+        inner: &mut ServerState,
+        pane: PaneId,
+        terminal: &Arc<TerminalSession>,
+        now: Instant,
+    ) -> bool {
+        let identity = Arc::as_ptr(terminal) as usize;
+        let due = match inner.name_checks.get_mut(&pane) {
+            Some(check)
+                if check.terminal == identity
+                    && now.saturating_duration_since(check.last) < NAME_INTERVAL =>
+            {
+                if check.due.is_some() {
+                    return false;
+                }
+                let due = check.last + NAME_INTERVAL;
+                check.due = Some(due);
+                due
+            }
+            _ => {
+                inner.name_checks.insert(
+                    pane,
+                    NameCheck {
+                        terminal: identity,
+                        last: now,
+                        due: None,
+                    },
+                );
+                return true;
+            }
+        };
+        if inner
+            .scheduled_name_check
+            .is_none_or(|scheduled| scheduled > due)
+        {
+            inner.scheduled_name_check = Some(due);
+            let _ = self
+                .timer_tx
+                .send(TimerInput::Timer(TimerCommand::NameCheck(due)));
+        }
+        false
+    }
+
+    pub(super) fn run_due_name_checks(self: &Arc<Self>, now: Instant) {
+        let due = {
+            let mut inner = self.inner.lock();
+            let inner = &mut *inner;
+            inner.scheduled_name_check = None;
+            let mut due = Vec::new();
+            let mut next: Option<Instant> = None;
+            for (pane, check) in &mut inner.name_checks {
+                let Some(deadline) = check.due else {
+                    continue;
+                };
+                if deadline > now {
+                    next = Some(next.map_or(deadline, |next| next.min(deadline)));
+                    continue;
+                }
+                check.due = None;
+                if let Some(terminal) = inner.terminals.get(pane)
+                    && Arc::as_ptr(terminal) as usize == check.terminal
+                    && terminal.take_output_since_check()
+                {
+                    check.last = now;
+                    due.push((*pane, Arc::clone(terminal)));
+                }
+            }
+            if let Some(next) = next {
+                inner.scheduled_name_check = Some(next);
+                let _ = self
+                    .timer_tx
+                    .send(TimerInput::Timer(TimerCommand::NameCheck(next)));
+            }
+            due
+        };
+        for (pane, terminal) in due {
+            let (current_command, live_path) = terminal_foreground_facts(&terminal);
+            let events =
+                self.apply_pane_runtime(pane, &terminal, &current_command, live_path, true, now);
+            self.enqueue_event_hooks(events);
+        }
     }
 
     pub(super) fn apply_due_window_renames(self: &Arc<Self>, now: Instant) {

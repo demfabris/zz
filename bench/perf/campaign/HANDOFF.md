@@ -758,6 +758,15 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   pin (15 fail on the base). Open: switching session and back drops the chooser (base too);
   `choose-tree -Zw` with no client and a chooser started from a hook do nothing (base too).
 - Linux batch6 workspace tests on `86e721ad`: 5133 passed, the 2 failures pass alone.
+- batch6 Linux checks on `86e721ad` done 20:13, all green against the known reds: fmt, clippy,
+  workspace tests (5133 passed, the 2 failures pass alone), compat-check, debug build,
+  `tui-output-backpressure.sh` 9/9, DL5 flood probe 4 panes 103.9 MB/s alive 175/175 replies and
+  12 panes 74.6 MB/s alive 174/175 (the blocker is fixed on Linux too), attached-client 0 rejected
+  keys, corpus 248 clean; reds lane2-store, show-options-hooks, the four `known/*`,
+  control-alias-prepare, plugin-runtime-resurrect-restore and plugin-runtime-continuum (it failed
+  the first pass and passed alone at load 4.5 from STEADY and EM1 builds). batch7 on `097a4e6e`
+  (the chooser fix on top): Linux clippy and tests of the five touched crates, chooser and format
+  compat rows, tui-choosers.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

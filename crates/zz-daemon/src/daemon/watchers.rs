@@ -89,13 +89,17 @@ pub(super) struct Watcher {
 struct FrameSnapshot {
     runtime: Arc<TerminalViewport>,
     views: Vec<(TerminalViewId, Arc<TerminalViewport>, Option<u64>)>,
+    sunk: Vec<TerminalViewId>,
 }
 
 impl FrameSnapshot {
     fn capture(terminal: &TerminalSession) -> Self {
+        let runtime = terminal.latest_viewport();
+        let (views, sunk) = terminal.latest_frames();
         Self {
-            runtime: terminal.latest_viewport(),
-            views: terminal.latest_view_frames(),
+            runtime,
+            views,
+            sunk,
         }
     }
 
@@ -439,6 +443,7 @@ impl TerminalWatcher {
                 }
                 let frame = frame.expect("viewport notification frame");
                 let current = frame.views;
+                let sunk = frame.sunk;
                 let runtime_viewport = frame.runtime;
                 let active = current
                     .iter()
@@ -448,20 +453,22 @@ impl TerminalWatcher {
                 let mut mode_clients = BTreeSet::new();
                 for (view, viewport, epoch) in current {
                     finished |= terminal_status_should_close(&viewport.status);
-                    let base = epoch.and_then(|epoch| {
-                        self.previous
-                            .get(&view)
-                            .filter(|(seen, _)| *seen == epoch)
-                            .map(|(_, previous)| previous.as_ref())
-                    });
-                    shared.publish_terminal_for_pane(
-                        pane,
-                        ClientId(view.0),
-                        base,
-                        &viewport,
-                        terminal,
-                        &mut self.fanout,
-                    );
+                    if !sunk.contains(&view) {
+                        let base = epoch.and_then(|epoch| {
+                            self.previous
+                                .get(&view)
+                                .filter(|(seen, _)| *seen == epoch)
+                                .map(|(_, previous)| previous.as_ref())
+                        });
+                        shared.publish_terminal_for_pane(
+                            pane,
+                            ClientId(view.0),
+                            base,
+                            &viewport,
+                            terminal,
+                            &mut self.fanout,
+                        );
+                    }
                     let key = (
                         mode_kind(viewport.mode),
                         viewport.scrollbar,

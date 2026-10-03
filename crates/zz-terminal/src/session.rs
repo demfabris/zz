@@ -1298,6 +1298,14 @@ pub enum TerminalEvent {
     },
 }
 
+pub type ViewFrame = (TerminalViewId, Arc<TerminalViewport>, Option<u64>);
+
+pub trait TerminalFrameSink: Send + Sync {
+    fn deliver(&self, frames: &[ViewFrame], sunk: &mut Vec<TerminalViewId>);
+
+    fn as_any(&self) -> &dyn std::any::Any;
+}
+
 /// Single-consumer terminal event stream with bounded reliable-event accounting.
 #[derive(Clone)]
 pub struct TerminalEvents {
@@ -1346,7 +1354,13 @@ struct EventQueueState {
     identity: Box<IdentityLatch>,
     foreground: RwLock<Option<Box<ForegroundSource>>>,
     completion: AtomicU64,
-    notification_sink: Box<OnceLock<Box<dyn Fn() + Send + Sync>>>,
+    sinks: Box<EventSinks>,
+}
+
+#[derive(Default)]
+struct EventSinks {
+    notification: OnceLock<Box<dyn Fn() + Send + Sync>>,
+    frame: OnceLock<Arc<dyn TerminalFrameSink>>,
 }
 
 impl EventQueueState {
@@ -1361,12 +1375,12 @@ impl EventQueueState {
             identity: Box::new(IdentityLatch::default()),
             foreground: RwLock::new(None),
             completion: AtomicU64::new(0),
-            notification_sink: Box::new(OnceLock::new()),
+            sinks: Box::default(),
         }
     }
 
     fn notify_consumer(&self) {
-        if let Some(sink) = self.notification_sink.get() {
+        if let Some(sink) = self.sinks.notification.get() {
             sink();
         }
     }
@@ -1454,7 +1468,7 @@ impl Drop for DeferredTerminalEvent {
 
 impl TerminalEvents {
     pub fn install_notification_sink(&self, sink: impl Fn() + Send + Sync + 'static) {
-        assert!(self.state.notification_sink.set(Box::new(sink)).is_ok());
+        assert!(self.state.sinks.notification.set(Box::new(sink)).is_ok());
         self.state.notify_consumer();
     }
 
@@ -1549,6 +1563,7 @@ struct PublishedViewports {
     last_command_status: Option<i32>,
     facts: TerminalFacts,
     search_string: String,
+    sunk: Vec<TerminalViewId>,
 }
 
 impl PublishedViewports {
@@ -1563,6 +1578,7 @@ impl PublishedViewports {
             last_command_status: None,
             facts: TerminalFacts::default(),
             search_string: String::new(),
+            sunk: Vec::new(),
         }
     }
 }
@@ -2403,7 +2419,12 @@ impl TerminalSession {
     }
 
     #[must_use]
-    pub fn latest_view_frames(&self) -> Vec<(TerminalViewId, Arc<TerminalViewport>, Option<u64>)> {
+    pub fn latest_view_frames(&self) -> Vec<ViewFrame> {
+        self.latest_frames().0
+    }
+
+    #[must_use]
+    pub fn latest_frames(&self) -> (Vec<ViewFrame>, Vec<TerminalViewId>) {
         let latest = self.latest.read();
         let mut frames = latest
             .by_view
@@ -2417,7 +2438,16 @@ impl TerminalSession {
             })
             .collect::<Vec<_>>();
         frames.sort_by_key(|(view, _, _)| view.0);
-        frames
+        (frames, latest.sunk.clone())
+    }
+
+    pub fn install_frame_sink(&self, sink: Arc<dyn TerminalFrameSink>) {
+        let _ = self.events.state.sinks.frame.set(sink);
+    }
+
+    #[must_use]
+    pub fn frame_sink(&self) -> Option<&Arc<dyn TerminalFrameSink>> {
+        self.events.state.sinks.frame.get()
     }
 
     #[must_use]
@@ -5108,11 +5138,31 @@ impl Publisher {
     }
 
     fn set_facts(&self, facts: TerminalFacts) {
-        self.latest.write().facts = facts;
+        let titled = {
+            let mut latest = self.latest.write();
+            let titled = latest.facts.program_title_writes != facts.program_title_writes;
+            latest.facts = facts;
+            titled
+        };
+        if titled {
+            self.notify_latest();
+        }
     }
 
     fn set_progress_bar(&self, bar: ProgressBar) {
-        self.latest.write().bar = bar;
+        let changed = {
+            let mut latest = self.latest.write();
+            let changed = latest.bar.state != bar.state;
+            latest.bar = bar;
+            changed
+        };
+        if changed {
+            self.notify_latest();
+        }
+    }
+
+    fn frame_sink(&self) -> Option<&Arc<dyn TerminalFrameSink>> {
+        self.state.sinks.frame.get()
     }
 
     fn set_last_command_status(&self, status: Option<i32>) {
@@ -5129,6 +5179,7 @@ impl Publisher {
             latest.by_view.clear();
             latest.epochs.clear();
             latest.copy_facts.clear();
+            latest.sunk.clear();
         }
         self.notify_viewports(&viewport, 0);
     }
@@ -5136,8 +5187,9 @@ impl Publisher {
     fn publish_frame(
         &self,
         fallback: FallbackFrame,
-        viewports: Vec<(TerminalViewId, Arc<TerminalViewport>, Option<u64>)>,
+        viewports: Vec<ViewFrame>,
         copy_facts: HashMap<TerminalViewId, Arc<CopyModeFacts>>,
+        sunk: Vec<TerminalViewId>,
         notify: bool,
     ) {
         let mut by_view = HashMap::with_capacity(viewports.len());
@@ -5166,6 +5218,7 @@ impl Publisher {
             latest.by_view = by_view;
             latest.epochs = epochs;
             latest.copy_facts = copy_facts;
+            latest.sunk = sunk;
         }
         if notify {
             self.notify_viewports(&fallback, view_count);
@@ -5291,6 +5344,7 @@ impl Publisher {
                 .collect::<HashMap<_, _>>();
             let view_count = by_view.len();
             latest.by_view = by_view;
+            latest.sunk.clear();
             (Arc::clone(&latest.fallback), view_count)
         };
         self.notify_viewports(&fallback, view_count);
@@ -13884,6 +13938,23 @@ struct StreamState {
     epoch: u64,
 }
 
+#[derive(PartialEq)]
+struct SinkEdge {
+    title: Arc<str>,
+    working_directory: Option<Arc<str>>,
+    status: SessionStatus,
+}
+
+impl SinkEdge {
+    fn of(viewport: &TerminalViewport) -> Self {
+        Self {
+            title: Arc::clone(&viewport.presentation.title),
+            working_directory: viewport.presentation.working_directory.clone(),
+            status: viewport.status.clone(),
+        }
+    }
+}
+
 struct Frames<'alloc> {
     #[cfg(test)]
     snapshot_builds: usize,
@@ -13902,6 +13973,7 @@ struct Frames<'alloc> {
     synchronized_output_deadline: Option<Instant>,
     retain_render_until: Option<Instant>,
     last_settle: Option<Instant>,
+    sink_edge: Option<SinkEdge>,
 }
 
 impl<'alloc> Frames<'alloc> {
@@ -13927,6 +13999,7 @@ impl<'alloc> Frames<'alloc> {
             synchronized_output_deadline: None,
             retain_render_until: None,
             last_settle: None,
+            sink_edge: None,
         })
     }
 
@@ -14233,6 +14306,10 @@ fn publish_views<'alloc: 'callbacks, 'callbacks>(
         streamed_any |= streaming;
         viewports.push((view_id, viewport, streaming.then(|| frames.epoch(view_id))));
     }
+    let mut sunk = Vec::new();
+    if streamed_any && let Some(sink) = publisher.frame_sink() {
+        sink.deliver(&viewports, &mut sunk);
+    }
     let refreshed = if streamed_any || force_fallback || frames.preview {
         None
     } else {
@@ -14242,6 +14319,18 @@ fn publish_views<'alloc: 'callbacks, 'callbacks>(
     let fallback = if streamed_any {
         frames.unbuilt_since = None;
         frames.last_unbuilt = None;
+        let all_sunk = !frames.preview && viewports.iter().all(|(view, _, _)| sunk.contains(view));
+        if !all_sunk {
+            frames.sink_edge = None;
+        } else if notify {
+            let edge = viewports
+                .iter()
+                .find(|(_, _, epoch)| epoch.is_some())
+                .map(|(_, viewport, _)| SinkEdge::of(viewport));
+            let changed = frames.sink_edge != edge;
+            frames.sink_edge = edge;
+            notify = frames.admit_notify(changed);
+        }
         FallbackFrame::FirstStreamed
     } else if let Some((viewport, metadata_changed)) = refreshed {
         if matches!(change, SnapshotChange::Content) {
@@ -14264,7 +14353,7 @@ fn publish_views<'alloc: 'callbacks, 'callbacks>(
     frames
         .published
         .extend(viewports.iter().map(|(view, _, _)| *view));
-    publisher.publish_frame(fallback, viewports, copy_facts, notify);
+    publisher.publish_frame(fallback, viewports, copy_facts, sunk, notify);
     frames.release_unused(active);
     Ok(())
 }

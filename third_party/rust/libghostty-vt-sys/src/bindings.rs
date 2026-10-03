@@ -61,6 +61,8 @@ pub const DA_DEVICE_TYPE_VT420: u16 = 41;
 pub const DA_DEVICE_TYPE_VT510: u16 = 61;
 pub const DA_DEVICE_TYPE_VT520: u16 = 64;
 pub const DA_DEVICE_TYPE_VT525: u16 = 65;
+pub const RENDER_STATE_CELL_HYPERLINK: u32 = 1;
+pub const RENDER_STATE_CELL_PROTECTED: u32 = 2;
 pub const MODS_SHIFT: u16 = 1;
 pub const MODS_CTRL: u16 = 2;
 pub const MODS_ALT: u16 = 4;
@@ -3631,6 +3633,127 @@ impl Default for RenderStateColors {
         }
     }
 }
+#[doc = " One cell written by ghostty_render_state_row_cells_copy().\n"]
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct RenderStateCell {
+    #[doc = " The base codepoint (0 when the cell has no text), the background\n  palette index, or the background color as 0xRRGGBB, chosen by\n  content_tag."]
+    pub content: u32,
+    #[doc = " Index into the copy's style table. Index 0 is the default style."]
+    pub style: u16,
+    #[doc = " Zero when the cell has at most one codepoint, otherwise one plus the\n  index of its span in the copy's grapheme table."]
+    pub grapheme: u16,
+    #[doc = " The cell content tag (GhosttyCellContentTag)."]
+    pub content_tag: u8,
+    #[doc = " The cell width (GhosttyCellWide)."]
+    pub wide: u8,
+    #[doc = " GHOSTTY_RENDER_STATE_CELL_* flag bits."]
+    pub flags: u8,
+    #[doc = " The semantic content of the cell (GhosttyCellSemanticContent)."]
+    pub semantic_content: u8,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of RenderStateCell"][::std::mem::size_of::<RenderStateCell>() - 12usize];
+    ["Alignment of RenderStateCell"][::std::mem::align_of::<RenderStateCell>() - 4usize];
+    ["Offset of field: RenderStateCell::content"]
+        [::std::mem::offset_of!(RenderStateCell, content) - 0usize];
+    ["Offset of field: RenderStateCell::style"]
+        [::std::mem::offset_of!(RenderStateCell, style) - 4usize];
+    ["Offset of field: RenderStateCell::grapheme"]
+        [::std::mem::offset_of!(RenderStateCell, grapheme) - 6usize];
+    ["Offset of field: RenderStateCell::content_tag"]
+        [::std::mem::offset_of!(RenderStateCell, content_tag) - 8usize];
+    ["Offset of field: RenderStateCell::wide"]
+        [::std::mem::offset_of!(RenderStateCell, wide) - 9usize];
+    ["Offset of field: RenderStateCell::flags"]
+        [::std::mem::offset_of!(RenderStateCell, flags) - 10usize];
+    ["Offset of field: RenderStateCell::semantic_content"]
+        [::std::mem::offset_of!(RenderStateCell, semantic_content) - 11usize];
+};
+#[doc = " A grapheme cluster in the copy's grapheme byte buffer.\n"]
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct RenderStateGrapheme {
+    #[doc = " Byte offset of the cluster's UTF-8 encoding."]
+    pub offset: u32,
+    #[doc = " Byte length of the cluster's UTF-8 encoding, base codepoint first."]
+    pub len: u32,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of RenderStateGrapheme"][::std::mem::size_of::<RenderStateGrapheme>() - 8usize];
+    ["Alignment of RenderStateGrapheme"][::std::mem::align_of::<RenderStateGrapheme>() - 4usize];
+    ["Offset of field: RenderStateGrapheme::offset"]
+        [::std::mem::offset_of!(RenderStateGrapheme, offset) - 0usize];
+    ["Offset of field: RenderStateGrapheme::len"]
+        [::std::mem::offset_of!(RenderStateGrapheme, len) - 4usize];
+};
+#[doc = " Caller-provided buffers for ghostty_render_state_row_cells_copy().\n\n This struct uses the sized-struct ABI pattern. Initialize with\n GHOSTTY_INIT_SIZED(GhosttyRenderStateRowCellsCopy), then point each\n array at storage and set its capacity. On return every *_len field holds\n the number of entries the copy needs; when any of them exceeds its\n capacity the call returns GHOSTTY_OUT_OF_SPACE and the caller grows that\n buffer and copies again.\n\n The style table holds each distinct style of the copied cells once, in\n first-use order after the default style at index 0, so a caller resolves\n every style once per copy instead of once per cell. A cells capacity of\n len and a styles capacity of len + 1 never run short.\n"]
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct RenderStateRowCellsCopy {
+    #[doc = " Size of this struct in bytes. Must be set to sizeof(GhosttyRenderStateRowCellsCopy)."]
+    pub size: usize,
+    #[doc = " Cell output, one entry per copied column."]
+    pub cells: *mut RenderStateCell,
+    pub cells_cap: usize,
+    pub cells_len: usize,
+    #[doc = " Style table output. Index 0 is always the default style."]
+    pub styles: *mut Style,
+    pub styles_cap: usize,
+    pub styles_len: usize,
+    #[doc = " Grapheme table output, one span per multi-codepoint cell."]
+    pub graphemes: *mut RenderStateGrapheme,
+    pub graphemes_cap: usize,
+    pub graphemes_len: usize,
+    #[doc = " UTF-8 bytes of the grapheme table's clusters."]
+    pub grapheme_bytes: *mut u8,
+    pub grapheme_bytes_cap: usize,
+    pub grapheme_bytes_len: usize,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of RenderStateRowCellsCopy"]
+        [::std::mem::size_of::<RenderStateRowCellsCopy>() - 104usize];
+    ["Alignment of RenderStateRowCellsCopy"]
+        [::std::mem::align_of::<RenderStateRowCellsCopy>() - 8usize];
+    ["Offset of field: RenderStateRowCellsCopy::size"]
+        [::std::mem::offset_of!(RenderStateRowCellsCopy, size) - 0usize];
+    ["Offset of field: RenderStateRowCellsCopy::cells"]
+        [::std::mem::offset_of!(RenderStateRowCellsCopy, cells) - 8usize];
+    ["Offset of field: RenderStateRowCellsCopy::cells_cap"]
+        [::std::mem::offset_of!(RenderStateRowCellsCopy, cells_cap) - 16usize];
+    ["Offset of field: RenderStateRowCellsCopy::cells_len"]
+        [::std::mem::offset_of!(RenderStateRowCellsCopy, cells_len) - 24usize];
+    ["Offset of field: RenderStateRowCellsCopy::styles"]
+        [::std::mem::offset_of!(RenderStateRowCellsCopy, styles) - 32usize];
+    ["Offset of field: RenderStateRowCellsCopy::styles_cap"]
+        [::std::mem::offset_of!(RenderStateRowCellsCopy, styles_cap) - 40usize];
+    ["Offset of field: RenderStateRowCellsCopy::styles_len"]
+        [::std::mem::offset_of!(RenderStateRowCellsCopy, styles_len) - 48usize];
+    ["Offset of field: RenderStateRowCellsCopy::graphemes"]
+        [::std::mem::offset_of!(RenderStateRowCellsCopy, graphemes) - 56usize];
+    ["Offset of field: RenderStateRowCellsCopy::graphemes_cap"]
+        [::std::mem::offset_of!(RenderStateRowCellsCopy, graphemes_cap) - 64usize];
+    ["Offset of field: RenderStateRowCellsCopy::graphemes_len"]
+        [::std::mem::offset_of!(RenderStateRowCellsCopy, graphemes_len) - 72usize];
+    ["Offset of field: RenderStateRowCellsCopy::grapheme_bytes"]
+        [::std::mem::offset_of!(RenderStateRowCellsCopy, grapheme_bytes) - 80usize];
+    ["Offset of field: RenderStateRowCellsCopy::grapheme_bytes_cap"]
+        [::std::mem::offset_of!(RenderStateRowCellsCopy, grapheme_bytes_cap) - 88usize];
+    ["Offset of field: RenderStateRowCellsCopy::grapheme_bytes_len"]
+        [::std::mem::offset_of!(RenderStateRowCellsCopy, grapheme_bytes_len) - 96usize];
+};
+impl Default for RenderStateRowCellsCopy {
+    fn default() -> Self {
+        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            s.assume_init()
+        }
+    }
+}
 unsafe extern "C" {
     #[doc = " Create a new render state instance.\n\n failure\n"]
     pub fn ghostty_render_state_new(
@@ -3795,6 +3918,15 @@ unsafe extern "C" {
         keys: *const RenderStateRowCellsData::Type,
         values: *mut *mut ::std::os::raw::c_void,
         out_written: *mut usize,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Copy a column range of the current row into packed cells in one call.\n\n Copies the columns [x, x + len) of the row that populated `cells`,\n clamped to the row width, with styles and multi-codepoint graphemes as\n indexes into tables written alongside. A cell's style and text match\n GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_STYLE and _GRAPHEMES_UTF8; its\n colors resolve from the style and content tag through the render state\n palette the way _FG_COLOR and _BG_COLOR resolve them. The iterator\n position is not used or changed.\n\n          GHOSTTY_INVALID_VALUE)\n         buffer is short (the *_len fields hold the sizes needed)\n"]
+    pub fn ghostty_render_state_row_cells_copy(
+        cells: RenderStateRowCells,
+        x: u16,
+        len: u16,
+        out: *mut RenderStateRowCellsCopy,
     ) -> Result::Type;
 }
 unsafe extern "C" {

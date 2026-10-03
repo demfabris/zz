@@ -49,7 +49,9 @@ or an index into the grapheme arena flagged by `GRAPHEME_TABLE_BIT`.
 # Publication and consumption
 
 The worker builds frames in `build_snapshot`: it walks libghostty dirty rows through `RenderState` +
-`RowIterator`/`CellIterator`, interns styles/graphemes into the actor's `ViewportDictionary` (with cell/
+`RowIterator`, copies each row's cells in one call (`CellIteration::copy_into` into a reused
+`CellsCopy`, over the fork's `ghostty_render_state_row_cells_copy`: packed cells, each distinct style
+once, graphemes as UTF-8 spans), interns styles/graphemes into the actor's `ViewportDictionary` (with cell/
 overlay plane pooling), and assembles overlays for selection, search matches, hover links, and the copy
 cursor. Live dictionaries use viewport-scaled high-water marks: crossing one starts a new dictionary
 generation and rebuilds the visible working set, which forces one full viewport instead of retaining

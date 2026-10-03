@@ -89,7 +89,6 @@ fn a_peer_probe_leaves_no_idle_worker() {
     let pool = Pool::default();
     pool.submit(Task::Peers {
         panes: Vec::new(),
-        always: false,
         reply: None,
         completed: None,
     })

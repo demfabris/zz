@@ -25,7 +25,7 @@ use libghostty_vt::{
     focus, key,
     kitty::graphics::{self, DecodedImage, ImageFormat, PlacementIterator},
     mouse::{self, EncoderSize},
-    render::{CellIterator, CursorVisualStyle, Dirty, RowIterator},
+    render::{CellIterator, CellsCopy, Colors, CursorVisualStyle, Dirty, RowIterator},
     screen::{
         CellContentTag, CellSemanticContent, CellWide, RowSemanticPrompt, Screen, TrackedGridRef,
     },
@@ -175,6 +175,8 @@ const PTY_BRIDGE_SPIN_MAX: u32 = 512;
 const PTY_BRIDGE_SPIN_MIN: u32 = 8;
 #[cfg(target_os = "linux")]
 const PTY_GATHER_BRIDGE_SPIN_MAX: u32 = 16;
+#[cfg(target_os = "linux")]
+const PTY_GATHER_ADMIT_PASSES: u32 = 8;
 const CONTENT_PUBLISH_STALENESS: Duration = Duration::from_millis(16);
 const SYNCHRONIZED_OUTPUT_TIMEOUT: Duration = Duration::from_secs(1);
 #[cfg(unix)]
@@ -2953,8 +2955,11 @@ impl TerminalSession {
 
 impl Drop for TerminalSession {
     fn drop(&mut self) {
-        if !self.terminating.load(Ordering::Acquire) {
-            let _ = self.commands.try_send(Command::Shutdown);
+        if !self.terminating.load(Ordering::Acquire)
+            && let Err(crossbeam_channel::TrySendError::Full(command)) =
+                self.commands.try_send(Command::Shutdown)
+        {
+            self.commands.defer(command);
         }
     }
 }
@@ -4261,7 +4266,8 @@ struct ViewportDictionary {
     shared_presentation: Arc<TerminalPresentation>,
     shared_overlays: Arc<[OverlaySpan]>,
     overlay_pool: SmallVec<[Arc<[OverlaySpan]>; RETAINED_OVERLAY_PLANES]>,
-    grapheme_scratch: String,
+    row_copy: CellsCopy,
+    row_styles: Vec<Option<u16>>,
     overlay_scratch: Vec<OverlaySpan>,
     shared_dirty: u8,
     style_compaction_limit: usize,
@@ -4378,7 +4384,8 @@ impl ViewportDictionary {
     fn release_pools(&mut self) {
         self.cell_pool.clear();
         self.overlay_pool.clear();
-        self.grapheme_scratch = String::new();
+        self.row_copy = CellsCopy::new();
+        self.row_styles = Vec::new();
         self.overlay_scratch = Vec::new();
     }
 
@@ -5979,6 +5986,10 @@ fn run_terminal(
         wake,
         wake_rx,
         false,
+        #[cfg(target_os = "linux")]
+        pty_gather_enabled()
+            .then(|| PtyGather::start("zz-pty-gather".to_owned()))
+            .transpose()?,
     )?;
     let mut actor = shard::Actor::Live(Box::new(actor));
     loop {
@@ -11204,22 +11215,10 @@ struct SearchCellOffset {
     width: u16,
 }
 
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-struct HistorySearchRow {
-    text_start: u32,
-    text_end: u32,
-    offset_start: u32,
-    offset_end: u32,
-}
-
 #[derive(Debug)]
 struct HistorySearchSnapshot {
     columns: u16,
-    text: String,
-    rows: Vec<HistorySearchRow>,
-    offsets: Vec<SearchCellOffset>,
-    terminal: Option<Arc<Mutex<libghostty_vt::terminal::ScreenSnapshot>>>,
+    terminal: Arc<Mutex<libghostty_vt::terminal::ScreenSnapshot>>,
     total_rows: u32,
     #[cfg(test)]
     search_gate: Mutex<()>,
@@ -11747,87 +11746,19 @@ struct SearchSnapshotCompression<'a>(&'a HistorySearchSnapshot);
 
 impl Drop for SearchSnapshotCompression<'_> {
     fn drop(&mut self) {
-        if !*NO_COMPRESS && let Some(terminal) = &self.0.terminal {
-            let _ = terminal.lock().compress(CompressionMode::Full);
-        }
+        let _ = self.0.terminal.lock().compress(CompressionMode::Full);
     }
 }
 
 impl HistorySearchSnapshot {
     fn capture(terminal: &Terminal<'_, '_>) -> Result<Self, WorkerError> {
-        if ModeRevision::clone_enabled() {
-            return Self::capture_flat(terminal);
-        }
         Ok(Self {
             columns: terminal.cols()?,
-            text: String::new(),
-            rows: Vec::new(),
-            offsets: Vec::new(),
             total_rows: u32::try_from(terminal.total_rows()?)
                 .map_err(|_| WorkerError::ViewportMetadataTooLarge)?,
-            terminal: Some(Arc::new(Mutex::new(terminal.clone_screen()?))),
+            terminal: Arc::new(Mutex::new(terminal.clone_screen()?)),
             #[cfg(test)]
             search_gate: Mutex::new(()),
-        })
-    }
-
-    fn capture_flat(terminal: &Terminal<'_, '_>) -> Result<Self, WorkerError> {
-        let row_count = terminal.total_rows()?;
-        let columns = terminal.cols()?;
-        let mut rows = Vec::with_capacity(row_count);
-        let cell_capacity = row_count.saturating_mul(usize::from(columns)).min(
-            MAX_SEARCH_SNAPSHOT_BYTES
-                / (std::mem::size_of::<SearchCellOffset>() + std::mem::size_of::<u8>()),
-        );
-        let mut text = String::with_capacity(cell_capacity);
-        let mut offsets = Vec::with_capacity(cell_capacity);
-        let mut grapheme_scratch = Vec::new();
-        for row in 0..row_count {
-            let row = u32::try_from(row).unwrap_or(u32::MAX);
-            let text_start =
-                u32::try_from(text.len()).map_err(|_| WorkerError::SearchSnapshotTooLarge)?;
-            let offset_start =
-                u32::try_from(offsets.len()).map_err(|_| WorkerError::SearchSnapshotTooLarge)?;
-            append_history_row(
-                terminal,
-                row,
-                columns,
-                &mut text,
-                &mut offsets,
-                &mut grapheme_scratch,
-            )?;
-            rows.push(HistorySearchRow {
-                text_start,
-                text_end: u32::try_from(text.len())
-                    .map_err(|_| WorkerError::SearchSnapshotTooLarge)?,
-                offset_start,
-                offset_end: u32::try_from(offsets.len())
-                    .map_err(|_| WorkerError::SearchSnapshotTooLarge)?,
-            });
-            let used = text
-                .len()
-                .saturating_add(
-                    offsets
-                        .len()
-                        .saturating_mul(std::mem::size_of::<SearchCellOffset>()),
-                )
-                .saturating_add(
-                    rows.len()
-                        .saturating_mul(std::mem::size_of::<HistorySearchRow>()),
-                );
-            if used > MAX_SEARCH_SNAPSHOT_BYTES {
-                return Err(WorkerError::SearchSnapshotTooLarge);
-            }
-        }
-        Ok(Self {
-            columns,
-            text,
-            rows,
-            offsets,
-            terminal: None,
-            #[cfg(test)]
-            search_gate: Mutex::new(()),
-            total_rows: u32::try_from(row_count).unwrap_or(u32::MAX),
         })
     }
 
@@ -11895,9 +11826,9 @@ impl HistorySearchSnapshot {
             if cancelled() {
                 return None;
             }
-            let (row_text, row_offsets) = if let Some(terminal) = &self.terminal {
-                let mut terminal = terminal.lock();
-                if !*NO_COMPRESS && row > 0 && row % 512 == 0 {
+            {
+                let mut terminal = self.terminal.lock();
+                if row > 0 && row % 512 == 0 {
                     terminal.compress(CompressionMode::Full).ok()?;
                 }
                 let text_start = u32::try_from(text.len()).ok()?;
@@ -11919,36 +11850,23 @@ impl HistorySearchSnapshot {
                 if wrapped && row.saturating_add(1) < self.total_rows {
                     continue;
                 }
-                (text.as_str(), offsets.as_slice())
-            } else {
-                let captured = self.rows.get(usize::try_from(row).ok()?)?;
-                let text_start = usize::try_from(captured.text_start).ok()?;
-                let text_end = usize::try_from(captured.text_end).ok()?;
-                let offset_start = usize::try_from(captured.offset_start).ok()?;
-                let offset_end = usize::try_from(captured.offset_end).ok()?;
-                (
-                    self.text.get(text_start..text_end)?,
-                    self.offsets.get(offset_start..offset_end)?,
-                )
-            };
-            for found in expression.find_iter(row_text) {
+            }
+            for found in expression.find_iter(&text) {
                 let Some((start, end)) =
-                    search_match_span(row_offsets, found.start(), found.end(), self.columns)
+                    search_match_span(&offsets, found.start(), found.end(), self.columns)
                 else {
                     continue;
                 };
-                let (start_row, end_row) = if self.terminal.is_some() {
-                    let first = row_offsets.partition_point(|cell| {
+                let (start_row, end_row) = {
+                    let first = offsets.partition_point(|cell| {
                         usize::try_from(cell.end).is_ok_and(|end| end <= found.start())
                     });
-                    let after_last = row_offsets.partition_point(|cell| {
+                    let after_last = offsets.partition_point(|cell| {
                         usize::try_from(cell.start).is_ok_and(|start| start < found.end())
                     });
                     let start = wrapped_rows.partition_point(|(_, end)| *end <= first);
                     let end = wrapped_rows.partition_point(|(_, end)| *end < after_last);
                     (wrapped_rows.get(start)?.0, wrapped_rows.get(end)?.0)
-                } else {
-                    (row, row)
                 };
                 match_scratch.push(SearchMatch {
                     row: start_row,
@@ -13109,118 +13027,317 @@ fn wait_for_wake(
 }
 
 #[cfg(target_os = "linux")]
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "the gather thread owns its fd and both channel endpoints"
-)]
-fn gather_pty_linux(
-    drain_fd: impl std::os::fd::AsFd,
+fn pty_gather_enabled() -> bool {
+    std::env::var_os("ZZ_PTY_GATHER").is_none_or(|value| value != "0")
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone)]
+struct PtyGather {
+    sources: Sender<GatherSource>,
+    wake: ActorWake,
+}
+
+#[cfg(target_os = "linux")]
+struct GatherSource {
+    fd: filedescriptor::FileDescriptor,
     output: Sender<ReaderMessage>,
     recycled: Receiver<Vec<u8>>,
-    mut child: Option<LinuxChildWatch>,
     wake: ActorWake,
-) {
-    use rustix::event::{PollFd, PollFlags};
+    slot: Arc<GatherSlot>,
+}
 
-    let mut eof = false;
-    while !eof {
-        let Ok(mut buffer) = recycled.recv() else {
-            return;
+#[cfg(target_os = "linux")]
+#[derive(Default)]
+struct GatherSlot {
+    starved: AtomicBool,
+    closed: AtomicBool,
+}
+
+#[cfg(target_os = "linux")]
+struct GatherLease {
+    slot: Arc<GatherSlot>,
+    wake: ActorWake,
+}
+
+#[cfg(target_os = "linux")]
+impl PtyGather {
+    fn start(name: String) -> Result<Self, WorkerError> {
+        let (wake_rx, pipe) =
+            configured_actor_wake_pipe().map_err(|error| WorkerError::Io(error.into()))?;
+        let pending = Arc::new(AtomicBool::new(false));
+        let (sources, incoming) = crossbeam_channel::unbounded();
+        let wake = ActorWake {
+            ready: None,
+            pipe: Some(Arc::new(pipe)),
+            pending: Some(Arc::clone(&pending)),
         };
-        debug_assert_eq!(buffer.len(), PTY_READ_BUFFER_BYTES);
+        thread::Builder::new()
+            .name(name)
+            .spawn(move || gather_pty_linux(&wake_rx, &pending, &incoming))
+            .map_err(WorkerError::Io)?;
+        Ok(Self { sources, wake })
+    }
 
-        let mut length = 0_usize;
-        let mut spins = 0_u32;
-        while length < buffer.len() {
-            if length == 0 {
-                loop {
-                    let (pty_ready, child_ready) = {
-                        let mut fds = SmallVec::<[PollFd<'_>; 2]>::new();
-                        fds.push(PollFd::new(&drain_fd, PollFlags::IN));
-                        if let Some(watch) = &child {
-                            fds.push(PollFd::new(&watch.pidfd, PollFlags::IN));
-                        }
-                        match rustix::event::poll(&mut fds, None) {
-                            Ok(_) => (
-                                !fds[0].revents().is_empty(),
-                                fds.get(1).is_some_and(|fd| !fd.revents().is_empty()),
-                            ),
-                            Err(rustix::io::Errno::INTR) => (false, false),
-                            Err(error) => {
-                                log::debug!("Linux PTY gather poll stopped: {error}");
-                                eof = true;
-                                break;
-                            }
-                        }
-                    };
-                    if child_ready && child.as_ref().is_some_and(LinuxChildWatch::reap) {
-                        child = None;
-                    }
-                    if pty_ready {
-                        break;
-                    }
-                }
-                if eof {
-                    break;
-                }
-            }
+    fn add(
+        &self,
+        fd: filedescriptor::FileDescriptor,
+        output: Sender<ReaderMessage>,
+        recycled: Receiver<Vec<u8>>,
+        wake: ActorWake,
+    ) -> Result<GatherLease, WorkerError> {
+        let slot = Arc::new(GatherSlot::default());
+        self.sources
+            .send(GatherSource {
+                fd,
+                output,
+                recycled,
+                wake,
+                slot: Arc::clone(&slot),
+            })
+            .map_err(|_| WorkerError::Thread("PTY gather stopped".to_owned()))?;
+        self.wake.notify();
+        Ok(GatherLease {
+            slot,
+            wake: self.wake.clone(),
+        })
+    }
+}
 
-            match rustix::io::read(&drain_fd, &mut buffer[length..]) {
-                Ok(0) | Err(rustix::io::Errno::IO) => {
-                    eof = true;
-                    break;
-                }
-                Ok(read) => {
-                    length += read;
-                    spins = 0;
-                }
-                Err(rustix::io::Errno::INTR) => {}
-                Err(rustix::io::Errno::AGAIN) => {
-                    if length >= PTY_BRIDGE_THRESHOLD_BYTES && spins < PTY_GATHER_BRIDGE_SPIN_MAX {
-                        spins += 1;
-                        continue;
-                    }
-                    if length == 0 {
-                        continue;
-                    }
-                    break;
-                }
-                Err(error) => {
-                    log::debug!("Linux PTY gather stopped: {error}");
-                    eof = true;
-                    break;
-                }
-            }
-        }
-
-        if length > 0 {
-            if output.send(ReaderMessage::Data { buffer, length }).is_err() {
-                return;
-            }
-            wake.notify();
+#[cfg(target_os = "linux")]
+impl GatherLease {
+    fn returned(&self) {
+        std::sync::atomic::fence(Ordering::SeqCst);
+        if self.slot.starved.load(Ordering::Relaxed)
+            && self.slot.starved.swap(false, Ordering::AcqRel)
+        {
+            self.wake.notify();
         }
     }
-    let _ = output.send(ReaderMessage::Eof);
-    wake.notify();
-    while let Some(watch) = &child {
-        let mut fds = [PollFd::new(&watch.pidfd, PollFlags::IN)];
-        match rustix::event::poll(&mut fds, None) {
-            Ok(_) => {
-                if watch.reap() {
-                    child = None;
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for GatherLease {
+    fn drop(&mut self) {
+        self.slot.closed.store(true, Ordering::Release);
+        self.wake.notify();
+    }
+}
+
+#[cfg(any(target_os = "linux", not(unix)))]
+struct BufferReturn {
+    buffers: Sender<Vec<u8>>,
+    #[cfg(target_os = "linux")]
+    gather: Option<GatherLease>,
+}
+
+#[cfg(any(target_os = "linux", not(unix)))]
+impl BufferReturn {
+    fn give(&self, buffer: Vec<u8>) {
+        let _ = self.buffers.try_send(buffer);
+        #[cfg(target_os = "linux")]
+        if let Some(gather) = &self.gather {
+            gather.returned();
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+struct GatherPane {
+    source: GatherSource,
+    buffer: Option<Vec<u8>>,
+    length: usize,
+    served: bool,
+    done: bool,
+}
+
+#[cfg(target_os = "linux")]
+impl GatherPane {
+    fn has_buffer(&mut self) -> bool {
+        if self.buffer.is_none() {
+            self.buffer = self.source.recycled.try_recv().ok().or_else(|| {
+                self.source.slot.starved.store(true, Ordering::Relaxed);
+                std::sync::atomic::fence(Ordering::SeqCst);
+                let buffer = self.source.recycled.try_recv().ok();
+                if buffer.is_some() {
+                    self.source.slot.starved.store(false, Ordering::Relaxed);
                 }
+                buffer
+            });
+        }
+        self.buffer.is_some()
+    }
+
+    fn step(&mut self) -> Option<bool> {
+        let buffer = self.buffer.as_mut()?;
+        debug_assert_eq!(buffer.len(), PTY_READ_BUFFER_BYTES);
+        match rustix::io::read(&self.source.fd, &mut buffer[self.length..]) {
+            Ok(0) | Err(rustix::io::Errno::IO) => {}
+            Ok(read) => {
+                self.length += read;
+                if self.length < buffer.len() {
+                    return Some(true);
+                }
+                self.send();
+                return None;
             }
-            Err(rustix::io::Errno::INTR) => {}
-            Err(error) => {
-                log::debug!("Linux child exit poll stopped: {error}");
-                let _ = watch
-                    .exit
-                    .send(reap_child(watch.pid, true).unwrap_or_else(|| {
-                        Err(std::io::Error::other("the pane child was reaped elsewhere"))
-                    }));
-                child = None;
+            Err(rustix::io::Errno::INTR) => return Some(false),
+            Err(rustix::io::Errno::AGAIN) => {
+                if self.length >= PTY_BRIDGE_THRESHOLD_BYTES {
+                    return Some(false);
+                }
+                self.send();
+                return None;
+            }
+            Err(error) => log::debug!("Linux PTY gather stopped: {error}"),
+        }
+        self.send();
+        if !self.done {
+            let _ = self.source.output.try_send(ReaderMessage::Eof);
+            self.source.wake.notify();
+        }
+        self.done = true;
+        None
+    }
+
+    fn send(&mut self) {
+        if self.length == 0 {
+            return;
+        }
+        let length = std::mem::take(&mut self.length);
+        let Some(buffer) = self.buffer.take() else {
+            return;
+        };
+        if self
+            .source
+            .output
+            .try_send(ReaderMessage::Data { buffer, length })
+            .is_ok()
+        {
+            self.source.wake.notify();
+        } else {
+            self.done = true;
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn poll_gather(
+    wake_rx: Option<&std::os::fd::OwnedFd>,
+    panes: &mut [GatherPane],
+    active: &[usize],
+    timeout: Option<&rustix::event::Timespec>,
+) -> rustix::io::Result<(bool, SmallVec<[usize; 8]>)> {
+    use rustix::event::{PollFd, PollFlags};
+
+    let polled = panes
+        .iter_mut()
+        .enumerate()
+        .filter(|(index, pane)| !pane.done && !pane.served && !active.contains(index))
+        .filter_map(|(index, pane)| pane.has_buffer().then_some(index))
+        .collect::<SmallVec<[usize; 8]>>();
+    let mut fds = SmallVec::<[PollFd<'_>; 9]>::new();
+    fds.extend(wake_rx.map(|fd| PollFd::new(fd, PollFlags::IN)));
+    let offset = fds.len();
+    fds.extend(
+        polled
+            .iter()
+            .map(|&index| PollFd::new(&panes[index].source.fd, PollFlags::IN)),
+    );
+    match rustix::event::poll(&mut fds, timeout) {
+        Ok(_) => {}
+        Err(rustix::io::Errno::INTR) => return Ok((false, SmallVec::new())),
+        Err(error) => return Err(error),
+    }
+    Ok((
+        offset > 0 && !fds[0].revents().is_empty(),
+        polled
+            .iter()
+            .zip(&fds[offset..])
+            .filter(|(_, fd)| !fd.revents().is_empty())
+            .map(|(&index, _)| index)
+            .collect(),
+    ))
+}
+
+#[cfg(target_os = "linux")]
+fn read_gather_round(panes: &mut [GatherPane], mut active: SmallVec<[usize; 8]>) {
+    let now = rustix::event::Timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    let mut idle = 0_u32;
+    let mut passes = 0_u32;
+    while !active.is_empty() && idle <= PTY_GATHER_BRIDGE_SPIN_MAX {
+        passes += 1;
+        if passes.is_multiple_of(PTY_GATHER_ADMIT_PASSES)
+            && let Ok((_, ready)) = poll_gather(None, panes, &active, Some(&now))
+        {
+            active.extend(ready);
+        }
+        let mut progress = false;
+        active.retain(|index| {
+            let pane = &mut panes[*index];
+            let stay = pane.step().is_some_and(|moved| {
+                progress |= moved;
+                true
+            });
+            pane.served |= !stay;
+            stay
+        });
+        idle = if progress { 0 } else { idle + 1 };
+    }
+    for index in active {
+        panes[index].send();
+    }
+    for pane in panes.iter_mut() {
+        pane.served = false;
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn gather_pty_linux(
+    wake_rx: &std::os::fd::OwnedFd,
+    pending: &AtomicBool,
+    incoming: &Receiver<GatherSource>,
+) {
+    let mut panes = Vec::<GatherPane>::new();
+    let mut accepting = true;
+    loop {
+        while accepting {
+            match incoming.try_recv() {
+                Ok(source) => panes.push(GatherPane {
+                    source,
+                    buffer: None,
+                    length: 0,
+                    served: false,
+                    done: false,
+                }),
+                Err(crossbeam_channel::TryRecvError::Empty) => break,
+                Err(crossbeam_channel::TryRecvError::Disconnected) => accepting = false,
             }
         }
+        panes.retain(|pane| !pane.source.slot.closed.load(Ordering::Acquire));
+        if !accepting && panes.is_empty() {
+            return;
+        }
+        let (woken, ready) = match poll_gather(Some(wake_rx), &mut panes, &[], None) {
+            Ok(polled) => polled,
+            Err(error) => {
+                log::error!("Linux PTY gather poll stopped: {error}");
+                for pane in &panes {
+                    let _ = pane.source.output.try_send(ReaderMessage::Eof);
+                    pane.source.wake.notify();
+                }
+                return;
+            }
+        };
+        if woken {
+            let _ = drain_wake_pipe(wake_rx);
+            pending.store(false, Ordering::SeqCst);
+        }
+        read_gather_round(&mut panes, ready);
+        panes.retain(|pane| !pane.done);
     }
 }
 
@@ -13289,7 +13406,7 @@ fn consume_pty_output(
     raw_output_tap: &mut Option<(u64, RawOutputTapSender)>,
     buffer: Vec<u8>,
     length: usize,
-    recycled: &Sender<Vec<u8>>,
+    recycled: &BufferReturn,
 ) -> (Option<u64>, usize) {
     log::trace!(
         target: "zz_terminal::diagnostics::pty",
@@ -13299,7 +13416,7 @@ fn consume_pty_output(
     );
     let closed_tap = tap_raw_output(raw_output_tap, &buffer[..length]);
     let parsed = feed_pty_output(terminal, passthrough, engine, &buffer[..length]);
-    let _ = recycled.try_send(buffer);
+    recycled.give(buffer);
     (closed_tap, parsed)
 }
 
@@ -13596,25 +13713,6 @@ fn ghostty_key(key: KeyCode) -> key::Key {
     }
 }
 
-static EAGER_FRAMES: LazyLock<bool> = LazyLock::new(|| perf_flag("ZZ_PERF_EAGER_FRAMES", "1"));
-
-fn perf_flag(name: &str, value: &str) -> bool {
-    std::env::var_os(name).is_some_and(|set| set == value)
-}
-
-#[must_use]
-pub fn perf_knobs() -> [(&'static str, bool); 4] {
-    [
-        ("ZZ_PERF_COPY_CLONE=1", ModeRevision::clone_enabled()),
-        ("ZZ_PERF_EAGER_FRAMES=1", *EAGER_FRAMES),
-        ("ZZ_PERF_NO_COMPRESS=1", *NO_COMPRESS),
-        ("ZZ_PERF_ECHO_FASTPATH=0", *NO_ECHO_FASTPATH),
-    ]
-}
-
-static NO_COMPRESS: LazyLock<bool> = LazyLock::new(|| perf_flag("ZZ_PERF_NO_COMPRESS", "1"));
-static NO_ECHO_FASTPATH: LazyLock<bool> = LazyLock::new(|| perf_flag("ZZ_PERF_ECHO_FASTPATH", "0"));
-
 const ECHO_WINDOW: Duration = Duration::from_millis(50);
 const ECHO_PUBLISHES: u8 = 4;
 
@@ -13631,8 +13729,7 @@ impl EchoWindow {
     }
 
     fn due(&self) -> bool {
-        !*NO_ECHO_FASTPATH
-            && self.publishes > 0
+        self.publishes > 0
             && self
                 .opened
                 .is_some_and(|opened| opened.elapsed() < ECHO_WINDOW)
@@ -13655,7 +13752,7 @@ struct IdleCompression {
 
 impl IdleCompression {
     fn enabled(&self) -> bool {
-        !self.unsupported && !*NO_COMPRESS
+        !self.unsupported
     }
 
     fn observe(&mut self, terminal: &Terminal<'_, '_>, now: Instant) {
@@ -13824,11 +13921,9 @@ impl<'alloc> Frames<'alloc> {
     }
 
     fn streaming(&self, view: TerminalViewId) -> bool {
-        *EAGER_FRAMES
-            || self
-                .streams
-                .get(&view)
-                .is_some_and(|state| state.stream.is_on())
+        self.streams
+            .get(&view)
+            .is_some_and(|state| state.stream.is_on())
     }
 
     fn epoch(&self, view: TerminalViewId) -> u64 {
@@ -13922,7 +14017,7 @@ impl<'alloc> Frames<'alloc> {
     }
 
     fn needs_cells(&self, active: &ActiveTerminalViews) -> bool {
-        *EAGER_FRAMES || self.preview || active.keys().any(|view| self.streaming(*view))
+        self.preview || active.keys().any(|view| self.streaming(*view))
     }
 
     fn release_unused(&mut self, active: &ActiveTerminalViews) {
@@ -14101,7 +14196,7 @@ fn publish_views<'alloc: 'callbacks, 'callbacks>(
         streamed_any |= streaming;
         viewports.push((view_id, viewport, streaming.then(|| frames.epoch(view_id))));
     }
-    let refreshed = if streamed_any || force_fallback || *EAGER_FRAMES || frames.preview {
+    let refreshed = if streamed_any || force_fallback || frames.preview {
         None
     } else {
         publisher.refresh_fallback(terminal, &mut frames.dictionary, &status)?
@@ -14683,6 +14778,10 @@ fn reported_working_directory(value: &str) -> Option<String> {
     Some(value.to_owned())
 }
 
+#[cfg(test)]
+#[path = "session/row_copy_tests.rs"]
+mod row_copy_tests;
+
 fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
     terminal: &Terminal<'alloc, 'callbacks>,
     render_state: &mut RenderState<'alloc>,
@@ -14764,10 +14863,8 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
     }
     let dictionary_reset = dictionary.generation != previous_dictionary_generation;
     let dimensions_changed = dictionary.shared_cells.len() != cell_count;
-    let mut grapheme_scratch = std::mem::take(&mut dictionary.grapheme_scratch);
-    if grapheme_scratch.capacity() < 8 {
-        grapheme_scratch.reserve(8 - grapheme_scratch.capacity());
-    }
+    let mut row_copy = std::mem::take(&mut dictionary.row_copy);
+    let mut row_styles = std::mem::take(&mut dictionary.row_styles);
     let mut overlays = std::mem::take(&mut dictionary.overlay_scratch);
     let overlay_only = matches!(change, SnapshotChange::Overlay);
     let cell_plane_dirty =
@@ -14808,70 +14905,56 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
                     .and_then(|cells| cells.get_mut(row_start..row_end))
                     .ok_or(WorkerError::ViewportMetadataTooLarge)?;
                 output_row.fill(PackedCell::EMPTY);
-                let mut cell_iteration = cells.update(row)?;
-                let mut column = 0_usize;
-                while let Some(cell) = cell_iteration.next() {
-                    if column >= usize::from(columns) {
-                        break;
-                    }
-                    let raw_style = cell.style()?;
-                    let mut cell_foreground = color(cell.fg_color()?.unwrap_or(colors.foreground));
-                    let mut cell_background = color(cell.bg_color()?.unwrap_or(colors.background));
-                    if raw_style.inverse {
-                        std::mem::swap(&mut cell_foreground, &mut cell_background);
-                    }
-
-                    grapheme_scratch.clear();
-                    cell.graphemes_utf8(&mut grapheme_scratch)?;
-                    let raw_cell = cell.raw_cell()?;
-                    let classes = if raw_style.inverse {
-                        (ColourClass::Resolved, ColourClass::Resolved)
+                cells.update(row)?.copy_into(0, columns, &mut row_copy)?;
+                row_styles.clear();
+                row_styles.resize(row_copy.style_count(), None);
+                let mut previous = None;
+                for (slot, cell) in output_row.iter_mut().zip(row_copy.cells().iter().copied()) {
+                    let background = if let Some(index) = cell.bg_color_palette() {
+                        CellBackground::Palette(index.0)
+                    } else if let Some(value) = cell.bg_color_rgb() {
+                        CellBackground::Rgb(value)
                     } else {
-                        (
-                            classes.ground(raw_style.fg_color, 0),
-                            match raw_cell.content_tag()? {
-                                CellContentTag::BgColorPalette => {
-                                    classes.entry(raw_cell.bg_color_palette()?.0)
-                                }
-                                CellContentTag::BgColorRgb => ColourClass::Rgb,
-                                CellContentTag::Codepoint | CellContentTag::CodepointGrapheme => {
-                                    classes.ground(raw_style.bg_color, 1)
-                                }
-                            },
-                        )
+                        CellBackground::Style
                     };
-                    let width = match raw_cell.wide()? {
+                    let hyperlink = cell.has_hyperlink();
+                    let style_index = cell.style_index();
+                    let plain = background == CellBackground::Style && !hyperlink;
+                    let cached = if plain {
+                        row_styles.get(style_index).copied().flatten()
+                    } else {
+                        previous
+                            .filter(|(key, _)| *key == (style_index, background, hyperlink))
+                            .map(|(_, id)| id)
+                    };
+                    let style_id = if let Some(id) = cached {
+                        id
+                    } else {
+                        let id = dictionary.intern_style(copied_cell_style(
+                            &row_copy.style(style_index)?,
+                            background,
+                            hyperlink,
+                            &colors,
+                            &classes,
+                        ));
+                        if plain {
+                            row_styles[style_index] = Some(id);
+                        } else {
+                            previous = Some(((style_index, background, hyperlink), id));
+                        }
+                        id
+                    };
+                    let glyph = match row_copy.grapheme(cell)? {
+                        Some(text) => dictionary.encode_glyph(text),
+                        None => cell.codepoint().map_or(0, u32::from),
+                    };
+                    let width = match cell.wide()? {
                         CellWide::Narrow => CellWidth::Narrow,
                         CellWide::Wide => CellWidth::Wide,
                         CellWide::SpacerTail => CellWidth::SpacerTail,
                         CellWide::SpacerHead => CellWidth::SpacerHead,
                     };
-                    let underline_color =
-                        resolve_style_color(raw_style.underline_color, &colors.palette);
-                    let foreground_explicit_rgb = matches!(
-                        if raw_style.inverse {
-                            raw_style.bg_color
-                        } else {
-                            raw_style.fg_color
-                        },
-                        StyleColor::Rgb(_)
-                    );
-                    let style = PackedStyle::new(
-                        cell_foreground,
-                        cell_background,
-                        underline_color,
-                        style_attributes(
-                            &raw_style,
-                            foreground_explicit_rgb,
-                            raw_cell.has_hyperlink()?,
-                        ),
-                        underline_style(raw_style.underline),
-                    )
-                    .with_classes(classes.0, classes.1);
-                    let style_id = dictionary.intern_style(style);
-                    let glyph = dictionary.encode_glyph(&grapheme_scratch);
-                    output_row[column] = PackedCell::new(glyph, style_id, width);
-                    column += 1;
+                    *slot = PackedCell::new(glyph, style_id, width);
                 }
                 row.set_dirty(false)?;
             }
@@ -14879,7 +14962,8 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
         }
         Ok(())
     })();
-    dictionary.grapheme_scratch = grapheme_scratch;
+    dictionary.row_copy = row_copy;
+    dictionary.row_styles = row_styles;
     if let Err(error) = extraction_result {
         if let Some(cells) = next_cells {
             dictionary.retain_cell_plane(cells);
@@ -15197,6 +15281,60 @@ fn style_attributes(
     attributes |= u16::from(foreground_explicit_rgb) * ATTR_EXPLICIT_RGB;
     attributes |= u16::from(hyperlink) * ATTR_HYPERLINK;
     attributes
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CellBackground {
+    Style,
+    Palette(u8),
+    Rgb(RgbColor),
+}
+
+fn copied_cell_style(
+    style: &libghostty_vt::style::Style,
+    background: CellBackground,
+    hyperlink: bool,
+    colors: &Colors,
+    classes: &Classifier<'_>,
+) -> PackedStyle {
+    let palette = &colors.palette;
+    let mut cell_foreground =
+        resolve_style_color(style.fg_color, palette).unwrap_or(color(colors.foreground));
+    let mut cell_background = match background {
+        CellBackground::Style => resolve_style_color(style.bg_color, palette),
+        CellBackground::Palette(index) => Some(color(palette[usize::from(index)])),
+        CellBackground::Rgb(value) => Some(color(value)),
+    }
+    .unwrap_or(color(colors.background));
+    let (foreground_class, background_class) = if style.inverse {
+        std::mem::swap(&mut cell_foreground, &mut cell_background);
+        (ColourClass::Resolved, ColourClass::Resolved)
+    } else {
+        (
+            classes.ground(style.fg_color, 0),
+            match background {
+                CellBackground::Style => classes.ground(style.bg_color, 1),
+                CellBackground::Palette(index) => classes.entry(index),
+                CellBackground::Rgb(_) => ColourClass::Rgb,
+            },
+        )
+    };
+    let foreground_explicit_rgb = matches!(
+        if style.inverse {
+            style.bg_color
+        } else {
+            style.fg_color
+        },
+        StyleColor::Rgb(_)
+    );
+    PackedStyle::new(
+        cell_foreground,
+        cell_background,
+        resolve_style_color(style.underline_color, palette),
+        style_attributes(style, foreground_explicit_rgb, hyperlink),
+        underline_style(style.underline),
+    )
+    .with_classes(foreground_class, background_class)
 }
 
 const fn underline_style(underline: Underline) -> UnderlineStyle {
@@ -15595,7 +15733,7 @@ mod tests {
                 &mut None,
             );
         }
-        let revision = ModeRevision::capture(&mut terminal).expect("revision");
+        let revision = ModeRevision::capture(&terminal).expect("revision");
         let rows = revision.total_rows();
         (
             revision.capture_rows(0, rows.saturating_sub(1), false, false, false),
@@ -15976,7 +16114,7 @@ mod tests {
             );
         }
         assert_eq!(terminal.cursor_x().expect("cursor"), 6);
-        let revision = ModeRevision::capture(&mut terminal).expect("revision");
+        let revision = ModeRevision::capture(&terminal).expect("revision");
         assert_eq!(revision.capture_rows(0, 0, false, false, false), "abcd");
         assert!(revision.cell_matches_text(PointCoordinate { x: 5, y: 0 }, "d"));
     }
@@ -18090,8 +18228,8 @@ mod tests {
             SessionStatus::Running,
         )
         .expect("first snapshot");
-        let grapheme_allocation = dictionary.grapheme_scratch.as_ptr();
-        let grapheme_capacity = dictionary.grapheme_scratch.capacity();
+        let style_allocation = dictionary.row_styles.as_ptr();
+        let style_capacity = dictionary.row_styles.capacity();
         let overlay_only = snapshot(
             &terminal,
             &mut render_state,
@@ -18112,8 +18250,8 @@ mod tests {
         assert!(Arc::ptr_eq(&first.cells, &overlay_only.cells));
         assert!(Arc::ptr_eq(&first.overlays, &overlay_only.overlays));
         assert!(Arc::ptr_eq(&first.dictionary, &overlay_only.dictionary));
-        assert_eq!(dictionary.grapheme_scratch.as_ptr(), grapheme_allocation);
-        assert_eq!(dictionary.grapheme_scratch.capacity(), grapheme_capacity);
+        assert_eq!(dictionary.row_styles.as_ptr(), style_allocation);
+        assert_eq!(dictionary.row_styles.capacity(), style_capacity);
 
         terminal.vt_write(b"two");
         let changed = snapshot(
@@ -18138,8 +18276,8 @@ mod tests {
         ));
         assert!(!Arc::ptr_eq(&overlay_only.cells, &changed.cells));
         assert!(Arc::ptr_eq(&overlay_only.dictionary, &changed.dictionary));
-        assert_eq!(dictionary.grapheme_scratch.as_ptr(), grapheme_allocation);
-        assert_eq!(dictionary.grapheme_scratch.capacity(), grapheme_capacity);
+        assert_eq!(dictionary.row_styles.as_ptr(), style_allocation);
+        assert_eq!(dictionary.row_styles.capacity(), style_capacity);
 
         terminal.vt_write(b"\x1b]0;renamed\x07");
         let renamed = snapshot(
@@ -18160,8 +18298,8 @@ mod tests {
             &renamed.presentation.title
         ));
         assert!(!Arc::ptr_eq(&changed.presentation, &renamed.presentation));
-        assert_eq!(dictionary.grapheme_scratch.as_ptr(), grapheme_allocation);
-        assert_eq!(dictionary.grapheme_scratch.capacity(), grapheme_capacity);
+        assert_eq!(dictionary.row_styles.as_ptr(), style_allocation);
+        assert_eq!(dictionary.row_styles.capacity(), style_capacity);
     }
 
     #[test]
@@ -19333,8 +19471,6 @@ mod tests {
         assert_eq!(search.matches[0].end, 11);
         assert_eq!(std::mem::size_of::<SearchCellOffset>(), 12);
         assert_eq!(std::mem::align_of::<SearchCellOffset>(), 4);
-        assert_eq!(std::mem::size_of::<HistorySearchRow>(), 16);
-        assert_eq!(std::mem::align_of::<HistorySearchRow>(), 4);
     }
 
     #[test]
@@ -19555,15 +19691,10 @@ mod tests {
             view_id: view,
             screen: Screen::Primary,
             query: SearchQuery::literal("queued"),
-            snapshot: Arc::new(HistorySearchSnapshot {
-                columns: 1,
-                text: String::new(),
-                rows: Vec::new(),
-                offsets: Vec::new(),
-                terminal: None,
-                search_gate: Mutex::new(()),
-                total_rows: 0,
-            }),
+            snapshot: Arc::new(
+                HistorySearchSnapshot::capture(&new_terminal(1, 1, 1).expect("terminal"))
+                    .expect("snapshot"),
+            ),
             selection: SearchSelectionPolicy::Last,
             match_scratch: matches,
             latest_request,
@@ -20671,7 +20802,7 @@ mod tests {
     fn frozen_copy_formatter_preserves_code_whitespace_and_line_structure() {
         let mut terminal = new_terminal(16, 4, 16).expect("terminal");
         terminal.vt_write(b"  one\r\n\r\n    two");
-        let revision = ModeRevision::capture(&mut terminal).expect("revision");
+        let revision = ModeRevision::capture(&terminal).expect("revision");
         let row_with = |needle| {
             (0..revision.total_rows())
                 .find(|row| {
@@ -20717,7 +20848,7 @@ mod tests {
     fn frozen_copy_formatter_preserves_wrapped_and_rectangular_columns() {
         let mut wrapped = new_terminal(5, 3, 16).expect("wrapped terminal");
         wrapped.vt_write(b"ab  cdef");
-        let revision = ModeRevision::capture(&mut wrapped).expect("wrapped revision");
+        let revision = ModeRevision::capture(&wrapped).expect("wrapped revision");
         let first = (0..revision.total_rows())
             .find(|row| revision.first_char(PointCoordinate { x: 0, y: *row }) == Some('a'))
             .expect("wrapped row");
@@ -20737,7 +20868,7 @@ mod tests {
 
         let mut rectangle = new_terminal(8, 2, 16).expect("rectangle terminal");
         rectangle.vt_write(b"ab  z\r\nc   y");
-        let revision = ModeRevision::capture(&mut rectangle).expect("rectangle revision");
+        let revision = ModeRevision::capture(&rectangle).expect("rectangle revision");
         let first = (0..revision.total_rows())
             .find(|row| revision.first_char(PointCoordinate { x: 0, y: *row }) == Some('a'))
             .expect("first rectangle row");
@@ -20774,7 +20905,7 @@ mod tests {
     fn vi_copy_keeps_the_final_newline_when_the_right_edge_passes_the_last_line() {
         let mut terminal = new_terminal(12, 4, 16).expect("terminal");
         terminal.vt_write(b"abc\r\ndef\r\n\r\nghi");
-        let revision = ModeRevision::capture(&mut terminal).expect("revision");
+        let revision = ModeRevision::capture(&terminal).expect("revision");
         let first = (0..revision.total_rows())
             .find(|row| revision.first_char(PointCoordinate { x: 0, y: *row }) == Some('a'))
             .expect("first row");
@@ -21480,21 +21611,57 @@ mod tests {
     }
 
     #[cfg(target_os = "linux")]
-    #[test]
-    fn linux_pty_gather_preserves_order_through_bounded_buffers() {
+    fn gather_fixture(
+        gather: &PtyGather,
+        pool: usize,
+    ) -> (
+        std::os::fd::OwnedFd,
+        Receiver<ReaderMessage>,
+        BufferReturn,
+        Vec<usize>,
+    ) {
         let (read_fd, write_fd) = rustix::pipe::pipe().expect("PTY fixture pipe");
         rustix::io::ioctl_fionbio(&read_fd, true).expect("nonblocking fixture reader");
-        let (output_tx, output_rx) = crossbeam_channel::bounded(PTY_BUFFER_POOL_SIZE);
-        let (recycle_tx, recycle_rx) = crossbeam_channel::bounded(PTY_BUFFER_POOL_SIZE);
+        let (output_tx, output_rx) = crossbeam_channel::bounded(pool + 1);
+        let (recycle_tx, recycle_rx) = crossbeam_channel::bounded(pool);
         let mut allocations = Vec::new();
-        for _ in 0..PTY_BUFFER_POOL_SIZE {
+        for _ in 0..pool {
             let buffer = vec![0_u8; PTY_READ_BUFFER_BYTES];
             allocations.push(buffer.as_ptr() as usize);
             recycle_tx.send(buffer).expect("seed gather pool");
         }
-        let gather = thread::spawn(move || {
-            gather_pty_linux(read_fd, output_tx, recycle_rx, None, ActorWake::none());
-        });
+        let fd = filedescriptor::FileDescriptor::dup(&read_fd).expect("fixture reader");
+        let lease = gather
+            .add(fd, output_tx, recycle_rx, ActorWake::none())
+            .expect("register the fixture with the gather");
+        (
+            write_fd,
+            output_rx,
+            BufferReturn {
+                buffers: recycle_tx,
+                gather: Some(lease),
+            },
+            allocations,
+        )
+    }
+
+    #[cfg(target_os = "linux")]
+    fn gathered(output: &Receiver<ReaderMessage>) -> Option<(Vec<u8>, usize)> {
+        match output
+            .recv_timeout(Duration::from_secs(2))
+            .expect("gather output")
+        {
+            ReaderMessage::Data { buffer, length } => Some((buffer, length)),
+            ReaderMessage::Eof => None,
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_pty_gather_preserves_order_through_bounded_buffers() {
+        let gather = PtyGather::start("zz-pty-gather".to_owned()).expect("gather thread");
+        let (write_fd, output_rx, buffers, allocations) =
+            gather_fixture(&gather, PTY_BUFFER_POOL_SIZE);
         let expected = (0..PTY_READ_BUFFER_BYTES * 2 + 137)
             .map(|index| u8::try_from(index % 251).expect("bounded byte"))
             .collect::<Vec<_>>();
@@ -21512,16 +21679,12 @@ mod tests {
 
         let mut observed = Vec::with_capacity(expected.len());
         let mut observed_allocations = Vec::new();
-        while let ReaderMessage::Data { buffer, length } = output_rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("gather output")
-        {
+        while let Some((buffer, length)) = gathered(&output_rx) {
             observed.extend_from_slice(&buffer[..length]);
             observed_allocations.push(buffer.as_ptr() as usize);
-            let _ = recycle_tx.send(buffer);
+            buffers.give(buffer);
         }
         writer.join().expect("fixture writer");
-        gather.join().expect("gather thread");
 
         assert_eq!(observed, expected);
         assert!(
@@ -21534,40 +21697,66 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn linux_pty_gather_delivers_an_interactive_partial_batch() {
-        let (read_fd, write_fd) = rustix::pipe::pipe().expect("PTY fixture pipe");
-        rustix::io::ioctl_fionbio(&read_fd, true).expect("nonblocking fixture reader");
-        let (output_tx, output_rx) = crossbeam_channel::bounded(PTY_BUFFER_POOL_SIZE);
-        let (recycle_tx, recycle_rx) = crossbeam_channel::bounded(PTY_BUFFER_POOL_SIZE);
-        for _ in 0..PTY_BUFFER_POOL_SIZE {
-            recycle_tx
-                .send(vec![0_u8; PTY_READ_BUFFER_BYTES])
-                .expect("seed gather pool");
-        }
-        let gather = thread::spawn(move || {
-            gather_pty_linux(read_fd, output_tx, recycle_rx, None, ActorWake::none());
-        });
+        let gather = PtyGather::start("zz-pty-gather".to_owned()).expect("gather thread");
+        let (write_fd, output_rx, buffers, _) = gather_fixture(&gather, PTY_BUFFER_POOL_SIZE);
 
         assert_eq!(
             rustix::io::write(&write_fd, b"prompt").expect("interactive fixture write"),
             6
         );
-        let ReaderMessage::Data { buffer, length } = output_rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("interactive gather output")
-        else {
-            panic!("gather reached EOF before delivering the partial batch");
-        };
+        let (buffer, length) = gathered(&output_rx).expect("interactive gather output");
         assert_eq!(&buffer[..length], b"prompt");
-        recycle_tx.send(buffer).expect("recycle gather buffer");
+        buffers.give(buffer);
 
         drop(write_fd);
-        assert!(matches!(
-            output_rx
-                .recv_timeout(Duration::from_secs(2))
-                .expect("gather EOF"),
-            ReaderMessage::Eof
-        ));
-        gather.join().expect("gather thread");
+        assert!(gathered(&output_rx).is_none());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_pty_gather_parks_a_starved_pane_without_blocking_its_neighbour() {
+        let gather = PtyGather::start("zz-pty-gather".to_owned()).expect("gather thread");
+        let (busy_fd, busy_output, busy_buffers, _) = gather_fixture(&gather, 1);
+        let (quiet_fd, quiet_output, _quiet_buffers, _) = gather_fixture(&gather, 1);
+
+        rustix::io::write(&busy_fd, b"first").expect("busy fixture write");
+        let (held, length) = gathered(&busy_output).expect("first busy batch");
+        assert_eq!(&held[..length], b"first");
+        rustix::io::write(&busy_fd, b"second").expect("busy fixture write");
+        rustix::io::write(&quiet_fd, b"quiet").expect("quiet fixture write");
+        let (quiet, length) = gathered(&quiet_output).expect("quiet batch");
+        assert_eq!(&quiet[..length], b"quiet");
+        assert!(busy_output.is_empty());
+
+        busy_buffers.give(held);
+        let (resumed, length) = gathered(&busy_output).expect("resumed busy batch");
+        assert_eq!(&resumed[..length], b"second");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_pty_gather_closes_the_fd_of_a_released_pane() {
+        let gather = PtyGather::start("zz-pty-gather".to_owned()).expect("gather thread");
+        let (write_fd, output_rx, buffers, _) = gather_fixture(&gather, 1);
+        drop(gather);
+        drop(buffers);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while rustix::io::write(&write_fd, b"x") != Err(rustix::io::Errno::PIPE) {
+            assert!(
+                Instant::now() < deadline,
+                "gather kept the released fd open"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+        loop {
+            match output_rx.recv_timeout(Duration::from_secs(2)) {
+                Ok(_) => {}
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                    panic!("gather kept the released pane")
+                }
+            }
+        }
     }
 
     #[test]

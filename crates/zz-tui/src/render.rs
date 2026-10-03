@@ -209,6 +209,14 @@ struct PaintedSidebarRow {
 const PAINT_BEGIN: &[u8] = b"\x1b[?2026h\x1b[?25l";
 const PAINT_END: &[u8] = b"\x1b[?2026l";
 const PAINT_TAIL_BYTES: usize = 64;
+const SHOW_CURSOR: &[u8] = b"\x1b[?25h";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct TtyState {
+    cursor: Option<(u16, u16)>,
+    sgr_reset: bool,
+    visible: bool,
+}
 
 type TerminalStyleKey = (
     PackedStyle,
@@ -257,6 +265,8 @@ pub(crate) struct Renderer {
     terminal_sgr: Option<(TerminalStyleKey, Vec<u8>)>,
     blank_is_default: bool,
     default_blank: HashMap<PaneId, Rect>,
+    tty: Option<(TtyState, usize)>,
+    settled: Option<TtyState>,
 }
 
 impl Renderer {
@@ -306,6 +316,8 @@ impl Renderer {
             terminal_sgr: None,
             blank_is_default: false,
             default_blank: HashMap::new(),
+            tty: None,
+            settled: None,
         }
     }
 
@@ -321,6 +333,8 @@ impl Renderer {
     }
 
     pub fn invalidate(&mut self) {
+        self.tty = None;
+        self.settled = None;
         self.terminal_sgr = None;
         self.paint_tail.clear();
         self.painted.clear();
@@ -425,7 +439,8 @@ impl Renderer {
         self.note_terminal_colours();
         self.forget_default_blank_under_overlays(model);
         self.output.clear();
-        self.output.extend_from_slice(b"\x1b[?2026h\x1b[?25l");
+        self.output.extend_from_slice(PAINT_BEGIN);
+        self.begin_tty_state();
         let popup_visible = model.popup.is_some();
         let floating_input = popup_visible || model.menu.is_some() || model.confirm.is_some();
         if model.status.title != self.last_title {
@@ -462,7 +477,7 @@ impl Renderer {
                 }
             }
         } else {
-            let cleared_to_default = force && *crate::COALESCE;
+            let cleared_to_default = force;
             if force {
                 self.default_blank.clear();
             }
@@ -521,7 +536,8 @@ impl Renderer {
                 return self.paint(model, false);
             }
             self.output.clear();
-            self.output.extend_from_slice(b"\x1b[?2026h\x1b[?25l");
+            self.output.extend_from_slice(PAINT_BEGIN);
+            self.begin_tty_state();
             self.emit_queued_control();
             self.kitty.suspend(&mut self.output);
             self.paint_popup(model, false);
@@ -531,7 +547,8 @@ impl Renderer {
             return self.flush_output();
         }
         self.output.clear();
-        self.output.extend_from_slice(b"\x1b[?2026h\x1b[?25l");
+        self.output.extend_from_slice(PAINT_BEGIN);
+        self.begin_tty_state();
         if model.choose_tree.is_none()
             && model.choose_buffer.is_none()
             && model.popup.is_none()
@@ -559,14 +576,93 @@ impl Renderer {
         self.flush_output()
     }
 
+    fn begin_tty_state(&mut self) {
+        self.tty = self.settled.map(|state| {
+            (
+                TtyState {
+                    visible: false,
+                    ..state
+                },
+                self.output.len(),
+            )
+        });
+    }
+
+    fn tty_state(&self) -> Option<TtyState> {
+        self.tty
+            .filter(|(_, at)| *at == self.output.len())
+            .map(|(state, _)| state)
+    }
+
+    fn set_tty_state(&mut self, state: TtyState) {
+        self.tty = Some((state, self.output.len()));
+    }
+
+    fn move_to(&mut self, column: u16, row: u16) {
+        let state = self.tty_state();
+        if state.is_some_and(|state| state.cursor == Some((column, row))) {
+            return;
+        }
+        write_cursor_position(&mut self.output, column, row);
+        self.set_tty_state(TtyState {
+            cursor: Some((column, row)),
+            sgr_reset: state.is_some_and(|state| state.sgr_reset),
+            visible: state.is_some_and(|state| state.visible),
+        });
+    }
+
+    fn show_cursor(&mut self) {
+        let state = self.tty_state();
+        self.output.extend_from_slice(SHOW_CURSOR);
+        if let Some(state) = state {
+            self.set_tty_state(TtyState {
+                visible: true,
+                ..state
+            });
+        }
+    }
+
+    fn settle(&mut self) -> Option<TtyState> {
+        let previous = self.settled.take();
+        let end = self.output.len().checked_sub(PAINT_END.len());
+        self.settled = self
+            .tty
+            .take()
+            .filter(|(_, at)| Some(*at) == end && self.output.ends_with(PAINT_END))
+            .map(|(state, _)| state);
+        previous
+    }
+
     fn flush_output(&mut self) -> io::Result<()> {
+        let previous = self.settle();
         let control = std::mem::take(&mut self.control_replay);
+        if control.is_empty()
+            && previous.is_some_and(|state| state.visible)
+            && self.settled.is_some_and(|state| state.visible)
+            && let Some(text) = self
+                .output
+                .strip_prefix(PAINT_BEGIN)
+                .and_then(|body| body.strip_suffix(PAINT_END))
+                .and_then(|body| body.strip_suffix(SHOW_CURSOR))
+            && text.iter().all(|byte| *byte >= 0x20 && *byte != 0x7f)
+        {
+            let text = PAINT_BEGIN.len()..PAINT_BEGIN.len() + text.len();
+            self.output.truncate(text.end);
+            self.output.drain(..text.start);
+            self.paint_tail.clear();
+            if self.output.is_empty() {
+                return Ok(());
+            }
+            if self.writer.borrow_mut().submit(&mut self.output)? == Submission::Dropped {
+                self.invalidate();
+            }
+            return Ok(());
+        }
         let body = self
             .output
             .strip_prefix(PAINT_BEGIN)
             .and_then(|body| body.strip_suffix(PAINT_END));
-        if *crate::COALESCE
-            && control.is_empty()
+        if control.is_empty()
             && let Some(body) = body
             && cursor_only(body)
             && self.paint_tail.ends_with(body)
@@ -612,6 +708,8 @@ impl Renderer {
     /// disappear, and writing it after the alternate screen is gone would put
     /// pane bytes on the user's shell.
     pub fn discard_queued_paints(&mut self) {
+        self.tty = None;
+        self.settled = None;
         self.output.clear();
         self.control_replay.clear();
         self.writer.borrow_mut().abandon();
@@ -631,14 +729,13 @@ impl Renderer {
     fn paint_workspace(&mut self, model: &Model, force: bool, cleared_to_default: bool) {
         let lines = model.pane_border_lines();
         let indicators = model.pane_border_indicators();
-        let border_changed = !*crate::COALESCE
-            || self.border_chrome.as_ref().is_none_or(|cached| {
-                cached.0 != model.pane_border_status()
-                    || cached.1 != lines
-                    || cached.2 != indicators
-                    || cached.3 != model.status.pane_borders
-                    || cached.4 != model.status.theme
-            });
+        let border_changed = self.border_chrome.as_ref().is_none_or(|cached| {
+            cached.0 != model.pane_border_status()
+                || cached.1 != lines
+                || cached.2 != indicators
+                || cached.3 != model.status.pane_borders
+                || cached.4 != model.status.theme
+        });
         let force = force || border_changed;
         if border_changed {
             self.border_chrome = Some((
@@ -778,14 +875,6 @@ impl Renderer {
                     } else if cleared_to_default || known_blank {
                         self.painted.remove(&entry.pane);
                         self.default_blank.insert(entry.pane, content);
-                    } else if force && !*crate::COALESCE {
-                        self.paint_card(
-                            content,
-                            "Terminal",
-                            &pane.title,
-                            "waiting for frame",
-                            model,
-                        );
                     }
                 }
                 PaneKindSnapshot::Browser(_) if browser_live => {
@@ -916,9 +1005,7 @@ impl Renderer {
         force: bool,
         damage: Option<&FrameDamage>,
     ) {
-        let coalesce = *crate::COALESCE;
-        if coalesce
-            && !force
+        if !force
             && self.painted.get(&pane).is_some_and(|previous| {
                 previous.rect == rect
                     && previous.viewport.columns == viewport.columns
@@ -940,7 +1027,7 @@ impl Renderer {
                 || previous.viewport.foreground != viewport.foreground
                 || previous.viewport.background != viewport.background
         });
-        if force || structural_change || !coalesce && matches!(damage, Some(FrameDamage::All)) {
+        if force || structural_change {
             for row in 0..rect.height {
                 self.blit_row(viewport, row, rect);
             }
@@ -948,9 +1035,7 @@ impl Renderer {
             for row in rows.iter().copied().filter(|row| *row < rect.height) {
                 if let Some(columns) = previous.as_ref().map_or_else(
                     || Some(0..rect.width),
-                    |previous| {
-                        changed_columns(&previous.viewport, viewport, row, rect.width, coalesce)
-                    },
+                    |previous| changed_columns(&previous.viewport, viewport, row, rect.width),
                 ) {
                     self.blit_columns(viewport, row, rect, columns);
                 }
@@ -959,9 +1044,7 @@ impl Renderer {
             for row in 0..rect.height {
                 if let Some(columns) = previous.as_ref().map_or_else(
                     || Some(0..rect.width),
-                    |previous| {
-                        changed_columns(&previous.viewport, viewport, row, rect.width, coalesce)
-                    },
+                    |previous| changed_columns(&previous.viewport, viewport, row, rect.width),
                 ) {
                     self.blit_columns(viewport, row, rect, columns);
                 }
@@ -976,16 +1059,17 @@ impl Renderer {
         );
     }
 
-    fn write_match_sgr(&mut self, matched: u8) {
+    fn write_match_sgr(&mut self, matched: u8) -> bool {
         let Some(style) = matched
             .checked_sub(1)
             .and_then(|index| self.match_styles.get(usize::from(index)))
             .and_then(Option::as_ref)
         else {
-            return;
+            return false;
         };
         self.output.extend_from_slice(b"\x1b[0m");
         write_selection_sgr(&mut self.output, style);
+        true
     }
 
     fn write_terminal_sgr(
@@ -993,7 +1077,8 @@ impl Renderer {
         style: PackedStyle,
         reverse: bool,
         viewport: &TerminalViewport,
-    ) {
+        reset: bool,
+    ) -> bool {
         let key = (
             style,
             reverse,
@@ -1023,9 +1108,14 @@ impl Renderer {
             );
             self.terminal_sgr = Some((key, bytes));
         }
-        if let Some((_, bytes)) = &self.terminal_sgr {
+        let Some((_, bytes)) = &self.terminal_sgr else {
+            return false;
+        };
+        let equivalent = sgr_is_reset(bytes);
+        if !(reset && equivalent) {
             self.output.extend_from_slice(bytes);
         }
+        equivalent
     }
 
     fn blit_row(&mut self, viewport: &TerminalViewport, row: u16, rect: Rect) {
@@ -1113,11 +1203,13 @@ impl Renderer {
             self.selection_style = selection_style;
             return;
         }
-        write_cursor_position(
-            &mut self.output,
+        self.move_to(
             rect.x.saturating_add(columns.start),
             rect.y.saturating_add(row),
         );
+        let entry = self.tty_state();
+        let mut sgr_reset = entry.is_some_and(|state| state.sgr_reset);
+        let visible = entry.is_some_and(|state| state.visible);
         let mut current_style = None;
         let mut terminal_column = columns.start;
         for column in columns.start..clear_from.unwrap_or(columns.end) {
@@ -1136,10 +1228,13 @@ impl Renderer {
                         );
                     }
                     if current_style != Some((style, reverse, selected, matched)) {
-                        self.write_terminal_sgr(style, reverse, viewport);
-                        self.write_match_sgr(matched);
+                        sgr_reset = self.write_terminal_sgr(style, reverse, viewport, sgr_reset);
+                        if self.write_match_sgr(matched) {
+                            sgr_reset = false;
+                        }
                         if selected && let Some(selection) = &selection_style {
                             write_selection_sgr(&mut self.output, selection);
+                            sgr_reset = false;
                         }
                         current_style = Some((style, reverse, selected, matched));
                     }
@@ -1156,10 +1251,13 @@ impl Renderer {
                 );
             }
             if current_style != Some((style, reverse, selected, matched)) {
-                self.write_terminal_sgr(style, reverse, viewport);
-                self.write_match_sgr(matched);
+                sgr_reset = self.write_terminal_sgr(style, reverse, viewport, sgr_reset);
+                if self.write_match_sgr(matched) {
+                    sgr_reset = false;
+                }
                 if selected && let Some(selection) = &selection_style {
                     write_selection_sgr(&mut self.output, selection);
+                    sgr_reset = false;
                 }
                 current_style = Some((style, reverse, selected, matched));
             }
@@ -1176,7 +1274,7 @@ impl Renderer {
             write_glyph(&mut self.output, viewport.glyph(cell), advance);
             terminal_column = column.saturating_add(advance);
         }
-        let mut reset = current_style.is_some();
+        let mut reset = !sgr_reset;
         if let Some(start) = erase_from {
             if terminal_column != start {
                 write_cursor_position(
@@ -1198,10 +1296,21 @@ impl Renderer {
             }
             write!(self.output, "\x1b[{}X", rect.width - start)
                 .expect("writing to Vec cannot fail");
+            terminal_column = start;
         }
         if reset {
             self.output.extend_from_slice(b"\x1b[0m");
         }
+        self.set_tty_state(TtyState {
+            cursor: (terminal_column < rect.width).then(|| {
+                (
+                    rect.x.saturating_add(terminal_column),
+                    rect.y.saturating_add(row),
+                )
+            }),
+            sgr_reset: true,
+            visible,
+        });
         self.selection_style = selection_style;
     }
 
@@ -1838,8 +1947,7 @@ impl Renderer {
         let overlay = status_overlay(model, width);
         let origin = model.status_origin_y();
         let geometry = (x, origin, width);
-        if *crate::COALESCE
-            && !force
+        if !force
             && overlay.is_none()
             && self.status_geometry == Some(geometry)
             && self.status_source.as_ref() == Some(&model.status)
@@ -2368,20 +2476,26 @@ impl Renderer {
             self.hide_cursor();
             return;
         }
-        write_cursor_position(
-            &mut self.output,
+        self.move_to(
             rect.x.saturating_add(column),
             rect.y.saturating_add(cursor.row()),
         );
         if cursor.visible() {
-            self.output.extend_from_slice(b"\x1b[?25h");
+            self.show_cursor();
         } else {
             self.hide_cursor();
         }
     }
 
     fn hide_cursor(&mut self) {
+        let state = self.tty_state();
         self.output.extend_from_slice(b"\x1b[?25l");
+        if let Some(state) = state {
+            self.set_tty_state(TtyState {
+                visible: false,
+                ..state
+            });
+        }
     }
 }
 
@@ -2398,10 +2512,9 @@ fn changed_columns(
     current: &TerminalViewport,
     row: u16,
     width: u16,
-    incremental: bool,
 ) -> Option<std::ops::Range<u16>> {
     if (!Arc::ptr_eq(&previous.dictionary, &current.dictionary)
-        && (!incremental || previous.dictionary.as_ref() != current.dictionary.as_ref()))
+        && previous.dictionary.as_ref() != current.dictionary.as_ref())
         || previous
             .overlays
             .iter()
@@ -2424,11 +2537,10 @@ fn changed_columns(
     let end = cells
         .rposition(|(before, after)| before != after)
         .map_or(start + 1, |last| start + last + 2);
-    if !incremental
-        || before[start..end]
-            .iter()
-            .chain(&after[start..end])
-            .any(|cell| cell.width() != CellWidth::Narrow)
+    if before[start..end]
+        .iter()
+        .chain(&after[start..end])
+        .any(|cell| cell.width() != CellWidth::Narrow)
     {
         Some(0..width)
     } else {
@@ -3067,6 +3179,23 @@ fn fill_cells(fill: char, width: usize) -> String {
     )
 }
 
+fn sgr_is_reset(bytes: &[u8]) -> bool {
+    let Some(mut rest) = bytes.strip_prefix(b"\x1b[0m") else {
+        return false;
+    };
+    while !rest.is_empty() {
+        let Some(after) = rest
+            .strip_prefix(b"\x1b[39m")
+            .or_else(|| rest.strip_prefix(b"\x1b[49m"))
+            .or_else(|| rest.strip_prefix(b"\x1b[0m"))
+        else {
+            return false;
+        };
+        rest = after;
+    }
+    true
+}
+
 fn cursor_only(bytes: &[u8]) -> bool {
     let mut rest = bytes;
     while !rest.is_empty() {
@@ -3261,9 +3390,7 @@ fn write_border_runs(
     for (&(row, column), (sgr, glyph)) in cells {
         match last {
             Some((last_row, last_column)) if last_row == row && last_column + 1 == column => {}
-            Some((last_row, last_column))
-                if *crate::COALESCE && last_row + 1 == row && last_column == column =>
-            {
+            Some((last_row, last_column)) if last_row + 1 == row && last_column == column => {
                 output.extend_from_slice(b"\x08\n");
             }
             _ => write_cursor_position(output, column, row),
@@ -4046,7 +4173,7 @@ mod tests {
                 &renderer.terminal_defaults,
             );
             renderer.output.clear();
-            renderer.write_terminal_sgr(style, reverse, &viewport);
+            renderer.write_terminal_sgr(style, reverse, &viewport, false);
             assert_eq!(renderer.output, expected);
         }
         assert!(renderer.terminal_sgr.is_some());
@@ -4147,47 +4274,15 @@ mod tests {
     }
 
     #[test]
-    fn disabled_coalescing_repaints_full_rows_after_frame_updates() {
-        if *crate::COALESCE {
-            return;
-        }
-        let before = styled_viewport();
-        let mut after = before.clone();
-        Arc::make_mut(&mut after.cells)[1] = PackedCell::new('z' as u32, 0, CellWidth::Narrow);
-        let rect = Rect {
-            x: 0,
-            y: 0,
-            width: 3,
-            height: 1,
-        };
-        let mut renderer = Renderer::new();
-        renderer.paint_terminal(PaneId(1), &before, rect, true, None);
-        renderer.output.clear();
-        renderer.paint_terminal(
-            PaneId(1),
-            &after,
-            rect,
-            false,
-            Some(&FrameDamage::Rows(vec![0])),
-        );
-        let output = String::from_utf8(renderer.output.clone()).unwrap();
-        assert!(output.starts_with("\x1b[1;1H"), "{output:?}");
-        assert!(output.contains("az") && output.contains('c'), "{output:?}");
-        renderer.output.clear();
-        renderer.paint_terminal(PaneId(1), &after, rect, false, Some(&FrameDamage::All));
-        assert!(!renderer.output.is_empty());
-    }
-
-    #[test]
     fn changed_wide_cells_and_overlay_rows_keep_full_row_repaints() {
         let before = styled_viewport();
         let mut after = before.clone();
         Arc::make_mut(&mut after.cells)[1] = PackedCell::new('界' as u32, 0, CellWidth::Wide);
-        assert_eq!(changed_columns(&before, &after, 0, 3, true), Some(0..3));
+        assert_eq!(changed_columns(&before, &after, 0, 3), Some(0..3));
 
         let mut after = before.clone();
         after.overlays = Arc::from([OverlaySpan::new(0, 1, 2, OverlayKind::Selection)]);
-        assert_eq!(changed_columns(&before, &after, 0, 3, true), Some(0..3));
+        assert_eq!(changed_columns(&before, &after, 0, 3), Some(0..3));
     }
 
     fn waiting_pane_model() -> Model {

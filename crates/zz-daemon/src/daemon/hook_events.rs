@@ -1,35 +1,13 @@
-use std::sync::LazyLock;
-
 use zz_mux::{ChangeWindow, JournalChanges, MuxState};
 
 use super::*;
 
-pub(super) static READONLY_SKIP: LazyLock<bool> =
-    LazyLock::new(|| std::env::var_os("ZZ_PERF_READONLY_SKIP").is_none_or(|value| value != "0"));
-
-pub(super) static EAGER_FACTS: LazyLock<bool> =
-    LazyLock::new(|| std::env::var_os("ZZ_PERF_EAGER_FACTS").is_some_and(|value| value == "1"));
-
-pub(super) static HOOK_JOURNAL: LazyLock<bool> =
-    LazyLock::new(|| std::env::var_os("ZZ_PERF_HOOK_JOURNAL").is_none_or(|value| value != "0"));
-
-pub(super) fn log_knobs() {
-    log::info!(
-        target: "zz_daemon::perf",
-        "hook knobs: ZZ_PERF_READONLY_SKIP={} ZZ_PERF_EAGER_FACTS={} ZZ_PERF_HOOK_JOURNAL={}",
-        u8::from(*READONLY_SKIP),
-        u8::from(*EAGER_FACTS),
-        u8::from(*HOOK_JOURNAL),
-    );
-}
-
 pub(super) fn command_is_read_only(command: &str, args: &[RawText]) -> bool {
-    *READONLY_SKIP
-        && zz_protocol::catalog_command_spec(command).is_some_and(|spec| !spec.mutates(args))
+    zz_protocol::catalog_command_spec(command).is_some_and(|spec| !spec.mutates(args))
 }
 
 pub(super) fn format_facts_unread(command: &str, args: &[RawText]) -> bool {
-    !*EAGER_FACTS && expands_no_format(command, args)
+    expands_no_format(command, args)
 }
 
 pub(super) fn expands_no_format(command: &str, args: &[RawText]) -> bool {
@@ -128,16 +106,9 @@ impl HookDiff<'_> {
 
 impl HookScope {
     pub(super) fn open(engine: &mut MuxEngine) -> Self {
-        if *HOOK_JOURNAL {
-            Self {
-                before: cfg!(debug_assertions).then(|| MuxHookSnapshot::capture(engine)),
-                window: Some(engine.state.open_change_window()),
-            }
-        } else {
-            Self {
-                window: None,
-                before: Some(MuxHookSnapshot::capture(engine)),
-            }
+        Self {
+            before: cfg!(debug_assertions).then(|| MuxHookSnapshot::capture(engine)),
+            window: Some(engine.state.open_change_window()),
         }
     }
 
@@ -932,22 +903,14 @@ impl FocusProbeScope {
     }
 
     pub(super) fn open_within(inner: &mut ServerState, window: Option<&ChangeWindow>) -> Self {
-        if *HOOK_JOURNAL {
-            Self {
-                probe: capture_client_focus_probe(inner),
-                full: cfg!(debug_assertions).then(|| capture_pane_focus_probe(inner)),
-                window: Some(
-                    window
-                        .cloned()
-                        .unwrap_or_else(|| inner.engine.state.open_change_window()),
-                ),
-            }
-        } else {
-            Self {
-                probe: capture_pane_focus_probe(inner),
-                window: None,
-                full: None,
-            }
+        Self {
+            probe: capture_client_focus_probe(inner),
+            full: cfg!(debug_assertions).then(|| capture_pane_focus_probe(inner)),
+            window: Some(
+                window
+                    .cloned()
+                    .unwrap_or_else(|| inner.engine.state.open_change_window()),
+            ),
         }
     }
 

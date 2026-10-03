@@ -25,9 +25,7 @@ fn status_parameters_observe_options_arrays_titles_environment_and_default_termi
     let first = parameters(&inner, Some(session));
     inner.engine.set_format_now(1234);
     let second = parameters(&inner, Some(session));
-    if inner.engine.format_cache_revision().is_some() {
-        assert!(Arc::ptr_eq(&first, &second));
-    }
+    assert!(Arc::ptr_eq(&first, &second));
     for args in [
         vec!["set-option", "-g", "status-left", "#{session_name}:new"],
         vec!["set-option", "-g", "status-format[0]", "#{client_width}"],
@@ -106,10 +104,7 @@ fn status_parameters_retarget_sessions_and_reject_a_replaced_engine_with_equal_r
 fn status_parameters_bound_includes_environment_and_disables_retention_on_rollback() {
     let mut inner = ServerState::default();
     parameters(&inner, None);
-    assert_eq!(
-        inner.status_parameters_cache.lock().is_some(),
-        inner.engine.format_cache_revision().is_some()
-    );
+    assert!(inner.status_parameters_cache.lock().is_some());
     let large = "v".repeat(600_000);
     execute(
         &mut inner,
@@ -157,10 +152,7 @@ fn raw_text_bound_rejects_large_job_parameters_and_keeps_small_raw_values() {
             assert!(!Arc::ptr_eq(&first, &same));
         } else {
             assert!(first.retained_bytes() < STATUS_PREPARATION_MAX_BYTES);
-            assert_eq!(
-                Arc::ptr_eq(&first, &same),
-                inner.engine.format_cache_revision().is_some()
-            );
+            assert!(Arc::ptr_eq(&first, &same));
         }
     }
 }
@@ -200,20 +192,18 @@ fn status_preparation_reuses_engine_capture_and_keeps_client_and_config_values_f
         )
     };
     let first = zz_mux::with_borrowed_formats(true, || request(&inner));
-    if zz_mux::format_cache_knob() {
-        zz_mux::with_borrowed_formats(true, || {
-            let cached = cached_live_status_context(
-                &inner,
-                Some(session),
-                Some(window),
-                parameters(&inner, Some(session)).needs,
-                &first.references,
-                true,
-            )
-            .unwrap();
-            assert!(first.context.same_detached(&cached));
-        });
-    }
+    zz_mux::with_borrowed_formats(true, || {
+        let cached = cached_live_status_context(
+            &inner,
+            Some(session),
+            Some(window),
+            parameters(&inner, Some(session)).needs,
+            &first.references,
+            true,
+        )
+        .unwrap();
+        assert!(first.context.same_detached(&cached));
+    });
     let mut renderer = StatusRenderer::default();
     let first_left = renderer.render_initial(&first).left;
     let prefix = first_left.strip_suffix("80::1").unwrap().to_owned();
@@ -291,10 +281,8 @@ fn status_fact_selection_plans_reuse_dependencies_and_keep_referenced_facts_fres
     assert_eq!(inner.engine.format_cache_revision(), revision);
     for _ in 0..3 {
         let current = parameters(&inner, Some(session));
-        if zz_mux::format_cache_knob() {
-            assert!(Arc::ptr_eq(&first, &current));
-            assert_eq!(FORMAT_FACT_SELECTION_BUILDS.with(Cell::get), builds);
-        }
+        assert!(Arc::ptr_eq(&first, &current));
+        assert_eq!(FORMAT_FACT_SELECTION_BUILDS.with(Cell::get), builds);
         let selected = facts(&inner, &current);
         assert_eq!(expand(&inner, &selected), "/dev/changed:120:/dev/changed:1");
         let request = status_request_with_selected_facts(
@@ -317,7 +305,5 @@ fn status_fact_selection_plans_reuse_dependencies_and_keep_referenced_facts_fres
         assert_eq!(expand(&inner, &selected), expand(&inner, &complete));
     }
     assert_eq!(expand(&inner, &original), "/dev/first:80:/dev/first:0");
-    if zz_mux::format_cache_knob() {
-        assert_eq!(FORMAT_FACT_SELECTION_BUILDS.with(Cell::get), builds);
-    }
+    assert_eq!(FORMAT_FACT_SELECTION_BUILDS.with(Cell::get), builds);
 }

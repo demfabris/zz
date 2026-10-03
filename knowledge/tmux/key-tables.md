@@ -47,7 +47,7 @@ prefix state and the client's active copy-mode table. `KeyTables::snapshot()` fl
 binding help from published truth instead of hardcoded guesses. Each table also carries a
 generation, and after a change the daemon publishes `EventPayload::KeyTablesPatched` with only the
 tables that changed and the names of removed ones (`KeyTables::table_generations`,
-`snapshot_table`); `ZZ_PERF_KEY_TABLE_DELTA=0` sends every table in `KeyTablesChanged` instead.
+`snapshot_table`).
 
 The `choose-tree` and `choose-buffer` tables resolve daemon-side too: choosers forward raw key
 presses (`ChooseTreeAction::Key` / `ChooseBufferAction::Key`) and the daemon maps them through

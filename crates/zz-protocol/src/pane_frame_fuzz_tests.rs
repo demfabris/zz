@@ -506,16 +506,12 @@ fn payload(frame: &[u8]) -> Vec<u8> {
 fn chained_patches_keep_client_state_equal_to_daemon_state() {
     let mut patches = 0_usize;
     let mut fulls = 0_usize;
-    let mut row_patches = 0_usize;
     for seed in 1..=400_u64 {
         let mut rng = Rng(seed.wrapping_mul(0x2545_f491_4f6c_dd1d) | 1);
         let mut daemon = fresh(&mut rng, seed << 20);
         let mut client = decode_full(&full_frame(&daemon));
         assert_eq!(client, daemon, "seed {seed} initial");
-        let mut widened_client = client.clone();
         let mut shared_client = client.clone();
-        let mut whole_rows = TerminalDiffScratch::default();
-        whole_rows.set_whole_rows(true);
         let mut shared = TerminalDiffScratch::default();
         let mut tail = PatchTail::default();
         let mut shared_frame = Vec::new();
@@ -587,32 +583,17 @@ fn chained_patches_keep_client_state_equal_to_daemon_state() {
                     .apply_patch(decode_patch(&shared_frame))
                     .unwrap_or_else(|error| panic!("seed {seed} step {step} shared: {error:?}"));
                 assert_eq!(shared_client, current, "seed {seed} step {step} shared");
-                let widened =
-                    TerminalViewport::diff_with_scratch(&daemon, &current, &mut whole_rows)
-                        .expect("a whole-row diff agrees with the span diff");
-                if !widened.changed_rows.is_empty() {
-                    row_patches += 1;
-                }
-                let frame = patch_frame(&widened);
-                widened_client
-                    .apply_patch(decode_patch(&frame))
-                    .unwrap_or_else(|error| panic!("seed {seed} step {step} widened: {error:?}"));
-                assert_eq!(widened_client, current, "seed {seed} step {step} widened");
             } else {
                 fulls += 1;
                 client = decode_full(&full_frame(&current));
                 assert_eq!(client, current, "seed {seed} step {step} full");
-                widened_client = client.clone();
                 shared_client = client.clone();
                 assert!(TerminalViewport::diff_shared(&daemon, &current, &mut shared).is_none());
             }
             daemon = current;
         }
     }
-    assert!(
-        patches > 10_000,
-        "{patches} patches, {fulls} fulls, {row_patches}"
-    );
+    assert!(patches > 10_000, "{patches} patches, {fulls} fulls");
 }
 
 #[test]

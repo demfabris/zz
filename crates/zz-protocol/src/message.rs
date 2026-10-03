@@ -3886,6 +3886,22 @@ pub enum ProtocolMessage {
     Batch(crate::Batch),
     TreeSync,
     GetKeyTables,
+    ControlStdio,
+    ControlStdin {
+        bytes: Vec<u8>,
+        submitted: bool,
+        closed: bool,
+        error: Option<String>,
+    },
+    ControlStdioSync {
+        next_number: u64,
+    },
+    ControlWrite {
+        bytes: Vec<u8>,
+        idle: Option<(u64, u64)>,
+        close: bool,
+    },
+    ControlStdioClosed,
 }
 
 fn deserialize_client_terminal_type<'de, D>(deserializer: D) -> Result<String, D::Error>

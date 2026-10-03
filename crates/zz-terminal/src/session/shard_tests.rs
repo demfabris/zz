@@ -339,8 +339,26 @@ fn twenty_panes_select_direct_or_gather_readers() {
             .iter()
             .filter(|name| name.starts_with("zz-pty-gather"))
             .count(),
-        if gather { 20 } else { 0 }
+        if gather { 4 } else { 0 }
     );
+}
+
+#[test]
+fn a_full_raw_tap_parks_its_pane_without_blocking_a_neighbour() {
+    let shard = ShardHandle::start(109).expect("shard");
+    let flood = session(&shard, "exec yes flood");
+    let (tap, tapped) = TerminalSession::raw_output_tap_channel();
+    flood.arm_raw_output_tap(1, tap).expect("arm the flood tap");
+    wait(|| tapped.receiver.as_ref().is_some_and(Receiver::is_full));
+    let quiet = session(&shard, "stty -echo; printf 'ready\\r\\n'; exec cat");
+    wait(|| captured(&quiet, "ready"));
+    quiet.send_text("quiet echo\n");
+    wait(|| captured(&quiet, "quiet echo"));
+    for _ in 0..64 {
+        tapped
+            .recv_timeout(Duration::from_secs(2))
+            .expect("the tapped flood resumes once drained");
+    }
 }
 
 #[test]

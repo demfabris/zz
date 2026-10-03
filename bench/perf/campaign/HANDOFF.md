@@ -4,9 +4,10 @@ Entry point for a fresh session continuing the zz daemon performance rebuild. Wr
 the macbook, continued the same day on the Linux host alienware (see "Linux leg"). State on
 2026-10-02: waves 0 to 3 are on `main` and pushed. Wave 3 (W3-SHARDS, W3-TUI, W3-LOOP and nine
 Opus fix lanes) closed at `e9bc174c`; its exit gates are `wave3-macbook-e9bc174c.json` and
-`wave3-alienware-e9bc174c.json`. The Ghostty fork pin is `67351380` (trim fix `c3941417`, copy
-snapshots `7823f65d`, used-size active page copies). No lane in flight, no lane worktree left.
-Wave 4 starts from "Next session: wave 4"; read "Lane brief rules" before launching anything.
+`wave3-alienware-e9bc174c.json`. The Ghostty fork pin is `189df4a1` (row cell copy, branch
+`zz-2026-10-02`, on `67351380`: trim fix `c3941417`, copy snapshots `7823f65d`, used-size active
+page copies); the libghostty-rs pin is `f5f82601`. No lane in flight, no lane worktree left.
+Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" before launching anything.
 
 ## Next session: wave 4
 
@@ -17,7 +18,7 @@ Wave 4 starts from "Next session: wave 4"; read "Lane brief rules" before launch
    status-job threads 3/s -> 0 and instructions -26% / -46%, kill-pane instructions -26% Mac,
    copy entry CPU -17 to -44%, control output +18 to +88%. No unexplained regression: see the
    two exit entries in the merge log for each flagged row. Pushed to main the same day.
-2. Wave 4 in merge order: W4-DELIVER, W4-ROWS, W4-BINARY, gate `--stage final`
+2. Wave 4 in merge order: W4-DELIVER, W4-ROWS, W4-BINARY (closed unmerged, see the wave-4 merge log), gate `--stage final`
    (`knowledge/designs/daemon-perf-rebuild.md`). What still loses to tmux at wave-3 exit, all
    W4-DELIVER unless noted: echo p50/p99 1.8-2.6 ms against 0.92-1.13 on Linux (Mac p50 0.59-0.90
    against 0.26-0.33), `control.latency` 1.2-1.5x, `attach.cpu`/`attach.ttfc`, `chatty.cpu_pct.visible`
@@ -65,6 +66,210 @@ Wave 4 starts from "Next session: wave 4"; read "Lane brief rules" before launch
    rows. The wave-exit corpus found what 36 merge rows did not (two W3-LOOP parity regressions):
    run the full corpus before calling a wave done.
 6. Release freeze until wave 4 exits; protocol stays 107.
+
+## Wave 4 merge log (from 2026-10-02)
+
+- Start, 2026-10-02 20:15. `perf/wave4` from main `06ea9cf1` in `~/dev/zz-perf-int` on both hosts
+  (alienware gets it through `perf/wave4-mac`, then `--ff-only`: pushing a branch that a worktree
+  has checked out is refused). `lane-briefs.py` points at wave 4 (`--stage final`, base
+  `wave3-<host>-e9bc174c.json`, wave-3 reds listed, plain rollback switches instead of
+  `ZZ_PERF_*`). Final-stage rescore of the wave-3 exit gates (`run.py --rescore <json> --stage
+  final`): Mac 8 fails (`spawn.cpu.split_empty_P` 2.1x, `chatty.cpu_pct.visible`, five echo rows,
+  `control.latency` 1.41x), Linux 20 (spawn CPU x3, chatty flip/visible, `mem.threads.*` x4 at
+  25-26 against 12, `attach.cpu.p1`/`.p4` 1.4-1.48x, six echo rows, `control.latency` 1.52x,
+  `control.burst_cmds_per_s` 0.83x, and the noisy `cli.wall.capture_history.p20`).
+- Lanes launched at once as Opus subagents (`lane-impl`), briefs from
+  `bench/perf/campaign/scripts/wave4-briefs.py` (copied from scratch `/tmp/zzpc/w4/`), lane check
+  `/tmp/zzpc/w4/lanecheck.sh` every 15 min:
+  - KNOBS (`~/dev/zz-knobs`, Mac): delete every `ZZ_PERF_*` knob and the code only it reaches.
+    Decision: all 26 go now. The doc's rule deletes wave-N knobs when wave N+2 starts; the wave-1
+    knobs were missed at the start of wave 3, so wave 1 and wave 2 go together. Merges first: it
+    touches every lane's files and is the smallest.
+  - W4-DELIVER plan (`~/dev/zz-deliver`, Mac): the section predates wave 3, so the first brief maps
+    the as-built code and writes `bench/perf/campaign/w4-deliver-plan.txt` (slices, zones, done
+    criteria, parallel groups, and whether control latency/burst and Linux attach CPU belong here
+    or in a separate control lane). Slices follow the plan.
+  - W4-BINARY (`~/dev/zz-binary`, Mac): the daemon-only executable and packaging; Linux build and
+    ssh remote start are mine after the lane.
+  - W4-ROWS (`~/dev/zz-rows`, Mac). Decision: profile now on the wave-4 base instead of after the
+    DELIVER merge (DELIVER changes routing, not how a frame reads cells); it is re-measured on the
+    DELIVER merge before it merges. A fork change is committed in a scratch Ghostty clone, not
+    pushed; it gets one review, then I publish a dated branch and repin.
+  - SPAWN (new lane, no doc section; the wave-3 handoff left `spawn.cpu.*` unowned): edits in the
+    Mac worktree `~/dev/zz-spawn`, builds and measures in a detached alienware worktree of the same
+    name (`git checkout --detach perf/spawn` after each push).
+  - Decision: five lanes at once, four compiling on the Mac (owner, 2026-10-02: "bump the gas, we
+    have usage"). Instruction, byte, count and thread rows are the signal while they build; wall
+    and CPU rows are judged in quiet A/Bs at merge time.
+- W4-DELIVER plan done in 21 min (`a1f6fe3a` on perf/wave4, cherry-picked from the plan lane):
+  `bench/perf/campaign/w4-deliver-plan.txt` plus four probe scripts (`w4-deliver-*.py`). Wave 3
+  already removed the `zz-pane-N` threads and (on unix) the control tap threads; a second client
+  on a pane costs +6 Minstr/5 s against +515 for the first. Slices DL1 (current command, cwd and
+  activity off the frame path), DL2 (per-pane stream sequence, encode once), DL3/DL3b (shard
+  sinks), DL4 (shard writes the socket directly when the queue is empty), DL5 (%output as a sink
+  kind and the per-pane sequence barrier), DL6 (Linux: one gather thread per shard, threads
+  25 -> 9). Owners for all 28 final-stage fails. Two new lanes from it: C1 CONTROL
+  (`control.latency`: the daemon is already cheaper than tmux per command, the gap is the
+  `zz_cli -C` process, 9.5 us and 64 kinstr per command) and TUI-ECHO (the TUI client spends 105
+  kinstr and 70 us per key; DELIVER alone gives 60-100 us of the 196 us the Mac echo p50 needs).
+  Order: DL1, DL2 and DL4 start after KNOBS merges (it deletes knobs inside their functions); DL3
+  and DL3b rebase on W4-ROWS; DL6 merges after SPAWN.
+- Launched at 20:50: DL6 (`~/dev/zz-gather`, Mac edits, detached alienware worktree for builds),
+  CONTROL (`~/dev/zz-control`, Mac; decision: relay variant first, the SCM_RIGHTS stdio variant
+  allowed if the relay misses, behind `ZZ_CONTROL_RELAY=1`, since DL5 has not started and will
+  rebase on it) and TUI-ECHO (`~/dev/zz-tuiecho`, Mac). Seven lanes in flight: five compiling on
+  the Mac (load about 28 on 16 cores, 64% memory free), two building on alienware.
+- KNOBS merged 2026-10-02 21:45 as `bce8d6a5` (lane 82 min, `539b41f9`, plus my `339d3c4a`):
+  every `ZZ_PERF_*` knob gone, 49 files, +522/-1739. Kept on purpose: the daemon's legacy
+  command path (gpui-shared `connection.rs` and `InteractiveClient` still send ClientHello,
+  PrepareCommandList and CommandRequest, and the CLI falls back to it when a daemon refuses
+  Exec), the format interpreter (format tracing uses it) and three test-only oracle switches with
+  no env var (`with_eager_universe`, `with_borrowed_formats`, `compiled::with_enabled`), the mux
+  engine's `set_automatic_rename_throttle` (the daemon always sets it on), `KeyTablesChanged`.
+  Deleted fallbacks include the flat copy-mode capture (a paged grid always), whole-row diffs
+  (`TerminalDiffScratch` 136 -> 128 bytes), `FormatHookFactsView`, the TUI waiting card and the
+  per-connection threads on Windows; `run.py` no longer writes `meta.knobs`. Windows check:
+  `DOCS_RS=1 cargo check -p zz-daemon --target x86_64-pc-windows-msvc` (skips the zig build) gave
+  one new dead-code warning, `OutboundFrame::into_vec`, now `cfg(test)`: 17 warnings, as on the
+  base. The lane's quick gate ran at load 25-30: `chatty.instr_per_s.hidden` 1.075x raw, 1.013x
+  normalized by tmux over nine pairs; every cli, control and attach instruction row <= 1.017 at
+  the minimum of three. Merge checks on both hosts follow (Linux A/B through quiet-gate).
+- DL1 launched 21:50 on `perf/deliver` from `bce8d6a5` (`~/dev/zz-deliver` on the Mac, detached
+  worktree of the same name on alienware).
+- W4-BINARY closed, not merged (lane 93 min, `perf/binary` `b08a3565`, branch and worktree
+  removed; the commit stays in the Mac reflog). The split works but moves `mem.rss.p1` only 12.20
+  -> 11.72 MiB (2.87x tmux; gate 2x): the CLI-only code is 1.3 MB, the resident text is the
+  daemon's own. Decision: about 1,000 net lines in 39 files (two executables in every recipe, a
+  build-id handshake, a `/proc` fd pin for the tmux wrapper) is not worth 0.48 MiB of clean text
+  pages while the footprint rows pass; `mem.rss.*` stays informational. The design doc's W4-BINARY
+  section has the numbers and the order-file lever (8.3 MB idle, 2.10x) if RSS ever matters.
+- W4-ROWS merged 2026-10-02 23:00 as `ebf23f86` (lane 102 min, `2a0e7d72`, plus my repin
+  `15643e1b`). Row extraction was 54% of daemon samples in chatty visible, 25% in echo busy30:
+  the fork call `ghostty_render_state_row_cells_copy` (Ghostty `189df4a1`, new branch
+  `zz-2026-10-02` on `67351380`) copies a row into packed 12-byte cells with a style table and
+  UTF-8 grapheme spans, no allocation, no thread; the wrapper exposes `CellIteration::copy_into`
+  (libghostty-rs `zz-2026-10-02`: `d975339f` plus `f5f82601`). FFI calls per 180x50 frame 81,250
+  -> 250; frame build 53.9% -> 24.7% of chatty-visible samples; `chatty.cpu_pct.visible` 3.48 ->
+  2.18% on the Mac (now passes the final rule), `chatty.instr_per_s.visible` 0.33x, flip/hidden/
+  steady 0.75-0.81x. Fork review (codex ultra, 13 min after a watchdog false start: pass the lane
+  head, not the lane base, as the review's base): the C ABI is clean (6510 native tests, 73
+  ReleaseSafe probes on limits, buffers and bad input); one blocker in the wrapper, inherited from
+  `8e40135`: `RowIterator::update` and `CellIterator::update` did not tie their return lifetimes
+  to the snapshot and row, so safe Rust could copy from freed render state (reproduced). Fixed in
+  `f5f82601` (`'s` on both), then both branches published and repinned; zz-terminal 375 pass on
+  the fetched pins. Open: copy-mode history capture (`ModeRevision::capture_flat`) still reads per
+  cell and could use the same copy.
+- TUI-ECHO merged as `127f09b1` in one batch with ROWS (lane 105 min, `ffcfc2c4`; done=false): the
+  client waits on kqueue on macOS (select elsewhere and as the fallback), reads the socket once per
+  wake, and the renderer tracks the terminal cursor and default style so an echoed key is 5 bytes
+  instead of 63 (tmux writes 5). Per key 108.6 -> 92.1 kinstr and 64.5 -> 56.8 us; the 40 kinstr
+  target is below the OS floor here (a minimal relay with the six syscalls per key costs 55.5
+  kinstr, 25-29 us; the counter includes kernel work). echo.p50.idle did not move beyond noise.
+  Out of its zone, left open: key message encoding in zz-protocol (12-15% of client user CPU per
+  key), `ClientCore::claims_prefix_input` allocating a String per key (6%), and each frame copying
+  the full 38 KB cell array (8%). Going below the floor needs tmux's shape (the server writes the
+  client's terminal), the TUI analogue of CONTROL's stdio handoff.
+- Merge checks run per batch from here (ROWS + TUI-ECHO as `batch1`): serial 35-minute suites
+  per lane were the bottleneck with seven lanes; each lane already carries its own A/B.
+- CONTROL (lane 73 min, `986abe33`, done for the Mac): `zz_cli -C` hands its stdin/stdout to the
+  daemon over SCM_RIGHTS and the daemon writes plain command replies and `%output` straight to
+  them; everything else goes back through the client's renderer. Mac `control.latency` 0.0338 ->
+  0.0113 ms (0.81x tmux), burst 291k (1.69x), client 0 kinstr per command. A zero-work relay alone
+  costs 47 kinstr, so the relay variant was skipped. Parity review running; Linux leg: cli tests
+  280 pass, control_stdio tests and startup diagnostics pass, compat 6 of 7 (the known red).
+- Incident 22:05-22:32: the CONTROL reviewer's probe daemon held 462 of the Mac's 511 PTYs (`cat`
+  panes), so every other lane's tests failed with "PTY error: Device not configured"; stopped by
+  message, lanes told to rerun. Lane briefs should cap probes at 50 panes.
+- Incident on alienware: quiet-gate pauses every foreign compile, and a paused cargo holds the
+  shared package-cache lock, so with four lanes plus my checks the solo reruns of merge checks
+  (600 s including compile) timed out (KNOBS: `an_attach_repaints_a_dead_pane_kept_by_remain_on_exit`,
+  `formatted_split_wait_resumes_its_pane_wait_on_the_loop`) and my CONTROL release build died.
+  Instruction rows do not need quiet-gate; use it only for wall rows, one at a time.
+- CONTROL parity review (Opus, 42 min): block integrity, escaping, kill-server, detach,
+  pause-after, 17 EOF/blank-Return inputs and the relay fallbacks match; 2 majors (a SIGKILLed
+  client with a full stdout pipe blocks the loop up to 1 s in `ControlStdio::close` ->
+  `flush_blocking`; after a client is killed the daemon keeps its fds and keeps writing
+  `%output`, so the reader never sees EOF) and 5 minors (O_NONBLOCK left on the client's stdio if
+  the daemon dies, a 5 s ack deadline, stderr diagnostic order, a new client against an older 107
+  daemon fails instead of falling back, stdout WRITABLE left registered). Fix round launched.
+  Two bugs found that predate wave 4: `kill-window` from a control client leaks the pane's PTY
+  (3 ptmx fds per pane; this is what took the 462 PTYs) -> lane PTYLEAK (`~/dev/zz-ptyleak`);
+  `refresh-client -f wait-exit`, blank line, EOF hangs (tmux exits 0) -> the CONTROL fix round.
+- SPAWN (lane 141 min, `4d79a6d2`, done=false): Linux panes start with `clone(CLONE_VM |
+  CLONE_VFORK)` on a 64 KiB stack instead of `fork()` from the multithreaded daemon (copy-on-write
+  faults on the shard per pane 250 -> 4), the exec fence pipe is gone on Linux, `TIOCGPTPEER` for
+  the slave, empty panes skip the spawn environment. alienware: `spawn.cpu.split_shell` 2.23-2.35
+  -> 1.80-1.83 ms (tmux 1.29-1.35), `new_window` 2.40-2.52 -> 1.61-1.69 (tmux 1.20-1.40),
+  `split_empty_P` 0.85-0.91 -> 0.82-0.87 (tmux 0.63-0.71); kernel time, not instructions
+  (`split_shell` user instructions +7%, unexplained). Left outside its zone: the per-pane gather
+  thread (DL6), `terminal_current_command` per publish (DL1), and `settle_unwatched`, which builds a
+  full snapshot about 100 ms after spawn: about 50% of `split_empty_P` instructions (0.9 Minstr,
+  214 us per split), owner DL3 (sinks) unless a smaller slice takes it first. A safety review of
+  the CLONE_VM child (Opus: codex's cyber filter stops process-spawn reviews) runs before merging.
+- batch1 Mac merge checks (ROWS + TUI-ECHO on `127f09b1`, A/B against the post-KNOBS binary): fmt,
+  clippy, compat-check, web, iPad, tui-screen-diff, tui-copy-mode, tui-overlays pass; 5 workspace
+  load failures pass alone; compat 31/35 (the four `known/*`); attached-client failed on the tmux
+  side again (the load flake, load 25). Quick A/B: `attach.instr.p1`/`.p4` -50.6%/-44.6%,
+  `chatty.instr_per_s.flip`/`.hidden` -28.7%/-26.4%, `chatty.tty_kibps.hidden` -23%; echo rows
+  lower but the base runs were load spikes (p50 idle 1.27 ms), so they are not evidence.
+- KNOBS on Linux (`bce8d6a5`): 44 solo reruns pass; compat 99/101 (`show-options-hooks`,
+  `smoke/control-alias-prepare`, both red on wave 3); one solo failure to settle:
+  `mode_keys_scope_visible_command_output_separately_from_underlying_copy_mode` ("output view 1
+  did not close" at 30 s, alone, at load 6-7).
+- CONTROL merged as `59db7c3e` (fix round 36 min, `70e4f1ef`): both majors fixed (remove never
+  blocks, the buffer is dropped; socket EOF closes the handed stdio and outbound at once), the five
+  minors (flags restored at exit and before the client writes stdout itself, ack wait with no
+  deadline, the stderr diagnostic after the reply, stdout WRITABLE deregistered once drained, and
+  a `control-stdio-v1` capability bit in the compact Welcome so a new client stays on the relay
+  against an older daemon, no new message), and the wait-exit hang (`capture_pending_return`
+  dropped a second Return or EOF that arrived during a command). Mac after the fixes: latency
+  0.0125 ms, burst 211k, instructions per command unchanged. Windows check equals the base.
+  Known gap kept: kill-server against a handoff client whose consumer stopped reading drops the
+  final `%exit` after the 2 s writer timeout (the relay client would write it later). DL5 rebases
+  on it. Linux checks for the merged tree (`59db7c3e`) run in alienware `~/dev/zz-control`.
+- DL6 merged as `d408426e` (lane 162 min, `71e04876`, done=false): one Linux gather thread per
+  shard (`gather_pty_linux` over every PTY of its shard plus a wake pipe for launches, exits and
+  buffer returns; a pane with no free buffer leaves the poll set; started lazily, so shards with
+  only empty or output panes add no thread). `mem.threads.p20`/`tui20`/`scroll180`/`scroll80`
+  25/25/26/26 -> 9, the final rule (12) met. zz-terminal 378 pass, tui-output-backpressure 9/9.
+  Throughput floors not judged: the owner was gaming on alienware (about 3 cores, 8 GB swap;
+  a bare `cat` ceiling ran 2.5x slower), and `bench/run.sh` needs a `dist/zz` GUI bundle there.
+  Single-shard busy probe: 1 busy pane flat, 4 busy unicode +1%, 4 busy ascii 120 -> 105 MB/s
+  (-13%): follow-up DL6b (`perf/gather2`, same worktrees). Attach on Linux: kernel time is
+  0.25/0.5 ms of 2.7/3.55 ms per attach and the gather threads do nothing during it, so
+  `attach.cpu.*` is not a gather lever (DL1 and later slices). The lane killed CONTROL's Linux
+  release build with `pkill -f "cargo build --release -j6 -p zz-cli"` (briefs now forbid broad
+  pkill patterns). Merging it landed under the running batch2 Mac checks (mostly Linux-only
+  code); merge checks now take `WT=<worktree>` so they run on a fixed snapshot.
+- PTYLEAK (lane 46 min, `d492c144`, done): the leak was a lost `Shutdown`, not a held session.
+  `TerminalSession::drop` sends `Shutdown` with `try_send` into the actor's one-slot mailbox;
+  with a control client attached, `stop_control_output_tap` queues `DisarmRawOutputTap` just
+  before, the slot is full and the shutdown was dropped, so the child and 3 ptmx fds lived on
+  (kill-window/kill-pane 3 -> 63 fds after 20 pairs, respawn-pane -k 3 -> 87, kill-session 3 ->
+  60). Now `Drop` defers `Shutdown` behind the queued command; `ptyleak_tests.rs` fails on the
+  base. Merges after batch2's Mac checks finish (they run in `zz-perf-int`).
+- TEARDOWN (launched 23:40 from `perf/ptyleak`): `mode_keys_scope_visible_command_output_
+  separately_from_underlying_copy_mode` takes 30 s on both hosts because teardown waits for its
+  `sleep 30` pane to exit on its own (3.08 s with `sleep 3`): a shard actor is not woken when its
+  terminal is dropped. The lane makes a kill reach an idle silent child within 100 ms.
+- Linux checks of the merged tree run in alienware `~/dev/zz-control` (`~/.cache/zz-perf/batch2`);
+  the old KNOBS Linux check was stopped after its release build timed out at 40 min on the loaded
+  host (its fmt, clippy, 44 solos and compat 99/101 stand; the three solo stragglers pass alone,
+  `formatted_split_wait_resumes_its_pane_wait_on_the_loop` 2 of 3).
+- SPAWN safety review (Opus, 56 min): the CLONE_VM child is sound (signals blocked across clone
+  and reset in the child, no allocation or lock, BIND_NOW, fds 0-3 only, exec failure statuses
+  and pidfd reaping unchanged). Two majors: the 64 KiB child stack came from mimalloc and nearly
+  doubled daemon footprint per live pane (Linux `mem.footprint.p20` 6.3-6.8 -> 11.05 MiB; the
+  lane never ran `--only mem`), and clearing the THP flag on the shared mm opened a daemon-wide
+  THP window that raced other shards' spawns (2 of 8 runs got a huge page; the lane's own THP
+  test failed 4 of 25). Decisions for the fix round: an mmap'd stack with a guard page; Linux
+  panes inherit the daemon's THP-off setting (already the case under every CLI- or ssh-started
+  daemon; a recorded difference from tmux); `ZZ_PTY_FORK=1` selects the old fork path; a shard
+  blocking until exec is accepted (glibc posix_spawn does the same). Unchecked parity question:
+  `respawn-pane` reuses the pane's previous shell, not the current `default-shell`.
+- Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
+  notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
+  was already merged).
 
 ## Wave 3 merge log (from 2026-10-01)
 

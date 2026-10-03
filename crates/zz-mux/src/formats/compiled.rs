@@ -6,9 +6,6 @@ const CACHE_ENTRIES: usize = 512;
 const CACHE_BYTES: usize = 1024 * 1024;
 const CACHE_CONTAINER_BYTES: usize = 64 * 1024;
 
-static COMPILED_FORMATS: LazyLock<bool> =
-    LazyLock::new(|| std::env::var("ZZ_PERF_COMPILED_FORMATS").as_deref() != Ok("0"));
-
 static CACHE: LazyLock<Mutex<Cache>> = LazyLock::new(Mutex::default);
 
 thread_local! {
@@ -21,7 +18,7 @@ pub(super) fn enabled() -> bool {
     if let Some(enabled) = ENABLED.get() {
         return enabled;
     }
-    *COMPILED_FORMATS
+    true
 }
 
 #[cfg(test)]
@@ -44,9 +41,6 @@ struct Cache {
 }
 
 pub(super) fn get(source: &str) -> Arc<Template> {
-    if !format_cache_knob() {
-        return Arc::new(Template::parse(source, false));
-    }
     if let Some(template) = CACHE.lock().entries.get(source).cloned() {
         return template;
     }
@@ -1585,22 +1579,19 @@ mod tests {
         let source = "clock-retention:#{t/d:start_time}";
         let first = get(source);
         let second = get(source);
-        assert_eq!(Arc::ptr_eq(&first, &second), format_cache_knob());
-        assert_eq!(
-            Arc::ptr_eq(&first.format_parts, &second.format_parts),
-            format_cache_knob()
-        );
+        assert!(Arc::ptr_eq(&first, &second));
+        assert!(Arc::ptr_eq(&first.format_parts, &second.format_parts));
         assert!(first.clock_dependent);
         assert_eq!(first.references, second.references);
         let cache = CACHE.lock();
-        assert_eq!(cache.entries.contains_key(source), format_cache_knob());
+        assert!(cache.entries.contains_key(source));
         assert_eq!(
             cache
                 .order
                 .iter()
                 .filter(|entry| entry.as_ref() == source)
                 .count(),
-            usize::from(format_cache_knob()),
+            1,
         );
     }
 
@@ -1666,11 +1657,7 @@ mod tests {
             let first = engine.cached_format_references(source);
             let second = engine.cached_format_references(source);
             assert_eq!(first, second, "{source}");
-            assert_eq!(
-                Arc::ptr_eq(&first, &second),
-                format_cache_knob(),
-                "{source}"
-            );
+            assert!(Arc::ptr_eq(&first, &second), "{source}");
         }
         let before = engine.cached_format_references("#{E:@fmt}");
         assert!(before.contains("pane_id"));
@@ -1692,7 +1679,7 @@ mod tests {
         let source = "shared-connection-syntax:#{pane_id}";
         let first = std::thread::spawn(move || get(source)).join().unwrap();
         let second = std::thread::spawn(move || get(source)).join().unwrap();
-        assert_eq!(Arc::ptr_eq(&first, &second), format_cache_knob());
+        assert!(Arc::ptr_eq(&first, &second));
     }
 
     #[test]

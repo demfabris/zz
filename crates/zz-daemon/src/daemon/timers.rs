@@ -1,22 +1,8 @@
-use std::sync::LazyLock;
-
 use super::*;
 
 pub(super) const PUBLISH_FLUSH_INTERVAL: Duration = Duration::from_millis(16);
 
 pub(super) const PEER_PROBE_INTERVAL: Duration = Duration::from_secs(1);
-
-pub(super) static EAGER_PUBLISH: LazyLock<bool> =
-    LazyLock::new(|| std::env::var_os("ZZ_PERF_EAGER_PUBLISH").is_some_and(|value| value == "1"));
-
-pub(super) static RENAME_THROTTLE: LazyLock<bool> =
-    LazyLock::new(|| std::env::var_os("ZZ_PERF_RENAME_THROTTLE").is_none_or(|value| value != "0"));
-
-pub(super) static KEY_TABLE_DELTA: LazyLock<bool> =
-    LazyLock::new(|| std::env::var_os("ZZ_PERF_KEY_TABLE_DELTA").is_none_or(|value| value != "0"));
-
-pub(super) static PEER_SCAN_ALWAYS: LazyLock<bool> =
-    LazyLock::new(|| std::env::var_os("ZZ_PERF_PEER_SCAN").is_some_and(|value| value == "always"));
 
 pub(super) struct KeyTablePublishHold(Arc<Shared>);
 
@@ -473,7 +459,6 @@ impl LoopTimers {
                     #[cfg(all(feature = "agent", unix))]
                     if let Err(error) = shared.helpers.submit(helpers::Task::Peers {
                         panes: shared.peer_scan_inputs(),
-                        always: *PEER_SCAN_ALWAYS,
                         reply: None,
                         completed: Some(self.completion_sender.clone()),
                     }) {
@@ -847,10 +832,6 @@ impl Shared {
     }
 
     pub(super) fn request_publish(self: &Arc<Self>, reason: PublishReason) {
-        if *EAGER_PUBLISH {
-            self.publish_snapshot();
-            return;
-        }
         let now = Instant::now();
         let flush_now = {
             let mut flush = self.publish_flush.lock();
@@ -907,8 +888,7 @@ impl Shared {
             let inner = self.inner.lock();
             let choosers = !inner.clients.values().all(|c| c.choose_tree.is_none());
             let presentation = (!inner.clients.values().all(|c| c.subscriber.is_none())
-                || inner.engine.has_window_style_settings()
-                || *EAGER_PUBLISH)
+                || inner.engine.has_window_style_settings())
                 && inner.engine.runtime_facts_reach_presentation();
             (presentation, choosers)
         };
@@ -1050,7 +1030,7 @@ impl Shared {
 
     #[cfg(all(feature = "agent", unix))]
     pub(super) fn peer_scan_armed(inner: &ServerState) -> bool {
-        *PEER_SCAN_ALWAYS || !inner.claude_peer_states.is_empty()
+        !inner.claude_peer_states.is_empty()
     }
 
     #[cfg(not(all(feature = "agent", unix)))]

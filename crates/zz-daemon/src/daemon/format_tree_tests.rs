@@ -159,9 +159,6 @@ fn borrowed_facts_keep_engine_access_with_legacy_variables_and_nested_loops() {
 
 #[test]
 fn borrowed_command_facts_expand_without_building_an_owned_snapshot() {
-    if !*BORROWED_FORMAT_FACTS {
-        return;
-    }
     let (shared, client, mut context) = fixture();
     let before = OWNED_FORMAT_FACT_BUILDS.with(Cell::get);
     shared
@@ -306,28 +303,26 @@ fn selected_status_default_omits_unused_fact_maps_and_matches_complete_capture()
     let inner = shared.inner.lock();
     let before = OWNED_FORMAT_FACT_BUILDS.with(Cell::get);
     let selected = selected_request(&inner, client);
-    if *BORROWED_FORMAT_FACTS {
-        assert_eq!(OWNED_FORMAT_FACT_BUILDS.with(Cell::get), before);
-        assert!(selected.facts.clients.is_empty());
-        assert!(selected.facts.session_attachments.is_empty());
-        assert!(selected.facts.session_last_attached.is_empty());
-        assert!(selected.facts.window_clients.is_empty());
-        assert!(selected.facts.copy_modes.is_empty());
-        assert!(selected.facts.pane_modes.is_empty());
-        assert!(selected.facts.terminals.is_empty());
-        assert!(selected.facts.buffer.is_none());
-        assert!(selected.facts.client_environment.is_none());
-        let client_facts = selected.facts.client.as_ref().unwrap();
-        assert_eq!(client_facts.width, "80");
-        assert!(client_facts.name.is_empty());
-        assert!(client_facts.pid.is_empty());
-        assert!(client_facts.tty.is_empty());
-        assert!(client_facts.session.is_empty());
-        assert!(client_facts.written.is_empty());
-        assert!(client_facts.discarded.is_empty());
-        assert!(client_facts.environment.is_none());
-        assert!(client_facts.terminal.is_none());
-    }
+    assert_eq!(OWNED_FORMAT_FACT_BUILDS.with(Cell::get), before);
+    assert!(selected.facts.clients.is_empty());
+    assert!(selected.facts.session_attachments.is_empty());
+    assert!(selected.facts.session_last_attached.is_empty());
+    assert!(selected.facts.window_clients.is_empty());
+    assert!(selected.facts.copy_modes.is_empty());
+    assert!(selected.facts.pane_modes.is_empty());
+    assert!(selected.facts.terminals.is_empty());
+    assert!(selected.facts.buffer.is_none());
+    assert!(selected.facts.client_environment.is_none());
+    let client_facts = selected.facts.client.as_ref().unwrap();
+    assert_eq!(client_facts.width, "80");
+    assert!(client_facts.name.is_empty());
+    assert!(client_facts.pid.is_empty());
+    assert!(client_facts.tty.is_empty());
+    assert!(client_facts.session.is_empty());
+    assert!(client_facts.written.is_empty());
+    assert!(client_facts.discarded.is_empty());
+    assert!(client_facts.environment.is_none());
+    assert!(client_facts.terminal.is_none());
     let complete = complete_request(&inner, client);
     assert_eq!(complete.facts.clients.len(), 1);
     assert_eq!(
@@ -611,9 +606,7 @@ fn selected_status_borders_borrow_facts_without_adding_them_to_the_request() {
     let complete = complete_request(&inner, client);
     assert_eq!(selected.pane_borders, complete.pane_borders);
     assert!(!selected.pane_borders.is_empty());
-    if *BORROWED_FORMAT_FACTS {
-        assert!(selected.facts.session_attachments.is_empty());
-    }
+    assert!(selected.facts.session_attachments.is_empty());
 }
 
 #[test]

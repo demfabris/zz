@@ -40,7 +40,7 @@ pub(super) struct PaneActor {
     #[cfg(not(unix))]
     no_output: Receiver<ReaderMessage>,
     #[cfg(any(target_os = "linux", not(unix)))]
-    recycle_tx: Sender<Vec<u8>>,
+    recycle_tx: BufferReturn,
     #[cfg(windows)]
     master_close_tx: Sender<Box<dyn portable_pty::MasterPty + Send>>,
     effects: Rc<RefCell<PtyEffects>>,
@@ -106,6 +106,7 @@ impl PaneActor {
         wake: &ActorWake,
         wake_rx: WakeReceiver,
         sharded: bool,
+        #[cfg(target_os = "linux")] gather: Option<PtyGather>,
     ) -> Result<Self, WorkerError> {
         install_kitty_png_decoder();
         #[cfg(not(unix))]
@@ -196,7 +197,7 @@ impl PaneActor {
         #[cfg(any(target_os = "linux", not(unix)))]
         let (exit_tx, exit_rx) = crossbeam_channel::bounded(1);
         #[cfg(target_os = "linux")]
-        let mut linux_child = watch_child_linux(shell_process_id, exit_tx, wake.clone())?;
+        let linux_child = watch_child_linux(shell_process_id, exit_tx, wake.clone())?;
         #[cfg(windows)]
         let (master_close_tx, master_close_rx) = crossbeam_channel::bounded(1);
         #[cfg(not(unix))]
@@ -266,12 +267,10 @@ impl PaneActor {
         let drain_fd = Some(drain_fd);
         #[cfg(any(target_os = "linux", not(unix)))]
         let (output_rx, recycle_tx) = {
-            #[cfg(target_os = "linux")]
-            let gather = std::env::var_os("ZZ_PTY_GATHER").is_none_or(|value| value != "0");
             #[cfg(not(unix))]
-            let gather = true;
-            if gather {
-                let (output_tx, output_rx) = crossbeam_channel::bounded(PTY_BUFFER_POOL_SIZE);
+            let gather = Some(());
+            if let Some(gather) = gather {
+                let (output_tx, output_rx) = crossbeam_channel::bounded(PTY_BUFFER_POOL_SIZE + 1);
                 let (recycle_tx, recycle_rx) = crossbeam_channel::bounded(PTY_BUFFER_POOL_SIZE);
                 for _ in 0..PTY_BUFFER_POOL_SIZE {
                     recycle_tx
@@ -279,25 +278,15 @@ impl PaneActor {
                         .map_err(|error| WorkerError::Thread(error.to_string()))?;
                 }
                 #[cfg(target_os = "linux")]
-                thread::Builder::new()
-                    .name("zz-pty-gather".into())
-                    .spawn({
-                        let gather_child = if sharded { None } else { linux_child.take() };
-                        let drain_fd = drain_fd.take().expect("gather owns the PTY master");
-                        let output_wake = wake.clone();
-                        move || {
-                            gather_pty_linux(
-                                drain_fd,
-                                output_tx,
-                                recycle_rx,
-                                gather_child,
-                                output_wake,
-                            );
-                        }
-                    })
-                    .map_err(WorkerError::Io)?;
+                let lease = gather.add(
+                    drain_fd.take().expect("gather owns the PTY master"),
+                    output_tx,
+                    recycle_rx,
+                    wake.clone(),
+                )?;
                 #[cfg(not(unix))]
                 {
+                    let () = gather;
                     let pending_output: Box<dyn Fn() -> usize + Send> = Box::new(|| 0);
                     let output_wake = wake.clone();
                     thread::Builder::new()
@@ -307,10 +296,24 @@ impl PaneActor {
                         })
                         .map_err(WorkerError::Io)?;
                 }
-                (output_rx, recycle_tx)
+                (
+                    output_rx,
+                    BufferReturn {
+                        buffers: recycle_tx,
+                        #[cfg(target_os = "linux")]
+                        gather: Some(lease),
+                    },
+                )
             } else {
                 let (recycle_tx, _) = crossbeam_channel::unbounded();
-                (crossbeam_channel::never(), recycle_tx)
+                (
+                    crossbeam_channel::never(),
+                    BufferReturn {
+                        buffers: recycle_tx,
+                        #[cfg(target_os = "linux")]
+                        gather: None,
+                    },
+                )
             }
         };
 
@@ -1925,7 +1928,7 @@ impl PaneActor {
                                 .raw_output_parse_backlog_bytes
                                 .saturating_add(bytes.len());
                             self.raw_output_parse_backlog.push_back((bytes, 0));
-                            let _ = self.recycle_tx.try_send(buffer);
+                            self.recycle_tx.give(buffer);
                         } else {
                             let started = diagnostic_timer();
                             let (closed, parsed) = consume_pty_output(
@@ -2251,9 +2254,7 @@ impl DeadPane {
         }
         self.publisher.set_foreground_source(None);
         let mut surface = self.surface;
-        if !*NO_COMPRESS {
-            surface.terminal.compress(CompressionMode::Full)?;
-        }
+        surface.terminal.compress(CompressionMode::Full)?;
         if self
             .slot
             .lock()

@@ -134,10 +134,7 @@ fn status_option_snapshot_reuses_unchanged_options_and_refreshes_scopes() {
         )
         .unwrap();
     let first = engine.cached_format_option_snapshot();
-    assert_eq!(
-        Arc::ptr_eq(&first, &engine.cached_format_option_snapshot()),
-        crate::format_cache_knob()
-    );
+    assert!(Arc::ptr_eq(&first, &engine.cached_format_option_snapshot()));
     set(&mut engine, &mut context, &["status-left", "changed"]);
     let second = engine.cached_format_option_snapshot();
     assert!(!Arc::ptr_eq(&first, &second));
@@ -377,16 +374,9 @@ fn default_key_listing_reuses_output_and_bypasses_option_hook_overrides() {
         engine.list_keys(&context, &args, &mut hooks).unwrap(),
         first
     );
-    assert_eq!(
-        engine.key_listing_cache.lock().is_some(),
-        crate::format_cache_knob()
-    );
-    if crate::format_cache_knob() {
-        assert_eq!(hooks.calls, 10);
-        assert!(cold_calls > hooks.calls);
-    } else {
-        assert_eq!(hooks.calls, cold_calls);
-    }
+    assert!(engine.key_listing_cache.lock().is_some());
+    assert_eq!(hooks.calls, 10);
+    assert!(cold_calls > hooks.calls);
     for command in ["override-one", "override-two"] {
         hooks.command = Some(command);
         let output = engine
@@ -430,22 +420,18 @@ fn default_key_listing_proven_tmux_hooks_skip_scoped_option_probes() {
     let first = engine
         .list_keys(&context, &args, &mut CommandHooks::new(0))
         .unwrap();
-    if crate::format_cache_knob() {
-        assert_eq!(
-            engine.list_keys(&context, &args, &mut ProvenHooks).unwrap(),
-            first,
-        );
-        let mut hooks = RowFormatHooks {
-            inner: &mut ProvenHooks,
-            line: 5,
-        };
-        assert_eq!(
-            engine.list_keys(&context, &args, &mut hooks).unwrap(),
-            first
-        );
-    } else {
-        assert!(engine.key_listing_cache.lock().is_none());
-    }
+    assert_eq!(
+        engine.list_keys(&context, &args, &mut ProvenHooks).unwrap(),
+        first,
+    );
+    let mut hooks = RowFormatHooks {
+        inner: &mut ProvenHooks,
+        line: 5,
+    };
+    assert_eq!(
+        engine.list_keys(&context, &args, &mut hooks).unwrap(),
+        first
+    );
 }
 
 #[test]

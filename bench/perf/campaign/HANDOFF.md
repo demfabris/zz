@@ -732,6 +732,17 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   `/tmp/zzpc/w4/steady.md`, `~/dev/zz-steady` on both hosts): split the extra CPU per thread
   (utime/stime, context switches, faults, syscalls), bisect the merges, fix; it waits for batch6's
   gate before using alienware and for ALLDONE before CPU series.
+- batch6 Linux (`86e721ad`, ECHOIN merged). Three alternating pairs against `a486069e`
+  (19:05-19:22, load 0.3-0.7): `echo.p50.idle` 1.53/1.47/.. -> 1.39/1.36/.. ms (1.41-1.45x tmux,
+  passes in all three post runs), `echo.p99.idle` 1.35-1.45x, `echo.p99.idle.p20.k1` 1.38-1.40x,
+  `echo.p50.busy30` about 1.51x, `echo.p99.capture_history.p20.k1` -40%; hidden-chatty
+  instructions +21% with client tty bytes +100% (rename luck). Quiet final gate 19:22-19:29:
+  **100 pass, 5 fail, 0 regressed** (`~/.cache/zz-perf/batch6/final-86e721ad.json`): fails
+  `echo.p50.idle` 1.38 ms against 0.908 (1.52x; the A/B pairs passed), `echo.p50.busy30` 1.54x,
+  `attach.cpu.p4` 3.13 against 2.36 ms (1.33x), `spawn.cpu.kill_pane` 0.993 against 0.87 (rule
+  plus 0.1; fails on `0d7dabf7` too), `control.latency` 0.0166 against 0.0128 ms (1.3x; tmux's
+  sample is fast against its 0.0156 at a486069e: recheck with pairs). `chatty.cpu_pct.steady`
+  passed in this gate. Next: EM1 (idle panes read on the shard, no gather hop) for echo margin.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

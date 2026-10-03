@@ -335,7 +335,7 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   but `attach.ttfc.p4` failed in 2 of 3 lane runs and 0 of 3 base runs on the loaded host: the
   row to watch at wave exit. Frames are 1-3 bytes larger (6-byte varint sequence). DL5 must order
   by per-pane stream sequence, since frame and event sequences no longer compare.
-- DL3 launched 01:15 as workflow `w4-slices` (run `wf_a3e8d9c5-200`): implement -> parity and perf
+- DL3 launched 01:05 as workflow `w4-slices` (run `wf_a3e8d9c5-200`): implement -> parity and perf
   reviews in parallel -> fix; the script takes a list of slices and is reused for DL3b/DL4/DL5.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit

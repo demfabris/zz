@@ -715,6 +715,18 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   from. Trap: `compat/tui-choosers.sh` with no argument runs `target/debug/zz`, a stale GUI build
   (that run reported 0 of 78 differing); always pass the zz_cli binary. Round 3 fix agent from
   19:05.
+- Linux A/B, 3 alternating pairs on the idle host (18:43-19:01), `0d7dabf7` (before DL3-DL5)
+  against `a486069e`, groups spawn, chatty, attach, echo (`~/.cache/zz-perf/batch5/ab-*.json`):
+  `chatty.cpu_pct.flip` equal (pre 2.92-3.01, post 2.88-2.90: the gate's fail was noise);
+  `spawn.cpu.kill_pane` pre 0.88-0.96 ms, post 0.95-1.09 (tmux 0.76-0.86; fails on pre too);
+  `echo.p50.idle` 1.61 -> 1.52 ms; `attach.cpu.p4` 3.09 -> 3.02 ms; `echo.p99.idle.p20(.k1)`
+  -17%/-18%. **`chatty.cpu_pct.steady` +17% (pre 3.43/4.06/3.73, post 4.45/3.86/4.38, tmux
+  3.0-3.4) at equal instructions (15.1 -> 15.0 Minstr/s): extra kernel work.** Suspect: DL4's
+  direct write sends one `sendto` per frame from the shard where the loop sent several frames
+  per `writev`, and frames no longer coalesce while one is unwritten (ACFIX measured 800+ sent
+  against about 500 before for a typed burst). Lane STEADY after batch6's measurements.
+- batch6 on alienware from 19:01 (`86e721ad` = ECHOIN merged): release build, three A/B pairs
+  against `a486069e` (echo, chatty, attach, spawn), a quiet final gate, then the full checks.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

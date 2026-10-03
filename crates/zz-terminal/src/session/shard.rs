@@ -106,6 +106,10 @@ impl ShardHandle {
                     wake_registered: false,
                     #[cfg(target_os = "macos")]
                     events: Vec::with_capacity(32),
+                    #[cfg(target_os = "linux")]
+                    index,
+                    #[cfg(target_os = "linux")]
+                    gather: None,
                     actors: HashMap::new(),
                     next_id: 0,
                     cursor: 0,
@@ -244,6 +248,10 @@ struct Shard {
     wake_registered: bool,
     #[cfg(target_os = "macos")]
     events: Vec<rustix::event::kqueue::Event>,
+    #[cfg(target_os = "linux")]
+    index: usize,
+    #[cfg(target_os = "linux")]
+    gather: Option<PtyGather>,
     actors: HashMap<usize, Entry>,
     next_id: usize,
     cursor: usize,
@@ -261,19 +269,31 @@ impl Shard {
                 #[cfg(not(unix))]
                 let wake_rx = ();
                 let actor = match launch.kind {
-                    LaunchKind::Pty { input_rx, spawn } => PaneActor::spawn(
-                        launch.control_rx,
-                        input_rx,
-                        launch.slot,
-                        launch.publisher,
-                        launch.max_scrollback,
-                        &launch.appearance,
-                        &spawn,
-                        &launch.wake,
-                        wake_rx,
-                        true,
-                    )
-                    .map(|actor| Actor::Live(Box::new(actor))),
+                    LaunchKind::Pty { input_rx, spawn } => {
+                        #[cfg(target_os = "linux")]
+                        let gather = match self.pty_gather() {
+                            Ok(gather) => gather,
+                            Err(error) => {
+                                report_worker_error(&publisher, &error);
+                                continue;
+                            }
+                        };
+                        PaneActor::spawn(
+                            launch.control_rx,
+                            input_rx,
+                            launch.slot,
+                            launch.publisher,
+                            launch.max_scrollback,
+                            &launch.appearance,
+                            &spawn,
+                            &launch.wake,
+                            wake_rx,
+                            true,
+                            #[cfg(target_os = "linux")]
+                            gather,
+                        )
+                        .map(|actor| Actor::Live(Box::new(actor)))
+                    }
                     LaunchKind::Surface {
                         title,
                         text,
@@ -402,6 +422,17 @@ impl Shard {
                 }
             }
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn pty_gather(&mut self) -> Result<Option<PtyGather>, WorkerError> {
+        if !pty_gather_enabled() {
+            return Ok(None);
+        }
+        if self.gather.is_none() {
+            self.gather = Some(PtyGather::start(format!("zz-pty-gather-{}", self.index))?);
+        }
+        Ok(self.gather.clone())
     }
 
     fn collect_channels(&mut self, ready: &mut Vec<(usize, Option<Wake>, bool, bool)>) {

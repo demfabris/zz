@@ -4123,6 +4123,9 @@ fn write_direct_terminal(state: &mut OutboundState, frame: &[u8]) -> Option<usiz
 #[cfg(all(test, unix))]
 mod direct_write_tests;
 
+#[cfg(all(test, unix))]
+mod typed_burst_tests;
+
 fn close_outbound(state: &mut OutboundState) {
     #[cfg(unix)]
     if let Some(socket) = state.quiet_socket.take() {

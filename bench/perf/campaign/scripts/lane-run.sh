@@ -9,7 +9,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 START=$(date +%s)
 python3 "$HERE/lane-watchdog.py" "$WT" "$BRIEF" "$OUT" "$START" "$BUDGET" "$IDLE" "$BASE" "$ZONE" &
 WATCHDOG=$!
-codex exec -m gpt-6.1-sol -c model_reasoning_effort="\"$EFFORT\"" -c service_tier='"priority"' \
+codex exec -m "${CODEX_MODEL:-gpt-6-astra}" -c model_reasoning_effort="\"$EFFORT\"" -c service_tier='"priority"' \
   -s danger-full-access -C "$WT" --json --output-schema "$HERE/lane-answer.schema.json" -o "$OUT" \
   "Read $BRIEF and do exactly what it says." < /dev/null > "$OUT.events.jsonl" 2> "$OUT.stderr.log"
 STATUS=$?

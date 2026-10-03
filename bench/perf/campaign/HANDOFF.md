@@ -1159,6 +1159,7 @@ Lanes in flight:
 - "No compromises": targets are floors. A lane that meets its target but still shows avoidable work on its path removes that work too.
 - Wave 3 (single-owner loop and PTY shards) is committed, not optional. W2-FMT, W4-ROWS and W4-BINARY are reinstated lanes.
 - 2026-10-02: implementation lanes run as Opus 5.5 subagents at xhigh effort, not codex (too slow for implementation). Deeper reviews are unchanged.
+- 2026-10-03: codex only when a lane is stuck ("invoke gpt 6 astra xhigh for review if and only if we feeling stuck"): `lane-run.sh` defaults to `gpt-6-astra` (override with `CODEX_MODEL`), effort `xhigh`; routine parity, perf and fork reviews go to Opus subagents.
 
 ## Decisions taken on the Linux leg (owner away; revisit if you disagree)
 

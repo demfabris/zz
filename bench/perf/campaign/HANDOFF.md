@@ -662,6 +662,17 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   clippy (zz-terminal, zz-daemon, zz-protocol, zz-client, zz-tui, zz-cli) exit 0; those crates'
   tests 2997 passed, 20 load failures, all pass alone; attached-client, tui-screen-diff,
   tui-copy-mode exit 0; 24 compat rows (attach, detach, client, session, control) clean.
+- Parity side lane `fix/choose-detach` (`~/dev/zz-choosedetach`, from the ATTACH hang probe):
+  `input_choose_tree`/`input_choose_buffer` sent every key to the chooser without asking the key
+  engine, so `C-b d` (and `C-b 1`, etc.) inside a chooser did not run its binding; tmux checks the
+  prefix before the mode. `8c3c6c9a` runs bindings first (`chooser_key_binding`,
+  `KeyEngine::handle_overlay_with_repeat_metadata`) plus scenario `smoke/chooser-prefix-keys`.
+  Review: no blocker; two majors being fixed: zz's chooser is per client, so after `C-b n`/`c`
+  it follows the client and keeps taking keys (tmux leaves the tree on its pane; `[`, `?`, `q`
+  stack on top of it), and `C-b C-b` (send-prefix) now types a raw C-b into the pane under the
+  chooser (tmux sends it to the tree). Minors: a chooser over copy mode swallows the first key
+  after a repeat or prefix timeout, a GUI search-prompt race on PrefixArmed, stale swallowed-key
+  records, weak scenario cases. Fix agent from 17:35.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

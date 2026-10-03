@@ -658,6 +658,10 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   `/tmp/zzpc/w4/echoin2.md`: merge perf/wave4 (ACFIX's overflow and ATTACH's hold and
   short-read drain touch the same code; EM2 must wait behind the overflow and stay correct inside
   a hold), then the remaining gates, review and fix.
+- Checks on `daf82ee6` (ATTACH merged, `~/dev/zz-check`, 16:40-16:52): fmt, clippy, Linux-target
+  clippy (zz-terminal, zz-daemon, zz-protocol, zz-client, zz-tui, zz-cli) exit 0; those crates'
+  tests 2997 passed, 20 load failures, all pass alone; attached-client, tui-screen-diff,
+  tui-copy-mode exit 0; 24 compat rows (attach, detach, client, session, control) clean.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

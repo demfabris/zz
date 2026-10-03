@@ -155,15 +155,34 @@ channels. Each shard starts one `zz-pty-gather-N` thread with its first PTY pane
 launches, exits and buffer returns. The actor consumes at most four batches per turn and
 returns each buffer to the pool. A pane whose four buffers are all with its actor leaves the
 poll set until one comes back, so a stalled pane does not hold up the others on the shard,
-and a full ring still lets kernel flow control backpressure the child. One poll round reads
-every ready pane in turn, one read per pane per pass, until each has filled its buffer or gone
-quiet, so several busy panes keep their PTY queues refilling in parallel. `ZZ_PTY_GATHER=0`
-reads on the shard thread instead.
+and a full ring still lets kernel flow control backpressure the child. The thread reads every
+ready pane in turn, one read per pane per pass, so several busy panes keep their PTY queues
+refilling in parallel. A pane that fills a buffer goes on into its next free one. A pane whose
+read comes back empty while it holds at least 1 KiB waits in the next zero-timeout poll instead
+of being read again, and sends its partial batch after 16 polls that miss it, so a busy pane
+neither waits for its neighbours nor holds back their partial batches. Every eight passes that
+poll also admits newly ready panes and picks up launches, exits and buffer returns; the thread
+blocks in `poll` only when no pane is reading or waiting. `ZZ_PTY_GATHER=0` reads on the shard thread instead.
+
+One thread cannot keep several saturated PTYs as full as one reader per pane. A Linux PTY read
+copies out of the 4 KiB line discipline buffer, and a `read` or `poll` that finds it empty
+waits in `flush_work` for the kernel worker refilling it, even on a nonblocking fd, so a lone
+reader stalls on one pane while the others have data. Asking `FIONREAD` first never waits, but
+it costs more than the wait: in a C model on alienware with four `cat` panes, FIONREAD-gated
+reads reached 124–152 MB/s, the plain gather 169–205, and one blocking reader per pane
+235–284 (two threads 194–215, four 230–244). So when a pane fills a buffer and another pane on
+the shard filled one in the last 10 ms, the gather lends every busy pane but one to a thread of
+its own, at most three per shard, named like the gather. A lent pane takes its buffers, its
+partial batch and its bridge state along, and its lease wakes whichever thread holds it, so
+buffer returns and exits still land. The helper hands the pane back and exits after 100 ms
+without a full buffer, so a quiet shard runs one gather thread. Single-shard probe, four busy
+ASCII panes: 242.5 MB/s, against 247.4 for the per-pane readers before the gather and 177.3
+for the gather alone.
 
 ```mermaid
 flowchart LR
     child["PTY child"] --> kernel["Linux PTY queue"]
-    kernel --> gather["zz-pty-gather-N, one per shard<br/>poll + nonblocking read<br/>spin 16"]
+    kernel --> gather["zz-pty-gather-N, one per shard<br/>plus one per extra busy pane<br/>poll + nonblocking read<br/>spin 16"]
     gather -->|"4 × 64 KiB bounded pool"| actor["zz-terminal actor<br/>vt_write + commands"]
     actor -->|"recycle buffer"| gather
     actor -->|"snapshot at 16 ms gate"| render["GUI"]

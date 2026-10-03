@@ -454,6 +454,14 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   loop samples under control output, 10% more decoding them for handed stdio); Mac
   `chatty.instr_per_s.flip`/`.hidden` +7-8% from the wave-4 merge with no client attached
   (NAMES suspected); Linux still wakes 4.83 threads per echoed key (tmux about 2).
+- Four lanes launched 11:15 as one `w4-side-lanes` run `wf_bbdbd956-c4c` (briefs `bytes`,
+  `ctrlcpu`, `namescost`, `echomap` in `wave4-briefs.py`; Mac worktrees `~/dev/zz-<slug>`, detached
+  alienware twins with reflinked targets; base `abe69d02`, base binaries `0d7dabf7` in both
+  integration trees): BYTES (serde byte fields as bytes: postcard's wire is the same, the per-byte
+  serialize goes), CTRLCPU (control-mode CPU per command; owns the burst row), NAMESCOST (attribute
+  and remove the Mac chatty +7-8% instruction rise), ECHOMAP (measure-only: Linux echo stage by
+  stage against tmux, and the slices that reach 1.40 ms; DL4 alone gives -64 us of the -230 us
+  needed). The ATTACH slice and the echo slices wait for DL4 and DL5.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

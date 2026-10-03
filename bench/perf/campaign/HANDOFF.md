@@ -637,6 +637,18 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   releasing held wakes before any blocking send and before a request's wait, with three tests that
   fail on the lane head. Because a hold can hang the daemon, a second review focused only on hangs
   runs before the merge (15:57).
+- ATTACH hang review: safe. Both holds run on the loop thread, hooks run after the hold drops,
+  every wait inside a hold either never needs the shard or now writes the held wakes first; a
+  20-pane probe set (flooding pane, a pane that never reads, pipe-pane and control clients that
+  never read, hooks with run-shell, display-message and capture-pane, copy mode, choose-tree, two
+  clients, kill-pane during attach) never hung, and the pre-fix build hangs on the idle-pane
+  scenarios. Minor fixed in `61a1f794`: `WakeHold` is `!Send` (a hold dropped on another thread
+  would leave its creator deferring wakes for good). Latent, not fixed: `wait_for_identity` (tests
+  only) polls without releasing held wakes. Parity note from the probe: in zz `C-b d` inside
+  choose-tree does not detach; tmux does (key routing, not wakes; check on main).
+- ATTACH merged as `daf82ee6`; conflicts with BYTES2 resolved as planned (`AcceptWake::wake`
+  clones the waker out of the mutex and wakes through `wake_loop`; `poll_ready` runs
+  `clear_loop_again()`, then park, poll, unpark). Checks in `~/dev/zz-check` running.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

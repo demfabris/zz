@@ -648,9 +648,9 @@ resident. It happened in about one start in four, depending on free huge pages, 
 looked like noise. The `no_thp` feature of `mimalloc` does not help: libmimalloc-sys 0.1.49
 defines `MI_NO_THP`, which in mimalloc v3 only skips `MADV_HUGEPAGE`, while mimalloc's own CMake
 also sets `MI_DEFAULT_ALLOW_THP=0`. `zz_cli` now registers a constructor in `.init_array.00100`,
-ahead of mimalloc's (priority 101), that sets `PR_SET_THP_DISABLE` for the process, and the Linux
-pane fork clears it again before exec, so pane programs keep the system setting (`run-shell` and
-status job children still inherit it). Same-binary A/B with the THP knob (deleted in wave 4): footprint p1
+ahead of mimalloc's (priority 101), that sets `PR_SET_THP_DISABLE` for the process. The Linux
+pane fork used to clear it again before exec; since W4-SPAWN pane programs inherit it like
+`run-shell` and status job children do. Same-binary A/B with the THP knob (deleted in wave 4): footprint p1
 15.2 -> 3.1 MiB, p20 99-100 -> 18 MiB, detached throughput 90.6 -> 88-90 MB/s (unchanged within
 noise), spawn instructions unchanged.
 
@@ -1211,8 +1211,9 @@ Missed or handed on:
   portable-pty's mutex, and unwatched panes wake their watcher at most ten times a second; the
   second lookup per event in `terminal_current_command` and `terminal_working_directory` stays
   with whoever owns those functions after the merge.
-- Linux still forks: glibc's `posix_spawn` with `addclosefrom_np` needs glibc 2.34, newer than
-  the headless binary's floor, and Linux reclaims `MADV_DONTNEED` pages after a fork. The macOS
+- Linux still forks (until W4-SPAWN): glibc's `posix_spawn` with `addclosefrom_np` needs glibc
+  2.34, newer than the headless binary's floor, and Linux reclaims `MADV_DONTNEED` pages after a
+  fork. The macOS
   launcher adds one exec to each pane's start (a few ms before the program runs, off the command
   path); a tiny dedicated launcher binary would halve that but needs a build step and a file to
   ship.
@@ -3889,9 +3890,56 @@ an input error so stderr keeps its place. Control-mode return capture keeps a se
 EOF queued instead of dropping it, so `refresh-client -f wait-exit`, a blank line and EOF exits 0
 in both modes. Tests: `control_stdio_tests.rs` and the cli_binary control section.
 
+## W4-SPAWN: Linux panes start through a shared-memory clone (as built 2026-10-02)
+
+`fork()` from the multithreaded daemon copied its page tables and write-protected every anonymous
+page, so the shard thread then took about 250 copy-on-write faults per new pane on the pages it
+touched next (thread start, terminal setup, the first publish); after the change it takes 4. On
+Linux the pane child now starts with `clone(CLONE_VM | CLONE_VFORK)` (`spawn_shared` in
+`crates/zz-terminal/src/session/unix_pty.rs`) and runs the same `exec_child` setup before exec.
+The parent stays suspended until the child execs or exits, so the exec fence pipe and its poll
+are gone on Linux. The child runs on its own 64 KiB mapping with a `PROT_NONE` guard page below
+it, unmapped as soon as `clone` returns. The PTY master opens with `O_CLOEXEC` and the slave comes
+from `TIOCGPTPEER`, with the path as fallback. Empty panes skip building a spawn environment they
+never use. macOS keeps the `posix_spawn` helper, with `spawn_forked` as its fallback.
+
+Pane programs inherit the daemon's transparent huge page setting: on Linux a zz pane starts with
+THP disabled when the daemon disabled it, which `zz_cli` does at start (W1 Linux follow-up
+above). tmux leaves THP alone; this is a recorded difference. Before this lane a pane got THP back
+only from a daemon that had turned it off itself, and a daemon started by the CLI or over ssh
+never does (it inherits the CLI's setting), so the common case is unchanged. The child can no
+longer clear the flag: on a shared mm that gave the whole daemon a window with THP on, and with
+20 panes in one command list the review saw 2048 kB of daemon `AnonHugePages` in 2 of 8 runs.
+
+`ZZ_PTY_FORK=1`, read once at the first spawn, puts Linux back on `spawn_forked` and the exec
+fence.
+
+The shard thread now waits for the child's exec with no limit, where the fence wait gave up after
+`PANE_EXEC_WAIT` (500 ms). An exec that stalls after the path checks pass (a binary on a hung FUSE
+or network file system) holds every pane on that shard until it returns. glibc's `posix_spawn`
+waits the same way; accepted.
+
+Review fix: the first version took the child stack from mimalloc (`Vec::with_capacity`). The
+freed 64 KiB block came back as a pane's PTY read buffer, so each live pane kept about 235 kB more
+resident (`mem.footprint.p20` 6.3-6.8 -> 11.1 MiB on alienware); the stack is now its own
+mapping.
+
+Measured on alienware against perf/wave4 `f44e7cbab`, five alternating quick runs each
+(`--only spawn,mem`, load 2-8). DL6 is in the base, so it no longer starts a reader thread per
+pane. `spawn.cpu.split_shell` 1.47-2.11 -> 1.15-1.44 ms (median -29%, tmux 0.83-1.17),
+`spawn.cpu.new_window` 1.33-1.95 -> 0.87-1.47 ms (-29%, tmux 0.64-1.04), `split_empty_P` -9%,
+`kill_pane` unchanged. User instructions do not move (`spawn.instr.split_shell` 0.60-0.65 Minstr
+on both), so the saving is kernel time. `mem.footprint.p1` 2.36 -> 2.37 MiB; `.p20` medians 7.57
+-> 7.72 MiB (runs spread 7.2-8.7 on the base and 7.2-11.5 on the lane), 7.70 -> 7.63 MiB over
+five more alternating `--only mem` pairs, and the review's footprint probe (20 default shells)
+reads 5.23-5.24 MiB on the base and 5.24-5.25 on the lane. With 20 panes in one
+command list, all 20 start with THP off and the daemon holds no `AnonHugePages`, in 8 of 8 runs and
+in 3 of 3 with `ZZ_PTY_FORK=1`. On the Mac only the empty-pane environment skip reaches this code,
+and three alternating runs show the spawn rows equal to the base.
+
 # Rollback switches
 
-Waves 1 and 2 put each behaviour change behind a `ZZ_PERF_*` environment knob, read once at start, so a parity regression could be bisected without a revert. Every one of them, with the fallback path that only the knob reached, was deleted at the start of wave 4 (perf/knobs, "Delete the wave-1 and wave-2 rollback knobs and the paths only they reached"). What remains: the wave-3 tuning switches `ZZ_PTY_SHARDS` and `ZZ_PTY_GATHER`; the daemon's ClientHello, PrepareCommandList and CommandRequest path, which interactive clients and gpui-shared still send and which the CLI falls back to for a daemon without Exec; and the test oracles `with_eager_universe`, `with_borrowed_formats` and the compiled-format interpreter switch. Wire changes and the thread model need a revert to roll back.
+Waves 1 and 2 put each behaviour change behind a `ZZ_PERF_*` environment knob, read once at start, so a parity regression could be bisected without a revert. Every one of them, with the fallback path that only the knob reached, was deleted at the start of wave 4 (perf/knobs, "Delete the wave-1 and wave-2 rollback knobs and the paths only they reached"). What remains: the wave-3 tuning switches `ZZ_PTY_SHARDS` and `ZZ_PTY_GATHER`; `ZZ_PTY_FORK=1` (W4-SPAWN), which starts Linux panes with fork and the exec fence again; the daemon's ClientHello, PrepareCommandList and CommandRequest path, which interactive clients and gpui-shared still send and which the CLI falls back to for a daemon without Exec; and the test oracles `with_eager_universe`, `with_borrowed_formats` and the compiled-format interpreter switch. Wire changes and the thread model need a revert to roll back.
 
 # Tests and fixtures to add
 

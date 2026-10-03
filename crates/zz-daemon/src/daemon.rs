@@ -9313,37 +9313,44 @@ impl Shared {
                             .engine
                             .set_pane_start_command(*pane, command.clone().unwrap_or_default())?;
                         let shell = Some(terminal_shell_for_session(&inner.engine, pane_session)?);
-                        let mut env =
-                            terminal_environment_for_session(&inner.engine, pane_session)?;
-                        env.push((
-                            "TMUX".into(),
-                            Some(tmux_environment(&self.socket_path, Some(pane_session)).into()),
-                        ));
-                        env.extend(
-                            pane_environment
-                                .iter()
-                                .map(|(name, value)| (name.into(), Some(value.into()))),
-                        );
-                        env.extend([
-                            (OsString::from("ZZ_PANE"), Some(pane.to_string().into())),
-                            (
-                                "ZZ_SOCKET".into(),
-                                Some(self.socket_path.as_os_str().to_owned()),
-                            ),
-                            ("ZZ_SESSION".into(), Some(pane_session.to_string().into())),
-                            ("TMUX_PANE".into(), Some(pane.to_string().into())),
-                        ]);
-                        #[cfg(unix)]
-                        if let Some(shim) = self.tmux_shim.lock().as_ref() {
-                            crate::configure_pane_tmux_environment(
-                                &mut env,
-                                &shim.directory,
-                                &shim.executable,
+                        let env = if empty {
+                            Vec::new()
+                        } else {
+                            let mut env =
+                                terminal_environment_for_session(&inner.engine, pane_session)?;
+                            env.push((
+                                "TMUX".into(),
+                                Some(
+                                    tmux_environment(&self.socket_path, Some(pane_session)).into(),
+                                ),
+                            ));
+                            env.extend(
+                                pane_environment
+                                    .iter()
+                                    .map(|(name, value)| (name.into(), Some(value.into()))),
                             );
-                        }
-                        if let Some(path) = &working_directory {
-                            env.push(("PWD".into(), Some(path.as_os_str().to_owned())));
-                        }
+                            env.extend([
+                                (OsString::from("ZZ_PANE"), Some(pane.to_string().into())),
+                                (
+                                    "ZZ_SOCKET".into(),
+                                    Some(self.socket_path.as_os_str().to_owned()),
+                                ),
+                                ("ZZ_SESSION".into(), Some(pane_session.to_string().into())),
+                                ("TMUX_PANE".into(), Some(pane.to_string().into())),
+                            ]);
+                            #[cfg(unix)]
+                            if let Some(shim) = self.tmux_shim.lock().as_ref() {
+                                crate::configure_pane_tmux_environment(
+                                    &mut env,
+                                    &shim.directory,
+                                    &shim.executable,
+                                );
+                            }
+                            if let Some(path) = &working_directory {
+                                env.push(("PWD".into(), Some(path.as_os_str().to_owned())));
+                            }
+                            env
+                        };
                         let spawn = TerminalSpawn {
                             knobs: terminal_options.knobs,
                             working_directory: working_directory.clone(),

@@ -256,6 +256,17 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   the old KNOBS Linux check was stopped after its release build timed out at 40 min on the loaded
   host (its fmt, clippy, 44 solos and compat 99/101 stand; the three solo stragglers pass alone,
   `formatted_split_wait_resumes_its_pane_wait_on_the_loop` 2 of 3).
+- SPAWN safety review (Opus, 56 min): the CLONE_VM child is sound (signals blocked across clone
+  and reset in the child, no allocation or lock, BIND_NOW, fds 0-3 only, exec failure statuses
+  and pidfd reaping unchanged). Two majors: the 64 KiB child stack came from mimalloc and nearly
+  doubled daemon footprint per live pane (Linux `mem.footprint.p20` 6.3-6.8 -> 11.05 MiB; the
+  lane never ran `--only mem`), and clearing the THP flag on the shared mm opened a daemon-wide
+  THP window that raced other shards' spawns (2 of 8 runs got a huge page; the lane's own THP
+  test failed 4 of 25). Decisions for the fix round: an mmap'd stack with a guard page; Linux
+  panes inherit the daemon's THP-off setting (already the case under every CLI- or ssh-started
+  daemon; a recorded difference from tmux); `ZZ_PTY_FORK=1` selects the old fork path; a shard
+  blocking until exec is accepted (glibc posix_spawn does the same). Unchecked parity question:
+  `respawn-pane` reuses the pane's previous shell, not the current `default-shell`.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

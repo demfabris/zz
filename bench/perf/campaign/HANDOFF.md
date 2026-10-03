@@ -526,6 +526,23 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   escaping, the per-drain allocation, `AcceptWake::wake` holding its mutex across the mio wake).
   ATTACH counts daemon syscalls and context switches per attach with `PROC_PIDTASKINFO` against
   tmux on the Mac and cuts the extra ones (the Linux `attach.cpu.*` excess is kernel time).
+- ECHOMAP (`perf/echomap` `5a4fc6a6`, map `bench/perf/campaign/w4-echo-map.txt` plus probe
+  scripts, in review): Mac stage table at DL4's head: zz echo 192.9 us p50 against tmux 147.6.
+  zz's daemon work equals tmux's (PTY write to output write 54 us against 58, input path 45
+  against 42); the 45 us zz pays more is the attach client relay (32.5 us of client CPU and two
+  socket hops of about 9 us). tmux's client hands its tty to the server and sleeps through every
+  key. Per key: zz daemon 17.06 unix syscalls and 4.74 context switches, tmux server 11.68 and
+  3.70. On alienware the idle states exit slowly (C2 253 us, C3 1048 us; keys come 20-50 ms
+  apart), so quiet Linux echo measures serial wakes of sleeping threads: zz 8 (client, loop, shard,
+  pane, gather, shard, client, bench), tmux 4; loaded-host tmux echo is 0.273 ms against 0.931
+  quiet. Slices: EM1 idle panes read on the shard, no gather hop (Linux only, waits for ssh); EM2
+  the loop writes plain keys to the PTY itself; EM3 one wake-pipe read per drain; EM4 pinning or a
+  brief client spin (Linux experiment); EM5 a fast loop input path. EM1 + EM2 model at about
+  1.23-1.31 ms on Linux, under the 1.40 target only if the gather wake is worth 110 us or more.
+  Larger lever, not planned: the tmux model, where the daemon reads the attach client's tty
+  itself (removes the client's long-sleep wake and a socket hop per key).
+- ECHOIN launched 13:20 (run `wf_86fcf37c-003`, brief `echoin`, `~/dev/zz-echoin`): EM3, EM2 and
+  EM5 on the Mac, one commit each.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

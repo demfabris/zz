@@ -705,6 +705,16 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   profile puts EM2's per-turn checks under 1% of daemon CPU), attach instructions within 2%. Not
   met: the probe steps (socket read -> dispatch 13.3 us against 8, dispatch -> PTY write 7.3 us
   against 6), not re-measured after the merge. Linux measured next (batch6).
+- `fix/choose-detach` round 2 (`186f70e9`): a chooser is drawn and takes keys only while the
+  client's window holds its source pane; modes opened after it take keys and hide it;
+  send-prefix inside it goes to it; releases forwarded. Second review: not ready. Blocker: it
+  checks the window, not the active pane, so `C-b w`, `C-b o`, `xy` killed the window (the chooser
+  kept the keys); fixing to pane scope. Major, on main since `824f7c03`: choose-tree session and
+  window rows render the pane line (`tree_variable` is read after the built-ins and the built-in
+  `pane_format` is 1 on every row); that is where `tui-choosers.sh`'s 25 differing rows come
+  from. Trap: `compat/tui-choosers.sh` with no argument runs `target/debug/zz`, a stale GUI build
+  (that run reported 0 of 78 differing); always pass the zz_cli binary. Round 3 fix agent from
+  19:05.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

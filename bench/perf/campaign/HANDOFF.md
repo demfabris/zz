@@ -288,6 +288,13 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   name cache in `process_info.rs` misses whenever the foreground pid changes (`KERN_PROCARGS2`);
   the choose-tree activity sort still refreshes per output frame while such a chooser is open.
 - DL2 launched 00:05 (10-03) on `perf/deliver` reset to `37822fbf` (same worktrees as DL1).
+- Pushed mid-wave to main 2026-10-03 00:15 (no tag; the freeze holds until wave 4 exits): KNOBS,
+  ROWS, TUI-ECHO, CONTROL, DL6, PTYLEAK, TEARDOWN, DL1. Checks on the merged head: Mac batch1 and
+  batch2 merge checks (above), Linux functional checks of `59db7c3e` (1378 tests, control_stdio,
+  compat 37/42 with the known reds, startup diagnostics, backpressure) and Linux clippy of
+  `300a2f7d` after one fix (`RawFd` imported only for the macOS kqueue loop: TUI-ECHO never ran a
+  Linux build). Rule from this: every Mac lane's merge waits for a Linux `cargo clippy` of the
+  merged head. Wave-exit gates and the full corpus still to come.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

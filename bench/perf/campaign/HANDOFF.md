@@ -791,7 +791,7 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   enough that the exit lands on the unwatched pane's 200 ms first rebuild. Real daemon against the
   pin, seven print-and-exit variants: capture-pane, history and an attach all match tmux. The test
   now waits for each dead pane's notice; 20/20 alone on Linux.
-- **Pushed to main 2026-10-03 21:00: `421f4918..4320b601`, 80 commits** (BURST, DL3-DL5, CTRLCPU,
+- **Pushed to main 2026-10-03 20:41: `421f4918..4320b601`, 80 commits** (BURST, DL3-DL5, CTRLCPU,
   ECHOMAP, ACFIX, BYTES2, ATTACH, ECHOIN, the chooser fix, DEADPANE, docs). evidence-secrets clean,
   credential scan of the outgoing diff clean, no attribution lines. Both hosts' main checkouts
   fast-forwarded. No tag (the freeze holds until the wave-4 exit).

@@ -727,6 +727,11 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   against about 500 before for a typed burst). Lane STEADY after batch6's measurements.
 - batch6 on alienware from 19:01 (`86e721ad` = ECHOIN merged): release build, three A/B pairs
   against `a486069e` (echo, chatty, attach, spawn), a quiet final gate, then the full checks.
+- The steady workload has no client attached (10 detached windows printing every 10 ms), so DL4's
+  direct write is not the cause. Lane STEADY launched 19:10 (run `wf_685333d9-6de`, brief
+  `/tmp/zzpc/w4/steady.md`, `~/dev/zz-steady` on both hosts): split the extra CPU per thread
+  (utime/stime, context switches, faults, syscalls), bisect the merges, fix; it waits for batch6's
+  gate before using alienware and for ALLDONE before CPU series.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

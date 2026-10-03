@@ -227,6 +227,20 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   Known gap kept: kill-server against a handoff client whose consumer stopped reading drops the
   final `%exit` after the 2 s writer timeout (the relay client would write it later). DL5 rebases
   on it. Linux checks for the merged tree (`59db7c3e`) run in alienware `~/dev/zz-control`.
+- DL6 merged as `d408426e` (lane 162 min, `71e04876`, done=false): one Linux gather thread per
+  shard (`gather_pty_linux` over every PTY of its shard plus a wake pipe for launches, exits and
+  buffer returns; a pane with no free buffer leaves the poll set; started lazily, so shards with
+  only empty or output panes add no thread). `mem.threads.p20`/`tui20`/`scroll180`/`scroll80`
+  25/25/26/26 -> 9, the final rule (12) met. zz-terminal 378 pass, tui-output-backpressure 9/9.
+  Throughput floors not judged: the owner was gaming on alienware (about 3 cores, 8 GB swap;
+  a bare `cat` ceiling ran 2.5x slower), and `bench/run.sh` needs a `dist/zz` GUI bundle there.
+  Single-shard busy probe: 1 busy pane flat, 4 busy unicode +1%, 4 busy ascii 120 -> 105 MB/s
+  (-13%): follow-up DL6b (`perf/gather2`, same worktrees). Attach on Linux: kernel time is
+  0.25/0.5 ms of 2.7/3.55 ms per attach and the gather threads do nothing during it, so
+  `attach.cpu.*` is not a gather lever (DL1 and later slices). The lane killed CONTROL's Linux
+  release build with `pkill -f "cargo build --release -j6 -p zz-cli"` (briefs now forbid broad
+  pkill patterns). Merging it landed under the running batch2 Mac checks (mostly Linux-only
+  code); merge checks now take `WT=<worktree>` so they run on a fixed snapshot.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

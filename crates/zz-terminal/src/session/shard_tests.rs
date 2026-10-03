@@ -408,6 +408,7 @@ fn a_child_stuck_draining_its_terminal_does_not_freeze_the_shard() {
         Arc::new(TerminalAppearance::default()),
         MAX_OUTPUT_VIEW_SCROLLBACK,
         true,
+        None,
         Ok(Some(shard.clone())),
     );
     live.send_text("still served\n");

@@ -125,6 +125,10 @@ use pane_actor::PaneActor;
 
 const INITIAL_COLUMNS: u16 = 80;
 const INITIAL_ROWS: u16 = 24;
+/// `spawn_pane`'s `SPAWN_EMPTY` branch in the pin (spawn.c) gives a pane with no
+/// process newline mode and no cursor, so a stream written into it starts each
+/// line at column 0 and nothing blinks where nobody can type.
+const EMPTY_PANE_MODES: &str = "\x1b[20h\x1b[?25l";
 const INITIAL_CELL_WIDTH: u32 = 8;
 const INITIAL_CELL_HEIGHT: u32 = 18;
 const MAX_LINK_URI_BYTES: usize = 16 * 1024;
@@ -367,6 +371,7 @@ impl EngineFilter {
             cursor_y: terminal.cursor_y()?,
             alternate_on,
             mouse_tracking: terminal.is_mouse_tracking()?,
+            cursor_hidden: !terminal.is_cursor_visible()?,
             program_title_writes: self.program_title_writes,
         })
     }
@@ -1536,6 +1541,7 @@ pub struct TerminalFacts {
     /// reads off `wp->base.mode`, which is what every stock pane-body row
     /// guards its `send -M` branch on.
     pub mouse_tracking: bool,
+    pub cursor_hidden: bool,
     pub program_title_writes: u64,
 }
 
@@ -2053,6 +2059,7 @@ impl TerminalSession {
             appearance,
             MAX_OUTPUT_VIEW_SCROLLBACK,
             true,
+            None,
         )
     }
 
@@ -2068,6 +2075,7 @@ impl TerminalSession {
             appearance,
             MAX_STARTUP_OUTPUT_VIEW_SCROLLBACK,
             true,
+            None,
         )
     }
 
@@ -2082,6 +2090,23 @@ impl TerminalSession {
             appearance,
             max_scrollback.min(MAX_HISTORY_LIMIT),
             false,
+            None,
+        )
+    }
+
+    #[must_use]
+    pub fn spawn_empty_pane(
+        max_scrollback: usize,
+        appearance: Arc<TerminalAppearance>,
+        size: Option<TerminalSize>,
+    ) -> Self {
+        Self::spawn_surface_with_appearance(
+            String::new(),
+            EMPTY_PANE_MODES.to_owned(),
+            appearance,
+            max_scrollback.min(MAX_HISTORY_LIMIT),
+            false,
+            size,
         )
     }
 
@@ -2091,12 +2116,13 @@ impl TerminalSession {
         appearance: Arc<TerminalAppearance>,
         max_scrollback: usize,
         frozen: bool,
+        size: Option<TerminalSize>,
     ) -> Self {
         #[cfg(unix)]
         let shard = shard::choose();
         #[cfg(not(unix))]
         let shard: Result<Option<shard::ShardHandle>, WorkerError> = Ok(None);
-        Self::spawn_surface_with_shard(title, text, appearance, max_scrollback, frozen, shard)
+        Self::spawn_surface_with_shard(title, text, appearance, max_scrollback, frozen, size, shard)
     }
 
     fn spawn_surface_with_shard(
@@ -2105,6 +2131,7 @@ impl TerminalSession {
         appearance: Arc<TerminalAppearance>,
         max_scrollback: usize,
         frozen: bool,
+        size: Option<TerminalSize>,
         shard: Result<Option<shard::ShardHandle>, WorkerError>,
     ) -> Self {
         let wake = match &shard {
@@ -2126,10 +2153,11 @@ impl TerminalSession {
         let event_state = Arc::new(EventQueueState::new());
         event_state.resolve_identity();
         let (event_tx, events) = terminal_event_channel(&event_state);
+        let geometry = size.map(Geometry::from_size).unwrap_or_default();
         let latest = Arc::new(RwLock::new(PublishedViewports::new(
             TerminalViewport::blank_with_appearance(
-                INITIAL_COLUMNS,
-                INITIAL_ROWS,
+                geometry.columns,
+                geometry.rows,
                 SessionStatus::Starting,
                 &appearance,
             ),
@@ -2154,6 +2182,7 @@ impl TerminalSession {
                         title,
                         text,
                         frozen,
+                        geometry,
                     },
                     alive,
                     wake,
@@ -2178,6 +2207,7 @@ impl TerminalSession {
                             appearance,
                             max_scrollback,
                             frozen,
+                            geometry,
                         );
                         drop(alive);
                     })
@@ -4995,7 +5025,7 @@ fn decode_kitty_png<'alloc>(
 enum FallbackFrame {
     FirstStreamed,
     Built(TerminalViewport),
-    Metadata(TerminalViewport, bool),
+    Metadata(TerminalViewport),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -5157,7 +5187,7 @@ impl Publisher {
                 true,
             ),
             FallbackFrame::Built(viewport) => (Arc::new(viewport), true),
-            FallbackFrame::Metadata(viewport, current) => (Arc::new(viewport), current),
+            FallbackFrame::Metadata(viewport) => (Arc::new(viewport), false),
         };
         {
             let mut latest = self.latest.write();
@@ -5222,10 +5252,6 @@ impl Publisher {
 
     fn latest_fallback(&self) -> Arc<TerminalViewport> {
         Arc::clone(&self.latest.read().fallback)
-    }
-
-    fn fallback_current(&self) -> bool {
-        self.latest.read().fallback_current
     }
 
     fn notify_latest(&self) {
@@ -5502,6 +5528,7 @@ fn output_view_worker(
     appearance: Arc<TerminalAppearance>,
     max_scrollback: usize,
     frozen: bool,
+    geometry: Geometry,
 ) {
     let result = (|| {
         let mut actor = new_output_view(
@@ -5513,6 +5540,7 @@ fn output_view_worker(
             &appearance,
             max_scrollback,
             frozen,
+            geometry,
             &ActorWake::none(),
         )?;
         loop {
@@ -5686,10 +5714,10 @@ fn new_output_view(
     appearance: &TerminalAppearance,
     max_scrollback: usize,
     frozen: bool,
+    geometry: Geometry,
     wake: &ActorWake,
 ) -> Result<surface_actor::SurfaceActor<'static, 'static>, WorkerError> {
     install_kitty_png_decoder();
-    let geometry = Geometry::default();
     let mut terminal = new_terminal(geometry.columns, geometry.rows, max_scrollback)?;
     let reported_color_scheme = Rc::new(Cell::new(ghostty_color_scheme(appearance.color_scheme)));
     let color_scheme_source = Rc::clone(&reported_color_scheme);
@@ -5698,8 +5726,10 @@ fn new_output_view(
     register_bell(&mut terminal, publisher.clone())?;
     if frozen {
         write_output_view_content(&mut terminal, title, text);
+    } else {
+        terminal.vt_write(text.as_bytes());
     }
-    surface_actor::SurfaceActor::new(
+    let mut actor = surface_actor::SurfaceActor::new(
         command_rx,
         slot,
         publisher,
@@ -5722,7 +5752,11 @@ fn new_output_view(
             search: Some(SearchWorker::spawn(wake.clone())),
         },
         frozen,
-    )
+    )?;
+    if !frozen {
+        actor.publish_started()?;
+    }
+    Ok(actor)
 }
 
 struct SurfaceTerminal<'a, 'b> {
@@ -13863,40 +13897,6 @@ impl IdleCompression {
 const UNWATCHED_SETTLE_QUIET: Duration = Duration::from_millis(100);
 const UNWATCHED_SETTLE_MAX: Duration = Duration::from_secs(1);
 const UNWATCHED_NOTIFY_INTERVAL: Duration = Duration::from_millis(100);
-const CELL_NEUTRAL_ANSI_MODES: [u16; 2] = [4, 20];
-const CELL_NEUTRAL_DEC_MODES: [u16; 11] =
-    [1, 25, 1000, 1002, 1003, 1004, 1005, 1006, 1015, 1016, 2004];
-
-fn writes_only_modes(bytes: &[u8]) -> bool {
-    let mut rest = bytes;
-    while let Some(sequence) = rest.strip_prefix(b"\x1b[") {
-        let (modes, sequence) = match sequence.strip_prefix(b"?") {
-            Some(sequence) => (&CELL_NEUTRAL_DEC_MODES[..], sequence),
-            None => (&CELL_NEUTRAL_ANSI_MODES[..], sequence),
-        };
-        let Some(end) = sequence
-            .iter()
-            .position(|byte| !byte.is_ascii_digit() && *byte != b';')
-        else {
-            return false;
-        };
-        let (parameters, tail) = sequence.split_at(end);
-        if parameters.is_empty() || !matches!(tail[0], b'h' | b'l') {
-            return false;
-        }
-        let neutral = parameters.split(|byte| *byte == b';').all(|parameter| {
-            std::str::from_utf8(parameter)
-                .ok()
-                .and_then(|parameter| parameter.parse::<u16>().ok())
-                .is_some_and(|mode| modes.contains(&mode))
-        });
-        if !neutral {
-            return false;
-        }
-        rest = &tail[1..];
-    }
-    rest.is_empty() && !bytes.is_empty()
-}
 
 struct RenderResources<'alloc> {
     state: RenderState<'alloc>,
@@ -13940,8 +13940,6 @@ struct Frames<'alloc> {
     synchronized_output_deadline: Option<Instant>,
     retain_render_until: Option<Instant>,
     last_settle: Option<Instant>,
-    blank: bool,
-    mode_only_write: bool,
 }
 
 impl<'alloc> Frames<'alloc> {
@@ -13967,8 +13965,6 @@ impl<'alloc> Frames<'alloc> {
             synchronized_output_deadline: None,
             retain_render_until: None,
             last_settle: None,
-            blank: true,
-            mode_only_write: false,
         })
     }
 
@@ -14225,10 +14221,6 @@ fn publish_views<'alloc: 'callbacks, 'callbacks>(
     status: SessionStatus,
     notify: bool,
 ) -> Result<(), WorkerError> {
-    let mode_only = std::mem::take(&mut frames.mode_only_write);
-    if matches!(change, SnapshotChange::Content) && !mode_only {
-        frames.blank = false;
-    }
     if frames.defer_synchronized_output(terminal, &status)? {
         return Ok(());
     }
@@ -14290,17 +14282,13 @@ fn publish_views<'alloc: 'callbacks, 'callbacks>(
         frames.last_unbuilt = None;
         FallbackFrame::FirstStreamed
     } else if let Some((viewport, metadata_changed)) = refreshed {
-        let cells_kept = mode_only
-            && frames.blank
-            && viewport.cursor.is_some_and(Cursor::visible) == terminal.is_cursor_visible()?;
-        if matches!(change, SnapshotChange::Content) && !cells_kept {
+        if matches!(change, SnapshotChange::Content) {
             let now = Instant::now();
             frames.unbuilt_since.get_or_insert(now);
             frames.last_unbuilt = Some(now);
         }
         notify = notify && frames.admit_notify(metadata_changed);
-        let current = cells_kept && frames.unbuilt_since.is_none() && publisher.fallback_current();
-        FallbackFrame::Metadata(viewport, current)
+        FallbackFrame::Metadata(viewport)
     } else {
         if !active.is_empty() {
             terminal.set_selection(None)?;
@@ -15563,6 +15551,7 @@ mod tests {
                     cursor_y: 23,
                     alternate_on: true,
                     mouse_tracking: false,
+                    cursor_hidden: false,
                     program_title_writes: 0,
                 }
             );
@@ -15590,6 +15579,7 @@ mod tests {
                     cursor_y: 23,
                     alternate_on: false,
                     mouse_tracking: false,
+                    cursor_hidden: false,
                     program_title_writes: 0,
                 }
             );

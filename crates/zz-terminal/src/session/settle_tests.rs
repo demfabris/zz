@@ -1,144 +1,42 @@
 use super::*;
 
-fn unwatched(
-    columns: u16,
-    rows: u16,
-) -> (
-    Terminal<'static, 'static>,
-    Publisher,
-    TerminalEvents,
-    ActiveTerminalViews,
-    Frames<'static>,
-) {
-    let state = Arc::new(EventQueueState::new());
-    let (event_tx, events) = terminal_event_channel(&state);
-    let publisher = Publisher {
-        event_tx,
-        latest: Arc::new(RwLock::new(PublishedViewports::new(
-            TerminalViewport::blank(columns, rows, SessionStatus::Starting),
-        ))),
-        state,
-    };
-    let terminal = new_terminal(columns, rows, 32).expect("terminal");
-    let frames = Frames::new(&TerminalAppearance::default()).expect("frames");
-    (
-        terminal,
-        publisher,
-        events,
-        ActiveTerminalViews::new(),
-        frames,
-    )
-}
-
-fn feed(
-    terminal: &mut Terminal<'static, 'static>,
-    publisher: &Publisher,
-    frames: &mut Frames<'static>,
-    active: &mut ActiveTerminalViews,
-    bytes: &[u8],
-) {
-    terminal.vt_write(bytes);
-    frames.mode_only_write = writes_only_modes(bytes);
-    publish_active_views(
-        terminal,
-        publisher,
-        frames,
-        SnapshotChange::Content,
-        active,
-        &WordSeparators::default(),
-        SessionStatus::Running,
-    )
-    .expect("publish");
-}
-
-#[test]
-fn only_cell_neutral_mode_sets_count_as_mode_writes() {
-    for bytes in [
-        &b"\x1b[20h\x1b[?25l"[..],
-        b"\x1b[?1000;1006h",
-        b"\x1b[4l",
-        b"\x1b[?2004h\x1b[?1004l",
-    ] {
-        assert!(writes_only_modes(bytes), "{bytes:?}");
-    }
-    for bytes in [
-        &b""[..],
-        b"x",
-        b"\x1b[?25l\r\n",
-        b"\x1b[?1049h",
-        b"\x1b[?3h",
-        b"\x1b[?20h",
-        b"\x1b[25l",
-        b"\x1b[2J",
-        b"\x1b[?25",
-        b"\x1b[?h",
-        b"\x1b[?25lx",
-        b"\x1b[?25;3l",
-    ] {
-        assert!(!writes_only_modes(bytes), "{bytes:?}");
+fn wait_until(what: &str, mut ready: impl FnMut() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !ready() {
+        assert!(Instant::now() < deadline, "timed out waiting for {what}");
+        thread::sleep(Duration::from_millis(5));
     }
 }
 
 #[test]
-fn a_blank_pane_fed_only_modes_builds_no_settle_snapshot() {
-    let (mut terminal, publisher, _events, mut active, mut frames) = unwatched(80, 24);
-    feed(
-        &mut terminal,
-        &publisher,
-        &mut frames,
-        &mut active,
-        b"\x1b[20h\x1b[?25l",
+fn an_empty_pane_starts_at_its_size_with_its_modes_and_builds_no_settle_snapshot() {
+    let session = TerminalSession::spawn_empty_pane(
+        64,
+        Arc::new(TerminalAppearance::default()),
+        Some(TerminalSize::cells(80, 11)),
     );
-    assert!(frames.rebuild_due().is_none());
-    assert!(matches!(
-        publisher.latest_fallback().status,
-        SessionStatus::Running
-    ));
-    std::thread::sleep(UNWATCHED_SETTLE_QUIET);
-    settle_unwatched(
-        &mut terminal,
-        &publisher,
-        &mut frames,
-        &mut active,
-        &WordSeparators::default(),
-        SessionStatus::Running,
-    )
-    .expect("settle");
-    assert_eq!(frames.snapshot_builds, 0);
-
-    feed(
-        &mut terminal,
-        &publisher,
-        &mut frames,
-        &mut active,
-        b"hello",
-    );
-    assert!(frames.rebuild_due().is_some());
-    feed(
-        &mut terminal,
-        &publisher,
-        &mut frames,
-        &mut active,
-        b"\x1b[?2004h",
-    );
+    wait_until("the empty pane to run", || {
+        matches!(session.latest_viewport().status, SessionStatus::Running)
+    });
+    let viewport = session.latest_viewport();
+    assert_eq!((viewport.columns, viewport.rows), (80, 11));
+    assert!(session.facts().cursor_hidden);
+    let capture = session
+        .capture(CaptureOptions::default())
+        .expect("capture the empty pane");
+    assert_eq!(capture.split('\n').count(), 11, "{capture:?}");
+    thread::sleep(UNWATCHED_SETTLE_QUIET * 3);
     assert!(
-        frames.rebuild_due().is_some(),
-        "a later mode write keeps the settle owed"
+        !session.latest_viewport_is_current(),
+        "nothing was written, so the unwatched fallback is never built"
     );
-}
 
-#[test]
-fn a_mode_write_on_a_pane_whose_cursor_shows_still_settles() {
-    let (mut terminal, publisher, _events, mut active, mut frames) = unwatched(80, 24);
-    feed(
-        &mut terminal,
-        &publisher,
-        &mut frames,
-        &mut active,
-        b"\x1b[?2004h",
-    );
-    assert!(
-        frames.rebuild_due().is_some(),
-        "the fallback has no cursor but the terminal shows one"
-    );
+    assert!(session.feed(Arc::from(&b"a\nb"[..])));
+    wait_until("the settle after real output", || {
+        session.latest_viewport_is_current()
+    });
+    let capture = session
+        .capture(CaptureOptions::default())
+        .expect("capture after output");
+    assert!(capture.starts_with("a\nb\n"), "{capture:?}");
 }

@@ -303,6 +303,16 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   (`~/dev/zz-tuiecho2`: key encode, prefix canonicalisation and the per-frame cell copy in the TUI
   client). Every brief now ends with a Linux clippy on a detached alienware worktree of the same
   name. Briefs in `wave4-briefs.py`.
+- SPAWN merged as `706d08b3` (fix round 57 min, `45dae962`): the child stack is a 64 KiB mmap with a
+  PROT_NONE guard page, unmapped when clone returns; Linux panes inherit the daemon's THP setting
+  (child prctl, parent reset and `THP_DISABLED_HERE` gone; the test, renamed
+  `a_pane_keeps_transparent_huge_pages_off_when_zz_turned_them_off`, checks both spawn paths);
+  `ZZ_PTY_FORK=1` selects the old fork path with the exec fence. alienware, pairs at load 2-8:
+  `spawn.cpu.split_shell` 1.83 -> 1.30 ms and `new_window` 1.60 -> 1.13 ms (-29% each), footprint
+  p1 +0.3%, p20 -0.9% over five mem-only pairs (the 20-shell probe 5.23 vs 5.24 MiB); THP probe 0
+  huge pages and every pane THP-off in 8/8. Still red against tmux on Linux: the three
+  `spawn.cpu.*` rows (SETTLE takes `split_empty_P`); on the Mac `split_empty_P`. Flaky on Linux on
+  base and lane alike: `an_attach_repaints_a_dead_pane_kept_by_remain_on_exit` (5 of 10 alone).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

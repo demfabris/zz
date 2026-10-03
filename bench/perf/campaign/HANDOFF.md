@@ -767,6 +767,18 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   the first pass and passed alone at load 4.5 from STEADY and EM1 builds). batch7 on `097a4e6e`
   (the chooser fix on top): Linux clippy and tests of the five touched crates, chooser and format
   compat rows, tui-choosers.
+- batch7 Linux (`097a4e6e`, the chooser fix on top of batch6): clippy of the five touched crates
+  exit 0; their tests 3129 passed, 3 failed, 2 pass alone; chooser and format compat rows 21
+  clean; tui-choosers 78/78. The third failure,
+  `attachframes_tests::an_attach_repaints_a_dead_pane_kept_by_remain_on_exit`, fails alone on
+  Linux ("1 of 2 panes printed": a pane that prints a marker and exits never shows it in its
+  last viewport; passes on macOS; DL4's lane saw it at `5a9c0ef0` already). Lane DEADPANE
+  (`~/dev/zz-deadpane`, branch `fix/deadpane`, from 20:24) finds whether a pane that prints and
+  exits loses its output on Linux; main waits for its answer.
+- Mac checks on `ce2b2c75` (19:37-19:49): fmt, clippy, Linux-target clippy, compat-check, web-build
+  pass; tests of seven crates 3806 passed, 14 load failures, all pass alone; attached-client,
+  tui-screen-diff, tui-copy-mode, tui-choosers 78/78 and tui-overlays 48/48 pass; full corpus
+  running.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

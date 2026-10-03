@@ -12994,15 +12994,27 @@ fn watch_child_linux(
 
 #[cfg(unix)]
 fn drain_wake_pipe(wake_rx: &std::os::fd::OwnedFd) -> Result<(), WorkerError> {
+    drain_wake_reads(|drained| rustix::io::read(wake_rx, drained))
+}
+
+#[cfg(unix)]
+fn drain_wake_reads(
+    mut read: impl FnMut(&mut [u8]) -> Result<usize, rustix::io::Errno>,
+) -> Result<(), WorkerError> {
     let mut drained = [0_u8; 64];
     loop {
-        match rustix::io::read(wake_rx, &mut drained) {
-            Ok(0) | Err(rustix::io::Errno::AGAIN) => return Ok(()),
+        match read(&mut drained) {
+            Ok(count) if count < drained.len() => return Ok(()),
+            Err(rustix::io::Errno::AGAIN) => return Ok(()),
             Ok(_) | Err(rustix::io::Errno::INTR) => {}
             Err(error) => return Err(WorkerError::Io(error.into())),
         }
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "session/wake_drain_echoin_tests.rs"]
+mod wake_drain_echoin_tests;
 
 #[cfg(not(unix))]
 fn wait_for_wake(

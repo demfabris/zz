@@ -779,6 +779,12 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   pass; tests of seven crates 3806 passed, 14 load failures, all pass alone; attached-client,
   tui-screen-diff, tui-copy-mode, tui-choosers 78/78 and tui-overlays 48/48 pass; full corpus
   running.
+- Mac full corpus on `ce2b2c75` (19:49-20:37): only the known Mac reds once prompt-history,
+  smoke/copy-mode-resize-freeze and smoke/plugin-runtime-oh-my-tmux are rerun under
+  `LANG=LC_ALL=en_US.UTF-8` (all three clean). Trap: run `compat/run.sh` with the UTF-8 locale
+  (merge-checks-mac.sh exports it); without it the pinned tmux prints `_` for characters it
+  cannot encode, and those three rows go red on the tmux side. The same cause explains the
+  "newline vs `_`" copy-mode-resize-freeze reports from ECHOIN and the chooser lane.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

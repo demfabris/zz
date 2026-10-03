@@ -20,9 +20,15 @@ fn direct(mailbox: &OutboundMailbox) -> UnixStream {
 }
 
 fn loop_waker(mailbox: &OutboundMailbox) -> Poll {
+    loop_waker_owned_by(
+        mailbox,
+        thread::spawn(|| thread::current().id()).join().unwrap(),
+    )
+}
+
+fn loop_waker_owned_by(mailbox: &OutboundMailbox, owner: thread::ThreadId) -> Poll {
     let poll = Poll::new().unwrap();
     let waker = Arc::new(mio::Waker::new(poll.registry(), Token(7)).unwrap());
-    let owner = thread::spawn(|| thread::current().id()).join().unwrap();
     *mailbox.loop_waker.lock() = Some((waker, owner));
     poll
 }
@@ -187,6 +193,29 @@ fn queued_reliable_messages_and_an_inflight_writer_keep_frames_on_the_loop() {
 }
 
 #[test]
+fn loop_thread_terminal_frames_stay_behind_later_reliable_messages() {
+    let mailbox = OutboundMailbox::new();
+    let _poll = loop_waker_owned_by(&mailbox, thread::current().id());
+    let mut peer = direct(&mailbox);
+    let pane = PaneId(8);
+    let full = terminal_test_message(pane, 1, 1);
+
+    assert_eq!(
+        mailbox.enqueue_terminal(pane, &full),
+        TerminalEnqueue::Queued
+    );
+    assert!(mailbox.enqueue_reliable(&ProtocolMessage::TreeSync));
+    assert!(available(&mut peer).is_empty());
+    let frames = drain(&mailbox);
+    assert_eq!(frames.len(), 2);
+    assert_eq!(
+        decode_protocol_frame(&frames[0]).unwrap(),
+        ProtocolMessage::TreeSync
+    );
+    assert_eq!(decode_protocol_frame(&frames[1]).unwrap(), full);
+}
+
+#[test]
 fn attach_batches_settling_and_control_collection_disable_direct_writes() {
     let setups: [fn(&OutboundMailbox); 4] = [
         OutboundMailbox::hold_terminals,
@@ -325,4 +354,87 @@ fn interactive_connections_get_a_direct_socket_that_closes_with_the_connection()
     drop(client);
     connection.join().unwrap().unwrap();
     assert!(mailbox.state.lock().direct_socket.is_none());
+}
+
+fn fill(socket: &std::os::fd::OwnedFd) -> usize {
+    let junk = vec![0_u8; 64 * 1024];
+    let mut chunk = junk.len();
+    let mut filled = 0;
+    while chunk != 0 {
+        match send_nonblocking(socket, &junk[..chunk]) {
+            Ok(written) => filled += written,
+            Err(rustix::io::Errno::INTR) => {}
+            Err(rustix::io::Errno::AGAIN) => chunk /= 2,
+            Err(error) => panic!("fill client socket: {error}"),
+        }
+    }
+    filled
+}
+
+fn eventually(mut done: impl FnMut() -> bool) -> bool {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !done() {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+    true
+}
+
+#[test]
+fn a_refused_control_stdio_on_an_interactive_connection_holds_the_direct_path() {
+    let shared = Arc::new(Shared::new(1));
+    shared.initialize(false).expect("initialize daemon state");
+    let (mut client, server) = UnixStream::pair().unwrap();
+    client
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let connection_shared = Arc::clone(&shared);
+    let connection = thread::spawn(move || handle_connection(server, &connection_shared));
+    zz_protocol::write_protocol_message(&mut client, &hello(ClientKind::Interactive)).unwrap();
+    assert!(matches!(
+        zz_protocol::read_protocol_message(&mut client).unwrap(),
+        ProtocolMessage::ServerHello(_)
+    ));
+    let mailbox = sole_writer(&shared);
+    assert!(eventually(|| {
+        let state = mailbox.state.lock();
+        state.queued_bytes == 0 && state.writer_inflight_bytes == 0
+    }));
+
+    client.set_nonblocking(true).unwrap();
+    let junk = {
+        let state = mailbox.state.lock();
+        assert!(state.queued_bytes == 0 && state.writer_inflight_bytes == 0);
+        available(&mut client);
+        fill(state.direct_socket.as_ref().expect("direct socket"))
+    };
+    client.set_nonblocking(false).unwrap();
+    zz_protocol::write_protocol_message(&mut client, &ProtocolMessage::ControlStdio).unwrap();
+    assert!(eventually(|| {
+        let state = mailbox.state.lock();
+        state.queued_bytes != 0 || state.writer_inflight_bytes != 0
+    }));
+
+    let pane = PaneId(9);
+    let full = terminal_test_message(pane, 1, 1);
+    assert_eq!(
+        mailbox.enqueue_terminal(pane, &full),
+        TerminalEnqueue::Queued
+    );
+    assert!(mailbox.state.lock().terminals.contains_key(&pane));
+
+    let mut skipped = vec![0; junk];
+    client.read_exact(&mut skipped).unwrap();
+    assert_eq!(
+        zz_protocol::read_protocol_message(&mut client).unwrap(),
+        ProtocolMessage::ControlStdioClosed
+    );
+    assert_eq!(
+        zz_protocol::read_protocol_message(&mut client).unwrap(),
+        full
+    );
+    drop(client);
+    connection.join().unwrap().unwrap();
 }

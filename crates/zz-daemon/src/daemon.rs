@@ -3280,6 +3280,12 @@ impl OutboundMailbox {
             log::error!("failed to encode terminal update for {pane}");
             return TerminalEnqueue::Closed;
         };
+        #[cfg(unix)]
+        let off_loop = self
+            .loop_waker
+            .lock()
+            .as_ref()
+            .is_none_or(|(_, owner)| *owner != thread::current().id());
         let mut state = self.state.lock();
         if state.closed {
             return TerminalEnqueue::Closed;
@@ -3340,7 +3346,7 @@ impl OutboundMailbox {
             clear_preview_refresh(&mut state, pane);
         }
         #[cfg(unix)]
-        if let Some(written) = write_direct_terminal(&mut state, &encoded) {
+        if off_loop && let Some(written) = write_direct_terminal(&mut state, &encoded) {
             state.delivered_terminals.insert(pane, transition.current);
             if written == encoded.len() {
                 return TerminalEnqueue::Queued;

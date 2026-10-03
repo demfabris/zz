@@ -4,7 +4,7 @@ title: Daemon-owned PTY worker model
 description: How the daemon spawns and owns one PTY-backed terminal session per pane, the thread/ownership boundary between zz-daemon and the zz-terminal worker, and the paths that carry terminal frames out and send-keys in.
 resource: crates/zz-daemon/src/daemon.rs
 tags: [pty, daemon, terminal, threading, send-keys]
-timestamp: 2026-10-03T12:20:00Z
+timestamp: 2026-10-03T14:25:00Z
 ---
 
 # Overview
@@ -131,12 +131,15 @@ while a frame or its predecessor carries Kitty placements. The views it took are
 beside the frame (`TerminalSession::latest_frames`). A record removed under that lock gets no later
 frame, and the mailbox's generation checks drop or widen anything that lands against a stale base.
 When an interactive client's mailbox holds nothing, the loop has no write in flight for it and no
-attach batch, attach settle or control collection is open, `enqueue_terminal_with` writes the frame
-itself under the mailbox lock with one nonblocking `send` on a duplicate of the client's socket
+attach batch, attach settle or control collection is open, `enqueue_terminal_with` called off the
+loop thread writes the frame itself under the mailbox lock with one nonblocking `send` on a duplicate of the client's socket
 (`OutboundState::direct_socket`, set by `Connection::prepare_hello` for `ClientKind::Interactive`
 and dropped when the mailbox closes or the connection goes away). A short write leaves the rest at
 the front of the reliable lane as `OutboundFrame::Partial` and wakes the loop, which owns the socket
 until the mailbox is idle again; an error drops the duplicate and queues the frame for the loop.
+Frames the loop thread enqueues itself keep the slot, so they still go out behind reliable messages
+the same turn queues later. A refused `ControlStdio` is queued on the mailbox like any reply, and an
+accepted one drops both socket duplicates, so the loop stays the only writer while it holds bytes.
 Otherwise the mailbox wakes the loop only when a client's terminal slot goes from empty to
 non-empty, and the sink holds those wakes until the frame is published
 (`TerminalFrameSink::published`): when the same publish also notified the loop, that notification's

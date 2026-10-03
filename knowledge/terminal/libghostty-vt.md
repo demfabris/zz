@@ -46,7 +46,7 @@ The worker uses these libghostty facilities (imports in `session.rs` and `sessio
 | Facility | Types used | Used for |
 | --- | --- | --- |
 | Terminal state | `Terminal<'alloc,'callbacks>`, `Screen`, `Mode` | VT parsing of PTY bytes, grid + scrollback, primary/alternate screens. |
-| Render extraction | `RenderState`, `RowIterator`, `CellIterator`, `Dirty`, `CursorVisualStyle` | Walk dirty rows/cells into [`PackedCell`](/concepts/terminal-frame.md) frames. |
+| Render extraction | `RenderState`, `RowIterator`, `CellIterator`, `CellsCopy`, `Dirty`, `CursorVisualStyle` | Walk dirty rows and copy each row's cells in one call (`copy_into`, fork commit `189df4a1`) into [`PackedCell`](/concepts/terminal-frame.md) frames. |
 | Cell semantics | `CellWide`, `CellSemanticContent`, `RowSemanticPrompt`, `TrackedGridRef`, `PointCoordinate` | Wide-glyph spacers, OSC 133 prompt/input/output marks, stable scroll-safe references. |
 | Key encoding | `key::Encoder`, `key::Event`, `key::Key`, `OptionAsAlt` | Encode [`KeyInput`](/terminal/interaction.md) to terminal bytes (Kitty keyboard aware). |
 | Mouse encoding | `mouse::Encoder`, `mouse::Event`, `EncoderSize` | Application mouse reporting when the app requests tracking. |

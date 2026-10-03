@@ -608,6 +608,17 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   charge in a slot. Merged as `4e32204d`. Behaviour change worth knowing: a pane that stops
   reading now holds up to about 262k typed keys and a later Ctrl-C waits behind them, as tmux's
   unbounded buffer does; before, zz dropped everything past 256.
+- BYTES2 merged as `537575b6` (`perf/bytes`: `312f8923` byte fields, a perf/wave4 merge,
+  `30de86ba` the per-byte cuts, review fix `c14ca7ee`): `%output` escapes rendered in bulk, the
+  per-drain allocation gone, `AcceptWake::wake` no longer holds its mutex across the mio wake, the
+  control feed skips the waker while the loop is awake, and small chunks merge into one growable
+  tail (one copy per byte). Mac, alternating against perf/wave4 `30a64536`: daemon instructions per
+  streamed byte 94.7 -> 55.8 (-41%), stream probe 201 -> 239 MB/s, `control.output_mbps` 197.6 ->
+  211.5 over six pairs, `control.latency` 0.0142 -> 0.0136 ms. ATTACH rewrites the same lines in
+  `AcceptWake::wake` and `EventLoop::poll_ready`: keep both (the waker cloned out of the mutex and
+  woken through ATTACH's `wake_loop`; `clear_loop_again()` first in poll_ready, then park, poll,
+  unpark). Checks on `537575b6` (ACFIX + BYTES) running in the snapshot `~/dev/zz-check` (the first
+  ACFIX quick check was stopped: the BYTES merge landed in its tree mid-run, the recorded trap).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

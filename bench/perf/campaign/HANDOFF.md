@@ -466,7 +466,7 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   YubiKey (`id_ed25519_sk`), so a new master needs the owner's touch. Every Linux step since then
   is NOT RUN and queued below ("Linux leg owed"). Trap: start a long unattended run only with a
   fresh master (`ssh -O check alienware`; it lasts 4 h from the touch).
-- DL4/DL5 fixes (workflow finished 12:30, 4 h 13 min in all):
+- DL4/DL5 fixes (workflow finished 12:30, 4 h 13 min in all; DL5 fix 11:07, DL4 fix 11:24):
   - DL4 fix `970ec32a`: `open_stdio` clears the direct socket and sends its refusal through the
     mailbox; frames queued on the loop thread stay on the loop's write path, so they cannot pass
     later reliable messages. Mac echo p50 shows no gain over 8 + 6 pairs (instructions per key
@@ -478,7 +478,7 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
     `%begin` are ordered lines. Mac probe, 4 busy panes: 110-145 MB/s with every reply answered
     (12 panes 81 MB/s); `control.output_mbps` 195.7, `control.latency` 0.0119 ms. Linux not
     rerun (ssh).
-- Merged 12:40: DL3+DL4 (`perf/deliver4` at `970ec32a`) and DL5 (`perf/deliver5` at `d0116461`),
+- Merged 12:31: DL3+DL4 (`perf/deliver4` at `970ec32a`) and DL5 (`perf/deliver5` at `d0116461`),
   both clean, as `3924f8fa`. Decision: DL4 proved the loop-busy and Linux echo gain the hold was
   for; Mac echo p50 did not move, recorded as not met. Mac batch4 checks running in the snapshot
   worktree `~/dev/zz-check` (full corpus, wire checks, A/B against `0d7dabf7`). Main is not
@@ -520,7 +520,7 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   `x86_64-unknown-linux-gnu`, glibc 2.35, libghostty cross-built). On `3924f8fa`, zz-daemon,
   zz-terminal, zz-mux, zz-protocol, zz-client, zz-tui and zz-cli: exit 0. It type-checks the
   Linux cfg paths; it does not run anything, so Linux tests and timings stay owed.
-- BYTES2 and ATTACH launched 13:05 as `w4-side-lanes` run `wf_d7e4fa99-820` (briefs `bytes2`,
+- BYTES2 and ATTACH launched 12:43 as `w4-side-lanes` run `wf_d7e4fa99-820` (briefs `bytes2`,
   `attach`; Mac-only, Linux clippy through the script above). BYTES2 merges perf/wave4 into
   `perf/bytes`, re-measures on top of DL5, and cuts the remaining per-byte cost (bulk `%output`
   escaping, the per-drain allocation, `AcceptWake::wake` holding its mutex across the mio wake).
@@ -541,7 +541,7 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   1.23-1.31 ms on Linux, under the 1.40 target only if the gather wake is worth 110 us or more.
   Larger lever, not planned: the tmux model, where the daemon reads the attach client's tty
   itself (removes the client's long-sleep wake and a socket hop per key).
-- ECHOIN launched 13:20 (run `wf_86fcf37c-003`, brief `echoin`, `~/dev/zz-echoin`): EM3, EM2 and
+- ECHOIN launched 12:49 (run `wf_86fcf37c-003`, brief `echoin`, `~/dev/zz-echoin`): EM3, EM2 and
   EM5 on the Mac, one commit each.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit

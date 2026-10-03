@@ -418,7 +418,7 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   CPU/instruction rows equal the DL3 base (the wave-4 gain there is DL1, DL2 and ROWS). Decision:
   hold DL3 until DL4 (the shard writes an idle socket directly, removing that loop wake and
   writev, and the echo hop) proves the gain on top of it; merge both together then.
-- DL4 and DL5 launched 04:45 on top of DL3 as workflow `w4-slices` run `wf_3436d1b8-110`
+- DL4 and DL5 launched 08:15 on top of DL3 as workflow `w4-slices` run `wf_3436d1b8-110`
   (`~/dev/zz-deliver4`, `~/dev/zz-deliver5`, both first merge perf/wave4). DL4 owns loop busy <= 10
   in addition to its echo criterion; DL5 replaces the control output taps with a sink kind and adds
   the per-pane stream barrier.

@@ -216,6 +216,17 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   `smoke/control-alias-prepare`, both red on wave 3); one solo failure to settle:
   `mode_keys_scope_visible_command_output_separately_from_underlying_copy_mode` ("output view 1
   did not close" at 30 s, alone, at load 6-7).
+- CONTROL merged as `59db7c3e` (fix round 36 min, `70e4f1ef`): both majors fixed (remove never
+  blocks, the buffer is dropped; socket EOF closes the handed stdio and outbound at once), the five
+  minors (flags restored at exit and before the client writes stdout itself, ack wait with no
+  deadline, the stderr diagnostic after the reply, stdout WRITABLE deregistered once drained, and
+  a `control-stdio-v1` capability bit in the compact Welcome so a new client stays on the relay
+  against an older daemon, no new message), and the wait-exit hang (`capture_pending_return`
+  dropped a second Return or EOF that arrived during a command). Mac after the fixes: latency
+  0.0125 ms, burst 211k, instructions per command unchanged. Windows check equals the base.
+  Known gap kept: kill-server against a handoff client whose consumer stopped reading drops the
+  final `%exit` after the 2 s writer timeout (the relay client would write it later). DL5 rebases
+  on it. Linux checks for the merged tree (`59db7c3e`) run in alienware `~/dev/zz-control`.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

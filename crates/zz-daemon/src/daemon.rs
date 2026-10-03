@@ -5233,6 +5233,10 @@ mod loop_reviewfixes_tests;
 #[path = "daemon/empty_pane_tests.rs"]
 mod empty_pane_tests;
 
+#[cfg(all(test, unix))]
+#[path = "daemon/plain_key_echoin_tests.rs"]
+mod plain_key_echoin_tests;
+
 impl Shared {
     #[inline]
     fn read_client<T>(&self, id: ClientId, read: impl FnOnce(Option<&Client>) -> T) -> T {
@@ -20616,6 +20620,21 @@ impl Shared {
             } => Some(*layout_generation),
             _ => None,
         };
+        let input = match input {
+            InputMessage::Key {
+                pane,
+                input,
+                text_follows: false,
+            } => match self.plain_key_generation(client, pane, &input) {
+                Some(generation) => return self.input_plain_key(client, pane, input, generation),
+                None => InputMessage::Key {
+                    pane,
+                    input,
+                    text_follows: false,
+                },
+            },
+            input => input,
+        };
         let Some(input) = ctrl::normalize_resize(&mut self.inner.lock(), client, input) else {
             return Ok(());
         };
@@ -23467,6 +23486,78 @@ impl Shared {
         self.note_terminal_input(client, pane);
         self.dispatch_input_key(client, pane, input)
             .map_err(Into::into)
+    }
+
+    fn plain_key_generation(
+        &self,
+        client: ClientId,
+        pane: PaneId,
+        input: &zz_terminal::KeyInput,
+    ) -> Option<u64> {
+        if !matches!(
+            input.action,
+            zz_terminal::KeyAction::Press | zz_terminal::KeyAction::Repeat
+        ) {
+            return None;
+        }
+        let inner = self.inner.lock();
+        let registered = inner.client(client)?;
+        if inner.client_flags.contains(client)
+            || registered.message.is_some()
+            || registered.command_prompt.is_some()
+            || registered.choose_tree.is_some()
+            || registered.choose_buffer.is_some()
+            || registered.display_panes.is_some()
+            || registered.popup.is_some()
+            || registered.menu.is_some()
+            || registered.confirm.is_some()
+            || registered.copy_session.is_some()
+            || registered.command_output.is_some()
+            || registered.published_key_table.is_some()
+            || registered.key_table_deadline.is_some()
+            || registered
+                .key_engine
+                .as_ref()
+                .is_some_and(|engine| *engine != KeyEngine::default())
+            || inner
+                .pane_modes
+                .get(&pane)
+                .is_some_and(|modes| !modes.is_empty())
+            || inner.engine.dead_pane_dismisses_on_key(pane)
+        {
+            return None;
+        }
+        let session = client_attached_session(&inner, client)?;
+        let (decision, _) = KeyEngine::default().handle_with_repeat_metadata(
+            &inner.engine.keys,
+            &input_key_name(input),
+            Instant::now(),
+            Duration::ZERO,
+            Duration::ZERO,
+            Duration::ZERO,
+            &inner.engine.key_table_for_session(session),
+        );
+        (decision == KeyDecision::Pass).then(|| inner.engine.state.generation())
+    }
+
+    fn input_plain_key(
+        self: &Arc<Self>,
+        client: ClientId,
+        pane: PaneId,
+        input: zz_terminal::KeyInput,
+        generation: u64,
+    ) -> Result<(), DaemonError> {
+        self.note_terminal_input(client, pane);
+        let result = self.dispatch_input_key(client, pane, input);
+        let publish = {
+            let inner = self.inner.lock();
+            let current = inner.engine.state.generation();
+            current != generation && inner.last_published_mux_generation != current
+        };
+        if publish {
+            self.publish_snapshot();
+        }
+        result.map_err(Into::into)
     }
 
     fn dispatch_input_key(

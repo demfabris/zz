@@ -10,7 +10,7 @@ pub(super) struct PaneActor {
     #[cfg(unix)]
     shell_process_id: Option<u32>,
     #[cfg(unix)]
-    writer: PtyWriter,
+    pub(super) writer: PtyWriter,
     #[cfg(not(unix))]
     writer: Box<dyn Write + Send>,
     #[cfg(unix)]
@@ -233,7 +233,7 @@ impl PaneActor {
                     "failed to make the PTY master nonblocking: {errno}"
                 ))
             })?;
-            let writer = PtyWriter::new(writer_fd);
+            let writer = PtyWriter::attach(Arc::clone(&input_rx.direct), writer_fd);
             (drain_fd, writer)
         };
         #[cfg(not(unix))]
@@ -942,7 +942,44 @@ impl PaneActor {
     }
 
     pub(super) fn echo_pending(&self) -> bool {
+        #[cfg(unix)]
+        if self.writer.direct.echo_noted() {
+            return true;
+        }
         self.echo.due()
+    }
+
+    #[cfg(unix)]
+    pub(super) fn begin_turn(&mut self) {
+        self.writer.direct.close();
+        if let Some(written) = self.writer.direct.take_echo() {
+            self.echo.open_at(written);
+        }
+    }
+
+    #[cfg(unix)]
+    pub(super) fn end_turn(&self) {
+        let direct = self.exit_status.is_none()
+            && !self.terminating
+            && !self.reader_eof
+            && !pty_effects_pending(&self.effects)
+            && self
+                .terminal
+                .kitty_keyboard_flags()
+                .is_ok_and(|flags| flags.is_empty())
+            && self
+                .active_views
+                .values()
+                .all(|view| view_takes_direct_input(view))
+            && self.terminal.scrollbar().is_ok_and(|scrollbar| {
+                scrollbar.offset.saturating_add(scrollbar.len) >= scrollbar.total
+            });
+        self.writer.direct.reopen(|| {
+            direct
+                && self.control_rx.is_empty()
+                && self.input_rx.is_idle()
+                && slot_is_idle(&self.slot.lock())
+        });
     }
 
     pub(super) fn on_wake(&mut self, wakeup: Wake) -> Result<bool, WorkerError> {

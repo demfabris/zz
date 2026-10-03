@@ -267,6 +267,15 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   daemon; a recorded difference from tmux); `ZZ_PTY_FORK=1` selects the old fork path; a shard
   blocking until exec is accepted (glibc posix_spawn does the same). Unchecked parity question:
   `respawn-pane` reuses the pane's previous shell, not the current `default-shell`.
+- TEARDOWN merged (lane 19 min, `b048ed0f` + my `c72a7323`): my hypothesis was wrong. Teardown is
+  prompt on the base (every kill path reaps an idle child in about 1.5 ms in process, 16 ms
+  through the CLI under load, with or without a control client, both shard settings; `Shutdown`
+  already wakes the shard). The test sent Escape to the copy pane, which parks the output since
+  `fec8e107` (09-10, "Keep the view surface to its pane's keys"), so the output only closed when
+  its `sleep 30` window died, racing the 30 s wait deadline. The key now goes to the output
+  pane (0.07 s) and the pane sleeps 300 s, so a regression fails at the deadline instead of
+  passing by luck. Noted, not fixed: a sharded actor whose session drops after `terminate()` gets
+  no wake when its channel closes; its own grace and SIGKILL timers cover the child.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

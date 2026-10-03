@@ -399,6 +399,13 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   the generation starts 2^40 above the previous terminal; idle echo still 31 B against the 64 B
   rule), and CPU rows `spawn.cpu.kill_pane`/`split_shell`, `echo.p99.idle.p20` failing at flat
   instructions while DL3 built on the same host (judge in the quiet exit gates).
+- batch3 Linux (`52f8e3ab`, 03:17-04:12): clippy, compat-check, backpressure pass; 6 load failures
+  pass alone; full corpus only the expected Linux reds (the four `known/*`, lane2-store,
+  show-options-hooks, control-alias-prepare, format-modifier-client-loop with the debug build,
+  plugin-runtime-resurrect-restore). A/B against the wave-3 exit binary: attach instructions
+  -50%/-48%, `chatty.instr_per_s.flip`/`.hidden` -59%/-55%, `spawn.instr.split_empty_P` -86%,
+  `echo.wire_bytes.busy30` 137 -> 149 B. `attach.ttfc.p4` failed its ratio in the lane runs but
+  reads 8.2-9.3 ms against the base's 8.3-10.0 in the same pairs: noise. Pushed to main after.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

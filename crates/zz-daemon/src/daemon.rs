@@ -19891,6 +19891,7 @@ impl Shared {
         session: SessionId,
         event_hooks_enabled: bool,
     ) -> Result<(MuxSnapshot, Vec<PendingHookEvent>), ServerError> {
+        let _wakes = zz_terminal::hold_actor_wakes();
         let mut inner = self.inner.lock();
         if !inner.engine.state.sessions.contains_key(&session)
             || inner.destroying_unattached.contains(&session)
@@ -20392,6 +20393,7 @@ impl Shared {
         client: ClientId,
         event_hooks_enabled: bool,
     ) -> (bool, Vec<PendingHookEvent>) {
+        let _wakes = zz_terminal::hold_actor_wakes();
         let mut inner = self.inner.lock();
         let sessions = inner
             .attached

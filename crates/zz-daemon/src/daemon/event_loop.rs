@@ -375,7 +375,7 @@ impl EventLoop {
             files,
             base,
         ));
-        self.waker.wake()?;
+        crate::transport::wake_loop(&self.waker)?;
         Ok(())
     }
 
@@ -443,6 +443,7 @@ impl EventLoop {
         shared: &Arc<Shared>,
         initialized: impl FnOnce(),
     ) -> Result<(), DaemonError> {
+        let _loop_thread = crate::transport::LoopThread::enter(&self.waker);
         let mut initialized = Some(initialized);
         let mut startup_error = None;
         let mut ready = Vec::new();
@@ -602,7 +603,7 @@ impl EventLoop {
                     mailbox.close_after_flush();
                 }
                 self.shutdown_phase = ShutdownPhase::Writers(mailboxes);
-                self.waker.wake()?;
+                crate::transport::wake_loop(&self.waker)?;
                 self.timers
                     .shutdown_deadline(Some(Instant::now() + SHUTDOWN_WRITER_TIMEOUT));
             }
@@ -649,6 +650,7 @@ impl EventLoop {
     }
 
     fn poll_ready(&mut self) -> Result<(), DaemonError> {
+        crate::transport::clear_loop_again();
         let timeout = self.poll_timeout(Instant::now());
         match self.poll.poll(&mut self.events, timeout) {
             Ok(()) => Ok(()),
@@ -681,7 +683,7 @@ impl EventLoop {
             }
         }
         self.accept_again = true;
-        self.waker.wake()?;
+        crate::transport::wake_loop(&self.waker)?;
         Ok(())
     }
 
@@ -775,7 +777,7 @@ impl EventLoop {
             self.connections.get_mut(&token).unwrap().inbound.compact();
             if received >= attach::MAX_BATCHED_WRITE_BYTES {
                 self.connections.get_mut(&token).unwrap().read_again = true;
-                let _ = self.waker.wake();
+                let _ = crate::transport::wake_loop(&self.waker);
                 return;
             }
         }
@@ -828,7 +830,7 @@ impl EventLoop {
             connection.start_command();
             connection.busy = true;
             connection.hello = Some(message);
-            let _ = self.waker.wake();
+            let _ = crate::transport::wake_loop(&self.waker);
         } else if let Some(client) = connection.client {
             match message {
                 ProtocolMessage::GuiResponse(response) => {
@@ -934,11 +936,11 @@ impl EventLoop {
                     shared.client_writers.lock().remove(&client);
                 }
                 connection.hello = Some(first);
-                let _ = self.waker.wake();
+                let _ = crate::transport::wake_loop(&self.waker);
             }
             _ => {
                 if !connection.pending.is_empty() {
-                    let _ = self.waker.wake();
+                    let _ = crate::transport::wake_loop(&self.waker);
                 }
             }
         }
@@ -987,7 +989,7 @@ impl EventLoop {
                 if last {
                     self.disconnect(token, shared);
                 } else if !connection.pending.is_empty() {
-                    let _ = self.waker.wake();
+                    let _ = crate::transport::wake_loop(&self.waker);
                 }
                 return;
             }
@@ -1064,7 +1066,7 @@ impl EventLoop {
         if prepared.ready_on_loop {
             connection.exec = Some(execution);
             connection.exec_request = Some(prepared);
-            let _ = self.waker.wake();
+            let _ = crate::transport::wake_loop(&self.waker);
             return;
         }
         if prepared.waiting_output {
@@ -1197,7 +1199,7 @@ impl EventLoop {
             result,
             continuation,
         });
-        let _ = self.waker.wake();
+        let _ = crate::transport::wake_loop(&self.waker);
     }
 
     fn turn_pipe_jobs(&mut self, shared: &Arc<Shared>) {
@@ -1613,7 +1615,7 @@ impl EventLoop {
                             result,
                             continuation,
                         });
-                        self.waker.wake()?;
+                        crate::transport::wake_loop(&self.waker)?;
                     }
                 }
             }
@@ -1673,7 +1675,7 @@ impl EventLoop {
                             connection.session = Some(session);
                             if !connection.pending.is_empty() {
                                 connection.read_again = true;
-                                let _ = self.waker.wake();
+                                let _ = crate::transport::wake_loop(&self.waker);
                             }
                         }
                         connection::MessageProgress::Wait => {
@@ -1726,7 +1728,7 @@ impl EventLoop {
                 && control_written
                     .is_some_and(|before| connection.outbound.state.lock().written_bytes > before)
             {
-                self.waker.wake()?;
+                crate::transport::wake_loop(&self.waker)?;
             }
             if let Some(client) = connection.client {
                 while let Some(pane) = connection.outbound.take_preview_refresh() {
@@ -1744,7 +1746,7 @@ impl EventLoop {
                     && !*shared.startup_ready.lock()
                     && matches!(connection.pending.front(), Some((ProtocolMessage::Exec(request), _)) if !request.commands.is_empty() && request.startup_reentry != Some(shared.server_id));
                 if !startup_wait {
-                    let _ = self.waker.wake();
+                    let _ = crate::transport::wake_loop(&self.waker);
                 }
             }
             if connection.writable != writing {
@@ -1807,7 +1809,7 @@ impl EventLoop {
             }
             connection.session.take();
             connection.exec.take();
-            self.waker.wake().ok();
+            crate::transport::wake_loop(&self.waker).ok();
         }
         if !connection.busy {
             connection.outbound.close_after_flush();
@@ -1854,11 +1856,15 @@ impl EventLoop {
                 cleanup_pending = true;
             }
             if cleanup_pending {
-                self.waker.wake().ok();
+                crate::transport::wake_loop(&self.waker).ok();
             }
         }
     }
 }
+
+#[cfg(test)]
+#[path = "event_loop_attach_wake_tests.rs"]
+mod attach_wake_tests;
 
 impl Drop for Connection {
     fn drop(&mut self) {
@@ -1957,14 +1963,14 @@ impl Connection {
                             command.resume(continuation);
                         }
                         if let Some((waker, _)) = self.outbound.loop_waker.lock().as_ref() {
-                            waker.wake()?;
+                            crate::transport::wake_loop(waker)?;
                         }
                     }
                     if sent >= attach::MAX_BATCHED_WRITE_BYTES {
                         if (!self.frames.is_empty() || self.outbound.state.lock().queued_bytes != 0)
                             && let Some((waker, _)) = self.outbound.loop_waker.lock().as_ref()
                         {
-                            waker.wake()?;
+                            crate::transport::wake_loop(waker)?;
                         }
                         return Ok(());
                     }

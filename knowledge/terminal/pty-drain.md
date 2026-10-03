@@ -4,7 +4,7 @@ title: PTY drain topology (the IO fast path)
 description: How macOS keeps its tuned inline PTY actor while Linux overlaps a bounded gather stage with VT parsing; includes the probe and benchmark results behind each platform choice.
 resource: crates/zz-terminal/src/session.rs
 tags: [pty, throughput, drain, spin-bridge, poll, benchmark, session]
-timestamp: 2026-10-02T00:00:00Z
+timestamp: 2026-10-03T00:00:00Z
 ---
 
 # Overview
@@ -316,6 +316,14 @@ first on every wake. The actor excludes the PTY-input lane from the wait set whe
 a backlog, while PTY reads, resize, capture, and pure view actions keep running. Continuing reads lets
 an echoing terminal or a full-duplex child consume input without deadlocking behind its own output.
 Output views and non-Unix targets use `ActorWake::none()`: the same call sites, zero cfg noise.
+
+A daemon path can hold these bytes with `hold_actor_wakes()`. Inside the hold, a notify marks its
+pipe and returns, and the hold writes one byte per pipe when it ends. A blocking `request` writes the
+held bytes before it waits, so a round trip never sleeps behind its own wake. A hold never
+touches the shard's pending flag, so wakes from other threads still go out at once. Attach
+(`attach_collect_event_hooks`) and detach (`detach_client_state`) hold, so a shard wakes once for the
+resize, view, and stream commands of its pane instead of once per command. The drain stops at the
+first short read: a pipe returns every queued byte, so the second read could only return `EAGAIN`.
 
 ## The 16 ms gate (bookkeeping moved out of the hot loop)
 

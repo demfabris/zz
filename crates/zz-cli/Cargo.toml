@@ -27,7 +27,7 @@ zz-tui = { path = "../zz-tui" }
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
-rustix = { workspace = true, features = ["net"] }
+rustix = { workspace = true, features = ["fs", "net"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 mimalloc = { workspace = true, features = ["no_thp"] }

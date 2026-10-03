@@ -158,3 +158,78 @@ fn a_line_that_does_not_settle_in_the_daemon_goes_to_the_client_as_submitted() {
         ]
     );
 }
+
+fn read_to_eof(fd: &OwnedFd) -> usize {
+    let mut buffer = [0_u8; 16384];
+    let mut total = 0;
+    loop {
+        match rustix::io::read(fd, &mut buffer) {
+            Ok(0) => return total,
+            Ok(read) => total += read,
+            Err(rustix::io::Errno::INTR) => {}
+            Err(error) => panic!("read control stdout: {error}"),
+        }
+    }
+}
+
+#[test]
+fn closing_behind_a_full_stdout_returns_at_once_and_drops_the_rest() {
+    let (mut control, _input, stdout, _poll) = stdio_pair();
+    control.client_write(&vec![b'x'; 1 << 20], None, false);
+    assert!(!control.flush().expect("flush into a full pipe"));
+    let started = Instant::now();
+    control.close();
+    assert!(started.elapsed() < Duration::from_millis(100));
+    assert!(read_to_eof(&stdout) < 1 << 20);
+}
+
+#[test]
+fn a_drained_stdout_stops_waking_the_loop() {
+    let (mut control, _input, stdout, _poll) = stdio_pair();
+    control.client_write(&vec![b'x'; 256 * 1024], None, false);
+    assert!(!control.flush().expect("flush into a full pipe"));
+    assert!(control.stdout_registered);
+    let mut buffer = [0_u8; 16384];
+    while !control.flush().expect("flush after a read") {
+        rustix::io::read(&stdout, &mut buffer).expect("read control stdout");
+    }
+    assert!(!control.stdout_registered);
+}
+
+#[test]
+fn a_lost_client_frees_its_stdio_at_once_behind_a_blocked_stdout() {
+    let shared = Arc::new(Shared::new(17));
+    let mut event_loop = EventLoop::empty(&shared).unwrap();
+    let (peer, server) = UnixStream::pair().unwrap();
+    let token = event_loop.insert(server.receive_fd().unwrap()).unwrap();
+    let (stdin_read, stdin_write) = rustix::pipe::pipe().expect("stdin pipe");
+    let (stdout_read, stdout_write) = rustix::pipe::pipe().expect("stdout pipe");
+    let connection = event_loop.connections.get_mut(&token).unwrap();
+    connection.kind = Some(ClientKind::Control);
+    connection.received_fds = vec![stdin_read, stdout_write];
+    event_loop.open_stdio(token);
+    let connection = event_loop.connections.get_mut(&token).unwrap();
+    connection
+        .stdio
+        .as_mut()
+        .expect("handed-off stdio")
+        .client_write(&vec![b'x'; 1 << 20], None, false);
+    let outbound = Arc::clone(&connection.outbound);
+    assert!(outbound.enqueue_reliable(&ProtocolMessage::ControlStdioClosed));
+    event_loop.turn(&shared).unwrap();
+    assert!(event_loop.connections.contains_key(&token));
+    assert!(outbound.state.lock().queued_bytes > 0);
+
+    drop(peer);
+    let started = Instant::now();
+    event_loop.read_ready(token, &shared);
+    event_loop.turn(&shared).unwrap();
+    assert!(started.elapsed() < Duration::from_millis(250));
+    assert!(!event_loop.connections.contains_key(&token));
+    assert!(event_loop.stdio_tokens.is_empty());
+    assert!(read_to_eof(&stdout_read) < 1 << 20);
+    assert_eq!(
+        rustix::io::write(&stdin_write, b"x"),
+        Err(rustix::io::Errno::PIPE)
+    );
+}

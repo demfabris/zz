@@ -8913,6 +8913,46 @@ tmux set-option -g @plugin loaded
             assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
         }
 
+        #[test]
+        fn wait_exit_returns_at_eof_after_the_blank_line_in_both_stdio_modes() {
+            for relay in [None, Some("1")] {
+                let fixture = Fixture::new();
+                if !local_socket_bind_available(&fixture.socket) {
+                    return;
+                }
+                let mut command = fixture.command();
+                if let Some(relay) = relay {
+                    command.env("ZZ_CONTROL_RELAY", relay);
+                }
+                let mut child = command
+                    .args(["-C", "new-session", "-s", "wait-eof", "exec /bin/cat"])
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .expect("spawn wait-exit control client");
+                let mut stdin = child.stdin.take().expect("piped stdin");
+                stdin
+                    .write_all(b"refresh-client -f wait-exit\n\n")
+                    .expect("write wait-exit input");
+                drop(stdin);
+                let deadline = Instant::now() + Duration::from_secs(10);
+                while child.try_wait().expect("poll wait-exit client").is_none() {
+                    if Instant::now() >= deadline {
+                        let _ = child.kill();
+                        panic!("wait-exit control client held past EOF (relay {relay:?})");
+                    }
+                    thread::sleep(Duration::from_millis(10));
+                }
+                let output = child
+                    .wait_with_output()
+                    .expect("wait for wait-exit control");
+                assert_eq!(output.status.code(), Some(0), "relay {relay:?}");
+                let stream = parse_stream(&output.stdout, false);
+                assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
+            }
+        }
+
         fn checked_layout(layout: &str) -> bool {
             layout.split_once(',').is_some_and(|(checksum, body)| {
                 checksum.len() == 4

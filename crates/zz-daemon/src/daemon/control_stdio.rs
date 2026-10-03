@@ -13,7 +13,6 @@ mod tests;
 const STDOUT_HIGH: usize = 256 * 1024;
 const INPUT_READ_LIMIT: usize = 256 * 1024;
 const DEFERRED_OUTPUT: usize = 64 * 1024;
-const CLOSE_FLUSH_TIMEOUT: Duration = Duration::from_secs(1);
 
 pub(super) fn receive(
     stream: &UnixStream,
@@ -251,6 +250,7 @@ impl ControlStdio {
 
     fn enter_forward(&mut self, frames: &mut Vec<OutboundFrame>) {
         if self.direct {
+            let _ = self.flush();
             self.direct = false;
             let sync = encode(&ProtocolMessage::ControlStdioSync {
                 next_number: self.next_number,
@@ -481,35 +481,17 @@ impl ControlStdio {
         }
         self.output.clear();
         self.output_offset = 0;
+        self.stop_writing();
         Ok(true)
     }
 
-    fn flush_blocking(&mut self) {
-        let deadline = Instant::now() + CLOSE_FLUSH_TIMEOUT;
-        while self.output_offset < self.output.len() {
-            match rustix::io::write(&self.stdout, &self.output[self.output_offset..]) {
-                Ok(written) => self.output_offset += written,
-                Err(rustix::io::Errno::INTR) => {}
-                Err(rustix::io::Errno::AGAIN) => {
-                    let remaining = deadline.saturating_duration_since(Instant::now());
-                    if remaining.is_zero() {
-                        break;
-                    }
-                    let timeout = rustix::event::Timespec {
-                        tv_sec: 0,
-                        tv_nsec: i64::from(remaining.subsec_nanos().max(1_000_000)),
-                    };
-                    let mut poll = [rustix::event::PollFd::new(
-                        &self.stdout,
-                        rustix::event::PollFlags::OUT,
-                    )];
-                    let _ = rustix::event::poll(&mut poll, Some(&timeout));
-                }
-                Err(_) => break,
-            }
+    fn stop_writing(&mut self) {
+        if self.stdout_registered {
+            self.stdout_registered = false;
+            let _ = self
+                .registry
+                .deregister(&mut SourceFd(&self.stdout.as_raw_fd()));
         }
-        self.output.clear();
-        self.output_offset = 0;
     }
 
     fn release(&mut self, frames: &mut Vec<OutboundFrame>) {
@@ -517,7 +499,6 @@ impl ControlStdio {
             return;
         }
         self.deregister();
-        self.flush_blocking();
         self.restore();
         self.released = true;
         frames.push(encode(&ProtocolMessage::ControlStdioClosed));
@@ -530,18 +511,12 @@ impl ControlStdio {
 
     pub(super) fn deregister(&mut self) {
         self.stop_reading();
-        if self.stdout_registered {
-            self.stdout_registered = false;
-            let _ = self
-                .registry
-                .deregister(&mut SourceFd(&self.stdout.as_raw_fd()));
-        }
+        self.stop_writing();
     }
 
     pub(super) fn close(mut self) {
         self.deregister();
         if !self.released {
-            self.flush_blocking();
             self.restore();
         }
     }
@@ -635,6 +610,25 @@ impl Connection {
 }
 
 impl EventLoop {
+    pub(super) fn close_stdio(&mut self, stdio: Box<ControlStdio>) {
+        self.stdio_tokens.remove(&stdio.stdin_token);
+        self.stdio_tokens.remove(&stdio.stdout_token);
+        stdio.close();
+    }
+
+    pub(super) fn drop_stdio(&mut self, token: Token) {
+        let Some(connection) = self.connections.get_mut(&token) else {
+            return;
+        };
+        let Some(stdio) = connection.stdio.take() else {
+            return;
+        };
+        if stdio.holds_connection() {
+            connection.outbound.close();
+        }
+        self.close_stdio(stdio);
+    }
+
     pub(super) fn open_stdio(&mut self, token: Token) {
         let connection = self.connections.get_mut(&token).unwrap();
         let fds = std::mem::take(&mut connection.received_fds);

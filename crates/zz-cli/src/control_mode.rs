@@ -561,7 +561,7 @@ pub(crate) fn run(
         }
     };
     #[cfg(unix)]
-    let (stdio, stash) = match start_stdio(&client) {
+    let (flags, stash) = match start_stdio(&client) {
         Ok(started) => started,
         Err(error) => {
             eprintln!("{}", format_local_command_error(socket_path, error.into()));
@@ -569,7 +569,8 @@ pub(crate) fn run(
         }
     };
     #[cfg(not(unix))]
-    let (stdio, stash) = (false, VecDeque::new());
+    let (flags, stash) = (None::<()>, VecDeque::new());
+    let stdio = flags.is_some();
     let terminal = match ControlTerminal::enter(level >= 2) {
         Ok(terminal) => terminal,
         Err(error) => {
@@ -577,8 +578,8 @@ pub(crate) fn run(
             return ExitCode::FAILURE;
         }
     };
-    let sink = if stdio {
-        ControlOutput::daemon(Arc::clone(&client))
+    let sink = if let Some(flags) = flags {
+        ControlOutput::daemon(Arc::clone(&client), flags)
     } else {
         ControlOutput::Stdout(io::BufWriter::new(io::stdout().lock()))
     };
@@ -1721,14 +1722,16 @@ fn capture_pending_return<W: Write>(
     pending_stdin: &mut VecDeque<StdinEvent>,
     output: &mut ControlWriter<W>,
 ) {
+    if pending_return.is_some() {
+        pending_stdin.push_back(stdin);
+        return;
+    }
     match PendingReturn::from_stdin(stdin, return_code, pending_stdin.len()) {
         Ok(return_event) => {
             if return_event.discards_pane_output() {
                 output.begin_exit_drain();
             }
-            if pending_return.is_none() {
-                *pending_return = Some(return_event);
-            }
+            *pending_return = Some(return_event);
         }
         Err(stdin) => pending_stdin.push_back(stdin),
     }
@@ -1790,7 +1793,7 @@ fn settle_deferred_return(
     }
 }
 
-fn finish_control_return<W: Write>(
+fn finish_control_return<W: Write + ControlClose>(
     client: &InteractiveClient,
     pending_return: PendingReturn,
     output: &mut ControlWriter<W>,
@@ -1808,6 +1811,7 @@ fn finish_control_return<W: Write>(
         PendingReturn::InputError { message, .. } => (true, Some(message)),
     };
     if let Some(error) = input_error.as_deref() {
+        output.output.close_sink();
         eprintln!("zz: {error}");
     }
     let _ = client.detach();
@@ -1990,11 +1994,48 @@ fn stdio_passable() -> bool {
 }
 
 #[cfg(unix)]
-fn start_stdio(client: &InteractiveClient) -> io::Result<(bool, VecDeque<ProtocolMessage>)> {
-    let mut stash = VecDeque::new();
-    if std::env::var_os("ZZ_CONTROL_RELAY").is_some_and(|value| value == "1") || !stdio_passable() {
-        return Ok((false, stash));
+struct StdioFlags([Option<rustix::fs::OFlags>; 3]);
+
+#[cfg(unix)]
+impl StdioFlags {
+    fn capture() -> Self {
+        Self([
+            rustix::fs::fcntl_getfl(io::stdin()).ok(),
+            rustix::fs::fcntl_getfl(io::stdout()).ok(),
+            rustix::fs::fcntl_getfl(io::stderr()).ok(),
+        ])
     }
+
+    fn restore(&self) {
+        let [stdin, stdout, stderr] = self.0;
+        if let Some(flags) = stdin {
+            let _ = rustix::fs::fcntl_setfl(io::stdin(), flags);
+        }
+        if let Some(flags) = stdout {
+            let _ = rustix::fs::fcntl_setfl(io::stdout(), flags);
+        }
+        if let Some(flags) = stderr {
+            let _ = rustix::fs::fcntl_setfl(io::stderr(), flags);
+        }
+    }
+}
+
+#[cfg(unix)]
+fn start_stdio(
+    client: &InteractiveClient,
+) -> io::Result<(Option<StdioFlags>, VecDeque<ProtocolMessage>)> {
+    let mut stash = VecDeque::new();
+    if std::env::var_os("ZZ_CONTROL_RELAY").is_some_and(|value| value == "1")
+        || !client
+            .server_hello()
+            .capabilities
+            .iter()
+            .any(|capability| capability == zz_protocol::CONTROL_STDIO_CAPABILITY)
+        || !stdio_passable()
+    {
+        return Ok((None, stash));
+    }
+    let flags = StdioFlags::capture();
     let frame = zz_protocol::encode_protocol_message(&ProtocolMessage::ControlStdio)
         .map_err(io::Error::other)?;
     let socket = client.receive_fd()?;
@@ -2015,8 +2056,10 @@ fn start_stdio(client: &InteractiveClient) -> io::Result<(bool, VecDeque<Protoco
     }
     loop {
         match client.recv().map_err(io::Error::other)? {
-            ProtocolMessage::ControlStdioSync { next_number: 0 } => return Ok((true, stash)),
-            ProtocolMessage::ControlStdioClosed => return Ok((false, stash)),
+            ProtocolMessage::ControlStdioSync { next_number: 0 } => {
+                return Ok((Some(flags), stash));
+            }
+            ProtocolMessage::ControlStdioClosed => return Ok((None, stash)),
             ProtocolMessage::Batch(batch) => stash.extend(
                 batch
                     .messages()
@@ -2035,22 +2078,24 @@ enum ControlOutput {
         buffer: Vec<u8>,
         reported: Option<(u64, u64)>,
         direct: Option<io::BufWriter<io::StdoutLock<'static>>>,
+        flags: StdioFlags,
     },
 }
 
 impl ControlOutput {
     #[cfg(unix)]
-    fn daemon(client: Arc<InteractiveClient>) -> Self {
+    fn daemon(client: Arc<InteractiveClient>, flags: StdioFlags) -> Self {
         Self::Daemon {
             client,
             buffer: Vec::new(),
             reported: None,
             direct: None,
+            flags,
         }
     }
 
     #[cfg(not(unix))]
-    fn daemon(_client: Arc<InteractiveClient>) -> Self {
+    fn daemon(_client: Arc<InteractiveClient>, _flags: ()) -> Self {
         Self::Stdout(io::BufWriter::new(io::stdout().lock()))
     }
 
@@ -2060,6 +2105,7 @@ impl ControlOutput {
             client,
             buffer,
             direct,
+            flags,
             ..
         } = self
         else {
@@ -2079,6 +2125,7 @@ impl ControlOutput {
             let ProtocolMessage::ControlWrite { bytes, .. } = message else {
                 unreachable!();
             };
+            flags.restore();
             let mut stdout = io::BufWriter::new(io::stdout().lock());
             stdout.write_all(&bytes)?;
             stdout.flush()?;
@@ -2116,7 +2163,6 @@ impl ControlOutput {
             && let Self::Daemon { direct: None, .. } = self
             && let Ok(socket) = client.receive_fd()
         {
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
             loop {
                 match client.try_recv() {
                     Ok(Some(message))
@@ -2124,30 +2170,22 @@ impl ControlOutput {
                     {
                         break;
                     }
-                    Ok(Some(_)) if std::time::Instant::now() < deadline => {}
-                    Ok(Some(_)) | Err(_) => break,
+                    Ok(Some(_)) => {}
+                    Err(_) => break,
                     Ok(None) => {
-                        let remaining =
-                            deadline.saturating_duration_since(std::time::Instant::now());
-                        if remaining.is_zero() {
-                            break;
-                        }
                         let mut poll = [rustix::event::PollFd::new(
                             &socket,
                             rustix::event::PollFlags::IN,
                         )];
-                        let timeout = rustix::event::Timespec {
-                            tv_sec: 0,
-                            tv_nsec: 50_000_000,
-                        };
-                        let _ = rustix::event::poll(&mut poll, Some(&timeout));
+                        let _ = rustix::event::poll(&mut poll, None);
                     }
                 }
             }
         }
-        if let Self::Daemon { direct, .. } = self
+        if let Self::Daemon { direct, flags, .. } = self
             && direct.is_none()
         {
+            flags.restore();
             *direct = Some(io::BufWriter::new(io::stdout().lock()));
         }
     }
@@ -4321,6 +4359,10 @@ mod tests {
         assert!(matches!(
             pending_stdin.pop_front(),
             Some(StdinEvent::Line(line)) if line == "display-message -p SECOND"
+        ));
+        assert!(matches!(
+            pending_stdin.pop_front(),
+            Some(StdinEvent::Line(line)) if line.is_empty()
         ));
         assert!(pending_stdin.is_empty());
         pending_return.consume_preceding_input();

@@ -3809,6 +3809,28 @@ count before and after; strip unused features (TLS, http, russh client) from the
 Gate `--stage final`: `mem.rss.p1` <= 2x tmux (informational metric promoted to gated for this
 lane); cold start not slower; remote start works against an ssh host in the fleet tests.
 
+## W4-CONTROL: control client stdio handoff (as built 2026-10-02)
+
+A relay in front of `tmux -C` that does no work still costs 6.9 us and 47 kinstr per command, so
+the lane took the stdio variant. `zz_cli -C` passes its stdin and stdout to the daemon with
+SCM_RIGHTS (`ControlStdio`, `crates/zz-daemon/src/daemon/control_stdio.rs`). While the client is
+idle and caught up, the daemon runs plain lines itself and writes `%begin`/`%end` and `%output`
+to that stdout. Hooks, tree changes, errors, multi-step or waiting commands, blank lines and EOF
+go back to the client, which renders them with its own code and returns the bytes in
+`ControlWrite`; `ControlStdioSync` carries the next frame number across the switch. The client
+keeps its own stdio with `ZZ_CONTROL_RELAY=1`, for a tty, file or named FIFO stdin (kqueue misses
+FIFO EOF on macOS), on the thread connection path, and against a daemon whose `Welcome` lacks the
+`control-stdio-v1` capability bit (an older protocol-107 daemon).
+
+Review fixes: removing a connection never blocks on its stdout (it drops what is left, as a dead
+relay client does); a client socket EOF closes the handed stdin and stdout and the outbound queue
+at once instead of draining into a dead client's pipe; WRITABLE on stdout is dropped once a flush
+drains; the client restores the flags of fds 0, 1 and 2 when it takes stdout back or exits, waits
+for the close ack with no deadline while the socket lives, and hands stdout back before printing
+an input error so stderr keeps its place. Control-mode return capture keeps a second Return or
+EOF queued instead of dropping it, so `refresh-client -f wait-exit`, a blank line and EOF exits 0
+in both modes. Tests: `control_stdio_tests.rs` and the cli_binary control section.
+
 # Rollback switches
 
 One environment knob per behaviour change, read once at daemon start (the CLI one at CLI start),

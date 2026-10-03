@@ -749,7 +749,9 @@ impl EventLoop {
                         && connection.kind == Some(ClientKind::Interactive)
                         && connection.initialized
                         && !connection.initializing;
-                    if !connection.drain_input {
+                    let drain_input = connection.drain_input;
+                    self.drop_stdio(token);
+                    if !drain_input {
                         self.disconnect(token, shared);
                     }
                     return;
@@ -1811,9 +1813,7 @@ impl EventLoop {
     fn remove(&mut self, token: Token, shared: &Arc<Shared>) {
         if let Some(mut connection) = self.connections.remove(&token) {
             if let Some(stdio) = connection.stdio.take() {
-                self.stdio_tokens.remove(&stdio.stdin_token);
-                self.stdio_tokens.remove(&stdio.stdout_token);
-                stdio.close();
+                self.close_stdio(stdio);
             }
             let mut cleanup_pending = false;
             let _ = self

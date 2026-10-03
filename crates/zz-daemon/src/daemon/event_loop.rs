@@ -1856,6 +1856,12 @@ impl EventLoop {
     }
 }
 
+impl Drop for Connection {
+    fn drop(&mut self) {
+        self.outbound.state.lock().direct_socket = None;
+    }
+}
+
 impl Connection {
     fn start_command(&mut self) {
         assert!(self.command.is_none());
@@ -1878,6 +1884,16 @@ impl Connection {
                 .filter(|socket| rustix::net::sockopt::set_socket_nosigpipe(socket, true).is_ok());
             self.outbound.state.lock().quiet_socket = socket;
         }
+        let interactive = match message {
+            ProtocolMessage::Hello(hello) => hello.client.kind == ClientKind::Interactive,
+            ProtocolMessage::ClientHello(hello) => hello.kind == ClientKind::Interactive,
+            _ => false,
+        };
+        let socket = interactive.then(|| self.stream.receive_fd().ok()).flatten();
+        #[cfg(target_vendor = "apple")]
+        let socket = socket
+            .filter(|socket| rustix::net::sockopt::set_socket_nosigpipe(socket, true).is_ok());
+        self.outbound.state.lock().direct_socket = socket;
     }
 
     fn write_ready(&mut self) -> io::Result<()> {

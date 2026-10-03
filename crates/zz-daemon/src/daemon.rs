@@ -2207,6 +2207,8 @@ struct OutboundState {
     writer_batch_reliable: usize,
     #[cfg(unix)]
     quiet_socket: Option<std::os::fd::OwnedFd>,
+    #[cfg(unix)]
+    direct_socket: Option<std::os::fd::OwnedFd>,
     terminals_held: bool,
     attach_batch: bool,
     #[cfg(unix)]
@@ -3337,6 +3339,21 @@ impl OutboundMailbox {
         if matches!(delivery, TerminalDelivery::Preview { .. }) {
             clear_preview_refresh(&mut state, pane);
         }
+        #[cfg(unix)]
+        if let Some(written) = write_direct_terminal(&mut state, &encoded) {
+            state.delivered_terminals.insert(pane, transition.current);
+            if written == encoded.len() {
+                return TerminalEnqueue::Queued;
+            }
+            state.queued_bytes += encoded.len() - written;
+            state.reliable.push_back(OutboundFrame::Partial {
+                frame: Box::new(OutboundFrame::Shared(encoded)),
+                offset: written,
+            });
+            drop(state);
+            self.notify_one();
+            return TerminalEnqueue::Queued;
+        }
         let idle = state.terminals.is_empty();
         state.queued_bytes += encoded.len();
         state.terminals.insert(
@@ -3623,6 +3640,8 @@ impl OutboundMailbox {
         state.closed = true;
         #[cfg(unix)]
         drop(state.quiet_socket.take());
+        #[cfg(unix)]
+        drop(state.direct_socket.take());
         if matches!(
             state.ctrl_collecting,
             ControlCollection::Quiet | ControlCollection::Attach
@@ -3671,6 +3690,8 @@ impl OutboundMailbox {
         }
         #[cfg(unix)]
         drop(state.quiet_socket.take());
+        #[cfg(unix)]
+        drop(state.direct_socket.take());
         state.discarded_bytes = state
             .discarded_bytes
             .saturating_add(state.writer_inflight_bytes as u64);
@@ -3969,10 +3990,7 @@ fn try_write_quiet_group(state: &mut OutboundState) -> bool {
     if state.queued_bytes != frame.len() {
         return false;
     }
-    let flags = rustix::net::SendFlags::DONTWAIT;
-    #[cfg(not(any(target_vendor = "apple", target_os = "redox", target_os = "vita")))]
-    let flags = flags | rustix::net::SendFlags::NOSIGNAL;
-    let written = match rustix::net::send(socket, frame.as_ref(), flags) {
+    let written = match send_nonblocking(socket, frame) {
         Ok(0) => return false,
         Ok(written) => written,
         Err(error) if error == rustix::io::Errno::INTR || error == rustix::io::Errno::AGAIN => {
@@ -3998,11 +4016,53 @@ fn try_write_quiet_group(state: &mut OutboundState) -> bool {
     }
 }
 
+#[cfg(unix)]
+fn send_nonblocking(socket: &std::os::fd::OwnedFd, bytes: &[u8]) -> rustix::io::Result<usize> {
+    let flags = rustix::net::SendFlags::DONTWAIT;
+    #[cfg(not(any(target_vendor = "apple", target_os = "redox", target_os = "vita")))]
+    let flags = flags | rustix::net::SendFlags::NOSIGNAL;
+    rustix::net::send(socket, bytes, flags)
+}
+
+#[cfg(unix)]
+fn write_direct_terminal(state: &mut OutboundState, frame: &[u8]) -> Option<usize> {
+    if state.queued_bytes != 0
+        || !state.reliable.is_empty()
+        || !state.terminals.is_empty()
+        || state.writer_inflight_bytes != 0
+        || state.writer_finished
+        || state.attach_batch
+        || state.terminals_held
+        || state.attach_settling.is_some()
+        || state.ctrl_collecting != ControlCollection::None
+    {
+        return None;
+    }
+    let socket = state.direct_socket.as_ref()?;
+    match send_nonblocking(socket, frame) {
+        Ok(0) => None,
+        Ok(written) => {
+            state.written_bytes = state.written_bytes.saturating_add(written as u64);
+            Some(written)
+        }
+        Err(error) if error == rustix::io::Errno::INTR || error == rustix::io::Errno::AGAIN => None,
+        Err(_) => {
+            state.direct_socket = None;
+            None
+        }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod direct_write_tests;
+
 fn close_outbound(state: &mut OutboundState) {
     #[cfg(unix)]
     if let Some(socket) = state.quiet_socket.take() {
         let _ = rustix::net::shutdown(&socket, rustix::net::Shutdown::Both);
     }
+    #[cfg(unix)]
+    drop(state.direct_socket.take());
     state.discarded_bytes = state
         .discarded_bytes
         .saturating_add(state.queued_bytes as u64);

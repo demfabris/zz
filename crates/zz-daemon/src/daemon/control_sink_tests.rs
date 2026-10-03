@@ -5,6 +5,8 @@ use super::*;
 enum Seen {
     Output(PaneId, Vec<u8>),
     Closed(String),
+    Hook(String),
+    Reply,
     Exit,
 }
 
@@ -56,11 +58,13 @@ fn observe(message: ProtocolMessage, seen: &mut Vec<Seen>) {
                     variables.get("hook_window").cloned().unwrap_or_default(),
                 ));
             }
+            EventPayload::HookEvent { name, .. } => seen.push(Seen::Hook(name)),
             EventPayload::Detached { .. } | EventPayload::ControlExit { .. } => {
                 seen.push(Seen::Exit);
             }
             _ => {}
         },
+        ProtocolMessage::CommandResponse(_) => seen.push(Seen::Reply),
         _ => {}
     }
 }
@@ -72,19 +76,25 @@ fn collect(mailbox: &OutboundMailbox, seen: &mut Vec<Seen>) {
 }
 
 fn wait_until(
+    shared: &Shared,
     mailbox: &OutboundMailbox,
     seen: &mut Vec<Seen>,
     mut done: impl FnMut(&[Seen]) -> bool,
 ) {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
+        shared.pump_control_output_at(Instant::now());
         collect(mailbox, seen);
         if done(seen) {
             return;
         }
         assert!(
             Instant::now() < deadline,
-            "control stream stalled: {seen:?}"
+            "control stream stalled: {seen:?} open {} lines {}",
+            mailbox.is_open(),
+            mailbox
+                .control_feed()
+                .map_or(0, shard_sink::ControlFeed::queued_lines)
         );
         thread::sleep(Duration::from_millis(1));
     }
@@ -126,7 +136,7 @@ fn final_output_of_a_pane_that_prints_and_exits_in_one_read_precedes_exit() {
         assert!(output_routed(&shared.inner.lock(), pane));
         assert!(terminal.send_raw_input(Arc::from(b"\n".as_slice())));
         let mut seen = Vec::new();
-        wait_until(&mailbox, &mut seen, |seen| {
+        wait_until(&shared, &mailbox, &mut seen, |seen| {
             seen.iter().any(|seen| matches!(seen, Seen::Exit))
         });
         let exit = seen
@@ -219,7 +229,7 @@ fn output_read_before_kill_pane_precedes_the_window_close() {
         collect(&mailbox, &mut seen);
         run(&shared, client, &["kill-pane", "-t", &pane.to_string()]);
         let window = window.to_string();
-        wait_until(&mailbox, &mut seen, |seen| {
+        wait_until(&shared, &mailbox, &mut seen, |seen| {
             seen.iter()
                 .any(|seen| matches!(seen, Seen::Closed(closed) if *closed == window))
         });
@@ -276,6 +286,170 @@ fn a_full_control_queue_parks_the_pane_without_dropping_bytes() {
     let mut expected = vec![b'x'; total];
     expected.extend_from_slice(b"END");
     assert_eq!(delivered[start..], expected[..]);
+}
+
+fn four_panes(shared: &Arc<Shared>, client: ClientId, name: &str, command: &str) -> Vec<PaneId> {
+    run(shared, client, &["new-session", "-d", "-s", name, command]);
+    let target = format!("{name}:");
+    for _ in 0..3 {
+        run(
+            shared,
+            client,
+            &["new-window", "-d", "-t", &target, command],
+        );
+    }
+    let (id, _, _) = session(shared, name);
+    shared.attach(client, id).expect("control attach");
+    let inner = shared.inner.lock();
+    inner.engine.state.sessions[&id]
+        .windows
+        .iter()
+        .map(|window| inner.engine.state.windows[window].active_pane)
+        .collect()
+}
+
+fn renamed(seen: &Seen, round: usize) -> bool {
+    matches!(seen, Seen::Hook(name) if *name == format!("window-renamed-{round}"))
+}
+
+#[test]
+fn rename_hooks_behind_four_full_panes_wait_in_order_without_closing_the_client() {
+    let shared = Arc::new(Shared::new(1));
+    let (client, mailbox) = control(&shared);
+    let panes = four_panes(&shared, client, "renamed", "exec cat");
+    take_reliable_messages(&mailbox);
+    let feed = mailbox.control_feed().expect("control feed");
+    let chunk = vec![b'r'; 64 * 1024];
+    for round in 0..2 {
+        for pane in &panes {
+            for _ in 0..CONTROL_PENDING_CHUNKS_PER_PANE {
+                feed.queue_at(*pane, &chunk, Instant::now());
+            }
+        }
+        let hook = Shared::event(EventPayload::HookEvent {
+            name: format!("window-renamed-{round}"),
+            variables: BTreeMap::new(),
+        });
+        assert!(mailbox.enqueue_reliable(&hook));
+        assert!(feed.queued_lines() > round);
+    }
+    let mut seen = Vec::new();
+    collect(&mailbox, &mut seen);
+    assert!(!seen.iter().any(|seen| renamed(seen, 0) || renamed(seen, 1)));
+    let mut pumps = 0;
+    while !seen.iter().any(|seen| renamed(seen, 1)) {
+        assert!(mailbox.is_open(), "client closed after {pumps} pumps");
+        pumps += 1;
+        assert!(pumps < 100_000, "hooks never delivered");
+        shared.pump_control_output_at(Instant::now());
+        let (_, queued) = mailbox.queued_reliable().expect("open mailbox");
+        assert!(
+            queued < CONTROL_PENDING_MESSAGE_LIMIT + panes.len() + 4,
+            "pump queued {queued} messages"
+        );
+        collect(&mailbox, &mut seen);
+    }
+    assert!(mailbox.is_open());
+    for round in 0..2 {
+        let at = seen
+            .iter()
+            .position(|seen| renamed(seen, round))
+            .expect("hook");
+        for pane in &panes {
+            assert_eq!(
+                output_of(&seen[..at], *pane).len(),
+                (round + 1) * CONTROL_PENDING_CHUNKS_PER_PANE * chunk.len()
+            );
+        }
+    }
+}
+
+fn raw_request(line: &str) -> zz_protocol::ExecRequest {
+    zz_protocol::ExecRequest {
+        protocol_version: PROTOCOL_VERSION,
+        flags: zz_protocol::ExecFlags::default(),
+        client_instance_id: ClientInstanceId(920),
+        origin: None,
+        working_directory: None,
+        tty: None,
+        size: None,
+        features: 0,
+        startup_reentry: None,
+        spawned_server_id: None,
+        expect_server_id: None,
+        process_id: std::process::id(),
+        environment: ClientEnvironmentBlob::default(),
+        commands: Vec::new(),
+        raw_control_line: Some(line.to_owned()),
+    }
+}
+
+#[test]
+fn control_replies_keep_arriving_while_four_panes_flood() {
+    let shared = Arc::new(Shared::new(1));
+    let (client, mailbox) = control(&shared);
+    let panes = four_panes(
+        &shared,
+        client,
+        "flood",
+        "exec yes flood-flood-flood-flood-flood-flood-flood-flood",
+    );
+    let feed = mailbox.control_feed().expect("control feed");
+    let started = Instant::now();
+    while panes
+        .iter()
+        .any(|pane| feed.queued(*pane) < CONTROL_PENDING_CHUNKS_PER_PANE)
+    {
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "panes never filled"
+        );
+        thread::sleep(Duration::from_millis(1));
+    }
+    let mut context = ExecutionContext::default();
+    let mut delivered = BTreeMap::<PaneId, usize>::new();
+    let mut slowest = Duration::ZERO;
+    for round in 0..20 {
+        let sent = Instant::now();
+        shared.execute_compact_request(
+            client,
+            ClientKind::Control,
+            &mut context,
+            raw_request("display-message -p tick"),
+            &mailbox,
+        );
+        let mut replied = false;
+        while !replied {
+            assert!(mailbox.is_open(), "round {round}: client closed");
+            assert!(
+                sent.elapsed() < Duration::from_secs(5),
+                "round {round}: no reply"
+            );
+            thread::sleep(Duration::from_millis(1));
+            shared.pump_control_output_at(Instant::now());
+            let mut seen = Vec::new();
+            collect(&mailbox, &mut seen);
+            for entry in seen {
+                match entry {
+                    Seen::Output(pane, bytes) => *delivered.entry(pane).or_default() += bytes.len(),
+                    Seen::Reply => replied = true,
+                    _ => {}
+                }
+            }
+        }
+        slowest = slowest.max(sent.elapsed());
+    }
+    run(&shared, client, &["kill-session", "-t", "flood"]);
+    assert!(
+        slowest < Duration::from_secs(5),
+        "slowest reply {slowest:?}"
+    );
+    assert!(
+        panes
+            .iter()
+            .all(|pane| delivered.get(pane).is_some_and(|bytes| *bytes > 0)),
+        "{delivered:?}"
+    );
 }
 
 #[cfg(target_os = "linux")]

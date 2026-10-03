@@ -376,6 +376,18 @@ impl OutboundMailbox {
     }
 
     pub(super) fn enqueue_control_group(&self, frames: Vec<OutboundFrame>) -> bool {
+        self.control_ordered(shard_sink::ControlOrder::AfterLines, move |mailbox| {
+            mailbox.push_control_group(frames)
+        })
+    }
+
+    fn enqueue_control_reply(&self, frames: Vec<OutboundFrame>) -> bool {
+        self.control_ordered(shard_sink::ControlOrder::AfterOutput, move |mailbox| {
+            mailbox.push_control_group(frames)
+        })
+    }
+
+    fn push_control_group(&self, frames: Vec<OutboundFrame>) -> bool {
         let mut state = self.state.lock();
         let sequence = Shared::next_sequence();
         if state.ctrl_collecting == ControlCollection::Quiet && !state.buffered {
@@ -1403,8 +1415,7 @@ impl Shared {
             } else {
                 Ok(vec![response_frame.into(), exit_frame.into()])
             };
-            outbound.control_barrier();
-            if !frames.is_ok_and(|frames| outbound.enqueue_control_group(frames)) {
+            if !frames.is_ok_and(|frames| outbound.enqueue_control_reply(frames)) {
                 for message in &completion {
                     let _ = outbound.enqueue_reliable(message);
                 }

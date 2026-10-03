@@ -2657,9 +2657,14 @@ impl OutboundMailbox {
         self.control.get()
     }
 
-    fn control_barrier(&self) {
-        if let Some(feed) = self.control_feed() {
-            feed.flush(self);
+    fn control_ordered(
+        &self,
+        order: shard_sink::ControlOrder,
+        line: impl FnOnce(&OutboundMailbox) -> bool + Send + 'static,
+    ) -> bool {
+        match self.control_feed() {
+            Some(feed) => feed.order(self, order, line),
+            None => line(self),
         }
     }
 
@@ -2735,9 +2740,7 @@ impl OutboundMailbox {
         encoded: OutboundFrame,
         wakeup: bool,
     ) -> bool {
-        if !shard_sink::passes_control_barrier(message) {
-            self.control_barrier();
-        }
+        let order = shard_sink::control_order(message);
         let removed_pane = match message {
             ProtocolMessage::Event(Event {
                 payload: EventPayload::PaneRemoved(pane),
@@ -2799,6 +2802,26 @@ impl OutboundMailbox {
             state.queued_bytes = state.queued_bytes.saturating_sub(pending.encoded.len());
             discard_outbound_frame(&mut state, pending.encoded);
         }
+        if let Some(order) = order
+            && let Some(feed) = self.control_feed()
+        {
+            drop(state);
+            return feed.order(self, order, move |mailbox| {
+                mailbox.push_reliable(mailbox.state.lock(), encoded, wakeup)
+            });
+        }
+        self.push_reliable(state, encoded, wakeup)
+    }
+
+    fn push_reliable(
+        &self,
+        mut state: parking_lot::MutexGuard<'_, OutboundState>,
+        encoded: OutboundFrame,
+        wakeup: bool,
+    ) -> bool {
+        if state.closed {
+            return false;
+        }
         if state.attach_batch && state.reliable.len() >= MAX_RELIABLE_MESSAGES / 2 {
             state.attach_batch = false;
         }
@@ -2829,8 +2852,10 @@ impl OutboundMailbox {
 
     #[must_use]
     fn enqueue_encoded_reliable(&self, encoded: impl Into<OutboundFrame>) -> bool {
-        self.control_barrier();
-        self.enqueue_encoded_reliable_with(encoded.into(), |_| {})
+        let encoded = encoded.into();
+        self.control_ordered(shard_sink::ControlOrder::AfterOutput, move |mailbox| {
+            mailbox.enqueue_encoded_reliable_with(encoded, |_| {})
+        })
     }
 
     #[must_use]
@@ -2845,10 +2870,11 @@ impl OutboundMailbox {
                 return false;
             }
         };
-        self.control_barrier();
-        self.enqueue_encoded_reliable_with(encoded.into(), |state| {
-            forget_delivered_terminals_state(state);
-            state.terminals_held = false;
+        self.control_ordered(shard_sink::ControlOrder::AfterOutput, move |mailbox| {
+            mailbox.enqueue_encoded_reliable_with(encoded.into(), |state| {
+                forget_delivered_terminals_state(state);
+                state.terminals_held = false;
+            })
         })
     }
 
@@ -3649,7 +3675,9 @@ impl OutboundMailbox {
     }
 
     fn close_after_flush(&self) {
-        self.close_control_feed();
+        if let Some(feed) = self.control_feed() {
+            feed.finish(self);
+        }
         let mut state = self.state.lock();
         state.closed = true;
         #[cfg(unix)]
@@ -13102,9 +13130,14 @@ impl Shared {
                 .clients
                 .iter()
                 .filter_map(|(id, client)| {
-                    let output = client.control_output.as_ref()?;
                     let subscriber = client.subscriber.clone()?;
-                    (!output.no_output).then_some((*id, subscriber, output.pause_after_ms))
+                    subscriber.control_feed()?;
+                    let output = client.control_output.as_ref();
+                    Some((
+                        *id,
+                        subscriber,
+                        output.and_then(|output| output.pause_after_ms),
+                    ))
                 })
                 .collect::<Vec<_>>()
         };
@@ -34770,6 +34803,7 @@ struct PendingControlOutput {
     bytes: Arc<[u8]>,
     offset: usize,
     enqueued_at: Instant,
+    seq: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44330,6 +44364,7 @@ fn control_output_age_action(
 fn drain_control_pane_output(
     pending: &mut VecDeque<PendingControlOutput>,
     limit: usize,
+    before: u64,
     now: Instant,
 ) -> (u64, Vec<u8>) {
     let enqueued_at = pending
@@ -44340,7 +44375,7 @@ fn drain_control_pane_output(
         u64::try_from(now.saturating_duration_since(enqueued_at).as_millis()).unwrap_or(u64::MAX);
     let mut bytes = Vec::with_capacity(limit);
     while bytes.len() < limit {
-        let Some(chunk) = pending.front_mut() else {
+        let Some(chunk) = pending.front_mut().filter(|chunk| chunk.seq < before) else {
             break;
         };
         let take = (limit - bytes.len()).min(chunk.bytes.len().saturating_sub(chunk.offset));

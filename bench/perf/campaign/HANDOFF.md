@@ -406,6 +406,22 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   -50%/-48%, `chatty.instr_per_s.flip`/`.hidden` -59%/-55%, `spawn.instr.split_empty_P` -86%,
   `echo.wire_bytes.busy30` 137 -> 149 B. `attach.ttfc.p4` failed its ratio in the lane runs but
   reads 8.2-9.3 ms against the base's 8.3-10.0 in the same pairs: noise. Pushed to main after.
+- DL3 (workflow `wf_a3e8d9c5-200`, 7 h: impl, two reviews, fix; `perf/deliver` `443939fa` +
+  `41dce0ce`, not merged yet): `PaneSink` per pane (`daemon/shard_sink.rs`) with per (pane, view)
+  records; foreground live frames are diffed, encoded once and queued on every mailbox from the
+  shard; non-live views, frozen clients, kitty frames and full slots fall back to the loop for that
+  frame and keep the record's base (review fix: a fallback used to force two full frames); sunk
+  panes notify the loop only on edges or every 100 ms of output (every frame while an output watch
+  is alive); the mailbox wakes the loop only on an empty -> non-empty slot. Mac `--stage final`
+  100 pass, 0 fail, 0 regressed; footprint p1 4.69, p20 11.5 MiB. Not met: loop busy in visible
+  15-17 against base 13-24 (the loop still wakes and calls writev per frame), and the visible
+  CPU/instruction rows equal the DL3 base (the wave-4 gain there is DL1, DL2 and ROWS). Decision:
+  hold DL3 until DL4 (the shard writes an idle socket directly, removing that loop wake and
+  writev, and the echo hop) proves the gain on top of it; merge both together then.
+- DL4 and DL5 launched 04:45 on top of DL3 as workflow `w4-slices` run `wf_3436d1b8-110`
+  (`~/dev/zz-deliver4`, `~/dev/zz-deliver5`, both first merge perf/wave4). DL4 owns loop busy <= 10
+  in addition to its echo criterion; DL5 replaces the control output taps with a sink kind and adds
+  the per-pane stream barrier.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

@@ -2955,8 +2955,11 @@ impl TerminalSession {
 
 impl Drop for TerminalSession {
     fn drop(&mut self) {
-        if !self.terminating.load(Ordering::Acquire) {
-            let _ = self.commands.try_send(Command::Shutdown);
+        if !self.terminating.load(Ordering::Acquire)
+            && let Err(crossbeam_channel::TrySendError::Full(command)) =
+                self.commands.try_send(Command::Shutdown)
+        {
+            self.commands.defer(command);
         }
     }
 }

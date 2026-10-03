@@ -44534,6 +44534,9 @@ fn drain_control_pane_output(
     (age_ms, bytes)
 }
 
+#[cfg(all(test, unix))]
+mod ptyleak_tests;
+
 #[cfg(unix)]
 fn stop_control_output_tap(tap: ControlOutputTap) {
     let request = tap

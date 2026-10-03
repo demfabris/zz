@@ -255,7 +255,10 @@ allocator, this prevents mimalloc from requesting transparent huge pages with
 `MADV_HUGEPAGE`; it does not change the system setting or disable huge pages for
 child programs. Small allocations across many terminal threads otherwise
 inflate resident memory on systems configured to honor that request. Compare
-both RSS and terminal throughput when changing this policy.
+both RSS and terminal throughput when changing this policy. Separately, `zz_cli`
+sets `PR_SET_THP_DISABLE` for itself at start, and pane programs, `run-shell`
+and status jobs inherit it, so a program in a zz pane on Linux starts with
+transparent huge pages off (tmux leaves them alone).
 
 On glibc, the desktop calls `malloc_trim(0)` every 10 seconds on the main
 thread (`start_heap_trim` in `crates/zz/src/lib.rs`). Mesa, Wayland, and other

@@ -536,20 +536,35 @@ fn slot_changes_made_after_a_queued_command_run_after_it() {
 
 #[cfg(target_os = "linux")]
 #[test]
-fn a_pane_gets_transparent_huge_pages_back_when_zz_turned_them_off() {
-    let before = std::fs::read_to_string("/proc/self/status").expect("read own status");
-    if before.contains("THP_enabled:\t0") {
-        return;
+fn a_pane_keeps_transparent_huge_pages_off_when_zz_turned_them_off() {
+    if std::env::var_os("ZZ_PTY_FORK").is_none() {
+        let output = std::process::Command::new(std::env::current_exe().expect("test binary"))
+            .args([
+                "--exact",
+                "session::pane_tests::a_pane_keeps_transparent_huge_pages_off_when_zz_turned_them_off",
+            ])
+            .env("ZZ_PTY_FORK", "1")
+            .output()
+            .expect("forked pane test");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success() && stdout.contains("1 passed"),
+            "{stdout}{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
     super::unix_pty::disable_transparent_huge_pages();
-    let after = std::fs::read_to_string("/proc/self/status").expect("read own status");
-    assert!(after.contains("THP_enabled:\t0"), "zz turned them off here");
+    let before = std::fs::read_to_string("/proc/self/status").expect("read own status");
+    assert!(
+        before.contains("THP_enabled:\t0"),
+        "zz turned them off here"
+    );
     let session =
         shell_session("awk '/^THP_enabled/ {print \"THP=\" $2}' /proc/self/status; read _");
     wait_until("the pane's THP state", || {
         text(&session.latest_viewport()).contains("THP=")
     });
-    assert!(text(&session.latest_viewport()).contains("THP=1"));
+    assert!(text(&session.latest_viewport()).contains("THP=0"));
     let spawned = std::fs::read_to_string("/proc/self/status").expect("read own status");
     assert!(
         spawned.contains("THP_enabled:\t0"),

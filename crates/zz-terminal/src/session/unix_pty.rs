@@ -11,7 +11,6 @@ use std::time::Duration;
 
 use crate::pty_types::{CommandBuilder, PtySize};
 use rustix::fs::{Access, Mode, OFlags};
-#[cfg(not(target_os = "linux"))]
 use rustix::io::FdFlags;
 use rustix::pty::OpenptFlags;
 
@@ -121,20 +120,13 @@ const PTY_EXEC_FENCE: RawFd = 3;
 static PTY_EXEC_HOST: AtomicBool = AtomicBool::new(false);
 
 #[cfg(target_os = "linux")]
-static THP_DISABLED_HERE: AtomicBool = AtomicBool::new(false);
-
-#[cfg(target_os = "linux")]
 #[allow(
     unsafe_code,
     reason = "prctl runs in a constructor before the allocator starts and touches no memory the process owns"
 )]
 pub(super) fn disable_transparent_huge_pages() {
     unsafe {
-        if libc::prctl(libc::PR_GET_THP_DISABLE, 0, 0, 0, 0) == 0
-            && libc::prctl(libc::PR_SET_THP_DISABLE, 1, 0, 0, 0) == 0
-        {
-            THP_DISABLED_HERE.store(true, Ordering::Relaxed);
-        }
+        libc::prctl(libc::PR_SET_THP_DISABLE, 1, 0, 0, 0);
     }
 }
 
@@ -229,7 +221,6 @@ impl Spawned {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
 fn exec_fence() -> io::Result<(OwnedFd, OwnedFd)> {
     let (read, write) = rustix::pipe::pipe()?;
     rustix::io::fcntl_setfd(&read, FdFlags::CLOEXEC)?;
@@ -249,41 +240,41 @@ pub(super) fn spawn(
         fallback: pointers(&plan.fallback),
     };
     #[cfg(target_os = "linux")]
-    {
-        spawn_shared(&plan, &pointers, slave.as_raw_fd()).map(|pid| Spawned {
+    if !fork_selected() {
+        return spawn_shared(&plan, &pointers, slave.as_raw_fd()).map(|pid| Spawned {
             pid,
             exec_fence: None,
-        })
+        });
     }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let (exec_fence, fence_write) = exec_fence()?;
-        #[cfg(target_os = "macos")]
-        if let Some(helper) = pty_exec_helper() {
-            match spawn_through_helper(helper, &plan, slave.as_raw_fd(), fence_write.as_raw_fd()) {
-                Ok(pid) => {
-                    return Ok(Spawned {
-                        pid,
-                        exec_fence: Some(exec_fence),
-                    });
-                }
-                Err(error) => log::warn!(
-                    target: "zz_terminal::spawn",
-                    "pane helper {} failed, forking instead: {error}",
-                    helper.to_string_lossy()
-                ),
+    let (exec_fence, fence_write) = exec_fence()?;
+    #[cfg(target_os = "macos")]
+    if let Some(helper) = pty_exec_helper() {
+        match spawn_through_helper(helper, &plan, slave.as_raw_fd(), fence_write.as_raw_fd()) {
+            Ok(pid) => {
+                return Ok(Spawned {
+                    pid,
+                    exec_fence: Some(exec_fence),
+                });
             }
+            Err(error) => log::warn!(
+                target: "zz_terminal::spawn",
+                "pane helper {} failed, forking instead: {error}",
+                helper.to_string_lossy()
+            ),
         }
-        spawn_forked(&plan, &pointers, slave.as_raw_fd(), fence_write.as_raw_fd()).map(|pid| {
-            Spawned {
-                pid,
-                exec_fence: Some(exec_fence),
-            }
-        })
     }
+    spawn_forked(&plan, &pointers, slave.as_raw_fd(), fence_write.as_raw_fd()).map(|pid| Spawned {
+        pid,
+        exec_fence: Some(exec_fence),
+    })
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "linux")]
+fn fork_selected() -> bool {
+    static FORK: OnceLock<bool> = OnceLock::new();
+    *FORK.get_or_init(|| std::env::var_os("ZZ_PTY_FORK").is_some_and(|value| value == "1"))
+}
+
 #[allow(
     unsafe_code,
     reason = "the child only makes async-signal-safe calls on memory prepared before the fork, \
@@ -319,6 +310,67 @@ fn spawn_forked(
 const SHARED_CHILD_STACK_BYTES: usize = 64 * 1024;
 
 #[cfg(target_os = "linux")]
+struct ChildStack {
+    base: *mut libc::c_void,
+    length: usize,
+}
+
+#[cfg(target_os = "linux")]
+#[allow(
+    unsafe_code,
+    reason = "maps a private anonymous region this value owns and unmaps it on drop"
+)]
+impl ChildStack {
+    fn map() -> io::Result<Self> {
+        let guard = usize::try_from(unsafe { libc::sysconf(libc::_SC_PAGESIZE) })
+            .ok()
+            .filter(|&page| page > 0)
+            .unwrap_or(4096);
+        let length = guard + SHARED_CHILD_STACK_BYTES;
+        unsafe {
+            let base = libc::mmap(
+                std::ptr::null_mut(),
+                length,
+                libc::PROT_NONE,
+                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_STACK | libc::MAP_NORESERVE,
+                -1,
+                0,
+            );
+            if base == libc::MAP_FAILED {
+                return Err(io::Error::last_os_error());
+            }
+            let stack = Self { base, length };
+            if libc::mprotect(
+                base.byte_add(guard),
+                SHARED_CHILD_STACK_BYTES,
+                libc::PROT_READ | libc::PROT_WRITE,
+            ) == -1
+            {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(stack)
+        }
+    }
+
+    fn top(&self) -> *mut libc::c_void {
+        unsafe { self.base.byte_add(self.length) }
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[allow(
+    unsafe_code,
+    reason = "unmaps the region map returned, after the child has exec'd or exited"
+)]
+impl Drop for ChildStack {
+    fn drop(&mut self) {
+        unsafe {
+            libc::munmap(self.base, self.length);
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
 struct SharedChild<'a> {
     plan: &'a ExecPlan,
     pointers: &'a ExecPointers,
@@ -352,7 +404,7 @@ extern "C" fn shared_child(argument: *mut libc::c_void) -> libc::c_int {
               their dispositions"
 )]
 fn spawn_shared(plan: &ExecPlan, pointers: &ExecPointers, slave: RawFd) -> io::Result<u32> {
-    let mut stack = Vec::<u8>::with_capacity(SHARED_CHILD_STACK_BYTES);
+    let stack = ChildStack::map()?;
     let mut child = SharedChild {
         plan,
         pointers,
@@ -360,22 +412,17 @@ fn spawn_shared(plan: &ExecPlan, pointers: &ExecPointers, slave: RawFd) -> io::R
         descriptors: DescriptorScratch::new(),
     };
     unsafe {
-        let top = stack.as_mut_ptr().add(SHARED_CHILD_STACK_BYTES);
-        let top = top.sub(top.addr() % 16);
         let mut blocked: libc::sigset_t = std::mem::zeroed();
         let mut previous: libc::sigset_t = std::mem::zeroed();
         libc::sigfillset(&raw mut blocked);
         libc::pthread_sigmask(libc::SIG_SETMASK, &raw const blocked, &raw mut previous);
         let pid = libc::clone(
             shared_child,
-            top.cast(),
+            stack.top(),
             libc::CLONE_VM | libc::CLONE_VFORK | libc::SIGCHLD,
             (&raw mut child).cast(),
         );
         let error = (pid == -1).then(io::Error::last_os_error);
-        if THP_DISABLED_HERE.load(Ordering::Relaxed) {
-            libc::prctl(libc::PR_SET_THP_DISABLE, 1, 0, 0, 0);
-        }
         libc::pthread_sigmask(libc::SIG_SETMASK, &raw const previous, std::ptr::null_mut());
         error.map_or(Ok(pid.cast_unsigned()), Err)
     }
@@ -709,10 +756,6 @@ unsafe fn exec_child(
             libc::_exit(1);
         }
         descriptors.close_inherited(fence);
-        #[cfg(target_os = "linux")]
-        if THP_DISABLED_HERE.load(Ordering::Relaxed) {
-            libc::prctl(libc::PR_SET_THP_DISABLE, 0, 0, 0, 0);
-        }
         libc::execve(
             plan.program.as_ptr(),
             pointers.argv.as_ptr(),

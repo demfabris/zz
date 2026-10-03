@@ -1211,10 +1211,14 @@ impl ClientCore {
             return;
         };
         let damage = patch_damage(viewport, &patch);
-        let retired = adopt_spare_cells(viewport, self.spare_cells.remove(&pane));
-        let stale = (patch.scroll == 0).then(|| patch.changed_rows.row_indices().collect());
+        let retired = adopt_spare_cells(viewport, self.spare_cells.remove(&pane))
+            .filter(|_| patch.scroll == 0)
+            .map(|(cells, mut stale)| {
+                stale.extend(patch.changed_rows.row_indices());
+                (cells, stale)
+            });
         if viewport.apply_patch(patch).is_ok() {
-            if let (Some(cells), Some(stale)) = (retired, stale)
+            if let Some((cells, stale)) = retired
                 && !Arc::ptr_eq(&cells, &viewport.cells)
             {
                 self.spare_cells.insert(
@@ -1334,28 +1338,36 @@ struct SpareCells {
 fn adopt_spare_cells(
     viewport: &mut TerminalViewport,
     spare: Option<SpareCells>,
-) -> Option<Arc<[PackedCell]>> {
+) -> Option<(Arc<[PackedCell]>, Vec<u16>)> {
     if Arc::get_mut(&mut viewport.cells).is_some() {
         return None;
     }
     let retired = Arc::clone(&viewport.cells);
-    if let Some(mut spare) = spare
-        && spare.generation == (viewport.generation, viewport.view_generation)
-        && spare.cells.len() == retired.len()
-        && let Some(cells) = Arc::get_mut(&mut spare.cells)
+    let Some(SpareCells {
+        mut cells,
+        mut stale,
+        generation,
+    }) = spare
+    else {
+        return Some((retired, Vec::new()));
+    };
+    if generation == (viewport.generation, viewport.view_generation)
+        && cells.len() == retired.len()
+        && let Some(buffer) = Arc::get_mut(&mut cells)
     {
         let columns = usize::from(viewport.columns);
-        for row in spare.stale.iter().map(|row| usize::from(*row) * columns) {
+        for row in stale.iter().map(|row| usize::from(*row) * columns) {
             if let (Some(target), Some(source)) = (
-                cells.get_mut(row..row + columns),
+                buffer.get_mut(row..row + columns),
                 retired.get(row..row + columns),
             ) {
                 target.copy_from_slice(source);
             }
         }
-        viewport.cells = spare.cells;
+        viewport.cells = cells;
     }
-    Some(retired)
+    stale.clear();
+    Some((retired, stale))
 }
 
 /// Which rows a patch will touch, computed against the pre-apply viewport.
@@ -2528,6 +2540,92 @@ mod tests {
         }));
         assert!(core.snapshot().sessions.is_empty());
         assert_eq!(core.poll_outbound(), Some(Outbound::TreeSync));
+    }
+
+    #[test]
+    fn reused_cell_buffers_follow_patches_while_clones_are_held() {
+        let pane = PaneId(4);
+        let mut adoptable = 0;
+        for seed in 1..=4_u64 {
+            let mut state = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+            let mut next = move |bound: usize| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                (state % bound as u64) as usize
+            };
+            let mut core = ClientCore::new();
+            let mut reference = TerminalViewport::blank(12, 6, zz_terminal::SessionStatus::Running);
+            core.handle_message(event(EventPayload::TerminalViewport {
+                pane,
+                viewport: reference.clone(),
+            }));
+            let mut held: Vec<(TerminalViewport, Vec<PackedCell>)> = Vec::new();
+            for step in 0..600 {
+                let mut current = reference.clone();
+                current.generation += 1;
+                let cells = Arc::make_mut(&mut current.cells);
+                let len = cells.len();
+                match next(6) {
+                    0 => {
+                        let shift = (1 + next(2)) * 12;
+                        cells.copy_within(shift.., 0);
+                        cells[len - shift..].fill(PackedCell::EMPTY);
+                    }
+                    1 => {
+                        let row = next(6) * 12;
+                        let start = row + next(12);
+                        cells[start..row + 12].fill(PackedCell::EMPTY);
+                    }
+                    _ => {}
+                }
+                for _ in 0..next(5) {
+                    let index = next(len);
+                    let glyph = u32::from(b'a') + next(26) as u32;
+                    cells[index] = PackedCell::new(glyph, 0, zz_terminal::CellWidth::Narrow);
+                }
+                adoptable += usize::from(
+                    core.spare_cells
+                        .get(&pane)
+                        .is_some_and(|spare| Arc::strong_count(&spare.cells) == 1),
+                );
+                if next(97) == 0 {
+                    core.handle_message(event(EventPayload::TerminalViewport {
+                        pane,
+                        viewport: current.clone(),
+                    }));
+                } else {
+                    let patch = TerminalViewport::diff(&reference, &current).unwrap();
+                    core.handle_message(event(EventPayload::TerminalPatch { pane, patch }));
+                }
+                reference = current;
+                drain(&mut core);
+                assert_eq!(
+                    core.viewport(pane).unwrap().cells[..],
+                    reference.cells[..],
+                    "seed {seed} step {step}"
+                );
+                for (clone, cells) in &held {
+                    assert_eq!(clone.cells[..], cells[..], "seed {seed} step {step}");
+                }
+                match next(4) {
+                    0 if held.len() < 3 => {}
+                    1 => {
+                        held.drain(..held.len().min(1));
+                        continue;
+                    }
+                    2 => {
+                        held.clear();
+                        continue;
+                    }
+                    _ => held.clear(),
+                }
+                let clone = core.viewport(pane).unwrap().clone();
+                let cells = clone.cells.to_vec();
+                held.push((clone, cells));
+            }
+        }
+        assert!(adoptable > 0);
     }
 
     #[test]

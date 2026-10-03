@@ -730,13 +730,17 @@ impl Renderer {
     fn paint_workspace(&mut self, model: &Model, force: bool, cleared_to_default: bool) {
         let lines = model.pane_border_lines();
         let indicators = model.pane_border_indicators();
-        let border_changed = self.border_chrome.as_ref().is_none_or(|cached| {
-            cached.0 != model.pane_border_status()
+        let border_changed = self.border_chrome.as_mut().is_none_or(|cached| {
+            let changed = cached.0 != model.pane_border_status()
                 || cached.1 != lines
                 || cached.2 != indicators
                 || !Arc::ptr_eq(&cached.3, &model.status)
                     && (cached.3.pane_borders != model.status.pane_borders
-                        || cached.3.theme != model.status.theme)
+                        || cached.3.theme != model.status.theme);
+            if !changed {
+                cached.3 = Arc::clone(&model.status);
+            }
+            changed
         });
         let force = force || border_changed;
         if border_changed {
@@ -1952,10 +1956,10 @@ impl Renderer {
         if !force
             && overlay.is_none()
             && self.status_geometry == Some(geometry)
-            && self.status_source.as_ref().is_some_and(|source| {
-                Arc::ptr_eq(source, &model.status) || **source == *model.status
-            })
+            && let Some(source) = self.status_source.as_mut()
+            && (Arc::ptr_eq(source, &model.status) || **source == *model.status)
         {
+            *source = Arc::clone(&model.status);
             return;
         }
         self.status_source = overlay.is_none().then(|| Arc::clone(&model.status));

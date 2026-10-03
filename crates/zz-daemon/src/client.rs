@@ -1708,11 +1708,15 @@ impl InteractiveClient {
     pub fn send_input(&self, input: InputMessage) -> Result<(), DaemonError> {
         if let InputMessage::Key {
             pane,
-            input,
+            input: key,
             text_follows,
         } = &input
         {
-            return self.writer.lock().send_key(*pane, input, *text_follows);
+            return self.send_locked(&input, |writer| {
+                writer.send_encoded(&input, |frame| {
+                    encode_key_input_into(*pane, key, *text_follows, frame)
+                })
+            });
         }
         self.send(&ProtocolMessage::Input(input))
     }
@@ -2022,11 +2026,19 @@ impl InteractiveClient {
     }
 
     pub fn send(&self, message: &ProtocolMessage) -> Result<(), DaemonError> {
+        self.send_locked(message, |writer| writer.send(message))
+    }
+
+    fn send_locked(
+        &self,
+        message: &impl std::fmt::Debug,
+        send: impl FnOnce(&mut ProtocolSender<ClientStream>) -> Result<(), DaemonError>,
+    ) -> Result<(), DaemonError> {
         let started = diagnostic_timer();
         let lock_started = diagnostic_timer();
         let mut writer = self.writer.lock();
         let lock_wait_us = diagnostic_elapsed_us(lock_started);
-        let result = writer.send(message);
+        let result = send(&mut writer);
         log::trace!(
             target: "zz_daemon::diagnostics::client",
             "interactive_send success={} lock_wait_us={} total_elapsed_us={} message={message:#?}",
@@ -2237,27 +2249,20 @@ impl<S: TransportStream> ProtocolSender<S> {
         }
     }
 
-    fn send_key(
-        &mut self,
-        pane: PaneId,
-        input: &zz_terminal::KeyInput,
-        text_follows: bool,
-    ) -> Result<(), DaemonError> {
-        encode_key_input_into(pane, input, text_follows, &mut self.frame)?;
-        self.stream.write_all(&self.frame)?;
-        self.stream.flush()?;
-        log::trace!(
-            target: "zz_daemon::diagnostics::protocol",
-            "send key bytes={} pane={pane} input={input:?} text_follows={text_follows}",
-            self.frame.len(),
-        );
-        Ok(())
+    fn send(&mut self, message: &ProtocolMessage) -> Result<(), DaemonError> {
+        self.send_encoded(message, |frame| {
+            encode_protocol_message_into(message, frame)
+        })
     }
 
-    fn send(&mut self, message: &ProtocolMessage) -> Result<(), DaemonError> {
+    fn send_encoded(
+        &mut self,
+        message: &impl std::fmt::Debug,
+        encode: impl FnOnce(&mut Vec<u8>) -> Result<(), ProtocolError>,
+    ) -> Result<(), DaemonError> {
         let started = diagnostic_timer();
         let encode_started = diagnostic_timer();
-        encode_protocol_message_into(message, &mut self.frame)?;
+        encode(&mut self.frame)?;
         let encode_us = diagnostic_elapsed_us(encode_started);
         let write_started = diagnostic_timer();
         self.stream.write_all(&self.frame)?;

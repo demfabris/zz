@@ -89545,7 +89545,7 @@ bind - split-window -v -c "#{pane_current_path}"
             &shared,
             client,
             &mut context,
-            pane,
+            output_pane,
             test_key(KeyCode::Escape, Modifiers::default(), None),
         );
         wait_for_command_output_close(&mailbox, output_id);

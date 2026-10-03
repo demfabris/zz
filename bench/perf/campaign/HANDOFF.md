@@ -561,6 +561,22 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   non-ASCII as word bytes each fail it). Checks on `dfdc1d4f`: fmt, clippy, Linux-target clippy
   (zz-mux, zz-daemon, zz-cli) exit 0; zz-mux, zz-daemon and zz-cli tests 2640 passed, 23 failed at
   Mac load about 25, all 23 pass alone. Linux burst series owed.
+- batch4 Mac (`3924f8fa`, DL3-DL5 merged, in `~/dev/zz-check`, 12:33-13:46, load 25-29 from
+  lanes): fmt, clippy, compat-check, web-build, iPad build, tui-screen-diff pass; workspace tests
+  5087 passed, the 2 failures pass alone; full corpus only the expected Mac reds (the four
+  `known/*`, census-hooks, if-shell-background-order, control-alias-prepare,
+  plugin-runtime-continuum, plugin-runtime-vim-tmux-navigator, resurrect-save,
+  source-file-byte-name, status-background-jobs), 245 clean. **attached-client fails on the zz
+  side, twice: typed input is dropped.** The popup-underlay step types a long `bash -c` script
+  through the attach client; the pane receives it with characters missing and the daemon logs
+  about 410 `rejected terminal PTY input command=key ... pending_commands=256` lines. The base
+  `0d7dabf7` passes that step with 0 rejections (it fails later at the known tmux-side flake), so
+  DL3, DL4 or DL5 introduced it. Lane ACFIX (`~/dev/zz-acfix`, `perf/acfix`, background agent
+  from 13:58) bisects and fixes; no main push until it lands. Quick A/B against `0d7dabf7`
+  (loaded, three pairs): `chatty.instr_per_s.flip` -5.5%, `echo.p99.idle` -53%; to watch:
+  `control.output_mbps` 198 -> 87 MB/s median (one of three runs warns; BYTES2 re-measures on
+  this base) and `chatty.instr_per_s.hidden` +22% with `chatty.tty_kibps.hidden` +56% (client
+  bytes, the rename luck NAMESCOST found).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

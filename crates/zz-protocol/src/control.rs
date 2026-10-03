@@ -231,20 +231,11 @@ pub struct ClientView {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Batch {
     pub sequence: u64,
-    #[serde(deserialize_with = "deserialize_batch_frames")]
+    #[serde(
+        serialize_with = "crate::message::serialize_byte_vecs",
+        deserialize_with = "crate::message::deserialize_byte_vecs"
+    )]
     pub frames: Vec<Vec<u8>>,
-}
-
-fn deserialize_batch_frames<'de, D>(deserializer: D) -> Result<Vec<Vec<u8>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Vec::<serde_bytes::ByteBuf>::deserialize(deserializer).map(|frames| {
-        frames
-            .into_iter()
-            .map(serde_bytes::ByteBuf::into_vec)
-            .collect()
-    })
 }
 
 #[cfg(test)]

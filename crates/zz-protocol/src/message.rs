@@ -832,7 +832,7 @@ fn deserialize_agent_image_data<'de, D>(deserializer: D) -> Result<Vec<u8>, D::E
 where
     D: Deserializer<'de>,
 {
-    let bytes = Vec::<u8>::deserialize(deserializer)?;
+    let bytes: Vec<u8> = serde_bytes::deserialize(deserializer)?;
     if bytes.len() > MAX_AGENT_PROMPT_BYTES {
         return Err(D::Error::invalid_length(
             bytes.len(),
@@ -922,7 +922,7 @@ fn deserialize_agent_update_items<'de, D>(deserializer: D) -> Result<Vec<Vec<u8>
 where
     D: Deserializer<'de>,
 {
-    let items = Vec::<Vec<u8>>::deserialize(deserializer)?;
+    let items = deserialize_byte_vecs(deserializer)?;
     if agent_update_batch_bytes(&items) > MAX_AGENT_UPDATES_BYTES {
         return Err(D::Error::invalid_length(
             items.len(),
@@ -931,6 +931,29 @@ where
     }
     Ok(items)
 }
+
+pub(crate) fn serialize_byte_vecs<S>(items: &[Vec<u8>], serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.collect_seq(items.iter().map(|item| serde_bytes::Bytes::new(item)))
+}
+
+pub(crate) fn deserialize_byte_vecs<'de, D>(deserializer: D) -> Result<Vec<Vec<u8>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Vec::<serde_bytes::ByteBuf>::deserialize(deserializer).map(|items| {
+        items
+            .into_iter()
+            .map(serde_bytes::ByteBuf::into_vec)
+            .collect()
+    })
+}
+
+#[cfg(test)]
+#[path = "wire_bytes_tests.rs"]
+mod wire_bytes_tests;
 
 /// Total wire bytes an `AgentUpdates` batch carries, saturating rather than
 /// wrapping so a forged length can never appear small.
@@ -1022,7 +1045,7 @@ fn deserialize_client_file_bytes<'de, D>(deserializer: D) -> Result<Vec<u8>, D::
 where
     D: Deserializer<'de>,
 {
-    let bytes = Vec::<u8>::deserialize(deserializer)?;
+    let bytes: Vec<u8> = serde_bytes::deserialize(deserializer)?;
     if bytes.len() > MAX_CLIENT_FILE_BYTES {
         return Err(D::Error::invalid_length(
             bytes.len(),
@@ -1036,7 +1059,7 @@ fn deserialize_paste_upload_chunk<'de, D>(deserializer: D) -> Result<Vec<u8>, D:
 where
     D: Deserializer<'de>,
 {
-    let bytes = Vec::<u8>::deserialize(deserializer)?;
+    let bytes: Vec<u8> = serde_bytes::deserialize(deserializer)?;
     if bytes.len() > MAX_PASTE_UPLOAD_CHUNK_BYTES {
         return Err(D::Error::invalid_length(
             bytes.len(),
@@ -1366,7 +1389,7 @@ impl Serialize for RawText {
     where
         S: serde::Serializer,
     {
-        self.as_bytes().serialize(serializer)
+        serializer.serialize_bytes(self.as_bytes())
     }
 }
 
@@ -1385,7 +1408,13 @@ impl<'de> Deserialize<'de> for RawText {
 /// path is a byte string, not text, so the wire keeps it verbatim and the daemon
 /// rebuilds the exact `PathBuf`; every other platform carries UTF-8 bytes.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ClientPath(#[serde(deserialize_with = "deserialize_client_path")] Vec<u8>);
+pub struct ClientPath(
+    #[serde(
+        serialize_with = "serde_bytes::serialize",
+        deserialize_with = "deserialize_client_path"
+    )]
+    Vec<u8>,
+);
 
 impl ClientPath {
     /// The wire form of `path`, or `None` when this platform cannot represent it.
@@ -1444,7 +1473,7 @@ fn deserialize_client_path<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let bytes = Vec::<u8>::deserialize(deserializer)?;
+    let bytes: Vec<u8> = serde_bytes::deserialize(deserializer)?;
     if bytes.len() > MAX_CLIENT_WORKING_DIRECTORY_BYTES {
         return Err(D::Error::invalid_length(
             bytes.len(),
@@ -2302,7 +2331,10 @@ impl AgentCommand {
 pub struct AgentImage {
     #[serde(deserialize_with = "deserialize_agent_image_format")]
     pub format: String,
-    #[serde(deserialize_with = "deserialize_agent_image_data")]
+    #[serde(
+        serialize_with = "serde_bytes::serialize",
+        deserialize_with = "deserialize_agent_image_data"
+    )]
     pub data: Vec<u8>,
 }
 
@@ -3429,6 +3461,7 @@ pub enum EventPayload {
         pane: PaneId,
         image_id: u32,
         generation: u64,
+        #[serde(with = "serde_bytes")]
         bytes: Vec<u8>,
     },
     KittyImagesRemoved {
@@ -3441,7 +3474,10 @@ pub enum EventPayload {
     AgentUpdates {
         pane: PaneId,
         first_seq: u64,
-        #[serde(deserialize_with = "deserialize_agent_update_items")]
+        #[serde(
+            serialize_with = "serialize_byte_vecs",
+            deserialize_with = "deserialize_agent_update_items"
+        )]
         items: Vec<Vec<u8>>,
     },
     AgentState {
@@ -3488,6 +3524,7 @@ pub enum EventPayload {
     },
     PaneOutput {
         pane: PaneId,
+        #[serde(with = "serde_bytes")]
         bytes: Vec<u8>,
     },
     PaneOutputState {
@@ -3497,6 +3534,7 @@ pub enum EventPayload {
     PaneOutputAged {
         pane: PaneId,
         age_ms: u64,
+        #[serde(with = "serde_bytes")]
         bytes: Vec<u8>,
     },
     ControlFlags {
@@ -3696,7 +3734,10 @@ pub enum ProtocolMessage {
     /// marker: the upload completes at the declared `total_bytes`.
     PasteUploadChunk {
         upload_id: u64,
-        #[serde(deserialize_with = "deserialize_paste_upload_chunk")]
+        #[serde(
+            serialize_with = "serde_bytes::serialize",
+            deserialize_with = "deserialize_paste_upload_chunk"
+        )]
         bytes: Vec<u8>,
     },
     FetchPastedImage {
@@ -3713,7 +3754,10 @@ pub enum ProtocolMessage {
     PastedImageChunk {
         pane: PaneId,
         number: u32,
-        #[serde(deserialize_with = "deserialize_paste_upload_chunk")]
+        #[serde(
+            serialize_with = "serde_bytes::serialize",
+            deserialize_with = "deserialize_paste_upload_chunk"
+        )]
         bytes: Vec<u8>,
     },
     PastedImageUnavailable {
@@ -3888,6 +3932,7 @@ pub enum ProtocolMessage {
     GetKeyTables,
     ControlStdio,
     ControlStdin {
+        #[serde(with = "serde_bytes")]
         bytes: Vec<u8>,
         submitted: bool,
         closed: bool,
@@ -3897,6 +3942,7 @@ pub enum ProtocolMessage {
         next_number: u64,
     },
     ControlWrite {
+        #[serde(with = "serde_bytes")]
         bytes: Vec<u8>,
         idle: Option<(u64, u64)>,
         close: bool,
@@ -4041,7 +4087,10 @@ pub enum ClientFileOperation {
     Read,
     Write {
         append: bool,
-        #[serde(deserialize_with = "deserialize_client_file_bytes")]
+        #[serde(
+            serialize_with = "serde_bytes::serialize",
+            deserialize_with = "deserialize_client_file_bytes"
+        )]
         data: Vec<u8>,
     },
     ReadStdin {
@@ -4067,7 +4116,10 @@ pub struct ClientFileRequest {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClientFileResponse {
     pub request_id: u64,
-    #[serde(deserialize_with = "deserialize_client_file_bytes")]
+    #[serde(
+        serialize_with = "serde_bytes::serialize",
+        deserialize_with = "deserialize_client_file_bytes"
+    )]
     pub data: Vec<u8>,
     #[serde(deserialize_with = "deserialize_optional_client_file_error")]
     pub error: Option<String>,

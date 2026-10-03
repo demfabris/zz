@@ -121,6 +121,7 @@ pub(super) struct EventLoop {
     #[cfg(test)]
     startup_sender: mpsc::Sender<()>,
     waker: Arc<Waker>,
+    control_wake: Arc<shard_sink::ControlWake>,
     timers: timers::LoopTimers,
     watchers: watchers::LoopWatchers,
     jobs: jobs::JobRegistry,
@@ -311,6 +312,7 @@ impl EventLoop {
             #[cfg(test)]
             startup_sender: _startup_sender,
             waker,
+            control_wake: Arc::clone(&shared.control_wake),
             timers,
             watchers,
             jobs: jobs::JobRegistry::default(),
@@ -649,8 +651,14 @@ impl EventLoop {
     }
 
     fn poll_ready(&mut self) -> Result<(), DaemonError> {
-        let timeout = self.poll_timeout(Instant::now());
-        match self.poll.poll(&mut self.events, timeout) {
+        let timeout = if self.control_wake.park() {
+            Some(Duration::ZERO)
+        } else {
+            self.poll_timeout(Instant::now())
+        };
+        let polled = self.poll.poll(&mut self.events, timeout);
+        self.control_wake.unpark();
+        match polled {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == ErrorKind::Interrupted => Ok(()),
             Err(error) => Err(error.into()),

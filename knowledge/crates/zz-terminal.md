@@ -4,7 +4,7 @@ title: zz-terminal crate
 description: The per-pane terminal engine that owns a PTY child and every libghostty-vt object on a worker thread and publishes immutable renderer-neutral frames.
 resource: crates/zz-terminal/src/terminal_core.rs
 tags: [terminal, libghostty, pty, actor, worker-thread, frames]
-timestamp: 2026-09-16T22:03:45Z
+timestamp: 2026-10-03T00:00:00Z
 ---
 
 # Overview
@@ -37,14 +37,18 @@ command sender + frame subscriber, while all mutable state lives behind one work
 
 `CommandSender` routes work through two bounded lanes. A capacity-one control lane carries resize,
 capture, copy-mode, and pure view operations. An ordered PTY-input lane carries text, keys,
-mouse/focus/paste operations, and pending-paste markers; it caps admission at 256 commands and 64
-MiB, charging each command's payload plus a 4 KiB floor. Producers use nonblocking input admission
-and reject the whole command when either cap is full. The actor chooses control first and executes
+mouse/focus/paste operations, and pending-paste markers. It holds 256 commands in channel slots,
+charged at their payload plus a 4 KiB floor, and queues the rest in order in an overflow charged at
+their payload plus 256 bytes (an entry keeps that charge when it reaches a slot); each slot that frees pulls the oldest overflow entry in, so typed keys
+are never dropped at the slot count. Producers use nonblocking input admission and reject a whole
+command only when the 64 MiB byte budget is full. The actor writes up to 256 queued commands per
+wake, within the 1 ms drain turn, and stops early for a writer backlog or a waiting control command.
+The actor chooses control first and executes
 both lanes on its single worker thread, so terminal state mutations cannot interleave. While
 `PtyWriter` holds unwritten bytes, the actor pauses further PTY input, continues PTY reads and control
 work, and retains libghostty-generated PTY replies in `PtyEffects` until the writer drains.
-`command_queue_len` includes writer-held and queued input permits; `pending_pty_input_bytes` exposes
-their combined admission charge. See
+`command_queue_len` includes writer-held and queued input permits and overflow entries;
+`pending_pty_input_bytes` exposes their combined admission charge. See
 [pty-worker](/concepts/pty-worker.md) for the actor lifecycle in depth.
 
 On Unix, `run_terminal` obtains its default shell command from `shell_integration.rs`. zsh and

@@ -147,6 +147,20 @@ impl Actor {
             || matches!(self, Self::Live(actor) if actor.echo_pending())
     }
 
+    pub(super) fn begin_turn(&mut self) {
+        #[cfg(unix)]
+        if let Self::Live(actor) = self {
+            actor.begin_turn();
+        }
+    }
+
+    pub(super) fn end_turn(&self) {
+        #[cfg(unix)]
+        if let Self::Live(actor) = self {
+            actor.end_turn();
+        }
+    }
+
     fn next_deadline(&self) -> Instant {
         match self {
             Self::Live(actor) => actor.next_deadline(),
@@ -372,7 +386,8 @@ impl Shard {
                         .all(|(id, entry)| id == only_id || entry.deadline > Instant::now())
             });
             for (id, wake, pty, child) in ready.drain(..) {
-                if let Some(entry) = self.actors.remove(&id) {
+                if let Some(mut entry) = self.actors.remove(&id) {
+                    entry.actor.begin_turn();
                     let result = (|| {
                         let actor = if let Some(wake) = wake {
                             entry.actor.on_wake(wake)?
@@ -471,7 +486,8 @@ impl Shard {
     }
 
     fn dispatch(&mut self, id: usize, wake: Option<Wake>) {
-        if let Some(entry) = self.actors.remove(&id) {
+        if let Some(mut entry) = self.actors.remove(&id) {
+            entry.actor.begin_turn();
             let result = if let Some(wake) = wake {
                 entry.actor.on_wake(wake)
             } else {
@@ -500,6 +516,7 @@ impl Shard {
     ) {
         match result {
             Ok(Some(actor)) => {
+                actor.end_turn();
                 let deadline = actor.next_deadline();
                 #[cfg(target_os = "macos")]
                 let recheck_channels =

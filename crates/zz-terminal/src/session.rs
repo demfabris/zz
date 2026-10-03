@@ -2559,6 +2559,10 @@ impl TerminalSession {
     }
 
     pub fn send_key_for_view(&self, view: TerminalViewId, input: KeyInput) {
+        #[cfg(unix)]
+        if self.commands.write_direct_key(&input) {
+            return;
+        }
         self.send_command(Command::Key {
             view: Some(view),
             input: Box::new(input),
@@ -3220,6 +3224,11 @@ impl PendingControl {
     }
 }
 
+#[cfg(unix)]
+fn slot_is_idle(slot: &ControlSlot) -> bool {
+    !slot.wake_queued && slot.in_flight == 0 && slot.deferred.is_empty()
+}
+
 fn take_control_slot(
     slot: &Mutex<ControlSlot>,
     woke_by: Option<Command>,
@@ -3338,6 +3347,8 @@ struct QueuedInput {
 struct InputReceiver {
     commands: Receiver<QueuedInput>,
     admission: Arc<Mutex<InputAdmission>>,
+    #[cfg(unix)]
+    direct: Arc<DirectInput>,
 }
 
 impl std::ops::Deref for InputReceiver {
@@ -3360,6 +3371,8 @@ struct InputSender {
     admission: Arc<Mutex<InputAdmission>>,
     max_commands: usize,
     max_bytes: usize,
+    #[cfg(unix)]
+    direct: Arc<DirectInput>,
 }
 
 impl InputSender {
@@ -3422,16 +3435,22 @@ fn input_channel_with_limits(
 ) -> (InputSender, InputReceiver) {
     let (commands, receiver) = crossbeam_channel::bounded(max_commands);
     let admission = Arc::new(Mutex::new(InputAdmission::default()));
+    #[cfg(unix)]
+    let direct = Arc::new(DirectInput::default());
     (
         InputSender {
             commands,
             admission: Arc::clone(&admission),
             max_commands,
             max_bytes,
+            #[cfg(unix)]
+            direct: Arc::clone(&direct),
         },
         InputReceiver {
             commands: receiver,
             admission,
+            #[cfg(unix)]
+            direct,
         },
     )
 }
@@ -3660,6 +3679,7 @@ impl CommandSender {
         if slot.in_flight == 0 {
             let wake = update(&mut slot) && !std::mem::replace(&mut slot.wake_queued, true);
             drop(slot);
+            self.close_direct_input();
             if wake {
                 let _ = self.try_send(Command::Wake);
             }
@@ -3671,6 +3691,33 @@ impl CommandSender {
         let in_flight = slot.in_flight;
         slot.deferred
             .extend(later.into_iter().map(|command| (in_flight, command)));
+        drop(slot);
+        self.close_direct_input();
+    }
+
+    fn close_direct_input(&self) {
+        #[cfg(unix)]
+        if let Some(input) = &self.queues.input {
+            input.direct.close();
+        }
+    }
+
+    #[cfg(unix)]
+    fn write_direct_key(&self, input: &KeyInput) -> bool {
+        let Some(queue) = &self.queues.input else {
+            return false;
+        };
+        let Some(bytes) = direct_key_bytes(input) else {
+            return false;
+        };
+        match queue.direct.write(bytes) {
+            DirectWrite::Closed => false,
+            DirectWrite::Written => true,
+            DirectWrite::Queued => {
+                let _ = self.try_send(Command::Wake);
+                true
+            }
+        }
     }
 
     fn counts_in_flight(&self, command: &Command) -> bool {
@@ -3715,6 +3762,7 @@ impl CommandSender {
             result
         };
         if result.is_ok() {
+            self.close_direct_input();
             self.queues.wake.notify();
         }
         result
@@ -3745,6 +3793,7 @@ impl CommandSender {
             result
         };
         if result.is_ok() {
+            self.close_direct_input();
             self.queues.wake.notify();
         }
         result
@@ -3789,6 +3838,7 @@ impl CommandSender {
         slot.deferred.push((in_flight, command));
         let wake = in_flight == 0 && !std::mem::replace(&mut slot.wake_queued, true);
         drop(slot);
+        self.close_direct_input();
         if wake {
             let _ = self.try_send(Command::Wake);
         }
@@ -3838,6 +3888,7 @@ impl CommandSender {
             result
         };
         if result.is_ok() {
+            self.close_direct_input();
             self.queues.wake.notify();
         }
         result
@@ -6014,7 +6065,9 @@ fn run_terminal(
             return Ok(());
         };
         actor = next;
+        actor.end_turn();
         let wake = actor.wait_for_wake()?;
+        actor.begin_turn();
         let Some(next) = actor.on_wake(wake)? else {
             return Ok(());
         };
@@ -6474,6 +6527,19 @@ fn release_view(
     terminal.set_selection(None)?;
     terminal.scroll_viewport(ScrollViewport::Bottom);
     Ok(true)
+}
+
+#[cfg(unix)]
+fn view_takes_direct_input(view: &TerminalViewState) -> bool {
+    view.copy_mode.is_none()
+        && view.selection.is_none()
+        && view.search.is_none()
+        && view.search_origin.is_none()
+        && view.search_snapshot.is_none()
+        && view.hover_link.is_none()
+        && matches!(view.viewport, ViewportAnchor::FollowBottom)
+        && view.unseen_output == 0
+        && !view.mouse_button_pressed
 }
 
 fn prepare_live_input(
@@ -12518,36 +12584,85 @@ enum Wake {
 }
 
 #[cfg(unix)]
-struct PtyWriter {
-    fd: filedescriptor::FileDescriptor,
+#[derive(Default)]
+struct DirectInput {
+    state: Mutex<PtyWriteState>,
+    echo: AtomicBool,
+}
+
+#[cfg(unix)]
+#[derive(Default)]
+struct PtyWriteState {
+    open: bool,
+    fd: Option<filedescriptor::FileDescriptor>,
     pending: Vec<u8>,
     offset: usize,
 }
 
 #[cfg(unix)]
-impl PtyWriter {
-    fn new(fd: filedescriptor::FileDescriptor) -> Self {
-        Self {
-            fd,
-            pending: Vec::new(),
-            offset: 0,
-        }
+enum DirectWrite {
+    Closed,
+    Written,
+    Queued,
+}
+
+#[cfg(unix)]
+impl DirectInput {
+    fn close(&self) {
+        self.state.lock().open = false;
     }
 
-    fn has_pending(&self) -> bool {
-        self.offset < self.pending.len()
+    fn reopen(&self, ready: impl FnOnce() -> bool) {
+        let mut state = self.state.lock();
+        state.open = state.fd.is_some() && !state.has_pending() && ready();
     }
 
     #[cfg(test)]
-    fn queued_bytes(&self) -> usize {
-        self.pending.len().saturating_sub(self.offset)
+    fn is_open(&self) -> bool {
+        self.state.lock().open
+    }
+
+    fn take_echo(&self) -> bool {
+        self.echo.load(Ordering::Acquire) && self.echo.swap(false, Ordering::AcqRel)
+    }
+
+    fn echo_noted(&self) -> bool {
+        self.echo.load(Ordering::Acquire)
+    }
+
+    fn write(&self, bytes: &[u8]) -> DirectWrite {
+        let mut state = self.state.lock();
+        if !state.open || state.has_pending() {
+            return DirectWrite::Closed;
+        }
+        self.echo.store(true, Ordering::Release);
+        state.compact_for(bytes.len());
+        state.pending.extend_from_slice(bytes);
+        if state.flush_pending().is_err() || state.has_pending() {
+            state.open = false;
+            return DirectWrite::Queued;
+        }
+        DirectWrite::Written
+    }
+}
+
+#[cfg(unix)]
+impl PtyWriteState {
+    fn has_pending(&self) -> bool {
+        self.offset < self.pending.len()
     }
 
     fn flush_pending(&mut self) -> std::io::Result<()> {
         let mut budget = PTY_WRITE_BUDGET_BYTES;
         while self.has_pending() && budget != 0 {
+            let Some(fd) = &self.fd else {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "PTY writer is closed",
+                ));
+            };
             let end = self.offset.saturating_add(budget).min(self.pending.len());
-            match rustix::io::write(&self.fd, &self.pending[self.offset..end]) {
+            match rustix::io::write(fd, &self.pending[self.offset..end]) {
                 Ok(0) => {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::WriteZero,
@@ -12586,14 +12701,65 @@ impl PtyWriter {
 }
 
 #[cfg(unix)]
+struct PtyWriter {
+    direct: Arc<DirectInput>,
+}
+
+#[cfg(unix)]
+impl PtyWriter {
+    #[cfg(test)]
+    fn new(fd: filedescriptor::FileDescriptor) -> Self {
+        Self::attach(Arc::default(), fd)
+    }
+
+    fn attach(direct: Arc<DirectInput>, fd: filedescriptor::FileDescriptor) -> Self {
+        {
+            let mut state = direct.state.lock();
+            state.open = false;
+            state.fd = Some(fd);
+        }
+        Self { direct }
+    }
+
+    fn has_pending(&self) -> bool {
+        self.direct.state.lock().has_pending()
+    }
+
+    #[cfg(test)]
+    fn queued_bytes(&self) -> usize {
+        let state = self.direct.state.lock();
+        state.pending.len().saturating_sub(state.offset)
+    }
+
+    #[cfg(test)]
+    fn pending_capacity(&self) -> usize {
+        self.direct.state.lock().pending.capacity()
+    }
+
+    fn flush_pending(&mut self) -> std::io::Result<()> {
+        self.direct.state.lock().flush_pending()
+    }
+}
+
+#[cfg(unix)]
+impl Drop for PtyWriter {
+    fn drop(&mut self) {
+        let mut state = self.direct.state.lock();
+        state.open = false;
+        state.fd = None;
+    }
+}
+
+#[cfg(unix)]
 impl Write for PtyWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         if buf.is_empty() {
             return Ok(0);
         }
-        self.compact_for(buf.len());
-        self.pending.extend_from_slice(buf);
-        self.flush_pending()?;
+        let mut state = self.direct.state.lock();
+        state.compact_for(buf.len());
+        state.pending.extend_from_slice(buf);
+        state.flush_pending()?;
         Ok(buf.len())
     }
 
@@ -12601,6 +12767,10 @@ impl Write for PtyWriter {
         self.flush_pending()
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "session/direct_input_echoin_tests.rs"]
+mod direct_input_echoin_tests;
 
 #[cfg(all(unix, not(target_os = "linux")))]
 fn wait_for_wake(
@@ -13851,6 +14021,24 @@ fn drain_effects_if_writer_ready(
         return Ok(());
     }
     drain_effects(effects, writer)
+}
+
+#[cfg(unix)]
+fn direct_key_bytes(input: &KeyInput) -> Option<&[u8]> {
+    if !matches!(input.action, KeyAction::Press | KeyAction::Repeat)
+        || input.modifiers != Modifiers::default()
+    {
+        return None;
+    }
+    match input.key {
+        KeyCode::Character(_) => input
+            .text
+            .as_deref()
+            .filter(|text| !text.is_empty() && !text.chars().any(char::is_control))
+            .map(str::as_bytes),
+        KeyCode::Enter if input.text.is_none() => Some(b"\r"),
+        _ => None,
+    }
 }
 
 fn encode_key(
@@ -17589,7 +17777,7 @@ mod tests {
         writer.flush_pending().expect("drain large input");
 
         assert!(!writer.has_pending());
-        assert_eq!(writer.pending.capacity(), 0);
+        assert_eq!(writer.pending_capacity(), 0);
     }
 
     #[test]

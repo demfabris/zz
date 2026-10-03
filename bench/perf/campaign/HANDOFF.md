@@ -573,9 +573,9 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   `0d7dabf7` passes that step with 0 rejections (it fails later at the known tmux-side flake), so
   DL3, DL4 or DL5 introduced it. Lane ACFIX (`~/dev/zz-acfix`, `perf/acfix`, background agent
   from 13:58) bisects and fixes; no main push until it lands. Quick A/B against `0d7dabf7`
-  (loaded, three pairs): `chatty.instr_per_s.flip` -5.5%, `echo.p99.idle` -53%; to watch:
-  `control.output_mbps` 198 -> 87 MB/s median (one of three runs warns; BYTES2 re-measures on
-  this base) and `chatty.instr_per_s.hidden` +22% with `chatty.tty_kibps.hidden` +56% (client
+  (loaded, three pairs): `chatty.instr_per_s.flip` -5.5%, `echo.p99.idle` -53%; `control.output_mbps` per run pre
+  182/198/200, post 87/5/212 MB/s with tmux 37/9/44 in the post runs (host load: the third pair
+  is the clean one, 212 against 200); to watch: `chatty.instr_per_s.hidden` +22% with `chatty.tty_kibps.hidden` +56% (client
   bytes, the rename luck NAMESCOST found).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit

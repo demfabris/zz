@@ -550,4 +550,9 @@ fn a_pane_gets_transparent_huge_pages_back_when_zz_turned_them_off() {
         text(&session.latest_viewport()).contains("THP=")
     });
     assert!(text(&session.latest_viewport()).contains("THP=1"));
+    let spawned = std::fs::read_to_string("/proc/self/status").expect("read own status");
+    assert!(
+        spawned.contains("THP_enabled:\t0"),
+        "spawning the pane left them off here"
+    );
 }

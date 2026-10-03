@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use crate::pty_types::{CommandBuilder, PtySize};
 use rustix::fs::{Access, Mode, OFlags};
+#[cfg(not(target_os = "linux"))]
 use rustix::io::FdFlags;
 use rustix::pty::OpenptFlags;
 
@@ -51,16 +52,33 @@ pub(super) struct UnixPty {
 }
 
 pub(super) fn open(size: PtySize) -> io::Result<UnixPty> {
-    let master = rustix::pty::openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY)?;
-    rustix::io::fcntl_setfd(&master, FdFlags::CLOEXEC)?;
+    #[cfg(target_os = "linux")]
+    let master =
+        rustix::pty::openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY | OpenptFlags::CLOEXEC)?;
+    #[cfg(not(target_os = "linux"))]
+    let master = {
+        let master = rustix::pty::openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY)?;
+        rustix::io::fcntl_setfd(&master, FdFlags::CLOEXEC)?;
+        master
+    };
     rustix::pty::grantpt(&master)?;
     rustix::pty::unlockpt(&master)?;
     let name = rustix::pty::ptsname(&master, Vec::new())?;
-    let slave = rustix::fs::open(
-        name.as_c_str(),
-        OFlags::RDWR | OFlags::NOCTTY | OFlags::CLOEXEC,
-        Mode::empty(),
-    )?;
+    let open_by_name = || {
+        rustix::fs::open(
+            name.as_c_str(),
+            OFlags::RDWR | OFlags::NOCTTY | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+    };
+    #[cfg(target_os = "linux")]
+    let slave = rustix::pty::ioctl_tiocgptpeer(
+        &master,
+        OpenptFlags::RDWR | OpenptFlags::NOCTTY | OpenptFlags::CLOEXEC,
+    )
+    .or_else(|_| open_by_name())?;
+    #[cfg(not(target_os = "linux"))]
+    let slave = open_by_name()?;
     let master = UnixMaster(master);
     master.resize(size)?;
     Ok(UnixPty {
@@ -191,13 +209,16 @@ fn pty_exec_helper() -> Option<&'static CString> {
 
 pub(super) struct Spawned {
     pub(super) pid: u32,
-    pub(super) exec_fence: OwnedFd,
+    pub(super) exec_fence: Option<OwnedFd>,
 }
 
 impl Spawned {
     pub(super) fn wait_for_exec(self, limit: Duration) {
+        let Some(exec_fence) = &self.exec_fence else {
+            return;
+        };
         let mut fds = [rustix::event::PollFd::new(
-            &self.exec_fence,
+            exec_fence,
             rustix::event::PollFlags::IN | rustix::event::PollFlags::HUP,
         )];
         let deadline = std::time::Instant::now() + limit;
@@ -212,6 +233,7 @@ impl Spawned {
     }
 }
 
+#[cfg(not(target_os = "linux"))]
 fn exec_fence() -> io::Result<(OwnedFd, OwnedFd)> {
     let (read, write) = rustix::pipe::pipe()?;
     rustix::io::fcntl_setfd(&read, FdFlags::CLOEXEC)?;
@@ -225,29 +247,59 @@ pub(super) fn spawn(
     slave: &OwnedFd,
 ) -> io::Result<Spawned> {
     let plan = ExecPlan::new(builder, environment)?;
-    let (exec_fence, fence_write) = exec_fence()?;
     let pointers = ExecPointers {
         argv: pointers(&plan.argv),
         envp: pointers(&plan.envp),
         fallback: pointers(&plan.fallback),
     };
-    #[cfg(target_os = "macos")]
-    if let Some(helper) = pty_exec_helper() {
-        match spawn_through_helper(helper, &plan, slave.as_raw_fd(), fence_write.as_raw_fd()) {
-            Ok(pid) => return Ok(Spawned { pid, exec_fence }),
-            Err(error) => log::warn!(
-                target: "zz_terminal::spawn",
-                "pane helper {} failed, forking instead: {error}",
-                helper.to_string_lossy()
-            ),
-        }
+    #[cfg(target_os = "linux")]
+    {
+        spawn_shared(&plan, &pointers, slave.as_raw_fd()).map(|pid| Spawned {
+            pid,
+            exec_fence: None,
+        })
     }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let (exec_fence, fence_write) = exec_fence()?;
+        #[cfg(target_os = "macos")]
+        if let Some(helper) = pty_exec_helper() {
+            match spawn_through_helper(helper, &plan, slave.as_raw_fd(), fence_write.as_raw_fd()) {
+                Ok(pid) => {
+                    return Ok(Spawned {
+                        pid,
+                        exec_fence: Some(exec_fence),
+                    });
+                }
+                Err(error) => log::warn!(
+                    target: "zz_terminal::spawn",
+                    "pane helper {} failed, forking instead: {error}",
+                    helper.to_string_lossy()
+                ),
+            }
+        }
+        spawn_forked(&plan, &pointers, slave.as_raw_fd(), fence_write.as_raw_fd()).map(|pid| {
+            Spawned {
+                pid,
+                exec_fence: Some(exec_fence),
+            }
+        })
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+#[allow(
+    unsafe_code,
+    reason = "the child only makes async-signal-safe calls on memory prepared before the fork, \
+              and every signal stays blocked until it has reset their dispositions"
+)]
+fn spawn_forked(
+    plan: &ExecPlan,
+    pointers: &ExecPointers,
+    slave: RawFd,
+    fence: RawFd,
+) -> io::Result<u32> {
     let mut descriptors = DescriptorScratch::new();
-    #[allow(
-        unsafe_code,
-        reason = "the child only makes async-signal-safe calls on memory prepared before the fork, \
-                  and every signal stays blocked until it has reset their dispositions"
-    )]
     unsafe {
         let mut blocked: libc::sigset_t = std::mem::zeroed();
         let mut previous: libc::sigset_t = std::mem::zeroed();
@@ -255,24 +307,81 @@ pub(super) fn spawn(
         libc::pthread_sigmask(libc::SIG_SETMASK, &raw const blocked, &raw mut previous);
         let pid = libc::fork();
         if pid == 0 {
-            exec_child(
-                &plan,
-                &pointers,
-                slave.as_raw_fd(),
-                fence_write.as_raw_fd(),
-                &mut descriptors,
-            );
+            exec_child(plan, pointers, slave, Some(fence), &mut descriptors);
         }
         let error = io::Error::last_os_error();
         libc::pthread_sigmask(libc::SIG_SETMASK, &raw const previous, std::ptr::null_mut());
         if pid == -1 {
             Err(error)
         } else {
-            Ok(Spawned {
-                pid: pid.cast_unsigned(),
-                exec_fence,
-            })
+            Ok(pid.cast_unsigned())
         }
+    }
+}
+
+#[cfg(target_os = "linux")]
+const SHARED_CHILD_STACK_BYTES: usize = 64 * 1024;
+
+#[cfg(target_os = "linux")]
+struct SharedChild<'a> {
+    plan: &'a ExecPlan,
+    pointers: &'a ExecPointers,
+    slave: RawFd,
+    descriptors: DescriptorScratch,
+}
+
+#[cfg(target_os = "linux")]
+#[allow(
+    unsafe_code,
+    reason = "runs on the stack spawn_shared reserved, between clone and exec"
+)]
+extern "C" fn shared_child(argument: *mut libc::c_void) -> libc::c_int {
+    let child = unsafe { &mut *argument.cast::<SharedChild<'_>>() };
+    unsafe {
+        exec_child(
+            child.plan,
+            child.pointers,
+            child.slave,
+            None,
+            &mut child.descriptors,
+        )
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[allow(
+    unsafe_code,
+    reason = "the child borrows this address space until it execs and only makes raw syscalls \
+              on memory prepared before the clone, with every signal blocked until it has reset \
+              their dispositions"
+)]
+fn spawn_shared(plan: &ExecPlan, pointers: &ExecPointers, slave: RawFd) -> io::Result<u32> {
+    let mut stack = Vec::<u8>::with_capacity(SHARED_CHILD_STACK_BYTES);
+    let mut child = SharedChild {
+        plan,
+        pointers,
+        slave,
+        descriptors: DescriptorScratch::new(),
+    };
+    unsafe {
+        let top = stack.as_mut_ptr().add(SHARED_CHILD_STACK_BYTES);
+        let top = top.sub(top.addr() % 16);
+        let mut blocked: libc::sigset_t = std::mem::zeroed();
+        let mut previous: libc::sigset_t = std::mem::zeroed();
+        libc::sigfillset(&raw mut blocked);
+        libc::pthread_sigmask(libc::SIG_SETMASK, &raw const blocked, &raw mut previous);
+        let pid = libc::clone(
+            shared_child,
+            top.cast(),
+            libc::CLONE_VM | libc::CLONE_VFORK | libc::SIGCHLD,
+            (&raw mut child).cast(),
+        );
+        let error = (pid == -1).then(io::Error::last_os_error);
+        if THP_DISABLED_HERE.load(Ordering::Relaxed) {
+            libc::prctl(libc::PR_SET_THP_DISABLE, 1, 0, 0, 0);
+        }
+        libc::pthread_sigmask(libc::SIG_SETMASK, &raw const previous, std::ptr::null_mut());
+        error.map_or(Ok(pid.cast_unsigned()), Err)
     }
 }
 
@@ -494,7 +603,7 @@ impl DescriptorScratch {
         unsafe_code,
         reason = "proc_pidinfo writes into capacity reserved before the fork"
     )]
-    unsafe fn close_inherited(&mut self, keep: RawFd) {
+    unsafe fn close_inherited(&mut self, keep: Option<RawFd>) {
         let capacity = self.0.capacity();
         let bytes =
             i32::try_from(capacity * std::mem::size_of::<libc::proc_fdinfo>()).unwrap_or(i32::MAX);
@@ -513,7 +622,7 @@ impl DescriptorScratch {
         let count = (written / std::mem::size_of::<libc::proc_fdinfo>()).min(capacity);
         for index in 0..count {
             let descriptor = unsafe { (*self.0.as_ptr().add(index)).proc_fd };
-            if descriptor > 2 && descriptor != keep {
+            if descriptor > 2 && Some(descriptor) != keep {
                 unsafe {
                     libc::close(descriptor);
                 }
@@ -539,18 +648,25 @@ impl DescriptorScratch {
         unsafe_code,
         reason = "close_range and close are async-signal-safe syscalls"
     )]
-    unsafe fn close_inherited(&mut self, keep: RawFd) {
+    unsafe fn close_inherited(&mut self, keep: Option<RawFd>) {
         #[cfg(any(target_os = "linux", target_os = "android"))]
-        if let Ok(keep) = u32::try_from(keep)
-            && keep >= 3
-            && (keep == 3
-                || unsafe { libc::syscall(libc::SYS_close_range, 3_u32, keep - 1, 0_u32) } == 0)
-            && unsafe { libc::syscall(libc::SYS_close_range, keep + 1, u32::MAX, 0_u32) } == 0
         {
-            return;
+            let close_range = |first: u32, last: u32| unsafe {
+                libc::syscall(libc::SYS_close_range, first, last, 0_u32) == 0
+            };
+            let closed = match keep.map(u32::try_from) {
+                None => close_range(3, u32::MAX),
+                Some(Ok(keep)) if keep >= 3 => {
+                    (keep == 3 || close_range(3, keep - 1)) && close_range(keep + 1, u32::MAX)
+                }
+                Some(_) => false,
+            };
+            if closed {
+                return;
+            }
         }
         for descriptor in 3..self.0 {
-            if descriptor != keep {
+            if Some(descriptor) != keep {
                 unsafe {
                     libc::close(descriptor);
                 }
@@ -566,13 +682,13 @@ const SIGNAL_LIMIT: libc::c_int = 65;
 
 #[allow(
     unsafe_code,
-    reason = "runs in the forked child between fork and exec, on memory prepared before the fork"
+    reason = "runs in the child between its creation and exec, on memory prepared beforehand"
 )]
 unsafe fn exec_child(
     plan: &ExecPlan,
     pointers: &ExecPointers,
     slave: RawFd,
-    fence: RawFd,
+    fence: Option<RawFd>,
     descriptors: &mut DescriptorScratch,
 ) -> ! {
     unsafe {

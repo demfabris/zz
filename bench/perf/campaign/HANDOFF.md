@@ -649,6 +649,15 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
 - ATTACH merged as `daf82ee6`; conflicts with BYTES2 resolved as planned (`AcceptWake::wake`
   clones the waker out of the mutex and wakes through `wake_loop`; `poll_ready` runs
   `clear_loop_again()`, then park, poll, unpark). Checks in `~/dev/zz-check` running.
+- ECHOIN stalled: the agent's transcript stopped at 14:26 (no processes, no report) with its three
+  commits in place (`c5afe7b8` EM3, `04e2b776` EM2, `6e8ba2d2` EM5). Mac numbers it left: daemon
+  unix syscalls per key 17.4 -> 13.3, context switches 4.2 -> 3.2, shard wakes per key 1.0, socket
+  read -> dispatch 13.3 us, dispatch -> PTY write 7.3 us; four alternating pairs: echo.p50.idle
+  -3.5%, chatty.instr_per_s.flip +2.7%; compat 48 clean, smoke/copy-mode-resize-freeze red (not in
+  the base log). Workflow stopped at 16:45 and relaunched as run `wf_c2135366-8ce` with brief
+  `/tmp/zzpc/w4/echoin2.md`: merge perf/wave4 (ACFIX's overflow and ATTACH's hold and
+  short-read drain touch the same code; EM2 must wait behind the overflow and stay correct inside
+  a hold), then the remaining gates, review and fix.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

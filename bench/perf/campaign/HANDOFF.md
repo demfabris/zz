@@ -363,7 +363,7 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   +67% (86k against 51k), `control.cpu_per_cmd` -39%, `control.instr_per_cmd` +21% (the daemon now
   writes what the client used to). Chatty flip/hidden CPU rows failed on the lane in quick mode at
   39-57% fewer instructions: load, judged at wave exit.
-- Side lanes merged 01:55 (workflow `w4-side-lanes`, 9 agents, 2.9 h):
+- Side lanes merged 03:10 (workflow `w4-side-lanes`, 9 agents, 2.9 h):
   - SETTLE `e703eb64` (lane `99c07f48` + fix `a2bbc675`): an empty pane (`split-window ''`) is now
     created at its real size with its modes set before the actor starts (`spawn_empty_pane`), so
     no settle build runs for it; `#{cursor_flag}` is backed by `TerminalFacts::cursor_hidden`
@@ -383,7 +383,7 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
     reused buffer (`zz-protocol/src/key_frame.rs`), prefix keys are canonicalised once, and the
     client reuses a spare cell buffer instead of copying the 38 KB array per frame (seeded test
     `reused_cell_buffers_follow_patches_while_clones_are_held`). Client per key 92 -> 76.6 kinstr.
-- batch3 checks from 02:00 on `52f8e3ab` (everything since batch2): Mac full suite in the snapshot
+- batch3 checks from 03:15 on `52f8e3ab` (everything since batch2): Mac full suite in the snapshot
   worktree `~/dev/zz-check` plus the full corpus, A/B against the wave-3 exit binary; Linux the
   same in alienware `~/dev/zz-perf-int` (`~/.cache/zz-perf/batch3`, no quiet-gate).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion

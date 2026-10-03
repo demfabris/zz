@@ -619,6 +619,10 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   woken through ATTACH's `wake_loop`; `clear_loop_again()` first in poll_ready, then park, poll,
   unpark). Checks on `537575b6` (ACFIX + BYTES) running in the snapshot `~/dev/zz-check` (the first
   ACFIX quick check was stopped: the BYTES merge landed in its tree mid-run, the recorded trap).
+- Checks on `537575b6` (ACFIX + BYTES2, snapshot `~/dev/zz-check`, 15:44-15:52): fmt, clippy,
+  Linux-target clippy (zz-terminal, zz-daemon, zz-protocol, zz-client), web-build pass; tests of
+  those crates 2458 passed, 19 load failures, all 19 pass alone; attached-client 0 rejected keys,
+  only the known tmux-side flake.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

@@ -132,19 +132,22 @@ thread_local! {
 pub fn hold_actor_wakes() -> WakeHold {
     #[cfg(unix)]
     {
-        WakeHold(HELD_WAKES.with_borrow_mut(|held| {
-            if held.is_some() {
-                return false;
-            }
-            *held = Some(Vec::new());
-            true
-        }))
+        WakeHold(
+            HELD_WAKES.with_borrow_mut(|held| {
+                if held.is_some() {
+                    return false;
+                }
+                *held = Some(Vec::new());
+                true
+            }),
+            std::marker::PhantomData,
+        )
     }
     #[cfg(not(unix))]
-    WakeHold()
+    WakeHold(std::marker::PhantomData)
 }
 
-pub struct WakeHold(#[cfg(unix)] bool);
+pub struct WakeHold(#[cfg(unix)] bool, std::marker::PhantomData<*const ()>);
 
 #[cfg(unix)]
 impl Drop for WakeHold {

@@ -577,6 +577,27 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   182/198/200, post 87/5/212 MB/s with tmux 37/9/44 in the post runs (host load: the third pair
   is the clean one, 212 against 200); to watch: `chatty.instr_per_s.hidden` +22% with `chatty.tty_kibps.hidden` +56% (client
   bytes, the rename luck NAMESCOST found).
+- ACFIX (`perf/acfix` `b05f2949`, 87 min, in review): the cause is DL4's first commit `4f74b200`
+  (bisect: DL3 alone, DL3 + wave4 and the DL5 tip pass with 0 rejections; `4f74b200` and the DL4
+  tip fail with 414-415). Before DL4 the sink skipped encoding while the client still had an
+  unwritten frame for that pane (`terminal_pending`), which coalesced frames for free; the direct
+  write drains at once, so the shard sent a frame after every echoed key (repro: about 500 frames
+  sent and 600 skipped before, 800+ sent and 0 skipped with DL4), and the actor took one queued
+  input per wake, so its drain rate fell below the typing rate and the 256-command cap (each
+  command charged its payload plus a 4096-byte floor) refused about 440 keys. Fix: `on_wake`
+  writes up to 256 queued inputs per wake inside a 1 ms turn (early stop on a PTY writer backlog
+  or a waiting control command); inputs past the 256 slots wait in order in an overflow in the
+  admission state (payload plus 256 bytes each), so only the 64 MiB budget refuses input. Not
+  backpressure: pausing the client socket would freeze that client's prefix keys and detach when
+  a pane stops reading, and tmux keeps reading the client and buffers pane input. Test
+  `typed_burst_tests.rs` (2400 keys; 1278 arrive on the merged head). attached-client popup step
+  passes 3 of 3 with 0 rejections; chatty instruction rows within 2% over three full rounds.
+  Note for ECHOIN's EM2 at merge: the loop's direct key write must also wait while the overflow
+  holds entries.
+- `97f123cb`: DL5's `final_output_of_a_pane_that_prints_and_exits_in_one_read_precedes_exit` runs
+  100 rounds instead of 1000 (1 s instead of 12.5 s alone; 60-100 s inside the full suite, where it
+  pushed 15-25 other daemon tests past their deadlines: the bimodal daemon suite since DL5). The
+  1000- and 4000-round runs belong in reviews.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

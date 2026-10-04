@@ -5,14 +5,17 @@ fn sharded_reader_turn_stops_at_the_byte_limit_and_preserves_eof() {
     let (output, queued) = crossbeam_channel::unbounded();
     output.send(ReaderMessage::Eof).expect("queue EOF");
     let mut consumed = 0;
-    assert!(!drain_pty_output_burst(
-        &queued,
-        vec![0; PTY_DRAIN_TURN_BYTES],
-        PTY_DRAIN_TURN_BYTES,
-        true,
-        PTY_BUFFER_POOL_SIZE,
-        |_, length| consumed += length,
-    ));
+    assert!(
+        drain_pty_output_burst(
+            &queued,
+            vec![0; PTY_DRAIN_TURN_BYTES],
+            PTY_DRAIN_TURN_BYTES,
+            true,
+            PTY_BUFFER_POOL_SIZE,
+            |_, length| consumed += length,
+        )
+        .is_none()
+    );
     assert_eq!(consumed, PTY_DRAIN_TURN_BYTES);
     assert!(matches!(queued.try_recv(), Ok(ReaderMessage::Eof)));
 }
@@ -27,17 +30,20 @@ fn sharded_reader_turn_yields_after_a_slow_batch() {
         })
         .expect("queue next batch");
     let mut consumed = Vec::new();
-    assert!(!drain_pty_output_burst(
-        &queued,
-        vec![1],
-        1,
-        true,
-        PTY_BUFFER_POOL_SIZE,
-        |buffer, _| {
-            consumed.push(buffer);
-            thread::sleep(PTY_DRAIN_TURN_TIME);
-        },
-    ));
+    assert!(
+        drain_pty_output_burst(
+            &queued,
+            vec![1],
+            1,
+            true,
+            PTY_BUFFER_POOL_SIZE,
+            |buffer, _| {
+                consumed.push(buffer);
+                thread::sleep(PTY_DRAIN_TURN_TIME);
+            },
+        )
+        .is_none()
+    );
     assert_eq!(consumed, [vec![1]]);
     assert_eq!(queued.len(), 1);
 }
@@ -65,13 +71,15 @@ fn sharded_reader_turn_consumes_eof_after_the_final_batch() {
                 consumed.push(buffer);
             },
         );
-        if eof {
+        if eof.is_some() {
             break;
         }
-        match queued.try_recv().expect("next reader event") {
-            ReaderMessage::Data { buffer: next, .. } => buffer = next,
-            ReaderMessage::Eof => break,
-        }
+        let ReaderMessage::Data { buffer: next, .. } =
+            queued.try_recv().expect("next reader event")
+        else {
+            break;
+        };
+        buffer = next;
     }
     assert_eq!(consumed, [vec![1], vec![2]]);
     assert!(queued.is_empty());

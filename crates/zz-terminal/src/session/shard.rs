@@ -580,9 +580,9 @@ impl Shard {
         ready: &mut Vec<(usize, Option<Wake>, bool, bool)>,
     ) -> Result<(), WorkerError> {
         use rustix::event::{PollFd, PollFlags};
-        let mut fds = SmallVec::<[PollFd<'_>; 9]>::new();
+        let mut fds = SmallVec::<[PollFd<'_>; 17]>::new();
         fds.push(PollFd::new(&self.wake_rx, PollFlags::IN));
-        let mut sources = SmallVec::<[(usize, bool); 8]>::new();
+        let mut sources = SmallVec::<[(usize, bool); 16]>::new();
         for (&id, entry) in &self.actors {
             if let Actor::Live(actor) = &entry.actor {
                 let (pty, child) = actor.poll_sources();

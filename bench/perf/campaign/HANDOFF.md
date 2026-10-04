@@ -795,6 +795,32 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   ECHOMAP, ACFIX, BYTES2, ATTACH, ECHOIN, the chooser fix, DEADPANE, docs). evidence-secrets clean,
   credential scan of the outgoing diff clean, no attribution lines. Both hosts' main checkouts
   fast-forwarded. No tag (the freeze holds until the wave-4 exit).
+- STEADY and EM1 (Linux, run together 20:05-22:00). STEADY bisected the `chatty.cpu_pct.steady`
+  "+17%" between 0d7dabf7 and a486069e: no merge adds kernel work (per-thread wakes, faults and
+  syscalls equal at every bisect point; ATTACH halves the shard's wake-pipe reads), so the gap was
+  run-to-run noise (the row reads 3.8-4.7 on alienware). The real steady cost is the gather hop
+  (~1000 wakes and ~3000 syscalls per second for 10 hidden panes at 100 lines/s). Both lanes then
+  built the same fix: read a quiet Linux pane on its shard, lend a busy one to the gather.
+- **Decision: merge EM1, drop STEADY** (`36a82ea1`). EM1 was reviewed (one major: the 100 us echo
+  target is not shown, run-to-run fast/slow modes swamp it; six minors) and fixed (`384663fd`: the
+  Linux shard path caps bridge spins at 16 as the gather does, the tests poll instead of sleeping,
+  `BufferReturn.gather` is a plain lease), rebased on `ede917fe`. STEADY touched the same lines
+  and had no review yet; I stopped its workflow and its probes on alienware. Two STEADY ideas not
+  in EM1 stay open: a 2 s hand-back (EM1 uses 100 ms) and stopping a direct read after a short
+  read under 1 KiB without the extra EAGAIN read. Branch perf/steady (`e396a525`, ~/dev/zz-steady)
+  stays until the wave-4 exit for reference.
+- EM1 numbers (alienware, against batch6-86e721ad): no zz-pty-gather wake or read per key; server
+  wakes per key idle 6.96 -> 4.80, busy30 6.28 -> 4.12; chatty instructions per second -11%,
+  chatty CPU -11% to -28%; echo p50 -30 to -130 us depending on the run's mode; Unicode throughput
+  +1.8% over 8 alternating pairs (the ceiling swung 74-117 MB/s under load, so within 2% is all
+  this host can say); backpressure 9/9. `knowledge/terminal/pty-drain.md` now describes the home,
+  lend and hand-back cycle (`8080adf5`, `d9d59154`; it also named a function that no longer exists).
+- Correction: the ssh master does not expire at a fixed time. `ControlPersist 14400` is an idle
+  timeout, so the 18:30 master lives while connections keep using it; only a new master needs the
+  security key.
+- batch8 (`~/.cache/zz-perf/batch8`, 22:08) on `36a82ea1`: three A/B pairs against
+  batch6-86e721ad with control added, the strict final gate, then the batch6 checks plus
+  tui-choosers. Mac checks of `d9d59154` run in ~/dev/zz-check (/tmp/zzpc/w4/mac-d9d59154).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

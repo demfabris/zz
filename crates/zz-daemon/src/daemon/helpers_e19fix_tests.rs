@@ -1,4 +1,4 @@
-use super::super::{ClientKind, CommandInvocation, ExecutionContext, Shared};
+use super::super::{ClientId, ClientKind, CommandInvocation, ExecutionContext, Shared};
 use super::*;
 
 #[test]

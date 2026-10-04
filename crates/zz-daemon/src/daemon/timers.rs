@@ -292,6 +292,7 @@ impl ClientTimers {
 
 #[cfg(unix)]
 pub(super) enum TimerCompletion {
+    #[cfg_attr(not(feature = "agent"), allow(dead_code))]
     Peer,
 }
 
@@ -306,6 +307,7 @@ pub(super) struct LoopTimers {
     deadlines: Deadlines,
     pub(super) hooks: hook_queue::LoopHooks,
     completed: crossbeam_channel::Receiver<TimerCompletion>,
+    #[cfg_attr(not(feature = "agent"), allow(dead_code))]
     completion_sender: crossbeam_channel::Sender<TimerCompletion>,
     clients: ClientTimers,
     shutdown_due: bool,

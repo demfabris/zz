@@ -6723,6 +6723,7 @@ impl Shared {
         true
     }
 
+    #[cfg(feature = "agent")]
     fn client_instance_id(&self, client: ClientId) -> Option<ClientInstanceId> {
         self.read_client(client, |client| client.and_then(|c| c.instance_id))
     }
@@ -16462,7 +16463,10 @@ impl Shared {
                 )
                 .into());
             }
+            #[cfg(feature = "agent")]
             return self.submit_agent_prompt_and_wait(client, pane, payload, &parsed);
+            #[cfg(not(feature = "agent"))]
+            return Err(ServerError::PaneExited(pane).into());
         }
         let mut execution = self.deliver_to_agent(pane, payload, parsed.submit)?;
         if parsed.submit && kind != ClientKind::Interactive {
@@ -16821,7 +16825,7 @@ impl Shared {
             .into());
         };
         let provider = provider
-            .parse::<AgentProvider>()
+            .parse::<zz_protocol::AgentProvider>()
             .map_err(ServerError::CommandParse)?;
         let request_id = request_id
             .parse::<u64>()
@@ -17308,6 +17312,7 @@ impl Shared {
         terminal_reads::run_pane(self, client, pane, terminal, parsed)
     }
 
+    #[cfg(feature = "agent")]
     fn paste_and_submit(
         self: &Arc<Self>,
         pane: PaneId,
@@ -33454,17 +33459,6 @@ impl Shared {
         }
         self.report_command_queue_park();
         wait.finish(self, Execution::default())
-    }
-
-    #[cfg(not(feature = "agent"))]
-    fn submit_agent_prompt_and_wait(
-        self: &Arc<Self>,
-        _client: ClientId,
-        pane: PaneId,
-        _text: String,
-        _parsed: &ParsedAgentSend,
-    ) -> Result<Execution, DaemonError> {
-        Err(ServerError::PaneExited(pane).into())
     }
 
     /// Push the pane state of every agent pane a reattaching client can see.

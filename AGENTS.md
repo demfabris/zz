@@ -50,6 +50,7 @@ Run `just` recipes from the repo root; `just --list` shows everything.
 |---|---|
 | `cargo test --workspace --all-features` | Tests (what CI runs) |
 | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | Lint (what CI runs) |
+| `cargo clippy -p zz-daemon --no-default-features --features daemon --all-targets -- -D warnings` | Lint the daemon without agent support (CI runs this too) |
 | `cargo fmt --all` | Format |
 | `just run <mac\|linux> [--verbose] [--features <list>]` | Launch isolated zz Dev (own daemon, config, browser, and data). Extra args are those two flags, not Cargo passthrough. No `windows` |
 | `just watch <platform>` | Rebuild and relaunch on source change |

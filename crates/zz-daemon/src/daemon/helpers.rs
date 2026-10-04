@@ -11,7 +11,9 @@ use std::{
 
 use parking_lot::{Condvar, Mutex};
 
-use super::{ClientId, PaneId, path_listing};
+use super::path_listing;
+#[cfg(feature = "agent")]
+use super::{ClientId, PaneId};
 
 const MAX_WORKERS: usize = 2;
 const MAX_PENDING: usize = 64;

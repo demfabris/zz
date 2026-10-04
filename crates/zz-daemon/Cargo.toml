@@ -26,6 +26,8 @@ daemon = [
     "dep:crossbeam-channel",
     "dep:ignore",
     "dep:mio",
+    "dep:serde",
+    "dep:serde_json",
     "dep:zz-mux",
     "zz-terminal/session",
 ]

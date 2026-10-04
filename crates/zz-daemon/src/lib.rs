@@ -41,6 +41,7 @@ mod agent;
 #[cfg_attr(target_os = "ios", allow(dead_code))]
 mod askpass;
 #[cfg(feature = "daemon")]
+#[cfg_attr(not(feature = "agent"), allow(dead_code))]
 mod bounded_command;
 mod client;
 #[cfg(feature = "daemon")]

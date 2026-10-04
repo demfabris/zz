@@ -356,11 +356,18 @@ async fn shutdown_closes_listener_active_connections_and_pending_handshakes() {
     echo.await.unwrap();
 }
 
+fn loopback_listeners() -> (std::net::TcpListener, std::net::TcpListener) {
+    loop {
+        let ipv4 = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = ipv4.local_addr().unwrap().port();
+        if let Ok(ipv6) = std::net::TcpListener::bind((Ipv6Addr::LOCALHOST, port)) {
+            return (ipv4, ipv6);
+        }
+    }
+}
+
 fn unused_loopback_port() -> u16 {
-    let ipv4 = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-    let port = ipv4.local_addr().unwrap().port();
-    let _ipv6 = std::net::TcpListener::bind((Ipv6Addr::LOCALHOST, port)).unwrap();
-    port
+    loopback_listeners().0.local_addr().unwrap().port()
 }
 
 #[tokio::test]
@@ -446,14 +453,20 @@ async fn loopback_rejects_invalid_ports_and_conflicts_without_partial_listeners(
         io::ErrorKind::InvalidInput
     );
     for host in ["127.0.0.1", "::1"] {
-        let occupied = std::net::TcpListener::bind((host, 0)).unwrap();
-        let port = occupied.local_addr().unwrap().port();
+        let (ipv4, ipv6) = loopback_listeners();
+        let port = ipv4.local_addr().unwrap().port();
+        let (occupied, other_host) = if host == "::1" {
+            drop(ipv4);
+            (ipv6, "127.0.0.1")
+        } else {
+            drop(ipv6);
+            (ipv4, "::1")
+        };
         assert_eq!(
             forward.ensure(port).unwrap_err().kind(),
             io::ErrorKind::AddrInUse
         );
         assert!(!forward.ports.contains_key(&port));
-        let other_host = if host == "::1" { "127.0.0.1" } else { "::1" };
         let other = std::net::TcpListener::bind((other_host, port)).unwrap();
         drop((occupied, other));
         forward.ensure(port).unwrap();

@@ -190,8 +190,15 @@ fn blocked_output_retains_offsets_while_another_client_responds() {
         .stream
         .set_send_buffer_size(4096)
         .unwrap();
+    let final_output = ProtocolMessage::CommandResponse(CommandResponse::Success {
+        request_id: 10,
+        output: RawText::from("y".repeat(64 * 1024)),
+        exit_code: 0,
+        stderr: String::new(),
+        stdout_claim: StdoutClaim::default(),
+    });
     let final_mailbox = Arc::clone(&event_loop.connections[&responsive].outbound);
-    assert!(final_mailbox.enqueue_reliable(&output));
+    assert!(final_mailbox.enqueue_reliable(&final_output));
     event_loop.turn(&shared).unwrap();
     assert!(!event_loop.connections[&responsive].frames.is_empty());
     shared.request_shutdown();
@@ -202,7 +209,11 @@ fn blocked_output_retains_offsets_while_another_client_responds() {
         event_loop.shutdown_completed()
     });
     final_messages.extend(messages(&mut fast, &mut input));
-    assert!(final_messages.iter().any(|message| message == &output));
+    assert!(
+        final_messages
+            .iter()
+            .any(|message| message == &final_output)
+    );
     assert!(final_mailbox.state.lock().writer_finished);
     assert!(!event_loop.connections.contains_key(&responsive));
 }

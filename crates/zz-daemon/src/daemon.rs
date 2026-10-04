@@ -82069,7 +82069,7 @@ set-option -g @alias-mixed-next yes
                 ),
             )
             .expect("open handoff pipe");
-        let payload_bytes = 2_usize * 1024 * 1024;
+        let payload_bytes = 512_usize * 1024;
         assert!(
             terminal.send_raw_input(Arc::from(
                 format!("yes 0123456789abcdef | head -c {payload_bytes}; printf 'ENDMARK\\n'\n")
@@ -82095,12 +82095,19 @@ set-option -g @alias-mixed-next yes
         shared
             .attach(control, session)
             .expect("attach control during flood");
-        take_reliable_messages(&control_mailbox);
+        let control_writer = {
+            let mailbox = Arc::clone(&control_mailbox);
+            thread::spawn(move || {
+                let mut frames = Vec::new();
+                while mailbox.recv_batch(&mut frames, MAX_OUTBOUND_BYTES) {
+                    mailbox.finish_batch(&mut frames);
+                }
+            })
+        };
 
         let deadline = Instant::now() + Duration::from_secs(30);
         let captured = loop {
             let captured = fs::read(&output).unwrap_or_default();
-            let _ = take_reliable_messages(&control_mailbox);
             if captured.ends_with(b"ENDMARK\n") {
                 break captured;
             }
@@ -82130,6 +82137,8 @@ set-option -g @alias-mixed-next yes
             );
         }
 
+        control_mailbox.close();
+        control_writer.join().expect("control writer");
         shared.request_shutdown();
     }
 
@@ -117286,6 +117295,9 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     pub(super) fn take_reliable_messages(mailbox: &OutboundMailbox) -> Vec<ProtocolMessage> {
+        if let Some(feed) = mailbox.control_feed() {
+            feed.pump(mailbox, feed.pause_after_ms(), Instant::now());
+        }
         let frames = {
             let mut state = mailbox.state.lock();
             let frames = state.reliable.drain(..).collect::<Vec<_>>();

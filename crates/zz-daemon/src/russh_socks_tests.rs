@@ -357,9 +357,13 @@ async fn shutdown_closes_listener_active_connections_and_pending_handshakes() {
 }
 
 fn loopback_listeners() -> (std::net::TcpListener, std::net::TcpListener) {
+    static NEXT: AtomicU16 = AtomicU16::new(0);
     loop {
-        let ipv4 = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        let port = ipv4.local_addr().unwrap().port();
+        let offset = u32::from(NEXT.fetch_add(1, Ordering::Relaxed)) + std::process::id();
+        let port = 20_000 + u16::try_from(offset % 12_000).unwrap();
+        let Ok(ipv4) = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port)) else {
+            continue;
+        };
         if let Ok(ipv6) = std::net::TcpListener::bind((Ipv6Addr::LOCALHOST, port)) {
             return (ipv4, ipv6);
         }

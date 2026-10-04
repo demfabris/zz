@@ -884,6 +884,11 @@ impl ControlFeed {
     }
 
     #[cfg(test)]
+    pub(super) fn pause_after_ms(&self) -> Option<u64> {
+        self.state.lock().pause_after_ms
+    }
+
+    #[cfg(test)]
     pub(super) fn queued_lines(&self) -> usize {
         self.state.lock().lines.len()
     }

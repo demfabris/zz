@@ -362,8 +362,8 @@ fn install_plan(release: &Release, channel: Channel, environment: &Environment) 
     match environment.os {
         "macos" => match &environment.homebrew {
             Some((prefix, cask)) => InstallPlan::Terminal(format!(
-                "{} upgrade --cask {cask}",
-                prefix.join("bin").join("brew").display()
+                "{}/bin/brew upgrade --cask {cask}",
+                prefix.display()
             )),
             None => InstallPlan::Terminal(install_script_command(channel, None)),
         },

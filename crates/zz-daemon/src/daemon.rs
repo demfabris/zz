@@ -109571,6 +109571,8 @@ bind - split-window -v -c "#{pane_current_path}"
             )
             .expect("explicit default write");
         assert!(!shared.exit_empty_armed.load(Ordering::Acquire));
+        #[cfg(unix)]
+        lifecycle::wait_for_cleanup(&shared);
         assert!(shared.stopping.load(Ordering::Acquire));
     }
 
@@ -109624,6 +109626,8 @@ bind - split-window -v -c "#{pane_current_path}"
                 &CommandInvocation::new("list-sessions", [] as [&str; 0]),
             )
             .expect("first post-startup command");
+        #[cfg(unix)]
+        lifecycle::wait_for_cleanup(&shared);
         assert!(shared.stopping.load(Ordering::Acquire));
     }
 

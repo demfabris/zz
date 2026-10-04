@@ -906,6 +906,14 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   ms (150 attaches: 8.608 vs 8.494; three timing modes at 3.5, 8 and 11.5 ms for zz and tmux alike).
   Left: the loop thread (status render 12.6%, detach key through the general executor 28%,
   per-turn overhead 15% of loop user cycles).
+- Mac checks of `fc1ccbc6` (both merges): fmt, clippy, Linux-target clippy pass; zz-daemon,
+  zz-terminal, zz-cli, zz-tui, zz-client 2744 passed, 19 load failures, all pass alone.
+- Closed gap `clients.command-round-trip-latency` (`compat/tmux-gaps.json`, registered 09-18 at
+  2.2 s for `split-window -P` on an empty pane and ~100 ms per command): `wait_for_terminal_identity`
+  runs only in tests now, and on the Mac both commands finish in under 10 ms per invocation with
+  d9d59154. Trap: `just compat-check` fails `verify_claims_test` with "unattributed: unbound
+  variable" when `bash` resolves to macOS /bin/bash 3.2; it passes with /opt/homebrew/bin first
+  in PATH (red on fc1ccbc6 too under 3.2, so not from any change).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

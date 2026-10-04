@@ -90,10 +90,8 @@ jobs:
           rustup run nightly cargo check --manifest-path clients/web/Cargo.toml --target wasm32-unknown-unknown --all-targets --locked
 
       # Windows is second-class support, so its test failures warn rather than
-      # fail the job. Only the zz-daemon lib suite still fails there, about 50
-      # of its 1052 tests, mostly unix assumptions in the tests: panes that run
-      # sh, printf or true, ConPTY panes without a tty name, terminfo, /tmp and
-      # unix paths, and Windows paths written unquoted into tmux syntax.
+      # fail the job. The workspace suite passes there, and --no-fail-fast
+      # keeps one failing crate from hiding the ones after it.
       # Leaving the job permanently red is what let a Windows-only compile
       # error reach a release tag unnoticed: with the tests demoted, red means
       # Windows no longer builds or packages, which is the thing that can
@@ -102,7 +100,7 @@ jobs:
       - name: Test workspace
         continue-on-error: ${{ runner.os == 'Windows' }}
         timeout-minutes: ${{ runner.os == 'Windows' && 90 || 360 }}
-        run: cargo test --workspace --all-features
+        run: cargo test --workspace --all-features ${{ runner.os == 'Windows' && '--no-fail-fast' || '' }}
 
       - name: Test zz-mux release profile
         if: runner.os == 'Linux'
@@ -126,7 +124,11 @@ jobs:
       - name: Headless binary stays GUI-free
         shell: bash
         run: |
-          cargo tree -p zz-cli -e normal --prefix none | grep -Eq '^(gpui|gpui_platform|wgpu|cef|zz-ui|zz-browser|zz-chrome-import) ' && { echo "zz-cli links GUI crates"; exit 1; } || true
+          tree=$(cargo tree -p zz-cli -e normal --prefix none)
+          if grep -Eq '^(gpui|gpui_platform|wgpu|cef|zz-ui|zz-browser|zz-chrome-import) ' <<<"$tree"; then
+            echo "zz-cli links GUI crates"
+            exit 1
+          fi
 
       - name: Smoke packaged macOS CLI
         if: runner.os == 'macOS'

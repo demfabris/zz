@@ -65,11 +65,18 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
    run-shell moved onto the job registry its child is reaped only through SIGCHLD or a lucky
    `try_wait` in `JobRegistry::register`. `SignalPipes::new` now clears the loop thread's mask;
    test `a_daemon_spawned_with_blocked_signals_reaps_its_startup_shell_and_honors_sigterm`. The
-   perf gates never saw it because `isolate.py` runs with an empty config. Still open, GUI side:
-   every other child spawned from background-executor threads (ssh for remote hosts, shell
-   commands) inherits the same blocked mask; the GUI never reaps its daemon child; the daemon
-   inherits the GUI's Metal shader-cache fds (not close-on-exec) and hands them to run-shell
-   children. The `#[cfg(test)]` reaping in `EventLoop::turn` hides SIGCHLD dependence from tests.
+   perf gates never saw it because `isolate.py` runs with an empty config. Follow-ups, same day:
+   `a6867b4d` drops the test-only reap from `EventLoop::turn` (five tests now install
+   `SignalPipes` and drive `poll_test_turn`); `3dd6cd22` routes all 39 non-test `Command`
+   spawns through `zz_daemon::unmasked::SpawnUnmasked` (mask cleared on the calling thread for
+   the spawn, so std stays on posix_spawn; clippy `disallowed-methods` rejects plain
+   `spawn`/`output`/`status` outside tests) and hands the spawned daemon to a
+   `zz-daemon-reaper` thread. Still open: the GUI's Metal shader-cache fds leak into the daemon
+   (a separate session owns that fix); `CommandExt::exec` in zz-tui, gpui's Linux `open_uri`
+   (`smol::process`) and CEF helpers are outside the lint; a Windows cross-clippy of zz-daemon
+   shows about 20 pre-existing warnings; `client_focus_closes_display_panes_and_preserves_chooser_modes`
+   fails most full-parallel Linux runs on main too. Lane shells must put
+   `~/.local/share/mise/installs/zig/0.16.0` first in PATH (Homebrew zig 0.17 breaks libghostty).
 
 ## Wave 4 merge log (from 2026-10-02)
 

@@ -465,20 +465,10 @@ impl LoopTimers {
                 }
                 Expiry::PeerProbe => {
                     recurring_due = true;
-                    self.clients.peer_running = true;
                     shared.prepare_peer_probe(&mut self.clients.probe, now);
                     #[cfg(all(feature = "agent", unix))]
-                    if let Err(error) = shared.helpers.submit(helpers::Task::Peers {
-                        panes: shared.peer_scan_inputs(),
-                        reply: None,
-                        completed: Some(self.completion_sender.clone()),
-                    }) {
-                        self.clients.peer_running = false;
-                        log::warn!("could not start peer scan: {error}");
-                    }
-                    #[cfg(not(all(feature = "agent", unix)))]
                     {
-                        self.clients.peer_running = false;
+                        self.clients.peer_running = shared.start_peer_scan(&self.completion_sender);
                     }
                 }
                 Expiry::Monitors | Expiry::CopyRefresh | Expiry::ClockMode => {
@@ -1148,6 +1138,24 @@ impl Shared {
     #[cfg(not(all(feature = "agent", unix)))]
     pub(super) fn request_peer_probe(&self) {}
 
+    #[cfg(all(feature = "agent", unix))]
+    fn start_peer_scan(&self, completed: &crossbeam_channel::Sender<TimerCompletion>) -> bool {
+        let armed = Self::peer_scan_armed(&self.inner.lock());
+        let panes = self.peer_scan_inputs();
+        if !armed && self.helpers.peer_scan_settled(&panes) {
+            return false;
+        }
+        if let Err(error) = self.helpers.submit(helpers::Task::Peers {
+            panes,
+            reply: None,
+            completed: Some(completed.clone()),
+        }) {
+            log::warn!("could not start peer scan: {error}");
+            return false;
+        }
+        true
+    }
+
     fn peer_probe_requested(&self) -> bool {
         #[cfg(all(feature = "agent", unix))]
         {
@@ -1210,3 +1218,7 @@ mod e20_tests;
 #[cfg(all(test, unix))]
 #[path = "delay_timer_tests.rs"]
 mod delay_tests;
+
+#[cfg(all(test, feature = "agent", unix))]
+#[path = "timers_peerskip_tests.rs"]
+mod peerskip_tests;

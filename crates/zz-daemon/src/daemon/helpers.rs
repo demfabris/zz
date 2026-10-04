@@ -120,6 +120,8 @@ struct State {
     loop_thread: Mutex<Option<thread::ThreadId>>,
     #[cfg(all(feature = "agent", unix))]
     peers: Mutex<crate::agent::claude_peers::RegistryCache>,
+    #[cfg(all(feature = "agent", unix))]
+    settled: Mutex<Option<PeerKey>>,
 }
 
 pub(super) struct Pool {
@@ -148,6 +150,8 @@ impl Default for Pool {
                 loop_thread: Mutex::new(None),
                 #[cfg(all(feature = "agent", unix))]
                 peers: Mutex::new(crate::agent::claude_peers::RegistryCache::default()),
+                #[cfg(all(feature = "agent", unix))]
+                settled: Mutex::new(None),
             }),
             results: receiver,
             #[cfg(unix)]
@@ -239,6 +243,18 @@ impl Pool {
         result
             .recv()
             .map_err(|_| io::Error::other("file helper stopped"))?
+    }
+
+    #[cfg(all(feature = "agent", unix))]
+    pub(super) fn peer_scan_settled(&self, panes: &[(PaneId, String, Option<u32>)]) -> bool {
+        let Ok(directory) = crate::agent::claude_peers::registry_dir() else {
+            return false;
+        };
+        self.state
+            .settled
+            .lock()
+            .as_ref()
+            .is_some_and(|key| key.holds(&directory, panes))
     }
 
     pub(super) fn submit_wait(&self, task: Task) -> io::Result<()> {
@@ -506,8 +522,80 @@ fn finish_peer_scan(
 mod reviewfixes_tests;
 
 #[cfg(all(feature = "agent", unix))]
+type Stamp = Option<(i64, i64, u64, u64)>;
+
+#[cfg(all(feature = "agent", unix))]
+fn stamp(path: &std::path::Path) -> Stamp {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(path).ok().map(|metadata| {
+        (
+            metadata.mtime(),
+            metadata.mtime_nsec(),
+            metadata.len(),
+            metadata.ino(),
+        )
+    })
+}
+
+#[cfg(all(feature = "agent", unix))]
+const PEER_RACY_SECONDS: i64 = 2;
+
+#[cfg(all(feature = "agent", unix))]
+pub(super) struct PeerKey {
+    panes: Vec<(PaneId, String, Option<u32>)>,
+    directory: std::path::PathBuf,
+    stamps: Vec<(std::path::PathBuf, Stamp)>,
+}
+
+#[cfg(all(feature = "agent", unix))]
+impl PeerKey {
+    fn take(directory: &std::path::Path, panes: &[(PaneId, String, Option<u32>)]) -> Option<Self> {
+        let mut stamps = vec![(directory.to_path_buf(), stamp(directory))];
+        if stamps[0].1.is_some() {
+            for entry in std::fs::read_dir(directory).ok()? {
+                let path = entry.ok()?.path();
+                if path
+                    .extension()
+                    .is_some_and(|extension| extension == "json")
+                {
+                    let seen = stamp(&path);
+                    stamps.push((path, seen));
+                }
+            }
+        }
+        let now = i64::try_from(
+            super::SystemTime::now()
+                .duration_since(super::UNIX_EPOCH)
+                .ok()?
+                .as_secs(),
+        )
+        .ok()?;
+        stamps
+            .iter()
+            .all(|(_, seen)| {
+                seen.is_none_or(|(seconds, ..)| {
+                    seconds <= now && now - seconds >= PEER_RACY_SECONDS
+                })
+            })
+            .then(|| Self {
+                panes: panes.to_vec(),
+                directory: directory.to_path_buf(),
+                stamps,
+            })
+    }
+
+    fn holds(&self, directory: &std::path::Path, panes: &[(PaneId, String, Option<u32>)]) -> bool {
+        self.directory == directory
+            && (self.stamps.len() == 1 || self.panes == panes)
+            && self.stamps.iter().all(|(path, seen)| stamp(path) == *seen)
+    }
+}
+
+#[cfg(all(feature = "agent", unix))]
 fn scan_peers(state: &State, panes: Vec<(PaneId, String, Option<u32>)>) -> PeerResult {
     use crate::agent::claude_peers;
+    *state.settled.lock() = None;
+    let key = PeerKey::take(&claude_peers::registry_dir()?, &panes);
     let mut records: Vec<_> = {
         let mut registry = state.peers.lock();
         registry.refresh()?;
@@ -519,7 +607,7 @@ fn scan_peers(state: &State, panes: Vec<(PaneId, String, Option<u32>)>) -> PeerR
         .unwrap_or_default()
         .as_millis() as u64;
     let parents = std::cell::RefCell::new(std::collections::BTreeMap::new());
-    Ok(panes
+    let updates: Vec<_> = panes
         .into_iter()
         .map(|(pane, target, pid)| {
             let value = claude_peers::record_for_pane_with_parents(&records, &target, pid, |pid| {
@@ -549,7 +637,11 @@ fn scan_peers(state: &State, panes: Vec<(PaneId, String, Option<u32>)>) -> PeerR
             });
             (pane, pid, value)
         })
-        .collect())
+        .collect();
+    if updates.iter().all(|(_, _, value)| value.is_none()) {
+        *state.settled.lock() = key;
+    }
+    Ok(updates)
 }
 
 #[cfg(unix)]
@@ -612,3 +704,7 @@ mod e19fix_tests;
 #[cfg(test)]
 #[path = "helpers_helperwait_tests.rs"]
 mod helperwait_tests;
+
+#[cfg(all(test, feature = "agent", unix))]
+#[path = "helpers_peerskip_tests.rs"]
+mod peerskip_tests;

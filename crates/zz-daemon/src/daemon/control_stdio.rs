@@ -20,6 +20,7 @@ mod bytes2_tests;
 
 const STDOUT_HIGH: usize = 256 * 1024;
 const INPUT_READ_LIMIT: usize = 256 * 1024;
+const INPUT_CHUNK: usize = 8192;
 const DEFERRED_OUTPUT: usize = 1024;
 
 pub(super) fn receive(
@@ -57,6 +58,7 @@ pub(super) struct ControlStdio {
     stdout_registered: bool,
     input: Vec<u8>,
     consumed: usize,
+    drained: bool,
     input_closed: bool,
     input_error: Option<String>,
     output: Vec<u8>,
@@ -251,6 +253,7 @@ impl ControlStdio {
             stdout_registered: false,
             input: Vec::new(),
             consumed: 0,
+            drained: true,
             input_closed: false,
             input_error: None,
             output: Vec::new(),
@@ -307,28 +310,55 @@ impl ControlStdio {
         }
     }
 
-    pub(super) fn read_input(&mut self) {
-        let mut buffer = [0_u8; 8192];
+    pub(super) fn read_input(&mut self) -> bool {
+        self.read_chunks(false)
+    }
+
+    fn read_chunks(&mut self, until_short: bool) -> bool {
         let mut read = 0;
+        let mut arrived = false;
         self.compact_input();
         while self.reading && read < INPUT_READ_LIMIT {
-            match rustix::io::read(&self.stdin, &mut buffer) {
+            self.input.reserve(INPUT_CHUNK);
+            let room = self.input.capacity() - self.input.len();
+            match rustix::io::read(&self.stdin, rustix::buffer::spare_capacity(&mut self.input)) {
                 Ok(0) => {
                     self.input_closed = true;
                     self.stop_reading();
+                    arrived = true;
                 }
                 Ok(count) => {
                     read += count;
-                    self.input.extend_from_slice(&buffer[..count]);
+                    arrived = true;
+                    if until_short && count < room && self.input.last() == Some(&b'\n') {
+                        self.drained = false;
+                        return true;
+                    }
                 }
                 Err(rustix::io::Errno::INTR) => {}
-                Err(rustix::io::Errno::AGAIN) => return,
+                Err(rustix::io::Errno::AGAIN) => break,
                 Err(error) => {
                     self.input_error = Some(io::Error::from(error).to_string());
                     self.stop_reading();
+                    arrived = true;
                 }
             }
         }
+        self.drained = !self.reading || read < INPUT_READ_LIMIT;
+        arrived
+    }
+
+    fn wants_input(&self) -> bool {
+        !self.drained && !self.input[self.consumed..].contains(&b'\n')
+    }
+
+    fn drain_input(&mut self, frames: &mut Vec<OutboundFrame>) -> bool {
+        if !self.wants_input() {
+            return false;
+        }
+        let arrived = self.read_input();
+        self.input_ready(frames);
+        arrived
     }
 
     fn stop_reading(&mut self) {
@@ -562,6 +592,15 @@ impl ControlStdio {
 }
 
 impl Connection {
+    fn takes_stdio_line(&self) -> bool {
+        self.initialized
+            && !self.busy
+            && !self.read_closed
+            && self.command.is_none()
+            && self.pending.is_empty()
+            && self.session.is_some()
+    }
+
     pub(super) fn write_stdio_ready(&mut self) -> io::Result<()> {
         loop {
             if !self.frames.is_empty() {
@@ -696,36 +735,49 @@ impl EventLoop {
         }
     }
 
-    pub(super) fn stdio_ready(&mut self, owner: Token, token: Token) {
+    pub(super) fn stdio_ready(&mut self, owner: Token, token: Token, shared: &Arc<Shared>) {
         let Some(connection) = self.connections.get_mut(&owner) else {
             return;
         };
         let Some(stdio) = connection.stdio.as_mut() else {
             return;
         };
-        if token == stdio.stdin_token {
-            stdio.read_input();
-            stdio.input_ready(&mut connection.frames);
+        if token != stdio.stdin_token {
+            return;
         }
+        stdio.read_chunks(true);
+        stdio.input_ready(&mut connection.frames);
+        if !stdio.wants_line() || !connection.takes_stdio_line() {
+            return;
+        }
+        shared.turn_control_output(
+            self.control_output_deadline
+                .is_some_and(|deadline| Instant::now() >= deadline),
+        );
+        if let Err(error) = connection.write_ready() {
+            log::debug!("client write failed: {error}");
+            self.remove(owner, shared);
+            return;
+        }
+        self.pump_stdio(owner, shared);
     }
 
     pub(super) fn pump_stdio(&mut self, token: Token, shared: &Arc<Shared>) -> bool {
+        let mut drain = true;
         loop {
             let Some(connection) = self.connections.get_mut(&token) else {
                 return false;
             };
+            let eligible = connection.takes_stdio_line();
             let Some(stdio) = connection.stdio.as_mut() else {
                 return true;
             };
             if !stdio.wants_line() {
-                return true;
+                if std::mem::take(&mut drain) && stdio.drain_input(&mut connection.frames) {
+                    continue;
+                }
+                break;
             }
-            let eligible = connection.initialized
-                && !connection.busy
-                && !connection.read_closed
-                && connection.command.is_none()
-                && connection.pending.is_empty()
-                && connection.session.is_some();
             let line = stdio.take_line(eligible, &mut connection.frames);
             let started = line.is_some();
             if let Some(line) = line {
@@ -757,14 +809,30 @@ impl EventLoop {
                 self.remove(token, shared);
                 return false;
             }
-            if !started
-                || self.connections[&token]
-                    .stdio
-                    .as_ref()
-                    .is_some_and(|stdio| stdio.unit.is_some())
-            {
+            let connection = self
+                .connections
+                .get_mut(&token)
+                .expect("written connection");
+            let Some(stdio) = connection.stdio.as_mut() else {
                 return true;
+            };
+            if !started || stdio.unit.is_some() {
+                if std::mem::take(&mut drain)
+                    && stdio.drain_input(&mut connection.frames)
+                    && stdio.wants_line()
+                {
+                    continue;
+                }
+                break;
             }
         }
+        if self.connections[&token]
+            .stdio
+            .as_ref()
+            .is_some_and(|stdio| stdio.wants_input())
+        {
+            let _ = crate::transport::wake_loop(&self.waker);
+        }
+        true
     }
 }

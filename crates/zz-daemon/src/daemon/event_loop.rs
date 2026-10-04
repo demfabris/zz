@@ -510,7 +510,7 @@ impl EventLoop {
                     self.jobs
                         .ready(self.poll.registry(), token, readable, writable);
                 } else if let Some(&owner) = self.stdio_tokens.get(&token) {
-                    self.stdio_ready(owner, token);
+                    self.stdio_ready(owner, token, shared);
                 } else if self.connections.contains_key(&token) {
                     if readable {
                         self.read_ready(token, shared);

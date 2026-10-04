@@ -695,6 +695,7 @@ impl Session {
                         command,
                         (request_id, last),
                         outbound,
+                        inline.then_some(true),
                     ) {
                         return MessageProgress::Done;
                     }

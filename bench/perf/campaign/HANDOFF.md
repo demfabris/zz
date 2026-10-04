@@ -1030,6 +1030,13 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
 - Next: a handoff-vs-relay attach A/B on alienware (scratch bench copy with ZZ_TUI_RELAY in KEEP,
   ~/zzpc-w4/relay-ab) to size TTYIN's attach cost on Linux; clean Mac checks on `8d2b0e31` in
   /tmp/zzpc/w4/macchecks-8d2b0e31.
+- Clean Mac checks on `8d2b0e31`: fmt, clippy, Linux-target clippy pass; zz-protocol, zz-client,
+  zz-tui, zz-cli, zz-daemon, zz-terminal 3062 passed, 22 load failures, all pass alone; raw-TUI
+  fixtures with the UTF-8 locale all pass: attached-client, tui-screen-diff 147/147, tui-choosers
+  78/78, tui-copy-mode, tui-indicators 23/23, tui-mouse 67/67, tui-overlays 48/48,
+  tui-pane-geometry 6/6. batch11's Linux checks on `0a67eaab` (same Linux code): clippy, workspace
+  tests (all failures pass alone), compat-check, backpressure 9/9, flood 110.7 / 79.0 MB/s,
+  attached-client pass with 0 rejections.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

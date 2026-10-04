@@ -208,6 +208,7 @@ enum Handoff {
 }
 
 const RELEASE_WAIT: Duration = Duration::from_secs(1);
+const GRAPHICS_REPLY_WAIT: Duration = Duration::from_secs(1);
 
 pub(super) struct EventLoop {
     client: Option<Arc<InteractiveClient>>,
@@ -361,6 +362,12 @@ impl EventLoop {
         self.buffered = true;
     }
 
+    pub fn await_graphics_reply(&mut self) {
+        self.parser
+            .await_graphics_reply(Instant::now() + GRAPHICS_REPLY_WAIT);
+        self.report_tty(|| None);
+    }
+
     pub fn report_tty(&mut self, pane: impl FnOnce() -> Option<PaneId>) {
         if let Some(report) = self.next_report(pane)
             && let Some(client) = self.client.as_ref()
@@ -454,6 +461,12 @@ impl EventLoop {
             self.parser.flush_escape(&mut decoded);
             self.terminal_events.extend(decoded);
             self.escape_deadline = None;
+        }
+    }
+
+    fn expire_graphics_reply(&mut self, now: Instant) {
+        if self.parser.expire_graphics_reply(now) {
+            self.parse_terminal(&[]);
         }
     }
 
@@ -629,6 +642,7 @@ impl EventLoop {
     ) -> Result<Option<MainEvent>, String> {
         self.escape_ms = escape_time.load(Ordering::Relaxed);
         self.expire_escape(now);
+        self.expire_graphics_reply(now);
         {
             let mut output = output.borrow_mut();
             output.tick(now);
@@ -656,9 +670,13 @@ impl EventLoop {
             BrowserWait::Blocking => None,
             BrowserWait::Timeout(timeout) => Some(timeout),
         };
-        for deadline in [self.escape_deadline, output.borrow().deadline()]
-            .into_iter()
-            .flatten()
+        for deadline in [
+            self.escape_deadline,
+            self.parser.graphics_reply_deadline(),
+            output.borrow().deadline(),
+        ]
+        .into_iter()
+        .flatten()
         {
             let remaining = deadline.saturating_duration_since(now);
             timeout = Some(timeout.map_or(remaining, |timeout| timeout.min(remaining)));
@@ -830,6 +848,38 @@ mod tests {
             event_loop.wait(&output, Some(Duration::ZERO)).unwrap(),
             (true, false, false)
         );
+    }
+
+    #[test]
+    fn a_graphics_probe_takes_keys_back_from_the_daemon_until_its_fence_or_deadline() {
+        let (mut event_loop, _input, _peer, _signal) = pipe_loop();
+        event_loop.tty_handoff = 1;
+        event_loop.requested();
+        event_loop.take_tty_message(ProtocolMessage::TtyInputStarted { handoff: 1 });
+        let pane = PaneId(4);
+        let ready = |received, pane| Some(ProtocolMessage::TtyInputReady { received, pane });
+        assert_eq!(event_loop.next_report(|| Some(pane)), ready(0, Some(pane)));
+        event_loop.await_graphics_reply();
+        assert_eq!(event_loop.tty_reported, Some((0, None)));
+        assert_eq!(event_loop.next_report(|| Some(pane)), None);
+        event_loop.take_tty_message(ProtocolMessage::TtyInputBytes {
+            bytes: b"Gi=4294967295;OK\x1b\\\x1b[?62c".to_vec(),
+        });
+        assert_eq!(event_loop.terminal_events.len(), 2);
+        event_loop.terminal_events.clear();
+        assert_eq!(event_loop.next_report(|| Some(pane)), ready(1, Some(pane)));
+
+        event_loop.await_graphics_reply();
+        assert_eq!(event_loop.tty_reported, Some((1, None)));
+        event_loop.take_tty_message(ProtocolMessage::TtyInputBytes {
+            bytes: b"Gi=1\r".to_vec(),
+        });
+        assert!(event_loop.terminal_events.is_empty());
+        let deadline = event_loop.parser.graphics_reply_deadline().unwrap();
+        event_loop.expire_graphics_reply(deadline);
+        assert_eq!(event_loop.terminal_events.len(), 5);
+        event_loop.terminal_events.clear();
+        assert_eq!(event_loop.next_report(|| Some(pane)), ready(2, Some(pane)));
     }
 
     #[test]

@@ -305,6 +305,15 @@ fn plain_keys_reach_the_pane_and_the_rest_waits_for_the_client_to_catch_up() {
 }
 
 #[test]
+fn typed_gi_reaches_the_pane_while_the_client_hands_keys_over() {
+    let mut tty = Tty::open();
+    tty.ready(0);
+    tty.type_bytes(b"echo Gi=1\r");
+    assert!(tty.take().is_empty());
+    tty.screen_shows("echo Gi=1");
+}
+
+#[test]
 fn a_bound_key_or_the_prefix_goes_back_to_the_client_in_order() {
     let mut tty = Tty::open();
     for (key, message) in [("z", "zed"), ("Left", "left")] {
@@ -327,12 +336,9 @@ fn a_bound_key_or_the_prefix_goes_back_to_the_client_in_order() {
     tty.type_bytes(b"\x1b");
     assert_eq!(tty.take(), [bytes(b"\x1b")]);
     tty.ready(3);
-    tty.type_bytes(b"Gi=");
-    assert_eq!(tty.take(), [bytes(b"Gi=")]);
-    tty.ready(4);
     tty.type_bytes(b"\x1b[Dw");
     assert_eq!(tty.take(), [bytes(b"\x1b[Dw")]);
-    tty.ready(5);
+    tty.ready(4);
     tty.type_bytes(b"\x1bxv");
     assert_eq!(tty.take(), [bytes(b"\x1bxv")]);
     tty.screen_shows("x");

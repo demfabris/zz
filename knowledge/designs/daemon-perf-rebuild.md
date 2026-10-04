@@ -4089,7 +4089,11 @@ its existing parser. Once anything is forwarded, later bytes follow it until the
 `TtyInputReady` with the number of chunks it has processed and the pane, which it only does with
 an empty event queue, an idle parser, no pending escape and no client-side route open
 (`input::plain_key_pane`, `InputRouter::passes_plain_keys`); it reports no pane only to withdraw
-one it reported for the same count. Output stays on the client.
+one it reported for the same count. Output stays on the client. A kitty graphics probe makes the
+parser busy: the client withdraws its pane before it writes the probe and reports it again once
+the primary device attributes reply that fences the probe arrives, or after a second. Only in that
+window does the parser read text starting with `Gi=` as a reply that a relay stripped of its
+`ESC _`; outside it `Gi=` is typed text on both sides, so the daemon has no special case for it.
 
 The client keeps its tty with `ZZ_TUI_RELAY=1`, against a daemon without the bit, when stdin is
 not a terminal, on an ssh endpoint, and when the daemon refuses (`TtyInputClosed`). It takes the

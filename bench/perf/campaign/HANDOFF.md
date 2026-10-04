@@ -914,6 +914,18 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   d9d59154. Trap: `just compat-check` fails `verify_claims_test` with "unattributed: unbound
   variable" when `bash` resolves to macOS /bin/bash 3.2; it passes with /opt/homebrew/bin first
   in PATH (red on fc1ccbc6 too under 3.2, so not from any change).
+- batch10 (`~/.cache/zz-perf/batch10`, from 01:31) on `fc1ccbc6`: A/B pairs against 36a82ea1
+  (zz / tmux ratio, base -> merged): `attach.cpu.p4` -> 1.19x, `attach.instr.p4` 5.13 -> 3.84 M,
+  `control.latency` 0.82 -> 0.95x on a fast tmux sample (zz 0.0131 -> 0.0122 ms), echo rows
+  1.37-1.43x unchanged, `kill_pane` 1.00 -> 1.02x, chatty hidden instructions -19%. Three strict
+  gates: 102/3, 101/4, 104/1. By the median rule one row fails: `spawn.cpu.kill_pane`, zz 0.814,
+  0.796, 0.905 ms against tmux 0.574, 0.587, 0.682 (rule plus 0.1), while zz runs fewer user
+  instructions (0.156 M against 0.180 M). Passing medians: `attach.cpu.p4` 0.945x, `attach.ttfc.p4`
+  1.00x, `control.latency` 0.938x, echo rows. `cli.wall.version.p1` (info) reads 3x its wave-3
+  value on zz and tmux alike (the known bimodal row).
+- KILLPANE launched 02:20 as `w4-side-lanes` run `wf_1cb365b4-c1f` (brief /tmp/zzpc/w4/killpane.md,
+  ~/dev/zz-killpane on both hosts from `0ded1faa`): Linux kill-pane kernel time, target tmux plus
+  0.05 ms.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

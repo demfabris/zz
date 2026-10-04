@@ -1343,6 +1343,15 @@ impl TerminalDiffScratch {
         if Arc::ptr_eq(&previous.cells, &current.cells) {
             return 0;
         }
+        if let Some(row) = single_changed_row(previous, current) {
+            self.remember_single_row(previous, current, row);
+            self.spans.extend(changed_span(
+                row,
+                previous.row(row),
+                current.row(row).unwrap_or_default(),
+            ));
+            return 0;
+        }
         let scroll = best_row_shift(previous, current, self);
         for row in 0..current.rows {
             let source = i32::from(row) - i32::from(scroll);
@@ -1354,6 +1363,33 @@ impl TerminalDiffScratch {
             self.spans.extend(changed_span(row, before, after));
         }
         scroll
+    }
+
+    fn remember_single_row(
+        &mut self,
+        previous: &TerminalViewport,
+        current: &TerminalViewport,
+        row: u16,
+    ) {
+        let rows = usize::from(current.rows);
+        let cached = |cells: &Arc<[PackedCell]>| {
+            self.cached_cells
+                .as_ref()
+                .is_some_and(|cached| Arc::ptr_eq(cached, cells))
+                && self.row_fingerprints.len() == rows
+        };
+        if cached(&current.cells) {
+            return;
+        }
+        if cached(&previous.cells) {
+            self.row_fingerprints[usize::from(row)] =
+                row_fingerprint(current.row(row).unwrap_or_default());
+        } else {
+            self.row_fingerprints.clear();
+            self.row_fingerprints.reserve(rows.saturating_mul(2));
+            self.row_fingerprints.extend(row_fingerprints(current));
+        }
+        self.cached_cells = Some(Arc::clone(&current.cells));
     }
 }
 
@@ -2046,6 +2082,22 @@ fn best_row_shift(
     shift
 }
 
+fn single_changed_row(previous: &TerminalViewport, current: &TerminalViewport) -> Option<u16> {
+    if current.rows == 0 {
+        return None;
+    }
+    let mut changed = None;
+    for row in 0..current.rows {
+        if first_difference(previous.row(row)?, current.row(row)?).is_some() {
+            if changed.is_some() {
+                return None;
+            }
+            changed = Some(row);
+        }
+    }
+    Some(changed.unwrap_or(0))
+}
+
 fn row_fingerprints(viewport: &TerminalViewport) -> impl Iterator<Item = u64> + '_ {
     (0..viewport.rows).map(|row| row_fingerprint(viewport.row(row).unwrap_or_default()))
 }
@@ -2422,6 +2474,63 @@ mod tests {
         let mut retained = previous;
         retained.apply_patch(patch).expect("valid patch");
         assert_eq!(retained, current);
+    }
+
+    #[test]
+    fn a_one_row_change_keeps_the_fingerprints_a_later_scroll_needs() {
+        let glyph = |value: char| PackedCell::new(u32::from(value), 0, CellWidth::Narrow);
+        let mut previous = TerminalViewport::blank(3, 4, SessionStatus::Running);
+        previous.generation = 1;
+        let cells = Arc::make_mut(&mut previous.cells);
+        for (row, value) in ['A', 'B', 'C', 'D'].into_iter().enumerate() {
+            cells[row * 3..row * 3 + 3].fill(glyph(value));
+        }
+        let mut scratch = TerminalDiffScratch::default();
+        let mut retained = previous.clone();
+        for (generation, (index, value)) in [(11, 'x'), (4, 'y')].into_iter().enumerate() {
+            let mut current = previous.clone();
+            current.generation = 2 + generation as u64;
+            current.view_generation = current.generation;
+            Arc::make_mut(&mut current.cells)[index] = glyph(value);
+            let patch = TerminalViewport::diff_with_scratch(&previous, &current, &mut scratch)
+                .expect("compatible frame");
+            assert_eq!(patch.scroll, 0);
+            assert_eq!(
+                patch.changed_rows.row_indices().collect::<Vec<_>>(),
+                [u16::try_from(index / 3).unwrap()]
+            );
+            assert_eq!(
+                scratch.row_fingerprints,
+                row_fingerprints(&current).collect::<Vec<_>>()
+            );
+            retained.apply_patch(patch).expect("valid patch");
+            assert_eq!(retained, current);
+            previous = current;
+        }
+
+        let mut copied = previous.clone();
+        copied.generation = 8;
+        copied.view_generation = 8;
+        copied.cells = Arc::from(previous.cells.as_ref());
+        let patch = TerminalViewport::diff_with_scratch(&previous, &copied, &mut scratch)
+            .expect("compatible copy");
+        assert_eq!(patch.scroll, 0);
+        assert!(patch.changed_rows.is_empty());
+        retained.apply_patch(patch).expect("valid copy patch");
+        previous = copied;
+
+        let mut scrolled = previous.clone();
+        scrolled.generation = 9;
+        scrolled.view_generation = 9;
+        let cells = Arc::make_mut(&mut scrolled.cells);
+        cells.copy_within(3..12, 0);
+        cells[9..12].fill(glyph('E'));
+        let patch = TerminalViewport::diff_with_scratch(&previous, &scrolled, &mut scratch)
+            .expect("compatible scroll");
+        assert_eq!(patch.scroll, -1);
+        assert_eq!(patch.changed_rows.row_indices().collect::<Vec<_>>(), [3]);
+        retained.apply_patch(patch).expect("valid scroll patch");
+        assert_eq!(retained, scrolled);
     }
 
     #[test]

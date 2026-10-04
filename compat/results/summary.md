@@ -39,10 +39,10 @@
 | format-modifier-option-loop | 17 | yes | 0 | yes | yes | yes |
 | format-modifier-width | 9 | yes | 0 | yes | yes | yes |
 | format-option-loop-context | 14 | yes | 0 | yes | yes | yes |
-| formats | 16 | yes | 0 | yes | yes | yes |
-| formats-values | 45 | yes | 0 | yes | yes | yes |
 | format-window-cell-metrics | 8 | yes | 0 | yes | yes | yes |
 | format-window-neighbour-user-options | 26 | yes | 0 | yes | yes | yes |
+| formats-values | 45 | yes | 0 | yes | yes | yes |
+| formats | 16 | yes | 0 | yes | yes | yes |
 | honest-knobs-c1-defaults | 18 | yes | 0 | yes | yes | yes |
 | honest-knobs-c1-errors | 17 | yes | 0 | yes | yes | yes |
 | honest-knobs-c1-layout | 9 | yes | 0 | yes | yes | yes |
@@ -76,16 +76,16 @@
 | pane-spawn-options | 25 | yes | 0 | yes | yes | yes |
 | pane-spawn-retain | 27 | yes | 0 | yes | yes | yes |
 | pane-spawn-style-title-v2 | 18 | yes | 0 | yes | yes | yes |
-| panes | 9 | yes | 0 | yes | yes | yes |
 | pane-target-grammar | 70 | yes | 0 | yes | yes | yes |
+| panes | 9 | yes | 0 | yes | yes | yes |
 | prefix2 | 15 | yes | 0 | yes | yes | yes |
 | presets-mirrored | 6 | yes | 0 | yes | yes | yes |
 | presets | 7 | yes | 0 | yes | yes | yes |
 | prompt-history | 8 | yes | 0 | yes | yes | yes |
 | renderer-styles | 12 | yes | 0 | yes | yes | yes |
 | resize-directions | 16 | yes | 0 | yes | yes | yes |
-| resize | 6 | yes | 0 | yes | yes | yes |
 | resize-window | 16 | yes | 0 | yes | yes | yes |
+| resize | 6 | yes | 0 | yes | yes | yes |
 | send-keys-repeat | 16 | yes | 0 | yes | yes | yes |
 | send-keys-reset | 16 | yes | 0 | yes | yes | yes |
 | session-activity | 5 | yes | 0 | yes | yes | yes |
@@ -97,9 +97,9 @@
 | source-file-output | 12 | yes | 0 | yes | yes | yes |
 | source-hook-cwd-event | 3 | yes | 0 | yes | yes | yes |
 | source-hook-cwd-sourced | 3 | yes | 0 | yes | yes | yes |
-| splits-sized | 5 | yes | 0 | yes | yes | yes |
 | split-window-zoom-hidden-width | 21 | yes | 0 | yes | yes | yes |
 | split-window-zoom | 11 | yes | 0 | yes | yes | yes |
+| splits-sized | 5 | yes | 0 | yes | yes | yes |
 | status-options | 79 | yes | 0 | yes | yes | yes |
 | stderr-parity | 14 | yes | 0 | yes | yes | yes |
 | strict-key-validation | 40 | yes | 0 | yes | yes | yes |
@@ -130,15 +130,16 @@
 | smoke/chooser-buffer-vocabulary | 3 | yes | 0 | yes | yes | yes |
 | smoke/chooser-kill-keys | 3 | yes | 0 | yes | yes | yes |
 | smoke/chooser-kill-on-exit | 3 | yes | 0 | yes | yes | yes |
+| smoke/chooser-prefix-keys | 3 | yes | 0 | yes | yes | yes |
 | smoke/chooser-row-flags | 3 | yes | 0 | yes | yes | yes |
 | smoke/chooser-tree-vocabulary | 3 | yes | 0 | yes | yes | yes |
 | smoke/clear-history-hyperlinks | 3 | yes | 0 | yes | yes | yes |
 | smoke/cli-chain-parse-abort | 3 | yes | 0 | yes | yes | yes |
+| smoke/cli-output-bytes | 2 | yes | 0 | yes | yes | yes |
 | smoke/client-exit-actions | 3 | yes | 0 | yes | yes | yes |
 | smoke/client-non-utf8-cwd | 4 | yes | 0 | yes | yes | yes |
 | smoke/client-resized-context | 3 | yes | 0 | yes | yes | yes |
 | smoke/client-utf8-sanitizer | 2 | yes | 0 | yes | yes | yes |
-| smoke/cli-output-bytes | 2 | yes | 0 | yes | yes | yes |
 | smoke/command-flag-errors | 3 | yes | 0 | yes | yes | yes |
 | smoke/command-prompt-chain | 2 | yes | 0 | yes | yes | yes |
 | smoke/command-prompt-editing | 2 | yes | 0 | yes | yes | yes |
@@ -152,7 +153,7 @@
 | smoke/config-non-utf8-byte-matrix | 2 | yes | 0 | yes | yes | yes |
 | smoke/config-non-utf8-file-bytes | 8 | yes | 0 | yes | yes | yes |
 | smoke/continuum-init | 2 | yes | 0 | yes | yes | yes |
-| smoke/control-alias-prepare | 3 | yes | 0 | yes | yes | yes |
+| smoke/control-alias-prepare | 4 | yes | 0 | yes | yes | yes |
 | smoke/control-eof-drain | 2 | yes | 0 | yes | yes | yes |
 | smoke/control-hard-loss | 2 | yes | 0 | yes | yes | yes |
 | smoke/control-notify | 2 | yes | 0 | yes | yes | yes |
@@ -160,11 +161,13 @@
 | smoke/copy-mode-command-errors | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-copy-line | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-formats | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-history-freeze | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-kill-on-exit | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-mode-keys-tail | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-mode-keys | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-prompt-bindings | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-refresh | 3 | yes | 0 | yes | yes | yes |
+| smoke/copy-mode-resize-freeze | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-search | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-mode-source-pane | 3 | yes | 0 | yes | yes | yes |
 | smoke/copy-selection-clipboard-bytes | 3 | yes | 0 | yes | yes | yes |
@@ -255,12 +258,13 @@
 | smoke/tpm-init | 5 | yes | 0 | yes | yes | yes |
 | smoke/tui-client-input-backpressure | 2 | yes | 0 | yes | yes | yes |
 | smoke/vim-tmux-navigator | 8 | yes | 0 | yes | yes | yes |
+| smoke/wait-for-loop | 3 | yes | 0 | yes | yes | yes |
 | smoke/yank | 3 | yes | 0 | yes | yes | yes |
 
 ## Attached-client fixture
 
 Status: `PASS`
-Recorded at: `88a116d7fb04`
+Recorded at: `fd7fc3bc6c24`
 
 ## Retries
 

@@ -109378,6 +109378,8 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("set policy");
         shared.unregister(client);
         assert!(shared.inner.lock().engine.state.sessions.is_empty());
+        #[cfg(unix)]
+        lifecycle::wait_for_cleanup(&shared);
         assert!(shared.stopping.load(Ordering::Acquire));
     }
 

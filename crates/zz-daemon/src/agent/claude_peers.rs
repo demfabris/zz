@@ -234,6 +234,43 @@ impl RegistryCache {
             .values()
             .filter_map(|(_, record)| record.as_ref())
     }
+
+    pub(crate) fn settled(&self) -> Option<RegistryKey> {
+        let directory = self.directory.clone()?;
+        let files = self
+            .files
+            .iter()
+            .map(|(name, (seen, _))| (directory.join(name), *seen));
+        let mut stamps = Vec::with_capacity(self.files.len() + 1);
+        for (path, seen) in std::iter::once((directory.clone(), self.listing)).chain(files) {
+            if seen.is_some_and(|seen| seen.racy) {
+                return None;
+            }
+            stamps.push((path, seen.map(|seen| seen.stamp)));
+        }
+        Some(RegistryKey { directory, stamps })
+    }
+}
+
+pub(crate) struct RegistryKey {
+    directory: PathBuf,
+    stamps: Vec<(PathBuf, Option<FileStamp>)>,
+}
+
+impl RegistryKey {
+    pub(crate) fn has_files(&self) -> bool {
+        self.stamps.len() > 1
+    }
+
+    pub(crate) fn holds(&self, directory: &Path) -> bool {
+        self.directory == directory
+            && self.stamps.iter().all(|(path, stamp)| {
+                fs::metadata(path)
+                    .ok()
+                    .map(|metadata| FileStamp::of(&metadata))
+                    == *stamp
+            })
+    }
 }
 
 fn socket_dir(records: &[PeerRecord]) -> io::Result<PathBuf> {
@@ -1266,3 +1303,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "claude_peers_peerskip_tests.rs"]
+mod peerskip_tests;

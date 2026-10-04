@@ -2130,8 +2130,13 @@ fn serve_test_loop(event_loop: &mut EventLoop, shared: &Arc<Shared>) -> Result<(
                 if readable {
                     event_loop.read_ready(token, shared);
                 }
-                if writable && let Some(connection) = event_loop.connections.get_mut(&token) {
-                    connection.write_ready()?;
+                if writable
+                    && let Some(connection) = event_loop.connections.get_mut(&token)
+                    && let Err(error) = connection.write_ready()
+                {
+                    log::debug!("client write failed: {error}");
+                    connection.outbound.close();
+                    event_loop.remove(token, shared);
                 }
             }
         }

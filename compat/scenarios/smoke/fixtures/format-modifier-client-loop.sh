@@ -101,36 +101,40 @@ check_equal empty-body-byte 0a "$(od -An -tx1 -v "$work/empty-body" | tr -d ' \n
 first_pid="$(attach one)"
 await_clients 1 || { echo "format-modifier-client-loop-$side: attach-one"; exit 0; }
 check_equal one-count 1 "$(expand '#{n:#{L:x}}')"
+first_name="$(main_client list-clients -t "=$session" -F '#{client_name}')"
 
 second_pid="$(attach two)"
 await_clients 2 || { echo "format-modifier-client-loop-$side: attach-two"; exit 0; }
 
+second_name="$(main_client list-clients -t "=$session" -F '#{client_name}' | grep -vxF "$first_name")"
+attached="<$first_name><$second_name>"
+attached_reversed="<$second_name><$first_name>"
 ascending="$(names_sorted | wrapped)"
 descending="$(names_sorted | sed '1!G;h;$!d' | wrapped)"
 window="$(expand '#{window_index}')"
 
-# Default, i, and n all reach the pin's name comparison; r negates the whole
-# comparison, tie-break included.
-check_equal order-default "$ascending" "$(expand '#{L:<#{client_name}>}')"
-check_equal order-index "$ascending" "$(expand '#{Li:<#{client_name}>}')"
+# Default and i keep the attach order and r reverses it; n sorts by name and r
+# negates that comparison.
+check_equal order-default "$attached" "$(expand '#{L:<#{client_name}>}')"
+check_equal order-index "$attached" "$(expand '#{Li:<#{client_name}>}')"
 check_equal order-name "$ascending" "$(expand '#{Ln:<#{client_name}>}')"
-check_equal order-reversed "$descending" "$(expand '#{Lr:<#{client_name}>}')"
-check_equal order-index-reversed "$descending" "$(expand '#{Lir:<#{client_name}>}')"
+check_equal order-reversed "$attached_reversed" "$(expand '#{Lr:<#{client_name}>}')"
+check_equal order-index-reversed "$attached_reversed" "$(expand '#{Lir:<#{client_name}>}')"
 check_equal order-name-reversed "$descending" "$(expand '#{Lnr:<#{client_name}>}')"
 
 # An order letter the pin does not know falls back to the default order.
-check_equal order-unknown "$ascending" "$(expand '#{Lz:<#{client_name}>}')"
-check_equal order-unknown-reversed "$descending" "$(expand '#{Lzr:<#{client_name}>}')"
+check_equal order-unknown "$attached" "$(expand '#{Lz:<#{client_name}>}')"
+check_equal order-unknown-reversed "$attached_reversed" "$(expand '#{Lzr:<#{client_name}>}')"
 
 # The row replaces the client and keeps the outer session, window, and pane.
 check_equal row-context \
     "<$session:$window:0><$session:$window:0>" \
     "$(expand '#{L:<#{session_name}:#{window_index}:#{pane_index}>}')"
-check_equal row-tty "$ascending" "$(expand '#{L:<#{client_tty}>}')"
+check_equal row-tty "$attached" "$(expand '#{L:<#{client_tty}>}')"
 
 # Loops nest in both directions and the inner one keeps the outer row's client.
 check_equal nested-window "[$window][$window]" "$(expand '#{L:[#{window_index}]}')"
-check_equal nested-window-client "$ascending" "$(expand '#{L:#{W:<#{client_name}>}}')"
+check_equal nested-window-client "$attached" "$(expand '#{L:#{W:<#{client_name}>}}')"
 check_equal nested-client '[xx][xx]' "$(expand '#{L:[#{L:x}]}')"
 check_equal nested-count 2 "$(expand '#{n:#{L:x}}')"
 

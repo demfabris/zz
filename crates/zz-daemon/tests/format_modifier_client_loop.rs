@@ -3,7 +3,7 @@
 //! The pin loops `sort_get_clients`: every attached client, none of the ones
 //! that never attached, each row built from that client while the outer
 //! session, window, and pane stay where they were (format.c
-//! `format_loop_clients`, sort.c `sort_client_cmp`). Command clients are
+//! `format_loop_clients`, sort.c `sort_get_clients`). Command clients are
 //! connections, not attachments, so they never own a row.
 
 #![cfg(all(unix, feature = "daemon"))]
@@ -17,6 +17,18 @@ const ROW: &str = "#{L:<#{client_name}>}";
 fn sorted(mut names: Vec<String>) -> Vec<String> {
     names.sort();
     names
+}
+
+fn attach_interactive_then_control(clients: &mut Clients, session: &str) -> Vec<String> {
+    clients.attach_interactive(session);
+    let first = clients.client_names();
+    clients.attach_control(session);
+    let second = clients
+        .client_names()
+        .into_iter()
+        .filter(|name| !first.contains(name))
+        .collect::<Vec<_>>();
+    first.into_iter().chain(second).collect()
 }
 
 fn wrap(names: &[String]) -> String {
@@ -44,12 +56,10 @@ fn a_server_with_no_attached_client_expands_the_loop_to_nothing() {
 #[test]
 fn every_attached_client_owns_one_row_and_the_command_client_owns_none() {
     let mut clients = Clients::start("client-loop-roster", &["base"]);
-    clients.attach_interactive("base");
-    clients.attach_control("base");
+    let names = attach_interactive_then_control(&mut clients, "base");
 
-    let names = clients.client_names();
     assert_eq!(names.len(), 2, "two clients attached: {names:?}");
-    assert_eq!(clients.format("base", ROW), wrap(&sorted(names)));
+    assert_eq!(clients.format("base", ROW), wrap(&names));
     // The connection running display-message is a command client, so the row
     // count stays at the number of attachments.
     assert_eq!(clients.format("base", "#{L:x}").len(), 2);
@@ -58,8 +68,8 @@ fn every_attached_client_owns_one_row_and_the_command_client_owns_none() {
 #[test]
 fn a_row_answers_the_client_formats_for_its_own_client() {
     let mut clients = Clients::start("client-loop-identity", &["left", "right"]);
-    clients.attach_interactive("left");
-    clients.attach_control("right");
+    clients.attach_interactive("right");
+    clients.attach_control("left");
 
     let listed = clients.listed("#{client_name}\u{1}#{client_session}\u{1}#{client_control_mode}");
     let mut expected = listed
@@ -67,12 +77,12 @@ fn a_row_answers_the_client_formats_for_its_own_client() {
         .map(|line| {
             let fields = line.split('\u{1}').collect::<Vec<_>>();
             (
-                fields[0].to_owned(),
+                fields[2].to_owned(),
                 format!("<{}|{}|{}>", fields[0], fields[1], fields[2]),
             )
         })
         .collect::<Vec<_>>();
-    expected.sort();
+    expected.sort_by_key(|(mode, _)| mode.clone());
     let expected = expected.into_iter().map(|(_, row)| row).collect::<String>();
     assert_eq!(
         clients.format(
@@ -96,30 +106,34 @@ fn a_row_answers_the_client_formats_for_its_own_client() {
 #[test]
 fn the_order_flags_and_reversal_follow_the_pinned_comparator() {
     let mut clients = Clients::start("client-loop-order", &["base"]);
-    let first = clients.attach_interactive("base");
-    clients.attach_control("base");
+    let attached = attach_interactive_then_control(&mut clients, "base");
 
-    let by_name = wrap(&sorted(clients.client_names()));
-    let mut reversed_names = sorted(clients.client_names());
-    reversed_names.reverse();
-    let by_name_reversed = wrap(&reversed_names);
+    let mut attached_reversed = attached.clone();
+    attached_reversed.reverse();
+    let by_name = sorted(attached.clone());
+    let mut by_name_reversed = by_name.clone();
+    by_name_reversed.reverse();
 
-    // Default, i, and n all land on SORT_ORDER or SORT_NAME, which the pin
-    // resolves through the same strcmp on the client name.
-    for form in [
-        "#{L:<#{client_name}>}",
-        "#{Li:<#{client_name}>}",
-        "#{Ln:<#{client_name}>}",
-    ] {
-        assert_eq!(clients.format("base", form), by_name, "{form}");
+    // Default and i are SORT_ORDER, which keeps the order the clients attached
+    // and only reverses it for r. n compares names and r negates that.
+    for form in ["#{L:<#{client_name}>}", "#{Li:<#{client_name}>}"] {
+        assert_eq!(clients.format("base", form), wrap(&attached), "{form}");
     }
-    for form in [
-        "#{Lr:<#{client_name}>}",
-        "#{Lir:<#{client_name}>}",
-        "#{Lnr:<#{client_name}>}",
-    ] {
-        assert_eq!(clients.format("base", form), by_name_reversed, "{form}");
+    for form in ["#{Lr:<#{client_name}>}", "#{Lir:<#{client_name}>}"] {
+        assert_eq!(
+            clients.format("base", form),
+            wrap(&attached_reversed),
+            "{form}"
+        );
     }
+    assert_eq!(
+        clients.format("base", "#{Ln:<#{client_name}>}"),
+        wrap(&by_name)
+    );
+    assert_eq!(
+        clients.format("base", "#{Lnr:<#{client_name}>}"),
+        wrap(&by_name_reversed)
+    );
 
     // t is activity, newest first: the control client attached last, so it
     // leads until the interactive client sends input.
@@ -133,7 +147,7 @@ fn the_order_flags_and_reversal_follow_the_pinned_comparator() {
             .expect("two rows"),
         "tr negates the finished activity comparison"
     );
-    clients.note_activity(first, "base");
+    clients.note_activity(0, "base");
     let interactive_first = clients.format("base", "#{Lt:<#{client_name}>}");
     assert_ne!(
         interactive_first, control_first,
@@ -172,14 +186,12 @@ fn attaching_and_detaching_change_the_roster_the_loop_walks() {
 #[test]
 fn nested_and_malformed_client_loops_keep_the_pinned_fallback() {
     let mut clients = Clients::start("client-loop-nesting", &["base"]);
-    clients.attach_interactive("base");
-    clients.attach_control("base");
-    let by_name = wrap(&sorted(clients.client_names()));
+    let names = attach_interactive_then_control(&mut clients, "base");
 
     // An order letter the pin does not know falls back to SORT_ORDER without
     // reversing, so it reads exactly like the bare modifier.
     for form in ["#{Lz:<#{client_name}>}", "#{Lqq:<#{client_name}>}"] {
-        assert_eq!(clients.format("base", form), by_name, "{form}");
+        assert_eq!(clients.format("base", form), wrap(&names), "{form}");
     }
 
     // A window loop inside a client row keeps the row's client and picks up the
@@ -188,7 +200,6 @@ fn nested_and_malformed_client_loops_keep_the_pinned_fallback() {
         clients.format("base", "#{L:#{W:[#{window_index}]}}"),
         "[0][0]"
     );
-    let names = sorted(clients.client_names());
     assert_eq!(
         clients.format("base", "#{L:#{W:(#{client_name})}}"),
         surround(&names, '(', ')')

@@ -1,11 +1,11 @@
 //! The `L` modifier's row order, straight against a roster the test controls.
 //!
-//! sort.c `sort_client_cmp` only ever compares two things: activity, newest
-//! first, and the client name, which both breaks every tie and stands in for
-//! the orders the client comparator does not implement. `r` negates the
-//! finished comparison, so it reverses the tie-break too. A daemon carrying two
-//! GUI clients on one host cannot hand those cases distinct names, so the
-//! roster here is synthetic.
+//! sort.c `sort_qsort` leaves the default order alone, so the rows keep the
+//! order the clients connected and `r` reverses that list. Only `n` and `t`
+//! reach `sort_client_cmp`, which compares the name or the activity, newest
+//! first, breaks ties by name, and negates the finished comparison for `r`. A
+//! daemon carrying two GUI clients on one host cannot hand those cases distinct
+//! names, so the roster here is synthetic.
 
 use std::collections::BTreeMap;
 
@@ -16,8 +16,8 @@ struct Roster {
 }
 
 impl Roster {
-    /// `(name, activity, session)` triples, deliberately handed to the engine
-    /// out of order so nothing passes by accident.
+    /// `(name, activity, session)` triples in the order the clients connected,
+    /// which is neither name nor activity order so nothing passes by accident.
     fn new(rows: &[(&str, u64, &str)]) -> Self {
         Self {
             rows: rows
@@ -65,14 +65,22 @@ fn expand(rows: &[(&str, u64, &str)], format: &str) -> String {
 const THREE: &[(&str, u64, &str)] = &[("beta", 2, "s2"), ("alpha", 9, "s1"), ("gamma", 5, "s3")];
 
 #[test]
-fn the_default_and_the_index_and_name_flags_all_order_by_client_name() {
-    for form in ["#{L:", "#{Li:", "#{Ln:"] {
+fn the_default_and_the_index_flag_keep_the_connect_order() {
+    for form in ["#{L:", "#{Li:"] {
         assert_eq!(
             expand(THREE, &format!("{form}<#{{client_name}}>}}")),
-            "<alpha><beta><gamma>",
+            "<beta><alpha><gamma>",
             "{form}"
         );
     }
+}
+
+#[test]
+fn the_name_flag_orders_by_client_name() {
+    assert_eq!(
+        expand(THREE, "#{Ln:<#{client_name}>}"),
+        "<alpha><beta><gamma>"
+    );
 }
 
 #[test]
@@ -84,11 +92,18 @@ fn the_time_flag_orders_by_activity_newest_first() {
 }
 
 #[test]
+fn reversal_flips_the_connect_order() {
+    for form in ["#{Lr:", "#{Lir:"] {
+        assert_eq!(
+            expand(THREE, &format!("{form}<#{{client_name}}>}}")),
+            "<gamma><alpha><beta>",
+            "{form}"
+        );
+    }
+}
+
+#[test]
 fn reversal_negates_the_finished_comparison_including_the_name_tie_break() {
-    assert_eq!(
-        expand(THREE, "#{Lr:<#{client_name}>}"),
-        "<gamma><beta><alpha>"
-    );
     assert_eq!(
         expand(THREE, "#{Lnr:<#{client_name}>}"),
         "<gamma><beta><alpha>"
@@ -105,24 +120,24 @@ fn reversal_negates_the_finished_comparison_including_the_name_tie_break() {
 }
 
 #[test]
-fn an_unknown_order_letter_falls_back_to_the_name_order_without_reversing() {
+fn an_unknown_order_letter_falls_back_to_the_connect_order_without_reversing() {
     for form in ["#{Lz:", "#{L:", "#{Lqq:"] {
         assert_eq!(
             expand(THREE, &format!("{form}#{{client_name}}}}")),
-            "alphabetagamma",
+            "betaalphagamma",
             "{form}"
         );
     }
     // r is read from the same argument as the order letter, so it still applies
     // when the order letter itself is unknown.
-    assert_eq!(expand(THREE, "#{Lzr:#{client_name}}"), "gammabetaalpha");
+    assert_eq!(expand(THREE, "#{Lzr:#{client_name}}"), "gammaalphabeta");
 }
 
 #[test]
 fn a_row_answers_only_for_its_own_client_and_leaks_nothing_outside_the_loop() {
     assert_eq!(
         expand(THREE, "#{L:<#{client_name}:#{client_session}>}"),
-        "<alpha:s1><beta:s2><gamma:s3>"
+        "<beta:s2><alpha:s1><gamma:s3>"
     );
     // A client format the row does not carry is empty inside the loop rather
     // than the outer client's value.
@@ -145,9 +160,9 @@ fn client_loops_nest_and_each_level_keeps_its_own_row() {
     assert_eq!(
         expand(THREE, "#{L:[#{client_name}#{L:(#{client_name})}]}"),
         concat!(
-            "[alpha(alpha)(beta)(gamma)]",
-            "[beta(alpha)(beta)(gamma)]",
-            "[gamma(alpha)(beta)(gamma)]"
+            "[beta(beta)(alpha)(gamma)]",
+            "[alpha(beta)(alpha)(gamma)]",
+            "[gamma(beta)(alpha)(gamma)]"
         )
     );
 }

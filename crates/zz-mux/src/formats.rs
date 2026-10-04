@@ -3557,7 +3557,8 @@ pub trait StatusHooks {
         0
     }
 
-    /// Every attached client eligible for an `L` loop row, in any order.
+    /// Every attached client eligible for an `L` loop row, in the order the
+    /// clients connected.
     fn client_loop_rows(&mut self, _context: &StatusContext) -> Vec<FormatClientRow> {
         Vec::new()
     }
@@ -5777,10 +5778,17 @@ fn client_loop_scoped(name: &str) -> bool {
     })
 }
 
-/// `sort_client_cmp`: only activity orders rows, most recent first, and the
-/// name comparison both breaks ties and stands in for every other order. `r`
-/// negates the finished comparison, tie-break included.
+/// sort.c `sort_qsort`: the default order leaves the rows in the order the
+/// clients connected and `r` only reverses that list. Name and activity go
+/// through `sort_client_cmp`, where the name breaks ties and `r` negates the
+/// finished comparison, tie-break included.
 fn sort_client_loop_rows(rows: &mut [FormatClientRow], sort: Option<LoopSort>, reversed: bool) {
+    if !matches!(sort, Some(LoopSort::Name | LoopSort::Activity)) {
+        if reversed {
+            rows.reverse();
+        }
+        return;
+    }
     rows.sort_by(|left, right| {
         let ordering = match sort {
             Some(LoopSort::Activity) => right.activity.cmp(&left.activity),

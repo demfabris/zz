@@ -46760,12 +46760,8 @@ impl crate::status::FormatFactSource for BorrowedFormatHookFacts<'_> {
                 engine,
                 fields: self.client_fields,
             };
-            self.attached
-                .iter()
-                .filter(|(session, _)| engine.state.sessions.contains_key(session))
-                .flat_map(|(session, clients)| {
-                    clients.iter().map(move |client| (*client, *session))
-                })
+            loop_clients_in_connect_order(self.attached, engine)
+                .into_iter()
                 .map(|(client, session)| {
                     client_format_facts_from_source(&source, client, session).loop_row(
                         self.client_fields
@@ -47203,13 +47199,8 @@ fn format_hook_facts(inner: &ServerState) -> FormatHookFacts {
         )),
         session_last_attached: Arc::new(inner.session_last_attached.clone()),
         clients: Arc::new(
-            inner
-                .attached
-                .iter()
-                .filter(|(session, _)| inner.engine.state.sessions.contains_key(session))
-                .flat_map(|(session, clients)| {
-                    clients.iter().map(move |client| (*client, *session))
-                })
+            loop_clients_in_connect_order(&inner.attached, &inner.engine)
+                .into_iter()
                 .map(|(client, session)| {
                     client_format_facts(inner, client, session).loop_row(
                         inner
@@ -47227,6 +47218,19 @@ fn format_hook_facts(inner: &ServerState) -> FormatHookFacts {
             .map(buffer_format_facts),
         ..FormatHookFacts::default()
     }
+}
+
+fn loop_clients_in_connect_order(
+    attached: &BTreeMap<SessionId, BTreeSet<ClientId>>,
+    engine: &MuxEngine,
+) -> Vec<(ClientId, SessionId)> {
+    let mut clients = attached
+        .iter()
+        .filter(|(session, _)| engine.state.sessions.contains_key(session))
+        .flat_map(|(session, clients)| clients.iter().map(move |client| (*client, *session)))
+        .collect::<Vec<_>>();
+    clients.sort_unstable();
+    clients
 }
 
 fn format_hook_facts_for_client(

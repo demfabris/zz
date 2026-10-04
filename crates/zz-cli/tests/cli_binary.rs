@@ -9,14 +9,22 @@ use std::process::Command;
 /// semantic:explicit-config-keeps-mux-conf-layer, and cycle 17 watched it
 /// reach the tests that never said where home is.
 fn isolated_zz() -> (tempfile::TempDir, Command) {
+    let root = if cfg!(unix) {
+        std::path::PathBuf::from("/tmp")
+    } else {
+        std::env::temp_dir()
+    };
     let directory = tempfile::Builder::new()
         .prefix("zz-cli-env-")
-        .tempdir_in("/tmp")
+        .tempdir_in(root)
         .expect("temporary CLI home");
     let mut command = Command::new(env!("CARGO_BIN_EXE_zz_cli"));
     command
         .env("HOME", directory.path())
-        .env("XDG_CONFIG_HOME", directory.path());
+        .env("XDG_CONFIG_HOME", directory.path())
+        .env("APPDATA", directory.path())
+        .env("LOCALAPPDATA", directory.path())
+        .env("USERPROFILE", directory.path());
     (directory, command)
 }
 

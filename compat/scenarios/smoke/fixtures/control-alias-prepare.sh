@@ -24,14 +24,41 @@ fi
 main_client set-option -s command-alias[40] 'live=display-message -p old'
 raw="$HOME/control-alias-prepare.raw"
 errors="$HOME/control-alias-prepare.err"
-{
-    printf '%s\n' "set-option -s command-alias[40] 'live=display-message -p new' ; live"
-    printf '%s\n' 'live'
-    printf '%s\n' 'set-environment -g CONTROL_NEXT visible'
-    printf '%s\n' 'display-message -p $CONTROL_NEXT'
-    printf '%s\n' 'set-environment -g CONTROL_BEFORE bad ; frobnicate ; set-environment -g CONTROL_AFTER bad'
-    printf '%s\n' 'detach-client'
-} | control_client >"$raw" 2>"$errors"
+input="$HOME/control-alias-prepare.in"
+
+wait_for() {
+    tries=0
+    until "$@"; do
+        tries=$((tries + 1))
+        [ "$tries" -lt 200 ] || return 0
+        sleep 0.05
+    done
+}
+
+alias_outputs() {
+    [ "$(grep -cxE 'old|new' "$raw")" -ge "$1" ]
+}
+
+next_is_set() {
+    main_client show-environment -g CONTROL_NEXT >/dev/null 2>&1
+}
+
+rm -f "$input"
+mkfifo "$input"
+control_client <"$input" >"$raw" 2>"$errors" &
+control=$!
+exec 3>"$input"
+printf '%s\n' "set-option -s command-alias[40] 'live=display-message -p new' ; live" >&3
+wait_for alias_outputs 1
+printf '%s\n' 'live' >&3
+wait_for alias_outputs 2
+printf '%s\n' 'set-environment -g CONTROL_NEXT visible' >&3
+wait_for next_is_set
+printf '%s\n' 'display-message -p $CONTROL_NEXT' >&3
+printf '%s\n' 'set-environment -g CONTROL_BEFORE bad ; frobnicate ; set-environment -g CONTROL_AFTER bad' >&3
+printf '%s\n' 'detach-client' >&3
+exec 3>&-
+wait "$control"
 
 if grep -qx old "$raw" && grep -qx new "$raw" && [ "$(main_client live)" = new ]; then
     main_client set-environment -g CONTROL_ALIAS_SNAPSHOT frozen

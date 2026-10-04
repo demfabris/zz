@@ -145,6 +145,10 @@ impl EventParser {
         self.bytes.first() == Some(&0x1b)
     }
 
+    pub fn is_idle(&self) -> bool {
+        self.bytes.is_empty() && !self.in_paste
+    }
+
     pub fn flush_escape(&mut self, output: &mut Vec<Event>) {
         if self.has_pending_escape() {
             if self.bytes.starts_with(b"\x1b[?") || self.bytes.starts_with(b"\x1b_") {

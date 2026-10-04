@@ -2256,6 +2256,145 @@ fn shifted_character(input: &KeyInput, character: char) -> char {
     character
 }
 
+/// The key press a raw terminal client decodes from the start of one tty read
+/// and the bytes it spans, for the keys that mean the same whatever follows
+/// them: every 7-bit byte except ESC, a complete UTF-8 scalar that is not a
+/// control, and a complete cursor or function key sequence.
+#[must_use]
+pub fn tty_input_key(bytes: &[u8]) -> Option<(KeyInput, usize)> {
+    match *bytes.first()? {
+        0x1b => tty_sequence_key(bytes),
+        0x80.. => tty_text_key(bytes),
+        byte => Some((tty_byte_key(byte), 1)),
+    }
+}
+
+fn tty_byte_key(byte: u8) -> KeyInput {
+    let (key, control) = match byte {
+        b'\t' => (KeyCode::Tab, false),
+        b'\n' | b'\r' => (KeyCode::Enter, false),
+        0x7f => (KeyCode::Backspace, false),
+        0 => (KeyCode::Character(' '), true),
+        1..=26 => (KeyCode::Character(char::from(b'a' + byte - 1)), true),
+        28..=31 => (KeyCode::Character(char::from(b'\\' + byte - 28)), true),
+        _ => (
+            KeyCode::Character(char::from(byte.to_ascii_lowercase())),
+            false,
+        ),
+    };
+    let character = match key {
+        KeyCode::Character(character) => Some(character),
+        _ => None,
+    };
+    let text = if control {
+        character
+    } else {
+        character.map(|_| char::from(byte))
+    };
+    KeyInput {
+        action: zz_terminal::KeyAction::Press,
+        key,
+        modifiers: zz_terminal::Modifiers::new(byte.is_ascii_uppercase(), control, false, false),
+        text: text.map(|text| text.to_string().into_boxed_str()),
+        unshifted_codepoint: character,
+    }
+}
+
+fn tty_text_key(bytes: &[u8]) -> Option<(KeyInput, usize)> {
+    let width = match bytes[0] {
+        0xc2..=0xdf => 2,
+        0xe0..=0xef => 3,
+        0xf0..=0xf4 => 4,
+        _ => return None,
+    };
+    let character = std::str::from_utf8(bytes.get(..width)?)
+        .ok()?
+        .chars()
+        .next()?;
+    let key = KeyInput {
+        action: zz_terminal::KeyAction::Press,
+        key: KeyCode::Character(character),
+        modifiers: zz_terminal::Modifiers::default(),
+        text: Some(character.to_string().into_boxed_str()),
+        unshifted_codepoint: Some(character),
+    };
+    (!character.is_control()).then_some((key, width))
+}
+
+fn tty_sequence_key(bytes: &[u8]) -> Option<(KeyInput, usize)> {
+    if bytes.get(1) == Some(&b'O') {
+        return Some((tty_named_key(tty_final_key(*bytes.get(2)?)?, 1), 3));
+    }
+    if bytes.get(1) != Some(&b'[') {
+        return None;
+    }
+    let end = 2 + bytes
+        .get(2..)?
+        .iter()
+        .position(|byte| (0x40..=0x7e).contains(byte))?;
+    let parameters = std::str::from_utf8(&bytes[2..end]).ok()?;
+    if bytes[end] == b'Z' && parameters.is_empty() {
+        return Some((tty_named_key(KeyCode::Tab, 2), end + 1));
+    }
+    let (number, modifier) = parameters.split_once(';').unwrap_or((parameters, "1"));
+    let digits = |field: &str| !field.is_empty() && field.bytes().all(|byte| byte.is_ascii_digit());
+    let modifier = digits(modifier)
+        .then(|| modifier.parse::<u8>().ok())
+        .flatten()
+        .filter(|modifier| (1..=16).contains(modifier))?;
+    let key = match bytes[end] {
+        b'~' if digits(number) => tty_tilde_key(number.parse().ok()?)?,
+        final_byte if matches!(number, "" | "1") => tty_final_key(final_byte)?,
+        _ => return None,
+    };
+    Some((tty_named_key(key, modifier), end + 1))
+}
+
+fn tty_final_key(final_byte: u8) -> Option<KeyCode> {
+    Some(match final_byte {
+        b'A' => KeyCode::ArrowUp,
+        b'B' => KeyCode::ArrowDown,
+        b'C' => KeyCode::ArrowRight,
+        b'D' => KeyCode::ArrowLeft,
+        b'H' => KeyCode::Home,
+        b'F' => KeyCode::End,
+        b'P'..=b'S' => KeyCode::Function(final_byte - b'P' + 1),
+        _ => return None,
+    })
+}
+
+fn tty_tilde_key(number: u16) -> Option<KeyCode> {
+    let number = u8::try_from(number).ok()?;
+    Some(match number {
+        1 | 7 => KeyCode::Home,
+        2 => KeyCode::Insert,
+        3 => KeyCode::Delete,
+        4 | 8 => KeyCode::End,
+        5 => KeyCode::PageUp,
+        6 => KeyCode::PageDown,
+        11..=15 => KeyCode::Function(number - 10),
+        17..=21 => KeyCode::Function(number - 11),
+        23..=24 => KeyCode::Function(number - 12),
+        _ => return None,
+    })
+}
+
+fn tty_named_key(key: KeyCode, modifier: u8) -> KeyInput {
+    let bits = modifier - 1;
+    KeyInput {
+        action: zz_terminal::KeyAction::Press,
+        key,
+        modifiers: zz_terminal::Modifiers::new(
+            bits & 1 != 0,
+            bits & 4 != 0,
+            bits & 2 != 0,
+            bits & 8 != 0,
+        ),
+        text: None,
+        unshifted_codepoint: None,
+    }
+}
+
 /// Fold a wire key press into the tmux-grammar name the key tables index by.
 #[must_use]
 pub fn input_key_name(input: &KeyInput) -> KeyName {

@@ -3948,6 +3948,26 @@ pub enum ProtocolMessage {
         close: bool,
     },
     ControlStdioClosed,
+    TtyInput {
+        handoff: u64,
+    },
+    TtyInputStarted {
+        handoff: u64,
+    },
+    TtyInputBytes {
+        #[serde(with = "serde_bytes")]
+        bytes: Vec<u8>,
+    },
+    TtyInputReady {
+        received: u64,
+        pane: Option<PaneId>,
+    },
+    TtyInputRelease {
+        handoff: u64,
+    },
+    TtyInputClosed {
+        handoff: u64,
+    },
 }
 
 fn deserialize_client_terminal_type<'de, D>(deserializer: D) -> Result<String, D::Error>

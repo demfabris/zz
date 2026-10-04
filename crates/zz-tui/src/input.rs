@@ -210,6 +210,41 @@ pub(crate) fn handle(
     }
 }
 
+/// The pane `handle` would send a plain key press to as one `Key` message and
+/// nothing else, or `None` while any client-side route could claim it.
+pub(crate) fn plain_key_pane(
+    model: &Model,
+    browser: &BrowserState,
+    prefix_armed: bool,
+    releases: bool,
+) -> Option<zz_protocol::PaneId> {
+    if prefix_armed
+        || model.menu.is_some()
+        || model.menu_action_pending
+        || model.menu_swallowed_key.is_some()
+        || model.confirm.is_some()
+        || model.confirm_reply_pending
+        || model.confirm_swallowed_key.is_some()
+        || model.popup.is_some()
+        || !model.popup_keys_down.is_empty()
+        || model.sidebar_edit.is_some()
+        || model.command_prompt.is_some()
+        || model.choose_tree.is_some()
+        || model.choose_buffer.is_some()
+        || model.display_panes.is_some()
+        || model.command_output_focus().is_some()
+        || model.click.is_some()
+        || model.sidebar_focused()
+        || !model.router.passes_plain_keys(releases)
+    {
+        return None;
+    }
+    let pane = model.active_pane()?;
+    (matches!(model.pane_snapshot(pane)?.kind, PaneKindSnapshot::Terminal)
+        && !browser.has_surface(pane))
+    .then_some(pane)
+}
+
 fn popup_paste_input(active: bool, text: &str) -> Option<InputMessage> {
     active.then_some(InputMessage::Popup {
         action: PopupAction::TerminalView(TerminalViewAction::Paste(text.to_owned())),
@@ -2339,6 +2374,206 @@ mod tests {
             focused_window: Some(WindowId(1)),
         }));
         model
+    }
+
+    fn parse_tty(bytes: &[u8]) -> (Vec<TerminalEvent>, bool) {
+        let mut parser = crate::terminal_event::EventParser::default();
+        let mut events = Vec::new();
+        parser.push(bytes, &mut events);
+        (events, parser.is_idle())
+    }
+
+    fn assert_tty_key_parses_here(bytes: &[u8]) -> Option<KeyInput> {
+        let (daemon, width) = zz_protocol::tty_input_key(bytes)?;
+        assert_eq!(width, bytes.len(), "{bytes:?}");
+        let (events, idle) = parse_tty(bytes);
+        let [TerminalEvent::Key(event)] = events.as_slice() else {
+            panic!("{bytes:?}: {events:?}");
+        };
+        assert!(idle, "{bytes:?}");
+        assert_eq!(key_input(*event), daemon, "{bytes:?}");
+        let mut followed = bytes.to_vec();
+        followed.push(b'x');
+        assert_eq!(
+            zz_protocol::tty_input_key(&followed),
+            Some((daemon.clone(), width)),
+            "{bytes:?}"
+        );
+        Some(daemon)
+    }
+
+    fn tty_text_samples() -> Vec<char> {
+        let mut samples = (0x80..=0x10_ffff_u32)
+            .step_by(37)
+            .filter_map(char::from_u32)
+            .collect::<Vec<_>>();
+        samples.extend([
+            '\u{85}',
+            '\u{a0}',
+            '\u{e9}',
+            '\u{c9}',
+            '\u{df}',
+            '\u{f1}',
+            '\u{20ac}',
+            '\u{4e2d}',
+            '\u{fffd}',
+            '\u{1f600}',
+            '\u{10ffff}',
+        ]);
+        samples
+    }
+
+    fn tty_sequence_samples() -> Vec<Vec<u8>> {
+        let numbers = (0..=30)
+            .map(|number: u16| number.to_string())
+            .chain(["", "03", "200", "+1"].map(str::to_owned))
+            .collect::<Vec<_>>();
+        let modifiers = (0..=17)
+            .map(|modifier: u8| Some(modifier.to_string()))
+            .chain(["", "+2", "05", "2:1", "2:3"].map(|modifier| Some(modifier.to_owned())))
+            .chain([None])
+            .collect::<Vec<_>>();
+        let mut samples = Vec::new();
+        for number in &numbers {
+            for modifier in &modifiers {
+                let parameters = match modifier {
+                    Some(modifier) => format!("{number};{modifier}"),
+                    None => number.clone(),
+                };
+                for final_byte in 0x40..=0x7e_u8 {
+                    let mut sample = format!("\x1b[{parameters}").into_bytes();
+                    sample.push(final_byte);
+                    samples.push(sample);
+                }
+            }
+        }
+        samples.extend((0..=u8::MAX).map(|final_byte| vec![0x1b, b'O', final_byte]));
+        samples
+    }
+
+    #[test]
+    fn every_key_the_daemon_decodes_parses_to_the_same_key_here() {
+        let mut keyed = 0;
+        for byte in 0..=u8::MAX {
+            match assert_tty_key_parses_here(&[byte]) {
+                Some(_) => keyed += 1,
+                None => assert!(byte == 0x1b || byte >= 0x80, "{byte:#x}"),
+            }
+        }
+        assert_eq!(keyed, 127);
+        for character in tty_text_samples() {
+            let encoded = character.to_string().into_bytes();
+            assert_eq!(
+                assert_tty_key_parses_here(&encoded).is_some(),
+                !character.is_control(),
+                "{character:?}"
+            );
+            for cut in 1..encoded.len() {
+                assert_eq!(zz_protocol::tty_input_key(&encoded[..cut]), None);
+                let (events, idle) = parse_tty(&encoded[..cut]);
+                assert!(events.is_empty() && !idle, "{character:?}");
+            }
+        }
+        let decoded = tty_sequence_samples()
+            .iter()
+            .filter_map(|sample| {
+                assert_tty_key_parses_here(sample)
+                    .map(|key| (String::from_utf8_lossy(sample).into_owned(), key))
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+        for (sequence, name) in [
+            ("\x1b[A", "Up"),
+            ("\x1b[D", "Left"),
+            ("\x1bOB", "Down"),
+            ("\x1bOP", "F1"),
+            ("\x1b[H", "Home"),
+            ("\x1b[3~", "DC"),
+            ("\x1b[5~", "PPage"),
+            ("\x1b[24;8~", "C-M-S-F12"),
+            ("\x1b[1;5C", "C-Right"),
+            ("\x1b[1;3D", "M-Left"),
+            ("\x1b[Z", "BTab"),
+        ] {
+            assert_eq!(
+                decoded
+                    .get(sequence)
+                    .map(|key| zz_protocol::input_key_name(key).into_string()),
+                Some(name.to_owned()),
+                "{sequence:?}"
+            );
+        }
+        for sequence in [
+            "\x1b",
+            "\x1b[",
+            "\x1b[1;5",
+            "\x1ba",
+            "\x1b[I",
+            "\x1b[O",
+            "\x1b[200~",
+            "\x1b[1;17A",
+            "\x1b[1;A",
+            "\x1b[1;2:3A",
+            "\x1b[2A",
+            "\x1b[<0;1;1M",
+            "\x1b[M",
+            "\x1b[97;5u",
+            "\x1bOp",
+        ] {
+            assert_eq!(
+                zz_protocol::tty_input_key(sequence.as_bytes()),
+                None,
+                "{sequence:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_plain_key_pane_is_offered_only_while_handle_would_forward_the_key_unchanged() {
+        let mut model = routing_model();
+        let browser = BrowserState::new(None);
+        let pane = zz_protocol::PaneId(1);
+        assert_eq!(plain_key_pane(&model, &browser, false, false), Some(pane));
+        let samples = (0..0x80_u8)
+            .map(|byte| vec![byte])
+            .chain(
+                tty_text_samples()
+                    .into_iter()
+                    .map(|character| character.to_string().into_bytes()),
+            )
+            .chain(tty_sequence_samples())
+            .filter_map(|sample| {
+                let (daemon, width) = zz_protocol::tty_input_key(&sample)?;
+                (width == sample.len()).then_some((sample, daemon))
+            })
+            .collect::<Vec<_>>();
+        assert!(samples.len() > 1000, "{}", samples.len());
+        for (sample, daemon) in samples {
+            let (events, _) = parse_tty(&sample);
+            let [TerminalEvent::Key(event)] = events.as_slice() else {
+                panic!("{sample:?}: {events:?}");
+            };
+            let owner = model.router.owner();
+            assert_eq!(
+                route_test_key(&mut model, *event, PrefixView::default()),
+                [InputMessage::Key {
+                    pane,
+                    input: daemon,
+                    text_follows: false,
+                }],
+                "{sample:?}"
+            );
+            assert_eq!(model.router.owner(), owner);
+            assert_eq!(plain_key_pane(&model, &browser, false, false), Some(pane));
+        }
+        assert_eq!(plain_key_pane(&model, &browser, true, false), None);
+        model.menu_action_pending = true;
+        assert_eq!(plain_key_pane(&model, &browser, false, false), None);
+        model.menu_action_pending = false;
+        model.popup_keys_down.push((pane, KeyCode::Character('a')));
+        assert_eq!(plain_key_pane(&model, &browser, false, false), None);
+        model.popup_keys_down.clear();
+        model.focus_sidebar();
+        assert_eq!(plain_key_pane(&model, &browser, false, false), None);
     }
 
     fn route_test_key(model: &mut Model, event: KeyEvent, prefix: PrefixView) -> Vec<InputMessage> {

@@ -90,16 +90,18 @@ jobs:
           rustup run nightly cargo check --manifest-path clients/web/Cargo.toml --target wasm32-unknown-unknown --all-targets --locked
 
       # Windows is second-class support, so its test failures warn rather than
-      # fail the job. Four fail deterministically there today
-      # (agent::controller::tests::session_controls_send_the_daemon_every_filter_and_restore_path,
-      # both control_mode::tests source-read cases, and
-      # update::tests::macos_uses_the_installer_unless_homebrew_owns_the_app).
+      # fail the job. Only the zz-daemon lib suite still fails there, about 50
+      # of its 1052 tests, mostly unix assumptions in the tests: panes that run
+      # sh, printf or true, ConPTY panes without a tty name, terminfo, /tmp and
+      # unix paths, and Windows paths written unquoted into tmux syntax.
       # Leaving the job permanently red is what let a Windows-only compile
       # error reach a release tag unnoticed: with the tests demoted, red means
       # Windows no longer builds or packages, which is the thing that can
-      # actually strand a release.
+      # actually strand a release. The timeout stops a Windows-only hang from
+      # holding the runner until the six-hour job limit.
       - name: Test workspace
         continue-on-error: ${{ runner.os == 'Windows' }}
+        timeout-minutes: ${{ runner.os == 'Windows' && 90 || 360 }}
         run: cargo test --workspace --all-features
 
       - name: Test zz-mux release profile

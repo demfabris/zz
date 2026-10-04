@@ -15973,6 +15973,8 @@ impl Shared {
         if !self.loop_active.load(Ordering::Acquire) {
             self.start_timers()?;
         }
+        #[cfg(all(test, windows))]
+        self.start_timers()?;
         self.timer_tx
             .send(timers::TimerInput::Callback {
                 deadline: (!delay.is_zero()).then(|| Instant::now() + delay),

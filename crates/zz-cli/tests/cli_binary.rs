@@ -177,7 +177,7 @@ mod daemon_autostart {
         fmt::Write as _,
         fs::File,
         io::{self, Read as _, Write as _},
-        os::fd::FromRawFd as _,
+        os::fd::{AsRawFd as _, FromRawFd as _},
         path::{Path, PathBuf},
         process::{Child, ChildStdin, Command, Output, Stdio},
         sync::mpsc,
@@ -840,6 +840,28 @@ mod daemon_autostart {
         assert_eq!(listed.status.code(), Some(0));
         assert_eq!(listed.stdout, b"autostart\n");
         assert!(listed.stderr.is_empty());
+    }
+
+    #[test]
+    fn autostarted_daemon_does_not_inherit_client_descriptors() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let marker = File::open(&fixture.config).expect("open inherited marker");
+        rustix::io::fcntl_setfd(&marker, rustix::io::FdFlags::empty())
+            .expect("make marker inheritable");
+        let descriptor = marker.as_raw_fd();
+        let created = fixture.run(&["new-session", "-d", "-s", "descriptors"]);
+        drop(marker);
+        assert_eq!(created.status.code(), Some(0));
+
+        let probe = fixture.run(&[
+            "run-shell",
+            &format!("[ -e /dev/fd/{descriptor} ] && echo inherited || echo clean"),
+        ]);
+        assert_eq!(probe.status.code(), Some(0));
+        assert_eq!(probe.stdout, b"clean\n");
     }
 
     #[test]

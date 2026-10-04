@@ -2325,15 +2325,103 @@ mod readiness {
 fn detach_daemon_session(command: &mut Command, ready_fd: std::os::fd::RawFd) {
     use std::os::unix::process::CommandExt as _;
 
-    // SAFETY: the hook only calls setsid and fcntl, which are async-signal-safe.
+    let mut inherited = InheritedDescriptors::new();
+    // SAFETY: the hook only calls setsid, fcntl, and close_range or
+    // proc_pidinfo into memory reserved before the fork, which are
+    // async-signal-safe.
     unsafe {
         command.pre_exec(move || {
             let _ = rustix::process::setsid();
+            inherited.mark_cloexec();
             if ready_fd >= 0 {
                 libc::fcntl(ready_fd, libc::F_SETFD, 0);
             }
             Ok(())
         });
+    }
+}
+
+#[cfg(target_os = "macos")]
+struct InheritedDescriptors(Vec<libc::proc_fdinfo>);
+
+#[cfg(all(unix, not(target_os = "macos")))]
+struct InheritedDescriptors(libc::c_int);
+
+#[cfg(unix)]
+fn descriptor_limit() -> usize {
+    let open = rustix::process::getrlimit(rustix::process::Resource::Nofile)
+        .current
+        .unwrap_or(4096)
+        .clamp(256, 65_536);
+    usize::try_from(open).unwrap_or(4096)
+}
+
+#[cfg(target_os = "macos")]
+impl InheritedDescriptors {
+    fn new() -> Self {
+        Self(Vec::with_capacity(descriptor_limit()))
+    }
+
+    #[allow(
+        unsafe_code,
+        reason = "proc_pidinfo writes into capacity reserved before the fork"
+    )]
+    fn mark_cloexec(&mut self) {
+        let capacity = self.0.capacity();
+        let bytes =
+            i32::try_from(capacity * std::mem::size_of::<libc::proc_fdinfo>()).unwrap_or(i32::MAX);
+        let written = unsafe {
+            libc::proc_pidinfo(
+                libc::getpid(),
+                libc::PROC_PIDLISTFDS,
+                0,
+                self.0.as_mut_ptr().cast(),
+                bytes,
+            )
+        };
+        let Ok(written) = usize::try_from(written) else {
+            return;
+        };
+        let count = (written / std::mem::size_of::<libc::proc_fdinfo>()).min(capacity);
+        for index in 0..count {
+            let descriptor = unsafe { (*self.0.as_ptr().add(index)).proc_fd };
+            if descriptor > 2 {
+                unsafe {
+                    libc::fcntl(descriptor, libc::F_SETFD, libc::FD_CLOEXEC);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+impl InheritedDescriptors {
+    fn new() -> Self {
+        Self(libc::c_int::try_from(descriptor_limit()).unwrap_or(4096))
+    }
+
+    #[allow(
+        unsafe_code,
+        reason = "close_range and fcntl are async-signal-safe syscalls"
+    )]
+    fn mark_cloexec(&mut self) {
+        #[cfg(target_os = "linux")]
+        if unsafe {
+            libc::syscall(
+                libc::SYS_close_range,
+                3_u32,
+                u32::MAX,
+                libc::CLOSE_RANGE_CLOEXEC,
+            )
+        } == 0
+        {
+            return;
+        }
+        for descriptor in 3..self.0 {
+            unsafe {
+                libc::fcntl(descriptor, libc::F_SETFD, libc::FD_CLOEXEC);
+            }
+        }
     }
 }
 

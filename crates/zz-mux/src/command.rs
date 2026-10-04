@@ -23222,6 +23222,7 @@ mod tests {
         ));
     }
 
+    #[cfg(unix)]
     #[test]
     fn server_access_answers_the_pins_lookups_and_refuses_a_second_identity() {
         let mut engine = MuxEngine::default();
@@ -23355,11 +23356,6 @@ mod tests {
             .ok()
             .flatten()
             .map(|group| group.name)
-    }
-
-    #[cfg(not(unix))]
-    fn primary_group_name() -> Option<String> {
-        None
     }
 
     #[test]

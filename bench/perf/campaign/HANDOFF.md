@@ -866,6 +866,16 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   binary reads 0.66, 0.88 and 1.25 ms across the three runs (tmux 3.6-4.1): noise around a row
   far inside its rule. JSONs: `~/.cache/zz-perf/batch9/final-36a82ea1-{1,2,3}.json` (copies in
   /tmp/zzpc/w4/batch9 on the Mac).
+- Mac exit-style gates on `d9d59154` (/tmp/zzpc/w4/macgate, 23:54-00:16, three `--stage final
+  --strict` runs against wave3-macbook-e9bc174c.json; the lanes' Mac compiles paused, but load 5-7
+  from desktop apps: dasd, Codex, Discord): 102/3, 103/2, 102/3. By the median rule one row fails:
+  `echo.p50.busy30` 1.57, 1.70, 1.55x (zz 0.20-0.80 ms, tmux 0.12-0.47; rule 1.5x). Not new: the
+  Mac A/B at merge batch 4 read 1.61-1.97x on both sides. One-run fails: `spawn.cpu.split_empty_P`
+  (1.38x once, medians 0.93x), `spawn.cpu.new_window` (1.31x once, median 1.17x), `attach.ttfc.p1`
+  (1.26x once, median 1.05x), `echo.p99.idle` (1.62x once, median 1.13x), `echo.p99.busy30` (1.84x
+  once, median 1.02x). Gate 3's "regressed" cli rows are host state (tmux slower by the same
+  factor). This was the first full Mac final gate since DL3.
+- Decision: lane MACECHO for Mac `echo.p50.busy30`, alongside CTLLAT and ATTACHP4.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

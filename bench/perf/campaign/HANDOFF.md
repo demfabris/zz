@@ -1070,8 +1070,9 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
 - Worktree cleanup 10:50: removed zz-steady on both hosts (perf/steady `e396a525` kept as a branch)
   and the merged lanes' Linux worktrees zz-bytes, zz-ctrlcpu, zz-deliver4, zz-deliver5, zz-echomap,
   zz-namescost. Linux perf/deliver5 still points at `6dbebe74`, the pre-amend version of the
-  merged `d0116461` (superseded, kept as a branch). Left: ~/dev/zz-perf-int on both hosts, the Mac
-  snapshot ~/dev/zz-check and ~/dev/zz-macqos (until MACQOS reports).
+  merged `d0116461` (superseded, kept as a branch). After the exit (12:55) the rest went too:
+  ~/dev/zz-perf-int on both hosts, ~/dev/zz-check and ~/dev/zz-macqos; only the main checkouts
+  remain. The 15-minute lane watch cron is deleted.
 - MACQOS (run `wf_440f0332-55d`, 1 h 50 min): no commit; QoS is not the lever. A process with no
   darwin role is capped at LEGACY (priority 31) whatever its threads request, so
   `pthread_set_qos_class_self_np` alone does nothing (MACECHO's experiment never changed

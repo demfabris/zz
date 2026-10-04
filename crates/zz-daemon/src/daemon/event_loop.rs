@@ -947,6 +947,12 @@ impl EventLoop {
         {
             return;
         }
+        if let ProtocolMessage::Exec(request) = message
+            && !request.commands.is_empty()
+            && self.timers.hooks.ready()
+        {
+            return;
+        }
         if matches!(
             message,
             ProtocolMessage::Hello(_) | ProtocolMessage::ClientHello(_)
@@ -1184,6 +1190,7 @@ impl EventLoop {
             && connection.command.is_none()
             && !connection.read_closed
             && connection.pending.is_empty()
+            && !self.timers.hooks_pending()
             && matches!(&message, ProtocolMessage::Exec(request) if connection.client.is_some()
                 || request.commands.is_empty()
                 || request.startup_reentry == Some(shared.server_id)

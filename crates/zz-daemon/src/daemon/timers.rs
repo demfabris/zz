@@ -349,15 +349,17 @@ impl LoopTimers {
     }
 
     pub(super) fn next(&self, now: Instant) -> Option<Instant> {
-        if self
-            .inputs
-            .as_ref()
-            .is_some_and(|inputs| !inputs.is_empty())
-            || self.hooks.ready()
-        {
+        if self.hooks_pending() {
             return Some(now);
         }
         self.deadlines.next()
+    }
+
+    pub(super) fn hooks_pending(&self) -> bool {
+        self.inputs
+            .as_ref()
+            .is_some_and(|inputs| !inputs.is_empty())
+            || self.hooks.ready()
     }
 
     pub(super) fn turn(

@@ -779,14 +779,17 @@ As built (branch `perf/publish`), where it departs from the scope above:
   (mtime, size, inode) changes, or when it was read within 2 s of its mtime (a coarse clock can
   hide a same-length rewrite, as git's racy-clean check), and re-lists the directory the same way.
 - A probe skips the helper scan when it cannot change the answer. A scan that finds no state for
-  any pane leaves a key in the helper pool: the pane list with pids, and the (mtime, size, inode)
-  of the registry directory and each `*.json` in it, taken before the registry is read. The next
-  probe restats those paths on the loop thread (one stat when the directory is missing) and
-  submits only when a stamp differs, a pane pid differs while some record file exists, a state is
-  recorded, or a stamp was within 2 s of the scan. With no record file every pane reads none, so
-  spawning and killing panes does not start a scan either. On alienware, one pane printing every
-  100 ms with no Claude session went from 59 helper thread starts a minute to none, and daemon
-  CPU from 240 to 209 ms a minute.
+  any pane leaves a key in the helper pool: the pane list with pids, and the stamps
+  `RegistryCache` took of the registry directory and each record file while it read them
+  (`RegistryCache::settled`, none when any stamp is within 2 s of its read). The next probe
+  restats those paths on the loop thread (one stat when the directory is missing) and submits
+  only when a stamp differs, a pane pid differs while some record file exists, or a state is
+  recorded. With no record file every pane reads none, so spawning and killing panes does not
+  start a scan either. On alienware, one pane printing every 100 ms with no Claude session went
+  from 59 helper thread starts a minute to none, and daemon CPU from 240 to 209 ms a minute.
+  `spawn.instr.kill_pane` went from .150 to .138 in each of three 5-run series. The zz median of
+  `spawn.cpu.kill_pane` went .81 to .76, .82 to .75 and .79 to .78 ms in those series, and its
+  zz minus tmux gap moved by less than the tmux side's run-to-run noise, so neither is a signal.
 - Merged onto FOOTPRINT and FORMAT, the command path got fast enough that `display-message` right
   after `copy-mode` ran before the terminal actor entered the mode (`#{pane_in_mode}` read 0 in
   compat `smoke/copy-mode-formats`). A command that sends copy-mode view actions now ends with one

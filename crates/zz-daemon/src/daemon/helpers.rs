@@ -250,11 +250,9 @@ impl Pool {
         let Ok(directory) = crate::agent::claude_peers::registry_dir() else {
             return false;
         };
-        self.state
-            .settled
-            .lock()
-            .as_ref()
-            .is_some_and(|key| key.holds(&directory, panes))
+        self.state.settled.lock().as_ref().is_some_and(|key| {
+            (!key.registry.has_files() || key.panes == panes) && key.registry.holds(&directory)
+        })
     }
 
     pub(super) fn submit_wait(&self, task: Task) -> io::Result<()> {
@@ -522,84 +520,19 @@ fn finish_peer_scan(
 mod reviewfixes_tests;
 
 #[cfg(all(feature = "agent", unix))]
-type Stamp = Option<(i64, i64, u64, u64)>;
-
-#[cfg(all(feature = "agent", unix))]
-fn stamp(path: &std::path::Path) -> Stamp {
-    use std::os::unix::fs::MetadataExt;
-    std::fs::metadata(path).ok().map(|metadata| {
-        (
-            metadata.mtime(),
-            metadata.mtime_nsec(),
-            metadata.len(),
-            metadata.ino(),
-        )
-    })
-}
-
-#[cfg(all(feature = "agent", unix))]
-const PEER_RACY_SECONDS: i64 = 2;
-
-#[cfg(all(feature = "agent", unix))]
-pub(super) struct PeerKey {
+struct PeerKey {
     panes: Vec<(PaneId, String, Option<u32>)>,
-    directory: std::path::PathBuf,
-    stamps: Vec<(std::path::PathBuf, Stamp)>,
-}
-
-#[cfg(all(feature = "agent", unix))]
-impl PeerKey {
-    fn take(directory: &std::path::Path, panes: &[(PaneId, String, Option<u32>)]) -> Option<Self> {
-        let mut stamps = vec![(directory.to_path_buf(), stamp(directory))];
-        if stamps[0].1.is_some() {
-            for entry in std::fs::read_dir(directory).ok()? {
-                let path = entry.ok()?.path();
-                if path
-                    .extension()
-                    .is_some_and(|extension| extension == "json")
-                {
-                    let seen = stamp(&path);
-                    stamps.push((path, seen));
-                }
-            }
-        }
-        let now = i64::try_from(
-            super::SystemTime::now()
-                .duration_since(super::UNIX_EPOCH)
-                .ok()?
-                .as_secs(),
-        )
-        .ok()?;
-        stamps
-            .iter()
-            .all(|(_, seen)| {
-                seen.is_none_or(|(seconds, ..)| {
-                    seconds <= now && now - seconds >= PEER_RACY_SECONDS
-                })
-            })
-            .then(|| Self {
-                panes: panes.to_vec(),
-                directory: directory.to_path_buf(),
-                stamps,
-            })
-    }
-
-    fn holds(&self, directory: &std::path::Path, panes: &[(PaneId, String, Option<u32>)]) -> bool {
-        self.directory == directory
-            && (self.stamps.len() == 1 || self.panes == panes)
-            && self.stamps.iter().all(|(path, seen)| stamp(path) == *seen)
-    }
+    registry: crate::agent::claude_peers::RegistryKey,
 }
 
 #[cfg(all(feature = "agent", unix))]
 fn scan_peers(state: &State, panes: Vec<(PaneId, String, Option<u32>)>) -> PeerResult {
     use crate::agent::claude_peers;
     *state.settled.lock() = None;
-    let key = PeerKey::take(&claude_peers::registry_dir()?, &panes);
-    let mut records: Vec<_> = {
+    let (mut records, registry): (Vec<_>, _) = {
         let mut registry = state.peers.lock();
         registry.refresh()?;
-        registry.records().cloned().collect()
+        (registry.records().cloned().collect(), registry.settled())
     };
     records.retain(|record| record.zz.is_none());
     let now = super::SystemTime::now()
@@ -608,9 +541,9 @@ fn scan_peers(state: &State, panes: Vec<(PaneId, String, Option<u32>)>) -> PeerR
         .as_millis() as u64;
     let parents = std::cell::RefCell::new(std::collections::BTreeMap::new());
     let updates: Vec<_> = panes
-        .into_iter()
+        .iter()
         .map(|(pane, target, pid)| {
-            let value = claude_peers::record_for_pane_with_parents(&records, &target, pid, |pid| {
+            let value = claude_peers::record_for_pane_with_parents(&records, target, *pid, |pid| {
                 *parents
                     .borrow_mut()
                     .entry(pid)
@@ -635,11 +568,11 @@ fn scan_peers(state: &State, panes: Vec<(PaneId, String, Option<u32>)>) -> PeerR
                 }
                 .to_owned()
             });
-            (pane, pid, value)
+            (*pane, *pid, value)
         })
         .collect();
     if updates.iter().all(|(_, _, value)| value.is_none()) {
-        *state.settled.lock() = key;
+        *state.settled.lock() = registry.map(|registry| PeerKey { panes, registry });
     }
     Ok(updates)
 }
@@ -704,7 +637,3 @@ mod e19fix_tests;
 #[cfg(test)]
 #[path = "helpers_helperwait_tests.rs"]
 mod helperwait_tests;
-
-#[cfg(all(test, feature = "agent", unix))]
-#[path = "helpers_peerskip_tests.rs"]
-mod peerskip_tests;

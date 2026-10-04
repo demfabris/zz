@@ -169,5 +169,27 @@ fn an_unchanged_registry_skips_the_peer_scan_and_any_change_runs_it() {
     assert!(!probe());
     set_pid(std::process::id());
     assert!(!probe());
+
+    fs::write(&file, record(&target, "busy")).unwrap();
+    backdate(&file);
+    backdate(&sessions);
+    assert!(probe());
+    assert_eq!(state().as_deref(), Some("working"));
+    fs::remove_file(&file).unwrap();
+    backdate(&sessions);
+    assert!(shared.start_peer_scan(&completed));
+    completions.recv_timeout(Duration::from_secs(10)).unwrap();
+    let dropped = shared
+        .helpers
+        .results
+        .recv_timeout(Duration::from_secs(10))
+        .unwrap();
+    set_pid(1);
+    shared.apply_helper_result(dropped);
+    assert_eq!(state().as_deref(), Some("working"));
+    assert!(shared.helpers.peer_scan_settled(&shared.peer_scan_inputs()));
+    assert!(probe());
+    assert_eq!(state(), None);
+    assert!(!probe());
     shared.request_shutdown();
 }

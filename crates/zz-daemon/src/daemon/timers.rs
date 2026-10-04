@@ -6,6 +6,8 @@ pub(super) const PEER_PROBE_INTERVAL: Duration = Duration::from_secs(1);
 
 pub(super) const NAME_INTERVAL: Duration = Duration::from_millis(500);
 
+pub(super) const FIRST_NAME_RECHECK: Duration = Duration::from_millis(50);
+
 pub(super) struct NameCheck {
     terminal: usize,
     last: Instant,
@@ -958,7 +960,7 @@ impl Shared {
                 return true;
             }
             _ => {
-                let due = now + NAME_INTERVAL;
+                let due = now + FIRST_NAME_RECHECK;
                 inner.name_checks.insert(
                     pane,
                     NameCheck {
@@ -1017,23 +1019,6 @@ impl Shared {
                     .send(TimerInput::Timer(TimerCommand::NameCheck(next)));
             }
             due
-        };
-        self.check_names(due, now);
-    }
-
-    pub(super) fn run_frame_name_checks(self: &Arc<Self>, now: Instant) {
-        let due = {
-            let inner = self.inner.lock();
-            inner
-                .name_checks
-                .iter()
-                .filter(|(_, check)| check.frame)
-                .filter_map(|(pane, check)| {
-                    let terminal = inner.terminals.get(pane)?;
-                    (Arc::as_ptr(terminal) as usize == check.terminal)
-                        .then(|| (*pane, Arc::clone(terminal), false))
-                })
-                .collect::<Vec<_>>()
         };
         self.check_names(due, now);
     }

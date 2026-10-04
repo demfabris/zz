@@ -7567,7 +7567,6 @@ impl Shared {
         mux_source: MuxOptionSource,
         queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
-        self.run_frame_name_checks(Instant::now());
         let client_terminal = if context.has_no_client() {
             ClientTerminal::NoClient
         } else {

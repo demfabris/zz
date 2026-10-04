@@ -1067,6 +1067,11 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   clean; a pattern scan of the 42,191 added lines (AWS, GitHub, Slack, Anthropic, OpenAI and Google
   key shapes, private-key blocks, JWTs, quoted secrets, email addresses) found nothing; no
   attribution lines. Both hosts' main checkouts fast-forwarded. No tag.
+- Worktree cleanup 10:50: removed zz-steady on both hosts (perf/steady `e396a525` kept as a branch)
+  and the merged lanes' Linux worktrees zz-bytes, zz-ctrlcpu, zz-deliver4, zz-deliver5, zz-echomap,
+  zz-namescost. Linux perf/deliver5 still points at `6dbebe74`, the pre-amend version of the
+  merged `d0116461` (superseded, kept as a branch). Left: ~/dev/zz-perf-int on both hosts, the Mac
+  snapshot ~/dev/zz-check and ~/dev/zz-macqos (until MACQOS reports).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

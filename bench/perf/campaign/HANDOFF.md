@@ -932,6 +932,25 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   10 red (batch6's set with `smoke/format-modifier-client-loop`, the tmux-side client-order
   check, in place of `smoke/plugin-runtime-continuum`, the load flake); tui-choosers 78/78. Gate
   JSONs copied to /tmp/zzpc/w4/batch10 on the Mac.
+- MACECHO merged as `b1601895` (lane `7b6b3556` + review fix `c715c0a5`; done false). No wait to
+  fix on the Mac busy30 echo: no pacing delay (the echo publishes about 2 us after the PTY read),
+  one 5-byte tty write, no queueing behind a partial write. A quiet busy30 key is 157 us: bench to
+  client 22.9, client in 10.5, loop 27.8, pane hop 24.2, shard 23.8, client out 17.1, tty to
+  bench 15.8. The daemon's work matches tmux's server; the gap is the attach client relay: tmux's
+  client hands the server its tty, so a key costs 4 serial wakes there against 6 in zz, and every
+  wake stretches under load. Runs fall in a fast state (zz 0.10-0.20 ms, ratio 1.56-1.83x) or a
+  slow one (zz 0.8-0.9 ms, 1.36-1.59x); compare base and lane within a state. What merged: the
+  frame diff tracks up to 8 changed rows in one pass before the shift search and rehashes only
+  those rows (one row 79 -> 52 kinstr per 120x40 diff, two rows 81 -> 54, scroll and 20-row frames
+  +1.7-2.2%); an old-vs-new fuzz of 6M diffs matched scroll, spans, cells and fingerprints. Echo
+  daemon instructions per key -10%, an editor-style frame (cursor row plus a ruler) 283 -> 256 k.
+  No latency change. The review's major (the first version paid an extra full pass on two-row
+  frames, +60%) is what the fix commit closed. QoS: Rust threads start at DEFAULT (0x15) while
+  tmux inherits USER_INTERACTIVE (0x21); raising zz's threads did not move the loaded Mac.
+- Decision: lane TTYIN, the input half of a tmux-style tty handoff (the raw TUI passes its tty
+  input fd to the daemon like `zz_cli -C` passes stdio; plain keys go straight to the pane, the
+  rest goes back to the client raw and in order), to take one serial wake out of the Mac echo.
+  Output stays on the client. Brief /tmp/zzpc/w4/ttyin.md, ~/dev/zz-ttyin from `b1601895`.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

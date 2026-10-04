@@ -821,6 +821,29 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
 - batch8 (`~/.cache/zz-perf/batch8`, 22:08) on `36a82ea1`: three A/B pairs against
   batch6-86e721ad with control added, the strict final gate, then the batch6 checks plus
   tui-choosers. Mac checks of `d9d59154` run in ~/dev/zz-check (/tmp/zzpc/w4/mac-d9d59154).
+- batch8 A/B, three pairs at load 0.4-1.2, medians of the three run medians (zz / tmux ratio,
+  86e721ad -> 36a82ea1): `echo.p50.idle` 1.48 -> 1.39x, `echo.p50.busy30` 1.54 -> 1.42x,
+  `echo.p99.idle` 1.41 -> 1.32x, `attach.cpu.p4` 1.30 -> 1.25x, `spawn.cpu.kill_pane` 1.21 ->
+  0.93x, `control.latency` 0.99 -> 1.07x, `chatty.cpu_pct.steady` 4.36 -> 2.91% (tmux 3.2-3.5),
+  chatty instructions -10 to -12%. Mac checks of `d9d59154`: fmt, clippy, Linux-target clippy
+  pass; zz-terminal + zz-daemon 2026 passed, 19 load failures, all 19 pass alone.
+- Strict final gate on `36a82ea1` (`~/.cache/zz-perf/batch8/final-36a82ea1.json`, one run, lane
+  compiles paused): 100 pass, 5 fail: `spawn.cpu.kill_pane` 0.782 vs 0.663 (tmux sample fast),
+  `attach.ttfc.p4` 1.14x, `attach.cpu.p4` 1.46x (3.31 vs 2.27), `echo.p50.busy30` 1.52x and
+  `echo.p99.busy30` 1.61x (tmux 0.747, its fast mode). 5 "regressed" against wave 3: four
+  throughput rows at 0.82-0.86 of the wave-3 values, but the bare-reader ceiling rows fell the same
+  (0.83-0.84) and tmux fell 8-11%, so zz over ceiling is unchanged (ascii 0.99 vs 0.97 at
+  86e721ad); host drift. `mem.copy_cpu.scroll180` 1.31 ms (0.68-1.07 before, tmux 4.0): noise
+  until the exit runs show otherwise.
+- **Decision: the wave-4 exit is judged on three strict full gates per host, back to back on a
+  quiet host; a ratio row passes when the median of its three ratios passes.** One run cannot
+  decide rows whose tmux side flips between a fast and a slow mode (echo busy30 tmux 0.75-0.92 ms,
+  `kill_pane` tmux 0.66-0.87, `control.latency` tmux 0.0128-0.0196). All three JSONs go to
+  bench/perf/results.
+- CTLLAT and ATTACHP4 launched 22:20 as `w4-side-lanes` run `wf_71e6cd92-2a7` (briefs
+  /tmp/zzpc/w4/{ctllat,attachp4}.md, worktrees ~/dev/zz-ctllat and ~/dev/zz-attachp4 on both
+  hosts, from `3e00c00f`): `control.latency` (zz flat at 0.016 ms since 86e721ad, 0.0136 at
+  BURST; rule 1.1x) and Linux `attach.cpu.p4` (kernel time; target 1.2x).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

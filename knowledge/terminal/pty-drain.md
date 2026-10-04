@@ -1,18 +1,19 @@
 ---
 type: Subsystem
 title: PTY drain topology (the IO fast path)
-description: How macOS keeps its tuned inline PTY actor while Linux overlaps a bounded gather stage with VT parsing; includes the probe and benchmark results behind each platform choice.
+description: How macOS keeps its tuned inline PTY actor while Linux reads idle panes on their shard and lends busy ones to a bounded gather stage that overlaps reads with VT parsing; includes the probe and benchmark results behind each platform choice.
 resource: crates/zz-terminal/src/session.rs
 tags: [pty, throughput, drain, spin-bridge, poll, benchmark, session]
-timestamp: 2026-10-03T00:00:00Z
+timestamp: 2026-10-03T22:15:00Z
 ---
 
 # Overview
 
 `run_terminal` in `session.rs` is the terminal actor. It owns the libghostty-vt state (see
 [libghostty-vt](/terminal/libghostty-vt.md)), command handling, and snapshot publishing.
-macOS and other Unix targets drain the PTY inline with the actor. Linux gives PTY reads to
-one bounded gather thread per shard while the actor parses the previous batch. Windows keeps the
+macOS and other Unix targets drain the PTY inline with the actor. Linux reads an idle pane on
+its shard too, and lends a busy one to a bounded gather thread per shard, which reads while
+the actor parses the previous batch. Windows keeps the
 portable blocking-reader path. Each platform keeps libghostty state on the actor thread.
 
 Benchmarked 2026-07-28 (`bench/`, Mac16,5, 180×50, medians of 5 hyperfine runs):
@@ -150,9 +151,22 @@ both costs in series:
 ```
 
 The Linux path rotates four preallocated 64 KiB buffers per pane through bounded Crossbeam
-channels. Each shard starts one `zz-pty-gather-N` thread with its first PTY pane. It owns
-`read` and `poll` for every PTY master on the shard, plus its own wake pipe, which carries
-launches, exits and buffer returns. The actor consumes at most four batches per turn and
+channels. A pane starts at home: its shard polls and reads the PTY master directly
+(`DirectReader`), so an idle or interactive pane costs no gather wake. Once 64 KiB arrive
+with no 10 ms pause, `lend_if_busy` hands the pane to its shard's `zz-pty-gather-N` thread,
+which the shard starts with its first PTY pane. The gather owns `read` and `poll` for every
+pane it holds, plus its own wake pipe, which carries launches, exits and buffer returns. It
+sends a pane back 100 ms after the pane's last delivered batch, provided the pane holds a
+free buffer, so a starved pane stays with the gather. `go_home` parks the pane in its
+`GatherSlot` under the slot lock and then sends a payload-free `ReaderMessage::Home` after
+the pane's last data, so bytes keep their order and only one side reads the fd at a time.
+The message carries no pane because a Crossbeam sender stored inside its own channel is
+never freed. On the shard, a direct read turn stops after a short read that hit `EAGAIN`, so
+an echo costs two PTY reads. On alienware this removed every gather wake and read from an
+echo, cut chatty instructions per second by about 11% and chatty CPU by 11 to 28%; the echo
+median moved only 30 to 130 us, less than the gather hop was expected to cost.
+
+The actor consumes at most four batches per turn and
 returns each buffer to the pool. A pane whose four buffers are all with its actor leaves the
 poll set until one comes back, so a stalled pane does not hold up the others on the shard,
 and a full ring still lets kernel flow control backpressure the child. The thread reads every
@@ -162,7 +176,7 @@ read comes back empty while it holds at least 1 KiB waits in the next zero-timeo
 of being read again, and sends its partial batch after 16 polls that miss it, so a busy pane
 neither waits for its neighbours nor holds back their partial batches. Every eight passes that
 poll also admits newly ready panes and picks up launches, exits and buffer returns; the thread
-blocks in `poll` only when no pane is reading or waiting. `ZZ_PTY_GATHER=0` reads on the shard thread instead.
+blocks in `poll` only when no pane is reading or waiting. `ZZ_PTY_GATHER=0` keeps every pane on its shard.
 
 One thread cannot keep several saturated PTYs as full as one reader per pane. A Linux PTY read
 copies out of the 4 KiB line discipline buffer, and a `read` or `poll` that finds it empty
@@ -185,15 +199,20 @@ the gather alone.
 ```mermaid
 flowchart LR
     child["PTY child"] --> kernel["Linux PTY queue"]
-    kernel --> gather["zz-pty-gather-N, one per shard<br/>plus one per extra busy pane<br/>poll + nonblocking read<br/>spin 16"]
-    gather -->|"4 × 64 KiB bounded pool"| actor["zz-terminal actor<br/>vt_write + commands"]
+    kernel --> shard["shard poll + direct read<br/>idle and interactive panes<br/>spin 8..16"]
+    shard -->|"64 KiB with no 10 ms pause"| gather["zz-pty-gather-N, one per shard<br/>plus one per extra busy pane<br/>poll + nonblocking read<br/>spin 16"]
+    gather -->|"Home after 100 ms quiet"| shard
+    shard --> actor["zz-terminal actor<br/>vt_write + commands"]
+    gather -->|"4 × 64 KiB bounded pool"| actor
     actor -->|"recycle buffer"| gather
     actor -->|"snapshot at 16 ms gate"| render["GUI"]
 ```
 
 A partial batch below 1 KiB goes to the actor at its first `EAGAIN`. Saturated output gets
 16 direct read retries, enough to bridge Linux queue refills without the 512-spin macOS
-budget. The shard sleeps in `poll` on its wake pipe; the gather marks the pane ready and
+budget. The shard's direct reads use the same cap: on Linux `PTY_BRIDGE_SPIN_MAX` is
+`PTY_GATHER_BRIDGE_SPIN_MAX`, so `bridge_spins` moves between 8 and 16 there; with 512, bursts
+written as many small writes cost about 45% more read syscalls. The shard sleeps in `poll` on its wake pipe; the gather marks the pane ready and
 writes that pipe at most once until the shard drains it.
 
 ## The macOS inline spin bridge (`Wake::PtyReadable` arm)

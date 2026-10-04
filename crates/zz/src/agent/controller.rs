@@ -4279,6 +4279,7 @@ mod tests {
     fn session_controls_send_the_daemon_every_filter_and_restore_path(cx: &mut TestAppContext) {
         let (controller, sink) = proxy_controller(cx);
         let pane = PaneId(15);
+        let new_workspace = std::env::temp_dir().join("new-workspace");
         cx.update(|cx| {
             controller.update(cx, |controller, cx| {
                 ready_pane(controller, pane);
@@ -4313,7 +4314,7 @@ mod tests {
                 controller.panes.get_mut(&pane).expect("pane").connection =
                     AgentConnectionState::Ready;
                 controller
-                    .set_working_directory(pane, Path::new("/new-workspace"), cx)
+                    .set_working_directory(pane, &new_workspace, cx)
                     .expect("start in another workspace");
             });
         });
@@ -4346,9 +4347,7 @@ mod tests {
                     },
                 },
                 AgentRequest::SessionOp {
-                    op: AgentSessionOpKind::New {
-                        cwd: PathBuf::from("/new-workspace"),
-                    },
+                    op: AgentSessionOpKind::New { cwd: new_workspace },
                 },
             ]
         );

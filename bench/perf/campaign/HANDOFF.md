@@ -1039,6 +1039,11 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   tui-pane-geometry 6/6. batch11's Linux checks on `0a67eaab` (same Linux code): clippy, workspace
   tests (all failures pass alone), compat-check, backpressure 9/9, flood 110.7 / 79.0 MB/s,
   attached-client pass with 0 rejections.
+- Two side sessions the owner started from task chips landed work: `c950d462` (perf/gireply, merged
+  into perf/wave4 by that session: a bare `Gi=` counts as a kitty reply only while a probe waits,
+  the daemon's mirror check is gone) and `a246b6eb` on local main, not pushed (the daemon builds
+  without the agent feature, and CI lints that build). The wave-4 push to main must merge
+  `a246b6eb` too.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

@@ -159,6 +159,29 @@ fn a_line_that_does_not_settle_in_the_daemon_goes_to_the_client_as_submitted() {
     );
 }
 
+#[test]
+fn a_short_read_leaves_the_drain_for_after_the_reply() {
+    let (mut control, input, _stdout, _poll) = stdio_pair();
+    let mut forwarded = Vec::new();
+    control.client_write(b"", Some((0, 1)), false);
+    rustix::io::write(&input, b"display-message -p a\n").expect("write control line");
+    assert!(control.read_chunks(true));
+    assert!(!control.drained);
+    rustix::io::write(&input, b"display-message -p b\n").expect("write second line");
+    assert!(control.drain_input(&mut forwarded));
+    assert!(control.drained);
+    assert!(!control.drain_input(&mut forwarded));
+    assert_eq!(
+        control.take_line(true, &mut forwarded).as_deref(),
+        Some("display-message -p a")
+    );
+    assert_eq!(
+        &control.input[control.consumed..],
+        b"display-message -p b\n"
+    );
+    assert!(forwarded.is_empty());
+}
+
 fn read_to_eof(fd: &OwnedFd) -> usize {
     let mut buffer = [0_u8; 16384];
     let mut total = 0;

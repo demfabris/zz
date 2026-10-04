@@ -85,7 +85,8 @@ impl Burst {
             .as_ref()
             .unwrap()
             .stdin_token;
-        self.event_loop.stdio_ready(self.token, stdin_token);
+        self.event_loop
+            .stdio_ready(self.token, stdin_token, &self.shared);
         self.event_loop.turn(&self.shared).unwrap();
     }
 
@@ -150,6 +151,48 @@ fn a_burst_of_daemon_lines_reaches_stdout_in_one_write() {
     let writes = burst.writes();
     assert_eq!(writes.len(), 1, "{writes:?}");
     assert_eq!(blocks(&writes[0]), expected(8));
+    assert!(burst.forwarded().is_empty());
+}
+
+#[test]
+fn a_line_is_answered_on_its_stdin_event_and_the_drain_follows_the_reply() {
+    let mut burst = Burst::direct();
+    rustix::io::write(&burst.stdin, b"display-message -p a\n").unwrap();
+    let stdin_token = burst.stdio().stdin_token;
+    burst
+        .event_loop
+        .stdio_ready(burst.token, stdin_token, &burst.shared);
+    let writes = burst.writes();
+    assert_eq!(writes.len(), 1, "{writes:?}");
+    assert_eq!(blocks(&writes[0]), [(1, "a".to_owned())]);
+    assert!(burst.stdio().drained);
+    assert!(burst.forwarded().is_empty());
+}
+
+#[test]
+fn output_queued_before_a_line_reaches_stdout_ahead_of_its_reply() {
+    let mut burst = Burst::direct();
+    let output = ProtocolMessage::Event(Event {
+        sequence: 0,
+        payload: EventPayload::PaneOutput {
+            pane: zz_protocol::PaneId(3),
+            bytes: b"ready".to_vec(),
+        },
+    });
+    assert!(
+        burst.event_loop.connections[&burst.token]
+            .outbound
+            .enqueue_reliable(&output)
+    );
+    rustix::io::write(&burst.stdin, b"display-message -p a\n").unwrap();
+    let stdin_token = burst.stdio().stdin_token;
+    burst
+        .event_loop
+        .stdio_ready(burst.token, stdin_token, &burst.shared);
+    let text = burst.writes().concat();
+    let (first, rest) = text.split_once('\n').unwrap();
+    assert_eq!(first, "%output %3 ready");
+    assert_eq!(blocks(rest), [(1, "a".to_owned())]);
     assert!(burst.forwarded().is_empty());
 }
 

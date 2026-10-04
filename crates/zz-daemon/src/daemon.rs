@@ -7567,6 +7567,7 @@ impl Shared {
         mux_source: MuxOptionSource,
         queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
+        self.run_frame_name_checks(Instant::now());
         let client_terminal = if context.has_no_client() {
             ClientTerminal::NoClient
         } else {
@@ -28110,7 +28111,7 @@ impl Shared {
                 .values()
                 .filter_map(|c| c.choose_tree.as_ref())
                 .any(|chooser| chooser.sort.order() == Some(TmuxSortOrder::Activity));
-            let check = self.admit_name_check(&mut inner, pane, terminal, now);
+            let check = self.admit_name_check(&mut inner, pane, terminal, now, false);
             (
                 check,
                 silence_schedule,
@@ -28131,6 +28132,25 @@ impl Shared {
         }
         if check {
             self.check_pane_runtime(pane, terminal, true, now);
+        }
+    }
+
+    fn note_pane_frame(
+        self: &Arc<Self>,
+        pane: PaneId,
+        terminal: &Arc<TerminalSession>,
+        now: Instant,
+    ) {
+        let check = {
+            let mut inner = self.inner.lock();
+            inner
+                .terminals
+                .get(&pane)
+                .is_some_and(|current| Arc::ptr_eq(current, terminal))
+                && self.admit_name_check(&mut inner, pane, terminal, now, true)
+        };
+        if check {
+            self.check_pane_runtime(pane, terminal, false, now);
         }
     }
 

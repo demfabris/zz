@@ -10,6 +10,7 @@ pub(super) struct NameCheck {
     terminal: usize,
     last: Instant,
     due: Option<Instant>,
+    frame: bool,
 }
 
 pub(super) struct KeyTablePublishHold(Arc<Shared>);
@@ -931,30 +932,43 @@ impl Shared {
         pane: PaneId,
         terminal: &Arc<TerminalSession>,
         now: Instant,
+        frame: bool,
     ) -> bool {
         let identity = Arc::as_ptr(terminal) as usize;
-        let due = match inner.name_checks.get_mut(&pane) {
+        let (due, admitted) = match inner.name_checks.get_mut(&pane) {
             Some(check)
                 if check.terminal == identity
                     && now.saturating_duration_since(check.last) < NAME_INTERVAL =>
             {
+                check.frame |= frame;
                 if check.due.is_some() {
                     return false;
                 }
                 let due = check.last + NAME_INTERVAL;
                 check.due = Some(due);
-                due
+                (due, false)
+            }
+            Some(check) if check.terminal == identity => {
+                *check = NameCheck {
+                    terminal: identity,
+                    last: now,
+                    due: None,
+                    frame: false,
+                };
+                return true;
             }
             _ => {
+                let due = now + NAME_INTERVAL;
                 inner.name_checks.insert(
                     pane,
                     NameCheck {
                         terminal: identity,
                         last: now,
-                        due: None,
+                        due: Some(due),
+                        frame: true,
                     },
                 );
-                return true;
+                (due, true)
             }
         };
         if inner
@@ -966,7 +980,7 @@ impl Shared {
                 .timer_tx
                 .send(TimerInput::Timer(TimerCommand::NameCheck(due)));
         }
-        false
+        admitted
     }
 
     pub(super) fn run_due_name_checks(self: &Arc<Self>, now: Instant) {
@@ -985,12 +999,15 @@ impl Shared {
                     continue;
                 }
                 check.due = None;
+                let frame = std::mem::take(&mut check.frame);
                 if let Some(terminal) = inner.terminals.get(pane)
                     && Arc::as_ptr(terminal) as usize == check.terminal
-                    && terminal.take_output_since_check()
                 {
-                    check.last = now;
-                    due.push((*pane, Arc::clone(terminal)));
+                    let output = terminal.take_output_since_check();
+                    if output || frame {
+                        check.last = now;
+                        due.push((*pane, Arc::clone(terminal), output));
+                    }
                 }
             }
             if let Some(next) = next {
@@ -1001,10 +1018,31 @@ impl Shared {
             }
             due
         };
-        for (pane, terminal) in due {
+        self.check_names(due, now);
+    }
+
+    pub(super) fn run_frame_name_checks(self: &Arc<Self>, now: Instant) {
+        let due = {
+            let inner = self.inner.lock();
+            inner
+                .name_checks
+                .iter()
+                .filter(|(_, check)| check.frame)
+                .filter_map(|(pane, check)| {
+                    let terminal = inner.terminals.get(pane)?;
+                    (Arc::as_ptr(terminal) as usize == check.terminal)
+                        .then(|| (*pane, Arc::clone(terminal), false))
+                })
+                .collect::<Vec<_>>()
+        };
+        self.check_names(due, now);
+    }
+
+    fn check_names(self: &Arc<Self>, due: Vec<(PaneId, Arc<TerminalSession>, bool)>, now: Instant) {
+        for (pane, terminal, output) in due {
             let (current_command, live_path) = terminal_foreground_facts(&terminal);
             let events =
-                self.apply_pane_runtime(pane, &terminal, &current_command, live_path, true, now);
+                self.apply_pane_runtime(pane, &terminal, &current_command, live_path, output, now);
             self.enqueue_event_hooks(events);
         }
     }

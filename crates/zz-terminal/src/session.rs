@@ -68,7 +68,7 @@ mod copy_grid;
 mod deferred_event_tests;
 mod mode_revision;
 mod pane_actor;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod pane_tests;
 #[cfg(test)]
 mod reader_tests;

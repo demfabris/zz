@@ -875,7 +875,9 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   (1.26x once, median 1.05x), `echo.p99.idle` (1.62x once, median 1.13x), `echo.p99.busy30` (1.84x
   once, median 1.02x). Gate 3's "regressed" cli rows are host state (tmux slower by the same
   factor). This was the first full Mac final gate since DL3.
-- Decision: lane MACECHO for Mac `echo.p50.busy30`, alongside CTLLAT and ATTACHP4.
+- Decision: lane MACECHO for Mac `echo.p50.busy30`, alongside CTLLAT and ATTACHP4, launched 00:25 as
+  `w4-side-lanes` run `wf_eb6ed636-6ac` (brief /tmp/zzpc/w4/macecho.md, ~/dev/zz-macecho from
+  `69f45664`, Mac only; target 1.35x over five alternating echo runs).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

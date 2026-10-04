@@ -173,8 +173,12 @@ fn scan_directories(
             let Some(label) = relative.to_str() else {
                 continue;
             };
+            #[cfg(windows)]
+            let label = label.replace('\\', "/");
+            #[cfg(not(windows))]
+            let label = label.to_owned();
             batch.push(PickerEntry {
-                relative: SharedString::from(label.to_owned()),
+                relative: SharedString::from(label),
                 absolute: Arc::from(entry.path()),
                 prior: entry_prior(depth + 1, entry.path().join(".git").exists()),
             });

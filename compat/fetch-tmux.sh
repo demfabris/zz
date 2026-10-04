@@ -120,7 +120,7 @@ log "building $TMUX_VERSION"
   # The pin hard-errors on macOS unless the utf8proc choice is explicit; the
   # harness diffs topology and geometry, never glyph widths, so pick the
   # dependency-free build everywhere.
-  ./configure --disable-utf8proc
+  ac_cv_prog_found_vlock=no ./configure --disable-utf8proc
   make clean
   make
 ) >&2

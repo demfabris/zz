@@ -387,7 +387,16 @@ fn an_idle_pane_reads_on_its_shard_and_a_burst_visits_the_gather() {
         gather_reads(gather) > before + 16,
         "the burst stayed on the shard"
     );
-    thread::sleep(PTY_GATHER_LEND_IDLE * 3);
+    let mut probe = 0;
+    wait_within(Duration::from_secs(10), || {
+        thread::sleep(PTY_GATHER_LEND_IDLE * 2);
+        probe += 1;
+        let text = format!("probe {probe}");
+        let before = gather_reads(gather);
+        pane.send_text(format!("{text}\n"));
+        wait(|| captured(&pane, &text));
+        gather_reads(gather) == before
+    });
     echo("quiet again");
     echo("still quiet");
 }

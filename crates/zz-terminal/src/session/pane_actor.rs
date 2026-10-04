@@ -290,7 +290,7 @@ impl PaneActor {
         let recycle_tx = BufferReturn {
             buffers: recycle_tx,
             #[cfg(target_os = "linux")]
-            gather: Some(lease),
+            gather: lease,
         };
 
         let effects = Rc::new(RefCell::new(PtyEffects::new()));
@@ -1940,12 +1940,7 @@ impl PaneActor {
             }
             #[cfg(target_os = "linux")]
             ReaderMessage::Home => {
-                if let Some(pane) = self
-                    .recycle_tx
-                    .gather
-                    .as_ref()
-                    .and_then(GatherLease::take_home)
-                {
+                if let Some(pane) = self.recycle_tx.gather.take_home() {
                     self.read_buffer = self.reader.park(pane);
                 }
             }

@@ -255,8 +255,10 @@ const PTY_DRAIN_TURN_TIME: Duration = Duration::from_millis(1);
 const PTY_BRIDGE_THRESHOLD_BYTES: usize = 1024;
 /// Nonblocking read retries bridging a saturated producer's kernel queue refill.
 /// Probed on Mac16,5/macOS 27: spin 64/256/512 gave 281/332/348 MB/s.
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "linux")))]
 const PTY_BRIDGE_SPIN_MAX: u32 = 512;
+#[cfg(target_os = "linux")]
+const PTY_BRIDGE_SPIN_MAX: u32 = PTY_GATHER_BRIDGE_SPIN_MAX;
 #[cfg(unix)]
 const PTY_BRIDGE_SPIN_MIN: u32 = 8;
 #[cfg(target_os = "linux")]
@@ -13642,7 +13644,7 @@ impl Drop for GatherLease {
 struct BufferReturn {
     buffers: Sender<Vec<u8>>,
     #[cfg(target_os = "linux")]
-    gather: Option<GatherLease>,
+    gather: GatherLease,
 }
 
 #[cfg(any(target_os = "linux", not(unix)))]
@@ -13650,9 +13652,7 @@ impl BufferReturn {
     fn give(&self, buffer: Vec<u8>) {
         let _ = self.buffers.try_send(buffer);
         #[cfg(target_os = "linux")]
-        if let Some(gather) = &self.gather {
-            gather.returned();
-        }
+        self.gather.returned();
     }
 }
 
@@ -22543,7 +22543,7 @@ mod tests {
             output_rx,
             BufferReturn {
                 buffers: recycle_tx,
-                gather: Some(lease),
+                gather: lease,
             },
             allocations,
         )
@@ -22610,9 +22610,10 @@ mod tests {
         assert_eq!(buffer.len(), PTY_READ_BUFFER_BYTES);
         let half = PTY_READ_BUFFER_BYTES / 2;
         assert!(!reader.lend_if_busy(half, &mut buffer, &buffers));
-        thread::sleep(PTY_GATHER_LEND_BUSY);
+        reader.last -= PTY_GATHER_LEND_BUSY;
         assert!(!reader.lend_if_busy(half, &mut buffer, &buffers));
         assert!(reader.fd().is_some());
+        reader.last = Instant::now() + Duration::from_mins(1);
         assert!(reader.lend_if_busy(half, &mut buffer, &buffers));
         assert!(reader.fd().is_none());
         assert!(buffer.is_empty());
@@ -22643,11 +22644,7 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     fn sent_home(buffers: &BufferReturn) -> GatherPane {
-        buffers
-            .gather
-            .as_ref()
-            .and_then(GatherLease::take_home)
-            .expect("the pane waits at home")
+        buffers.gather.take_home().expect("the pane waits at home")
     }
 
     #[cfg(target_os = "linux")]
@@ -22897,8 +22894,7 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     fn lent_out(gather: &PtyGather, buffers: &BufferReturn) -> bool {
-        let lease = buffers.gather.as_ref().expect("gather lease");
-        let owner = lease.slot.owner.lock();
+        let owner = buffers.gather.slot.owner.lock();
         matches!(
             (&owner.pipe, &gather.panes.wake.pipe),
             (Some(owner), Some(home)) if !Arc::ptr_eq(owner, home)

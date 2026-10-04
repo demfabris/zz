@@ -79,6 +79,8 @@ OSC 7 working directories, and cursor resets continue alongside the prompt marks
 The worker retains maps of active and inactive views. Each attached view has its own scroll,
 selection, and copy-mode state; `publish_active_views` snapshots active views independently.
 `detach_view` retains the view's state as inactive, and `release_view` drops its retained state.
+When the last view stops streaming, the pane keeps its render state for `VIEWED_RENDER_RETAIN`
+(5 s) before releasing it, so a reattach or window switch inside that window skips the rebuild.
 
 Synchronized output (`DECSET 2026`) holds the last published frames while parsing and input
 continue. `Publisher::defer_synchronized_output` guards the shared snapshot path. Both live-PTY

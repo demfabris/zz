@@ -15,6 +15,7 @@ use thiserror::Error;
 use zz_protocol::{ProtocolError, RawText, ServerError};
 
 const STARTUP_REENTRY_CAPABILITY_PREFIX: &str = "zz-startup-reentry=";
+pub const CLIENT_EXITS_ON_DETACH_CAPABILITY: &str = "client-exits-on-detach-v1";
 const STARTUP_REENTRY_ENVIRONMENT_VARIABLE: &str = "ZZ_STARTUP_REENTRY";
 #[cfg(feature = "daemon")]
 const PARENT_CLAUDE_SESSION_ENVIRONMENT: &[&str] = &[

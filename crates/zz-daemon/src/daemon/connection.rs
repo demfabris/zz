@@ -153,6 +153,7 @@ impl Session {
             registered.origin = hello.origin;
             registered.nested = client_nested_fact(&hello.capabilities);
             registered.utf8 = client_utf8_fact(&hello.capabilities);
+            registered.exits_on_detach = attach::client_exits_on_detach_fact(&hello.capabilities);
             let features = client_features_fact(&hello.capabilities);
             registered.features = (features != 0).then_some(features);
             registered.tty = client_tty_fact(&hello.capabilities);
@@ -297,6 +298,15 @@ impl Session {
     }
 
     #[cfg(unix)]
+    fn finishing_initialize(&self) -> bool {
+        match &self.request {
+            Some(PendingMessage::Initialize { commands, .. }) => commands.as_slice().is_empty(),
+            Some(PendingMessage::InitializeFinish(_)) => true,
+            _ => false,
+        }
+    }
+
+    #[cfg(unix)]
     pub(super) fn start_message(&mut self, message: ProtocolMessage) {
         assert!(self.request.is_none());
         self.request = Some(PendingMessage::Message(message));
@@ -329,6 +339,8 @@ impl Session {
             self.input_wait = None;
             return MessageProgress::Done;
         }
+        let wakes = (!inline && self.initializing).then(zz_terminal::hold_actor_wakes);
+        let mut step_again = wakes.is_some();
         loop {
             if let Some(mut task) = self.task.take() {
                 match task.run(inline) {
@@ -342,6 +354,9 @@ impl Session {
                     }
                     wait_queue::Progress::Ready => {
                         self.task = Some(task);
+                        if std::mem::take(&mut step_again) {
+                            continue;
+                        }
                         return MessageProgress::Ready;
                     }
                     wait_queue::Progress::Done => {
@@ -415,7 +430,7 @@ impl Session {
                                 }
                             }
                         }
-                        if !inline {
+                        if !inline && !self.finishing_initialize() {
                             return MessageProgress::Ready;
                         }
                     }

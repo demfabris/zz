@@ -176,7 +176,7 @@ fn hold_wake(pipe: &Arc<std::os::fd::OwnedFd>, pending: Option<&Arc<AtomicBool>>
 }
 
 #[cfg(unix)]
-fn release_held_wakes() {
+pub fn release_held_wakes() {
     let held = HELD_WAKES
         .try_with(|held| held.borrow_mut().as_mut().map(std::mem::take))
         .ok()
@@ -14619,6 +14619,7 @@ impl IdleCompression {
 
 const UNWATCHED_SETTLE_QUIET: Duration = Duration::from_millis(100);
 const UNWATCHED_SETTLE_MAX: Duration = Duration::from_secs(1);
+const VIEWED_RENDER_RETAIN: Duration = Duration::from_secs(5);
 const UNWATCHED_NOTIFY_INTERVAL: Duration = Duration::from_millis(100);
 
 struct RenderResources<'alloc> {
@@ -14679,6 +14680,7 @@ struct Frames<'alloc> {
     notify_owed: bool,
     synchronized_output_deadline: Option<Instant>,
     retain_render_until: Option<Instant>,
+    watched: bool,
     last_settle: Option<Instant>,
     sink_edge: Option<SinkEdge>,
 }
@@ -14705,6 +14707,7 @@ impl<'alloc> Frames<'alloc> {
             notify_owed: false,
             synchronized_output_deadline: None,
             retain_render_until: None,
+            watched: false,
             last_settle: None,
             sink_edge: None,
         })
@@ -14840,6 +14843,11 @@ impl<'alloc> Frames<'alloc> {
     fn release_unused(&mut self, active: &ActiveTerminalViews) {
         if self.needs_cells(active) {
             self.retain_render_until = None;
+            self.watched = true;
+            return;
+        }
+        if std::mem::take(&mut self.watched) && self.render.is_some() {
+            self.retain_render_until = Some(Instant::now() + VIEWED_RENDER_RETAIN);
             return;
         }
         if self
@@ -15097,7 +15105,9 @@ fn settle_unwatched<'alloc: 'callbacks, 'callbacks>(
         .is_some_and(|last| now < last + UNWATCHED_SETTLE_QUIET)
         || frames.last_settle.is_some_and(|last| now < last + horizon);
     frames.last_settle = Some(now);
-    frames.retain_render_until = recurring.then(|| now + horizon);
+    frames.retain_render_until = frames
+        .retain_render_until
+        .max(recurring.then(|| now + horizon));
     frames.force_fallback = true;
     publish_views(
         terminal,

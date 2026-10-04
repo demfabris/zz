@@ -1155,6 +1155,7 @@ fn hangup_parent() {
 #[cfg(not(unix))]
 const fn hangup_parent() {}
 
+#[cfg(unix)]
 fn start_kitty_probe(
     probe: &mut KittyProbe,
     terminal: &mut TerminalGuard,

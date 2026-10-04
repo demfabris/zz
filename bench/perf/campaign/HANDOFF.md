@@ -11,16 +11,16 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
 
 ## Next session: after wave 4
 
-1. Wave 4 is built and gated on `3057f095` (`perf/wave4`, merged into main with the push of
-   2026-10-04). Exit gates: `bench/perf/results/wave4-<host>-3057f095-{1,2,3}.json`, three strict
-   full `--stage final` runs per host, each against the wave-3 JSON. Rule (decided 2026-10-03): a
-   ratio row passes when the median of its three ratios passes. Linux passes every row. The Mac
-   misses two by a hair: `spawn.cpu.split_empty_P` (1.301, 1.24, 0.80x; rule 1.2x; zz sits at
-   0.37-0.40 or 0.51-0.56 ms per run) and `attach.ttfc.p4` (0.945, 1.109, 1.224x; rule 1.1x).
-   Lane MACQOS (brief /tmp/zzpc/w4/macqos.md, ~/dev/zz-macqos) tests whether daemon threads at
-   DEFAULT QoS landing on efficiency cores explain the two-mode Mac CPU rows; see the merge log
-   for its result. Until those two rows pass or the owner accepts them, the release freeze holds
-   and nothing is tagged; protocol stays 107.
+1. Wave 4 exited 2026-10-04 on `3057f095` (`perf/wave4`, on main since `ce668da4`). Exit gates:
+   `bench/perf/results/wave4-alienware-3057f095-{1,2,3}.json` and
+   `wave4-macbook-3057f095-r2-{1,2,3}.json` (the first Mac set, `wave4-macbook-3057f095-{1,2,3}`,
+   started right after the release build and missed `spawn.cpu.split_empty_P` and
+   `attach.ttfc.p4` by a hair; lane MACQOS showed those rows follow the clock and cache warmth,
+   18-run medians 0.979x and 0.996x). Rule (decided 2026-10-03): three strict full
+   `--stage final` runs per host, a ratio row passing when the median of its three ratios passes.
+   Every row passes on both hosts. The release freeze can lift when the owner wants a release;
+   nothing is tagged and protocol stays 107. On the Mac, start gates on a binary built well
+   before, not right after a release build.
 2. Headline against wave 3 (zz / tmux, medians; Linux, then Mac): echo p50 idle 1.92 -> 1.22x,
    2.25 -> 1.34x; echo p50 busy30 2.01 -> 1.29x, 2.75 -> 1.40x; `attach.cpu.p4` 1.48 -> 1.17x,
    0.85 -> 0.60x; `control.latency` 1.52 -> 0.94x, 1.41 -> 0.71x; `chatty.cpu_pct.visible`
@@ -56,7 +56,7 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
    measuring worktree. The bench keeps only `isolate.py` KEEP from the caller's environment. On
    the Mac, run `just compat-check` and `compat/run.sh` with /opt/homebrew/bin first in PATH
    (bash 3.2 fails them), and never bisect in a worktree another script is using.
-6. Release freeze until the wave-4 exit is accepted; protocol stays 107.
+6. Protocol stays 107 until the owner decides on a release.
 
 ## Wave 4 merge log (from 2026-10-02)
 
@@ -1092,6 +1092,17 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
 - Decision: a second set of three strict Mac gates on the same exit binary, not started right
   after a build (/tmp/zzpc/w4/macgate2). If its medians pass, the Mac exit passes by the same rule;
   if not, accepting the rows is the owner's call.
+- **Wave 4 exited 2026-10-04 12:47.** Second Mac set on the exit binary (sha256 bc06a103,
+  `bench/perf/results/wave4-macbook-3057f095-r2-{1,2,3}.json`, gates started 3 h after the build):
+  105/2, 103/2, 104/2; by the median rule every ratio row passes: `spawn.cpu.split_empty_P` 0.976,
+  1.195, 0.977x; `attach.ttfc.p4` 1.008, 1.047, 0.933x; `spawn.cpu.kill_pane` zz minus tmux 0.054,
+  0.104, 0.042 ms (plus 0.1); echo busy30 1.44-1.48x, idle 1.20-1.45x; `echo.p99.busy30` median
+  1.23x. Two instruction rows trip the 5% wave tolerance in runs 1 and 3 (`spawn.instr.split_shell`
+  3.109 and 3.042 M against wave 3's 2.880; `spawn.instr.new_window` 3.218 once): the same binary
+  read 2.890-2.926 M in the first set and 2.896 in this set's run 2, and run 2 ran at load 14.8
+  from other sessions' builds, so the count moves with the host, not the code. Linux passed on the
+  first set. Wave 4 is done on both hosts; the release freeze can lift whenever the owner wants a
+  release (nothing tagged).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

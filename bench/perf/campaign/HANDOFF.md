@@ -1045,6 +1045,20 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   back as the load flake); tui-choosers 78/78.
 - Final exit run on `49dfd9a5` (adds the macOS getpath fix and gireply): three strict gates per
   host, the touched crates' tests and the raw-TUI fixtures.
+- Final exit run on `3057f095` (`bench/perf/results/wave4-<host>-3057f095-{1,2,3}.json`). Linux
+  (batch12): 103/2, 105/0, 102/3; every row passes by the median rule (`kill_pane` zz 0.7915 vs
+  tmux 0.7916, `attach.cpu.p4` 1.17x, `attach.ttfc.p4` 1.03x, `attach.ttfc.p1` 1.08x); clippy;
+  zz-tui, zz-daemon, zz-cli, zz-client, zz-protocol tests 2674 passed, 1 failed, passes alone;
+  backpressure 9/9; attached-client 0 rejections; tui-choosers 78/78; tui-screen-diff 147/147.
+  `mem.copy_cpu.scroll180` flagged in all three, but `mem.copy_instr.scroll180` is 4.116 M on every
+  head since 36a82ea1 while its CPU swings 0.70-1.51 ms: host clock state, not code. Mac: 104/1,
+  103/2, 104/1; fails by the median rule `spawn.cpu.split_empty_P` (1.24x) and `attach.ttfc.p4`
+  (1.109x); echo busy30 1.40x and idle 1.34x pass; fmt, clippy, Linux-target clippy; six crates'
+  tests 3080 passed, 7 load failures, all pass alone; every raw-TUI fixture passes (attached-client,
+  tui-screen-diff 147/147, tui-choosers 78/78, tui-copy-mode, tui-indicators 23/23, tui-mouse 67/67,
+  tui-overlays, tui-pane-geometry).
+- Decision: push main now with wave 4 as built (secrets and credential scans first), and leave the
+  two Mac rows to MACQOS (launched 10:40, `w4-side-lanes` run `wf_440f0332-55d`) and the owner.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

@@ -136,9 +136,9 @@ once per 256 KiB turn.
 
 All symbols live in `crates/zz-terminal/src/session.rs`. The compile-time split keeps the
 macOS inline path under `cfg(all(unix, not(target_os = "linux")))`, selects
-`gather_pty_linux` on Linux, and retains `read_pty` for non-Unix targets.
+`DirectReader` and `PtyGather` on Linux, and retains `read_pty` for non-Unix targets.
 
-## The Linux gather pipeline (`gather_pty_linux`)
+## The Linux gather pipeline (`DirectReader`, `PtyGather`)
 
 Linux PTY reads average about 2.9 KiB and vary across 1, 2, 3, 5, and 7 KiB, with occasional
 64 KiB reads. A pure PTY pump drained the 150 MiB fixture in 250–254 ms. The pinned

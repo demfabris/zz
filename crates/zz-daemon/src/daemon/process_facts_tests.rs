@@ -94,35 +94,25 @@ fn a_symlinked_agent_binary_keeps_its_invoked_name() {
 #[test]
 fn a_pane_without_a_process_never_requests_a_peer_probe() {
     let shared = Arc::new(Shared::new(1));
-    run(
-        &shared,
-        &["new-session", "-d", "-s", "s", "exec sleep 1000000"],
-    );
-    let pane = run(
-        &shared,
-        &[
-            "split-window",
-            "-d",
-            "-P",
-            "-F",
-            "#{pane_id}",
-            "-t",
-            "s:0",
-            "",
-        ],
-    )
-    .trim()
-    .parse::<PaneId>()
-    .expect("empty pane id");
-    let terminal = shared
+    let pane = shared
         .inner
         .lock()
-        .terminals
-        .get(&pane)
-        .cloned()
-        .expect("empty pane terminal");
+        .engine
+        .state
+        .create_session("s")
+        .unwrap()
+        .2;
+    let terminal = Arc::new(TerminalSession::spawn_empty_pane(
+        2000,
+        Arc::new(TerminalAppearance::default()),
+        None,
+    ));
+    shared
+        .inner
+        .lock()
+        .terminals_mut()
+        .insert(pane, Arc::clone(&terminal));
     assert!(terminal.process_id().is_none());
-    shared.peer_probe.store(false, Ordering::Release);
     shared.synchronize_pane_runtime(pane, &terminal, "", None, true, Instant::now());
     assert!(!shared.peer_probe.load(Ordering::Acquire));
     shared.request_shutdown();

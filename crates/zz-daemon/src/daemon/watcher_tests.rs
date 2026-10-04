@@ -224,12 +224,18 @@ fn a_dropped_terminal_queues_its_notifications_without_waking_the_loop() {
     shared.watcher_tx.wake.install(waker);
     let mut events = mio::Events::with_capacity(8);
     start(&mut watchers, &shared, pane, &terminal);
-    watchers.turn(&shared);
-    poll.poll(&mut events, Some(Duration::from_millis(10)))
-        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        watchers.turn(&shared);
+        poll.poll(&mut events, Some(Duration::from_millis(10)))
+            .unwrap();
+        if !shared.watcher_tx.pending_wake.load(Ordering::Acquire) {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+    }
     shared.inner.lock().terminals_mut().remove(&pane);
     drop(terminal);
-    let deadline = Instant::now() + Duration::from_secs(2);
     while watchers.inputs.as_ref().unwrap().is_empty() {
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(1));

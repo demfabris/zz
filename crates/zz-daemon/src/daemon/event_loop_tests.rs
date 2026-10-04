@@ -192,3 +192,55 @@ fn a_panicking_startup_worker_still_posts_completion() {
         .unwrap();
     assert!(matches!(result, Err(DaemonError::Thread(_))));
 }
+
+#[test]
+fn racing_starts_leave_one_daemon_and_no_start_lock() {
+    let socket = PathBuf::from(format!(
+        "/tmp/zz-b1-lock-{}-{}.sock",
+        std::process::id(),
+        server_id()
+    ));
+    let mut lock = socket.as_os_str().to_owned();
+    lock.push(".lock");
+    let lock = PathBuf::from(lock);
+    fs::write(&lock, "").unwrap();
+    let starters = 4;
+    let barrier = Arc::new(std::sync::Barrier::new(starters));
+    let (ready, started) = mpsc::channel();
+    let (finished, results) = mpsc::channel();
+    let threads = (0..starters)
+        .map(|_| {
+            let daemon = Daemon::new(&socket).without_user_config();
+            let barrier = Arc::clone(&barrier);
+            let ready = ready.clone();
+            let finished = finished.clone();
+            thread::spawn(move || {
+                barrier.wait();
+                let result = daemon.run_foreground_with_ready(|_| ready.send(()).unwrap());
+                finished.send(result).unwrap();
+            })
+        })
+        .collect::<Vec<_>>();
+    started.recv_timeout(Duration::from_secs(20)).unwrap();
+    for _ in 1..starters {
+        let result = results.recv_timeout(Duration::from_secs(20)).unwrap();
+        assert!(
+            matches!(&result, Err(DaemonError::AlreadyRunning(path)) if *path == socket),
+            "{result:?}"
+        );
+    }
+    assert!(started.try_recv().is_err());
+    assert!(!lock.exists());
+    tests::connect_command_retry(&socket)
+        .execute(CommandInvocation::new("kill-server", [] as [&str; 0]))
+        .unwrap();
+    results
+        .recv_timeout(Duration::from_secs(10))
+        .unwrap()
+        .unwrap();
+    for thread in threads {
+        thread.join().unwrap();
+    }
+    assert!(!socket.exists());
+    assert!(!lock.exists());
+}

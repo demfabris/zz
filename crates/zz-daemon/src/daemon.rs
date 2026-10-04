@@ -51965,24 +51965,53 @@ fn post_admission_callback_error(error: DaemonError) -> DaemonError {
 }
 
 #[cfg(unix)]
-fn prepare_socket(path: &Path, ready: &mut BootstrapReady) -> Result<fs::File, DaemonError> {
+struct StartLock {
+    path: PathBuf,
+    _file: fs::File,
+}
+
+#[cfg(unix)]
+impl StartLock {
+    fn acquire(path: PathBuf) -> Result<Self, DaemonError> {
+        use std::os::unix::fs::{MetadataExt as _, OpenOptionsExt as _};
+
+        loop {
+            let file = fs::OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .write(true)
+                .mode(0o600)
+                .open(&path)?;
+            rustix::fs::flock(&file, rustix::fs::FlockOperation::LockExclusive)
+                .map_err(std::io::Error::from)?;
+            let held = file.metadata()?;
+            match fs::metadata(&path) {
+                Ok(current) if current.dev() == held.dev() && current.ino() == held.ino() => {
+                    return Ok(Self { path, _file: file });
+                }
+                Ok(_) => {}
+                Err(error) if error.kind() == ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for StartLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+#[cfg(unix)]
+fn prepare_socket(path: &Path, ready: &mut BootstrapReady) -> Result<StartLock, DaemonError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     let mut lock_path = path.as_os_str().to_owned();
     lock_path.push(".lock");
-    let lock = {
-        use std::os::unix::fs::OpenOptionsExt as _;
-
-        fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .mode(0o600)
-            .open(PathBuf::from(lock_path))?
-    };
-    rustix::fs::flock(&lock, rustix::fs::FlockOperation::LockExclusive)
-        .map_err(std::io::Error::from)?;
+    let lock = StartLock::acquire(PathBuf::from(lock_path))?;
     // A stopping daemon releases its endpoint within one accept tick; wait
     // that out so a spawn racing a kill-server binds instead of dying to a
     // socket that only looks alive. The deadline is generous because loaded

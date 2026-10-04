@@ -28274,7 +28274,7 @@ impl Shared {
             self.schedule_window_renames(&mut inner);
             result
         };
-        if output || changed.is_some() {
+        if (output || changed.is_some()) && pid.is_some() {
             self.request_peer_probe();
         }
         if let Some(reason) = changed {

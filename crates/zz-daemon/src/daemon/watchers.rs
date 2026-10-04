@@ -58,12 +58,18 @@ impl Sender {
         let notifications = events.clone();
         watcher.events = Some(events);
         let notified = Arc::clone(&watcher.notified);
+        let terminal = watcher.terminal.clone();
         if !self.send(Input::Started(Box::new(watcher))) {
             return Err(DaemonError::Thread("watcher loop stopped".to_owned()));
         }
         let sender = self.clone();
         notifications.install_notification_sink(move || {
-            if !notified.swap(true, Ordering::AcqRel) {
+            if notified.swap(true, Ordering::AcqRel) {
+                return;
+            }
+            if terminal.strong_count() == 0 {
+                let _ = sender.sender.send(Input::Ready(id));
+            } else {
                 sender.send(Input::Ready(id));
             }
         });

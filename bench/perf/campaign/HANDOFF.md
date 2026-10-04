@@ -953,6 +953,24 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   Output stays on the client. Brief /tmp/zzpc/w4/ttyin.md, ~/dev/zz-ttyin from `b1601895`.
 - MACECHO's Linux leg: `cargo test -j6 -p zz-terminal --all-features` on `77648bb6` (alienware):
   418 passed, 0 failed. TTYIN launched 03:10 as `w4-side-lanes` run `wf_f461a19c-3f7`.
+- KILLPANE merged as `e8e0a2f7` (lane `1e9efde4` + test fix `0b55f109`; done false, the brief's
+  itemised exit). Cuts: a dropped terminal's output, exit and close notices queue without waking
+  the loop (the next turn removes the watcher), and a pane with no process never requests a peer
+  probe. Instructions per kill 0.1556 -> 0.1504 M (-3.3%), main-thread context switches per kill
+  5 -> 3 (shell pane) and 2 -> 1 (empty pane); about 1.5-2.1 k of the instructions move to the next
+  command. The CPU row did not move beyond noise (reviewer: base gap +0.068, lane +0.093 ms over
+  6 quiet pairs). Why the row is unstable: the bench kills empty and shell panes, and the median
+  of 20 kills falls between the two clusters; the package clock sits at 1.1 or 4.5 GHz per kill.
+  At 1.1 GHz an empty kill costs zz 661 us against tmux 439 (zz main thread 463 us, about tmux +24;
+  the shard thread 156 us: a cold wake plus 4 munmaps of 392 KiB libghostty preheated pages,
+  `page_preheat = 4` in the Ghostty fork; a peer-probe helper thread in 1 of 20 kills, +381 us),
+  while a shell kill costs zz 995 us against tmux 1136 (tmux forks utempter). Not taken: gating
+  the SIGCHLD self-pipe wake on live jobs; a process-wide pool for libghostty's preheated pages
+  (native fork change).
+- Decision: lane PEERSKIP (brief /tmp/zzpc/w4/peerskip.md, ~/dev/zz-peerskip on both hosts from
+  `e8e0a2f7`, 90 min): skip a peer scan whose inputs (sessions directory stat, pane pid set) did
+  not change since a scan that found nothing, removing the per-second helper thread start that a
+  printing pane causes.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

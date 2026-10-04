@@ -33,6 +33,9 @@ impl TtyInput {
         let Ok([handed]) = <[OwnedFd; 1]>::try_from(fds) else {
             return Err(io::Error::from(ErrorKind::InvalidInput));
         };
+        #[cfg(target_vendor = "apple")]
+        let name = rustix::fs::getpath(&handed)?;
+        #[cfg(not(target_vendor = "apple"))]
         let name = rustix::termios::ttyname(&handed, Vec::new())?;
         let fd = rustix::fs::open(
             name.as_c_str(),

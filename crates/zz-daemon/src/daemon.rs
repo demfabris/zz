@@ -4488,7 +4488,7 @@ struct SharedServer {
     stopping: AtomicBool,
     shutdown_pending: AtomicBool,
     shutdown_forced: AtomicBool,
-    shutdown_announced: AtomicBool,
+    shutdown_announced: Mutex<bool>,
     shutdown_blockers: Mutex<ShutdownBlockerState>,
     shutdown_drops_event_hooks: AtomicBool,
     #[cfg(unix)]
@@ -5454,7 +5454,7 @@ impl Shared {
             stopping: AtomicBool::new(false),
             shutdown_pending: AtomicBool::new(false),
             shutdown_forced: AtomicBool::new(false),
-            shutdown_announced: AtomicBool::new(false),
+            shutdown_announced: Mutex::new(false),
             shutdown_blockers: Mutex::new(ShutdownBlockerState::default()),
             shutdown_drops_event_hooks: AtomicBool::new(false),
             #[cfg(unix)]
@@ -5976,18 +5976,20 @@ impl Shared {
     }
 
     fn announce_shutdown(&self) {
-        if !self.shutdown_announced.swap(true, Ordering::AcqRel) {
-            let clients = self
-                .inner
-                .lock()
-                .clients
-                .iter()
-                .filter_map(|(id, client)| client.subscriber.as_ref().map(|_| id))
-                .copied()
-                .collect::<Vec<_>>();
-            for client in clients {
-                self.publish_to_client(client, EventPayload::ServerStopping);
-            }
+        let mut announced = self.shutdown_announced.lock();
+        if std::mem::replace(&mut *announced, true) {
+            return;
+        }
+        let clients = self
+            .inner
+            .lock()
+            .clients
+            .iter()
+            .filter_map(|(id, client)| client.subscriber.as_ref().map(|_| id))
+            .copied()
+            .collect::<Vec<_>>();
+        for client in clients {
+            self.publish_to_client(client, EventPayload::ServerStopping);
         }
     }
 

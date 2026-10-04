@@ -214,3 +214,38 @@ fn closure_without_a_final_event_removes_the_loop_receiver() {
         thread::yield_now();
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn a_dropped_terminal_queues_its_notifications_without_waking_the_loop() {
+    let (shared, pane, terminal, mut watchers) = fixture();
+    let mut poll = mio::Poll::new().unwrap();
+    let waker = Arc::new(mio::Waker::new(poll.registry(), mio::Token(1)).unwrap());
+    shared.watcher_tx.wake.install(waker);
+    let mut events = mio::Events::with_capacity(8);
+    start(&mut watchers, &shared, pane, &terminal);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        watchers.turn(&shared);
+        poll.poll(&mut events, Some(Duration::from_millis(10)))
+            .unwrap();
+        if !shared.watcher_tx.pending_wake.load(Ordering::Acquire) {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+    }
+    shared.inner.lock().terminals_mut().remove(&pane);
+    drop(terminal);
+    while watchers.inputs.as_ref().unwrap().is_empty() {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(1));
+    }
+    poll.poll(&mut events, Some(Duration::from_millis(50)))
+        .unwrap();
+    assert!(events.is_empty());
+    while !watchers.surfaces.is_empty() {
+        watchers.turn(&shared);
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+}

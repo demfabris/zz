@@ -89,3 +89,31 @@ fn a_symlinked_agent_binary_keeps_its_invoked_name() {
     assert_eq!(current_command(), "claude");
     shared.request_shutdown();
 }
+
+#[cfg(all(feature = "agent", unix))]
+#[test]
+fn a_pane_without_a_process_never_requests_a_peer_probe() {
+    let shared = Arc::new(Shared::new(1));
+    let pane = shared
+        .inner
+        .lock()
+        .engine
+        .state
+        .create_session("s")
+        .unwrap()
+        .2;
+    let terminal = Arc::new(TerminalSession::spawn_empty_pane(
+        2000,
+        Arc::new(TerminalAppearance::default()),
+        None,
+    ));
+    shared
+        .inner
+        .lock()
+        .terminals_mut()
+        .insert(pane, Arc::clone(&terminal));
+    assert!(terminal.process_id().is_none());
+    shared.synchronize_pane_runtime(pane, &terminal, "", None, true, Instant::now());
+    assert!(!shared.peer_probe.load(Ordering::Acquire));
+    shared.request_shutdown();
+}

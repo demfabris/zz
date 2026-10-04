@@ -976,6 +976,16 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   (the four known/* rows, census-hooks, if-shell-background-order, smoke/control-alias-prepare,
   smoke/plugin-runtime-continuum, smoke/plugin-runtime-vim-tmux-navigator, smoke/resurrect-save,
   smoke/source-file-byte-name, smoke/status-background-jobs).
+- PEERSKIP merged as `d6da097d` (lane `033645bb` + review fix `db4c485b`, done true; 80 min).
+  The Expiry::PeerProbe arm skips the helper task when no peer state is recorded and the registry
+  key (`RegistryCache::settled()`: stamps of ~/.claude/sessions and each pid-named record taken
+  while reading, none within 2 s of its mtime) still holds; pane pids count only while a record
+  file exists. A pane printing every 100 ms: helper thread starts 59 -> 0 per minute, daemon
+  task-clock 237-243 -> 202-215 ms per minute. `spawn.instr.kill_pane` 0.150 -> 0.138 M in three
+  series; `spawn.cpu.kill_pane` flat (zz median .785 -> .783, the tmux side swings .62-.86).
+  Left open by design: a dead Claude record's pid reused in the same pane, or the wall clock
+  stepping back, can go unseen while no state is recorded and no file changes. The non-agent
+  build (`--no-default-features --features daemon`) has 13 compile errors on the base too.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

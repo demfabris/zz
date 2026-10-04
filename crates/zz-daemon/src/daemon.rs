@@ -116411,6 +116411,11 @@ bind - split-window -v -c "#{pane_current_path}"
                 break;
             }
         }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while shared.inner.lock().message_log.len() < 2 {
+            assert!(Instant::now() < deadline, "attach hooks did not fire");
+            thread::sleep(Duration::from_millis(5));
+        }
         assert_eq!(
             shared
                 .inner

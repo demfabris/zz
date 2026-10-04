@@ -2,7 +2,7 @@
 type: Design Plan
 title: Daemon performance rebuild
 description: "The campaign to bring the zz daemon to tmux cost per command, per pane and per attach while keeping the 5x output throughput lead - a permanent zz-vs-tmux gate first, then waves that remove unrequested work (one-frame Exec commands, change-driven publication, lazy formats, frames only for watchers, a compact wire under one unreleased protocol version), then one mux loop and PTY shards; the lane brief source with targets, merge order, write zones, gates and rollback switches."
-status: Approved 2026-09-28; waves 0-3 on main (wave 3 closed 2026-10-02, exit gates wave3-macbook-e9bc174c.json and wave3-alienware-e9bc174c.json); release freeze until W4 exits; wave 4 (W4-DELIVER, W4-ROWS, KNOBS, SPAWN, CONTROL, TUI-ECHO; W4-BINARY closed unmerged) in progress; state in bench/perf/campaign/HANDOFF.md
+status: Approved 2026-09-28; waves 0-4 built (wave 3 closed 2026-10-02; wave 4 exit run 2026-10-04 on 3057f095, gates bench/perf/results/wave4-<host>-3057f095-{1,2,3}.json: Linux passes every row by the median of three strict runs, the Mac misses two rows by a hair, spawn.cpu.split_empty_P and attach.ttfc.p4); W4-BINARY closed unmerged; release freeze until the Mac rows pass or are accepted; state in bench/perf/campaign/HANDOFF.md
 resource: crates/zz-daemon/src/daemon.rs
 tags:
 - performance
@@ -12,10 +12,27 @@ tags:
 - benchmark
 - campaign
 - design-plan
-timestamp: 2026-10-02T23:15:00Z
+timestamp: 2026-10-04T11:00:00Z
 ---
 
 # Campaign status
+
+2026-10-04: wave 4 is built and gated. Lanes merged on `perf/wave4` since wave 3: W4-DELIVER
+(DL1-DL5: per-pane shard sinks, terminal frames written by the shard straight to an idle client,
+control-mode output from the sink), W4-ROWS, KNOBS, SPAWN, CONTROL, TUI-ECHO, BURST, CTRLCPU,
+ECHOMAP, ACFIX, BYTES2, ATTACH, ECHOIN, EM1 (quiet Linux panes read on their shard), CTLLAT,
+ATTACHP4, MACECHO, KILLPANE, PEERSKIP and TTYIN (the raw TUI hands its tty input to the daemon).
+The exit judgement is three strict full `--stage final` runs per host, a ratio row passing when
+the median of its three ratios passes (one run cannot decide rows whose tmux side flips between a
+fast and a slow mode). On 3057f095 Linux passes every row (103/2, 105/0, 102/3 per run); the Mac
+passes all but `spawn.cpu.split_empty_P` (median 1.24x, rule 1.2x, a row whose zz value sits in
+one of two modes per run) and `attach.ttfc.p4` (1.109x, rule 1.1x). Against wave 3, zz / tmux
+ratios by median, Linux then Mac: `echo.p50.idle` 1.92 -> 1.22x and 2.25 -> 1.34x,
+`echo.p50.busy30` 2.01 -> 1.29x and 2.75 -> 1.40x, `attach.cpu.p4` 1.48 -> 1.17x and 0.85 ->
+0.60x, `control.latency` 1.52 -> 0.94x and 1.41 -> 0.71x, `chatty.cpu_pct.visible` 2.24 -> 0.94x
+and 1.47 -> 0.68x, `spawn.cpu.split_shell` 1.54 -> 0.99x and 1.02 -> 0.75x, `mem.threads.p20` 25
+-> 9 and 5 -> 5; throughput unchanged at 2.2x (Linux) and 6.6x (Mac) tmux. W3-LOOP step (d), the
+Mutex removal, stays deferred.
 
 2026-10-02: waves 0 to 3 are on main. Wave 1 exited 2026-09-29 (`1e0bfc6a`), wave 2 on 2026-10-01
 (gates `wave2-<host>-3d0fc1b0.json`), wave 3 (W3-SHARDS, W3-TUI, W3-LOOP and nine fix lanes) on
@@ -778,6 +795,18 @@ As built (branch `perf/publish`), where it departs from the scope above:
   no per-event `tcgetpgrp`. `RegistryCache` in claude_peers.rs re-reads a record only when its
   (mtime, size, inode) changes, or when it was read within 2 s of its mtime (a coarse clock can
   hide a same-length rewrite, as git's racy-clean check), and re-lists the directory the same way.
+- A probe skips the helper scan when it cannot change the answer. A scan that finds no state for
+  any pane leaves a key in the helper pool: the pane list with pids, and the stamps
+  `RegistryCache` took of the registry directory and each record file while it read them
+  (`RegistryCache::settled`, none when any stamp is within 2 s of its read). The next probe
+  restats those paths on the loop thread (one stat when the directory is missing) and submits
+  only when a stamp differs, a pane pid differs while some record file exists, or a state is
+  recorded. With no record file every pane reads none, so spawning and killing panes does not
+  start a scan either. On alienware, one pane printing every 100 ms with no Claude session went
+  from 59 helper thread starts a minute to none, and daemon CPU from 240 to 209 ms a minute.
+  `spawn.instr.kill_pane` went from .150 to .138 in each of three 5-run series. The zz median of
+  `spawn.cpu.kill_pane` went .81 to .76, .82 to .75 and .79 to .78 ms in those series, and its
+  zz minus tmux gap moved by less than the tmux side's run-to-run noise, so neither is a signal.
 - Merged onto FOOTPRINT and FORMAT, the command path got fast enough that `display-message` right
   after `copy-mode` ran before the terminal actor entered the mode (`#{pane_in_mode}` read 0 in
   compat `smoke/copy-mode-formats`). A command that sends copy-mode view actions now ends with one
@@ -4054,6 +4083,68 @@ generations, with invalidation tests for the mutation paths.
 - Three alternating quick pairs against `/tmp/zzpc/w3/loop-b5fix-cli`: 18 of 21 CLI/chatty instruction medians meet 1.02x. Remaining misses: `cli.instr.has_session.p20` 1.0218x, `cli.instr.select_pane.p20` 1.0702x, `chatty.instr_per_s.hidden` 1.0553x. Thread counts stay 4 to 3 at p1 and 42 to 41 at p20. Status-job instructions fall 2.7%.
 - Checks: 1382 daemon unit tests and 35 integration tests pass, one ignored; 17 timer tests pass after the clippy fix; fmt, clippy, and all four requested compat scenarios pass. The final quick W0 gate has 37 pass, 1 fail, and 42 info rows, with no harness errors or regressions. The failure is the pre-existing status-job thread rate near 3/s against a 0.5/s limit.
 - Handed on: the three instruction misses above; idle wakeups remain unmeasured because the permitted commands omit `idle`. Linux `/proc`, PTY gather, epoll, THP, and `tui-output-backpressure.sh` checks did not run on this Mac. Scratch results stay in `/tmp/zzpc/b6fix-{b5fix,b6fix}-{1,2,3}.json` and `/tmp/zzpc/loop-b6fix.json`. This step does not meet its done criterion.
+
+## W4-TTYIN: the raw TUI hands its tty input to the daemon (as built 2026-10-04)
+
+tmux's client gives the server its tty, so a key wakes the server, the pane and the server again
+before the bench sees the echo. zz's relay client added a client wake and a socket hop on the way
+in. `zz_cli attach` now passes its stdin to the daemon with SCM_RIGHTS after the hello
+(`TtyInput`, behind the `tty-input-v1` Welcome bit and the same hello capability; protocol stays
+107). The daemon reopens the terminal by name with its own nonblocking open file description, so
+it never changes the flags of the shell's terminal, and reads it on the mux loop
+(`crates/zz-daemon/src/daemon/tty_input.rs`). A key that means the same whatever follows it
+(`zz_protocol::tty_input_key`: every 7-bit byte except ESC, a complete UTF-8 scalar that is not a
+control, and a complete cursor, Home, End, Insert, Delete, page or function key sequence, bare or
+with an xterm modifier; checked against zz-tui's parser for all 256 bytes, sampled scalars and
+every candidate sequence) goes straight to the pane through the EM5 plain-key path while the
+client has reported that it is caught up and that a plain key would reach that pane unchanged,
+the daemon agrees that pane is the client's active pane, the connection has nothing queued and
+the key tables pass it. Anything else (Alt keys, other escape sequences, mouse, paste, focus and
+terminal replies, a sequence cut off at the end of a read, the prefix and bound keys, anything
+while a daemon-side mode is open) goes back to the client in `TtyInputBytes`, which feeds it to
+its existing parser. Once anything is forwarded, later bytes follow it until the client sends
+`TtyInputReady` with the number of chunks it has processed and the pane, which it only does with
+an empty event queue, an idle parser, no pending escape and no client-side route open
+(`input::plain_key_pane`, `InputRouter::passes_plain_keys`); it reports no pane only to withdraw
+one it reported for the same count. Output stays on the client. A kitty graphics probe makes the
+parser busy: the client withdraws its pane before it writes the probe and reports it again once
+the primary device attributes reply that fences the probe arrives, or after a second. Only in that
+window does the parser read text starting with `Gi=` as a reply that a relay stripped of its
+`ESC _`; outside it `Gi=` is typed text on both sides, so the daemon has no special case for it.
+
+The client keeps its tty with `ZZ_TUI_RELAY=1`, against a daemon without the bit, when stdin is
+not a terminal, on an ssh endpoint, and when the daemon refuses (`TtyInputClosed`). It takes the
+tty back with `TtyInputRelease` and waits up to a second for the close before it exits, suspends
+or switches hosts. Every handoff carries a number that `TtyInputStarted`, `TtyInputRelease` and
+`TtyInputClosed` repeat, so a close that answers an earlier handoff (a release that timed out in
+a daemon stall, then a resume) leaves the next one standing, and the client counts chunks only
+from the start of the current one. The daemon closes the terminal on release, on socket EOF or
+disconnect, when shutdown starts, and before the next read once a client that exits on detach
+has been detached (daemon state the detach sets and an attach clears), so bytes typed after a
+detach stay in the terminal for the shell. It services tty readiness after the other events of
+the same poll batch, so a release or EOF that arrives with the bytes closes the terminal first.
+
+Measured on the reference Mac against perf/wave4 `b1601895`, 20 alternating `--only echo` runs
+per binary on the lane's final code (load 2-24): `echo.p50.busy30` 1.461x -> 1.277x tmux (median
+of the run ratios; 1.649 -> 1.480 in the fast host state, 1.425 -> 1.269 in the slow one),
+`echo.p50.idle` 1.360x -> 1.192x, `echo.p99.busy30` 1.328x -> 0.980x, `echo.p99.idle` 1.138x ->
+1.160x (noise: one five-run series alone read 1.089 -> 1.655, and the same keys interleaved
+base, lane and tmux in one window gave a 2.20 / 2.16 / 1.84 ms p99 over 2000 keys). Every bench
+key took the direct path; only the detach chord was forwarded. Per key (`w4-echomap.py`, busy30)
+the client goes from 2.10 to 0.92 context switches, 5.6 to 2.7 syscalls and 139 to 109 kinstr;
+the daemon keeps its 2.1 switches and drops from 190 to 183 kinstr. On alienware, three pairs
+against batch10 `fc1ccbc6`: busy30 1.48x -> 1.25x, idle 1.35x -> 1.22x, p99 idle 1.31x -> 1.12x,
+p99 busy30 1.42x -> 1.27x.
+
+The review round keyed UTF-8 text and cursor keys in the daemon too and numbered the handoffs. With
+an echo pane, p50 for `é` went from 0.89-0.92 ms on the base relay and 0.97-0.99 ms before the
+fix to 0.76-0.79 ms, and Left from 0.93-1.00 and 1.03-1.07 ms to 0.86-0.87 ms (three rounds,
+binaries interleaved). Five more alternating Mac runs on the fixed code: `echo.p50.busy30` 1.452x
+-> 1.246x, `echo.p50.idle` 1.336x -> 1.169x, `echo.p99.busy30` 1.432x -> 0.831x, `echo.p99.idle`
+1.331x -> 1.673x (over the last 20 runs of each binary the median zz p99 is 1.84 ms on the base
+and 1.85 ms on the lane, and the lane's p90 was lower in every run of this series). Three
+alienware pairs: busy30 1.41x -> 1.28x, idle 1.37x -> 1.20x, p99 idle 1.34x -> 1.13x, p99 busy30
+1.41x -> 1.28x.
 
 ## W3-SHARDS TUI attach follow-up, 2026-10-01
 

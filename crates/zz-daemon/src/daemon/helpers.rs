@@ -122,6 +122,8 @@ struct State {
     loop_thread: Mutex<Option<thread::ThreadId>>,
     #[cfg(all(feature = "agent", unix))]
     peers: Mutex<crate::agent::claude_peers::RegistryCache>,
+    #[cfg(all(feature = "agent", unix))]
+    settled: Mutex<Option<PeerKey>>,
 }
 
 pub(super) struct Pool {
@@ -150,6 +152,8 @@ impl Default for Pool {
                 loop_thread: Mutex::new(None),
                 #[cfg(all(feature = "agent", unix))]
                 peers: Mutex::new(crate::agent::claude_peers::RegistryCache::default()),
+                #[cfg(all(feature = "agent", unix))]
+                settled: Mutex::new(None),
             }),
             results: receiver,
             #[cfg(unix)]
@@ -241,6 +245,16 @@ impl Pool {
         result
             .recv()
             .map_err(|_| io::Error::other("file helper stopped"))?
+    }
+
+    #[cfg(all(feature = "agent", unix))]
+    pub(super) fn peer_scan_settled(&self, panes: &[(PaneId, String, Option<u32>)]) -> bool {
+        let Ok(directory) = crate::agent::claude_peers::registry_dir() else {
+            return false;
+        };
+        self.state.settled.lock().as_ref().is_some_and(|key| {
+            (!key.registry.has_files() || key.panes == panes) && key.registry.holds(&directory)
+        })
     }
 
     pub(super) fn submit_wait(&self, task: Task) -> io::Result<()> {
@@ -508,12 +522,19 @@ fn finish_peer_scan(
 mod reviewfixes_tests;
 
 #[cfg(all(feature = "agent", unix))]
+struct PeerKey {
+    panes: Vec<(PaneId, String, Option<u32>)>,
+    registry: crate::agent::claude_peers::RegistryKey,
+}
+
+#[cfg(all(feature = "agent", unix))]
 fn scan_peers(state: &State, panes: Vec<(PaneId, String, Option<u32>)>) -> PeerResult {
     use crate::agent::claude_peers;
-    let mut records: Vec<_> = {
+    *state.settled.lock() = None;
+    let (mut records, registry): (Vec<_>, _) = {
         let mut registry = state.peers.lock();
         registry.refresh()?;
-        registry.records().cloned().collect()
+        (registry.records().cloned().collect(), registry.settled())
     };
     records.retain(|record| record.zz.is_none());
     let now = super::SystemTime::now()
@@ -521,10 +542,10 @@ fn scan_peers(state: &State, panes: Vec<(PaneId, String, Option<u32>)>) -> PeerR
         .unwrap_or_default()
         .as_millis() as u64;
     let parents = std::cell::RefCell::new(std::collections::BTreeMap::new());
-    Ok(panes
-        .into_iter()
+    let updates: Vec<_> = panes
+        .iter()
         .map(|(pane, target, pid)| {
-            let value = claude_peers::record_for_pane_with_parents(&records, &target, pid, |pid| {
+            let value = claude_peers::record_for_pane_with_parents(&records, target, *pid, |pid| {
                 *parents
                     .borrow_mut()
                     .entry(pid)
@@ -549,9 +570,13 @@ fn scan_peers(state: &State, panes: Vec<(PaneId, String, Option<u32>)>) -> PeerR
                 }
                 .to_owned()
             });
-            (pane, pid, value)
+            (*pane, *pid, value)
         })
-        .collect())
+        .collect();
+    if updates.iter().all(|(_, _, value)| value.is_none()) {
+        *state.settled.lock() = registry.map(|registry| PeerKey { panes, registry });
+    }
+    Ok(updates)
 }
 
 #[cfg(unix)]

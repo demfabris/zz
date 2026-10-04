@@ -12,6 +12,9 @@ use super::*;
 #[path = "control_stdio.rs"]
 mod control_stdio;
 
+#[path = "tty_input.rs"]
+mod tty_input;
+
 #[cfg(test)]
 #[path = "event_loop_e19_tests.rs"]
 mod e19_tests;
@@ -132,6 +135,7 @@ pub(super) struct EventLoop {
     agents: agent_inbox::AgentInbox,
     connections: BTreeMap<Token, Box<Connection>>,
     stdio_tokens: BTreeMap<Token, Token>,
+    tty_tokens: BTreeMap<Token, Token>,
     inserted_queues: Vec<wait_queue::InsertedTask>,
     completed: mpsc::Receiver<Completion>,
     completion_sender: mpsc::Sender<Completion>,
@@ -244,6 +248,7 @@ struct Connection {
     ancillary: bool,
     received_fds: Vec<OwnedFd>,
     stdio: Option<Box<control_stdio::ControlStdio>>,
+    tty: Option<Box<tty_input::TtyInput>>,
 }
 
 #[cfg(test)]
@@ -323,6 +328,7 @@ impl EventLoop {
             agents,
             connections: BTreeMap::new(),
             stdio_tokens: BTreeMap::new(),
+            tty_tokens: BTreeMap::new(),
             inserted_queues: Vec::new(),
             completed,
             completion_sender,
@@ -434,6 +440,7 @@ impl EventLoop {
                 ancillary: false,
                 received_fds: Vec::new(),
                 stdio: None,
+                tty: None,
             }),
         );
         Ok(token)
@@ -510,7 +517,7 @@ impl EventLoop {
                     self.jobs
                         .ready(self.poll.registry(), token, readable, writable);
                 } else if let Some(&owner) = self.stdio_tokens.get(&token) {
-                    self.stdio_ready(owner, token);
+                    self.stdio_ready(owner, token, shared);
                 } else if self.connections.contains_key(&token) {
                     if readable {
                         self.read_ready(token, shared);
@@ -525,6 +532,7 @@ impl EventLoop {
                     }
                 }
             }
+            self.ttys_ready(&ready, shared);
         }
     }
 
@@ -553,6 +561,9 @@ impl EventLoop {
 
     fn start_shutdown(&mut self, shared: &Arc<Shared>) {
         self.shutdown_started = true;
+        for token in self.tty_tokens.values().copied().collect::<Vec<_>>() {
+            self.close_tty(token, true);
+        }
         self.status_client.stop();
         self.turn_status_jobs();
         self.jobs.cancel_all(self.poll.registry());
@@ -762,6 +773,7 @@ impl EventLoop {
                         && !connection.initializing;
                     let drain_input = connection.drain_input;
                     self.drop_stdio(token);
+                    self.close_tty(token, false);
                     if !drain_input {
                         self.disconnect(token, shared);
                     }
@@ -808,6 +820,20 @@ impl EventLoop {
                 if let Some(stdio) = connection.stdio.as_mut() {
                     stdio.client_write(&bytes, idle, close);
                 }
+                return true;
+            }
+            ProtocolMessage::TtyInput { handoff } => {
+                self.open_tty(token, handoff);
+                return true;
+            }
+            ProtocolMessage::TtyInputReady { received, pane } => {
+                if let Some(tty) = connection.tty.as_mut() {
+                    tty.ready(received, pane);
+                }
+                return true;
+            }
+            ProtocolMessage::TtyInputRelease { handoff } => {
+                self.release_tty(token, handoff);
                 return true;
             }
             _ => {}
@@ -1630,6 +1656,14 @@ impl EventLoop {
             if std::mem::take(&mut connection.read_again) {
                 self.read_ready(token, shared);
             }
+            if self
+                .connections
+                .get(&token)
+                .and_then(|connection| connection.tty.as_ref())
+                .is_some_and(|tty| tty.again())
+            {
+                self.tty_ready(token, shared);
+            }
             let Some(connection) = self.connections.get_mut(&token) else {
                 continue;
             };
@@ -1790,6 +1824,7 @@ impl EventLoop {
     }
 
     fn disconnect(&mut self, token: Token, shared: &Arc<Shared>) {
+        self.close_tty(token, false);
         let Some(connection) = self.connections.get_mut(&token) else {
             return;
         };
@@ -1828,6 +1863,10 @@ impl EventLoop {
         if let Some(mut connection) = self.connections.remove(&token) {
             if let Some(stdio) = connection.stdio.take() {
                 self.close_stdio(stdio);
+            }
+            if let Some(tty) = connection.tty.take() {
+                self.tty_tokens.remove(&tty.token);
+                tty.close();
             }
             let mut cleanup_pending = false;
             let _ = self
@@ -1907,6 +1946,16 @@ impl Connection {
             ProtocolMessage::ClientHello(hello) => hello.kind == ClientKind::Interactive,
             _ => false,
         };
+        if interactive
+            && let ProtocolMessage::Hello(hello) = message
+            && hello
+                .client
+                .capabilities
+                .iter()
+                .any(|capability| capability == zz_protocol::TTY_INPUT_CAPABILITY)
+        {
+            self.ancillary = true;
+        }
         let socket = interactive.then(|| self.stream.receive_fd().ok()).flatten();
         #[cfg(target_vendor = "apple")]
         let socket = socket

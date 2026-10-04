@@ -97,6 +97,12 @@ impl SignalInbox {
     }
 }
 
+impl Drop for EventLoop {
+    fn drop(&mut self) {
+        self.release_tty();
+    }
+}
+
 impl Drop for SignalInbox {
     fn drop(&mut self) {
         for id in self.registrations.drain(..) {
@@ -193,7 +199,25 @@ impl Queue {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Handoff {
+    Own,
+    Requested,
+    Daemon,
+    Releasing,
+}
+
+const RELEASE_WAIT: Duration = Duration::from_secs(1);
+const GRAPHICS_REPLY_WAIT: Duration = Duration::from_secs(1);
+
 pub(super) struct EventLoop {
+    client: Option<Arc<InteractiveClient>>,
+    tty: Handoff,
+    tty_handoff: u64,
+    tty_received: u64,
+    tty_reported: Option<(u64, Option<PaneId>)>,
+    escape_ms: u64,
+    stash: VecDeque<ProtocolMessage>,
     socket: OwnedFd,
     stdin: OwnedFd,
     signals: SignalInbox,
@@ -211,8 +235,15 @@ pub(super) struct EventLoop {
 }
 
 impl EventLoop {
-    pub fn new(client: &InteractiveClient) -> io::Result<Self> {
+    pub fn new(client: &Arc<InteractiveClient>) -> io::Result<Self> {
         Ok(Self {
+            client: Some(Arc::clone(client)),
+            tty: Handoff::Own,
+            tty_handoff: 0,
+            tty_received: 0,
+            tty_reported: None,
+            escape_ms: 0,
+            stash: VecDeque::new(),
             socket: client.receive_fd()?,
             stdin: io::stdin().as_fd().try_clone_to_owned()?,
             signals: SignalInbox::new()?,
@@ -230,15 +261,179 @@ impl EventLoop {
         })
     }
 
-    pub fn replace(&mut self, client: &InteractiveClient) -> io::Result<()> {
-        self.socket = client.receive_fd()?;
+    pub fn replace(&mut self, client: &Arc<InteractiveClient>, local: bool) -> io::Result<()> {
+        let socket = client.receive_fd()?;
+        self.release_tty();
+        self.client = Some(Arc::clone(client));
+        self.tty = Handoff::Own;
+        self.tty_received = 0;
+        self.tty_reported = None;
+        self.stash.clear();
+        self.socket = socket;
         self.disconnected = false;
         self.buffered = true;
         #[cfg(target_os = "macos")]
         if let Some(queue) = self.queue.as_mut() {
             queue.armed[1] = None;
         }
+        self.request_tty(local);
         Ok(())
+    }
+
+    pub fn request_tty(&mut self, local: bool) {
+        let Some(client) = self.client.as_ref() else {
+            return;
+        };
+        if self.tty != Handoff::Own
+            || self.disconnected
+            || !local
+            || std::env::var_os("ZZ_TUI_RELAY").is_some_and(|value| value == "1")
+            || !rustix::termios::isatty(&self.stdin)
+            || !client
+                .server_hello()
+                .capabilities
+                .iter()
+                .any(|capability| capability == zz_protocol::TTY_INPUT_CAPABILITY)
+        {
+            return;
+        }
+        self.tty_handoff += 1;
+        let request = ProtocolMessage::TtyInput {
+            handoff: self.tty_handoff,
+        };
+        match client.send_with_fd(&request, self.stdin.as_fd()) {
+            Ok(()) => self.requested(),
+            Err(error) => log::debug!("tty input handoff failed: {error}"),
+        }
+    }
+
+    fn requested(&mut self) {
+        self.tty = Handoff::Requested;
+        self.tty_reported = None;
+    }
+
+    pub fn release_tty(&mut self) {
+        if !matches!(self.tty, Handoff::Requested | Handoff::Daemon) {
+            return;
+        }
+        let Some(client) = self.client.clone() else {
+            self.tty = Handoff::Own;
+            return;
+        };
+        self.tty = Handoff::Releasing;
+        let release = ProtocolMessage::TtyInputRelease {
+            handoff: self.tty_handoff,
+        };
+        if client.send(&release).is_err() {
+            self.tty = Handoff::Own;
+            return;
+        }
+        let deadline = Instant::now() + RELEASE_WAIT;
+        while self.tty == Handoff::Releasing {
+            match client.try_recv() {
+                Ok(Some(message)) => {
+                    if let Some(message) = self.take_tty_message(*message) {
+                        self.stash.push_back(message);
+                    }
+                }
+                Ok(None) => {
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    if remaining.is_zero() {
+                        break;
+                    }
+                    let timeout = rustix::event::Timespec {
+                        tv_sec: remaining.as_secs().try_into().unwrap_or(i64::MAX),
+                        tv_nsec: i64::from(remaining.subsec_nanos()),
+                    };
+                    let mut poll = [rustix::event::PollFd::new(
+                        &self.socket,
+                        rustix::event::PollFlags::IN,
+                    )];
+                    match rustix::event::poll(&mut poll, Some(&timeout)) {
+                        Ok(_) | Err(rustix::io::Errno::INTR) => {}
+                        Err(_) => break,
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        self.tty = Handoff::Own;
+        self.tty_reported = None;
+        self.buffered = true;
+    }
+
+    pub fn await_graphics_reply(&mut self) {
+        self.parser
+            .await_graphics_reply(Instant::now() + GRAPHICS_REPLY_WAIT);
+        self.report_tty(|| None);
+    }
+
+    pub fn report_tty(&mut self, pane: impl FnOnce() -> Option<PaneId>) {
+        if let Some(report) = self.next_report(pane)
+            && let Some(client) = self.client.as_ref()
+        {
+            let _ = client.send(&report);
+        }
+    }
+
+    fn next_report(&mut self, pane: impl FnOnce() -> Option<PaneId>) -> Option<ProtocolMessage> {
+        if self.tty != Handoff::Daemon {
+            return None;
+        }
+        let pane = (self.terminal_events.is_empty()
+            && self.pending_main.is_none()
+            && self.escape_deadline.is_none()
+            && self.parser.is_idle())
+        .then(pane)
+        .flatten();
+        let direct = matches!(
+            self.tty_reported,
+            Some((received, Some(_))) if received == self.tty_received
+        );
+        if (pane.is_none() && !direct) || self.tty_reported == Some((self.tty_received, pane)) {
+            return None;
+        }
+        self.tty_reported = Some((self.tty_received, pane));
+        Some(ProtocolMessage::TtyInputReady {
+            received: self.tty_received,
+            pane,
+        })
+    }
+
+    fn take_tty_message(&mut self, message: ProtocolMessage) -> Option<ProtocolMessage> {
+        match message {
+            ProtocolMessage::TtyInputStarted { handoff } => {
+                if self.tty == Handoff::Requested && handoff == self.tty_handoff {
+                    self.tty = Handoff::Daemon;
+                    self.tty_received = 0;
+                    self.tty_reported = None;
+                }
+            }
+            ProtocolMessage::TtyInputBytes { bytes } => {
+                if self.tty == Handoff::Daemon {
+                    self.tty_received += 1;
+                }
+                self.parse_terminal(&bytes);
+            }
+            ProtocolMessage::TtyInputClosed { handoff } => {
+                if handoff == self.tty_handoff {
+                    self.tty = Handoff::Own;
+                    self.tty_reported = None;
+                }
+            }
+            message => return Some(message),
+        }
+        None
+    }
+
+    fn parse_terminal(&mut self, bytes: &[u8]) {
+        let mut decoded = Vec::new();
+        self.parser.push(bytes, &mut decoded);
+        self.terminal_events.extend(decoded);
+        self.escape_deadline = self
+            .parser
+            .has_pending_escape()
+            .then(|| Instant::now() + Duration::from_millis(self.escape_ms));
     }
 
     fn read_terminal(&mut self, escape_time: &AtomicU64) -> io::Result<()> {
@@ -251,12 +446,8 @@ impl EventLoop {
                 ));
             }
             Ok(count) => {
-                let mut decoded = Vec::new();
-                self.parser.push(&bytes[..count], &mut decoded);
-                self.terminal_events.extend(decoded);
-                self.escape_deadline = self.parser.has_pending_escape().then(|| {
-                    Instant::now() + Duration::from_millis(escape_time.load(Ordering::Relaxed))
-                });
+                self.escape_ms = escape_time.load(Ordering::Relaxed);
+                self.parse_terminal(&bytes[..count]);
             }
             Err(rustix::io::Errno::AGAIN | rustix::io::Errno::INTR) => {}
             Err(error) => return Err(error.into()),
@@ -270,6 +461,12 @@ impl EventLoop {
             self.parser.flush_escape(&mut decoded);
             self.terminal_events.extend(decoded);
             self.escape_deadline = None;
+        }
+    }
+
+    fn expire_graphics_reply(&mut self, now: Instant) {
+        if self.parser.expire_graphics_reply(now) {
+            self.parse_terminal(&[]);
         }
     }
 
@@ -291,7 +488,9 @@ impl EventLoop {
         let mut read_socket = read_socket;
         self.buffered = true;
         for handled in 0..MAX_COALESCED_EVENTS {
-            let received = if read_socket {
+            let received = if let Some(message) = self.stash.pop_front() {
+                Ok(Some(Box::new(message)))
+            } else if read_socket {
                 client.try_recv()
             } else {
                 client.try_recv_buffered()
@@ -299,9 +498,12 @@ impl EventLoop {
             match received {
                 Ok(Some(message)) => {
                     read_socket = false;
+                    let Some(message) = self.take_tty_message(*message) else {
+                        continue;
+                    };
                     forward_protocol_message(
                         core,
-                        *message,
+                        message,
                         connection,
                         events,
                         frames,
@@ -319,6 +521,8 @@ impl EventLoop {
                 }
                 Err(error) => {
                     self.disconnected = true;
+                    self.tty = Handoff::Own;
+                    self.tty_reported = None;
                     let _ = events.send(MainEvent::Disconnected {
                         connection,
                         error: error.to_string(),
@@ -342,8 +546,7 @@ impl EventLoop {
         #[cfg(target_os = "macos")]
         {
             let wanted = [
-                self.terminal_events
-                    .is_empty()
+                (self.terminal_events.is_empty() && self.tty == Handoff::Own)
                     .then(|| self.stdin.as_raw_fd()),
                 (!self.disconnected).then(|| self.socket.as_raw_fd()),
                 Some(self.signals.fd.as_raw_fd()),
@@ -388,7 +591,7 @@ impl EventLoop {
         self.writable.resize(elements, FdSetElement::default());
         self.readable.fill(FdSetElement::default());
         self.writable.fill(FdSetElement::default());
-        if self.terminal_events.is_empty() {
+        if self.terminal_events.is_empty() && self.tty == Handoff::Own {
             fd_set_insert(&mut self.readable, self.stdin.as_raw_fd());
         }
         if !self.disconnected {
@@ -437,7 +640,9 @@ impl EventLoop {
         escape_time: &AtomicU64,
         output: &Rc<std::cell::RefCell<TerminalWriter>>,
     ) -> Result<Option<MainEvent>, String> {
+        self.escape_ms = escape_time.load(Ordering::Relaxed);
         self.expire_escape(now);
+        self.expire_graphics_reply(now);
         {
             let mut output = output.borrow_mut();
             output.tick(now);
@@ -465,14 +670,19 @@ impl EventLoop {
             BrowserWait::Blocking => None,
             BrowserWait::Timeout(timeout) => Some(timeout),
         };
-        for deadline in [self.escape_deadline, output.borrow().deadline()]
-            .into_iter()
-            .flatten()
+        for deadline in [
+            self.escape_deadline,
+            self.parser.graphics_reply_deadline(),
+            output.borrow().deadline(),
+        ]
+        .into_iter()
+        .flatten()
         {
             let remaining = deadline.saturating_duration_since(now);
             timeout = Some(timeout.map_or(remaining, |timeout| timeout.min(remaining)));
         }
-        if self.pending_main.is_some() || !self.terminal_events.is_empty() {
+        if self.pending_main.is_some() || !self.terminal_events.is_empty() || !self.stash.is_empty()
+        {
             timeout = Some(Duration::ZERO);
         }
         let (terminal_ready, socket_ready, signal_ready) = self
@@ -535,6 +745,13 @@ mod tests {
         let (signal_fd, signal_writer) = nonblocking_pipe().unwrap();
         (
             EventLoop {
+                client: None,
+                tty: Handoff::Own,
+                tty_handoff: 0,
+                tty_received: 0,
+                tty_reported: None,
+                escape_ms: 25,
+                stash: VecDeque::new(),
                 socket: socket.into(),
                 stdin,
                 signals: SignalInbox {
@@ -577,6 +794,138 @@ mod tests {
         event_loop.expire_escape(deadline);
         assert_eq!(event_loop.terminal_events.len(), 2);
         assert!(!event_loop.parser.has_pending_escape());
+    }
+
+    #[test]
+    fn a_handed_tty_stays_unread_and_daemon_bytes_parse_in_order() {
+        let (mut event_loop, input, _peer, _signal) = pipe_loop();
+        let output = TerminalWriter::with_sink(Box::new(|_| Ok(())));
+        event_loop.tty_handoff = 1;
+        event_loop.requested();
+        assert!(
+            event_loop
+                .take_tty_message(ProtocolMessage::TtyInputStarted { handoff: 1 })
+                .is_none()
+        );
+        assert_eq!(event_loop.tty, Handoff::Daemon);
+        rustix::io::write(&input, b"a").unwrap();
+        assert_eq!(
+            event_loop.wait(&output, Some(Duration::ZERO)).unwrap(),
+            (false, false, false)
+        );
+        let pane = PaneId(4);
+        let ready = |received, pane| Some(ProtocolMessage::TtyInputReady { received, pane });
+        assert_eq!(event_loop.next_report(|| Some(pane)), ready(0, Some(pane)));
+        assert!(
+            event_loop
+                .take_tty_message(ProtocolMessage::TtyInputBytes {
+                    bytes: b"x\x1b".to_vec()
+                })
+                .is_none()
+        );
+        assert_eq!(event_loop.tty_received, 1);
+        assert_eq!(event_loop.terminal_events.len(), 1);
+        assert_eq!(event_loop.next_report(|| Some(pane)), None);
+        event_loop.terminal_events.clear();
+        assert_eq!(event_loop.next_report(|| Some(pane)), None);
+        let deadline = event_loop.escape_deadline.unwrap();
+        event_loop.expire_escape(deadline);
+        assert_eq!(event_loop.terminal_events.len(), 1);
+        event_loop.terminal_events.clear();
+        assert_eq!(event_loop.next_report(|| Some(pane)), ready(1, Some(pane)));
+        assert_eq!(event_loop.next_report(|| Some(pane)), None);
+        assert_eq!(event_loop.next_report(|| None), ready(1, None));
+        assert_eq!(event_loop.next_report(|| None), None);
+        assert_eq!(event_loop.next_report(|| Some(pane)), ready(1, Some(pane)));
+        assert!(
+            event_loop
+                .take_tty_message(ProtocolMessage::TtyInputClosed { handoff: 1 })
+                .is_none()
+        );
+        assert_eq!(event_loop.tty, Handoff::Own);
+        assert_eq!(event_loop.next_report(|| Some(pane)), None);
+        assert_eq!(
+            event_loop.wait(&output, Some(Duration::ZERO)).unwrap(),
+            (true, false, false)
+        );
+    }
+
+    #[test]
+    fn a_graphics_probe_takes_keys_back_from_the_daemon_until_its_fence_or_deadline() {
+        let (mut event_loop, _input, _peer, _signal) = pipe_loop();
+        event_loop.tty_handoff = 1;
+        event_loop.requested();
+        event_loop.take_tty_message(ProtocolMessage::TtyInputStarted { handoff: 1 });
+        let pane = PaneId(4);
+        let ready = |received, pane| Some(ProtocolMessage::TtyInputReady { received, pane });
+        assert_eq!(event_loop.next_report(|| Some(pane)), ready(0, Some(pane)));
+        event_loop.await_graphics_reply();
+        assert_eq!(event_loop.tty_reported, Some((0, None)));
+        assert_eq!(event_loop.next_report(|| Some(pane)), None);
+        event_loop.take_tty_message(ProtocolMessage::TtyInputBytes {
+            bytes: b"Gi=4294967295;OK\x1b\\\x1b[?62c".to_vec(),
+        });
+        assert_eq!(event_loop.terminal_events.len(), 2);
+        event_loop.terminal_events.clear();
+        assert_eq!(event_loop.next_report(|| Some(pane)), ready(1, Some(pane)));
+
+        event_loop.await_graphics_reply();
+        assert_eq!(event_loop.tty_reported, Some((1, None)));
+        event_loop.take_tty_message(ProtocolMessage::TtyInputBytes {
+            bytes: b"Gi=1\r".to_vec(),
+        });
+        assert!(event_loop.terminal_events.is_empty());
+        let deadline = event_loop.parser.graphics_reply_deadline().unwrap();
+        event_loop.expire_graphics_reply(deadline);
+        assert_eq!(event_loop.terminal_events.len(), 5);
+        event_loop.terminal_events.clear();
+        assert_eq!(event_loop.next_report(|| Some(pane)), ready(2, Some(pane)));
+    }
+
+    #[test]
+    fn a_late_close_for_an_earlier_handoff_leaves_the_next_one_standing() {
+        let (mut event_loop, input, _peer, _signal) = pipe_loop();
+        let output = TerminalWriter::with_sink(Box::new(|_| Ok(())));
+        rustix::io::write(&input, b"c").unwrap();
+        event_loop.tty_handoff = 1;
+        event_loop.requested();
+        event_loop.take_tty_message(ProtocolMessage::TtyInputStarted { handoff: 1 });
+        event_loop.take_tty_message(ProtocolMessage::TtyInputBytes {
+            bytes: b"a".to_vec(),
+        });
+        assert_eq!(event_loop.tty_received, 1);
+        event_loop.tty = Handoff::Own;
+        event_loop.tty_handoff = 2;
+        event_loop.requested();
+        event_loop.take_tty_message(ProtocolMessage::TtyInputBytes {
+            bytes: b"b".to_vec(),
+        });
+        assert_eq!(event_loop.terminal_events.len(), 2);
+        event_loop.take_tty_message(ProtocolMessage::TtyInputClosed { handoff: 1 });
+        assert_eq!(event_loop.tty, Handoff::Requested);
+        event_loop.take_tty_message(ProtocolMessage::TtyInputStarted { handoff: 1 });
+        assert_eq!(event_loop.tty, Handoff::Requested);
+        event_loop.take_tty_message(ProtocolMessage::TtyInputStarted { handoff: 2 });
+        assert_eq!(event_loop.tty, Handoff::Daemon);
+        event_loop.terminal_events.clear();
+        let pane = PaneId(4);
+        assert_eq!(
+            event_loop.next_report(|| Some(pane)),
+            Some(ProtocolMessage::TtyInputReady {
+                received: 0,
+                pane: Some(pane)
+            })
+        );
+        assert_eq!(
+            event_loop.wait(&output, Some(Duration::ZERO)).unwrap(),
+            (false, false, false)
+        );
+        event_loop.take_tty_message(ProtocolMessage::TtyInputClosed { handoff: 2 });
+        assert_eq!(event_loop.tty, Handoff::Own);
+        assert_eq!(
+            event_loop.wait(&output, Some(Duration::ZERO)).unwrap(),
+            (true, false, false)
+        );
     }
 
     #[test]

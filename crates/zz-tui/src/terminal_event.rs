@@ -1,6 +1,6 @@
 //! Bounded decoding for the terminal input protocols enabled by `tty`.
 
-use std::ops::BitOr;
+use std::{ops::BitOr, time::Instant};
 
 const MAX_BUFFER_BYTES: usize = 4 * 1024 * 1024;
 /// A device control string with no terminator in sight is not one, the way a
@@ -131,6 +131,7 @@ pub(crate) struct EventParser {
     bytes: Vec<u8>,
     paste: Vec<u8>,
     in_paste: bool,
+    graphics_reply: Option<Instant>,
 }
 
 impl EventParser {
@@ -143,6 +144,26 @@ impl EventParser {
 
     pub fn has_pending_escape(&self) -> bool {
         self.bytes.first() == Some(&0x1b)
+    }
+
+    pub fn is_idle(&self) -> bool {
+        self.bytes.is_empty() && !self.in_paste && self.graphics_reply.is_none()
+    }
+
+    pub fn await_graphics_reply(&mut self, deadline: Instant) {
+        self.graphics_reply = Some(deadline);
+    }
+
+    pub const fn graphics_reply_deadline(&self) -> Option<Instant> {
+        self.graphics_reply
+    }
+
+    pub fn expire_graphics_reply(&mut self, now: Instant) -> bool {
+        let expired = self.graphics_reply.is_some_and(|deadline| deadline <= now);
+        if expired {
+            self.graphics_reply = None;
+        }
+        expired
     }
 
     pub fn flush_escape(&mut self, output: &mut Vec<Event>) {
@@ -184,11 +205,14 @@ impl EventParser {
                 self.in_paste = true;
                 continue;
             }
-            let Some(parsed) = parse_one(&self.bytes) else {
+            let Some(parsed) = parse_one(&self.bytes, self.graphics_reply.is_some()) else {
                 return;
             };
             self.bytes.drain(..parsed.consumed);
             if let Some(event) = parsed.event {
+                if event == Event::DeviceAttributes {
+                    self.graphics_reply = None;
+                }
                 output.push(event);
             }
         }
@@ -200,8 +224,8 @@ struct Parsed {
     event: Option<Event>,
 }
 
-fn parse_one(bytes: &[u8]) -> Option<Parsed> {
-    if bytes.starts_with(b"Gi=") {
+fn parse_one(bytes: &[u8], graphics_reply: bool) -> Option<Parsed> {
+    if graphics_reply && bytes.starts_with(b"Gi=") {
         let terminator = find_subslice(bytes, b"\x1b\\")?;
         return Some(Parsed {
             consumed: terminator + 2,
@@ -210,7 +234,7 @@ fn parse_one(bytes: &[u8]) -> Option<Parsed> {
     }
     let first = *bytes.first()?;
     if first == 0x1b {
-        return parse_escape(bytes);
+        return parse_escape(bytes, graphics_reply);
     }
     if first < 0x20 || first == 0x7f {
         return Some(Parsed {
@@ -238,7 +262,7 @@ fn parse_one(bytes: &[u8]) -> Option<Parsed> {
     })
 }
 
-fn parse_escape(bytes: &[u8]) -> Option<Parsed> {
+fn parse_escape(bytes: &[u8], graphics_reply: bool) -> Option<Parsed> {
     let second = *bytes.get(1)?;
     if second == b'_' {
         let terminator = find_subslice(&bytes[2..], b"\x1b\\")? + 2;
@@ -287,7 +311,7 @@ fn parse_escape(bytes: &[u8]) -> Option<Parsed> {
         });
     }
 
-    let parsed = parse_one(&bytes[1..])?;
+    let parsed = parse_one(&bytes[1..], graphics_reply)?;
     let event = match parsed.event {
         Some(Event::Key(mut key)) => {
             key.modifiers = key.modifiers | KeyModifiers::ALT;
@@ -667,6 +691,28 @@ mod tests {
         events
     }
 
+    fn probing(bytes: &[u8]) -> Vec<Event> {
+        let mut parser = EventParser::default();
+        parser.await_graphics_reply(Instant::now() + std::time::Duration::from_mins(1));
+        let mut events = Vec::new();
+        parser.push(bytes, &mut events);
+        events
+    }
+
+    fn typed(text: &str) -> Vec<Event> {
+        text.chars()
+            .map(|character| {
+                Event::Key(match character {
+                    '\r' => KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+                    character if character.is_ascii_uppercase() => {
+                        KeyEvent::new(KeyCode::Char(character), KeyModifiers::SHIFT)
+                    }
+                    character => KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),
+                })
+            })
+            .collect()
+    }
+
     #[test]
     fn parses_text_control_and_legacy_keys() {
         let events = parse(b"A\x1b[1;5D\x1bOP\x1c");
@@ -902,14 +948,56 @@ mod tests {
             ok: true,
         };
         assert_eq!(parse(prefixed.as_bytes()), vec![expected.clone()]);
-        assert_eq!(parse(stripped.as_bytes()), vec![expected]);
+        assert_eq!(probing(stripped.as_bytes()), vec![expected]);
         assert_eq!(
-            parse(error.as_bytes()),
+            probing(error.as_bytes()),
             vec![Event::KittyGraphicsResponse {
                 image_id: FILE_PROBE_IMAGE_ID,
                 ok: false,
             }]
         );
+    }
+
+    #[test]
+    fn typed_gi_is_text_unless_a_graphics_probe_waits_for_its_reply() {
+        assert_eq!(parse(b"echo Gi=1\r"), typed("echo Gi=1\r"));
+
+        let mut parser = EventParser::default();
+        let mut events = Vec::new();
+        let deadline = Instant::now();
+        parser.await_graphics_reply(deadline);
+        assert!(!parser.is_idle());
+        parser.push(b"Gi=1\r", &mut events);
+        assert!(events.is_empty());
+        assert!(
+            !parser.expire_graphics_reply(
+                deadline
+                    .checked_sub(std::time::Duration::from_millis(1))
+                    .unwrap()
+            )
+        );
+        parser.push(b"", &mut events);
+        assert!(events.is_empty());
+        assert!(parser.expire_graphics_reply(deadline));
+        parser.push(b"", &mut events);
+        assert_eq!(events, typed("Gi=1\r"));
+        assert!(parser.is_idle());
+
+        let mut events = Vec::new();
+        parser.await_graphics_reply(Instant::now() + std::time::Duration::from_mins(1));
+        let reply = format!("Gi={FILE_PROBE_IMAGE_ID};OK\x1b\\\x1b[?62;22c");
+        parser.push(reply.as_bytes(), &mut events);
+        assert!(parser.is_idle());
+        parser.push(b"Gi=1\r", &mut events);
+        let mut expected = vec![
+            Event::KittyGraphicsResponse {
+                image_id: FILE_PROBE_IMAGE_ID,
+                ok: true,
+            },
+            Event::DeviceAttributes,
+        ];
+        expected.extend(typed("Gi=1\r"));
+        assert_eq!(events, expected);
     }
 
     #[test]

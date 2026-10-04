@@ -333,3 +333,67 @@ fn selected_live_views_keep_their_own_overlays() {
         latest.by_view[&TerminalViewId(3)].overlays
     );
 }
+
+#[test]
+fn a_pane_keeps_its_render_state_for_a_while_after_its_last_view_leaves() {
+    let mut terminal = new_terminal(8, 3, 32).expect("terminal");
+    let (publisher, _events, mut active, mut frames) = fixture(1);
+    terminal.vt_write(b"x");
+    publish(
+        &mut terminal,
+        &publisher,
+        &mut frames,
+        &mut active,
+        SnapshotChange::Content,
+    );
+    assert!(frames.render.is_some());
+    frames.set_stream(TerminalViewId(1), ViewStream::Off);
+    frames.release_unused(&active);
+    assert!(frames.render.is_some());
+    assert!(
+        frames
+            .retain_render_until
+            .is_some_and(|until| until > Instant::now() + VIEWED_RENDER_RETAIN / 2)
+    );
+    frames.release_unused(&active);
+    assert!(frames.render.is_some());
+    frames.retain_render_until = Some(Instant::now());
+    frames.release_unused(&active);
+    assert!(frames.render.is_none());
+    assert!(frames.retain_render_until.is_none());
+}
+
+#[test]
+fn output_after_the_last_view_leaves_keeps_the_render_retention() {
+    let mut terminal = new_terminal(8, 3, 32).expect("terminal");
+    let (publisher, _events, mut active, mut frames) = fixture(1);
+    terminal.vt_write(b"x");
+    publish(
+        &mut terminal,
+        &publisher,
+        &mut frames,
+        &mut active,
+        SnapshotChange::Content,
+    );
+    frames.set_stream(TerminalViewId(1), ViewStream::Off);
+    frames.release_unused(&active);
+    let retained = frames.retain_render_until;
+    assert!(retained.is_some());
+    terminal.vt_write(b"y");
+    let quiet = Instant::now()
+        .checked_sub(UNWATCHED_SETTLE_QUIET * 2)
+        .expect("a past instant");
+    frames.unbuilt_since = Some(quiet);
+    frames.last_unbuilt = Some(quiet);
+    settle_unwatched(
+        &mut terminal,
+        &publisher,
+        &mut frames,
+        &mut active,
+        &WordSeparators::default(),
+        SessionStatus::Running,
+    )
+    .expect("settle");
+    assert!(frames.render.is_some());
+    assert_eq!(frames.retain_render_until, retained);
+}

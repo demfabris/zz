@@ -297,6 +297,19 @@ impl InputRouter {
     pub fn drain_effects(&mut self) -> Vec<Effect> {
         std::mem::take(&mut self.effects)
     }
+
+    #[must_use]
+    pub fn passes_plain_keys(&self, releases: bool) -> bool {
+        let table = match self.owner() {
+            InputOwner::None => None,
+            InputOwner::Pane(_, SurfaceKind::Terminal) => Some(TERMINAL_TABLE),
+            _ => return false,
+        };
+        self.effects.is_empty()
+            && (!releases || self.claim.local_releases.is_empty())
+            && !self.keymap.binds(UI_TABLE)
+            && table.is_none_or(|table| !self.keymap.binds(table))
+    }
 }
 
 #[cfg(test)]

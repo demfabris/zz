@@ -556,6 +556,11 @@ impl ChromeKeymap {
         Self { tables }
     }
 
+    #[must_use]
+    pub fn binds(&self, table: &str) -> bool {
+        self.tables.has_table(table)
+    }
+
     /// Resolve a key press against one chrome table.
     #[must_use]
     pub fn resolve(&self, table: &str, input: &KeyInput) -> Option<ChromeAction> {

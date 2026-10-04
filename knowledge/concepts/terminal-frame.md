@@ -70,8 +70,8 @@ Content publishes are themselves time-coalesced in the actor
 snapshots immediately, so interactive echo is never delayed. Faster bursts (sustained floods)
 defer to a select-deadline arm, capping full-grid snapshot builds on the drain path at ~60 Hz
 regardless of throughput. In `crates/zz-terminal/src/session.rs`, macOS and other non-Linux Unix
-targets drain the PTY on the actor thread through `Wake::PtyReadable`. Linux uses `gather_pty_linux`
-with four pooled 64 KiB buffers; non-Unix targets use the blocking `read_pty` thread. See
+targets drain the PTY on the actor thread through `Wake::PtyReadable`. Linux reads idle panes on their shard
+and lends busy ones to the shard's `PtyGather`, each pane with four pooled 64 KiB buffers; non-Unix targets use the blocking `read_pty` thread. See
 [PTY drain topology](/terminal/pty-drain.md) for the platform paths and drain limits.
 The reliable-event queue for `CopyReady`/`OpenUri`/`ViewClosed` is separate
 and byte-bounded. If a copy or URI action exceeds that backlog it is discarded and logged without

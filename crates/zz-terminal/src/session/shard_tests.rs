@@ -343,6 +343,64 @@ fn twenty_panes_select_direct_or_gather_readers() {
     );
 }
 
+#[cfg(target_os = "linux")]
+fn gather_reads(name: &str) -> u64 {
+    std::fs::read_dir("/proc/self/task")
+        .expect("process threads")
+        .filter_map(Result::ok)
+        .filter(|task| {
+            std::fs::read_to_string(task.path().join("comm"))
+                .is_ok_and(|comm| comm.trim_end() == name)
+        })
+        .filter_map(|task| std::fs::read_to_string(task.path().join("io")).ok())
+        .filter_map(|io| {
+            io.lines()
+                .find_map(|line| line.strip_prefix("syscr: "))?
+                .trim()
+                .parse::<u64>()
+                .ok()
+        })
+        .sum()
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn an_idle_pane_reads_on_its_shard_and_a_burst_visits_the_gather() {
+    let shard = ShardHandle::start(8).expect("shard");
+    let gather = "zz-pty-gather-8";
+    let pane = session(
+        &shard,
+        "stty -echo; printf 'ready\\r\\n'; while read -r line; do if [ \"$line\" = go ]; then head -c 1048576 /dev/zero | tr '\\0' x; printf '\\r\\nburst done\\r\\n'; else printf '%s\\r\\n' \"$line\"; fi; done",
+    );
+    wait(|| captured(&pane, "ready"));
+    let echo = |text: &str| {
+        let before = gather_reads(gather);
+        pane.send_text(format!("{text}\n"));
+        wait(|| captured(&pane, text));
+        assert_eq!(gather_reads(gather), before, "{text} woke the gather");
+    };
+    echo("idle before");
+    let before = gather_reads(gather);
+    pane.send_text("go\n");
+    wait_within(Duration::from_secs(20), || captured(&pane, "burst done"));
+    assert!(
+        gather_reads(gather) > before + 16,
+        "the burst stayed on the shard"
+    );
+    let mut probe = 0;
+    wait_within(Duration::from_secs(10), || {
+        thread::sleep(PTY_GATHER_LEND_IDLE * 2);
+        probe += 1;
+        let text = format!("probe {probe}");
+        let before = gather_reads(gather);
+        pane.send_text(format!("{text}\n"));
+        wait(|| captured(&pane, &text));
+        gather_reads(gather) == before
+    });
+    echo("quiet again");
+    echo("still quiet");
+}
+
 #[test]
 fn a_full_output_sink_parks_its_pane_without_blocking_a_neighbour() {
     let shard = ShardHandle::start(109).expect("shard");

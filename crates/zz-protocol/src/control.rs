@@ -13,6 +13,7 @@ use crate::{
 
 pub const CONTROL_CAPABILITY: &str = "control-plane-v2";
 pub const CONTROL_STDIO_CAPABILITY: &str = "control-stdio-v1";
+pub const TTY_INPUT_CAPABILITY: &str = "tty-input-v1";
 pub const MAX_BATCH_FRAMES: usize = 4096;
 
 pub const CAPABILITY_NAMES: &[&str] = &[
@@ -48,6 +49,7 @@ pub const CAPABILITY_NAMES: &[&str] = &[
     "pane-frame-v1",
     CONTROL_CAPABILITY,
     CONTROL_STDIO_CAPABILITY,
+    TTY_INPUT_CAPABILITY,
 ];
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

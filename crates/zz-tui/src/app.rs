@@ -594,6 +594,10 @@ pub(crate) fn run(
     model.update_snapshot(Arc::clone(lock_core(&core).snapshot()));
     model.begin_client_focus_attach();
     let mut event_loop = EventLoop::new(&client).map_err(|error| error.to_string())?;
+    if terminal.kitty_probe_sent() {
+        event_loop.await_graphics_reply();
+    }
+    event_loop.request_tty(matches!(endpoint, Endpoint::Local(_)));
 
     let mut attempt = attempt;
     let mut creating_default = false;
@@ -602,8 +606,16 @@ pub(crate) fn run(
     let mut deferred = None;
 
     let outcome = loop {
+        event_loop.report_tty(|| {
+            input::plain_key_pane(
+                &model,
+                &browser,
+                lock_core(&core).prefix_armed(),
+                key_releases,
+            )
+        });
         if browser.wants_graphics() {
-            start_kitty_probe(&mut kitty_probe, &mut terminal)?;
+            start_kitty_probe(&mut kitty_probe, &mut terminal, &mut event_loop)?;
         }
         let mut now = Instant::now();
         if model.expire_client_message(now) {
@@ -674,7 +686,11 @@ pub(crate) fn run(
                                         .iter()
                                         .any(|update| !matches!(update, KittyImageUpdate::Reset))
                                 {
-                                    start_kitty_probe(&mut kitty_probe, &mut terminal)?;
+                                    start_kitty_probe(
+                                        &mut kitty_probe,
+                                        &mut terminal,
+                                        &mut event_loop,
+                                    )?;
                                 }
                                 let changed = !updates.is_empty();
                                 apply_kitty_updates(&mut renderer, updates, accept_images);
@@ -904,6 +920,7 @@ pub(crate) fn run(
                                     &mut event_loop,
                                     &mut connection_id,
                                     connected,
+                                    matches!(next_endpoint, Endpoint::Local(_)),
                                     &events,
                                     &mut frames,
                                     &mut kitty_images,
@@ -977,6 +994,7 @@ pub(crate) fn run(
                     &mut event_loop,
                     &mut connection_id,
                     replacement,
+                    matches!(endpoint, Endpoint::Local(_)),
                     &events,
                     &mut frames,
                     &mut kitty_images,
@@ -1033,6 +1051,7 @@ pub(crate) fn run(
                     .send_input(InputMessage::ClientSuspendState { suspended: true })
                     .map_err(|error| error.to_string())?;
                 renderer.pause(true);
+                event_loop.release_tty();
                 terminal.suspend();
                 #[cfg(unix)]
                 rustix::process::kill_process(
@@ -1049,6 +1068,10 @@ pub(crate) fn run(
                 terminal
                     .resume(model.mouse_arming, extended_keys, focus_events)
                     .map_err(|error| error.to_string())?;
+                if terminal.kitty_probe_sent() {
+                    event_loop.await_graphics_reply();
+                }
+                event_loop.request_tty(matches!(endpoint, Endpoint::Local(_)));
                 renderer.pause(false);
                 renderer
                     .paint(&model, true)
@@ -1066,6 +1089,7 @@ pub(crate) fn run(
         remembered_session = model.attached_session.or(remembered_session);
     };
 
+    event_loop.release_tty();
     browser.close_all();
     renderer.discard_queued_paints();
     drop(terminal);
@@ -1131,8 +1155,13 @@ fn hangup_parent() {
 #[cfg(not(unix))]
 const fn hangup_parent() {}
 
-fn start_kitty_probe(probe: &mut KittyProbe, terminal: &mut TerminalGuard) -> Result<(), String> {
+fn start_kitty_probe(
+    probe: &mut KittyProbe,
+    terminal: &mut TerminalGuard,
+    event_loop: &mut EventLoop,
+) -> Result<(), String> {
     if probe.start() {
+        event_loop.await_graphics_reply();
         terminal
             .probe_kitty_graphics()
             .map_err(|error| error.to_string())?;
@@ -1362,13 +1391,14 @@ fn replace_connection(
     event_loop: &mut EventLoop,
     connection_id: &mut u64,
     connected: PreparedConnection,
+    local: bool,
     _events: &mpsc::Sender<MainEvent>,
     frames: &mut Arc<FrameInbox>,
     kitty_images: &mut Arc<KittyImageInbox>,
     _kitty_gate: &Arc<AtomicU8>,
 ) -> Result<(), String> {
     event_loop
-        .replace(&connected.client)
+        .replace(&connected.client, local)
         .map_err(|error| error.to_string())?;
     kitty_images.clear();
     *client = connected.client;

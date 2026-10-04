@@ -24,6 +24,10 @@ impl Burst {
     }
 
     fn open(kind: rustix::net::SocketType) -> Self {
+        Self::open_with(kind, rustix::pipe::pipe().unwrap())
+    }
+
+    fn open_with(kind: rustix::net::SocketType, (stdin_read, stdin): (OwnedFd, OwnedFd)) -> Self {
         let shared = Arc::new(Shared::new(17));
         let mut event_loop = EventLoop::empty(&shared).unwrap();
         let (mut peer, server) = UnixStream::pair().unwrap();
@@ -38,7 +42,6 @@ impl Burst {
             event_loop.turn(&shared).unwrap();
             thread::sleep(Duration::from_millis(1));
         }
-        let (stdin_read, stdin) = rustix::pipe::pipe().unwrap();
         let (stdout, stdout_write) = rustix::net::socketpair(
             rustix::net::AddressFamily::UNIX,
             kind,
@@ -85,7 +88,8 @@ impl Burst {
             .as_ref()
             .unwrap()
             .stdin_token;
-        self.event_loop.stdio_ready(self.token, stdin_token);
+        self.event_loop
+            .stdio_ready(self.token, stdin_token, &self.shared);
         self.event_loop.turn(&self.shared).unwrap();
     }
 
@@ -150,6 +154,48 @@ fn a_burst_of_daemon_lines_reaches_stdout_in_one_write() {
     let writes = burst.writes();
     assert_eq!(writes.len(), 1, "{writes:?}");
     assert_eq!(blocks(&writes[0]), expected(8));
+    assert!(burst.forwarded().is_empty());
+}
+
+#[test]
+fn a_line_is_answered_on_its_stdin_event_and_the_drain_follows_the_reply() {
+    let mut burst = Burst::direct();
+    rustix::io::write(&burst.stdin, b"display-message -p a\n").unwrap();
+    let stdin_token = burst.stdio().stdin_token;
+    burst
+        .event_loop
+        .stdio_ready(burst.token, stdin_token, &burst.shared);
+    let writes = burst.writes();
+    assert_eq!(writes.len(), 1, "{writes:?}");
+    assert_eq!(blocks(&writes[0]), [(1, "a".to_owned())]);
+    assert!(burst.stdio().drained);
+    assert!(burst.forwarded().is_empty());
+}
+
+#[test]
+fn output_queued_before_a_line_reaches_stdout_ahead_of_its_reply() {
+    let mut burst = Burst::direct();
+    let output = ProtocolMessage::Event(Event {
+        sequence: 0,
+        payload: EventPayload::PaneOutput {
+            pane: zz_protocol::PaneId(3),
+            bytes: b"ready".to_vec(),
+        },
+    });
+    assert!(
+        burst.event_loop.connections[&burst.token]
+            .outbound
+            .enqueue_reliable(&output)
+    );
+    rustix::io::write(&burst.stdin, b"display-message -p a\n").unwrap();
+    let stdin_token = burst.stdio().stdin_token;
+    burst
+        .event_loop
+        .stdio_ready(burst.token, stdin_token, &burst.shared);
+    let text = burst.writes().concat();
+    let (first, rest) = text.split_once('\n').unwrap();
+    assert_eq!(first, "%output %3 ready");
+    assert_eq!(blocks(rest), [(1, "a".to_owned())]);
     assert!(burst.forwarded().is_empty());
 }
 
@@ -248,4 +294,122 @@ fn a_backpressured_burst_keeps_every_block_whole_and_in_order() {
     assert!(backpressured);
     assert_eq!(blocks(&String::from_utf8(text).unwrap()), expected(400));
     assert!(burst.forwarded().is_empty());
+}
+
+#[cfg(target_os = "linux")]
+fn deep_stdin() -> (OwnedFd, OwnedFd) {
+    let (read, write) = rustix::pipe::pipe().unwrap();
+    rustix::pipe::fcntl_setpipe_size(&write, 1 << 20).unwrap();
+    (read, write)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn deep_stdin() -> (OwnedFd, OwnedFd) {
+    let (read, write) = rustix::net::socketpair(
+        rustix::net::AddressFamily::UNIX,
+        rustix::net::SocketType::STREAM,
+        rustix::net::SocketFlags::empty(),
+        None,
+    )
+    .unwrap();
+    rustix::net::sockopt::set_socket_send_buffer_size(&write, 1 << 20).unwrap();
+    rustix::net::sockopt::set_socket_recv_buffer_size(&read, 1 << 20).unwrap();
+    (read, write)
+}
+
+fn deep_burst() -> Burst {
+    let burst = Burst::open_with(rustix::net::SocketType::STREAM, deep_stdin());
+    rustix::net::sockopt::set_socket_send_buffer_size(&burst.stdio().stdout, 1 << 20).unwrap();
+    rustix::net::sockopt::set_socket_recv_buffer_size(&burst.stdout, 1 << 20).unwrap();
+    burst
+}
+
+fn padded_lines(count: usize) -> String {
+    let pad = " ".repeat(400);
+    (0..count)
+        .map(|line| format!("display-message -p b{line}{pad}\n"))
+        .collect::<Vec<_>>()
+        .concat()
+}
+
+fn pending_wake(burst: &mut Burst, events: &mut mio::Events) -> bool {
+    burst
+        .event_loop
+        .poll
+        .poll(events, Some(Duration::ZERO))
+        .unwrap();
+    events.iter().any(|event| event.token() == WAKE)
+}
+
+#[test]
+fn input_past_the_read_limit_is_answered_without_another_write() {
+    let mut burst = deep_burst();
+    let count = INPUT_READ_LIMIT / 256;
+    let payload = padded_lines(count);
+    assert!(payload.len() > INPUT_READ_LIMIT + INPUT_CHUNK);
+    let _thread = crate::transport::LoopThread::enter(&burst.event_loop.waker);
+    let mut events = mio::Events::with_capacity(16);
+    pending_wake(&mut burst, &mut events);
+    assert_eq!(
+        rustix::io::write(&burst.stdin, payload.as_bytes()).unwrap(),
+        payload.len()
+    );
+    let stdin_token = burst.stdio().stdin_token;
+    let mut text = Vec::new();
+    let mut buffer = [0_u8; 8192];
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while text.windows(5).filter(|window| window == b"%end ").count() < count {
+        assert!(
+            Instant::now() < deadline,
+            "stdin past the read limit stalled"
+        );
+        crate::transport::clear_loop_again();
+        burst
+            .event_loop
+            .poll
+            .poll(&mut events, Some(Duration::from_millis(10)))
+            .unwrap();
+        if events.is_empty() {
+            continue;
+        }
+        if events.iter().any(|event| event.token() == stdin_token) {
+            burst
+                .event_loop
+                .stdio_ready(burst.token, stdin_token, &burst.shared);
+        }
+        burst.event_loop.turn(&burst.shared).unwrap();
+        loop {
+            match rustix::net::recv(&burst.stdout, &mut buffer, rustix::net::RecvFlags::DONTWAIT) {
+                Ok((read, _)) => text.extend_from_slice(&buffer[..read]),
+                Err(rustix::io::Errno::AGAIN) => break,
+                Err(error) => panic!("read control stdout: {error}"),
+            }
+        }
+    }
+    assert!(burst.stdio().drained);
+    assert_eq!(
+        blocks(&String::from_utf8(text).unwrap()),
+        expected(count as u64)
+    );
+    assert!(burst.forwarded().is_empty());
+}
+
+#[test]
+fn a_pass_that_stops_at_the_read_limit_wakes_the_loop_for_the_rest() {
+    let mut burst = deep_burst();
+    let _thread = crate::transport::LoopThread::enter(&burst.event_loop.waker);
+    let mut events = mio::Events::with_capacity(16);
+    pending_wake(&mut burst, &mut events);
+    rustix::io::write(&burst.stdin, b"display-message -p a\n").unwrap();
+    let connection = burst.event_loop.connections.get_mut(&burst.token).unwrap();
+    assert!(connection.stdio.as_mut().unwrap().read_chunks(true));
+    let payload = padded_lines(INPUT_READ_LIMIT / 128);
+    assert_eq!(
+        rustix::io::write(&burst.stdin, payload.as_bytes()).unwrap(),
+        payload.len()
+    );
+    crate::transport::clear_loop_again();
+    assert!(burst.event_loop.pump_stdio(burst.token, &burst.shared));
+    assert!(!burst.stdio().drained);
+    assert!(pending_wake(&mut burst, &mut events));
 }

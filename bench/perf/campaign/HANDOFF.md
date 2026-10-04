@@ -9,63 +9,54 @@ Opus fix lanes) closed at `e9bc174c`; its exit gates are `wave3-macbook-e9bc174c
 page copies); the libghostty-rs pin is `f5f82601`. No lane in flight, no lane worktree left.
 Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" before launching anything.
 
-## Next session: wave 4
+## Next session: after wave 4
 
-1. Wave 3 closed 2026-10-02 at `e9bc174c` (W3-SHARDS, W3-TUI, W3-LOOP, and nine fix lanes run
-   as Opus subagents; see "Wave 3 merge log"). Exit gates `wave3-macbook-e9bc174c.json` and
-   `wave3-alienware-e9bc174c.json` (strict, full, `--baseline wave2-<host>-3d0fc1b0.json`).
-   Against wave 2: threads p20 25 -> 5 Mac / 45 -> 25 Linux, footprint p20 -36% / -20%,
-   status-job threads 3/s -> 0 and instructions -26% / -46%, kill-pane instructions -26% Mac,
-   copy entry CPU -17 to -44%, control output +18 to +88%. No unexplained regression: see the
-   two exit entries in the merge log for each flagged row. Pushed to main the same day.
-2. Wave 4 in merge order: W4-DELIVER, W4-ROWS, W4-BINARY (closed unmerged, see the wave-4 merge log), gate `--stage final`
-   (`knowledge/designs/daemon-perf-rebuild.md`). What still loses to tmux at wave-3 exit, all
-   W4-DELIVER unless noted: echo p50/p99 1.8-2.6 ms against 0.92-1.13 on Linux (Mac p50 0.59-0.90
-   against 0.26-0.33), `control.latency` 1.2-1.5x, `attach.cpu`/`attach.ttfc`, `chatty.cpu_pct.visible`
-   2.2x on Linux, `mem.threads.p20` 25 on Linux (one gather thread per pane; the final gate wants
-   12 or fewer), `spawn.cpu.*` 1.6-1.8x on Linux (spawn path, not owned yet: give it to
-   W4-BINARY or a spawn lane), `control.burst_cmds_per_s` 0.83x tmux. Watch in W4-DELIVER: Mac
-   `chatty.cpu_pct.steady` (ten hidden printing panes) is about 11% above loop-00 after
-   normalizing by tmux, at +4% instructions, under both tolerances.
-3. Deferred: W3-LOOP step (d), the Mutex removal (570 production lock sites, at most 0.8% of
-   instructions, uncontended after e21). Plan and census in `bench/perf/campaign/w3-loop-d-plan.txt`
-   (10 slices); run it as its own lane after W4-DELIVER, whose shard delivery removes most of
-   the cross-thread locking it would otherwise have to rework.
-4. Open items found in wave 3 (none blocks wave 4):
-   - A command handed off from inside a nested list (an `if-shell -F` body, a prompt template)
-     runs after the rest of that list; tmux runs it in place (`loop_handoff.rs`).
-   - `wait-for` and agent waits (`wait-pane`) bound to a key are not converted to continuations.
-   - Three compat rows fail on every build here against the pinned tmux oracle
-     (`smoke/control-alias-prepare`, `if-shell-background-order`, prompt history): a separate task.
-   - Mac rows red on the wave-2 binary too: `census-hooks`,
-     `smoke/plugin-runtime-vim-tmux-navigator`, `smoke/source-file-byte-name` (plus the known
-     tmux-also-fails rows). Linux: `smoke/format-modifier-client-loop` red with the debug build
-     only.
-   - zz-daemon lib tests: 5-25 timing failures per parallel run on either host, all pass alone;
-     `ZZ_PTY_SHARDS` 4, 16 or 0 makes no difference. zz-terminal `search_worker_tests` counts
-     named threads through /proc and is not isolated like the daemon thread-count tests.
-   - Mac `compat/attached-client.sh` fails on the tmux side under load: the copy-mode position
-     indicator is captured half drawn (`[` with no `N/M]`), so the first transcript line does not
-     match. It passes alone on a quiet Mac. Killing the fixture mid-run leaks its `zzai-*` tmux
-     server; kill those by hand.
-   - Binaries before `writestall` (loop-00 included) hang in a full-history `capture-pane -S -` of
-     a 20-pane session: use `wave3-gate-cli` (`2ea96e66`) or later as an A/B base for that row.
-   - `endpoint::tests::remote_scripts_fall_back_to_the_mac_app_bundle_cli` returns early when a
-     zz sits in /opt/homebrew/bin or /usr/local/bin.
-   - Measurement: `cli.instr.display.p20` and `cli.wall.version.p1` are bimodal on every binary
-     and on tmux; `chatty.tty_kibps.hidden` swings 30-50% between identical runs.
-   - Cheap instruction wins seen and not taken: `after_command_hook`'s binary search (~0.9% of
-     source_1000), repeated `canonical_command` lookups (~3.6% with `resolve_command`), the
-     per-command `format_variables` clone in `execute_with_mux_source_inner`, Linux chain5 and
-     list_keys +1 to +1.6% from `CommandTask::new_with_log`.
-5. Lanes are Opus subagents now (owner decision 2026-10-02): `~/.claude/agents/lane-impl.md`
-   (`model: opus`, `effort: xhigh`) with a `lane-briefs.py` brief, one worktree each, a warm
-   target cloned with `/bin/cp -c -R`, Linux work over ssh. Nine lanes took 14 min to 2 h 12 min.
-   Wall-time measurements on alienware go through `~/.cache/zz-perf/quiet-gate.sh` (pauses other
-   lanes' compiles under ~/dev); a binary copied to tmpfs `/tmp` there inflates the footprint
-   rows. The wave-exit corpus found what 36 merge rows did not (two W3-LOOP parity regressions):
-   run the full corpus before calling a wave done.
-6. Release freeze until wave 4 exits; protocol stays 107.
+1. Wave 4 is built and gated on `3057f095` (`perf/wave4`, merged into main with the push of
+   2026-10-04). Exit gates: `bench/perf/results/wave4-<host>-3057f095-{1,2,3}.json`, three strict
+   full `--stage final` runs per host, each against the wave-3 JSON. Rule (decided 2026-10-03): a
+   ratio row passes when the median of its three ratios passes. Linux passes every row. The Mac
+   misses two by a hair: `spawn.cpu.split_empty_P` (1.301, 1.24, 0.80x; rule 1.2x; zz sits at
+   0.37-0.40 or 0.51-0.56 ms per run) and `attach.ttfc.p4` (0.945, 1.109, 1.224x; rule 1.1x).
+   Lane MACQOS (brief /tmp/zzpc/w4/macqos.md, ~/dev/zz-macqos) tests whether daemon threads at
+   DEFAULT QoS landing on efficiency cores explain the two-mode Mac CPU rows; see the merge log
+   for its result. Until those two rows pass or the owner accepts them, the release freeze holds
+   and nothing is tagged; protocol stays 107.
+2. Headline against wave 3 (zz / tmux, medians; Linux, then Mac): echo p50 idle 1.92 -> 1.22x,
+   2.25 -> 1.34x; echo p50 busy30 2.01 -> 1.29x, 2.75 -> 1.40x; `attach.cpu.p4` 1.48 -> 1.17x,
+   0.85 -> 0.60x; `control.latency` 1.52 -> 0.94x, 1.41 -> 0.71x; `chatty.cpu_pct.visible`
+   2.24 -> 0.94x, 1.47 -> 0.68x; `spawn.cpu.split_shell` 1.54 -> 0.99x, 1.02 -> 0.75x; threads
+   p20 25 -> 9 on Linux; throughput holds at 2.2x and 6.6x tmux.
+3. Rows that read worse on one run and why (do not chase without an instruction or count signal):
+   `spawn.cpu.kill_pane` mixes empty and shell kills, and the package clock sits at 1.1 or 4.5 GHz
+   per kill; `attach.cpu.*` per sample is bimodal for zz and tmux alike; `mem.copy_cpu.scroll180`
+   swings 0.70-1.51 ms at a constant 4.116 M instructions; `cli.wall.version.p1` is bimodal on both
+   muxes; echo rows flip between fast and slow host states (compare within a state).
+4. Open items found in wave 4 (none blocks the exit):
+   - The remaining Mac echo gap is the relay client's output half: frames are still painted by
+     `zz_cli attach`. An output handoff (the daemon paints the tty for a handed-off client) would
+     take the last client wake out of the echo path; it needs the zz-tui renderer state in the
+     daemon (zz-tui depends on zz-daemon today).
+   - Loop thread per attach (ATTACHP4): status render 12.6%, the detach key through the general
+     executor 28%, per-turn overhead 15% of loop user cycles; each shard notifies the loop twice
+     per attach.
+   - Kill-pane: the shard's teardown munmaps four 392 KiB libghostty preheated pages
+     (`page_preheat = 4` in the Ghostty fork); a process-wide page pool would take that out of
+     every kill and spawn. SIGCHLD still wakes the loop on every pane exit.
+   - Control mode: lines read in the same stdin chunk as `detach-client` are dropped (tmux runs
+     them from a pipe); command execution in daemon.rs is 40% of a control command's user cycles.
+   - Peer scans: a dead Claude record's pid reused in the same pane can go unseen while no state is
+     recorded and no file changes.
+   - Deferred from wave 3: W3-LOOP step (d), the Mutex removal (`bench/perf/campaign/w3-loop-d-plan.txt`).
+   - Wave-3 items still open: the nested-list handoff order (`loop_handoff.rs`), `wait-for` and
+     `wait-pane` bound to keys, three compat rows red against the pin on every build.
+5. Lanes are Opus subagents (`~/.claude/agents/lane-impl.md`) driven by the `w4-side-lanes`
+   workflow (implement, adversarial review with structured findings, one fix pass); briefs in
+   /tmp/zzpc/w4/*.md, generated pieces in `bench/perf/campaign/scripts/wave4-briefs.py`. Wall and
+   CPU series on alienware go inside `~/.cache/zz-perf/quiet-gate.sh` with OWN set to the
+   measuring worktree. The bench keeps only `isolate.py` KEEP from the caller's environment. On
+   the Mac, run `just compat-check` and `compat/run.sh` with /opt/homebrew/bin first in PATH
+   (bash 3.2 fails them), and never bisect in a worktree another script is using.
+6. Release freeze until the wave-4 exit is accepted; protocol stays 107.
 
 ## Wave 4 merge log (from 2026-10-02)
 
@@ -785,6 +776,289 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   (merge-checks-mac.sh exports it); without it the pinned tmux prints `_` for characters it
   cannot encode, and those three rows go red on the tmux side. The same cause explains the
   "newline vs `_`" copy-mode-resize-freeze reports from ECHOIN and the chooser lane.
+- DEADPANE: a test bug, merged as `4320b601` (test only, `1c03db7b`). The dead pane's "Pane is
+  dead" notice scrolls the marker into history (tmux does the same); the test only saw the marker
+  in a 2 ms gap between the exit frame and the notice frame, and on Linux the shell starts fast
+  enough that the exit lands on the unwatched pane's 200 ms first rebuild. Real daemon against the
+  pin, seven print-and-exit variants: capture-pane, history and an attach all match tmux. The test
+  now waits for each dead pane's notice; 20/20 alone on Linux.
+- **Pushed to main 2026-10-03 20:41: `421f4918..4320b601`, 80 commits** (BURST, DL3-DL5, CTRLCPU,
+  ECHOMAP, ACFIX, BYTES2, ATTACH, ECHOIN, the chooser fix, DEADPANE, docs). evidence-secrets clean,
+  credential scan of the outgoing diff clean, no attribution lines. Both hosts' main checkouts
+  fast-forwarded. No tag (the freeze holds until the wave-4 exit).
+- STEADY and EM1 (Linux, run together 20:05-22:00). STEADY bisected the `chatty.cpu_pct.steady`
+  "+17%" between 0d7dabf7 and a486069e: no merge adds kernel work (per-thread wakes, faults and
+  syscalls equal at every bisect point; ATTACH halves the shard's wake-pipe reads), so the gap was
+  run-to-run noise (the row reads 3.8-4.7 on alienware). The real steady cost is the gather hop
+  (~1000 wakes and ~3000 syscalls per second for 10 hidden panes at 100 lines/s). Both lanes then
+  built the same fix: read a quiet Linux pane on its shard, lend a busy one to the gather.
+- **Decision: merge EM1, drop STEADY** (`36a82ea1`). EM1 was reviewed (one major: the 100 us echo
+  target is not shown, run-to-run fast/slow modes swamp it; six minors) and fixed (`384663fd`: the
+  Linux shard path caps bridge spins at 16 as the gather does, the tests poll instead of sleeping,
+  `BufferReturn.gather` is a plain lease), rebased on `ede917fe`. STEADY touched the same lines
+  and had no review yet; I stopped its workflow and its probes on alienware. Two STEADY ideas not
+  in EM1 stay open: a 2 s hand-back (EM1 uses 100 ms) and stopping a direct read after a short
+  read under 1 KiB without the extra EAGAIN read. Branch perf/steady (`e396a525`, ~/dev/zz-steady)
+  stays until the wave-4 exit for reference.
+- EM1 numbers (alienware, against batch6-86e721ad): no zz-pty-gather wake or read per key; server
+  wakes per key idle 6.96 -> 4.80, busy30 6.28 -> 4.12; chatty instructions per second -11%,
+  chatty CPU -11% to -28%; echo p50 -30 to -130 us depending on the run's mode; Unicode throughput
+  +1.8% over 8 alternating pairs (the ceiling swung 74-117 MB/s under load, so within 2% is all
+  this host can say); backpressure 9/9. `knowledge/terminal/pty-drain.md` now describes the home,
+  lend and hand-back cycle (`8080adf5`, `d9d59154`; it also named a function that no longer exists).
+- Correction: the ssh master does not expire at a fixed time. `ControlPersist 14400` is an idle
+  timeout, so the 18:30 master lives while connections keep using it; only a new master needs the
+  security key.
+- batch8 (`~/.cache/zz-perf/batch8`, 22:08) on `36a82ea1`: three A/B pairs against
+  batch6-86e721ad with control added, the strict final gate, then the batch6 checks plus
+  tui-choosers. Mac checks of `d9d59154` run in ~/dev/zz-check (/tmp/zzpc/w4/mac-d9d59154).
+- batch8 A/B, three pairs at load 0.4-1.2, medians of the three run medians (zz / tmux ratio,
+  86e721ad -> 36a82ea1): `echo.p50.idle` 1.48 -> 1.39x, `echo.p50.busy30` 1.54 -> 1.42x,
+  `echo.p99.idle` 1.41 -> 1.32x, `attach.cpu.p4` 1.30 -> 1.25x, `spawn.cpu.kill_pane` 1.21 ->
+  0.93x, `control.latency` 0.99 -> 1.07x, `chatty.cpu_pct.steady` 4.36 -> 2.91% (tmux 3.2-3.5),
+  chatty instructions -10 to -12%. Mac checks of `d9d59154`: fmt, clippy, Linux-target clippy
+  pass; zz-terminal + zz-daemon 2026 passed, 19 load failures, all 19 pass alone.
+- Final gate on `36a82ea1` (`~/.cache/zz-perf/batch8/final-36a82ea1.json`, one run without `--strict`, lane
+  compiles paused): 100 pass, 5 fail: `spawn.cpu.kill_pane` 0.782 vs 0.663 (tmux sample fast),
+  `attach.ttfc.p4` 1.14x, `attach.cpu.p4` 1.46x (3.31 vs 2.27), `echo.p50.busy30` 1.52x and
+  `echo.p99.busy30` 1.61x (tmux 0.747, its fast mode). 5 "regressed" against wave 3: four
+  throughput rows at 0.82-0.86 of the wave-3 values, but the bare-reader ceiling rows fell the same
+  (0.83-0.84) and tmux fell 8-11%, so zz over ceiling is unchanged (ascii 0.99 vs 0.97 at
+  86e721ad); host drift. `mem.copy_cpu.scroll180` 1.31 ms (0.68-1.07 before, tmux 4.0): noise
+  until the exit runs show otherwise.
+- **Decision: the wave-4 exit is judged on three strict full gates per host, back to back on a
+  quiet host; a ratio row passes when the median of its three ratios passes.** One run cannot
+  decide rows whose tmux side flips between a fast and a slow mode (echo busy30 tmux 0.75-0.92 ms,
+  `kill_pane` tmux 0.66-0.87, `control.latency` tmux 0.0128-0.0196). All three JSONs go to
+  bench/perf/results.
+- CTLLAT and ATTACHP4 launched 22:20 as `w4-side-lanes` run `wf_71e6cd92-2a7` (briefs
+  /tmp/zzpc/w4/{ctllat,attachp4}.md, worktrees ~/dev/zz-ctllat and ~/dev/zz-attachp4 on both
+  hosts, from `3e00c00f`): `control.latency` (zz flat at 0.016 ms since 86e721ad, 0.0136 at
+  BURST; rule 1.1x) and Linux `attach.cpu.p4` (kernel time; target 1.2x).
+- batch8 checks on `36a82ea1` (ALLDONE 23:22): fmt, clippy pass; workspace tests 5149 passed,
+  4 failed, all 4 pass alone; compat-check, debug build pass; backpressure 9/9; attached-client
+  pass, 0 rejections; corpus 248 clean, 11 red: batch6's 10 plus
+  `smoke/format-modifier-client-loop`, red alone too, where zz is clean and the tmux side fails its
+  own client-order check (the fixture wants clients in pts-number order; tmux lists them in attach
+  order, and this run allocated /dev/pts/15 before /dev/pts/10); tui-choosers 78/78. The flood
+  probes in the batch ran at load 6 (lane builds) and read low; a quiet alternating rerun, three
+  rounds (base 86e721ad / EM1, MB/s): 4 panes 103.8/101.8, 100.5/98.7, 107.9/106.7; 12 panes
+  72.4/75.1, 72.6/74.3, 78.2/80.9; every pane progressed (172-176 of 175 ends).
+- batch9 (`~/.cache/zz-perf/batch9`, from 23:28): three `--stage final --strict` full gates of
+  batch8-36a82ea1-cli against the wave-3 baseline, back to back inside quiet-gate.sh (lane
+  compiles paused): the exit judgement on the EM1 head if the two lanes do not land.
+- batch9 result (23:29-23:49, load 1.0-1.8): 101/4, 104/1, 102/3 pass/fail. By the median rule
+  only `attach.cpu.p4` fails (ratios 1.22, 1.345, 1.40; rule 1.25x). Rows failing one run only:
+  `spawn.cpu.kill_pane` (fails gate 3 on a 0.617 ms tmux sample; median zz 0.897 vs tmux 0.808,
+  within plus 0.1), `attach.ttfc.p1`/`.p4` (medians 1.04/1.05x), `attach.cpu.p1` (1.01x),
+  `echo.p50.idle` (1.39x), `echo.p50.busy30` (1.46x). Gate 1 ran in a slow host state (cli rows
+  about 3x slower on zz and tmux alike, attach rows faster), which explains its four "regressed"
+  cli rows. `mem.copy_cpu.scroll180` is flagged against wave 3 in gates 2 and 3, but the same
+  binary reads 0.66, 0.88 and 1.25 ms across the three runs (tmux 3.6-4.1): noise around a row
+  far inside its rule. JSONs: `~/.cache/zz-perf/batch9/final-36a82ea1-{1,2,3}.json` (copies in
+  /tmp/zzpc/w4/batch9 on the Mac).
+- Mac exit-style gates on `d9d59154` (/tmp/zzpc/w4/macgate, 23:54-00:16, three `--stage final
+  --strict` runs against wave3-macbook-e9bc174c.json; the lanes' Mac compiles paused, but load 5-7
+  from desktop apps: dasd, Codex, Discord): 102/3, 103/2, 102/3. By the median rule one row fails:
+  `echo.p50.busy30` 1.57, 1.70, 1.55x (zz 0.20-0.80 ms, tmux 0.12-0.47; rule 1.5x). Not new: the
+  Mac A/B at merge batch 4 read 1.61-1.97x on both sides. One-run fails: `spawn.cpu.split_empty_P`
+  (1.38x once, medians 0.93x), `spawn.cpu.new_window` (1.31x once, median 1.17x), `attach.ttfc.p1`
+  (1.26x once, median 1.05x), `echo.p99.idle` (1.62x once, median 1.13x), `echo.p99.busy30` (1.84x
+  once, median 1.02x). Gate 3's "regressed" cli rows are host state (tmux slower by the same
+  factor). This was the first full Mac final gate since DL3.
+- Decision: lane MACECHO for Mac `echo.p50.busy30`, alongside CTLLAT and ATTACHP4, launched 00:25 as
+  `w4-side-lanes` run `wf_eb6ed636-6ac` (brief /tmp/zzpc/w4/macecho.md, ~/dev/zz-macecho from
+  `69f45664`, Mac only; target 1.35x over five alternating echo runs).
+- CTLLAT merged as `ee2a5cd2` (lane `a6a41f38` + review fix `5c5cfc5b`; impl, review, fix in
+  3 h 07 min, done true). No merge raised `control.latency`: every binary from BURST to 36a82ea1
+  does 1 loop wake, 2 reads and 1 write per command (tmux 1, 1, 1; neither client wakes), and a
+  quiet 3-pair series read BURST 1.013x and 36a82ea1 0.994x; the 0.0136 -> 0.016 ms move was the
+  host, tmux moved with it. Cuts: `read_input` reads into the buffer's spare capacity (no zeroed
+  8 KiB stack buffer), a short read ending on a newline stops and the EAGAIN read moves after the
+  reply, a runnable line is answered on its stdin event (pending control output and queued frames
+  go first, so `%begin` order holds), one defer-wakeup check instead of two. Review fix: a read
+  that stops at `INPUT_READ_LIMIT` (256 KiB) left the rest in the pipe under edge-triggered epoll
+  (12483 of 20000 lines answered on base and lane alike, tmux all); now the pass wakes the loop
+  and reads the rest (20000 in 0.09 s). Quiet alienware, three series of 5 against 36a82ea1:
+  latency 1.041x -> 0.961x, instructions per command 44.3k -> 41.5k, burst 198k -> 202k/s. Mac
+  0.747x -> 0.738x. Not fixed (base behaviour): lines read in the same stdin chunk as
+  `detach-client` are dropped, as tmux does with a tty stdin; tmux runs them from a pipe.
+- ATTACHP4 merged as `989c4b65` (lane `9ed24255` + review fix `fc65c471`, done false only on
+  `attach.ttfc` within noise). Each p4 pane woke its shard 4 times per attach and detach (attach
+  commands, settle one turn later, detach, `release_view` at unregister) and rebuilt its render
+  state (about 410K instructions) on every attach. Now a compact client's initialize holds actor
+  wakes for its whole worker step and `settle_attach_terminals` releases them right after queueing
+  the settle requests (one shard wake, started before the status render); the raw TUI sends hello
+  capability `client-exits-on-detach-v1` (protocol stays 107; GUI, iOS and web still park their
+  views); `Frames::release_unused` keeps render state 5 s after the last view stops streaming.
+  16 shard wakes per attach and detach -> 8, shard instructions per pane 410K -> 130K. Quiet
+  alienware, two series of 5 against 36a82ea1: `attach.cpu.p4` 1.112x and 1.114x (base 1.259x,
+  1.312x), instr.p1 4.63 -> 3.46 M, instr.p4 5.12 -> 3.84 M, wire_s2c equal, ttfc.p4 8.43 vs 8.39
+  ms (150 attaches: 8.608 vs 8.494; three timing modes at 3.5, 8 and 11.5 ms for zz and tmux alike).
+  Left: the loop thread (status render 12.6%, detach key through the general executor 28%,
+  per-turn overhead 15% of loop user cycles).
+- Mac checks of `fc1ccbc6` (both merges): fmt, clippy, Linux-target clippy pass; zz-daemon,
+  zz-terminal, zz-cli, zz-tui, zz-client 2744 passed, 19 load failures, all pass alone.
+- Closed gap `clients.command-round-trip-latency` (`compat/tmux-gaps.json`, registered 09-18 at
+  2.2 s for `split-window -P` on an empty pane and ~100 ms per command): `wait_for_terminal_identity`
+  runs only in tests now, and on the Mac both commands finish in under 10 ms per invocation with
+  d9d59154. Trap: `just compat-check` fails `verify_claims_test` with "unattributed: unbound
+  variable" when `bash` resolves to macOS /bin/bash 3.2; it passes with /opt/homebrew/bin first
+  in PATH (red on fc1ccbc6 too under 3.2, so not from any change).
+- batch10 (`~/.cache/zz-perf/batch10`, from 01:31) on `fc1ccbc6`: A/B pairs against 36a82ea1
+  (zz / tmux ratio, base -> merged): `attach.cpu.p4` -> 1.19x, `attach.instr.p4` 5.13 -> 3.84 M,
+  `control.latency` 0.82 -> 0.95x on a fast tmux sample (zz 0.0131 -> 0.0122 ms), echo rows
+  1.37-1.43x unchanged, `kill_pane` 1.00 -> 1.02x, chatty hidden instructions -19%. Three strict
+  gates: 102/3, 101/4, 104/1. By the median rule one row fails: `spawn.cpu.kill_pane`, zz 0.814,
+  0.796, 0.905 ms against tmux 0.574, 0.587, 0.682 (rule plus 0.1), while zz runs fewer user
+  instructions (0.156 M against 0.180 M). Passing medians: `attach.cpu.p4` 0.945x, `attach.ttfc.p4`
+  1.00x, `control.latency` 0.938x, echo rows. `cli.wall.version.p1` (info) reads 3x its wave-3
+  value on zz and tmux alike (the known bimodal row).
+- KILLPANE launched 02:20 as `w4-side-lanes` run `wf_1cb365b4-c1f` (brief /tmp/zzpc/w4/killpane.md,
+  ~/dev/zz-killpane on both hosts from `0ded1faa`): Linux kill-pane kernel time, target tmux plus
+  0.05 ms.
+- batch10 checks on `fc1ccbc6` (ALLDONE 02:58): fmt, clippy pass; workspace tests 5162 passed,
+  1 failed, passes alone; compat-check, debug build pass; backpressure 9/9; flood 4 panes 109.1,
+  12 panes 80.1 MB/s, every pane progressed; attached-client pass, 0 rejections; corpus 249 clean,
+  10 red (batch6's set with `smoke/format-modifier-client-loop`, the tmux-side client-order
+  check, in place of `smoke/plugin-runtime-continuum`, the load flake); tui-choosers 78/78. Gate
+  JSONs copied to /tmp/zzpc/w4/batch10 on the Mac.
+- MACECHO merged as `b1601895` (lane `7b6b3556` + review fix `c715c0a5`; done false). No wait to
+  fix on the Mac busy30 echo: no pacing delay (the echo publishes about 2 us after the PTY read),
+  one 5-byte tty write, no queueing behind a partial write. A quiet busy30 key is 157 us: bench to
+  client 22.9, client in 10.5, loop 27.8, pane hop 24.2, shard 23.8, client out 17.1, tty to
+  bench 15.8. The daemon's work matches tmux's server; the gap is the attach client relay: tmux's
+  client hands the server its tty, so a key costs 4 serial wakes there against 6 in zz, and every
+  wake stretches under load. Runs fall in a fast state (zz 0.10-0.20 ms, ratio 1.56-1.83x) or a
+  slow one (zz 0.8-0.9 ms, 1.36-1.59x); compare base and lane within a state. What merged: the
+  frame diff tracks up to 8 changed rows in one pass before the shift search and rehashes only
+  those rows (one row 79 -> 52 kinstr per 120x40 diff, two rows 81 -> 54, scroll and 20-row frames
+  +1.7-2.2%); an old-vs-new fuzz of 6M diffs matched scroll, spans, cells and fingerprints. Echo
+  daemon instructions per key -10%, an editor-style frame (cursor row plus a ruler) 283 -> 256 k.
+  No latency change. The review's major (the first version paid an extra full pass on two-row
+  frames, +60%) is what the fix commit closed. QoS: Rust threads start at DEFAULT (0x15) while
+  tmux inherits USER_INTERACTIVE (0x21); raising zz's threads did not move the loaded Mac.
+- Decision: lane TTYIN, the input half of a tmux-style tty handoff (the raw TUI passes its tty
+  input fd to the daemon like `zz_cli -C` passes stdio; plain keys go straight to the pane, the
+  rest goes back to the client raw and in order), to take one serial wake out of the Mac echo.
+  Output stays on the client. Brief /tmp/zzpc/w4/ttyin.md, ~/dev/zz-ttyin from `b1601895`.
+- MACECHO's Linux leg: `cargo test -j6 -p zz-terminal --all-features` on `77648bb6` (alienware):
+  418 passed, 0 failed. TTYIN launched 03:10 as `w4-side-lanes` run `wf_f461a19c-3f7`.
+- KILLPANE merged as `e8e0a2f7` (lane `1e9efde4` + test fix `0b55f109`; done false, the brief's
+  itemised exit). Cuts: a dropped terminal's output, exit and close notices queue without waking
+  the loop (the next turn removes the watcher), and a pane with no process never requests a peer
+  probe. Instructions per kill 0.1556 -> 0.1504 M (-3.3%), main-thread context switches per kill
+  5 -> 3 (shell pane) and 2 -> 1 (empty pane); about 1.5-2.1 k of the instructions move to the next
+  command. The CPU row did not move beyond noise (reviewer: base gap +0.068, lane +0.093 ms over
+  6 quiet pairs). Why the row is unstable: the bench kills empty and shell panes, and the median
+  of 20 kills falls between the two clusters; the package clock sits at 1.1 or 4.5 GHz per kill.
+  At 1.1 GHz an empty kill costs zz 661 us against tmux 439 (zz main thread 463 us, about tmux +24;
+  the shard thread 156 us: a cold wake plus 4 munmaps of 392 KiB libghostty preheated pages,
+  `page_preheat = 4` in the Ghostty fork; a peer-probe helper thread in 1 of 20 kills, +381 us),
+  while a shell kill costs zz 995 us against tmux 1136 (tmux forks utempter). Not taken: gating
+  the SIGCHLD self-pipe wake on live jobs; a process-wide pool for libghostty's preheated pages
+  (native fork change).
+- Decision: lane PEERSKIP (brief /tmp/zzpc/w4/peerskip.md, ~/dev/zz-peerskip on both hosts from
+  `e8e0a2f7`, 90 min): skip a peer scan whose inputs (sessions directory stat, pane pid set) did
+  not change since a scan that found nothing, removing the per-second helper thread start that a
+  printing pane causes.
+- Full Mac corpus on `613839a9` (KILLPANE merged; debug zz_cli, UTF-8 locale, Homebrew bash;
+  /tmp/zzpc/w4/mac-corpus-613839a9, 05:01-05:47): 246 clean, 12 red, exactly the known Mac set
+  (the four known/* rows, census-hooks, if-shell-background-order, smoke/control-alias-prepare,
+  smoke/plugin-runtime-continuum, smoke/plugin-runtime-vim-tmux-navigator, smoke/resurrect-save,
+  smoke/source-file-byte-name, smoke/status-background-jobs).
+- PEERSKIP merged as `d6da097d` (lane `033645bb` + review fix `db4c485b`, done true; 80 min).
+  The Expiry::PeerProbe arm skips the helper task when no peer state is recorded and the registry
+  key (`RegistryCache::settled()`: stamps of ~/.claude/sessions and each pid-named record taken
+  while reading, none within 2 s of its mtime) still holds; pane pids count only while a record
+  file exists. A pane printing every 100 ms: helper thread starts 59 -> 0 per minute, daemon
+  task-clock 237-243 -> 202-215 ms per minute. `spawn.instr.kill_pane` 0.150 -> 0.138 M in three
+  series; `spawn.cpu.kill_pane` flat (zz median .785 -> .783, the tmux side swings .62-.86).
+  Left open by design: a dead Claude record's pid reused in the same pane, or the wall clock
+  stepping back, can go unseen while no state is recorded and no file changes. The non-agent
+  build (`--no-default-features --features daemon`) has 13 compile errors on the base too.
+- TTYIN merged as `0eeadc62` (lane `43796416` + review fix `694cd572`, done true; 5 h 10 min) and
+  `a24e96e8` drops the three doc comments it added. Design as built: `zz_cli attach` sends its stdin
+  with SCM_RIGHTS behind capability `tty-input-v1` (Welcome bit and hello capability; protocol stays
+  107, six messages appended: `TtyInput`, `TtyInputStarted`, `TtyInputBytes`, `TtyInputReady`,
+  `TtyInputRelease`, `TtyInputClosed`, each carrying a handoff number). The daemon reopens the
+  terminal by name, nonblocking and without becoming its controlling terminal (device numbers must
+  match), and reads it on the mux loop (`daemon/tty_input.rs`). A key that `zz_protocol::
+  tty_input_key` decodes (every 7-bit byte but ESC, a complete UTF-8 scalar, complete cursor,
+  Home/End, Insert/Delete, page and F1-F12 sequences) goes to the pane through the EM5 path when
+  the client's last report matches the forwarded count, its reported pane is the daemon's active
+  pane for it, the connection is idle and the key tables pass the key; everything else goes back
+  as `TtyInputBytes` and later bytes wait for the client's `TtyInputReady`. The client feeds those
+  bytes to its own parser and reports Ready only when its queues are empty and no client-side route
+  could claim a plain key (`InputRouter::passes_plain_keys`). Release before exit, suspend and host
+  switch (1 s cap); a detached exits-on-detach client's terminal closes before the next read; tty
+  readiness is handled after the other events of a poll batch. Fallbacks: `ZZ_TUI_RELAY=1`, ssh
+  endpoints, non-tty stdin, an older daemon, any refusal. Mac, 5 pairs in the slow state:
+  `echo.p50.busy30` 1.452 -> 1.246x, `echo.p50.idle` 1.336 -> 1.169x, `echo.p99.busy30` 1.432 ->
+  0.831x; `echo.p99.idle` by median of per-run ratios 1.209 -> 1.598 over 20 runs, while its
+  medians are equal (zz 1.840 vs 1.845 ms, tmux 1.396 vs 1.404). Client per key: context switches
+  2.10 -> 0.92, syscalls 5.6 -> 2.7. Linux, 3 pairs: busy30 1.408 -> 1.280x, idle 1.365 -> 1.195x.
+  Every raw-TUI fixture matches base with and without `ZZ_TUI_RELAY=1`. Typed text starting with `Gi=`
+  froze the raw TUI's parser (pre-existing; the daemon mirrored it). Fixed by `c950d462` (merge of
+  perf/gireply): a bare `Gi=` is a kitty reply only while a probe waits for its fence or 1 s, the
+  client withdraws its direct pane before it writes a probe, and the daemon check is gone.
+- Exit gates on `0a67eaab` (three strict full runs per host). Linux (batch11): 104/1, 103/2,
+  104/1; by the median rule `attach.cpu.p4` fails (1.224, 1.656, 1.278x; rule 1.25x) and
+  `attach.ttfc.p4` fails (1.115, 1.242, 1.099x; rule 1.1x), both passing on fc1ccbc6 (0.945x and
+  1.002x); attach instructions are unchanged (p4 ratio 0.317), so the new cost is kernel time and
+  wakes. Everything else passes, `spawn.cpu.kill_pane` included; echo busy30 1.26-1.33x, idle
+  1.17-1.24x, `echo.p99.idle` 1.15-1.21x, `control.latency` 0.77-0.95x. Mac: 102/5, 104/3, 105/2;
+  `attach.instr.p1` 4.06 -> 13.1 M against d9d59154 (+49% on the wave-3 baseline), and
+  `spawn.cpu.split_empty_P` 1.33, 1.33, 0.86x (the known bimodal row: zz 0.37 or 0.54-0.56 ms).
+- Mac attach regression found and fixed (`8d2b0e31`): TTYIN's daemon found the handed tty's path
+  with `ttyname_r`, which on macOS scans /dev (0.59 ms per call in a Python probe); `F_GETPATH`
+  (`rustix::fs::getpath`) returns the same path in 0.5 us. Bisect with the bench at the head:
+  d9d59154 4.06 M, b1601895 3.00, e8e0a2f7 3.01, d6da097d 3.01, 0a67eaab 12.4-13.1, the fix 3.32 M
+  per p1 attach. Linux keeps `ttyname_r` (a /proc readlink). Trap: the bench drops every
+  environment variable outside `isolate.py` KEEP, so `ZZ_TUI_RELAY=1` in the caller's environment
+  never reaches the client (my first relay check measured the handoff twice).
+- Trap: I bisected in ~/dev/zz-check while the Mac exit script was still running its checks there;
+  those checks and fixtures ran against switching trees and were thrown away. Use a separate
+  snapshot for any bisect.
+- Next: a handoff-vs-relay attach A/B on alienware (scratch bench copy with ZZ_TUI_RELAY in KEEP,
+  ~/zzpc-w4/relay-ab) to size TTYIN's attach cost on Linux; clean Mac checks on `8d2b0e31` in
+  /tmp/zzpc/w4/macchecks-8d2b0e31.
+- Clean Mac checks on `8d2b0e31`: fmt, clippy, Linux-target clippy pass; zz-protocol, zz-client,
+  zz-tui, zz-cli, zz-daemon, zz-terminal 3062 passed, 22 load failures, all pass alone; raw-TUI
+  fixtures with the UTF-8 locale all pass: attached-client, tui-screen-diff 147/147, tui-choosers
+  78/78, tui-copy-mode, tui-indicators 23/23, tui-mouse 67/67, tui-overlays 48/48,
+  tui-pane-geometry 6/6. batch11's Linux checks on `0a67eaab` (same Linux code): clippy, workspace
+  tests (all failures pass alone), compat-check, backpressure 9/9, flood 110.7 / 79.0 MB/s,
+  attached-client pass with 0 rejections.
+- Two side sessions the owner started from task chips landed work: `c950d462` (perf/gireply, merged
+  into perf/wave4 by that session: a bare `Gi=` counts as a kitty reply only while a probe waits,
+  the daemon's mirror check is gone) and `a246b6eb` on local main, not pushed (the daemon builds
+  without the agent feature, and CI lints that build). The wave-4 push to main must merge
+  `a246b6eb` too.
+- Handoff vs relay attach A/B on alienware (batch11-0a67eaab-cli, 5 alternating pairs, quiet,
+  scratch bench with ZZ_TUI_RELAY in KEEP; ~/zzpc-w4/relay-ab): `attach.cpu.p4` handoff 2.946 vs
+  relay 3.003 ms (tmux 2.50 / 2.58), `attach.ttfc.p4` 8.488 vs 8.737, `attach.cpu.p1` 2.325 vs
+  3.381, instructions equal (p4 3.869 vs 3.849 M), wire c2s 1942 vs 1964 B. TTYIN costs attach
+  nothing measurable; batch11's two attach fails are the row's noise (per-sample attach CPU is
+  bimodal for zz and tmux alike, the 1.1 / 4.5 GHz clock states KILLPANE measured). No code change.
+- batch11 rest: corpus 248 clean, red set = batch6's known set (`smoke/plugin-runtime-continuum`
+  back as the load flake); tui-choosers 78/78.
+- Final exit run on `49dfd9a5` (adds the macOS getpath fix and gireply): three strict gates per
+  host, the touched crates' tests and the raw-TUI fixtures.
+- Final exit run on `3057f095` (`bench/perf/results/wave4-<host>-3057f095-{1,2,3}.json`). Linux
+  (batch12): 103/2, 105/0, 102/3; every row passes by the median rule (`kill_pane` zz 0.7915 vs
+  tmux 0.7916, `attach.cpu.p4` 1.17x, `attach.ttfc.p4` 1.03x, `attach.ttfc.p1` 1.08x); clippy;
+  zz-tui, zz-daemon, zz-cli, zz-client, zz-protocol tests 2674 passed, 1 failed, passes alone;
+  backpressure 9/9; attached-client 0 rejections; tui-choosers 78/78; tui-screen-diff 147/147.
+  `mem.copy_cpu.scroll180` flagged in all three, but `mem.copy_instr.scroll180` is 4.116 M on every
+  head since 36a82ea1 while its CPU swings 0.70-1.51 ms: host clock state, not code. Mac: 104/1,
+  103/2, 104/1; fails by the median rule `spawn.cpu.split_empty_P` (1.24x) and `attach.ttfc.p4`
+  (1.109x); echo busy30 1.40x and idle 1.34x pass; fmt, clippy, Linux-target clippy; six crates'
+  tests 3080 passed, 7 load failures, all pass alone; every raw-TUI fixture passes (attached-client,
+  tui-screen-diff 147/147, tui-choosers 78/78, tui-copy-mode, tui-indicators 23/23, tui-mouse 67/67,
+  tui-overlays, tui-pane-geometry).
+- Decision: push main now with wave 4 as built (secrets and credential scans first), and leave the
+  two Mac rows to MACQOS (launched 10:40, `w4-side-lanes` run `wf_440f0332-55d`) and the owner.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

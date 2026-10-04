@@ -1015,6 +1015,7 @@ impl Shared {
                     outbound.finish_attach_settle(round);
                 });
         }
+        zz_terminal::release_held_wakes();
         let _ = self.timer_tx.send(timers::TimerInput::Callback {
             deadline: Some(Instant::now() + ATTACH_SETTLE_BOUND),
             callback: Box::new(move || outbound.expire_attach_settles(round)),
@@ -1333,6 +1334,7 @@ impl Shared {
                 prepared,
                 (index as u64 + 1, index + 1 == command_count),
                 outbound,
+                None,
             ) {
                 return;
             }
@@ -1351,11 +1353,14 @@ impl Shared {
         mut prepared: PreparedCommand,
         position: (u64, bool),
         outbound: &Arc<OutboundMailbox>,
+        deferrable: Option<bool>,
     ) -> bool {
         let (request_id, last) = position;
         let mut collecting = false;
         if kind == ClientKind::Control {
-            let wakeup = !control_query_can_defer_wakeup(&self.inner.lock(), context, &prepared);
+            let wakeup = !deferrable.unwrap_or_else(|| {
+                control_query_can_defer_wakeup(&self.inner.lock(), context, &prepared)
+            });
             collecting = !wakeup && outbound.collect_control_query();
             let started = Self::event(EventPayload::ControlCommandStarted {
                 request_id,

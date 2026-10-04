@@ -58,6 +58,18 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
    the Mac, run `just compat-check` and `compat/run.sh` with /opt/homebrew/bin first in PATH
    (bash 3.2 fails them), and never bisect in a worktree another script is using.
 6. Protocol stays 107 until the owner decides on a release.
+7. STARTFIX (2026-10-04, `d243a464`): a GUI-spawned daemon whose `mux.conf` has a foreground
+   `run-shell` hung forever on "connecting to zz daemon..." and ignored SIGTERM. Rust 1.97's
+   `Command::spawn` keeps the parent thread's signal mask, the GUI spawns the daemon from a
+   libdispatch worker (mask `0xfbfee027`), so SIGCHLD, SIGTERM and SIGINT arrived blocked; since
+   run-shell moved onto the job registry its child is reaped only through SIGCHLD or a lucky
+   `try_wait` in `JobRegistry::register`. `SignalPipes::new` now clears the loop thread's mask;
+   test `a_daemon_spawned_with_blocked_signals_reaps_its_startup_shell_and_honors_sigterm`. The
+   perf gates never saw it because `isolate.py` runs with an empty config. Still open, GUI side:
+   every other child spawned from background-executor threads (ssh for remote hosts, shell
+   commands) inherits the same blocked mask; the GUI never reaps its daemon child; the daemon
+   inherits the GUI's Metal shader-cache fds (not close-on-exec) and hands them to run-shell
+   children. The `#[cfg(test)]` reaping in `EventLoop::turn` hides SIGCHLD dependence from tests.
 
 ## Wave 4 merge log (from 2026-10-02)
 

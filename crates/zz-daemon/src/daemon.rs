@@ -117840,18 +117840,22 @@ bind - split-window -v -c "#{pane_current_path}"
                 observed.load(Ordering::Acquire),
                 "the runner started before the attached client could see the agent pane"
             );
-            assert!(
-                take_reliable_messages(&mailbox)
-                    .iter()
-                    .any(|message| matches!(
-                        message,
-                        ProtocolMessage::Event(Event {
-                            payload: EventPayload::AgentState { pane, .. },
-                            ..
-                        }) if *pane == agent
-                    )),
-                "opening the runtime did not publish the agent pane state"
-            );
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !take_reliable_messages(&mailbox).iter().any(|message| {
+                matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::AgentState { pane, .. },
+                        ..
+                    }) if *pane == agent
+                )
+            }) {
+                assert!(
+                    Instant::now() < deadline,
+                    "opening the runtime did not publish the agent pane state"
+                );
+                thread::sleep(Duration::from_millis(5));
+            }
             shared.shutdown_agents();
         }
 

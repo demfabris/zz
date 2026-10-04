@@ -951,6 +951,8 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   input fd to the daemon like `zz_cli -C` passes stdio; plain keys go straight to the pane, the
   rest goes back to the client raw and in order), to take one serial wake out of the Mac echo.
   Output stays on the client. Brief /tmp/zzpc/w4/ttyin.md, ~/dev/zz-ttyin from `b1601895`.
+- MACECHO's Linux leg: `cargo test -j6 -p zz-terminal --all-features` on `77648bb6` (alienware):
+  418 passed, 0 failed. TTYIN launched 03:10 as `w4-side-lanes` run `wf_f461a19c-3f7`.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

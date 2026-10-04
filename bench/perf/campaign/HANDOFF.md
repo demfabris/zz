@@ -50,8 +50,9 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
    - Wave-3 items still open: the nested-list handoff order (`loop_handoff.rs`), `wait-for` and
      `wait-pane` bound to keys, three compat rows red against the pin on every build.
 5. Lanes are Opus subagents (`~/.claude/agents/lane-impl.md`) driven by the `w4-side-lanes`
-   workflow (implement, adversarial review with structured findings, one fix pass); briefs in
-   /tmp/zzpc/w4/*.md, generated pieces in `bench/perf/campaign/scripts/wave4-briefs.py`. Wall and
+   workflow (implement, adversarial review with structured findings, one fix pass); the wave-4
+   briefs lived in /tmp/zzpc/w4 and went with the scratch cleanup (the merge log records each
+   lane's task, numbers and result), generated pieces in `bench/perf/campaign/scripts/wave4-briefs.py`. Wall and
    CPU series on alienware go inside `~/.cache/zz-perf/quiet-gate.sh` with OWN set to the
    measuring worktree. The bench keeps only `isolate.py` KEEP from the caller's environment. On
    the Mac, run `just compat-check` and `compat/run.sh` with /opt/homebrew/bin first in PATH
@@ -1072,7 +1073,11 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   zz-namescost. Linux perf/deliver5 still points at `6dbebe74`, the pre-amend version of the
   merged `d0116461` (superseded, kept as a branch). After the exit (12:55) the rest went too:
   ~/dev/zz-perf-int on both hosts, ~/dev/zz-check and ~/dev/zz-macqos; only the main checkouts
-  remain. The 15-minute lane watch cron is deleted.
+  remain. The 15-minute lane watch cron is deleted. Later the same day: every campaign branch on
+  both hosts deleted (all on main as the same or an amended commit, except the dropped
+  perf/steady), the stale Codex worktree removed, and the scratch dirs /tmp/zzpc (Mac, about
+  42 GB) and ~/zzpc-* (alienware) deleted, so /tmp/zzpc and ~/zzpc-* paths in this log are history.
+  `~/.cache/zz-perf` on alienware stays: quiet-gate.sh and the A/B base binaries.
 - MACQOS (run `wf_440f0332-55d`, 1 h 50 min): no commit; QoS is not the lever. A process with no
   darwin role is capped at LEGACY (priority 31) whatever its threads request, so
   `pthread_set_qos_class_self_np` alone does nothing (MACECHO's experiment never changed

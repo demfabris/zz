@@ -951,12 +951,10 @@ impl Shared {
                 (due, false)
             }
             Some(check) if check.terminal == identity => {
-                *check = NameCheck {
-                    terminal: identity,
-                    last: now,
-                    due: None,
-                    frame: false,
-                };
+                check.last = now;
+                if !check.frame {
+                    check.due = None;
+                }
                 return true;
             }
             _ => {
@@ -965,7 +963,7 @@ impl Shared {
                     pane,
                     NameCheck {
                         terminal: identity,
-                        last: now,
+                        last: now.checked_sub(NAME_INTERVAL).unwrap_or(now),
                         due: Some(due),
                         frame: true,
                     },

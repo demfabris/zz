@@ -878,6 +878,34 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
 - Decision: lane MACECHO for Mac `echo.p50.busy30`, alongside CTLLAT and ATTACHP4, launched 00:25 as
   `w4-side-lanes` run `wf_eb6ed636-6ac` (brief /tmp/zzpc/w4/macecho.md, ~/dev/zz-macecho from
   `69f45664`, Mac only; target 1.35x over five alternating echo runs).
+- CTLLAT merged as `ee2a5cd2` (lane `a6a41f38` + review fix `5c5cfc5b`; impl, review, fix in
+  3 h 07 min, done true). No merge raised `control.latency`: every binary from BURST to 36a82ea1
+  does 1 loop wake, 2 reads and 1 write per command (tmux 1, 1, 1; neither client wakes), and a
+  quiet 3-pair series read BURST 1.013x and 36a82ea1 0.994x; the 0.0136 -> 0.016 ms move was the
+  host, tmux moved with it. Cuts: `read_input` reads into the buffer's spare capacity (no zeroed
+  8 KiB stack buffer), a short read ending on a newline stops and the EAGAIN read moves after the
+  reply, a runnable line is answered on its stdin event (pending control output and queued frames
+  go first, so `%begin` order holds), one defer-wakeup check instead of two. Review fix: a read
+  that stops at `INPUT_READ_LIMIT` (256 KiB) left the rest in the pipe under edge-triggered epoll
+  (12483 of 20000 lines answered on base and lane alike, tmux all); now the pass wakes the loop
+  and reads the rest (20000 in 0.09 s). Quiet alienware, three series of 5 against 36a82ea1:
+  latency 1.041x -> 0.961x, instructions per command 44.3k -> 41.5k, burst 198k -> 202k/s. Mac
+  0.747x -> 0.738x. Not fixed (base behaviour): lines read in the same stdin chunk as
+  `detach-client` are dropped, as tmux does with a tty stdin; tmux runs them from a pipe.
+- ATTACHP4 merged as `989c4b65` (lane `9ed24255` + review fix `fc65c471`, done false only on
+  `attach.ttfc` within noise). Each p4 pane woke its shard 4 times per attach and detach (attach
+  commands, settle one turn later, detach, `release_view` at unregister) and rebuilt its render
+  state (about 410K instructions) on every attach. Now a compact client's initialize holds actor
+  wakes for its whole worker step and `settle_attach_terminals` releases them right after queueing
+  the settle requests (one shard wake, started before the status render); the raw TUI sends hello
+  capability `client-exits-on-detach-v1` (protocol stays 107; GUI, iOS and web still park their
+  views); `Frames::release_unused` keeps render state 5 s after the last view stops streaming.
+  16 shard wakes per attach and detach -> 8, shard instructions per pane 410K -> 130K. Quiet
+  alienware, two series of 5 against 36a82ea1: `attach.cpu.p4` 1.112x and 1.114x (base 1.259x,
+  1.312x), instr.p1 4.63 -> 3.46 M, instr.p4 5.12 -> 3.84 M, wire_s2c equal, ttfc.p4 8.43 vs 8.39
+  ms (150 attaches: 8.608 vs 8.494; three timing modes at 3.5, 8 and 11.5 ms for zz and tmux alike).
+  Left: the loop thread (status render 12.6%, detach key through the general executor 28%,
+  per-turn overhead 15% of loop user cycles).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

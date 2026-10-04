@@ -1072,6 +1072,26 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   zz-namescost. Linux perf/deliver5 still points at `6dbebe74`, the pre-amend version of the
   merged `d0116461` (superseded, kept as a branch). Left: ~/dev/zz-perf-int on both hosts, the Mac
   snapshot ~/dev/zz-check and ~/dev/zz-macqos (until MACQOS reports).
+- MACQOS (run `wf_440f0332-55d`, 1 h 50 min): no commit; QoS is not the lever. A process with no
+  darwin role is capped at LEGACY (priority 31) whatever its threads request, so
+  `pthread_set_qos_class_self_np` alone does nothing (MACECHO's experiment never changed
+  scheduling); `setpriority(PRIO_DARWIN_ROLE, 0, ROLE_UI)` or the public `task_policy_set(...,
+  TASK_CATEGORY_POLICY, {role = TASK_FOREGROUND_APPLICATION})` lifts it to 46/47, not inherited by
+  pane children. zz and tmux both run at 31 on P cores (E-core time 0 in 58 of 60 ops). Raising
+  the loop, shards and helpers (q1) or also every zz_cli main (q2) moved no medians and narrowed
+  no spread; idle 0, chatty CPU slightly lower. Why the Mac rows vary: `split_empty_P` is a fixed
+  0.45 M instructions per op at 0.37-0.63 IPC on the loop (tmux 0.92 M at 1.25-1.7), so its CPU time
+  follows the clock (2.3-3.8 GHz per op) and cache warmth after idle gaps (zz 0.20 ms back to back,
+  0.40 ms after 500 ms idle; tmux 0.15 -> 0.31). Pooled over 18 runs of the exit binary:
+  `split_empty_P` median 0.979x (3/18 over the rule), `attach.ttfc.p4` 0.996x (5/18 over); the
+  reviewer adds that Mac `spawn.cpu.kill_pane` sits at its limit too (median gap 0.092 ms against
+  plus 0.1; 7/18 over). Each gate row is a median of 10 samples whose p10-p90 spans about 0.25-0.75
+  ms, so it flips between clusters. Lead for later: the loop's low work per cycle per CLI command.
+  Side finding (chip): the daemon's `prepare_socket` leaves `<socket>.lock` behind (about 2600 in
+  /tmp from bench runs); tmux deletes its lock once the server starts.
+- Decision: a second set of three strict Mac gates on the same exit binary, not started right
+  after a build (/tmp/zzpc/w4/macgate2). If its medians pass, the Mac exit passes by the same rule;
+  if not, accepting the rows is the owner's call.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

@@ -1059,6 +1059,14 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   tui-overlays, tui-pane-geometry).
 - Decision: push main now with wave 4 as built (secrets and credential scans first), and leave the
   two Mac rows to MACQOS (launched 10:40, `w4-side-lanes` run `wf_440f0332-55d`) and the owner.
+- **Pushed to main 2026-10-04 10:46: `4320b601..ce668da4`, 56 commits** (`ce668da4` merges
+  perf/wave4 at `24dc1b6b` into main at `a246b6eb`, the no-agent build commit). Before the push, on
+  the merged tree: Mac and Linux `cargo clippy --workspace --all-targets --all-features -D
+  warnings` and CI's new `cargo clippy -p zz-daemon --no-default-features --features daemon
+  --all-targets -D warnings` pass, fmt clean, Linux helpers tests pass; `compat/evidence-secrets.py`
+  clean; a pattern scan of the 42,191 added lines (AWS, GitHub, Slack, Anthropic, OpenAI and Google
+  key shapes, private-key blocks, JWTs, quoted secrets, email addresses) found nothing; no
+  attribution lines. Both hosts' main checkouts fast-forwarded. No tag.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

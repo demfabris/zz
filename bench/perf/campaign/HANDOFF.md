@@ -827,7 +827,7 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   0.93x, `control.latency` 0.99 -> 1.07x, `chatty.cpu_pct.steady` 4.36 -> 2.91% (tmux 3.2-3.5),
   chatty instructions -10 to -12%. Mac checks of `d9d59154`: fmt, clippy, Linux-target clippy
   pass; zz-terminal + zz-daemon 2026 passed, 19 load failures, all 19 pass alone.
-- Strict final gate on `36a82ea1` (`~/.cache/zz-perf/batch8/final-36a82ea1.json`, one run, lane
+- Final gate on `36a82ea1` (`~/.cache/zz-perf/batch8/final-36a82ea1.json`, one run without `--strict`, lane
   compiles paused): 100 pass, 5 fail: `spawn.cpu.kill_pane` 0.782 vs 0.663 (tmux sample fast),
   `attach.ttfc.p4` 1.14x, `attach.cpu.p4` 1.46x (3.31 vs 2.27), `echo.p50.busy30` 1.52x and
   `echo.p99.busy30` 1.61x (tmux 0.747, its fast mode). 5 "regressed" against wave 3: four
@@ -853,6 +853,9 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   probes in the batch ran at load 6 (lane builds) and read low; a quiet alternating rerun, three
   rounds (base 86e721ad / EM1, MB/s): 4 panes 103.8/101.8, 100.5/98.7, 107.9/106.7; 12 panes
   72.4/75.1, 72.6/74.3, 78.2/80.9; every pane progressed (172-176 of 175 ends).
+- batch9 (`~/.cache/zz-perf/batch9`, from 23:28): three `--stage final --strict` full gates of
+  batch8-36a82ea1-cli against the wave-3 baseline, back to back inside quiet-gate.sh (lane
+  compiles paused): the exit judgement on the EM1 head if the two lanes do not land.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

@@ -52,15 +52,21 @@ fn wait_for_panes(shared: &Shared, live: usize, dead: usize) {
 }
 
 fn hello(session: &str) -> ProtocolMessage {
+    hello_with(session, &[])
+}
+
+fn hello_with(session: &str, extra: &[&str]) -> ProtocolMessage {
+    let mut capabilities = vec![
+        zz_protocol::PANE_FRAME_CAPABILITY.to_owned(),
+        ClientHello::CLIENT_TERMINAL_CAPABILITY.to_owned(),
+    ];
+    capabilities.extend(extra.iter().map(|capability| (*capability).to_owned()));
     let mut hello = zz_protocol::Hello::from_client(ClientHello {
         protocol_version: PROTOCOL_VERSION,
         client_instance_id: ClientInstanceId(931),
         kind: ClientKind::Interactive,
         device_name: None,
-        capabilities: vec![
-            zz_protocol::PANE_FRAME_CAPABILITY.to_owned(),
-            ClientHello::CLIENT_TERMINAL_CAPABILITY.to_owned(),
-        ],
+        capabilities,
         color_scheme: None,
         origin: None,
         working_directory: None,
@@ -202,12 +208,83 @@ fn frames_session(
 }
 
 fn register(shared: &Arc<Shared>, session: &str) -> (connection::Session, Arc<OutboundMailbox>) {
+    register_hello(shared, hello(session))
+}
+
+fn register_hello(
+    shared: &Arc<Shared>,
+    hello: ProtocolMessage,
+) -> (connection::Session, Arc<OutboundMailbox>) {
     let outbound = OutboundMailbox::new();
     let cancel = Arc::new(AtomicBool::new(false));
-    let connection = connection::Session::register(shared, hello(session), &outbound, &cancel)
+    let connection = connection::Session::register(shared, hello, &outbound, &cancel)
         .unwrap()
         .unwrap();
     (connection, outbound)
+}
+
+#[test]
+fn an_attach_initializes_in_one_worker_step() {
+    let shared = Arc::new(Shared::new(934));
+    let mut context = ExecutionContext::default();
+    frames_session(&shared, &mut context, "onestep", 4, 0);
+    shared.loop_active.store(true, Ordering::Release);
+    let (mut session, outbound) = register(&shared, "onestep");
+    let attached = settled(&shared, &outbound, 4, || {
+        session.start_initialize(&shared, &outbound);
+        assert!(matches!(
+            session.run_message(&shared, &outbound, false),
+            connection::MessageProgress::Done
+        ));
+    });
+    assert_eq!(attached.len(), 2, "{:?}", summary(&attached));
+    assert_eq!(viewports(&attached[1]), 4, "{:?}", summary(&attached));
+    shared.loop_active.store(false, Ordering::Release);
+    drop(session);
+    run(&shared, &mut context, "kill-session", &["-t", "onestep"]);
+}
+
+fn views_after_detach(id: u64, extra: &[&str]) -> Vec<usize> {
+    let shared = Arc::new(Shared::new(id));
+    let mut context = ExecutionContext::default();
+    frames_session(&shared, &mut context, "leave", 2, 0);
+    shared.loop_active.store(true, Ordering::Release);
+    let (mut session, outbound) = register_hello(&shared, hello_with("leave", extra));
+    settled(&shared, &outbound, 2, || {
+        session.initialize(&shared, &outbound);
+    });
+    shared
+        .execute(
+            session.client,
+            ClientKind::Interactive,
+            &mut ExecutionContext::default(),
+            &CommandInvocation::new("detach-client", std::iter::empty::<&str>()),
+        )
+        .unwrap();
+    let views = shared
+        .inner
+        .lock()
+        .terminals
+        .values()
+        .map(|terminal| terminal.known_view_count())
+        .collect();
+    shared.loop_active.store(false, Ordering::Release);
+    drop(session);
+    run(&shared, &mut context, "kill-session", &["-t", "leave"]);
+    views
+}
+
+#[test]
+fn a_detach_parks_the_views_of_a_client_that_stays() {
+    assert_eq!(views_after_detach(935, &[]), [1, 1]);
+}
+
+#[test]
+fn a_detach_releases_the_views_of_a_client_that_exits_on_detach() {
+    assert_eq!(
+        views_after_detach(936, &[crate::CLIENT_EXITS_ON_DETACH_CAPABILITY]),
+        [0, 0]
+    );
 }
 
 #[test]

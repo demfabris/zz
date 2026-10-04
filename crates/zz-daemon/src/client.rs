@@ -451,7 +451,7 @@ impl CommandClient {
             std::io::stdin().is_terminal() && std::io::stdout().is_terminal(),
             false,
             false,
-            &[],
+            &[crate::CLIENT_EXITS_ON_DETACH_CAPABILITY],
             self.route.facts,
             Some(attach),
         )?;
@@ -1084,7 +1084,7 @@ impl InteractiveClient {
             endpoint,
             None,
             None,
-            &[],
+            &[crate::CLIENT_EXITS_ON_DETACH_CAPABILITY],
             Some(attach),
             true,
         )

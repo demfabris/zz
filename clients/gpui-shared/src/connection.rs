@@ -562,7 +562,7 @@ impl Connection {
         cx.notify();
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, not(target_family = "wasm")))]
     pub(crate) fn record_input_for_test(
         &mut self,
     ) -> std::rc::Rc<std::cell::RefCell<Vec<ProtocolMessage>>> {
@@ -571,7 +571,7 @@ impl Connection {
         sink
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, not(target_family = "wasm")))]
     pub(crate) fn handle_message_for_test(
         &mut self,
         message: ProtocolMessage,

@@ -2064,7 +2064,7 @@ fn accumulate_scroll(remainder: &mut f32, delta: f32) -> i32 {
     lines
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_family = "wasm")))]
 mod tests {
     use super::*;
 

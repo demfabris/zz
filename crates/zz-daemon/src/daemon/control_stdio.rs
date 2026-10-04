@@ -344,12 +344,16 @@ impl ControlStdio {
                 }
             }
         }
-        self.drained = true;
+        self.drained = !self.reading || read < INPUT_READ_LIMIT;
         arrived
     }
 
+    fn wants_input(&self) -> bool {
+        !self.drained && !self.input[self.consumed..].contains(&b'\n')
+    }
+
     fn drain_input(&mut self, frames: &mut Vec<OutboundFrame>) -> bool {
-        if self.drained {
+        if !self.wants_input() {
             return false;
         }
         let arrived = self.read_input();
@@ -759,6 +763,7 @@ impl EventLoop {
     }
 
     pub(super) fn pump_stdio(&mut self, token: Token, shared: &Arc<Shared>) -> bool {
+        let mut drain = true;
         loop {
             let Some(connection) = self.connections.get_mut(&token) else {
                 return false;
@@ -768,10 +773,10 @@ impl EventLoop {
                 return true;
             };
             if !stdio.wants_line() {
-                if stdio.drain_input(&mut connection.frames) {
+                if std::mem::take(&mut drain) && stdio.drain_input(&mut connection.frames) {
                     continue;
                 }
-                return true;
+                break;
             }
             let line = stdio.take_line(eligible, &mut connection.frames);
             let started = line.is_some();
@@ -812,11 +817,22 @@ impl EventLoop {
                 return true;
             };
             if !started || stdio.unit.is_some() {
-                if stdio.drain_input(&mut connection.frames) && stdio.wants_line() {
+                if std::mem::take(&mut drain)
+                    && stdio.drain_input(&mut connection.frames)
+                    && stdio.wants_line()
+                {
                     continue;
                 }
-                return true;
+                break;
             }
         }
+        if self.connections[&token]
+            .stdio
+            .as_ref()
+            .is_some_and(|stdio| stdio.wants_input())
+        {
+            let _ = crate::transport::wake_loop(&self.waker);
+        }
+        true
     }
 }

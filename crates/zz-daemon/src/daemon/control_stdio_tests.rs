@@ -168,13 +168,15 @@ fn a_short_read_leaves_the_drain_for_after_the_reply() {
     assert!(control.read_chunks(true));
     assert!(!control.drained);
     rustix::io::write(&input, b"display-message -p b\n").expect("write second line");
-    assert!(control.drain_input(&mut forwarded));
-    assert!(control.drained);
     assert!(!control.drain_input(&mut forwarded));
+    assert!(!control.drained);
     assert_eq!(
         control.take_line(true, &mut forwarded).as_deref(),
         Some("display-message -p a")
     );
+    assert!(control.drain_input(&mut forwarded));
+    assert!(control.drained);
+    assert!(!control.drain_input(&mut forwarded));
     assert_eq!(
         &control.input[control.consumed..],
         b"display-message -p b\n"
@@ -244,6 +246,16 @@ fn a_lost_client_frees_its_stdio_at_once_behind_a_blocked_stdout() {
     assert!(outbound.state.lock().queued_bytes > 0);
 
     drop(peer);
+    let closing = Instant::now() + Duration::from_secs(5);
+    while rustix::net::recv(
+        &server,
+        &mut [0_u8; 1],
+        rustix::net::RecvFlags::PEEK | rustix::net::RecvFlags::DONTWAIT,
+    ) != Ok((0, 0))
+    {
+        assert!(Instant::now() < closing, "peer close deadline");
+        thread::sleep(Duration::from_millis(1));
+    }
     let started = Instant::now();
     event_loop.read_ready(token, &shared);
     event_loop.turn(&shared).unwrap();

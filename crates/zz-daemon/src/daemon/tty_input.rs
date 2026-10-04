@@ -185,7 +185,7 @@ impl EventLoop {
         let mut wrote = closed;
         if let (Some(client), Some(pane)) = (connection.client, tty.direct) {
             while start < input.len() {
-                if input[start..].starts_with(b"Gi=") || !connection.takes_tty_key() {
+                if !connection.takes_tty_key() {
                     break;
                 }
                 let Some((key, width)) = zz_protocol::tty_input_key(&input[start..]) else {

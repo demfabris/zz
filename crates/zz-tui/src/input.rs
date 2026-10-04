@@ -210,8 +210,6 @@ pub(crate) fn handle(
     }
 }
 
-/// The pane `handle` would send a plain key press to as one `Key` message and
-/// nothing else, or `None` while any client-side route could claim it.
 pub(crate) fn plain_key_pane(
     model: &Model,
     browser: &BrowserState,

@@ -298,9 +298,6 @@ impl InputRouter {
         std::mem::take(&mut self.effects)
     }
 
-    /// Whether every key press without a chrome binding would leave the
-    /// router unchanged and come back `Native`, so a daemon can deliver one
-    /// to the active terminal pane without asking this router first.
     #[must_use]
     pub fn passes_plain_keys(&self, releases: bool) -> bool {
         let table = match self.owner() {

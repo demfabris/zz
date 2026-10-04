@@ -2256,10 +2256,6 @@ fn shifted_character(input: &KeyInput, character: char) -> char {
     character
 }
 
-/// The key press a raw terminal client decodes from the start of one tty read
-/// and the bytes it spans, for the keys that mean the same whatever follows
-/// them: every 7-bit byte except ESC, a complete UTF-8 scalar that is not a
-/// control, and a complete cursor or function key sequence.
 #[must_use]
 pub fn tty_input_key(bytes: &[u8]) -> Option<(KeyInput, usize)> {
     match *bytes.first()? {

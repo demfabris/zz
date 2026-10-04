@@ -844,6 +844,15 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   /tmp/zzpc/w4/{ctllat,attachp4}.md, worktrees ~/dev/zz-ctllat and ~/dev/zz-attachp4 on both
   hosts, from `3e00c00f`): `control.latency` (zz flat at 0.016 ms since 86e721ad, 0.0136 at
   BURST; rule 1.1x) and Linux `attach.cpu.p4` (kernel time; target 1.2x).
+- batch8 checks on `36a82ea1` (ALLDONE 23:22): fmt, clippy pass; workspace tests 5149 passed,
+  4 failed, all 4 pass alone; compat-check, debug build pass; backpressure 9/9; attached-client
+  pass, 0 rejections; corpus 248 clean, 11 red: batch6's 10 plus
+  `smoke/format-modifier-client-loop`, red alone too, where zz is clean and the tmux side fails its
+  own client-order check (the fixture wants clients in pts-number order; tmux lists them in attach
+  order, and this run allocated /dev/pts/15 before /dev/pts/10); tui-choosers 78/78. The flood
+  probes in the batch ran at load 6 (lane builds) and read low; a quiet alternating rerun, three
+  rounds (base 86e721ad / EM1, MB/s): 4 panes 103.8/101.8, 100.5/98.7, 107.9/106.7; 12 panes
+  72.4/75.1, 72.6/74.3, 78.2/80.9; every pane progressed (172-176 of 175 ends).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

@@ -4017,7 +4017,10 @@ mod tests {
 
     #[test]
     fn standalone_diagnostics_only_set_source_read_return_codes() {
-        let source_read = "stream did not contain valid UTF-8: /tmp/invalid-source.conf";
+        let source_read = format!(
+            "stream did not contain valid UTF-8: {}",
+            std::env::temp_dir().join("invalid-source.conf").display()
+        );
         for kind in [
             zz_protocol::ClientMessageKind::Error,
             zz_protocol::ClientMessageKind::Warning,
@@ -4030,7 +4033,7 @@ mod tests {
                     payload: EventPayload::ClientMessage {
                         pane: None,
                         kind,
-                        text: source_read.to_owned(),
+                        text: source_read.clone(),
                     },
                 }),
                 &mut source_state,
@@ -5696,16 +5699,23 @@ mod tests {
 
     #[test]
     fn daemon_source_read_failures_keep_their_own_channel() {
+        let root = std::env::temp_dir();
         for text in [
-            "No such file or directory: /tmp/mux.conf",
-            "Invalid argument: /tmp/mux.conf",
-            "Cannot allocate memory: /tmp/mux.conf",
-            "Pattern syntax error: /tmp/[",
-            "too many nested files",
-            "Is a directory (os error 21): /tmp/a: b",
-            "stream did not contain valid UTF-8: /tmp/binary.conf",
+            "No such file or directory: /tmp/mux.conf".to_owned(),
+            "Invalid argument: /tmp/mux.conf".to_owned(),
+            "Cannot allocate memory: /tmp/mux.conf".to_owned(),
+            "Pattern syntax error: /tmp/[".to_owned(),
+            "too many nested files".to_owned(),
+            format!(
+                "Is a directory (os error 21): {}: b",
+                root.join("a").display()
+            ),
+            format!(
+                "stream did not contain valid UTF-8: {}",
+                root.join("binary.conf").display()
+            ),
         ] {
-            assert!(is_source_error_message(text), "{text}");
+            assert!(is_source_error_message(&text), "{text}");
         }
         assert!(!is_source_error_message(
             "/tmp/mux.conf:51: too many nested files"

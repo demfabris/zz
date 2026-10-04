@@ -986,6 +986,29 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   Left open by design: a dead Claude record's pid reused in the same pane, or the wall clock
   stepping back, can go unseen while no state is recorded and no file changes. The non-agent
   build (`--no-default-features --features daemon`) has 13 compile errors on the base too.
+- TTYIN merged as `0eeadc62` (lane `43796416` + review fix `694cd572`, done true; 5 h 10 min) and
+  `a24e96e8` drops the three doc comments it added. Design as built: `zz_cli attach` sends its stdin
+  with SCM_RIGHTS behind capability `tty-input-v1` (Welcome bit and hello capability; protocol stays
+  107, six messages appended: `TtyInput`, `TtyInputStarted`, `TtyInputBytes`, `TtyInputReady`,
+  `TtyInputRelease`, `TtyInputClosed`, each carrying a handoff number). The daemon reopens the
+  terminal by name, nonblocking and without becoming its controlling terminal (device numbers must
+  match), and reads it on the mux loop (`daemon/tty_input.rs`). A key that `zz_protocol::
+  tty_input_key` decodes (every 7-bit byte but ESC, a complete UTF-8 scalar, complete cursor,
+  Home/End, Insert/Delete, page and F1-F12 sequences) goes to the pane through the EM5 path when
+  the client's last report matches the forwarded count, its reported pane is the daemon's active
+  pane for it, the connection is idle and the key tables pass the key; everything else goes back
+  as `TtyInputBytes` and later bytes wait for the client's `TtyInputReady`. The client feeds those
+  bytes to its own parser and reports Ready only when its queues are empty and no client-side route
+  could claim a plain key (`InputRouter::passes_plain_keys`). Release before exit, suspend and host
+  switch (1 s cap); a detached exits-on-detach client's terminal closes before the next read; tty
+  readiness is handled after the other events of a poll batch. Fallbacks: `ZZ_TUI_RELAY=1`, ssh
+  endpoints, non-tty stdin, an older daemon, any refusal. Mac, 5 pairs in the slow state:
+  `echo.p50.busy30` 1.452 -> 1.246x, `echo.p50.idle` 1.336 -> 1.169x, `echo.p99.busy30` 1.432 ->
+  0.831x; `echo.p99.idle` by median of per-run ratios 1.209 -> 1.598 over 20 runs, while its
+  medians are equal (zz 1.840 vs 1.845 ms, tmux 1.396 vs 1.404). Client per key: context switches
+  2.10 -> 0.92, syscalls 5.6 -> 2.7. Linux, 3 pairs: busy30 1.408 -> 1.280x, idle 1.365 -> 1.195x.
+  Every raw-TUI fixture matches base with and without `ZZ_TUI_RELAY=1`. Separate task (chip): typed
+  text starting with `Gi=` freezes the raw TUI's parser (pre-existing; the daemon mirrors it).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

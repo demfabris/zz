@@ -167,6 +167,132 @@ fn foreground_loop_accepts_startup_reentry_and_keeps_ordinary_execs_parked() {
 }
 
 #[test]
+#[allow(
+    unsafe_code,
+    reason = "the child starts with the signal mask a GUI worker thread hands the daemon"
+)]
+fn a_daemon_spawned_with_blocked_signals_reaps_its_startup_shell_and_honors_sigterm() {
+    use std::os::unix::process::CommandExt as _;
+
+    const CHILD: &str = "ZZ_BLOCKED_SIGNALS_DAEMON";
+    const TEST: &str = "daemon::event_loop_tests::a_daemon_spawned_with_blocked_signals_reaps_its_startup_shell_and_honors_sigterm";
+
+    struct Holder(PathBuf);
+
+    impl Drop for Holder {
+        fn drop(&mut self) {
+            if let Some(pid) = fs::read_to_string(&self.0)
+                .ok()
+                .and_then(|pid| pid.trim().parse().ok())
+                .and_then(rustix::process::Pid::from_raw)
+            {
+                let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
+            }
+        }
+    }
+
+    if std::env::var_os(CHILD).is_none() {
+        let mut blocked: libc::sigset_t = unsafe { std::mem::zeroed() };
+        unsafe {
+            libc::sigemptyset(&raw mut blocked);
+            for signal in [libc::SIGCHLD, libc::SIGTERM, libc::SIGINT] {
+                libc::sigaddset(&raw mut blocked, signal);
+            }
+        }
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command
+            .args([TEST, "--exact", "--test-threads=1"])
+            .env(CHILD, "1")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        unsafe {
+            command.pre_exec(move || {
+                libc::sigprocmask(libc::SIG_BLOCK, &raw const blocked, std::ptr::null_mut());
+                Ok(())
+            });
+        }
+        let mut child = command.spawn().unwrap();
+        let deadline = Instant::now() + Duration::from_mins(1);
+        while child.try_wait().unwrap().is_none() {
+            if Instant::now() >= deadline {
+                child.kill().unwrap();
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        let output = child.wait_with_output().unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success() && stdout.contains("running 1 test"),
+            "{stdout}{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+
+    let directory = tempfile::tempdir_in("/tmp").unwrap();
+    let holder = Holder(directory.path().join("holder"));
+    let config = directory.path().join("mux.conf");
+    fs::write(
+        &config,
+        format!(
+            "run-shell 'sleep 30 & echo $! > {}; sleep 0.2'\nset-option -g @initialized yes\n",
+            holder.0.display()
+        ),
+    )
+    .unwrap();
+    let socket = PathBuf::from(format!(
+        "/tmp/zz-blocked-signals-{}-{}.sock",
+        std::process::id(),
+        server_id()
+    ));
+    let daemon = Daemon::new(&socket)
+        .with_server_id(778)
+        .with_mux_config_files([config]);
+    let (ready, started) = mpsc::channel();
+    let (done, ended) = mpsc::channel();
+    let daemon_thread = thread::spawn(move || {
+        let result = daemon.run_foreground_with_ready(|_| ready.send(()).unwrap());
+        let _ = done.send(result);
+    });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !holder.0.exists() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(holder.0.exists(), "startup shell started");
+    let (connected, welcome) = mpsc::channel();
+    let endpoint = crate::Endpoint::Local(socket.clone());
+    thread::spawn(move || {
+        let _ = connected.send(
+            crate::InteractiveClient::connect_endpoint_with_prompts_and_attach(
+                &endpoint,
+                Some(TerminalColorScheme::Dark),
+                None,
+                &[zz_protocol::ClientHello::CLIENT_PATH_PICKER_CAPABILITY],
+                None,
+                false,
+            ),
+        );
+    });
+    started
+        .recv_timeout(Duration::from_secs(10))
+        .expect("startup finished after its run-shell exited");
+    let client = welcome
+        .recv_timeout(Duration::from_secs(10))
+        .expect("interactive client welcomed")
+        .unwrap();
+    rustix::process::kill_process(rustix::process::getpid(), rustix::process::Signal::TERM)
+        .unwrap();
+    ended
+        .recv_timeout(Duration::from_secs(10))
+        .expect("SIGTERM stopped the daemon")
+        .unwrap();
+    daemon_thread.join().unwrap();
+    drop(client);
+    assert!(!socket.exists());
+}
+
+#[test]
 fn a_panicking_startup_worker_still_posts_completion() {
     let socket = PathBuf::from(format!(
         "/tmp/zz-b1-panic-{}-{}.sock",

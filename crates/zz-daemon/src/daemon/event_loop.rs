@@ -38,7 +38,15 @@ struct SignalPipes {
 }
 
 impl SignalPipes {
+    #[allow(
+        unsafe_code,
+        reason = "clear the signal mask the spawning thread left on the loop thread"
+    )]
     fn new(poll: &Poll) -> io::Result<Self> {
+        unsafe {
+            let empty: libc::sigset_t = std::mem::zeroed();
+            libc::pthread_sigmask(libc::SIG_SETMASK, &raw const empty, std::ptr::null_mut());
+        }
         let (shutdown, shutdown_write) = UnixStream::pair()?;
         let (child, child_write) = UnixStream::pair()?;
         shutdown.set_nonblocking(true)?;

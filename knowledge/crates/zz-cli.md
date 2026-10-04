@@ -4,7 +4,7 @@ title: zz-cli crate
 description: Headless CLI, daemon entrypoint, and terminal attach client shared with the desktop app.
 resource: crates/zz-cli/src/lib.rs
 tags: [crate, cli, daemon, tui, headless, packaging]
-timestamp: 2026-09-16T00:00:00Z
+timestamp: 2026-10-04T00:00:00Z
 ---
 
 # Overview
@@ -20,6 +20,9 @@ Headless archives instead ship the same binary as `zz`, alongside the MIT and Ap
 
 The `daemon_executable` rule makes a GUI spawn the sibling `cli` and the headless
 binary spawn itself. Sessions survive when the desktop client quits.
+The spawner hands the daemon's `Child` to a `zz-daemon-reaper` thread that waits on it,
+so a daemon that stops while the GUI or an attach client is still running does not stay
+behind as a zombie.
 `zz app` opens the desktop app beside the headless binary, or explains that the
 app is not installed on a headless host.
 

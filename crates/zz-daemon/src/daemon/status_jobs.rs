@@ -206,6 +206,7 @@ pub(crate) mod tests;
 #[cfg(windows)]
 mod windows {
     use super::*;
+    use crate::unmasked::SpawnUnmasked as _;
     use std::{
         collections::BTreeMap,
         io::Read as _,
@@ -234,7 +235,7 @@ mod windows {
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
                     .stderr(Stdio::null())
-                    .status();
+                    .status_unmasked();
                 let _ = child.kill();
             }
             self.stdout = None;
@@ -352,7 +353,7 @@ mod windows {
                                 .stdout(Stdio::piped())
                                 .stderr(Stdio::null());
                             let child = loop {
-                                match command.spawn() {
+                                match command.spawn_unmasked() {
                                     Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
                                     result => break result,
                                 }

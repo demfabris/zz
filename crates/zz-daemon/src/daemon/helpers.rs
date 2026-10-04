@@ -14,6 +14,7 @@ use parking_lot::{Condvar, Mutex};
 use super::path_listing;
 #[cfg(feature = "agent")]
 use super::{ClientId, PaneId};
+use crate::unmasked::SpawnUnmasked as _;
 
 const MAX_WORKERS: usize = 2;
 const MAX_PENDING: usize = 64;
@@ -445,7 +446,7 @@ fn run(task: Task, _state: &State) -> Option<Result> {
                         )
                         .ok();
                 }
-                command.output().ok()
+                command.output_unmasked().ok()
             });
             let _ = reply.send(());
             None

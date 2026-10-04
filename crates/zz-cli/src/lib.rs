@@ -1,3 +1,11 @@
+#![cfg_attr(
+    test,
+    allow(
+        clippy::disallowed_methods,
+        reason = "tests spawn helper processes from threads with an empty signal mask"
+    )
+)]
+
 #[cfg(not(windows))]
 extern crate mimalloc;
 #[cfg(all(test, not(target_os = "ios")))]
@@ -27,7 +35,7 @@ use std::{
 #[cfg(not(target_os = "ios"))]
 use zz_daemon::{
     CommandClient, CommandOutcome, Daemon, Endpoint, ExecChain, ExecChainEnd, ExecClassifier,
-    classify_local_connect_error, terminate_incompatible_daemon,
+    classify_local_connect_error, terminate_incompatible_daemon, unmasked::SpawnUnmasked as _,
 };
 use zz_daemon::{DaemonError, InteractiveClient};
 #[cfg(not(target_os = "ios"))]
@@ -1646,7 +1654,7 @@ fn run_tmux_shell_command(
         .arg("-c")
         .arg(shell_command)
         .env("SHELL", &shell)
-        .status()
+        .status_unmasked()
     {
         Ok(status) => status
             .code()
@@ -2211,7 +2219,7 @@ fn spawn_daemon(
     ) {
         eprintln!("{hint}");
     }
-    command.spawn()?;
+    reap_when_exited(command.spawn_unmasked()?);
     log::debug!(
         target: "zz::diagnostics::process",
         "spawned daemon path={} child_verbose_flag_applied={}",
@@ -2221,6 +2229,13 @@ fn spawn_daemon(
     #[cfg(unix)]
     ready.wait(DAEMON_READY_DEADLINE);
     Ok(server_id)
+}
+
+#[cfg(not(target_os = "ios"))]
+fn reap_when_exited(mut child: std::process::Child) {
+    let _ = thread::Builder::new()
+        .name("zz-daemon-reaper".to_owned())
+        .spawn(move || child.wait());
 }
 
 #[cfg(all(unix, not(target_os = "ios")))]
@@ -2636,7 +2651,7 @@ pub fn launch_application(socket_path: &Path) -> ExitCode {
         .env_remove("TMUX")
         .env_remove("TMUX_PANE");
     diagnostics::configure_spawned_process(&mut command);
-    match command.status() {
+    match command.status_unmasked() {
         Ok(status) if status.success() => ExitCode::SUCCESS,
         Ok(status) => {
             eprintln!("zz: could not open {}: {status}", bundle.display());
@@ -2682,7 +2697,7 @@ pub fn launch_application(socket_path: &Path) -> ExitCode {
         command.env(APP_STARTUP_DIRECTORY_ENV, directory);
     }
     diagnostics::configure_spawned_process(&mut command);
-    match command.spawn() {
+    match command.spawn_unmasked() {
         Ok(_) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("zz: could not open the application: {error}");
@@ -4069,6 +4084,27 @@ mod tests {
         assert_eq!(super::daemon_executable_from(&application), cli);
         std::fs::remove_file(&application).expect("remove application");
         assert_eq!(super::daemon_executable_from(&cli), cli);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_spawned_daemon_that_exits_is_reaped_while_the_spawner_lives() {
+        use zz_daemon::unmasked::SpawnUnmasked as _;
+
+        let child = std::process::Command::new("/bin/sh")
+            .args(["-c", "exit 0"])
+            .spawn_unmasked()
+            .expect("spawn a short-lived child");
+        let pid = rustix::process::Pid::from_child(&child);
+        super::reap_when_exited(child);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while rustix::process::test_kill_process(pid).is_ok() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the exited child is still a zombie"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
     }
 
     #[cfg(target_os = "macos")]

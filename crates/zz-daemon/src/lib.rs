@@ -1,4 +1,11 @@
 //! Persistent mux daemon, local IPC transport, and command client.
+#![cfg_attr(
+    test,
+    allow(
+        clippy::disallowed_methods,
+        reason = "tests spawn helper processes from threads with an empty signal mask"
+    )
+)]
 
 #[cfg(feature = "daemon")]
 use std::{
@@ -70,6 +77,7 @@ mod status;
 #[cfg_attr(target_os = "ios", allow(dead_code))]
 mod terminal_features;
 mod transport;
+pub mod unmasked;
 pub mod user_data;
 
 #[cfg(feature = "agent")]

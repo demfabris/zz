@@ -1,4 +1,11 @@
 //! Cross-platform terminal session and renderer-neutral snapshots.
+#![cfg_attr(
+    test,
+    allow(
+        clippy::disallowed_methods,
+        reason = "tests spawn helper processes from threads with an empty signal mask"
+    )
+)]
 
 mod appearance;
 mod input;

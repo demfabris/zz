@@ -8,6 +8,10 @@
 //! decode — than the in-process one would.
 
 #![cfg(all(unix, feature = "agent"))]
+#![allow(
+    clippy::disallowed_methods,
+    reason = "tests spawn helper processes from threads with an empty signal mask"
+)]
 
 use std::{
     collections::{BTreeMap, BTreeSet},

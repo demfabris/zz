@@ -13,6 +13,7 @@ use agent_client_protocol::AcpAgent;
 use serde_json::{Value, json};
 
 use super::{claude_peers, environment::with_platform_environment};
+use crate::unmasked::SpawnUnmasked as _;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -84,7 +85,7 @@ pub(crate) fn pane_runs_codex(pane_pid: u32) -> bool {
             #[cfg(not(target_os = "linux"))]
             let executable = Command::new("ps")
                 .args(["-p", &pid.to_string(), "-o", "comm="])
-                .output()
+                .output_unmasked()
                 .ok()
                 .filter(|output| output.status.success())
                 .map(|output| {
@@ -123,7 +124,7 @@ pub(crate) fn group_runs_codex(group: u32) -> bool {
         .args(["-axo", "pid=,pgid=,comm="])
         .stdin(Stdio::null())
         .stderr(Stdio::null())
-        .output()
+        .output_unmasked()
     else {
         return false;
     };
@@ -246,7 +247,7 @@ fn resolve_thread(codex: &Path, cwd: &Path, name: &str) -> Result<String, QueueE
             .stdin(Stdio::piped())
             .stdout(stdout.try_clone()?)
             .stderr(Stdio::null())
-            .spawn()?,
+            .spawn_unmasked()?,
     );
     let mut offset = 0;
     let mut pending = Vec::new();
@@ -361,7 +362,7 @@ fn queue(codex: &Path, thread_id: &str, text: &str) -> Result<String, QueueError
             .stdin(Stdio::null())
             .stdout(stdout.try_clone()?)
             .stderr(stderr.try_clone()?)
-            .spawn()?,
+            .spawn_unmasked()?,
     );
     let status = loop {
         if Instant::now() >= deadline {

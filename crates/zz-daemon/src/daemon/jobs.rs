@@ -18,6 +18,7 @@ use super::{
     DaemonError, Shared, ShellJobPermit, ShellJobResult, configure_shell_job_environment,
     existing_job_working_directory, shell_process,
 };
+use crate::unmasked::SpawnUnmasked as _;
 use std::path::Path;
 use zz_protocol::RawText;
 
@@ -636,7 +637,7 @@ pub(super) fn launch_status(mut command: Command, mut output: StatusOutput) -> i
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     let mut child = loop {
-        match command.spawn() {
+        match command.spawn_unmasked() {
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
             Ok(child) => break child,
             Err(error) => {
@@ -716,7 +717,7 @@ pub(super) fn launch_shell(
     }
     output.shutdown(std::net::Shutdown::Write)?;
     let child = loop {
-        match process.spawn() {
+        match process.spawn_unmasked() {
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
             result => break result?,
         }

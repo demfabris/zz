@@ -238,13 +238,15 @@ fn spawn_player(_path: &Path) -> Option<std::process::Child> {
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn player_command(program: &str, args: &[&str], path: &Path) -> Option<std::process::Child> {
+    use zz_daemon::unmasked::SpawnUnmasked as _;
+
     std::process::Command::new(program)
         .args(args)
         .arg(path)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .spawn()
+        .spawn_unmasked()
         .ok()
 }
 

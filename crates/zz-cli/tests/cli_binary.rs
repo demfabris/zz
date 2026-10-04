@@ -1,3 +1,7 @@
+#![allow(
+    clippy::disallowed_methods,
+    reason = "tests spawn helper processes from threads with an empty signal mask"
+)]
 use std::process::Command;
 
 /// A `zz` that cannot see the developer's own `~/.config/zz/mux.conf`: an

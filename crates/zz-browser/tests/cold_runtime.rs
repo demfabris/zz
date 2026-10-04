@@ -2,6 +2,10 @@
     feature = "cef-runtime",
     any(target_os = "macos", all(target_os = "linux", target_arch = "x86_64"))
 ))]
+#![allow(
+    clippy::disallowed_methods,
+    reason = "tests spawn helper processes from threads with an empty signal mask"
+)]
 
 use zz_browser::{
     BrowserBootstrap, BrowserProfilePaths, RuntimePhase, bootstrap_with_profile_paths,

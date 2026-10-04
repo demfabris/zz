@@ -18,6 +18,8 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::unmasked::SpawnUnmasked as _;
+
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", default)]
 pub(crate) struct PeerRecord {
@@ -617,7 +619,7 @@ fn proc_start(pid: u32) -> io::Result<String> {
     let output = Command::new("ps")
         .env("TZ", "UTC")
         .args(["-p", &pid.to_string(), "-o", "lstart="])
-        .output()?;
+        .output_unmasked()?;
     let start = trimmed_proc_start(&output.stdout);
     if !output.status.success() || start.is_empty() {
         return Err(io::Error::new(
@@ -701,7 +703,9 @@ fn adapter_pid(pane: &str) -> io::Result<u32> {
 
 #[cfg(not(target_os = "linux"))]
 pub(super) fn process_parents() -> io::Result<Vec<(u32, u32)>> {
-    let output = Command::new("ps").args(["-axo", "pid=,ppid="]).output()?;
+    let output = Command::new("ps")
+        .args(["-axo", "pid=,ppid="])
+        .output_unmasked()?;
     let parents: Vec<(u32, u32)> = String::from_utf8_lossy(&output.stdout)
         .lines()
         .filter_map(|line| {
@@ -717,7 +721,7 @@ fn adapter_pid(pane: &str) -> io::Result<u32> {
     for pid in descendants_by_depth(&process_parents()?, std::process::id()) {
         let environment = Command::new("ps")
             .args(["-E", "-o", "command=", "-p", &pid.to_string()])
-            .output()?;
+            .output_unmasked()?;
         if env_marks_pane(
             String::from_utf8_lossy(&environment.stdout)
                 .split_whitespace()

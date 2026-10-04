@@ -6,6 +6,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::unmasked::SpawnUnmasked as _;
+
 const MAX_STDERR_BYTES: usize = 256 * 1024;
 
 pub(crate) fn run_output_until(
@@ -44,7 +46,7 @@ fn spawn_output(command: &mut Command) -> Result<Child, String> {
     command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()
+        .spawn_unmasked()
         .map_err(|error| format!("git could not start: {error}"))
 }
 
@@ -150,7 +152,7 @@ fn terminate_output(child: &mut Child) -> Result<std::process::ExitStatus, Strin
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .status();
+            .status_unmasked();
     }
     let _ = child.kill();
     child

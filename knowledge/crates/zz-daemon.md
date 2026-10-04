@@ -4,7 +4,7 @@ title: zz-daemon crate
 description: The persistent local daemon. Sole authority for mux state, owner of PTY-backed terminal sessions and Agent-pane ACP adapter children, and the fan-out engine that streams coalesced terminal frames and agent transcripts to attached and short-lived clients over a socket or named pipe.
 resource: crates/zz-daemon/src/daemon.rs
 tags: [crate, daemon, ipc, fanout, transport, agent]
-timestamp: 2026-10-03T02:00:00-03:00
+timestamp: 2026-10-04T00:00:00-03:00
 ---
 
 # Overview
@@ -61,6 +61,7 @@ send-keys, and client events. It contains no GPUI or CEF code; live browser rend
 | `lifecycle.rs` | `RecoveredDaemon`, `DaemonRecoveryError`, `terminate_incompatible_daemon` | Single-instance identity file + guarded termination of an incompatible-protocol daemon |
 | `keys.rs` | (crate-internal) `input_key_name`, `send_tokens` | tmux key spelling ↔ `KeyInput`; named-key/literal fan-out for `send-keys` |
 | `status.rs` | (crate-internal) `StatusRenderer`, `status_context` | Expands the [tmux status line](/tmux/status-line.md) per client: strftime, bounded `#()` execution with an output cache, change diffing |
+| `unmasked.rs` | `unmasked::SpawnUnmasked` | The only way zz starts a `std::process::Command`: `spawn_unmasked`, `output_unmasked` and `status_unmasked` clear the calling thread's signal mask for the spawn and put it back after. Since Rust 1.97 a child inherits the mask of the thread that spawned it, and GPUI's background threads block nearly every signal, so a plain spawn from the desktop app starts ssh, shells and helpers with SIGINT, SIGTERM, SIGCHLD and SIGWINCH blocked. `clippy.toml` disallows the plain `spawn`, `output` and `status`; tests and `zz-xtask` are exempt |
 | `user_data.rs` | `platform_data_dir`, `restrict_to_current_user`, `restrict_directory_to_current_user` | Where user-owned application data lives and how it is permission-hardened. The policy sits here because the daemon's agent journal answers to it too; `crates/zz/src/user_data.rs` is now a re-export of this module |
 | `agent/` (feature `agent`) | `AgentStreamItem`/`AgentStreamPayload` and friends via the crate root | The daemon-owned Agent runtime: `host` (one thread per pane, prompt queue, permission bookkeeping), `runtime` (the ACP connection), `fanout` (coalescing, wire sequence, replay ring, pane state), `journal`, `git_summary` (bounded current-worktree totals), `environment` (ACP child PATH repair and workspace identity), `paths`, plus a test-only in-process `fixture` |
 

@@ -1,3 +1,11 @@
+#![cfg_attr(
+    test,
+    allow(
+        clippy::disallowed_methods,
+        reason = "tests spawn helper processes from threads with an empty signal mask"
+    )
+)]
+
 mod agent;
 mod app_icon;
 mod app_shell;

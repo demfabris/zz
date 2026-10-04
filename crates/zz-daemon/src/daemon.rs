@@ -149,6 +149,7 @@ use crate::{
     },
     terminal_features::{terminal_colour_count, terminal_feature_mask, terminal_features_list},
     transport::{AcceptWake, LocalTransport, Transport, TransportListener, TransportStream},
+    unmasked::SpawnUnmasked as _,
 };
 
 #[cfg(windows)]
@@ -12941,7 +12942,7 @@ impl Shared {
                 Stdio::null()
             })
             .stderr(Stdio::null());
-        let mut child = process.spawn().map_err(|error| {
+        let mut child = process.spawn_unmasked().map_err(|error| {
             ServerError::InvalidCommand(format!("could not start pipe-pane command: {error}"))
         })?;
         let pid = child.id();
@@ -44407,7 +44408,7 @@ fn run_shell_job(
     if let Some(startup_reentry) = startup_reentry {
         process.env(crate::STARTUP_REENTRY_ENVIRONMENT_VARIABLE, startup_reentry);
     }
-    let mut child = process.spawn().map_err(|_| ())?;
+    let mut child = process.spawn_unmasked().map_err(|_| ())?;
     drop(child.stdin.take());
     let Some(mut stdout) = child.stdout.take() else {
         let _ = terminate_copy_pipe(&mut child);
@@ -44602,7 +44603,7 @@ fn run_copy_pipe_with_timeout(
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     let mut child = process
-        .spawn()
+        .spawn_unmasked()
         .map_err(|error| format!("could not start process: {error}"))?;
     let started = Instant::now();
     loop {
@@ -44667,7 +44668,7 @@ fn launch_copy_pipe(
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     let mut child = process
-        .spawn()
+        .spawn_unmasked()
         .map_err(|error| format!("could not start process: {error}"))?;
     let input = child.stdin.take().unwrap();
     Ok(jobs::Launch {
@@ -44782,7 +44783,7 @@ fn terminate_copy_pipe(child: &mut Child) -> (Option<String>, Option<std::io::Er
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .status()
+            .status_unmasked()
             .map_err(|error| format!("could not run taskkill: {error}"))
             .and_then(|status| {
                 if status.success() {

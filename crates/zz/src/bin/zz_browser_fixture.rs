@@ -33,6 +33,7 @@ use zz_browser::{
 };
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 use zz_browser::{BrowserGpuContext, OsrFrame, SessionId};
+use zz_daemon::unmasked::SpawnUnmasked as _;
 
 const DEFAULT_PORT: u16 = 9324;
 const DEFAULT_SPIKE_SECONDS: u64 = 10;
@@ -573,7 +574,7 @@ fn launch_shared_texture_spike(seconds: u64, port: u16) -> ExitCode {
         .arg(port.to_string())
         .env("ZZ_BROWSER_GPU", "1")
         .env("ZZ_BROWSER_SHARED_TEXTURE", "1")
-        .status()
+        .status_unmasked()
     {
         Ok(status) if status.success() => ExitCode::SUCCESS,
         Ok(status) => {

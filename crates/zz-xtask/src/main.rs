@@ -1,3 +1,8 @@
+#![allow(
+    clippy::disallowed_methods,
+    reason = "build tooling runs from a shell, never from a GUI thread"
+)]
+
 use std::{env, error::Error, fs, path::PathBuf, process::ExitCode};
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]

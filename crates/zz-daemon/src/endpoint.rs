@@ -43,6 +43,8 @@ use crate::askpass::{AskpassListener, SshPrompts};
 #[cfg(windows)]
 use crate::transport::{LocalListener, LocalStream, TransportListener as _};
 use crate::transport::{LocalTransport, Transport as _, TransportStream as _};
+#[cfg(any(unix, windows, test))]
+use crate::unmasked::SpawnUnmasked as _;
 
 /// `sh -l` reads `/etc/profile` and `~/.profile`; a PATH exported from `~/.bash_profile` or
 /// `~/.zshrc` never reaches it, which hides the CLI that install.sh linked into one of these.
@@ -764,7 +766,7 @@ fn discard_dead_control_master(endpoint: &SshEndpoint, control_path: &Path) {
         return;
     }
     let alive = ssh_control_command(endpoint, control_path, "check", None)
-        .status()
+        .status_unmasked()
         .is_ok_and(|status| status.success());
     if !alive {
         let _ = fs::remove_file(control_path);
@@ -809,7 +811,7 @@ fn probe_remote_socket(
 ) -> Result<PathBuf, EndpointError> {
     let target = endpoint.to_string();
     let output = ssh_probe_command(endpoint, session)
-        .output()
+        .output_unmasked()
         .map_err(|source| EndpointError::SshSpawn {
             operation: "remote socket probe",
             source,
@@ -894,7 +896,7 @@ fn ensure_remote_daemon(
 ) -> Result<(), EndpointError> {
     let target = endpoint.to_string();
     let output = ssh_daemon_start_command(endpoint, session, remote_socket)
-        .output()
+        .output_unmasked()
         .map_err(|source| EndpointError::SshSpawn {
             operation: "remote daemon start",
             source,
@@ -990,7 +992,7 @@ impl SshForward {
         let socks_port = available_socks_port();
         let child =
             ssh_forward_command(endpoint, session, &local_socket, &remote_socket, socks_port)
-                .spawn()
+                .spawn_unmasked()
                 .map_err(|source| EndpointError::SshSpawn {
                     operation: "socket forward",
                     source,
@@ -1056,10 +1058,12 @@ impl SshForward {
             remote_socket,
             self.socks_port,
         );
-        self.child = command.spawn().map_err(|source| EndpointError::SshSpawn {
-            operation: "socket forward",
-            source,
-        })?;
+        self.child = command
+            .spawn_unmasked()
+            .map_err(|source| EndpointError::SshSpawn {
+                operation: "socket forward",
+                source,
+            })?;
         self.wait_for_socket(endpoint)
     }
 
@@ -1072,7 +1076,7 @@ impl SshForward {
         }
         let cancel = |forwarding| {
             let _ = ssh_control_command(&self.endpoint, control_path, "cancel", Some(forwarding))
-                .status();
+                .status_unmasked();
         };
         cancel(("-L", self.forwarding.as_os_str()));
         if let Some(port) = self.socks_port {
@@ -1306,7 +1310,7 @@ impl SshForward {
         })?;
 
         let mut child = ssh_proxy_command(endpoint, session, &remote_socket)
-            .spawn()
+            .spawn_unmasked()
             .map_err(|source| EndpointError::SshSpawn {
                 operation: "socket proxy",
                 source,

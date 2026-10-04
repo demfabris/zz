@@ -30,7 +30,10 @@ use zz_terminal::{
     CellWidth, CopyModeFacts, ProgressBar, TerminalColorScheme, TerminalSession, TerminalViewport,
 };
 
-use crate::{configure_shell_job_environment, paths::home_directory, shell_process};
+use crate::{
+    configure_shell_job_environment, paths::home_directory, shell_process,
+    unmasked::SpawnUnmasked as _,
+};
 
 type ShellCacheKey = (ClientId, FormatJobTag, String);
 
@@ -1119,7 +1122,7 @@ pub(crate) fn terminfo_is_warm(environment: &[RawText]) -> bool {
 }
 
 fn terminfo_entries(term: &str) -> Option<Arc<Vec<String>>> {
-    terminfo_entries_using(term, &|mut command| command.output().ok())
+    terminfo_entries_using(term, &|mut command| command.output_unmasked().ok())
 }
 
 fn terminfo_entries_using(
@@ -1266,7 +1269,7 @@ fn decode_terminfo_string(value: &str) -> String {
 /// it. Reading the database is a subprocess, so registration warms the cache
 /// while the state lock is down and the format path only ever reads it back.
 pub(crate) fn warm_terminfo_entries(environment: &[RawText]) {
-    warm_terminfo_entries_using(environment, &|mut command| command.output().ok());
+    warm_terminfo_entries_using(environment, &|mut command| command.output_unmasked().ok());
 }
 
 pub(crate) fn warm_terminfo_entries_using(

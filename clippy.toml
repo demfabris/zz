@@ -7,4 +7,7 @@ disallowed-methods = [
     { path = "gpui::rgb", reason = "chrome colors must come from cx.theme(); see knowledge/configuration/ui-conventions doc" },
     { path = "gpui::rgba", reason = "chrome colors must come from cx.theme(); see knowledge/configuration/ui-conventions doc" },
     { path = "gpui::hsla", reason = "chrome colors must come from cx.theme(); see knowledge/configuration/ui-conventions doc" },
+    { path = "std::process::Command::spawn", reason = "children inherit the signal mask of the spawning thread; spawn through zz_daemon::unmasked::SpawnUnmasked" },
+    { path = "std::process::Command::output", reason = "children inherit the signal mask of the spawning thread; spawn through zz_daemon::unmasked::SpawnUnmasked" },
+    { path = "std::process::Command::status", reason = "children inherit the signal mask of the spawning thread; spawn through zz_daemon::unmasked::SpawnUnmasked" },
 ]

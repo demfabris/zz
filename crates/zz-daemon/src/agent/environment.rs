@@ -14,6 +14,8 @@ use std::{
 
 use agent_client_protocol::AcpAgent;
 
+use crate::unmasked::SpawnUnmasked as _;
+
 pub(crate) fn with_platform_environment(agent: AcpAgent) -> AcpAgent {
     with_executable_path(agent, executable_path())
 }
@@ -39,7 +41,7 @@ pub(crate) fn warm_adapter_cache(commands: &[String]) {
             if let Some(path) = path {
                 warm.env("PATH", path);
             }
-            match warm.status() {
+            match warm.status_unmasked() {
                 Ok(status) if status.success() => {
                     log::debug!(target: "zz::agent", "warmed adapter cache for {spec}");
                 }
@@ -207,6 +209,8 @@ mod login_shell {
         time::{Duration, Instant},
     };
 
+    use crate::unmasked::SpawnUnmasked as _;
+
     /// A shell whose init hangs must not stall an agent pane spawn: every
     /// attempt is killed at this deadline.
     const LOGIN_SHELL_TIMEOUT: Duration = Duration::from_secs(3);
@@ -311,7 +315,7 @@ mod login_shell {
             command.current_dir(home);
         }
 
-        let mut child = command.spawn().ok()?;
+        let mut child = command.spawn_unmasked().ok()?;
         let deadline = Instant::now() + LOGIN_SHELL_TIMEOUT;
         loop {
             // Init that blocks after printing must not cost the whole timeout.
@@ -369,7 +373,7 @@ mod login_shell {
                 r#"PATH=; eval "$(/usr/libexec/path_helper -s)"; printf '\036%s\037' "$PATH""#,
             ])
             .env_clear()
-            .output()
+            .output_unmasked()
             .ok()?;
         output
             .status

@@ -1400,7 +1400,7 @@ impl EventLoop {
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
-            let mut child = match command.spawn() {
+            let mut child = match command.spawn_unmasked() {
                 Ok(child) => child,
                 Err(error) => {
                     let _ = reply.send(Err(error.to_string()));

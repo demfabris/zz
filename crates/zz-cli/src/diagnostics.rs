@@ -16,6 +16,8 @@ use std::{
 
 use env_logger::{Builder, Env, Target, WriteStyle};
 use zz_daemon::process_info::{self, ProcessSample};
+#[cfg(target_os = "macos")]
+use zz_daemon::unmasked::SpawnUnmasked as _;
 use zz_protocol::RawText;
 
 pub const INTERNAL_LOG_ARGUMENT: &str = "--zz-verbose-log";
@@ -295,7 +297,7 @@ pub fn capture_stall_sample(reason: &str) {
         .arg(std::process::id().to_string())
         .args(["2", "10", "-mayDie", "-file"])
         .arg(&path)
-        .output();
+        .output_unmasked();
     match output {
         Ok(output) if output.status.success() => {
             log::warn!(

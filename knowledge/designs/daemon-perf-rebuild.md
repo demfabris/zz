@@ -2,7 +2,7 @@
 type: Design Plan
 title: Daemon performance rebuild
 description: "The campaign to bring the zz daemon to tmux cost per command, per pane and per attach while keeping the 5x output throughput lead - a permanent zz-vs-tmux gate first, then waves that remove unrequested work (one-frame Exec commands, change-driven publication, lazy formats, frames only for watchers, a compact wire under one unreleased protocol version), then one mux loop and PTY shards; the lane brief source with targets, merge order, write zones, gates and rollback switches."
-status: Approved 2026-09-28; waves 0-3 on main (wave 3 closed 2026-10-02, exit gates wave3-macbook-e9bc174c.json and wave3-alienware-e9bc174c.json); release freeze until W4 exits; wave 4 (W4-DELIVER, W4-ROWS, KNOBS, SPAWN, CONTROL, TUI-ECHO, TTYIN; W4-BINARY closed unmerged) in progress; state in bench/perf/campaign/HANDOFF.md
+status: Approved 2026-09-28; waves 0-4 built (wave 3 closed 2026-10-02; wave 4 exit run 2026-10-04 on 3057f095, gates bench/perf/results/wave4-<host>-3057f095-{1,2,3}.json: Linux passes every row by the median of three strict runs, the Mac misses two rows by a hair, spawn.cpu.split_empty_P and attach.ttfc.p4); W4-BINARY closed unmerged; release freeze until the Mac rows pass or are accepted; state in bench/perf/campaign/HANDOFF.md
 resource: crates/zz-daemon/src/daemon.rs
 tags:
 - performance
@@ -12,10 +12,27 @@ tags:
 - benchmark
 - campaign
 - design-plan
-timestamp: 2026-10-02T23:15:00Z
+timestamp: 2026-10-04T11:00:00Z
 ---
 
 # Campaign status
+
+2026-10-04: wave 4 is built and gated. Lanes merged on `perf/wave4` since wave 3: W4-DELIVER
+(DL1-DL5: per-pane shard sinks, terminal frames written by the shard straight to an idle client,
+control-mode output from the sink), W4-ROWS, KNOBS, SPAWN, CONTROL, TUI-ECHO, BURST, CTRLCPU,
+ECHOMAP, ACFIX, BYTES2, ATTACH, ECHOIN, EM1 (quiet Linux panes read on their shard), CTLLAT,
+ATTACHP4, MACECHO, KILLPANE, PEERSKIP and TTYIN (the raw TUI hands its tty input to the daemon).
+The exit judgement is three strict full `--stage final` runs per host, a ratio row passing when
+the median of its three ratios passes (one run cannot decide rows whose tmux side flips between a
+fast and a slow mode). On 3057f095 Linux passes every row (103/2, 105/0, 102/3 per run); the Mac
+passes all but `spawn.cpu.split_empty_P` (median 1.24x, rule 1.2x, a row whose zz value sits in
+one of two modes per run) and `attach.ttfc.p4` (1.109x, rule 1.1x). Against wave 3, zz / tmux
+ratios by median, Linux then Mac: `echo.p50.idle` 1.92 -> 1.22x and 2.25 -> 1.34x,
+`echo.p50.busy30` 2.01 -> 1.29x and 2.75 -> 1.40x, `attach.cpu.p4` 1.48 -> 1.17x and 0.85 ->
+0.60x, `control.latency` 1.52 -> 0.94x and 1.41 -> 0.71x, `chatty.cpu_pct.visible` 2.24 -> 0.94x
+and 1.47 -> 0.68x, `spawn.cpu.split_shell` 1.54 -> 0.99x and 1.02 -> 0.75x, `mem.threads.p20` 25
+-> 9 and 5 -> 5; throughput unchanged at 2.2x (Linux) and 6.6x (Mac) tmux. W3-LOOP step (d), the
+Mutex removal, stays deferred.
 
 2026-10-02: waves 0 to 3 are on main. Wave 1 exited 2026-09-29 (`1e0bfc6a`), wave 2 on 2026-10-01
 (gates `wave2-<host>-3d0fc1b0.json`), wave 3 (W3-SHARDS, W3-TUI, W3-LOOP and nine fix lanes) on

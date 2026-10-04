@@ -97145,9 +97145,8 @@ bind - split-window -v -c "#{pane_current_path}"
     #[test]
     fn attached_client_extents_clamp_retained_and_default_dimensions() {
         let shared = Arc::new(Shared::new(1));
-        let (session, pane, _) = output_view_session_fixture(&shared, "extent-clamp", "target");
-        let (other_session, _, _) =
-            output_view_session_fixture(&shared, "extent-clamp-other", "other");
+        let (session, _, pane) = switch_test_session(&shared, "extent-clamp");
+        let (other_session, _, _) = switch_test_session(&shared, "extent-clamp-other");
         let window = shared
             .inner
             .lock()

@@ -4,8 +4,7 @@ fn until(event_loop: &mut EventLoop, shared: &Arc<Shared>, done: impl Fn(&EventL
     let deadline = Instant::now() + Duration::from_secs(5);
     while !done(event_loop) {
         assert!(Instant::now() < deadline);
-        event_loop.turn(shared).unwrap();
-        thread::sleep(Duration::from_millis(1));
+        event_loop.poll_test_turn(shared, Duration::from_millis(1));
     }
 }
 
@@ -31,6 +30,7 @@ fn shutdown_runs_close_hooks_before_freezing_admissions() {
             .unwrap();
     }
     let mut event_loop = EventLoop::empty(&shared).unwrap();
+    event_loop.signals = Some(SignalPipes::new(&event_loop.poll).unwrap());
     shared.request_shutdown();
     event_loop.turn(&shared).unwrap();
     assert!(!shared.response_admissions.lock().frozen);

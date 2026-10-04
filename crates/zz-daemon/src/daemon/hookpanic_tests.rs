@@ -51,6 +51,7 @@ fn waiting_event_hook(event: &str, command: CommandInvocation, worker: bool) {
             .unwrap();
     }
     let mut event_loop = EventLoop::empty(&shared).unwrap();
+    event_loop.signals = Some(SignalPipes::new(&event_loop.poll).unwrap());
     let (mut peer, server) = UnixStream::pair().unwrap();
     peer.set_nonblocking(true).unwrap();
     let token = event_loop.insert(server.receive_fd().unwrap()).unwrap();
@@ -87,7 +88,7 @@ fn waiting_event_hook(event: &str, command: CommandInvocation, worker: bool) {
             Instant::now() < deadline,
             "event hook did not park: {received:?}"
         );
-        event_loop.turn(&shared).unwrap();
+        event_loop.poll_test_turn(&shared, Duration::from_millis(1));
         received.extend(io_tests::messages(&mut peer, &mut input));
         let parked = started.exists() && !event_loop.timers.hooks.is_empty();
         if parked
@@ -97,7 +98,6 @@ fn waiting_event_hook(event: &str, command: CommandInvocation, worker: bool) {
         {
             break;
         }
-        thread::sleep(Duration::from_millis(1));
     }
     assert!(matches!(
         received.as_slice(),
@@ -130,7 +130,7 @@ fn waiting_event_hook(event: &str, command: CommandInvocation, worker: bool) {
     received.clear();
     loop {
         assert!(Instant::now() < deadline, "event hook did not finish");
-        event_loop.turn(&shared).unwrap();
+        event_loop.poll_test_turn(&shared, Duration::from_millis(1));
         received.extend(io_tests::messages(&mut peer, &mut input));
         let finished = shared
             .inner
@@ -145,7 +145,6 @@ fn waiting_event_hook(event: &str, command: CommandInvocation, worker: bool) {
         {
             break;
         }
-        thread::sleep(Duration::from_millis(1));
     }
     assert!(matches!(
         received.as_slice(),

@@ -1301,6 +1301,36 @@ impl EventLoop {
         self.turn(shared).unwrap();
     }
 
+    #[cfg(test)]
+    fn poll_test_turn(&mut self, shared: &Arc<Shared>, timeout: Duration) {
+        self.turn(shared).unwrap();
+        match self.poll.poll(&mut self.events, Some(timeout)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::Interrupted => {}
+            Err(error) => panic!("test loop poll failed: {error}"),
+        }
+        let ready = self
+            .events
+            .iter()
+            .map(|event| {
+                (
+                    event.token(),
+                    event.is_readable() || event.is_read_closed(),
+                    event.is_writable() || event.is_write_closed(),
+                )
+            })
+            .collect::<Vec<_>>();
+        for (token, readable, writable) in ready {
+            if token == CHILD_SIGNAL {
+                SignalPipes::drain(&mut self.signals.as_mut().unwrap().child).unwrap();
+                self.jobs.child_signal(self.poll.registry());
+            } else if self.jobs.contains_token(token) {
+                self.jobs
+                    .ready(self.poll.registry(), token, readable, writable);
+            }
+        }
+    }
+
     fn turn_status_jobs(&mut self) {
         if !self.status_client.take_pending() {
             return;
@@ -1468,8 +1498,6 @@ impl EventLoop {
     }
 
     fn turn(&mut self, shared: &Arc<Shared>) -> Result<(), DaemonError> {
-        #[cfg(test)]
-        self.jobs.child_signal(self.poll.registry());
         #[cfg(feature = "agent")]
         self.agents.turn(shared);
         if shared.terminal_requests.pending()

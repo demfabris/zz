@@ -24,6 +24,7 @@ fn sourced_commands_run_once_when_their_new_hooks_park() {
         fs::write(&path, config.replace("GATE", release.0.to_str().unwrap())).unwrap();
         let shared = Arc::new(Shared::new(120 + index as u64));
         let mut event_loop = EventLoop::empty(&shared).unwrap();
+        event_loop.signals = Some(SignalPipes::new(&event_loop.poll).unwrap());
         let (mut peer, server) = UnixStream::pair().unwrap();
         peer.set_nonblocking(true).unwrap();
         let token = event_loop.insert(server.receive_fd().unwrap()).unwrap();
@@ -55,9 +56,8 @@ fn sourced_commands_run_once_when_their_new_hooks_park() {
         let mut output = Vec::new();
         while shared.inner.lock().paste_buffers.is_empty() {
             assert!(Instant::now() < deadline, "case {index}: {output:?}");
-            event_loop.turn(&shared).unwrap();
+            event_loop.poll_test_turn(&shared, Duration::from_millis(1));
             output.extend(io_tests::messages(&mut peer, &mut input));
-            thread::sleep(Duration::from_millis(1));
         }
         let mut context = ExecutionContext::default();
         let after = shared
@@ -77,9 +77,8 @@ fn sourced_commands_run_once_when_their_new_hooks_park() {
             .any(|message| matches!(message, ProtocolMessage::ExecExit(_)))
         {
             assert!(Instant::now() < deadline);
-            event_loop.turn(&shared).unwrap();
+            event_loop.poll_test_turn(&shared, Duration::from_millis(1));
             output.extend(io_tests::messages(&mut peer, &mut input));
-            thread::sleep(Duration::from_millis(1));
         }
         assert!(output.iter().any(|message| matches!(message, ProtocolMessage::CommandResponse(CommandResponse::Success { output, exit_code: 0, .. }) if output == "yes")));
         assert_eq!(shared.inner.lock().paste_buffers.len(), 1);

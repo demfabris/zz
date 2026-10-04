@@ -5,8 +5,7 @@ fn until(event_loop: &mut EventLoop, shared: &Arc<Shared>, done: impl Fn() -> bo
     let deadline = Instant::now() + Duration::from_secs(5);
     while !done() {
         assert!(Instant::now() < deadline, "shutdown phase did not complete");
-        event_loop.turn(shared).unwrap();
-        thread::sleep(Duration::from_millis(2));
+        event_loop.poll_test_turn(shared, Duration::from_millis(2));
     }
 }
 
@@ -16,6 +15,7 @@ fn signal_shutdown_waits_for_a_foreground_job_that_ends_within_its_grace() {
     let marker = directory.path().join("finished");
     let shared = Arc::new(Shared::new(1));
     let mut event_loop = EventLoop::empty(&shared).unwrap();
+    event_loop.signals = Some(SignalPipes::new(&event_loop.poll).unwrap());
     let worker = spawn_foreground_shell_job(
         &shared,
         ClientId(301),
@@ -38,6 +38,7 @@ fn signal_shutdown_waits_for_a_foreground_job_that_ends_within_its_grace() {
 fn signal_shutdown_stops_a_foreground_job_that_outlives_its_grace() {
     let shared = Arc::new(Shared::new(1));
     let mut event_loop = EventLoop::empty(&shared).unwrap();
+    event_loop.signals = Some(SignalPipes::new(&event_loop.poll).unwrap());
     let worker = spawn_foreground_shell_job(&shared, ClientId(302), "sleep 30".to_owned());
     let grace = Duration::from_millis(200);
     let signalled = Instant::now();

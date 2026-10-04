@@ -971,6 +971,11 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   `e8e0a2f7`, 90 min): skip a peer scan whose inputs (sessions directory stat, pane pid set) did
   not change since a scan that found nothing, removing the per-second helper thread start that a
   printing pane causes.
+- Full Mac corpus on `613839a9` (KILLPANE merged; debug zz_cli, UTF-8 locale, Homebrew bash;
+  /tmp/zzpc/w4/mac-corpus-613839a9, 05:01-05:47): 246 clean, 12 red, exactly the known Mac set
+  (the four known/* rows, census-hooks, if-shell-background-order, smoke/control-alias-prepare,
+  smoke/plugin-runtime-continuum, smoke/plugin-runtime-vim-tmux-navigator, smoke/resurrect-save,
+  smoke/source-file-byte-name, smoke/status-background-jobs).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

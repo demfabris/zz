@@ -2999,7 +2999,22 @@ fn caller_stdin() -> Result<std::fs::File, String> {
 }
 
 fn stdin_read_error() -> String {
-    crate::strerror_text(&io::Error::from_raw_os_error(CLIENT_FILE_READ_ERRNO))
+    errno_text(CLIENT_FILE_READ_ERRNO)
+}
+
+#[cfg(unix)]
+fn errno_text(errno: i32) -> String {
+    crate::strerror_text(&io::Error::from_raw_os_error(errno))
+}
+
+#[cfg(not(unix))]
+fn errno_text(errno: i32) -> String {
+    match errno {
+        5 => "Input/output error",
+        9 => "Bad file descriptor",
+        _ => "Unknown error",
+    }
+    .to_owned()
 }
 
 fn read_command_stdin(binary: bool) -> Result<Vec<u8>, String> {
@@ -3084,10 +3099,9 @@ impl Drop for StdinReadSignal {
 fn answer_client_file(request: &ClientFileRequest) -> ClientFileResponse {
     let path = PathBuf::from(&request.path);
     let (data, error) = match &request.operation {
-        ClientFileOperation::ReadStdin { .. } | ClientFileOperation::ReadStdinChunk => (
-            Vec::new(),
-            Some(crate::strerror_text(&io::Error::from_raw_os_error(9))),
-        ),
+        ClientFileOperation::ReadStdin { .. } | ClientFileOperation::ReadStdinChunk => {
+            (Vec::new(), Some(errno_text(9)))
+        }
         ClientFileOperation::Read => match read_client_file(&path) {
             Ok(data) => (data, None),
             Err(error) => (Vec::new(), Some(error)),
@@ -3112,7 +3126,7 @@ fn read_client_file(path: &Path) -> Result<Vec<u8>, String> {
     let mut data = Vec::new();
     file.take(limit.saturating_add(1))
         .read_to_end(&mut data)
-        .map_err(|_| crate::strerror_text(&io::Error::from_raw_os_error(CLIENT_FILE_READ_ERRNO)))?;
+        .map_err(|_| errno_text(CLIENT_FILE_READ_ERRNO))?;
     Ok(data)
 }
 

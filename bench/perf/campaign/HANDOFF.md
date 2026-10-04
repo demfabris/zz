@@ -926,6 +926,12 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
 - KILLPANE launched 02:20 as `w4-side-lanes` run `wf_1cb365b4-c1f` (brief /tmp/zzpc/w4/killpane.md,
   ~/dev/zz-killpane on both hosts from `0ded1faa`): Linux kill-pane kernel time, target tmux plus
   0.05 ms.
+- batch10 checks on `fc1ccbc6` (ALLDONE 02:58): fmt, clippy pass; workspace tests 5162 passed,
+  1 failed, passes alone; compat-check, debug build pass; backpressure 9/9; flood 4 panes 109.1,
+  12 panes 80.1 MB/s, every pane progressed; attached-client pass, 0 rejections; corpus 249 clean,
+  10 red (batch6's set with `smoke/format-modifier-client-loop`, the tmux-side client-order
+  check, in place of `smoke/plugin-runtime-continuum`, the load flake); tui-choosers 78/78. Gate
+  JSONs copied to /tmp/zzpc/w4/batch10 on the Mac.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

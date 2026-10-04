@@ -1044,6 +1044,16 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   the daemon's mirror check is gone) and `a246b6eb` on local main, not pushed (the daemon builds
   without the agent feature, and CI lints that build). The wave-4 push to main must merge
   `a246b6eb` too.
+- Handoff vs relay attach A/B on alienware (batch11-0a67eaab-cli, 5 alternating pairs, quiet,
+  scratch bench with ZZ_TUI_RELAY in KEEP; ~/zzpc-w4/relay-ab): `attach.cpu.p4` handoff 2.946 vs
+  relay 3.003 ms (tmux 2.50 / 2.58), `attach.ttfc.p4` 8.488 vs 8.737, `attach.cpu.p1` 2.325 vs
+  3.381, instructions equal (p4 3.869 vs 3.849 M), wire c2s 1942 vs 1964 B. TTYIN costs attach
+  nothing measurable; batch11's two attach fails are the row's noise (per-sample attach CPU is
+  bimodal for zz and tmux alike, the 1.1 / 4.5 GHz clock states KILLPANE measured). No code change.
+- batch11 rest: corpus 248 clean, red set = batch6's known set (`smoke/plugin-runtime-continuum`
+  back as the load flake); tui-choosers 78/78.
+- Final exit run on `49dfd9a5` (adds the macOS getpath fix and gireply): three strict gates per
+  host, the touched crates' tests and the raw-TUI fixtures.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

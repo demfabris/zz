@@ -1007,8 +1007,10 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   0.831x; `echo.p99.idle` by median of per-run ratios 1.209 -> 1.598 over 20 runs, while its
   medians are equal (zz 1.840 vs 1.845 ms, tmux 1.396 vs 1.404). Client per key: context switches
   2.10 -> 0.92, syscalls 5.6 -> 2.7. Linux, 3 pairs: busy30 1.408 -> 1.280x, idle 1.365 -> 1.195x.
-  Every raw-TUI fixture matches base with and without `ZZ_TUI_RELAY=1`. Separate task (chip): typed
-  text starting with `Gi=` freezes the raw TUI's parser (pre-existing; the daemon mirrors it).
+  Every raw-TUI fixture matches base with and without `ZZ_TUI_RELAY=1`. Typed text starting with `Gi=`
+  froze the raw TUI's parser (pre-existing; the daemon mirrored it). Fixed by `c950d462` (merge of
+  perf/gireply): a bare `Gi=` is a kitty reply only while a probe waits for its fence or 1 s, the
+  client withdraws its direct pane before it writes a probe, and the daemon check is gone.
 - Exit gates on `0a67eaab` (three strict full runs per host). Linux (batch11): 104/1, 103/2,
   104/1; by the median rule `attach.cpu.p4` fails (1.224, 1.656, 1.278x; rule 1.25x) and
   `attach.ttfc.p4` fails (1.115, 1.242, 1.099x; rule 1.1x), both passing on fc1ccbc6 (0.945x and

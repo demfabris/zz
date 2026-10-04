@@ -4063,24 +4063,33 @@ in. `zz_cli attach` now passes its stdin to the daemon with SCM_RIGHTS after the
 (`TtyInput`, behind the `tty-input-v1` Welcome bit and the same hello capability; protocol stays
 107). The daemon reopens the terminal by name with its own nonblocking open file description, so
 it never changes the flags of the shell's terminal, and reads it on the mux loop
-(`crates/zz-daemon/src/daemon/tty_input.rs`). A byte that is a key on its own (every 7-bit byte
-except ESC, `zz_protocol::tty_input_key`, checked against zz-tui's parser for all 256 bytes) goes
-straight to the pane through the EM5 plain-key path while the client has reported that it is
-caught up and that a plain key would reach that pane unchanged, the daemon agrees that pane is
-the client's active pane, the connection has nothing queued and the key tables pass it. Anything
-else (escape sequences, mouse, paste, focus and terminal replies, the prefix and bound keys,
-anything while a daemon-side mode is open) goes back to the client in `TtyInputBytes`, which feeds
-it to its existing parser. Once anything is forwarded, later bytes follow it until the client
-sends `TtyInputReady` with the number of chunks it has processed and the pane, which it only does
-with an empty event queue, an idle parser, no pending escape and no client-side route open
-(`input::plain_key_pane`, `InputRouter::passes_plain_keys`). Output stays on the client.
+(`crates/zz-daemon/src/daemon/tty_input.rs`). A key that means the same whatever follows it
+(`zz_protocol::tty_input_key`: every 7-bit byte except ESC, a complete UTF-8 scalar that is not a
+control, and a complete cursor, Home, End, Insert, Delete, page or function key sequence, bare or
+with an xterm modifier; checked against zz-tui's parser for all 256 bytes, sampled scalars and
+every candidate sequence) goes straight to the pane through the EM5 plain-key path while the
+client has reported that it is caught up and that a plain key would reach that pane unchanged,
+the daemon agrees that pane is the client's active pane, the connection has nothing queued and
+the key tables pass it. Anything else (Alt keys, other escape sequences, mouse, paste, focus and
+terminal replies, a sequence cut off at the end of a read, the prefix and bound keys, anything
+while a daemon-side mode is open) goes back to the client in `TtyInputBytes`, which feeds it to
+its existing parser. Once anything is forwarded, later bytes follow it until the client sends
+`TtyInputReady` with the number of chunks it has processed and the pane, which it only does with
+an empty event queue, an idle parser, no pending escape and no client-side route open
+(`input::plain_key_pane`, `InputRouter::passes_plain_keys`); it reports no pane only to withdraw
+one it reported for the same count. Output stays on the client.
 
 The client keeps its tty with `ZZ_TUI_RELAY=1`, against a daemon without the bit, when stdin is
 not a terminal, on an ssh endpoint, and when the daemon refuses (`TtyInputClosed`). It takes the
 tty back with `TtyInputRelease` and waits up to a second for the close before it exits, suspends
-or switches hosts. The daemon closes the terminal on release, on socket EOF or disconnect, when
-shutdown starts, and when a client that exits on detach is found detached before the next read,
-so bytes typed after a detach stay in the terminal for the shell.
+or switches hosts. Every handoff carries a number that `TtyInputStarted`, `TtyInputRelease` and
+`TtyInputClosed` repeat, so a close that answers an earlier handoff (a release that timed out in
+a daemon stall, then a resume) leaves the next one standing, and the client counts chunks only
+from the start of the current one. The daemon closes the terminal on release, on socket EOF or
+disconnect, when shutdown starts, and before the next read once a client that exits on detach
+has been detached (daemon state the detach sets and an attach clears), so bytes typed after a
+detach stay in the terminal for the shell. It services tty readiness after the other events of
+the same poll batch, so a release or EOF that arrives with the bytes closes the terminal first.
 
 Measured on the reference Mac against perf/wave4 `b1601895`, 20 alternating `--only echo` runs
 per binary on the lane's final code (load 2-24): `echo.p50.busy30` 1.461x -> 1.277x tmux (median
@@ -4093,6 +4102,16 @@ the client goes from 2.10 to 0.92 context switches, 5.6 to 2.7 syscalls and 139 
 the daemon keeps its 2.1 switches and drops from 190 to 183 kinstr. On alienware, three pairs
 against batch10 `fc1ccbc6`: busy30 1.48x -> 1.25x, idle 1.35x -> 1.22x, p99 idle 1.31x -> 1.12x,
 p99 busy30 1.42x -> 1.27x.
+
+The review round keyed UTF-8 text and cursor keys in the daemon too and numbered the handoffs. With
+an echo pane, p50 for `é` went from 0.89-0.92 ms on the base relay and 0.97-0.99 ms before the
+fix to 0.76-0.79 ms, and Left from 0.93-1.00 and 1.03-1.07 ms to 0.86-0.87 ms (three rounds,
+binaries interleaved). Five more alternating Mac runs on the fixed code: `echo.p50.busy30` 1.452x
+-> 1.246x, `echo.p50.idle` 1.336x -> 1.169x, `echo.p99.busy30` 1.432x -> 0.831x, `echo.p99.idle`
+1.331x -> 1.673x (over the last 20 runs of each binary the median zz p99 is 1.84 ms on the base
+and 1.85 ms on the lane, and the lane's p90 was lower in every run of this series). Three
+alienware pairs: busy30 1.41x -> 1.28x, idle 1.37x -> 1.20x, p99 idle 1.34x -> 1.13x, p99 busy30
+1.41x -> 1.28x.
 
 ## W3-SHARDS TUI attach follow-up, 2026-10-01
 

@@ -61,6 +61,7 @@ struct Tty {
     slave: OwnedFd,
     client: ClientId,
     pane: PaneId,
+    handoff: u64,
     tty_messages: Vec<ProtocolMessage>,
 }
 
@@ -90,7 +91,7 @@ impl Tty {
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("new-session", ["-d", "-s", "tty", "exec /bin/cat"]),
+                &CommandInvocation::new("new-session", ["-d", "-s", "tty", "exec /bin/cat -v"]),
             )
             .expect("new session");
         shared
@@ -107,21 +108,35 @@ impl Tty {
             slave,
             client,
             pane: context.pane.expect("pane"),
+            handoff: 0,
             tty_messages: Vec::new(),
         };
         tty.hand_over();
-        assert_eq!(tty.take(), [ProtocolMessage::TtyInputStarted]);
+        assert_eq!(tty.take(), [started(1)]);
         tty
     }
 
     fn hand_over(&mut self) {
         let handed = self.slave.try_clone().unwrap();
+        self.hand_over_fd(handed);
+    }
+
+    fn hand_over_fd(&mut self, handed: OwnedFd) {
         self.event_loop
             .connections
             .get_mut(&self.token)
             .unwrap()
             .received_fds = vec![handed];
-        self.send(&ProtocolMessage::TtyInput);
+        self.handoff += 1;
+        self.send(&ProtocolMessage::TtyInput {
+            handoff: self.handoff,
+        });
+    }
+
+    fn release(&mut self) {
+        self.send(&ProtocolMessage::TtyInputRelease {
+            handoff: self.handoff,
+        });
     }
 
     fn send(&mut self, message: &ProtocolMessage) {
@@ -142,9 +157,9 @@ impl Tty {
             .extend(messages.into_iter().filter(|message| {
                 matches!(
                     message,
-                    ProtocolMessage::TtyInputStarted
+                    ProtocolMessage::TtyInputStarted { .. }
                         | ProtocolMessage::TtyInputBytes { .. }
-                        | ProtocolMessage::TtyInputClosed
+                        | ProtocolMessage::TtyInputClosed { .. }
                 )
             }));
     }
@@ -163,6 +178,13 @@ impl Tty {
 
     fn type_bytes(&mut self, bytes: &[u8]) {
         rustix::io::write(&self.master, bytes).unwrap();
+        self.wait_readable();
+        self.event_loop.tty_ready(self.token, &self.shared);
+        self.event_loop.turn(&self.shared).unwrap();
+        self.collect();
+    }
+
+    fn wait_readable(&self) {
         let fd = self.tty_fd().expect("open tty").try_clone().unwrap();
         let mut poll = [rustix::event::PollFd::new(
             &fd,
@@ -173,9 +195,23 @@ impl Tty {
             tv_nsec: 0,
         };
         assert_eq!(rustix::event::poll(&mut poll, Some(&timeout)).unwrap(), 1);
-        self.event_loop.tty_ready(self.token, &self.shared);
-        self.event_loop.turn(&self.shared).unwrap();
-        self.collect();
+    }
+
+    fn left_in_terminal(&self) -> Vec<u8> {
+        let mut left = [0_u8; 16];
+        let count = rustix::io::read(&self.slave, &mut left).unwrap();
+        left[..count].to_vec()
+    }
+
+    fn detach(&self) {
+        self.shared
+            .execute(
+                self.client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("detach-client", Vec::<String>::new()),
+            )
+            .expect("detach");
     }
 
     fn ready(&mut self, received: u64) {
@@ -217,6 +253,14 @@ impl Tty {
     }
 }
 
+fn started(handoff: u64) -> ProtocolMessage {
+    ProtocolMessage::TtyInputStarted { handoff }
+}
+
+fn closed(handoff: u64) -> ProtocolMessage {
+    ProtocolMessage::TtyInputClosed { handoff }
+}
+
 fn bytes(bytes: &[u8]) -> ProtocolMessage {
     ProtocolMessage::TtyInputBytes {
         bytes: bytes.to_vec(),
@@ -232,36 +276,47 @@ fn plain_keys_reach_the_pane_and_the_rest_waits_for_the_client_to_catch_up() {
     tty.ready(1);
     tty.type_bytes(b"b");
     assert!(tty.take().is_empty());
-    tty.screen_shows("ab");
-    tty.type_bytes("\u{e9}".as_bytes());
-    assert_eq!(tty.take(), [bytes("\u{e9}".as_bytes())]);
+    tty.type_bytes("\u{e9}\u{4e2d}".as_bytes());
+    assert!(tty.take().is_empty());
+    tty.screen_shows("ab\u{e9}\u{4e2d}");
+    let cut = "\u{e9}".as_bytes();
+    tty.type_bytes(&cut[..1]);
+    assert_eq!(tty.take(), [bytes(&cut[..1])]);
+    tty.type_bytes(&cut[1..]);
+    assert_eq!(tty.take(), [bytes(&cut[1..])]);
     tty.type_bytes(b"c");
     assert_eq!(tty.take(), [bytes(b"c")]);
     tty.client_key(key("\u{e9}"));
-    tty.ready(2);
+    tty.ready(3);
     tty.ready(1);
     tty.type_bytes(b"d");
     assert_eq!(tty.take(), [bytes(b"d")]);
     tty.client_key(key("c"));
-    tty.ready(3);
-    tty.client_key(key("d"));
     tty.ready(4);
+    tty.client_key(key("d"));
+    tty.ready(5);
     tty.type_bytes(b"e");
     assert!(tty.take().is_empty());
-    tty.screen_shows("ab\u{e9}cde");
+    tty.screen_shows("ab\u{e9}\u{4e2d}\u{e9}cde");
+    tty.type_bytes(b"\x1b[D");
+    tty.type_bytes(b"\r");
+    assert!(tty.take().is_empty());
+    tty.screen_shows("^[[D");
 }
 
 #[test]
 fn a_bound_key_or_the_prefix_goes_back_to_the_client_in_order() {
     let mut tty = Tty::open();
-    tty.shared
-        .execute(
-            tty.client,
-            ClientKind::Interactive,
-            &mut ExecutionContext::default(),
-            &CommandInvocation::new("bind-key", ["-n", "z", "display-message", "zed"]),
-        )
-        .expect("bind");
+    for (key, message) in [("z", "zed"), ("Left", "left")] {
+        tty.shared
+            .execute(
+                tty.client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("bind-key", ["-n", key, "display-message", message]),
+            )
+            .expect("bind");
+    }
     tty.ready(0);
     tty.type_bytes(b"xzy");
     assert_eq!(tty.take(), [bytes(b"zy")]);
@@ -274,38 +329,37 @@ fn a_bound_key_or_the_prefix_goes_back_to_the_client_in_order() {
     tty.ready(3);
     tty.type_bytes(b"Gi=");
     assert_eq!(tty.take(), [bytes(b"Gi=")]);
+    tty.ready(4);
+    tty.type_bytes(b"\x1b[Dw");
+    assert_eq!(tty.take(), [bytes(b"\x1b[Dw")]);
+    tty.ready(5);
+    tty.type_bytes(b"\x1bxv");
+    assert_eq!(tty.take(), [bytes(b"\x1bxv")]);
     tty.screen_shows("x");
 }
 
 #[test]
 fn release_detach_and_socket_loss_close_the_tty_without_reading_more() {
     let mut tty = Tty::open();
-    tty.send(&ProtocolMessage::TtyInputRelease);
-    assert_eq!(tty.take(), [ProtocolMessage::TtyInputClosed]);
+    tty.release();
+    assert_eq!(tty.take(), [closed(1)]);
     assert!(tty.tty_fd().is_none());
     assert!(tty.event_loop.tty_tokens.is_empty());
 
     tty.hand_over();
-    assert_eq!(tty.take(), [ProtocolMessage::TtyInputStarted]);
+    assert_eq!(tty.take(), [started(2)]);
     tty.ready(0);
     tty.type_bytes(b"q");
     tty.screen_shows("q");
-    tty.shared
-        .execute(
-            tty.client,
-            ClientKind::Interactive,
-            &mut ExecutionContext::default(),
-            &CommandInvocation::new("detach-client", Vec::<String>::new()),
-        )
-        .expect("detach");
+    tty.detach();
     rustix::io::write(&tty.master, b"w").unwrap();
-    thread::sleep(Duration::from_millis(50));
+    tty.wait_readable();
     tty.event_loop.tty_ready(tty.token, &tty.shared);
-    assert!(tty.take().contains(&ProtocolMessage::TtyInputClosed));
+    assert!(tty.take().contains(&closed(2)));
     assert!(tty.tty_fd().is_none());
-    let mut left = [0_u8; 4];
-    assert_eq!(rustix::io::read(&tty.slave, &mut left).unwrap(), 1);
-    assert_eq!(&left[..1], b"w");
+    assert_eq!(tty.left_in_terminal(), b"w");
+    tty.release();
+    assert_eq!(tty.take(), [closed(2)]);
 
     let mut tty = Tty::open();
     tty.peer.shutdown(std::net::Shutdown::Both).unwrap();
@@ -320,19 +374,49 @@ fn release_detach_and_socket_loss_close_the_tty_without_reading_more() {
 }
 
 #[test]
+fn a_client_detached_before_any_key_leaves_the_terminal_unread() {
+    let mut tty = Tty::open();
+    tty.detach();
+    rustix::io::write(&tty.master, b"hello\r").unwrap();
+    tty.wait_readable();
+    tty.event_loop.tty_ready(tty.token, &tty.shared);
+    assert_eq!(tty.take(), [closed(1)]);
+    assert!(tty.tty_fd().is_none());
+    assert_eq!(tty.left_in_terminal(), b"hello\r");
+}
+
+#[test]
+fn a_release_read_in_the_same_turn_closes_the_tty_before_its_bytes_are_read() {
+    let mut tty = Tty::open();
+    tty.ready(0);
+    let tty_token = tty.event_loop.connections[&tty.token]
+        .tty
+        .as_ref()
+        .unwrap()
+        .token;
+    rustix::io::write(&tty.master, b"w").unwrap();
+    tty.wait_readable();
+    tty.peer
+        .write_all(
+            &encode_protocol_message(&ProtocolMessage::TtyInputRelease { handoff: 1 }).unwrap(),
+        )
+        .unwrap();
+    let ready = [(tty_token, true, false), (tty.token, true, false)];
+    tty.event_loop.read_ready(tty.token, &tty.shared);
+    tty.event_loop.ttys_ready(&ready, &tty.shared);
+    assert_eq!(tty.take(), [closed(1)]);
+    assert_eq!(tty.left_in_terminal(), b"w");
+}
+
+#[test]
 fn a_handoff_without_a_terminal_is_refused() {
     let mut tty = Tty::open();
-    tty.send(&ProtocolMessage::TtyInputRelease);
+    tty.release();
     tty.take();
     let (read, _write) = rustix::pipe::pipe().unwrap();
-    tty.event_loop
-        .connections
-        .get_mut(&tty.token)
-        .unwrap()
-        .received_fds = vec![read];
-    tty.send(&ProtocolMessage::TtyInput);
-    assert_eq!(tty.take(), [ProtocolMessage::TtyInputClosed]);
-    tty.send(&ProtocolMessage::TtyInput);
-    assert_eq!(tty.take(), [ProtocolMessage::TtyInputClosed]);
+    tty.hand_over_fd(read);
+    assert_eq!(tty.take(), [closed(2)]);
+    tty.send(&ProtocolMessage::TtyInput { handoff: 3 });
+    assert_eq!(tty.take(), [closed(3)]);
     assert!(tty.tty_fd().is_none());
 }

@@ -19989,6 +19989,7 @@ impl Shared {
         inner.activity_sequence = inner.activity_sequence.saturating_add(1);
         let activity = inner.activity_sequence;
         if let Some(registered) = inner.client_mut(client) {
+            registered.detached = false;
             registered.activity = Some(activity);
             registered.activity_time = Some(now);
         }
@@ -20484,6 +20485,7 @@ impl Shared {
             .and_then(|c| c.terminal_input_sequence.take());
         inner.client_mut(client).and_then(|c| c.key_engine.take());
         if let Some(registered) = inner.client_mut(client) {
+            registered.detached |= was_attached;
             registered.last_session = None;
             registered.activity = None;
             registered.activity_time = None;
@@ -23532,12 +23534,11 @@ impl Shared {
         plain_key_generation_locked(&inner, client, pane, input)
     }
 
-    fn tty_input_attached(&self, client: ClientId) -> (bool, bool) {
-        let inner = self.inner.lock();
-        (
-            client_attached_session(&inner, client).is_some(),
-            inner.client(client).is_some_and(|c| c.exits_on_detach),
-        )
+    fn tty_input_left(&self, client: ClientId) -> bool {
+        self.inner
+            .lock()
+            .client(client)
+            .is_some_and(|c| c.exits_on_detach && c.detached)
     }
 
     fn input_plain_key(
@@ -34926,6 +34927,7 @@ struct Client {
     kind: Option<ClientKind>,
     has_terminal: bool,
     exits_on_detach: bool,
+    detached: bool,
     features: Option<u32>,
     terminal_type: Option<String>,
     nested: bool,
@@ -51512,8 +51514,9 @@ fn handle_connection_message<S: TransportStream>(
             ProtocolMessage::ControlStdio => {
                 let _ = outbound.enqueue_reliable(&ProtocolMessage::ControlStdioClosed);
             }
-            ProtocolMessage::TtyInput | ProtocolMessage::TtyInputRelease => {
-                let _ = outbound.enqueue_reliable(&ProtocolMessage::TtyInputClosed);
+            ProtocolMessage::TtyInput { handoff }
+            | ProtocolMessage::TtyInputRelease { handoff } => {
+                let _ = outbound.enqueue_reliable(&ProtocolMessage::TtyInputClosed { handoff });
             }
             ProtocolMessage::GetKeyTables => {
                 let tables = shared.inner.lock().engine.keys.snapshot();

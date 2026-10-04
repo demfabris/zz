@@ -11,9 +11,9 @@ pub(super) struct TtyInput {
     registry: mio::Registry,
     fd: OwnedFd,
     pub(super) token: Token,
+    handoff: u64,
     forwarded: u64,
     direct: Option<PaneId>,
-    attached: bool,
     again: bool,
     input: Vec<u8>,
 }
@@ -26,6 +26,7 @@ enum TtyRead {
 impl TtyInput {
     fn open(
         fds: Vec<OwnedFd>,
+        handoff: u64,
         registry: &mio::Registry,
         next_token: &mut usize,
     ) -> io::Result<Self> {
@@ -50,9 +51,9 @@ impl TtyInput {
             registry: registry.try_clone()?,
             fd,
             token,
+            handoff,
             forwarded: 0,
             direct: None,
-            attached: false,
             again: false,
             input: Vec::new(),
         })
@@ -107,28 +108,30 @@ impl Connection {
 }
 
 impl EventLoop {
-    pub(super) fn open_tty(&mut self, token: Token) {
+    pub(super) fn open_tty(&mut self, token: Token, handoff: u64) {
+        self.close_tty(token, false);
         let connection = self.connections.get_mut(&token).unwrap();
         let fds = std::mem::take(&mut connection.received_fds);
-        if let Some(tty) = connection.tty.take() {
-            self.tty_tokens.remove(&tty.token);
-            tty.close();
-        }
-        let connection = self.connections.get_mut(&token).unwrap();
-        match TtyInput::open(fds, self.poll.registry(), &mut self.next_token) {
+        let reply = match TtyInput::open(fds, handoff, self.poll.registry(), &mut self.next_token) {
             Ok(tty) => {
                 self.tty_tokens.insert(tty.token, token);
                 connection.tty = Some(Box::new(tty));
-                let _ = connection
-                    .outbound
-                    .enqueue_reliable(&ProtocolMessage::TtyInputStarted);
+                ProtocolMessage::TtyInputStarted { handoff }
             }
             Err(error) => {
                 log::debug!("tty input refused: {error}");
-                let _ = connection
-                    .outbound
-                    .enqueue_reliable(&ProtocolMessage::TtyInputClosed);
+                ProtocolMessage::TtyInputClosed { handoff }
             }
+        };
+        let _ = connection.outbound.enqueue_reliable(&reply);
+    }
+
+    pub(super) fn release_tty(&mut self, token: Token, handoff: u64) {
+        self.close_tty(token, false);
+        if let Some(connection) = self.connections.get_mut(&token) {
+            let _ = connection
+                .outbound
+                .enqueue_reliable(&ProtocolMessage::TtyInputClosed { handoff });
         }
     }
 
@@ -136,14 +139,25 @@ impl EventLoop {
         let Some(connection) = self.connections.get_mut(&token) else {
             return;
         };
-        if let Some(tty) = connection.tty.take() {
-            self.tty_tokens.remove(&tty.token);
-            tty.close();
-        }
+        let Some(tty) = connection.tty.take() else {
+            return;
+        };
+        self.tty_tokens.remove(&tty.token);
         if notify {
             let _ = connection
                 .outbound
-                .enqueue_reliable(&ProtocolMessage::TtyInputClosed);
+                .enqueue_reliable(&ProtocolMessage::TtyInputClosed {
+                    handoff: tty.handoff,
+                });
+        }
+        tty.close();
+    }
+
+    pub(super) fn ttys_ready(&mut self, ready: &[(Token, bool, bool)], shared: &Arc<Shared>) {
+        for (token, ..) in ready {
+            if let Some(&owner) = self.tty_tokens.get(token) {
+                self.tty_ready(owner, shared);
+            }
         }
     }
 
@@ -154,26 +168,24 @@ impl EventLoop {
         let Some(tty) = connection.tty.as_mut() else {
             return;
         };
-        if let Some(client) = connection.client {
-            let (attached, leaves) = shared.tty_input_attached(client);
-            if attached {
-                tty.attached = true;
-            } else if tty.attached && leaves {
-                self.close_tty(token, true);
-                self.flush_tty_owner(token, shared);
-                return;
-            }
+        if connection
+            .client
+            .is_some_and(|client| shared.tty_input_left(client))
+        {
+            self.close_tty(token, true);
+            self.flush_tty_owner(token, shared);
+            return;
         }
         let closed = matches!(tty.read(), TtyRead::Closed);
         let mut input = std::mem::take(&mut tty.input);
         let mut start = 0;
         let mut wrote = closed;
         if let (Some(client), Some(pane)) = (connection.client, tty.direct) {
-            while let Some(&byte) = input.get(start) {
+            while start < input.len() {
                 if input[start..].starts_with(b"Gi=") || !connection.takes_tty_key() {
                     break;
                 }
-                let Some(key) = zz_protocol::tty_input_key(byte) else {
+                let Some((key, width)) = zz_protocol::tty_input_key(&input[start..]) else {
                     break;
                 };
                 let Some(generation) = shared.tty_key_generation(client, pane, &key) else {
@@ -192,7 +204,7 @@ impl EventLoop {
                                 },
                             ));
                 }
-                start += 1;
+                start += width;
             }
         }
         let tty = connection.tty.as_mut().expect("tty input");

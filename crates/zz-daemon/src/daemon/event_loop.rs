@@ -518,8 +518,6 @@ impl EventLoop {
                         .ready(self.poll.registry(), token, readable, writable);
                 } else if let Some(&owner) = self.stdio_tokens.get(&token) {
                     self.stdio_ready(owner, token, shared);
-                } else if let Some(&owner) = self.tty_tokens.get(&token) {
-                    self.tty_ready(owner, shared);
                 } else if self.connections.contains_key(&token) {
                     if readable {
                         self.read_ready(token, shared);
@@ -534,6 +532,7 @@ impl EventLoop {
                     }
                 }
             }
+            self.ttys_ready(&ready, shared);
         }
     }
 
@@ -823,8 +822,8 @@ impl EventLoop {
                 }
                 return true;
             }
-            ProtocolMessage::TtyInput => {
-                self.open_tty(token);
+            ProtocolMessage::TtyInput { handoff } => {
+                self.open_tty(token, handoff);
                 return true;
             }
             ProtocolMessage::TtyInputReady { received, pane } => {
@@ -833,8 +832,8 @@ impl EventLoop {
                 }
                 return true;
             }
-            ProtocolMessage::TtyInputRelease => {
-                self.close_tty(token, true);
+            ProtocolMessage::TtyInputRelease { handoff } => {
+                self.release_tty(token, handoff);
                 return true;
             }
             _ => {}

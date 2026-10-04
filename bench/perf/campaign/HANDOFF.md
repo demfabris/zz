@@ -856,6 +856,16 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
 - batch9 (`~/.cache/zz-perf/batch9`, from 23:28): three `--stage final --strict` full gates of
   batch8-36a82ea1-cli against the wave-3 baseline, back to back inside quiet-gate.sh (lane
   compiles paused): the exit judgement on the EM1 head if the two lanes do not land.
+- batch9 result (23:29-23:49, load 1.0-1.8): 101/4, 104/1, 102/3 pass/fail. By the median rule
+  only `attach.cpu.p4` fails (ratios 1.22, 1.345, 1.40; rule 1.25x). Rows failing one run only:
+  `spawn.cpu.kill_pane` (fails gate 3 on a 0.617 ms tmux sample; median zz 0.897 vs tmux 0.808,
+  within plus 0.1), `attach.ttfc.p1`/`.p4` (medians 1.04/1.05x), `attach.cpu.p1` (1.01x),
+  `echo.p50.idle` (1.39x), `echo.p50.busy30` (1.46x). Gate 1 ran in a slow host state (cli rows
+  about 3x slower on zz and tmux alike, attach rows faster), which explains its four "regressed"
+  cli rows. `mem.copy_cpu.scroll180` is flagged against wave 3 in gates 2 and 3, but the same
+  binary reads 0.66, 0.88 and 1.25 ms across the three runs (tmux 3.6-4.1): noise around a row
+  far inside its rule. JSONs: `~/.cache/zz-perf/batch9/final-36a82ea1-{1,2,3}.json` (copies in
+  /tmp/zzpc/w4/batch9 on the Mac).
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

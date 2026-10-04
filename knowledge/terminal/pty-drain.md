@@ -343,8 +343,12 @@ after its own command is queued and before it waits for the reply, so neither sl
 its own hold kept back. A hold never
 touches the shard's pending flag, so wakes from other threads still go out at once. Attach
 (`attach_collect_event_hooks`) and detach (`detach_client_state`) hold, so a shard wakes once for the
-resize, view, and stream commands of its pane instead of once per command. The drain stops at the
-first short read: a pipe returns every queued byte, so the second read could only return `EAGAIN`.
+resize, view, and stream commands of its pane instead of once per command. A compact client's
+initialization holds for its whole worker step, and `settle_attach_terminals` writes the held bytes
+with `release_held_wakes()` right after it queues the settle requests, so a shard wakes once for the
+attach commands and the settle barrier, and starts while the step still renders the status line.
+The drain stops at the first short read: a pipe returns every queued byte, so the second read could
+only return `EAGAIN`.
 
 ## The 16 ms gate (bookkeeping moved out of the hot loop)
 

@@ -1015,6 +1015,7 @@ impl Shared {
                     outbound.finish_attach_settle(round);
                 });
         }
+        zz_terminal::release_held_wakes();
         let _ = self.timer_tx.send(timers::TimerInput::Callback {
             deadline: Some(Instant::now() + ATTACH_SETTLE_BOUND),
             callback: Box::new(move || outbound.expire_attach_settles(round)),

@@ -176,7 +176,7 @@ fn hold_wake(pipe: &Arc<std::os::fd::OwnedFd>, pending: Option<&Arc<AtomicBool>>
 }
 
 #[cfg(unix)]
-fn release_held_wakes() {
+pub fn release_held_wakes() {
     let held = HELD_WAKES
         .try_with(|held| held.borrow_mut().as_mut().map(std::mem::take))
         .ok()
@@ -15105,7 +15105,9 @@ fn settle_unwatched<'alloc: 'callbacks, 'callbacks>(
         .is_some_and(|last| now < last + UNWATCHED_SETTLE_QUIET)
         || frames.last_settle.is_some_and(|last| now < last + horizon);
     frames.last_settle = Some(now);
-    frames.retain_render_until = recurring.then(|| now + horizon);
+    frames.retain_render_until = frames
+        .retain_render_until
+        .max(recurring.then(|| now + horizon));
     frames.force_fallback = true;
     publish_views(
         terminal,

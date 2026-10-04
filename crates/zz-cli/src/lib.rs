@@ -2564,7 +2564,7 @@ pub fn connect_terminal_surface_client_with_config(
                 &Endpoint::Local(path.to_path_buf()),
                 None,
                 None,
-                &[],
+                &[zz_daemon::CLIENT_EXITS_ON_DETACH_CAPABILITY],
                 attach.cloned(),
                 true,
             )

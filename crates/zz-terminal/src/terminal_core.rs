@@ -46,6 +46,8 @@ pub use model::{
 pub use paste::{PastePreparationError, prepare_paste_buffer};
 #[cfg(all(feature = "session", target_os = "linux"))]
 pub use session::disable_transparent_huge_pages;
+#[cfg(all(feature = "session", unix))]
+pub use session::release_held_wakes;
 #[cfg(feature = "session")]
 pub use session::{
     CaptureBoundary, CaptureOptions, CapturedCopySource, CopyModeFacts, CopyModeSelectionFacts,

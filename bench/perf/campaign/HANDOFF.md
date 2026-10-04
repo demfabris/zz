@@ -1009,6 +1009,27 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
   2.10 -> 0.92, syscalls 5.6 -> 2.7. Linux, 3 pairs: busy30 1.408 -> 1.280x, idle 1.365 -> 1.195x.
   Every raw-TUI fixture matches base with and without `ZZ_TUI_RELAY=1`. Separate task (chip): typed
   text starting with `Gi=` freezes the raw TUI's parser (pre-existing; the daemon mirrors it).
+- Exit gates on `0a67eaab` (three strict full runs per host). Linux (batch11): 104/1, 103/2,
+  104/1; by the median rule `attach.cpu.p4` fails (1.224, 1.656, 1.278x; rule 1.25x) and
+  `attach.ttfc.p4` fails (1.115, 1.242, 1.099x; rule 1.1x), both passing on fc1ccbc6 (0.945x and
+  1.002x); attach instructions are unchanged (p4 ratio 0.317), so the new cost is kernel time and
+  wakes. Everything else passes, `spawn.cpu.kill_pane` included; echo busy30 1.26-1.33x, idle
+  1.17-1.24x, `echo.p99.idle` 1.15-1.21x, `control.latency` 0.77-0.95x. Mac: 102/5, 104/3, 105/2;
+  `attach.instr.p1` 4.06 -> 13.1 M against d9d59154 (+49% on the wave-3 baseline), and
+  `spawn.cpu.split_empty_P` 1.33, 1.33, 0.86x (the known bimodal row: zz 0.37 or 0.54-0.56 ms).
+- Mac attach regression found and fixed (`8d2b0e31`): TTYIN's daemon found the handed tty's path
+  with `ttyname_r`, which on macOS scans /dev (0.59 ms per call in a Python probe); `F_GETPATH`
+  (`rustix::fs::getpath`) returns the same path in 0.5 us. Bisect with the bench at the head:
+  d9d59154 4.06 M, b1601895 3.00, e8e0a2f7 3.01, d6da097d 3.01, 0a67eaab 12.4-13.1, the fix 3.32 M
+  per p1 attach. Linux keeps `ttyname_r` (a /proc readlink). Trap: the bench drops every
+  environment variable outside `isolate.py` KEEP, so `ZZ_TUI_RELAY=1` in the caller's environment
+  never reaches the client (my first relay check measured the handoff twice).
+- Trap: I bisected in ~/dev/zz-check while the Mac exit script was still running its checks there;
+  those checks and fixtures ran against switching trees and were thrown away. Use a separate
+  snapshot for any bisect.
+- Next: a handoff-vs-relay attach A/B on alienware (scratch bench copy with ZZ_TUI_RELAY in KEEP,
+  ~/zzpc-w4/relay-ab) to size TTYIN's attach cost on Linux; clean Mac checks on `8d2b0e31` in
+  /tmp/zzpc/w4/macchecks-8d2b0e31.
 - Trap: a SendMessage to an agent that already finished resumes it. Wait for its next completion
   notice before removing its worktree (TUI-ECHO lost its worktree mid-rerun this way; its commit
   was already merged).

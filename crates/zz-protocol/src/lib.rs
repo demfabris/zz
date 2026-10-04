@@ -35,7 +35,7 @@ pub use catalog::{
 pub use control::{
     AttachOperation, Batch, CAPABILITY_NAMES, CONTROL_CAPABILITY, CONTROL_STDIO_CAPABILITY,
     ClientView, ClientViewport, Hello, KeySubscription, MAX_BATCH_FRAMES, MouseBindings,
-    Subscriptions, TreeSubscription, Welcome, key_tables_hash,
+    Subscriptions, TTY_INPUT_CAPABILITY, TreeSubscription, Welcome, key_tables_hash,
 };
 pub use exec::{
     ClientEnvironmentBlob, EXEC_CAPABILITY, ExecExit, ExecFlags, ExecOutcome, ExecRequest,
@@ -45,7 +45,7 @@ pub use framing::{MAX_ENCODED_FRAME_BYTES, MAX_FRAME_BYTES, ProtocolError};
 pub use id::{ClientId, ClientInstanceId, PaneId, SessionId, SplitId, WindowId};
 pub use key::{
     Binding, KeyDecision, KeyEngine, KeyName, KeyTables, canonical_key, input_key_name,
-    input_typed_text, is_key_name,
+    input_typed_text, is_key_name, tty_input_key,
 };
 pub use key_frame::encode_key_input_into;
 pub use menu::{

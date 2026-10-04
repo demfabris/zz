@@ -2256,6 +2256,42 @@ fn shifted_character(input: &KeyInput, character: char) -> char {
     character
 }
 
+/// The key press a raw terminal client decodes from one tty byte read on its
+/// own, for the bytes that mean the same key whatever follows them: every
+/// 7-bit byte except ESC.
+#[must_use]
+pub fn tty_input_key(byte: u8) -> Option<KeyInput> {
+    let (key, control) = match byte {
+        0x1b | 0x80.. => return None,
+        b'\t' => (KeyCode::Tab, false),
+        b'\n' | b'\r' => (KeyCode::Enter, false),
+        0x7f => (KeyCode::Backspace, false),
+        0 => (KeyCode::Character(' '), true),
+        1..=26 => (KeyCode::Character(char::from(b'a' + byte - 1)), true),
+        28..=31 => (KeyCode::Character(char::from(b'\\' + byte - 28)), true),
+        _ => (
+            KeyCode::Character(char::from(byte.to_ascii_lowercase())),
+            false,
+        ),
+    };
+    let character = match key {
+        KeyCode::Character(character) => Some(character),
+        _ => None,
+    };
+    let text = if control {
+        character
+    } else {
+        character.map(|_| char::from(byte))
+    };
+    Some(KeyInput {
+        action: zz_terminal::KeyAction::Press,
+        key,
+        modifiers: zz_terminal::Modifiers::new(byte.is_ascii_uppercase(), control, false, false),
+        text: text.map(|text| text.to_string().into_boxed_str()),
+        unshifted_codepoint: character,
+    })
+}
+
 /// Fold a wire key press into the tmux-grammar name the key tables index by.
 #[must_use]
 pub fn input_key_name(input: &KeyInput) -> KeyName {

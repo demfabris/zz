@@ -451,7 +451,10 @@ impl CommandClient {
             std::io::stdin().is_terminal() && std::io::stdout().is_terminal(),
             false,
             false,
-            &[crate::CLIENT_EXITS_ON_DETACH_CAPABILITY],
+            &[
+                crate::CLIENT_EXITS_ON_DETACH_CAPABILITY,
+                zz_protocol::TTY_INPUT_CAPABILITY,
+            ],
             self.route.facts,
             Some(attach),
         )?;
@@ -1084,7 +1087,10 @@ impl InteractiveClient {
             endpoint,
             None,
             None,
-            &[crate::CLIENT_EXITS_ON_DETACH_CAPABILITY],
+            &[
+                crate::CLIENT_EXITS_ON_DETACH_CAPABILITY,
+                zz_protocol::TTY_INPUT_CAPABILITY,
+            ],
             Some(attach),
             true,
         )
@@ -1973,6 +1979,42 @@ impl InteractiveClient {
     #[cfg(unix)]
     pub fn receive_fd(&self) -> io::Result<std::os::fd::OwnedFd> {
         self.reader.lock().stream.get_ref().receive_fd()
+    }
+
+    #[cfg(unix)]
+    pub fn send_with_fd(
+        &self,
+        message: &ProtocolMessage,
+        fd: std::os::fd::BorrowedFd<'_>,
+    ) -> io::Result<()> {
+        let frame = zz_protocol::encode_protocol_message(message).map_err(io::Error::other)?;
+        let writer = self.writer.lock();
+        let socket = writer.stream.receive_fd()?;
+        let fds = [fd];
+        let mut space = [std::mem::MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(1))];
+        let mut ancillary = rustix::net::SendAncillaryBuffer::new(&mut space);
+        ancillary.push(rustix::net::SendAncillaryMessage::ScmRights(&fds));
+        let mut sent = loop {
+            match rustix::net::sendmsg(
+                &socket,
+                &[io::IoSlice::new(&frame)],
+                &mut ancillary,
+                rustix::net::SendFlags::empty(),
+            ) {
+                Ok(sent) => break sent,
+                Err(rustix::io::Errno::INTR) => {}
+                Err(error) => return Err(error.into()),
+            }
+        };
+        while sent < frame.len() {
+            match rustix::io::write(&socket, &frame[sent..]) {
+                Ok(written) => sent += written,
+                Err(rustix::io::Errno::INTR) => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        drop(writer);
+        Ok(())
     }
 
     #[cfg(unix)]

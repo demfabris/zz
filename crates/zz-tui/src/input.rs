@@ -210,6 +210,41 @@ pub(crate) fn handle(
     }
 }
 
+/// The pane `handle` would send a plain key press to as one `Key` message and
+/// nothing else, or `None` while any client-side route could claim it.
+pub(crate) fn plain_key_pane(
+    model: &Model,
+    browser: &BrowserState,
+    prefix_armed: bool,
+    releases: bool,
+) -> Option<zz_protocol::PaneId> {
+    if prefix_armed
+        || model.menu.is_some()
+        || model.menu_action_pending
+        || model.menu_swallowed_key.is_some()
+        || model.confirm.is_some()
+        || model.confirm_reply_pending
+        || model.confirm_swallowed_key.is_some()
+        || model.popup.is_some()
+        || !model.popup_keys_down.is_empty()
+        || model.sidebar_edit.is_some()
+        || model.command_prompt.is_some()
+        || model.choose_tree.is_some()
+        || model.choose_buffer.is_some()
+        || model.display_panes.is_some()
+        || model.command_output_focus().is_some()
+        || model.click.is_some()
+        || model.sidebar_focused()
+        || !model.router.passes_plain_keys(releases)
+    {
+        return None;
+    }
+    let pane = model.active_pane()?;
+    (matches!(model.pane_snapshot(pane)?.kind, PaneKindSnapshot::Terminal)
+        && !browser.has_surface(pane))
+    .then_some(pane)
+}
+
 fn popup_paste_input(active: bool, text: &str) -> Option<InputMessage> {
     active.then_some(InputMessage::Popup {
         action: PopupAction::TerminalView(TerminalViewAction::Paste(text.to_owned())),
@@ -2339,6 +2374,64 @@ mod tests {
             focused_window: Some(WindowId(1)),
         }));
         model
+    }
+
+    #[test]
+    fn every_byte_the_daemon_keys_parses_to_the_same_key_here() {
+        let mut keyed = 0;
+        for byte in 0..=u8::MAX {
+            let mut parser = crate::terminal_event::EventParser::default();
+            let mut events = Vec::new();
+            parser.push(&[byte], &mut events);
+            let Some(daemon) = zz_protocol::tty_input_key(byte) else {
+                assert!(byte == 0x1b || byte >= 0x80, "{byte:#x}");
+                continue;
+            };
+            keyed += 1;
+            let [TerminalEvent::Key(event)] = events.as_slice() else {
+                panic!("{byte:#x}: {events:?}");
+            };
+            assert!(parser.is_idle());
+            assert_eq!(key_input(*event), daemon, "{byte:#x}");
+        }
+        assert_eq!(keyed, 127);
+    }
+
+    #[test]
+    fn a_plain_key_pane_is_offered_only_while_handle_would_forward_the_key_unchanged() {
+        let mut model = routing_model();
+        let browser = BrowserState::new(None);
+        let pane = zz_protocol::PaneId(1);
+        assert_eq!(plain_key_pane(&model, &browser, false, false), Some(pane));
+        for byte in (0..0x80_u8).filter(|byte| *byte != 0x1b) {
+            let mut parser = crate::terminal_event::EventParser::default();
+            let mut events = Vec::new();
+            parser.push(&[byte], &mut events);
+            let [TerminalEvent::Key(event)] = events.as_slice() else {
+                panic!("{byte:#x}: {events:?}");
+            };
+            let owner = model.router.owner();
+            assert_eq!(
+                route_test_key(&mut model, *event, PrefixView::default()),
+                [InputMessage::Key {
+                    pane,
+                    input: zz_protocol::tty_input_key(byte).unwrap(),
+                    text_follows: false,
+                }],
+                "{byte:#x}"
+            );
+            assert_eq!(model.router.owner(), owner);
+            assert_eq!(plain_key_pane(&model, &browser, false, false), Some(pane));
+        }
+        assert_eq!(plain_key_pane(&model, &browser, true, false), None);
+        model.menu_action_pending = true;
+        assert_eq!(plain_key_pane(&model, &browser, false, false), None);
+        model.menu_action_pending = false;
+        model.popup_keys_down.push((pane, KeyCode::Character('a')));
+        assert_eq!(plain_key_pane(&model, &browser, false, false), None);
+        model.popup_keys_down.clear();
+        model.focus_sidebar();
+        assert_eq!(plain_key_pane(&model, &browser, false, false), None);
     }
 
     fn route_test_key(model: &mut Model, event: KeyEvent, prefix: PrefixView) -> Vec<InputMessage> {

@@ -2,7 +2,7 @@
 type: Design Plan
 title: Daemon performance rebuild
 description: "The campaign to bring the zz daemon to tmux cost per command, per pane and per attach while keeping the 5x output throughput lead - a permanent zz-vs-tmux gate first, then waves that remove unrequested work (one-frame Exec commands, change-driven publication, lazy formats, frames only for watchers, a compact wire under one unreleased protocol version), then one mux loop and PTY shards; the lane brief source with targets, merge order, write zones, gates and rollback switches."
-status: Approved 2026-09-28; waves 0-3 on main (wave 3 closed 2026-10-02, exit gates wave3-macbook-e9bc174c.json and wave3-alienware-e9bc174c.json); release freeze until W4 exits; wave 4 (W4-DELIVER, W4-ROWS, KNOBS, SPAWN, CONTROL, TUI-ECHO; W4-BINARY closed unmerged) in progress; state in bench/perf/campaign/HANDOFF.md
+status: Approved 2026-09-28; waves 0-3 on main (wave 3 closed 2026-10-02, exit gates wave3-macbook-e9bc174c.json and wave3-alienware-e9bc174c.json); release freeze until W4 exits; wave 4 (W4-DELIVER, W4-ROWS, KNOBS, SPAWN, CONTROL, TUI-ECHO, TTYIN; W4-BINARY closed unmerged) in progress; state in bench/perf/campaign/HANDOFF.md
 resource: crates/zz-daemon/src/daemon.rs
 tags:
 - performance
@@ -4054,6 +4054,45 @@ generations, with invalidation tests for the mutation paths.
 - Three alternating quick pairs against `/tmp/zzpc/w3/loop-b5fix-cli`: 18 of 21 CLI/chatty instruction medians meet 1.02x. Remaining misses: `cli.instr.has_session.p20` 1.0218x, `cli.instr.select_pane.p20` 1.0702x, `chatty.instr_per_s.hidden` 1.0553x. Thread counts stay 4 to 3 at p1 and 42 to 41 at p20. Status-job instructions fall 2.7%.
 - Checks: 1382 daemon unit tests and 35 integration tests pass, one ignored; 17 timer tests pass after the clippy fix; fmt, clippy, and all four requested compat scenarios pass. The final quick W0 gate has 37 pass, 1 fail, and 42 info rows, with no harness errors or regressions. The failure is the pre-existing status-job thread rate near 3/s against a 0.5/s limit.
 - Handed on: the three instruction misses above; idle wakeups remain unmeasured because the permitted commands omit `idle`. Linux `/proc`, PTY gather, epoll, THP, and `tui-output-backpressure.sh` checks did not run on this Mac. Scratch results stay in `/tmp/zzpc/b6fix-{b5fix,b6fix}-{1,2,3}.json` and `/tmp/zzpc/loop-b6fix.json`. This step does not meet its done criterion.
+
+## W4-TTYIN: the raw TUI hands its tty input to the daemon (as built 2026-10-04)
+
+tmux's client gives the server its tty, so a key wakes the server, the pane and the server again
+before the bench sees the echo. zz's relay client added a client wake and a socket hop on the way
+in. `zz_cli attach` now passes its stdin to the daemon with SCM_RIGHTS after the hello
+(`TtyInput`, behind the `tty-input-v1` Welcome bit and the same hello capability; protocol stays
+107). The daemon reopens the terminal by name with its own nonblocking open file description, so
+it never changes the flags of the shell's terminal, and reads it on the mux loop
+(`crates/zz-daemon/src/daemon/tty_input.rs`). A byte that is a key on its own (every 7-bit byte
+except ESC, `zz_protocol::tty_input_key`, checked against zz-tui's parser for all 256 bytes) goes
+straight to the pane through the EM5 plain-key path while the client has reported that it is
+caught up and that a plain key would reach that pane unchanged, the daemon agrees that pane is
+the client's active pane, the connection has nothing queued and the key tables pass it. Anything
+else (escape sequences, mouse, paste, focus and terminal replies, the prefix and bound keys,
+anything while a daemon-side mode is open) goes back to the client in `TtyInputBytes`, which feeds
+it to its existing parser. Once anything is forwarded, later bytes follow it until the client
+sends `TtyInputReady` with the number of chunks it has processed and the pane, which it only does
+with an empty event queue, an idle parser, no pending escape and no client-side route open
+(`input::plain_key_pane`, `InputRouter::passes_plain_keys`). Output stays on the client.
+
+The client keeps its tty with `ZZ_TUI_RELAY=1`, against a daemon without the bit, when stdin is
+not a terminal, on an ssh endpoint, and when the daemon refuses (`TtyInputClosed`). It takes the
+tty back with `TtyInputRelease` and waits up to a second for the close before it exits, suspends
+or switches hosts. The daemon closes the terminal on release, on socket EOF or disconnect, when
+shutdown starts, and when a client that exits on detach is found detached before the next read,
+so bytes typed after a detach stay in the terminal for the shell.
+
+Measured on the reference Mac against perf/wave4 `b1601895`, 20 alternating `--only echo` runs
+per binary on the lane's final code (load 2-24): `echo.p50.busy30` 1.461x -> 1.277x tmux (median
+of the run ratios; 1.649 -> 1.480 in the fast host state, 1.425 -> 1.269 in the slow one),
+`echo.p50.idle` 1.360x -> 1.192x, `echo.p99.busy30` 1.328x -> 0.980x, `echo.p99.idle` 1.138x ->
+1.160x (noise: one five-run series alone read 1.089 -> 1.655, and the same keys interleaved
+base, lane and tmux in one window gave a 2.20 / 2.16 / 1.84 ms p99 over 2000 keys). Every bench
+key took the direct path; only the detach chord was forwarded. Per key (`w4-echomap.py`, busy30)
+the client goes from 2.10 to 0.92 context switches, 5.6 to 2.7 syscalls and 139 to 109 kinstr;
+the daemon keeps its 2.1 switches and drops from 190 to 183 kinstr. On alienware, three pairs
+against batch10 `fc1ccbc6`: busy30 1.48x -> 1.25x, idle 1.35x -> 1.22x, p99 idle 1.31x -> 1.12x,
+p99 busy30 1.42x -> 1.27x.
 
 ## W3-SHARDS TUI attach follow-up, 2026-10-01
 

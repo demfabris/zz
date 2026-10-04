@@ -23516,44 +23516,28 @@ impl Shared {
         ) {
             return None;
         }
+        plain_key_generation_locked(&self.inner.lock(), client, pane, input)
+    }
+
+    fn tty_key_generation(
+        &self,
+        client: ClientId,
+        pane: PaneId,
+        input: &zz_terminal::KeyInput,
+    ) -> Option<u64> {
         let inner = self.inner.lock();
-        let registered = inner.client(client)?;
-        if inner.client_flags.contains(client)
-            || registered.message.is_some()
-            || registered.command_prompt.is_some()
-            || registered.choose_tree.is_some()
-            || registered.choose_buffer.is_some()
-            || registered.display_panes.is_some()
-            || registered.popup.is_some()
-            || registered.menu.is_some()
-            || registered.confirm.is_some()
-            || registered.copy_session.is_some()
-            || registered.command_output.is_some()
-            || registered.published_key_table.is_some()
-            || registered.key_table_deadline.is_some()
-            || registered
-                .key_engine
-                .as_ref()
-                .is_some_and(|engine| *engine != KeyEngine::default())
-            || inner
-                .pane_modes
-                .get(&pane)
-                .is_some_and(|modes| !modes.is_empty())
-            || inner.engine.dead_pane_dismisses_on_key(pane)
-        {
+        if client_active_pane(&inner, client) != Some(pane) {
             return None;
         }
-        let session = client_attached_session(&inner, client)?;
-        let (decision, _) = KeyEngine::default().handle_with_repeat_metadata(
-            &inner.engine.keys,
-            &input_key_name(input),
-            Instant::now(),
-            Duration::ZERO,
-            Duration::ZERO,
-            Duration::ZERO,
-            &inner.engine.key_table_for_session(session),
-        );
-        (decision == KeyDecision::Pass).then(|| inner.engine.state.generation())
+        plain_key_generation_locked(&inner, client, pane, input)
+    }
+
+    fn tty_input_attached(&self, client: ClientId) -> (bool, bool) {
+        let inner = self.inner.lock();
+        (
+            client_attached_session(&inner, client).is_some(),
+            inner.client(client).is_some_and(|c| c.exits_on_detach),
+        )
     }
 
     fn input_plain_key(
@@ -41061,6 +41045,51 @@ fn session_active_pane(inner: &ServerState, session: SessionId) -> Option<PaneId
     Some(inner.engine.state.windows.get(&window)?.active_pane)
 }
 
+fn plain_key_generation_locked(
+    inner: &ServerState,
+    client: ClientId,
+    pane: PaneId,
+    input: &zz_terminal::KeyInput,
+) -> Option<u64> {
+    let registered = inner.client(client)?;
+    if inner.client_flags.contains(client)
+        || registered.message.is_some()
+        || registered.command_prompt.is_some()
+        || registered.choose_tree.is_some()
+        || registered.choose_buffer.is_some()
+        || registered.display_panes.is_some()
+        || registered.popup.is_some()
+        || registered.menu.is_some()
+        || registered.confirm.is_some()
+        || registered.copy_session.is_some()
+        || registered.command_output.is_some()
+        || registered.published_key_table.is_some()
+        || registered.key_table_deadline.is_some()
+        || registered
+            .key_engine
+            .as_ref()
+            .is_some_and(|engine| *engine != KeyEngine::default())
+        || inner
+            .pane_modes
+            .get(&pane)
+            .is_some_and(|modes| !modes.is_empty())
+        || inner.engine.dead_pane_dismisses_on_key(pane)
+    {
+        return None;
+    }
+    let session = client_attached_session(inner, client)?;
+    let (decision, _) = KeyEngine::default().handle_with_repeat_metadata(
+        &inner.engine.keys,
+        &input_key_name(input),
+        Instant::now(),
+        Duration::ZERO,
+        Duration::ZERO,
+        Duration::ZERO,
+        &inner.engine.key_table_for_session(session),
+    );
+    (decision == KeyDecision::Pass).then(|| inner.engine.state.generation())
+}
+
 fn client_active_pane(inner: &ServerState, client: ClientId) -> Option<PaneId> {
     let window = client_focused_window_for_attachment(inner, client)?;
     Some(inner.engine.state.windows.get(&window)?.active_pane)
@@ -51482,6 +51511,9 @@ fn handle_connection_message<S: TransportStream>(
             }
             ProtocolMessage::ControlStdio => {
                 let _ = outbound.enqueue_reliable(&ProtocolMessage::ControlStdioClosed);
+            }
+            ProtocolMessage::TtyInput | ProtocolMessage::TtyInputRelease => {
+                let _ = outbound.enqueue_reliable(&ProtocolMessage::TtyInputClosed);
             }
             ProtocolMessage::GetKeyTables => {
                 let tables = shared.inner.lock().engine.keys.snapshot();

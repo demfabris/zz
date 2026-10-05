@@ -52315,10 +52315,27 @@ fn source_glob_error_warning(path: &Path, error: &str) -> String {
 fn filesystem_error_message(error: &std::io::Error) -> String {
     let message = error.to_string();
     error.raw_os_error().map_or(message.clone(), |code| {
+        #[cfg(not(unix))]
+        if let Some(text) = posix_error_text(error.kind()) {
+            return text.to_owned();
+        }
         message
             .strip_suffix(&format!(" (os error {code})"))
             .unwrap_or(&message)
             .to_owned()
+    })
+}
+
+#[cfg(not(unix))]
+fn posix_error_text(kind: ErrorKind) -> Option<&'static str> {
+    Some(match kind {
+        ErrorKind::NotFound => "No such file or directory",
+        ErrorKind::PermissionDenied => "Permission denied",
+        ErrorKind::IsADirectory => "Is a directory",
+        ErrorKind::NotADirectory => "Not a directory",
+        ErrorKind::InvalidInput | ErrorKind::InvalidFilename => "Invalid argument",
+        ErrorKind::OutOfMemory => "Cannot allocate memory",
+        _ => return None,
     })
 }
 
@@ -54202,6 +54219,17 @@ mod tests {
                 source_read_error_warning(child, &std::io::Error::from_raw_os_error(code));
             assert_eq!(config_command_error(&command, &warning), expected);
         }
+    }
+
+    #[test]
+    fn source_read_errors_use_posix_text_on_every_os() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let missing = directory.path().join("missing.conf");
+        let error = fs::read(&missing).expect_err("missing source file");
+        assert_eq!(
+            source_read_error_warning(&missing, &error),
+            missing_source_error(&missing)
+        );
     }
 
     #[test]

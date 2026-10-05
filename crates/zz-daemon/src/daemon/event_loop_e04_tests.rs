@@ -11,7 +11,7 @@ fn formatted_split_wait_resumes_its_pane_wait_on_the_loop() {
             client,
             ClientKind::Command,
             &mut context,
-            &CommandInvocation::new("new-session", ["-d", "-s", "e04wait", ""]),
+            &CommandInvocation::new("new-session", ["-d", "-s", "e04wait", "exec sleep 30"]),
         )
         .unwrap();
     let mut event_loop = EventLoop::empty(&shared).unwrap();

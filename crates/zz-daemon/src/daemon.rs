@@ -79409,11 +79409,10 @@ set-option -g @alias-mixed-next yes
             terminal_features_list(u32::MAX),
             crate::terminal_features::TERMINAL_FEATURES.join(",")
         );
+        let client_cwd = std::env::temp_dir().join("client cwd");
         assert_eq!(
-            client_working_directory_fact(
-                ClientPath::from_path(Path::new("/tmp/client cwd")).as_ref()
-            ),
-            Some(PathBuf::from("/tmp/client cwd"))
+            client_working_directory_fact(ClientPath::from_path(&client_cwd).as_ref()),
+            Some(client_cwd)
         );
         assert_eq!(
             client_working_directory_fact(
@@ -79456,12 +79455,13 @@ set-option -g @alias-mixed-next yes
             ),
             PathBuf::from("/tmp/client cwd/configs/*.conf")
         );
+        let absolute = std::env::temp_dir().join("absolute.conf");
         assert_eq!(
             resolve_source_path(
-                &RawText::from("/tmp/absolute.conf"),
+                &RawText::from(absolute.to_str().expect("UTF-8 temp directory")),
                 Some(Path::new("/ignored"))
             ),
-            PathBuf::from("/tmp/absolute.conf")
+            absolute
         );
         #[cfg(unix)]
         assert_eq!(
@@ -87124,7 +87124,9 @@ set-option -g @alias-mixed-next yes
         assert!(matches!(
             error,
             DaemonError::Server(ServerError::InvalidCommand(message))
-                if message.ends_with(": ") || message.contains(": /")
+                if message
+                    .split_once(": ")
+                    .is_some_and(|(_, path)| path.is_empty() || Path::new(path).is_absolute())
         ));
         command_context
             .format_variables
@@ -87166,7 +87168,9 @@ set-option -g @alias-mixed-next yes
         assert!(matches!(
             error,
             DaemonError::Server(ServerError::InvalidCommand(message))
-                if message.ends_with(": ") || message.contains(": /")
+                if message
+                    .split_once(": ")
+                    .is_some_and(|(_, path)| path.is_empty() || Path::new(path).is_absolute())
         ));
         command_context.format_variables.remove("path");
         let origin_output = directory.path().join("source-session-save-buffer-origin");

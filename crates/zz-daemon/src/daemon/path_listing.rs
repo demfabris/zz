@@ -1701,7 +1701,16 @@ mod tests {
     #[test]
     fn osc7_directory_keeps_the_first_candidate_that_exists() {
         let scratch = tempfile::tempdir().expect("temp dir");
-        let root = scratch.path().to_str().expect("utf-8 temp dir");
+        let root = scratch
+            .path()
+            .to_str()
+            .expect("utf-8 temp dir")
+            .replace('\\', "/");
+        let root = if root.starts_with('/') {
+            root
+        } else {
+            format!("/{root}")
+        };
         fs::create_dir(scratch.path().join("100%41")).expect("percent dir");
         fs::create_dir(scratch.path().join("a b")).expect("space dir");
 
@@ -2109,18 +2118,19 @@ mod tests {
     #[test]
     fn relative_requests_join_the_latest_requested_root_before_any_walker_runs() {
         let (shared, client, _) = path_list_client();
-        let root = Path::new("/r/a/b");
+        let top = std::env::temp_dir().join("r");
+        let root = top.join("a").join("b");
         assert_eq!(
             shared.record_requested_path_list_root(client, 1, root.to_str()),
-            (Some(root.to_path_buf()), None)
+            (Some(root.clone()), None)
         );
         assert_eq!(
             shared.record_requested_path_list_root(client, 2, Some("..")),
-            (Some(PathBuf::from("/r/a")), Some(root.to_path_buf()))
+            (Some(top.join("a")), Some(root))
         );
         assert_eq!(
             shared.record_requested_path_list_root(client, 3, Some("..")),
-            (Some(PathBuf::from("/r")), Some(PathBuf::from("/r/a")))
+            (Some(top.clone()), Some(top.join("a")))
         );
 
         let cancel = AtomicBool::new(false);
@@ -2131,7 +2141,7 @@ mod tests {
                 .lock()
                 .client(client)
                 .and_then(|c| c.path_list_root.as_ref()),
-            Some(&(3, Some(PathBuf::from("/r"))))
+            Some(&(3, Some(top.clone())))
         );
         cancel.store(true, Ordering::Release);
         shared.record_resolved_path_list_root(client, 3, Path::new("/cancelled"), &cancel);
@@ -2141,7 +2151,7 @@ mod tests {
                 .lock()
                 .client(client)
                 .and_then(|c| c.path_list_root.as_ref()),
-            Some(&(3, Some(PathBuf::from("/r"))))
+            Some(&(3, Some(top.clone())))
         );
         cancel.store(false, Ordering::Release);
         shared.record_resolved_path_list_root(client, 3, Path::new("/home/me"), &cancel);

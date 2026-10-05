@@ -2001,8 +2001,10 @@ mod tests {
             updated_at: None,
         };
 
-        assert!(valid_session_summary(&summary("s-1", "/work")));
-        assert!(!valid_session_summary(&summary("", "/work")));
+        let work = std::env::temp_dir().join("work");
+        let work = work.to_str().expect("UTF-8 temp directory");
+        assert!(valid_session_summary(&summary("s-1", work)));
+        assert!(!valid_session_summary(&summary("", work)));
         assert!(!valid_session_summary(&summary("s-1", "relative")));
         assert!(!valid_session_id("with\u{7}bell"));
         assert!(!valid_session_cursor(""));

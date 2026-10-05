@@ -473,7 +473,7 @@ fn poll_wait(shared: &Arc<Shared>, target: Arc<Target>, mut wait: Wait) {
                     screen
                         .lines()
                         .count()
-                        .saturating_sub(usize::from(target.terminal.latest_viewport().rows))
+                        .saturating_sub(usize::from(target.terminal.size().1))
                 });
                 if let Some(line) = screen
                     .lines()

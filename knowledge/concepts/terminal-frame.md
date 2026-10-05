@@ -4,7 +4,7 @@ title: Terminal frame (TerminalViewport)
 description: The immutable, renderer-neutral terminal snapshot (packed cells, interned styles, overlays, cursor, and modes) published from the worker thread and diffed into retained-grid patches.
 resource: crates/zz-terminal/src/model.rs
 tags: [frame, viewport, packed-cell, patch, immutable, snapshot]
-timestamp: 2026-07-31T00:00:00Z
+timestamp: 2026-10-05T00:00:00Z
 ---
 
 # Overview
@@ -58,6 +58,18 @@ generation and rebuilds the visible working set, which forces one full viewport 
 historical styles/graphemes indefinitely. The hard wire budgets are 65,536 styles, 1,048,576 graphemes,
 and 16 MiB of grapheme bytes; an unrepresentable visible cell falls back to default style or its first
 Unicode scalar rather than terminating the terminal actor.
+
+A frame covers what its clients can show, not always the whole terminal. Each client tells
+the pane the area it can display (`TerminalSession::set_view_area`: a TUI's terminal size, or
+for a client with no terminal size the widest window its per-pane reports imply), and
+`build_snapshot` builds the top-left `min(columns, area columns) x min(rows, area rows)` of the
+live viewport, the region the raw TUI paints. The bound is the largest area of the views that
+stream the pane; a streaming view with no area, or a choose-tree preview watch, builds the
+whole terminal, and with nothing streaming the last bound stays. The cursor, overlays and Kitty
+placements outside the region are dropped, the scrollbar stays the terminal's, and history chunks
+are cut to the frame's columns. The terminal and its pty keep their size, so capture-pane, copy
+mode and the pane formats read it directly; `TerminalSession::size()` is the size the latest
+frames were built at. Copy-mode frames are still built at the terminal's size.
 
 One publish carries one frame per **active view**, and a view is an attached client:
 `publish_active_views` restores each view's scroll anchor, selection, copy-mode, and search state

@@ -282,6 +282,7 @@ fn wrapped_copy_search_places_emacs_at_end_and_vi_at_start() {
             &mut ViewportDictionary::default(),
             Some(&view),
             SessionStatus::Running,
+            None,
         )
         .expect("live search overlays");
         for frame in [live, frozen] {

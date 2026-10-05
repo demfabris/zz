@@ -21263,6 +21263,7 @@ impl Shared {
                 .entry(pane)
                 .or_default()
                 .insert(client, geometry);
+            sync_client_view_areas(&inner, client);
             if let Some(cell) = inner
                 .client_mut(client)
                 .and_then(|c| c.cell_pixels.as_mut())
@@ -21316,6 +21317,7 @@ impl Shared {
             if let Some(registered) = inner.client_mut(client) {
                 registered.size = Some((columns, rows));
             }
+            sync_client_view_areas(&inner, client);
             let mut hook_events = Vec::new();
             if kind == ClientKind::Interactive {
                 if let Some(event) =
@@ -26766,10 +26768,10 @@ impl Shared {
                             .iter()
                             .filter_map(|(pane, kind)| {
                                 terminal_viewport_for_pane(&inner, *pane, view)
-                                    .filter(|(_, viewport)| {
+                                    .filter(|(terminal, _)| {
                                         everything
                                             || !attach::attach_frame_superseded(
-                                                &inner, *pane, viewport,
+                                                &inner, *pane, terminal,
                                             )
                                     })
                                     .map(|(terminal, viewport)| (*pane, *kind, terminal, viewport))
@@ -29384,11 +29386,10 @@ impl Shared {
         let Some(terminal) = terminal else {
             return false;
         };
-        if let Some((columns, rows)) = geometry {
-            let viewport = terminal.latest_viewport();
-            if (viewport.columns, viewport.rows) != (columns, rows) {
-                terminal.resize(columns, rows, 0, 0);
-            }
+        if let Some((columns, rows)) = geometry
+            && terminal.size() != (columns, rows)
+        {
+            terminal.resize(columns, rows, 0, 0);
         }
         terminal.feed(Arc::from(bytes))
     }
@@ -33827,11 +33828,10 @@ impl Shared {
             };
             (terminal, inner.engine.pane_geometry(pane))
         };
-        if let Some((columns, rows)) = geometry {
-            let viewport = terminal.latest_viewport();
-            if (viewport.columns, viewport.rows) != (columns, rows) {
-                terminal.resize(columns, rows, 0, 0);
-            }
+        if let Some((columns, rows)) = geometry
+            && terminal.size() != (columns, rows)
+        {
+            terminal.resize(columns, rows, 0, 0);
         }
         terminal.feed(Arc::from(bytes));
     }
@@ -40835,13 +40835,20 @@ fn client_viewport_facts_from_source(
         .engine
         .pane_format_geometry(Some(session), Some(window), Some(pane));
     let cursor = inner.terminals.get(&pane).and_then(|terminal| {
-        let cursor = terminal
-            .latest_viewport()
-            .cursor
-            .filter(|cursor| cursor.visible())?;
+        let viewport = terminal.latest_viewport();
+        let (column, row) = if (viewport.columns, viewport.rows) == terminal.size() {
+            let cursor = viewport.cursor.filter(|cursor| cursor.visible())?;
+            (cursor.column(), cursor.row())
+        } else {
+            let facts = terminal.facts();
+            if facts.cursor_hidden {
+                return None;
+            }
+            (facts.cursor_x, facts.cursor_y)
+        };
         Some((
-            geometry.pane_left?.saturating_add(cursor.column()),
-            geometry.pane_top?.saturating_add(cursor.row()),
+            geometry.pane_left?.saturating_add(column),
+            geometry.pane_top?.saturating_add(row),
         ))
     });
     Some(ClientViewportFacts {
@@ -45345,6 +45352,7 @@ fn apply_view_streams(
         if previous.contains_key(pane) {
             continue;
         }
+        sync_view_area(inner, *pane, client);
         terminal.set_view_stream(
             view,
             match kind {
@@ -45642,7 +45650,50 @@ fn remove_client_terminal_geometries(
         }
         !geometries.is_empty()
     });
+    for pane in &affected {
+        sync_view_area(inner, *pane, client);
+    }
     affected
+}
+
+fn sync_view_area(inner: &ServerState, pane: PaneId, client: ClientId) {
+    if let Some(terminal) = inner.terminals.get(&pane) {
+        terminal.set_view_area(
+            TerminalViewId(client.0),
+            client_display_area(inner, client, pane),
+        );
+    }
+}
+
+fn sync_client_view_areas(inner: &ServerState, client: ClientId) {
+    for pane in inner
+        .client(client)
+        .and_then(|c| c.streamed_terminals.as_ref())
+        .into_iter()
+        .flat_map(BTreeMap::keys)
+    {
+        sync_view_area(inner, *pane, client);
+    }
+}
+
+fn client_display_area(inner: &ServerState, client: ClientId, pane: PaneId) -> Option<(u16, u16)> {
+    if let Some(size) = inner.client(client)?.size {
+        return Some(size);
+    }
+    let window = inner.engine.state.window_for_pane(pane)?;
+    inner
+        .terminal_geometries
+        .iter()
+        .filter(|(reported, _)| inner.engine.state.window_for_pane(**reported) == Some(window))
+        .filter_map(|(reported, geometries)| {
+            let geometry = geometries.get(&client)?;
+            inner
+                .engine
+                .window_extent_for_pane_geometry(*reported, geometry.columns, geometry.rows)
+        })
+        .reduce(|(columns, rows), (other_columns, other_rows)| {
+            (columns.max(other_columns), rows.max(other_rows))
+        })
 }
 
 fn terminal_geometry_owner(inner: &ServerState, pane: PaneId) -> Option<ClientId> {

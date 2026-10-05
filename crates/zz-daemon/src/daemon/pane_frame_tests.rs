@@ -154,6 +154,268 @@ fn pane_terminal(shared: &Shared, pane: PaneId) -> Arc<TerminalSession> {
     Arc::clone(&shared.inner.lock().terminals[&pane])
 }
 
+fn output(shared: &Arc<Shared>, context: &mut ExecutionContext, args: &[&str]) -> String {
+    shared
+        .execute(
+            COMMAND_CLIENT,
+            ClientKind::Command,
+            context,
+            &CommandInvocation::new(args[0], args[1..].iter().copied()),
+        )
+        .unwrap_or_else(|error| panic!("{args:?}: {error:?}"))
+        .output
+        .to_string()
+}
+
+#[cfg(unix)]
+#[test]
+fn an_oversized_pane_streams_what_its_client_shows_and_keeps_its_own_size() {
+    let shared = Arc::new(Shared::new(1));
+    let mut context = ExecutionContext::default();
+    command(
+        &shared,
+        &mut context,
+        &[
+            "new-session",
+            "-d",
+            "-s",
+            "big",
+            "-x",
+            "80",
+            "-y",
+            "24",
+            QUIET_PANE_COMMAND,
+        ],
+    );
+    let pane = context.pane.expect("pane");
+    let target = pane.to_string();
+    command(
+        &shared,
+        &mut context,
+        &["set-option", "-g", "status", "off"],
+    );
+    let (client, mailbox) = attached_client(&shared, "big", (80, 24));
+    let mut retained = TerminalViewport::blank(1, 1, zz_terminal::SessionStatus::Running);
+    let mut follow = |what: &str, columns: u16, rows: u16, marker: &str| {
+        wait_for(what, || {
+            let frames = drain(&mailbox, Duration::from_millis(30), |_| true);
+            apply_frames(&mut retained, &frames, pane);
+            (retained.columns, retained.rows) == (columns, rows)
+                && screen_text(&retained).contains(marker)
+        });
+        retained.clone()
+    };
+    follow("the attach frame", 80, 24, "");
+    command(
+        &shared,
+        &mut context,
+        &["resize-window", "-t", "big", "-x", "400", "-y", "300"],
+    );
+    command(
+        &shared,
+        &mut context,
+        &[
+            "send-keys",
+            "-t",
+            &target,
+            r"printf 'ZZ_%s\n\033[290;380HZZ_%s' NEAR FAR",
+            "Enter",
+        ],
+    );
+    let terminal = pane_terminal(&shared, pane);
+    let near = follow(
+        "a client-sized frame of the oversized pane",
+        80,
+        24,
+        "ZZ_NEAR",
+    );
+    assert!(!screen_text(&near).contains("ZZ_FAR"));
+    assert!(near.cursor.is_none());
+    assert_eq!(near.scrollbar.len, 300);
+    assert_eq!(terminal.size(), (400, 300));
+    assert_eq!(
+        output(
+            &shared,
+            &mut context,
+            &[
+                "display-message",
+                "-p",
+                "-t",
+                &target,
+                "#{pane_width}x#{pane_height}"
+            ],
+        ),
+        "400x300"
+    );
+    let capture = output(
+        &shared,
+        &mut context,
+        &["capture-pane", "-p", "-t", &target],
+    );
+    let lines = capture.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 300);
+    assert_eq!(lines[289], format!("{}ZZ_FAR", " ".repeat(379)));
+
+    assert!(shared.apply_client_size_report(
+        client,
+        ClientKind::Interactive,
+        &ExecutionContext::default(),
+        390,
+        295,
+        None,
+    ));
+    let grown = follow("a frame the size of the grown client", 390, 295, "ZZ_FAR");
+    assert!(screen_text(&grown).contains("ZZ_NEAR"));
+    assert_eq!(
+        grown.cursor.map(|cursor| (cursor.column(), cursor.row())),
+        Some((385, 289))
+    );
+    let latest = terminal
+        .latest_viewport_for(TerminalViewId(client.0))
+        .expect("the client's view frame");
+    assert_eq!(retained.cells, latest.cells);
+    assert_eq!(terminal.size(), (400, 300));
+
+    command(
+        &shared,
+        &mut context,
+        &["send-keys", "-t", &target, "seq 1 400", "Enter"],
+    );
+    wait_for("history above the oversized screen", || {
+        terminal.latest_viewport().scrollbar.total > 350
+    });
+    mailbox.state.lock().reliable.clear();
+    shared.send_history(client, pane, 0, 20, &mailbox);
+    let (rows, columns) = mailbox
+        .state
+        .lock()
+        .reliable
+        .drain(..)
+        .find_map(|frame| match decode_protocol_frame(&frame) {
+            Ok(ProtocolMessage::Event(Event {
+                payload: EventPayload::HistoryChunk { rows, columns, .. },
+                ..
+            })) => Some((rows, columns)),
+            _ => None,
+        })
+        .expect("a history chunk");
+    assert_eq!(columns, 390);
+    assert_eq!(rows.len(), 20);
+    assert!(rows.iter().all(|row| row.len() == 390));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_client_without_a_terminal_size_bounds_frames_by_the_window_its_reports_imply() {
+    let shared = Arc::new(Shared::new(1));
+    let mut context = ExecutionContext::default();
+    command(
+        &shared,
+        &mut context,
+        &[
+            "new-session",
+            "-d",
+            "-s",
+            "gui",
+            "-x",
+            "80",
+            "-y",
+            "24",
+            QUIET_PANE_COMMAND,
+        ],
+    );
+    let left = context.pane.expect("left pane");
+    command(
+        &shared,
+        &mut context,
+        &["split-window", "-h", "-t", "gui", QUIET_PANE_COMMAND],
+    );
+    let right = context.pane.expect("right pane");
+    command(
+        &shared,
+        &mut context,
+        &["set-option", "-g", "status", "off"],
+    );
+    command(
+        &shared,
+        &mut context,
+        &["resize-window", "-t", "gui", "-x", "400", "-y", "300"],
+    );
+    let mailbox = OutboundMailbox::new();
+    let (client, _) =
+        shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+    shared
+        .execute(
+            client,
+            ClientKind::Interactive,
+            &mut ExecutionContext::default(),
+            &CommandInvocation::new("attach-session", ["-t", "gui"]),
+        )
+        .expect("attach-session");
+    let report = |pane: PaneId, columns: u16, rows: u16| {
+        let geometry = TerminalGeometry {
+            columns,
+            rows,
+            cell_width_px: 8,
+            cell_height_px: 16,
+        };
+        assert!(
+            shared
+                .apply_terminal_size_report(client, pane, geometry, None)
+                .expect("size report")
+        );
+    };
+    let frame_extent = |pane: PaneId| {
+        pane_terminal(&shared, pane)
+            .latest_viewport_for(TerminalViewId(client.0))
+            .map(|viewport| (viewport.columns, viewport.rows))
+    };
+    let implied = |pane: PaneId, columns: u16, rows: u16| {
+        shared
+            .inner
+            .lock()
+            .engine
+            .window_extent_for_pane_geometry(pane, columns, rows)
+            .expect("an implied window extent")
+    };
+    report(left, 50, 30);
+    report(right, 49, 30);
+    let small = implied(left, 50, 30).max(implied(right, 49, 30));
+    let bounded_by = |extent: (u16, u16)| {
+        [left, right].into_iter().all(|pane| {
+            let geometry = shared
+                .inner
+                .lock()
+                .engine
+                .pane_geometry(pane)
+                .expect("geometry");
+            frame_extent(pane) == Some((extent.0.min(geometry.0), extent.1.min(geometry.1)))
+        })
+    };
+    wait_for("frames the size of the implied window", || {
+        bounded_by(small)
+    });
+    report(right, 99, 60);
+    let large = implied(left, 50, 30);
+    let large = (
+        large.0.max(implied(right, 99, 60).0),
+        large.1.max(implied(right, 99, 60).1),
+    );
+    assert!(large.0 > small.0 && large.1 > small.1);
+    wait_for("both frames following the larger implied window", || {
+        bounded_by(large)
+    });
+    assert_eq!(
+        shared
+            .inner
+            .lock()
+            .engine
+            .pane_geometry(right)
+            .map(|(_, rows)| rows),
+        Some(300)
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn a_typed_key_reaches_an_attached_client_as_a_patch_of_a_few_dozen_bytes() {

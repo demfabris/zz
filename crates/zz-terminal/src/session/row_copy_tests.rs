@@ -142,6 +142,14 @@ impl<'alloc> Fixture<'alloc> {
     }
 
     fn frame(&mut self, terminal: &Terminal<'alloc, '_>) -> TerminalViewport {
+        self.frame_within(terminal, None)
+    }
+
+    fn frame_within(
+        &mut self,
+        terminal: &Terminal<'alloc, '_>,
+        bound: Option<(u16, u16)>,
+    ) -> TerminalViewport {
         snapshot(
             terminal,
             &mut self.render_state,
@@ -152,8 +160,66 @@ impl<'alloc> Fixture<'alloc> {
             &mut self.dictionary,
             None,
             SessionStatus::Running,
+            bound,
         )
         .expect("snapshot")
+    }
+}
+
+fn top_left(facts: &[CellFacts], columns: u16, (width, height): (u16, u16)) -> Vec<CellFacts> {
+    facts
+        .chunks(usize::from(columns))
+        .take(usize::from(height))
+        .flat_map(|row| row[..usize::from(width)].iter().cloned())
+        .collect()
+}
+
+#[test]
+fn a_bounded_frame_is_the_top_left_region_of_the_terminal() {
+    let mut terminal = new_terminal(40, 8, 100).expect("terminal");
+    terminal.vt_write(STYLED);
+    let full = Fixture::new().frame(&terminal);
+    let mut fixture = Fixture::new();
+    let bounded = fixture.frame_within(&terminal, Some((12, 3)));
+    assert_eq!((bounded.columns, bounded.rows), (12, 3));
+    assert_eq!(bounded.cells.len(), 36);
+    assert_eq!(
+        frame_facts(&bounded),
+        top_left(&frame_facts(&full), 40, (12, 3))
+    );
+    assert!(full.cursor.is_some_and(|cursor| cursor.row() == 5));
+    assert!(bounded.cursor.is_none());
+    assert_eq!(bounded.scrollbar, full.scrollbar);
+
+    terminal.vt_write(b"\x1b[2;3H");
+    let moved = fixture.frame_within(&terminal, Some((12, 3)));
+    assert_eq!(
+        moved.cursor.map(|cursor| (cursor.column(), cursor.row())),
+        Some((2, 1))
+    );
+    let roomy = fixture.frame_within(&terminal, Some((400, 300)));
+    assert_eq!((roomy.columns, roomy.rows), (40, 8));
+    assert_eq!(frame_facts(&roomy), frame_facts(&full));
+}
+
+#[test]
+fn a_grown_bound_copies_the_rows_and_columns_it_skipped() {
+    let mut terminal = new_terminal(40, 8, 100).expect("terminal");
+    terminal.vt_write(STYLED);
+    let mut fixture = Fixture::new();
+    fixture.frame_within(&terminal, Some((10, 4)));
+    terminal.vt_write(b"\x1b[7;30H\x1b[44mbeyond\x1b[0m\x1b[2;1H\x1b[1;32mnear\x1b[0m");
+    let small = fixture.frame_within(&terminal, Some((10, 4)));
+    let facts = frame_facts(&Fixture::new().frame(&terminal));
+    assert_eq!(frame_facts(&small), top_left(&facts, 40, (10, 4)));
+    for bound in [(20, 2), (40, 8), (10, 4), (40, 8), (3, 8)] {
+        let frame = fixture.frame_within(&terminal, Some(bound));
+        assert_eq!((frame.columns, frame.rows), bound);
+        assert_eq!(
+            frame_facts(&frame),
+            top_left(&facts, 40, bound),
+            "{bound:?}"
+        );
     }
 }
 

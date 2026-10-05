@@ -109,6 +109,42 @@ fn two_and_four_live_views_build_one_snapshot_per_publish() {
 }
 
 #[test]
+fn frames_cover_the_largest_area_of_the_views_that_stream_them() {
+    let mut terminal = new_terminal(8, 3, 32).expect("terminal");
+    terminal.vt_write(b"abcdefgh\r\nijklmnop\r\nqrstuvwx");
+    let (publisher, _events, mut active, mut frames) = fixture(2);
+    let mut extent = |frames: &mut Frames<'static>| {
+        publish(
+            &mut terminal,
+            &publisher,
+            frames,
+            &mut active,
+            SnapshotChange::View,
+        );
+        let latest = publisher.latest.read();
+        assert_eq!(latest.size, (8, 3));
+        let first = &latest.by_view[&TerminalViewId(1)];
+        assert!(Arc::ptr_eq(first, &latest.by_view[&TerminalViewId(2)]));
+        (first.columns, first.rows)
+    };
+    frames.areas.insert(TerminalViewId(1), (4, 1));
+    assert_eq!(extent(&mut frames), (8, 3));
+    frames.areas.insert(TerminalViewId(2), (6, 2));
+    assert_eq!(extent(&mut frames), (6, 2));
+    frames.areas.insert(TerminalViewId(1), (3, 3));
+    assert_eq!(extent(&mut frames), (6, 3));
+    frames.preview = true;
+    assert_eq!(extent(&mut frames), (8, 3));
+    frames.preview = false;
+    frames.areas.insert(TerminalViewId(2), (20, 1));
+    assert_eq!(extent(&mut frames), (8, 3));
+    frames.set_stream(TerminalViewId(2), ViewStream::Off);
+    assert_eq!(frames.frame_bound(&active), Some((3, 3)));
+    frames.forget_view(TerminalViewId(1));
+    assert_eq!(frames.frame_bound(&active), Some((20, 3)));
+}
+
+#[test]
 fn frozen_views_keep_separate_frames_and_captured_sizes() {
     let mut terminal = new_terminal(8, 3, 32).expect("terminal");
     terminal.vt_write(b"frozen");

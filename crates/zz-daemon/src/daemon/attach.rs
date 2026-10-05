@@ -119,13 +119,13 @@ pub(super) fn presize_client_terminals(
 pub(super) fn attach_frame_superseded(
     inner: &ServerState,
     pane: PaneId,
-    viewport: &TerminalViewport,
+    terminal: &TerminalSession,
 ) -> bool {
     if inner.engine.state.pane(pane).is_none_or(|pane| pane.dead) {
         return false;
     }
     terminal_resize_for_pane(inner, pane).is_some_and(|(_, geometry)| {
-        (geometry.columns.max(1), geometry.rows.max(1)) != (viewport.columns, viewport.rows)
+        (geometry.columns.max(1), geometry.rows.max(1)) != terminal.size()
     })
 }
 

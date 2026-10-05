@@ -1740,11 +1740,13 @@ struct PublishedViewports {
     facts: TerminalFacts,
     search_string: String,
     sunk: Vec<TerminalViewId>,
+    size: (u16, u16),
 }
 
 impl PublishedViewports {
     fn new(viewport: TerminalViewport) -> Self {
         Self {
+            size: (viewport.columns, viewport.rows),
             fallback: Arc::new(viewport),
             by_view: HashMap::new(),
             epochs: HashMap::new(),
@@ -2475,6 +2477,11 @@ impl TerminalSession {
     }
 
     #[must_use]
+    pub fn size(&self) -> (u16, u16) {
+        self.latest.read().size
+    }
+
+    #[must_use]
     pub fn latest_viewport_for(&self, view: TerminalViewId) -> Option<Arc<TerminalViewport>> {
         self.latest.read().by_view.get(&view).cloned()
     }
@@ -2700,11 +2707,27 @@ impl TerminalSession {
     /// Permanently release a client view and all of its tracked terminal state.
     pub fn release_view(&self, view: TerminalViewId) {
         self.commands.with_slot(|slot| {
+            if slot.view_areas.remove(&view).is_some() {
+                slot.pending.view_areas = Some(slot.view_areas.clone());
+            }
             if !slot.known_views.remove(&view) {
                 return false;
             }
             slot.pending.push_view(Command::ReleaseView(view));
             true
+        });
+    }
+
+    pub fn set_view_area(&self, view: TerminalViewId, area: Option<(u16, u16)>) {
+        self.commands.with_slot(|slot| {
+            let changed = match area {
+                Some(area) => slot.view_areas.insert(view, area) != Some(area),
+                None => slot.view_areas.remove(&view).is_some(),
+            };
+            if changed {
+                slot.pending.view_areas = Some(slot.view_areas.clone());
+            }
+            changed
         });
     }
 
@@ -3196,6 +3219,7 @@ enum Command {
     Terminate,
     Shutdown,
     SetViewStream(TerminalViewId, ViewStream),
+    SetViewAreas(HashMap<TerminalViewId, (u16, u16)>),
     SetPreviewWatch(bool),
     FreshViewport(Sender<Arc<TerminalViewport>>),
     Wake,
@@ -3222,6 +3246,7 @@ struct ControlSlot {
     deferred: Vec<(usize, Command)>,
     in_flight: usize,
     known_views: HashSet<TerminalViewId>,
+    view_areas: HashMap<TerminalViewId, (u16, u16)>,
     requested_geometry: Option<Geometry>,
     wake_queued: bool,
 }
@@ -3246,6 +3271,7 @@ struct PendingControl {
     wrap_search: Option<bool>,
     engine_knobs: Option<EngineKnobs>,
     appearance: Option<Arc<TerminalAppearance>>,
+    view_areas: Option<HashMap<TerminalViewId, (u16, u16)>>,
     resize: Option<Geometry>,
     views: Vec<Command>,
     preview: Option<bool>,
@@ -3300,6 +3326,9 @@ impl PendingControl {
         }
         if let Some(appearance) = self.appearance.take() {
             commands.push(Command::SetAppearance(appearance));
+        }
+        if let Some(areas) = self.view_areas.take() {
+            commands.push(Command::SetViewAreas(areas));
         }
         if let Some(geometry) = self.resize.take() {
             commands.push(Command::Resize(geometry));
@@ -3378,6 +3407,7 @@ impl Command {
             Self::Terminate => "terminate",
             Self::Shutdown => "shutdown",
             Self::SetViewStream(..) => "set-view-stream",
+            Self::SetViewAreas(_) => "set-view-areas",
             Self::SetPreviewWatch(_) => "set-preview-watch",
             Self::FreshViewport(_) => "fresh-viewport",
             Self::Wake => "wake",
@@ -4460,6 +4490,7 @@ struct ViewportDictionary {
     grapheme_bytes: Vec<u8>,
     shared_dictionary: Arc<TerminalDictionary>,
     shared_cells: Arc<[PackedCell]>,
+    shared_columns: u16,
     cell_pool: SmallVec<[Arc<[PackedCell]>; RETAINED_CELL_PLANES]>,
     shared_presentation: Arc<TerminalPresentation>,
     shared_overlays: Arc<[OverlaySpan]>,
@@ -5329,6 +5360,7 @@ impl Publisher {
         let viewport = Arc::new(viewport);
         {
             let mut latest = self.latest.write();
+            latest.size = (viewport.columns, viewport.rows);
             latest.fallback = Arc::clone(&viewport);
             latest.fallback_current = true;
             latest.by_view.clear();
@@ -5345,6 +5377,7 @@ impl Publisher {
         viewports: Vec<ViewFrame>,
         copy_facts: HashMap<TerminalViewId, Arc<CopyModeFacts>>,
         sunk: Vec<TerminalViewId>,
+        size: (u16, u16),
         notify: bool,
     ) -> bool {
         let mut by_view = HashMap::with_capacity(viewports.len());
@@ -5374,6 +5407,7 @@ impl Publisher {
             latest.epochs = epochs;
             latest.copy_facts = copy_facts;
             latest.sunk = sunk;
+            latest.size = size;
         }
         notify && self.notify_viewports(&fallback, view_count)
     }
@@ -5383,6 +5417,7 @@ impl Publisher {
         terminal: &Terminal<'_, '_>,
         dictionary: &mut ViewportDictionary,
         status: &SessionStatus,
+        bound: Option<(u16, u16)>,
     ) -> Result<Option<(TerminalViewport, bool)>, WorkerError> {
         let previous = Arc::clone(&self.latest.read().fallback);
         let scrollbar = terminal.scrollbar()?;
@@ -5396,8 +5431,8 @@ impl Publisher {
         let at_bottom = |state: ScrollbarState| {
             u64::from(state.offset) + u64::from(state.len) >= u64::from(state.total)
         };
-        if previous.columns != terminal.cols()?
-            || previous.rows != terminal.rows()?
+        if (previous.columns, previous.rows)
+            != bounded_extent((terminal.cols()?, terminal.rows()?), bound)
             || previous.mode != TerminalMode::Live
             || !previous.overlays.is_empty()
             || previous.search.is_some()
@@ -6296,7 +6331,7 @@ fn reply_before_dead_notice(
                 count,
                 reply,
             } = *request;
-            let _ = reply.send(capture_history(terminal, start, count, class_hints));
+            let _ = reply.send(capture_history(terminal, start, count, class_hints, None));
         }
         Command::CaptureCopySource { reply } => {
             let _ = reply.send(
@@ -8241,12 +8276,13 @@ fn capture_history(
     start: u32,
     count: u32,
     hints: &ClassHints,
+    bound: Option<(u16, u16)>,
 ) -> Result<HistoryCapture, TerminalCaptureError> {
     let history_rows =
         u32::try_from(terminal.scrollback_rows().map_err(capture_failure)?).unwrap_or(u32::MAX);
     let start = start.min(history_rows);
     let end = start.saturating_add(count).min(history_rows);
-    let columns = terminal.cols().map_err(capture_failure)?.max(1);
+    let (columns, _) = bounded_extent((terminal.cols().map_err(capture_failure)?.max(1), 1), bound);
     let foreground = terminal
         .fg_color()
         .map_err(capture_failure)?
@@ -14682,6 +14718,8 @@ struct Frames<'alloc> {
     generations: ViewportGenerations,
     dictionary: ViewportDictionary,
     streams: HashMap<TerminalViewId, StreamState>,
+    areas: HashMap<TerminalViewId, (u16, u16)>,
+    idle_bound: Option<(u16, u16)>,
     preview: bool,
     force_fallback: bool,
     mode_views: HashSet<TerminalViewId>,
@@ -14709,6 +14747,8 @@ impl<'alloc> Frames<'alloc> {
                 ..ViewportDictionary::default()
             },
             streams: HashMap::new(),
+            areas: HashMap::new(),
+            idle_bound: None,
             preview: false,
             force_fallback: false,
             mode_views: HashSet::new(),
@@ -14782,8 +14822,43 @@ impl<'alloc> Frames<'alloc> {
 
     fn forget_view(&mut self, view: TerminalViewId) {
         self.streams.remove(&view);
+        self.areas.remove(&view);
         self.mode_views.remove(&view);
         self.published.remove(&view);
+    }
+
+    fn frame_bound(&self, active: &ActiveTerminalViews) -> Option<(u16, u16)> {
+        if self.preview {
+            return None;
+        }
+        let mut views = active
+            .keys()
+            .filter(|view| self.streaming(**view))
+            .peekable();
+        if views.peek().is_none() {
+            return self.idle_bound;
+        }
+        let mut bound = None;
+        for view in views {
+            let (columns, rows) = *self.areas.get(view)?;
+            bound = Some(
+                bound.map_or((columns, rows), |(most_columns, most_rows): (u16, u16)| {
+                    (most_columns.max(columns), most_rows.max(rows))
+                }),
+            );
+        }
+        bound
+    }
+
+    fn frame_extent(
+        &self,
+        terminal: &Terminal<'_, '_>,
+        active: &ActiveTerminalViews,
+    ) -> Result<(u16, u16), WorkerError> {
+        Ok(bounded_extent(
+            (terminal.cols()?, terminal.rows()?),
+            self.frame_bound(active),
+        ))
     }
 
     fn resources(
@@ -14816,6 +14891,7 @@ impl<'alloc> Frames<'alloc> {
         change: SnapshotChange,
         view: Option<&TerminalViewState>,
         status: SessionStatus,
+        bound: Option<(u16, u16)>,
     ) -> Result<TerminalViewport, WorkerError> {
         #[cfg(test)]
         {
@@ -14845,6 +14921,7 @@ impl<'alloc> Frames<'alloc> {
             &mut self.dictionary,
             view,
             status,
+            bound,
         )
     }
 
@@ -14987,6 +15064,8 @@ fn publish_views<'alloc: 'callbacks, 'callbacks>(
         return Ok(());
     }
     let force_fallback = std::mem::take(&mut frames.force_fallback);
+    let bound = frames.frame_bound(active);
+    let size = (terminal.cols()?, terminal.rows()?);
     let mut view_ids = active.keys().copied().collect::<Vec<_>>();
     view_ids.sort_by_key(|view| view.0);
     let mut viewports: Vec<(TerminalViewId, Arc<TerminalViewport>, Option<u64>)> =
@@ -15028,10 +15107,13 @@ fn publish_views<'alloc: 'callbacks, 'callbacks>(
         let viewport = if let Some((_, viewport, _)) = shared {
             Arc::clone(viewport)
         } else {
-            Arc::new(frames.snapshot(terminal, change, Some(view), status.clone())?)
+            Arc::new(frames.snapshot(terminal, change, Some(view), status.clone(), bound)?)
         };
         streamed_any |= streaming;
         viewports.push((view_id, viewport, streaming.then(|| frames.epoch(view_id))));
+    }
+    if streamed_any {
+        frames.idle_bound = bound;
     }
     let mut sunk = Vec::new();
     let frame_sink = publisher.frame_sink().filter(|_| streamed_any);
@@ -15039,7 +15121,7 @@ fn publish_views<'alloc: 'callbacks, 'callbacks>(
     let refreshed = if streamed_any || force_fallback || frames.preview {
         None
     } else {
-        publisher.refresh_fallback(terminal, &mut frames.dictionary, &status)?
+        publisher.refresh_fallback(terminal, &mut frames.dictionary, &status, bound)?
     };
     let mut notify = notify;
     let fallback = if streamed_any {
@@ -15073,13 +15155,13 @@ fn publish_views<'alloc: 'callbacks, 'callbacks>(
         }
         frames.unbuilt_since = None;
         frames.last_unbuilt = None;
-        FallbackFrame::Built(frames.snapshot(terminal, change, None, status)?)
+        FallbackFrame::Built(frames.snapshot(terminal, change, None, status, bound)?)
     };
     frames.published.clear();
     frames
         .published
         .extend(viewports.iter().map(|(view, _, _)| *view));
-    let notified = publisher.publish_frame(fallback, viewports, copy_facts, sunk, notify);
+    let notified = publisher.publish_frame(fallback, viewports, copy_facts, sunk, size, notify);
     if let Some(sink) = frame_sink {
         sink.published(notified);
     }
@@ -15587,6 +15669,7 @@ fn snapshot<'alloc: 'callbacks, 'callbacks>(
     dictionary: &mut ViewportDictionary,
     view: Option<&TerminalViewState>,
     status: SessionStatus,
+    bound: Option<(u16, u16)>,
 ) -> Result<TerminalViewport, WorkerError> {
     let started = diagnostic_timer();
     let result = build_snapshot(
@@ -15599,6 +15682,7 @@ fn snapshot<'alloc: 'callbacks, 'callbacks>(
         dictionary,
         view,
         status,
+        bound,
     );
     match &result {
         Ok(viewport) => log::trace!(
@@ -15632,6 +15716,16 @@ fn snapshot<'alloc: 'callbacks, 'callbacks>(
     result
 }
 
+fn bounded_extent((columns, rows): (u16, u16), bound: Option<(u16, u16)>) -> (u16, u16) {
+    bound.map_or((columns, rows), |(most_columns, most_rows)| {
+        (columns.min(most_columns.max(1)), rows.min(most_rows.max(1)))
+    })
+}
+
+fn placement_starts_inside(placement: &KittyPlacement, columns: u16, rows: u16) -> bool {
+    placement.viewport_col < i32::from(columns) && placement.viewport_row < i32::from(rows)
+}
+
 fn reported_working_directory(value: &str) -> Option<String> {
     if value.is_empty() {
         return None;
@@ -15653,6 +15747,7 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
     dictionary: &mut ViewportDictionary,
     view: Option<&TerminalViewState>,
     status: SessionStatus,
+    bound: Option<(u16, u16)>,
 ) -> Result<TerminalViewport, WorkerError> {
     if let Some(view) = view
         && let Some(copy_mode) = view.copy_mode.as_ref()
@@ -15682,12 +15777,12 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
         &default_palette,
         [colors.foreground, colors.background],
     );
-    let columns = snapshot.cols()?;
-    let row_count = snapshot.rows()?;
+    let (columns, row_count) = bounded_extent((snapshot.cols()?, snapshot.rows()?), bound);
     let foreground = color(colors.foreground);
     let background = color(colors.background);
     let cursor = snapshot
         .cursor_viewport()?
+        .filter(|position| position.x < columns && position.y < row_count)
         .map(|position| {
             Cursor::new(
                 position.x,
@@ -15723,7 +15818,8 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
         dictionary.reset_live(default_style, &colors.palette);
     }
     let dictionary_reset = dictionary.generation != previous_dictionary_generation;
-    let dimensions_changed = dictionary.shared_cells.len() != cell_count;
+    let dimensions_changed =
+        dictionary.shared_cells.len() != cell_count || dictionary.shared_columns != columns;
     let mut row_copy = std::mem::take(&mut dictionary.row_copy);
     let mut row_styles = std::mem::take(&mut dictionary.row_styles);
     let mut overlays = std::mem::take(&mut dictionary.overlay_scratch);
@@ -15739,7 +15835,9 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
             .map(|cells| Arc::get_mut(cells).expect("acquired cell plane remains unique"));
         let mut visible_row = 0_u16;
         let mut row_iteration = rows.update(&snapshot)?;
-        while let Some(row) = row_iteration.next() {
+        while visible_row < row_count
+            && let Some(row) = row_iteration.next()
+        {
             let row_start = usize::from(visible_row).saturating_mul(usize::from(columns));
             if let Some(selected) = row.selection()? {
                 overlays.push(OverlaySpan::with_flags(
@@ -15836,6 +15934,7 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
     }
     if let Some(cells) = next_cells {
         dictionary.commit_cell_plane(cells);
+        dictionary.shared_columns = columns;
     }
     snapshot.set_dirty(Dirty::Clean)?;
 
@@ -15855,13 +15954,26 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
     } else {
         Arc::from([])
     };
+    let kitty_placements = if kitty_placements
+        .iter()
+        .all(|placement| placement_starts_inside(placement, columns, row_count))
+    {
+        kitty_placements
+    } else {
+        kitty_placements
+            .iter()
+            .filter(|placement| placement_starts_inside(placement, columns, row_count))
+            .cloned()
+            .collect()
+    };
     if let Some(search) = search {
         for (index, found) in search.matches.iter().enumerate() {
             let start_row = found.row.max(scrollbar.offset);
-            let end_row = found
-                .end_row
-                .saturating_add(1)
-                .min(scrollbar.offset.saturating_add(scrollbar.len));
+            let end_row = found.end_row.saturating_add(1).min(
+                scrollbar
+                    .offset
+                    .saturating_add(scrollbar.len.min(u32::from(row_count))),
+            );
             for row in start_row..end_row {
                 let Some((start, end)) = found.span(row, columns) else {
                     continue;
@@ -17236,6 +17348,7 @@ mod tests {
             &mut dictionary,
             None,
             SessionStatus::Running,
+            None,
         )
         .expect("snapshot")
     }
@@ -17385,6 +17498,7 @@ mod tests {
             &mut dictionary,
             None,
             SessionStatus::Running,
+            None,
         )
         .expect("Kitty snapshot");
         let placement = viewport
@@ -17450,6 +17564,7 @@ mod tests {
             &mut dictionary,
             None,
             SessionStatus::Running,
+            None,
         )
         .expect("Kitty snapshot");
         let covered = viewport
@@ -17518,6 +17633,7 @@ mod tests {
             &mut dictionary,
             None,
             SessionStatus::Running,
+            None,
         )
         .expect("Kitty snapshot");
         assert!(
@@ -18544,6 +18660,7 @@ mod tests {
             &mut dictionary,
             None,
             SessionStatus::Running,
+            None,
         )
         .expect("initial snapshot");
         let previous_dictionary_generation = first.dictionary_generation;
@@ -18565,6 +18682,7 @@ mod tests {
             &mut dictionary,
             None,
             SessionStatus::Running,
+            None,
         )
         .expect("compacted snapshot");
 
@@ -18763,6 +18881,7 @@ mod tests {
             &mut dictionary,
             None,
             SessionStatus::Running,
+            None,
         )
         .expect("snapshot");
 
@@ -18956,6 +19075,7 @@ mod tests {
                 &mut dictionary,
                 None,
                 SessionStatus::Running,
+                None,
             )
             .expect("snapshot");
             let row = viewport.row(0).expect("first row");
@@ -19033,6 +19153,7 @@ mod tests {
                 &mut dictionary,
                 None,
                 SessionStatus::Running,
+                None,
             )
             .expect("snapshot");
             let row = viewport.row(0).expect("first row");
@@ -19136,6 +19257,7 @@ mod tests {
             &mut dictionary,
             None,
             SessionStatus::Running,
+            None,
         )
         .expect("first snapshot");
         let style_allocation = dictionary.row_styles.as_ptr();
@@ -19150,6 +19272,7 @@ mod tests {
             &mut dictionary,
             None,
             SessionStatus::Running,
+            None,
         )
         .expect("overlay snapshot");
         assert!(Arc::ptr_eq(
@@ -19174,6 +19297,7 @@ mod tests {
             &mut dictionary,
             None,
             SessionStatus::Running,
+            None,
         )
         .expect("changed snapshot");
         assert!(Arc::ptr_eq(
@@ -19200,6 +19324,7 @@ mod tests {
             &mut dictionary,
             None,
             SessionStatus::Running,
+            None,
         )
         .expect("renamed snapshot");
         assert_eq!(renamed.title(), "renamed");
@@ -19232,6 +19357,7 @@ mod tests {
             &mut dictionary,
             None,
             SessionStatus::Running,
+            None,
         )
         .expect("first snapshot");
         let first_allocation = first.cells.as_ptr();
@@ -19247,6 +19373,7 @@ mod tests {
             &mut dictionary,
             None,
             SessionStatus::Running,
+            None,
         )
         .expect("second snapshot");
         assert_ne!(second.cells.as_ptr(), first_allocation);
@@ -19263,6 +19390,7 @@ mod tests {
             &mut dictionary,
             None,
             SessionStatus::Running,
+            None,
         )
         .expect("third snapshot");
         assert_eq!(third.cells.as_ptr(), first_allocation);
@@ -19290,6 +19418,7 @@ mod tests {
             &mut dictionary,
             None,
             SessionStatus::Running,
+            None,
         )
         .expect("initial dictionary snapshot");
         assert!(initial.grapheme_offsets().len() > 1);
@@ -19305,6 +19434,7 @@ mod tests {
             &mut dictionary,
             None,
             SessionStatus::Running,
+            None,
         )
         .expect("style-only dictionary append");
         assert!(!Arc::ptr_eq(&initial.dictionary, &styled.dictionary));
@@ -19332,6 +19462,7 @@ mod tests {
             &mut dictionary,
             None,
             SessionStatus::Running,
+            None,
         )
         .expect("grapheme-only dictionary append");
         assert!(!Arc::ptr_eq(&styled.dictionary, &grapheme.dictionary));
@@ -19384,6 +19515,7 @@ mod tests {
             &mut dictionary,
             None,
             SessionStatus::Running,
+            None,
         )
         .expect("snapshot");
         assert!(viewport.overlays.is_empty());
@@ -19415,6 +19547,7 @@ mod tests {
             &mut dictionary,
             None,
             SessionStatus::Running,
+            None,
         )
         .expect("selection-only snapshot");
         assert!(Arc::ptr_eq(&viewport.cells, &moved.cells));
@@ -19438,6 +19571,7 @@ mod tests {
             &mut dictionary,
             None,
             SessionStatus::Running,
+            None,
         )
         .expect("unchanged overlay snapshot");
         assert!(Arc::ptr_eq(&moved.overlays, &unchanged.overlays));
@@ -22412,6 +22546,7 @@ mod tests {
             &mut dictionary,
             Some(&view),
             SessionStatus::Running,
+            None,
         )
         .expect("frozen snapshot");
         terminal.vt_write(b"\r\nlive-one\r\nlive-two\x1b[?1049hALT-SCREEN");
@@ -22430,6 +22565,7 @@ mod tests {
             &mut dictionary,
             Some(&view),
             SessionStatus::Running,
+            None,
         )
         .expect("snapshot after live changes");
         assert_eq!((after.columns, after.rows), (16, 3));

@@ -68,6 +68,47 @@ fn an_unwatched_pane_keeps_its_metadata_current_without_rebuilding_cells_per_bur
 }
 
 #[test]
+fn a_view_area_bounds_its_frames_while_the_terminal_keeps_its_size() {
+    let session =
+        shell_session("printf 'ZZ_TOP\\n'; while read -r line; do printf '%s\\n' \"$line\"; done");
+    let view = TerminalViewId(3);
+    let extent = |columns: u16, rows: u16, marker: &str| {
+        session.latest_viewport_for(view).is_some_and(|viewport| {
+            (viewport.columns, viewport.rows) == (columns, rows) && text(&viewport).contains(marker)
+        })
+    };
+    session.set_view_area(view, Some((20, 4)));
+    session.attach_view(view);
+    session.set_view_stream(view, ViewStream::Foreground);
+    wait_until("a frame the size of the view", || extent(20, 4, "ZZ_TOP"));
+    assert_eq!(session.size(), (60, 8));
+    session.resize(300, 200, 8, 16);
+    session.send_text("ZZ_AFTER\n");
+    wait_until("a resized terminal behind the same frame", || {
+        session.size() == (300, 200) && extent(20, 4, "ZZ_AFTER")
+    });
+    session.set_view_area(view, Some((120, 50)));
+    wait_until("a frame the size of the grown view", || {
+        extent(120, 50, "ZZ_AFTER")
+    });
+    session.set_view_area(view, None);
+    wait_until("a frame of the whole terminal", || {
+        extent(300, 200, "ZZ_AFTER")
+    });
+    session.set_view_area(view, Some((20, 4)));
+    wait_until("a frame the size of the view again", || {
+        extent(20, 4, "ZZ_AFTER")
+    });
+    session.set_view_stream(view, ViewStream::Off);
+    session.send_text("ZZ_IDLE\n");
+    wait_until("an unwatched frame at the last area", || {
+        let viewport = session.latest_viewport();
+        (viewport.columns, viewport.rows) == (20, 4) && text(&viewport).contains("ZZ_IDLE")
+    });
+    session.release_view(view);
+}
+
+#[test]
 fn turning_a_stream_on_publishes_a_whole_frame_under_a_new_epoch() {
     let session = shell_session(
         "printf 'ZZ_READY\\n'; while read -r line; do printf '%s\\n' \"$line\"; done",

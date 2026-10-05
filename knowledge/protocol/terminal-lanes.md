@@ -4,7 +4,7 @@ title: PaneFrame terminal lane (pane_frame.rs)
 description: The Terminal envelope lane that carries full viewports, span patches, command-output viewports and history chunks as varint headers, changed-metadata fields and rows of style runs with UTF-8 text, decoded by every client straight into PackedCell planes.
 resource: crates/zz-protocol/src/pane_frame.rs
 tags: [protocol, terminal, wire, packing, fanout]
-timestamp: 2026-10-03T02:00:00Z
+timestamp: 2026-10-05T00:00:00Z
 ---
 
 # Overview
@@ -170,6 +170,10 @@ changed column of each changed row, or up to the last non-empty cell with `clear
 empties the row's tail.
 
 # History chunks
+
+A pane larger than every client streaming it sends frames the size of the largest client's
+area, not of the pane (see [terminal frame](/concepts/terminal-frame.md)); `columns` and `rows` are
+the frame's, and a history chunk's `columns` match them.
 
 Kind 3 carries `start`, `total`, `offset`, `columns`, the row count (at most
 `MAX_HISTORY_CHUNK_ROWS`, 512), the styles and graphemes as in a full frame, then row records

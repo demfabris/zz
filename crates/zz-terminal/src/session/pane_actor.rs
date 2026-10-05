@@ -1540,6 +1540,7 @@ impl PaneActor {
                     start,
                     count,
                     &self.frames.dictionary.class_hints,
+                    self.frames.frame_bound(&self.active_views),
                 ));
                 self.compression.rearm();
             }
@@ -1632,6 +1633,27 @@ impl PaneActor {
             }
             Command::SetViewStream(view, stream) => {
                 if self.frames.set_stream(view, stream) && self.active_views.contains_key(&view) {
+                    publish_active_views(
+                        &mut self.terminal,
+                        &self.publisher,
+                        &mut self.frames,
+                        SnapshotChange::View,
+                        &mut self.active_views,
+                        &self.word_separators,
+                        SessionStatus::Running,
+                    )?;
+                }
+            }
+            Command::SetViewAreas(areas) => {
+                let before = self
+                    .frames
+                    .frame_extent(&self.terminal, &self.active_views)?;
+                self.frames.areas = areas;
+                if self
+                    .frames
+                    .frame_extent(&self.terminal, &self.active_views)?
+                    != before
+                {
                     publish_active_views(
                         &mut self.terminal,
                         &self.publisher,

@@ -52355,6 +52355,11 @@ fn expand_relative(source: &Path, nested: &RawText) -> PathBuf {
 }
 
 #[cfg(test)]
+fn tmux_path(path: &Path) -> String {
+    path.display().to_string().replace('\\', "\\\\")
+}
+
+#[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
     use std::sync::Arc;
@@ -65782,7 +65787,7 @@ mod tests {
         let outer = directory.path().join("outer.conf");
         fs::write(
             &outer,
-            format!("if-shell -F 1 \"source-file '{}'\"\n", inner.display()),
+            format!("if-shell -F 1 \"source-file '{}'\"\n", tmux_path(&inner)),
         )
         .expect("outer source fixture");
         let inner = inner.display().to_string();
@@ -68128,7 +68133,7 @@ set-option -g @alias-mixed-next yes
             format!(
                 "run-shell -C \"set-option -g @hook-continuation-before yes ; source-file '{}' ; set-option -g @hook-continuation-after yes\"\n\
                  set-option -g @hook-continuation-later yes\n",
-                hook_child.display()
+                tmux_path(&hook_child)
             ),
         )
         .expect("hook continuation outer fixture");
@@ -69987,7 +69992,7 @@ set-option -g @alias-mixed-next yes
             &root,
             format!(
                 "display-message -p ROOT_ONE\nsource-file -v {}\ndisplay-message -p ROOT_TWO\n",
-                child.display()
+                tmux_path(&child)
             ),
         )
         .expect("root source");
@@ -70017,7 +70022,7 @@ set-option -g @alias-mixed-next yes
              {}:3: display-message -p ROOT_TWO",
             root.display(),
             root.display(),
-            child.display(),
+            tmux_path(&child),
             root.display(),
         );
         let child_replay = "CHILD_ONE\nCHILD_TWO";
@@ -70256,7 +70261,7 @@ set-option -g @alias-mixed-next yes
                 "display-message -p CONDITIONAL_BEFORE\n\
                  if-shell -F 1 'source-file -v {}'\n\
                  display-message -p CONDITIONAL_AFTER\n",
-                child.display()
+                tmux_path(&child)
             ),
         )
         .expect("conditional source");
@@ -70283,7 +70288,7 @@ set-option -g @alias-mixed-next yes
                 "display-message -p ROOT_BEFORE\n\
                  if-shell -F 1 'source-file {}'\n\
                  display-message -p ROOT_AFTER\n",
-                error_child.display()
+                tmux_path(&error_child)
             ),
         )
         .expect("indirect error source");
@@ -70297,7 +70302,7 @@ set-option -g @alias-mixed-next yes
                 "kill-session -t missing-A\n\
                  if-shell -F 1 'source-file {}'\n\
                  kill-session -t missing-C\n",
-                ordered_error_child.display()
+                tmux_path(&ordered_error_child)
             ),
         )
         .expect("ordered error source");
@@ -70332,7 +70337,7 @@ set-option -g @alias-mixed-next yes
                     [
                         "-s".to_owned(),
                         "command-alias[90]".to_owned(),
-                        format!("indirect=source-file -v {}", child.display()),
+                        format!("indirect=source-file -v {}", tmux_path(&child)),
                     ],
                 ),
             )
@@ -70387,7 +70392,7 @@ set-option -g @alias-mixed-next yes
                     [
                         "-g".to_owned(),
                         "after-display-message".to_owned(),
-                        format!("source-file {}", hook_child.display()),
+                        format!("source-file {}", tmux_path(&hook_child)),
                     ],
                 ),
             )
@@ -70461,7 +70466,7 @@ set-option -g @alias-mixed-next yes
                     [
                         "-g".to_owned(),
                         "after-display-message".to_owned(),
-                        format!("source-file {}", terminal_hook_child.display()),
+                        format!("source-file {}", tmux_path(&terminal_hook_child)),
                     ],
                 ),
             )
@@ -71209,9 +71214,9 @@ set-option -g @alias-mixed-next yes
                  source-file {}\n\
                  kill-session -t hook-source-runtime\n\
                  display-message -p HOOK_SOURCE_AFTER\n",
-                leaf.display(),
-                unknown.display(),
-                unreadable.display(),
+                tmux_path(&leaf),
+                tmux_path(&unknown),
+                tmux_path(&unreadable),
             ),
         )
         .expect("hook root source");
@@ -71252,8 +71257,8 @@ set-option -g @alias-mixed-next yes
                 0,
                 "display-message -p HOOK_ARRAY_ZERO ; kill-session -t hook-direct-runtime ; display-message -p HOOK_ARRAY_ZERO_SKIPPED".to_owned(),
             ),
-            (1, format!("source-file {}", root.display())),
-            (2, format!("source-file {}", missing.display())),
+            (1, format!("source-file {}", tmux_path(&root))),
+            (2, format!("source-file {}", tmux_path(&missing))),
             (3, "display-message -p HOOK_ARRAY_THREE".to_owned()),
         ] {
             shared
@@ -71463,7 +71468,7 @@ set-option -g @alias-mixed-next yes
                 "display-message -p ROOT_BEFORE\n\
                  source-file {}\n\
                  display-message -p ROOT_AFTER\n",
-                invalid.display()
+                tmux_path(&invalid)
             ),
         )
         .expect("direct diagnostic source");
@@ -71474,7 +71479,7 @@ set-option -g @alias-mixed-next yes
                 "display-message -p ROOT_BEFORE\n\
                  if-shell -F 1 'source-file {}'\n\
                  display-message -p ROOT_AFTER\n",
-                invalid.display()
+                tmux_path(&invalid)
             ),
         )
         .expect("conditional diagnostic source");
@@ -71489,9 +71494,9 @@ set-option -g @alias-mixed-next yes
                 "display-message -p ROOT_BEFORE\n\
                  source-file -v {} {} {}\n\
                  display-message -p ROOT_AFTER\n",
-                good.display(),
-                invalid.display(),
-                later.display(),
+                tmux_path(&good),
+                tmux_path(&invalid),
+                tmux_path(&later),
             ),
         )
         .expect("nested multi diagnostic source");
@@ -71504,7 +71509,7 @@ set-option -g @alias-mixed-next yes
                 "display-message -p ROOT_BEFORE\n\
                  source-file {}\n\
                  display-message -p ROOT_AFTER\n",
-                unknown.display()
+                tmux_path(&unknown)
             ),
         )
         .expect("nested unknown source");
@@ -71527,7 +71532,7 @@ set-option -g @alias-mixed-next yes
              {}:3: display-message -p ROOT_AFTER",
             direct.display(),
             direct.display(),
-            invalid.display(),
+            tmux_path(&invalid),
             direct.display(),
         );
 
@@ -71620,9 +71625,9 @@ set-option -g @alias-mixed-next yes
                      GOOD_OUTPUT\nLATER_OUTPUT\n{diagnostic}\nROOT_AFTER\n",
                     nested_multi.display(),
                     nested_multi.display(),
-                    good.display(),
-                    invalid.display(),
-                    later.display(),
+                    tmux_path(&good),
+                    tmux_path(&invalid),
+                    tmux_path(&later),
                     nested_multi.display(),
                     good.display(),
                     later.display(),
@@ -71653,7 +71658,7 @@ set-option -g @alias-mixed-next yes
                      ROOT_BEFORE\n{}:1: unknown command: wibble\nROOT_AFTER\n",
                     nested_unknown.display(),
                     nested_unknown.display(),
-                    unknown.display(),
+                    tmux_path(&unknown),
                     nested_unknown.display(),
                     unknown.display(),
                 )
@@ -100950,7 +100955,7 @@ bind - split-window -v -c "#{pane_current_path}"
         .expect("confirm source child fixture");
         let confirm_body = format!(
             "source-file '{}' ; set-environment -g CONFIRM_INNER_AFTER yes",
-            child.display()
+            tmux_path(&child)
         );
         let outer_body = format!(
             "confirm-before -t desktop \"{confirm_body}\" ; set-environment -g CONFIRM_OUTER_AFTER yes"

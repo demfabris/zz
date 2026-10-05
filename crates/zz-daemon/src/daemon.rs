@@ -40045,7 +40045,7 @@ fn client_negotiated_features_from_source(
     )
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 fn client_feature_mask(inner: &ServerState, client: ClientId) -> u32 {
     client_feature_mask_from_source(&ClientFormatSource::from_inner(inner), client)
 }
@@ -102539,7 +102539,11 @@ bind - split-window -v -c "#{pane_current_path}"
                 "1",
                 "1",
                 "format-client",
-                "bpaste,ccolour,clipboard,cstyle,focus,RGB,title",
+                if cfg!(unix) {
+                    "bpaste,ccolour,clipboard,cstyle,focus,RGB,title"
+                } else {
+                    ""
+                },
                 "xterm-256color",
                 "",
                 "light",

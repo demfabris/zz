@@ -430,6 +430,7 @@ fn format_monitors_and_hooks_expand_the_same_bodies_on_a_lazy_universe() {
     });
 }
 
+#[cfg(unix)]
 #[test]
 fn terminal_features_and_overrides_reach_a_connected_client_on_the_next_read() {
     let fixture = fixture();

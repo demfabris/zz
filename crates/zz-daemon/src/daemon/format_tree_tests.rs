@@ -521,6 +521,7 @@ fn selected_status_client_dynamic_references_keep_terminal_and_environment_facts
         assert_eq!(selected.pid, "42");
         assert_eq!(selected.tty, "/dev/ttys003");
         assert!(selected.environment.is_some());
+        #[cfg(unix)]
         assert!(selected.terminal.is_some());
     }
 }

@@ -203,6 +203,29 @@ fn a_bounded_frame_is_the_top_left_region_of_the_terminal() {
 }
 
 #[test]
+fn a_bounded_frame_clips_the_render_state_to_its_region() {
+    let mut terminal = new_terminal(40, 8, 100).expect("terminal");
+    terminal.vt_write(STYLED);
+    let mut fixture = Fixture::new();
+    fixture.frame_within(&terminal, Some((12, 3)));
+    let clip = fixture
+        .render_state
+        .update(&terminal)
+        .expect("update")
+        .clip()
+        .expect("clip");
+    assert_eq!((clip.y, clip.cols, clip.rows), (0, 12, 3));
+    fixture.frame(&terminal);
+    let clip = fixture
+        .render_state
+        .update(&terminal)
+        .expect("update")
+        .clip()
+        .expect("clip");
+    assert_eq!((clip.y, clip.cols, clip.rows), (0, 40, 8));
+}
+
+#[test]
 fn a_grown_bound_copies_the_rows_and_columns_it_skipped() {
     let mut terminal = new_terminal(40, 8, 100).expect("terminal");
     terminal.vt_write(STYLED);

@@ -25,7 +25,7 @@ use libghostty_vt::{
     focus, key,
     kitty::graphics::{self, DecodedImage, ImageFormat, PlacementIterator},
     mouse::{self, EncoderSize},
-    render::{CellIterator, CellsCopy, Colors, CursorVisualStyle, Dirty, RowIterator},
+    render::{CellIterator, CellsCopy, Clip, Colors, CursorVisualStyle, Dirty, RowIterator},
     screen::{
         CellContentTag, CellSemanticContent, CellWide, RowSemanticPrompt, Screen, TrackedGridRef,
     },
@@ -14679,6 +14679,11 @@ struct RenderResources<'alloc> {
 impl<'alloc> RenderResources<'alloc> {
     fn new(terminal: &Terminal<'alloc, '_>) -> Result<Self, WorkerError> {
         let mut state = RenderState::new()?;
+        state.set_clip(Clip {
+            y: 0,
+            rows: 1,
+            cols: 1,
+        })?;
         state.update(terminal)?.set_dirty(Dirty::Full)?;
         Ok(Self {
             state,
@@ -15765,6 +15770,13 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
     let search = view.and_then(|view| view.search.as_ref());
     let hover_link = view.and_then(|view| view.hover_link.as_ref());
     let unseen_output = view.map_or(0, |view| view.unseen_output);
+    render_state.set_clip(
+        bound.map_or_else(Clip::default, |(most_columns, most_rows)| Clip {
+            y: 0,
+            rows: most_rows.max(1),
+            cols: most_columns.max(1),
+        }),
+    )?;
     let snapshot = render_state.update(terminal)?;
     let dirty = snapshot.dirty()?;
     let full_dirty = dirty == Dirty::Full;
@@ -15863,7 +15875,9 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
                     .as_deref_mut()
                     .and_then(|cells| cells.get_mut(row_start..row_end))
                     .ok_or(WorkerError::ViewportMetadataTooLarge)?;
-                cells.update(row)?.copy_into(0, columns, &mut row_copy)?;
+                cells
+                    .update(row)?
+                    .copy_trimmed_into(0, columns, &mut row_copy)?;
                 let copied = row_copy.cells().len().min(output_row.len());
                 output_row[copied..].fill(PackedCell::EMPTY);
                 row_styles.clear();

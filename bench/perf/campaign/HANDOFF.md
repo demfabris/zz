@@ -4,9 +4,10 @@ Entry point for a fresh session continuing the zz daemon performance rebuild. Wr
 the macbook, continued the same day on the Linux host alienware (see "Linux leg"). State on
 2026-10-02: waves 0 to 3 are on `main` and pushed. Wave 3 (W3-SHARDS, W3-TUI, W3-LOOP and nine
 Opus fix lanes) closed at `e9bc174c`; its exit gates are `wave3-macbook-e9bc174c.json` and
-`wave3-alienware-e9bc174c.json`. The Ghostty fork pin is `189df4a1` (row cell copy, branch
-`zz-2026-10-02`, on `67351380`: trim fix `c3941417`, copy snapshots `7823f65d`, used-size active
-page copies); the libghostty-rs pin is `f5f82601`. No lane in flight, no lane worktree left.
+`wave3-alienware-e9bc174c.json`. The Ghostty fork pin is `e482b036` (render state clip `0ab7941c`
+and trimmed row copies, branch `zz-2026-10-04`, on `189df4a1`: row cell copy on `zz-2026-10-02`,
+then `67351380` with trim fix `c3941417`, copy snapshots `7823f65d`, used-size active page
+copies); the libghostty-rs pin is `0db98a20` (`zz-2026-10-04`, on `f5f82601`). No lane in flight, no lane worktree left.
 Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" before launching anything.
 
 ## Next session: after wave 4

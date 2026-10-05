@@ -49,9 +49,10 @@ or an index into the grapheme arena flagged by `GRAPHEME_TABLE_BIT`.
 # Publication and consumption
 
 The worker builds frames in `build_snapshot`: it walks libghostty dirty rows through `RenderState` +
-`RowIterator`, copies each row's cells in one call (`CellIteration::copy_into` into a reused
-`CellsCopy`, over the fork's `ghostty_render_state_row_cells_copy`: packed cells, each distinct style
-once, graphemes as UTF-8 spans), interns styles/graphemes into the actor's `ViewportDictionary` (with cell/
+`RowIterator`, copies each row's cells in one call (`CellIteration::copy_trimmed_into` into a reused
+`CellsCopy`, over the fork's `ghostty_render_state_row_cells_copy`: packed cells up to the last
+non-default one, each distinct style once, graphemes as UTF-8 spans; the rest of the row is
+`PackedCell::EMPTY`), interns styles/graphemes into the actor's `ViewportDictionary` (with cell/
 overlay plane pooling), and assembles overlays for selection, search matches, hover links, and the copy
 cursor. Live dictionaries use viewport-scaled high-water marks: crossing one starts a new dictionary
 generation and rebuilds the visible working set, which forces one full viewport instead of retaining
@@ -63,7 +64,8 @@ A frame covers what its clients can show, not always the whole terminal. Each cl
 the pane the area it can display (`TerminalSession::set_view_area`: a TUI's terminal size, or
 for a client with no terminal size the widest window its per-pane reports imply), and
 `build_snapshot` builds the top-left `min(columns, area columns) x min(rows, area rows)` of the
-live viewport, the region the raw TUI paints. The bound is the largest area of the views that
+live viewport, the region the raw TUI paints. It sets the same region as the render state's
+clip (`RenderState::set_clip`), so libghostty copies only those rows and columns. The bound is the largest area of the views that
 stream the pane; a streaming view with no area, or a choose-tree preview watch, builds the
 whole terminal, and with nothing streaming the last bound stays. The cursor, overlays and Kitty
 placements outside the region are dropped, the scrollbar stays the terminal's, and history chunks

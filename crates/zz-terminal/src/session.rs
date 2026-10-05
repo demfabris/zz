@@ -6120,17 +6120,29 @@ fn refresh_frozen_view_appearance(
 
 fn terminal_command(spawn: &TerminalSpawn) -> CommandBuilder {
     match spawn.command.as_deref() {
-        #[cfg(windows)]
-        Some(argv) if !argv.is_empty() => {
-            let mut command = CommandBuilder::new("cmd.exe");
-            let joined = argv.join(" ");
-            command.args(["/C", joined.as_str()]);
-            command
-        }
-        #[cfg(not(windows))]
         Some(argv) if argv.len() >= 2 => {
             let mut command = CommandBuilder::new(&argv[0]);
             command.args(&argv[1..]);
+            command
+        }
+        #[cfg(windows)]
+        Some([shell_command]) => {
+            let mut command = CommandBuilder::new("cmd.exe");
+            let shell = command.get_shell();
+            command.args([
+                "/D",
+                "/V:ON",
+                "/C",
+                shell.as_str(),
+                "/D",
+                "/S",
+                "/C",
+                "!ZZ_PANE_COMMAND!",
+            ]);
+            command.env(
+                "ZZ_PANE_COMMAND",
+                format!("\"set ZZ_PANE_COMMAND=& {shell_command}\""),
+            );
             command
         }
         #[cfg(not(windows))]
@@ -24586,6 +24598,60 @@ mod tests {
         }
         assert!(contents.contains("ZZ_PHASE4D_SET=session"), "{contents:?}");
         assert!(contents.contains("ZZ_PHASE4D_REMOVE=unset"), "{contents:?}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_pane_commands_keep_quotes_and_spaced_paths() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let spaced = directory.path().join("with space");
+        std::fs::create_dir(&spaced).expect("directory with a space");
+        let path = spaced.join("quoted.txt");
+        let screen = |view: u64, command: Vec<String>, marker: &str| {
+            let session = TerminalSession::spawn(
+                DEFAULT_HISTORY_LIMIT,
+                Arc::new(TerminalAppearance::default()),
+                TerminalSpawn {
+                    command: Some(command),
+                    ..TerminalSpawn::default()
+                },
+            );
+            attach_streaming(&session, TerminalViewId(view));
+            let mut contents = String::new();
+            wait_for_test_viewport(&session, |viewport| {
+                contents.clear();
+                for cell in viewport.cells.iter() {
+                    viewport.push_glyph(*cell, &mut contents);
+                }
+                contents.contains(marker)
+            });
+            session.terminate();
+            contents
+        };
+
+        let shell = screen(
+            48,
+            vec![format!(
+                "echo \"a  b\">\"{path}\"& type \"{path}\"& set ZZ_PANE_COMMAND& echo ZZ_DONE& pause >nul",
+                path = path.display()
+            )],
+            "ZZ_DONE",
+        );
+        assert!(shell.contains("\"a  b\""), "{shell:?}");
+        assert!(!shell.contains("ZZ_PANE_COMMAND="), "{shell:?}");
+
+        let direct = screen(
+            49,
+            vec![
+                "choice".to_owned(),
+                "/C".to_owned(),
+                "y".to_owned(),
+                "/M".to_owned(),
+                "a  b".to_owned(),
+            ],
+            "[Y]?",
+        );
+        assert!(direct.contains("a  b [Y]?"), "{direct:?}");
     }
 
     #[cfg(unix)]

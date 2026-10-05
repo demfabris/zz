@@ -111469,6 +111469,7 @@ bind - split-window -v -c "#{pane_current_path}"
 
     #[test]
     fn pane_creation_output_waits_for_spawn_facts_and_preserves_empty_lines() {
+        let sleep = if cfg!(windows) { "timeout" } else { "sleep" };
         let shared = Arc::new(Shared::new(1));
         let client = ClientId(7);
         let mut context = ExecutionContext::default();
@@ -111479,7 +111480,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 &mut context,
                 &CommandInvocation::new(
                     "new-session",
-                    ["-d", "-s", "format-output", "--", "sleep", "30"],
+                    ["-d", "-s", "format-output", "--", sleep, "30"],
                 ),
             )
             .expect("format output session");
@@ -111499,7 +111500,7 @@ bind - split-window -v -c "#{pane_current_path}"
                         "-F",
                         "#{pane_start_path}|#{pane_pid}|#{pane_tty}|#{pane_start_command}",
                         "--",
-                        "sleep",
+                        sleep,
                         "30",
                     ],
                 ),
@@ -111513,7 +111514,7 @@ bind - split-window -v -c "#{pane_current_path}"
         if cfg!(unix) {
             assert!(!fields[2].is_empty());
         }
-        assert!(fields[3].contains("sleep"));
+        assert!(fields[3].contains(sleep));
         assert!(fields[3].contains("30"));
 
         let output = shared

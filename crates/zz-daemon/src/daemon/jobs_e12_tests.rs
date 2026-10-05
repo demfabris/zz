@@ -307,6 +307,7 @@ fn stale_token_cannot_touch_reused_descriptor() {
     let mut jobs = JobRegistry::default();
     let mut token = 4;
     let (done, results) = mpsc::channel();
+    let old_token = Token(token);
     jobs.register(
         poll.registry(),
         &mut token,
@@ -317,7 +318,6 @@ fn stale_token_cannot_touch_reused_descriptor() {
         ),
     )
     .unwrap();
-    let old_token = *jobs.tokens.keys().next().unwrap();
     pump(&mut poll, &mut jobs, |jobs| jobs.jobs.is_empty());
     assert_eq!(results.try_recv().unwrap().output, vec![b"old".to_vec()]);
     jobs.register(

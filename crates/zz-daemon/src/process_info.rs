@@ -1234,6 +1234,7 @@ mod platform {
 #[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
 mod tests {
     use std::{
+        io::Read as _,
         os::unix::fs::symlink,
         path::Path,
         process::{Child, Command, Stdio},
@@ -1252,13 +1253,25 @@ mod tests {
         }
     }
 
-    fn sleeper(executable: &Path, directory: &Path) -> Sleeper {
-        Sleeper(
-            Command::new(executable)
-                .arg("30")
+    fn ready(mut child: Child) -> Sleeper {
+        let mut ready = [0; 5];
+        child
+            .stdout
+            .as_mut()
+            .expect("child stdout")
+            .read_exact(&mut ready)
+            .expect("child ready");
+        assert_eq!(&ready, b"ready");
+        Sleeper(child)
+    }
+
+    fn sleeper(shell: &Path, directory: &Path) -> Sleeper {
+        ready(
+            Command::new(shell)
+                .args(["-c", "printf ready; while :; do sleep 1; done"])
                 .current_dir(directory)
                 .stdin(Stdio::null())
-                .stdout(Stdio::null())
+                .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .spawn()
                 .expect("spawn sleeper"),
@@ -1275,19 +1288,11 @@ mod tests {
         system
     }
 
-    fn sleep_binary() -> &'static Path {
-        ["/bin/sleep", "/usr/bin/sleep"]
-            .into_iter()
-            .map(Path::new)
-            .find(|path| path.exists())
-            .expect("a sleep binary")
-    }
-
     #[test]
     fn facts_match_sysinfo_for_a_symlinked_child() {
         let directory = tempfile::tempdir().expect("fixture directory");
         let link = directory.path().join("claude");
-        symlink(sleep_binary(), &link).expect("symlink");
+        symlink("/bin/bash", &link).expect("symlink");
         let child = sleeper(&link, directory.path());
         let pid = child.0.id();
 
@@ -1338,15 +1343,15 @@ mod tests {
         let directory = tempfile::tempdir().expect("fixture directory");
         let link = directory.path().join("claude");
         symlink("/bin/bash", &link).expect("symlink");
-        let mut child = Sleeper(
+        let mut child = ready(
             Command::new("/bin/bash")
                 .args([
                     "-c",
-                    "read -r _; exec \"$0\" -c 'while :; do sleep 1; done'",
+                    "printf ready; read -r _; exec \"$0\" -c 'while :; do sleep 1; done'",
                 ])
                 .arg(&link)
                 .stdin(Stdio::piped())
-                .stdout(Stdio::null())
+                .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .spawn()
                 .expect("spawn shell"),
@@ -1404,12 +1409,12 @@ mod tests {
         let directory = tempfile::tempdir().expect("fixture directory");
         let link = directory.path().join("claude");
         symlink("/bin/bash", &link).expect("symlink");
-        let child = Sleeper(
+        let child = ready(
             Command::new(&link)
-                .args(["-c", "while :; do sleep 1; done"])
+                .args(["-c", "printf ready; while :; do sleep 1; done"])
                 .arg("x".repeat(100_000))
                 .stdin(Stdio::null())
-                .stdout(Stdio::null())
+                .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .spawn()
                 .expect("spawn sleeper"),

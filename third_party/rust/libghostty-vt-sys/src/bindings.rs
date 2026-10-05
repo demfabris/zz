@@ -63,6 +63,7 @@ pub const DA_DEVICE_TYPE_VT520: u16 = 64;
 pub const DA_DEVICE_TYPE_VT525: u16 = 65;
 pub const RENDER_STATE_CELL_HYPERLINK: u32 = 1;
 pub const RENDER_STATE_CELL_PROTECTED: u32 = 2;
+pub const RENDER_STATE_ROW_CELLS_COPY_TRIM: u32 = 1;
 pub const MODS_SHIFT: u16 = 1;
 pub const MODS_CTRL: u16 = 2;
 pub const MODS_ALT: u16 = 4;
@@ -3408,6 +3409,27 @@ const _: () = {
     ["Offset of field: RenderStateOverscan::below"]
         [::std::mem::offset_of!(RenderStateOverscan, below) - 2usize];
 };
+#[doc = " A part of the viewport: a range of rows and the leftmost columns of\n each.\n\n This is used both to request a clip with\n GHOSTTY_RENDER_STATE_OPTION_CLIP and to report what an update captured\n with GHOSTTY_RENDER_STATE_DATA_CLIP. See \"Clip\" in the render state\n overview.\n"]
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct RenderStateClip {
+    #[doc = " The first viewport row."]
+    pub y: u16,
+    #[doc = " The number of rows starting at y. In a request, zero means every\n  row from y to the bottom of the viewport."]
+    pub rows: u16,
+    #[doc = " The number of columns from the left edge. In a request, zero means\n  every column."]
+    pub cols: u16,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of RenderStateClip"][::std::mem::size_of::<RenderStateClip>() - 6usize];
+    ["Alignment of RenderStateClip"][::std::mem::align_of::<RenderStateClip>() - 2usize];
+    ["Offset of field: RenderStateClip::y"][::std::mem::offset_of!(RenderStateClip, y) - 0usize];
+    ["Offset of field: RenderStateClip::rows"]
+        [::std::mem::offset_of!(RenderStateClip, rows) - 2usize];
+    ["Offset of field: RenderStateClip::cols"]
+        [::std::mem::offset_of!(RenderStateClip, cols) - 4usize];
+};
 #[doc = " The identity of a row across render state updates.\n\n Treat this value as opaque. Two ids are the same when both words are\n equal. No other comparison or interpretation is meaningful, and the\n contents may change between library versions. A zero-initialized id is\n never valid, so it can be used to mean \"no row\".\n\n bool same = a.bits[0] == b.bits[0] && a.bits[1] == b.bits[1];\n\n See \"Row Identity\" in the render state overview for how to use ids.\n"]
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
@@ -3429,11 +3451,11 @@ pub mod RenderStateData {
     pub const INVALID: Type = 0;
     #[doc = " Viewport width in cells (uint16_t)."]
     pub const COLS: Type = 1;
-    #[doc = " Viewport height in cells (uint16_t). This does not include\n  overscan rows."]
+    #[doc = " Viewport height in cells (uint16_t). This does not include\n  overscan rows and is not limited by a clip."]
     pub const ROWS: Type = 2;
     #[doc = " Current dirty state (GhosttyRenderStateDirty)."]
     pub const DIRTY: Type = 3;
-    #[doc = " Populate a pre-allocated GhosttyRenderStateRowIterator with row data\n  from the render state (GhosttyRenderStateRowIterator). Row data is\n  only valid as long as the underlying render state is not updated.\n  It is unsafe to use row data after updating the render state.\n\n  The iterator visits every row the last update captured, from top\n  to bottom. This is exactly the viewport unless overscan was\n  requested with GHOSTTY_RENDER_STATE_OPTION_OVERSCAN."]
+    #[doc = " Populate a pre-allocated GhosttyRenderStateRowIterator with row data\n  from the render state (GhosttyRenderStateRowIterator). Row data is\n  only valid as long as the underlying render state is not updated.\n  It is unsafe to use row data after updating the render state.\n\n  The iterator visits every row the last update captured, from top\n  to bottom. This is exactly the viewport unless overscan was\n  requested with GHOSTTY_RENDER_STATE_OPTION_OVERSCAN or a clip with\n  GHOSTTY_RENDER_STATE_OPTION_CLIP."]
     pub const ROW_ITERATOR: Type = 4;
     #[doc = " Default/current background color (GhosttyColorRgb)."]
     pub const COLOR_BACKGROUND: Type = 5;
@@ -3453,7 +3475,7 @@ pub mod RenderStateData {
     pub const CURSOR_BLINKING: Type = 12;
     #[doc = " Whether the cursor is at a password input field (bool)."]
     pub const CURSOR_PASSWORD_INPUT: Type = 13;
-    #[doc = " Whether the cursor is visible within the viewport (bool).\n  If false, the cursor viewport position values are undefined."]
+    #[doc = " Whether the cursor is visible within the viewport, and within the\n  clip if one is set (bool). If false, the cursor viewport position\n  values are undefined."]
     pub const CURSOR_VIEWPORT_HAS_VALUE: Type = 14;
     #[doc = " Cursor viewport x position in cells (uint16_t).\n  Only valid when CURSOR_VIEWPORT_HAS_VALUE is true."]
     pub const CURSOR_VIEWPORT_X: Type = 15;
@@ -3469,7 +3491,11 @@ pub mod RenderStateData {
     pub const OVERSCAN: Type = 20;
     #[doc = " The overscan request most recently set with\n  GHOSTTY_RENDER_STATE_OPTION_OVERSCAN (GhosttyRenderStateOverscan).\n  The next update uses this request. Both sides are zero if it was\n  never set."]
     pub const OVERSCAN_REQUEST: Type = 21;
-    #[doc = " The overscan request most recently set with\n  GHOSTTY_RENDER_STATE_OPTION_OVERSCAN (GhosttyRenderStateOverscan).\n  The next update uses this request. Both sides are zero if it was\n  never set."]
+    #[doc = " The part of the viewport the last update captured\n  (GhosttyRenderStateClip). This is the request limited to the\n  viewport, with zero counts replaced by the rows and columns they\n  stand for, so without a request it is the whole viewport."]
+    pub const CLIP: Type = 22;
+    #[doc = " The clip request most recently set with\n  GHOSTTY_RENDER_STATE_OPTION_CLIP (GhosttyRenderStateClip). The next\n  update uses this request. Every field is zero if it was never set."]
+    pub const CLIP_REQUEST: Type = 23;
+    #[doc = " The clip request most recently set with\n  GHOSTTY_RENDER_STATE_OPTION_CLIP (GhosttyRenderStateClip). The next\n  update uses this request. Every field is zero if it was never set."]
     pub const MAX_VALUE: Type = 2147483647;
 }
 pub mod RenderStateOption {
@@ -3479,7 +3505,9 @@ pub mod RenderStateOption {
     pub const DIRTY: Type = 0;
     #[doc = " Request overscan rows above and below the viewport\n  (GhosttyRenderStateOverscan). The request takes effect on the next\n  update and stays in effect until it is changed. Both sides are zero\n  by default, which captures only the viewport. The rows of the last\n  update can still be read after changing the request. Expect a full\n  redraw on the update after a change. See \"Overscan\" in the render\n  state overview."]
     pub const OVERSCAN: Type = 1;
-    #[doc = " Request overscan rows above and below the viewport\n  (GhosttyRenderStateOverscan). The request takes effect on the next\n  update and stays in effect until it is changed. Both sides are zero\n  by default, which captures only the viewport. The rows of the last\n  update can still be read after changing the request. Expect a full\n  redraw on the update after a change. See \"Overscan\" in the render\n  state overview."]
+    #[doc = " Capture only part of the viewport (GhosttyRenderStateClip). The\n  request takes effect on the next update and stays in effect until\n  it is changed. The default of all zeros captures the whole viewport.\n  The rows of the last update can still be read after changing the\n  request. Expect a full redraw on the update after a change. See\n  \"Clip\" in the render state overview."]
+    pub const CLIP: Type = 2;
+    #[doc = " Capture only part of the viewport (GhosttyRenderStateClip). The\n  request takes effect on the next update and stays in effect until\n  it is changed. The default of all zeros captures the whole viewport.\n  The rows of the last update can still be read after changing the\n  request. Expect a full redraw on the update after a change. See\n  \"Clip\" in the render state overview."]
     pub const MAX_VALUE: Type = 2147483647;
 }
 pub mod RenderStateRowData {
@@ -3495,9 +3523,9 @@ pub mod RenderStateRowData {
     pub const CELLS: Type = 3;
     #[doc = " Row-local selected cell range (GhosttyRenderStateRowSelection)."]
     pub const SELECTION: Type = 4;
-    #[doc = " A borrowed view of the raw cell values for the current row\n  (GhosttyCellsView). One value per column, identical to querying\n  GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_RAW for each cell. The view\n  is only valid as long as the underlying render state is not\n  updated; it is unsafe to use after updating the render state.\n\n  This is the bulk alternative to iterating cells one at a time.\n  It lets callers with expensive call boundaries (e.g. WebAssembly\n  embedders) read an entire row with a single call.\n\n  Bit positions aren't protected by ABI, so callers should parse them\n  out of the manifest from `ghostty_type_json`. Callers with access\n  to the C header or without high FFI costs should use `ghostty_cell_get`."]
+    #[doc = " A borrowed view of the raw cell values for the current row\n  (GhosttyCellsView). One value per column, identical to querying\n  GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_RAW for each cell. With a clip,\n  there is one value per clipped column. The view\n  is only valid as long as the underlying render state is not\n  updated; it is unsafe to use after updating the render state.\n\n  This is the bulk alternative to iterating cells one at a time.\n  It lets callers with expensive call boundaries (e.g. WebAssembly\n  embedders) read an entire row with a single call.\n\n  Bit positions aren't protected by ABI, so callers should parse them\n  out of the manifest from `ghostty_type_json`. Callers with access\n  to the C header or without high FFI costs should use `ghostty_cell_get`."]
     pub const CELLS_RAW: Type = 5;
-    #[doc = " The row's position relative to the top of the viewport (int32_t).\n  Viewport rows are 0 through rows - 1. Overscan rows above the\n  viewport are negative, and overscan rows below it start at rows.\n  Without overscan, this equals the y reported by\n  ghostty_render_state_row_iterator_next_dirty()."]
+    #[doc = " The row's position relative to the top of the viewport (int32_t).\n  Viewport rows are 0 through rows - 1. Overscan rows above the\n  viewport are negative, and overscan rows below it start at rows.\n  Without overscan or a clip, this equals the y reported by\n  ghostty_render_state_row_iterator_next_dirty()."]
     pub const VIEWPORT_Y: Type = 6;
     #[doc = " The row's identity across updates (GhosttyRenderStateRowId). This\n  works with or without overscan. See \"Row Identity\" in the render\n  state overview."]
     pub const ID: Type = 7;
@@ -3711,11 +3739,13 @@ pub struct RenderStateRowCellsCopy {
     pub grapheme_bytes: *mut u8,
     pub grapheme_bytes_cap: usize,
     pub grapheme_bytes_len: usize,
+    #[doc = " GHOSTTY_RENDER_STATE_ROW_CELLS_COPY_* flag bits. A size that ends\n  before this field copies without flags."]
+    pub flags: u32,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of RenderStateRowCellsCopy"]
-        [::std::mem::size_of::<RenderStateRowCellsCopy>() - 104usize];
+        [::std::mem::size_of::<RenderStateRowCellsCopy>() - 112usize];
     ["Alignment of RenderStateRowCellsCopy"]
         [::std::mem::align_of::<RenderStateRowCellsCopy>() - 8usize];
     ["Offset of field: RenderStateRowCellsCopy::size"]
@@ -3744,6 +3774,8 @@ const _: () = {
         [::std::mem::offset_of!(RenderStateRowCellsCopy, grapheme_bytes_cap) - 88usize];
     ["Offset of field: RenderStateRowCellsCopy::grapheme_bytes_len"]
         [::std::mem::offset_of!(RenderStateRowCellsCopy, grapheme_bytes_len) - 96usize];
+    ["Offset of field: RenderStateRowCellsCopy::flags"]
+        [::std::mem::offset_of!(RenderStateRowCellsCopy, flags) - 104usize];
 };
 impl Default for RenderStateRowCellsCopy {
     fn default() -> Self {
@@ -3921,7 +3953,7 @@ unsafe extern "C" {
     ) -> Result::Type;
 }
 unsafe extern "C" {
-    #[doc = " Copy a column range of the current row into packed cells in one call.\n\n Copies the columns [x, x + len) of the row that populated `cells`,\n clamped to the row width, with styles and multi-codepoint graphemes as\n indexes into tables written alongside. A cell's style and text match\n GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_STYLE and _GRAPHEMES_UTF8; its\n colors resolve from the style and content tag through the render state\n palette the way _FG_COLOR and _BG_COLOR resolve them. The iterator\n position is not used or changed.\n\n          GHOSTTY_INVALID_VALUE)\n         buffer is short (the *_len fields hold the sizes needed)\n"]
+    #[doc = " Copy a column range of the current row into packed cells in one call.\n\n Copies the columns [x, x + len) of the row that populated `cells`,\n clamped to the row width (the clip width when a clip is set), and with\n GHOSTTY_RENDER_STATE_ROW_CELLS_COPY_TRIM in out->flags without the\n trailing default cells, with styles and multi-codepoint graphemes as\n indexes into tables written alongside. A cell's style and text match\n GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_STYLE and _GRAPHEMES_UTF8; its\n colors resolve from the style and content tag through the render state\n palette the way _FG_COLOR and _BG_COLOR resolve them. The iterator\n position is not used or changed.\n\n          GHOSTTY_INVALID_VALUE)\n         buffer is short (the *_len fields hold the sizes needed)\n"]
     pub fn ghostty_render_state_row_cells_copy(
         cells: RenderStateRowCells,
         x: u16,

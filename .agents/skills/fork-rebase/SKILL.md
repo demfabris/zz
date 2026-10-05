@@ -128,15 +128,21 @@ Current forks and why:
 ## Native Ghostty fork
 
 `libghostty-vt-sys/build.rs` fetches `demfabris/ghostty`. The published pin is
-`189df4a1f6403f5bdc349fe44d1d2809741a4c1d` on `zz-2026-10-02` (the one-call row cell copy for frame build), on
+`e482b03688ccc9eebd6304176aa85bd5d81f0bfa` on `zz-2026-10-04` (the render state clip
+`0ab7941c` and trimmed row copies), on `189df4a1f6403f5bdc349fe44d1d2809741a4c1d` from
+`zz-2026-10-02` (the one-call row cell copy for frame build), on
 `67351380b6dc30124938d809809ac0aa42813283` from `zz-2026-09-30`, based on copy snapshots
 `7823f65dd55fc9ff420d5eb5cae761cbd1995994` and trim fix `c39414175ca2aad564b74b3f52196355f2671774`, upstream base
 `6301810a48aaa3426887a4316668f18833a40138`. It adds owned active-screen C ABI snapshots,
-shared resident and compressed history backing, snapshot regression tests, and active-page
-copies sized to their used rows to the three existing signal-stack, spare-page and trim
-commits. The fast-forwards keep the earlier pins in `zz-2026-09-30` history. The safe wrapper's copy APIs live in published
-`demfabris/libghostty-rs` commit `f5f826018e290e776c8bc4e5969c562efe530846` on new branch
-`zz-2026-10-02` (row copies and the iteration lifetime fix on `8e40135f` from `zz-2026-09-30`), based on `359ef751c189540eafb9110b2de89ad95ce48fc3`.
+shared resident and compressed history backing, snapshot regression tests,
+active-page copies sized to their used rows, one-call row copies, clipped render
+state updates and trimmed row copies to the three existing signal-stack,
+spare-page and trim commits. The fast-forwards keep the earlier pins in their branch
+history. The safe wrapper's copy and clip APIs live in published
+`demfabris/libghostty-rs` commit `0db98a206681fd60c2b1a1719daf14049eda8c30` on new branch
+`zz-2026-10-04`, on `f5f826018e290e776c8bc4e5969c562efe530846` from `zz-2026-10-02` (row
+copies and the iteration lifetime fix on `8e40135f` from `zz-2026-09-30`), based on
+`359ef751c189540eafb9110b2de89ad95ce48fc3`.
 zz vendors only the sys snapshot, without native
 source rewriting or a safe-wrapper path patch.
 
@@ -144,10 +150,12 @@ Published branches retain these pins:
 
 | Fork | Branch | Pin |
 |---|---|---|
+| `demfabris/ghostty` | `zz-2026-10-04` | `e482b03688ccc9eebd6304176aa85bd5d81f0bfa`, render state clip `0ab7941cb98263423377627b8b17d8d090c504bd` and trimmed row copies |
+| `demfabris/libghostty-rs` | `zz-2026-10-04` | `0db98a206681fd60c2b1a1719daf14049eda8c30`, clip and trimmed copy API |
 | `demfabris/ghostty` | `zz-2026-10-02` | `189df4a1f6403f5bdc349fe44d1d2809741a4c1d`, row cell copy |
 | `demfabris/libghostty-rs` | `zz-2026-10-02` | `f5f826018e290e776c8bc4e5969c562efe530846`, row copies and iteration lifetimes |
 | `demfabris/ghostty` | `zz-2026-09-30` | `67351380b6dc30124938d809809ac0aa42813283`; copy snapshots `7823f65dd55fc9ff420d5eb5cae761cbd1995994` and trim fix `c39414175ca2aad564b74b3f52196355f2671774` remain in its history |
-| `demfabris/ghostty` | `zz-2026-09-29` | `713374af`, spare-page reuse |
+| `demfabris/ghostty` | `zz-2026-09-29` | `713374afee3d4890f14733877fb51d831ffc82ee`, spare-page reuse |
 | `demfabris/ghostty` | `zz-2026-09-25` | `6fce227c`, C ABI signal-stack option |
 | `demfabris/ghostty` | `codex/cabi-signal-stack` | `fa7986a9`, previous pin |
 | `demfabris/libghostty-rs` | `zz-2026-09-30` | `8e40135fb20e9ed91c37c374fe1d14570c386d06`, owned copy API |
@@ -165,13 +173,21 @@ published pin through a retained branch or tag, and push the new pin as a
 new dated branch (`zz-YYYY-MM-DD`); never force-push an existing one. When the
 upstream base is new to the fork, create the branch at the upstream commit
 with `gh api repos/demfabris/ghostty/git/refs` (the fork network already holds
-the objects) and push only the carried commit on top. Recheck that C ABI code does not create Zig-owned workers or
+the objects) and push only the carried commit on top. When the new commits sit
+on the current pin, push a local branch started at the pin under the new name;
+`gh api repos/demfabris/ghostty/branches` lists every branch tip, which shows
+the branch holding a pin. Recheck that C ABI code does not create Zig-owned workers or
 install a Zig signal stack. Publish the tested commit, update `GHOSTTY_REPO`
 and `GHOSTTY_COMMIT` in `build.rs`, and update the sys README, UPSTREAM record,
 and knowledge pages. No Cargo lock update is needed for a native-only change.
-A base move that changes the C headers also needs a safe wrapper that speaks
-the new API and bindings regenerated with the snapshot's `gen-bindings` tool;
-the 2026-09-25 bump records how in UPSTREAM.md.
+A base move or carried commit that changes the C headers also needs a safe
+wrapper that speaks the new API and bindings regenerated with the snapshot's
+`gen-bindings` tool, then `rustfmt --edition 2024` on `src/bindings.rs` (the
+tool's formatter output differs from the workspace's), copied into the wrapper
+fork's sys crate; the 2026-09-25 bump records how in UPSTREAM.md. A wrapper
+change is published the same way, as a new dated branch on
+`demfabris/libghostty-rs`, and the root `Cargo.toml` rev and `Cargo.lock` move
+with it.
 
 Validate the actual archive and daemon: exported C symbols, terminal tests,
 signal-handler/alternate-stack behavior, and a normal macOS bundle build with

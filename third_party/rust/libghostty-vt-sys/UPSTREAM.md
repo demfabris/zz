@@ -8,14 +8,15 @@ This directory is a source snapshot of `libghostty-vt-sys` from
 - Upstream crate version: `0.2.1` (no newer release exists; the stack is unreleased)
 - Upstream wrapper Ghostty pin: `56dbc4a768778753737a3b9cbe0a3f9b4e434553`
 - Upstream Ghostty base: `6301810a48aaa3426887a4316668f18833a40138` (main, 2026-09-25)
-- Published Ghostty pin: `189df4a1f6403f5bdc349fe44d1d2809741a4c1d` on `demfabris/ghostty` branch `zz-2026-10-02` (one commit, the row cell copy, on `67351380b6dc30124938d809809ac0aa42813283`), pinned in `build.rs`. `zz-2026-09-30` keeps `67351380`. The branch fast-forwards retain copy snapshots `7823f65dd55fc9ff420d5eb5cae761cbd1995994` and trim fix `c39414175ca2aad564b74b3f52196355f2671774` in its history.
-- Fork history: six commits on upstream: the C ABI signal-stack option (`6fce227c`, still on `zz-2026-09-25`), the PageList spare-page reuse (`713374af`: line-limit pruning keeps the last pruned pool page resident for the next grow instead of decommitting and refaulting it; `compress` releases it and trims the last page), the trim fix (`c3941417`: preserves live cell blocks after history erase), owned copy snapshots (`7823f65d`), copied active pages at their used size (`67351380`), and the one-call row cell copy (`189df4a1`, `ghostty_render_state_row_cells_copy`). `zz-2026-09-29` keeps `713374af`; the previous pin `fa7986a9` stays on `codex/cabi-signal-stack`
+- Published Ghostty pin: `e482b03688ccc9eebd6304176aa85bd5d81f0bfa` on `demfabris/ghostty` branch `zz-2026-10-04` (two commits, the render state clip `0ab7941cb98263423377627b8b17d8d090c504bd` and the trimmed row copy, on `189df4a1f6403f5bdc349fe44d1d2809741a4c1d`), pinned in `build.rs`. `zz-2026-10-02` keeps `189df4a1` (the one-call row cell copy, on `67351380b6dc30124938d809809ac0aa42813283`) and `zz-2026-09-30` keeps `67351380`. The branch fast-forwards retain copy snapshots `7823f65dd55fc9ff420d5eb5cae761cbd1995994` and trim fix `c39414175ca2aad564b74b3f52196355f2671774` in their history.
+- Fork history: eight commits on upstream: the C ABI signal-stack option (`6fce227c`, still on `zz-2026-09-25`), the PageList spare-page reuse (`713374af`: line-limit pruning keeps the last pruned pool page resident for the next grow instead of decommitting and refaulting it; `compress` releases it and trims the last page), the trim fix (`c3941417`: preserves live cell blocks after history erase), owned copy snapshots (`7823f65d`), copied active pages at their used size (`67351380`), the one-call row cell copy (`189df4a1`, `ghostty_render_state_row_cells_copy`), the render state clip (`0ab7941c`, `GHOSTTY_RENDER_STATE_OPTION_CLIP`) and trimmed row copies (`e482b036`, `GHOSTTY_RENDER_STATE_ROW_CELLS_COPY_TRIM`). `zz-2026-09-29` keeps `713374af`; the previous pin `fa7986a9` stays on `codex/cabi-signal-stack`
 - License: MIT OR Apache-2.0; the upstream MIT license is retained here.
 - Wrapper source: [`demfabris/libghostty-rs`](https://github.com/demfabris/libghostty-rs),
-  published commit `f5f826018e290e776c8bc4e5969c562efe530846` on new branch
-  `zz-2026-10-02` (row copies `d975339f` plus the row and cell iteration lifetime fix),
-  pinned in the workspace manifest. `8e40135f` stays on `zz-2026-09-30`. Its parent
-  `359ef751c189540eafb9110b2de89ad95ce48fc3` remains on `zz-2026-09-25`.
+  published commit `0db98a206681fd60c2b1a1719daf14049eda8c30` on new branch
+  `zz-2026-10-04` (the clip and trimmed copy API), pinned in the workspace manifest.
+  `f5f826018e290e776c8bc4e5969c562efe530846` (row copies `d975339f` plus the row and cell
+  iteration lifetime fix) stays on `zz-2026-10-02`, `8e40135f` on `zz-2026-09-30`. Its
+  parent `359ef751c189540eafb9110b2de89ad95ce48fc3` remains on `zz-2026-09-25`.
 - Local override: the workspace patches the git-sourced sys package to this adjacent
   snapshot. The safe wrapper comes from the dependency fork, with owned copy
   snapshots and bounded row references. zz does not vendor the safe wrapper.
@@ -32,7 +33,7 @@ overscan and row ids), so the wrapper at #99 builds unchanged and its 22 unit te
 tests, and 20 doctests pass against `6301810a` with bindings regenerated from its headers.
 
 The base wrapper commit lives on a PR branch that Uzaaft rebases, so the workspace fetches
-the copy API from the `demfabris/libghostty-rs` fork's `zz-2026-10-02` branch.
+the copy API from the `demfabris/libghostty-rs` fork's `zz-2026-10-04` branch.
 Branch `zz-2026-09-25` keeps the base commit reachable.
 Move back to upstream at the first libghostty-rs release that contains this stack (likely
 0.3.0), and change both the dependency URL and the `[patch]` key in `Cargo.toml`.
@@ -199,15 +200,49 @@ Wrapper commit `d975339f7144b0c57c178c0eeb1ea411a99b554e` exposes it as
 `CellIteration::copy_into` filling a reusable `CellsCopy`, pins its own sys crate to the native
 commit, and regenerates its bindings; its suite passes (31 unit tests, 19 doctests) with a test
 against the per-cell getters. This snapshot's `src/bindings.rs` is regenerated from the same
-headers (additive only). Both commits sit on new local branches `zz-2026-10-02`, on top of
-`67351380` and `8e40135` respectively, and are not published yet: the workspace manifest already
-names the wrapper commit, and `build.rs` keeps the published native pin until the native branch
-is pushed, so build with `GHOSTTY_SOURCE_DIR` pointing at the native commit until then. To
-publish: push both branches, set `GHOSTTY_COMMIT` to `189df4a1`, and update the pins above.
-Rebase note: the native change touches only `src/terminal/c/render.zig`, `main.zig`,
+headers (additive only). Both commits are published on branches `zz-2026-10-02`, on top of
+`67351380` and `8e40135` respectively; the iteration lifetime fix `f5f82601` followed on the
+wrapper branch. Rebase note: the native change touches only `src/terminal/c/render.zig`, `main.zig`,
 `types.zig`, `src/lib_vt.zig` and `include/ghostty/vt/render.h`, and the wrapper change only
 `render.rs` plus the regenerated sys bindings and pin, so both replay on any base that keeps the
 render state row cells API.
+
+## Render state clip and trimmed row copies
+
+A pane resized far past its clients' size (`resize-window -x 10000 -y 10000` with a 120x40
+client) made every frame update copy the whole viewport into the render state: about 70 ms
+and 800 MB resident at 10000x10000 on alienware, with `ghostty_render_state_row_cells_copy`
+another 24% of the frame. Ghostty's own resize, page allocation and reflow were about 0.1%.
+
+Native fork commit `0ab7941cb98263423377627b8b17d8d090c504bd` adds a clip to the render state:
+`GHOSTTY_RENDER_STATE_OPTION_CLIP` takes a `GhosttyRenderStateClip` of a first viewport row, a
+row count and a column count from the left edge (zero counts mean "to the edge"), and
+`GHOSTTY_RENDER_STATE_DATA_CLIP` reports what an update captured. An update copies only the
+clipped rows and columns; overscan is captured around the clipped rows. `ROWS`, `COLS`,
+`ROW_DATA_VIEWPORT_Y` and the cursor keep viewport coordinates, and the cursor is reported only
+inside the clip. A clip change forces a full redraw. The default clip is the whole viewport, so
+callers that never set it see no change. Its tests compare clipped states with the matching part
+of an unclipped state across the randomized incremental-update run, with and without overscan.
+
+Native fork commit `e482b03688ccc9eebd6304176aa85bd5d81f0bfa` appends `flags` to
+`GhosttyRenderStateRowCellsCopy`. With `GHOSTTY_RENDER_STATE_ROW_CELLS_COPY_TRIM` the copy stops
+after the last cell of the range that is not a default (all-zero) cell, found by a backward scan
+eight cells at a time, so the caller fills the blank tail itself. A struct size that ends before
+`flags` still copies, without flags, so callers built against `189df4a1` keep working.
+
+Neither change adds a symbol: the archive exports the same 206 `ghostty_*` symbols, and all 200
+generated function declarations resolve in a C client that links and runs. The full native
+suite passes (6525 passed, 52 skipped). This snapshot's `src/bindings.rs` is regenerated from
+the `e482b036` headers with the snapshot's `gen-bindings` tool (additive only).
+
+Wrapper commit `0db98a206681fd60c2b1a1719daf14049eda8c30` exposes them as
+`RenderState::set_clip`, `Snapshot::clip` with a `Clip { y, rows, cols }`, and
+`CellIteration::copy_trimmed_into`; `copy_into` keeps its behavior. It pins its own sys crate to
+`e482b036` with the same regenerated bindings; its suite passes (33 unit tests, 3 sys tests, 19
+doctests) with tests for the clipped rows, columns and cursor and for trimmed copies against
+full ones. Rebase note: the native change touches only `src/terminal/render.zig`,
+`src/terminal/c/render.zig`, `src/terminal/c/types.zig` and `include/ghostty/vt/render.h`, and
+the wrapper change only `render.rs` plus the sys bindings and pin.
 
 ## Earlier grid patches
 

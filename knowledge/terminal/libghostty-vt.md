@@ -4,26 +4,29 @@ title: libghostty-vt embedding
 description: How zz-terminal embeds libghostty-vt over a pinned Ghostty snapshot, including line-counted scrollback, terminal color-query replies, and single-worker-thread ownership.
 resource: crates/zz-terminal/src/session.rs
 tags: [libghostty, ghostty, vt, zig, worker-thread, mode-revision, kitty-graphics]
-timestamp: 2026-09-30T12:00:00-03:00
+timestamp: 2026-10-04T23:00:00-03:00
 ---
 
 # Overview
 
 `libghostty-vt` is the VT engine inside [`zz-terminal`](/crates/zz-terminal.md). The
 workspace consumes published `demfabris/libghostty-rs` commit
-`8e40135fb20e9ed91c37c374fe1d14570c386d06` on new branch `zz-2026-09-30`, with
-`default-features = false`. Its parent `359ef751c189540eafb9110b2de89ad95ce48fc3`
-remains on `zz-2026-09-25`. That base
+`0db98a206681fd60c2b1a1719daf14049eda8c30` on new branch `zz-2026-10-04`, with
+`default-features = false`. Its parents `f5f826018e290e776c8bc4e5969c562efe530846`
+(`zz-2026-10-02`, row copies) and `8e40135fb20e9ed91c37c374fe1d14570c386d06`
+(`zz-2026-09-30`, copy snapshots) stay published, and the base
+`359ef751c189540eafb9110b2de89ad95ce48fc3` remains on `zz-2026-09-25`. That base
 contains the stacked render-hold and resize-scrollback APIs needed by the current C ABI.
 The safe wrapper lives in its dependency fork. zz replaces only `libghostty-vt-sys` with
 the local snapshot documented in `third_party/rust/libghostty-vt-sys/UPSTREAM.md`.
-The published native pin is `67351380b6dc30124938d809809ac0aa42813283` on branch
-`zz-2026-09-30`, upstream base `6301810a48aaa3426887a4316668f18833a40138`. It carries five
+The published native pin is `e482b03688ccc9eebd6304176aa85bd5d81f0bfa` on branch
+`zz-2026-10-04`, upstream base `6301810a48aaa3426887a4316668f18833a40138`. It carries eight
 changes: the C ABI signal-stack option, spare-page reuse, the history-erase trim fix
-(`c3941417`), owned copy snapshots (`7823f65d`) and copied active pages at their used size.
-The branch fast-forwards retain the earlier pins in its history; `zz-2026-09-29`
-keeps the spare-page pin `713374af`. zz pins both published copy commits for ordinary
-fetched-source builds without source rewriting or a safe-wrapper path patch.
+(`c3941417`), owned copy snapshots (`7823f65d`), copied active pages at their used size
+(`67351380`), one-call row cell copies (`189df4a1`), the render state clip (`0ab7941c`) and
+trimmed row copies. The branch fast-forwards retain the earlier pins in their history;
+`zz-2026-09-29` keeps the spare-page pin `713374af`. zz pins both published commits for
+ordinary fetched-source builds without source rewriting or a safe-wrapper path patch.
 Spare-page reuse keeps a pruned pool page resident for the next grow. The trim fix preserves
 live cell blocks after history erase. The signal-stack option removes unused Zig TLS storage
 from ReleaseSafe dev and test builds. Copy snapshots share immutable history backing,
@@ -46,7 +49,7 @@ The worker uses these libghostty facilities (imports in `session.rs` and `sessio
 | Facility | Types used | Used for |
 | --- | --- | --- |
 | Terminal state | `Terminal<'alloc,'callbacks>`, `Screen`, `Mode` | VT parsing of PTY bytes, grid + scrollback, primary/alternate screens. |
-| Render extraction | `RenderState`, `RowIterator`, `CellIterator`, `CellsCopy`, `Dirty`, `CursorVisualStyle` | Walk dirty rows and copy each row's cells in one call (`copy_into`, fork commit `189df4a1`) into [`PackedCell`](/concepts/terminal-frame.md) frames. |
+| Render extraction | `RenderState`, `RowIterator`, `CellIterator`, `CellsCopy`, `Clip`, `Dirty`, `CursorVisualStyle` | Walk dirty rows and copy each row's cells in one call (`copy_into`, fork commit `189df4a1`) into [`PackedCell`](/concepts/terminal-frame.md) frames. The fork also offers `RenderState::set_clip` (`0ab7941c`), which limits an update to a range of viewport rows and the leftmost columns, and `copy_trimmed_into` (`e482b036`), which leaves out a row's trailing default cells. |
 | Cell semantics | `CellWide`, `CellSemanticContent`, `RowSemanticPrompt`, `TrackedGridRef`, `PointCoordinate` | Wide-glyph spacers, OSC 133 prompt/input/output marks, stable scroll-safe references. |
 | Key encoding | `key::Encoder`, `key::Event`, `key::Key`, `OptionAsAlt` | Encode [`KeyInput`](/terminal/interaction.md) to terminal bytes (Kitty keyboard aware). |
 | Mouse encoding | `mouse::Encoder`, `mouse::Event`, `EncoderSize` | Application mouse reporting when the app requests tracking. |

@@ -4,7 +4,7 @@ title: Toolchain and system prerequisites
 description: The exact toolchain versions and per-platform system libraries required to build zz, pinned by rust-toolchain.toml, mise.toml, and CI.
 resource: .github/workflows/ci.yml
 tags: [prerequisites, toolchain, setup, rust, zig, cmake, linux, macos, windows, pacman]
-timestamp: 2026-08-19T11:49:46-03:00
+timestamp: 2026-10-04T23:00:00-03:00
 ---
 
 # Overview
@@ -79,7 +79,7 @@ components = ["clippy", "rustfmt"]
 | `mise.toml` | Selects Zig 0.16.0 for raw local Cargo commands when mise is active |
 | `.zigversion` | Mirrors the Zig pin for compatible Zig-specific tooling |
 | `Cargo.toml` | `workspace.package.rust-version = "1.97"`; `libghostty-vt` pinned to a `Uzaaft/libghostty-rs` commit (fetched from the `demfabris/libghostty-rs` fork) plus the local `libghostty-vt-sys` patch |
-| `third_party/rust/libghostty-vt-sys/UPSTREAM.md` | Records the wrapper commit, Ghostty `67351380` fork pin (`zz-2026-09-30`) and upstream base, its five commits (signal stack, spare pages, history-erase trim, copy snapshots, used-size active page copies), generated bindings, and removal condition |
+| `third_party/rust/libghostty-vt-sys/UPSTREAM.md` | Records the wrapper commit, Ghostty `e482b036` fork pin (`zz-2026-10-04`) and upstream base, its eight commits (signal stack, spare pages, history-erase trim, copy snapshots, used-size active page copies, row cell copies, render state clip, trimmed row copies), generated bindings, and removal condition |
 | `.github/workflows/ci.yml` | Authoritative list of Linux system packages and the Zig setup action, run across `ubuntu-24.04`, `macos-15`, `windows-2025` |
 | `packaging/arch/PKGBUILD` | Native Arch package metadata and filesystem layout for the validated Linux bundle |
 

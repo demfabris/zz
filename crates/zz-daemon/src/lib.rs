@@ -377,8 +377,11 @@ fn shell_process(command: &str) -> Command {
 
 #[cfg(all(feature = "daemon", windows))]
 fn shell_process(command: &str) -> Command {
+    use std::os::windows::process::CommandExt as _;
     let mut process = Command::new("cmd");
-    process.args(["/D", "/S", "/C"]).arg(command);
+    process
+        .args(["/D", "/S", "/C"])
+        .raw_arg(format!("\"{command}\""));
     process
 }
 

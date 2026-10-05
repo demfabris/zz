@@ -236,6 +236,7 @@ fn bulk_images_count_inflight_reliable_frames() {
 struct BurstListener {
     accepted: std::sync::atomic::AtomicUsize,
     total: usize,
+    peers: Mutex<Vec<UnixStream>>,
 }
 
 impl TransportListener for BurstListener {
@@ -248,7 +249,8 @@ impl TransportListener for BurstListener {
             return Err(ErrorKind::WouldBlock.into());
         }
         self.accepted.fetch_add(1, Ordering::AcqRel);
-        let (stream, _) = UnixStream::pair()?;
+        let (stream, peer) = UnixStream::pair()?;
+        self.peers.lock().push(peer);
         Ok(stream)
     }
     fn raw_fd(&self) -> std::os::fd::RawFd {
@@ -276,6 +278,7 @@ fn accept_bursts_yield_and_resume_without_a_new_listener_edge() {
     let listener = BurstListener {
         accepted: std::sync::atomic::AtomicUsize::new(0),
         total: 65,
+        peers: Mutex::new(Vec::new()),
     };
     event_loop
         .accept_ready::<BurstTransport>(&listener, &shared)
@@ -284,12 +287,10 @@ fn accept_bursts_yield_and_resume_without_a_new_listener_edge() {
     assert!(event_loop.accept_again);
     event_loop.poll_ready().unwrap();
     assert!(event_loop.events.iter().any(|event| event.token() == WAKE));
-    let tokens = event_loop.connections.keys().copied().collect::<Vec<_>>();
-    for token in tokens {
-        event_loop.read_ready(token, &shared);
+    assert_eq!(event_loop.connections.len(), 32);
+    for token in event_loop.connections.keys().copied().collect::<Vec<_>>() {
+        event_loop.remove(token, &shared);
     }
-    event_loop.turn(&shared).unwrap();
-    assert!(event_loop.connections.is_empty());
     event_loop
         .accept_ready::<BurstTransport>(&listener, &shared)
         .unwrap();
@@ -311,6 +312,7 @@ fn stopping_prevents_further_accepts() {
     let listener = BurstListener {
         accepted: std::sync::atomic::AtomicUsize::new(0),
         total: 65,
+        peers: Mutex::new(Vec::new()),
     };
     shared.request_shutdown();
     event_loop.turn(&shared).unwrap();

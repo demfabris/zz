@@ -792,9 +792,15 @@ fn an_output_watcher_makes_every_sunk_frame_urgent() {
 #[test]
 fn the_loop_wake_waits_for_the_publish_and_skips_a_notified_one() {
     let fixture = Fixture::new(4115, "exec sleep 1000000");
-    let (client, mailbox) = fixture.client(9115);
-    let view = view_of(client);
+    let view = view_of(ClientId(9115));
     let pane = fixture.pane;
+    let pane_sink = PaneSink::new(
+        pane,
+        Arc::clone(&fixture.shared.terminal_frames),
+        fixture.terminal.output_wake(),
+    );
+    let mailbox = OutboundMailbox::new();
+    pane_sink.set_view(view, Some((Arc::clone(&mailbox), true)));
     let mut poll = mio::Poll::new().expect("poll");
     let waker = Arc::new(mio::Waker::new(poll.registry(), mio::Token(7)).expect("waker"));
     let owner = thread::spawn(|| thread::current().id())
@@ -809,24 +815,18 @@ fn the_loop_wake_waits_for_the_publish_and_skips_a_notified_one() {
     let base = blank();
     let generation = 1 << 54;
     let mut sunk = Vec::new();
-    assert!(
-        !fixture
-            .sink()
-            .deliver(&[(view, frame(&base, generation), Some(1))], &mut sunk)
-    );
+    assert!(!pane_sink.deliver(&[(view, frame(&base, generation), Some(1))], &mut sunk));
     assert_eq!(sunk, vec![view]);
     assert!(pending(&mailbox, pane).is_some());
     assert!(!woke());
-    fixture.sink().published(false);
+    pane_sink.published(false);
     assert!(woke());
     pop_event(&mailbox).expect("first frame");
 
     sunk.clear();
-    fixture
-        .sink()
-        .deliver(&[(view, frame(&base, generation + 1), Some(1))], &mut sunk);
+    pane_sink.deliver(&[(view, frame(&base, generation + 1), Some(1))], &mut sunk);
     assert_eq!(sunk, vec![view]);
-    fixture.sink().published(true);
+    pane_sink.published(true);
     assert!(!woke());
     mailbox.notify_one();
     assert!(woke());

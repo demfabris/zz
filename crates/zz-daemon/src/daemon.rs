@@ -57,7 +57,7 @@ mod loop_handoff;
 #[cfg(unix)]
 mod pipe_jobs;
 #[cfg(all(test, unix))]
-mod solo_tests;
+pub(crate) mod solo_tests;
 mod source_queue;
 pub(crate) mod status_jobs;
 mod terminal_reads;

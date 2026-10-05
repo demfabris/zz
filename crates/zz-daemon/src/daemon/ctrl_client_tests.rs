@@ -54,6 +54,11 @@ fn readiness_retains_partial_frames_and_resumes_blocking_receive() {
 #[test]
 fn readiness_drains_initial_pending_and_buffered_frames_before_eof() {
     use std::io::Write as _;
+    if !crate::daemon::solo_tests::rerun_alone(
+        "client::ctrl_client_tests::readiness_drains_initial_pending_and_buffered_frames_before_eof",
+    ) {
+        return;
+    }
     let (_directory, mut daemon, client) = readiness_pair();
     let messages: Vec<_> = ["first", "second", "third"]
         .map(|session| zz_protocol::ProtocolMessage::Attach {
@@ -162,6 +167,11 @@ fn readiness_rejects_invalid_lengths_before_reading_a_body() {
 #[test]
 fn readiness_buffered_decode_leaves_kernel_data_and_eof_for_the_readiness_read() {
     use std::io::Write as _;
+    if !crate::daemon::solo_tests::rerun_alone(
+        "client::ctrl_client_tests::readiness_buffered_decode_leaves_kernel_data_and_eof_for_the_readiness_read",
+    ) {
+        return;
+    }
     let (_directory, mut daemon, client) = readiness_pair();
     let message = zz_protocol::ProtocolMessage::Attach {
         session: "still in the socket".to_owned(),

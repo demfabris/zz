@@ -321,6 +321,12 @@ async fn rejects_authentication_commands_and_malformed_addresses() {
 
 #[tokio::test]
 async fn shutdown_closes_listener_active_connections_and_pending_handshakes() {
+    #[cfg(all(unix, feature = "daemon"))]
+    if !crate::daemon::solo_tests::rerun_alone(
+        "russh_socks::tests::shutdown_closes_listener_active_connections_and_pending_handshakes",
+    ) {
+        return;
+    }
     let mut fixture = Fixture::start().await;
     let mut pending = fixture.connect().await;
     pending.write_all(&[5]).await.unwrap();
@@ -356,11 +362,11 @@ async fn shutdown_closes_listener_active_connections_and_pending_handshakes() {
     echo.await.unwrap();
 }
 
-fn loopback_listeners() -> (std::net::TcpListener, std::net::TcpListener) {
+fn loopback_listeners(window: u16) -> (std::net::TcpListener, std::net::TcpListener) {
     static NEXT: AtomicU16 = AtomicU16::new(0);
     loop {
         let offset = u32::from(NEXT.fetch_add(1, Ordering::Relaxed)) + std::process::id();
-        let port = 20_000 + u16::try_from(offset % 12_000).unwrap();
+        let port = 20_000 + window * 2_400 + u16::try_from(offset % 2_400).unwrap();
         let Ok(ipv4) = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port)) else {
             continue;
         };
@@ -370,17 +376,23 @@ fn loopback_listeners() -> (std::net::TcpListener, std::net::TcpListener) {
     }
 }
 
-fn unused_loopback_port() -> u16 {
-    loopback_listeners().0.local_addr().unwrap().port()
+fn unused_loopback_port(window: u16) -> u16 {
+    loopback_listeners(window).0.local_addr().unwrap().port()
 }
 
 #[tokio::test]
 async fn loopback_forwards_http_and_tcp_in_both_families_with_original_port() {
+    #[cfg(all(unix, feature = "daemon"))]
+    if !crate::daemon::solo_tests::rerun_alone(
+        "russh_socks::tests::loopback_forwards_http_and_tcp_in_both_families_with_original_port",
+    ) {
+        return;
+    }
     for local_host in ["127.0.0.1", "::1"] {
         let (remote_port, echo) = echo_server("::1").await;
         let mut fixture = Fixture::start_with_loopback(Some(remote_port)).await;
         let mut forward = LoopbackForward::new(Arc::clone(&fixture.session));
-        let port = unused_loopback_port();
+        let port = unused_loopback_port(0);
         forward = std::thread::spawn(move || {
             forward.ensure(port).unwrap();
             forward.ensure(port).unwrap();
@@ -417,7 +429,7 @@ async fn loopback_forwards_http_and_tcp_in_both_families_with_original_port() {
     });
     let mut fixture = Fixture::start_with_loopback(Some(remote_port)).await;
     let mut forward = LoopbackForward::new(Arc::clone(&fixture.session));
-    let port = unused_loopback_port();
+    let port = unused_loopback_port(0);
     forward.ensure(port).unwrap();
     for host in ["127.0.0.1", "::1"] {
         let mut stream = TcpStream::connect((host, port)).await.unwrap();
@@ -450,6 +462,12 @@ async fn loopback_forwards_http_and_tcp_in_both_families_with_original_port() {
 
 #[tokio::test]
 async fn loopback_rejects_invalid_ports_and_conflicts_without_partial_listeners() {
+    #[cfg(all(unix, feature = "daemon"))]
+    if !crate::daemon::solo_tests::rerun_alone(
+        "russh_socks::tests::loopback_rejects_invalid_ports_and_conflicts_without_partial_listeners",
+    ) {
+        return;
+    }
     let fixture = Fixture::start().await;
     let mut forward = LoopbackForward::new(Arc::clone(&fixture.session));
     assert_eq!(
@@ -457,7 +475,7 @@ async fn loopback_rejects_invalid_ports_and_conflicts_without_partial_listeners(
         io::ErrorKind::InvalidInput
     );
     for host in ["127.0.0.1", "::1"] {
-        let (ipv4, ipv6) = loopback_listeners();
+        let (ipv4, ipv6) = loopback_listeners(1);
         let port = ipv4.local_addr().unwrap().port();
         let (occupied, other_host) = if host == "::1" {
             drop(ipv4);
@@ -479,9 +497,15 @@ async fn loopback_rejects_invalid_ports_and_conflicts_without_partial_listeners(
 
 #[tokio::test]
 async fn loopback_shutdown_closes_connections_and_reconnect_rebinds_same_port() {
+    #[cfg(all(unix, feature = "daemon"))]
+    if !crate::daemon::solo_tests::rerun_alone(
+        "russh_socks::tests::loopback_shutdown_closes_connections_and_reconnect_rebinds_same_port",
+    ) {
+        return;
+    }
     let (remote_port, echo) = echo_server("::1").await;
     let mut fixture = Fixture::start_with_loopback(Some(remote_port)).await;
-    let port = unused_loopback_port();
+    let port = unused_loopback_port(2);
     let mut forward = LoopbackForward::new(Arc::clone(&fixture.session));
     forward.ensure(port).unwrap();
     let mut active = TcpStream::connect((Ipv6Addr::LOCALHOST, port))
@@ -594,11 +618,17 @@ async fn assert_http(host: &str, port: u16, body: &str) {
 
 #[tokio::test]
 async fn ssh_inventory_prepares_page_and_api_ports_then_refreshes_without_dropping_streams() {
+    #[cfg(all(unix, feature = "daemon"))]
+    if !crate::daemon::solo_tests::rerun_alone(
+        "russh_socks::tests::ssh_inventory_prepares_page_and_api_ports_then_refreshes_without_dropping_streams",
+    ) {
+        return;
+    }
     let fixture = Fixture::start().await;
     let (page_remote, page_server) = http_server("page").await;
     let (api_remote, api_server) = http_server("api").await;
-    let page = unused_loopback_port();
-    let api = unused_loopback_port();
+    let page = unused_loopback_port(3);
+    let api = unused_loopback_port(3);
     {
         let mut inventory = fixture.inventory.lock();
         inventory.output = format!("lsof\nn[::1]:{page}\nn*:{api}\n").into_bytes();
@@ -612,7 +642,7 @@ async fn ssh_inventory_prepares_page_and_api_ports_then_refreshes_without_droppi
     api_server.await.unwrap();
     forward.ensure(page).unwrap();
     let (new_remote, echo) = echo_server("::1").await;
-    let new_port = unused_loopback_port();
+    let new_port = unused_loopback_port(3);
     {
         let mut inventory = fixture.inventory.lock();
         inventory.output = format!("ss\nLISTEN 0 128 [::1]:{new_port} [::]:*\n").into_bytes();
@@ -683,13 +713,19 @@ async fn ssh_inventory_bounds_output_and_time_and_recovers_after_failure() {
 
 #[tokio::test]
 async fn discovered_port_conflicts_are_isolated_with_room_for_forty_services() {
+    #[cfg(all(unix, feature = "daemon"))]
+    if !crate::daemon::solo_tests::rerun_alone(
+        "russh_socks::tests::discovered_port_conflicts_are_isolated_with_room_for_forty_services",
+    ) {
+        return;
+    }
     let fixture = Fixture::start().await;
     let occupied = std::net::TcpListener::bind((Ipv6Addr::LOCALHOST, 0)).unwrap();
     let conflict = occupied.local_addr().unwrap().port();
     let mut forward = LoopbackForward::new(Arc::clone(&fixture.session));
     let mut ports = BTreeSet::from([conflict]);
     while ports.len() < 41 {
-        ports.insert(unused_loopback_port());
+        ports.insert(unused_loopback_port(4));
     }
     use std::io::Write as _;
     let mut output = b"lsof\n".to_vec();

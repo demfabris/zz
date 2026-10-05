@@ -32,6 +32,11 @@ pub(super) fn registered(
 
 #[test]
 fn writer_completion_releases_registration_before_blocked_session_cleanup() {
+    if !super::solo_tests::rerun_alone(
+        "daemon::event_loop::shutdown_tests::writer_completion_releases_registration_before_blocked_session_cleanup",
+    ) {
+        return;
+    }
     for kind in [
         ClientKind::Control,
         ClientKind::Command,

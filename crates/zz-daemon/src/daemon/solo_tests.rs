@@ -1,6 +1,6 @@
 const SOLO_TEST: &str = "ZZ_SOLO_TEST";
 
-pub(super) fn rerun_alone(test_path: &str) -> bool {
+pub(crate) fn rerun_alone(test_path: &str) -> bool {
     if std::env::var_os(SOLO_TEST).is_some_and(|path| path == test_path) {
         return true;
     }

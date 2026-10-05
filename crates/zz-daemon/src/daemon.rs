@@ -106519,6 +106519,10 @@ bind - split-window -v -c "#{pane_current_path}"
             .join()
             .expect("foreground shell worker")
             .expect("foreground shell result");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !shared.stopping.load(Ordering::Acquire) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(1));
+        }
         assert!(shared.stopping.load(Ordering::Acquire));
         drop(client);
         connection

@@ -81,7 +81,14 @@ fn twenty_parked_agent_waits_add_zero_command_workers() {
             .wire_state(*pane)
             .is_some_and(|state| matches!(state.phase, zz_protocol::AgentConnectionPhase::Ready))
     }) {
-        assert!(Instant::now() < deadline);
+        assert!(
+            Instant::now() < deadline,
+            "agent panes never all reached Ready: {:?}",
+            panes
+                .iter()
+                .map(|pane| runtime.wire_state(*pane).map(|state| state.phase))
+                .collect::<Vec<_>>()
+        );
         thread::sleep(Duration::from_millis(2));
     }
     shared

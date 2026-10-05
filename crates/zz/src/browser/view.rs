@@ -708,6 +708,11 @@ impl BrowserView {
         let window_visibility = cx.observe_window_visibility(window, |view, visibility, _, cx| {
             view.set_window_visible(visibility.is_visible(), cx);
         });
+        let window_bounds = cx.observe_window_bounds(window, |view, window, cx| {
+            if let Some(bounds) = view.content_bounds {
+                view.update_content_bounds(bounds, window, cx);
+            }
+        });
 
         let error = controller.read(cx).startup_error();
         let recoverable = controller.read(cx).runtime_phase() == Some(RuntimePhase::Running);
@@ -805,6 +810,7 @@ impl BrowserView {
                 focus_in,
                 focus_out,
                 window_visibility,
+                window_bounds,
             ],
         }
     }
@@ -4879,6 +4885,71 @@ mod tests {
         });
         assert!(notifications.get() > 0);
         cx.update(|_, cx| assert_eq!(view.read(cx).title, "Hidden second"));
+    }
+
+    #[gpui::test]
+    fn window_moves_carry_the_screen_origin_to_the_browser(cx: &mut TestAppContext) {
+        cx.update(zz_ui::init);
+        let view_slot = Rc::new(RefCell::new(None));
+        let captured_view = Rc::clone(&view_slot);
+        let (_, cx) = cx.add_window_view(move |window, cx| {
+            let controller =
+                cx.new(|cx| BrowserController::new(Err(BrowserError::AlreadyShutdown), cx));
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(DaemonError::Thread("test client".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            let view = cx.new(|cx| {
+                BrowserView::new(
+                    PaneId(7),
+                    &BrowserDescriptor::single(
+                        "https://example.com/".to_owned(),
+                        zz_browser::DEFAULT_BROWSER_PROFILE.to_owned(),
+                    ),
+                    controller,
+                    mux,
+                    window,
+                    cx,
+                )
+            });
+            captured_view.replace(Some(view.clone()));
+            Root::new(view, window, cx)
+        });
+        let view = view_slot.borrow().clone().expect("captured browser view");
+        let screen_origin = |cx: &mut gpui::VisualTestContext| {
+            cx.update(|window, cx| {
+                let view = view.read(cx);
+                let content = view.content_bounds.expect("content bounds");
+                let window_origin = window.bounds().origin;
+                (
+                    (view.viewport.screen_x, view.viewport.screen_y),
+                    (
+                        rounded_coordinate(window_origin.x + content.origin.x * window.zoom()),
+                        rounded_coordinate(window_origin.y + content.origin.y * window.zoom()),
+                    ),
+                )
+            })
+        };
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.update_content_bounds(
+                    Bounds::new(point(px(12.), px(40.)), gpui::size(px(400.), px(300.))),
+                    window,
+                    cx,
+                );
+            });
+        });
+        let (viewport, expected) = screen_origin(cx);
+        assert_eq!(viewport, expected);
+
+        cx.simulate_move(point(px(300.), px(200.)));
+        cx.run_until_parked();
+        let (viewport, expected) = screen_origin(cx);
+        assert_eq!(viewport, expected);
+        assert_ne!(viewport, (12, 40));
     }
 
     #[gpui::test]

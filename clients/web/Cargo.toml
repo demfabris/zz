@@ -21,8 +21,8 @@ async-channel = "2.5.0"
 base64 = "0.23.1"
 chrono = "0.4.45"
 image = { version = "=0.25.10", default-features = false }
-gpui = { git = "https://github.com/demfabris/gpui", rev = "499a950c989431ccbbb4ac157faee4f8144217b4" }
-gpui_platform = { git = "https://github.com/demfabris/gpui", rev = "499a950c989431ccbbb4ac157faee4f8144217b4", default-features = false }
+gpui = { git = "https://github.com/demfabris/gpui", rev = "58e32a0aa761c4d7f0039029c2b23198feff63d1" }
+gpui_platform = { git = "https://github.com/demfabris/gpui", rev = "58e32a0aa761c4d7f0039029c2b23198feff63d1", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 zz-client = { path = "../../crates/zz-client" }
@@ -31,7 +31,7 @@ zz-terminal = { path = "../../crates/zz-terminal", default-features = false }
 zz-ui = { path = "../../crates/zz-ui", features = ["agent"] }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-gpui_platform = { git = "https://github.com/demfabris/gpui", rev = "499a950c989431ccbbb4ac157faee4f8144217b4", default-features = false, features = ["font-kit", "wayland", "x11"] }
+gpui_platform = { git = "https://github.com/demfabris/gpui", rev = "58e32a0aa761c4d7f0039029c2b23198feff63d1", default-features = false, features = ["font-kit", "wayland", "x11"] }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 js-sys = "0.3"
@@ -40,7 +40,7 @@ wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = ["BinaryType", "Blob", "Clipboard", "CloseEvent", "Document", "Element", "ErrorEvent", "Event", "File", "FileList", "HtmlElement", "HtmlInputElement", "Location", "MessageEvent", "Navigator", "Node", "Storage", "WebSocket", "Window"] }
 
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
-gpui = { git = "https://github.com/demfabris/gpui", rev = "499a950c989431ccbbb4ac157faee4f8144217b4", features = ["test-support"] }
+gpui = { git = "https://github.com/demfabris/gpui", rev = "58e32a0aa761c4d7f0039029c2b23198feff63d1", features = ["test-support"] }
 
 [lints.rust]
 unsafe_code = "deny"

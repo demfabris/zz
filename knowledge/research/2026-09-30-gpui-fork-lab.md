@@ -10,7 +10,7 @@ tags:
 - linux
 - macos
 - hot-reload
-timestamp: 2026-10-02T06:00:00Z
+timestamp: 2026-10-05T00:00:00Z
 ---
 
 # Scope
@@ -310,3 +310,35 @@ Risks:
   renderer runs only in tests. Not measured.
 - **Hot reload on macOS**: not attempted. dioxus-cli 0.7.10 is not installed here (`dx` on this
   PATH is another tool), and the bundle, CEF framework and codesigning questions stand.
+
+# Fork sweep, 2026-10-05
+
+A web sweep of GPUI forks, apps that patch GPUI, and unmerged zed PRs (three `agy` research
+lanes) found mostly what this lab had already judged: retained mode, window composition and the
+gpui-ce MSAA fix. What was new since 09-30 went through one implementation lane each on
+`demfabris/gpui`, a failing-first test per fix, and a six-way A/B with `bench/gpui/frames.py`
+(profiling bundles, three repeats, base `499a950c98`). The window sat on the secondary display
+(`--bounds=-2600,80,1280,900`) because macOS stops drawing a covered window: an earlier attempt
+on the main display, with the machine in use, drew 0 frames in most windows. Run-to-run spread
+was about 10% on main-thread CPU with the machine in use, so only large effects count.
+
+| Change | Source | In zz | Outcome |
+| --- | --- | --- | --- |
+| Redraw on window moves only when metrics or hovered hitboxes change | makekosmos/imago (reimplemented) | 120 scripted moves: 121 to 124 frames on base, 15 after | Carried |
+| Track the pointer position from MouseExited | makekosmos/imago (reimplemented) | stale hover after the pointer left, reproduced in a test | Carried |
+| Skip the focus handle scan when no handle was released | XeTK/zed `531f25c3` | 100 notifies with 1,000 handles: 47.9 to 4.0 us per flush; frames.py flat | Carried |
+| Bound notifications per entity within one effect flush | slgobinath/bench `b554d5e8` | notify cycle hung forever on base, ends in 0.01 s | Carried |
+| Round device pixel canvas sizes in gpui_web | zed PR #63536 (closed, never fixed upstream) | N/N+1 flip at fractional DPR, reproduced in a test | Carried |
+| Keep fractional scale on wl_compositor v5 | zed PR #65038 | test only; GNOME and KDE advertise v6 | Carried |
+| Keep the Wayland IME off while a GPUI chord is pending | zed PR #64597 | test only; no IME on alienware | Carried |
+| Skip presenting frames whose scene matches the screen | zed PR #62455 (present-skip part) | 0 to 8 of about 3,650 frames skipped per scenario; costs a comparison on every frame | Rejected, branch `lab/present-skip` |
+| Assemble number-only lines from digit glyphs | longbridge/gpui-fast #21 | 85 to 90% cheaper per number line, but shape calls identical in every scenario: zz rarely shapes number-only lines | Parked, `lab/numbers` |
+| Allocate path textures on the first frame with paths (Metal, DirectX) | nnayz/zeus, mirrors `0efb4c1` | no frame drew a path, yet resident memory is identical: Apple GPUs never commit pages of an untouched texture | Parked until measured on Windows, `lab/metal-paths` |
+| Demand-driven frames and chord IME on Windows | zed PRs #63182, #64597 | type-checked only, win-desktop off | Parked, `lab/windows` |
+| Skip software Vulkan ICDs on Linux | zed PR #63346 | alienware has only the NVIDIA ICD | Not committed |
+
+Carried commits are on `demfabris/gpui` main at `53319f1ee9`. The move fix means a pure window
+move no longer repaints, so zz's browser view now refreshes CEF's screen origin from
+`observe_window_bounds` instead of prepaint. GPUI chords are not zz's prefix: zz handles its
+prefix in the daemon key tables, so the IME fixes help zz only if its terminal view stops
+preferring IME input while a prefix is pending.

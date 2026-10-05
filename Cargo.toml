@@ -51,9 +51,9 @@ filedescriptor = "0.8.3"
 env_logger = "0.11.11"
 foldhash = "0.2.0"
 futures-lite = "2.6.1"
-gpui = { git = "https://github.com/demfabris/gpui", rev = "499a950c989431ccbbb4ac157faee4f8144217b4" }
-gpui_platform = { git = "https://github.com/demfabris/gpui", rev = "499a950c989431ccbbb4ac157faee4f8144217b4", default-features = false, features = ["font-kit", "wayland", "x11"] }
-gpui_wgpu = { git = "https://github.com/demfabris/gpui", rev = "499a950c989431ccbbb4ac157faee4f8144217b4" }
+gpui = { git = "https://github.com/demfabris/gpui", rev = "58e32a0aa761c4d7f0039029c2b23198feff63d1" }
+gpui_platform = { git = "https://github.com/demfabris/gpui", rev = "58e32a0aa761c4d7f0039029c2b23198feff63d1", default-features = false, features = ["font-kit", "wayland", "x11"] }
+gpui_wgpu = { git = "https://github.com/demfabris/gpui", rev = "58e32a0aa761c4d7f0039029c2b23198feff63d1" }
 getrandom = "0.4.3"
 ignore = "0.4.33"
 image = { version = "=0.25.10", default-features = false }

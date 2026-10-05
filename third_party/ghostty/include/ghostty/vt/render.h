@@ -162,6 +162,33 @@ extern "C" {
  * }
  * @endcode
  *
+ * ## Clip
+ *
+ * A renderer that draws only part of a very large viewport, such as a
+ * client showing the top left corner of a bigger terminal, can capture
+ * just that part. Set GHOSTTY_RENDER_STATE_OPTION_CLIP to a range of
+ * viewport rows and a number of columns counted from the left edge. Rows
+ * and columns outside the clip are not copied, so an update costs what
+ * the clip holds rather than what the viewport holds.
+ *
+ * The row iterator then visits the clipped rows (and any overscan rows
+ * around them) and each row holds the clipped columns.
+ * GHOSTTY_RENDER_STATE_ROW_DATA_VIEWPORT_Y and the cursor position keep
+ * their viewport coordinates. The cursor is only reported when it is
+ * inside the clip. GHOSTTY_RENDER_STATE_DATA_ROWS and _COLS still report
+ * the size of the whole viewport. After an update,
+ * GHOSTTY_RENDER_STATE_DATA_CLIP reports what was captured: the request
+ * limited to the viewport, with zero counts replaced by the rows and
+ * columns they stand for. A clip always captures at least one row and
+ * one column.
+ *
+ * @code{.c}
+ * // Draw viewport rows 10 through 49, 120 columns wide.
+ * GhosttyRenderStateClip clip = { .y = 10, .rows = 40, .cols = 120 };
+ * ghostty_render_state_set(state, GHOSTTY_RENDER_STATE_OPTION_CLIP, &clip);
+ * ghostty_render_state_update(state, terminal);
+ * @endcode
+ *
  * ## Row Identity
  *
  * Every row has an id (GHOSTTY_RENDER_STATE_ROW_DATA_ID) that stays with
@@ -281,6 +308,30 @@ typedef struct {
 } GhosttyRenderStateOverscan;
 
 /**
+ * A part of the viewport: a range of rows and the leftmost columns of
+ * each.
+ *
+ * This is used both to request a clip with
+ * GHOSTTY_RENDER_STATE_OPTION_CLIP and to report what an update captured
+ * with GHOSTTY_RENDER_STATE_DATA_CLIP. See "Clip" in the render state
+ * overview.
+ *
+ * @ingroup render
+ */
+typedef struct {
+  /** The first viewport row. */
+  uint16_t y;
+
+  /** The number of rows starting at y. In a request, zero means every
+   *  row from y to the bottom of the viewport. */
+  uint16_t rows;
+
+  /** The number of columns from the left edge. In a request, zero means
+   *  every column. */
+  uint16_t cols;
+} GhosttyRenderStateClip;
+
+/**
  * The identity of a row across render state updates.
  *
  * Treat this value as opaque. Two ids are the same when both words are
@@ -314,7 +365,7 @@ typedef enum GHOSTTY_ENUM_TYPED {
   GHOSTTY_RENDER_STATE_DATA_COLS = 1,
 
   /** Viewport height in cells (uint16_t). This does not include
-   *  overscan rows. */
+   *  overscan rows and is not limited by a clip. */
   GHOSTTY_RENDER_STATE_DATA_ROWS = 2,
 
   /** Current dirty state (GhosttyRenderStateDirty). */
@@ -327,7 +378,8 @@ typedef enum GHOSTTY_ENUM_TYPED {
    *
    *  The iterator visits every row the last update captured, from top
    *  to bottom. This is exactly the viewport unless overscan was
-   *  requested with GHOSTTY_RENDER_STATE_OPTION_OVERSCAN.
+   *  requested with GHOSTTY_RENDER_STATE_OPTION_OVERSCAN or a clip with
+   *  GHOSTTY_RENDER_STATE_OPTION_CLIP.
    *  */
   GHOSTTY_RENDER_STATE_DATA_ROW_ITERATOR = 4,
 
@@ -360,8 +412,9 @@ typedef enum GHOSTTY_ENUM_TYPED {
   /** Whether the cursor is at a password input field (bool). */
   GHOSTTY_RENDER_STATE_DATA_CURSOR_PASSWORD_INPUT = 13,
 
-  /** Whether the cursor is visible within the viewport (bool).
-   *  If false, the cursor viewport position values are undefined. */
+  /** Whether the cursor is visible within the viewport, and within the
+   *  clip if one is set (bool). If false, the cursor viewport position
+   *  values are undefined. */
   GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_HAS_VALUE = 14,
 
   /** Cursor viewport x position in cells (uint16_t).
@@ -396,6 +449,17 @@ typedef enum GHOSTTY_ENUM_TYPED {
    *  The next update uses this request. Both sides are zero if it was
    *  never set. */
   GHOSTTY_RENDER_STATE_DATA_OVERSCAN_REQUEST = 21,
+
+  /** The part of the viewport the last update captured
+   *  (GhosttyRenderStateClip). This is the request limited to the
+   *  viewport, with zero counts replaced by the rows and columns they
+   *  stand for, so without a request it is the whole viewport. */
+  GHOSTTY_RENDER_STATE_DATA_CLIP = 22,
+
+  /** The clip request most recently set with
+   *  GHOSTTY_RENDER_STATE_OPTION_CLIP (GhosttyRenderStateClip). The next
+   *  update uses this request. Every field is zero if it was never set. */
+  GHOSTTY_RENDER_STATE_DATA_CLIP_REQUEST = 23,
   GHOSTTY_RENDER_STATE_DATA_MAX_VALUE = GHOSTTY_ENUM_MAX_VALUE,
 } GhosttyRenderStateData;
 
@@ -416,6 +480,14 @@ typedef enum GHOSTTY_ENUM_TYPED {
    *  redraw on the update after a change. See "Overscan" in the render
    *  state overview. */
   GHOSTTY_RENDER_STATE_OPTION_OVERSCAN = 1,
+
+  /** Capture only part of the viewport (GhosttyRenderStateClip). The
+   *  request takes effect on the next update and stays in effect until
+   *  it is changed. The default of all zeros captures the whole viewport.
+   *  The rows of the last update can still be read after changing the
+   *  request. Expect a full redraw on the update after a change. See
+   *  "Clip" in the render state overview. */
+  GHOSTTY_RENDER_STATE_OPTION_CLIP = 2,
   GHOSTTY_RENDER_STATE_OPTION_MAX_VALUE = GHOSTTY_ENUM_MAX_VALUE,
 } GhosttyRenderStateOption;
 
@@ -445,7 +517,8 @@ typedef enum GHOSTTY_ENUM_TYPED {
 
   /** A borrowed view of the raw cell values for the current row
    *  (GhosttyCellsView). One value per column, identical to querying
-   *  GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_RAW for each cell. The view
+   *  GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_RAW for each cell. With a clip,
+   *  there is one value per clipped column. The view
    *  is only valid as long as the underlying render state is not
    *  updated; it is unsafe to use after updating the render state.
    *
@@ -462,7 +535,7 @@ typedef enum GHOSTTY_ENUM_TYPED {
   /** The row's position relative to the top of the viewport (int32_t).
    *  Viewport rows are 0 through rows - 1. Overscan rows above the
    *  viewport are negative, and overscan rows below it start at rows.
-   *  Without overscan, this equals the y reported by
+   *  Without overscan or a clip, this equals the y reported by
    *  ghostty_render_state_row_iterator_next_dirty(). */
   GHOSTTY_RENDER_STATE_ROW_DATA_VIEWPORT_Y = 6,
 
@@ -1184,7 +1257,8 @@ GHOSTTY_API GhosttyResult ghostty_render_state_row_cells_get_multi(
  * Copy a column range of the current row into packed cells in one call.
  *
  * Copies the columns [x, x + len) of the row that populated `cells`,
- * clamped to the row width, with styles and multi-codepoint graphemes as
+ * clamped to the row width (the clip width when a clip is set), with
+ * styles and multi-codepoint graphemes as
  * indexes into tables written alongside. A cell's style and text match
  * GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_STYLE and _GRAPHEMES_UTF8; its
  * colors resolve from the style and content tag through the render state

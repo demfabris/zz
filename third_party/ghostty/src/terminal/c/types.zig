@@ -202,6 +202,7 @@ const type_decls = [_]TypeDecl{
     .initUnion("GhosttyPointValue", point.Point.CValue, point.Point.C),
     .initStruct("GhosttyReader", io.Reader),
     .initStruct("GhosttyRenderStateCell", render.CopiedCell),
+    .initStruct("GhosttyRenderStateClip", render.Clip),
     .initStruct("GhosttyRenderStateColors", render.Colors),
     .initStruct("GhosttyRenderStateCursor", render.Cursor),
     .initStruct("GhosttyRenderStateGrapheme", render.CopiedGrapheme),
@@ -942,6 +943,28 @@ test "manifest describes render state overscan types" {
     const option_values = manifest_types.get("GhosttyRenderStateOption").?.object
         .get("values").?.object;
     try std.testing.expectEqual(@as(i64, 1), option_values.get("OVERSCAN").?.integer);
+}
+
+test "manifest describes render state clip types" {
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json, .{});
+    defer parsed.deinit();
+    const manifest_types = parsed.value.object.get("types").?.object;
+
+    const clip = manifest_types.get("GhosttyRenderStateClip").?.object;
+    try std.testing.expectEqual(@as(i64, 6), clip.get("size").?.integer);
+    const clip_fields = clip.get("fields").?.object;
+    try std.testing.expectEqual(@as(i64, 0), clip_fields.get("y").?.object.get("offset").?.integer);
+    try std.testing.expectEqual(@as(i64, 2), clip_fields.get("rows").?.object.get("offset").?.integer);
+    try std.testing.expectEqual(@as(i64, 4), clip_fields.get("cols").?.object.get("offset").?.integer);
+
+    const data_values = manifest_types.get("GhosttyRenderStateData").?.object
+        .get("values").?.object;
+    try std.testing.expectEqual(@as(i64, 22), data_values.get("CLIP").?.integer);
+    try std.testing.expectEqual(@as(i64, 23), data_values.get("CLIP_REQUEST").?.integer);
+
+    const option_values = manifest_types.get("GhosttyRenderStateOption").?.object
+        .get("values").?.object;
+    try std.testing.expectEqual(@as(i64, 2), option_values.get("CLIP").?.integer);
 }
 
 test "manifest describes the complete packed cell layout" {

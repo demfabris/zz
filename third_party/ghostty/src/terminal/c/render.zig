@@ -31,10 +31,15 @@ const RenderStateWrapper = struct {
     /// reads at the wrong entries.
     overscan_request: renderpkg.RenderState.Overscan = .{},
 
+    /// The clip request set through the C API, applied like
+    /// `overscan_request` and for the same reason.
+    clip_request: renderpkg.RenderState.Clip = .{},
+
     /// Apply any pending option changes to the render state. Called at
     /// the start of every update.
     fn applyOptions(self: *RenderStateWrapper) void {
         self.state.overscan_request = self.overscan_request;
+        self.state.clip_request = self.clip_request;
     }
 };
 
@@ -67,7 +72,7 @@ const RowIteratorWrapper = struct {
 
     /// The viewport y of the first row in the slices. This is the
     /// negated count of overscan rows captured above the viewport, or
-    /// zero without overscan.
+    /// zero without overscan, offset by the first row of any clip.
     viewport_y_base: i32,
 
     /// The global dirty state from the render state that populated this
@@ -128,6 +133,25 @@ pub const Overscan = extern struct {
 
     fn init(v: renderpkg.RenderState.Overscan) Overscan {
         return .{ .above = v.above, .below = v.below };
+    }
+};
+
+/// C: GhosttyRenderStateClip
+///
+/// This uses `u16` rather than `size.CellCountInt` so that the C layout
+/// stays fixed even if the Zig type changes.
+pub const Clip = extern struct {
+    /// The first viewport row.
+    y: u16 = 0,
+
+    /// The number of rows starting at `y`.
+    rows: u16 = 0,
+
+    /// The number of columns from the left edge.
+    cols: u16 = 0,
+
+    fn init(v: renderpkg.RenderState.Clip) Clip {
+        return .{ .y = v.y, .rows = v.rows, .cols = v.cols };
     }
 };
 
@@ -200,6 +224,8 @@ pub const Data = enum(c_int) {
     colors = 19,
     overscan = 20,
     overscan_request = 21,
+    clip = 22,
+    clip_request = 23,
 
     /// Output type expected for querying the data of the given kind.
     pub fn OutType(comptime self: Data) type {
@@ -218,6 +244,7 @@ pub const Data = enum(c_int) {
             .cursor => Cursor,
             .colors => Colors,
             .overscan, .overscan_request => Overscan,
+            .clip, .clip_request => Clip,
         };
     }
 };
@@ -226,12 +253,14 @@ pub const Data = enum(c_int) {
 pub const SetOption = enum(c_int) {
     dirty = 0,
     overscan = 1,
+    clip = 2,
 
     /// Input type expected for setting the option.
     pub fn InType(comptime self: SetOption) type {
         return switch (self) {
             .dirty => Dirty,
             .overscan => Overscan,
+            .clip => Clip,
         };
     }
 };
@@ -404,7 +433,8 @@ fn getTyped(
                 .serials = row_data.items(.serial)[range.start..range.end],
                 .state_dirty = &state.state.dirty,
                 .palette = &state.state.colors.palette,
-                .viewport_y_base = -@as(i32, state.state.overscan.above),
+                .viewport_y_base = @as(i32, state.state.clip.y) -
+                    @as(i32, state.state.overscan.above),
             };
         },
         .color_background => out.* = state.state.colors.background.cval(),
@@ -436,6 +466,8 @@ fn getTyped(
         .colors => return writeColors(state, out),
         .overscan => out.* = .init(state.state.overscan),
         .overscan_request => out.* = .init(state.overscan_request),
+        .clip => out.* = .init(state.state.clip),
+        .clip_request => out.* = .init(state.clip_request),
     }
 
     return .success;
@@ -475,6 +507,11 @@ fn setTyped(
         .overscan => state.overscan_request = .{
             .above = value.above,
             .below = value.below,
+        },
+        .clip => state.clip_request = .{
+            .y = value.y,
+            .rows = value.rows,
+            .cols = value.cols,
         },
     }
 
@@ -2298,6 +2335,103 @@ test "render: row cells copy reports short buffers and ranges" {
     try testing.expectEqual(Result.invalid_value, row_cells_copy(cells, 9, 1, &tail));
     try testing.expectEqual(Result.invalid_value, row_cells_copy(null, 0, 1, &tail));
     try testing.expectEqual(Result.invalid_value, row_cells_copy(cells, 0, 1, null));
+}
+
+test "render: clip limits rows, columns and the cursor" {
+    var terminal: terminal_c.Terminal = null;
+    try testing.expectEqual(Result.success, terminal_c.new(
+        &lib.alloc.test_allocator,
+        &terminal,
+        10,
+        6,
+    ));
+    defer terminal_c.free(terminal);
+
+    const input = "r0\r\nr1\r\nr2\r\nr3\r\nr4\r\nr5";
+    terminal_c.vt_write(terminal, input, input.len);
+
+    var state: RenderState = null;
+    try testing.expectEqual(Result.success, new(&lib.alloc.test_allocator, &state));
+    defer free(state);
+
+    var out: Clip = .{};
+    try testing.expectEqual(Result.success, get(state, .clip_request, @ptrCast(&out)));
+    try testing.expectEqual(Clip{}, out);
+    try testing.expectEqual(Result.success, update(state, terminal));
+    try testing.expectEqual(Result.success, get(state, .clip, @ptrCast(&out)));
+    try testing.expectEqual(Clip{ .y = 0, .rows = 6, .cols = 10 }, out);
+
+    const req: Clip = .{ .y = 2, .rows = 3, .cols = 4 };
+    try testing.expectEqual(Result.success, set(state, .clip, @ptrCast(&req)));
+    try testing.expectEqual(Result.success, get(state, .clip_request, @ptrCast(&out)));
+    try testing.expectEqual(req, out);
+
+    // The request applies on the next update.
+    try testing.expectEqual(Result.success, get(state, .clip, @ptrCast(&out)));
+    try testing.expectEqual(Clip{ .y = 0, .rows = 6, .cols = 10 }, out);
+    try testing.expectEqual(Result.success, update(state, terminal));
+    try testing.expectEqual(Result.success, get(state, .clip, @ptrCast(&out)));
+    try testing.expectEqual(req, out);
+
+    var rows: size.CellCountInt = 0;
+    var cols: size.CellCountInt = 0;
+    try testing.expectEqual(Result.success, get(state, .rows, @ptrCast(&rows)));
+    try testing.expectEqual(Result.success, get(state, .cols, @ptrCast(&cols)));
+    try testing.expectEqual(@as(size.CellCountInt, 6), rows);
+    try testing.expectEqual(@as(size.CellCountInt, 10), cols);
+
+    // The cursor is on row 5, below the clip.
+    var has_cursor = true;
+    try testing.expectEqual(Result.success, get(state, .cursor_viewport_has_value, @ptrCast(&has_cursor)));
+    try testing.expect(!has_cursor);
+
+    var it: RowIterator = null;
+    try testing.expectEqual(Result.success, row_iterator_new(&lib.alloc.test_allocator, &it));
+    defer row_iterator_free(it);
+    var cells: RowCells = null;
+    try testing.expectEqual(Result.success, row_cells_new(&lib.alloc.test_allocator, &cells));
+    defer row_cells_free(cells);
+    try testing.expectEqual(Result.success, get(state, .row_iterator, @ptrCast(&it)));
+
+    var copied: [10]CopiedCell = undefined;
+    var styles: [11]style_c.Style = undefined;
+    var n: usize = 0;
+    while (row_iterator_next(it)) : (n += 1) {
+        var vy: i32 = undefined;
+        try testing.expectEqual(Result.success, row_get(it, .viewport_y, @ptrCast(&vy)));
+        try testing.expectEqual(@as(i32, @intCast(n + 2)), vy);
+
+        var view: cell_c.CellsView = undefined;
+        try testing.expectEqual(Result.success, row_get(it, .cells_raw, @ptrCast(&view)));
+        try testing.expectEqual(@as(usize, 4), view.len);
+
+        try testing.expectEqual(Result.success, row_get(it, .cells, @ptrCast(&cells)));
+        var copy: RowCellsCopy = .{
+            .cells = &copied,
+            .cells_cap = copied.len,
+            .styles = &styles,
+            .styles_cap = styles.len,
+        };
+        try testing.expectEqual(Result.success, row_cells_copy(cells, 0, 10, &copy));
+        try testing.expectEqual(@as(usize, 4), copy.cells_len);
+        try testing.expectEqual(@as(u32, 'r'), copied[0].content);
+        try testing.expectEqual(@as(u32, '0') + @as(u32, @intCast(n + 2)), copied[1].content);
+        try testing.expectEqual(Result.invalid_value, row_cells_select(cells, 4));
+    }
+    try testing.expectEqual(@as(usize, 3), n);
+
+    // A clip that holds the cursor reports it in viewport coordinates.
+    const bottom: Clip = .{ .y = 4 };
+    try testing.expectEqual(Result.success, set(state, .clip, @ptrCast(&bottom)));
+    try testing.expectEqual(Result.success, update(state, terminal));
+    try testing.expectEqual(Result.success, get(state, .clip, @ptrCast(&out)));
+    try testing.expectEqual(Clip{ .y = 4, .rows = 2, .cols = 10 }, out);
+    var cursor_y: size.CellCountInt = 0;
+    try testing.expectEqual(Result.success, get(state, .cursor_viewport_y, @ptrCast(&cursor_y)));
+    try testing.expectEqual(@as(size.CellCountInt, 5), cursor_y);
+
+    try testing.expectEqual(Result.invalid_value, set(state, .clip, null));
+    try testing.expectEqual(Result.invalid_value, get(state, .clip, null));
 }
 
 test "render: row iterator next" {

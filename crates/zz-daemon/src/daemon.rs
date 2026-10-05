@@ -52191,6 +52191,16 @@ fn source_working_directory_glob_prefix(path: &Path) -> PathBuf {
     PathBuf::from(glob::Pattern::escape(path.to_string_lossy().as_ref()))
 }
 
+#[cfg(test)]
+fn literal_directory_name(prefix: &str) -> String {
+    let specials = if cfg!(windows) {
+        "[literal]"
+    } else {
+        "[literal]*?"
+    };
+    format!("{prefix} {specials} with spaces")
+}
+
 fn resolve_source_path(path: &RawText, working_directory: Option<&Path>) -> PathBuf {
     let path = PathBuf::from(path.to_os_string());
     if path.is_absolute() {
@@ -64912,7 +64922,7 @@ mod tests {
     #[test]
     fn nested_source_replay_keeps_the_explicit_client_base() {
         let directory = tempfile::tempdir().expect("temporary directory");
-        let client_base = directory.path().join("client cwd [literal]*? with spaces");
+        let client_base = directory.path().join(literal_directory_name("client cwd"));
         let entry_directory = client_base.join("a");
         fs::create_dir_all(&entry_directory).expect("nested source directory");
         fs::write(
@@ -64962,9 +64972,9 @@ mod tests {
     #[test]
     fn attached_source_file_uses_selected_session_cwd() {
         let directory = tempfile::tempdir().expect("temporary directory");
-        let command_cwd = directory.path().join("command cwd [literal]*? with spaces");
-        let session_cwd = directory.path().join("session cwd [literal]*? with spaces");
-        let target_cwd = directory.path().join("target cwd [literal]*? with spaces");
+        let command_cwd = directory.path().join(literal_directory_name("command cwd"));
+        let session_cwd = directory.path().join(literal_directory_name("session cwd"));
+        let target_cwd = directory.path().join(literal_directory_name("target cwd"));
         for cwd in [&command_cwd, &session_cwd, &target_cwd] {
             fs::create_dir_all(cwd).expect("source cwd");
         }
@@ -71976,7 +71986,7 @@ set-option -g @alias-mixed-next yes
         let directory = tempfile::tempdir().expect("temporary directory");
         let parent = directory
             .path()
-            .join("entry parent [literal]*? with spaces");
+            .join(literal_directory_name("entry parent"));
         fs::create_dir(&parent).expect("nested source parent");
         let loud_entry = parent.join("loud.conf");
         let quiet_entry = parent.join("quiet.conf");

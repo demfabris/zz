@@ -1077,9 +1077,11 @@ mod tests {
             "node_modules/pkg/index.js",
             "target/debug/zz",
             "go/pkg/mod/cache/x",
-            "a\nb.txt",
-            "esc\u{1b}dir/child.txt",
         ] {
+            touch(root, file);
+        }
+        #[cfg(unix)]
+        for file in ["a\nb.txt", "esc\u{1b}dir/child.txt"] {
             touch(root, file);
         }
 

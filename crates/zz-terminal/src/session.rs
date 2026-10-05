@@ -4551,14 +4551,14 @@ impl ViewportDictionary {
             .cell_pool
             .iter_mut()
             .position(|plane| plane.len() == len && Arc::get_mut(plane).is_some());
-        let mut plane = reusable.map_or_else(
-            || Arc::from(vec![PackedCell::EMPTY; len]),
-            |index| self.cell_pool.swap_remove(index),
+        let (mut plane, blank) = reusable.map_or_else(
+            || (std::iter::repeat_n(PackedCell::EMPTY, len).collect(), true),
+            |index| (self.cell_pool.swap_remove(index), false),
         );
         let cells = Arc::get_mut(&mut plane).expect("new or uniquely retained cell plane");
         if preserve {
             cells.copy_from_slice(&self.shared_cells);
-        } else {
+        } else if !blank {
             cells.fill(PackedCell::EMPTY);
         }
         plane
@@ -15753,8 +15753,9 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
                     .as_deref_mut()
                     .and_then(|cells| cells.get_mut(row_start..row_end))
                     .ok_or(WorkerError::ViewportMetadataTooLarge)?;
-                output_row.fill(PackedCell::EMPTY);
                 cells.update(row)?.copy_into(0, columns, &mut row_copy)?;
+                let copied = row_copy.cells().len().min(output_row.len());
+                output_row[copied..].fill(PackedCell::EMPTY);
                 row_styles.clear();
                 row_styles.resize(row_copy.style_count(), None);
                 let mut previous = None;

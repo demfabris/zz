@@ -52333,9 +52333,13 @@ fn source_glob_matches(path: &Path) -> SourceGlobMatches {
             matches.paths.sort();
             matches
         }
-        Err(error) => SourceGlobMatches {
-            paths: Vec::new(),
-            errors: vec![error.to_string()],
+        Err(_) => SourceGlobMatches {
+            paths: path
+                .exists()
+                .then(|| path.to_path_buf())
+                .into_iter()
+                .collect(),
+            errors: Vec::new(),
         },
     }
 }

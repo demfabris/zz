@@ -4510,6 +4510,8 @@ struct SharedServer {
     response_admission_hook: Mutex<Option<ResponseAdmissionHook>>,
     #[cfg(test)]
     destroy_unattached_hook: Mutex<Option<ResponseAdmissionHook>>,
+    #[cfg(test)]
+    begin_stopping_hook: Mutex<Option<ResponseAdmissionHook>>,
     #[cfg(unix)]
     tmux_shim: Mutex<Option<TmuxShimGuard>>,
     status_job_needs: crate::status::StatusJobNeeds,
@@ -5476,6 +5478,8 @@ impl Shared {
             response_admission_hook: Mutex::new(None),
             #[cfg(test)]
             destroy_unattached_hook: Mutex::new(None),
+            #[cfg(test)]
+            begin_stopping_hook: Mutex::new(None),
             #[cfg(unix)]
             tmux_shim: Mutex::new(None),
             status_job_needs,
@@ -5775,6 +5779,11 @@ impl Shared {
         if self.shutdown_cleanup_started.swap(true, Ordering::AcqRel) {
             return;
         }
+        #[cfg(test)]
+        if let Some(hook) = self.begin_stopping_hook.lock().take() {
+            let _ = hook.reached.send(());
+            let _ = hook.release.recv();
+        }
         self.stopping.store(true, Ordering::Release);
         self.accept_wake.wake();
         self.startup_changed.notify_all();
@@ -6003,6 +6012,10 @@ impl Shared {
         let mut blockers = self.shutdown_blockers.lock();
         blockers.closed = true;
         blockers.active == 0
+    }
+
+    fn shutdown_closed(&self) -> bool {
+        self.stopping.load(Ordering::Acquire) || self.shutdown_blockers.lock().closed
     }
 
     fn active_shutdown_blockers(&self) -> usize {
@@ -14584,7 +14597,7 @@ impl Shared {
             let cancelled = frame.execution.has_yielded()
                 || self.command_queue_cancelled(client)
                 || self.command_client_exiting(stream_client)
-                || self.stopping.load(Ordering::Acquire)
+                || self.shutdown_closed()
                     && !frame.execution.is_draining()
                     && !frame.execution.detached;
             let command = (!cancelled).then(|| frame.commands.next()).flatten();
@@ -22165,6 +22178,11 @@ impl Shared {
             }
             return result;
         }
+        if self.shutdown_closed()
+            && !queue_execution.is_some_and(|queue| queue.is_draining() || queue.detached)
+        {
+            return Ok(Execution::default());
+        }
         let mut output = RawText::default();
         let mut first_error = None;
         let mut reported_error = None;
@@ -25566,6 +25584,9 @@ impl Shared {
         submission: &CommandPromptSubmission,
         origin: &str,
     ) {
+        if self.shutdown_closed() {
+            return;
+        }
         let typed = matches!(
             &submission.template,
             Some(CommandPromptTemplate::Commands(_))
@@ -31930,9 +31951,7 @@ impl Shared {
             || options
                 .replay_client
                 .is_some_and(|client| self.command_queue_cancelled(client))
-            || self.stopping.load(Ordering::Acquire)
-                && !queue_execution.is_draining()
-                && !queue_execution.detached
+            || self.shutdown_closed() && !queue_execution.is_draining() && !queue_execution.detached
         {
             return Ok(ConfigFrameAction::Finish);
         }
@@ -106055,12 +106074,15 @@ bind - split-window -v -c "#{pane_current_path}"
     fn direct_shutdown_waits_for_preexisting_foreground_jobs() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let shell_marker = directory.path().join("shell");
-        let condition_marker = directory.path().join("condition");
-        let branch_marker = directory.path().join("branch");
+        let shell_release = directory.path().join("release-1");
 
         let shared = Arc::new(Shared::new(1));
         let worker_shared = Arc::clone(&shared);
-        let shell_command = format!("sleep 0.2; printf shell > {}", shell_quote(&shell_marker));
+        let shell_command = format!(
+            "while [ ! -e {} ]; do sleep 0.01; done; printf shell > {}",
+            shell_quote(&shell_release),
+            shell_quote(&shell_marker)
+        );
         let shell = thread::spawn(move || {
             worker_shared.execute(
                 ClientId(201),
@@ -106083,6 +106105,7 @@ bind - split-window -v -c "#{pane_current_path}"
             )
             .expect("direct shutdown");
         assert!(!shared.stopping.load(Ordering::Acquire));
+        fs::write(&shell_release, b"").expect("release the shell job");
         shell
             .join()
             .expect("foreground shell worker")
@@ -106091,22 +106114,122 @@ bind - split-window -v -c "#{pane_current_path}"
             fs::read_to_string(&shell_marker).expect("shell marker"),
             "shell"
         );
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !shared.stopping.load(Ordering::Acquire) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
         assert!(shared.stopping.load(Ordering::Acquire));
 
-        let shared = Arc::new(Shared::new(2));
-        let worker_shared = Arc::clone(&shared);
-        let condition = format!(
-            "sleep 0.2; printf condition > {}; true",
-            shell_quote(&condition_marker)
-        );
-        let branch = format!("run-shell 'printf branch > {}'", branch_marker.display());
-        let if_shell = thread::spawn(move || {
-            worker_shared.execute(
-                ClientId(202),
+        for (server_id, client) in [(2, ClientId(202)), (3, ClientId(u64::MAX))] {
+            let release = directory.path().join(format!("release-{server_id}"));
+            let condition_marker = directory.path().join(format!("condition-{server_id}"));
+            let branch_marker = directory.path().join(format!("branch-{server_id}"));
+            let shared = Arc::new(Shared::new(server_id));
+            let (reached_sender, stopping_reached) = crossbeam_channel::bounded(1);
+            let (release_stopping, release_receiver) = crossbeam_channel::bounded(1);
+            *shared.begin_stopping_hook.lock() = Some(ResponseAdmissionHook {
+                reached: reached_sender,
+                release: release_receiver,
+            });
+            let worker_shared = Arc::clone(&shared);
+            let condition = format!(
+                "while [ ! -e {} ]; do sleep 0.01; done; printf condition > {}; true",
+                shell_quote(&release),
+                shell_quote(&condition_marker)
+            );
+            let branch = format!("run-shell 'printf branch > {}'", branch_marker.display());
+            let (result_sender, if_shell) = mpsc::channel();
+            thread::spawn(move || {
+                let _ = result_sender.send(worker_shared.execute(
+                    client,
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new("if-shell", [condition, branch]),
+                ));
+            });
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while shared.active_shutdown_blockers() != 1 && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(10));
+            }
+            assert_eq!(shared.active_shutdown_blockers(), 1);
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new("kill-server", [] as [&str; 0]),
+                )
+                .expect("shutdown during if-shell");
+            while !shared.shutdown_blockers.lock().closed && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(10));
+            }
+            assert!(shared.shutdown_blockers.lock().closed);
+            fs::write(&release, b"").expect("release the condition");
+            stopping_reached
+                .recv_timeout(Duration::from_secs(5))
+                .expect("shutdown reaches stopping");
+            let result = if_shell
+                .recv_timeout(Duration::from_secs(5))
+                .expect("if-shell finishes before stopping");
+            assert!(!shared.stopping.load(Ordering::Acquire));
+            release_stopping.send(()).expect("release stopping");
+            result.expect("foreground if-shell result");
+            assert_eq!(
+                fs::read_to_string(condition_marker).expect("condition marker"),
+                "condition"
+            );
+            assert!(!branch_marker.exists());
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while !shared.stopping.load(Ordering::Acquire) && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(10));
+            }
+            assert!(shared.stopping.load(Ordering::Acquire));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shutdown_skips_the_rest_of_a_queue_parked_on_a_preexisting_job() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let release = directory.path().join("release");
+        let first = directory.path().join("first");
+        let after = directory.path().join("after");
+        let shared = Arc::new(Shared::new(1));
+        let (reached_sender, stopping_reached) = crossbeam_channel::bounded(1);
+        let (release_stopping, release_receiver) = crossbeam_channel::bounded(1);
+        *shared.begin_stopping_hook.lock() = Some(ResponseAdmissionHook {
+            reached: reached_sender,
+            release: release_receiver,
+        });
+        shared
+            .execute(
+                ClientId(u64::MAX),
                 ClientKind::Command,
                 &mut ExecutionContext::default(),
-                &CommandInvocation::new("if-shell", [condition, branch]),
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s".to_owned(),
+                        "command-alias[59]".to_owned(),
+                        format!(
+                            "parked-queue=run-shell 'while [ ! -e {} ]; do sleep 0.01; done; printf first > {}' ; run-shell 'printf after > {}'",
+                            release.display(),
+                            first.display(),
+                            after.display(),
+                        ),
+                    ],
+                ),
             )
+            .expect("parked queue alias");
+        let worker_shared = Arc::clone(&shared);
+        let (result_sender, queue) = mpsc::channel();
+        thread::spawn(move || {
+            let _ = result_sender.send(worker_shared.execute(
+                ClientId(203),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("parked-queue", [] as [&str; 0]),
+            ));
         });
         let deadline = Instant::now() + Duration::from_secs(2);
         while shared.active_shutdown_blockers() != 1 && Instant::now() < deadline {
@@ -106120,16 +106243,71 @@ bind - split-window -v -c "#{pane_current_path}"
                 &mut ExecutionContext::default(),
                 &CommandInvocation::new("kill-server", [] as [&str; 0]),
             )
-            .expect("shutdown during if-shell");
-        if_shell
-            .join()
-            .expect("foreground if-shell worker")
-            .expect("foreground if-shell result");
-        assert_eq!(
-            fs::read_to_string(condition_marker).expect("condition marker"),
-            "condition"
+            .expect("shutdown during the parked queue");
+        while !shared.shutdown_blockers.lock().closed && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(shared.shutdown_blockers.lock().closed);
+        fs::write(&release, b"").expect("release the first job");
+        stopping_reached
+            .recv_timeout(Duration::from_secs(5))
+            .expect("shutdown reaches stopping");
+        let result = queue
+            .recv_timeout(Duration::from_secs(5))
+            .expect("queue finishes before stopping");
+        assert!(!shared.stopping.load(Ordering::Acquire));
+        release_stopping.send(()).expect("release stopping");
+        result.expect("parked queue result");
+        assert_eq!(fs::read_to_string(first).expect("first marker"), "first");
+        assert!(!after.exists());
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !shared.stopping.load(Ordering::Acquire) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(shared.stopping.load(Ordering::Acquire));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn command_prompt_submitted_after_shutdown_closes_runs_nothing() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let marker = directory.path().join("prompt");
+        let (shared, client, mailbox, mut context) = popup_test_workspace("prompt-shutdown");
+        let blocker = ShutdownBlocker::acquire(&shared, false).expect("pre-existing job");
+        shared.request_shutdown();
+        assert!(shared.shutdown_blockers.lock().closed);
+        assert!(!shared.stopping.load(Ordering::Acquire));
+        take_reliable_messages(&mailbox);
+
+        shared.submit_command_prompt(
+            client,
+            ClientKind::Interactive,
+            &mut context,
+            &CommandPromptSubmission {
+                inputs: Vec::new(),
+                template: Some(CommandPromptTemplate::String(format!(
+                    "run-shell 'printf prompt > {}'",
+                    marker.display()
+                ))),
+                source: None,
+            },
         );
-        assert!(!branch_marker.exists());
+
+        assert!(!take_reliable_messages(&mailbox).iter().any(|message| {
+            matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ClientMessage {
+                        kind: ClientMessageKind::Error,
+                        ..
+                    },
+                    ..
+                })
+            )
+        }));
+        assert!(!marker.exists());
+        drop(blocker);
+        lifecycle::wait_for_cleanup(&shared);
         assert!(shared.stopping.load(Ordering::Acquire));
     }
 

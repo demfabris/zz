@@ -1,5 +1,5 @@
 use super::*;
-use std::{io::Read as _, os::unix::net::UnixStream, sync::mpsc, time::Duration};
+use std::{io::Read as _, os::unix::net::UnixStream, process::Stdio, sync::mpsc, time::Duration};
 
 #[test]
 fn closed_job_input_keeps_socket_and_stream_jobs_alive_until_child_exit() {
@@ -36,7 +36,7 @@ fn closed_job_input_keeps_socket_and_stream_jobs_alive_until_child_exit() {
         });
         let (completed, results) = mpsc::channel();
         let launch = Launch {
-            child,
+            child: child.into(),
             descriptors: vec![Descriptor {
                 fd: input,
                 read: false,

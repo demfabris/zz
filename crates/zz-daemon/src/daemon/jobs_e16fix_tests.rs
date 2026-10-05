@@ -1,5 +1,5 @@
 use super::*;
-use std::{io::Read as _, sync::mpsc, time::Duration};
+use std::{io::Read as _, process::Stdio, sync::mpsc, time::Duration};
 
 #[test]
 fn closed_child_stdin_preserves_its_exit_status_without_cancellation() {
@@ -15,7 +15,7 @@ fn closed_child_stdin_preserves_its_exit_status_without_cancellation() {
     let input = child.stdin.take().unwrap();
     let (completed, results) = mpsc::channel();
     let launch = Launch {
-        child,
+        child: child.into(),
         descriptors: vec![Descriptor {
             fd: input.into(),
             read: false,

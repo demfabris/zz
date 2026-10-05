@@ -100,7 +100,7 @@ impl Request {
 impl Drop for Request {
     fn drop(&mut self) {
         if let Some(mut launch) = self.0.take() {
-            terminate_copy_pipe(&mut launch.child);
+            launch.child.terminate();
         }
     }
 }

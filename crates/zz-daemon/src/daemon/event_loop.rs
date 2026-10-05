@@ -1401,14 +1401,12 @@ impl EventLoop {
                 let _ = reply.send(Err("discovery job cancelled or timed out".into()));
                 continue;
             }
-            use std::os::unix::process::CommandExt as _;
-            command
-                .process_group(0)
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-            let mut child = match command.spawn_unmasked() {
-                Ok(child) => child,
+            let spawned = match jobs::spawn(
+                &mut command,
+                jobs::Environment::Inherited,
+                [jobs::Io::Null, jobs::Io::Piped, jobs::Io::Piped],
+            ) {
+                Ok(spawned) => spawned,
                 Err(error) => {
                     let _ = reply.send(Err(error.to_string()));
                     continue;
@@ -1416,13 +1414,13 @@ impl EventLoop {
             };
             let descriptors = vec![
                 jobs::Descriptor {
-                    fd: child.stdout.take().unwrap().into(),
+                    fd: spawned.stdout.unwrap(),
                     read: true,
                     input: None,
                     socket: false,
                 },
                 jobs::Descriptor {
-                    fd: child.stderr.take().unwrap().into(),
+                    fd: spawned.stderr.unwrap(),
                     read: true,
                     input: None,
                     socket: false,
@@ -1430,7 +1428,7 @@ impl EventLoop {
             ];
             let failed = reply.clone();
             let launch = jobs::Launch {
-                child,
+                child: spawned.child,
                 descriptors,
                 policy: jobs::CompletionPolicy::ChildExit,
                 deadline: Some(deadline),

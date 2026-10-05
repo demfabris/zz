@@ -138,7 +138,7 @@ fn dropping_unregistered_pipe_jobs_reaps_their_children() {
         Box::new(|_| {}),
     )
     .unwrap();
-    let pid = rustix::process::Pid::from_child(&launch.child);
+    let pid = rustix::process::Pid::from_raw(launch.child.id().cast_signed()).unwrap();
     client.launch(launch).unwrap();
     drop(client);
     assert_eq!(

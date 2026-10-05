@@ -8,7 +8,7 @@ use std::{
     fs,
     io::{ErrorKind, Read, Write},
     path::{Path, PathBuf},
-    process::{Child, ExitStatus, Stdio},
+    process::{ExitStatus, Stdio},
     sync::{
         Arc, LazyLock, Weak,
         atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
@@ -149,8 +149,9 @@ use crate::{
     },
     terminal_features::{terminal_colour_count, terminal_feature_mask, terminal_features_list},
     transport::{AcceptWake, LocalTransport, Transport, TransportListener, TransportStream},
-    unmasked::SpawnUnmasked as _,
 };
+#[cfg(not(unix))]
+use {crate::unmasked::SpawnUnmasked as _, std::process::Child};
 
 #[cfg(windows)]
 const ACCEPT_WAIT_TIMEOUT: Duration = Duration::from_millis(20);
@@ -12939,30 +12940,46 @@ impl Shared {
             (inner.next_pipe_token, command)
         };
         let mut process = shell_process(&command);
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt as _;
-
-            process.arg0("sh").process_group(0);
-        }
-        process
-            .stdin(if pipe_output {
-                Stdio::piped()
-            } else {
-                Stdio::null()
-            })
-            .stdout(if pipe_input {
-                Stdio::piped()
-            } else {
-                Stdio::null()
-            })
-            .stderr(Stdio::null());
-        let mut child = process.spawn_unmasked().map_err(|error| {
+        let failed = |error: std::io::Error| {
             ServerError::InvalidCommand(format!("could not start pipe-pane command: {error}"))
-        })?;
+        };
+        #[cfg(unix)]
+        let (mut child, child_input, child_output) = {
+            let io = |piped| {
+                if piped {
+                    jobs::Io::Piped
+                } else {
+                    jobs::Io::Null
+                }
+            };
+            let spawned = jobs::spawn(
+                &mut process,
+                jobs::Environment::Inherited,
+                [io(pipe_output), io(pipe_input), jobs::Io::Null],
+            )
+            .map_err(failed)?;
+            (spawned.child, spawned.stdin, spawned.stdout)
+        };
+        #[cfg(windows)]
+        let (child, child_input, child_output) = {
+            process
+                .stdin(if pipe_output {
+                    Stdio::piped()
+                } else {
+                    Stdio::null()
+                })
+                .stdout(if pipe_input {
+                    Stdio::piped()
+                } else {
+                    Stdio::null()
+                })
+                .stderr(Stdio::null());
+            let mut child = process.spawn_unmasked().map_err(failed)?;
+            let child_input = child.stdin.take();
+            let child_output = child.stdout.take();
+            (child, child_input, child_output)
+        };
         let pid = child.id();
-        let child_input = child.stdin.take();
-        let child_output = child.stdout.take();
         let (tap_output, tap) = if pipe_output {
             #[cfg(unix)]
             let output = {
@@ -13008,13 +13025,13 @@ impl Shared {
                 valid
             };
             if !valid {
-                terminate_copy_pipe(&mut child);
+                child.terminate();
                 return Err(ServerError::PaneExited(pane).into());
             }
             let mut descriptors = Vec::new();
             if let Some(input) = child_input {
                 descriptors.push(jobs::Descriptor {
-                    fd: input.into(),
+                    fd: input,
                     read: false,
                     input: None,
                     socket: false,
@@ -13022,7 +13039,7 @@ impl Shared {
             }
             if let Some(output) = child_output {
                 descriptors.push(jobs::Descriptor {
-                    fd: output.into(),
+                    fd: output,
                     read: true,
                     input: None,
                     socket: false,
@@ -44497,6 +44514,7 @@ fn install_shell_job_process(
     Ok(())
 }
 
+#[cfg(not(unix))]
 fn try_reap_shell_job_child(child: &mut Child) -> std::io::Result<Option<ExitStatus>> {
     loop {
         match child.try_wait() {
@@ -44692,9 +44710,7 @@ fn launch_copy_pipe(
     timeout: Duration,
     complete: Box<dyn FnOnce(jobs::Completion) + Send>,
 ) -> Result<jobs::Launch, String> {
-    use std::os::unix::process::CommandExt as _;
     let mut process = shell_process(command);
-    process.process_group(0);
     configure_shell_job_environment(
         &mut process,
         &environment.variables,
@@ -44705,18 +44721,16 @@ fn launch_copy_pipe(
         None,
         None,
     );
-    process
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let mut child = process
-        .spawn_unmasked()
-        .map_err(|error| format!("could not start process: {error}"))?;
-    let input = child.stdin.take().unwrap();
+    let spawned = jobs::spawn(
+        &mut process,
+        jobs::Environment::Cleared,
+        [jobs::Io::Piped, jobs::Io::Null, jobs::Io::Null],
+    )
+    .map_err(|error| format!("could not start process: {error}"))?;
     Ok(jobs::Launch {
-        child,
+        child: spawned.child,
         descriptors: vec![jobs::Descriptor {
-            fd: input.into(),
+            fd: spawned.stdin.unwrap(),
             read: false,
             input: Some(data.into_bytes()),
             socket: false,
@@ -44803,20 +44817,8 @@ fn run_copy_pipe_with_timeout(
     )
 }
 
+#[cfg(not(unix))]
 fn terminate_copy_pipe(child: &mut Child) -> (Option<String>, Option<std::io::Error>) {
-    #[cfg(unix)]
-    let tree_result = rustix::process::kill_process_group(
-        rustix::process::Pid::from_child(&*child),
-        rustix::process::Signal::KILL,
-    )
-    .or_else(|error| {
-        if error == rustix::io::Errno::SRCH {
-            Ok(())
-        } else {
-            Err(error)
-        }
-    })
-    .map_err(|error| format!("could not terminate process group: {error}"));
     #[cfg(windows)]
     let tree_result = {
         let pid = child.id().to_string();

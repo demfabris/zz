@@ -12,6 +12,8 @@ mod input;
 mod interaction;
 mod model;
 mod paste;
+#[cfg(all(feature = "session", target_os = "macos"))]
+pub mod posix_spawn;
 #[cfg(all(feature = "session", unix))]
 mod pty_types;
 #[cfg(feature = "session")]

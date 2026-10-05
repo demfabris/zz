@@ -15,7 +15,7 @@ fn launch(command: &str, policy: CompletionPolicy, complete: mpsc::Sender<Comple
         .unwrap();
     let fd = child.stdout.take().unwrap().into();
     Launch {
-        child,
+        child: child.into(),
         descriptors: vec![Descriptor {
             fd,
             read: true,
@@ -217,7 +217,7 @@ fn pipe_backpressure_and_bounded_turns_preserve_output() {
         poll.registry(),
         &mut token,
         Launch {
-            child,
+            child: child.into(),
             descriptors,
             policy: CompletionPolicy::ChildExitAndEof,
             deadline: None,
@@ -276,7 +276,7 @@ fn socket_input_shutdown_preserves_read_half() {
         poll.registry(),
         &mut token,
         Launch {
-            child,
+            child: child.into(),
             descriptors: vec![Descriptor {
                 fd: parent.into(),
                 read: true,
@@ -358,5 +358,33 @@ fn failed_attachment_reaps_the_owned_child() {
     assert!(result.error.is_some());
     assert_eq!(result.pid, pid);
     assert!(results.try_recv().is_err());
+    assert_reaped(pid);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn job_children_skip_a_socket_another_thread_has_not_marked_close_on_exec() {
+    use std::io::Read as _;
+    if !crate::daemon::solo_tests::rerun_alone(
+        "daemon::jobs::e12_tests::job_children_skip_a_socket_another_thread_has_not_marked_close_on_exec",
+    ) {
+        return;
+    }
+    let (reader, peer) = std::os::unix::net::UnixStream::pair().unwrap();
+    rustix::io::fcntl_setfd(&peer, rustix::io::FdFlags::empty()).unwrap();
+    let mut command = Command::new("/bin/sleep");
+    command.arg("30");
+    let mut spawned = spawn(
+        &mut command,
+        Environment::Inherited,
+        [Io::Null, Io::Null, Io::Null],
+    )
+    .unwrap();
+    drop(peer);
+    reader.set_nonblocking(true).unwrap();
+    let read = (&reader).read(&mut [0]).map_err(|error| error.kind());
+    let pid = spawned.child.id();
+    spawned.child.terminate();
+    assert_eq!(read, Ok(0), "the job child kept the peer's socket open");
     assert_reaped(pid);
 }

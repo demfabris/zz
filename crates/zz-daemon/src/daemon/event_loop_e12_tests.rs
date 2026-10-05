@@ -27,7 +27,7 @@ fn child_signal_reaps_only_registered_children_with_coalesced_exits() {
         let completed = completed.clone();
         event_loop
             .register_job(jobs::Launch {
-                child,
+                child: child.into(),
                 descriptors: vec![jobs::Descriptor {
                     fd,
                     read: true,

@@ -2,7 +2,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     io,
     os::fd::{AsRawFd, OwnedFd},
-    process::{Child, Command, ExitStatus, Stdio},
+    process::{Command, ExitStatus},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -18,7 +18,6 @@ use super::{
     DaemonError, Shared, ShellJobPermit, ShellJobResult, configure_shell_job_environment,
     existing_job_working_directory, shell_process,
 };
-use crate::unmasked::SpawnUnmasked as _;
 use std::path::Path;
 use zz_protocol::RawText;
 
@@ -69,7 +68,7 @@ impl PipeIo {
 }
 
 pub(super) struct Launch {
-    pub(super) child: Child,
+    pub(super) child: JobChild,
     pub(super) descriptors: Vec<Descriptor>,
     pub(super) policy: CompletionPolicy,
     pub(super) deadline: Option<Instant>,
@@ -135,7 +134,7 @@ impl Port {
 }
 
 struct Job {
-    child: Option<Child>,
+    child: Option<JobChild>,
     pid: u32,
     ports: BTreeMap<Token, Port>,
     output: Vec<Vec<u8>>,
@@ -155,7 +154,7 @@ struct Job {
 impl Job {
     fn reap(&mut self) {
         let Some(child) = &mut self.child else { return };
-        match super::try_reap_shell_job_child(child) {
+        match child.try_wait() {
             Ok(Some(status)) => {
                 self.status = Some(status);
                 self.child.take();
@@ -629,31 +628,243 @@ mod e16fix_tests;
 #[path = "jobs_reviewfixes_tests.rs"]
 mod reviewfixes_tests;
 
-pub(super) fn launch_status(mut command: Command, mut output: StatusOutput) -> io::Result<Launch> {
-    use std::os::unix::process::CommandExt as _;
-    command
-        .process_group(0)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    let mut child = loop {
-        match command.spawn_unmasked() {
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-            Ok(child) => break child,
-            Err(error) => {
-                output.publish(true, true);
-                return Err(error);
+pub(super) struct JobChild {
+    pid: u32,
+    status: Option<ExitStatus>,
+}
+
+#[cfg(test)]
+impl From<std::process::Child> for JobChild {
+    fn from(child: std::process::Child) -> Self {
+        Self {
+            pid: child.id(),
+            status: None,
+        }
+    }
+}
+
+impl JobChild {
+    pub(super) fn id(&self) -> u32 {
+        self.pid
+    }
+
+    pub(super) fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
+        self.reap(rustix::process::WaitOptions::NOHANG)
+    }
+
+    pub(super) fn wait(&mut self) -> io::Result<ExitStatus> {
+        self.reap(rustix::process::WaitOptions::empty())?
+            .ok_or_else(|| io::Error::other("waitpid returned without a status"))
+    }
+
+    pub(super) fn kill(&mut self) -> io::Result<()> {
+        if self.status.is_some() {
+            return Ok(());
+        }
+        rustix::process::kill_process(self.process(), rustix::process::Signal::KILL)
+            .map_err(Into::into)
+    }
+
+    pub(super) fn terminate(&mut self) {
+        if self.status.is_none() {
+            let _ =
+                rustix::process::kill_process_group(self.process(), rustix::process::Signal::KILL);
+        }
+        let _ = self.kill();
+        let _ = self.wait();
+    }
+
+    fn reap(&mut self, options: rustix::process::WaitOptions) -> io::Result<Option<ExitStatus>> {
+        use std::os::unix::process::ExitStatusExt as _;
+        while self.status.is_none() {
+            match rustix::process::waitpid(Some(self.process()), options) {
+                Err(rustix::io::Errno::INTR) => {}
+                Err(error) => return Err(error.into()),
+                Ok(None) => break,
+                Ok(Some((_, status))) => self.status = Some(ExitStatus::from_raw(status.as_raw())),
+            }
+        }
+        Ok(self.status)
+    }
+
+    fn process(&self) -> rustix::process::Pid {
+        rustix::process::Pid::from_raw(self.pid.cast_signed())
+            .expect("a spawned child has a positive pid")
+    }
+}
+
+pub(super) enum Io {
+    Null,
+    Piped,
+    Fd(OwnedFd),
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum Environment {
+    Inherited,
+    Cleared,
+}
+
+pub(super) struct Spawned {
+    pub(super) child: JobChild,
+    pub(super) stdin: Option<OwnedFd>,
+    pub(super) stdout: Option<OwnedFd>,
+    pub(super) stderr: Option<OwnedFd>,
+}
+
+#[cfg(target_os = "macos")]
+pub(super) fn spawn(
+    command: &mut Command,
+    environment: Environment,
+    streams: [Io; 3],
+) -> io::Result<Spawned> {
+    use std::{
+        ffi::{CString, OsStr},
+        os::unix::ffi::{OsStrExt as _, OsStringExt as _},
+    };
+    let c_string = |value: &OsStr| {
+        CString::new(value.as_bytes()).map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))
+    };
+    let program = command.get_program();
+    let argv = std::iter::once(Path::new(program).file_name().unwrap_or(program))
+        .chain(command.get_args())
+        .map(c_string)
+        .collect::<io::Result<Vec<_>>>()?;
+    let mut variables = match environment {
+        Environment::Inherited => std::env::vars_os().collect(),
+        Environment::Cleared => BTreeMap::new(),
+    };
+    for (name, value) in command.get_envs() {
+        match value {
+            Some(value) => variables.insert(name.to_owned(), value.to_owned()),
+            None => variables.remove(name),
+        };
+    }
+    let envp = variables
+        .into_iter()
+        .map(|(name, value)| {
+            let mut entry = name.into_vec();
+            entry.push(b'=');
+            entry.extend_from_slice(value.as_bytes());
+            CString::new(entry).map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))
+        })
+        .collect::<io::Result<Vec<_>>>()?;
+    let mut spawn = zz_terminal::posix_spawn::PosixSpawn::new()?;
+    spawn.process_group(0)?;
+    if let Some(directory) = command.get_current_dir() {
+        spawn.chdir(&c_string(directory.as_os_str())?)?;
+    }
+    let mut child_ends = Vec::new();
+    let mut attach = |target, io| -> io::Result<Option<OwnedFd>> {
+        match io {
+            Io::Null => {
+                let access = if target == 0 {
+                    libc::O_RDONLY
+                } else {
+                    libc::O_WRONLY
+                };
+                spawn.open(target, c"/dev/null", access)?;
+                Ok(None)
+            }
+            Io::Piped => {
+                let (read, write) = rustix::pipe::pipe()?;
+                rustix::io::fcntl_setfd(&read, rustix::io::FdFlags::CLOEXEC)?;
+                rustix::io::fcntl_setfd(&write, rustix::io::FdFlags::CLOEXEC)?;
+                let (parent, child) = if target == 0 {
+                    (write, read)
+                } else {
+                    (read, write)
+                };
+                spawn.dup2(child.as_raw_fd(), target)?;
+                child_ends.push(child);
+                Ok(Some(parent))
+            }
+            Io::Fd(fd) => {
+                spawn.dup2(fd.as_raw_fd(), target)?;
+                child_ends.push(fd);
+                Ok(None)
             }
         }
     };
-    let stdout = child.stdout.take().unwrap();
+    let [stdin, stdout, stderr] = streams;
+    let stdin = attach(0, stdin)?;
+    let stdout = attach(1, stdout)?;
+    let stderr = attach(2, stderr)?;
+    let program = c_string(program)?;
+    let pid = loop {
+        match spawn.spawn(&program, &argv, &envp) {
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            result => break result?,
+        }
+    };
+    drop(child_ends);
+    Ok(Spawned {
+        child: JobChild { pid, status: None },
+        stdin,
+        stdout,
+        stderr,
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(super) fn spawn(
+    command: &mut Command,
+    _: Environment,
+    streams: [Io; 3],
+) -> io::Result<Spawned> {
+    use crate::unmasked::SpawnUnmasked as _;
+    use std::{os::unix::process::CommandExt as _, process::Stdio};
+    if let Some(name) = Path::new(command.get_program()).file_name() {
+        let name = name.to_owned();
+        command.arg0(name);
+    }
+    let [stdin, stdout, stderr] = streams.map(|io| match io {
+        Io::Null => Stdio::null(),
+        Io::Piped => Stdio::piped(),
+        Io::Fd(fd) => Stdio::from(fd),
+    });
+    command
+        .process_group(0)
+        .stdin(stdin)
+        .stdout(stdout)
+        .stderr(stderr);
+    let mut child = loop {
+        match command.spawn_unmasked() {
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            result => break result?,
+        }
+    };
+    Ok(Spawned {
+        stdin: child.stdin.take().map(OwnedFd::from),
+        stdout: child.stdout.take().map(OwnedFd::from),
+        stderr: child.stderr.take().map(OwnedFd::from),
+        child: JobChild {
+            pid: child.id(),
+            status: None,
+        },
+    })
+}
+
+pub(super) fn launch_status(mut command: Command, mut output: StatusOutput) -> io::Result<Launch> {
+    let spawned = match spawn(
+        &mut command,
+        Environment::Cleared,
+        [Io::Null, Io::Piped, Io::Null],
+    ) {
+        Ok(spawned) => spawned,
+        Err(error) => {
+            output.publish(true, true);
+            return Err(error);
+        }
+    };
+    let stdout = spawned.stdout.unwrap();
     output.fd = stdout.as_raw_fd();
-    output.pid = child.id();
+    output.pid = spawned.child.id();
     output.publish(false, false);
     Ok(Launch {
-        child,
+        child: spawned.child,
         descriptors: vec![Descriptor {
-            fd: stdout.into(),
+            fd: stdout,
             read: true,
             input: None,
             socket: false,
@@ -683,10 +894,7 @@ pub(super) fn launch_shell(
     permit: ShellJobPermit,
     callback: impl FnOnce(Result<ShellJobResult, ()>) + Send + 'static,
 ) -> Result<(), DaemonError> {
-    use std::os::{
-        fd::OwnedFd,
-        unix::{net::UnixStream, process::CommandExt as _},
-    };
+    use std::os::unix::net::UnixStream;
     let (output, child_socket) = UnixStream::pair()?;
     let cwd = existing_job_working_directory(cwd);
     let mut process = shell_process(command);
@@ -700,28 +908,18 @@ pub(super) fn launch_shell(
         tmux_shim,
         zz_executable,
     );
-    process
-        .arg0("sh")
-        .process_group(0)
-        .current_dir(&cwd)
-        .env("PWD", cwd.as_os_str())
-        .stdin(Stdio::from(OwnedFd::from(child_socket.try_clone()?)))
-        .stdout(Stdio::from(OwnedFd::from(child_socket.try_clone()?)));
+    process.current_dir(&cwd).env("PWD", cwd.as_os_str());
     if let Some(startup_reentry) = startup_reentry {
         process.env(crate::STARTUP_REENTRY_ENVIRONMENT_VARIABLE, startup_reentry);
     }
-    if show_stderr {
-        process.stderr(Stdio::from(OwnedFd::from(child_socket.try_clone()?)));
-    } else {
-        process.stderr(Stdio::null());
-    }
+    let socket = || child_socket.try_clone().map(|socket| Io::Fd(socket.into()));
+    let stdio = [
+        socket()?,
+        socket()?,
+        if show_stderr { socket()? } else { Io::Null },
+    ];
     output.shutdown(std::net::Shutdown::Write)?;
-    let child = loop {
-        match process.spawn_unmasked() {
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-            result => break result?,
-        }
-    };
+    let child = spawn(&mut process, Environment::Cleared, stdio)?.child;
     *permit.process.lock() = Some(super::ShellJobProcess {
         pid: child.id(),
         cancel: Arc::clone(&permit.cancel),

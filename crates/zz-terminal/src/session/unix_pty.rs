@@ -429,60 +429,6 @@ fn spawn_shared(plan: &ExecPlan, pointers: &ExecPointers, slave: RawFd) -> io::R
 }
 
 #[cfg(target_os = "macos")]
-const POSIX_SPAWN_SETSID: libc::c_int = 0x0400;
-
-#[cfg(target_os = "macos")]
-#[allow(
-    unsafe_code,
-    reason = "posix_spawn_file_actions_addchdir_np has no binding in the libc crate"
-)]
-unsafe extern "C" {
-    fn posix_spawn_file_actions_addchdir_np(
-        actions: *mut libc::posix_spawn_file_actions_t,
-        path: *const libc::c_char,
-    ) -> libc::c_int;
-}
-
-#[cfg(target_os = "macos")]
-struct SpawnAttributes(libc::posix_spawnattr_t);
-
-#[cfg(target_os = "macos")]
-impl Drop for SpawnAttributes {
-    #[allow(unsafe_code, reason = "destroys attributes this value initialized")]
-    fn drop(&mut self) {
-        unsafe {
-            libc::posix_spawnattr_destroy(&raw mut self.0);
-        }
-    }
-}
-
-#[cfg(target_os = "macos")]
-struct SpawnActions(libc::posix_spawn_file_actions_t);
-
-#[cfg(target_os = "macos")]
-impl Drop for SpawnActions {
-    #[allow(unsafe_code, reason = "destroys file actions this value initialized")]
-    fn drop(&mut self) {
-        unsafe {
-            libc::posix_spawn_file_actions_destroy(&raw mut self.0);
-        }
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn spawn_result(code: libc::c_int) -> io::Result<()> {
-    if code == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::from_raw_os_error(code))
-    }
-}
-
-#[cfg(target_os = "macos")]
-#[allow(
-    unsafe_code,
-    reason = "posix_spawn reads argv, envp and the actions from memory that outlives the call"
-)]
 fn spawn_through_helper(
     helper: &CString,
     plan: &ExecPlan,
@@ -490,60 +436,22 @@ fn spawn_through_helper(
     fence: RawFd,
 ) -> io::Result<u32> {
     let marker = CString::new(PTY_EXEC_ARGUMENT).expect("the marker has no NUL byte");
-    let argv = [helper.as_ptr(), marker.as_ptr(), plan.program.as_ptr()]
-        .into_iter()
-        .chain(plan.argv.iter().map(|argument| argument.as_ptr()))
-        .chain(std::iter::once(std::ptr::null()))
-        .collect::<Vec<_>>();
-    let envp = pointers(&plan.envp);
-    let mut attributes = SpawnAttributes(std::ptr::null_mut());
-    spawn_result(unsafe { libc::posix_spawnattr_init(&raw mut attributes.0) })?;
-    let flags = libc::POSIX_SPAWN_SETSIGDEF
-        | libc::POSIX_SPAWN_SETSIGMASK
-        | libc::POSIX_SPAWN_CLOEXEC_DEFAULT
-        | POSIX_SPAWN_SETSID;
-    spawn_result(unsafe {
-        libc::posix_spawnattr_setflags(
-            &raw mut attributes.0,
-            libc::c_short::try_from(flags).expect("spawn flags fit a short"),
-        )
-    })?;
-    let mut defaults: libc::sigset_t = 0;
-    let empty: libc::sigset_t = 0;
-    unsafe {
-        libc::sigfillset(&raw mut defaults);
-    }
-    spawn_result(unsafe {
-        libc::posix_spawnattr_setsigdefault(&raw mut attributes.0, &raw const defaults)
-    })?;
-    spawn_result(unsafe {
-        libc::posix_spawnattr_setsigmask(&raw mut attributes.0, &raw const empty)
-    })?;
-    let mut actions = SpawnActions(std::ptr::null_mut());
-    spawn_result(unsafe { libc::posix_spawn_file_actions_init(&raw mut actions.0) })?;
+    let argv = [
+        helper.as_c_str(),
+        marker.as_c_str(),
+        plan.program.as_c_str(),
+    ]
+    .into_iter()
+    .chain(plan.argv.iter().map(CString::as_c_str))
+    .collect::<Vec<_>>();
+    let mut spawn = crate::posix_spawn::PosixSpawn::new()?;
+    spawn.new_session();
     for target in 0..=2 {
-        spawn_result(unsafe {
-            libc::posix_spawn_file_actions_adddup2(&raw mut actions.0, slave, target)
-        })?;
+        spawn.dup2(slave, target)?;
     }
-    spawn_result(unsafe {
-        libc::posix_spawn_file_actions_adddup2(&raw mut actions.0, fence, PTY_EXEC_FENCE)
-    })?;
-    spawn_result(unsafe {
-        posix_spawn_file_actions_addchdir_np(&raw mut actions.0, plan.directory.as_ptr())
-    })?;
-    let mut pid: libc::pid_t = 0;
-    spawn_result(unsafe {
-        libc::posix_spawn(
-            &raw mut pid,
-            helper.as_ptr(),
-            &raw const actions.0,
-            &raw const attributes.0,
-            argv.as_ptr().cast(),
-            envp.as_ptr().cast(),
-        )
-    })?;
-    Ok(pid.cast_unsigned())
+    spawn.dup2(fence, PTY_EXEC_FENCE)?;
+    spawn.chdir(&plan.directory)?;
+    spawn.spawn(helper, &argv, &plan.envp)
 }
 
 struct ExecPointers {

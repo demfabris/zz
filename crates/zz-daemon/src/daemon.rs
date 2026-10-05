@@ -46372,7 +46372,7 @@ fn mouse_pane_cell(
     Some((usize::from(x), usize::from(y)))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 fn wait_for_terminal_identity(terminal: &TerminalSession) {
     terminal.wait_for_identity(Duration::from_secs(2));
 }
@@ -78991,11 +78991,12 @@ set-option -g @alias-mixed-next yes
                     inner.engine.pane_runtime_facts(*pane).is_some_and(|facts| {
                         !facts.current_command.is_empty()
                             && facts.pid.is_some()
-                            && !facts.tty.is_empty()
+                            && (cfg!(windows) || !facts.tty.is_empty())
                     })
                 })
             };
             if settled {
+                wait_for_quiet_panes(shared, panes);
                 return;
             }
             assert!(
@@ -107417,6 +107418,7 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("close popup");
     }
 
+    #[cfg(unix)]
     #[test]
     fn nested_new_session_errors_precede_refusal_without_mutation() {
         let shared = Arc::new(Shared::new(1));
@@ -107650,6 +107652,7 @@ bind - split-window -v -c "#{pane_current_path}"
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn nested_attach_refuses_only_preexisting_sessions_when_the_caller_tty_matches_a_pane() {
         let shared = Arc::new(Shared::new(1));

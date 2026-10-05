@@ -7,7 +7,7 @@ Opus fix lanes) closed at `e9bc174c`; its exit gates are `wave3-macbook-e9bc174c
 `wave3-alienware-e9bc174c.json`. The Ghostty fork pin is `e482b036` (render state clip `0ab7941c`
 and trimmed row copies, branch `zz-2026-10-04`, on `189df4a1`: row cell copy on `zz-2026-10-02`,
 then `67351380` with trim fix `c3941417`, copy snapshots `7823f65d`, used-size active page
-copies); the libghostty-rs pin is `0db98a20` (`zz-2026-10-04`, on `f5f82601`). No lane in flight, no lane worktree left.
+copies); the libghostty-rs pin is `0db98a20` (`zz-2026-10-04`, on `f5f82601`). No lane in flight, no lane worktree left on any host (Mac, alienware, win-desktop `D:\dev\zz-ci` is a reusable lane checkout).
 Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" before launching anything.
 
 ## Next session: after wave 4
@@ -59,25 +59,50 @@ Wave 4 started 2026-10-02 (see "Wave 4 merge log"); read "Lane brief rules" befo
    the Mac, run `just compat-check` and `compat/run.sh` with /opt/homebrew/bin first in PATH
    (bash 3.2 fails them), and never bisect in a worktree another script is using.
 6. Protocol stays 107 until the owner decides on a release.
-7. STARTFIX (2026-10-04, `d243a464`): a GUI-spawned daemon whose `mux.conf` has a foreground
-   `run-shell` hung forever on "connecting to zz daemon..." and ignored SIGTERM. Rust 1.97's
-   `Command::spawn` keeps the parent thread's signal mask, the GUI spawns the daemon from a
-   libdispatch worker (mask `0xfbfee027`), so SIGCHLD, SIGTERM and SIGINT arrived blocked; since
-   run-shell moved onto the job registry its child is reaped only through SIGCHLD or a lucky
-   `try_wait` in `JobRegistry::register`. `SignalPipes::new` now clears the loop thread's mask;
-   test `a_daemon_spawned_with_blocked_signals_reaps_its_startup_shell_and_honors_sigterm`. The
-   perf gates never saw it because `isolate.py` runs with an empty config. Follow-ups, same day:
-   `a6867b4d` drops the test-only reap from `EventLoop::turn` (five tests now install
-   `SignalPipes` and drive `poll_test_turn`); `3dd6cd22` routes all 39 non-test `Command`
-   spawns through `zz_daemon::unmasked::SpawnUnmasked` (mask cleared on the calling thread for
-   the spawn, so std stays on posix_spawn; clippy `disallowed-methods` rejects plain
-   `spawn`/`output`/`status` outside tests) and hands the spawned daemon to a
-   `zz-daemon-reaper` thread. Still open: the GUI's Metal shader-cache fds leak into the daemon
-   (a separate session owns that fix); `CommandExt::exec` in zz-tui, gpui's Linux `open_uri`
-   (`smol::process`) and CEF helpers are outside the lint; a Windows cross-clippy of zz-daemon
-   shows about 20 pre-existing warnings; `client_focus_closes_display_panes_and_preserves_chooser_modes`
-   fails most full-parallel Linux runs on main too. Lane shells must put
-   `~/.local/share/mise/installs/zig/0.16.0` first in PATH (Homebrew zig 0.17 breaks libghostty).
+7. After wave 4, 2026-10-04/05 (all on main, `d243a464`..`42f2dc41`, released as v0.15.0):
+   - STARTFIX `d243a464`: a GUI-spawned daemon with a foreground `run-shell` in `mux.conf` hung on
+     "connecting to zz daemon..." and ignored SIGTERM. Rust 1.97's spawn keeps the parent thread's
+     signal mask and the GUI spawns from a libdispatch worker (mask `0xfbfee027`), so SIGCHLD,
+     SIGTERM and SIGINT arrived blocked. `SignalPipes::new` clears the loop thread's mask.
+     `3dd6cd22` routes every non-test spawn through `zz_daemon::unmasked::SpawnUnmasked` (clippy
+     `disallowed-methods` enforces it) and reaps the spawned daemon; `a6867b4d` drops the test-only
+     reap so tests take the SIGCHLD path; `bed9e141` marks the GUI's inherited fds close-on-exec
+     before the daemon execs; `6877091b` spawns daemon jobs on macOS through posix_spawn with
+     `POSIX_SPAWN_CLOEXEC_DEFAULT` (`jobs::spawn`, `JobChild`, shared `zz_terminal::posix_spawn`;
+     a killed pane's `/dev/ptmx` leaked into `run-shell -b` children before).
+   - CI on main had been red on all three OSes since 09-26 (each job stops at its first failing
+     step; Linux never got past the compat summary). Green again after: a regenerated corpus
+     summary (`73635f75`, 258 scenarios, with `L` client loops in attach order like tmux,
+     `fd7fc3bc`), the zz-tui Windows build (`cd7c4318`), about 70 load-sensitive or stale tests
+     made condition-driven, and real bugs found on the way: event hooks now run before a new exec
+     client's command (`8f321d3b`), a new pane rechecks its command after exec (`3a6c8959`), the
+     second `announce_shutdown` caller waits for the first (`8d87e48a`), queues stop once shutdown
+     closes its blockers so a late `if-shell` branch is skipped like tmux (`4a772e0e`), source and
+     stdin read errors use POSIX text on every OS, Windows shell jobs and pane commands keep their
+     quotes (`73b9b9db`, `b4baa97f`), Windows picker paths use `/`. Reproduce CI locally instead of
+     waiting on runners: alienware for Linux (`taskset -c 0-3`), the Mac with `ZZ_PTY_SHARDS=3
+     --test-threads=3` under load, win-desktop for Windows (`ssh fabri@win-desktop`, PowerShell
+     5.1; symlinked exes do not launch over ssh, so put the real toolchain dirs first in PATH).
+   - Huge panes: one pane resized to 10000x10000 froze every pane on its PTY shard for 2.1 s and
+     kept 3.1 GB, and each later frame cost 150 ms. `21156350` builds the cell plane in one pass;
+     VISFRAMES `2da467ae` builds an oversized pane's frames at the largest area its streaming
+     clients show (`bounded_extent`, `TerminalSession::set_view_area`; pane size, `capture-pane`
+     and copy mode stay full-size; GUI clients now show the top-left region like the TUI);
+     GHOSTROWS `42f2dc41` clips the fork's render state to that region and trims row copies. At
+     10000 now: neighbour stall 16 ms (tmux ~3), RSS 32 MB (tmux 5-11), send-keys 1287 per 3 s
+     (tmux 1316). Bench: `bench/perf/campaign/shard-resize.py`.
+   - Still open: copy-mode frames are built at full pane size; `#{C:}` searches only the frame
+     region of a streamed oversized pane; agents, ssh endpoints, `process_info` and
+     `bounded_command` still spawn through std on macOS and can pick up fds shard threads open in
+     the race window; Windows panes cost one extra `cmd.exe` per command pane and ConPTY swallows
+     mouse-mode requests; `twenty_parked_agent_waits_add_zero_command_workers`,
+     `loopback_forwards_http_and_tcp_in_both_families_with_original_port`,
+     `event_hooks_fire_after_mutation_with_captured_formats` and a few others still flake under
+     full parallel load and pass alone; `compat/attached-client.sh` fails on the Mac on the pinned
+     tmux side only. The last strict gates fail `attach.cpu.p4` (1.29) and
+     `spawn.cpu.kill_pane` by the median rule; both are listed as noisy in item 3 and A/B pairs
+     show them level with VISFRAMES. Lane shells must put `~/.local/share/mise/installs/zig/0.16.0`
+     first in PATH (Homebrew zig 0.17 breaks libghostty).
 
 ## Wave 4 merge log (from 2026-10-02)
 

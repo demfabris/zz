@@ -112538,6 +112538,14 @@ bind - split-window -v -c "#{pane_current_path}"
                 client,
                 ClientKind::Interactive,
                 &mut context,
+                &CommandInvocation::new("set-option", ["-g", "automatic-rename", "off"]),
+            )
+            .expect("hold window names");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
                 &CommandInvocation::new("new-session", ["-s", "work"]),
             )
             .expect("new session");

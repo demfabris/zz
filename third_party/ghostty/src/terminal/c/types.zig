@@ -965,6 +965,13 @@ test "manifest describes render state clip types" {
     const option_values = manifest_types.get("GhosttyRenderStateOption").?.object
         .get("values").?.object;
     try std.testing.expectEqual(@as(i64, 2), option_values.get("CLIP").?.integer);
+
+    const copy = manifest_types.get("GhosttyRenderStateRowCellsCopy").?.object;
+    const copy_fields = copy.get("fields").?.object;
+    try std.testing.expectEqual(
+        @as(i64, @offsetOf(render.RowCellsCopy, "flags")),
+        copy_fields.get("flags").?.object.get("offset").?.integer,
+    );
 }
 
 test "manifest describes the complete packed cell layout" {

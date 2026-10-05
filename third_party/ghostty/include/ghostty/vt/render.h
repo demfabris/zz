@@ -670,6 +670,20 @@ typedef struct {
 #define GHOSTTY_RENDER_STATE_CELL_PROTECTED (1u << 1)
 
 /**
+ * Flag bits for GhosttyRenderStateRowCellsCopy.flags.
+ *
+ * GHOSTTY_RENDER_STATE_ROW_CELLS_COPY_TRIM stops the copy after the last
+ * cell of the range that is not a default cell. A default cell is an
+ * erased or never written column: a GhosttyCell of zero, which copies to
+ * an all-zero GhosttyRenderStateCell. cells_len then counts the cells up
+ * to that one, and every column after it in the range is a default cell
+ * the caller fills in itself.
+ *
+ * @ingroup render
+ */
+#define GHOSTTY_RENDER_STATE_ROW_CELLS_COPY_TRIM (1u << 0)
+
+/**
  * One cell written by ghostty_render_state_row_cells_copy().
  *
  * @ingroup render
@@ -753,6 +767,10 @@ typedef struct {
   uint8_t* grapheme_bytes;
   size_t grapheme_bytes_cap;
   size_t grapheme_bytes_len;
+
+  /** GHOSTTY_RENDER_STATE_ROW_CELLS_COPY_* flag bits. A size that ends
+   *  before this field copies without flags. */
+  uint32_t flags;
 } GhosttyRenderStateRowCellsCopy;
 
 /**
@@ -1257,8 +1275,9 @@ GHOSTTY_API GhosttyResult ghostty_render_state_row_cells_get_multi(
  * Copy a column range of the current row into packed cells in one call.
  *
  * Copies the columns [x, x + len) of the row that populated `cells`,
- * clamped to the row width (the clip width when a clip is set), with
- * styles and multi-codepoint graphemes as
+ * clamped to the row width (the clip width when a clip is set), and with
+ * GHOSTTY_RENDER_STATE_ROW_CELLS_COPY_TRIM in out->flags without the
+ * trailing default cells, with styles and multi-codepoint graphemes as
  * indexes into tables written alongside. A cell's style and text match
  * GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_STYLE and _GRAPHEMES_UTF8; its
  * colors resolve from the style and content tag through the render state

@@ -875,6 +875,13 @@ pub const RowCellsCopy = extern struct {
     grapheme_bytes: ?[*]u8 = null,
     grapheme_bytes_cap: usize = 0,
     grapheme_bytes_len: usize = 0,
+    flags: u32 = 0,
+
+    pub const trim: u32 = 1 << 0;
+
+    /// The size of the struct before `flags` was added. Callers built
+    /// against it still copy, without flags.
+    const size_without_flags = @offsetOf(RowCellsCopy, "flags");
 };
 
 /// Slots in the direct-mapped style cache of `row_cells_copy`. A
@@ -890,10 +897,17 @@ pub fn row_cells_copy(
 ) callconv(lib.calling_conv) Result {
     const cells = cells_ orelse return .invalid_value;
     const out = out_ orelse return .invalid_value;
-    if (out.size < @sizeOf(RowCellsCopy)) return .invalid_value;
+    if (out.size < RowCellsCopy.size_without_flags) return .invalid_value;
     if (x > cells.raws.len) return .invalid_value;
+    const flags: u32 = if (out.size >= RowCellsCopy.size_without_flags + @sizeOf(u32))
+        out.flags
+    else
+        0;
     const start: usize = x;
-    const end: usize = @min(start + len, cells.raws.len);
+    const end: usize = if (flags & RowCellsCopy.trim != 0)
+        trimmedEnd(cells.raws, start, @min(start + len, cells.raws.len))
+    else
+        @min(start + len, cells.raws.len);
 
     var styles_len: usize = 1;
     if (out.styles_cap >= 1) {
@@ -994,6 +1008,22 @@ pub fn row_cells_copy(
         return .out_of_space;
     }
     return .success;
+}
+
+/// Returns the end of `raws[start..end]` without its trailing default
+/// cells, the all-zero cells an erased or never written column holds.
+fn trimmedEnd(raws: []const page.Cell, start: usize, end: usize) usize {
+    const group = 8;
+    const Group = @Vector(group, page.Cell.Backing);
+    const words: [*]const page.Cell.Backing = @ptrCast(raws.ptr);
+    var i = end;
+    while (i - start >= group) {
+        const v: Group = words[i - group ..][0..group].*;
+        if (@reduce(.Or, v) != 0) break;
+        i -= group;
+    }
+    while (i > start and raws[i - 1].isZero()) i -= 1;
+    return i;
 }
 
 inline fn rowCellsGetDispatch(
@@ -2335,6 +2365,95 @@ test "render: row cells copy reports short buffers and ranges" {
     try testing.expectEqual(Result.invalid_value, row_cells_copy(cells, 9, 1, &tail));
     try testing.expectEqual(Result.invalid_value, row_cells_copy(null, 0, 1, &tail));
     try testing.expectEqual(Result.invalid_value, row_cells_copy(cells, 0, 1, null));
+}
+
+test "render: row cells copy trims trailing default cells" {
+    var terminal: terminal_c.Terminal = null;
+    try testing.expectEqual(Result.success, terminal_c.new(
+        &lib.alloc.test_allocator,
+        &terminal,
+        20,
+        4,
+    ));
+    defer terminal_c.free(terminal);
+
+    const input = "ab\x1b[5Gc\r\n\x1b[48;5;4m\x1b[K\x1b[0m\r\n\r\n\u{4E2D}";
+    terminal_c.vt_write(terminal, input, input.len);
+
+    var state: RenderState = null;
+    try testing.expectEqual(Result.success, new(&lib.alloc.test_allocator, &state));
+    defer free(state);
+    try testing.expectEqual(Result.success, update(state, terminal));
+    var it: RowIterator = null;
+    try testing.expectEqual(Result.success, row_iterator_new(&lib.alloc.test_allocator, &it));
+    defer row_iterator_free(it);
+    var cells: RowCells = null;
+    try testing.expectEqual(Result.success, row_cells_new(&lib.alloc.test_allocator, &cells));
+    defer row_cells_free(cells);
+    try testing.expectEqual(Result.success, get(state, .row_iterator, @ptrCast(&it)));
+
+    var full: [20]CopiedCell = undefined;
+    var trimmed: [20]CopiedCell = undefined;
+    var styles: [21]style_c.Style = undefined;
+    const expected = [_]usize{ 5, 20, 0, 2 };
+    var y: usize = 0;
+    while (row_iterator_next(it)) : (y += 1) {
+        try testing.expectEqual(Result.success, row_get(it, .cells, @ptrCast(&cells)));
+        var all: RowCellsCopy = .{
+            .cells = &full,
+            .cells_cap = full.len,
+            .styles = &styles,
+            .styles_cap = styles.len,
+        };
+        try testing.expectEqual(Result.success, row_cells_copy(cells, 0, 20, &all));
+        try testing.expectEqual(@as(usize, 20), all.cells_len);
+
+        var trim: RowCellsCopy = .{
+            .cells = &trimmed,
+            .cells_cap = trimmed.len,
+            .styles = &styles,
+            .styles_cap = styles.len,
+            .flags = RowCellsCopy.trim,
+        };
+        try testing.expectEqual(Result.success, row_cells_copy(cells, 0, 20, &trim));
+        try testing.expectEqual(expected[y], trim.cells_len);
+        for (full[0..trim.cells_len], trimmed[0..trim.cells_len]) |a, b| {
+            try testing.expectEqual(a, b);
+        }
+        for (full[trim.cells_len..]) |cell| {
+            try testing.expectEqual(std.mem.zeroes(CopiedCell), cell);
+        }
+    }
+    try testing.expectEqual(@as(usize, 4), y);
+
+    try testing.expectEqual(Result.success, get(state, .row_iterator, @ptrCast(&it)));
+    try testing.expect(row_iterator_next(it));
+    try testing.expectEqual(Result.success, row_get(it, .cells, @ptrCast(&cells)));
+    var range: RowCellsCopy = .{
+        .cells = &trimmed,
+        .cells_cap = trimmed.len,
+        .styles = &styles,
+        .styles_cap = styles.len,
+        .flags = RowCellsCopy.trim,
+    };
+    try testing.expectEqual(Result.success, row_cells_copy(cells, 3, 10, &range));
+    try testing.expectEqual(@as(usize, 2), range.cells_len);
+    try testing.expectEqual(@as(u32, 'c'), trimmed[1].content);
+    try testing.expectEqual(Result.success, row_cells_copy(cells, 5, 10, &range));
+    try testing.expectEqual(@as(usize, 0), range.cells_len);
+
+    var old: RowCellsCopy = .{
+        .size = @offsetOf(RowCellsCopy, "flags"),
+        .cells = &trimmed,
+        .cells_cap = trimmed.len,
+        .styles = &styles,
+        .styles_cap = styles.len,
+        .flags = RowCellsCopy.trim,
+    };
+    try testing.expectEqual(Result.success, row_cells_copy(cells, 0, 20, &old));
+    try testing.expectEqual(@as(usize, 20), old.cells_len);
+    old.size -= 1;
+    try testing.expectEqual(Result.invalid_value, row_cells_copy(cells, 0, 20, &old));
 }
 
 test "render: clip limits rows, columns and the cursor" {

@@ -45276,6 +45276,31 @@ fn streamed_terminal_panes(
 }
 
 #[cfg(test)]
+mod test_shell {
+    pub(super) const IDLE: &str = if cfg!(windows) {
+        "pause >nul"
+    } else {
+        "read _"
+    };
+
+    pub(super) const SUCCEED: &str = if cfg!(windows) { "exit 0" } else { "true" };
+
+    pub(super) const COUNTER: &str = if cfg!(windows) {
+        "for /L %i in (1,1,2147483647) do @(echo count %i& ping -n 1 127.0.0.1 >nul)"
+    } else {
+        "i=0; while :; do i=$((i+1)); printf 'count %d\\n' $i; sleep 0.01; done"
+    };
+
+    pub(super) fn print_and_idle(text: &str) -> String {
+        if cfg!(windows) {
+            format!("echo {text}& {IDLE}")
+        } else {
+            format!("printf {text}; {IDLE}")
+        }
+    }
+}
+
+#[cfg(test)]
 mod pane_tests;
 
 fn apply_view_streams(
@@ -60648,6 +60673,11 @@ mod tests {
 
     #[test]
     fn remain_on_exit_retains_and_respawns_the_same_terminal_pane() {
+        let sleeper = if cfg!(windows) {
+            "ping -n 31 127.0.0.1 >nul"
+        } else {
+            "sleep 30"
+        };
         let shared = Arc::new(Shared::new(1));
         let mut context = ExecutionContext::default();
         shared
@@ -60677,7 +60707,11 @@ mod tests {
                         "-d",
                         "-s",
                         "dead-fixture",
-                        "printf 'ZZ_DEAD_FRAME\\n'; exit 7",
+                        if cfg!(windows) {
+                            "echo ZZ_DEAD_FRAME& exit 7"
+                        } else {
+                            "printf 'ZZ_DEAD_FRAME\\n'; exit 7"
+                        },
                     ],
                 ),
             )
@@ -60786,10 +60820,7 @@ mod tests {
                 ClientId(u64::MAX),
                 ClientKind::Command,
                 &mut context,
-                &CommandInvocation::new(
-                    "respawn-pane",
-                    ["-E", "-t", &pane.to_string(), "sleep 30"],
-                ),
+                &CommandInvocation::new("respawn-pane", ["-E", "-t", &pane.to_string(), sleeper]),
             )
             .expect("respawn dead pane empty");
         let empty = {
@@ -60803,7 +60834,7 @@ mod tests {
             assert_eq!(replacement.foreground_process_id(), None);
             assert_eq!(
                 inner.terminal_spawns[&pane].command.as_deref(),
-                Some(["sleep 30".to_owned()].as_slice())
+                Some([sleeper.to_owned()].as_slice())
             );
             replacement
         };
@@ -60840,7 +60871,7 @@ mod tests {
             assert_eq!(inner.engine.state.windows[&window].layout.project(), layout);
             assert_eq!(
                 inner.terminal_spawns[&pane].command.as_deref(),
-                Some(["sleep 30".to_owned()].as_slice())
+                Some([sleeper.to_owned()].as_slice())
             );
         }
 
@@ -67123,9 +67154,13 @@ set-option -g @alias-mixed-next yes
                 command,
                 ClientKind::Command,
                 &mut context,
-                &CommandInvocation::new("new-session", ["-d", "-s", "callback-hook-owner"]),
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-d", "-s", "callback-hook-owner", QUIET_PANE_COMMAND],
+                ),
             )
             .expect("callback hook owner session");
+        wait_for_quiet_panes(&shared, &[context.pane.expect("callback hook owner pane")]);
         shared
             .execute(
                 command,
@@ -70764,7 +70799,7 @@ set-option -g @alias-mixed-next yes
         let middle = directory.path().join("middle.conf");
         fs::write(
             &middle,
-            format!("if-shell -F 1 'source-file {}'\n", leaf.display()),
+            format!("if-shell -F 1 'source-file {}'\n", tmux_path(&leaf)),
         )
         .expect("middle source");
         let success_root = directory.path().join("success-root.conf");
@@ -70779,23 +70814,24 @@ set-option -g @alias-mixed-next yes
                  if-sh -F 1 'source-f {}'\n\
                  if-shell -bF 1 'source-file {}'\n\
                  if-shell -F 1 'source-file {}'\n\
-                 if-shell 'true' 'source-file {}'\n\
+                 if-shell '{succeed}' 'source-file {}'\n\
                  if-shell -F 1 'source-file {}'\n\
                  display-message -p ROOT_LATER\n",
-                success_child.display(),
-                success_child.display(),
-                success_child.display(),
-                success_child.display(),
-                success_child.display(),
-                success_child.display(),
-                middle.display(),
+                tmux_path(&success_child),
+                tmux_path(&success_child),
+                tmux_path(&success_child),
+                tmux_path(&success_child),
+                tmux_path(&success_child),
+                tmux_path(&success_child),
+                tmux_path(&middle),
+                succeed = test_shell::SUCCEED,
             ),
         )
         .expect("success root source");
         let direct_root = directory.path().join("direct-root.conf");
         fs::write(
             &direct_root,
-            format!("source-file {}\n", success_child.display()),
+            format!("source-file {}\n", tmux_path(&success_child)),
         )
         .expect("direct root source");
         let alias_root = directory.path().join("alias-root.conf");
@@ -70808,7 +70844,7 @@ set-option -g @alias-mixed-next yes
             format!(
                 "if-shell -F 1 'source-file {}'\n\
                  display-message -p AFTER_MISSING\n",
-                missing.display(),
+                tmux_path(&missing),
             ),
         )
         .expect("missing root source");
@@ -70828,7 +70864,7 @@ set-option -g @alias-mixed-next yes
                  if-shell -F 1 'kill-session -t direct-insert-missing'\n\
                  if-shell -F 1 'source-file {}'\n\
                  display-message -p ROOT_AFTER_ERROR\n",
-                error_child.display(),
+                tmux_path(&error_child),
             ),
         )
         .expect("error root source");
@@ -70845,7 +70881,7 @@ set-option -g @alias-mixed-next yes
             format!(
                 "if-shell -F 1 'source-file {}'\n\
                  display-message -p AFTER_UNKNOWN\n",
-                unknown.display(),
+                tmux_path(&unknown),
             ),
         )
         .expect("unknown root source");
@@ -70857,7 +70893,7 @@ set-option -g @alias-mixed-next yes
             format!(
                 "if-shell -F 1 'source-file {}'\n\
                  display-message -p AFTER_INVALID_UTF8\n",
-                invalid_utf8.display(),
+                tmux_path(&invalid_utf8),
             ),
         )
         .expect("invalid UTF-8 root source");
@@ -71023,7 +71059,7 @@ set-option -g @alias-mixed-next yes
                         "command-alias[91]".to_owned(),
                         format!(
                             "indirect-control-source=source-file {}",
-                            success_child.display()
+                            tmux_path(&success_child)
                         ),
                     ],
                 ),
@@ -71162,7 +71198,7 @@ set-option -g @alias-mixed-next yes
                     [
                         "-g".to_owned(),
                         "after-display-message".to_owned(),
-                        format!("source-file {}", hook_child.display()),
+                        format!("source-file {}", tmux_path(&hook_child)),
                     ],
                 ),
             )
@@ -71240,9 +71276,13 @@ set-option -g @alias-mixed-next yes
                 command,
                 ClientKind::Command,
                 &mut context,
-                &CommandInvocation::new("new-session", ["-d", "-s", "control-hook-frames"]),
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-d", "-s", "control-hook-frames", QUIET_PANE_COMMAND],
+                ),
             )
             .expect("hook frame session");
+        wait_for_quiet_panes(&shared, &[context.pane.expect("hook frame pane")]);
         let session = context.session.expect("hook frame session id");
         let mailbox = OutboundMailbox::new();
         let (control, _) =
@@ -75480,7 +75520,11 @@ set-option -g @alias-mixed-next yes
                         "-d",
                         "-s",
                         "capture",
-                        "printf 'zz-terminal-ready\\r\\nalpha\\r\\nbeta\\r\\ngamma\\r\\n'; exec /bin/cat",
+                        if cfg!(windows) {
+                            "echo zz-terminal-ready& echo alpha& echo beta& echo gamma& pause >nul"
+                        } else {
+                            "printf 'zz-terminal-ready\\r\\nalpha\\r\\nbeta\\r\\ngamma\\r\\n'; exec /bin/cat"
+                        },
                     ],
                 ),
             )
@@ -82692,7 +82736,7 @@ set-option -g @alias-mixed-next yes
                 &CommandInvocation::new(
                     "if-shell",
                     [
-                        "true",
+                        test_shell::SUCCEED,
                         "{ display-message -p typed-shell-true }",
                         "{ display-message -p typed-shell-false }",
                     ],
@@ -85162,13 +85206,21 @@ set-option -g @alias-mixed-next yes
         let process = Arc::new(Mutex::new(None));
         let worker_process = Arc::clone(&process);
         let (finished, result) = mpsc::sync_channel(1);
+        let environment = std::env::vars()
+            .map(|(name, value)| {
+                (
+                    RawText::from(name.as_str()),
+                    Some(RawText::from(value.as_str())),
+                )
+            })
+            .collect::<Vec<_>>();
         let worker = thread::spawn(move || {
             let stopping = AtomicBool::new(false);
             let result = run_shell_job(
                 "sort",
                 &std::env::temp_dir(),
                 "",
-                &[],
+                &environment,
                 "tmux-256color",
                 Path::new("zz-shell-job-test"),
                 None,
@@ -107251,7 +107303,6 @@ bind - split-window -v -c "#{pane_current_path}"
             )
             .expect("real session");
         let tracked_pane = context.pane.expect("real pane");
-        let terminal = Arc::clone(&shared.inner.lock().terminals[&tracked_pane]);
         {
             let inner = shared.inner.lock();
             assert!(
@@ -107259,16 +107310,18 @@ bind - split-window -v -c "#{pane_current_path}"
                 "a live pane without app mouse tracking still rejects"
             );
         }
-        terminal.send_text("printf '\\033[?1002hMOUSEON\\n'\n");
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while !terminal.latest_viewport().mouse_tracking {
-            assert!(
-                Instant::now() < deadline,
-                "pane never reported mouse tracking"
-            );
-            thread::sleep(Duration::from_millis(10));
-        }
+        #[cfg(unix)]
         {
+            let terminal = Arc::clone(&shared.inner.lock().terminals[&tracked_pane]);
+            terminal.send_text("printf '\\033[?1002hMOUSEON\\n'\n");
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !terminal.latest_viewport().mouse_tracking {
+                assert!(
+                    Instant::now() < deadline,
+                    "pane never reported mouse tracking"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
             let inner = shared.inner.lock();
             assert!(
                 !terminal_mouse_rejected(&inner, client, &wheel_for(tracked_pane)),
@@ -114155,7 +114208,11 @@ bind - split-window -v -c "#{pane_current_path}"
         );
     }
 
-    pub(super) const QUIET_PANE_COMMAND: &str = "while read -r line; do eval \"$line\"; done";
+    pub(super) const QUIET_PANE_COMMAND: &str = if cfg!(windows) {
+        "cmd /Q /K rem"
+    } else {
+        "while read -r line; do eval \"$line\"; done"
+    };
 
     fn belled_session(
         shared: &Arc<Shared>,
@@ -114192,8 +114249,25 @@ bind - split-window -v -c "#{pane_current_path}"
                 &CommandInvocation::new("select-window", ["-t", ":0"]),
             )
             .expect("select the first window");
+        wait_for_quiet_panes(shared, &[first, second]);
         take_reliable_messages(mailbox);
         (client, context, first, second)
+    }
+
+    fn wait_for_quiet_panes(shared: &Shared, panes: &[PaneId]) {
+        let terminals = panes
+            .iter()
+            .map(|pane| Arc::clone(&shared.inner.lock().terminals[pane]))
+            .collect::<Vec<_>>();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !terminals.iter().all(|terminal| {
+            terminal.last_output().map_or(cfg!(unix), |output| {
+                output.elapsed() > Duration::from_millis(300)
+            })
+        }) {
+            assert!(Instant::now() < deadline, "quiet panes kept printing");
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     fn pane_bell(messages: &[ProtocolMessage], pane: PaneId) -> bool {

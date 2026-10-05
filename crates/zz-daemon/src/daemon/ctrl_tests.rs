@@ -2178,15 +2178,23 @@ fn disconnected_control_exec_cannot_detach_the_next_active_client() {
         .insert(old, Arc::clone(&cancel));
     let directory = tempfile::Builder::new()
         .prefix("zz-ctrl-cancel-")
-        .tempdir_in("/tmp")
+        .tempdir()
         .expect("barrier directory");
     let ready = directory.path().join("ready");
     let release = directory.path().join("release");
-    let script = format!(
-        "touch {}; while test ! -e {}; do sleep 0.01; done",
-        ready.display(),
-        release.display()
-    );
+    let script = if cfg!(windows) {
+        format!(
+            "type nul > \"{}\" & for /L %i in (0,0,1) do @if exist \"{}\" exit 0",
+            ready.display(),
+            release.display()
+        )
+    } else {
+        format!(
+            "touch {}; while test ! -e {}; do sleep 0.01; done",
+            ready.display(),
+            release.display()
+        )
+    };
     let request = compact_exec_request(vec![
         CommandInvocation::new("run-shell", [script]),
         CommandInvocation::new("detach-client", [] as [&str; 0]),

@@ -497,7 +497,11 @@ fn two_sinks_on_one_pane_share_one_encode_per_frame() {
 fn a_streamed_pane_reaches_its_client_from_the_shard_and_still_syncs_its_title() {
     let fixture = Fixture::new(
         4108,
-        "sleep 0.3; printf '\\033]2;sink-title\\007'; while :; do echo tick; sleep 0.02; done",
+        if cfg!(windows) {
+            "ping -n 2 127.0.0.1 >nul& echo \u{1b}]2;sink-title\u{7}& for /L %i in (0,0,1) do @(echo tick& ping -n 1 127.0.0.1 >nul)"
+        } else {
+            "sleep 0.3; printf '\\033]2;sink-title\\007'; while :; do echo tick; sleep 0.02; done"
+        },
     );
     let mailbox = OutboundMailbox::new();
     let (client, _) = fixture.shared.register_subscribed(

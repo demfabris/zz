@@ -63,18 +63,13 @@ fn printing_session(
         shared,
         &mut context,
         "new-session",
-        &["-d", "-s", name, "-x", "60", "-y", "10", "read _"],
+        &["-d", "-s", name, "-x", "60", "-y", "10", test_shell::IDLE],
     );
     run(
         shared,
         &mut context,
         "new-window",
-        &[
-            "-d",
-            "-t",
-            &format!("{name}:"),
-            "i=0; while :; do i=$((i+1)); printf 'count %d\\n' $i; sleep 0.01; done",
-        ],
+        &["-d", "-t", &format!("{name}:"), test_shell::COUNTER],
     );
     let idle = pane_of(shared, &mut context, &format!("{name}:0"));
     let printing = pane_of(shared, &mut context, &format!("{name}:1"));
@@ -323,7 +318,12 @@ fn a_respawned_pane_streams_to_the_clients_that_watched_it() {
         &shared,
         &mut context,
         "new-session",
-        &["-d", "-s", "respawn-stream", "printf first; read _"],
+        &[
+            "-d",
+            "-s",
+            "respawn-stream",
+            &test_shell::print_and_idle("first"),
+        ],
     );
     let pane = context.pane.expect("pane");
     shared
@@ -334,7 +334,12 @@ fn a_respawned_pane_streams_to_the_clients_that_watched_it() {
         &shared,
         &mut context,
         "respawn-pane",
-        &["-k", "-t", &pane.to_string(), "printf ZZ_RESPAWNED; read _"],
+        &[
+            "-k",
+            "-t",
+            &pane.to_string(),
+            &test_shell::print_and_idle("ZZ_RESPAWNED"),
+        ],
     );
     shared.publish_snapshot();
     let respawned = terminal(&shared, pane);
@@ -358,7 +363,7 @@ fn split_window_true_reports_its_exit_status_once() {
         &shared,
         &mut context,
         "new-session",
-        &["-d", "-s", "true-exit", "read _"],
+        &["-d", "-s", "true-exit", test_shell::IDLE],
     );
     run(
         &shared,
@@ -376,7 +381,7 @@ fn split_window_true_reports_its_exit_status_once() {
         &shared,
         &mut context,
         "split-window",
-        &["-d", "-P", "-F", "#{pane_id}", "true"],
+        &["-d", "-P", "-F", "#{pane_id}", test_shell::SUCCEED],
     );
     let pane: PaneId = id.trim().parse().expect("split pane id");
     wait_until("the dead pane", || {
@@ -436,6 +441,7 @@ fn split_window_with_an_empty_command_prints_its_pane_without_waiting() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn styled_wide_lines_fill_the_history_limit_like_plain_ones() {
     let shared = Arc::new(Shared::new(1));

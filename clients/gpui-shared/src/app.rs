@@ -3,6 +3,9 @@ mod agent_pane;
 #[cfg(target_os = "ios")]
 #[path = "authentication.rs"]
 mod authentication;
+#[cfg(target_os = "ios")]
+#[path = "browser_pane.rs"]
+mod browser_pane;
 #[path = "floating.rs"]
 mod floating;
 #[path = "hosts.rs"]
@@ -143,6 +146,8 @@ pub(crate) struct AppShell {
     terminals: HashMap<PaneId, Entity<TerminalPane>>,
     waiting_panes: BTreeSet<PaneId>,
     agents: HashMap<PaneId, Entity<AgentPane>>,
+    #[cfg(target_os = "ios")]
+    browsers: HashMap<PaneId, Entity<browser_pane::BrowserPane>>,
     pickers: HashMap<PaneId, Entity<picker::PanePicker>>,
     sidebar: bool,
     slideover: bool,
@@ -355,6 +360,8 @@ impl AppShell {
             terminals: HashMap::new(),
             waiting_panes: BTreeSet::new(),
             agents: HashMap::new(),
+            #[cfg(target_os = "ios")]
+            browsers: HashMap::new(),
             pickers: HashMap::new(),
             sidebar: preferences.sidebar,
             slideover: false,
@@ -1042,6 +1049,10 @@ impl AppShell {
 
     fn focus_pane(&mut self, pane: PaneId, window: &mut Window, cx: &mut Context<Self>) {
         self.focused_pane = Some(pane);
+        #[cfg(target_os = "ios")]
+        if let Some(browser) = self.browsers.get(&pane) {
+            browser.read(cx).focus_handle(cx).focus(window, cx);
+        }
         if let Some(terminal) = self.terminals.get(&pane) {
             terminal.read(cx).focus_handle(cx).focus(window, cx);
         } else if let Some(agent) = self.agents.get(&pane) {
@@ -1460,6 +1471,9 @@ impl AppShell {
             .retain(|pane| existing.contains_key(pane));
         self.agents
             .retain(|pane, _| matches!(existing.get(pane), Some(PaneKindSnapshot::Agent(_))));
+        #[cfg(target_os = "ios")]
+        self.browsers
+            .retain(|pane, _| matches!(existing.get(pane), Some(PaneKindSnapshot::Browser(_))));
         self.pickers
             .retain(|pane, _| matches!(existing.get(pane), Some(PaneKindSnapshot::Picker)));
         let mut panes = HashMap::new();
@@ -1575,6 +1589,43 @@ impl AppShell {
                     }
                     agent.clone().into_any_element()
                 }
+                #[cfg(target_os = "ios")]
+                PaneKindSnapshot::Browser(descriptor) => {
+                    let host = self.connection.read(cx).endpoint().unwrap_or_default();
+                    if self
+                        .browsers
+                        .get(&pane_id)
+                        .is_some_and(|browser| !browser.read(cx).matches(host, &descriptor.profile))
+                    {
+                        self.browsers.remove(&pane_id);
+                    }
+                    let browser = self.browsers.entry(pane_id).or_insert_with(|| {
+                        let connection = self.connection.clone();
+                        cx.new(|cx| {
+                            browser_pane::BrowserPane::new(
+                                pane_id, descriptor, connection, window, cx,
+                            )
+                        })
+                    });
+                    browser.update(cx, |browser, cx| {
+                        browser.synchronize(
+                            descriptor,
+                            pane_id == active_window.active_pane,
+                            radii,
+                            window,
+                            cx,
+                        );
+                    });
+                    if can_focus
+                        && pane_id == active_window.active_pane
+                        && self.focused_pane != Some(pane_id)
+                    {
+                        browser.read(cx).focus_handle(cx).focus(window, cx);
+                        self.focused_pane = Some(pane_id);
+                    }
+                    browser.clone().into_any_element()
+                }
+                #[cfg(not(target_os = "ios"))]
                 PaneKindSnapshot::Browser(descriptor) => unsupported_pane(
                     "Browser",
                     IconName::Globe,
@@ -2651,6 +2702,12 @@ impl Render for AppShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         #[cfg(target_os = "ios")]
         self.sync_authentication(window, cx);
+        #[cfg(target_os = "ios")]
+        {
+            let host = self.connection.read(cx).endpoint().unwrap_or_default();
+            self.browsers
+                .retain(|_, browser| browser.read(cx).belongs_to_host(host));
+        }
         let dialog = window
             .root::<Root>()
             .flatten()
@@ -2673,6 +2730,59 @@ impl Render for AppShell {
         let titlebar = (self.settings.is_none() && !self.inline_sidebar(window))
             .then(|| self.status_bar(window, cx));
         let workspace = self.workspace(window, cx);
+        #[cfg(target_os = "ios")]
+        {
+            let connection = self.connection.read(cx);
+            let core = &connection.core;
+            let native_obscured = window
+                .root::<Root>()
+                .flatten()
+                .is_some_and(|root| !root.read(cx).notifications(cx).is_empty())
+                || window.focused(cx).is_some_and(|focus| {
+                    cx.build_action("zz_menu::Cancel", None)
+                        .ok()
+                        .is_some_and(|action| {
+                            window
+                                .highest_precedence_binding_for_action_in(action.as_ref(), &focus)
+                                .is_some()
+                        })
+                });
+            let unobstructed = connection.connected
+                && self.settings.is_none()
+                && !dialog
+                && !native_obscured
+                && self.prompt.is_none()
+                && !self.slideover
+                && self.pane_drag.is_none()
+                && core.choose_tree().is_none()
+                && core.choose_buffer().is_none()
+                && core.command_prompt().is_none()
+                && core.menu().is_none()
+                && core.confirm().is_none()
+                && core.popup().is_none()
+                && core.command_output().is_none()
+                && core.display_panes().is_none();
+            let visible: BTreeSet<_> = if unobstructed {
+                self.active_window(cx)
+                    .map(|window| {
+                        let layout = window
+                            .zoomed_pane
+                            .map_or(window.layout, zz_protocol::LayoutNode::Pane);
+                        pane_rects(&layout)
+                            .into_iter()
+                            .map(|(pane, _)| pane)
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            } else {
+                BTreeSet::new()
+            };
+            for (pane, browser) in &self.browsers {
+                browser.update(cx, |browser, cx| {
+                    browser.set_visible(visible.contains(pane), cx)
+                });
+            }
+        }
         let mut terminal_overlays = self
             .terminal_overlay(window, cx)
             .into_iter()

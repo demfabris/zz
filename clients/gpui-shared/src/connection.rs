@@ -438,6 +438,11 @@ impl Connection {
     }
 
     #[cfg(target_os = "ios")]
+    pub fn browser_client(&self) -> Option<Arc<zz_daemon::InteractiveClient>> {
+        self.connected.then(|| self.client.clone()).flatten()
+    }
+
+    #[cfg(target_os = "ios")]
     pub fn busy(&self) -> bool {
         !self.connected && (self.native.is_some() || self.retry.is_some())
     }

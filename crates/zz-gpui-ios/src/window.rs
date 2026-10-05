@@ -14,7 +14,7 @@ use objc::{
     class,
     declare::ClassDecl,
     msg_send,
-    runtime::{BOOL, Class, Object, Protocol, Sel, YES},
+    runtime::{BOOL, Class, NO, Object, Protocol, Sel, YES},
     sel, sel_impl,
 };
 use raw_window_handle as rwh;
@@ -1367,7 +1367,13 @@ extern "C" fn can_perform_action(this: &Object, _: Sel, action: Sel, sender: id)
     unsafe {
         if action == sel!(paste:) {
             let pasteboard: id = msg_send![class!(UIPasteboard), generalPasteboard];
-            msg_send![pasteboard, hasStrings]
+            let strings: BOOL = msg_send![pasteboard, hasStrings];
+            let images: BOOL = msg_send![pasteboard, hasImages];
+            if strings == YES || images == YES {
+                YES
+            } else {
+                NO
+            }
         } else if action == sel!(copy:) || action == sel!(selectAll:) {
             YES
         } else {
@@ -1377,16 +1383,11 @@ extern "C" fn can_perform_action(this: &Object, _: Sel, action: Sel, sender: id)
 }
 
 extern "C" fn paste(this: &Object, _: Sel, _: id) {
-    let text = unsafe {
-        let pasteboard: id = msg_send![class!(UIPasteboard), generalPasteboard];
-        let string: id = msg_send![pasteboard, string];
-        crate::nsstring_to_string(string)
-    };
-    if let Some(text) = text {
+    if let Some(item) = crate::platform::read_clipboard() {
         let state = unsafe { get_window_state(this) };
         let handler = state.borrow_mut().input_handler.take();
         if let Some(mut handler) = handler {
-            handler.paste(gpui::ClipboardItem::new_string(text));
+            handler.paste(item);
             state.borrow_mut().input_handler = Some(handler);
         }
     }

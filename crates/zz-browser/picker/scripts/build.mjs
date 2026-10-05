@@ -12,7 +12,7 @@ const result = await build({
   bundle: true,
   format: "iife",
   platform: "browser",
-  target: "chrome150",
+  target: ["chrome150", "safari26"],
   define: {
     "process.env.NODE_ENV": '"production"',
   },

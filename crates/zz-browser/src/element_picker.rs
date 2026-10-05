@@ -60,6 +60,17 @@ pub(crate) struct PickGeometry {
     pub(crate) scroll_y: f64,
     pub(crate) viewport_width: f64,
     pub(crate) viewport_height: f64,
+    #[serde(default)]
+    pub(crate) visual_viewport: Option<PickVisualViewport>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PickVisualViewport {
+    pub(crate) offset_left: f64,
+    pub(crate) offset_top: f64,
+    pub(crate) width: f64,
+    pub(crate) height: f64,
 }
 
 impl PickGeometry {
@@ -80,6 +91,18 @@ impl PickGeometry {
             && self.height > 0.0
             && self.viewport_width > 0.0
             && self.viewport_height > 0.0
+            && self.visual_viewport.is_none_or(|viewport| {
+                [
+                    viewport.offset_left,
+                    viewport.offset_top,
+                    viewport.width,
+                    viewport.height,
+                ]
+                .into_iter()
+                .all(f64::is_finite)
+                    && viewport.width > 0.0
+                    && viewport.height > 0.0
+            })
     }
 }
 
@@ -424,6 +447,7 @@ mod tests {
                     scroll_y: 50.0,
                     viewport_width: 1280.0,
                     viewport_height: 800.0,
+                    visual_viewport: None,
                 })
             ))
         );
@@ -432,6 +456,13 @@ mod tests {
     #[test]
     fn drops_unusable_geometry_without_failing_the_pick() {
         let unusable = [
+            {
+                let mut value = sample_geometry();
+                value["visualViewport"] = serde_json::json!({
+                    "offsetLeft": 12.0, "offsetTop": 30.0, "width": 0.0, "height": 400.0,
+                });
+                value
+            },
             serde_json::json!(null),
             serde_json::json!("not an object"),
             serde_json::json!({ "x": 1.0 }),

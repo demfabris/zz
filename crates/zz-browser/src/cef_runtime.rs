@@ -5342,6 +5342,7 @@ mod tests {
             scroll_y,
             viewport_width: 1280.0,
             viewport_height: 800.0,
+            visual_viewport: None,
         }
     }
 

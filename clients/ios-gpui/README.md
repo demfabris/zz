@@ -84,7 +84,7 @@ the native transport, key translation, and UIKit backend.
 
 - Terminal and Agent panes use the web client's working pane entities. Each pane
   keeps its own input focus, viewport, and content state.
-- Split right or bottom from the header, then choose Terminal or Agent. Close
+- Split right or bottom from the header, then choose Terminal, Agent, or Browser. Close
   removes the pane through the daemon. Drag a divider to resize the split.
 - A zoomed pane has an Exit zoom control. Drag a header grip to split or swap panes;
   the preview animates to the drop target. Mouse and touch divider drags update the daemon.
@@ -96,9 +96,15 @@ the native transport, key translation, and UIKit backend.
   Plans, permissions, and structured tool output use the shared transcript reducer.
   Code blocks use the native syntax highlighter. Command-V attaches a PNG or JPEG
   from the pasteboard; there is no image picker button.
-- Existing Browser panes show a deferred message. Existing Editor panes explain
-  that file contents are not yet shared by the daemon. Neither appears in the
-  new-pane picker.
+- Browser panes use native WebKit with tabs, an address field, back/forward, and reload.
+  SSH connections route page traffic through the host; `localhost` addresses reach
+  the host's loopback servers through port forwarding. Cookies and site storage
+  persist separately for each host and browser profile on the iPad. They do not
+  share the desktop browser's login or live page state.
+  The element picker copies context and a cropped screenshot for pasting into an
+  Agent pane. Tap the picker, then tap a page element; Cancel exits without copying.
+- Existing Editor panes explain that file contents are not yet shared by the daemon.
+  Editor does not appear in the new-pane picker.
 
 Command-P, Command-K, or the search button opens the palette that desktop and web also use. Use `:` for commands,
 `@` for windows, `%` for panes, and `~` for the connected host. Opening it closes

@@ -18,6 +18,7 @@ interface PickGeometry {
   scrollY: number;
   viewportWidth: number;
   viewportHeight: number;
+  visualViewport?: { offsetLeft: number; offsetTop: number; width: number; height: number };
 }
 
 interface ElementPickerAppearance {
@@ -88,6 +89,14 @@ function geometryFor(element: Element): PickGeometry | undefined {
     scrollY: window.scrollY,
     viewportWidth: window.innerWidth,
     viewportHeight: window.innerHeight,
+    ...(window.visualViewport ? {
+      visualViewport: {
+        offsetLeft: window.visualViewport.offsetLeft,
+        offsetTop: window.visualViewport.offsetTop,
+        width: window.visualViewport.width,
+        height: window.visualViewport.height,
+      },
+    } : {}),
   };
 }
 
@@ -217,7 +226,7 @@ function start(token: string, requestedAppearance: ElementPickerAppearance): voi
   const cursorStyle = document.createElement("style");
   cursorStyle.setAttribute(OVERLAY_ATTRIBUTE, "");
   cursorStyle.textContent =
-    "html[data-zz-picking], html[data-zz-picking] body, html[data-zz-picking] body * { cursor: crosshair !important; }";
+    "html[data-zz-picking], html[data-zz-picking] body, html[data-zz-picking] body * { cursor: crosshair !important; -webkit-tap-highlight-color: transparent !important; }";
   document.documentElement.setAttribute("data-zz-picking", "");
   document.documentElement.append(cursorStyle, host);
 

@@ -333,51 +333,32 @@ impl Platform for IosPlatform {
     }
 
     fn read_from_clipboard(&self) -> Option<ClipboardItem> {
-        unsafe {
-            let pasteboard: id = msg_send![class!(UIPasteboard), generalPasteboard];
-            if pasteboard.is_null() {
-                return None;
-            }
-            let mut entries = Vec::new();
-            for (kind, format) in [
-                ("public.png", gpui::ImageFormat::Png),
-                ("public.jpeg", gpui::ImageFormat::Jpeg),
-            ] {
-                let data: id = msg_send![pasteboard, dataForPasteboardType: ns_string(kind)];
-                if data.is_null() {
-                    continue;
-                }
-                let bytes: *const u8 = msg_send![data, bytes];
-                let length: usize = msg_send![data, length];
-                if !bytes.is_null() && length > 0 {
-                    let bytes = std::slice::from_raw_parts(bytes, length).to_vec();
-                    entries.push(gpui::ClipboardEntry::Image(gpui::Image::from_bytes(
-                        format, bytes,
-                    )));
-                    break;
-                }
-            }
-            let string: id = msg_send![pasteboard, string];
-            if let Some(text) = crate::nsstring_to_string(string) {
-                entries.push(gpui::ClipboardEntry::String(gpui::ClipboardString::new(
-                    text,
-                )));
-            }
-            (!entries.is_empty()).then_some(ClipboardItem { entries })
-        }
+        read_clipboard()
     }
 
     fn write_to_clipboard(&self, item: ClipboardItem) {
-        let Some(text) = item.text() else {
-            return;
-        };
         unsafe {
             let pasteboard: id = msg_send![class!(UIPasteboard), generalPasteboard];
             if pasteboard.is_null() {
                 return;
             }
-            let string = ns_string(&text);
-            let _: () = msg_send![pasteboard, setString: string];
+            let values: id = msg_send![class!(NSMutableDictionary), dictionary];
+            if let Some(text) = item.text() {
+                let _: () = msg_send![values, setObject: ns_string(&text) forKey: ns_string("public.utf8-plain-text")];
+            }
+            for entry in item.entries() {
+                if let gpui::ClipboardEntry::Image(image) = entry {
+                    let kind = match image.format() {
+                        gpui::ImageFormat::Png => "public.png",
+                        gpui::ImageFormat::Jpeg => "public.jpeg",
+                        _ => continue,
+                    };
+                    let data: id = msg_send![class!(NSData), dataWithBytes: image.bytes().as_ptr() length: image.bytes().len()];
+                    let _: () = msg_send![values, setObject: data forKey: ns_string(kind)];
+                    break;
+                }
+            }
+            let _: () = msg_send![pasteboard, setItems: crate::ns_array(&[values])];
         }
     }
 
@@ -711,5 +692,40 @@ pub(crate) fn screen_appearance() -> WindowAppearance {
         } else {
             WindowAppearance::Dark
         }
+    }
+}
+
+pub(crate) fn read_clipboard() -> Option<ClipboardItem> {
+    unsafe {
+        let pasteboard: id = msg_send![class!(UIPasteboard), generalPasteboard];
+        if pasteboard.is_null() {
+            return None;
+        }
+        let mut entries = Vec::new();
+        for (kind, format) in [
+            ("public.png", gpui::ImageFormat::Png),
+            ("public.jpeg", gpui::ImageFormat::Jpeg),
+        ] {
+            let data: id = msg_send![pasteboard, dataForPasteboardType: ns_string(kind)];
+            if data.is_null() {
+                continue;
+            }
+            let bytes: *const u8 = msg_send![data, bytes];
+            let length: usize = msg_send![data, length];
+            if !bytes.is_null() && length > 0 {
+                let bytes = std::slice::from_raw_parts(bytes, length).to_vec();
+                entries.push(gpui::ClipboardEntry::Image(gpui::Image::from_bytes(
+                    format, bytes,
+                )));
+                break;
+            }
+        }
+        let string: id = msg_send![pasteboard, string];
+        if let Some(text) = crate::nsstring_to_string(string) {
+            entries.push(gpui::ClipboardEntry::String(gpui::ClipboardString::new(
+                text,
+            )));
+        }
+        (!entries.is_empty()).then_some(ClipboardItem { entries })
     }
 }

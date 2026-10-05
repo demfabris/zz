@@ -16,6 +16,10 @@
     <key>UILaunchScreen</key><dict/>
     <key>UIApplicationSupportsIndirectInputEvents</key><true/>
     <key>NSLocalNetworkUsageDescription</key><string>Connect to your zz host over SSH.</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoadsInWebContent</key><true/>
+    </dict>
     <key>UISupportedInterfaceOrientations</key>
     <array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
     <key>UISupportedInterfaceOrientations~ipad</key>

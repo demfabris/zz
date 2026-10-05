@@ -9,9 +9,11 @@ use zz_ui::{
     pane::{pane_picker_choices, pane_picker_row},
 };
 
-const CHOICES: [(&str, &str, IconName, &str); 2] = [
+const CHOICES: &[(&str, &str, IconName, &str)] = &[
     ("Terminal", "terminal", IconName::SquareTerminal, "t"),
     ("Agent", "agent", IconName::RobotFace, "a"),
+    #[cfg(target_os = "ios")]
+    ("Browser", "browser", IconName::Globe, "b"),
 ];
 
 pub(super) struct PanePicker {
@@ -55,7 +57,7 @@ impl PanePicker {
     }
 
     fn enabled(&self, index: usize, cx: &App) -> bool {
-        index == 0
+        CHOICES[index].1 != "agent"
             || (self.agent_enabled
                 && crate::command_palette::agent_pane_available(&self.connection.read(cx).core))
     }

@@ -2,9 +2,12 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 #![allow(non_camel_case_types, non_upper_case_globals)]
 
+pub mod browser;
 mod dispatcher;
 mod display;
 mod drop;
+#[path = "../../zz-browser/src/element_picker.rs"]
+mod element_picker;
 mod keyboard;
 mod menu;
 mod momentum;

@@ -1221,6 +1221,10 @@ impl InputState {
         let Some(item) = cx.read_from_clipboard() else {
             return;
         };
+        self.paste_item(item, cx);
+    }
+
+    fn paste_item(&mut self, item: ClipboardItem, cx: &mut Context<Self>) {
         if let Some(text) = item.text() {
             let range = self.selection.clone();
             self.edit(range, &text, EditKind::Other, cx);
@@ -1482,6 +1486,10 @@ impl Render for InputState {
 }
 
 impl EntityInputHandler for InputState {
+    fn paste(&mut self, item: ClipboardItem, _: &mut Window, cx: &mut Context<Self>) {
+        self.paste_item(item, cx);
+    }
+
     /// Hands the OS IME the real text, masked field or not: masking it would
     /// break composition outright.
     fn text_for_range(
@@ -1824,6 +1832,57 @@ mod tests {
         let value = state.read_with(cx, |state, _| state.value().to_string());
         let heard = heard.borrow().clone();
         (value, heard)
+    }
+
+    #[gpui::test]
+    fn native_paste_preserves_text_and_image_from_one_clipboard_item(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        cx.update(crate::init);
+        let (state, cx) = cx.add_window_view(InputState::new);
+        let cx: &mut gpui::VisualTestContext = cx;
+        let heard = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        cx.update(|window, cx| {
+            let events = heard.clone();
+            cx.subscribe(&state, move |_, event: &InputEvent, _| {
+                events.borrow_mut().push(event.clone());
+            })
+            .detach();
+            state.update(cx, |state, cx| {
+                EntityInputHandler::paste(
+                    state,
+                    ClipboardItem {
+                        entries: vec![
+                            gpui::ClipboardEntry::String(gpui::ClipboardString::new(
+                                "[<button>Save</button>]".to_owned(),
+                            )),
+                            gpui::ClipboardEntry::Image(gpui::Image::from_bytes(
+                                gpui::ImageFormat::Png,
+                                PNG_PIXEL.to_vec(),
+                            )),
+                        ],
+                    },
+                    window,
+                    cx,
+                );
+            });
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            state.read_with(cx, |state, _| state.value().to_string()),
+            "[<button>Save</button>]"
+        );
+        let events = heard.borrow();
+        let images = events
+            .iter()
+            .filter_map(|event| match event {
+                InputEvent::PasteImages(images) => Some(images),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].len(), 1);
+        assert_eq!(images[0][0].bytes, PNG_PIXEL);
     }
 
     #[gpui::test]

@@ -18,9 +18,9 @@ dirty rows become compact [viewport patches](/concepts/terminal-frame.md), the c
 revisions, and GPUI caches shaped rows by revision. The work raises typography, color, cursor, IME,
 selection/links, and fractional-scale geometry to Zed's standard without discarding that path. One
 client-only layer paints on top of it so a remote pane feels local: local scroll sources rows from the
-pane's history ring. It patches
-`gpui` + `gpui_platform` through the `demfabris/zed` `zz-patches` branch; the exact revision
-and the list of carried patches live in [gpui-revision](/references/gpui-revision.md), which tracks
+pane's history ring. It builds on
+`gpui` + `gpui_platform` from our own `demfabris/gpui`; the exact revision
+and the list of zz changes live in [gpui-revision](/references/gpui-revision.md), which tracks
 `Cargo.lock`.
 
 # How frames map to GPUI painting

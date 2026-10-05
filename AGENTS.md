@@ -1,6 +1,6 @@
 # AGENTS.md
 
-zz is a tmux-superset terminal multiplexer that ships as a native GPU desktop app: a Rust workspace built on gpui (Zed's UI framework, consumed through a patched fork), a persistent daemon that owns sessions and PTYs, Chromium browser panes (CEF off-screen rendering), agent panes (ACP), and remote hosts over plain ssh. Targets macOS and Linux (Wayland), with experimental Windows/WSL and GPUI iOS clients, and a raw-terminal attach client.
+zz is a tmux-superset terminal multiplexer that ships as a native GPU desktop app: a Rust workspace built on gpui (Zed's UI framework, split out into our own `demfabris/gpui`), a persistent daemon that owns sessions and PTYs, Chromium browser panes (CEF off-screen rendering), agent panes (ACP), and remote hosts over plain ssh. Targets macOS and Linux (Wayland), with experimental Windows/WSL and GPUI iOS clients, and a raw-terminal attach client.
 
 Rust edition 2024, MSRV 1.97. Release builds on mac/windows require Zig 0.16.0 (see `mise.toml`).
 
@@ -27,7 +27,7 @@ Rust edition 2024, MSRV 1.97. Release builds on mac/windows require Zig 0.16.0 (
 - `compat/` — tmux compat campaign: differential harness (`run.sh`), gap registry (`tmux-gaps.json`), dispatch-board client (`board.py`), progress meter, orchestration handoff (`orchestration/`)
 - `compat/tui/` — TUI parity campaign: proof ledger (`campaign.json`), validator and report generator (`tracker.py`), cycle runners (`run-N.js`); closed 2026-09-20 at 18/18
 - `knowledge/` — OKF knowledge bundle for the whole system (start at `index.md`)
-- `scripts/` — build, packaging, profiling, and fork-maintenance scripts (`forks.conf`)
+- `scripts/` — build, packaging, and profiling scripts
 - `bench/` — terminal throughput benchmark harness
 - `site/` — zzmux.sh landing page and docs (Astro)
 - `third_party/` — vendored crates and pinned reference material
@@ -60,7 +60,6 @@ Recipes live in `Justfile` and `scripts/just/*.just` and run from the repo root.
 | `just build <platform>` | Release bundle into `dist/zz` (wraps `cargo xtask bundle-cef`) |
 | `just install mac` | Build and swap `/Applications/zz.app`; the daemon survives the swap |
 | `just ios [run\|build\|device\|testflight] [iPad\|iPhone]` | GPUI iOS app: simulator, a paired device (release, signed, installed), or a signed `dev.zz.ios` TestFlight upload; `ZZ_GPUI_DEMO=terminal` selects the terminal example |
-| `just fork status` / `just fork rebase <name>` | Carried-patch fork status / rebase |
 | `just site` | Docs site dev server with live reload |
 | `just web run` / `web setup` / `web build [--release]` / `web serve` | Browser client dev loop / toolchain / assets / local gateway |
 | `just profile <cpu\|memory\|startup\|system\|metal\|terminal> mac …` | Capture profiling data; read it back with `just profile summary <cpu\|metal\|terminal> <run>` |
@@ -75,11 +74,12 @@ Recipes live in `Justfile` and `scripts/just/*.just` and run from the repo root.
 Multiple agent sessions often share this checkout in parallel. Never `git stash`, hard-reset, or discard uncommitted changes you did not author — you may be destroying another session's in-flight work.
 </important>
 
-<important if="you are bumping gpui/zed or any dependency resolved through a [patch] fork">
+<important if="you are changing gpui or moving its pin">
 
-- `gpui`/`gpui_platform` resolve to `demfabris/zed` branch `zz-patches` — a carried-patch fork listed in `scripts/forks.conf`. Bumping upstream means rebasing the patch branch: `just fork status` for status, `just fork rebase zed` to rebase.
-- Strange gpui build errors right after a dependency change usually mean `Cargo.lock` and the fork branch are out of sync.
-- `clients/web` consumes gpui's WASM renderer in an excluded workspace. Keep its fork revision and lockfile in step with the root, and check `just web build` after a bump.
+- `gpui`, `gpui_platform`, and `gpui_wgpu` come from `demfabris/gpui`, our own repo with the 22 GPUI crates split out of Zed. It is not a patch branch: there is nothing to rebase, and upstream Zed fixes come in by hand. GPUI changes land there first, then the `rev` moves in root `Cargo.toml` `[workspace.dependencies]`.
+- Strange gpui build errors right after a dependency change usually mean `Cargo.lock` and the pinned rev are out of sync.
+- `clients/web` consumes gpui's WASM renderer in an excluded workspace. Keep its rev and lockfile in step with the root, and check `just web build` after a bump.
+- `knowledge/references/gpui-revision.md` has the full recipe; the `fork-rebase` skill covers the native Ghostty fork.
 </important>
 
 <important if="a test fails under cargo test --workspace">

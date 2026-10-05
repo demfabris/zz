@@ -1,30 +1,38 @@
 ---
 type: Reference
 title: GPUI revision pin
-description: Where the patched Zed revision zz builds against is defined, how to read it, and what the carried GPUI patches do. gpui-component is not a dependency.
+description: Where the demfabris/gpui revision zz builds against is pinned, how to move it, and what zz's GPUI changes do. gpui-component is not a dependency.
 resource: Cargo.toml
-tags: [gpui, zed, pin, reference, git-dependency]
-timestamp: 2026-10-02T00:00:00Z
+tags: [gpui, pin, reference, git-dependency]
+timestamp: 2026-10-05T00:00:00Z
 ---
 
 # Overview
 
-zz's GPUI application layer comes from the `demfabris/zed` `zz-patches` branch rather than a
-published crate. The desktop and browser clients pin the same published fork revision through
-their manifests and lockfiles.
-The iOS platform crate pins `gpui_wgpu` directly to the same fork revision.
+zz's GPUI layer comes from [`demfabris/gpui`](https://github.com/demfabris/gpui), our own
+repository holding the 22 GPUI crates split out of Zed on 2026-10-05. Its first commit is
+upstream `zed-industries/zed` at `933d8d9381`, limited to those crates; the next 89 are the
+commits that lived on the old `demfabris/zed` `zz-patches` branch (tip `5a00ac89a4`), replayed
+under new commit IDs. Before the split every build cloned all of Zed (about 400 MB) and every
+upstream bump meant rebasing the patch branch. Upstream fixes now come in by hand, when we want
+them.
+
+Commit IDs cited below come from the old `demfabris/zed` fork, which stays up as an archive. The
+same commits exist in `demfabris/gpui` with the same subjects.
+
 On Linux, `gpui_platform` is built with `font-kit`, Wayland, and X11 enabled; the same crate
 selects the native macOS and Windows backends automatically.
 
-**Do not read a revision out of this document.** The normal pin lives in three manifests and
-two lockfiles, which must agree outside a local experiment:
+**Do not read a revision out of this document.** The pin lives in two manifests and two
+lockfiles, which must agree:
 
 | Place | Role |
 | --- | --- |
-| `Cargo.toml`, `[patch."https://github.com/zed-industries/zed"]` | The `rev = "…"` on `gpui` and `gpui_platform`. This is the authority . editing it is how the pin moves. |
-| `clients/web/Cargo.toml` | The browser client's independent workspace patch. Keep it on the desktop revision. |
-| `crates/zz-gpui-ios/Cargo.toml` | The direct `gpui_wgpu` fork dependency. Keep its `rev` aligned; it bypasses the upstream patch table. |
-| `Cargo.lock` and `clients/web/Cargo.lock` | The resolved `source = "git+https://github.com/demfabris/zed?rev=…"` for normal Git pins. Regenerated, never hand-edited. |
+| `Cargo.toml`, `[workspace.dependencies]` | The `rev = "…"` on `gpui`, `gpui_platform`, and `gpui_wgpu` (the iOS crate's direct renderer dependency). This is the authority. Editing it is how the pin moves. |
+| `clients/web/Cargo.toml` | The browser client's own workspace. Keep it on the desktop revision. |
+| `Cargo.lock` and `clients/web/Cargo.lock` | The resolved `source = "git+https://github.com/demfabris/gpui?rev=…"`. Regenerated, never hand-edited. |
+
+A second `rev` anywhere is a second source identity and builds a second copy of every GPUI crate.
 
 The appearance diagnostics log line no longer holds a third copy to keep in sync:
 `crates/zz/build.rs` reads the resolved source out of `Cargo.lock` and stamps it into
@@ -32,11 +40,8 @@ The appearance diagnostics log line no longer holds a third copy to keep in sync
 trust this document:
 
 ```bash
-rg 'demfabris/zed|zz-forks/zed' Cargo.toml Cargo.lock clients/web/{Cargo.toml,Cargo.lock} crates/zz-gpui-ios/Cargo.toml
+rg 'demfabris/gpui' Cargo.toml Cargo.lock clients/web/{Cargo.toml,Cargo.lock}
 ```
-
-The fork itself is declared in `scripts/forks.conf` (`zed  zed-industries/zed  demfabris/zed
-zz-patches  main  gpui,gpui_platform`), which is what `just fork status` and `just fork rebase zed` read.
 
 **`gpui-component` is not a dependency.** It was forked into `crates/zz-ui` (`zz-ui`) and both
 `gpui-component` and `gpui-component-assets` are gone from the workspace and its lockfiles; nothing
@@ -64,7 +69,7 @@ and DirectX color/path pipelines and WGPU path composition. The Metal GPU test
 layers, and an opaque foreground. This prevents translucent layers from adding up to
 opaque window alpha.
 
-# Carried patches
+# zz changes to GPUI
 
 Fork commit `7bdd43258b` gives the native macOS Window menu first chance to handle
 `performKeyEquivalent:` in `gpui_macos/src/window.rs` `handle_key_equivalent`.
@@ -194,34 +199,37 @@ uses to show macOS browser frames on a native layer under the window (see
 display link after three vsyncs without frame demand, restarting it through `schedule_frame`
 and a new `frame_waker`, the same contract `gpui_web` uses for `requestAnimationFrame`.
 
-`Cargo.toml` no longer narrates the list; the branch's `git log` is the authority (it carries
+`git log` in `demfabris/gpui` is the authority (it carries
 more commits than this list numbers, because a few patches landed as follow-up fixes to an entry
 above).
 
 # Examples
 
 ```toml
-# Cargo.toml . workspace.dependencies declare upstream…
-gpui = { git = "https://github.com/zed-industries/zed" }
-gpui_platform = { git = "https://github.com/zed-industries/zed", default-features = false, features = ["font-kit", "wayland", "x11"] }
-
-# …and the patch section redirects both to the fork at one pinned rev.
-# `version = "=0.2.2"` is required on gpui because the zed repo holds more than
-# one crate by that name.
-[patch."https://github.com/zed-industries/zed"]
-gpui = { git = "https://github.com/demfabris/zed", rev = "<rev>", version = "=0.2.2" }
-gpui_platform = { git = "https://github.com/demfabris/zed", rev = "<rev>" }
+# Cargo.toml [workspace.dependencies]
+gpui = { git = "https://github.com/demfabris/gpui", rev = "<rev>" }
+gpui_platform = { git = "https://github.com/demfabris/gpui", rev = "<rev>", default-features = false, features = ["font-kit", "wayland", "x11"] }
+gpui_wgpu = { git = "https://github.com/demfabris/gpui", rev = "<rev>" }
 ```
 
-Adding a carried patch (no rebase; the lock is already at the branch tip):
+Landing a GPUI change: commit and push it in a `demfabris/gpui` checkout, set the new `rev` in
+both manifests, then re-resolve both lockfiles. Each lock diff should touch only the 22 GPUI
+`source =` lines. Then run the workspace gates and `just web build`.
 
 ```bash
-just fork status   # confirm LOCK is "in sync" before appending a commit
+cargo metadata --format-version 1 >/dev/null
+cargo metadata --manifest-path clients/web/Cargo.toml --format-version 1 >/dev/null
 ```
 
-Bumping upstream means rebasing `zz-patches`, then moving the `rev` in `Cargo.toml`
-`clients/web/Cargo.toml`, and `crates/zz-gpui-ios/Cargo.toml` before regenerating
-the two lockfiles.
+Pulling a fix from upstream Zed: crate paths in `demfabris/gpui` match Zed's, so a patch limited
+to the touched crates applies as-is.
+
+```bash
+git -C <zed-checkout> format-patch -1 <sha> --stdout -- crates/gpui crates/gpui_wgpu | git am -3
+```
+
+The two rebase sections below are history from the patch-branch era. Their layout sizes and
+test counts still hold.
 
 # Rebase checks from 2026-09-12
 

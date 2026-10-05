@@ -325,7 +325,7 @@ window-close and app-quit paths. Settings windows are intentionally excluded.
 
 GPUI's `overflow_hidden` mask is rectangular, so square-edged descendants (scrollbars, the Chromium
 texture) escape rounded corners. The frame therefore registers a scene-wide rounded clip via
-`Window::set_window_corner_mask` (a zz-patches carried gpui patch): every primitive except drop
+`Window::set_window_corner_mask` (a zz change in `demfabris/gpui`): every primitive except drop
 shadows is clipped to the frame's outer arc in the wgpu fragment shaders. Because gpui paints a
 div's border under its children and clipped content would cover it at the corners, the frame's 1px
 border is painted as a `border_ring` canvas over the children (padding, not a border, insets the

@@ -24,7 +24,7 @@ env_logger.workspace = true
 futures = "0.3"
 getrandom.workspace = true
 gpui.workspace = true
-gpui_wgpu = { git = "https://github.com/demfabris/zed", rev = "5a00ac89a40fa99e8d4da64ce24a1c09b85b7d31" }
+gpui_wgpu.workspace = true
 log.workspace = true
 memmap2 = "0.9.11"
 objc = "0.2"

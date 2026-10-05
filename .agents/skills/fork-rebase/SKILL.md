@@ -1,21 +1,54 @@
 ---
 name: fork-rebase
-description: Maintain Cargo forks in scripts/forks.conf and the native Ghostty fork pinned in third_party/rust/libghostty-vt-sys/build.rs (currently demfabris/zed carrying gpui patches - RenderImage::into_frames, WgpuDeviceContext, the external-texture element, the window corner mask, superellipse corner smoothing, refresh_rate exposure, and more; see git log on zz-patches). Use whenever bumping gpui/zed or any dep resolved through a [patch] to a demfabris fork, when the user says "bump gpui", "update zed", "rebase forks", or "fork status", and before debugging weird gpui build errors after a dependency change.
+description: Maintain zz's own GPUI repo (demfabris/gpui, the 22 gpui crates split out of Zed, carrying RenderImage::into_frames, WgpuDeviceContext, the external-texture element, the window corner mask, superellipse corner smoothing, refresh_rate exposure, and more) and the native Ghostty fork pinned in third_party/rust/libghostty-vt-sys/build.rs. Use when changing gpui, moving its pin, pulling an upstream Zed fix, when the user says "bump gpui", "update zed", or "rebase forks", and before debugging weird gpui build errors after a dependency change.
 ---
 
-# Carried-patch forks
+# GPUI: `demfabris/gpui`
 
-Some dependencies resolve through `[patch."<upstream-url>"]` sections in
-`Cargo.toml` to a fork under `demfabris/` whose patch branch carries a few
-commits on top of a pinned upstream rev. The manifest of all such forks is
-`scripts/forks.conf`; the tooling is `scripts/fork-sync.sh`.
+Since 2026-10-05 zz builds against [`demfabris/gpui`](https://github.com/demfabris/gpui), our
+own repo holding the 22 GPUI crates split out of Zed. It is not a patch branch: nothing gets
+rebased, and upstream Zed fixes come in by hand. Its first commit is upstream
+`zed-industries/zed` `933d8d9381` limited to those crates; the next 89 are the old
+`demfabris/zed` `zz-patches` commits (tip `5a00ac89a4`), replayed under new IDs. The old fork
+stays up as an archive; knowledge pages cite its commit IDs, and the same commits exist in
+`demfabris/gpui` with the same subjects. Crate paths match Zed's (`crates/gpui`,
+`crates/gpui_wgpu`, `tooling/perf`, ...), so upstream patches apply as-is.
 
-Current forks and why:
+Local checkout: `~/dev/gpui` on the macbook. Clone it anywhere else; it is about 7 MB.
 
-- **zed** (`demfabris/zed`, branch `zz-patches`): carried commits (authoritative
-  list: `git log` on the branch), each upstream-able
-  as a small Zed PR; if Zed merges equivalents, drop them and eventually the fork
-  branch. The core five:
+## Landing a GPUI change
+
+1. Commit and push in the `demfabris/gpui` checkout. Run `cargo check --workspace
+   --all-targets` there first, plus the GPU tests for whatever the change touches.
+2. Move the `rev` in root `Cargo.toml` `[workspace.dependencies]` (`gpui`, `gpui_platform`,
+   `gpui_wgpu`) and in `clients/web/Cargo.toml` (every `demfabris/gpui` line). All must match:
+   a second `rev` is a second source identity and builds a second copy of every GPUI crate.
+3. Re-resolve both lockfiles and check each diff touches only the 22 GPUI `source =` lines:
+
+   ```bash
+   cargo metadata --format-version 1 >/dev/null
+   cargo metadata --manifest-path clients/web/Cargo.toml --format-version 1 >/dev/null
+   rg -c 'demfabris/gpui' Cargo.lock clients/web/Cargo.lock
+   ```
+
+4. Run the workspace gates and `just web build`, then an isolated app run for anything visual.
+
+The gpui revision in diagnostics needs no manual bump: `crates/zz/build.rs` stamps
+`ZZ_GPUI_SOURCE` from `Cargo.lock` at build time.
+
+## Pulling a fix from upstream Zed
+
+```bash
+git -C <zed-checkout> format-patch -1 <sha> --stdout -- crates/gpui crates/gpui_wgpu | git am -3
+```
+
+Limit the pathspec to the crates the fix touches. Never bulk-merge upstream: take what we need,
+read it, and run the GPU tests for the renderers it touches.
+
+## What zz changed in GPUI
+
+`git log` in `demfabris/gpui` is the authority. The core five:
+
   1. `RenderImage::into_frames()` — retired browser frames return their pixel
      buffers to the OSR paint pool.
   2. `WgpuDeviceContext` — `Window::wgpu_device_context()` exposes the Linux
@@ -67,63 +100,35 @@ Current forks and why:
   extra `/ scale_factor` upstream still carries shrank the quarter-pixel phase on HiDPI —
   a one-line upstream-able fix).
 
-  Rebase gotchas learned on the 2026-08-16 rebase (base 90d024b → f543a76):
+Gotchas that still apply when changing renderers or pulling upstream work:
 
-  - The wgpu 30 bump patch is load-bearing, not droppable: upstream still pins
-    wgpu 29, but zz's own lock (and `clients/web/Cargo.lock`) resolve wgpu 30 through
-    the fork's bump; dropping it downgrades zz. Re-port it (Cargo.toml bump +
-    `color_space: SurfaceColorSpace::Auto` on both `SurfaceConfiguration`s +
-    `Queue::present(frame)` instead of `frame.present()`). Its companion
-    `apply_limit_buckets` patch only compiles against 30. Beware mid-rebase
-    reads: a conflicted working tree shows the patch's own Cargo.toml, which
-    can masquerade as upstream having done the bump.
+  - zz ships wgpu 30; upstream Zed still pinned 29 at the split. Upstream wgpu
+    code written against 29 needs porting: `color_space: SurfaceColorSpace::Auto`
+    on both `SurfaceConfiguration`s and `Queue::present(frame)` instead of
+    `frame.present()`. The `apply_limit_buckets` change only compiles against 30.
   - Upstream split wgpu instance loading into `shaders_storage.wgsl` /
     `shaders_webgl.wgsl` with per-record `load_*` functions. The storage
     variant reads the WGSL structs directly and follows them, but the WebGL
-    loaders hard-code word strides and read sequences — every carried patch
+    loaders hard-code word strides and read sequences — every change
     that widens a scene struct (Quad, Shadow, PolychromeSprite, SurfaceParams)
-    must also touch those loaders, and auto-merges won't do it.
-  - Cargo.lock auto-merges across the rebase can leave stale entries
-    (mixed wgpu 29/30 records, missing new gpui deps). Regenerate the lock and
-    inspect dependency drift against upstream, accounting for the carried wgpu
-    version and device-context dependency. Check the resolved graph used by zz.
-  - The browser client's excluded lock needs a `clients/web/Cargo.toml` rev bump plus a
-    `cargo metadata` re-resolve, and can need a second re-resolve to pick up
-    brand-new transitive deps (hdrhistogram, crossbeam-channel from the
-    profiler feature) — verify `just web build` passes, since `--locked`
-    is what catches it.
+    must also touch those loaders; nothing catches a
+    miss at compile time. `Quad` must stay a multiple of 16 bytes (44 words)
+    because the WebGL quad decoder reads whole texels.
   - Upstream unified perf tracking under gpui's `profiler` feature. Since
     `66cad0ed` (2026-09-22), zz leaves it disabled in production to avoid its
-    collection overhead. Enable it only for diagnostic builds or fork validation,
+    collection overhead. Enable it only for diagnostic builds or GPUI validation,
     on the desktop crate's `gpui` dependency, not the shared workspace dependency.
     The profiler uses native timing and crashes on WASM action dispatch if
     inherited by `zz-ui`. `set_frame_trace_enabled` became
     the shared `set_trace_enabled`, and collectors now yield
     `FrameEvent::{Draw,Present}` instead of bare `FrameTiming`.
 
-  Adding a carried patch is not a rebase: when `just fork status` reports LOCK
-  "in sync", commit on the branch tip in the local checkout, push, then repin
-  with an explicit rev — plain `cargo update -p gpui` can silently keep the
-  old branch tip without refetching ("Locking 0 packages" in its output), so
-  use `cargo update -p gpui --precise <new-rev>` (and the same for
-  `gpui_platform`), then verify the new rev actually appears in `Cargo.lock`.
-  Do not run `fork rebase` for this — it would move the upstream base as a
-  side effect.
-
-  The `[patch."https://github.com/zed-industries/zed"]` entries pin `rev =`
-  directly, not the `zz-patches` branch, so any new fork tip must be written
-  into `Cargo.toml` by hand as well.
-
-  Keep all three manifest locations aligned: the root and `clients/web`
-  patch tables, plus the direct `gpui_wgpu` dependency in
-  `crates/zz-gpui-ios/Cargo.toml`. The iOS dependency uses the fork URL directly,
-  so the upstream patch table does not replace it. A missed pin creates a second
-  GPUI dependency tree even if `cargo update --precise` changes its resolved SHA:
-  the old `?rev=` query remains a distinct source identity. Verify each lockfile
-  contains one fork source URL and that registry dependencies did not drift.
-
-  The gpui revision in diagnostics needs no manual bump: `crates/zz/build.rs`
-  stamps `ZZ_GPUI_SOURCE` from `Cargo.lock` at build time.
+Linux and Windows can be type-checked from macOS: `cargo check --target
+x86_64-unknown-linux-musl` with a `zig cc -target x86_64-linux-musl` wrapper named
+`x86_64-linux-musl-gcc` (drop cc-rs's `--target=` flag; a `zig c++` twin as `-g++`),
+`RUST_FONTCONFIG_DLOPEN=1`, and
+`FREETYPE2_NO_PKG_CONFIG=1`; and `cargo +1.97.0 check -p gpui_windows --target
+x86_64-pc-windows-msvc` with `RC_x86_64_pc_windows_msvc` set to Homebrew's `llvm-rc`.
 
 ## Native Ghostty fork
 
@@ -166,8 +171,6 @@ Cargo regenerates `Cargo.lock` against the published wrapper source.
 `third_party/rust/libghostty-vt-sys/UPSTREAM.md` owns the full commit IDs, rationale,
 validation, and removal conditions.
 
-`just fork status`, `forks.conf`, and `fork-sync.sh` only handle Cargo forks. Do not
-add this native dependency to that manifest or use its Cargo rebase command.
 For a native update, inspect both upstream and fork histories, preserve the
 published pin through a retained branch or tag, and push the new pin as a
 new dated branch (`zz-YYYY-MM-DD`); never force-push an existing one. When the
@@ -195,102 +198,3 @@ no `GHOSTTY_SOURCE_DIR` or pkg-config bypass. Zig's default test runner uses its
 own `std_options`, so its pass alone does not exercise this C ABI option.
 When using local source overrides, edits at the same path do not trigger Cargo's
 native rebuild; use distinct paths or explicitly rebuild the sys package.
-
-## Check status
-
-```
-just fork status
-```
-
-Shows, per fork: carried commit count, how far upstream has moved since our
-base, and whether `Cargo.lock` matches the fork branch tip. Run this whenever
-touching gpui/zed versions, and mention drift to the user if BEHIND is large.
-
-## Rebase onto newer upstream
-
-For a rebase that must preserve zz behavior, prepare and validate before
-publishing. `scripts/fork-sync.sh rebase` pushes before running checks and
-resets its cached local branch to `origin`; do not use that shortcut with
-uncommitted work or unpublished fork commits.
-
-1. Check the cache clone's status and worktrees. Fetch both remotes, record the
-   full remote patch tip and upstream target, and compare the patch tip with
-   all three zz manifest pins. Preserve any local-only commits.
-2. Create a backup branch at the old tip and a separate `codex/` branch in an
-   isolated worktree. Rebase there. Keep zz's behavior when resolving conflicts;
-   only drop a patch after proving upstream supplies its full behavior.
-3. Compare old and new patch series with `git range-diff`, inspect changed
-   patches and GPU layouts, and run the carried regressions.
-4. Publish a separate candidate branch, then update all three zz manifests and
-   regenerate their lockfiles against that exact GitHub commit. Keep
-   `zz-patches` at the old tip until validation finishes. Local Git URL
-   overrides can work with a complete clone, but a blobless clone can fail
-   because upload-pack disables lazy fetching of missing historical objects.
-5. Run the workspace gates below, `just web build`, and
-   an isolated native app run. Record any platform checks that need another host.
-6. Publish the tested tip to `zz-patches` with an explicit
-   `--force-with-lease=refs/heads/zz-patches:<recorded-old-tip>`. A changed remote
-   tip requires reconciliation. Keep the backup and verify `just fork status` and
-   all three manifest pins and both lockfiles after publication.
-
-The 2026-09-12 rebase also needed explicit `gpui/profiler` validation: upstream's
-new debug-overlay `Quad` initializer omitted zz's smoothing and padding fields.
-Audit new platform-gated struct initializers too; the Windows color-emoji test
-still used the old glyph `dilation` field. Upstream touch predictions, direct
-gestures, visual viewports, and keyboard/safe-area insets must pass through zz's
-content-zoom conversion. See `knowledge/references/gpui-revision.md` for the
-dated checks and shader layout sizes.
-
-The 2026-09-25 rebase hit three upstream changes. The wgpu renderer's GPU state moved
-into `WgpuRendererCore` (shared with the headless renderer), so carried per-frame state
-belongs on the core, not on `WgpuRenderer`. The WebGL quad loader became a fixed decoder
-over whole texels, so `Quad` must stay a multiple of 16 bytes (it is 44 words). Keystroke
-dispatch now passes `&Keystroke` and delivers standalone modifier taps to interceptors.
-Linux and Windows can be type-checked from macOS: `cargo check --target
-x86_64-unknown-linux-musl` with a `zig cc -target x86_64-linux-musl` wrapper named
-`x86_64-linux-musl-gcc` (drop cc-rs's `--target=` flag; a `zig c++` twin as `-g++`),
-`RUST_FONTCONFIG_DLOPEN=1`, and
-`FREETYPE2_NO_PKG_CONFIG=1`; and `cargo +1.97.0 check -p gpui_windows --target
-x86_64-pc-windows-msvc` with `RC_x86_64_pc_windows_msvc` set to Homebrew's `llvm-rc`.
-
-The older combined command remains available:
-
-```
-just fork rebase zed          # onto upstream main tip
-just fork rebase zed <rev>    # onto a specific upstream rev
-```
-
-The script keeps a cached blobless clone in `~/.cache/zz-forks/<name>`,
-rebases the patch branch, force-pushes (`--force-with-lease`), and runs
-`cargo update -p <packages>` to refresh `Cargo.lock`. Rebasing rewrites the
-branch, so afterwards set both `rev =` values in the `[patch."…/zed"]` section
-of `Cargo.toml` to the new `zz-patches` tip (`git rev-parse` it in the cache
-clone) and confirm `Cargo.lock` agrees. Then ALWAYS run the gates before
-committing:
-
-```
-cargo check --workspace && cargo clippy --workspace --all-targets && cargo test --workspace
-```
-
-Gotchas:
-
-- If upstream bumped a patched crate's version, the `version = "=X.Y.Z"` pin
-  in the `[patch]` section of `Cargo.toml` must be updated by hand (the pin
-  exists because the zed repo contains more than one crate named `gpui`).
-- Rebase conflicts are resolved inside the cache clone; the script prints the
-  exact commands.
-- Never rebase as a side effect of unrelated work — bumping the base rev pulls
-  in all upstream changes since the last pin and needs real verification (run
-  the app, not just the gates).
-
-## Adding a new carried-patch fork
-
-1. `gh repo fork <upstream> --clone=false`
-2. Branch at the exact rev Cargo.lock pins:
-   `gh api repos/demfabris/<repo>/git/refs -f ref=refs/heads/zz-patches -f sha=<locked-rev>`
-3. Commit the patch (GitHub contents API for small single-file changes — no
-   clone needed).
-4. Add a `[patch."<upstream-url>"]` section in `Cargo.toml` with a comment
-   saying what the patch carries and why.
-5. Add a line to `scripts/forks.conf`.
-6. Prefer upstreaming: open a PR against upstream so the fork can eventually die.

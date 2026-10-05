@@ -118,8 +118,7 @@ can select an installed library with `ghostty_terminal_clone_screen`.
 When comparing overrides, use distinct source paths or rebuild the sys package:
 Cargo tracks the override environment value, not edits inside that directory.
 
-This is a native dependency, outside the Cargo-only `scripts/forks.conf` and
-`just forks` workflow. Maintain it using the native Ghostty section in
+This is a native dependency. Maintain it using the native Ghostty section in
 `.agents/skills/fork-rebase/SKILL.md`. Preserve published commits through a
 retained branch or tag before rebasing. Drop the signal-stack change when upstream provides
 the same allocation behavior in ReleaseSafe, or when zz stops building

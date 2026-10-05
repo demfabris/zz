@@ -1,7 +1,6 @@
 import "scripts/just/settings.just"
 
 mod compat "scripts/just/compat.just"
-mod fork "scripts/just/fork.just"
 mod install "scripts/just/install.just"
 mod package "scripts/just/package.just"
 mod perf "scripts/just/perf.just"

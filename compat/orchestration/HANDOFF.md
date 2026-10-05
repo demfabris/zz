@@ -38,7 +38,7 @@ popup-underlay flake in the attached fixture, and then the fifth, started by the
 
 1. `desktop.overlay-consumers`: the desktop menu's mouse modality. gpui has capture-phase hooks for
    mouse down and up only; motion and wheel outside an open menu reach the pane beneath. A fork
-   question first (a capture-phase move/wheel hook in `demfabris/zed` `zz-patches`) or a mouse layer
+   question first (a capture-phase move/wheel hook in `demfabris/gpui`) or a mouse layer
    above the panes. Board front `F-GUI-MENU-MOUSE-MODALITY`, not a lane.
 2. `tui.status-row`, item `presentation:tui-status-row-theme-colours-per-client`: user-set
    `dark-theme-*`/`light-theme-*` colours and `theme` never reach the raw TUI. Measured and designed by

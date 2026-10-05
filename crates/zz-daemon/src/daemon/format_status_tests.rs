@@ -1,4 +1,4 @@
-use super::tests::{engine_request, execute, request, settled};
+use super::tests::{counted_value_job, engine_request, execute, request, settled};
 use super::*;
 
 #[test]
@@ -119,7 +119,11 @@ fn status_forget_high_watermark_preserves_out_of_order_and_reused_lower_ids() {
 
 #[test]
 fn status_forget_cleans_rendered_clients_and_preserves_other_clients_and_jobs() {
-    let (engine, context, mut first) = completed_request("#(printf '\\043{P:first}\\n')");
+    #[cfg(unix)]
+    let job = "#(printf '\\043{P:first}\\n')";
+    #[cfg(windows)]
+    let job = "#(echo ##{P:first})";
+    let (engine, context, mut first) = completed_request(job);
     first.context = Arc::new(
         engine
             .format_status_context(context.session, context.window, context.pane)
@@ -129,7 +133,6 @@ fn status_forget_cleans_rendered_clients_and_preserves_other_clients_and_jobs() 
     let mut second = first.clone();
     second.client = ClientId(2);
     let mut renderer = StatusRenderer::default();
-    #[cfg(unix)]
     let _jobs = crate::daemon::status_jobs::tests::Driver::new(renderer.job_client());
     settled(&mut renderer, &first);
     settled(&mut renderer, &second);
@@ -1220,10 +1223,9 @@ fn completed_status_shared_request_bypasses_unsafe_and_forced_job_formats() {
     }
     let directory = tempfile::tempdir().expect("shared forced job fixture");
     let count = directory.path().join("count");
-    let format = format!("#(echo run >> '{}'; echo value)", count.display());
+    let format = counted_value_job(&count);
     let request = Arc::new(request(1, &format, ""));
     let mut renderer = StatusRenderer::default();
-    #[cfg(unix)]
     let _jobs = crate::daemon::status_jobs::tests::Driver::new(renderer.job_client());
     assert_eq!(settled(&mut renderer, &request).left, "value");
     let runs = std::fs::read_to_string(&count).unwrap().lines().count();
@@ -1453,9 +1455,8 @@ fn completed_status_rejects_terminal_mode_and_unknown_dependencies() {
 fn completed_status_cache_keeps_forced_shell_jobs_running() {
     let directory = tempfile::tempdir().expect("forced job fixture");
     let count = directory.path().join("count");
-    let format = format!("#(echo run >> '{}'; echo value)", count.display());
+    let format = counted_value_job(&count);
     let mut renderer = StatusRenderer::default();
-    #[cfg(unix)]
     let _jobs = crate::daemon::status_jobs::tests::Driver::new(renderer.job_client());
     let request = request(1, &format, "");
     assert_eq!(settled(&mut renderer, &request).left, "value");
@@ -1510,7 +1511,6 @@ fn completed_status_invalidates_captured_global_and_session_environment_values()
 fn completed_status_rejects_stale_references_after_unsafe_template_changes() {
     let (_, _, mut request) = completed_request("#{session_name}");
     let mut renderer = StatusRenderer::default();
-    #[cfg(unix)]
     let _jobs = crate::daemon::status_jobs::tests::Driver::new(renderer.job_client());
     assert_eq!(
         renderer.render_forced_at(&request, 1_700_000_000).left,
@@ -1521,8 +1521,7 @@ fn completed_status_rejects_stale_references_after_unsafe_template_changes() {
     assert!(renderer.completed.is_none());
     let directory = tempfile::tempdir().expect("stale references job fixture");
     let count = directory.path().join("count");
-    Arc::make_mut(&mut request.formats).left =
-        format!("#(echo run >> '{}'; echo value)", count.display());
+    Arc::make_mut(&mut request.formats).left = counted_value_job(&count);
     assert_eq!(settled(&mut renderer, &request).left, "value");
     let runs = std::fs::read_to_string(&count).unwrap().lines().count();
     renderer.render_forced(&request);

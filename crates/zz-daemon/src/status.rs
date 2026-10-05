@@ -3269,12 +3269,7 @@ fn status_working_directory(context: &StatusContext) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(unix)]
     use crate::daemon::status_jobs::tests::renderer;
-    #[cfg(not(unix))]
-    fn renderer() -> StatusRenderer {
-        StatusRenderer::default()
-    }
     use std::time::{Duration, Instant};
     use zz_mux::{PaneKind, SplitSize, StatusValues, expand_format_values};
     use zz_protocol::Axis;
@@ -3293,6 +3288,14 @@ mod tests {
             thread::sleep(Duration::from_millis(5));
         }
         renderer.render_initial(request)
+    }
+
+    pub(super) fn counted_value_job(count: &Path) -> String {
+        #[cfg(unix)]
+        let command = format!("echo run >> '{}'; echo value", count.display());
+        #[cfg(windows)]
+        let command = format!("echo run>>\"{}\"& echo value", count.display());
+        format!("#({command})")
     }
 
     pub(super) fn request(client: u64, left: &str, right: &str) -> StatusRequest {
@@ -4869,7 +4872,7 @@ mod tests {
     fn the_same_job_in_two_status_formats_runs_once() {
         let directory = tempfile::tempdir().expect("job count fixture");
         let count = directory.path().join("count");
-        let format = format!("#(echo run >> '{}'; echo value)", count.display());
+        let format = counted_value_job(&count);
         let mut renderer = renderer();
         let request = request(1, &format, &format);
         assert_eq!(renderer.render_forced(&request).left, "");

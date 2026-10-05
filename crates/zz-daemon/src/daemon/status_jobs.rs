@@ -203,6 +203,75 @@ impl StatusClient {
 #[path = "jobs_e15_tests.rs"]
 pub(crate) mod tests;
 
+#[cfg(all(test, windows))]
+pub(crate) mod tests {
+    use super::*;
+    use std::{
+        ops::{Deref, DerefMut},
+        thread,
+        time::Duration,
+    };
+
+    pub(crate) struct Driver {
+        stop: Arc<AtomicBool>,
+        thread: Option<thread::JoinHandle<()>>,
+    }
+
+    impl Driver {
+        pub(crate) fn new(client: StatusClient) -> Self {
+            let stop = Arc::new(AtomicBool::new(false));
+            let stopping = Arc::clone(&stop);
+            let thread = thread::spawn(move || {
+                let mut registry = windows::Registry::new(client);
+                while !stopping.load(Ordering::Acquire) {
+                    registry.turn();
+                    thread::sleep(Duration::from_millis(5));
+                }
+            });
+            Self {
+                stop,
+                thread: Some(thread),
+            }
+        }
+    }
+
+    impl Drop for Driver {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Release);
+            if let Some(thread) = self.thread.take() {
+                thread.join().unwrap();
+            }
+        }
+    }
+
+    pub(crate) struct Renderer {
+        renderer: crate::status::StatusRenderer,
+        _driver: Driver,
+    }
+
+    pub(crate) fn renderer() -> Renderer {
+        let renderer = crate::status::StatusRenderer::default();
+        let driver = Driver::new(renderer.job_client());
+        Renderer {
+            renderer,
+            _driver: driver,
+        }
+    }
+
+    impl Deref for Renderer {
+        type Target = crate::status::StatusRenderer;
+        fn deref(&self) -> &Self::Target {
+            &self.renderer
+        }
+    }
+
+    impl DerefMut for Renderer {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.renderer
+        }
+    }
+}
+
 #[cfg(windows)]
 mod windows {
     use super::*;

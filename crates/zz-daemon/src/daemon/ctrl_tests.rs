@@ -785,7 +785,10 @@ fn a_late_gui_hook_wakes_quiet_started_before_its_reply() {
         }),
         false,
     ));
-    let hook = format!("capture-browser -t {pane} -o /tmp/zz-ctrl-late-hook.png");
+    let hook = format!(
+        "capture-browser -t {pane} -o {}",
+        tmux_path(&std::env::temp_dir().join("zz-ctrl-late-hook.png"))
+    );
     shared
         .inner
         .lock()

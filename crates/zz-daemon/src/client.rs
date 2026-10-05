@@ -3674,11 +3674,18 @@ mod tests {
         };
 
         for kind in [ClientKind::Interactive, ClientKind::Command] {
+            #[cfg(unix)]
             let directory = tempfile::Builder::new()
                 .prefix("zz-paneframe-")
                 .tempdir_in("/tmp")
                 .expect("create socket directory");
+            #[cfg(unix)]
             let socket = directory.path().join("daemon.sock");
+            #[cfg(windows)]
+            let socket = std::path::PathBuf::from(format!(
+                r"\\.\pipe\zz-paneframe-{}-{kind:?}",
+                std::process::id()
+            ));
             let listener = LocalTransport::bind(&socket).expect("bind handshake listener");
             let server = std::thread::spawn(move || {
                 let stream = listener.accept().expect("accept client");

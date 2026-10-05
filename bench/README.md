@@ -39,7 +39,7 @@ terminal running `inner.sh <label>` and waits on `results/<label>.done`.
 
 - **Release bundles only.** zz must be a release bundle — `run.sh` looks under
   `dist/zz` and `dist/zz-profile` (`cargo xtask bundle-cef --release`, or
-  `just profile-build mac`). A dev-profile build measures the build profile,
+  `just profile build mac`). A dev-profile build measures the build profile,
   not the terminal: unoptimized draw code and an unoptimized VT engine each
   cost multiples of the real number.
 - **Same grid or no comparison.** Throughput scales with the grid the terminal
@@ -69,7 +69,7 @@ can be added without touching the generator.
 `bench/perf/` is a separate benchmark: the zz daemon against a release tmux,
 both headless and isolated, covering CLI round trips, spawn, cold start,
 config replay, chatty panes, idle cost, memory, attach, echo latency,
-throughput, control mode and status jobs. `just perf-gate [stage]` runs it;
+throughput, control mode and status jobs. `just perf gate [stage]` runs it;
 see `bench/perf/README.md`.
 
 # GPUI frame cost (macOS)

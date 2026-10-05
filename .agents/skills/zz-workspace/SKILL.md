@@ -7,7 +7,7 @@ description: Drive the surrounding zz workspace from inside a zz Agent pane usin
 
 Drive terminal, browser, and Agent panes through the `zz` CLI. Run `zz tools`
 for the full catalog or `zz tools agent` for agent verbs. Run `zz tools --skill`
-for the agent guide with skill frontmatter. Regenerate it with `just tools-skill`.
+for the agent guide with skill frontmatter. Regenerate it with `just tools skill`.
 Run `zz tools terminal` for terminal verbs, `zz tools browser` for browser verbs,
 and `zz tools advanced` for state subscriptions and terminal-agent integration.
 

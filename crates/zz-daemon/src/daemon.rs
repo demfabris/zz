@@ -50829,7 +50829,7 @@ workspace_tools_sections! {
 
 Drive terminal, browser, and Agent panes through the `zz` CLI. Run `zz tools`
 for the full catalog or `zz tools agent` for agent verbs. Run `zz tools --skill`
-for the agent guide with skill frontmatter. Regenerate it with `just tools-skill`.
+for the agent guide with skill frontmatter. Regenerate it with `just tools skill`.
 Run `zz tools terminal` for terminal verbs, `zz tools browser` for browser verbs,
 and `zz tools advanced` for state subscriptions and terminal-agent integration.
 
@@ -80428,13 +80428,13 @@ set-option -g @alias-mixed-next yes
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.agents/skills/zz-workspace/SKILL.md");
         let skill = std::fs::read_to_string(path)
-            .expect("read workspace skill; run just tools-skill to regenerate it");
+            .expect("read workspace skill; run just tools skill to regenerate it");
         let generated = workspace_tools_catalog(&["--skill".into()])
             .expect("skill catalog")
             .output;
         assert_eq!(
             skill, generated,
-            "run just tools-skill to regenerate the skill"
+            "run just tools skill to regenerate the skill"
         );
         assert_eq!(
             generated.strip_prefix(WORKSPACE_TOOLS_FRONTMATTER),

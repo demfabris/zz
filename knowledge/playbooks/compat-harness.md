@@ -40,7 +40,7 @@ counts or open-item rosters in the philosophy, roadmap, divergence matrix, or re
 Run the fast gate before choosing or landing a compatibility slice:
 
 ```sh
-just compat-check
+just compat check
 ```
 
 The recipe calls `compat/check.sh`, which fetches the pinned tmux binary once, validates the oracle
@@ -330,7 +330,7 @@ later pin audit classifies `after-queue` as explicit-only: ordinary queues do no
 `set-hook -R` runs it. The current partition contains those 67 automatic producers and the
 explicit-only hook, with no `hook:` gaps left in the registry: `hooks.pane-events`, which held
 `pane-focus-in`, `pane-focus-out`, and `pane-set-clipboard`, closed on 2026-09-02.
-`just compat-check` requires the exact
+`just compat check` requires the exact
 `daemon::tests::pinned_hook_producer_partition_matches_the_oracle` and
 `status::tests::daemon_delegated_format_consumers_match_mux_inventory` tests. The second test seeds
 buffer, client, and session facts, then requires every one of the 44 delegated names to resolve
@@ -345,7 +345,7 @@ the shared-binding
 runtime mismatch for bare key-only `bind-key`; downstream command and copy-action behavior retains
 its separate owners. Slice 10v closes `tracker.format-vocabulary-registration` with the schema 5
 source inventory and disjoint, exhaustive production-owned partitions. New or stale literal,
-derived, propagation, or modifier entries fail `just compat-check`.
+derived, propagation, or modifier entries fail `just compat check`.
 
 `formats.context-producer-fidelity` closed on 2026-09-04 with the `set-hook -B` monitor subsystem,
 and `formats.modifier-fidelity` closed on 2026-09-02. Native typed producers remain accepted under
@@ -795,7 +795,7 @@ user's passwd entry, and reports a located syntax error only when the required l
 Run the strict corpus and attached-client contract from the repository root:
 
 ```sh
-just compat --strict-geometry --attached-client
+just compat run --strict-geometry --attached-client
 ```
 
 `compat/run.sh` without flags remains the non-strict headless-only form. It prints the temporary
@@ -1047,14 +1047,14 @@ Register a gap before implementing it:
    `known/` scenario only for an accepted exact mismatch. Its first metadata comment must be
    `# gap: <stable-gap-id>`, and the registry entry must declare the expected
    `TOPO GEO FMT OUT WARN` tuple.
-4. Run `just compat-check`. Fix unclassified structural gaps, stale manifest entries, broken
+4. Run `just compat check`. Fix unclassified structural gaps, stale manifest entries, broken
    evidence, and tuple mismatches before changing behavior.
 5. Implement the slice and run its focused evidence. Run the full strict corpus when the change can
    affect shared command, topology, geometry, format, output, config, or attached-client behavior.
 6. If the implementation closes an adopt gap, pass its acceptance checks, then move the ID from
    `gaps` to `closed`. Record its title, `closed_on`, evidence, and resolution. If work remains,
    update the same active ID and its evidence. Regenerate `knowledge/tmux/gaps.md`, then run
-   `just compat-check` again.
+   `just compat check` again.
 
 When the user resumes the campaign, use the generated report to rerank and choose a slice. The
 roadmap supplies dependency order, and the divergence matrix supplies detailed rationale; neither

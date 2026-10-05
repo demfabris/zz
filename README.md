@@ -99,7 +99,9 @@ sudo apt install ./zz-<version>-linux-<arch>.deb
 
 # Development
 
-Install [just](https://github.com/casey/just)
+Install [just](https://github.com/casey/just) 1.52 or newer. Run `just` to browse command
+groups, `just web` to list browser commands, or `just --list --list-submodules` for the full tree.
+Related commands use `just <group> <action> [arguments]`; `run`, `watch`, and `build` stay at the root.
 
 ## Prerequisites
 
@@ -110,10 +112,15 @@ Install [just](https://github.com/casey/just)
 - Windows x64: Git for Windows (including Git Bash), the MSVC Rust toolchain, and Visual Studio 2022 Build Tools with the C++ tools and a Windows SDK.
 
 ```sh
-just [build|install] [mac|linux]
-just dmg
-just pacman-[package|install]
-just deb-[package|install]
+just build mac
+just install mac
+just package mac
+just package arch
+just install arch
+just package deb
+just install deb
+just web run
+just web build --release
 ```
 
 On Windows, build from PowerShell:

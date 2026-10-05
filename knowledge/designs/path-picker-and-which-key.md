@@ -387,7 +387,7 @@ Bookkeeping in the same change:
   dated reasons; manifest counts 366 to 367 and 91 to 92; the `COMMAND_SPECS` count in
   `crates/zz-mux/tests/hunt_claims.rs`; `python3 compat/tmux-tracker.py write-report`; a zz-native row in
   `knowledge/tmux/commands.md`.
-- `just web-build` for the lockfile.
+- `just web build` for the lockfile.
 
 # Build order
 

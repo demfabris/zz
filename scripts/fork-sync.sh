@@ -52,7 +52,7 @@ status() {
     done < <(read_conf)
     echo
     echo "CARRIED = our patch commits on the branch; BEHIND = upstream commits since"
-    echo "our base. Rebase with: just fork-rebase <name> [rev]"
+    echo "our base. Rebase with: just fork rebase <name> [rev]"
 }
 
 rebase() {

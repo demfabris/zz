@@ -245,7 +245,7 @@ jobs:
         # The runner's distribution is what dpkg-shlibdeps resolves the bundle's
         # libraries against, so the published deb targets Ubuntu 24.04 and up.
         # A release artifact is worth the slow compression level the local
-        # `just deb-package` skips.
+        # `just package deb` skips.
         env:
           ZZ_DEB_COMPRESSION_LEVEL: 19
         run: |

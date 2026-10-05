@@ -96,12 +96,12 @@ HELPER_BINARY="$PROFILE_APP/Contents/Frameworks/zz Helper.app/Contents/MacOS/zz 
 SYMBOLS_DIR="$(dirname "$PROFILE_APP")/symbols"
 
 [[ -x "$APP_BINARY" ]] ||
-    fail "profiling bundle is missing; run 'just profile-build mac' first"
+    fail "profiling bundle is missing; run 'just profile build mac' first"
 [[ -x "$HELPER_BINARY" ]] ||
-    fail "profiling helper is missing; run 'just profile-build mac' first"
+    fail "profiling helper is missing; run 'just profile build mac' first"
 if [[ "$PROFILE_REQUIRES_SYMBOLS" == "true" ]]; then
     [[ -d "$SYMBOLS_DIR/zz.dSYM" && -d "$SYMBOLS_DIR/zz_helper.dSYM" ]] ||
-        fail "matching profiling dSYMs are missing; run 'just profile-build mac' first"
+        fail "matching profiling dSYMs are missing; run 'just profile build mac' first"
 fi
 
 PROFILE_EXISTING_PIDS=()

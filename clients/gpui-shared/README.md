@@ -10,4 +10,4 @@ the WASM build. Each application owns its entry point, fonts, window lifecycle,
 and platform backend; the shell, navigation, settings, and preferences are shared.
 
 Run `cargo test --manifest-path clients/web/Cargo.toml --lib` for shared logic
-checks, `just web-build` for WASM, and `just ios-gpui iPad build` for iOS.
+checks, `just web build` for WASM, and `just ios build iPad` for iOS.

@@ -21,7 +21,7 @@ is rendered.
 
 The house-style reference is `crates/zz-ui/src/command/palette_view.rs`. It demonstrates `cx.theme()`
 derivations alongside the `Input`/`InputState`, `ListItem`, `Kbd`, and `Tag` widgets.
-The browser client in `clients/web` (`just web`) uses the shared GPUI components outside the desktop app.
+The browser client in `clients/web` (`just web run`) uses the shared GPUI components outside the desktop app.
 
 # Rules
 

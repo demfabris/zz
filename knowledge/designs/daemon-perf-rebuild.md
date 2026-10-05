@@ -418,7 +418,7 @@ per-caller reuse).
   (hard link if that fails, else the installed path); the clone goes with the wrapper on daemon
   exit. `spawn_daemon` no longer exports `ZZ_TMUX_EXECUTABLE`, and an explicit one still wins
   unpinned.
-- Every lane that touches the wire runs `just web-build` and `just ios-gpui iPad build` in its
+- Every lane that touches the wire runs `just web build` and `just ios build iPad` in its
   gate. `crates/zz-protocol/src/key.rs` is added to `NOT_WIRE` in `compat/wire-version.py`
   (KeyTables is not serialized), so W1-PUBLISH does not trip the guard after a future release.
 
@@ -433,7 +433,7 @@ per-caller reuse).
 | 4 | W4-DELIVER, W4-ROWS, W4-BINARY | `--stage final` |
 
 - Lanes in a wave develop in parallel from the wave base. They merge serially in the order above.
-  Before merging, a lane rebases onto the previous merge, runs `just perf-gate <wave stage>
+  Before merging, a lane rebases onto the previous merge, runs `just perf gate <wave stage>
   --strict --baseline <previous merge JSON>` on a quiet host, and commits its own JSON as
   `bench/perf/results/w<wave>-<n>-<lane>-<host>-<sha8>.json`.
 - A lane may not make a metric it does not own worse than the `tolerance` block of
@@ -466,7 +466,7 @@ Built in `bench/perf/` (`run.py`, `gate.py`, `isolate.py`, `probe.py`, `timing.p
 stdlib + ctypes, headless. `bench/perf/README.md` is the reference for flags, probes, ids and the
 noise policy; this section records what the lanes rely on.
 
-- `just perf-gate [stage] [args]` builds `zz_cli` and runs `run.py --zz target/release/zz_cli
+- `just perf gate [stage] [args]` builds `zz_cli` and runs `run.py --zz target/release/zz_cli
   --stage <stage>`. Flags: `--json`, `--baseline <previous merge>`, `--w0 <W0 JSON>` (found
   automatically), `--quick`, `--only`, `--strict`, `--keep`, `--rescore`, `--targets`.
 - **tmux is a release build**: without `--tmux` the gate tries `/opt/homebrew/bin/tmux`,
@@ -4012,7 +4012,7 @@ Waves 1 and 2 put each behaviour change behind a `ZZ_PERF_*` environment knob, r
   of daemon.rs (production ends near line 44.7k, `mod tests` holds the remaining ~65k lines).
   Helpers needed from `mod tests` get `pub(super)` in place.
 - New struct fields are appended, never reordered. Find code by function name.
-- Develop with `just perf-gate` `--quick`; run the full gate for the wave stage before merging,
+- Develop with `just perf gate` `--quick`; run the full gate for the wave stage before merging,
   on a quiet machine for wall metrics. `compat/.cache` is not in a fresh worktree: run
   `compat/fetch-tmux.sh` there for compat scripts (the gate uses the release tmux).
 - A failing zz-daemon test under the full workspace is re-run alone before diagnosis.

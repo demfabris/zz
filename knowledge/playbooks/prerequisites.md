@@ -22,6 +22,7 @@ flow that consumes CMake/Ninja.
 
 | Requirement | Pin / version | Checked against | Why it's needed |
 | --- | --- | --- | --- |
+| just | `1.52` or newer | `scripts/just/settings.just` (`default-list`), `Justfile` (`mod`) | Lists command groups and runs their recipes |
 | Rust | `1.97.0`, minimal profile, `clippy` + `rustfmt` components | `rust-toolchain.toml`; `workspace.package.rust-version = "1.97"` in `Cargo.toml` | Toolchain auto-selected by `rustup` when present |
 | Zig | `0.16.0` | `mise.toml`, mirrored in `.zigversion`; `mlugg/setup-zig@v2.2.1` with `version: 0.16.0` in CI | Builds `libghostty-vt` with the local sys crate and a native fork removing unused C-host signal-stack storage |
 | CMake | `3.21` or newer | `cmake_minimum_required(VERSION 3.21)` in the CEF distribution's own `CMakeLists.txt`; `cmake` in the CI apt list | Configures the CEF C++ wrapper build invoked by `xtask`/`cef::build_util` |

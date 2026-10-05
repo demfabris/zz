@@ -84,7 +84,7 @@ stores its update date, active gaps, and closed history. The generated
 product disposition as open, blocked, or accepted. `depends_on` records delivery order and does not
 set status.
 
-`just compat-check` calls `compat/check.sh`, validates the clean pinned oracle and registry, requires
+`just compat check` calls `compat/check.sh`, validates the clean pinned oracle and registry, requires
 nine named mux compatibility tests in the full `zz-mux` library run, then runs three named daemon
 compatibility tests through `--exact`. The Rust gate reconciles upstream command and alias names,
 flag arities, positional bounds, custom argument rules, option names, global formats, literal and

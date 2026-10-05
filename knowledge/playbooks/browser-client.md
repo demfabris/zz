@@ -25,27 +25,27 @@ key bindings, copy mode, and Agent processes.
 Start the development daemon with `just run mac` or `just run linux`, then run from the repo root:
 
 ```sh
-just web-setup
-just web-build
-just web-serve
+just web setup
+just web build
+just web serve
 ```
 
-Open `http://127.0.0.1:8081`. `just web` builds the assets, starts the gateway, and watches
+Open `http://127.0.0.1:8081`. `just web run` builds the assets, starts the gateway, and watches
 the client and shared crates for changes. Refresh the page after a rebuild.
-`just web-build` produces dev assets under `clients/web/dist-dev`. Dev builds use a separate
-local-storage key for preferences. `just web-build-release` produces optimized release assets
+`just web build` produces dev assets under `clients/web/dist-dev`. Dev builds use a separate
+local-storage key for preferences. `just web build --release` produces optimized release assets
 under `clients/web/dist` with the ordinary zz identity. Serve those with
 `ZZ_DEV_BUILD=0 cargo run -p zz-web -- --assets clients/web/dist` (port 8080 by default).
 Both builds enable code highlighting (tree-sitter compiled to WASM), which needs `llvm-ar`
 (`brew install llvm` on macOS); `WEB_SYNTAX_HIGHLIGHTING=0` builds without it. The grammars add
-roughly 0.7 MB gzipped, so `just live-demo` leaves them out.
+roughly 0.7 MB gzipped.
 
 The dev recipes compile the gateway with `ZZ_DEV_BUILD=1` and connect to the existing
 `zz-dev` daemon socket. They clear inherited `ZZ_SOCKET` and pane context. An explicit
 `--socket` selects another daemon:
 
 ```sh
-just web-serve --bind 127.0.0.1:8081 --socket /tmp/zz-browser.sock
+just web serve --bind 127.0.0.1:8081 --socket /tmp/zz-browser.sock
 ```
 
 The browser and daemon must use the same protocol version. If an installed daemon reports a
@@ -165,7 +165,7 @@ cargo test -p zz-web --locked
 cargo clippy -p zz-web --all-targets --locked -- -D warnings
 cargo test --manifest-path clients/web/Cargo.toml --lib --locked
 rustup run nightly cargo check --manifest-path clients/web/Cargo.toml --target wasm32-unknown-unknown --all-targets --locked
-just web-build
+just web build
 ```
 
 Gateway integration tests start a real daemon, attach over WebSocket, resize and type into a

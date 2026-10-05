@@ -247,7 +247,7 @@ This table preserves the 2026-08-22 roster. Do not update it as a live ledger.
 `python3 compat/tmux-tracker.py check` validates the registry and evidence;
 `cargo test -p zz-mux compat_manifest` checks current Rust structural gaps against it.
 `python3 compat/tmux-tracker.py write-report` publishes the current roster in the generated gap
-report. `just compat-check` runs the full gate.
+report. `just compat check` runs the full gate.
 
 ## Command positional bounds
 

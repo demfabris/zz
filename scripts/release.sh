@@ -38,7 +38,7 @@ esac
 
 installed="$(cargo release --version 2>/dev/null || true)"
 [[ "$installed" == "cargo-release $CARGO_RELEASE_VERSION" ]] || \
-    die "cargo-release $CARGO_RELEASE_VERSION is required; run 'just release-setup'"
+    die "cargo-release $CARGO_RELEASE_VERSION is required; run 'just release setup'"
 
 [[ -z "$(git -C "$REPO_ROOT" status --porcelain)" ]] || \
     die "working tree is not clean; commit or remove local changes before releasing"

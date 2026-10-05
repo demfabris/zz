@@ -36,7 +36,7 @@ rg 'demfabris/zed|zz-forks/zed' Cargo.toml Cargo.lock clients/web/{Cargo.toml,Ca
 ```
 
 The fork itself is declared in `scripts/forks.conf` (`zed  zed-industries/zed  demfabris/zed
-zz-patches  main  gpui,gpui_platform`), which is what `just forks` and `just fork-rebase zed` read.
+zz-patches  main  gpui,gpui_platform`), which is what `just fork status` and `just fork rebase zed` read.
 
 **`gpui-component` is not a dependency.** It was forked into `crates/zz-ui` (`zz-ui`) and both
 `gpui-component` and `gpui-component-assets` are gone from the workspace and its lockfiles; nothing
@@ -216,7 +216,7 @@ gpui_platform = { git = "https://github.com/demfabris/zed", rev = "<rev>" }
 Adding a carried patch (no rebase; the lock is already at the branch tip):
 
 ```bash
-just forks   # confirm LOCK is "in sync" before appending a commit
+just fork status   # confirm LOCK is "in sync" before appending a commit
 ```
 
 Bumping upstream means rebasing `zz-patches`, then moving the `rev` in `Cargo.toml`

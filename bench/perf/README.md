@@ -10,15 +10,15 @@ tmux, nothing else.
 ## Running
 
 ```sh
-just perf-gate                      # build zz_cli, stage baseline, full run
-just perf-gate wave1 --quick        # lane loop, about 3 minutes
-just perf-gate wave1 --strict --baseline bench/perf/results/<previous merge>.json
+just perf gate                      # build zz_cli, stage baseline, full run
+just perf gate wave1 --quick        # lane loop, about 3 minutes
+just perf gate wave1 --strict --baseline bench/perf/results/<previous merge>.json
 python3 bench/perf/run.py --only cli,attach --quick
 python3 bench/perf/run.py --targets # the Targets table of the design doc, from thresholds.json
 python3 bench/perf/test_gate.py     # threshold, noise policy and tmux choice tests
 ```
 
-`just perf-gate` runs `cargo build --release -p zz-cli` first, so the binary
+`just perf gate` runs `cargo build --release -p zz-cli` first, so the binary
 matches the tree. `run.py` alone does not build; it records the binary's
 sha256 and mtime in `meta` and warns when the binary is older than the HEAD
 commit.

@@ -90,7 +90,7 @@ Current forks and why:
   - The browser client's excluded lock needs a `clients/web/Cargo.toml` rev bump plus a
     `cargo metadata` re-resolve, and can need a second re-resolve to pick up
     brand-new transitive deps (hdrhistogram, crossbeam-channel from the
-    profiler feature) — verify `just web-build` passes, since `--locked`
+    profiler feature) — verify `just web build` passes, since `--locked`
     is what catches it.
   - Upstream unified perf tracking under gpui's `profiler` feature. Since
     `66cad0ed` (2026-09-22), zz leaves it disabled in production to avoid its
@@ -101,13 +101,13 @@ Current forks and why:
     the shared `set_trace_enabled`, and collectors now yield
     `FrameEvent::{Draw,Present}` instead of bare `FrameTiming`.
 
-  Adding a carried patch is not a rebase: when `just forks` reports LOCK
+  Adding a carried patch is not a rebase: when `just fork status` reports LOCK
   "in sync", commit on the branch tip in the local checkout, push, then repin
   with an explicit rev — plain `cargo update -p gpui` can silently keep the
   old branch tip without refetching ("Locking 0 packages" in its output), so
   use `cargo update -p gpui --precise <new-rev>` (and the same for
   `gpui_platform`), then verify the new rev actually appears in `Cargo.lock`.
-  Do not run `fork-rebase` for this — it would move the upstream base as a
+  Do not run `fork rebase` for this — it would move the upstream base as a
   side effect.
 
   The `[patch."https://github.com/zed-industries/zed"]` entries pin `rev =`
@@ -166,7 +166,7 @@ Cargo regenerates `Cargo.lock` against the published wrapper source.
 `third_party/rust/libghostty-vt-sys/UPSTREAM.md` owns the full commit IDs, rationale,
 validation, and removal conditions.
 
-`just forks`, `forks.conf`, and `fork-sync.sh` only handle Cargo forks. Do not
+`just fork status`, `forks.conf`, and `fork-sync.sh` only handle Cargo forks. Do not
 add this native dependency to that manifest or use its Cargo rebase command.
 For a native update, inspect both upstream and fork histories, preserve the
 published pin through a retained branch or tag, and push the new pin as a
@@ -199,7 +199,7 @@ native rebuild; use distinct paths or explicitly rebuild the sys package.
 ## Check status
 
 ```
-just forks
+just fork status
 ```
 
 Shows, per fork: carried commit count, how far upstream has moved since our
@@ -226,11 +226,11 @@ uncommitted work or unpublished fork commits.
    `zz-patches` at the old tip until validation finishes. Local Git URL
    overrides can work with a complete clone, but a blobless clone can fail
    because upload-pack disables lazy fetching of missing historical objects.
-5. Run the workspace gates below, `just web-build`, and
+5. Run the workspace gates below, `just web build`, and
    an isolated native app run. Record any platform checks that need another host.
 6. Publish the tested tip to `zz-patches` with an explicit
    `--force-with-lease=refs/heads/zz-patches:<recorded-old-tip>`. A changed remote
-   tip requires reconciliation. Keep the backup and verify `just forks` and
+   tip requires reconciliation. Keep the backup and verify `just fork status` and
    all three manifest pins and both lockfiles after publication.
 
 The 2026-09-12 rebase also needed explicit `gpui/profiler` validation: upstream's
@@ -256,8 +256,8 @@ x86_64-pc-windows-msvc` with `RC_x86_64_pc_windows_msvc` set to Homebrew's `llvm
 The older combined command remains available:
 
 ```
-just fork-rebase zed          # onto upstream main tip
-just fork-rebase zed <rev>    # onto a specific upstream rev
+just fork rebase zed          # onto upstream main tip
+just fork rebase zed <rev>    # onto a specific upstream rev
 ```
 
 The script keeps a cached blobless clone in `~/.cache/zz-forks/<name>`,

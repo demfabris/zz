@@ -1,5 +1,5 @@
-# This is a local-development PKGBUILD. Use `just pacman-package` or
-# `just pacman-install` from the repository root so dist/zz is built first.
+# This is a local-development PKGBUILD. Use `just package arch` or
+# `just install arch` from the repository root so dist/zz is built first.
 # The published AUR package is its sibling in aur/, rendered per release by
 # scripts/render-aur.sh; keep the two in sync.
 #

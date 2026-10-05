@@ -134,7 +134,7 @@ fi
 printf '%s\n' "$control" > "$pkg_root/DEBIAN/control"
 
 # The payload is a 1.4 GB Chromium that compresses slowly and barely shrinks;
-# level 3 keeps a local `just deb-package` under a minute. Release builds raise
+# level 3 keeps a local `just package deb` under a minute. Release builds raise
 # it through ZZ_DEB_COMPRESSION_LEVEL.
 dpkg-deb --build --root-owner-group \
     -Zzstd -z"${ZZ_DEB_COMPRESSION_LEVEL:-3}" --threads-max="$(nproc)" \

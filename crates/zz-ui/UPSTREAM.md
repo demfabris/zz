@@ -175,7 +175,7 @@ Each opened dialog has its own animation identity so replacement dialogs animate
 
 Re-syncing a module against a newer upstream revision means updating the
 revision above, re-applying that module's delta, and re-running the workspace
-build, the tests, and the browser client (`just web-build`).
+build, the tests, and the browser client (`just web build`).
 
 ## Cherry-picked since the fork revision
 

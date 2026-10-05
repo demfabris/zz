@@ -123,7 +123,7 @@ partitions all 68 pinned hook names into 27 explicit event producers, 37 generic
 `after-<command>` producers derived from implemented command names, explicit-only `after-queue`,
 and three active gaps: `pane-focus-in`, `pane-focus-out`, and `pane-set-clipboard`. A later pin audit
 proved that ordinary queues do not produce `after-queue`; `set-hook -R` remains its explicit path. The test rejects
-duplicate explicit names and overlap between produced and tracked names. `just compat-check`
+duplicate explicit names and overlap between produced and tracked names. `just compat check`
 requires the named daemon test and runs it through `--exact`. The slice changes no runtime
 behavior, protocol, differential scenario, or step.
 
@@ -893,7 +893,7 @@ Run the cheapest proof that can fail the current edit:
    behavior.
 2. At slice close, build the debug binary and run the full attached-client fixture against the
    pinned tmux oracle. Treat a skip or reduced scenario count as a failure.
-3. At a campaign checkpoint, run `just compat --strict-geometry --attached-client`, regenerate the
+3. At a campaign checkpoint, run `just compat run --strict-geometry --attached-client`, regenerate the
    canonical summary, and run `compat/run.sh --check-summary` as a separate check.
 
 Use campaign checkpoints after the Alert cohort, after two more completed slices, and at the

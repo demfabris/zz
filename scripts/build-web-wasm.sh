@@ -21,17 +21,17 @@ elif [[ "$#" != 0 ]]; then
 fi
 
 if ! rustup run "$WEB_TOOLCHAIN" rustc --version >/dev/null 2>&1; then
-    echo "missing Rust $WEB_TOOLCHAIN; run: just web-setup" >&2
+    echo "missing Rust $WEB_TOOLCHAIN; run: just web setup" >&2
     exit 2
 fi
 
 if ! rustup target list --installed --toolchain "$WEB_TOOLCHAIN" | rg -qx 'wasm32-unknown-unknown'; then
-    echo "missing WASM target; run: just web-setup" >&2
+    echo "missing WASM target; run: just web setup" >&2
     exit 2
 fi
 
 if ! command -v wasm-bindgen >/dev/null 2>&1 || [[ "$(wasm-bindgen --version)" != "wasm-bindgen 0.2.128" ]]; then
-    echo "wasm-bindgen 0.2.128 is required; run: just web-setup" >&2
+    echo "wasm-bindgen 0.2.128 is required; run: just web setup" >&2
     exit 2
 fi
 

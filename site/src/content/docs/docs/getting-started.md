@@ -79,8 +79,8 @@ sudo apt install ./zz-<version>-linux-<arch>.deb
 ```
 
 Arch users can build a native package from the checkout with
-`just pacman-package`, or `just pacman-install` to build and install in one
-step; the Debian equivalents are `just deb-package` and `just deb-install`.
+`just package arch`, or `just install arch` to build and install in one
+step; the Debian equivalents are `just package deb` and `just install deb`.
 
 Wayland is the most exercised host; X11 is compiled in and works. Chromium picks
 the backend itself. You need unprivileged user namespaces enabled, because zz
@@ -469,7 +469,7 @@ scrollback, layouts, and browser URLs; a reboot starts clean.
 - **Zig 0.16.0.** Pinned in `mise.toml`. Install [mise](https://mise.jdx.dev/),
   then `mise install`. Zig compiles `libghostty-vt`, the VT engine.
 - **CMake 3.21+ and Ninja.** The CEF C++ wrapper is built from source.
-- **`just`, `git`, and a network connection.** The build clones a pinned Ghostty
+- **`just` 1.52+, `git`, and a network connection.** The build clones a pinned Ghostty
   commit and downloads a matching CEF distribution.
 - **Linux**, the same list CI installs:
 
@@ -489,10 +489,10 @@ scrollback, layouts, and browser URLs; a reboot starts clean.
 ```sh
 just build mac       # or: linux, windows -> release bundle in dist/zz
 just run mac         # or: linux -> debug build, straight into a window
-just dmg             # macOS: dist/zz-macos.dmg
-just zip-windows     # Windows: dist/zz-windows.zip
-just pacman-package  # Arch: a native package
-just deb-package     # Debian/Ubuntu: dist/zz-linux.deb
+just package mac             # macOS: dist/zz-macos.dmg
+just package windows     # Windows: dist/zz-windows.zip
+just package arch  # Arch: a native package
+just package deb     # Debian/Ubuntu: dist/zz-linux.deb
 ```
 
 There is no cross-compilation; build each platform on itself. Checks are plain

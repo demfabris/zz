@@ -233,7 +233,7 @@ depend on `zz-daemon` with `default-features = false` and never inherit
    through the daemon into a headless `InteractiveClient`, asserting convergence and printing
    throughput and daemon CPU time; `agent_stream_soak` is `#[ignore]`d (it runs for minutes)
    and `agent_stream_soak_slow_client` covers the lag-and-replay path. Numbers land here.
-3. `just profile-system mac 20s` during a soak to confirm the added threads (1 per pane + the
+3. `just profile system mac 20s` during a soak to confirm the added threads (1 per pane + the
    shared park ticker + the shared flush thread + `async-process` reaper + `blocking` pool)
    idle correctly (the parked-clock lesson: nothing polls while no agent runs).
 

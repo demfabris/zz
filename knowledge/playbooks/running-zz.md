@@ -20,6 +20,11 @@ equivalent.
 
 # Examples
 
+Use just 1.52 or newer. `just` lists the top-level commands and groups; `just profile`
+lists profiling actions, and `just --list --list-submodules` shows the full tree.
+Related recipes live in `scripts/just/*.just` and use `just <group> <action> [arguments]`.
+Run these commands from any directory inside the checkout; recipes use the repository root.
+
 Start zz. It connects to an already-running daemon, or starts one automatically:
 
 ```sh
@@ -107,11 +112,11 @@ it from an installed zz pane, use `env -u ZZ_SOCKET ~/.local/bin/zz-dev list-ses
 
 The other development recipes share this identity:
 
-- `just web`, `just web-build`, and `just web-serve` use dev assets in `clients/web/dist-dev`,
-  port 8081, separate browser preferences, and the existing dev daemon. `web-serve --socket PATH`
-  overrides the socket. `web-build-release` retains ordinary release assets in `clients/web/dist`.
+- `just web run`, `just web build`, and `just web serve` use dev assets in `clients/web/dist-dev`,
+  port 8081, separate browser preferences, and the existing dev daemon. `web serve --socket PATH`
+  overrides the socket. `web build --release` retains ordinary release assets in `clients/web/dist`.
 
-`just ios-gpui` runs the experimental GPUI terminal with its own app identity. It finds an existing
+`just ios` runs the experimental GPUI terminal with its own app identity. It finds an existing
 dev socket or accepts `ZZ_GPUI_ENDPOINT` and `ZZ_DEV_SOCKET`; see `clients/ios-gpui/README.md`.
 
 `just build` and package installation keep their existing identity and destinations. Brew/AUR
@@ -164,10 +169,10 @@ bundling falls back to ad-hoc signing; `MACOS_LOCAL_SIGN_IDENTITY` selects an id
 SHA-1, while `MACOS_LOCAL_SIGN_IDENTITY=-` forces ad-hoc signing. Public release signing remains a
 separate Developer ID/notarization step.
 
-On Arch Linux, package that release bundle with `just pacman-package`, or build and install it in
-one step with `just pacman-install`. The installed `/usr/bin/zz` symlink resolves to the `cli`
-launcher beside the complete CEF runtime under `/usr/lib/zz`. On Debian and Ubuntu the pair is `just deb-package` (emitting
-`dist/zz-linux.deb`) and `just deb-install`, which installs it through `apt` so the computed
+On Arch Linux, package that release bundle with `just package arch`, or build and install it in
+one step with `just install arch`. The installed `/usr/bin/zz` symlink resolves to the `cli`
+launcher beside the complete CEF runtime under `/usr/lib/zz`. On Debian and Ubuntu the pair is `just package deb` (emitting
+`dist/zz-linux.deb`) and `just install deb`, which installs it through `apt` so the computed
 dependencies resolve. The deb also installs `/etc/apparmor.d/zz`; without that profile, Ubuntu
 24.04+ denies the user namespace the browser panes' zygote needs.
 
@@ -283,7 +288,7 @@ The profiling workflow deliberately uses the real CEF bundle rather than a raw C
 the release-optimized `profiling` Cargo profile once:
 
 ```sh
-just profile-build mac
+just profile build mac
 ```
 
 This writes `dist/zz-profile/zz.app` plus matching `zz.dSYM` and `zz_helper.dSYM` bundles under
@@ -297,16 +302,16 @@ build scripts when a profile emits DWARF.
 Capture one question at a time:
 
 ```sh
-just profile-cpu mac                 # Time Profiler attached to the GUI
-just profile-cpu mac daemon 30s      # Time Profiler attached to the daemon
-just profile-cpu mac all 20s         # broader, noisier all-process CPU trace
-just profile-cpu-summary <run-dir>   # retain only the isolated owned process tree
-just profile-system mac 20s          # scheduling, waits, wakeups, and IPC
-just profile-metal mac 20s           # GPUI and CEF Metal work
-just profile-metal-summary <run-dir> # zz-only frame and GPU summary
-just profile-startup mac 8s          # launch to the first attributed displayed frame
-just profile-terminal-diagnostics mac 20s
-just profile-terminal-summary <run-dir>
+just profile cpu mac                 # Time Profiler attached to the GUI
+just profile cpu mac daemon 30s      # Time Profiler attached to the daemon
+just profile cpu mac all 20s         # broader, noisier all-process CPU trace
+just profile summary cpu <run-dir>   # retain only the isolated owned process tree
+just profile system mac 20s          # scheduling, waits, wakeups, and IPC
+just profile metal mac 20s           # GPUI and CEF Metal work
+just profile summary metal <run-dir> # zz-only frame and GPU summary
+just profile startup mac 8s          # launch to the first attributed displayed frame
+just profile terminal mac 20s
+just profile summary terminal <run-dir>
 ```
 
 `scripts/profile-macos.sh` creates a short private socket path and launches the profiling bundle
@@ -342,8 +347,8 @@ standard library.
 Measure memory without Instruments or verbose logging:
 
 ```sh
-just profile-memory mac 60s
-ZZ_PROFILE_APP=/Applications/zz.app just profile-memory mac 60s
+just profile memory mac 60s
+ZZ_PROFILE_APP=/Applications/zz.app just profile memory mac 60s
 python3 scripts/sample-macos-memory.py --pid GUI_PID --daemon-pid DAEMON_PID \
     --duration 60s --output target/profiles/live-memory
 ```
@@ -362,11 +367,11 @@ target, so keep those snapshots separate from clean timing measurements.
 See [Apple's memory profiling explanation](https://developer.apple.com/videos/play/wwdc2022/10106/).
 
 Memory and attached Instruments captures start after daemon readiness and warmup,
-including when warmup is zero. `profile-startup` instead launches the bundle under
+including when warmup is zero. `profile startup` instead launches the bundle under
 Metal System Trace, with no warmup or dSYM requirement. For an existing release bundle:
 
 ```sh
-ZZ_PROFILE_APP=/Applications/zz.app just profile-startup mac 8s
+ZZ_PROFILE_APP=/Applications/zz.app just profile startup mac 8s
 python3 scripts/summarize-macos-startup.py target/profiles/<startup-run>
 ```
 
@@ -395,15 +400,15 @@ Check VM tags against the allocator source: this build's mimalloc v3 uses tag 10
 which `vmmap` labels `IOAccelerator` without `(graphics)`. That label alone is not
 evidence of daemon GPU allocations.
 
-`profile-terminal-diagnostics` is deliberately separate from clean CPU/Metal captures. It enables
+`profile terminal` is deliberately separate from clean CPU/Metal captures. It enables
 only the existing `zz::diagnostics::terminal_render` trace target and records cache hits, misses,
 uncached rows, prepared text rows, and prepaint time in `app.stderr.log`; it does not run
-Instruments. `profile-terminal-summary` filters prompt-only startup frames out of its cache ratio
+Instruments. `profile summary terminal` filters prompt-only startup frames out of its cache ratio
 when content-active frames exist. Logging changes frame timing, so use this mode to explain why
 renderer work occurs, never as a before/after CPU benchmark.
 
 The default five-second warmup starts after the isolated daemon is ready. Use
-`ZZ_PROFILE_WARMUP_SECONDS=10 just profile-metal mac 30s` when a scenario needs more setup time.
+`ZZ_PROFILE_WARMUP_SECONDS=10 just profile metal mac 30s` when a scenario needs more setup time.
 For a steady-state CEF comparison, allow 45–60 seconds after opening the browser so helper startup
 cannot dominate the sample.
 Keep baseline runs quiet: do not add `--verbose` to them. Diagnostics and
@@ -516,7 +521,7 @@ The browser-specific environment controls:
 
 The root workspace excludes `clients/web`. CI checks that standalone browser-client
 workspace in a separate Linux step, and local release checks must include its
-native tests and shipped WASM configuration. `just web-setup` installs the nightly
+native tests and shipped WASM configuration. `just web setup` installs the nightly
 WASM target used by the browser check below.
 
 ```sh

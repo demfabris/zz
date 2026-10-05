@@ -22,7 +22,7 @@ Rust edition 2024, MSRV 1.97. Release builds on mac/windows require Zig 0.16.0 (
 - `crates/zz-web` - local HTTP/WebSocket gateway for browser clients
 - `clients/web` - full-page GPUI/WASM client using zz-ui and zz-client, with its own Cargo workspace
 - `clients/gpui-shared` - one app shell, sidebar, status bar, settings, palette, overlays, pane entities, connection reducer, and image modules compiled by web and iOS clients
-- `crates/zz-gpui-ios` and `clients/ios-gpui` - UIKit GPUI backend and iOS client with the shared session sidebar, terminal and agent panes, split layout, and thin-client settings (`just ios-gpui`); a standalone terminal example remains available (`ZZ_GPUI_DEMO=terminal`)
+- `crates/zz-gpui-ios` and `clients/ios-gpui` - UIKit GPUI backend and iOS client with the shared session sidebar, terminal and agent panes, split layout, and thin-client settings (`just ios`); a standalone terminal example remains available (`ZZ_GPUI_DEMO=terminal`)
 - `crates/zz-xtask` — build tooling: CEF bundling, packaging (`cargo xtask`)
 - `compat/` — tmux compat campaign: differential harness (`run.sh`), gap registry (`tmux-gaps.json`), dispatch-board client (`board.py`), progress meter, orchestration handoff (`orchestration/`)
 - `compat/tui/` — TUI parity campaign: proof ledger (`campaign.json`), validator and report generator (`tracker.py`), cycle runners (`run-N.js`); closed 2026-09-20 at 18/18
@@ -44,7 +44,10 @@ counts as TUI progress; accepted tmux gaps do not.
 
 <important if="you need to build, run, test, lint, package, profile, or release">
 
-Run `just` recipes from the repo root; `just --list` shows everything.
+Use just 1.52 or newer. Run `just` for the command groups, `just <group>` for its actions,
+and `just --list --list-submodules` for the full tree. Keep related workflows under
+`just <group> <action> [arguments]`; common desktop commands stay at the root.
+Recipes live in `Justfile` and `scripts/just/*.just` and run from the repo root.
 
 | Command | What it does |
 |---|---|
@@ -56,14 +59,15 @@ Run `just` recipes from the repo root; `just --list` shows everything.
 | `just watch <platform>` | Rebuild and relaunch on source change |
 | `just build <platform>` | Release bundle into `dist/zz` (wraps `cargo xtask bundle-cef`) |
 | `just install mac` | Build and swap `/Applications/zz.app`; the daemon survives the swap |
-| `just ios-gpui [iPad\|iPhone] [run\|build\|device\|testflight]` | GPUI iOS app: simulator, a paired device (release, signed, installed), or a signed `dev.zz.ios` TestFlight upload; `ZZ_GPUI_DEMO=terminal` selects the terminal example |
-| `just forks` / `just fork-rebase <name>` | Carried-patch fork status / rebase |
+| `just ios [run\|build\|device\|testflight] [iPad\|iPhone]` | GPUI iOS app: simulator, a paired device (release, signed, installed), or a signed `dev.zz.ios` TestFlight upload; `ZZ_GPUI_DEMO=terminal` selects the terminal example |
+| `just fork status` / `just fork rebase <name>` | Carried-patch fork status / rebase |
 | `just site` | Docs site dev server with live reload |
-| `just web` / `web-setup` / `web-build[-release]` / `web-serve` | Browser client dev loop / toolchain / assets / local gateway |
-| `just profile-cpu\|profile-system\|profile-metal\|profile-terminal-diagnostics mac …` | Instruments captures (macOS); read one back with `profile-cpu-summary`, `profile-metal-summary`, or `profile-terminal-summary` (`profile-system` has no summary recipe) |
-| `just profile-build mac` | Release-optimized bundle with dSYMs for profiling |
-| `just dmg` / `zip-windows` / `pacman-package` / `pacman-install` / `deb-package` / `deb-install` | Platform packages |
-| `just release-mac <version>` | Full signed+notarized DMG (setup: `notary-setup-mac`; pieces: `sign-mac`, `notarize-mac`, `verify-notarized-mac`, `release-mac-check`) |
+| `just web run` / `web setup` / `web build [--release]` / `web serve` | Browser client dev loop / toolchain / assets / local gateway |
+| `just profile <cpu\|memory\|startup\|system\|metal\|terminal> mac …` | Capture profiling data; read it back with `just profile summary <cpu\|metal\|terminal> <run>` |
+| `just profile build mac` | Release-optimized bundle with dSYMs for profiling |
+| `just package mac` / `package windows` / `package arch` / `install arch` / `package deb` / `install deb` | Platform packages |
+| `just release bump <level-or-version> [--execute]` | Preview or publish a version bump (setup: `just release setup`) |
+| `just release mac build <version>` | Full signed+notarized DMG (setup: `release mac setup`; pieces: `release mac sign`, `release mac notarize`, `release mac verify`, `release mac check`) |
 | `bench/run.sh` | Terminal throughput benchmarks |
 </important>
 
@@ -73,9 +77,9 @@ Multiple agent sessions often share this checkout in parallel. Never `git stash`
 
 <important if="you are bumping gpui/zed or any dependency resolved through a [patch] fork">
 
-- `gpui`/`gpui_platform` resolve to `demfabris/zed` branch `zz-patches` — a carried-patch fork listed in `scripts/forks.conf`. Bumping upstream means rebasing the patch branch: `just forks` for status, `just fork-rebase zed` to rebase.
+- `gpui`/`gpui_platform` resolve to `demfabris/zed` branch `zz-patches` — a carried-patch fork listed in `scripts/forks.conf`. Bumping upstream means rebasing the patch branch: `just fork status` for status, `just fork rebase zed` to rebase.
 - Strange gpui build errors right after a dependency change usually mean `Cargo.lock` and the fork branch are out of sync.
-- `clients/web` consumes gpui's WASM renderer in an excluded workspace. Keep its fork revision and lockfile in step with the root, and check `just web-build` after a bump.
+- `clients/web` consumes gpui's WASM renderer in an excluded workspace. Keep its fork revision and lockfile in step with the root, and check `just web build` after a bump.
 </important>
 
 <important if="a test fails under cargo test --workspace">
@@ -86,7 +90,7 @@ A few `zz-daemon` tests are timing-sensitive and only fail under full-workspace 
 
 - The daemon outlives the app: after installing a new build, existing sessions keep running the old daemon binary until it restarts. Don't chase "missing" behavior in a stale daemon.
 - `just run` / `just watch` build zz Dev with `ZZ_DEV_BUILD=1`, clear inherited daemon/pane context, and use `zz-dev` config/data/socket paths. The macOS bundle is `dist/zz-dev/zz Dev.app` (`dev.zz.app.dev`); Linux launches `target/debug/zz-dev`. Installed and beta packages keep their existing behavior.
-- `just web` / `web-build` / `web-serve` use dev assets and port 8081. Dev SSH selects `zz-dev`, linked by desktop dev runs into `~/.local/bin`. `web-build-release` retains production identity. `just ios-gpui` opens the session sidebar and daemon-backed terminal/agent panes; its gear opens Appearance, Status bar, Panes, Terminal, Hosts, Advanced, and About settings; set `ZZ_GPUI_DEMO=terminal` for the terminal example. See `clients/ios-gpui/README.md` for endpoint selection.
+- `just web run` / `web build` / `web serve` use dev assets and port 8081. Dev SSH selects `zz-dev`, linked by desktop dev runs into `~/.local/bin`. `web build --release` retains production identity. `just ios` opens the session sidebar and daemon-backed terminal/agent panes; its gear opens Appearance, Status bar, Panes, Terminal, Hosts, Advanced, and About settings; set `ZZ_GPUI_DEMO=terminal` for the terminal example. See `clients/ios-gpui/README.md` for endpoint selection.
 - `ZZ_SOCKET` overrides the socket the app dials. Unix socket paths have a low length cap (`sun_path`); put test sockets directly under `/tmp`.
 - Recipes live in `knowledge/playbooks/running-zz.md`.
 </important>

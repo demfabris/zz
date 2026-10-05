@@ -27,7 +27,7 @@ select the `zz-dev` catalog entry and copy those dev resources before signing.
 The script requires Xcode 26+ because `actool` ships with Xcode proper, not the Command
 Line Tools. Bundling does not run `actool`: its GPU-backed renderer crashed repeatedly on virtualized
 CI runners. Local bundles use a sole installed Apple Development identity when available and fall
-back to ad-hoc signing otherwise. `just release-mac <version-label>` layers the separate public
+back to ad-hoc signing otherwise. `just release mac build <version-label>` layers the separate public
 distribution workflow on top: Developer ID signing from the inside out, DMG packaging and signing,
 Apple notarization through a Keychain profile, ticket stapling, Gatekeeper assessment, and a final
 SHA-256 checksum.
@@ -53,7 +53,7 @@ cargo xtask bundle-cef --release --output dist/zz
 Release-optimized macOS profiling bundle with source-level dSYMs:
 
 ```sh
-just profile-build mac
+just profile build mac
 ```
 
 Launch the resulting macOS app bundle:
@@ -72,12 +72,12 @@ cargo xtask verify-cef-bundle dist/zz/zz
 Install the pinned release driver once, preview the next beta, then publish the exact preview:
 
 ```sh
-just release-setup
-just release beta
-just release beta --execute
+just release setup
+just release bump beta
+just release bump beta --execute
 ```
 
-`just release` is always a dry run. It checks the clean `main` branch and upstream state, previews
+`just release bump` is always a dry run. It checks the clean `main` branch and upstream state, previews
 the workspace and lockfile changes, and shows the release commit and tag. Adding `--execute`
 asks for confirmation, creates one version commit plus an annotated `v<version>` tag, and pushes
 both to `origin`. Pushing the tag starts `.github/workflows/release.yml`; no separate GitHub release
@@ -86,10 +86,10 @@ command is needed.
 Run the macOS signing sequence locally when testing credentials or reproducing release CI:
 
 ```sh
-just notary-setup-mac
-just release-mac-check
-just release-mac 0.2.0-beta.1
-just verify-notarized-mac dist/zz-0.2.0-beta.1-macos-arm64.dmg
+just release mac setup
+just release mac check
+just release mac build 0.2.0-beta.1
+just release mac verify dist/zz-0.2.0-beta.1-macos-arm64.dmg
 ```
 
 The Keychain profile defaults to `zz-notary`; override it with `MACOS_NOTARY_PROFILE`. The script
@@ -159,12 +159,12 @@ then mounted to verify its contents and the app's strict recursive code signatur
 app remains ad-hoc signed; public distribution without Gatekeeper warnings requires Developer ID
 signing and notarization.
 
-Arch developers can run `just pacman-package` to turn the same validated Linux bundle into a native
-package, or `just pacman-install` to build it and install it through `makepkg`. The package keeps the
+Arch developers can run `just package arch` to turn the same validated Linux bundle into a native
+package, or `just install arch` to build it and install it through `makepkg`. The package keeps the
 runtime together in `/usr/lib/zz`, exposes `/usr/bin/zz` as a relative symlink, and installs the
 shared desktop entry and icons.
 
-Debian and Ubuntu have `just deb-package` (emitting `dist/zz-linux.deb`) and `just deb-install`,
+Debian and Ubuntu have `just package deb` (emitting `dist/zz-linux.deb`) and `just install deb`,
 which hands the result to `apt` so its dependencies resolve. The release workflow builds the same
 package per architecture and attaches it to the GitHub release. Two things separate it from the Arch
 package. Its `Depends` is computed rather than curated: `dpkg-shlibdeps` reads the bundle's ELF
@@ -244,7 +244,7 @@ What `bundle-cef` does, in order:
     entitlement, signs the `PATH` launcher and then the main app with its device/privacy
     entitlements, signs the DMG, submits it
     with `notarytool --wait`, saves the notary log, staples the ticket, and checks both `stapler` and
-    Gatekeeper. `just release-mac <version>` drives the complete sequence, requires that version to
+    Gatekeeper. `just release mac build <version>` drives the complete sequence, requires that version to
     match the workspace manifest, and refuses to overwrite an existing artifact. Its layout
     assertion requires the launcher, and its final sweep fails on any Mach-O file in the app that is
     not Developer ID-signed.

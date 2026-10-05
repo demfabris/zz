@@ -14,15 +14,15 @@ Use an Apple Silicon Mac with Xcode, Rust's `aarch64-apple-ios-sim` target, and
 Zig 0.16.0. From the repository root:
 
 ```sh
-just ios-gpui
-just ios-gpui iPhone
-just ios-gpui iPad build
+just ios
+just ios run iPhone
+just ios build iPad
 ```
 
 To run on a paired iPad or iPhone, unlock it and use device mode:
 
 ```sh
-just ios-gpui iPad device
+just ios device iPad
 ```
 
 Device mode builds a release arm64 binary, signs it with your first Apple Development identity
@@ -40,7 +40,7 @@ Simulator and device builds use the zz Dev icon (`assets/zz-dev.icon`, compiled 
 ## TestFlight
 
 ```sh
-just ios-gpui iPad testflight
+just ios testflight iPad
 ```
 
 TestFlight mode builds a release binary with the production identity (`zz` on the host), packages
@@ -57,7 +57,7 @@ The launcher probes zz Dev socket candidates and skips stale sockets. It does no
 choose a socket and session:
 
 ```sh
-ZZ_GPUI_ENDPOINT=/tmp/my-zz.sock ZZ_GPUI_SESSION=work just ios-gpui
+ZZ_GPUI_ENDPOINT=/tmp/my-zz.sock ZZ_GPUI_SESSION=work just ios
 ```
 
 `ZZ_DEV_SOCKET` also selects a local socket. Set `ZZ_GPUI_SIMULATOR` to a simulator
@@ -189,13 +189,13 @@ The terminal uses `InteractiveClient`, `ClientCore`, and the shared `zz-ui`
 painter and Kitty image cache. The daemon owns the PTY and Ghostty parser/encoder.
 
 ```sh
-ZZ_GPUI_DEMO=terminal just ios-gpui
+ZZ_GPUI_DEMO=terminal just ios
 ```
 
 To attach the terminal example to a specific socket and session:
 
 ```sh
-ZZ_GPUI_DEMO=terminal ZZ_GPUI_ENDPOINT=/tmp/my-zz.sock ZZ_GPUI_SESSION=work just ios-gpui
+ZZ_GPUI_DEMO=terminal ZZ_GPUI_ENDPOINT=/tmp/my-zz.sock ZZ_GPUI_SESSION=work just ios
 ```
 
 Without a saved endpoint, the terminal example opens a connection field. **Host** opens that
@@ -280,7 +280,7 @@ cargo test --locked --manifest-path clients/web/Cargo.toml
 cargo fmt -p zz-gpui-ios -p zz-ui --check
 IPHONEOS_DEPLOYMENT_TARGET=26.0 cargo clippy --locked -p zz-gpui-ios --all-targets --target aarch64-apple-ios-sim -- -D warnings
 IPHONEOS_DEPLOYMENT_TARGET=26.0 cargo build --locked -p zz-gpui-ios --bin zz-gpui-ios --target aarch64-apple-ios
-just web-build
+just web build
 ```
 
 ## Recovered history

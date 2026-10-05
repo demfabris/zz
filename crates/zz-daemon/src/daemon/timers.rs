@@ -61,9 +61,19 @@ pub(super) struct PublishFlush {
     runtime_facts: bool,
     scheduled: bool,
     last: Option<Instant>,
+    #[cfg(test)]
+    pub(super) frozen: Option<Instant>,
 }
 
 impl PublishFlush {
+    fn now(&self) -> Instant {
+        #[cfg(test)]
+        if let Some(now) = self.frozen {
+            return now;
+        }
+        Instant::now()
+    }
+
     fn take(&mut self) -> Option<PublishReason> {
         let reason = if self.tree {
             Some(PublishReason::Tree)
@@ -844,9 +854,9 @@ impl Shared {
     }
 
     pub(super) fn request_publish(self: &Arc<Self>, reason: PublishReason) {
-        let now = Instant::now();
         let flush_now = {
             let mut flush = self.publish_flush.lock();
+            let now = flush.now();
             match reason {
                 PublishReason::Tree => flush.tree = true,
                 PublishReason::RuntimeFacts => flush.runtime_facts = true,
@@ -875,7 +885,7 @@ impl Shared {
         let mut flush = self.publish_flush.lock();
         flush.take();
         flush.scheduled = false;
-        flush.last = Some(Instant::now());
+        flush.last = Some(flush.now());
     }
 
     fn flush_publish(self: &Arc<Self>) {

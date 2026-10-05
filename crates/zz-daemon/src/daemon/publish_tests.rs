@@ -288,7 +288,7 @@ fn pane_events_publish_on_the_leading_edge_and_coalesce_the_rest() {
             .rename_window(window, name)
             .expect("rename");
     };
-    thread::sleep(timers::PUBLISH_FLUSH_INTERVAL * 2);
+    shared.publish_flush.lock().frozen = Some(Instant::now() + Duration::from_hours(1));
     rename("leading");
     shared.request_publish(timers::PublishReason::Tree);
     assert_eq!(snapshots(events(&mailbox)).len(), 1);
@@ -297,6 +297,12 @@ fn pane_events_publish_on_the_leading_edge_and_coalesce_the_rest() {
     rename("trailing");
     shared.request_publish(timers::PublishReason::Tree);
     assert!(snapshots(events(&mailbox)).is_empty());
+    shared
+        .timer_tx
+        .send(timers::TimerInput::Timer(
+            timers::TimerCommand::PublishFlush(Instant::now()),
+        ))
+        .expect("fire the trailing flush");
     let deadline = Instant::now() + Duration::from_secs(5);
     let trailing = loop {
         let sent = snapshots(events(&mailbox));

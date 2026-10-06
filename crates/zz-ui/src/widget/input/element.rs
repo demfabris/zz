@@ -16,6 +16,7 @@ use super::state::{CURSOR_WIDTH, InputMode, InputState, NEWLINE_SELECTION_WIDTH}
 use crate::Colorize as _;
 
 const MASK_CHAR: char = '•';
+const REVEAL_MARGIN: Pixels = px(20.0);
 
 #[derive(Clone)]
 struct Mask {
@@ -320,6 +321,11 @@ impl Element for TextElement {
         let previous_scroll = state.scroll;
         let follow_cursor = state.follow_cursor;
         let reset_scroll = state.reset_scroll;
+        let viewport = state
+            .focus_handle_ref()
+            .is_focused(window)
+            .then(|| window.visual_viewport_bounds().size);
+        let reveal = viewport.is_some() && viewport != state.revealed_viewport;
 
         let is_placeholder = value.is_empty();
         let mask =
@@ -408,11 +414,15 @@ impl Element for TextElement {
             state.scroll = scroll;
             state.follow_cursor = false;
             state.reset_scroll = false;
+            state.revealed_viewport = viewport;
             if state.measured_rows != rows {
                 state.measured_rows = rows;
                 cx.notify();
             }
         });
+        if reveal {
+            window.request_autoscroll(bounds.dilate(REVEAL_MARGIN));
+        }
 
         PrepaintState {
             layout,

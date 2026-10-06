@@ -5,8 +5,8 @@ use gpui::{
     ElementInputHandler, Entity, EntityInputHandler, FocusHandle, Focusable, Hsla, ImageSource,
     KeyDownEvent, KeyUpEvent, Keystroke, ModifiersChangedEvent, MouseButton, MouseDownEvent,
     MouseExitEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, Pixels, Point, Render,
-    ScrollWheelEvent, Subscription, Task, UTF16Selection, Window, anchored, canvas, deferred, div,
-    img, point, prelude::*, px,
+    ScrollWheelEvent, Subscription, Task, TextInputAction, TextInputConfiguration, UTF16Selection,
+    Window, anchored, canvas, deferred, div, img, point, prelude::*, px,
 };
 use zz_client::{
     ChromeAction, ChromeKeymap, ChromeProfile, ClientCore, CoreEvent, TERMINAL_TABLE,
@@ -1919,6 +1919,16 @@ impl EntityInputHandler for TerminalPane {
         _: &mut Context<Self>,
     ) -> Option<usize> {
         Some(0)
+    }
+    fn text_input_configuration(
+        &mut self,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> TextInputConfiguration {
+        TextInputConfiguration {
+            input_action: TextInputAction::Enter,
+            ..TextInputConfiguration::default()
+        }
     }
 }
 

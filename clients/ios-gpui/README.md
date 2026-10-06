@@ -149,10 +149,15 @@ The tree button opens navigation on iPhone.
 ## Keyboard
 
 Without a hardware keyboard, tapping a terminal, the agent composer, or any text
-field raises the on-screen keyboard. A row above it adds Escape, Tab, Control, Option,
-the arrows, and a hide button. Control and Option latch for the next key, so
-Control then C sends Ctrl-C. The workspace shrinks to the space above the docked
-keyboard; a floating keyboard leaves the layout alone. Attaching a hardware
+field raises the on-screen keyboard. For a terminal, a row above it adds Escape, Tab,
+Control, Option, the arrows, and a hide button; the backend shows it only for an input
+whose Return inserts a line break, so settings fields, prompts, the palette, and host
+forms get the plain keyboard, and the phone shell uses its own key row instead.
+Control and Option latch for the next key, so Control then C sends Ctrl-C. The
+workspace shrinks to the space above the docked keyboard, and a focused settings
+field scrolls back into view above it; a focused row of a long settings page keeps
+painting while it is off screen, so the keyboard stays up. A floating keyboard
+leaves the layout alone. Attaching a hardware
 keyboard hides the on-screen one, and detaching it brings it back for the focused
 field. Autocorrect, smart punctuation, and capitalization stay off unless a field
 asks for them.

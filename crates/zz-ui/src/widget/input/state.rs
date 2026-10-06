@@ -126,6 +126,7 @@ pub struct InputState {
     pub(super) measured_rows: usize,
     pub(super) follow_cursor: bool,
     pub(super) reset_scroll: bool,
+    pub(super) revealed_viewport: Option<gpui::Size<Pixels>>,
 
     blink: Entity<BlinkCursor>,
     context_menu: Option<Entity<PopupMenu>>,
@@ -191,6 +192,7 @@ impl InputState {
             measured_rows: 1,
             follow_cursor: false,
             reset_scroll: false,
+            revealed_viewport: None,
             blink,
             context_menu: None,
             context_menu_position: Point::default(),

@@ -1202,11 +1202,23 @@ extern "C" fn input_view(this: &Object, _: Sel) -> id {
 extern "C" fn input_accessory_view(this: &Object, _: Sel) -> id {
     let state = unsafe { get_window_state(this) };
     let state = state.borrow();
-    if state.soft_keyboard && !state.compact_keyboard {
+    if terminal_key_row(
+        state.soft_keyboard,
+        state.compact_keyboard,
+        &state.text_input,
+    ) {
         state.accessory_view
     } else {
         nil
     }
+}
+
+fn terminal_key_row(
+    soft_keyboard: bool,
+    compact_keyboard: bool,
+    text_input: &TextInputConfiguration,
+) -> bool {
+    soft_keyboard && !compact_keyboard && text_input.input_action == TextInputAction::Enter
 }
 
 extern "C" fn resign_first_responder(this: &Object, _: Sel) -> BOOL {
@@ -2202,5 +2214,28 @@ extern "C" fn sync_keyboard(context: *mut c_void) {
             }
         }
         let _: () = msg_send![view, release];
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_terminal_gets_the_key_row() {
+        let terminal = TextInputConfiguration {
+            input_action: TextInputAction::Enter,
+            ..TextInputConfiguration::default()
+        };
+        let field = TextInputConfiguration::default();
+        let done = TextInputConfiguration {
+            input_action: TextInputAction::Done,
+            ..TextInputConfiguration::default()
+        };
+        assert!(terminal_key_row(true, false, &terminal));
+        assert!(!terminal_key_row(true, false, &field));
+        assert!(!terminal_key_row(true, false, &done));
+        assert!(!terminal_key_row(true, true, &terminal));
+        assert!(!terminal_key_row(false, false, &terminal));
     }
 }

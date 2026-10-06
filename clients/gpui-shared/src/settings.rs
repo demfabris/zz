@@ -1,8 +1,8 @@
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use gpui::{
-    AnyElement, App, Context, Entity, IntoElement, Subscription, Window, canvas, div, prelude::*,
-    px,
+    AnyElement, App, Context, Entity, FocusHandle, Focusable as _, IntoElement, Subscription,
+    Window, canvas, div, prelude::*, px,
 };
 use zz_ui::{
     ActiveTheme as _, Colorize as _, IconName, Sizable as _, StyledExt as _, Theme, ThemeMode,
@@ -618,13 +618,18 @@ impl AppShell {
                     .filter(|item| {
                         shown(Setting::UiZoom, phone) || !matches!(item, AppearancePageItem::UiZoom)
                     })
-                    .collect();
+                    .collect::<Vec<_>>();
+                let focus = items
+                    .iter()
+                    .map(|item| self.appearance_focus(*item, cx))
+                    .collect::<Vec<_>>();
                 let view = cx.entity();
                 return appearance_page(items, move |item, position, _, cx| {
                     view.update(cx, |this, cx| {
                         this.appearance_item(item, position, narrow, cx)
                     })
                 })
+                .row_focus(focus)
                 .into_any_element();
             }
             SettingsSection::Panes => {
@@ -839,6 +844,28 @@ impl AppShell {
             _ => {}
         }
         self.hosts_page("settings-page", section.title(), narrow, cx)
+    }
+
+    fn appearance_focus(
+        &self,
+        item: AppearancePageItem<ChromeColor>,
+        cx: &App,
+    ) -> Option<FocusHandle> {
+        let controls = &self.settings_controls;
+        let input = match item {
+            AppearancePageItem::UiZoom => &controls.zoom,
+            AppearancePageItem::ChromeContrast => &controls.contrast,
+            AppearancePageItem::WidgetCornerRadius => &controls.radius,
+            AppearancePageItem::ShadowStrength => &controls.shadow_strength,
+            AppearancePageItem::ChromeColor(color) => {
+                let index = ChromeColor::ALL
+                    .iter()
+                    .position(|candidate| *candidate == color)?;
+                return Some(controls.colors.get(index)?.focus_handle(cx));
+            }
+            _ => return None,
+        };
+        Some(input.focus_handle(cx))
     }
 
     fn appearance_item(

@@ -5,8 +5,18 @@ The app opens the session sidebar beside the attached window's panes. It uses
 agent interface. Web and iOS compile the same app shell, sidebar, status bar, settings,
 command palette, overlays, terminal, agent, connection reducer, and image caches
 from `clients/gpui-shared/src`.
-The sidebar is 256 points wide and respects the iOS safe area. On iPhone it
-opens over the workspace and closes when you select a session, window, or pane.
+The sidebar is 256 points wide and respects the iOS safe area.
+
+On iPhone, and in any window narrower than 640 points, the attached session uses the
+phone shell instead: one pane fills the screen and a sideways swipe pages through every
+pane in window order. Landing on a pane zooms it (`resize-pane -Z`), so the daemon sizes
+the window to that pane; terminal previews keep the neighbouring pane live while it
+slides in. The bottom bar has a tree button (the sidebar tree as a bottom sheet), the
+pane name with page dots grouped by window (tap it for the window chooser), and a
+keyboard button. The keyboard opens only from that button or a tap on the terminal.
+While it is up, a key row replaces the bar: hide, esc, tab, sticky ctrl and alt, `|`,
+`~`, `/`, a prefix key that lists the prefix table's common bindings as tappable rows,
+and an arrow pad you hold and slide toward a direction.
 
 ## Run
 
@@ -114,7 +124,7 @@ its pane's content, and display-panes labels keep their tmux styles and alignmen
 Notices preserve severity, duration, and explicit clearing; a failed command reports
 as `command: error`.
 
-The sidebar button reopens navigation on iPhone.
+The tree button opens navigation on iPhone.
 
 ## Keyboard
 

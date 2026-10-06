@@ -7,7 +7,7 @@ use gpui::{
 use zz_ui::{
     ActiveTheme as _, Colorize as _, IconName, Sizable as _, StyledExt as _, Theme, ThemeMode,
     UiZoom,
-    button::{Button, ButtonVariants as _},
+    button::Button,
     chrome_palette::{
         ChromeColor, ChromePresetId, ThemeModeSetting, chrome_presets, inherited_chrome_colors,
         resolved_chrome_colors,
@@ -441,58 +441,69 @@ impl AppShell {
         } else {
             SettingsSection::Appearance
         };
-        let content = self.settings_page(section, narrow, cx);
-        let view = cx.entity().downgrade();
+        if !narrow {
+            return self.settings_page(section, narrow, cx);
+        }
+        let picked = self.settings_picked;
+        let content = if picked {
+            self.settings_page(section, narrow, cx)
+        } else {
+            zz_ui::settings::settings_section_index(
+                &SECTIONS,
+                {
+                    let view = cx.entity().downgrade();
+                    move |choice, _, cx| {
+                        let _ = view.update(cx, |this, cx| {
+                            this.settings = Some(choice);
+                            this.settings_picked = true;
+                            cx.notify();
+                        });
+                    }
+                },
+                cx,
+            )
+            .into_any_element()
+        };
+        let title = if picked { section.title() } else { "Settings" };
         div()
             .flex()
             .flex_col()
             .size_full()
             .min_w_0()
             .min_h_0()
-            .when(narrow, |page| {
-                page.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .h(zz_ui::TITLE_BAR_HEIGHT)
-                        .flex_none()
-                        .px(px(8.0))
-                        .gap(px(4.0))
-                        .child(
-                            Button::compact_icon("settings-close", IconName::ArrowLeft)
-                                .tooltip("Back to workspace")
-                                .on_click(cx.listener(|this, _, window, cx| {
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .h(zz_ui::TITLE_BAR_HEIGHT)
+                    .flex_none()
+                    .px(px(8.0))
+                    .gap(px(4.0))
+                    .child(
+                        Button::compact_icon("settings-back", IconName::ArrowLeft)
+                            .tooltip(if picked {
+                                "Settings"
+                            } else {
+                                "Back to workspace"
+                            })
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                if picked {
+                                    this.settings_picked = false;
+                                } else {
                                     this.settings = None;
                                     this.focused_pane = None;
-                                    this.focus.focus(window, cx);
-                                    cx.notify();
-                                })),
-                        )
-                        .child(
-                            Button::new("settings-section")
-                                .ghost()
-                                .small()
-                                .label(section.title())
-                                .icon(IconName::ChevronDown)
-                                .dropdown_menu(move |menu, _, _| {
-                                    SECTIONS.into_iter().fold(menu, |menu, choice| {
-                                        let view = view.clone();
-                                        menu.item(
-                                            PopupMenuItem::new(choice.title())
-                                                .icon(choice.icon())
-                                                .on_click(move |_, window, cx| {
-                                                    let _ = view.update(cx, |this, cx| {
-                                                        this.settings = Some(choice);
-                                                        this.focus.focus(window, cx);
-                                                        cx.notify();
-                                                    });
-                                                }),
-                                        )
-                                    })
-                                }),
-                        ),
-                )
-            })
+                                }
+                                this.focus.focus(window, cx);
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        div()
+                            .text_size(zz_ui::rems_from_px(15.0))
+                            .font_medium()
+                            .child(title),
+                    ),
+            )
             .child(content)
             .into_any_element()
     }

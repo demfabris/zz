@@ -147,9 +147,10 @@ and source-resolution tasks; changing sections or closing settings releases the 
 
 Appearance is long enough that mounting every off-screen control makes wheel-event
 layout proportional to the whole page. It therefore describes its content as individual rows
-and render it through GPUI's variable-height `ListState`: only rows in the viewport plus a small
-overdraw are constructed, while a uniform height hint gives the scrollbar a useful extent before
-each row has been measured. The page-keyed list state retains scroll position independently for
+and render it through GPUI's variable-height `ListState`: every row is measured once per width
+(`measure_all`), then each frame constructs only rows in the viewport plus a small overdraw. A
+uniform height hint was tried first, but a touch fling stopped at the hinted end whenever real rows
+were taller (phone rows stack their controls), and reached the bottom only after a pause. The page-keyed list state retains scroll position independently for
 each section. Terminal and short pages keep the ordinary scroll column. GPUI's list honours only the
 vertical padding of its own style and places every row at its left edge, so a virtualized page
 carries the page gutter and the bounded, centered content column *per row*; otherwise its cards sit

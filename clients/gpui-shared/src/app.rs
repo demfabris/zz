@@ -154,6 +154,7 @@ pub(crate) struct AppShell {
     sidebar: bool,
     slideover: bool,
     settings: Option<SettingsSection>,
+    settings_picked: bool,
     preferences: settings::Preferences,
     settings_controls: settings::Controls,
     pub(crate) focus: FocusHandle,
@@ -370,6 +371,7 @@ impl AppShell {
             sidebar: preferences.sidebar,
             slideover: false,
             settings: None,
+            settings_picked: false,
             preferences,
             settings_controls,
             focus: cx.focus_handle(),
@@ -2745,6 +2747,9 @@ impl AppShell {
 
 impl Render for AppShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.settings.is_none() {
+            self.settings_picked = false;
+        }
         #[cfg(target_os = "ios")]
         self.sync_authentication(window, cx);
         #[cfg(target_os = "ios")]

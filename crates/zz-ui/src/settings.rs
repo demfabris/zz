@@ -3,6 +3,8 @@ pub mod appearance;
 pub mod panes_preview;
 pub mod status_bar_preview;
 
+use std::rc::Rc;
+
 use crate::Colorize as _;
 use crate::{
     ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _,
@@ -185,6 +187,41 @@ pub fn settings_navigation_group_label(group: SettingsNavigationGroup, cx: &App)
         .child(group.title())
 }
 
+/// The settings root on a narrow screen: one row per section, grouped like
+/// the sidebar navigation. Tapping a row hands its section to `on_pick`.
+pub fn settings_section_index(
+    sections: &[SettingsSection],
+    on_pick: impl Fn(SettingsSection, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> SettingsScrollColumn {
+    let on_pick = Rc::new(on_pick);
+    let mut groups: Vec<(SettingsNavigationGroup, Vec<SettingsSection>)> = Vec::new();
+    for &section in sections {
+        let group = section.navigation_group();
+        match groups.last_mut() {
+            Some((last, members)) if *last == group => members.push(section),
+            _ => groups.push((group, vec![section])),
+        }
+    }
+    let chevron = cx.theme().foreground.muted();
+    settings_scroll_column("settings-index").children(groups.into_iter().map(|(group, members)| {
+        SettingsStack::titled(group.title()).children(members.into_iter().map(|section| {
+            let on_pick = Rc::clone(&on_pick);
+            SettingEntry::new(section.title(), "")
+                .title_icon(section.icon())
+                .control(
+                    Icon::new(crate::IconName::ChevronRight)
+                        .size(crate::rems_from_px(14.0))
+                        .text_color(chevron),
+                )
+                .on_click(
+                    ElementId::Name(format!("settings-index-{}", section.title()).into()),
+                    move |_, window, cx| on_pick(section, window, cx),
+                )
+        }))
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,7 +248,7 @@ mod tests {
                     move |index, _, _| {
                         rendered.fetch_add(1, Ordering::Relaxed);
                         div()
-                            .h(px(50.0))
+                            .h(px(120.0))
                             .flex_none()
                             .debug_selector(move || format!("virtual-settings-row-{index}"))
                             .into_any_element()
@@ -405,7 +442,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn virtual_column_only_constructs_rows_near_the_viewport(cx: &mut TestAppContext) {
+    fn one_long_scroll_reaches_the_last_row(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let rendered = Arc::new(AtomicUsize::new(0));
         let rendered_for_view = Arc::clone(&rendered);
@@ -420,10 +457,17 @@ mod tests {
 
         assert!(cx.debug_bounds("virtual-settings-row-0").is_some());
         assert!(cx.debug_bounds("virtual-settings-row-99").is_none());
-        assert!(
-            rendered.load(Ordering::Relaxed) < 20,
-            "a short viewport must not construct the full settings page"
-        );
+
+        cx.simulate_event(gpui::ScrollWheelEvent {
+            position: gpui::point(px(100.0), px(100.0)),
+            delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.0), px(-100_000.0))),
+            ..Default::default()
+        });
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        assert!(cx.debug_bounds("virtual-settings-row-99").is_some());
+        assert!(cx.debug_bounds("virtual-settings-row-0").is_none());
     }
 
     #[gpui::test]
@@ -535,14 +579,14 @@ impl RenderOnce for SettingsScrollColumn {
     }
 }
 
-const SETTINGS_LIST_ITEM_HEIGHT_HINT: f32 = 82.0;
 const SETTINGS_LIST_OVERDRAW: f32 = 24.0;
 
 type SettingsItemRenderer = Box<dyn FnMut(usize, &mut Window, &mut App) -> AnyElement + 'static>;
 
-/// A settings page that only constructs rows in or around the viewport. Rows
-/// keep [`settings_scroll_column`]'s bounded content width, but each owns the
-/// space beneath it, so a glued run of entries stays glued.
+/// A settings page that paints only rows in or around the viewport. Every row
+/// is measured once per width, so a fling reaches the real end of the page.
+/// Rows keep [`settings_scroll_column`]'s bounded content width, but each owns
+/// the space beneath it, so a glued run of entries stays glued.
 #[must_use]
 pub fn settings_virtual_column(
     id: &'static str,
@@ -573,13 +617,12 @@ impl RenderOnce for SettingsVirtualColumn {
                     ListAlignment::Top,
                     px(SETTINGS_LIST_OVERDRAW),
                 )
-                .with_uniform_item_height(px(SETTINGS_LIST_ITEM_HEIGHT_HINT))
+                .measure_all()
             })
             .read(cx)
             .clone();
         if list_state.item_count() != self.item_count {
-            list_state
-                .reset_with_uniform_height(self.item_count, px(SETTINGS_LIST_ITEM_HEIGHT_HINT));
+            list_state.reset(self.item_count);
         }
 
         let mut render_item = self.render_item;
@@ -792,7 +835,10 @@ pub struct SettingEntry {
     disabled: bool,
     position: StackPosition,
     children: Vec<AnyElement>,
+    on_click: Option<(ElementId, EntryClick)>,
 }
+
+type EntryClick = Rc<dyn Fn(&gpui::ClickEvent, &mut gpui::Window, &mut App)>;
 
 impl SettingEntry {
     pub fn new(title: impl Into<SharedString>, description: impl Into<SharedString>) -> Self {
@@ -805,7 +851,19 @@ impl SettingEntry {
             disabled: false,
             position: StackPosition::Middle,
             children: Vec::new(),
+            on_click: None,
         }
+    }
+
+    /// Make the whole row a button, for a row that opens something.
+    #[must_use]
+    pub fn on_click(
+        mut self,
+        id: impl Into<ElementId>,
+        handler: impl Fn(&gpui::ClickEvent, &mut gpui::Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_click = Some((id.into(), Rc::new(handler)));
+        self
     }
 
     /// A state glyph drawn before the title; see [`SettingCopy::title_icon`].
@@ -912,7 +970,7 @@ impl RenderOnce for SettingEntry {
             })
             .child(body);
 
-        div()
+        let row = div()
             .relative()
             .flex()
             .flex_col()
@@ -960,7 +1018,15 @@ impl RenderOnce for SettingEntry {
                         ),
                 )
             })
-            .child(surface)
+            .child(surface);
+        match self.on_click {
+            Some((id, handler)) => row
+                .id(id)
+                .cursor_pointer()
+                .on_click(move |event, window, cx| handler(event, window, cx))
+                .into_any_element(),
+            None => row.into_any_element(),
+        }
     }
 }
 
@@ -1017,12 +1083,14 @@ impl RenderOnce for SettingCopy {
                     .child(div().text_size(crate::rems_from_px(13.0)).child(self.title))
                     .when_some(self.title_actions, gpui::ParentElement::child),
             )
-            .child(
-                div()
-                    .text_size(crate::rems_from_px(11.0))
-                    .text_color(cx.theme().foreground.muted())
-                    .child(self.description),
-            )
+            .when(!self.description.is_empty(), |this| {
+                this.child(
+                    div()
+                        .text_size(crate::rems_from_px(11.0))
+                        .text_color(cx.theme().foreground.muted())
+                        .child(self.description),
+                )
+            })
     }
 }
 

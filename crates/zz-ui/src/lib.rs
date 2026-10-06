@@ -55,6 +55,7 @@ pub mod attachment;
 pub mod browser;
 pub mod chooser;
 pub mod command;
+pub mod compact;
 pub mod feedback;
 pub mod mend;
 pub mod navigation;

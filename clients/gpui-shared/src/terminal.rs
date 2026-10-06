@@ -2039,7 +2039,7 @@ pub fn key_input(event: &KeyDownEvent) -> KeyInput {
     )
 }
 
-fn keystroke_input(keystroke: &Keystroke, action: KeyAction) -> KeyInput {
+pub(crate) fn keystroke_input(keystroke: &Keystroke, action: KeyAction) -> KeyInput {
     #[cfg(target_os = "ios")]
     {
         crate::input::key_input(keystroke, action)

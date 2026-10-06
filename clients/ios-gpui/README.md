@@ -14,9 +14,13 @@ the window to that pane; terminal previews keep the neighbouring pane live while
 slides in. The bottom bar has a tree button (the sidebar tree as a bottom sheet), the
 pane name with page dots grouped by window (tap it for the window chooser), and a
 keyboard button. The keyboard opens only from that button or a tap on the terminal.
-While it is up, a key row replaces the bar: hide, esc, tab, sticky ctrl and alt, `|`,
-`~`, `/`, a prefix key that lists the prefix table's common bindings as tappable rows,
-and an arrow pad you hold and slide toward a direction.
+While it is up, a key row replaces the bar: hide, esc, tab, ctrl, alt, `|`, `~`, `/`,
+prefix, and an arrow pad. Keys with a dot share one gesture: tap for the key's own job,
+hold or slide up for a card, and release on an item to pick it. A tap latches ctrl or
+alt for the next key; holding them offers common chords (^C, ^D, ^Z, ^R, M-b, M-f).
+Prefix opens a short menu (new pane, new window, rename pane, last pane, kill pane) and
+an All bindings sheet that sends any prefix binding through the daemon's key table. The
+arrow pad repeats while held.
 
 ## Run
 
@@ -174,7 +178,8 @@ as a color font.
 
 Settings uses the shared `zz-ui` form rows, previews, palettes, color pickers,
 number fields, and switches. iPad keeps the section navigation beside the page;
-iPhone uses a full-width page with a section menu and a back button.
+iPhone opens on a list of sections; tapping one opens its page, and back returns
+to the list.
 
 - **Appearance:** System/Light/Dark appearance, light and dark palettes,
   background/foreground/accent colors, UI zoom, contrast, animations, widget

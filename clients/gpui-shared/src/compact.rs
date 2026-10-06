@@ -6,34 +6,43 @@ use gpui::{
     Subscription, Window, div, prelude::*, px,
 };
 use zz_client::StatusBarModel;
-use zz_protocol::{PaneId, PaneKindSnapshot, WindowId};
+use zz_protocol::{InputMessage, PaneId, PaneKindSnapshot, WindowId};
+use zz_terminal::KeyAction;
 use zz_ui::{
     ActiveTheme as _, IconName,
     compact::{
-        ArrowPad, ArrowPadEvent, Instant, KEY_ROW_HEIGHT, KeyRow, PageDot, Pager, PagerEvent,
-        WhichKeyList, bottom_sheet, compact_bar, compact_bar_button, compact_bar_title,
-        compact_pane_header, page_dots, top_shade,
+        ArrowPadEvent, Instant, KEY_ROW_HEIGHT, KeyRow, PageDot, Pager, PagerEvent, PopoverKey,
+        PopoverKeyEvent, PopoverKeyItem, ToolKeys, WhichKeyList, bottom_sheet, compact_bar,
+        compact_bar_button, compact_bar_title, compact_pane_header, page_dots, top_shade,
     },
+    kbd::Kbd,
     pane::pane_header_icon_button,
-    which_key::{WhichKeyCap, WhichKeyHeader, WhichKeyRow},
+    which_key::{WhichKeyCap, WhichKeyRow},
 };
 
 use super::{AppShell, sidebar};
 
 const PAGE_GAP: f32 = 12.0;
 const CARD_RADIUS: f32 = 22.0;
-const WHICH_KEY_INSET: f32 = 10.0;
-const WHICH_KEY_GAP: f32 = 8.0;
+
+const NEW_PANE: &str = "new-pane";
+const NEW_WINDOW: &str = "new-window";
+const RENAME_PANE: &str = "rename-pane";
+const LAST_PANE: &str = "last-pane";
+const KILL_PANE: &str = "kill-pane";
+const ALL_BINDINGS: &str = "all-bindings";
 
 #[derive(Default)]
 pub(super) struct CompactState {
     pager: Pager,
     width: f32,
-    arrow_pad: Option<(Entity<ArrowPad>, Subscription)>,
+    tool_keys: Option<(ToolKeys, [Subscription; 4])>,
+    bindings: bool,
     preview: Option<bool>,
     zoom_intent: Option<PaneId>,
     compact_keyboard: Option<bool>,
     last_current: Option<PaneId>,
+    previous: Option<PaneId>,
 }
 
 impl CompactState {
@@ -41,7 +50,24 @@ impl CompactState {
         self.preview = None;
         self.zoom_intent = None;
         self.last_current = None;
+        self.previous = None;
+        self.bindings = false;
     }
+}
+
+fn prefix_menu() -> (Vec<PopoverKeyItem>, PopoverKeyItem) {
+    (
+        vec![
+            PopoverKeyItem::new(NEW_PANE, "New pane").icon(IconName::Plus),
+            PopoverKeyItem::new(NEW_WINDOW, "New window").icon(IconName::AppWindow),
+            PopoverKeyItem::new(RENAME_PANE, "Rename pane").icon(IconName::Pencil),
+            PopoverKeyItem::new(LAST_PANE, "Last pane").icon(IconName::History),
+            PopoverKeyItem::new(KILL_PANE, "Kill pane")
+                .icon(IconName::Xmark)
+                .danger(),
+        ],
+        PopoverKeyItem::new(ALL_BINDINGS, "All bindings").icon(IconName::Keyboard),
+    )
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -167,19 +193,35 @@ fn dispatch_key(keystroke: Keystroke, window: &mut Window, cx: &mut App) {
     });
 }
 
+fn send_chord(
+    _: &mut AppShell,
+    _: &Entity<PopoverKey>,
+    event: &PopoverKeyEvent,
+    window: &mut Window,
+    cx: &mut Context<AppShell>,
+) {
+    let PopoverKeyEvent::Pick(id) = event;
+    if let Ok(keystroke) = Keystroke::parse(id) {
+        let keystroke = zz_ui::compact::StickyModifiers::apply(&keystroke, cx);
+        dispatch_key(keystroke, window, cx);
+    }
+}
+
 fn keyboard_visible(window: &Window) -> bool {
     window.visual_viewport_bounds().size.height + px(1.0) < window.viewport_size().height
 }
 
-fn which_key(core: &zz_client::ClientCore) -> Option<(WhichKeyHeader, Arc<[WhichKeyRow]>)> {
-    let prefix = core
-        .mux_options()
+fn prefix_spelling(core: &zz_client::ClientCore) -> String {
+    core.mux_options()
         .get(zz_protocol::MuxOptionKey::Prefix)
         .filter(|option| !option.value.eq_ignore_ascii_case("none"))
         .map_or_else(
             || "C-b".to_owned(),
             |option| zz_protocol::canonical_key(&option.value),
-        );
+        )
+}
+
+fn binding_rows(core: &zz_client::ClientCore, prefix: &str) -> Arc<[WhichKeyRow]> {
     let cap = |keys: &[String], yours: bool| WhichKeyCap {
         keys: keys
             .iter()
@@ -189,9 +231,9 @@ fn which_key(core: &zz_client::ClientCore) -> Option<(WhichKeyHeader, Arc<[Which
         raw: keys.join(" ").into(),
         yours,
     };
-    let rows: Arc<[WhichKeyRow]> = zz_client::which_key::rows(core.key_tables(), "prefix", &prefix)
+    zz_client::which_key::rows(core.key_tables(), "prefix", prefix)
         .into_iter()
-        .filter(|row| row.core)
+        .filter(|row| tmux_keystroke(row.first_key()).is_some())
         .map(|row| WhichKeyRow {
             id: row.first_key().to_owned().into(),
             caps: row
@@ -205,24 +247,7 @@ fn which_key(core: &zz_client::ClientCore) -> Option<(WhichKeyHeader, Arc<[Which
                 .map(|group| SharedString::new_static(group.title())),
             repeat: row.repeat,
         })
-        .collect();
-    if rows.is_empty() {
-        return None;
-    }
-    let more = core
-        .prefix_bindings()
-        .iter()
-        .find(|binding| zz_client::which_key::opens_all_keys(&binding.commands))
-        .map(|binding| cap(std::slice::from_ref(&binding.key), false));
-    Some((
-        WhichKeyHeader {
-            table: "prefix".into(),
-            prefix: tmux_keystroke(&prefix),
-            prefix_raw: prefix.into(),
-            more,
-        },
-        rows,
-    ))
+        .collect()
 }
 
 impl AppShell {
@@ -302,21 +327,127 @@ impl AppShell {
         }
     }
 
-    fn arrow_pad(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<ArrowPad> {
-        if let Some((pad, _)) = &self.compact.arrow_pad {
-            return pad.clone();
+    fn tool_keys(&mut self, window: &mut Window, cx: &mut Context<Self>) -> ToolKeys {
+        if let Some((keys, _)) = &self.compact.tool_keys {
+            return keys.clone();
         }
-        let pad = cx.new(ArrowPad::new);
-        let subscription =
-            cx.subscribe_in(&pad, window, |_, _, event: &ArrowPadEvent, window, cx| {
-                let ArrowPadEvent::Arrow(direction) = event;
-                if let Ok(keystroke) = Keystroke::parse(direction.key()) {
-                    let keystroke = zz_ui::compact::StickyModifiers::apply(&keystroke, cx);
-                    dispatch_key(keystroke, window, cx);
+        let (items, footer) = prefix_menu();
+        let keys = ToolKeys::new(items, Some(footer), cx);
+        let subscriptions = [
+            cx.subscribe_in(
+                &keys.arrows,
+                window,
+                |_, _, event: &ArrowPadEvent, window, cx| {
+                    let ArrowPadEvent::Arrow(direction) = event;
+                    if let Ok(keystroke) = Keystroke::parse(direction.key()) {
+                        let keystroke = zz_ui::compact::StickyModifiers::apply(&keystroke, cx);
+                        dispatch_key(keystroke, window, cx);
+                    }
+                },
+            ),
+            cx.subscribe_in(&keys.control, window, send_chord),
+            cx.subscribe_in(&keys.alt, window, send_chord),
+            cx.subscribe_in(
+                &keys.prefix,
+                window,
+                |this, _, event: &PopoverKeyEvent, _, cx| {
+                    let PopoverKeyEvent::Pick(id) = event;
+                    this.prefix_action(id, cx);
+                },
+            ),
+        ];
+        self.compact.tool_keys = Some((keys.clone(), subscriptions));
+        keys
+    }
+
+    fn prefix_action(&mut self, id: &str, cx: &mut Context<Self>) {
+        let connection = self.connection.read(cx);
+        if !connection.connected || connection.core.attached_read_only() {
+            return;
+        }
+        let Some(pane) = self.active_window(cx).map(|window| window.active_pane) else {
+            return;
+        };
+        let target = pane.to_string();
+        let here = || vec!["-c".to_owned(), "#{pane_current_path}".to_owned()];
+        match id {
+            NEW_PANE => {
+                let mut args = vec!["-h".to_owned(), "-t".to_owned(), target];
+                args.extend(here());
+                self.command("split-window", args, cx);
+            }
+            NEW_WINDOW => self.command("new-window", here(), cx),
+            RENAME_PANE => {
+                let title = self
+                    .connection
+                    .read(cx)
+                    .core
+                    .snapshot()
+                    .sessions
+                    .iter()
+                    .flat_map(|session| &session.windows)
+                    .find_map(|window| window.panes.get(&pane))
+                    .map(|pane| pane.title.clone())
+                    .unwrap_or_default();
+                self.command(
+                    "command-prompt",
+                    vec![
+                        "-I".into(),
+                        title,
+                        "-p".into(),
+                        "rename pane:".into(),
+                        format!("select-pane -t {target} -T '%%'"),
+                    ],
+                    cx,
+                );
+            }
+            LAST_PANE => {
+                let model = self.status_model(cx);
+                let (pages, _) = pages(&model, &self.unseen_agents);
+                if let Some(page) = self
+                    .compact
+                    .previous
+                    .and_then(|previous| pages.iter().find(|page| page.pane == previous))
+                {
+                    self.compact_select(page, cx);
                 }
-            });
-        self.compact.arrow_pad = Some((pad.clone(), subscription));
-        pad
+            }
+            KILL_PANE => self.command("kill-pane", vec!["-t".into(), target], cx),
+            ALL_BINDINGS => self.compact.bindings = true,
+            _ => {}
+        }
+        cx.notify();
+    }
+
+    fn send_binding(&self, key: &str, cx: &mut Context<Self>) {
+        let Some(pane) = self.active_window(cx).map(|window| window.active_pane) else {
+            return;
+        };
+        let core = &self.connection.read(cx).core;
+        let mut spellings = Vec::new();
+        if !core.prefix_armed() {
+            spellings.push(prefix_spelling(core));
+        }
+        spellings.push(key.to_owned());
+        let Some(keystrokes) = spellings
+            .iter()
+            .map(|spelling| tmux_keystroke(spelling))
+            .collect::<Option<Vec<_>>>()
+        else {
+            return;
+        };
+        for keystroke in keystrokes {
+            for action in [KeyAction::Press, KeyAction::Release] {
+                self.send_input(
+                    InputMessage::Key {
+                        pane,
+                        input: crate::terminal::keystroke_input(&keystroke, action),
+                        text_follows: false,
+                    },
+                    cx,
+                );
+            }
+        }
     }
 
     fn compact_scroll(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
@@ -518,7 +649,7 @@ impl AppShell {
     pub(super) fn compact_shell(
         &mut self,
         terminal_overlays: Vec<AnyElement>,
-        mut overlays: Vec<AnyElement>,
+        overlays: Vec<AnyElement>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Stateful<gpui::Div> {
@@ -528,6 +659,7 @@ impl AppShell {
         let current_pane = pages.get(current).map(|page| page.pane);
         if self.compact.last_current.is_some() && current_pane != self.compact.last_current {
             self.compact.zoom_intent = current_pane;
+            self.compact.previous = self.compact.last_current;
         }
         self.compact.last_current = current_pane;
         self.reconcile_compact_zoom(cx);
@@ -579,6 +711,9 @@ impl AppShell {
             .children(strip)
             .child(top_shade(top_inset, cx))
             .children(terminal_overlays);
+        if !keyboard && let Some((keys, _)) = &self.compact.tool_keys {
+            keys.clone().close(cx);
+        }
         let bottom = if keyboard {
             self.compact_key_area(window, cx)
         } else {
@@ -612,8 +747,13 @@ impl AppShell {
                 .child(compact_bar(tree, title, keys, cx))
                 .into_any_element()
         };
+        let mut sheets = Vec::new();
         if self.slideover {
-            overlays.insert(0, self.compact_tree_sheet(safe_bottom, window, cx));
+            sheets.push(self.compact_tree_sheet(safe_bottom, window, cx));
+        }
+        if self.compact.bindings {
+            let inset = if keyboard { px(0.0) } else { safe_bottom };
+            sheets.push(self.compact_bindings_sheet(inset, cx));
         }
         div()
             .id("compact-shell")
@@ -624,59 +764,25 @@ impl AppShell {
             .bg(cx.theme().background)
             .child(pager_area)
             .child(bottom)
-            .children(overlays)
+            .children(sheets)
+            .child(
+                div()
+                    .absolute()
+                    .top(top_inset)
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .children(overlays),
+            )
     }
 
     fn compact_key_area(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let pad = self.arrow_pad(window, cx);
-        let core = &self.connection.read(cx).core;
-        let armed = core.prefix_armed();
-        let which = armed.then(|| which_key(core)).flatten();
-        let prefix = core
-            .mux_options()
-            .get(zz_protocol::MuxOptionKey::Prefix)
-            .filter(|option| !option.value.eq_ignore_ascii_case("none"))
-            .map_or_else(
-                || "C-b".to_owned(),
-                |option| zz_protocol::canonical_key(&option.value),
-            );
-        let row = KeyRow::new(pad)
-            .prefix_label("prefix")
-            .prefix_armed(armed)
+        let keys = self.tool_keys(window, cx);
+        let armed = self.connection.read(cx).core.prefix_armed();
+        keys.prefix.update(cx, |key, cx| key.set_armed(armed, cx));
+        let row = KeyRow::new(keys.row())
             .on_key(|keystroke, window, cx| dispatch_key(keystroke.clone(), window, cx))
-            .on_prefix(move |window, cx| {
-                let key = if armed { Some("Escape") } else { None };
-                if let Some(keystroke) = tmux_keystroke(key.unwrap_or(&prefix)) {
-                    dispatch_key(keystroke, window, cx);
-                }
-            })
             .on_hide(|window, _| window.dismiss_virtual_keyboard());
-        let room = window.visual_viewport_bounds().size.height
-            - window.fully_visible_bounds().top()
-            - px(KEY_ROW_HEIGHT + 2.0 * WHICH_KEY_GAP);
-        let list = which.map(|(header, rows)| {
-            div()
-                .absolute()
-                .left(px(WHICH_KEY_INSET))
-                .right(px(WHICH_KEY_INSET))
-                .bottom(px(KEY_ROW_HEIGHT + WHICH_KEY_GAP))
-                .max_h(room)
-                .flex()
-                .flex_col()
-                .child(
-                    WhichKeyList::new(header, rows)
-                        .on_pick(|id, window, cx| {
-                            if let Some(keystroke) = tmux_keystroke(id) {
-                                dispatch_key(keystroke, window, cx);
-                            }
-                        })
-                        .on_more(|window, cx| {
-                            if let Some(keystroke) = tmux_keystroke("?") {
-                                dispatch_key(keystroke, window, cx);
-                            }
-                        }),
-                )
-        });
         div()
             .relative()
             .flex_none()
@@ -686,8 +792,40 @@ impl AppShell {
             .border_t_1()
             .border_color(cx.theme().border())
             .child(row)
-            .children(list)
             .into_any_element()
+    }
+
+    fn compact_bindings_sheet(
+        &mut self,
+        bottom_inset: Pixels,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let core = &self.connection.read(cx).core;
+        let prefix = prefix_spelling(core);
+        let rows = binding_rows(core, &prefix);
+        let cap = tmux_keystroke(&prefix).map(|key| Kbd::new(key).lowercase().into_any_element());
+        let pick = cx.weak_entity();
+        let dismiss = cx.weak_entity();
+        bottom_sheet(
+            "compact-bindings-sheet",
+            "All bindings",
+            cap,
+            WhichKeyList::new(rows).on_pick(move |id, _, cx| {
+                let _ = pick.update(cx, |this, cx| {
+                    this.compact.bindings = false;
+                    this.send_binding(id, cx);
+                    cx.notify();
+                });
+            }),
+            bottom_inset,
+            move |_, cx| {
+                let _ = dismiss.update(cx, |this, cx| {
+                    this.compact.bindings = false;
+                    cx.notify();
+                });
+            },
+            cx,
+        )
     }
 
     fn compact_tree_sheet(

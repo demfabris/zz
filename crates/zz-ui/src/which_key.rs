@@ -53,7 +53,7 @@ pub struct WhichKeyView {
 }
 
 pub(crate) struct Group<'a> {
-    title: Option<SharedString>,
+    pub(crate) title: Option<SharedString>,
     pub(crate) rows: Vec<&'a WhichKeyRow>,
 }
 

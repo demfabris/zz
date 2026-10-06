@@ -7,6 +7,7 @@ use gpui::{
 
 use super::{
     arrow_pad::ArrowPad,
+    popover_key::{PopoverKey, PopoverKeyItem, PopoverKeyTap, alt_chords, control_chords},
     sticky::{StickyModifier, StickyModifiers},
 };
 use crate::{ActiveTheme as _, Colorize as _, Icon, IconName, StyledExt as _, rems_from_px};
@@ -14,8 +15,8 @@ use crate::{ActiveTheme as _, Colorize as _, Icon, IconName, StyledExt as _, rem
 pub const KEY_ROW_HEIGHT: f32 = 44.0;
 pub(super) const KEY_HEIGHT: f32 = 32.0;
 
-const KEY_MIN_WIDTH: f32 = 30.0;
-const KEY_PADDING_X: f32 = 4.0;
+pub(super) const KEY_MIN_WIDTH: f32 = 30.0;
+pub(super) const KEY_PADDING_X: f32 = 4.0;
 const ROW_PADDING_X: f32 = 8.0;
 const KEY_GAP: f32 = 4.0;
 const LATCHED_WASH: u8 = 6;
@@ -56,8 +57,8 @@ pub enum KeyRowKey {
         keystroke: Keystroke,
     },
     Modifier(StickyModifier),
-    Prefix,
-    Arrows,
+    Popover(Entity<PopoverKey>),
+    Arrows(Entity<ArrowPad>),
 }
 
 impl KeyRowKey {
@@ -83,20 +84,60 @@ impl KeyRowKey {
             },
         }
     }
+}
 
-    pub fn defaults() -> Vec<Self> {
+#[derive(Clone)]
+pub struct ToolKeys {
+    pub arrows: Entity<ArrowPad>,
+    pub control: Entity<PopoverKey>,
+    pub alt: Entity<PopoverKey>,
+    pub prefix: Entity<PopoverKey>,
+}
+
+impl ToolKeys {
+    pub fn new(prefix: Vec<PopoverKeyItem>, footer: Option<PopoverKeyItem>, cx: &mut App) -> Self {
+        let latch = |label: &'static str, modifier, items: Vec<PopoverKeyItem>, cx: &mut App| {
+            cx.new(|cx| {
+                PopoverKey::new(label, PopoverKeyTap::Latch(modifier), cx)
+                    .items(items)
+                    .columns(2)
+            })
+        };
+        Self {
+            arrows: cx.new(ArrowPad::new),
+            control: latch("ctrl", StickyModifier::Control, control_chords(), cx),
+            alt: latch("alt", StickyModifier::Alt, alt_chords(), cx),
+            prefix: cx.new(|cx| {
+                let key = PopoverKey::new("prefix", PopoverKeyTap::Open, cx).items(prefix);
+                match footer {
+                    Some(footer) => key.footer(footer),
+                    None => key,
+                }
+            }),
+        }
+    }
+
+    pub fn row(&self) -> Vec<KeyRowKey> {
         vec![
-            Self::Hide,
-            Self::named("esc", "escape"),
-            Self::named("tab", "tab"),
-            Self::Modifier(StickyModifier::Control),
-            Self::Modifier(StickyModifier::Alt),
-            Self::text("|"),
-            Self::text("~"),
-            Self::text("/"),
-            Self::Prefix,
-            Self::Arrows,
+            KeyRowKey::Hide,
+            KeyRowKey::named("esc", "escape"),
+            KeyRowKey::named("tab", "tab"),
+            KeyRowKey::Popover(self.control.clone()),
+            KeyRowKey::Popover(self.alt.clone()),
+            KeyRowKey::text("|"),
+            KeyRowKey::text("~"),
+            KeyRowKey::text("/"),
+            KeyRowKey::Popover(self.prefix.clone()),
+            KeyRowKey::Arrows(self.arrows.clone()),
         ]
+    }
+
+    pub fn close(&self, cx: &mut App) {
+        for key in [&self.control, &self.alt, &self.prefix] {
+            if key.read(cx).is_open() {
+                key.update(cx, PopoverKey::close);
+            }
+        }
     }
 }
 
@@ -105,55 +146,23 @@ type Handler = Rc<dyn Fn(&mut Window, &mut App)>;
 
 #[derive(IntoElement)]
 pub struct KeyRow {
-    arrow_pad: Entity<ArrowPad>,
     keys: Vec<KeyRowKey>,
-    prefix_armed: bool,
-    prefix_label: SharedString,
     on_key: Option<KeyHandler>,
-    on_prefix: Option<Handler>,
     on_hide: Option<Handler>,
 }
 
 impl KeyRow {
-    pub fn new(arrow_pad: Entity<ArrowPad>) -> Self {
+    pub fn new(keys: Vec<KeyRowKey>) -> Self {
         Self {
-            arrow_pad,
-            keys: KeyRowKey::defaults(),
-            prefix_armed: false,
-            prefix_label: "C-b".into(),
+            keys,
             on_key: None,
-            on_prefix: None,
             on_hide: None,
         }
     }
 
     #[must_use]
-    pub fn keys(mut self, keys: Vec<KeyRowKey>) -> Self {
-        self.keys = keys;
-        self
-    }
-
-    #[must_use]
-    pub fn prefix_armed(mut self, armed: bool) -> Self {
-        self.prefix_armed = armed;
-        self
-    }
-
-    #[must_use]
-    pub fn prefix_label(mut self, label: impl Into<SharedString>) -> Self {
-        self.prefix_label = label.into();
-        self
-    }
-
-    #[must_use]
     pub fn on_key(mut self, f: impl Fn(&Keystroke, &mut Window, &mut App) + 'static) -> Self {
         self.on_key = Some(Rc::new(f));
-        self
-    }
-
-    #[must_use]
-    pub fn on_prefix(mut self, f: impl Fn(&mut Window, &mut App) + 'static) -> Self {
-        self.on_prefix = Some(Rc::new(f));
         self
     }
 
@@ -229,27 +238,12 @@ impl KeyRow {
                     })
                     .into_any_element()
             }
-            KeyRowKey::Prefix => {
-                let on_prefix = self.on_prefix.clone();
-                let look = if self.prefix_armed {
-                    KeyLook::Inverted
-                } else {
-                    KeyLook::Rest
-                };
-                Self::cap(index, look, cx)
-                    .child(self.prefix_label.clone())
-                    .on_click(move |_, window, cx| {
-                        if let Some(on_prefix) = &on_prefix {
-                            on_prefix(window, cx);
-                        }
-                    })
-                    .into_any_element()
-            }
-            KeyRowKey::Arrows => div()
+            KeyRowKey::Popover(key) => div().flex().flex_none().child(key).into_any_element(),
+            KeyRowKey::Arrows(pad) => div()
                 .flex()
                 .flex_none()
                 .ml_auto()
-                .child(self.arrow_pad.clone())
+                .child(pad)
                 .into_any_element(),
         }
     }
@@ -293,24 +287,20 @@ mod tests {
     use super::*;
 
     struct Host {
-        pad: Entity<ArrowPad>,
-        armed: bool,
+        keys: ToolKeys,
         sent: Rc<RefCell<Vec<String>>>,
     }
 
     impl Render for Host {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
             let sent = Rc::clone(&self.sent);
-            let prefix = Rc::clone(&self.sent);
             let hide = Rc::clone(&self.sent);
             div().size_full().child(
                 div().absolute().bottom_0().left_0().right_0().child(
-                    KeyRow::new(self.pad.clone())
-                        .prefix_armed(self.armed)
+                    KeyRow::new(self.keys.row())
                         .on_key(move |keystroke, _, _| {
                             sent.borrow_mut().push(keystroke.unparse());
                         })
-                        .on_prefix(move |_, _| prefix.borrow_mut().push("prefix".into()))
                         .on_hide(move |_, _| hide.borrow_mut().push("hide".into())),
                 ),
             )
@@ -324,20 +314,17 @@ mod tests {
         });
     }
 
-    const KEYS: [&str; 9] = [
-        "key-row-key-0",
-        "key-row-key-1",
-        "key-row-key-2",
-        "key-row-key-3",
-        "key-row-key-4",
-        "key-row-key-5",
-        "key-row-key-6",
-        "key-row-key-7",
-        "key-row-key-8",
-    ];
+    fn host(cx: &mut TestAppContext) -> (gpui::Entity<Host>, &mut VisualTestContext) {
+        cx.update(crate::init);
+        let (host, cx) = cx.add_window_view(move |_, cx| Host {
+            keys: ToolKeys::new(vec![PopoverKeyItem::new("new-pane", "New pane")], None, cx),
+            sent: Rc::default(),
+        });
+        redraw(cx);
+        (host, cx)
+    }
 
-    fn tap(cx: &mut VisualTestContext, index: usize) {
-        let selector = KEYS[index];
+    fn tap(cx: &mut VisualTestContext, selector: &'static str) {
         let center = cx.debug_bounds(selector).expect(selector).center();
         cx.simulate_click(center, Modifiers::none());
         redraw(cx);
@@ -345,42 +332,28 @@ mod tests {
 
     #[gpui::test]
     fn keys_send_through_the_sticky_latch(cx: &mut TestAppContext) {
-        cx.update(crate::init);
-        let sent = Rc::new(RefCell::new(Vec::new()));
-        let log = Rc::clone(&sent);
-        let (_, cx) = cx.add_window_view(move |_, cx| Host {
-            pad: cx.new(ArrowPad::new),
-            armed: false,
-            sent: log,
-        });
-        redraw(cx);
+        let (host, cx) = host(cx);
         assert!(cx.debug_bounds("arrow-pad").is_some());
 
-        tap(cx, 1);
-        tap(cx, 3);
+        tap(cx, "key-row-key-1");
+        tap(cx, "popover-key-ctrl");
         assert!(cx.update(|_, cx| StickyModifiers::get(cx).control));
-        tap(cx, 7);
+        tap(cx, "key-row-key-7");
         assert!(cx.update(|_, cx| StickyModifiers::get(cx).is_empty()));
-        tap(cx, 8);
-        tap(cx, 0);
-        assert_eq!(
-            sent.borrow().as_slice(),
-            ["escape", "ctrl-/", "prefix", "hide"]
-        );
+        tap(cx, "key-row-key-0");
+        let sent = host.read_with(cx, |host, _| host.sent.borrow().clone());
+        assert_eq!(sent, ["escape", "ctrl-/", "hide"]);
+
+        tap(cx, "popover-key-prefix");
+        assert!(cx.debug_bounds("popover-key-item-new-pane").is_some());
     }
 
     #[gpui::test]
     fn the_arrows_sit_at_the_right_edge(cx: &mut TestAppContext) {
-        cx.update(crate::init);
-        let (_, cx) = cx.add_window_view(move |_, cx| Host {
-            pad: cx.new(ArrowPad::new),
-            armed: true,
-            sent: Rc::default(),
-        });
-        redraw(cx);
+        let (_, cx) = host(cx);
         let row = cx.debug_bounds("key-row").expect("row");
         let pad = cx.debug_bounds("arrow-pad").expect("pad");
-        let prefix = cx.debug_bounds("key-row-key-8").expect("prefix");
+        let prefix = cx.debug_bounds("popover-key-prefix").expect("prefix");
         assert!(pad.left() > prefix.right());
         assert!(row.right() - pad.right() <= gpui::px(ROW_PADDING_X + 0.5));
     }

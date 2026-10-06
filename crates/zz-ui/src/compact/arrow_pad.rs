@@ -1,12 +1,14 @@
 use gpui::{
-    Anchor, AnyElement, App, Context, EventEmitter, HitboxBehavior, IntoElement, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render,
-    Styled as _, Task, TouchDragEvent, TouchPhase, Window, anchored, canvas, deferred, div, point,
-    prelude::*, px, relative,
+    AnyElement, App, Context, EventEmitter, IntoElement, ParentElement as _, Pixels, Point, Render,
+    Styled as _, Task, Window, div, prelude::*,
 };
 use web_time::Duration;
 
-use super::key_row::{KEY_HEIGHT, KeyLook, key_surface};
+use super::{
+    key_row::{KEY_HEIGHT, KeyLook, key_surface},
+    popover_key::popover_above,
+    press::{Grip, Press, press_listeners},
+};
 use crate::{ActiveTheme as _, Colorize as _, Icon, IconName, StyledExt as _, rems_from_px};
 
 const THRESHOLD: f32 = 10.0;
@@ -14,7 +16,6 @@ const REPEAT_DELAY: Duration = Duration::from_millis(300);
 const REPEAT_INTERVAL: Duration = Duration::from_millis(80);
 const PAD_WIDTH: f32 = 52.0;
 const BUBBLE: f32 = 132.0;
-const BUBBLE_GAP: f32 = 8.0;
 const BUBBLE_PADDING: f32 = 6.0;
 const CELL_GAP: f32 = 4.0;
 const HUB: f32 = 6.0;
@@ -69,12 +70,6 @@ pub enum ArrowPadEvent {
     Arrow(ArrowDirection),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Grip {
-    Touch,
-    Mouse,
-}
-
 pub struct ArrowPad {
     press: Option<(Point<Pixels>, Grip)>,
     direction: Option<ArrowDirection>,
@@ -100,45 +95,6 @@ impl ArrowPad {
         self.direction
     }
 
-    fn grip(&self) -> Option<Grip> {
-        self.press.map(|(_, grip)| grip)
-    }
-
-    fn grab(&mut self, at: Point<Pixels>, grip: Grip, cx: &mut Context<Self>) {
-        self.press = Some((at, grip));
-        self.direction = None;
-        self.repeat = None;
-        cx.notify();
-    }
-
-    fn track(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
-        let Some((origin, _)) = self.press else {
-            return;
-        };
-        let direction = resolve_direction(
-            f32::from(at.x - origin.x),
-            f32::from(at.y - origin.y),
-            THRESHOLD,
-        );
-        if direction == self.direction {
-            return;
-        }
-        self.direction = direction;
-        self.repeat = direction.map(|direction| {
-            cx.emit(ArrowPadEvent::Arrow(direction));
-            Self::repeat(direction, cx)
-        });
-        cx.notify();
-    }
-
-    fn release(&mut self, cx: &mut Context<Self>) {
-        if self.press.take().is_some() {
-            self.direction = None;
-            self.repeat = None;
-            cx.notify();
-        }
-    }
-
     fn repeat(direction: ArrowDirection, cx: &mut Context<Self>) -> Task<()> {
         cx.spawn(async move |pad, cx| {
             let mut wait = REPEAT_DELAY;
@@ -157,99 +113,6 @@ impl ArrowPad {
                 wait = REPEAT_INTERVAL;
             }
         })
-    }
-
-    fn listeners(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let pad = cx.entity().downgrade();
-        canvas(
-            |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
-            move |_, hitbox, window, _| {
-                window.on_mouse_event({
-                    let pad = pad.clone();
-                    let hitbox = hitbox.clone();
-                    move |event: &TouchDragEvent, phase, window, cx| {
-                        if !phase.bubble() {
-                            return;
-                        }
-                        let Some(pad) = pad.upgrade() else {
-                            return;
-                        };
-                        match event.phase {
-                            TouchPhase::Started => {
-                                if window.default_prevented()
-                                    || !hitbox.is_hovered_at(event.start_position, window)
-                                {
-                                    return;
-                                }
-                                window.prevent_default();
-                                pad.update(cx, |pad, cx| {
-                                    pad.grab(event.start_position, Grip::Touch, cx);
-                                    pad.track(event.position, cx);
-                                });
-                            }
-                            TouchPhase::Moved => pad.update(cx, |pad, cx| {
-                                if pad.grip() == Some(Grip::Touch) {
-                                    pad.track(event.position, cx);
-                                }
-                            }),
-                            TouchPhase::Ended | TouchPhase::Cancelled => {
-                                pad.update(cx, |pad, cx| {
-                                    if pad.grip() == Some(Grip::Touch) {
-                                        pad.release(cx);
-                                    }
-                                });
-                            }
-                        }
-                    }
-                });
-                window.on_mouse_event({
-                    let pad = pad.clone();
-                    move |event: &MouseDownEvent, phase, window, cx| {
-                        if !phase.bubble()
-                            || event.button != MouseButton::Left
-                            || !hitbox.is_hovered(window)
-                        {
-                            return;
-                        }
-                        let Some(pad) = pad.upgrade() else {
-                            return;
-                        };
-                        window.prevent_default();
-                        cx.stop_propagation();
-                        pad.update(cx, |pad, cx| pad.grab(event.position, Grip::Mouse, cx));
-                    }
-                });
-                window.on_mouse_event({
-                    let pad = pad.clone();
-                    move |event: &MouseMoveEvent, phase, _, cx| {
-                        if !phase.bubble() {
-                            return;
-                        }
-                        if let Some(pad) = pad.upgrade() {
-                            pad.update(cx, |pad, cx| {
-                                if pad.grip() == Some(Grip::Mouse) {
-                                    pad.track(event.position, cx);
-                                }
-                            });
-                        }
-                    }
-                });
-                window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
-                    if !phase.bubble() || event.button != MouseButton::Left {
-                        return;
-                    }
-                    if let Some(pad) = pad.upgrade() {
-                        pad.update(cx, |pad, cx| {
-                            if pad.grip() == Some(Grip::Mouse) {
-                                pad.release(cx);
-                            }
-                        });
-                    }
-                });
-            },
-        )
-        .absolute()
-        .inset_0()
     }
 
     fn bubble(&self, cx: &App) -> AnyElement {
@@ -317,10 +180,50 @@ impl ArrowPad {
     }
 }
 
+impl Press for ArrowPad {
+    fn grip(&self) -> Option<Grip> {
+        self.press.map(|(_, grip)| grip)
+    }
+
+    fn grab(&mut self, at: Point<Pixels>, grip: Grip, cx: &mut Context<Self>) {
+        self.press = Some((at, grip));
+        self.direction = None;
+        self.repeat = None;
+        cx.notify();
+    }
+
+    fn track(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+        let Some((origin, _)) = self.press else {
+            return;
+        };
+        let direction = resolve_direction(
+            f32::from(at.x - origin.x),
+            f32::from(at.y - origin.y),
+            THRESHOLD,
+        );
+        if direction == self.direction {
+            return;
+        }
+        self.direction = direction;
+        self.repeat = direction.map(|direction| {
+            cx.emit(ArrowPadEvent::Arrow(direction));
+            Self::repeat(direction, cx)
+        });
+        cx.notify();
+    }
+
+    fn release(&mut self, _cancelled: bool, cx: &mut Context<Self>) {
+        if self.press.take().is_some() {
+            self.direction = None;
+            self.repeat = None;
+            cx.notify();
+        }
+    }
+}
+
 impl Render for ArrowPad {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let held = self.held();
-        let gap = rems_from_px(BUBBLE_GAP).to_pixels(window.rem_size());
         let look = if held {
             KeyLook::Inverted
         } else {
@@ -336,27 +239,19 @@ impl Render for ArrowPad {
             .w(rems_from_px(PAD_WIDTH))
             .h(rems_from_px(KEY_HEIGHT))
             .child(Icon::new(IconName::ArrowsMove).size(rems_from_px(18.0)))
-            .child(self.listeners(cx))
+            .child(press_listeners(cx.entity().downgrade()))
             .when(held, |pad| {
-                pad.child(
-                    div().absolute().top_0().left(relative(0.5)).child(
-                        deferred(
-                            anchored()
-                                .anchor(Anchor::BottomCenter)
-                                .offset(point(px(0.0), -gap))
-                                .snap_to_window_with_margin(px(8.0))
-                                .child(self.bubble(cx)),
-                        )
-                        .with_priority(2),
-                    ),
-                )
+                pad.child(popover_above(self.bubble(cx), window))
             })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use gpui::{Entity, Subscription, TestAppContext, VisualTestContext};
+    use gpui::{
+        Entity, MouseButton, Subscription, TestAppContext, TouchDragEvent, TouchPhase,
+        VisualTestContext, point, px,
+    };
 
     use super::*;
 

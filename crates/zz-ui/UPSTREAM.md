@@ -271,6 +271,9 @@ counterpart. `Pager` is a renderer-free model that pages one pane per screen fro
 wheel scrolls (rubber-banded edges, a quarter-width or velocity commit, one page per gesture,
 momentum ignored after release, a spring settle). The rest is the chrome around it: `page_dots`,
 `compact_bar` with its 44px buttons and title, `compact_pane_header` and `top_shade`,
-`bottom_sheet`, `WhichKeyList`, and the soft-keyboard `KeyRow` with app-level
-`StickyModifiers` and an `ArrowPad` that repeats while held. Colors come from the theme; nothing
-here depends on a platform.
+`bottom_sheet`, the grouped `WhichKeyList` a sheet shows, and the soft-keyboard `KeyRow` with
+app-level `StickyModifiers`. Its tool keys share one gesture: a tap does the key's own job, and a
+hold or a slide raises a card above it, where releasing on an item picks it. `ArrowPad` is the
+direction card and repeats while held; `PopoverKey` is a menu or chord grid (`ToolKeys` builds the
+ctrl, alt, and prefix set). A long press released in place leaves the card open for taps. Colors
+come from the theme; nothing here depends on a platform.

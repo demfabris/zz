@@ -196,7 +196,7 @@ fn pane_stdin_requests_one_chunk_at_a_time_and_cancels_on_target_loss() {
             client,
             ClientKind::Command,
             &mut context,
-            &CommandInvocation::new("new-session", ["-d", "-s", "e11stream", ""]),
+            &CommandInvocation::new("new-session", ["-d", "-s", "e11stream", "exec sleep 30"]),
         )
         .unwrap();
     let mut event_loop = EventLoop::empty(&shared).unwrap();

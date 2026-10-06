@@ -7,7 +7,7 @@ fn pane(shared: &Arc<Shared>) -> PaneId {
             ClientId(u64::MAX),
             ClientKind::Command,
             &mut context,
-            &CommandInvocation::new("new-session", ["-d", "-s", "e04", ""]),
+            &CommandInvocation::new("new-session", ["-d", "-s", "e04", "exec sleep 30"]),
         )
         .unwrap();
     context.pane.unwrap()

@@ -69,6 +69,14 @@ and DirectX color/path pipelines and WGPU path composition. The Metal GPU test
 layers, and an opaque foreground. This prevents translucent layers from adding up to
 opaque window alpha.
 
+Wide blurred inset shadows take a cheaper path in Metal, WGPU, and DirectX (`1b395e5`). A
+pixel more than three blur radii (plus the largest corner) inside the hole is discarded, and
+when every corner radius is at most a quarter of the blur the shadow is blurred as a sharp
+rectangle with two erf pairs instead of the four-sample corner loop. zz's pane focus glow is
+such a shadow: zz's GPU fragment time on a 2672x1482pt window fell from 237 to 144 ms/s. The
+ignored test `bench_pane_glow` times the glow offscreen; see
+[the surface cost research](/research/2026-10-06-surface-cost.md).
+
 # zz changes to GPUI
 
 Fork commit `7bdd43258b` gives the native macOS Window menu first chance to handle

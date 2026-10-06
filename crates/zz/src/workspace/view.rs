@@ -489,6 +489,89 @@ impl PaneContent {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct TerminalHeaderState {
+    active: bool,
+    title: String,
+    can_drag: bool,
+    background: gpui::Hsla,
+    radii: Corners<Pixels>,
+    opacity: f32,
+}
+
+struct TerminalHeaderView {
+    pane: PaneId,
+    app: WeakEntity<AppView>,
+    mux: Entity<MuxClient>,
+    state: Option<TerminalHeaderState>,
+}
+
+impl TerminalHeaderView {
+    fn sync(&mut self, state: TerminalHeaderState, cx: &mut Context<Self>) {
+        if self.state.as_ref() != Some(&state) {
+            self.state = Some(state);
+            cx.notify();
+        }
+    }
+}
+
+impl Render for TerminalHeaderView {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let Some(state) = self.state.clone() else {
+            return div().w_full().into_any_element();
+        };
+        let pane = self.pane;
+        let mux = self.mux.clone();
+        let drag_app = self.app.clone();
+        let click_app = self.app.clone();
+        let title = state.title.clone();
+        let header = terminal_pane_header(
+            state.active,
+            title.clone(),
+            pane_drag_button(
+                ("terminal-pane-drag", pane.0),
+                pane,
+                title,
+                state.can_drag,
+                move |drag, _, cx| {
+                    if let Some(app) = drag_app.upgrade() {
+                        app.update(cx, |view, cx| view.on_pane_drag_start(*drag, cx));
+                    }
+                },
+                cx,
+            ),
+            move |action, _, cx| {
+                let command = match action {
+                    TerminalPaneAction::SplitBottom => picker_split_command(pane, Axis::Vertical),
+                    TerminalPaneAction::SplitRight => picker_split_command(pane, Axis::Horizontal),
+                    TerminalPaneAction::Close => kill_target_command(TreeTarget::Pane(pane)),
+                };
+                mux.read(cx).execute(command);
+            },
+            cx,
+        )
+        .on_click(move |_, window, cx| {
+            let Some(app) = click_app.upgrade() else {
+                return;
+            };
+            app.update(cx, |view, cx| {
+                view.mux.read(cx).execute(pane_select_command(pane));
+                if let Some((_, focus)) = view.pane_focus_target(pane, cx) {
+                    focus.focus(window, cx);
+                }
+            });
+        });
+        div()
+            .w_full()
+            .h_full()
+            .bg(state.background)
+            .rounded_tl(state.radii.top_left)
+            .rounded_tr(state.radii.top_right)
+            .child(header.opacity(state.opacity))
+            .into_any_element()
+    }
+}
+
 struct PopupPane {
     state: PopupState,
     terminal: Entity<TerminalView>,
@@ -657,6 +740,7 @@ pub struct AppView {
     new_session: Entity<NewSessionView>,
     pickers: BTreeMap<PaneId, Entity<PanePickerView>>,
     terminals: BTreeMap<PaneId, Entity<TerminalView>>,
+    terminal_headers: BTreeMap<PaneId, Entity<TerminalHeaderView>>,
     browsers: BTreeMap<PaneId, Entity<BrowserView>>,
     agents: BTreeMap<PaneId, Entity<AgentView>>,
     editors: BTreeMap<PaneId, Entity<EditorView>>,
@@ -970,6 +1054,7 @@ impl AppView {
             new_session,
             pickers: BTreeMap::new(),
             terminals: BTreeMap::new(),
+            terminal_headers: BTreeMap::new(),
             browsers: BTreeMap::new(),
             agents: BTreeMap::new(),
             editors: BTreeMap::new(),
@@ -1865,6 +1950,18 @@ impl AppView {
                                 });
                                 self.terminals.insert(pane, view);
                             }
+                            if !self.terminal_headers.contains_key(pane) {
+                                let pane = *pane;
+                                let app = cx.entity().downgrade();
+                                let mux = self.mux.clone();
+                                let header = cx.new(|_| TerminalHeaderView {
+                                    pane,
+                                    app,
+                                    mux,
+                                    state: None,
+                                });
+                                self.terminal_headers.insert(pane, header);
+                            }
                         }
                         PaneKindSnapshot::Browser(browser) => {
                             wanted_browsers.insert(*pane);
@@ -2195,6 +2292,8 @@ impl AppView {
 
         self.pickers.retain(|pane, _| wanted_pickers.contains(pane));
         self.terminals
+            .retain(|pane, _| wanted_terminals.contains(pane));
+        self.terminal_headers
             .retain(|pane, _| wanted_terminals.contains(pane));
         self.agents.retain(|pane, _| wanted_agents.contains(pane));
         self.editors.retain(|pane, _| wanted_editors.contains(pane));
@@ -2998,14 +3097,10 @@ impl AppView {
                 );
                 let terminal_header =
                     pane_snapshot.filter(|pane| matches!(pane.kind, PaneKindSnapshot::Terminal));
-                let content = if let Some(snapshot) = terminal_header {
+                let header_view = terminal_header
+                    .and_then(|snapshot| Some((snapshot, self.terminal_headers.get(pane)?)));
+                let content = if let Some((snapshot, header_view)) = header_view {
                     let pane = *pane;
-                    let mux = self.mux.clone();
-                    let view = cx.entity();
-                    let title = zz_client::navigation::pane_label(snapshot);
-                    let can_drag = self.mux.read(cx).is_connected()
-                        && window.zoomed_pane.is_none()
-                        && window.panes.len() > 1;
                     let background = self
                         .command_output
                         .as_ref()
@@ -3016,56 +3111,28 @@ impl AppView {
                             || crate::theme::app_pane_background(cx),
                             |terminal| terminal.read(cx).pane_background(cx),
                         );
-                    let header = terminal_pane_header(
+                    let state = TerminalHeaderState {
                         active,
-                        title.clone(),
-                        pane_drag_button(
-                            ("terminal-pane-drag", pane.0),
-                            pane,
-                            title,
-                            can_drag,
-                            move |drag, _, cx| {
-                                view.update(cx, |view, cx| view.on_pane_drag_start(*drag, cx));
-                            },
-                            cx,
-                        ),
-                        move |action, _, cx| {
-                            let command = match action {
-                                TerminalPaneAction::SplitBottom => {
-                                    picker_split_command(pane, Axis::Vertical)
-                                }
-                                TerminalPaneAction::SplitRight => {
-                                    picker_split_command(pane, Axis::Horizontal)
-                                }
-                                TerminalPaneAction::Close => {
-                                    kill_target_command(TreeTarget::Pane(pane))
-                                }
-                            };
-                            mux.read(cx).execute(command);
-                        },
-                        cx,
-                    )
-                    .on_click(cx.listener(move |view, _, window, cx| {
-                        view.mux.read(cx).execute(pane_select_command(pane));
-                        if let Some((_, focus)) = view.pane_focus_target(pane, cx) {
-                            focus.focus(window, cx);
-                        }
-                    }));
+                        title: zz_client::navigation::pane_label(snapshot),
+                        can_drag: self.mux.read(cx).is_connected()
+                            && window.zoomed_pane.is_none()
+                            && window.panes.len() > 1,
+                        background,
+                        radii,
+                        opacity: if inactive { inactive_opacity } else { 1.0 },
+                    };
+                    header_view.update(cx, |header, cx| header.sync(state, cx));
                     div()
                         .flex()
                         .flex_col()
                         .size_full()
                         .child(
-                            div()
-                                .flex_none()
-                                .bg(background)
-                                .rounded_tl(radii.top_left)
-                                .rounded_tr(radii.top_right)
-                                .child(header.opacity(if inactive {
-                                    inactive_opacity
-                                } else {
-                                    1.0
-                                })),
+                            AnyView::from(header_view.clone()).cached(
+                                StyleRefinement::default()
+                                    .h(px(TERMINAL_HEADER_HEIGHT))
+                                    .w_full()
+                                    .flex_none(),
+                            ),
                         )
                         .child(div().flex_1().min_h_0().min_w_0().child(content))
                         .into_any_element()

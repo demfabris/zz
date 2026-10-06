@@ -192,21 +192,21 @@ impl Controls {
         });
         let contrast = cx.new(|cx| {
             InputState::new(window, cx)
-                .default_value((preferences.contrast * 100.0).to_string())
+                .default_value(number_text(preferences.contrast * 100.0))
                 .step(5.0)
                 .min(50.0)
                 .max(200.0)
         });
         let shadow_strength = cx.new(|cx| {
             InputState::new(window, cx)
-                .default_value((preferences.shadow_strength * 100.0).to_string())
+                .default_value(number_text(preferences.shadow_strength * 100.0))
                 .step(5.0)
                 .min(0.0)
                 .max(100.0)
         });
         let terminal_scale = cx.new(|cx| {
             InputState::new(window, cx)
-                .default_value((preferences.terminal_font_scale * 100.0).to_string())
+                .default_value(number_text(preferences.terminal_font_scale * 100.0))
                 .step(10.0)
                 .min(50.0)
                 .max(300.0)
@@ -284,7 +284,7 @@ impl Controls {
             let value = pane_values[control as usize] * scale;
             let input = cx.new(|cx| {
                 InputState::new(window, cx)
-                    .default_value(value.to_string())
+                    .default_value(number_text(value))
                     .min(f64::from(min))
                     .max(f64::from(max))
                     .step(step)
@@ -313,7 +313,7 @@ impl Controls {
                     *control.value(&mut this.preferences) = value / scale;
                     if commit {
                         input.update(cx, |input, cx| {
-                            input.set_value(value.to_string(), window, cx);
+                            input.set_value(number_text(value), window, cx);
                         });
                     }
                     this.preferences.save();
@@ -504,7 +504,13 @@ impl AppShell {
                             .child(title),
                     ),
             )
-            .child(content)
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .relative()
+                    .child(div().absolute().inset_0().flex().child(content)),
+            )
             .into_any_element()
     }
 
@@ -1058,7 +1064,7 @@ impl AppShell {
                             1.0
                         };
                     this.settings_controls.panes[control as usize].update(cx, |input, cx| {
-                        input.set_value((default * scale).to_string(), window, cx);
+                        input.set_value(number_text(default * scale), window, cx);
                     });
                     this.preferences.save();
                     this.preferences.apply(&this.connection, window, cx);
@@ -1323,6 +1329,12 @@ fn status_field<'a>(preferences: &'a mut Preferences, id: &str) -> &'a mut bool 
         "badges" => &mut preferences.status_badges,
         _ => &mut preferences.status_agents,
     }
+}
+
+fn number_text(value: f32) -> String {
+    let text = format!("{value:.2}");
+    let text = text.trim_end_matches('0').trim_end_matches('.');
+    if text == "-0" { "0" } else { text }.to_owned()
 }
 
 fn number_control(input: &Entity<InputState>, cx: &App) -> gpui::Div {
@@ -1616,8 +1628,19 @@ impl PaneControl {
 
 #[cfg(test)]
 mod tests {
-    use super::sample_terminal_viewport;
+    use super::{number_text, sample_terminal_viewport};
     use zz_terminal::{ATTR_BOLD, ATTR_ITALIC, CursorStyle, TerminalAppearance};
+
+    #[test]
+    fn number_fields_hide_float_noise() {
+        assert_eq!(number_text(1.05_f32 * 100.0), "105");
+        assert_eq!(number_text(0.85_f32 * 100.0), "85");
+        assert_eq!(number_text(13.5), "13.5");
+        assert_eq!(number_text(0.7), "0.7");
+        assert_eq!(number_text(0.05), "0.05");
+        assert_eq!(number_text(0.0), "0");
+        assert_eq!(number_text(-0.001), "0");
+    }
 
     #[test]
     fn terminal_preview_uses_host_palette_styles_and_cursor() {

@@ -2750,6 +2750,15 @@ impl Render for AppShell {
         if self.settings.is_none() {
             self.settings_picked = false;
         }
+        let page_inset = if self.preferences.extend_bottom_safe_area {
+            (window.visual_viewport_bounds().bottom() - window.fully_visible_bounds().bottom())
+                .max(px(0.0))
+        } else {
+            px(0.0)
+        };
+        if zz_ui::settings::SettingsBottomInset::get(cx) != page_inset {
+            cx.set_global(zz_ui::settings::SettingsBottomInset(page_inset));
+        }
         #[cfg(target_os = "ios")]
         self.sync_authentication(window, cx);
         #[cfg(target_os = "ios")]

@@ -17,8 +17,8 @@ use crate::{
 };
 use gpui::{
     AnyElement, App, ElementId, IntoElement, ListAlignment, ListSizingBehavior, ListState,
-    ParentElement, RenderOnce, SharedString, Styled as _, Window, div, list, prelude::*, px,
-    relative,
+    ParentElement, Pixels, RenderOnce, SharedString, Styled as _, Window, div, list, prelude::*,
+    px, relative,
 };
 
 /// A page in the settings sidebar, ordered by the labeled groups the sidebar
@@ -470,6 +470,45 @@ mod tests {
         assert!(cx.debug_bounds("virtual-settings-row-0").is_none());
     }
 
+    struct InsetPageTest;
+
+    impl Render for InsetPageTest {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().flex().w(px(400.0)).h(px(220.0)).child(
+                settings_scroll_column("inset-test").children((0..10).map(|index| {
+                    div()
+                        .h(px(50.0))
+                        .flex_none()
+                        .debug_selector(move || format!("inset-row-{index}"))
+                })),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn the_bottom_inset_keeps_the_last_row_clear(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::init(cx);
+            cx.set_global(SettingsBottomInset(px(40.0)));
+        });
+        let (_, cx) = cx.add_window_view(|_, _| InsetPageTest);
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        cx.simulate_event(gpui::ScrollWheelEvent {
+            position: gpui::point(px(100.0), px(100.0)),
+            delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.0), px(-10_000.0))),
+            ..Default::default()
+        });
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        let last = cx.debug_bounds("inset-row-9").expect("last row");
+        assert!(last.bottom() <= px(220.0 - 40.0));
+    }
+
     #[gpui::test]
     fn virtual_rows_land_where_scrolled_rows_do(cx: &mut TestAppContext) {
         cx.update(crate::init);
@@ -523,6 +562,20 @@ pub fn settings_page_description(section: SettingsSection, cx: &App) -> gpui::Di
         )
 }
 
+/// Room a host keeps clear below the last row of every settings page, such as
+/// an iOS home indicator the page draws under. Unset means none.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct SettingsBottomInset(pub Pixels);
+
+impl gpui::Global for SettingsBottomInset {}
+
+impl SettingsBottomInset {
+    #[must_use]
+    pub fn get(cx: &App) -> Pixels {
+        cx.try_global::<Self>().map_or(px(0.0), |inset| inset.0)
+    }
+}
+
 /// A settings page: a scrolling column of [`SettingsStack`]s, with the shared
 /// scrollbar overlaid. `id` keys the scroll handle, so each page keeps its own
 /// position.
@@ -573,7 +626,8 @@ impl RenderOnce for SettingsScrollColumn {
                             .flex_none()
                             .gap(px(18.0))
                             .children(self.children),
-                    ),
+                    )
+                    .child(div().flex_none().h(SettingsBottomInset::get(cx))),
             )
             .vertical_scrollbar(&handle)
     }
@@ -640,7 +694,8 @@ impl RenderOnce for SettingsVirtualColumn {
         })
         .with_sizing_behavior(ListSizingBehavior::Auto)
         .size_full()
-        .py(px(SETTINGS_PAGE_PADDING));
+        .pt(px(SETTINGS_PAGE_PADDING))
+        .pb(px(SETTINGS_PAGE_PADDING) + SettingsBottomInset::get(cx));
 
         div()
             .id(self.id)

@@ -920,7 +920,7 @@ impl AppShell {
     }
 
     pub(super) fn narrow(window: &Window) -> bool {
-        window.fully_visible_bounds().size.width < px(640.0)
+        settings::phone() || window.fully_visible_bounds().size.width < px(640.0)
     }
 
     pub(super) fn inline_sidebar(&self, window: &Window) -> bool {

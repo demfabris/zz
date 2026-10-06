@@ -2759,6 +2759,7 @@ impl Render for AppShell {
         if zz_ui::settings::SettingsBottomInset::get(cx) != page_inset {
             cx.set_global(zz_ui::settings::SettingsBottomInset(page_inset));
         }
+        zz_ui::touch::CoarsePointer::set(Self::narrow(window), cx);
         #[cfg(target_os = "ios")]
         self.sync_authentication(window, cx);
         #[cfg(target_os = "ios")]
@@ -2920,6 +2921,7 @@ impl Render for AppShell {
             .pb((window.viewport_size().height - bottom).max(px(0.0)))
             .pl(visible.left())
             .pr(window.viewport_size().width - visible.right())
+            .child(zz_ui::compact::coast_guard())
             .child(shell)
     }
 }

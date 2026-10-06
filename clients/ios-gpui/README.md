@@ -22,6 +22,14 @@ Prefix opens a short menu (new pane, new window, rename pane, last pane, kill pa
 an All bindings sheet that sends any prefix binding through the daemon's key table. The
 arrow pad repeats while held.
 
+Both sheets follow the finger when dragged down by the grabber or the header, or by their
+content once it is scrolled to the top. Dragged past about half their height, or flicked down,
+they close; a shorter drag springs back, and dragging up resists. A tap on the dimmed area above
+still closes them. Small controls take taps across a 44-point box around the glyph (pane close,
+settings back, tree actions, reset and stepper buttons, switches, select menus), workspace tree
+rows are 44 points tall, and each key in the key row answers across the whole row height and
+up to the middle of the gap to its neighbours.
+
 ## Run
 
 Use an Apple Silicon Mac with Xcode, Rust's `aarch64-apple-ios-sim` target, and
@@ -179,7 +187,9 @@ as a color font.
 Settings uses the shared `zz-ui` form rows, previews, palettes, color pickers,
 number fields, and switches. iPad keeps the section navigation beside the page;
 iPhone opens on a list of sections; tapping one opens its page, and back returns
-to the list.
+to the list. A drag from the left edge also goes back: the page follows the finger with
+the section list sliding in underneath, and releasing past half the width or with a
+rightward flick completes it. On the list, the same swipe returns to the workspace.
 
 - **Appearance:** System/Light/Dark appearance, light and dark palettes,
   background/foreground/accent colors, UI zoom, contrast, animations, widget

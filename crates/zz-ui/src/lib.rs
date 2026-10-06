@@ -67,4 +67,5 @@ pub mod settings;
 pub mod shell;
 pub mod terminal;
 pub mod terminal_images;
+pub mod touch;
 pub mod which_key;

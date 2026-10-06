@@ -1166,11 +1166,13 @@ pub fn settings_reset_button(
     tooltip: impl Into<SharedString>,
     enabled: bool,
 ) -> Button {
+    let slop = crate::touch::control_slop(crate::Size::XSmall);
     Button::new(id)
         .xsmall()
         .compact()
         .ghost()
         .flat()
+        .hit_slop(slop, slop)
         .icon(crate::IconName::Undo2)
         .tooltip(tooltip)
         .disabled(!enabled)

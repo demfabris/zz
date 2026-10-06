@@ -19,6 +19,8 @@ pub(super) const KEY_MIN_WIDTH: f32 = 30.0;
 pub(super) const KEY_PADDING_X: f32 = 4.0;
 const ROW_PADDING_X: f32 = 8.0;
 const KEY_GAP: f32 = 4.0;
+const KEY_GROUP: &str = "key-row-key";
+pub(super) const KEY_SLOP: (f32, f32) = (KEY_GAP / 2.0, (KEY_ROW_HEIGHT - KEY_HEIGHT) / 2.0);
 const LATCHED_WASH: u8 = 6;
 const PRESSED_WASH: u8 = 4;
 
@@ -172,45 +174,59 @@ impl KeyRow {
         self
     }
 
-    fn cap(index: usize, look: KeyLook, cx: &App) -> Stateful<Div> {
+    fn slot(id: impl Into<ElementId>) -> Stateful<Div> {
+        div()
+            .id(id)
+            .flex()
+            .flex_none()
+            .items_center()
+            .h_full()
+            .px(rems_from_px(KEY_SLOP.0))
+    }
+
+    fn cap(index: usize, look: KeyLook, content: impl IntoElement, cx: &App) -> Stateful<Div> {
         let selector = format!("key-row-key-{index}");
-        key_surface(
-            div().id(ElementId::named_usize("key-row-key", index)),
-            look,
-            cx,
-        )
-        .debug_selector(move || selector)
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .min_w(rems_from_px(KEY_MIN_WIDTH))
-        .px(rems_from_px(KEY_PADDING_X))
-        .whitespace_nowrap()
-        .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
-        .when(look == KeyLook::Rest, |cap| {
-            let pressed = cx.theme().background.washed(PRESSED_WASH);
-            cap.active(move |style| style.bg(pressed))
-        })
+        Self::slot(ElementId::named_usize("key-row-key", index))
+            .group(KEY_GROUP)
+            .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
+            .child(
+                key_surface(div().id("cap"), look, cx)
+                    .debug_selector(move || selector)
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .justify_center()
+                    .min_w(rems_from_px(KEY_MIN_WIDTH))
+                    .px(rems_from_px(KEY_PADDING_X))
+                    .whitespace_nowrap()
+                    .when(look == KeyLook::Rest, |cap| {
+                        let pressed = cx.theme().background.washed(PRESSED_WASH);
+                        cap.group_active(KEY_GROUP, move |style| style.bg(pressed))
+                    })
+                    .child(content),
+            )
     }
 
     fn key(&self, index: usize, key: KeyRowKey, sticky: StickyModifiers, cx: &App) -> AnyElement {
         match key {
             KeyRowKey::Hide => {
                 let on_hide = self.on_hide.clone();
-                Self::cap(index, KeyLook::Rest, cx)
-                    .child(Icon::new(IconName::ChevronDown).size(rems_from_px(16.0)))
-                    .on_click(move |_, window, cx| {
-                        if let Some(on_hide) = &on_hide {
-                            on_hide(window, cx);
-                        }
-                    })
-                    .into_any_element()
+                Self::cap(
+                    index,
+                    KeyLook::Rest,
+                    Icon::new(IconName::ChevronDown).size(rems_from_px(16.0)),
+                    cx,
+                )
+                .on_click(move |_, window, cx| {
+                    if let Some(on_hide) = &on_hide {
+                        on_hide(window, cx);
+                    }
+                })
+                .into_any_element()
             }
             KeyRowKey::Key { label, keystroke } => {
                 let on_key = self.on_key.clone();
-                Self::cap(index, KeyLook::Rest, cx)
-                    .child(label)
+                Self::cap(index, KeyLook::Rest, label, cx)
                     .on_click(move |_, window, cx| {
                         let keystroke = StickyModifiers::apply(&keystroke, cx);
                         window.refresh();
@@ -230,18 +246,17 @@ impl KeyRow {
                     StickyModifier::Control => "ctrl",
                     StickyModifier::Alt => "alt",
                 };
-                Self::cap(index, look, cx)
-                    .child(label)
+                Self::cap(index, look, label, cx)
                     .on_click(move |_, window, cx| {
                         StickyModifiers::toggle(modifier, cx);
                         window.refresh();
                     })
                     .into_any_element()
             }
-            KeyRowKey::Popover(key) => div().flex().flex_none().child(key).into_any_element(),
-            KeyRowKey::Arrows(pad) => div()
-                .flex()
-                .flex_none()
+            KeyRowKey::Popover(key) => Self::slot(ElementId::named_usize("key-row-slot", index))
+                .child(key)
+                .into_any_element(),
+            KeyRowKey::Arrows(pad) => Self::slot(ElementId::named_usize("key-row-slot", index))
                 .ml_auto()
                 .child(pad)
                 .into_any_element(),
@@ -267,8 +282,7 @@ impl RenderOnce for KeyRow {
             .items_center()
             .w_full()
             .h(rems_from_px(KEY_ROW_HEIGHT))
-            .px(rems_from_px(ROW_PADDING_X))
-            .gap(rems_from_px(KEY_GAP))
+            .px(rems_from_px(ROW_PADDING_X - KEY_SLOP.0))
             .overflow_x_scroll()
             .restrict_scroll_to_axis()
             .font_family(cx.theme().font_family.clone())
@@ -346,6 +360,38 @@ mod tests {
 
         tap(cx, "popover-key-prefix");
         assert!(cx.debug_bounds("popover-key-item-new-pane").is_some());
+    }
+
+    #[gpui::test]
+    fn keys_take_taps_off_the_cap(cx: &mut TestAppContext) {
+        let (host, cx) = host(cx);
+        let row = cx.debug_bounds("key-row").expect("row");
+        let esc = cx.debug_bounds("key-row-key-1").expect("esc");
+        assert_eq!(row.size.height, gpui::px(KEY_ROW_HEIGHT));
+        assert_eq!(esc.size.height, gpui::px(KEY_HEIGHT));
+        for at in [
+            gpui::point(esc.center().x, row.top() + gpui::px(1.0)),
+            gpui::point(esc.center().x, row.bottom() - gpui::px(1.0)),
+            gpui::point(esc.right() + gpui::px(1.5), esc.center().y),
+            gpui::point(esc.left() - gpui::px(1.5), row.top() + gpui::px(1.0)),
+        ] {
+            cx.simulate_click(at, Modifiers::none());
+            redraw(cx);
+        }
+        let sent = host.read_with(cx, |host, _| host.sent.borrow().clone());
+        assert_eq!(sent, ["escape", "escape", "escape", "escape"]);
+
+        let ctrl = cx.debug_bounds("popover-key-ctrl").expect("ctrl");
+        let above = gpui::point(ctrl.center().x, row.top() + gpui::px(1.0));
+        for phase in [gpui::TouchPhase::Started, gpui::TouchPhase::Ended] {
+            cx.simulate_event(gpui::TouchDragEvent {
+                phase,
+                start_position: above,
+                position: above,
+            });
+            redraw(cx);
+        }
+        assert!(cx.update(|_, cx| StickyModifiers::get(cx).control));
     }
 
     #[gpui::test]

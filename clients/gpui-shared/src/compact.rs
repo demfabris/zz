@@ -593,6 +593,7 @@ impl AppShell {
         };
         let actions = writable.then(|| {
             pane_header_icon_button(("compact-close-pane", pane_id.0), IconName::Xmark, true, cx)
+                .hit_slop(10.0, 10.0)
                 .tooltip("Close pane")
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.command("kill-pane", vec!["-t".into(), pane_id.to_string()], cx);
@@ -824,8 +825,8 @@ impl AppShell {
                     cx.notify();
                 });
             },
-            cx,
         )
+        .into_any_element()
     }
 
     fn compact_tree_sheet(
@@ -877,8 +878,9 @@ impl AppShell {
             move |window, cx| {
                 let _ = view.update(cx, |this, cx| this.release_sidebar_focus(window, cx));
             },
-            cx,
         )
+        .content_scroll(self.sidebar_scroll.0.borrow().base_handle.clone())
+        .into_any_element()
     }
 }
 

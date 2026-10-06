@@ -1,7 +1,10 @@
 use gpui::{
     Context, HitboxBehavior, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Pixels, Point, Styled as _, TouchDragEvent, TouchPhase, WeakEntity, canvas,
+    MouseUpEvent, Pixels, Point, Styled, TouchDragEvent, TouchPhase, WeakEntity, canvas,
 };
+
+use super::key_row::KEY_SLOP;
+use crate::rems_from_px;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Grip {
@@ -16,8 +19,18 @@ pub(super) trait Press: Sized + 'static {
     fn release(&mut self, cancelled: bool, cx: &mut Context<Self>);
 }
 
+pub(super) fn key_slop<E: Styled>(element: E) -> E {
+    let (x, y) = KEY_SLOP;
+    element
+        .absolute()
+        .top(rems_from_px(-y))
+        .bottom(rems_from_px(-y))
+        .left(rems_from_px(-x))
+        .right(rems_from_px(-x))
+}
+
 pub(super) fn press_listeners<T: Press>(target: WeakEntity<T>) -> impl IntoElement {
-    canvas(
+    key_slop(canvas(
         |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
         move |_, hitbox, window, _| {
             window.on_mouse_event({
@@ -110,7 +123,5 @@ pub(super) fn press_listeners<T: Press>(target: WeakEntity<T>) -> impl IntoEleme
                 }
             });
         },
-    )
-    .absolute()
-    .inset_0()
+    ))
 }

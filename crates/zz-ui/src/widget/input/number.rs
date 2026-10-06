@@ -142,9 +142,11 @@ impl NumberInput {
         disabled: bool,
     ) -> Button {
         let state = state.clone();
+        let slop = crate::touch::control_slop(size);
         Button::new(id)
             .ghost()
             .flat()
+            .hit_slop(slop, slop)
             .with_size(size)
             .icon(icon)
             .compact()

@@ -604,7 +604,7 @@ fn render_row(entry: &TreeRow, active: bool, runtime: &Runtime, cx: &mut App) ->
             ),
         );
     }
-    let actions = tree_action_strip(format!("web-tree-actions-{id}"), actions);
+    let actions = tree_action_strip(format!("web-tree-actions-{id}"), actions, cx);
     let badge_color = entry.badge.map(|badge| badge.color(cx));
     let marker = if is_host {
         tree_host_marker(entry.bell, badge_color, cx)

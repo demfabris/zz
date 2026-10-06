@@ -444,9 +444,40 @@ impl AppShell {
         if !narrow {
             return self.settings_page(section, narrow, cx);
         }
+        let view = cx.entity().downgrade();
         let picked = self.settings_picked;
+        zz_ui::compact::swipe_back(
+            "settings-swipe-back",
+            self.settings_route(section, picked, cx),
+            move |window, cx| {
+                let _ = view.update(cx, |this, cx| this.settings_back(window, cx));
+            },
+        )
+        .when(picked, |swipe| {
+            swipe.under(self.settings_route(section, false, cx))
+        })
+        .into_any_element()
+    }
+
+    fn settings_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.settings_picked {
+            self.settings_picked = false;
+        } else {
+            self.settings = None;
+            self.focused_pane = None;
+        }
+        self.focus.focus(window, cx);
+        cx.notify();
+    }
+
+    fn settings_route(
+        &self,
+        section: SettingsSection,
+        picked: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let content = if picked {
-            self.settings_page(section, narrow, cx)
+            self.settings_page(section, true, cx)
         } else {
             zz_ui::settings::settings_section_index(
                 &SECTIONS,
@@ -481,20 +512,14 @@ impl AppShell {
                     .gap(px(4.0))
                     .child(
                         Button::compact_icon("settings-back", IconName::ArrowLeft)
+                            .hit_slop(10.0, 10.0)
                             .tooltip(if picked {
                                 "Settings"
                             } else {
                                 "Back to workspace"
                             })
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                if picked {
-                                    this.settings_picked = false;
-                                } else {
-                                    this.settings = None;
-                                    this.focused_pane = None;
-                                }
-                                this.focus.focus(window, cx);
-                                cx.notify();
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.settings_back(window, cx);
                             })),
                     )
                     .child(

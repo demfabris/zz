@@ -12,7 +12,7 @@ use web_time::Duration;
 
 use super::{
     key_row::{KEY_HEIGHT, KEY_MIN_WIDTH, KEY_PADDING_X, KeyLook, key_surface},
-    press::{Grip, Press, press_listeners},
+    press::{Grip, Press, key_slop, press_listeners},
     sticky::{StickyModifier, StickyModifiers},
 };
 use crate::{ActiveTheme as _, Colorize as _, Icon, IconName, StyledExt as _, rems_from_px};
@@ -22,7 +22,7 @@ const SLIDE: f32 = 12.0;
 const GAP: f32 = 8.0;
 const WINDOW_MARGIN: f32 = 8.0;
 const CARD_PADDING: f32 = 6.0;
-const ITEM_HEIGHT: f32 = 40.0;
+const ITEM_HEIGHT: f32 = 44.0;
 const ITEM_GAP: f32 = 2.0;
 const LIST_WIDTH: f32 = 216.0;
 const CELL_WIDTH: f32 = 124.0;
@@ -487,11 +487,10 @@ impl Render for PopoverKey {
                     .rounded_full()
                     .bg(hint),
             )
-            .child(
-                canvas(move |bounds, _, _| key.set(bounds), |_, (), _, _| {})
-                    .absolute()
-                    .inset_0(),
-            )
+            .child(key_slop(canvas(
+                move |bounds, _, _| key.set(bounds),
+                |_, (), _, _| {},
+            )))
             .child(press_listeners(cx.entity().downgrade()))
             .when(open, |key| {
                 let card = self.card(cx);

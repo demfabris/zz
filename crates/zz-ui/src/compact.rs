@@ -16,4 +16,5 @@ pub use key_row::{KEY_ROW_HEIGHT, KeyRow, KeyRowKey};
 pub use pager::{Pager, PagerEvent, PagerLayout, PagerResponse};
 pub use sheet::bottom_sheet;
 pub use sticky::{StickyModifier, StickyModifiers};
+pub use web_time::Instant;
 pub use which_key_list::WhichKeyList;

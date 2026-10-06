@@ -6,6 +6,8 @@ mod authentication;
 #[cfg(target_os = "ios")]
 #[path = "browser_pane.rs"]
 mod browser_pane;
+#[path = "compact.rs"]
+mod compact;
 #[path = "floating.rs"]
 mod floating;
 #[path = "hosts.rs"]
@@ -182,6 +184,7 @@ pub(crate) struct AppShell {
     pane_canvas_bounds: Rc<Cell<Bounds<Pixels>>>,
     pane_bounds: Rc<RefCell<HashMap<PaneId, Bounds<Pixels>>>>,
     rendered_drop_preview: Rc<Cell<DropPreviewFrame>>,
+    compact: compact::CompactState,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -251,6 +254,7 @@ impl AppShell {
                             this.chooser_revision = this.chooser_revision.wrapping_add(1).max(1);
                         }
                         this.focused_pane = None;
+                        this.compact.reset_attachment();
                         this.waiting_panes.clear();
                         this.popup_terminal = None;
                         this.output_terminal = None;
@@ -400,6 +404,7 @@ impl AppShell {
             pane_canvas_bounds: Rc::default(),
             pane_bounds: Rc::default(),
             rendered_drop_preview: Rc::default(),
+            compact: compact::CompactState::default(),
             _subscriptions: vec![
                 key_events,
                 observer,
@@ -1067,6 +1072,127 @@ impl AppShell {
         );
     }
 
+    fn prune_pane_entities(&mut self, cx: &App) {
+        let existing: HashMap<_, _> = self
+            .connection
+            .read(cx)
+            .core
+            .snapshot()
+            .sessions
+            .iter()
+            .flat_map(|session| &session.windows)
+            .flat_map(|window| {
+                window
+                    .panes
+                    .iter()
+                    .map(|(id, pane)| (*id, pane.kind.clone()))
+            })
+            .collect();
+        if self.pickers.keys().any(|pane| {
+            self.focused_pane == Some(*pane)
+                && !matches!(existing.get(pane), Some(PaneKindSnapshot::Picker))
+        }) {
+            self.focused_pane = None;
+        }
+        self.terminals
+            .retain(|pane, _| matches!(existing.get(pane), Some(PaneKindSnapshot::Terminal)));
+        self.waiting_panes
+            .retain(|pane| existing.contains_key(pane));
+        self.agents
+            .retain(|pane, _| matches!(existing.get(pane), Some(PaneKindSnapshot::Agent(_))));
+        #[cfg(target_os = "ios")]
+        self.browsers
+            .retain(|pane, _| matches!(existing.get(pane), Some(PaneKindSnapshot::Browser(_))));
+        self.pickers
+            .retain(|pane, _| matches!(existing.get(pane), Some(PaneKindSnapshot::Picker)));
+    }
+
+    fn terminal_entity(&mut self, pane: PaneId, cx: &mut Context<Self>) -> Entity<TerminalPane> {
+        self.terminals
+            .entry(pane)
+            .or_insert_with(|| {
+                let connection = self.connection.clone();
+                let suppressed = Rc::clone(&self.terminal_resize_suppressed);
+                cx.new(|cx| {
+                    TerminalPane::new(pane, connection, cx).with_resize_suppression(suppressed)
+                })
+            })
+            .clone()
+    }
+
+    fn agent_entity(
+        &mut self,
+        pane: PaneId,
+        descriptor: &zz_protocol::AgentDescriptor,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<AgentPane> {
+        let view = cx.weak_entity();
+        let touch_view = view.clone();
+        self.agents
+            .entry(pane)
+            .or_insert_with(|| {
+                let connection = self.connection.clone();
+                cx.new(|cx| {
+                    let mut agent =
+                        AgentPane::new(pane, descriptor.clone(), connection, window, cx);
+                    agent.set_header_drag_handler(move |drag, _, cx| {
+                        let _ = view.update(cx, |this, cx| this.on_pane_drag_start(*drag, cx));
+                    });
+                    agent.set_header_touch_drag_handler(move |event, window, cx| {
+                        let _ = touch_view.update(cx, |this, cx| {
+                            this.touch_pane_drag(pane, event, window, cx);
+                        });
+                    });
+                    agent
+                })
+            })
+            .clone()
+    }
+
+    #[cfg(target_os = "ios")]
+    fn browser_entity(
+        &mut self,
+        pane: PaneId,
+        descriptor: &zz_protocol::BrowserDescriptor,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<browser_pane::BrowserPane> {
+        let host = self.connection.read(cx).endpoint().unwrap_or_default();
+        if self
+            .browsers
+            .get(&pane)
+            .is_some_and(|browser| !browser.read(cx).matches(host, &descriptor.profile))
+        {
+            self.browsers.remove(&pane);
+        }
+        self.browsers
+            .entry(pane)
+            .or_insert_with(|| {
+                let connection = self.connection.clone();
+                cx.new(|cx| {
+                    browser_pane::BrowserPane::new(pane, descriptor, connection, window, cx)
+                })
+            })
+            .clone()
+    }
+
+    fn picker_entity(
+        &mut self,
+        pane: PaneId,
+        cx: &mut Context<Self>,
+    ) -> Entity<picker::PanePicker> {
+        self.pickers
+            .entry(pane)
+            .or_insert_with(|| {
+                let connection = self.connection.clone();
+                cx.new(|cx| {
+                    picker::PanePicker::new(pane, connection, self.preferences.agent_enabled, cx)
+                })
+            })
+            .clone()
+    }
+
     fn dismiss_pane_prefix(&self, pane: PaneId, cx: &mut App) {
         if !self.connection.read(cx).core.prefix_armed() {
             return;
@@ -1444,38 +1570,7 @@ impl AppShell {
         let output = core
             .command_output_id()
             .zip(core.command_output().map(|(pane, _)| pane));
-        let existing: HashMap<_, _> = self
-            .connection
-            .read(cx)
-            .core
-            .snapshot()
-            .sessions
-            .iter()
-            .flat_map(|session| &session.windows)
-            .flat_map(|window| {
-                window
-                    .panes
-                    .iter()
-                    .map(|(id, pane)| (*id, pane.kind.clone()))
-            })
-            .collect();
-        if self.pickers.keys().any(|pane| {
-            self.focused_pane == Some(*pane)
-                && !matches!(existing.get(pane), Some(PaneKindSnapshot::Picker))
-        }) {
-            self.focused_pane = None;
-        }
-        self.terminals
-            .retain(|pane, _| matches!(existing.get(pane), Some(PaneKindSnapshot::Terminal)));
-        self.waiting_panes
-            .retain(|pane| existing.contains_key(pane));
-        self.agents
-            .retain(|pane, _| matches!(existing.get(pane), Some(PaneKindSnapshot::Agent(_))));
-        #[cfg(target_os = "ios")]
-        self.browsers
-            .retain(|pane, _| matches!(existing.get(pane), Some(PaneKindSnapshot::Browser(_))));
-        self.pickers
-            .retain(|pane, _| matches!(existing.get(pane), Some(PaneKindSnapshot::Picker)));
+        self.prune_pane_entities(cx);
         let mut panes = HashMap::new();
         self.pane_bounds
             .borrow_mut()
@@ -1511,20 +1606,13 @@ impl AppShell {
                             terminal.read(cx).focus_handle(cx).focus(window, cx);
                             self.output_terminal = Some((id, terminal));
                         }
-                        &self
-                            .output_terminal
+                        self.output_terminal
                             .as_ref()
                             .expect("command output terminal")
                             .1
+                            .clone()
                     } else {
-                        self.terminals.entry(pane_id).or_insert_with(|| {
-                            let connection = self.connection.clone();
-                            let suppressed = Rc::clone(&self.terminal_resize_suppressed);
-                            cx.new(|cx| {
-                                TerminalPane::new(pane_id, connection, cx)
-                                    .with_resize_suppression(suppressed)
-                            })
-                        })
+                        self.terminal_entity(pane_id, cx)
                     };
                     if can_focus
                         && pane_id == active_window.active_pane
@@ -1557,25 +1645,7 @@ impl AppShell {
                     terminal.clone().into_any_element()
                 }
                 PaneKindSnapshot::Agent(descriptor) => {
-                    let view = cx.weak_entity();
-                    let touch_view = view.clone();
-                    let agent = self.agents.entry(pane_id).or_insert_with(|| {
-                        let connection = self.connection.clone();
-                        cx.new(|cx| {
-                            let mut agent =
-                                AgentPane::new(pane_id, descriptor.clone(), connection, window, cx);
-                            agent.set_header_drag_handler(move |drag, _, cx| {
-                                let _ =
-                                    view.update(cx, |this, cx| this.on_pane_drag_start(*drag, cx));
-                            });
-                            agent.set_header_touch_drag_handler(move |event, window, cx| {
-                                let _ = touch_view.update(cx, |this, cx| {
-                                    this.touch_pane_drag(pane_id, event, window, cx);
-                                });
-                            });
-                            agent
-                        })
-                    });
+                    let agent = self.agent_entity(pane_id, descriptor, window, cx);
                     agent.update(cx, |agent, cx| {
                         agent.update_descriptor(descriptor, cx);
                         agent.set_corner_radii(radii, cx);
@@ -1587,26 +1657,11 @@ impl AppShell {
                         agent.read(cx).focus_handle(cx).focus(window, cx);
                         self.focused_pane = Some(pane_id);
                     }
-                    agent.clone().into_any_element()
+                    agent.into_any_element()
                 }
                 #[cfg(target_os = "ios")]
                 PaneKindSnapshot::Browser(descriptor) => {
-                    let host = self.connection.read(cx).endpoint().unwrap_or_default();
-                    if self
-                        .browsers
-                        .get(&pane_id)
-                        .is_some_and(|browser| !browser.read(cx).matches(host, &descriptor.profile))
-                    {
-                        self.browsers.remove(&pane_id);
-                    }
-                    let browser = self.browsers.entry(pane_id).or_insert_with(|| {
-                        let connection = self.connection.clone();
-                        cx.new(|cx| {
-                            browser_pane::BrowserPane::new(
-                                pane_id, descriptor, connection, window, cx,
-                            )
-                        })
-                    });
+                    let browser = self.browser_entity(pane_id, descriptor, window, cx);
                     browser.update(cx, |browser, cx| {
                         browser.synchronize(
                             descriptor,
@@ -1623,7 +1678,7 @@ impl AppShell {
                         browser.read(cx).focus_handle(cx).focus(window, cx);
                         self.focused_pane = Some(pane_id);
                     }
-                    browser.clone().into_any_element()
+                    browser.into_any_element()
                 }
                 #[cfg(not(target_os = "ios"))]
                 PaneKindSnapshot::Browser(descriptor) => unsupported_pane(
@@ -1643,17 +1698,7 @@ impl AppShell {
                     cx,
                 ),
                 PaneKindSnapshot::Picker => {
-                    let picker = self.pickers.entry(pane_id).or_insert_with(|| {
-                        let connection = self.connection.clone();
-                        cx.new(|cx| {
-                            picker::PanePicker::new(
-                                pane_id,
-                                connection,
-                                self.preferences.agent_enabled,
-                                cx,
-                            )
-                        })
-                    });
+                    let picker = self.picker_entity(pane_id, cx);
                     if can_focus
                         && pane_id == active_window.active_pane
                         && self.focused_pane != Some(pane_id)
@@ -1665,7 +1710,7 @@ impl AppShell {
                         picker.set_agent_enabled(self.preferences.agent_enabled);
                         picker.set_corner_radii(radii, cx);
                     });
-                    picker.clone().into_any_element()
+                    picker.into_any_element()
                 }
             };
             let content = if matches!(pane.kind, PaneKindSnapshot::Terminal) {
@@ -2722,14 +2767,16 @@ impl Render for AppShell {
         {
             self.release_sidebar_focus(window, cx);
         }
-        let sidebar = if self.inline_sidebar(window) {
+        let compact = self.compact_active(window, cx);
+        self.sync_compact_mode(compact, cx);
+        let sidebar = if !compact && self.inline_sidebar(window) {
             self.sidebar(window, cx)
         } else {
             div().into_any_element()
         };
-        let titlebar = (self.settings.is_none() && !self.inline_sidebar(window))
+        let titlebar = (!compact && self.settings.is_none() && !self.inline_sidebar(window))
             .then(|| self.status_bar(window, cx));
-        let workspace = self.workspace(window, cx);
+        let workspace = (!compact).then(|| self.workspace(window, cx));
         #[cfg(target_os = "ios")]
         {
             let connection = self.connection.read(cx);
@@ -2762,7 +2809,9 @@ impl Render for AppShell {
                 && core.popup().is_none()
                 && core.command_output().is_none()
                 && core.display_panes().is_none();
-            let visible: BTreeSet<_> = if unobstructed {
+            let visible: BTreeSet<_> = if unobstructed && compact {
+                self.compact_visible_panes(cx)
+            } else if unobstructed {
                 self.active_window(cx)
                     .map(|window| {
                         let layout = window
@@ -2789,57 +2838,63 @@ impl Render for AppShell {
             .collect::<Vec<_>>();
         terminal_overlays.extend(self.floating_overlay(window, cx));
         let mut overlays = Vec::new();
-        if self.slideover && !self.inline_sidebar(window) && self.settings.is_none() {
+        if !compact && self.slideover && !self.inline_sidebar(window) && self.settings.is_none() {
             overlays.push(self.slideover(window, cx));
         }
         overlays.extend(self.overlay(window, cx));
         overlays.extend(Root::render_dialog_layer(window, cx).map(IntoElement::into_any_element));
         overlays
             .extend(Root::render_notification_layer(window, cx).map(IntoElement::into_any_element));
-        let shell = app_shell_surface(
-            "web-client",
-            cx.theme().background,
-            sidebar,
-            titlebar,
-            app_workspace_surface("web-workspace", workspace, terminal_overlays, cx),
-            overlays,
-        )
-        .track_focus(&self.focus)
-        .on_key_up(cx.listener(Self::key_up))
-        .map(|shell| {
-            #[cfg(target_os = "ios")]
-            let shell = shell
-                .on_action(cx.listener(Self::menu_command))
-                .on_action(cx.listener(|this, action: &OpenSession, _, cx| {
-                    this.connection.update(cx, |connection, cx| {
-                        connection.open_session(action.name.clone(), cx);
-                    });
-                    this.connect_recent_host(cx);
-                }));
-            shell
-        })
-        .on_drag_move::<SidebarResizeDrag>(cx.listener(
-            |this, event: &DragMoveEvent<SidebarResizeDrag>, window, cx| {
-                let previous = this.preferences.sidebar_width;
-                this.preferences.sidebar_width =
-                    f32::from(event.event.position.x - event.bounds.origin.x);
-                this.preferences.sidebar_width = this.sidebar_width(window);
-                if this.preferences.sidebar_width != previous {
-                    this.preferences.save();
-                    cx.notify();
-                }
-                cx.stop_propagation();
-            },
-        ))
-        .on_mouse_up(
-            MouseButton::Left,
-            cx.listener(|this, _, window, cx| {
-                cx.defer_in(window, |this, _, cx| this.finish_pane_drag(cx));
-                this.commit_split(cx);
-            }),
-        );
+        let shell = if let Some(workspace) = workspace {
+            app_shell_surface(
+                "web-client",
+                cx.theme().background,
+                sidebar,
+                titlebar,
+                app_workspace_surface("web-workspace", workspace, terminal_overlays, cx),
+                overlays,
+            )
+        } else {
+            self.compact_shell(terminal_overlays, overlays, window, cx)
+        };
+        let shell = shell
+            .track_focus(&self.focus)
+            .on_key_up(cx.listener(Self::key_up))
+            .map(|shell| {
+                #[cfg(target_os = "ios")]
+                let shell =
+                    shell
+                        .on_action(cx.listener(Self::menu_command))
+                        .on_action(cx.listener(|this, action: &OpenSession, _, cx| {
+                            this.connection.update(cx, |connection, cx| {
+                                connection.open_session(action.name.clone(), cx);
+                            });
+                            this.connect_recent_host(cx);
+                        }));
+                shell
+            })
+            .on_drag_move::<SidebarResizeDrag>(cx.listener(
+                |this, event: &DragMoveEvent<SidebarResizeDrag>, window, cx| {
+                    let previous = this.preferences.sidebar_width;
+                    this.preferences.sidebar_width =
+                        f32::from(event.event.position.x - event.bounds.origin.x);
+                    this.preferences.sidebar_width = this.sidebar_width(window);
+                    if this.preferences.sidebar_width != previous {
+                        this.preferences.save();
+                        cx.notify();
+                    }
+                    cx.stop_propagation();
+                },
+            ))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _, window, cx| {
+                    cx.defer_in(window, |this, _, cx| this.finish_pane_drag(cx));
+                    this.commit_split(cx);
+                }),
+            );
         let visible = window.fully_visible_bounds();
-        let bottom = if self.preferences.extend_bottom_safe_area {
+        let bottom = if compact || self.preferences.extend_bottom_safe_area {
             window.visual_viewport_bounds().bottom()
         } else {
             visible.bottom()
@@ -2847,7 +2902,7 @@ impl Render for AppShell {
         div()
             .size_full()
             .bg(cx.theme().background)
-            .pt(visible.top())
+            .pt(if compact { px(0.0) } else { visible.top() })
             .pb((window.viewport_size().height - bottom).max(px(0.0)))
             .pl(visible.left())
             .pr(window.viewport_size().width - visible.right())

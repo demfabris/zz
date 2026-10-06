@@ -54,6 +54,7 @@ pub(crate) struct IosWindowState {
     keyboard_overlap: f64,
     keyboard_requested: bool,
     soft_keyboard: bool,
+    compact_keyboard: bool,
     keyboard_sync_pending: bool,
     reload_input_views: bool,
     text_input: TextInputConfiguration,
@@ -179,6 +180,7 @@ impl IosWindow {
                 keyboard_overlap: 0.0,
                 keyboard_requested: false,
                 soft_keyboard: false,
+                compact_keyboard: false,
                 keyboard_sync_pending: false,
                 reload_input_views: false,
                 text_input: TextInputConfiguration::default(),
@@ -338,7 +340,11 @@ impl PlatformWindow for IosWindow {
 
     fn text_input_state_changed(&self, change: TextInputStateChange) {
         match change {
-            TextInputStateChange::FocusGained => self.show_soft_keyboard(),
+            TextInputStateChange::FocusGained => {
+                if !self.0.borrow().compact_keyboard {
+                    self.show_soft_keyboard();
+                }
+            }
             TextInputStateChange::FocusLost => self.hide_soft_keyboard(),
             TextInputStateChange::SelectionChanged | TextInputStateChange::ContentChanged => {}
         }
@@ -1140,7 +1146,7 @@ extern "C" fn input_view(this: &Object, _: Sel) -> id {
 extern "C" fn input_accessory_view(this: &Object, _: Sel) -> id {
     let state = unsafe { get_window_state(this) };
     let state = state.borrow();
-    if state.soft_keyboard {
+    if state.soft_keyboard && !state.compact_keyboard {
         state.accessory_view
     } else {
         nil
@@ -1460,6 +1466,26 @@ pub fn show_edit_menu(x: f32, y: f32) {
         ];
         let _: () = msg_send![edit_menu, presentEditMenuWithConfiguration: configuration];
     }
+}
+
+pub fn set_compact_keyboard(enabled: bool) {
+    let view = ACTIVE_VIEW.get();
+    let Some(state) = (!view.is_null())
+        .then(|| unsafe { try_window_state(&*view) })
+        .flatten()
+    else {
+        return;
+    };
+    {
+        let mut state = state.borrow_mut();
+        if state.compact_keyboard == enabled {
+            return;
+        }
+        state.compact_keyboard = enabled;
+        state.latched = Modifiers::default();
+        state.reload_input_views = true;
+    }
+    schedule_keyboard_sync(view);
 }
 
 pub fn request_paste() {

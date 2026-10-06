@@ -4,10 +4,10 @@ use gpui::accesskit;
 use gpui::{
     AnyWindowHandle, Bounds, Capslock, CursorStyle, DevicePixels, DispatchEventResult,
     KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, ModifiersChangedEvent, MouseButton,
-    MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, Pixels, PlatformAtlas,
-    PlatformDisplay, PlatformInput, PlatformInputHandler, PlatformWindow, Point, PromptButton,
-    PromptLevel, RequestFrameOptions, ScrollDelta, ScrollWheelEvent, Size, TextInputAction,
-    TextInputConfiguration, TextInputStateChange, TouchEvent, TouchId, TouchPhase,
+    MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, PinchEvent, Pixels,
+    PlatformAtlas, PlatformDisplay, PlatformInput, PlatformInputHandler, PlatformWindow, Point,
+    PromptButton, PromptLevel, RequestFrameOptions, ScrollDelta, ScrollWheelEvent, Size,
+    TextInputAction, TextInputConfiguration, TextInputStateChange, TouchEvent, TouchId, TouchPhase,
     WindowAppearance, WindowBackgroundAppearance, WindowBounds, WindowParams, point, px, size,
 };
 use objc::{
@@ -65,6 +65,7 @@ pub(crate) struct IosWindowState {
     last_touch: Point<Pixels>,
     touch_gestures: bool,
     touches: HashMap<usize, (TouchId, Point<Pixels>)>,
+    pinch: Option<crate::pinch::Pinch>,
     next_touch: u64,
     pointer_button: Option<MouseButton>,
     momentum: Option<crate::momentum::Momentum>,
@@ -191,6 +192,7 @@ impl IosWindow {
                 last_touch: Point::default(),
                 touch_gestures,
                 touches: HashMap::new(),
+                pinch: None,
                 next_touch: 0,
                 pointer_button: None,
                 momentum: None,
@@ -1094,6 +1096,9 @@ fn dispatch_touches(this: &Object, touches: id, phase: TouchPhase) -> bool {
         let location: CGPoint =
             unsafe { msg_send![touch, locationInView: this as *const Object as id] };
         let position = point(px(location.x as f32), px(location.y as f32));
+        if pinch_touch(this, touch as usize, phase, position) {
+            continue;
+        }
         let id = {
             let mut state = state.borrow_mut();
             state.last_touch = position;
@@ -1123,6 +1128,57 @@ fn dispatch_touches(this: &Object, touches: id, phase: TouchPhase) -> bool {
                 position,
                 predicted_position: None,
                 force: None,
+            }),
+        );
+    }
+    true
+}
+
+fn pinch_touch(this: &Object, key: usize, phase: TouchPhase, position: Point<Pixels>) -> bool {
+    let state = unsafe { get_window_state(this) };
+    let (step, cancelled, modifiers) = {
+        let mut state = state.borrow_mut();
+        let modifiers = state.keyboard.modifiers;
+        if let Some(pinch) = state.pinch.as_mut() {
+            if pinch.owns(key) {
+                let step = pinch.touch(key, phase, position);
+                if pinch.finished() {
+                    state.pinch = None;
+                }
+                (step, None, modifiers)
+            } else {
+                return phase == TouchPhase::Started;
+            }
+        } else if phase == TouchPhase::Started && state.touches.len() == 1 {
+            let Some((first, (id, at))) = state.touches.drain().next() else {
+                return false;
+            };
+            state.pinch = Some(crate::pinch::Pinch::new([first, key], [at, position]));
+            (None, Some((id, at)), modifiers)
+        } else {
+            return false;
+        }
+    };
+    if let Some((id, position)) = cancelled {
+        dispatch_event(
+            this,
+            PlatformInput::Touch(TouchEvent {
+                id,
+                phase: TouchPhase::Cancelled,
+                position,
+                predicted_position: None,
+                force: None,
+            }),
+        );
+    }
+    if let Some(step) = step {
+        dispatch_event(
+            this,
+            PlatformInput::Pinch(PinchEvent {
+                position: step.position,
+                delta: step.delta,
+                modifiers,
+                phase: step.phase,
             }),
         );
     }

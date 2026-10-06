@@ -30,6 +30,14 @@ settings back, tree actions, reset and stepper buttons, switches, select menus),
 rows are 44 points tall, and each key in the key row answers across the whole row height and
 up to the middle of the gap to its neighbours.
 
+Pinch a terminal to change its text size, as in Blink Shell: the pinch starts once the
+fingers' spread changes by 6% and by at least 8 points (gpui's touch slop), then follows the
+fingers from that spread. The size moves in 5% steps between 50% and 300% (the Terminal
+font scale setting), and a badge shows the percentage while pinching and for a second after.
+The text resizes live; the pane reports its new grid to the daemon once, after the fingers
+lift, and the size is saved then. A second finger cancels the first finger's scroll, page
+swipe, or tap, so two fingers never page or scroll.
+
 ## Run
 
 Use an Apple Silicon Mac with Xcode, Rust's `aarch64-apple-ios-sim` target, and
@@ -174,13 +182,15 @@ being composed, hardware keys go to the input method first.
 
 The connection reconnects two seconds after it drops, and immediately when the app
 returns to the foreground. Leaving the app keeps the connection open for the short
-background time iPadOS allows. Settings › Advanced › Display can keep the screen
+background time iPadOS allows. Settings › System › Display can keep the screen
 awake while connected. Under thermal pressure or Low Power Mode, frames are capped
-at 60 per second. iPadOS text size scales the interface (turn it off in Advanced ›
-Display); Reduce Motion and Increase Contrast apply live. The text system loads the
-iOS system fonts, so Chinese, Japanese, Korean, Arabic, Hebrew, and other scripts
-render. Emoji still show as blank: GPUI's text system only treats Noto Color Emoji
-as a color font.
+at 60 per second. The system text size (Dynamic Type) scales the interface and applies
+live. On iPad it multiplies UI zoom and can be turned off in System › Display; on iPhone it
+is the only interface scale, capped at the largest non-accessibility size (135%) because it
+scales controls and icons as well as text. Reduce Motion and Increase Contrast apply live.
+The text system loads the iOS system fonts, so Chinese, Japanese, Korean, Arabic, Hebrew,
+and other scripts render. Emoji still show as blank: GPUI's text system only treats Noto
+Color Emoji as a color font.
 
 ## Settings
 
@@ -208,7 +218,10 @@ rightward flick completes it. On the list, the same swipe returns to the workspa
   the screen awake while connected.
 - **About:** app version and source link.
 
-The page omits desktop-only options and controls for unsupported pane kinds.
+The page omits desktop-only options and controls for unsupported pane kinds. iPhone also
+leaves out Panes and Status bar (the phone shell shows one pane without gaps or frames and
+has its own bottom bar), UI zoom, and Match system text size; its Agent panes switch moves to
+System.
 Interface and pane preferences are saved atomically in the app container
 at `Library/Application Support/zz-gpui/preferences.json` and restored on launch.
 Touch controls work without a keyboard; numeric values and hex colors open the
@@ -296,6 +309,11 @@ automatic reconnect after a daemon restart, live text size changes, the Command-
 command, a second window scene, `zz://attach/<session>`, and long-press Copy/Paste.
 Drag and drop, dictation, Pencil handwriting, CJK input methods, and the menu bar
 itself were not exercised.
+
+iPhone Simulator checks on 2026-10-06 covered pinching a terminal in the phone shell (one grid
+report per pinch, after release; a two-finger sideways pan neither pages nor scrolls), live
+system text size changes from XS to AX5, and the phone's Settings list. iPad Simulator kept
+Panes, Status bar, UI zoom, and Match system text size.
 
 Copy/paste of text copied within the app was verified. Text injected through
 `simctl pbcopy` was not readable from UIKit in this simulator session; cross-app

@@ -18,6 +18,14 @@ impl IosDisplay {
     }
 }
 
+pub fn phone() -> bool {
+    let idiom: isize = unsafe {
+        let device: *mut Object = msg_send![class!(UIDevice), currentDevice];
+        msg_send![device, userInterfaceIdiom]
+    };
+    idiom == 0
+}
+
 impl PlatformDisplay for IosDisplay {
     fn id(&self) -> DisplayId {
         DisplayId::from(0u64)

@@ -4,7 +4,7 @@ title: UI design conventions
 description: The component, palette, and styling rules that keep zz application chrome consistent and theme-aware.
 resource: crates/zz-ui/src/command/palette_view.rs
 tags: [ui, gpui, zz-ui, theme, chrome, clippy]
-timestamp: 2026-09-22T00:00:00Z
+timestamp: 2026-10-06T00:00:00Z
 ---
 
 # Overview
@@ -220,6 +220,11 @@ named `Size` or `zz_ui::rems_from_px` when that captures a component's semantic 
 do not multiply metrics by `UiZoom` again. Browser viewports already receive the effective window
 scale factor, so native-to-CEF geometry follows the same rule. Geometry that must remain physically
 screen-sized needs to opt out explicitly with `UiZoom::unzoomed`.
+
+The thin clients compute their zoom in `interface_zoom` (`clients/gpui-shared/src/settings.rs`).
+On iPad the system text size multiplies the stored UI zoom unless **Match system text size** is off.
+On iPhone there is no UI zoom: the system text size (Dynamic Type) is the scale, capped at 135%
+because zoom grows controls and icons as well as text, and Settings hides both rows.
 
 # Terminal color exception
 

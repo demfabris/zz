@@ -270,7 +270,8 @@ lifecycle; native daemon and operating-system dependencies stay outside `zz-ui`.
 counterpart. `Pager` is a renderer-free model that pages one pane per screen from touch pans and
 wheel scrolls (rubber-banded edges, a quarter-width or velocity commit, one page per gesture,
 momentum ignored after release, a spring settle). The rest is the chrome around it: `page_dots`,
-`compact_bar` with its 44px buttons and title, `compact_pane_header` and `top_shade`,
+`compact_bar` with its 44px buttons and title, `compact_pane_header` and `top_shade`, the
+centered `compact_hud` badge (the terminal text size while pinching),
 `bottom_sheet` (dragged down by its header, or by its content from the top, to close), the
 grouped `WhichKeyList` a sheet shows, `swipe_back` for an edge swipe that pops a pushed page over
 the one beneath it, and the soft-keyboard `KeyRow` with app-level `StickyModifiers`. The sheet and

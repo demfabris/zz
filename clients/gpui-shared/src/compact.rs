@@ -1,9 +1,9 @@
-use std::{collections::BTreeSet, sync::Arc};
+use std::{collections::BTreeSet, sync::Arc, time::Duration};
 
 use gpui::{
     AnyElement, App, Context, Corners, Entity, Focusable as _, IntoElement, Keystroke,
-    ParentElement as _, Pixels, ScrollDelta, ScrollWheelEvent, SharedString, Stateful, Styled as _,
-    Subscription, Window, div, prelude::*, px,
+    ParentElement as _, PinchEvent, Pixels, ScrollDelta, ScrollWheelEvent, SharedString, Stateful,
+    Styled as _, Subscription, TouchPhase, Window, div, prelude::*, px,
 };
 use zz_client::StatusBarModel;
 use zz_protocol::{InputMessage, PaneId, PaneKindSnapshot, WindowId};
@@ -13,7 +13,8 @@ use zz_ui::{
     compact::{
         ArrowPadEvent, Instant, KEY_ROW_HEIGHT, KeyRow, PageDot, Pager, PagerEvent, PopoverKey,
         PopoverKeyEvent, PopoverKeyItem, ToolKeys, WhichKeyList, bottom_sheet, compact_bar,
-        compact_bar_button, compact_bar_title, compact_pane_header, page_dots, top_shade,
+        compact_bar_button, compact_bar_title, compact_hud, compact_pane_header, page_dots,
+        top_shade,
     },
     kbd::Kbd,
     pane::pane_header_icon_button,
@@ -21,9 +22,12 @@ use zz_ui::{
 };
 
 use super::{AppShell, sidebar};
+use crate::terminal::TerminalDisplayPreferences;
 
 const PAGE_GAP: f32 = 12.0;
 const CARD_RADIUS: f32 = 22.0;
+const PINCH_STEPS: f32 = 20.0;
+const SCALE_HUD_LINGER: Duration = Duration::from_secs(1);
 
 const NEW_PANE: &str = "new-pane";
 const NEW_WINDOW: &str = "new-window";
@@ -43,6 +47,8 @@ pub(super) struct CompactState {
     compact_keyboard: Option<bool>,
     last_current: Option<PaneId>,
     previous: Option<PaneId>,
+    pinch: Option<(f32, f32)>,
+    scale_hud: Option<Instant>,
 }
 
 impl CompactState {
@@ -98,6 +104,15 @@ pub(super) fn pages(model: &StatusBarModel, unseen: &BTreeSet<PaneId>) -> (Vec<P
         }
     }
     (pages, current)
+}
+
+pub(super) fn pinch_font_scale(start: f32, pinch: f32) -> f32 {
+    let scale = (start * pinch * PINCH_STEPS).round() / PINCH_STEPS;
+    if scale.is_finite() {
+        scale.clamp(0.5, 3.0)
+    } else {
+        start
+    }
 }
 
 pub(super) fn dot_groups(pages: &[Page], current: usize) -> Vec<Vec<PageDot>> {
@@ -275,6 +290,10 @@ impl AppShell {
         }
         if !compact {
             zz_ui::compact::StickyModifiers::take(cx);
+            if self.compact.pinch.take().is_some() {
+                self.terminal_resize_suppressed.set(false);
+                self.preferences.save();
+            }
         }
     }
 
@@ -468,6 +487,53 @@ impl AppShell {
         self.terminal_resize_suppressed
             .set(self.compact.pager.is_moving());
         self.commit_page(response.event, cx);
+        cx.notify();
+    }
+
+    fn compact_pinch(&mut self, event: &PinchEvent, window: &mut Window, cx: &mut Context<Self>) {
+        match event.phase {
+            TouchPhase::Started => {
+                let model = self.status_model(cx);
+                let (pages, _) = pages(&model, &self.unseen_agents);
+                if !pages
+                    .get(self.compact.pager.index())
+                    .is_some_and(|page| page.kind == PaneKindSnapshot::Terminal)
+                {
+                    return;
+                }
+                self.compact.pinch = Some((self.preferences.terminal_font_scale, 1.0));
+                self.terminal_resize_suppressed.set(true);
+            }
+            TouchPhase::Moved => {
+                let Some((start, pinch)) = self.compact.pinch.as_mut() else {
+                    return;
+                };
+                *pinch += event.delta;
+                let scale = pinch_font_scale(*start, *pinch);
+                if scale != self.preferences.terminal_font_scale {
+                    self.preferences.terminal_font_scale = scale;
+                    cx.set_global(TerminalDisplayPreferences {
+                        font_family: self.preferences.terminal_font_family.clone(),
+                        font_scale: scale,
+                    });
+                }
+            }
+            TouchPhase::Ended | TouchPhase::Cancelled => {
+                if self.compact.pinch.take().is_none() {
+                    return;
+                }
+                self.preferences.save();
+                self.sync_terminal_scale_input(window, cx);
+                self.terminal_resize_suppressed.set(false);
+                self.compact.scale_hud = Some(Instant::now() + SCALE_HUD_LINGER);
+                cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(SCALE_HUD_LINGER).await;
+                    this.update(cx, |_, cx| cx.notify()).ok();
+                })
+                .detach();
+            }
+        }
+        cx.stop_propagation();
         cx.notify();
     }
 
@@ -672,7 +738,10 @@ impl AppShell {
         self.commit_page(event, cx);
         if animating {
             window.request_animation_frame();
-        } else if self.terminal_resize_suppressed.get() && self.split_drag.is_none() {
+        } else if self.terminal_resize_suppressed.get()
+            && self.split_drag.is_none()
+            && self.compact.pinch.is_none()
+        {
             self.terminal_resize_suppressed.set(false);
         }
         let motion = self.compact.pager.motion(width);
@@ -709,9 +778,32 @@ impl AppShell {
             .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _, cx| {
                 this.compact_scroll(event, cx);
             }))
+            .on_pinch(cx.listener(|this, event: &PinchEvent, window, cx| {
+                if event.phase == TouchPhase::Started {
+                    this.compact_pinch(event, window, cx);
+                }
+            }))
+            .capture_pinch(cx.listener(|this, event: &PinchEvent, window, cx| {
+                if event.phase != TouchPhase::Started {
+                    this.compact_pinch(event, window, cx);
+                }
+            }))
             .children(strip)
             .child(top_shade(top_inset, cx))
-            .children(terminal_overlays);
+            .children(terminal_overlays)
+            .when(
+                self.compact.pinch.is_some()
+                    || self
+                        .compact
+                        .scale_hud
+                        .is_some_and(|until| Instant::now() < until),
+                |area| {
+                    area.child(compact_hud(
+                        format!("{:.0}%", self.preferences.terminal_font_scale * 100.0),
+                        cx,
+                    ))
+                },
+            );
         if !keyboard && let Some((keys, _)) = &self.compact.tool_keys {
             keys.clone().close(cx);
         }
@@ -908,6 +1000,18 @@ mod tests {
             Some(("up".into(), true))
         );
         assert!(tmux_keystroke("F13-nope").is_none());
+    }
+
+    #[test]
+    fn pinch_scales_terminal_text_in_five_percent_steps_within_the_setting_range() {
+        assert_eq!(pinch_font_scale(1.0, 1.0), 1.0);
+        assert_eq!(pinch_font_scale(1.0, 1.02), 1.0);
+        assert_eq!(pinch_font_scale(1.0, 1.5), 1.5);
+        assert_eq!(pinch_font_scale(1.2, 1.12), 1.35);
+        assert_eq!(pinch_font_scale(1.0, 0.8), 0.8);
+        assert_eq!(pinch_font_scale(2.5, 2.0), 3.0);
+        assert_eq!(pinch_font_scale(0.6, 0.1), 0.5);
+        assert_eq!(pinch_font_scale(1.1, f32::NAN), 1.1);
     }
 
     #[test]

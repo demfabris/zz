@@ -941,7 +941,7 @@ impl AppShell {
         let navigation = if let Some(selected) = self.settings {
             let mut rows = Vec::new();
             let mut previous_group = None;
-            for section in settings::SECTIONS {
+            for section in settings::sections() {
                 let group = section.navigation_group();
                 if previous_group != Some(group) {
                     rows.push(settings_navigation_group_label(group, cx).into_any_element());

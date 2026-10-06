@@ -11,11 +11,13 @@ mod element_picker;
 mod keyboard;
 mod menu;
 mod momentum;
+mod pinch;
 mod platform;
 mod text_input;
 mod window;
 
 pub(crate) use dispatcher::*;
+pub use display::phone;
 pub(crate) use display::*;
 pub use menu::MenuCommand;
 pub use platform::IosPlatform;

@@ -3,6 +3,7 @@ mod bar;
 mod dismissal;
 mod dots;
 mod header;
+mod hud;
 mod key_row;
 mod pager;
 mod popover_key;
@@ -17,6 +18,7 @@ pub use bar::{COMPACT_BAR_HEIGHT, compact_bar, compact_bar_button, compact_bar_t
 pub use dismissal::coast_guard;
 pub use dots::{PageDot, page_dots};
 pub use header::{COMPACT_PANE_HEADER_HEIGHT, compact_pane_header, top_shade};
+pub use hud::compact_hud;
 pub use key_row::{KEY_ROW_HEIGHT, KeyRow, KeyRowKey, ToolKeys};
 pub use pager::{Pager, PagerEvent, PagerLayout, PagerResponse};
 pub use popover_key::{

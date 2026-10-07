@@ -216,6 +216,7 @@ impl AppShell {
                 self.hosts.saved.save();
                 self.connection
                     .update(cx, |connection, cx| connection.connect_to(endpoint, cx));
+                super::settings::finish_field(window, cx);
             }
             Err(error) => self.hosts.error = Some(error.into()),
         }

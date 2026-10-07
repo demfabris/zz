@@ -51,12 +51,15 @@ pub(crate) struct IosWindowState {
     keyboard: crate::keyboard::Keyboard,
     input_view: id,
     accessory_view: id,
+    done_bar: id,
     keyboard_probe: id,
     keyboard_overlap: f64,
     keyboard_motion: Option<KeyboardMotion>,
     keyboard_requested: bool,
     soft_keyboard: bool,
     compact_keyboard: bool,
+    number_pad: bool,
+    number_pad_shown: bool,
     keyboard_sync_pending: bool,
     reload_input_views: bool,
     text_input: TextInputConfiguration,
@@ -186,12 +189,15 @@ impl IosWindow {
                 keyboard: Default::default(),
                 input_view: msg_send![class!(UIView), new],
                 accessory_view: accessory_view(native_view),
+                done_bar: done_bar(native_view),
                 keyboard_probe: install_keyboard_probe(native_view),
                 keyboard_overlap: 0.0,
                 keyboard_motion: None,
                 keyboard_requested: false,
                 soft_keyboard: false,
                 compact_keyboard: false,
+                number_pad: false,
+                number_pad_shown: false,
                 keyboard_sync_pending: false,
                 reload_input_views: false,
                 text_input: TextInputConfiguration::default(),
@@ -284,6 +290,7 @@ impl Drop for IosWindow {
                 state.display_link.invalidate();
                 let _: () = msg_send![state.input_view, release];
                 let _: () = msg_send![state.accessory_view, release];
+                let _: () = msg_send![state.done_bar, release];
                 let _: () = msg_send![state.keyboard_probe, release];
                 let center: id = msg_send![class!(NSNotificationCenter), defaultCenter];
                 let _: () = msg_send![center, removeObserver: state.native_view];
@@ -672,11 +679,12 @@ fn register_view_class() {
             sel!(zzAccessoryKey:),
             accessory_key as extern "C" fn(&Object, Sel, id),
         );
+        decl.add_method(sel!(zzDone:), done as extern "C" fn(&Object, Sel, id));
         decl.add_method(
             sel!(zzHardwareKeyboardChanged:),
             hardware_keyboard_changed as extern "C" fn(&Object, Sel, id),
         );
-        let traits: [(Sel, extern "C" fn(&Object, Sel) -> isize); 8] = [
+        let traits: [(Sel, extern "C" fn(&Object, Sel) -> isize); 9] = [
             (sel!(autocorrectionType), autocorrection_type),
             (sel!(autocapitalizationType), autocapitalization_type),
             (sel!(spellCheckingType), spell_checking_type),
@@ -685,6 +693,7 @@ fn register_view_class() {
             (sel!(smartInsertDeleteType), smart_punctuation_type),
             (sel!(inlinePredictionType), inline_prediction_type),
             (sel!(returnKeyType), return_key_type),
+            (sel!(keyboardType), keyboard_type),
         ];
         for (selector, getter) in traits {
             decl.add_method(selector, getter);
@@ -895,7 +904,11 @@ extern "C" fn layout_subviews(this: &Object, _: Sel) {
     };
     let moved = {
         let mut state = state.borrow_mut();
-        let target = unsafe { keyboard_overlap(state.native_view, state.keyboard_probe) };
+        let target = if state.soft_keyboard || hardware_keyboard() {
+            unsafe { keyboard_overlap(state.native_view, state.keyboard_probe) }
+        } else {
+            0.0
+        };
         if target == state.keyboard_target() {
             false
         } else if let Some((duration, spring)) = unsafe { keyboard_animation(state.keyboard_probe) }
@@ -1347,6 +1360,8 @@ extern "C" fn input_accessory_view(this: &Object, _: Sel) -> id {
         &state.text_input,
     ) {
         state.accessory_view
+    } else if state.soft_keyboard && state.number_pad_shown {
+        state.done_bar
     } else {
         nil
     }
@@ -1399,6 +1414,12 @@ extern "C" fn smart_punctuation_type(this: &Object, _: Sel) -> isize {
 
 extern "C" fn inline_prediction_type(this: &Object, _: Sel) -> isize {
     if text_input(this).suggestions { 0 } else { 1 }
+}
+
+extern "C" fn keyboard_type(this: &Object, _: Sel) -> isize {
+    let number_pad =
+        unsafe { try_window_state(this) }.is_some_and(|state| state.borrow().number_pad_shown);
+    if number_pad { 8 } else { 0 }
 }
 
 extern "C" fn return_key_type(this: &Object, _: Sel) -> isize {
@@ -1558,6 +1579,12 @@ extern "C" fn insert_text(this: &Object, _: Sel, text: id) {
         }
         return;
     }
+    let number_pad = unsafe { get_window_state(this) }.borrow().number_pad;
+    let text = if number_pad {
+        text.replace(',', ".")
+    } else {
+        text
+    };
     match text.as_str() {
         "\n" | "\r" => synthesize_key(this, "enter"),
         "\t" => synthesize_key(this, "tab"),
@@ -1690,6 +1717,25 @@ pub fn set_compact_keyboard(enabled: bool) {
         }
         state.compact_keyboard = enabled;
         state.latched = Modifiers::default();
+        state.reload_input_views = true;
+    }
+    schedule_keyboard_sync(view);
+}
+
+pub fn set_number_pad(enabled: bool) {
+    let view = ACTIVE_VIEW.get();
+    let Some(state) = (!view.is_null())
+        .then(|| unsafe { try_window_state(&*view) })
+        .flatten()
+    else {
+        return;
+    };
+    {
+        let mut state = state.borrow_mut();
+        if state.number_pad == enabled {
+            return;
+        }
+        state.number_pad = enabled;
         state.reload_input_views = true;
     }
     schedule_keyboard_sync(view);
@@ -2284,6 +2330,26 @@ unsafe fn accessory_view(view: id) -> id {
     container
 }
 
+unsafe fn done_bar(view: id) -> id {
+    let toolbar: id = msg_send![class!(UIToolbar), new];
+    let _: () = msg_send![toolbar, sizeToFit];
+    let _: () = msg_send![toolbar, setAutoresizingMask: 2usize];
+    let space: id = msg_send![class!(UIBarButtonItem), alloc];
+    let space: id = msg_send![space, initWithBarButtonSystemItem: 5isize target: nil action: nil];
+    let done: id = msg_send![class!(UIBarButtonItem), alloc];
+    let done: id =
+        msg_send![done, initWithBarButtonSystemItem: 0isize target: view action: sel!(zzDone:)];
+    let _: () = msg_send![toolbar, setItems: ns_array(&[space, done])];
+    let _: () = msg_send![space, release];
+    let _: () = msg_send![done, release];
+    toolbar
+}
+
+extern "C" fn done(this: &Object, _: Sel, _: id) {
+    synthesize_key(this, "enter");
+    request_keyboard(this as *const Object as id, false);
+}
+
 extern "C" fn accessory_key(this: &Object, _: Sel, sender: id) {
     let tag: isize = unsafe { msg_send![sender, tag] };
     let Some((.., key)) = ACCESSORY_KEYS.get((tag - ACCESSORY_TAG) as usize) else {
@@ -2386,6 +2452,9 @@ extern "C" fn sync_keyboard(context: *mut c_void) {
                     || std::mem::take(&mut state.reload_input_views)
                     || (visible && state.keyboard_target() == 0.0);
                 state.soft_keyboard = visible;
+                if visible {
+                    state.number_pad_shown = state.number_pad;
+                }
                 (visible, reload)
             };
             if reload {

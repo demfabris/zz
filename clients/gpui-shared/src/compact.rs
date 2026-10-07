@@ -230,7 +230,7 @@ fn key_row_lift(safe_bottom: Pixels, bar: Pixels, overlap: Pixels) -> Pixels {
     (safe_bottom + bar - px(KEY_ROW_HEIGHT) - overlap).max(px(0.0))
 }
 
-fn keyboard_visible(window: &Window) -> bool {
+pub(super) fn keyboard_visible(window: &Window) -> bool {
     window.visual_viewport_bounds().size.height + px(1.0) < window.viewport_size().height
 }
 

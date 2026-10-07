@@ -226,6 +226,10 @@ fn send_chord(
     }
 }
 
+fn key_row_lift(safe_bottom: Pixels, bar: Pixels, overlap: Pixels) -> Pixels {
+    (safe_bottom + bar - px(KEY_ROW_HEIGHT) - overlap).max(px(0.0))
+}
+
 fn keyboard_visible(window: &Window) -> bool {
     window.visual_viewport_bounds().size.height + px(1.0) < window.viewport_size().height
 }
@@ -845,8 +849,8 @@ impl AppShell {
         }
         let bottom = if keyboard {
             let bar = rems_from_px(COMPACT_BAR_HEIGHT).to_pixels(window.rem_size()) + px(1.0);
-            let rest = self.compact.safe_bottom + bar - px(KEY_ROW_HEIGHT);
-            self.compact_key_area((rest - overlap).max(px(0.0)), window, cx)
+            let lift = key_row_lift(self.compact.safe_bottom, bar, overlap);
+            self.compact_key_area(lift, window, cx)
         } else {
             let page = pages.get(shown);
             let groups = dot_groups(&pages, shown);
@@ -1057,6 +1061,16 @@ mod tests {
         assert_eq!(pinch_font_scale(2.5, 2.0), 3.0);
         assert_eq!(pinch_font_scale(0.6, 0.1), 0.5);
         assert_eq!(pinch_font_scale(1.1, f32::NAN), 1.1);
+    }
+
+    #[test]
+    fn the_key_row_rests_on_the_bar_line_until_the_keyboard_passes_it() {
+        let (safe, bar) = (px(34.0), px(53.0));
+        let top =
+            |overlap: f32| px(KEY_ROW_HEIGHT) + key_row_lift(safe, bar, px(overlap)) + px(overlap);
+        assert_eq!(top(0.0), safe + bar);
+        assert_eq!(top(40.0), safe + bar);
+        assert_eq!(top(300.0), px(KEY_ROW_HEIGHT + 300.0));
     }
 
     #[test]

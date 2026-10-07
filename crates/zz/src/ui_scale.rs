@@ -2,7 +2,7 @@
 
 use gpui::{App, KeyBinding, Window};
 use zz_client::{ChromeAction, UI_TABLE};
-use zz_ui::{ROOT_KEY_CONTEXT, TitleBar, UiZoom};
+use zz_ui::{ROOT_KEY_CONTEXT, UiZoom};
 
 use crate::keymap::ChromeChord;
 
@@ -69,7 +69,8 @@ pub fn apply_to_new_window(window: &mut Window, cx: &App) {
 
 fn apply(window: &mut Window, zoom: f32) {
     window.set_zoom(zoom);
-    window.set_traffic_light_position(TitleBar::traffic_light_position(zoom));
+    #[cfg(target_os = "macos")]
+    window.set_traffic_light_position(zz_ui::TitleBar::traffic_light_position(zoom));
 }
 
 /// The effective zoom, rounded for display.

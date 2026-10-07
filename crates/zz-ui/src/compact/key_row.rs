@@ -17,8 +17,8 @@ pub(super) const KEY_HEIGHT: f32 = 32.0;
 
 pub(super) const KEY_MIN_WIDTH: f32 = 30.0;
 pub(super) const KEY_PADDING_X: f32 = 4.0;
-const ROW_PADDING_X: f32 = 8.0;
-const KEY_GAP: f32 = 4.0;
+const ROW_PADDING_X: f32 = 6.0;
+const KEY_GAP: f32 = 3.0;
 const KEY_GROUP: &str = "key-row-key";
 pub(super) const KEY_SLOP: (f32, f32) = (KEY_GAP / 2.0, (KEY_ROW_HEIGHT - KEY_HEIGHT) / 2.0);
 const LATCHED_WASH: u8 = 6;
@@ -374,8 +374,11 @@ mod tests {
         for at in [
             gpui::point(esc.center().x, row.top() + gpui::px(1.0)),
             gpui::point(esc.center().x, row.bottom() - gpui::px(1.0)),
-            gpui::point(esc.right() + gpui::px(1.5), esc.center().y),
-            gpui::point(esc.left() - gpui::px(1.5), row.top() + gpui::px(1.0)),
+            gpui::point(esc.right() + gpui::px(KEY_SLOP.0 - 0.5), esc.center().y),
+            gpui::point(
+                esc.left() - gpui::px(KEY_SLOP.0 - 0.5),
+                row.top() + gpui::px(1.0),
+            ),
         ] {
             cx.simulate_click(at, Modifiers::none());
             redraw(cx);

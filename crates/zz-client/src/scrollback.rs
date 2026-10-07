@@ -428,7 +428,8 @@ pub fn apply_retained_patch(
             }
             std::cmp::Ordering::Greater => {
                 let shift_u32 = u32::try_from(shift).unwrap_or(u32::MAX);
-                invalidate_history = total_delta != Some(0)
+                invalidate_history = total_delta
+                    .is_none_or(|delta| delta != 0 && offset_reverse != Some(shift_u32))
                     || offset_reverse.is_none_or(|delta| delta > shift_u32)
                     || retained.history.len() < shift;
             }
@@ -1387,5 +1388,38 @@ mod tests {
         );
         pacer.clear();
         assert_eq!(pacer.request(pane, None, 0, Some(&retained), started), None);
+    }
+
+    #[test]
+    fn scrolling_back_while_output_appends_below_keeps_the_ring() {
+        let mut next_revision = 1;
+        let mut retained = new_retained_viewport(
+            history_fixture_viewport(&[10, 11, 12, 13], 1, 14, 10),
+            &mut next_revision,
+        );
+        let dictionary = retained.viewport.dictionary.as_ref().clone();
+        assert!(apply_history_chunk(
+            &mut retained,
+            0,
+            14,
+            10,
+            1,
+            chunk_rows(&(0..10).collect::<Vec<_>>()),
+            dictionary,
+            &mut next_revision,
+        ));
+        let back = history_fixture_viewport(&[8, 9, 10, 11], 2, 15, 8);
+        let patch = TerminalViewport::diff(&retained.viewport, &back).unwrap();
+        assert_eq!(patch.scroll, 2);
+        apply_retained_patch(&mut retained, patch, &mut next_revision).unwrap();
+        assert_eq!(retained_history_ids(&retained), (0..8).collect::<Vec<_>>());
+        assert_eq!(retained.history_invalidations, 0);
+
+        let trimmed = history_fixture_viewport(&[6, 7, 8, 9], 3, 16, 5);
+        let patch = TerminalViewport::diff(&retained.viewport, &trimmed).unwrap();
+        assert_eq!(patch.scroll, 2);
+        apply_retained_patch(&mut retained, patch, &mut next_revision).unwrap();
+        assert!(retained.history.is_empty());
+        assert_eq!(retained.history_invalidations, 1);
     }
 }

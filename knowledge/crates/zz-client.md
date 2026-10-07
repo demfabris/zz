@@ -65,7 +65,8 @@ TUI and C ABI use the core's viewport retention directly.
 `scrollback.rs` holds the retained viewport both kinds of shell paint from: the live grid, its row
 revisions, and a `HistoryRing` of rows above the server's viewport, filled from rows that scroll off
 the top and from `HistoryChunk` replies. `apply_retained_patch` keeps the ring aligned with the
-server's offset and drops it when a patch cannot be reconciled. The desktop `MuxClient` stores one per pane itself; `ClientCore`
+server's offset and drops it when a patch cannot be reconciled; a scroll back that arrives together
+with output appended below keeps it. The desktop `MuxClient` stores one per pane itself; `ClientCore`
 stores one per pane too, with an empty ring unless the shell calls `retain_history`, so the TUI and
 the C ABI pay nothing for rows they never paint. `history_request_range` sizes a backfill or
 prefetch request, and `HistoryPacer` is the request policy as a sans-IO value: one request in flight

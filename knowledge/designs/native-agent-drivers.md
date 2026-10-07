@@ -161,6 +161,11 @@ Claude driver. One `codex app-server` child per pane over stdio, as the other ap
   failed status on a non-zero exit; file changes render their unified diffs as old and new text;
   MCP and dynamic tool calls, web searches, and collab agent calls get rows; `turn/plan/updated`
   is the plan; `thread/tokenUsage/updated` is the usage meter.
+- **Subagents.** Codex streams a spawned agent's thread on the same connection. A
+  `subAgentActivity` item (or a `spawnAgent` collab call's `receiverThreadIds`) opens an agent row
+  and maps the child thread to it; the child's tool items become rows with `_meta.zz.parent`, so
+  they nest as steps, and its latest message becomes the agent row's content. Live only: a resumed
+  thread shows the agent rows but not their steps, which live in the child threads.
 - **Settings.** Model and effort from `model/list`; the mode presets read-only, auto, and full
   access map to `approvalPolicy` and `sandboxPolicy` on the next `turn/start`.
 - **Sessions.** `thread/list` filtered by cwd.
@@ -171,7 +176,8 @@ file changes applied, `restart-agent-pane` resuming the thread with its memory, 
 # Next
 
 1. A "rewind to here" action on prompt rows that sends `//rewind n`.
-2. Codex subagent threads (`collabAgentToolCall` receivers) and background terminals.
+2. Codex background terminals (`thread/backgroundTerminals/*`) in the task tray, and subagent
+   steps on resume (`thread/read` of each child thread).
 3. Orchestration: PiP panes and a decision on in-session tools. The groundwork is in:
    `agent-send --notify` submits to another agent pane and, when that turn ends, posts the reply
    back into the calling agent pane as a prompt queued behind its own turn (t3code's async

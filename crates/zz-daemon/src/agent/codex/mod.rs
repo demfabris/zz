@@ -1414,6 +1414,13 @@ impl Runtime {
         if let Some(thread) = params["threadId"].as_str()
             && Some(thread) != current.as_deref()
         {
+            for update in self
+                .translator
+                .child(thread, method, params)
+                .unwrap_or_default()
+            {
+                self.update(update, true).await?;
+            }
             return Ok(());
         }
         match method {

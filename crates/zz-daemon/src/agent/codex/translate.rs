@@ -13,6 +13,7 @@ pub(crate) struct Translator {
     streamed: HashSet<String>,
     commands: HashMap<String, String>,
     prompts: HashSet<String>,
+    agents: HashMap<String, String>,
 }
 
 impl Translator {
@@ -72,6 +73,43 @@ impl Translator {
         }
     }
 
+    pub(crate) fn child(
+        &mut self,
+        thread: &str,
+        method: &str,
+        params: &Value,
+    ) -> Option<Vec<Value>> {
+        let parent = self.agents.get(thread)?.clone();
+        let item = &params["item"];
+        let mut updates = match (method, item["type"].as_str()) {
+            ("item/completed", Some("agentMessage")) => item["text"]
+                .as_str()
+                .filter(|text| !text.trim().is_empty())
+                .map(|text| {
+                    vec![json!({
+                        "sessionUpdate": "tool_call_update",
+                        "toolCallId": parent,
+                        "content": [text_content(&tail(text))],
+                    })]
+                })
+                .unwrap_or_default(),
+            (
+                "item/started" | "item/completed",
+                Some("userMessage" | "agentMessage" | "reasoning" | "plan"),
+            ) => Vec::new(),
+            ("item/started" | "item/completed" | "item/commandExecution/outputDelta", _) => {
+                self.notification(method, params)
+            }
+            _ => Vec::new(),
+        };
+        for update in &mut updates {
+            if update["sessionUpdate"] == "tool_call" {
+                update["_meta"]["zz"] = json!({ "parent": parent });
+            }
+        }
+        Some(updates)
+    }
+
     pub(crate) fn history_item(&mut self, item: &Value) -> Vec<Value> {
         if item["type"] == "userMessage" {
             return user_text(item)
@@ -96,6 +134,12 @@ impl Translator {
 
     fn started(&mut self, item: &Value) -> Vec<Value> {
         let id = id_of(item);
+        if item["type"] == "subAgentActivity" {
+            return self.activity(&id, item);
+        }
+        if item["tool"] == "spawnAgent" {
+            self.adopt(&id, item);
+        }
         let Some(info) = tool_info(item, &self.cwd) else {
             return Vec::new();
         };
@@ -119,6 +163,9 @@ impl Translator {
 
     fn completed(&mut self, item: &Value) -> Vec<Value> {
         let id = id_of(item);
+        if item["tool"] == "spawnAgent" {
+            self.adopt(&id, item);
+        }
         match item["type"].as_str() {
             Some("userMessage") => {
                 let Some(text) = user_text(item) else {
@@ -163,6 +210,54 @@ impl Translator {
             }
             None => Vec::new(),
         }
+    }
+
+    fn adopt(&mut self, id: &str, item: &Value) {
+        for thread in item["receiverThreadIds"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+        {
+            self.agents.insert(thread.to_owned(), id.to_owned());
+        }
+    }
+
+    fn activity(&mut self, id: &str, item: &Value) -> Vec<Value> {
+        let Some(thread) = item["agentThreadId"].as_str() else {
+            return Vec::new();
+        };
+        let status = match item["kind"].as_str() {
+            Some("completed") => "completed",
+            Some("interrupted") => "failed",
+            _ => "in_progress",
+        };
+        if let Some(row) = self.agents.get(thread) {
+            return vec![json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": row,
+                "status": status,
+            })];
+        }
+        self.agents.insert(thread.to_owned(), id.to_owned());
+        let name = item["agentPath"]
+            .as_str()
+            .and_then(|path| path.rsplit('/').find(|part| !part.is_empty()))
+            .unwrap_or("agent")
+            .replace(['_', '-'], " ");
+        let mut title = name.chars();
+        let title = title.next().map_or_else(String::new, |first| {
+            first.to_uppercase().chain(title).collect()
+        });
+        vec![json!({
+            "sessionUpdate": "tool_call",
+            "toolCallId": id,
+            "title": clip_title(&title),
+            "kind": "think",
+            "status": status,
+            "rawInput": { "agentPath": item["agentPath"], "agentThreadId": thread },
+            "_meta": { "codex": { "itemType": "subAgentActivity" } },
+        })]
     }
 
     fn whole(&mut self, id: &str, kind: &str, text: Option<&str>) -> Vec<Value> {
@@ -351,9 +446,24 @@ pub(crate) fn tool_info(item: &Value, cwd: &Path) -> Option<ToolInfo> {
             Vec::new(),
         ),
         "collabAgentToolCall" => (
-            item["prompt"]
-                .as_str()
-                .map_or_else(|| "Agent".to_owned(), str::to_owned),
+            match item["tool"].as_str() {
+                Some("wait") => "Wait for agents".to_owned(),
+                Some("closeAgent") => "Close agent".to_owned(),
+                Some("interruptAgent") => "Stop agent".to_owned(),
+                Some("listAgents") => "List agents".to_owned(),
+                Some("resumeAgent") => "Resume agent".to_owned(),
+                tool => item["prompt"].as_str().map_or_else(
+                    || {
+                        if tool == Some("spawnAgent") {
+                            "Start agent"
+                        } else {
+                            "Message agent"
+                        }
+                        .to_owned()
+                    },
+                    str::to_owned,
+                ),
+            },
             "think",
             Vec::new(),
             Vec::new(),
@@ -516,6 +626,81 @@ mod tests {
                 .any(|update| update["sessionUpdate"] == "user_message_chunk"
                     && update["content"]["text"] == "Reply with exactly: hi there"),
             "the prompt echo stays with the host"
+        );
+    }
+
+    #[test]
+    fn a_recorded_subagent_nests_its_steps_under_its_row() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("src/agent/codex/fixtures/subagent.ndjson");
+        let messages = std::fs::read_to_string(&path)
+            .expect("fixture")
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .map(|record| record["msg"].clone())
+            .collect::<Vec<_>>();
+        let main = messages
+            .iter()
+            .find(|message| message["method"] == "turn/started")
+            .and_then(|message| message["params"]["threadId"].as_str())
+            .expect("main thread")
+            .to_owned();
+        let mut translator = Translator::new(PathBuf::from("/work"));
+        let updates = messages
+            .iter()
+            .flat_map(|message| {
+                let method = message["method"].as_str().unwrap_or_default();
+                let params = &message["params"];
+                match params["threadId"].as_str() {
+                    Some(thread) if thread != main => {
+                        translator.child(thread, method, params).unwrap_or_default()
+                    }
+                    _ => translator.notification(method, params),
+                }
+            })
+            .collect::<Vec<_>>();
+        for update in &updates {
+            serde_json::from_value::<SessionUpdate>(update.clone())
+                .unwrap_or_else(|error| panic!("{update} is not an ACP update: {error}"));
+        }
+        let calls = updates
+            .iter()
+            .filter(|update| update["sessionUpdate"] == "tool_call")
+            .collect::<Vec<_>>();
+        let agent = calls
+            .iter()
+            .find(|call| call["title"] == "List directory")
+            .expect("agent row");
+        assert_eq!(agent["kind"], "think");
+        let steps = calls
+            .iter()
+            .filter(|call| call["_meta"]["zz"]["parent"] == agent["toolCallId"])
+            .collect::<Vec<_>>();
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0]["title"], "ls");
+        assert!(calls.iter().any(|call| call["title"] == "Wait for agents"));
+        let row = updates
+            .iter()
+            .filter(|update| {
+                update["sessionUpdate"] == "tool_call_update"
+                    && update["toolCallId"] == agent["toolCallId"]
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            row.iter()
+                .any(|update| update["content"][0]["content"]["text"] == "one.txt, two.txt")
+        );
+        assert_eq!(row.last().expect("completion")["status"], "completed");
+        assert!(!updates.iter().any(|update| {
+            update["sessionUpdate"] == "agent_message_chunk"
+                && update["content"]["text"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("one.txt"))
+        }));
+        assert!(
+            translator
+                .child("unknown", "item/started", &json!({}))
+                .is_none()
         );
     }
 

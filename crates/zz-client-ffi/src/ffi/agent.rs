@@ -385,13 +385,14 @@ impl ZzAgentModel {
                 request_id,
                 tool_call,
                 options,
+                questions,
             } => {
                 if let (Ok(tool), Ok(options)) = (
                     serde_json::from_value(tool_call),
                     serde_json::from_value(options),
                 ) {
                     self.transcript
-                        .request_permission(request_id, tool, options);
+                        .request_questions(request_id, tool, options, questions);
                 }
             }
             AgentStreamPayload::PermissionResolved {
@@ -516,7 +517,8 @@ impl ZzAgentModel {
                 prompts,
             } => self.restore(reclaim_id, prompts),
             AgentStreamPayload::TurnStarted { .. } => self.active_turn = true,
-            AgentStreamPayload::PromptAccepted { .. } => {}
+            AgentStreamPayload::PromptAccepted { .. } | AgentStreamPayload::TasksChanged { .. } => {
+            }
         }
     }
 

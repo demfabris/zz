@@ -588,6 +588,7 @@ struct StateFingerprint {
     error: Option<String>,
     auth_methods: usize,
     git: Option<zz_protocol::AgentGitSummary>,
+    tasks: Vec<zz_protocol::AgentTaskWire>,
     blobs: u64,
 }
 
@@ -726,7 +727,9 @@ impl AgentFanout {
             HostCommand::SwitchSession { .. } => AgentStreamPayload::SessionSwitchFailed {
                 message: "agent command queue is busy".to_owned(),
             },
-            HostCommand::SetAutoApprove(_) => return false,
+            HostCommand::SetAutoApprove(_)
+            | HostCommand::AnswerQuestion { .. }
+            | HostCommand::StopTask { .. } => return false,
             HostCommand::Prompt(mut queued) => {
                 queued.settle(Err(AgentTurnFailure::Reclaimed));
                 return self.reclaim_prompt(pane, queued.prompt);
@@ -1273,6 +1276,7 @@ impl PaneLane {
             error: state.error.clone(),
             auth_methods: state.auth_methods.len(),
             git: state.git.clone(),
+            tasks: state.tasks.clone(),
             blobs: self.blobs,
         };
         if self.fingerprint.as_ref() == Some(&fingerprint) {
@@ -1417,16 +1421,21 @@ fn wire(state: &AgentPaneState, title: Option<&str>) -> AgentPaneWire {
         config_options: String::new(),
         modes: String::new(),
         pending_permission: state.pending_permissions.first().map(|permission| {
+            let mut payload = serde_json::json!({
+                "toolCall": permission.tool_call,
+                "options": permission.options,
+            });
+            if !permission.questions.is_empty() {
+                payload["questions"] =
+                    serde_json::to_value(&permission.questions).unwrap_or_default();
+            }
             AgentPermissionWire {
                 request_id: permission.request_id,
-                payload: serde_json::json!({
-                    "toolCall": permission.tool_call,
-                    "options": permission.options,
-                })
-                .to_string(),
+                payload: payload.to_string(),
             }
         }),
         git: state.git.clone(),
+        tasks: state.tasks.clone(),
     }
 }
 

@@ -78,6 +78,10 @@ impl Translator {
         }
     }
 
+    pub(crate) fn task_tool_call(&self, task_id: &str) -> Option<String> {
+        self.task_tools.get(task_id).cloned()
+    }
+
     fn task_tool(&self, frame: &Value) -> Option<String> {
         frame["tool_use_id"]
             .as_str()
@@ -345,6 +349,7 @@ impl Translator {
         }
         if let Some(parent) = parent {
             call["_meta"]["claudeCode"]["parentToolUseId"] = Value::from(parent);
+            call["_meta"]["zz"] = json!({ "parent": parent });
         }
         vec![call]
     }

@@ -1712,7 +1712,9 @@ impl AgentController {
                 modes: decode_json(modes),
                 config_options: decode_json(config_options),
             },
-            AgentStreamPayload::StateSynced { .. } | AgentStreamPayload::PromptAccepted { .. } => {
+            AgentStreamPayload::StateSynced { .. }
+            | AgentStreamPayload::PromptAccepted { .. }
+            | AgentStreamPayload::TasksChanged { .. } => {
                 return None;
             }
             AgentStreamPayload::SessionsListed {
@@ -1774,6 +1776,7 @@ impl AgentController {
                 request_id,
                 tool_call,
                 options,
+                ..
             } => RuntimeEvent::PermissionRequested {
                 pane,
                 request_id,
@@ -3439,6 +3442,7 @@ mod tests {
                                     "Allow once",
                                     PermissionOptionKind::AllowOnce,
                                 )]),
+                                questions: Vec::new(),
                             },
                         ),
                         item(
@@ -3892,6 +3896,7 @@ mod tests {
                         additions: 21,
                         deletions: 8,
                     }),
+                    tasks: Vec::new(),
                 };
 
                 controller.apply_pane_state(pane, &state, cx);
@@ -3925,6 +3930,7 @@ mod tests {
                         modes: String::new(),
                         pending_permission: None,
                         git: None,
+                        tasks: Vec::new(),
                     },
                     cx,
                 );

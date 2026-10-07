@@ -1097,7 +1097,9 @@ impl Session {
             | ProtocolMessage::AgentAuthenticate { .. }
             | ProtocolMessage::AgentSessionOp { .. }
             | ProtocolMessage::AgentReplay { .. }
-            | ProtocolMessage::AgentAcknowledgePromptRestore { .. }) => {
+            | ProtocolMessage::AgentAcknowledgePromptRestore { .. }
+            | ProtocolMessage::AgentAnswerQuestion { .. }
+            | ProtocolMessage::AgentStopTask { .. }) => {
                 let read_only_blocked = !matches!(
                     message,
                     ProtocolMessage::AgentReplay { .. }

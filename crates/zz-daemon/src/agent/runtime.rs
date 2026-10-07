@@ -104,6 +104,9 @@ pub(crate) enum RuntimeCommand {
     Verb {
         prompt: AgentPrompt,
     },
+    StopTask {
+        task_id: String,
+    },
     Authenticate {
         method_id: String,
     },
@@ -126,6 +129,10 @@ pub(crate) enum RuntimeControl {
     RespondPermission {
         request_id: u64,
         option_id: Option<String>,
+    },
+    AnswerQuestion {
+        request_id: u64,
+        answers: Vec<zz_protocol::AgentQuestionAnswer>,
     },
 }
 
@@ -727,6 +734,7 @@ pub(crate) async fn run_agent_connection(
                     .and_then(|tool_call| Ok((tool_call, json_of(&request.options)?)))
                     .and_then(|(tool_call, options)| {
                         let payload = AgentStreamPayload::PermissionRequested {
+                            questions: Vec::new(),
                             request_id,
                             tool_call,
                             options,
@@ -906,6 +914,9 @@ pub(crate) async fn run_agent_connection(
                                 )
                                 .await?;
                             }
+                        }
+                        RuntimeControl::AnswerQuestion { .. } => {
+                            log::debug!(target: "zz::agent", "an ACP agent asks no question cards");
                         }
                     }
                 }
@@ -1557,7 +1568,7 @@ pub(crate) async fn run_agent_connection(
                             .await?,
                         }
                     }
-                    RuntimeCommand::Verb { .. } => {
+                    RuntimeCommand::Verb { .. } | RuntimeCommand::StopTask { .. } => {
                         log::debug!(target: "zz::agent", "an ACP agent has no zz commands");
                     }
                     RuntimeCommand::Shutdown => {

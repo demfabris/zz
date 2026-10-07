@@ -8,7 +8,9 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     sync::Arc,
 };
-use zz_protocol::{MAX_AGENT_PERMISSION_OPTIONS, MAX_AGENT_TOOL_CONTENT_ITEMS};
+use zz_protocol::{
+    MAX_AGENT_PERMISSION_OPTIONS, MAX_AGENT_TOOL_CONTENT_ITEMS, agent_stream::AgentQuestion,
+};
 
 const ENTRY_CHANGE_LOG_CAPACITY: usize = 4_096;
 const MAX_TOOL_PAYLOAD_BYTES: usize = 512 * 1024;
@@ -129,6 +131,8 @@ pub struct AgentPermissionRequest {
     pub tool_call_id: String,
     pub title: String,
     pub options: Vec<AgentPermissionOption>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub questions: Vec<AgentQuestion>,
 }
 
 #[derive(Debug)]
@@ -144,6 +148,7 @@ pub struct AgentTranscript<I> {
     message_entries: BTreeMap<(StreamRole, String), u64>,
     active_stream: Option<(StreamRole, u64)>,
     tool_entries: HashMap<String, u64>,
+    tool_parents: HashMap<u64, String>,
     structured_tool_outputs: BTreeSet<String>,
     plan_entry: Option<u64>,
     suppress_user_echo: bool,
@@ -164,6 +169,7 @@ impl<I> AgentTranscript<I> {
             message_entries: BTreeMap::new(),
             active_stream: None,
             tool_entries: HashMap::new(),
+            tool_parents: HashMap::new(),
             structured_tool_outputs: BTreeSet::new(),
             plan_entry: None,
             suppress_user_echo: false,
@@ -179,6 +185,16 @@ impl<I> AgentTranscript<I> {
     }
     pub fn entries(&self) -> &[AgentThreadEntry<I>] {
         &self.entries
+    }
+
+    /// The tool call a subagent's tool row belongs to, by the parent's tool
+    /// call ID, when the driver said so.
+    pub fn tool_parent(&self, entry_id: u64) -> Option<&str> {
+        self.tool_parents.get(&entry_id).map(String::as_str)
+    }
+
+    pub fn tool_entry(&self, tool_call_id: &str) -> Option<u64> {
+        self.tool_entries.get(tool_call_id).copied()
     }
     pub fn entry_revisions(&self) -> &[u64] {
         &self.entry_revisions
@@ -388,6 +404,13 @@ impl<I> AgentTranscript<I> {
 
     fn upsert_tool(&mut self, tool: ToolCall) {
         let protocol_id = tool.tool_call_id.0.to_string();
+        let parent = tool
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.get("zz"))
+            .and_then(|zz| zz.get("parent"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned);
         if tool.content.is_empty() {
             self.structured_tool_outputs.remove(&protocol_id);
         } else {
@@ -419,6 +442,9 @@ impl<I> AgentTranscript<I> {
         }
         let id = self.allocate_entry_id();
         self.tool_entries.insert(protocol_id.clone(), id);
+        if let Some(parent) = parent {
+            self.tool_parents.insert(id, parent);
+        }
         self.push_entry(AgentThreadEntry::Tool {
             id,
             protocol_id: protocol_id.clone(),
@@ -550,6 +576,16 @@ impl<I> AgentTranscript<I> {
         tool_call: ToolCallUpdate,
         options: Vec<PermissionOption>,
     ) {
+        self.request_questions(request_id, tool_call, options, Vec::new());
+    }
+
+    pub fn request_questions(
+        &mut self,
+        request_id: u64,
+        tool_call: ToolCallUpdate,
+        options: Vec<PermissionOption>,
+        questions: Vec<AgentQuestion>,
+    ) {
         let tool_call_id = tool_call.tool_call_id.0.to_string();
         let updated_title = tool_call.fields.title.clone();
         self.apply_tool_update(tool_call);
@@ -586,6 +622,7 @@ impl<I> AgentTranscript<I> {
                     kind: map_permission_kind(option.kind),
                 })
                 .collect(),
+            questions,
         };
         let mut pending_permissions = self.pending_permissions.to_vec();
         if let Some(existing) = pending_permissions
@@ -897,6 +934,44 @@ fn pretty_json_markdown(value: &impl serde::Serialize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn update(json: serde_json::Value) -> SessionUpdate {
+        serde_json::from_value(json).expect("ACP update")
+    }
+
+    #[test]
+    fn subagent_tool_rows_remember_their_parent_and_questions_ride_the_request() {
+        let mut transcript = AgentTranscript::<()>::new(|_, _| None);
+        transcript.apply_update(update(serde_json::json!({
+            "sessionUpdate": "tool_call", "toolCallId": "agent-1", "title": "Survey", "kind": "think",
+        })));
+        transcript.apply_update(update(serde_json::json!({
+            "sessionUpdate": "tool_call", "toolCallId": "read-1", "title": "Read a.rs", "kind": "read",
+            "_meta": { "zz": { "parent": "agent-1" } },
+        })));
+        let child = transcript.tool_entry("read-1").expect("child row");
+        let parent = transcript.tool_entry("agent-1").expect("parent row");
+        assert_eq!(transcript.tool_parent(child), Some("agent-1"));
+        assert_eq!(transcript.tool_parent(parent), None);
+        let tool_call: ToolCallUpdate = serde_json::from_value(serde_json::json!({
+            "toolCallId": "ask-1", "title": "Which fruit?",
+        }))
+        .expect("tool call");
+        transcript.request_questions(
+            9,
+            tool_call,
+            Vec::new(),
+            vec![AgentQuestion {
+                id: "fruit".to_owned(),
+                question: "Which fruit?".to_owned(),
+                multi_select: true,
+                ..AgentQuestion::default()
+            }],
+        );
+        let pending = transcript.permissions();
+        assert_eq!(pending[0].questions[0].id, "fruit");
+        assert!(pending[0].options.is_empty());
+    }
 
     #[test]
     fn copied_payloads_preserve_owned_truncation_behavior() {

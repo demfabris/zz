@@ -19,7 +19,10 @@ use async_channel::{Receiver, Sender};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use parking_lot::Mutex;
 use serde_json::{Map, Value, json};
-use zz_protocol::{AgentAutoApprove, AgentProvider, MAX_AGENT_RESULT_BYTES};
+use zz_protocol::{
+    AgentAutoApprove, AgentProvider, AgentQuestionAnswer, AgentTaskWire, MAX_AGENT_RESULT_BYTES,
+    MAX_AGENT_TASKS,
+};
 
 use crate::{
     agent::{
@@ -30,7 +33,10 @@ use crate::{
             RuntimeCommand, RuntimeControl, StderrTail, prompt_blocks, prompt_updates,
             report_journal_error, tier_approves, validate_payload,
         },
-        stream::{AgentPromptOutcome, AgentSessionCapabilities, AgentStreamPayload},
+        stream::{
+            AgentPromptOutcome, AgentQuestion, AgentQuestionOption, AgentSessionCapabilities,
+            AgentStreamPayload,
+        },
     },
     unmasked::SpawnUnmasked as _,
 };
@@ -162,7 +168,6 @@ pub(crate) async fn run_claude_runtime(
         requests: HashMap::new(),
         next_request: 0,
         permissions: HashMap::new(),
-        questions: HashMap::new(),
         turn: None,
         last_turn: 0,
         deferred_cancels: HashSet::new(),
@@ -365,6 +370,7 @@ enum Outgoing {
     Setting { option_id: String, value: String },
     Mode { mode_id: String },
     Side { message_id: String },
+    StopTask,
 }
 
 struct Turn {
@@ -386,8 +392,8 @@ enum Permission {
     },
     Question {
         claude_id: String,
-        question: String,
-        labels: Vec<String>,
+        input: Value,
+        questions: Vec<AgentQuestion>,
     },
 }
 
@@ -399,12 +405,6 @@ impl Permission {
             | Self::Question { claude_id, .. } => claude_id,
         }
     }
-}
-
-struct QuestionGroup {
-    input: Value,
-    answers: Map<String, Value>,
-    pending: HashSet<u64>,
 }
 
 struct Settings {
@@ -534,7 +534,6 @@ struct Runtime {
     requests: HashMap<String, (Outgoing, Instant)>,
     next_request: u64,
     permissions: HashMap<u64, Permission>,
-    questions: HashMap<String, QuestionGroup>,
     turn: Option<Turn>,
     last_turn: u64,
     deferred_cancels: HashSet<u64>,
@@ -762,6 +761,14 @@ impl Runtime {
                 Ok(())
             }
             RuntimeCommand::Verb { prompt } => self.verb(&prompt.text).await,
+            RuntimeCommand::StopTask { task_id } => {
+                self.request(
+                    &json!({ "subtype": "stop_task", "task_id": task_id }),
+                    Outgoing::StopTask,
+                    CONTROL_TIMEOUT,
+                );
+                Ok(())
+            }
             RuntimeCommand::Shutdown => Ok(()),
         }
     }
@@ -795,6 +802,10 @@ impl Runtime {
                 request_id,
                 option_id,
             } => self.answer(request_id, option_id).await,
+            RuntimeControl::AnswerQuestion {
+                request_id,
+                answers,
+            } => self.answer_questions(request_id, &answers).await,
         }
     }
 
@@ -854,7 +865,7 @@ impl Runtime {
             &json!({
                 "subtype": "initialize",
                 "supportedDialogKinds": [],
-                "perTaskStopAffordance": false,
+                "perTaskStopAffordance": true,
                 "agentProgressSummaries": true,
             }),
             Outgoing::Initialize,
@@ -1239,7 +1250,13 @@ impl Runtime {
                 );
                 self.fail_start(start, message).await
             }
-            (Outgoing::Interrupt, _) => Ok(()),
+            (Outgoing::Interrupt | Outgoing::StopTask, Ok(_)) | (Outgoing::Interrupt, Err(_)) => {
+                Ok(())
+            }
+            (Outgoing::StopTask, Err(error)) => {
+                self.notice(&format!("Could not stop the task: {error}"))
+                    .await
+            }
             (Outgoing::Side { message_id }, Ok(response)) => {
                 let answer = response["response"]
                     .as_str()
@@ -1338,7 +1355,6 @@ impl Runtime {
             message.push_str(&tail);
         }
         self.permissions.clear();
-        self.questions.clear();
         if let Some(starting) = self.starting.take() {
             self.requests.clear();
             return self.fail_start(starting.start, message).await;
@@ -1455,6 +1471,31 @@ impl Runtime {
                     self.publish_settings().await?;
                 }
             }
+            Some("background_tasks_changed") => {
+                let tasks = frame["tasks"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|task| task["ambient"] != true)
+                    .filter_map(|task| {
+                        let id = task["task_id"].as_str()?.to_owned();
+                        Some(AgentTaskWire {
+                            tool_call_id: self.translator.task_tool_call(&id),
+                            kind: task_kind(task["task_type"].as_str().unwrap_or_default()),
+                            description: task["description"]
+                                .as_str()
+                                .unwrap_or_default()
+                                .chars()
+                                .take(1000)
+                                .collect(),
+                            id,
+                        })
+                    })
+                    .take(MAX_AGENT_TASKS)
+                    .collect();
+                self.emit(AgentStreamPayload::TasksChanged { tasks })
+                    .await?;
+            }
             Some("commands_changed") => {
                 self.settings.commands = frame["commands"].as_array().cloned().unwrap_or_default();
                 self.publish_commands().await?;
@@ -1562,9 +1603,14 @@ impl Runtime {
                     option("approve", "Yes, and manually approve edits", "allow_once"),
                     option("keep_planning", "No, keep planning", "reject_once"),
                 ]);
-                self.ask(Permission::Plan { claude_id, input }, tool_call, options)
-                    .await
-                    .map(drop)
+                self.ask(
+                    Permission::Plan { claude_id, input },
+                    tool_call,
+                    options,
+                    Vec::new(),
+                )
+                .await
+                .map(drop)
             }
             _ => {
                 let info = tool_info(&tool, &input, &self.cwd());
@@ -1600,6 +1646,7 @@ impl Runtime {
                     },
                     tool_call,
                     Value::Array(options),
+                    Vec::new(),
                 )
                 .await
                 .map(drop)
@@ -1612,12 +1659,14 @@ impl Runtime {
         permission: Permission,
         tool_call: Value,
         options: Value,
+        questions: Vec<AgentQuestion>,
     ) -> Result<u64, String> {
         let request_id = self.permission_ids.fetch_add(1, Ordering::Relaxed);
         let mut payload = AgentStreamPayload::PermissionRequested {
             request_id,
             tool_call,
             options,
+            questions,
         };
         if validate_payload(&payload).is_err()
             && let AgentStreamPayload::PermissionRequested { tool_call, .. } = &mut payload
@@ -1645,60 +1694,73 @@ impl Runtime {
         tool_use_id: &str,
         input: Value,
     ) -> Result<(), String> {
-        let questions = input["questions"].as_array().cloned().unwrap_or_default();
+        let questions = input["questions"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|question| {
+                let text = question["question"]
+                    .as_str()
+                    .unwrap_or("Question")
+                    .to_owned();
+                AgentQuestion {
+                    id: text.clone(),
+                    header: question["header"].as_str().map(str::to_owned),
+                    question: text,
+                    options: question["options"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .map(|choice| AgentQuestionOption {
+                            label: choice["label"].as_str().unwrap_or_default().to_owned(),
+                            description: choice["description"]
+                                .as_str()
+                                .filter(|text| !text.is_empty())
+                                .map(str::to_owned),
+                        })
+                        .collect(),
+                    multi_select: question["multiSelect"] == true,
+                    allow_other: true,
+                    secret: false,
+                }
+            })
+            .collect::<Vec<_>>();
         if questions.is_empty() {
             self.respond(&claude_id, &allow(&input, None));
             return Ok(());
         }
-        let mut pending = HashSet::new();
-        for question in &questions {
-            let text = question["question"]
-                .as_str()
-                .unwrap_or("Question")
-                .to_owned();
-            let choices = question["options"].as_array().cloned().unwrap_or_default();
-            let labels = choices
-                .iter()
-                .map(|choice| choice["label"].as_str().unwrap_or_default().to_owned())
-                .collect::<Vec<_>>();
-            let options = choices
+        let options = match questions.as_slice() {
+            [only] if !only.multi_select => only
+                .options
                 .iter()
                 .enumerate()
                 .map(|(index, choice)| {
-                    let label = choice["label"].as_str().unwrap_or_default();
-                    let name = match choice["description"]
-                        .as_str()
-                        .filter(|text| !text.is_empty())
-                    {
-                        Some(description) => format!("{label}: {description}"),
-                        None => label.to_owned(),
+                    let name = match &choice.description {
+                        Some(description) => format!("{}: {description}", choice.label),
+                        None => choice.label.clone(),
                     };
                     option(&format!("answer-{index}"), &name, "allow_once")
                 })
-                .collect::<Vec<_>>();
-            let tool_call = json!({ "toolCallId": tool_use_id, "title": text });
-            let request_id = self
-                .ask(
-                    Permission::Question {
-                        claude_id: claude_id.clone(),
-                        question: text,
-                        labels,
-                    },
-                    tool_call,
-                    Value::Array(options),
-                )
-                .await?;
-            pending.insert(request_id);
-        }
-        self.questions.insert(
-            claude_id,
-            QuestionGroup {
+                .collect(),
+            _ => Vec::new(),
+        };
+        let title = match questions.as_slice() {
+            [only] => only.question.clone(),
+            _ => "Claude has questions".to_owned(),
+        };
+        let tool_call = json!({ "toolCallId": tool_use_id, "title": title });
+        self.ask(
+            Permission::Question {
+                claude_id,
                 input,
-                answers: Map::new(),
-                pending,
+                questions: questions.clone(),
             },
-        );
-        Ok(())
+            tool_call,
+            Value::Array(options),
+            questions,
+        )
+        .await
+        .map(drop)
     }
 
     async fn answer(&mut self, request_id: u64, option_id: Option<String>) -> Result<(), String> {
@@ -1735,46 +1797,53 @@ impl Runtime {
             }
             Permission::Question {
                 claude_id,
-                question,
-                labels,
+                input,
+                questions,
             } => {
-                let label = option_id
+                let chosen = option_id
                     .as_deref()
                     .and_then(|option| option.strip_prefix("answer-"))
                     .and_then(|index| index.parse::<usize>().ok())
-                    .and_then(|index| labels.get(index).cloned());
-                let Some(label) = label else {
-                    if let Some(group) = self.questions.remove(&claude_id) {
-                        for sibling in group.pending {
-                            if self.permissions.remove(&sibling).is_some() {
-                                self.emit(AgentStreamPayload::PermissionResolved {
-                                    request_id: sibling,
-                                    canceled: true,
-                                })
-                                .await?;
-                            }
-                        }
+                    .zip(questions.first())
+                    .and_then(|(index, question)| {
+                        let label = question.options.get(index)?.label.clone();
+                        Some(AgentQuestionAnswer {
+                            id: question.id.clone(),
+                            answers: vec![label],
+                        })
+                    });
+                match chosen {
+                    Some(answer) => {
+                        self.respond(&claude_id, &answered(&input, &questions, &[answer]));
                     }
-                    self.respond(&claude_id, &deny("The user dismissed the question.", false));
-                    return Ok(());
-                };
-                let Some(group) = self.questions.get_mut(&claude_id) else {
-                    return Ok(());
-                };
-                group.pending.remove(&request_id);
-                group.answers.insert(question, Value::from(label));
-                if group.pending.is_empty()
-                    && let Some(group) = self.questions.remove(&claude_id)
-                {
-                    let mut input = group.input;
-                    input["answers"] = Value::Object(group.answers);
-                    self.respond(
-                        &claude_id,
-                        &json!({ "behavior": "allow", "updatedInput": input }),
-                    );
+                    None => {
+                        self.respond(&claude_id, &deny("The user dismissed the question.", false));
+                    }
                 }
             }
         }
+        Ok(())
+    }
+
+    async fn answer_questions(
+        &mut self,
+        request_id: u64,
+        answers: &[AgentQuestionAnswer],
+    ) -> Result<(), String> {
+        let Some(Permission::Question {
+            claude_id,
+            input,
+            questions,
+        }) = self.permissions.remove(&request_id)
+        else {
+            return Ok(());
+        };
+        self.emit(AgentStreamPayload::PermissionResolved {
+            request_id,
+            canceled: false,
+        })
+        .await?;
+        self.respond(&claude_id, &answered(&input, &questions, answers));
         Ok(())
     }
 
@@ -1785,7 +1854,6 @@ impl Runtime {
             .filter(|(_, permission)| permission.claude_id() == claude_id)
             .map(|(id, _)| *id)
             .collect::<Vec<_>>();
-        self.questions.remove(claude_id);
         for request_id in withdrawn {
             self.permissions.remove(&request_id);
             self.emit(AgentStreamPayload::PermissionResolved {
@@ -1799,7 +1867,6 @@ impl Runtime {
 
     async fn cancel_permissions(&mut self, interrupt: bool) -> Result<(), String> {
         let pending = std::mem::take(&mut self.permissions);
-        self.questions.clear();
         let mut answered = HashSet::new();
         for (request_id, permission) in pending {
             if answered.insert(permission.claude_id().to_owned()) {
@@ -1818,6 +1885,25 @@ impl Runtime {
     }
 }
 
+fn answered(input: &Value, questions: &[AgentQuestion], answers: &[AgentQuestionAnswer]) -> Value {
+    let mut map = Map::new();
+    for question in questions {
+        if let Some(answer) = answers
+            .iter()
+            .find(|answer| answer.id == question.id)
+            .filter(|answer| !answer.answers.is_empty())
+        {
+            map.insert(
+                question.question.clone(),
+                Value::from(answer.answers.join(", ")),
+            );
+        }
+    }
+    let mut input = input.clone();
+    input["answers"] = Value::Object(map);
+    json!({ "behavior": "allow", "updatedInput": input })
+}
+
 fn side_answer(message_id: &str, answer: &str) -> Value {
     json!({
         "sessionUpdate": "agent_message_chunk",
@@ -1825,6 +1911,17 @@ fn side_answer(message_id: &str, answer: &str) -> Value {
         "content": { "type": "text", "text": answer },
         "_meta": { "zz": { "side": true } },
     })
+}
+
+fn task_kind(task_type: &str) -> String {
+    match task_type {
+        "local_bash" => "shell",
+        "local_agent" | "remote_agent" => "agent",
+        "monitor" | "local_monitor" => "monitor",
+        "" => "task",
+        other => other,
+    }
+    .to_owned()
 }
 
 fn spawn_thread(name: &str, body: impl FnOnce() + Send + 'static) -> Result<(), String> {
@@ -2154,6 +2251,7 @@ while read -r line; do :; done
                 request_id,
                 tool_call,
                 options,
+                ..
             } = next().await
             else {
                 panic!("expected a permission request");
@@ -2298,6 +2396,142 @@ while read -r line; do :; done
             commands.send(verb("//what")).await.expect("unknown");
             assert_eq!(next_text().await.0, "//what");
             assert_eq!(next_text().await.0, VERB_HELP);
+            commands
+                .send(RuntimeCommand::Shutdown)
+                .await
+                .expect("shutdown");
+        };
+        let (result, ()) = smol::block_on(futures_lite::future::zip(runtime, driver));
+        assert_eq!(result, Ok(()));
+    }
+
+    #[cfg(unix)]
+    const FAKE_QUESTION_CLAUDE: &str = r#"#!/bin/sh
+read -r init
+printf '%s\n' '{"type":"control_response","response":{"subtype":"success","request_id":"zz-1","response":{"commands":[],"models":[],"current_permission_mode":"default"}}}'
+read -r prompt
+printf '%s\n' '{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b1","task_type":"local_bash","description":"sleep 30"},{"task_id":"w1","task_type":"monitor","description":"watcher","ambient":true}]}'
+printf '%s\n' '{"type":"control_request","request_id":"q-1","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","tool_use_id":"t9","input":{"questions":[{"question":"Which fruit?","header":"Fruit","multiSelect":false,"options":[{"label":"apple"},{"label":"pear"}]},{"question":"Which colors?","header":"Colors","multiSelect":true,"options":[{"label":"red"},{"label":"blue"},{"label":"green"}]}]}}}'
+read -r answer
+case "$answer" in *'"request_id":"q-1"'*'"answers":{"Which colors?":"red, green","Which fruit?":"a fig"}'*) ;; *) echo "bad answer: $answer" >&2; exit 4 ;; esac
+printf '%s\n' '{"type":"system","subtype":"session_state_changed","state":"idle"}'
+while read -r line; do :; done
+"#;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_question_card_carries_every_question_and_answers_in_one_reply() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory = tempfile::tempdir().expect("tempdir");
+        let program = directory.path().join("claude");
+        std::fs::write(&program, FAKE_QUESTION_CLAUDE).expect("fake claude");
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755))
+            .expect("executable");
+        let command = ClaudeCommand::parse(&program.display().to_string()).expect("native");
+        let (commands, command_rx) = async_channel::unbounded();
+        let (controls, control_rx) = async_channel::unbounded();
+        let (events, event_rx) = async_channel::unbounded();
+        let runtime = run_claude_runtime(
+            command,
+            AgentWorkspaceEnvironment::default(),
+            AgentProvider::ClaudeCode,
+            RuntimeChannels {
+                auto_approve: Arc::new(Mutex::new(AgentAutoApprove::Off)),
+                permission_ids: Arc::new(AtomicU64::new(1)),
+                journal: None,
+                commands: command_rx,
+                controls: control_rx,
+                events,
+            },
+        );
+        let driver = async {
+            let until = |accept: fn(&AgentStreamPayload) -> bool| {
+                let event_rx = event_rx.clone();
+                async move {
+                    loop {
+                        let payload = futures_lite::future::or(
+                            async { event_rx.recv().await.expect("event") },
+                            async {
+                                smol::Timer::after(Duration::from_secs(20)).await;
+                                panic!("timed out waiting for the runtime");
+                            },
+                        )
+                        .await;
+                        if accept(&payload) {
+                            return payload;
+                        }
+                    }
+                }
+            };
+            commands
+                .send(RuntimeCommand::Open {
+                    cwd: directory.path().to_path_buf(),
+                    resume_session: None,
+                })
+                .await
+                .expect("open");
+            until(|payload| matches!(payload, AgentStreamPayload::SessionReady { .. })).await;
+            commands
+                .send(RuntimeCommand::Prompt {
+                    turn_id: 1,
+                    prompt: crate::agent::stream::AgentPrompt {
+                        text: "ask me".to_owned(),
+                        ..Default::default()
+                    },
+                })
+                .await
+                .expect("prompt");
+            let AgentStreamPayload::TasksChanged { tasks } = until(|payload| {
+                matches!(payload, AgentStreamPayload::TasksChanged { tasks } if !tasks.is_empty())
+            })
+            .await
+            else {
+                unreachable!();
+            };
+            assert_eq!(tasks.len(), 1, "ambient watchers stay out of the tray");
+            assert_eq!(tasks[0].kind, "shell");
+            let AgentStreamPayload::PermissionRequested {
+                request_id,
+                options,
+                questions,
+                ..
+            } = until(|payload| matches!(payload, AgentStreamPayload::PermissionRequested { .. }))
+                .await
+            else {
+                unreachable!();
+            };
+            assert_eq!(options, json!([]));
+            assert_eq!(questions.len(), 2);
+            assert!(questions[1].multi_select);
+            assert_eq!(questions[0].header.as_deref(), Some("Fruit"));
+            controls
+                .send(RuntimeControl::AnswerQuestion {
+                    request_id,
+                    answers: vec![
+                        AgentQuestionAnswer {
+                            id: "Which fruit?".to_owned(),
+                            answers: vec!["a fig".to_owned()],
+                        },
+                        AgentQuestionAnswer {
+                            id: "Which colors?".to_owned(),
+                            answers: vec!["red".to_owned(), "green".to_owned()],
+                        },
+                    ],
+                })
+                .await
+                .expect("answer");
+            until(|payload| {
+                matches!(
+                    payload,
+                    AgentStreamPayload::PermissionResolved {
+                        canceled: false,
+                        ..
+                    }
+                )
+            })
+            .await;
+            until(|payload| matches!(payload, AgentStreamPayload::PromptFinished { .. })).await;
             commands
                 .send(RuntimeCommand::Shutdown)
                 .await

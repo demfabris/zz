@@ -17,8 +17,8 @@ pub(crate) use zz_client::scrollback::{HistoryRing, RetainedTerminalViewport};
 use zz_client::{
     ClientCore, CoreEvent, Outbound,
     scrollback::{
-        HISTORY_BACKFILL_QUIET, HISTORY_REQUEST_RETRY, MAX_HISTORY_ROWS, apply_history_chunk,
-        apply_retained_patch, history_request_range, new_retained_viewport,
+        DeferredBackfill, HISTORY_BACKFILL_QUIET, HistoryFollowUp, HistoryPacer,
+        apply_history_chunk, apply_retained_patch, new_retained_viewport,
         replace_retained_viewport,
     },
 };
@@ -714,13 +714,6 @@ impl FakeConnectedHost {
     }
 }
 
-#[derive(Clone, Copy)]
-struct PendingHistoryRequest {
-    mutations: u64,
-    prefetch_target: Option<u32>,
-    sent: Instant,
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ReconnectAttachState {
     RememberedSession,
@@ -734,8 +727,7 @@ struct HostConnection {
     reader_thread: Option<thread::JoinHandle<()>>,
     resync_pending: bool,
     full_requests_pending: BTreeSet<PaneId>,
-    history_requests_pending: BTreeMap<PaneId, PendingHistoryRequest>,
-    history_backfill_deferred: BTreeMap<PaneId, u64>,
+    history: HistoryPacer,
     snapshot: Option<Arc<MuxSnapshot>>,
     appearance: Option<(TerminalAppearance, AppearanceProvenance)>,
     state: HostState,
@@ -762,8 +754,7 @@ impl HostConnection {
             reader_thread: None,
             resync_pending: false,
             full_requests_pending: BTreeSet::new(),
-            history_requests_pending: BTreeMap::new(),
-            history_backfill_deferred: BTreeMap::new(),
+            history: HistoryPacer::default(),
             snapshot: None,
             appearance: None,
             state: HostState::Disconnected,
@@ -834,8 +825,7 @@ impl HostConnection {
             reader_thread: Some(reader_thread),
             resync_pending: false,
             full_requests_pending: BTreeSet::new(),
-            history_requests_pending: BTreeMap::new(),
-            history_backfill_deferred: BTreeMap::new(),
+            history: HistoryPacer::default(),
             snapshot: None,
             appearance,
             state: HostState::Connected,
@@ -1315,7 +1305,7 @@ impl MuxClient {
     }
 
     fn request_history_backfill(&mut self, pane: PaneId) {
-        self.request_history(pane, None);
+        self.request_history(pane, None, Instant::now());
     }
 
     fn defer_history_backfill(
@@ -1325,12 +1315,11 @@ impl MuxClient {
         cx: &mut Context<Self>,
     ) {
         let host = self.attached_host;
-        let should_arm = self
+        if !self
             .attached_connection_mut()
-            .history_backfill_deferred
-            .insert(pane, history_mutations)
-            .is_none();
-        if !should_arm {
+            .history
+            .defer(pane, history_mutations)
+        {
             return;
         }
 
@@ -1341,39 +1330,20 @@ impl MuxClient {
                     if client.attached_host != host {
                         return false;
                     }
-                    let Some(recorded_mutations) = client
-                        .connections
-                        .get(&host)
-                        .and_then(|connection| connection.history_backfill_deferred.get(&pane))
-                        .copied()
-                    else {
-                        return false;
-                    };
-                    let Some(current_mutations) = client
+                    let mutations = client
                         .viewports
                         .get(&pane)
-                        .map(|retained| retained.read().history_mutations)
-                    else {
+                        .map(|retained| retained.read().history_mutations);
+                    let Some(connection) = client.connections.get_mut(&host) else {
                         return false;
                     };
-
-                    if current_mutations == recorded_mutations {
-                        let Some(connection) = client.connections.get_mut(&host) else {
-                            return false;
-                        };
-                        connection.history_backfill_deferred.remove(&pane);
-                        client.request_history_backfill(pane);
-                        false
-                    } else {
-                        let Some(recorded_mutations) =
-                            client.connections.get_mut(&host).and_then(|connection| {
-                                connection.history_backfill_deferred.get_mut(&pane)
-                            })
-                        else {
-                            return false;
-                        };
-                        *recorded_mutations = current_mutations;
-                        true
+                    match connection.history.resume_deferred(pane, mutations) {
+                        DeferredBackfill::Request => {
+                            client.request_history_backfill(pane);
+                            false
+                        }
+                        DeferredBackfill::Wait => true,
+                        DeferredBackfill::Done => false,
                     }
                 });
                 if !matches!(rearm, Ok(true)) {
@@ -1385,66 +1355,27 @@ impl MuxClient {
     }
 
     pub(crate) fn request_history_prefetch(&mut self, pane: PaneId, target_offset: u32) {
-        self.request_history(pane, Some(target_offset));
+        self.request_history(pane, Some(target_offset), Instant::now());
     }
 
-    fn request_history(&mut self, pane: PaneId, prefetch_target: Option<u32>) {
-        if prefetch_target.is_none()
-            && self
-                .attached_connection()
-                .history_backfill_deferred
-                .contains_key(&pane)
-        {
-            return;
-        }
-        let mut prefetch_target = prefetch_target;
-        if let Some(pending) = self
-            .attached_connection_mut()
-            .history_requests_pending
-            .get_mut(&pane)
-        {
-            let target = match (prefetch_target, pending.prefetch_target) {
-                (Some(target), Some(previous)) => Some(target.min(previous)),
-                (target, previous) => target.or(previous),
-            };
-            if pending.sent.elapsed() < HISTORY_REQUEST_RETRY {
-                pending.prefetch_target = target;
-                return;
-            }
-            prefetch_target = target;
-            self.attached_connection_mut()
-                .history_requests_pending
-                .remove(&pane);
-        }
-
-        let budget = prefetch_target
-            .map_or_else(|| self.core.history_trickle_budget(), |_| MAX_HISTORY_ROWS);
-        if budget == 0 {
-            return;
-        }
-        let Some(retained) = self.viewports.get(&pane).cloned() else {
-            return;
-        };
-        let retained = retained.read();
-        let Some((start, count)) = history_request_range(&retained, budget, prefetch_target) else {
-            return;
-        };
-        let mutations = retained.history_mutations;
-        drop(retained);
-
+    fn request_history(&mut self, pane: PaneId, prefetch_target: Option<u32>, now: Instant) {
+        let trickle_budget = self.core.history_trickle_budget();
+        let retained = self.viewports.get(&pane).cloned();
+        let retained = retained.as_ref().map(|retained| retained.read());
         let connection = self.attached_connection_mut();
-        connection.history_requests_pending.insert(
+        let Some((start, count)) = connection.history.request(
             pane,
-            PendingHistoryRequest {
-                mutations,
-                prefetch_target,
-                sent: Instant::now(),
-            },
-        );
+            prefetch_target,
+            trickle_budget,
+            retained.as_deref(),
+            now,
+        ) else {
+            return;
+        };
+        drop(retained);
         if let Some(client) = &connection.client {
             if let Err(error) = client.request_history(pane, start, count) {
-                connection.history_requests_pending.remove(&pane);
-                connection.history_backfill_deferred.remove(&pane);
+                connection.history.forget(pane);
                 log::warn!("failed to request terminal history for {pane}: {error}");
             }
             return;
@@ -1454,8 +1385,7 @@ impl MuxClient {
             client.request_history(pane, start, count);
             return;
         }
-        connection.history_requests_pending.remove(&pane);
-        connection.history_backfill_deferred.remove(&pane);
+        connection.history.forget(pane);
     }
 
     fn reconcile_hosts(&mut self, cx: &mut Context<Self>) {
@@ -1646,8 +1576,7 @@ impl MuxClient {
         connection.reader_thread = None;
         connection.resync_pending = false;
         connection.full_requests_pending.clear();
-        connection.history_requests_pending.clear();
-        connection.history_backfill_deferred.clear();
+        connection.history.clear();
         if host != HostId::LOCAL {
             connection.snapshot = None;
         }
@@ -3151,8 +3080,7 @@ impl MuxClient {
         let connection = self.attached_connection_mut();
         connection.resync_pending = false;
         connection.full_requests_pending.clear();
-        connection.history_requests_pending.clear();
-        connection.history_backfill_deferred.clear();
+        connection.history.clear();
         if self.next_prefix_cancel_request != 0 {
             self.prefix_cancelled_request = self
                 .prefix_cancelled_request
@@ -4014,7 +3942,7 @@ impl MuxClient {
                 let connection = self.attached_connection_mut();
                 connection.resync_pending = false;
                 connection.full_requests_pending.clear();
-                connection.history_backfill_deferred.clear();
+                connection.history.clear_deferred();
                 if !*attaching {
                     self.backfill_retained_history();
                 }
@@ -4250,8 +4178,7 @@ impl MuxClient {
         let reconnected = connection.reconnect_attach.take().is_some();
         connection.resync_pending = false;
         connection.full_requests_pending.clear();
-        connection.history_requests_pending.clear();
-        connection.history_backfill_deferred.clear();
+        connection.history.clear();
         self.error = self.error_after_next_attach.take();
         self.client_focus_attach_ready = true;
         self.client_focus_attach_pending = false;
@@ -4314,8 +4241,7 @@ impl MuxClient {
         self.clear_kitty_images(pane);
         let connection = self.attached_connection_mut();
         connection.full_requests_pending.remove(&pane);
-        connection.history_requests_pending.remove(&pane);
-        connection.history_backfill_deferred.remove(&pane);
+        connection.history.forget(pane);
         self.browser_commands.remove(&pane);
         self.terminal_commands.remove(&pane);
         #[cfg(feature = "agent-pane")]
@@ -4495,8 +4421,7 @@ impl MuxClient {
         );
         let connection = self.attached_connection_mut();
         connection.full_requests_pending.remove(&pane);
-        connection.history_requests_pending.remove(&pane);
-        connection.history_backfill_deferred.remove(&pane);
+        connection.history.forget(pane);
         if self.popup_pane != Some(pane) {
             self.request_history_backfill(pane);
         }
@@ -4603,40 +4528,30 @@ impl MuxClient {
         dictionary: TerminalDictionary,
         cx: &mut Context<Self>,
     ) {
-        let pending = self
+        let retained = self.viewports.get(&pane).cloned();
+        let mutations = retained
+            .as_ref()
+            .map(|retained| retained.read().history_mutations);
+        let (apply, follow_up) = self
             .attached_connection_mut()
-            .history_requests_pending
-            .remove(&pane);
-        let mut deferred_mutations = None;
-        if let Some(retained) = self.viewports.get(&pane) {
-            let mut retained = retained.write();
-            if pending.map(|request| request.mutations) == Some(retained.history_mutations) {
-                apply_history_chunk(
-                    &mut retained,
-                    start,
-                    total,
-                    offset,
-                    columns,
-                    rows,
-                    dictionary,
-                    &mut self.next_row_revision,
-                );
-            } else if matches!(
-                pending,
-                Some(PendingHistoryRequest {
-                    prefetch_target: None,
-                    ..
-                })
-            ) {
-                deferred_mutations = Some(retained.history_mutations);
-            }
+            .history
+            .chunk_arrived(pane, mutations);
+        if apply && let Some(retained) = retained {
+            apply_history_chunk(
+                &mut retained.write(),
+                start,
+                total,
+                offset,
+                columns,
+                rows,
+                dictionary,
+                &mut self.next_row_revision,
+            );
         }
-        if let Some(target) = pending.and_then(|request| request.prefetch_target) {
-            self.request_history_prefetch(pane, target);
-        } else if let Some(mutations) = deferred_mutations {
-            self.defer_history_backfill(pane, mutations, cx);
-        } else {
-            self.request_history_backfill(pane);
+        match follow_up {
+            HistoryFollowUp::Prefetch(target) => self.request_history_prefetch(pane, target),
+            HistoryFollowUp::Defer(mutations) => self.defer_history_backfill(pane, mutations, cx),
+            HistoryFollowUp::Backfill => self.request_history_backfill(pane),
         }
     }
 
@@ -4694,7 +4609,7 @@ mod tests {
     };
 
     use gpui::{AppContext as _, TestAppContext};
-    use zz_client::scrollback::MAX_HISTORY_CHUNK_ROWS;
+    use zz_client::scrollback::{HISTORY_REQUEST_RETRY, MAX_HISTORY_CHUNK_ROWS};
     use zz_protocol::{
         Axis, BrowserDescriptor, MuxOptions, PaneSnapshot, SessionSnapshot, SplitId, WindowId,
         WindowSnapshot,
@@ -9640,12 +9555,7 @@ mod tests {
             retained_history_ids(&mux.viewports[&pane].read()),
             vec![1_200]
         );
-        assert_eq!(
-            mux.attached_connection()
-                .history_backfill_deferred
-                .get(&pane),
-            Some(&1)
-        );
+        assert_eq!(mux.attached_connection().history.deferred(pane), Some(1));
         current
     }
     #[gpui::test]
@@ -9661,12 +9571,7 @@ mod tests {
             let retained = mux.viewports[&pane].read();
             assert_eq!(retained_history_ids(&retained), vec![1_200, 1_201]);
             assert_eq!(retained.history_mutations, 2);
-            assert_eq!(
-                mux.attached_connection()
-                    .history_backfill_deferred
-                    .get(&pane),
-                Some(&1)
-            );
+            assert_eq!(mux.attached_connection().history.deferred(pane), Some(1));
         });
 
         assert_eq!(&*fake.history_requests.borrow(), &[(pane, 688, 512)]);
@@ -9689,10 +9594,11 @@ mod tests {
         );
         cx.update(|cx| {
             assert!(
-                !mux.read(cx)
+                mux.read(cx)
                     .attached_connection()
-                    .history_backfill_deferred
-                    .contains_key(&pane)
+                    .history
+                    .deferred(pane)
+                    .is_none()
             );
             let ids = (688..1_200).collect::<Vec<_>>();
             mux.update(cx, |mux, cx| {
@@ -9736,11 +9642,8 @@ mod tests {
         cx.run_until_parked();
         cx.update(|cx| {
             assert_eq!(
-                mux.read(cx)
-                    .attached_connection()
-                    .history_backfill_deferred
-                    .get(&pane),
-                Some(&2)
+                mux.read(cx).attached_connection().history.deferred(pane),
+                Some(2)
             );
         });
         assert_eq!(fake.history_requests.borrow().len(), 1);
@@ -9753,11 +9656,8 @@ mod tests {
         cx.run_until_parked();
         cx.update(|cx| {
             assert_eq!(
-                mux.read(cx)
-                    .attached_connection()
-                    .history_backfill_deferred
-                    .get(&pane),
-                Some(&3)
+                mux.read(cx).attached_connection().history.deferred(pane),
+                Some(3)
             );
         });
         assert_eq!(fake.history_requests.borrow().len(), 1);
@@ -9821,11 +9721,7 @@ mod tests {
                     }),
                     cx,
                 );
-                assert!(
-                    mux.attached_connection()
-                        .history_requests_pending
-                        .contains_key(&pane)
-                );
+                assert!(mux.attached_connection().history.pending(pane).is_some());
             });
         });
         assert_eq!(&*fake.history_requests.borrow(), &[(pane, 688, 512)]);
@@ -9865,14 +9761,11 @@ mod tests {
             mux.update(cx, |mux, _| {
                 mux.request_history_backfill(pane);
                 assert_eq!(fake.history_requests.borrow().len(), 1);
-                mux.attached_connection_mut()
-                    .history_requests_pending
-                    .get_mut(&pane)
-                    .expect("the first request is pending")
-                    .sent = Instant::now()
-                    .checked_sub(HISTORY_REQUEST_RETRY + Duration::from_millis(1))
-                    .expect("a clock past the retry interval");
-                mux.request_history_backfill(pane);
+                mux.request_history(
+                    pane,
+                    None,
+                    Instant::now() + HISTORY_REQUEST_RETRY + Duration::from_millis(1),
+                );
             });
         });
         assert_eq!(
@@ -9888,24 +9781,13 @@ mod tests {
         cx.update(|cx| {
             defer_initial_history_backfill(&mux, cx, pane, &initial);
             mux.update(cx, |mux, _| {
-                assert!(
-                    mux.attached_connection()
-                        .history_backfill_deferred
-                        .contains_key(&pane)
-                );
+                assert!(mux.attached_connection().history.deferred(pane).is_some());
                 mux.request_history_prefetch(pane, 1_199);
                 assert_eq!(
-                    mux.attached_connection()
-                        .history_requests_pending
-                        .get(&pane)
-                        .and_then(|request| request.prefetch_target),
+                    mux.attached_connection().history.pending(pane).flatten(),
                     Some(1_199)
                 );
-                assert!(
-                    mux.attached_connection()
-                        .history_backfill_deferred
-                        .contains_key(&pane)
-                );
+                assert!(mux.attached_connection().history.deferred(pane).is_some());
             });
         });
 

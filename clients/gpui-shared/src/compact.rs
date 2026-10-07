@@ -3,18 +3,19 @@ use std::{collections::BTreeSet, sync::Arc, time::Duration};
 use gpui::{
     AnyElement, App, Context, Corners, Entity, Focusable as _, IntoElement, Keystroke,
     ParentElement as _, PinchEvent, Pixels, ScrollDelta, ScrollWheelEvent, SharedString, Stateful,
-    Styled as _, Subscription, TouchPhase, Window, div, prelude::*, px,
+    Styled as _, Subscription, TouchPhase, Window, div, linear_color_stop, linear_gradient,
+    prelude::*, px,
 };
 use zz_client::StatusBarModel;
 use zz_protocol::{InputMessage, PaneId, PaneKindSnapshot, WindowId};
 use zz_terminal::KeyAction;
 use zz_ui::{
-    ActiveTheme as _, IconName,
+    ActiveTheme as _, Colorize as _, IconName,
     compact::{
-        ArrowPadEvent, COMPACT_BAR_HEIGHT, Instant, KEY_ROW_HEIGHT, KeyRow, PageDot, Pager,
-        PagerEvent, PopoverKey, PopoverKeyEvent, PopoverKeyItem, ToolKeys, WhichKeyList,
-        bottom_sheet, compact_bar, compact_bar_button, compact_bar_title, compact_hud,
-        compact_pane_header, page_dots, top_shade,
+        ArrowPadEvent, COMPACT_BAR_HEIGHT, COMPACT_PANE_HEADER_HEIGHT, Instant, KEY_ROW_HEIGHT,
+        KeyRow, PageDot, Pager, PagerEvent, PopoverKey, PopoverKeyEvent, PopoverKeyItem, ToolKeys,
+        WhichKeyList, bottom_sheet, compact_bar, compact_bar_button, compact_bar_title,
+        compact_hud, compact_pane_header, page_dots, top_shade,
     },
     kbd::Kbd,
     pane::pane_header_icon_button,
@@ -26,6 +27,8 @@ use super::{AppShell, sidebar};
 use crate::terminal::TerminalDisplayPreferences;
 
 const PAGE_GAP: f32 = 12.0;
+const SCRIM_ALPHA: f32 = 0.8;
+const SCRIM_FADE: f32 = 12.0;
 const CARD_RADIUS: f32 = 22.0;
 const PINCH_STEPS: f32 = 20.0;
 const SCALE_HUD_LINGER: Duration = Duration::from_secs(1);
@@ -598,6 +601,7 @@ impl AppShell {
                 .map_or_else(|| "Dead".to_owned(), |status| format!("Dead · {status}"))
         });
         let mut background = cx.theme().background;
+        let mut rows_above = false;
         let content = match &pane.kind {
             PaneKindSnapshot::Terminal => {
                 let terminal = self.terminal_entity(pane_id, cx);
@@ -617,8 +621,10 @@ impl AppShell {
                         },
                         cx,
                     );
+                    terminal.set_rows_above(true, cx);
                 });
                 background = terminal.read(cx).pane_background(cx);
+                rows_above = terminal.read(cx).rows_above_shown(cx);
                 terminal.into_any_element()
             }
             PaneKindSnapshot::Agent(descriptor) => {
@@ -697,8 +703,36 @@ impl AppShell {
             .pt(top_inset)
             .bg(background)
             .rounded(radius)
-            .children(header)
+            .when(header.is_some(), |page| {
+                page.child(
+                    div()
+                        .flex_none()
+                        .h(rems_from_px(COMPACT_PANE_HEADER_HEIGHT)),
+                )
+            })
             .child(div().flex_1().min_h_0().min_w_0().child(content))
+            .children(header.map(|header| {
+                let bar = top_inset
+                    + rems_from_px(COMPACT_PANE_HEADER_HEIGHT).to_pixels(window.rem_size());
+                let scrim = cx.theme().background.opaque().blend(background);
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .pt(top_inset)
+                    .when(rows_above && bar > px(0.0), |overlay| {
+                        overlay.bg(linear_gradient(
+                            180.0,
+                            linear_color_stop(
+                                scrim.alpha(SCRIM_ALPHA),
+                                1.0 - SCRIM_FADE / f32::from(bar),
+                            ),
+                            linear_color_stop(scrim.alpha(0.0), 1.0),
+                        ))
+                    })
+                    .child(header)
+            }))
             .into_any_element()
     }
 

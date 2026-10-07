@@ -1643,6 +1643,7 @@ impl AppShell {
                             },
                             cx,
                         );
+                        terminal.set_rows_above(false, cx);
                     });
                     terminal.clone().into_any_element()
                 }

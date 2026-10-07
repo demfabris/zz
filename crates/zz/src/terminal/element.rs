@@ -128,6 +128,7 @@ impl Element for TerminalElement {
                 focused,
                 cursor_blink_visible: self.cursor_blink_visible,
                 marked_text: self.marked_text.as_deref(),
+                rows_above: None,
             },
             bounds,
             window,

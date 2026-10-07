@@ -114,7 +114,7 @@ The state machine is `LocalScrollState` in [`zz-client`](/crates/zz-client.md)
 (`crates/zz-client/src/local_scroll.rs`); the desktop `TerminalView`
 (`crates/zz/src/terminal/view.rs`) and the GPUI thin client's `TerminalPane`
 (`clients/gpui-shared/src/terminal.rs`, iOS and web) both drive it and send the effects it returns.
-The thin client keeps its rings in `ClientCore` (`retain_history`) and paces history requests with
+The thin client keeps its rings in `ClientCore` (`retain_history`); both pace history requests with
 the shared `HistoryPacer`.
 
 **Trackpad pixels.** A `ScrollDelta::Pixels` event (trackpad, Magic Mouse, macOS momentum, Wayland
@@ -145,11 +145,15 @@ wheel action then lands on exactly the viewport the user was looking at. A mouse
 before its `Mouse` action, keeping the overlay until the daemon arrives, so a selection starts on the
 row under the pointer.
 
-The daemon hears the final position once. `ScrollToOffset(target)` goes out after a 120 ms
-`LOCAL_SCROLL_DEBOUNCE`, so one gesture sends the follow steps plus one sync rather than a message per row.
-The overlay retires when the server's offset reaches the target with no other request outstanding,
-when the ring is invalidated, or after `LOCAL_SCROLL_TIMEOUT` of 2 s. At rest the server sits on the
-target and `sub_row` stays local, so a pane can rest partway through a row.
+The daemon hears the final position once. `ScrollToOffset(target)` goes out after the view has held
+still for a 120 ms `LOCAL_SCROLL_DEBOUNCE`, so one gesture sends the follow steps plus one sync rather
+than a message per row. Movement within a row restarts the wait too: a fling's tail can take longer
+than 120 ms per row, and a sync in the middle of it would pull the daemon back onto the current row,
+then the next step toward newer output would ask it to follow again, every 130 ms until the fling
+stopped. The overlay retires when the server's offset reaches the target with no other request
+outstanding, when the ring is invalidated, or `LOCAL_SCROLL_TIMEOUT` (2 s) after the view last
+moved. At rest the server sits on the target and `sub_row` stays local, so a pane can rest partway
+through a row.
 
 Input that moves the server's view outranks a pending sync. A keystroke, committed IME text, a paste,
 a search edit, and search next/previous all call `cancel_local_scroll`, which bumps the generation

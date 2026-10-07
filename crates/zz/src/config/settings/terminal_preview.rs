@@ -202,6 +202,7 @@ impl Render for TerminalPreview {
                                         focused: true,
                                         cursor_blink_visible: cursor_visible,
                                         marked_text: None,
+                                        rows_above: None,
                                     },
                                     bounds,
                                     window,

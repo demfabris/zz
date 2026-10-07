@@ -217,6 +217,7 @@ enum BenchKind {
     Swipe,
     Scroll,
     Drag,
+    Fling,
 }
 
 struct Bench {
@@ -234,6 +235,7 @@ impl Bench {
             "swipe" => BenchKind::Swipe,
             "scroll" => BenchKind::Scroll,
             "drag" => BenchKind::Drag,
+            "fling" => BenchKind::Fling,
             _ => return None,
         };
         Some(Self {
@@ -267,19 +269,24 @@ impl Bench {
                 Duration::from_millis(1500),
                 Duration::from_millis(150),
             ),
+            BenchKind::Fling => (
+                Duration::from_millis(4000),
+                Duration::from_millis(120),
+                Duration::ZERO,
+            ),
         }
     }
 
     fn position(&self, cycle: u32, progress: f32, size: Size<Pixels>) -> Point<Pixels> {
         let (width, height) = (f32::from(size.width), f32::from(size.height));
-        let progress = if cycle.is_multiple_of(2) {
-            progress
-        } else {
-            1.0 - progress
+        let older = match self.kind {
+            BenchKind::Fling => cycle % 5 < 2,
+            _ => cycle.is_multiple_of(2),
         };
+        let progress = if older { progress } else { 1.0 - progress };
         match self.kind {
             BenchKind::Swipe => point(px(width * (0.8 - 0.6 * progress)), px(height * 0.4)),
-            BenchKind::Scroll | BenchKind::Drag => {
+            BenchKind::Scroll | BenchKind::Drag | BenchKind::Fling => {
                 point(px(width * 0.5), px(height * (0.35 + 0.3 * progress)))
             }
         }

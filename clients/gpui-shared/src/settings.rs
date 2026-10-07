@@ -1630,6 +1630,7 @@ impl gpui::RenderOnce for TerminalPreview {
                                         focused: true,
                                         cursor_blink_visible: true,
                                         marked_text: None,
+                                        rows_above: None,
                                     },
                                     bounds,
                                     window,

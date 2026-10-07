@@ -182,6 +182,18 @@ Claude driver. One `codex app-server` child per pane over stdio, as the other ap
 Verified live on 2026-10-07 with Codex 0.159.0: a plain reply, a turn with two approvals and both
 file changes applied, `restart-agent-pane` resuming the thread with its memory, and `//fork`.
 
+# Tested versions
+
+| Agent | Version | Since |
+| --- | --- | --- |
+| Claude Code | 2.1.292 (Agent SDK types 0.3.293) | 2026-10-07 |
+| Codex | 0.159.0 (`multi_agent` on by default) | 2026-10-07 |
+
+Older CLIs may lack frames or methods the drivers use: `side_question`, `stop_task`,
+`--resume-session-at`, `session_state_changed`, and `background_tasks_changed` on Claude Code;
+`beforeTurnId`, `clientUserMessageId`, `subAgentActivity`, and `thread/backgroundTerminals/*` on
+Codex. The drivers have not been run against older versions.
+
 # Next
 
 1. A "rewind to here" action on prompt rows that sends `//rewind <id>`.
@@ -191,7 +203,7 @@ file changes applied, `restart-agent-pane` resuming the thread with its memory, 
    completion, over the CLI agents already use). Both vendors can also host tools without a
    process: Claude through `sdkMcpServers` and `mcp_message` control requests, Codex through
    `dynamicTools` on `thread/start` and `item/tool/call`.
-3. Keep-up: a weekly diff of `sdk.d.ts` and the Codex schema, and a minimum-version table. The
-   survey's `archive/codex-host` tag is not in this clone; the Codex driver was written fresh.
+3. Keep-up: a weekly diff of `sdk.d.ts` and the Codex schema against the tested versions above.
+   The survey's `archive/codex-host` tag is not in this clone; the Codex driver was written fresh.
 4. Small UI edges: a subagent step split from its agent row by assistant text does not nest, and
    gpui-shared's Enter on an ordinary permission can also send attached images.

@@ -46,6 +46,20 @@ pub trait TerminalHistorySource {
     fn row(&self, index: usize) -> Option<TerminalHistoryRow<'_>>;
 }
 
+impl TerminalHistorySource for zz_client::scrollback::HistoryRing {
+    fn row_count(&self) -> usize {
+        self.rows.len()
+    }
+
+    fn row(&self, index: usize) -> Option<TerminalHistoryRow<'_>> {
+        self.rows.get(index).map(|row| TerminalHistoryRow {
+            cells: &row.cells,
+            dictionary: &row.dictionary,
+            revision: row.revision,
+        })
+    }
+}
+
 pub trait TerminalImageSource {
     fn image(&self, image_id: u32, generation: u64) -> Option<Arc<RenderImage>>;
 }

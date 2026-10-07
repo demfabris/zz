@@ -6,14 +6,12 @@ use gpui::{
 };
 use parking_lot::RwLock;
 use zz_terminal::TerminalAppearance;
-use zz_ui::terminal::{
-    PaintState, TerminalHistoryRow, TerminalHistorySource, TerminalImageSource, TerminalRenderInput,
-};
+use zz_ui::terminal::{PaintState, TerminalImageSource, TerminalRenderInput};
 
 pub(crate) use zz_ui::terminal::RowRenderCache;
 
 use crate::{
-    mux::client::{HistoryRing, KittyImageCache, RetainedTerminalViewport},
+    mux::client::{KittyImageCache, RetainedTerminalViewport},
     pane,
     terminal::{
         shader,
@@ -67,20 +65,6 @@ impl IntoElement for TerminalElement {
 
     fn into_element(self) -> Self::Element {
         self
-    }
-}
-
-impl TerminalHistorySource for HistoryRing {
-    fn row_count(&self) -> usize {
-        self.rows.len()
-    }
-
-    fn row(&self, index: usize) -> Option<TerminalHistoryRow<'_>> {
-        self.rows.get(index).map(|row| TerminalHistoryRow {
-            cells: &row.cells,
-            dictionary: &row.dictionary,
-            revision: row.revision,
-        })
     }
 }
 

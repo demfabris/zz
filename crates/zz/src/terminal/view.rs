@@ -17,7 +17,13 @@ use gpui::{
     anchored, deferred, div, img, point, prelude::*, px,
 };
 use parking_lot::RwLock;
-use zz_client::{ChromeAction, TERMINAL_TABLE};
+use zz_client::{
+    ChromeAction, TERMINAL_TABLE,
+    local_scroll::{
+        LOCAL_SCROLL_DEBOUNCE, LOCAL_SCROLL_TIMEOUT, LocalScrollEffect, LocalScrollState,
+        LocalScrollStep, LocalScrollSync, local_scroll_available, scroll_fraction_offset,
+    },
+};
 use zz_protocol::{
     ClientMessageKind, CommandInvocation, InputMessage, PaneId, PopupAction, TerminalUiCommand,
 };
@@ -85,8 +91,6 @@ const GPUI_UNITS_PER_FONT_POINT: f32 = 96.0 / 72.0;
 static COPY_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 static PASTE_UPLOAD_ID: AtomicU64 = AtomicU64::new(1);
 const SELECTION_AUTOSCROLL_INTERVAL: Duration = Duration::from_millis(33);
-const LOCAL_SCROLL_DEBOUNCE: Duration = Duration::from_millis(120);
-const LOCAL_SCROLL_TIMEOUT: Duration = Duration::from_secs(2);
 const COPY_FLASH_SELECTION_GRACE: Duration = Duration::from_millis(500);
 const IMAGE_HOVER_DWELL: Duration = Duration::from_millis(250);
 const CURSOR_BLINK_TIMEOUT: Duration = Duration::from_secs(10);
@@ -355,139 +359,6 @@ enum SearchPromptBehavior {
     AcceptAndClose,
 }
 
-#[derive(Clone, Copy, Debug)]
-struct LocalScroll {
-    target_offset: u32,
-    requested_offset: Option<u32>,
-    request_floor: Option<u32>,
-    started: Instant,
-}
-
-impl LocalScroll {
-    fn new(target_offset: u32) -> Self {
-        Self {
-            target_offset,
-            requested_offset: None,
-            request_floor: None,
-            started: Instant::now(),
-        }
-    }
-
-    fn settled_at(self, server_offset: u32) -> bool {
-        server_offset == self.target_offset
-            && self
-                .requested_offset
-                .is_none_or(|requested| requested == self.target_offset)
-    }
-
-    fn record_request(&mut self, offset: u32) {
-        self.requested_offset = Some(offset);
-        self.request_floor = Some(self.request_floor.map_or(offset, |floor| floor.min(offset)));
-    }
-
-    fn observe_server(&mut self, server_offset: u32) {
-        if self.request_floor == Some(server_offset) || self.requested_offset == Some(server_offset)
-        {
-            self.request_floor = None;
-        }
-    }
-
-    fn reach(self, server_offset: u32) -> u32 {
-        self.request_floor
-            .map_or(server_offset, |floor| floor.min(server_offset))
-    }
-}
-
-fn local_scroll_gate(viewport: &TerminalViewport, history_rows: usize) -> bool {
-    matches!(viewport.mode, TerminalMode::Live)
-        && !viewport.mouse_tracking
-        && viewport.scrollbar.total > viewport.scrollbar.len
-        && history_rows != 0
-}
-
-fn local_scroll_should_retire(
-    local_scroll: LocalScroll,
-    server_offset: u32,
-    expected_history_invalidations: u64,
-    history_invalidations: u64,
-    now: Instant,
-) -> bool {
-    local_scroll.settled_at(server_offset)
-        || expected_history_invalidations != history_invalidations
-        || now.saturating_duration_since(local_scroll.started) >= LOCAL_SCROLL_TIMEOUT
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct PixelScrollPosition {
-    target: u32,
-    sub_row: f32,
-}
-
-fn pixel_scroll_position(
-    target: u32,
-    sub_row: f32,
-    delta: f32,
-    line_height: f32,
-    oldest: u32,
-    newest: u32,
-) -> PixelScrollPosition {
-    let height = f64::from(line_height);
-    let lower = (f64::from(oldest) - f64::from(target)) * height;
-    let upper = (f64::from(newest) - f64::from(target)) * height;
-    let relative = (-f64::from(sub_row) - f64::from(delta))
-        .max(lower)
-        .min(upper);
-    let mut rows = (relative / height).ceil();
-    let mut sub_row = rows * height - relative;
-    if sub_row >= height {
-        rows -= 1.0;
-        sub_row -= height;
-    }
-    if sub_row < 1e-3 {
-        sub_row = 0.0;
-    }
-    let target = (f64::from(target) + rows).clamp(0.0, f64::from(u32::MAX)) as u32;
-    PixelScrollPosition {
-        target,
-        sub_row: sub_row as f32,
-    }
-}
-
-fn daemon_follow_offset(
-    target: u32,
-    reference: u32,
-    rows: u16,
-    maximum: u32,
-    toward_newer: bool,
-) -> Option<u32> {
-    let rows = u32::from(rows.max(1));
-    let desired = target.saturating_add((rows / 2).max(1)).min(maximum);
-    let lead = reference.saturating_sub(target);
-    let needed = if toward_newer {
-        reference < target || lead < (rows / 4).max(1)
-    } else {
-        lead > (rows * 3 / 4).max(1)
-    };
-    (needed && reference != desired).then_some(desired)
-}
-
-fn scroll_fraction_offset(fraction: u32, maximum: u32) -> u32 {
-    u32::try_from(u128::from(maximum).saturating_mul(u128::from(fraction)) / u128::from(u32::MAX))
-        .unwrap_or(maximum)
-}
-
-fn local_scroll_needs_prefetch(
-    target_offset: u32,
-    scrollbar: ScrollbarState,
-    history_rows: usize,
-) -> bool {
-    let Ok(history_rows) = u32::try_from(history_rows) else {
-        return false;
-    };
-    let front = scrollbar.offset.saturating_sub(history_rows);
-    target_offset < front.saturating_add(scrollbar.len.saturating_mul(2))
-}
-
 fn terminal_text_input(pane: PaneId, key: Option<&KeyDownEvent>, text: &str) -> InputMessage {
     let Some(event) = key else {
         return InputMessage::Text {
@@ -548,11 +419,9 @@ pub(crate) struct TerminalView {
     observed_generation: u64,
     observed_view_generation: u64,
     observed_row_revision_epoch: u64,
-    observed_history_invalidations: u64,
     observed_pasted_image_revision: u64,
     observed_hovered_uri: Option<Arc<str>>,
-    local_scroll: Option<LocalScroll>,
-    local_scroll_generation: u64,
+    scroll: LocalScrollState,
     row_cache: Rc<RefCell<RowRenderCache>>,
     focus_handle: FocusHandle,
     marked_text: Option<String>,
@@ -572,7 +441,6 @@ pub(crate) struct TerminalView {
     link_hover_clear_sent: bool,
     forwarded_mouse_buttons: u8,
     scroll_rows: f32,
-    sub_row: Pixels,
     cursor_bounds: Option<Bounds<Pixels>>,
     link_hover_bounds: Option<Bounds<Pixels>>,
     image_hover_dwell_elapsed: bool,
@@ -1161,51 +1029,18 @@ impl TerminalView {
             }
             if let Some(retained) = retained {
                 let retained_changed = !Arc::ptr_eq(&retained, &view.retained);
-                let (
-                    generation,
-                    view_generation,
-                    row_revision_epoch,
-                    history_invalidations,
-                    server_offset,
-                    local_scroll_available,
-                    copy_generation,
-                ) = {
+                let (generation, view_generation, row_revision_epoch, copy_generation) = {
                     let state = retained.read();
+                    changed |= view
+                        .scroll
+                        .observe(&state, retained_changed, Instant::now());
                     (
                         state.viewport.generation,
                         state.viewport.view_generation,
                         state.row_revision_epoch,
-                        state.history_invalidations,
-                        state.viewport.scrollbar.offset,
-                        local_scroll_gate(&state.viewport, state.history.rows.len()),
                         state.copy_generation,
                     )
                 };
-                if let Some(local_scroll) = view.local_scroll.as_mut() {
-                    local_scroll.observe_server(server_offset);
-                }
-                if view.local_scroll.is_some_and(|local_scroll| {
-                    retained_changed
-                        || !local_scroll_available
-                        || local_scroll_should_retire(
-                            local_scroll,
-                            server_offset,
-                            view.observed_history_invalidations,
-                            history_invalidations,
-                            Instant::now(),
-                        )
-                }) {
-                    view.clear_local_scroll();
-                    changed = true;
-                }
-                if view.sub_row > px(0.0)
-                    && (retained_changed
-                        || !local_scroll_available
-                        || history_invalidations != view.observed_history_invalidations)
-                {
-                    view.sub_row = px(0.0);
-                    changed = true;
-                }
                 if generation != view.observed_generation
                     || view_generation != view.observed_view_generation
                     || row_revision_epoch != view.observed_row_revision_epoch
@@ -1217,7 +1052,6 @@ impl TerminalView {
                     view.observed_row_revision_epoch = row_revision_epoch;
                     changed = true;
                 }
-                view.observed_history_invalidations = history_invalidations;
                 if copy_generation != view.observed_copy_generation {
                     view.observed_copy_generation = copy_generation;
                     changed |= !retained_changed && view.start_copy_flash();
@@ -1293,11 +1127,9 @@ impl TerminalView {
             observed_generation,
             observed_view_generation,
             observed_row_revision_epoch,
-            observed_history_invalidations,
             observed_pasted_image_revision,
             observed_hovered_uri: None,
-            local_scroll: None,
-            local_scroll_generation: 0,
+            scroll: LocalScrollState::new(observed_history_invalidations),
             row_cache: Rc::new(RefCell::new(RowRenderCache::default())),
             focus_handle,
             marked_text: None,
@@ -1317,7 +1149,6 @@ impl TerminalView {
             link_hover_clear_sent: false,
             forwarded_mouse_buttons: 0,
             scroll_rows: 0.0,
-            sub_row: px(0.0),
             cursor_bounds: None,
             link_hover_bounds: None,
             image_hover_dwell_elapsed: false,
@@ -1413,271 +1244,111 @@ impl TerminalView {
     }
 
     pub(crate) fn local_scroll_target(&self) -> Option<u32> {
-        self.local_scroll
-            .map(|local_scroll| local_scroll.target_offset)
+        self.scroll.target()
     }
 
-    pub(crate) const fn scroll_pixel_offset(&self) -> Pixels {
-        self.sub_row
-    }
-
-    fn clear_local_scroll(&mut self) -> bool {
-        let cleared = self.local_scroll.take().is_some();
-        if cleared {
-            self.local_scroll_generation = self.local_scroll_generation.wrapping_add(1);
-        }
-        cleared
+    pub(crate) fn scroll_pixel_offset(&self) -> Pixels {
+        px(self.scroll.sub_row())
     }
 
     fn cancel_local_scroll(&mut self, cx: &mut Context<Self>) {
-        self.local_scroll_generation = self.local_scroll_generation.wrapping_add(1);
-        let had_sub_row = self.clear_sub_row();
-        if self.local_scroll.take().is_some() || had_sub_row {
+        if self.scroll.cancel() {
             cx.notify();
         }
-    }
-
-    fn clear_sub_row(&mut self) -> bool {
-        std::mem::replace(&mut self.sub_row, px(0.0)) > px(0.0)
     }
 
     fn scroll_by_pixels(&mut self, delta: Pixels, cx: &mut Context<Self>) -> bool {
-        let Some(grid) = self.hit_grid.filter(|grid| grid.line_height > px(0.0)) else {
+        let Some(grid) = self.hit_grid else {
             return false;
         };
-        if delta == px(0.0) {
-            return true;
-        }
-        let (server_offset, maximum_offset, rows, coverage_start) = {
+        let step = {
             let retained = self.retained.read();
-            let scrollbar = retained.viewport.scrollbar;
-            let history_rows = u32::try_from(retained.history.rows.len()).unwrap_or(u32::MAX);
-            (
-                scrollbar.offset,
-                scrollbar.total.saturating_sub(scrollbar.len),
-                retained.viewport.rows,
-                scrollbar.offset.saturating_sub(history_rows),
+            self.scroll.scroll_by_pixels(
+                f32::from(delta),
+                f32::from(grid.line_height),
+                &retained,
+                Instant::now(),
             )
         };
-        if let Some(local_scroll) = self.local_scroll.as_mut() {
-            local_scroll.observe_server(server_offset);
-        }
-        let local_scroll = self.local_scroll;
-        let position = pixel_scroll_position(
-            local_scroll.map_or(server_offset, |local_scroll| local_scroll.target_offset),
-            f32::from(self.sub_row),
-            f32::from(delta),
-            f32::from(grid.line_height),
-            coverage_start,
-            local_scroll
-                .map_or(server_offset, |local_scroll| {
-                    local_scroll.reach(server_offset)
-                })
-                .min(maximum_offset),
-        );
-        let follow = daemon_follow_offset(
-            position.target,
-            local_scroll
-                .and_then(|local_scroll| local_scroll.requested_offset)
-                .unwrap_or(server_offset),
-            rows,
-            maximum_offset,
-            delta < px(0.0),
-        );
-        if self.sub_row != px(position.sub_row) {
-            self.sub_row = px(position.sub_row);
-            cx.notify();
-        }
-        self.pixel_scroll_to(position.target, follow, cx);
+        let Some(step) = step else {
+            return false;
+        };
+        self.apply_local_scroll(step, cx);
         true
     }
 
-    fn pixel_scroll_to(&mut self, target: u32, follow: Option<u32>, cx: &mut Context<Self>) {
-        let (server_offset, history_invalidations) = {
-            let retained = self.retained.read();
-            (
-                retained.viewport.scrollbar.offset,
-                retained.history_invalidations,
-            )
-        };
-        let previous = self.local_scroll;
-        let moved = previous.is_none_or(|local_scroll| local_scroll.target_offset != target);
-        let mut next = match previous {
-            Some(local_scroll) if !moved => local_scroll,
-            Some(local_scroll) => LocalScroll {
-                target_offset: target,
-                started: Instant::now(),
-                ..local_scroll
-            },
-            None => LocalScroll::new(target),
-        };
-        if let Some(offset) = follow {
-            next.record_request(offset);
-            self.send_view_action(cx, TerminalViewAction::ScrollToOffset(offset));
-        }
-        if next.settled_at(server_offset) {
-            if self.clear_local_scroll() {
-                cx.notify();
+    fn apply_local_scroll(&mut self, step: LocalScrollStep, cx: &mut Context<Self>) {
+        for effect in step.effects {
+            match effect {
+                LocalScrollEffect::ScrollToOffset(offset) => {
+                    self.send_view_action(cx, TerminalViewAction::ScrollToOffset(offset));
+                }
+                LocalScrollEffect::Prefetch(target) => {
+                    self.request_local_scroll_prefetch(target, cx);
+                }
+                LocalScrollEffect::Sync(generation) => {
+                    self.schedule_local_scroll_sync(generation, cx);
+                }
             }
-            return;
         }
-        if !moved && follow.is_none() {
-            return;
+        if step.redraw {
+            cx.notify();
         }
-        self.observed_history_invalidations = history_invalidations;
-        self.local_scroll_generation = self.local_scroll_generation.wrapping_add(1);
-        self.local_scroll = Some(next);
-        cx.notify();
-        if moved {
-            self.request_local_scroll_prefetch(target, cx);
-        }
-        self.schedule_local_scroll_sync(self.local_scroll_generation, cx);
     }
 
     fn flush_local_scroll(&mut self, cx: &Context<Self>) {
-        let Some(local_scroll) = self.local_scroll.as_mut() else {
-            return;
-        };
-        if local_scroll.requested_offset == Some(local_scroll.target_offset) {
-            return;
+        if let Some(target) = self.scroll.flush() {
+            self.send_view_action(cx, TerminalViewAction::ScrollToOffset(target));
         }
-        let target = local_scroll.target_offset;
-        local_scroll.record_request(target);
-        self.send_view_action(cx, TerminalViewAction::ScrollToOffset(target));
     }
 
     fn should_use_local_scroll(&self) -> bool {
-        let retained = self.retained.read();
-        local_scroll_gate(&retained.viewport, retained.history.rows.len())
+        local_scroll_available(&self.retained.read())
     }
 
     fn scroll_locally_by(&mut self, delta: i64, cx: &mut Context<Self>) {
-        let base = self
-            .local_scroll
-            .map(|local_scroll| local_scroll.target_offset);
-        let (server_offset, maximum_offset) = {
+        let step = {
             let retained = self.retained.read();
-            let scrollbar = retained.viewport.scrollbar;
-            (
-                scrollbar.offset,
-                scrollbar.total.saturating_sub(scrollbar.len),
-            )
+            self.scroll.scroll_by_rows(delta, &retained, Instant::now())
         };
-        let base = base.unwrap_or(server_offset);
-        let target = i128::from(base)
-            .saturating_add(i128::from(delta))
-            .clamp(0, i128::from(maximum_offset));
-        self.scroll_locally_to(u32::try_from(target).unwrap_or(server_offset), cx);
+        self.apply_local_scroll(step, cx);
     }
 
     fn scroll_locally_to(&mut self, target: u32, cx: &mut Context<Self>) {
-        let (target, server_offset, coverage_start, at_tail, history_invalidations) = {
+        let step = {
             let retained = self.retained.read();
-            let scrollbar = retained.viewport.scrollbar;
-            let retained_rows = u32::try_from(retained.history.rows.len()).unwrap_or(u32::MAX);
-            let coverage_start = scrollbar.offset.saturating_sub(retained_rows);
-            let maximum_offset = scrollbar.total.saturating_sub(scrollbar.len);
-            (
-                target.min(maximum_offset),
-                scrollbar.offset,
-                coverage_start,
-                scrollbar.offset.saturating_add(scrollbar.len) >= scrollbar.total,
-                retained.history_invalidations,
-            )
+            self.scroll.scroll_to(target, &retained, Instant::now())
         };
-        self.observed_history_invalidations = history_invalidations;
-        if target < coverage_start {
-            self.request_local_scroll_prefetch(target, cx);
-            let cleared = self.clear_local_scroll();
-            self.send_view_action(cx, TerminalViewAction::ScrollToOffset(target));
-            if cleared {
-                cx.notify();
-            }
-            return;
-        }
-        if target > server_offset {
-            let cleared = self.clear_local_scroll();
-            self.send_view_action(cx, TerminalViewAction::ScrollToOffset(target));
-            if cleared {
-                cx.notify();
-            }
-            return;
-        }
-        if target == server_offset {
-            let cleared = self.clear_local_scroll();
-            if at_tail {
-                self.send_view_action(cx, TerminalViewAction::ScrollToOffset(target));
-            }
-            if cleared {
-                cx.notify();
-            }
-            return;
-        }
-
-        self.local_scroll_generation = self.local_scroll_generation.wrapping_add(1);
-        let generation = self.local_scroll_generation;
-        self.local_scroll = Some(LocalScroll {
-            target_offset: target,
-            started: Instant::now(),
-            ..self
-                .local_scroll
-                .unwrap_or_else(|| LocalScroll::new(target))
-        });
-        cx.notify();
-        self.request_local_scroll_prefetch(target, cx);
-        self.schedule_local_scroll_sync(generation, cx);
+        self.apply_local_scroll(step, cx);
     }
 
     fn request_local_scroll_prefetch(&self, target: u32, cx: &mut Context<Self>) {
         if self.command_output || self.popup {
             return;
         }
-        let near_cold_edge = {
-            let retained = self.retained.read();
-            local_scroll_needs_prefetch(
-                target,
-                retained.viewport.scrollbar,
-                retained.history.rows.len(),
-            )
-        };
-        if near_cold_edge {
-            self.mux
-                .update(cx, |mux, _| mux.request_history_prefetch(self.pane, target));
-        }
+        self.mux
+            .update(cx, |mux, _| mux.request_history_prefetch(self.pane, target));
     }
 
     fn schedule_local_scroll_sync(&self, generation: u64, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(LOCAL_SCROLL_DEBOUNCE).await;
             let Ok(active) = this.update(cx, |view, cx| {
-                if view.local_scroll_generation != generation {
-                    return false;
-                }
-                let server_offset = view.retained.read().viewport.scrollbar.offset;
-                let Some(local_scroll) = view.local_scroll.as_mut() else {
-                    return false;
+                let sync = {
+                    let retained = view.retained.read();
+                    view.scroll.sync(generation, &retained)
                 };
-                local_scroll.observe_server(server_offset);
-                let local_scroll = *local_scroll;
-                let converged = local_scroll.settled_at(server_offset);
-                if converged {
-                    view.clear_local_scroll();
-                    cx.notify();
-                    return false;
+                match sync {
+                    None => false,
+                    Some(LocalScrollSync::Retired) => {
+                        cx.notify();
+                        false
+                    }
+                    Some(LocalScrollSync::Requested(target)) => {
+                        view.send_view_action(cx, TerminalViewAction::ScrollToOffset(target));
+                        true
+                    }
                 }
-                if !view.should_use_local_scroll() {
-                    view.clear_local_scroll();
-                    cx.notify();
-                    return false;
-                }
-                view.send_view_action(
-                    cx,
-                    TerminalViewAction::ScrollToOffset(local_scroll.target_offset),
-                );
-                if let Some(local_scroll) = view.local_scroll.as_mut() {
-                    local_scroll.record_request(local_scroll.target_offset);
-                }
-                true
             }) else {
                 return;
             };
@@ -1689,14 +1360,7 @@ impl TerminalView {
                 .timer(LOCAL_SCROLL_TIMEOUT.saturating_sub(LOCAL_SCROLL_DEBOUNCE))
                 .await;
             let _ = this.update(cx, |view, cx| {
-                if view.local_scroll_generation != generation {
-                    return;
-                }
-                if view.local_scroll.is_some_and(|local_scroll| {
-                    Instant::now().saturating_duration_since(local_scroll.started)
-                        >= LOCAL_SCROLL_TIMEOUT
-                }) {
-                    view.clear_local_scroll();
+                if view.scroll.expire(generation, Instant::now()) {
                     cx.notify();
                 }
             });
@@ -2132,7 +1796,7 @@ impl TerminalView {
             cx.stop_propagation();
             return;
         }
-        if self.clear_sub_row() {
+        if self.scroll.clear_sub_row() {
             cx.notify();
         }
         let line_height = self.hit_grid.map_or(px(19.0), |grid| grid.line_height);
@@ -2150,13 +1814,9 @@ impl TerminalView {
                 self.scroll_locally_by(i64::from(lines), cx);
             } else {
                 if lines < 0
-                    && let Some(local_scroll) = self.local_scroll
+                    && let Some(target) = self.scroll.release()
                 {
-                    self.clear_local_scroll();
-                    self.send_view_action(
-                        cx,
-                        TerminalViewAction::ScrollToOffset(local_scroll.target_offset),
-                    );
+                    self.send_view_action(cx, TerminalViewAction::ScrollToOffset(target));
                     cx.notify();
                 }
                 let button = if lines < 0 {
@@ -2202,7 +1862,7 @@ impl TerminalView {
             return;
         };
         let fraction = zz_ui::terminal::scroll_fraction(grid.surface_bounds, position);
-        if self.clear_sub_row() {
+        if self.scroll.clear_sub_row() {
             cx.notify();
         }
         if self.should_use_local_scroll() {
@@ -3245,8 +2905,8 @@ pub(crate) fn key_code(key: &str) -> KeyCode {
 )]
 mod tests {
     use super::*;
-    use crate::mux::client::HistoryRow;
     use gpui::{FontStyle, FontWeight};
+    use zz_client::scrollback::HistoryRow;
     use zz_terminal::{AppearanceColor, CursorBlinkPolicy};
 
     gpui::actions!(terminal_view_test, [FocusNext, FocusPrevious]);
@@ -3547,157 +3207,6 @@ mod tests {
                 detail: "+3 output".to_owned(),
             })
         );
-    }
-
-    #[test]
-    fn local_scroll_gate_requires_live_untracked_scrollback_and_a_warm_ring() {
-        let mut viewport = TerminalViewport::blank(80, 24, SessionStatus::Running);
-        viewport.scrollbar = ScrollbarState {
-            total: 100,
-            offset: 76,
-            len: 24,
-        };
-        assert!(local_scroll_gate(&viewport, 1));
-
-        viewport.mode = TerminalMode::Copy {
-            position: 1,
-            total: 100,
-            hide_position: false,
-        };
-        assert!(!local_scroll_gate(&viewport, 1));
-        viewport.mode = TerminalMode::View {
-            position: 1,
-            total: 100,
-        };
-        assert!(!local_scroll_gate(&viewport, 1));
-        viewport.mode = TerminalMode::Live;
-
-        viewport.mouse_tracking = true;
-        assert!(!local_scroll_gate(&viewport, 1));
-        viewport.mouse_tracking = false;
-
-        viewport.scrollbar.total = viewport.scrollbar.len;
-        assert!(!local_scroll_gate(&viewport, 1));
-        viewport.scrollbar.total = 100;
-        assert!(!local_scroll_gate(&viewport, 0));
-    }
-
-    #[test]
-    fn local_scroll_retires_on_convergence_timeout_or_ring_invalidation() {
-        let started = Instant::now();
-        let local_scroll = LocalScroll {
-            started,
-            ..LocalScroll::new(40)
-        };
-        assert!(!local_scroll_should_retire(
-            local_scroll,
-            60,
-            7,
-            7,
-            (started + LOCAL_SCROLL_TIMEOUT)
-                .checked_sub(Duration::from_millis(1))
-                .unwrap(),
-        ));
-        assert!(local_scroll_should_retire(local_scroll, 40, 7, 7, started,));
-        assert!(local_scroll_should_retire(
-            local_scroll,
-            60,
-            7,
-            7,
-            started + LOCAL_SCROLL_TIMEOUT,
-        ));
-        assert!(local_scroll_should_retire(local_scroll, 60, 7, 8, started,));
-
-        let mut following = local_scroll;
-        following.record_request(60);
-        assert!(!local_scroll_should_retire(following, 40, 7, 7, started));
-        following.record_request(40);
-        assert!(local_scroll_should_retire(following, 40, 7, 7, started));
-    }
-
-    fn at(target: u32, sub_row: f32) -> PixelScrollPosition {
-        PixelScrollPosition { target, sub_row }
-    }
-
-    #[test]
-    fn trackpad_pixels_accumulate_and_carry_whole_rows_both_ways() {
-        let step =
-            |target, sub_row, delta| pixel_scroll_position(target, sub_row, delta, 20.0, 50, 100);
-        assert_eq!(step(100, 0.0, 5.0), at(100, 5.0));
-        assert_eq!(step(100, 5.0, 20.0), at(99, 5.0));
-        assert_eq!(step(99, 5.0, -10.0), at(100, 15.0));
-        assert_eq!(step(100, 0.0, 45.0), at(98, 5.0));
-        assert_eq!(step(98, 5.0, -45.0), at(100, 0.0));
-        assert_eq!(step(100, 0.0, 20.0), at(99, 0.0));
-    }
-
-    #[test]
-    fn trackpad_pixels_clamp_at_the_live_bottom_and_the_rings_oldest_row() {
-        let step = |target, sub_row, delta, oldest| {
-            pixel_scroll_position(target, sub_row, delta, 20.0, oldest, 100)
-        };
-        assert_eq!(step(100, 0.0, -30.0, 50), at(100, 0.0));
-        assert_eq!(step(100, 5.0, -30.0, 50), at(100, 0.0));
-        assert_eq!(step(99, 5.0, 50.0, 98), at(98, 0.0));
-        assert_eq!(step(98, 0.0, 7.0, 98), at(98, 0.0));
-        assert_eq!(step(0, 0.0, 10.0, 0), at(0, 0.0));
-    }
-
-    #[test]
-    fn trackpad_offsets_stay_exact_deep_in_scrollback() {
-        let mut position = at(3_000_000, 0.0);
-        for _ in 0..80 {
-            position =
-                pixel_scroll_position(position.target, position.sub_row, 0.25, 17.5, 0, 3_000_000);
-        }
-        assert_eq!(position.target, 2_999_999);
-        assert!((position.sub_row - 2.5).abs() < 1e-3);
-    }
-
-    #[test]
-    fn the_daemon_follows_a_gesture_in_steps_smaller_than_a_screen() {
-        assert_eq!(daemon_follow_offset(1000, 1000, 24, 1000, false), None);
-        assert_eq!(daemon_follow_offset(982, 1000, 24, 1000, false), None);
-        assert_eq!(daemon_follow_offset(981, 1000, 24, 1000, false), Some(993));
-        assert_eq!(daemon_follow_offset(500, 500, 24, 1000, false), None);
-
-        assert_eq!(daemon_follow_offset(500, 500, 24, 1000, true), Some(512));
-        assert_eq!(daemon_follow_offset(506, 512, 24, 1000, true), None);
-        assert_eq!(daemon_follow_offset(507, 512, 24, 1000, true), Some(519));
-        assert_eq!(daemon_follow_offset(995, 995, 24, 1000, true), Some(1000));
-        assert_eq!(daemon_follow_offset(999, 1000, 24, 1000, true), None);
-        assert_eq!(daemon_follow_offset(10, 9, 1, 1000, true), Some(11));
-    }
-
-    #[test]
-    fn outstanding_requests_cap_the_reach_until_the_daemon_passes_them() {
-        let mut local_scroll = LocalScroll::new(480);
-        local_scroll.record_request(480);
-        local_scroll.record_request(500);
-        assert_eq!(local_scroll.reach(510), 480);
-        local_scroll.observe_server(510);
-        assert_eq!(local_scroll.reach(510), 480);
-        local_scroll.observe_server(480);
-        assert_eq!(local_scroll.reach(480), 480);
-        assert_eq!(local_scroll.reach(500), 500);
-        assert!(!local_scroll.settled_at(480));
-
-        let mut coalesced = LocalScroll::new(480);
-        coalesced.record_request(480);
-        coalesced.record_request(500);
-        coalesced.observe_server(500);
-        assert_eq!(coalesced.reach(500), 500);
-    }
-
-    #[test]
-    fn local_scroll_prefetches_only_near_the_cold_edge() {
-        let scrollbar = ScrollbarState {
-            total: 110,
-            offset: 100,
-            len: 10,
-        };
-        assert!(local_scroll_needs_prefetch(99, scrollbar, 20));
-        assert!(!local_scroll_needs_prefetch(100, scrollbar, 20));
     }
 
     #[test]

@@ -2,6 +2,7 @@ import "scripts/just/settings.just"
 
 mod compat "scripts/just/compat.just"
 mod install "scripts/just/install.just"
+mod ios "scripts/just/ios.just"
 mod package "scripts/just/package.just"
 mod perf "scripts/just/perf.just"
 mod profile "scripts/just/profile.just"
@@ -48,9 +49,6 @@ headless platform *args:
     [[ -n "$version" ]] || { echo "workspace version is missing from Cargo.toml" >&2; exit 1; }
     cargo build --release -p zz-cli {{ args }}
     scripts/package-headless.sh target/release/zz_cli "dist/zz-$version-headless-$os-$arch.tar.gz"
-
-ios mode="run" family="iPad":
-    @scripts/ios-gpui.sh {{ family }} {{ mode }}
 
 # Serve the landing page + docs site with live reload (localhost:4321/zz).
 site:

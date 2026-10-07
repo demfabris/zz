@@ -41,17 +41,26 @@ swipe, or tap, so two fingers never page or scroll.
 ## Run
 
 Use an Apple Silicon Mac with Xcode, Rust's `aarch64-apple-ios-sim` target, and
-Zig 0.16.0. From the repository root:
+Zig 0.16.0. From the repository root, `just ios` lists the actions. Each takes `iPhone`
+(the default) or `iPad`:
 
 ```sh
-just ios
-just ios run iPhone
-just ios build iPad
+just ios rig
+just ios run
+just ios run iPad
+just ios build
 ```
 
-To run on a paired iPad or iPhone, unlock it and use device mode:
+`just ios rig` builds `zz_cli` and starts a throwaway daemon for simulator runs, with its own
+home under `target/ios-rig` and a socket at `/tmp/zzios-<checkout folder>.sock`, so every
+worktree gets its own. It seeds a session named `phone` with two panes in the first window and
+a second window, and `just ios run` attaches to it while it is up. `just ios rig stop` stops it.
+`ZZ_IOS_RIG_SOCKET` picks another socket.
+
+To run on a paired iPhone or iPad, unlock it and use device mode:
 
 ```sh
+just ios device
 just ios device iPad
 ```
 
@@ -70,7 +79,7 @@ Simulator and device builds use the zz Dev icon (`assets/zz-dev.icon`, compiled 
 ## TestFlight
 
 ```sh
-just ios testflight iPad
+just ios testflight
 ```
 
 TestFlight mode builds a release binary with the production identity (`zz` on the host), packages
@@ -83,11 +92,11 @@ uploads it for internal TestFlight testing. Signing uses the Apple account signe
 `ZZ_IOS_UPLOAD=0` exports the signed `.ipa` without uploading, and `ZZ_IOS_BUILD_NUMBER` overrides
 the build number.
 
-The launcher probes zz Dev socket candidates and skips stale sockets. It does not start a daemon. To
-choose a socket and session:
+Without a rig, the launcher probes zz Dev socket candidates and skips stale sockets. It does not
+start a daemon. To choose a socket and session:
 
 ```sh
-ZZ_GPUI_ENDPOINT=/tmp/my-zz.sock ZZ_GPUI_SESSION=work just ios
+ZZ_GPUI_ENDPOINT=/tmp/my-zz.sock ZZ_GPUI_SESSION=work just ios run
 ```
 
 `ZZ_DEV_SOCKET` also selects a local socket. Set `ZZ_GPUI_SIMULATOR` to a simulator
@@ -209,7 +218,7 @@ callbacks and the display drops to its idle rate.
 To measure frames on a paired, unlocked device without touching it:
 
 ```sh
-just ios bench iPhone
+just ios bench
 ```
 
 Bench mode builds and installs the device app like `device` mode, creates a session named
@@ -271,13 +280,13 @@ The terminal uses `InteractiveClient`, `ClientCore`, and the shared `zz-ui`
 painter and Kitty image cache. The daemon owns the PTY and Ghostty parser/encoder.
 
 ```sh
-ZZ_GPUI_DEMO=terminal just ios
+ZZ_GPUI_DEMO=terminal just ios run
 ```
 
 To attach the terminal example to a specific socket and session:
 
 ```sh
-ZZ_GPUI_DEMO=terminal ZZ_GPUI_ENDPOINT=/tmp/my-zz.sock ZZ_GPUI_SESSION=work just ios
+ZZ_GPUI_DEMO=terminal ZZ_GPUI_ENDPOINT=/tmp/my-zz.sock ZZ_GPUI_SESSION=work just ios run
 ```
 
 Without a saved endpoint, the terminal example opens a connection field. **Host** opens that

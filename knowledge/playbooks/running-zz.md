@@ -116,8 +116,10 @@ The other development recipes share this identity:
   port 8081, separate browser preferences, and the existing dev daemon. `web serve --socket PATH`
   overrides the socket. `web build --release` retains ordinary release assets in `clients/web/dist`.
 
-`just ios` runs the experimental GPUI terminal with its own app identity. It finds an existing
-dev socket or accepts `ZZ_GPUI_ENDPOINT` and `ZZ_DEV_SOCKET`; see `clients/ios-gpui/README.md`.
+`just ios run [iPhone|iPad]` runs the GPUI iOS client in a simulator with its own app identity.
+It attaches to the throwaway daemon from `just ios rig` when that is up, then to an existing dev
+socket, or to `ZZ_GPUI_ENDPOINT` / `ZZ_DEV_SOCKET`; `just ios device` installs it on a paired
+phone. See `clients/ios-gpui/README.md`.
 
 `just build` and package installation keep their existing identity and destinations. Brew/AUR
 beta selection is independent of development isolation. Plain Cargo builds do not enable the

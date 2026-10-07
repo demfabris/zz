@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root"
-family="${1:-iPad}"
+family="${1:-iPhone}"
 mode="${2:-run}"
 demo="${ZZ_GPUI_DEMO:-app}"
 [[ "$(uname -s)" == Darwin ]] || { echo "iOS GPUI requires macOS" >&2; exit 2; }
@@ -207,7 +207,7 @@ codesign --force --sign - "$app"
 endpoint="${ZZ_GPUI_ENDPOINT:-${ZZ_DEV_SOCKET:-${ZZ_SOCKET:-}}}"
 if [[ -z "$endpoint" ]]; then
     darwin_tmp="$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || true)"
-    for candidate in "${XDG_RUNTIME_DIR:-/tmp}/zz-dev/default.sock" "${TMPDIR:-/tmp}/zz-dev-${USER:-user}/default.sock" "${darwin_tmp%/}/zz-dev-${USER:-user}/default.sock" "/tmp/zz-dev-${USER:-user}/default.sock"; do
+    for candidate in "${ZZ_IOS_RIG_SOCKET:-/tmp/zzios-$(basename "$repo_root").sock}" "${XDG_RUNTIME_DIR:-/tmp}/zz-dev/default.sock" "${TMPDIR:-/tmp}/zz-dev-${USER:-user}/default.sock" "${darwin_tmp%/}/zz-dev-${USER:-user}/default.sock" "/tmp/zz-dev-${USER:-user}/default.sock"; do
         if [[ -S "$candidate" ]] && python3 - "$candidate" <<'PY'
 import socket, sys
 

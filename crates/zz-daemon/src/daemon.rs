@@ -16491,6 +16491,12 @@ impl Shared {
             }
         }
         let pane = self.resolve_agent_pane(context, parsed.target.as_deref())?;
+        if parsed.notify {
+            #[cfg(feature = "agent")]
+            return self.submit_agent_prompt_and_notify(context, pane, payload, kind);
+            #[cfg(not(feature = "agent"))]
+            return Err(ServerError::PaneExited(pane).into());
+        }
         if parsed.wait {
             if !matches!(kind, ClientKind::Command | ClientKind::Control) {
                 return Err(ServerError::InvalidCommand(
@@ -33403,6 +33409,78 @@ impl Shared {
         })
     }
 
+    /// Submit to `pane` and, when its turn ends, hand the reply back to the
+    /// agent pane that asked, queued behind whatever that pane is doing.
+    #[cfg(feature = "agent")]
+    fn submit_agent_prompt_and_notify(
+        self: &Arc<Self>,
+        context: &ExecutionContext,
+        pane: PaneId,
+        text: String,
+        kind: ClientKind,
+    ) -> Result<Execution, DaemonError> {
+        let caller = context
+            .pane
+            .filter(|caller| *caller != pane)
+            .filter(|caller| {
+                matches!(
+                    self.inner
+                        .lock()
+                        .engine
+                        .state
+                        .pane(*caller)
+                        .map(|pane| &pane.kind),
+                    Some(PaneKind::Agent(_))
+                )
+            })
+            .ok_or_else(|| {
+                ServerError::InvalidCommand(
+                    "agent-send --notify runs from inside another agent pane".to_owned(),
+                )
+            })?;
+        let runtime = self.agent_runtime().ok_or(ServerError::PaneExited(pane))?;
+        let shared = Arc::downgrade(&self.server_owner());
+        let waiter = crate::agent::host::AgentTurnWaiter {
+            reply: crate::daemon::cmdq::Reply::new(move |result| {
+                let Some(shared) = shared.upgrade() else {
+                    return;
+                };
+                let message = agent_notify_message(pane, result);
+                let spawned = std::thread::Builder::new()
+                    .name("zz-agent-notify".to_owned())
+                    .spawn(move || {
+                        if !shared.submit_agent_prompt(caller, message) {
+                            log::warn!(target: "zz::agent", "could not tell {caller} that {pane} finished");
+                        }
+                    });
+                if let Err(error) = spawned {
+                    log::warn!(target: "zz::agent", "could not report {pane} back to {caller}: {error}");
+                }
+            }),
+            on_block: AgentBlockPolicy::Wait,
+            audit: Arc::default(),
+        };
+        if !runtime.prompt_with_waiter(
+            pane,
+            AgentPrompt {
+                owner: ClientInstanceId(u64::MAX),
+                text,
+                images: Vec::new(),
+            },
+            Some(waiter),
+        ) {
+            return Err(ServerError::PaneExited(pane).into());
+        }
+        Ok(Execution {
+            output: if kind == ClientKind::Interactive {
+                RawText::default()
+            } else {
+                pane.to_string().into()
+            },
+            effects: Vec::new(),
+        })
+    }
+
     #[cfg(feature = "agent")]
     fn submit_agent_prompt_and_wait(
         self: &Arc<Self>,
@@ -49556,6 +49634,7 @@ struct ParsedAgentSend {
     target: Option<String>,
     submit: bool,
     wait: bool,
+    notify: bool,
     timeout: Option<Duration>,
     context: Option<ContextReference>,
     text: Vec<String>,
@@ -50573,6 +50652,47 @@ pub fn agent_send_reads_stdin(args: &[RawText]) -> bool {
     parse_agent_send_args(args).is_ok_and(|parsed| parsed.text.is_empty())
 }
 
+#[cfg(feature = "agent")]
+const MAX_AGENT_NOTIFY_BYTES: usize = 64 * 1024;
+
+#[cfg(feature = "agent")]
+fn agent_notify_message(
+    pane: PaneId,
+    result: Option<crate::agent::host::AgentTurnResult>,
+) -> String {
+    use crate::agent::host::AgentTurnFailure;
+
+    let reply = |reply: &crate::agent::host::AgentTurnReply| {
+        let text = if reply.final_text.trim().is_empty() {
+            &reply.text
+        } else {
+            &reply.final_text
+        };
+        let mut start = text.len().saturating_sub(MAX_AGENT_NOTIFY_BYTES);
+        while !text.is_char_boundary(start) {
+            start += 1;
+        }
+        text[start..].trim().to_owned()
+    };
+    match result {
+        Some(Ok(done)) => format!("[zz] Agent {pane} finished:\n\n{}", reply(&done)),
+        Some(Err(AgentTurnFailure::Stopped {
+            reason,
+            reply: done,
+        })) => format!("[zz] Agent {pane} stopped ({reason}):\n\n{}", reply(&done)),
+        Some(Err(AgentTurnFailure::Blocked { .. })) => {
+            format!("[zz] Agent {pane} is waiting for a permission answer.")
+        }
+        Some(Err(AgentTurnFailure::Failed(message))) => {
+            format!("[zz] Agent {pane} failed: {message}")
+        }
+        Some(Err(AgentTurnFailure::Cancelled)) => format!("[zz] Agent {pane} was stopped."),
+        Some(Err(AgentTurnFailure::Reclaimed | AgentTurnFailure::Closed)) | None => {
+            format!("[zz] Agent {pane} did not take the message.")
+        }
+    }
+}
+
 fn parse_agent_send_args(args: &[RawText]) -> Result<ParsedAgentSend, ServerError> {
     let mut parsed = ParsedAgentSend::default();
     let mut on_block_set = false;
@@ -50601,6 +50721,12 @@ fn parse_agent_send_args(args: &[RawText]) -> Result<ParsedAgentSend, ServerErro
         if argument == "--wait" {
             parsed.submit = true;
             parsed.wait = true;
+            index += 1;
+            continue;
+        }
+        if argument == "--notify" {
+            parsed.submit = true;
+            parsed.notify = true;
             index += 1;
             continue;
         }
@@ -50658,6 +50784,11 @@ fn parse_agent_send_args(args: &[RawText]) -> Result<ParsedAgentSend, ServerErro
     if parsed.json && parsed.final_only {
         return Err(ServerError::CommandParse(
             "agent-send --json and --final cannot be combined".to_owned(),
+        ));
+    }
+    if parsed.notify && parsed.wait {
+        return Err(ServerError::CommandParse(
+            "agent-send --notify and --wait cannot be combined".to_owned(),
         ));
     }
     if progress
@@ -50931,12 +51062,12 @@ Print nothing unless `-P` requests the new pane ID; `-F` changes its format.
 
 The providers are `codex` and `claude-code` (`claude` accepted). Choose one with `zz split-window --kind agent --provider <provider>`. The daemon spawns each provider through the `agent-command` or `agent-claude-code-command` option. Claude Code runs the user's own `claude` over its stream-json protocol and Codex runs the user's own `codex` through `codex app-server`; a command whose program is neither runs as an ACP adapter. The model, reasoning effort, and approval policy come from the adapter's own configuration: `~/.codex/config.toml` for Codex or Claude Code's own settings. `zz` does not set them.
 
-### `zz agent-send [-t %N] [--submit | --wait [--progress] [--timeout SECS] [--on-block wait|fail|allow|deny] [--json | --final]] [--context PATH[:START[-END]]] [TEXT]`
+### `zz agent-send [-t %N] [--submit | --notify | --wait [--progress] [--timeout SECS] [--on-block wait|fail|allow|deny] [--json | --final]] [--context PATH[:START[-END]]] [TEXT]`
 
 Draft into another Agent pane's composer for its user to review.
 Print `appended to the composer in %N` when drafted. An omitted or non-agent target routes to that window's most recently focused Agent pane. Read stdin when TEXT is omitted: `git diff | zz agent-send`. `--context` adds a file/line header and fences the payload; text is capped at 1 MiB.
 
-`--submit` sends now and prints the chosen pane; a busy pane queues the prompt. `--wait` submits, waits for that turn, and prints its reply on stdout (pane ID on stderr). Failure, cancellation, hand-back, or timeout exits non-zero. The timeout defaults to 600 seconds; `0` waits forever. A timeout leaves the turn running. `--json` prints one object with turn facts, `final_text`, and `transcript`. `--final` prints only the text after the last tool call or tool update. Both require `--wait`; combining them is a usage error. `--on-block wait` waits for permission. `--on-block fail` prints the pending permission JSON and exits 3 while the turn continues. `--on-block allow` answers tool permissions, preferring allow-once, and waits for user questions. `--on-block deny` rejects permissions, including user questions.
+`--submit` sends now and prints the chosen pane; a busy pane queues the prompt. `--notify` submits from inside an agent pane and, when the target's turn ends, posts its reply back into the calling pane as a prompt, queued behind that pane's own turn. `--wait` submits, waits for that turn, and prints its reply on stdout (pane ID on stderr). Failure, cancellation, hand-back, or timeout exits non-zero. The timeout defaults to 600 seconds; `0` waits forever. A timeout leaves the turn running. `--json` prints one object with turn facts, `final_text`, and `transcript`. `--final` prints only the text after the last tool call or tool update. Both require `--wait`; combining them is a usage error. `--on-block wait` waits for permission. `--on-block fail` prints the pending permission JSON and exits 3 while the turn continues. `--on-block allow` answers tool permissions, preferring allow-once, and waits for user questions. `--on-block deny` rejects permissions, including user questions.
 
 Turn facts: `final_text` contains message text after the last tool call or tool update. `tool_calls` counts tool calls the pane saw, including runtime-approved reads; permission counters count only requests that reached the pane. Each buffer keeps its tail when capped: 1 MiB for the transcript and 256 KiB for final text. The JSON object has `pane`, `stop_reason`, `duration_ms`, `tool_calls`, `permissions` (`requested`, `allowed`, `denied`), `truncated`, `final_text`, and `transcript`. A blocked reply also has a nested `permission` object. Exit 0 means `end_turn`; other stop reasons exit 1 with the reply still printed, except cancellation, which keeps its existing error output. A blocked wait exits 3 and a timeout exits 124. Stderr carries the pane ID and on-block audit lines. `--progress` requires `--wait` and an explicit `-t %N`. It prints tool calls, state changes, and a heartbeat after 60 seconds without a line to stderr. Titles in progress lines stop at 120 characters. Over `-H`, it prints `agent-send: --progress is local only` and waits without the progress stream.
 
@@ -79656,6 +79787,43 @@ set-option -g @alias-mixed-next yes
         assert_eq!(
             environment.map().get("VALUE").map(RawText::as_str),
             Some("contains=equals")
+        );
+    }
+
+    #[test]
+    fn agent_send_notify_submits_and_refuses_wait() {
+        let parsed = parse_agent_send_args(&["-t", "%2", "--notify", "go"].map(RawText::from))
+            .expect("parse");
+        assert!(parsed.notify && parsed.submit && !parsed.wait);
+        assert!(parse_agent_send_args(&["--notify", "--wait", "go"].map(RawText::from)).is_err());
+        assert!(
+            parse_agent_send_args(&["--notify", "--timeout", "5", "go"].map(RawText::from))
+                .is_err()
+        );
+    }
+
+    #[cfg(feature = "agent")]
+    #[test]
+    fn agent_notify_messages_carry_the_reply_or_why_there_is_none() {
+        use crate::agent::host::{AgentTurnFailure, AgentTurnReply};
+
+        let pane = PaneId(5);
+        let reply = AgentTurnReply {
+            text: "thinking... done".to_owned(),
+            final_text: "done".to_owned(),
+            ..AgentTurnReply::default()
+        };
+        assert_eq!(
+            agent_notify_message(pane, Some(Ok(reply))),
+            "[zz] Agent %5 finished:\n\ndone"
+        );
+        assert_eq!(
+            agent_notify_message(pane, Some(Err(AgentTurnFailure::Cancelled))),
+            "[zz] Agent %5 was stopped."
+        );
+        assert_eq!(
+            agent_notify_message(pane, None),
+            "[zz] Agent %5 did not take the message."
         );
     }
 

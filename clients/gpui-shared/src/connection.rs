@@ -39,6 +39,7 @@ struct AgentCursor {
     history_supported: bool,
     session_load_supported: bool,
     session_delete_supported: bool,
+    verbs_supported: bool,
     commands: Arc<[AgentCommand]>,
     command_session_reset: bool,
 }
@@ -74,6 +75,8 @@ struct AgentCapabilities {
     load: bool,
     #[serde(default)]
     delete: bool,
+    #[serde(default)]
+    verbs: bool,
 }
 
 impl AgentCursor {
@@ -112,6 +115,7 @@ impl AgentCursor {
                 self.history_supported = item.capabilities.list;
                 self.session_load_supported = item.capabilities.load;
                 self.session_delete_supported = item.capabilities.delete;
+                self.verbs_supported = item.capabilities.verbs;
             }
             if item.item == "sessionReset" {
                 journal.clear();
@@ -304,6 +308,12 @@ impl Connection {
         self.agent_cursors
             .get(&pane)
             .is_some_and(|cursor| cursor.session_delete_supported)
+    }
+
+    pub fn agent_verbs_supported(&self, pane: PaneId) -> bool {
+        self.agent_cursors
+            .get(&pane)
+            .is_some_and(|cursor| cursor.verbs_supported)
     }
 
     pub fn agent_commands(&self, pane: PaneId) -> Arc<[AgentCommand]> {

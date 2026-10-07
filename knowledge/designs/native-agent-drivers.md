@@ -116,6 +116,13 @@ session. A Claude fork has no session file until its first prompt, so the driver
 (`_meta.zz.fork` on its notice) in the pane's journal, and a restart before that prompt forks again
 under the same id.
 
+Prompt rows offer **Rewind to here** on hover while the pane is idle and its driver sets `verbs`;
+it sends `//rewind <id>` through the composer's send path. The shared reducer keeps each prompt
+row's message id (`AgentThreadEntry::User.message_id`; a row the client added itself takes it from
+the daemon's echo) and `rewind_id` skips rows that start with `/`, since vendor and zz commands are
+not rewind points. Clients send a zz command without opening a local turn or prompt row, because
+the daemon echoes the command itself and never queues it.
+
 # Background work, questions, subagents (v108)
 
 Background agents and commands stay `in_progress` in their own rows after launch and finish with
@@ -130,8 +137,11 @@ v108 entry of the [wire protocol](/protocol/wire-protocol.md).
 
 Desktop and gpui-shared render these through shared zz-ui widgets: the question card
 (`agent/question.rs`), the task tray chip in the composer (`agent/tasks.rs`), and the step fold in
-`agent.rs`, which nests subagent steps under their agent row, collapsed to a step count. FFI carries
-them in the agent snapshot (`permissions[].questions`, `tasks`, each entry's `parent`) and answers
+`agent.rs`, which nests subagent steps under their agent row, collapsed to a step count. A step
+leaves its place in the timeline for its agent's row wherever it arrives, before the agent or after
+other rows, and steps keep their arrival order; a loop of parent links renders flat. FFI carries
+them in the agent snapshot (`permissions[].questions`, `tasks`, each entry's `parent`, a prompt
+row's `message_id`) and answers
 with `zz_client_agent_answer_question` and `zz_client_agent_stop_task`. The card keeps answers
 inside the wire limits before Submit, and the protocol traces print a card's answer counts, never
 its text.
@@ -196,14 +206,11 @@ Codex. The drivers have not been run against older versions.
 
 # Next
 
-1. A "rewind to here" action on prompt rows that sends `//rewind <id>`.
-2. Orchestration: PiP panes and a decision on in-session tools. The groundwork is in:
+1. Orchestration: PiP panes and a decision on in-session tools. The groundwork is in:
    `agent-send --notify` submits to another agent pane and, when that turn ends, posts the reply
    back into the calling agent pane as a prompt queued behind its own turn (t3code's async
    completion, over the CLI agents already use). Both vendors can also host tools without a
    process: Claude through `sdkMcpServers` and `mcp_message` control requests, Codex through
    `dynamicTools` on `thread/start` and `item/tool/call`.
-3. Keep-up: a weekly diff of `sdk.d.ts` and the Codex schema against the tested versions above.
+2. Keep-up: a weekly diff of `sdk.d.ts` and the Codex schema against the tested versions above.
    The survey's `archive/codex-host` tag is not in this clone; the Codex driver was written fresh.
-4. Small UI edges: a subagent step split from its agent row by assistant text does not nest, and
-   gpui-shared's Enter on an ordinary permission can also send attached images.

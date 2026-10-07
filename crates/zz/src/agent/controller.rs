@@ -90,7 +90,7 @@ pub(crate) use zz_client::agent_transcript::{
     AgentPermissionKind, AgentPermissionRequest, AgentToolKindModel, AgentToolStatusModel,
     ToolPayload,
 };
-use zz_client::agent_transcript::{AgentTranscript, capped};
+use zz_client::agent_transcript::{AgentTranscript, capped, is_zz_command};
 pub(crate) type AgentThreadEntry = zz_client::agent_transcript::AgentThreadEntry<Arc<Image>>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -112,7 +112,7 @@ pub(crate) use zz_client::agent_config::{AgentConfigCategory, AgentConfigOption,
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[allow(
     clippy::struct_excessive_bools,
-    reason = "ACP exposes these six independent capabilities"
+    reason = "ACP exposes these seven independent capabilities"
 )]
 pub(crate) struct AgentSessionCapabilities {
     pub(crate) load: bool,
@@ -123,6 +123,7 @@ pub(crate) struct AgentSessionCapabilities {
     /// A prompt capability rather than a session one, but it arrives in the
     /// same handshake and gates the composer the same way.
     pub(crate) images: bool,
+    pub(crate) verbs: bool,
 }
 
 pub(crate) use zz_protocol::agent_stream::AgentSessionSummary;
@@ -1091,10 +1092,12 @@ impl AgentController {
         if let Some(refusal) = thread.image_refusal(!images.is_empty()) {
             return Err(refusal);
         }
-        let queueing = thread.connection.has_active_turn();
-        if !queueing && let Some(refusal) = thread.prompt_refusal(!images.is_empty()) {
+        let command = thread.session_capabilities.verbs && is_zz_command(&text);
+        let active = thread.connection.has_active_turn();
+        if !active && let Some(refusal) = thread.prompt_refusal(!images.is_empty()) {
             return Err(refusal);
         }
+        let queueing = active && !command;
         if queueing && self.queued_count(pane) >= MAX_AGENT_QUEUED_PROMPTS {
             return Err(Arc::from(
                 "finish or unqueue one of the four queued prompts first",
@@ -1115,6 +1118,9 @@ impl AgentController {
             }
             cx.notify();
             return Err(Arc::from("agent daemon is not connected"));
+        }
+        if command {
+            return Ok(());
         }
         if queueing {
             // The daemon publishes the queue depth; showing it immediately keeps
@@ -1759,6 +1765,7 @@ impl AgentController {
                     delete: capabilities.delete,
                     additional_directories: capabilities.additional_directories,
                     images: capabilities.images,
+                    verbs: capabilities.verbs,
                 },
             },
             AgentStreamPayload::SessionReset { restoring } => {
@@ -4543,6 +4550,52 @@ mod tests {
                 },
                 AgentRequest::Unqueue,
             ]
+        );
+    }
+
+    #[gpui::test]
+    fn a_zz_command_opens_no_turn_and_joins_no_queue(cx: &mut TestAppContext) {
+        let (controller, sink) = proxy_controller(cx);
+        let pane = PaneId(7);
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                ready_pane(controller, pane);
+                let thread = controller.panes.get_mut(&pane).expect("pane");
+                thread.session_capabilities.verbs = true;
+                controller
+                    .prompt(pane, "//rewind u-1", Vec::new(), cx)
+                    .expect("the command is sent");
+                let thread = &controller.panes[&pane];
+                assert_eq!(thread.connection, AgentConnectionState::Ready);
+                assert!(
+                    thread.transcript.entries().is_empty(),
+                    "the daemon echoes the command itself"
+                );
+                controller
+                    .prompt(pane, "first", Vec::new(), cx)
+                    .expect("first prompt");
+                controller
+                    .prompt(pane, "//steer faster", Vec::new(), cx)
+                    .expect("a command goes out mid-turn");
+                assert_eq!(controller.queued_count(pane), 0);
+                let thread = controller.panes.get_mut(&pane).expect("pane");
+                thread.session_capabilities.verbs = false;
+                controller
+                    .prompt(pane, "//steer later", Vec::new(), cx)
+                    .expect("a plain prompt is queued");
+                assert_eq!(controller.queued_count(pane), 1);
+            });
+        });
+
+        assert_eq!(
+            sink.borrow()
+                .iter()
+                .map(|(_, request)| match request {
+                    AgentRequest::Prompt { text, .. } => text.as_str(),
+                    _ => "",
+                })
+                .collect::<Vec<_>>(),
+            ["//rewind u-1", "first", "//steer faster", "//steer later"]
         );
     }
 

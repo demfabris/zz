@@ -17,7 +17,7 @@ use zz_client::{
         AgentConfigOption, AgentMode, agent_command_model, config_option_models, rendered_error,
         valid_session_cursor, valid_session_directory, valid_session_id, valid_session_summary,
     },
-    agent_transcript::AgentTranscript,
+    agent_transcript::{AgentTranscript, is_zz_command},
 };
 use zz_protocol::{
     AgentConnectionPhase, AgentPaneWire, AgentProvider, AgentQuestionAnswer, AgentSessionOpKind,
@@ -653,7 +653,8 @@ impl ZzAgentModel {
                     .collect(),
             )
             .map_err(|error| error.to_string())?;
-        if matches!(self.phase(), AgentConnectionPhase::Ready) {
+        let command = self.capabilities.verbs && is_zz_command(&text);
+        if matches!(self.phase(), AgentConnectionPhase::Ready) && !command {
             self.begin_prompt(text, images);
         }
         self.error = None;
@@ -1466,6 +1467,23 @@ mod tests {
         let step = entries.iter().find(|entry| entry["index"] == 0).unwrap();
         let agent = entries.iter().find(|entry| entry["index"] == 1).unwrap();
         assert_eq!(step["parent"], agent["entry"]["id"]);
+    }
+
+    #[test]
+    fn prompt_rows_carry_the_message_id_a_rewind_targets() {
+        let mut model = model();
+        let prompt = |id: &str, text: &str| json!({"sessionUpdate":"user_message_chunk","messageId":id,"content":{"type":"text","text":text}});
+        model.update(prompt("u-1", "first"));
+        model.begin_prompt("second".to_owned(), Vec::new());
+        let since = model.snapshot(0)["revision"].as_u64().unwrap();
+        model.update(prompt("u-2", "second"));
+
+        let next = model.snapshot(since);
+        assert_eq!(next["entries"][0]["index"], 1);
+        assert_eq!(next["entries"][0]["entry"]["message_id"], "u-2");
+        let all = model.snapshot(0);
+        assert_eq!(all["entries"][0]["entry"]["message_id"], "u-1");
+        assert_eq!(all["entries"].as_array().unwrap().len(), 2);
     }
 
     #[test]

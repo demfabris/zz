@@ -22,7 +22,7 @@ use zz_client::agent_config::{
 };
 use zz_client::agent_transcript::{
     AgentPermissionKind, AgentThreadEntry, AgentToolKindModel, AgentToolStatusModel,
-    AgentTranscript, ToolPayload,
+    AgentTranscript, ToolPayload, is_zz_command, rewind_command,
 };
 use zz_protocol::{
     AgentConnectionPhase, AgentDescriptor, AgentImage, AgentQuestionAnswer, AgentSessionOpKind,
@@ -422,6 +422,13 @@ impl AgentPane {
                 self.apply_question_step(step, window, cx);
                 return;
             }
+            if let Some((request_id, option)) = head.and_then(|permission| {
+                let option = permission.options.get(self.permission_selected)?.id.clone();
+                Some((permission.request_id, option))
+            }) {
+                self.respond_permission(request_id, Some(option), cx);
+                return;
+            }
         }
         self.synchronize_completions(cx);
         if let Some(index) = self.completion_selected {
@@ -550,7 +557,7 @@ impl AgentPane {
         Some(zz_ui::agent::slash::suggestion_list(rows, cx).into_any_element())
     }
 
-    fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn send_prompt(&mut self, text: &str, images: &[AgentImage], cx: &mut Context<Self>) -> bool {
         let connection = self.connection.read(cx);
         let allowed = self.settings_apply.is_none()
             && connection.connected
@@ -562,42 +569,53 @@ impl AgentPane {
                 ) || (state.phase == AgentConnectionPhase::Ready
                     && state.pending_permission.is_none())
             });
-        let text = self.input.read(cx).value().to_string();
-        if !allowed || (text.trim().is_empty() && self.attachments.is_empty()) {
-            return;
+        if !allowed || (text.trim().is_empty() && images.is_empty()) {
+            return false;
         }
-        if let Err(error) = crate::attachments::validate_images(&text, &self.attachments) {
+        if let Err(error) = crate::attachments::validate_images(text, images) {
             self.draft_error = Some(error);
             cx.notify();
-            return;
+            return false;
         }
         self.connection.update(cx, |connection, cx| {
             connection.send(
                 ProtocolMessage::AgentPrompt {
                     pane: self.pane,
-                    text: text.clone(),
-                    images: self.attachments.clone(),
+                    text: text.to_owned(),
+                    images: images.to_vec(),
                 },
                 cx,
             );
         });
-        if !self.connection.read(cx).connected {
-            return;
+        let connection = self.connection.read(cx);
+        if !connection.connected {
+            return false;
         }
-        let queueing = self
-            .connection
-            .read(cx)
-            .core
-            .agent_state(self.pane)
-            .is_some_and(|state| {
-                matches!(
-                    state.phase,
-                    AgentConnectionPhase::Running | AgentConnectionPhase::AwaitingPermission
-                )
-            });
-        if !queueing {
-            self.transcript.local_prompt(&text, &self.attachments);
+        let command = connection.agent_verbs_supported(self.pane) && is_zz_command(text);
+        let queueing = connection.core.agent_state(self.pane).is_some_and(|state| {
+            matches!(
+                state.phase,
+                AgentConnectionPhase::Running | AgentConnectionPhase::AwaitingPermission
+            )
+        });
+        if !queueing && !command {
+            self.transcript.local_prompt(text, images);
             self.transcript_dirty = true;
+        }
+        true
+    }
+
+    fn rewind_to(&mut self, message_id: &str, cx: &mut Context<Self>) {
+        if self.send_prompt(&rewind_command(message_id), &[], cx) {
+            cx.notify();
+        }
+    }
+
+    fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let text = self.input.read(cx).value().to_string();
+        let attachments = self.attachments.clone();
+        if !self.send_prompt(&text, &attachments, cx) {
+            return;
         }
         self.attachments.clear();
         self.draft_error = None;
@@ -2190,7 +2208,8 @@ impl AgentPane {
             return;
         }
         let input = self.input.read(cx);
-        if !input.value().trim().is_empty() && input.focus_handle(cx).is_focused(window) {
+        let composer_focused = input.focus_handle(cx).is_focused(window);
+        if !input.value().trim().is_empty() && composer_focused {
             return;
         }
         let Some(permission) = self.current_permission(cx) else {
@@ -2198,6 +2217,7 @@ impl AgentPane {
         };
         let options = permission.options;
         match event.keystroke.key.as_str() {
+            "enter" if composer_focused => return,
             "escape" => self.respond_permission(permission.request_id, None, cx),
             "up" if !options.is_empty() => {
                 self.permission_selected = self
@@ -2767,6 +2787,27 @@ impl Render for AgentPane {
                 cx,
             )
         });
+        let timeline = AgentTimeline::new(
+            self.rows.clone(),
+            self.scroll.clone(),
+            self.timeline.clone(),
+        )
+        .active_turn(running)
+        .bottom_padding(COMPOSER_OUTER_PADDING);
+        let timeline = if self.connection.read(cx).agent_verbs_supported(pane) {
+            let rewind_view = cx.entity();
+            timeline.rewind(
+                writable
+                    && state.phase == AgentConnectionPhase::Ready
+                    && state.pending_permission.is_none()
+                    && self.settings_apply.is_none(),
+                move |message_id, _, cx| {
+                    rewind_view.update(cx, |this, cx| this.rewind_to(message_id, cx));
+                },
+            )
+        } else {
+            timeline
+        };
         div()
             .relative()
             .flex()
@@ -2858,16 +2899,7 @@ impl Render for AgentPane {
                     .overflow_hidden()
                     .children(empty)
                     .when(!self.rows.is_empty(), |area| {
-                        area.child(
-                            AgentTimeline::new(
-                                self.rows.clone(),
-                                self.scroll.clone(),
-                                self.timeline.clone(),
-                            )
-                            .active_turn(running)
-                            .bottom_padding(COMPOSER_OUTER_PADDING),
-                        )
-                        .child(
+                        area.child(timeline).child(
                             div()
                                 .absolute()
                                 .top_0()
@@ -3185,10 +3217,12 @@ fn ui_entry_with_markdown(
             id,
             markdown,
             images,
+            ..
         } => AgentEntry::User {
             id: *id,
             markdown: streaming_markdown(markdown_sources, *id, markdown),
             images: images.clone().into(),
+            rewind_id: entry.rewind_id().map(gpui::SharedString::from),
         },
         AgentThreadEntry::Assistant { id, markdown, .. } => AgentEntry::Assistant {
             id: *id,
@@ -3527,6 +3561,56 @@ mod tests {
             zz_ui::agent::timeline_parent(&transcript.entries[0]),
             Some(transcript.entries[1].id())
         );
+    }
+
+    #[test]
+    fn a_step_that_arrives_before_its_agent_leaves_its_place_for_the_agents_row() {
+        let mut transcript = Transcript::default();
+        transcript.apply(
+            1,
+            &json!({"item":"update","update":{
+            "sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read a.rs","kind":"read",
+            "_meta":{"zz":{"parent":"agent-1"}}}}),
+        );
+        transcript.apply(
+            2,
+            &json!({"item":"update","update":{
+            "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"meanwhile"}}}),
+        );
+        transcript.apply(
+            3,
+            &json!({"item":"update","update":{
+            "sessionUpdate":"tool_call","toolCallId":"agent-1","title":"Survey","kind":"think"}}),
+        );
+        assert_eq!(
+            fold_timeline_rows(&transcript.entries).entry_to_row,
+            [1, 0, 1],
+            "the step moves past the reply into its agent's row"
+        );
+    }
+
+    #[test]
+    fn prompt_rows_carry_their_rewind_id_into_the_timeline() {
+        let prompt = |id: &str, text: &str| json!({"sessionUpdate":"user_message_chunk","messageId":id,"content":{"type":"text","text":text}});
+        let mut transcript = Transcript::default();
+        transcript.apply(
+            1,
+            &json!({"item":"sessionSwitched","replay":[prompt("u-1", "first"), prompt("zz-command-1-in", "//btw why")]}),
+        );
+        transcript.local_prompt("second", &[]);
+        transcript.apply(
+            2,
+            &json!({"item":"update","update":prompt("u-2", "second")}),
+        );
+        let rewind_ids = transcript
+            .entries
+            .iter()
+            .map(|entry| match entry {
+                AgentEntry::User { rewind_id, .. } => rewind_id.as_deref(),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(rewind_ids, [Some("u-1"), None, Some("u-2")]);
     }
 
     #[test]

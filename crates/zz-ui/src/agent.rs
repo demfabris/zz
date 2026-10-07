@@ -867,6 +867,7 @@ pub enum AgentEntry {
         markdown: AgentMarkdown,
         /// Images sent with the message, shown above its text as tiles.
         images: Arc<[Arc<Image>]>,
+        rewind_id: Option<SharedString>,
     },
     Assistant {
         id: u64,
@@ -973,15 +974,61 @@ pub struct FoldedTimelineRows {
 
 #[must_use]
 pub fn fold_timeline_rows(entries: &[AgentEntry]) -> FoldedTimelineRows {
+    let positions = entries
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| (entry.id(), index))
+        .collect::<HashMap<_, _>>();
+    let roots = (0..entries.len())
+        .map(|index| step_root(entries, &positions, index))
+        .collect::<Vec<_>>();
     let mut rows = Vec::new();
-    let mut entry_to_row = Vec::with_capacity(entries.len());
-    for entry in entries.iter().cloned() {
-        let (row_index, _) = append_timeline_row(&mut rows, entry);
-        entry_to_row.push(row_index);
+    let mut entry_to_row = vec![0; entries.len()];
+    for (index, entry) in entries.iter().enumerate() {
+        if roots[index].is_none() {
+            entry_to_row[index] = append_timeline_row(&mut rows, entry.clone()).0;
+        }
+    }
+    for (index, entry) in entries.iter().enumerate() {
+        if let Some(root) = roots[index] {
+            let row_index = entry_to_row[root];
+            nest_in_row(&mut rows[row_index], entry.clone());
+            entry_to_row[index] = row_index;
+        }
     }
     FoldedTimelineRows {
         rows: Arc::new(rows),
         entry_to_row,
+    }
+}
+
+fn step_root(
+    entries: &[AgentEntry],
+    positions: &HashMap<u64, usize>,
+    index: usize,
+) -> Option<usize> {
+    let mut at = index;
+    for _ in 0..entries.len() {
+        match timeline_parent(&entries[at]).and_then(|parent| positions.get(&parent).copied()) {
+            Some(parent) => at = parent,
+            None => return (at != index).then_some(at),
+        }
+    }
+    None
+}
+
+fn nest_in_row(row: &mut TimelineRow, entry: AgentEntry) {
+    match row {
+        TimelineRow::Group { entries, .. } => Arc::make_mut(entries).push(entry),
+        TimelineRow::Single(previous) => {
+            let id = previous.id();
+            let previous = previous.clone();
+            *row = TimelineRow::Group {
+                kind: TimelineGroupKind::Tool,
+                id,
+                entries: Arc::new(vec![previous, entry]),
+            };
+        }
     }
 }
 
@@ -998,19 +1045,7 @@ pub fn append_timeline_row(rows: &mut Vec<TimelineRow>, entry: AgentEntry) -> (u
     if let Some(parent) = timeline_parent(&entry)
         && let Some(row_index) = rows.iter().rposition(|row| row.entry(parent).is_some())
     {
-        let row = &mut rows[row_index];
-        match row {
-            TimelineRow::Group { entries, .. } => Arc::make_mut(entries).push(entry),
-            TimelineRow::Single(previous) => {
-                let id = previous.id();
-                let previous = previous.clone();
-                *row = TimelineRow::Group {
-                    kind: TimelineGroupKind::Tool,
-                    id,
-                    entries: Arc::new(vec![previous, entry]),
-                };
-            }
-        }
+        nest_in_row(&mut rows[row_index], entry);
         return (row_index, false);
     }
     if let Some(kind) = timeline_group_kind(&entry)
@@ -1385,6 +1420,14 @@ impl TimelineStick {
     }
 }
 
+type RewindHandler = Rc<dyn Fn(&SharedString, &mut Window, &mut App)>;
+
+#[derive(Clone)]
+struct TimelineRewind {
+    enabled: bool,
+    handler: RewindHandler,
+}
+
 #[derive(Clone, IntoElement)]
 pub struct AgentTimeline {
     rows: Arc<Vec<TimelineRow>>,
@@ -1392,6 +1435,7 @@ pub struct AgentTimeline {
     store: Entity<AgentTimelineStore>,
     active_turn: bool,
     bottom_padding: f32,
+    rewind: Option<TimelineRewind>,
 }
 
 impl AgentTimeline {
@@ -1407,6 +1451,7 @@ impl AgentTimeline {
             store,
             active_turn: false,
             bottom_padding: 4.0,
+            rewind: None,
         }
     }
 
@@ -1419,6 +1464,19 @@ impl AgentTimeline {
     #[must_use]
     pub fn bottom_padding(mut self, bottom_padding: f32) -> Self {
         self.bottom_padding = bottom_padding;
+        self
+    }
+
+    #[must_use]
+    pub fn rewind(
+        mut self,
+        enabled: bool,
+        handler: impl Fn(&SharedString, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.rewind = Some(TimelineRewind {
+            enabled,
+            handler: Rc::new(handler),
+        });
         self
     }
 }
@@ -1434,6 +1492,10 @@ impl gpui::RenderOnce for AgentTimeline {
             final_assistant_entry_id(&rows)
         };
         let bottom_padding = self.bottom_padding;
+        let rewind = self.rewind.map(|rewind| TimelineRewind {
+            enabled: rewind.enabled && !self.active_turn,
+            handler: rewind.handler,
+        });
 
         list(self.list_state, move |index, _window, cx| {
             let Some(row) = rows.get(index).cloned() else {
@@ -1453,6 +1515,7 @@ impl gpui::RenderOnce for AgentTimeline {
                             &store,
                             row,
                             copyable_assistant,
+                            rewind.as_ref(),
                             cx,
                         )),
                 )
@@ -1481,9 +1544,16 @@ fn render_timeline_row(
     store: &Entity<AgentTimelineStore>,
     row: TimelineRow,
     copyable_assistant: Option<u64>,
+    rewind: Option<&TimelineRewind>,
     cx: &mut App,
 ) -> AnyElement {
     match row {
+        TimelineRow::Single(AgentEntry::User {
+            id,
+            markdown,
+            images,
+            rewind_id,
+        }) => render_user_entry(store, id, markdown, &images, rewind.zip(rewind_id), cx),
         TimelineRow::Single(entry) => {
             render_entry(timeline_scroll, store, entry, copyable_assistant, cx)
         }
@@ -1833,6 +1903,88 @@ fn activity_row(
         })
 }
 
+const USER_ENTRY_GROUP: &str = "agent-user-entry";
+
+fn render_user_entry(
+    store: &Entity<AgentTimelineStore>,
+    id: u64,
+    markdown: AgentMarkdown,
+    images: &[Arc<Image>],
+    rewind: Option<(&TimelineRewind, SharedString)>,
+    cx: &mut App,
+) -> AnyElement {
+    let bubble = v_flex()
+        .debug_selector(|| "agent-user-bubble".to_owned())
+        .max_w(relative(1.0))
+        .gap_2()
+        .px_3()
+        .py_2()
+        .rounded(cx.theme().radius)
+        .border_1()
+        .border_color(cx.theme().border())
+        .bg(cx.theme().background.raised(1))
+        .text_size(crate::rems_from_px(13.0))
+        .when(!images.is_empty(), |this| {
+            this.child(
+                h_flex()
+                    .flex_wrap()
+                    .gap_1()
+                    .children(images.iter().enumerate().map(|(index, image)| {
+                        agent_attachment_thumbnail(
+                            (
+                                SharedString::from(format!("agent-user-attachment-{id}")),
+                                index,
+                            ),
+                            Arc::clone(image),
+                            TRANSCRIPT_ATTACHMENT,
+                            cx,
+                        )
+                        .debug_selector(|| "agent-user-attachment".to_owned())
+                    })),
+            )
+        })
+        .when(!markdown.is_empty(), |this| {
+            this.child(markdown_view(store, id, MarkdownSlot::Body, markdown, cx))
+        });
+    let entry = v_flex().id(("agent-user-entry", id)).w_full().items_end();
+    let Some((rewind, message_id)) = rewind else {
+        return entry.child(bubble).into_any_element();
+    };
+    entry
+        .group(USER_ENTRY_GROUP)
+        .child(
+            h_flex()
+                .w_full()
+                .justify_end()
+                .items_center()
+                .gap_1()
+                .child(rewind_button(id, rewind, message_id))
+                .child(bubble.min_w_0()),
+        )
+        .into_any_element()
+}
+
+fn rewind_button(id: u64, rewind: &TimelineRewind, message_id: SharedString) -> Div {
+    let handler = Rc::clone(&rewind.handler);
+    div()
+        .flex_none()
+        .invisible()
+        .when(rewind.enabled, |slot| {
+            slot.group_hover(USER_ENTRY_GROUP, gpui::Styled::visible)
+        })
+        .child(
+            div()
+                .debug_selector(|| "agent-user-rewind".to_owned())
+                .child(
+                Button::compact_icon(("agent-rewind", id), IconName::History)
+                    .tooltip(
+                        "Rewind to here: continue from before this prompt. Files stay as they are.",
+                    )
+                    .on_click(move |_, window, cx| handler(&message_id, window, cx)),
+            ),
+        )
+}
+
 fn render_entry(
     timeline_scroll: &ListState,
     store: &Entity<AgentTimelineStore>,
@@ -1845,43 +1997,8 @@ fn render_entry(
             id,
             markdown,
             images,
-        } => v_flex()
-            .id(("agent-user-entry", id))
-            .w_full()
-            .items_end()
-            .child(
-                v_flex()
-                    .debug_selector(|| "agent-user-bubble".to_owned())
-                    .max_w(relative(1.0))
-                    .gap_2()
-                    .px_3()
-                    .py_2()
-                    .rounded(cx.theme().radius)
-                    .border_1()
-                    .border_color(cx.theme().border())
-                    .bg(cx.theme().background.raised(1))
-                    .text_size(crate::rems_from_px(13.0))
-                    .when(!images.is_empty(), |this| {
-                        this.child(h_flex().flex_wrap().gap_1().children(
-                            images.iter().enumerate().map(|(index, image)| {
-                                agent_attachment_thumbnail(
-                                    (
-                                        SharedString::from(format!("agent-user-attachment-{id}")),
-                                        index,
-                                    ),
-                                    Arc::clone(image),
-                                    TRANSCRIPT_ATTACHMENT,
-                                    cx,
-                                )
-                                .debug_selector(|| "agent-user-attachment".to_owned())
-                            }),
-                        ))
-                    })
-                    .when(!markdown.is_empty(), |this| {
-                        this.child(markdown_view(store, id, MarkdownSlot::Body, markdown, cx))
-                    }),
-            )
-            .into_any_element(),
+            ..
+        } => render_user_entry(store, id, markdown, &images, None, cx),
         AgentEntry::Assistant { id, markdown } => {
             let copy = markdown.clone();
             v_flex()
@@ -3606,18 +3723,24 @@ mod tests {
         entry: AgentEntry,
         pane_width: Pixels,
         active_turn: bool,
+        rewinds: Option<Rc<std::cell::RefCell<Vec<SharedString>>>>,
     }
 
     impl Render for UserEntryTest {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            div().w(self.pane_width).h(px(600.0)).child(
-                AgentTimeline::new(
-                    Arc::new(vec![TimelineRow::Single(self.entry.clone())]),
-                    ListState::new(1, gpui::ListAlignment::Top, px(600.0)),
-                    self.store.clone(),
-                )
-                .active_turn(self.active_turn),
+            let timeline = AgentTimeline::new(
+                Arc::new(vec![TimelineRow::Single(self.entry.clone())]),
+                ListState::new(1, gpui::ListAlignment::Top, px(600.0)),
+                self.store.clone(),
             )
+            .active_turn(self.active_turn);
+            let timeline = match self.rewinds.clone() {
+                Some(rewinds) => timeline.rewind(true, move |id, _, _| {
+                    rewinds.borrow_mut().push(id.clone());
+                }),
+                None => timeline,
+            };
+            div().w(self.pane_width).h(px(600.0)).child(timeline)
         }
     }
 
@@ -3864,10 +3987,10 @@ mod tests {
         let nesting = StepNesting::new(entries);
         assert_eq!(
             nesting.top,
-            [0, 1, 2, 4],
+            [0, 1, 2, 3],
             "a step whose agent is unknown stands alone"
         );
-        assert_eq!(nesting.steps[&7], [3]);
+        assert_eq!(nesting.steps[&7], [4]);
         assert_eq!(
             tool_group_label(nesting.top.iter().map(|index| &entries[*index])),
             "Read files, Thought, Edit file"
@@ -3877,6 +4000,71 @@ mod tests {
             "2 steps · Read 4.rs"
         );
         assert_eq!(subagent_steps_label(1, None), "1 step");
+    }
+
+    #[test]
+    fn steps_leave_their_place_for_their_agents_row_in_arrival_order() {
+        let entries = vec![
+            test_step(1, 4),
+            AgentEntry::Assistant {
+                id: 2,
+                markdown: "working".into(),
+            },
+            test_tool_kind(
+                3,
+                "Read a.rs",
+                AgentToolKind::Read,
+                AgentToolStatus::Completed,
+            ),
+            test_tool_kind(4, "Survey", AgentToolKind::Think, AgentToolStatus::Running),
+            AgentEntry::Assistant {
+                id: 5,
+                markdown: "meanwhile".into(),
+            },
+            test_step(6, 4),
+            test_step(7, 6),
+            test_step(8, 99),
+        ];
+
+        let folded = fold_timeline_rows(&entries);
+
+        assert_eq!(folded.entry_to_row, [1, 0, 1, 1, 2, 1, 1, 3]);
+        let TimelineRow::Group { id: 3, entries, .. } = &folded.rows[1] else {
+            panic!("the agent's row holds its steps: {:?}", folded.rows[1]);
+        };
+        assert_eq!(
+            entries.iter().map(AgentEntry::id).collect::<Vec<_>>(),
+            [3, 4, 1, 6, 7]
+        );
+        let nesting = StepNesting::new(entries);
+        assert_eq!(nesting.top, [0, 1]);
+        assert_eq!(nesting.steps[&4], [2, 3], "steps keep their arrival order");
+        assert_eq!(nesting.steps[&6], [4], "a step's own steps nest under it");
+        assert!(matches!(
+            &folded.rows[3],
+            TimelineRow::Single(AgentEntry::Tool(tool)) if tool.id == 8
+        ));
+
+        let mut agent =
+            test_tool_entry(3, "Survey", AgentToolKind::Think, AgentToolStatus::Running);
+        agent.parent = Some(1);
+        let looped = [
+            test_step(1, 3),
+            AgentEntry::Assistant {
+                id: 2,
+                markdown: "between".into(),
+            },
+            AgentEntry::Tool(agent),
+            test_step(4, 4),
+        ];
+        let folded = fold_timeline_rows(&looped);
+        assert_eq!(folded.entry_to_row, [0, 1, 0, 2]);
+        let TimelineRow::Group { entries, .. } = &folded.rows[0] else {
+            panic!("a loop shares one row: {:?}", folded.rows[0]);
+        };
+        let nesting = StepNesting::new(entries);
+        assert_eq!(nesting.top, [0, 1], "a loop of parents renders flat");
+        assert!(nesting.steps.is_empty());
     }
 
     #[test]
@@ -4018,6 +4206,7 @@ mod tests {
                 entry,
                 pane_width: px(520.0),
                 active_turn: false,
+                rewinds: None,
             });
             crate::Root::new(view, window, cx)
         });
@@ -4063,6 +4252,7 @@ mod tests {
                 entry,
                 pane_width: px(520.0),
                 active_turn: true,
+                rewinds: None,
             });
             crate::Root::new(view, window, cx)
         });
@@ -4088,6 +4278,7 @@ mod tests {
                 entry,
                 pane_width: px(520.0),
                 active_turn: false,
+                rewinds: None,
             });
             crate::Root::new(view, window, cx)
         });
@@ -4116,6 +4307,7 @@ mod tests {
                 entry,
                 pane_width: PANE_WIDTH,
                 active_turn: false,
+                rewinds: None,
             });
             crate::Root::new(view, window, cx)
         });
@@ -4146,6 +4338,7 @@ mod tests {
             id: 1,
             markdown: "hi can you read this image properly?".into(),
             images: Arc::from([Arc::new(Image::from_bytes(gpui::ImageFormat::Png, bytes))]),
+            rewind_id: None,
         };
         let (_, cx) = cx.add_window_view(|window, cx| {
             let view = cx.new(|cx| UserEntryTest {
@@ -4153,6 +4346,7 @@ mod tests {
                 entry,
                 pane_width: PANE_WIDTH,
                 active_turn: false,
+                rewinds: None,
             });
             crate::Root::new(view, window, cx)
         });
@@ -4195,6 +4389,93 @@ mod tests {
             cx.update(crate::WindowExt::has_active_dialog),
             "clicking an attachment should open it"
         );
+    }
+
+    fn rewind_point(
+        cx: &mut TestAppContext,
+        pane_width: Pixels,
+        active_turn: bool,
+    ) -> (
+        Rc<std::cell::RefCell<Vec<SharedString>>>,
+        &mut VisualTestContext,
+    ) {
+        cx.update(crate::init);
+        let rewinds = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let recorded = Rc::clone(&rewinds);
+        let entry = AgentEntry::User {
+            id: 7,
+            markdown: "please rename every helper in this module and keep the tests passing, then explain what changed".into(),
+            images: Arc::from([]),
+            rewind_id: Some("prompt-7".into()),
+        };
+        let (_, cx) = cx.add_window_view(move |window, cx| {
+            let view = cx.new(|cx| UserEntryTest {
+                store: cx.new(|_| AgentTimelineStore::default()),
+                entry,
+                pane_width,
+                active_turn,
+                rewinds: Some(recorded),
+            });
+            crate::Root::new(view, window, cx)
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        (rewinds, cx)
+    }
+
+    #[gpui::test]
+    fn a_prompt_row_offers_rewind_on_hover_and_hands_over_its_id(cx: &mut TestAppContext) {
+        const PANE_WIDTH: Pixels = px(420.0);
+        let (rewinds, cx) = rewind_point(cx, PANE_WIDTH, false);
+        assert!(
+            cx.debug_bounds("agent-user-rewind").is_none(),
+            "the action waits for the pointer"
+        );
+        let bubble = cx
+            .debug_bounds("agent-user-bubble")
+            .expect("the user bubble should be painted");
+        assert!(bubble.origin.x >= px(0.0) && bubble.right() <= PANE_WIDTH);
+
+        cx.simulate_mouse_move(bubble.center(), None, gpui::Modifiers::none());
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        let rewind = cx
+            .debug_bounds("agent-user-rewind")
+            .expect("hovering the prompt reveals the action");
+        assert!(
+            rewind.right() <= bubble.left(),
+            "the action sits beside the bubble"
+        );
+        assert_eq!(
+            cx.debug_bounds("agent-user-bubble"),
+            Some(bubble),
+            "revealing the action does not move the bubble"
+        );
+
+        cx.simulate_click(rewind.center(), gpui::Modifiers::none());
+        assert_eq!(rewinds.borrow().as_slice(), ["prompt-7"]);
+    }
+
+    #[gpui::test]
+    fn rewind_stays_hidden_while_a_turn_runs(cx: &mut TestAppContext) {
+        let (rewinds, cx) = rewind_point(cx, px(420.0), true);
+        let bubble = cx
+            .debug_bounds("agent-user-bubble")
+            .expect("the user bubble should be painted");
+        cx.simulate_mouse_move(bubble.center(), None, gpui::Modifiers::none());
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        assert!(cx.debug_bounds("agent-user-rewind").is_none());
+        cx.simulate_click(
+            point(bubble.left() - px(14.0), bubble.center().y),
+            gpui::Modifiers::none(),
+        );
+        assert!(rewinds.borrow().is_empty());
     }
 
     #[test]

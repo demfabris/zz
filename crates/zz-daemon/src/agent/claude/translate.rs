@@ -36,6 +36,9 @@ pub(crate) struct Translator {
     tools: HashMap<String, String>,
     hidden_tools: HashSet<String>,
     summaries: HashMap<String, String>,
+    task_tools: HashMap<String, String>,
+    background: HashSet<String>,
+    settled: HashSet<String>,
     todos: Vec<PlanItem>,
     tasks: Vec<(String, PlanItem)>,
     pending_tasks: HashMap<String, PlanItem>,
@@ -75,19 +78,88 @@ impl Translator {
         }
     }
 
+    fn task_tool(&self, frame: &Value) -> Option<String> {
+        frame["tool_use_id"]
+            .as_str()
+            .map(str::to_owned)
+            .or_else(|| {
+                frame["task_id"]
+                    .as_str()
+                    .and_then(|task| self.task_tools.get(task).cloned())
+            })
+    }
+
     fn system(&mut self, frame: &Value) -> Vec<Value> {
         match frame["subtype"].as_str() {
-            Some("task_notification") => {
-                if let (Some(tool_use_id), Some(summary)) = (
-                    frame["tool_use_id"].as_str(),
-                    frame["summary"]
-                        .as_str()
-                        .filter(|summary| !summary.is_empty()),
-                ) {
-                    self.summaries
-                        .insert(tool_use_id.to_owned(), summary.to_owned());
+            Some("task_started") => {
+                if let (Some(task), Some(tool)) =
+                    (frame["task_id"].as_str(), frame["tool_use_id"].as_str())
+                {
+                    self.task_tools.insert(task.to_owned(), tool.to_owned());
+                    if frame["is_backgrounded"] == true {
+                        self.background.insert(tool.to_owned());
+                    }
                 }
                 Vec::new()
+            }
+            Some("task_updated") => {
+                if frame["patch"]["is_backgrounded"] == true
+                    && let Some(tool) = self.task_tool(frame)
+                {
+                    self.background.insert(tool);
+                }
+                Vec::new()
+            }
+            Some("task_progress") => {
+                let summary = frame["summary"]
+                    .as_str()
+                    .filter(|text| !text.trim().is_empty());
+                match (self.task_tool(frame), summary) {
+                    (Some(tool), Some(summary)) if self.tools.contains_key(&tool) => {
+                        vec![json!({
+                            "sessionUpdate": "tool_call_update",
+                            "toolCallId": tool,
+                            "status": "in_progress",
+                            "content": [text_content(summary)],
+                        })]
+                    }
+                    _ => Vec::new(),
+                }
+            }
+            Some("task_notification") => {
+                let Some(tool) = self.task_tool(frame) else {
+                    return Vec::new();
+                };
+                let summary = frame["summary"]
+                    .as_str()
+                    .filter(|summary| !summary.is_empty())
+                    .map(str::to_owned);
+                if !self.settled.contains(&tool) {
+                    if let Some(summary) = summary {
+                        self.summaries.insert(tool, summary);
+                    }
+                    return Vec::new();
+                }
+                let failed = matches!(
+                    frame["status"].as_str(),
+                    Some("failed" | "stopped" | "killed")
+                );
+                let output = match self.tools.get(&tool).map(String::as_str) {
+                    Some("Bash" | "PowerShell") => frame["output_file"]
+                        .as_str()
+                        .and_then(|path| output_tail(Path::new(path)))
+                        .or(summary),
+                    _ => summary,
+                };
+                let mut update = json!({
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": tool,
+                    "status": if failed { "failed" } else { "completed" },
+                });
+                if let Some(output) = output.filter(|output| !output.trim().is_empty()) {
+                    update["content"] = json!([text_content(&output)]);
+                }
+                vec![update]
             }
             Some("local_command_output") => frame["content"]
                 .as_str()
@@ -359,10 +431,17 @@ impl Translator {
                 _ => Some(text),
             }
         };
+        self.settled.insert(id.to_owned());
+        let running = !is_error && self.background.contains(id);
+        let status = match (is_error, running) {
+            (true, _) => "failed",
+            (false, true) => "in_progress",
+            (false, false) => "completed",
+        };
         let mut update = json!({
             "sessionUpdate": "tool_call_update",
             "toolCallId": id,
-            "status": if is_error { "failed" } else { "completed" },
+            "status": status,
         });
         if let Some(output) = output.filter(|output| !output.trim().is_empty()) {
             update["content"] = json!([text_content(&output)]);
@@ -469,6 +548,28 @@ pub(crate) fn result_text(content: &Value) -> String {
             .join("\n"),
         _ => String::new(),
     }
+}
+
+const MAX_OUTPUT_TAIL_BYTES: u64 = 64 * 1024;
+
+fn output_tail(path: &Path) -> Option<String> {
+    use std::io::{Read as _, Seek as _, SeekFrom};
+
+    let mut file = std::fs::File::open(path).ok()?;
+    let size = file.metadata().ok()?.len();
+    let start = size.saturating_sub(MAX_OUTPUT_TAIL_BYTES);
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut bytes = Vec::new();
+    file.take(MAX_OUTPUT_TAIL_BYTES)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    let text = String::from_utf8_lossy(&bytes);
+    let text = if start > 0 {
+        text.split_once('\n').map_or(&*text, |(_, rest)| rest)
+    } else {
+        &text
+    };
+    Some(text.trim_end().to_owned())
 }
 
 fn command_output(structured: &Value) -> Option<String> {
@@ -916,6 +1017,42 @@ mod tests {
         let done = json!({"type":"user","parent_tool_use_id":null,"message":{"role":"user","content":[
             {"type":"tool_result","tool_use_id":"t3","content":"Updated task #7"}]}});
         assert!(translator.frame(&done).is_empty());
+    }
+
+    #[test]
+    fn background_work_stays_running_until_its_notification() {
+        let output = tempfile::NamedTempFile::new().expect("output");
+        std::fs::write(output.path(), "line one\nlate\n").expect("write");
+        let mut translator = Translator::new(PathBuf::from("/work"));
+        let call = json!({"type":"assistant","parent_tool_use_id":null,"message":{"id":"m","content":[
+            {"type":"tool_use","id":"b1","name":"Bash","input":{"command":"sleep 30; echo late","run_in_background":true}}]}});
+        assert_eq!(kinds(&translator.frame(&call)), ["tool_call"]);
+        let started = json!({"type":"system","subtype":"task_started","task_id":"t9","tool_use_id":"b1","is_backgrounded":true,"task_type":"local_bash","description":"late"});
+        assert!(translator.frame(&started).is_empty());
+        let launched = json!({"type":"user","parent_tool_use_id":null,"message":{"role":"user","content":[
+            {"type":"tool_result","tool_use_id":"b1","content":"Command running in background with ID: t9."}]}});
+        let updates = translator.frame(&launched);
+        assert_eq!(updates[0]["status"], "in_progress");
+        let done = json!({"type":"system","subtype":"task_notification","task_id":"t9","tool_use_id":"b1","status":"completed",
+            "output_file": output.path(), "summary":"Background command completed"});
+        let updates = translator.frame(&done);
+        assert_eq!(updates[0]["status"], "completed");
+        assert_eq!(
+            updates[0]["content"][0]["content"]["text"],
+            "line one\nlate"
+        );
+        let agent = json!({"type":"assistant","parent_tool_use_id":null,"message":{"id":"m2","content":[
+            {"type":"tool_use","id":"a1","name":"Agent","input":{"description":"Survey","prompt":"p"}}]}});
+        translator.frame(&agent);
+        let progress = json!({"type":"system","subtype":"task_progress","task_id":"t10","tool_use_id":"a1","description":"Survey","summary":"Reading the reducer","usage":{"total_tokens":1,"tool_uses":1,"duration_ms":1}});
+        let updates = translator.frame(&progress);
+        assert_eq!(
+            updates[0]["content"][0]["content"]["text"],
+            "Reading the reducer"
+        );
+        for update in &updates {
+            serde_json::from_value::<SessionUpdate>(update.clone()).expect("ACP update");
+        }
     }
 
     #[test]

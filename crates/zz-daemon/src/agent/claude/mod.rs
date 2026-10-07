@@ -43,6 +43,8 @@ const REAP_GRACE: Duration = Duration::from_secs(2);
 const MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
 const MAX_REPLAY_UPDATES: usize = 4096;
 const SESSION_PAGE: usize = 50;
+const SIDE_TIMEOUT: Duration = Duration::from_mins(2);
+const VERB_HELP: &str = "zz commands: `//btw <question>` (or `//side`) asks Claude without adding to the conversation, `//steer <text>` redirects the running turn, and `//fork` continues in a copy of this conversation. A single `/` sends Claude Code's own commands.";
 const AGENT_NAME: &str = "Claude Code";
 const AGENT_KEY: &str = "claude-code";
 const BASE_ARGS: [&str; 11] = [
@@ -166,6 +168,7 @@ pub(crate) async fn run_claude_runtime(
         deferred_cancels: HashSet::new(),
         stale_commands: HashSet::new(),
         lifecycle_seen: false,
+        verbs: 0,
     };
     let commands = channels.commands;
     let controls = channels.controls;
@@ -324,11 +327,35 @@ enum Start {
     Open { resume: bool },
     New,
     Switch,
+    Fork,
+}
+
+enum Launch {
+    New(String),
+    Resume(String),
+    Fork { source: String, id: String },
+}
+
+impl Launch {
+    fn session_id(&self) -> &str {
+        match self {
+            Self::New(id) | Self::Resume(id) | Self::Fork { id, .. } => id,
+        }
+    }
+
+    fn history(&self) -> Option<&str> {
+        match self {
+            Self::New(_) => None,
+            Self::Resume(id) => Some(id),
+            Self::Fork { source, .. } => Some(source),
+        }
+    }
 }
 
 struct Starting {
     start: Start,
     session_id: String,
+    history: Option<String>,
     cwd: PathBuf,
 }
 
@@ -337,6 +364,7 @@ enum Outgoing {
     Interrupt,
     Setting { option_id: String, value: String },
     Mode { mode_id: String },
+    Side { message_id: String },
 }
 
 struct Turn {
@@ -513,6 +541,7 @@ struct Runtime {
     stale_commands: HashSet<String>,
     lifecycle_seen: bool,
     settings: Settings,
+    verbs: u64,
 }
 
 impl Runtime {
@@ -732,6 +761,7 @@ impl Runtime {
                 );
                 Ok(())
             }
+            RuntimeCommand::Verb { prompt } => self.verb(&prompt.text).await,
             RuntimeCommand::Shutdown => Ok(()),
         }
     }
@@ -774,6 +804,26 @@ impl Runtime {
         start: Start,
         resume: Option<String>,
     ) -> Result<(), String> {
+        let config = sessions::config_home();
+        let resume = resume.filter(|id| {
+            config
+                .as_deref()
+                .and_then(|config| sessions::session_file(config, &cwd, id))
+                .is_some()
+        });
+        let launch = match (start, resume) {
+            (Start::Fork, Some(source)) => Launch::Fork {
+                source,
+                id: new_uuid(),
+            },
+            (Start::Fork, None) => {
+                return self
+                    .notice("Nothing to fork yet: send a prompt first.")
+                    .await;
+            }
+            (_, Some(id)) => Launch::Resume(id),
+            (_, None) => Launch::New(new_uuid()),
+        };
         self.cancel_permissions(false).await?;
         if let Some(turn) = self.turn.take() {
             self.emit(AgentStreamPayload::PromptFinished {
@@ -785,26 +835,19 @@ impl Runtime {
         self.process = None;
         self.requests.clear();
         self.lifecycle_seen = false;
-        let config = sessions::config_home();
-        let resume = resume.filter(|id| {
-            config
-                .as_deref()
-                .and_then(|config| sessions::session_file(config, &cwd, id))
-                .is_some()
-        });
-        let session_id = resume.clone().unwrap_or_else(new_uuid);
-        if let Err(message) = self.spawn(&cwd, &session_id, resume.is_some()) {
+        if let Err(message) = self.spawn(&cwd, &launch) {
             return self.fail_start(start, message).await;
         }
         let start = match start {
             Start::Open { .. } => Start::Open {
-                resume: resume.is_some(),
+                resume: matches!(launch, Launch::Resume(_)),
             },
             other => other,
         };
         self.starting = Some(Starting {
             start,
-            session_id,
+            session_id: launch.session_id().to_owned(),
+            history: launch.history().map(str::to_owned),
             cwd,
         });
         self.request(
@@ -812,6 +855,7 @@ impl Runtime {
                 "subtype": "initialize",
                 "supportedDialogKinds": [],
                 "perTaskStopAffordance": false,
+                "agentProgressSummaries": true,
             }),
             Outgoing::Initialize,
             INITIALIZE_TIMEOUT,
@@ -819,7 +863,7 @@ impl Runtime {
         Ok(())
     }
 
-    fn spawn(&mut self, cwd: &Path, session_id: &str, resume: bool) -> Result<(), String> {
+    fn spawn(&mut self, cwd: &Path, launch: &Launch) -> Result<(), String> {
         let program = find_executable(&self.command.program).ok_or_else(|| {
             format!(
                 "Claude Code is not installed: `{}` was not found on PATH. Install it from https://code.claude.com, or point agent-claude-code-command at it.",
@@ -828,11 +872,13 @@ impl Runtime {
         })?;
         let mut command = Command::new(program);
         command.args(BASE_ARGS);
-        if resume {
-            command.args(["--resume", session_id]);
-        } else {
-            command.args(["--session-id", session_id]);
-        }
+        match launch {
+            Launch::New(id) => command.args(["--session-id", id]),
+            Launch::Resume(id) => command.args(["--resume", id]),
+            Launch::Fork { source, id } => {
+                command.args(["--resume", source, "--fork-session", "--session-id", id])
+            }
+        };
         command
             .args(&self.command.args)
             .current_dir(cwd)
@@ -930,7 +976,7 @@ impl Runtime {
         self.starting = None;
         match start {
             Start::Open { .. } => self.emit(AgentStreamPayload::PaneFailed { message }).await,
-            Start::New | Start::Switch => {
+            Start::New | Start::Switch | Start::Fork => {
                 self.emit(AgentStreamPayload::SessionSwitchFailed { message })
                     .await
             }
@@ -959,16 +1005,18 @@ impl Runtime {
                     delete: false,
                     additional_directories: false,
                     images: true,
+                    verbs: true,
                 },
             })
             .await?;
         }
         self.translator = Translator::new(starting.cwd.clone());
-        let replay = match starting.start {
-            Start::Open { resume: false } | Start::New => Vec::new(),
-            Start::Open { resume: true } | Start::Switch => {
-                self.history(&starting.session_id, &starting.cwd).await
+        let replay = match &starting.history {
+            Some(source) => {
+                self.history(source, &starting.session_id, &starting.cwd)
+                    .await
             }
+            None => Vec::new(),
         };
         self.session = Some(Session {
             id: starting.session_id.clone(),
@@ -976,7 +1024,7 @@ impl Runtime {
         });
         let restoring = match starting.start {
             Start::Open { .. } => !replay.is_empty(),
-            Start::New | Start::Switch => true,
+            Start::New | Start::Switch | Start::Fork => true,
         };
         self.emit(AgentStreamPayload::SessionReset { restoring })
             .await?;
@@ -994,7 +1042,7 @@ impl Runtime {
                 })
                 .await?;
             }
-            Start::New | Start::Switch => {
+            Start::New | Start::Switch | Start::Fork => {
                 self.emit(AgentStreamPayload::SessionSwitched {
                     session_id: starting.session_id,
                     cwd: starting.cwd,
@@ -1005,12 +1053,19 @@ impl Runtime {
                 .await?;
             }
         }
-        self.publish_commands().await
+        self.publish_commands().await?;
+        if let (Start::Fork, Some(source)) = (starting.start, &starting.history) {
+            self.notice(&format!(
+                "Forked from session `{source}`. The original is unchanged."
+            ))
+            .await?;
+        }
+        Ok(())
     }
 
-    async fn history(&self, session_id: &str, cwd: &Path) -> Vec<(Value, bool)> {
-        let file = sessions::config_home()
-            .and_then(|config| sessions::session_file(&config, cwd, session_id));
+    async fn history(&self, source: &str, session_id: &str, cwd: &Path) -> Vec<(Value, bool)> {
+        let file =
+            sessions::config_home().and_then(|config| sessions::session_file(&config, cwd, source));
         if let Some(file) = file {
             let cwd = cwd.to_path_buf();
             let mut updates = smol::unblock(move || sessions::transcript(&file, cwd)).await;
@@ -1027,7 +1082,7 @@ impl Runtime {
         let Some(journal) = self.journal.as_deref() else {
             return Vec::new();
         };
-        match journal.replay_for(self.provider, session_id) {
+        match journal.replay_for(self.provider, source) {
             Ok(records) => records
                 .into_iter()
                 .map(|(_, JournalEntry::Update(update))| (update, false))
@@ -1037,6 +1092,88 @@ impl Runtime {
                 Vec::new()
             }
         }
+    }
+
+    async fn verb(&mut self, text: &str) -> Result<(), String> {
+        let line = text.trim_start().strip_prefix("//").unwrap_or(text).trim();
+        let (name, rest) = line
+            .split_once(char::is_whitespace)
+            .map_or((line, ""), |(name, rest)| (name, rest.trim()));
+        self.verbs += 1;
+        let id = format!(
+            "zz-command-{}-{:08x}",
+            self.verbs,
+            random_u64() & 0xffff_ffff
+        );
+        self.update(
+            json!({
+                "sessionUpdate": "user_message_chunk",
+                "messageId": format!("{id}-in"),
+                "content": { "type": "text", "text": text.trim() },
+            }),
+            true,
+        )
+        .await?;
+        if self.session.is_none() || self.process.is_none() {
+            return self.notice("Claude Code is not running.").await;
+        }
+        match name {
+            "btw" | "side" if !rest.is_empty() => {
+                self.request(
+                    &json!({ "subtype": "side_question", "question": rest }),
+                    Outgoing::Side {
+                        message_id: format!("{id}-out"),
+                    },
+                    SIDE_TIMEOUT,
+                );
+                Ok(())
+            }
+            "steer" if !rest.is_empty() => {
+                if self.turn.is_none() {
+                    return self.notice("Nothing is running to steer.").await;
+                }
+                self.send(&json!({
+                    "type": "user",
+                    "uuid": new_uuid(),
+                    "session_id": "",
+                    "parent_tool_use_id": null,
+                    "priority": "now",
+                    "message": { "role": "user", "content": [{ "type": "text", "text": rest }] },
+                    "origin": { "kind": "human" },
+                }));
+                Ok(())
+            }
+            "fork" => {
+                if self.turn.is_some() {
+                    return self.notice("Stop the turn before forking.").await;
+                }
+                let Some(session) = &self.session else {
+                    return Ok(());
+                };
+                let (cwd, source) = (session.cwd.clone(), session.id.clone());
+                self.begin(cwd, Start::Fork, Some(source)).await
+            }
+            _ => self.notice(VERB_HELP).await,
+        }
+    }
+
+    async fn notice(&mut self, text: &str) -> Result<(), String> {
+        self.verbs += 1;
+        let id = format!(
+            "zz-notice-{}-{:08x}",
+            self.verbs,
+            random_u64() & 0xffff_ffff
+        );
+        self.update(
+            json!({
+                "sessionUpdate": "agent_message_chunk",
+                "messageId": id,
+                "content": { "type": "text", "text": text },
+                "_meta": { "zz": { "notice": true } },
+            }),
+            true,
+        )
+        .await
     }
 
     async fn publish_commands(&self) -> Result<(), String> {
@@ -1103,6 +1240,17 @@ impl Runtime {
                 self.fail_start(start, message).await
             }
             (Outgoing::Interrupt, _) => Ok(()),
+            (Outgoing::Side { message_id }, Ok(response)) => {
+                let answer = response["response"]
+                    .as_str()
+                    .filter(|text| !text.trim().is_empty())
+                    .unwrap_or("Claude had no answer.");
+                self.update(side_answer(&message_id, answer), true).await
+            }
+            (Outgoing::Side { .. }, Err(error)) => {
+                self.notice(&format!("The side question failed: {error}"))
+                    .await
+            }
             (Outgoing::Setting { option_id, value }, Ok(_)) => {
                 match option_id.as_str() {
                     "model" => {
@@ -1670,6 +1818,15 @@ impl Runtime {
     }
 }
 
+fn side_answer(message_id: &str, answer: &str) -> Value {
+    json!({
+        "sessionUpdate": "agent_message_chunk",
+        "messageId": message_id,
+        "content": { "type": "text", "text": answer },
+        "_meta": { "zz": { "side": true } },
+    })
+}
+
 fn spawn_thread(name: &str, body: impl FnOnce() + Send + 'static) -> Result<(), String> {
     thread::Builder::new()
         .name(name.to_owned())
@@ -2038,6 +2195,109 @@ while read -r line; do :; done
                 next().await,
                 AgentStreamPayload::PromptFinished { turn_id: 1, outcome: AgentPromptOutcome::Finished { stop_reason } } if stop_reason == "end_turn"
             ));
+            commands
+                .send(RuntimeCommand::Shutdown)
+                .await
+                .expect("shutdown");
+        };
+        let (result, ()) = smol::block_on(futures_lite::future::zip(runtime, driver));
+        assert_eq!(result, Ok(()));
+    }
+
+    #[cfg(unix)]
+    const FAKE_SIDE_CLAUDE: &str = r#"#!/bin/sh
+read -r init
+printf '%s\n' '{"type":"control_response","response":{"subtype":"success","request_id":"zz-1","response":{"commands":[],"models":[],"current_permission_mode":"default"}}}'
+read -r side
+case "$side" in *'"request_id":"zz-2"'*'"subtype":"side_question"'*'"question":"what is 2+2"'*) ;; *) echo "bad side: $side" >&2; exit 3 ;; esac
+printf '%s\n' '{"type":"control_response","response":{"subtype":"success","request_id":"zz-2","response":{"response":"4","synthetic":false}}}'
+while read -r line; do :; done
+"#;
+
+    #[cfg(unix)]
+    #[test]
+    fn side_questions_answer_outside_the_conversation() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory = tempfile::tempdir().expect("tempdir");
+        let program = directory.path().join("claude");
+        std::fs::write(&program, FAKE_SIDE_CLAUDE).expect("fake claude");
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755))
+            .expect("executable");
+        let command = ClaudeCommand::parse(&program.display().to_string()).expect("native");
+        let (commands, command_rx) = async_channel::unbounded();
+        let (_controls, control_rx) = async_channel::unbounded();
+        let (events, event_rx) = async_channel::unbounded();
+        let runtime = run_claude_runtime(
+            command,
+            AgentWorkspaceEnvironment::default(),
+            AgentProvider::ClaudeCode,
+            RuntimeChannels {
+                auto_approve: Arc::new(Mutex::new(AgentAutoApprove::Off)),
+                permission_ids: Arc::new(AtomicU64::new(1)),
+                journal: None,
+                commands: command_rx,
+                controls: control_rx,
+                events,
+            },
+        );
+        let driver = async {
+            let text_of = |payload: &AgentStreamPayload| match payload {
+                AgentStreamPayload::Update { update } => {
+                    update["content"]["text"].as_str().map(str::to_owned)
+                }
+                _ => None,
+            };
+            let next_text = || async {
+                loop {
+                    let payload = futures_lite::future::or(
+                        async { event_rx.recv().await.expect("event") },
+                        async {
+                            smol::Timer::after(Duration::from_secs(20)).await;
+                            panic!("timed out waiting for the runtime");
+                        },
+                    )
+                    .await;
+                    if let AgentStreamPayload::Update { update } = &payload
+                        && update["sessionUpdate"] == "available_commands_update"
+                    {
+                        continue;
+                    }
+                    if let Some(text) = text_of(&payload) {
+                        return (text, payload);
+                    }
+                }
+            };
+            commands
+                .send(RuntimeCommand::Open {
+                    cwd: directory.path().to_path_buf(),
+                    resume_session: None,
+                })
+                .await
+                .expect("open");
+            let verb = |text: &str| RuntimeCommand::Verb {
+                prompt: crate::agent::stream::AgentPrompt {
+                    text: text.to_owned(),
+                    ..Default::default()
+                },
+            };
+            while !matches!(
+                event_rx.recv().await.expect("event"),
+                AgentStreamPayload::SessionReady { .. }
+            ) {}
+            commands.send(verb("//btw what is 2+2")).await.expect("btw");
+            assert_eq!(next_text().await.0, "//btw what is 2+2");
+            let (answer, payload) = next_text().await;
+            assert_eq!(answer, "4");
+            assert!(
+                matches!(payload, AgentStreamPayload::Update { update } if update["_meta"]["zz"]["side"] == true)
+            );
+            commands.send(verb("//steer left")).await.expect("steer");
+            assert_eq!(next_text().await.0, "//steer left");
+            assert_eq!(next_text().await.0, "Nothing is running to steer.");
+            commands.send(verb("//what")).await.expect("unknown");
+            assert_eq!(next_text().await.0, "//what");
+            assert_eq!(next_text().await.0, VERB_HELP);
             commands
                 .send(RuntimeCommand::Shutdown)
                 .await

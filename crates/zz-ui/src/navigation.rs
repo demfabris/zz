@@ -3,8 +3,8 @@ pub mod status;
 pub mod tree;
 
 use crate::{
-    ActiveTheme as _, Colorize as _, Disableable as _, Icon, IconName, MACOS_TRAFFIC_LIGHT_INSET,
-    MACOS_TRAFFIC_LIGHT_SPAN, StyledExt as _, TITLE_BAR_HEIGHT, UiZoom,
+    ActiveTheme as _, Colorize as _, Disableable as _, Icon, IconName, StyledExt as _,
+    TITLE_BAR_HEIGHT,
     button::{Button, ButtonVariants as _, COMPACT_ICON_BUTTON_SIZE},
     rems_from_px,
     tooltip::Tooltip,
@@ -26,8 +26,6 @@ const WORKSPACE_TREE_FILL_INSET: f32 = 4.0;
 const TREE_TOUCH_SLOP: f32 = (TOUCH_TARGET - COMPACT_ICON_BUTTON_SIZE) / 2.0;
 const WORKSPACE_TREE_FILL_VERTICAL_INSET: f32 = 1.0;
 pub const WORKSPACE_SIDEBAR_DEFAULT_WIDTH: f32 = 256.0;
-pub const WORKSPACE_CONTROL_TRAFFIC_LIGHT_INSET: f32 =
-    2.0 * MACOS_TRAFFIC_LIGHT_INSET + MACOS_TRAFFIC_LIGHT_SPAN;
 const WORKSPACE_CHROME_CONTROL_GAP: f32 = 4.0;
 pub const WORKSPACE_STATUS_CONTENT_HEIGHT: Pixels = px(24.0);
 pub const WORKSPACE_STATUS_PILL_HEIGHT: Pixels = px(26.0);
@@ -49,7 +47,7 @@ pub struct WorkspaceStatusWindowState {
 #[must_use]
 pub fn workspace_controls_leading_inset(cx: &App) -> Pixels {
     if cfg!(target_os = "macos") {
-        UiZoom::unzoomed(px(WORKSPACE_CONTROL_TRAFFIC_LIGHT_INSET), cx)
+        crate::macos_traffic_light_clearance(cx)
     } else {
         px(WORKSPACE_TREE_CONTENT_INSET)
     }

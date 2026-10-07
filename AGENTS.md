@@ -59,7 +59,7 @@ Recipes live in `Justfile` and `scripts/just/*.just` and run from the repo root.
 | `just watch <platform>` | Rebuild and relaunch on source change |
 | `just build <platform>` | Release bundle into `dist/zz` (wraps `cargo xtask bundle-cef`) |
 | `just install mac` | Build and swap `/Applications/zz.app`; the daemon survives the swap |
-| `just ios [run\|build\|device\|testflight] [iPad\|iPhone]` | GPUI iOS app: simulator, a paired device (release, signed, installed), or a signed `dev.zz.ios` TestFlight upload; `ZZ_GPUI_DEMO=terminal` selects the terminal example |
+| `just ios [run\|build\|device\|bench\|testflight] [iPad\|iPhone]` | GPUI iOS app: simulator, a paired device (release, signed, installed), a hands-free frame benchmark on the device, or a signed `dev.zz.ios` TestFlight upload; `ZZ_GPUI_DEMO=terminal` selects the terminal example |
 | `just site` | Docs site dev server with live reload |
 | `just web run` / `web setup` / `web build [--release]` / `web serve` | Browser client dev loop / toolchain / assets / local gateway |
 | `just profile <cpu\|memory\|startup\|system\|metal\|terminal> mac …` | Capture profiling data; read it back with `just profile summary <cpu\|metal\|terminal> <run>` |

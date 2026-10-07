@@ -87,6 +87,7 @@ impl Default for IosPlatform {
 
 impl IosPlatform {
     pub fn new() -> Self {
+        crate::perf::Perf::place_frame_stats();
         let dispatcher = Arc::new(crate::IosDispatcher::new());
 
         let text_system: Arc<dyn PlatformTextSystem> = Arc::new(

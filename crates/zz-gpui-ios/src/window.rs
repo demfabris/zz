@@ -36,7 +36,7 @@ pub(crate) struct IosWindowState {
     _handle: AnyWindowHandle,
     native_window: id,
     native_view: id,
-    display_link: id,
+    display_link: Rc<crate::DisplayLink>,
     renderer: gpui_wgpu::WgpuRenderer,
     needs_presentation: bool,
     accesskit_adapter: Option<accesskit_ios::SubclassingAdapter>,
@@ -71,6 +71,7 @@ pub(crate) struct IosWindowState {
     momentum: Option<crate::momentum::Momentum>,
     pointer_interaction: id,
     edit_menu: id,
+    perf: crate::perf::Perf,
 }
 
 impl IosWindowState {
@@ -85,7 +86,7 @@ impl IosWindowState {
     }
 }
 
-pub(crate) struct IosWindow(Rc<RefCell<IosWindowState>>);
+pub(crate) struct IosWindow(Rc<RefCell<IosWindowState>>, Rc<crate::DisplayLink>);
 
 impl IosWindow {
     pub(crate) fn open(
@@ -163,7 +164,7 @@ impl IosWindow {
                 _handle: handle,
                 native_window,
                 native_view,
-                display_link: nil,
+                display_link: Rc::new(crate::DisplayLink::new()),
                 renderer,
                 needs_presentation: false,
                 accesskit_adapter: None,
@@ -198,6 +199,7 @@ impl IosWindow {
                 momentum: None,
                 pointer_interaction: nil,
                 edit_menu: nil,
+                perf: crate::perf::Perf::from_env(),
             }));
 
             state.borrow_mut().renderer.update_drawable_size(size(
@@ -239,10 +241,11 @@ impl IosWindow {
                 displayLinkWithTarget: native_view
                 selector: sel!(zzStep:)
             ];
+            let link = state.borrow().display_link.clone();
+            link.attach(display_link);
             let run_loop: id = msg_send![class!(NSRunLoop), mainRunLoop];
             let _: () =
                 msg_send![display_link, addToRunLoop: run_loop forMode: NSRunLoopCommonModes];
-            state.borrow_mut().display_link = display_link;
             eprintln!(
                 "[zz-ios] window open: bounds {}x{} scale {}",
                 screen_bounds.size.width, screen_bounds.size.height, scale
@@ -250,7 +253,7 @@ impl IosWindow {
 
             VIEWS.with_borrow_mut(|views| views.push(native_view));
             ACTIVE_VIEW.set(native_view);
-            Ok(Self(state))
+            Ok(Self(state, link))
         }
     }
 
@@ -269,7 +272,7 @@ impl Drop for IosWindow {
         let (view, window, close) = {
             let mut state = self.0.borrow_mut();
             unsafe {
-                let _: () = msg_send![state.display_link, invalidate];
+                state.display_link.invalidate();
                 let _: () = msg_send![state.input_view, release];
                 let _: () = msg_send![state.accessory_view, release];
                 let _: () = msg_send![state.keyboard_probe, release];
@@ -469,6 +472,15 @@ impl PlatformWindow for IosWindow {
         self.0.borrow_mut().request_frame_callback = Some(callback);
     }
 
+    fn frame_waker(&self) -> Option<Rc<dyn Fn()>> {
+        let link = self.1.clone();
+        Some(Rc::new(move || link.wake()))
+    }
+
+    fn schedule_frame(&self) {
+        self.1.wake();
+    }
+
     fn on_input(&self, callback: Box<dyn FnMut(PlatformInput) -> DispatchEventResult>) {
         self.0.borrow_mut().event_callback = Some(callback);
     }
@@ -503,6 +515,7 @@ impl PlatformWindow for IosWindow {
 
     fn draw(&self, scene: &gpui::Scene) {
         let mut state = self.0.borrow_mut();
+        state.perf.drew(scene);
         state.needs_presentation = !state.renderer.draw(scene);
     }
 
@@ -733,9 +746,24 @@ fn register_view_class() {
     }
 }
 
-extern "C" fn step(this: &Object, _: Sel, _link: id) {
-    advance_momentum(this);
+extern "C" fn step(this: &Object, _: Sel, link: id) {
     let state = unsafe { get_window_state(this) };
+    let display_link = state.borrow().display_link.clone();
+    display_link.begin_frame();
+    state.borrow_mut().perf.begin();
+    let bench = {
+        let mut state = state.borrow_mut();
+        state.perf.wants_frames().then(|| {
+            let rect: CGRect = unsafe { msg_send![state.native_view, bounds] };
+            let size = size(px(rect.size.width as f32), px(rect.size.height as f32));
+            state.perf.bench_input(Instant::now(), size)
+        })
+    }
+    .flatten();
+    if let Some(input) = bench {
+        dispatch_event(this, input);
+    }
+    advance_momentum(this);
     let repeat = state.borrow_mut().keyboard.repeat(Instant::now());
     if let Some(event) = repeat {
         dispatch_event(this, PlatformInput::KeyDown(event));
@@ -750,6 +778,17 @@ extern "C" fn step(this: &Object, _: Sel, _link: id) {
         callback(options);
         state.borrow_mut().request_frame_callback = Some(callback);
     }
+    let (timestamp, target): (f64, f64) =
+        unsafe { (msg_send![link, timestamp], msg_send![link, targetTimestamp]) };
+    let busy = {
+        let mut state = state.borrow_mut();
+        state.perf.end(timestamp, target);
+        state.momentum.is_some()
+            || !state.touches.is_empty()
+            || state.keyboard.repeating()
+            || state.perf.wants_frames()
+    };
+    display_link.end_frame(busy);
 }
 
 extern "C" fn appearance_changed(this: &Object, _: Sel) {
@@ -996,6 +1035,7 @@ fn pointer_input(this: &Object, touches: id, event: id, phase: TouchPhase) {
 extern "C" fn touches_began(this: &Object, _: Sel, touches: id, event: id) {
     unsafe {
         let _: BOOL = msg_send![this, becomeFirstResponder];
+        get_window_state(this).borrow().display_link.wake();
     }
     stop_momentum(this);
     if pointer_touch(touches) {
@@ -1027,6 +1067,10 @@ extern "C" fn touches_began(this: &Object, _: Sel, touches: id, event: id) {
 }
 
 extern "C" fn touches_moved(this: &Object, _: Sel, touches: id, event: id) {
+    unsafe { get_window_state(this) }
+        .borrow_mut()
+        .perf
+        .touch_moved();
     if pointer_touch(touches) {
         pointer_input(this, touches, event, TouchPhase::Moved);
         return;

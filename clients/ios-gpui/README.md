@@ -197,6 +197,39 @@ The text system loads the iOS system fonts, so Chinese, Japanese, Korean, Arabic
 and other scripts render. Emoji still show as blank: GPUI's text system only treats Noto
 Color Emoji as a color font.
 
+## Frame rate
+
+The display link asks for the screen's top rate with the range Flutter uses (half the maximum, but
+at least 60, up to the maximum), so ProMotion iPhones and iPads animate at 120 Hz;
+`CADisableMinimumFrameDurationOnPhone` in `Info.plist` lifts the iPhone's 60 Hz cap. The link
+pauses three ticks after the last frame request and restarts when the window is invalidated, a
+touch begins, or a momentum scroll or key repeat is running, so an idle app takes no vsync
+callbacks and the display drops to its idle rate.
+
+To measure frames on a paired, unlocked device without touching it:
+
+```sh
+just ios bench iPhone
+```
+
+Bench mode builds and installs the device app like `device` mode, creates a session named
+`iphone-bench` on the host's `zz-dev` (two panes with scrollback), launches the app three times
+against it (pager swipes, terminal flings, then 25 idle seconds), kills the session, and prints one
+`frames total` line per bench and the last idle link reports. `ZZ_BENCH_CYCLES` (default 16),
+`ZZ_BENCH_SESSION`, `ZZ_BENCH_CLI`, and `ZZ_BENCH_OUT` (log directory) adjust it. To bench an app
+built elsewhere, such as a baseline, run `scripts/ios-bench.sh <udid> <app> <endpoint>`. In the
+output, `interval` is the time between new frames in milliseconds (8.33 at 120 Hz), `dropped`
+counts vsyncs that passed without a new frame inside a burst, `cpu` is the main-thread time of
+each display link tick, and an idle `link:` line with few ticks means the display link is paused.
+
+`ZZ_GPUI_FRAME_LOG=1` prints, per burst of drawn frames, the interval between new frames (p50,
+p95, max), missed vsyncs, and the CPU time of each display link tick, plus link ticks and draws
+every five seconds. `ZZ_GPUI_BENCH=swipe` or `scroll` (optionally `:count`, default 16) waits eight
+seconds after launch and then plays horizontal pager swipes or vertical terminal flings from the
+display link. `GPUI_FRAME_STATS=frames.jsonl` writes gpui's per-frame JSON stats into the app's
+`tmp` directory. Device and simulator launches forward these variables and `ZZ_GPUI_SESSION`;
+`ZZ_GPUI_CARGO_PROFILE=testflight` builds the device app with line tables for Instruments.
+
 ## Settings
 
 Settings uses the shared `zz-ui` form rows, previews, palettes, color pickers,

@@ -73,6 +73,10 @@ impl Keyboard {
         })
     }
 
+    pub fn repeating(&self) -> bool {
+        self.repeat.is_some()
+    }
+
     pub fn repeat(&mut self, now: Instant) -> Option<KeyDownEvent> {
         let (hid, deadline) = self.repeat?;
         if now < deadline {

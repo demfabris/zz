@@ -486,8 +486,11 @@ impl AppShell {
         cx.stop_propagation();
         self.terminal_resize_suppressed
             .set(self.compact.pager.is_moving());
+        let changed = response.changed || response.event.is_some();
         self.commit_page(response.event, cx);
-        cx.notify();
+        if changed {
+            cx.notify();
+        }
     }
 
     fn compact_pinch(&mut self, event: &PinchEvent, window: &mut Window, cx: &mut Context<Self>) {

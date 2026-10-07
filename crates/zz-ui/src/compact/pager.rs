@@ -22,6 +22,7 @@ pub enum PagerEvent {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PagerResponse {
     pub consumed: bool,
+    pub changed: bool,
     pub event: Option<PagerEvent>,
 }
 
@@ -111,6 +112,7 @@ impl Pager {
         width: f32,
         now: Instant,
     ) -> PagerResponse {
+        let before = (self.shift, std::mem::discriminant(&self.motion));
         self.release_stale_wheel(now);
         if self
             .last_event
@@ -161,6 +163,7 @@ impl Pager {
         self.last_event = Some(now);
         PagerResponse {
             consumed,
+            changed: before != (self.shift, std::mem::discriminant(&self.motion)),
             event: self.event.take(),
         }
     }
@@ -562,13 +565,19 @@ mod tests {
         let clock = Clock::new();
         let mut pager = pager(0, 4);
         pager.scroll(-60.0, TouchPhase::Started, WIDTH, clock.at(0));
-        pager.scroll(-60.0, TouchPhase::Moved, WIDTH, clock.at(16));
+        assert!(
+            pager
+                .scroll(-60.0, TouchPhase::Moved, WIDTH, clock.at(16))
+                .changed
+        );
         let response = pager.scroll(0.0, TouchPhase::Ended, WIDTH, clock.at(24));
         assert_eq!(response.event, Some(PagerEvent::Commit { index: 1 }));
+        assert!(response.changed);
         let mut ms = 32;
         for _ in 0..30 {
             let response = pager.scroll(-80.0, TouchPhase::Moved, WIDTH, clock.at(ms));
             assert!(response.consumed);
+            assert!(!response.changed);
             assert_eq!(response.event, None);
             pager.tick(clock.at(ms));
             ms += 16;

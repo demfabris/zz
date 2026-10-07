@@ -541,21 +541,29 @@ impl Connection {
                     )
                 });
                 self.attaching = true;
-                self.native = Some(crate::transport::Connection::connect(
-                    endpoint,
-                    Some(target),
-                    true,
-                ));
-                self.reader = Some(cx.spawn(async move |this, cx| {
-                    loop {
-                        cx.background_executor()
-                            .timer(std::time::Duration::from_millis(16))
-                            .await;
-                        if this.update(cx, |this, cx| this.poll_native(cx)).is_err() {
-                            break;
+                let mut native =
+                    crate::transport::Connection::connect(endpoint, Some(target), true);
+                let ready = native.ready.take();
+                self.native = Some(native);
+                self.reader = ready.map(|mut ready| {
+                    cx.spawn(async move |this, cx| {
+                        use futures::StreamExt as _;
+                        while ready.next().await.is_some() {
+                            while ready.try_recv().is_ok() {}
+                            loop {
+                                match this.update(cx, |this, cx| this.poll_native(cx)) {
+                                    Ok(true) => {
+                                        cx.background_executor()
+                                            .timer(std::time::Duration::ZERO)
+                                            .await
+                                    }
+                                    Ok(false) => break,
+                                    Err(_) => return,
+                                }
+                            }
                         }
-                    }
-                }));
+                    })
+                });
             } else {
                 self.status = "Not connected".into();
             }
@@ -722,8 +730,10 @@ impl Connection {
             };
             self.send(message, cx);
         }
+        let mut changed = false;
         while let Some(event) = self.core.poll_event() {
             self.terminal_images.apply(&event);
+            changed |= !matches!(event, CoreEvent::ViewportChanged { .. });
             match &event {
                 CoreEvent::HelloReceived => {
                     self.connected = true;
@@ -908,18 +918,20 @@ impl Connection {
             self.pasted_images.release_retired(cx);
             cx.emit(event);
         }
-        cx.notify();
+        if changed {
+            cx.notify();
+        }
     }
 
     #[cfg(target_os = "ios")]
-    fn poll_native(&mut self, cx: &mut Context<Self>) {
+    fn poll_native(&mut self, cx: &mut Context<Self>) -> bool {
         for _ in 0..128 {
             let Some(event) = self
                 .native
                 .as_ref()
                 .and_then(|transport| transport.events.try_recv().ok())
             else {
-                break;
+                return false;
             };
             match event {
                 crate::transport::Event::Connected(client) => {
@@ -945,6 +957,7 @@ impl Connection {
                 crate::transport::Event::Failed(error) => self.disconnect_native(error, cx),
             }
         }
+        true
     }
 
     #[cfg(target_os = "ios")]
@@ -1722,5 +1735,51 @@ mod tests {
         assert!(!sender.frame(8, || panic!("a full queue must not copy another frame")));
         assert_eq!(ready(receiver.recv()), None);
         assert!(receiver.close_reason().contains("Too much pending output"));
+    }
+
+    #[gpui::test]
+    fn viewport_frames_leave_the_connection_unnotified(cx: &mut gpui::TestAppContext) {
+        use gpui::AppContext as _;
+        use zz_protocol::{ClientView, Event, EventPayload, PaneId, SessionId};
+
+        let connection = cx.new(super::Connection::new);
+        let notified = std::rc::Rc::new(std::cell::Cell::new(0));
+        let count = std::rc::Rc::clone(&notified);
+        let _observer =
+            cx.update(|cx| cx.observe(&connection, move |_, _| count.set(count.get() + 1)));
+        let event = |sequence, payload| ProtocolMessage::Event(Event { sequence, payload });
+        connection.update(cx, |connection, cx| {
+            connection.handle_message_for_test(
+                event(
+                    1,
+                    EventPayload::TerminalViewport {
+                        pane: PaneId(1),
+                        viewport: zz_terminal::TerminalViewport::blank(
+                            80,
+                            24,
+                            zz_terminal::SessionStatus::Running,
+                        ),
+                    },
+                ),
+                cx,
+            );
+        });
+        cx.run_until_parked();
+        assert_eq!(notified.get(), 0);
+        connection.update(cx, |connection, cx| {
+            connection.handle_message_for_test(
+                event(
+                    2,
+                    EventPayload::ClientView(ClientView {
+                        session: Some(SessionId(1)),
+                        layout_generation: 1,
+                        ..Default::default()
+                    }),
+                ),
+                cx,
+            );
+        });
+        cx.run_until_parked();
+        assert_eq!(notified.get(), 1);
     }
 }

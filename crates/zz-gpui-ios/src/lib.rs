@@ -11,6 +11,7 @@ mod element_picker;
 mod keyboard;
 mod menu;
 mod momentum;
+mod perf;
 mod pinch;
 mod platform;
 mod text_input;

@@ -2,7 +2,7 @@
 type: Design Plan
 title: Native agent drivers
 description: Agent panes drive each vendor's own protocol from the daemon. Claude Code runs over stream-json and its control protocol, Codex over a private `codex app-server` per pane, and ACP stays for the agents that speak it natively, all emitting the stream the shared reducer already renders.
-status: In progress (Claude Code and Codex drivers, zz commands, and the v108 wire for question cards, tasks, and subagent links on main 2026-10-07; the card, tray, and nested-row UI is in a lane; orchestration remains)
+status: In progress (Claude Code and Codex drivers, zz commands, and question cards, the task tray, and nested subagent steps on every client landed 2026-10-07; orchestration remains)
 resource: crates/zz-daemon/src/agent/claude/mod.rs
 tags:
 - agent
@@ -118,6 +118,14 @@ a `questions` list, answered by `AgentAnswerQuestion`. Subagent tool calls carry
 `_meta.zz.parent`, and the shared reducer exposes it as `tool_parent`. The wire details are in the
 v108 entry of the [wire protocol](/protocol/wire-protocol.md).
 
+Desktop and gpui-shared render these through shared zz-ui widgets: the question card
+(`agent/question.rs`), the task tray chip in the composer (`agent/tasks.rs`), and the step fold in
+`agent.rs`, which nests subagent steps under their agent row, collapsed to a step count. FFI carries
+them in the agent snapshot (`permissions[].questions`, `tasks`, each entry's `parent`) and answers
+with `zz_client_agent_answer_question` and `zz_client_agent_stop_task`. The card keeps answers
+inside the wire limits before Submit, and the protocol traces print a card's answer counts, never
+its text.
+
 Turns the agent starts on its own (a background task reporting back, a peer message) arrive as
 `Activity { busy }` stream items: Claude's `session_state_changed` and Codex's
 `thread/status/changed` while no host turn is open. The host shows the pane as running, holds new
@@ -155,15 +163,15 @@ file changes applied, `restart-agent-pane` resuming the thread with its memory, 
 
 # Next
 
-1. The question card, task tray, and nested subagent rows on desktop, gpui-shared, and FFI (the
-   wire and reducer are done).
-2. More commands: branch from a message (`--resume-session-at`, `thread/fork beforeTurnId`), rewind.
-3. Codex subagent threads (`collabAgentToolCall` receivers) and background terminals.
-4. Orchestration: PiP panes and a decision on in-session tools. The groundwork is in:
+1. More commands: branch from a message (`--resume-session-at`, `thread/fork beforeTurnId`), rewind.
+2. Codex subagent threads (`collabAgentToolCall` receivers) and background terminals.
+3. Orchestration: PiP panes and a decision on in-session tools. The groundwork is in:
    `agent-send --notify` submits to another agent pane and, when that turn ends, posts the reply
    back into the calling agent pane as a prompt queued behind its own turn (t3code's async
    completion, over the CLI agents already use). Both vendors can also host tools without a
    process: Claude through `sdkMcpServers` and `mcp_message` control requests, Codex through
    `dynamicTools` on `thread/start` and `item/tool/call`.
-5. Keep-up: a weekly diff of `sdk.d.ts` and the Codex schema, and a minimum-version table. The
+4. Keep-up: a weekly diff of `sdk.d.ts` and the Codex schema, and a minimum-version table. The
    survey's `archive/codex-host` tag is not in this clone; the Codex driver was written fresh.
+5. Small UI edges: a subagent step split from its agent row by assistant text does not nest, and
+   gpui-shared's Enter on an ordinary permission can also send attached images.

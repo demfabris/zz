@@ -149,6 +149,7 @@ pub struct AgentTranscript<I> {
     active_stream: Option<(StreamRole, u64)>,
     tool_entries: HashMap<String, u64>,
     tool_parents: HashMap<u64, String>,
+    awaiting_parent: HashMap<String, Vec<u64>>,
     structured_tool_outputs: BTreeSet<String>,
     plan_entry: Option<u64>,
     suppress_user_echo: bool,
@@ -170,6 +171,7 @@ impl<I> AgentTranscript<I> {
             active_stream: None,
             tool_entries: HashMap::new(),
             tool_parents: HashMap::new(),
+            awaiting_parent: HashMap::new(),
             structured_tool_outputs: BTreeSet::new(),
             plan_entry: None,
             suppress_user_echo: false,
@@ -443,6 +445,12 @@ impl<I> AgentTranscript<I> {
         let id = self.allocate_entry_id();
         self.tool_entries.insert(protocol_id.clone(), id);
         if let Some(parent) = parent {
+            if !self.tool_entries.contains_key(&parent) {
+                self.awaiting_parent
+                    .entry(parent.clone())
+                    .or_default()
+                    .push(id);
+            }
             self.tool_parents.insert(id, parent);
         }
         self.push_entry(AgentThreadEntry::Tool {
@@ -456,6 +464,15 @@ impl<I> AgentTranscript<I> {
             output,
             default_expanded: matches!(tool.status, ToolCallStatus::Failed),
         });
+        for child in self
+            .awaiting_parent
+            .remove(&protocol_id)
+            .unwrap_or_default()
+        {
+            if let Some(index) = self.entry_index(child) {
+                self.touch_entry(index);
+            }
+        }
     }
 
     fn apply_tool_update(&mut self, update: ToolCallUpdate) {
@@ -971,6 +988,33 @@ mod tests {
         let pending = transcript.permissions();
         assert_eq!(pending[0].questions[0].id, "fruit");
         assert!(pending[0].options.is_empty());
+    }
+
+    #[test]
+    fn a_step_that_arrives_before_its_agent_changes_once_the_agent_appears() {
+        let mut transcript = AgentTranscript::<()>::new(|_, _| None);
+        transcript.apply_update(update(serde_json::json!({
+            "sessionUpdate": "tool_call", "toolCallId": "read-1", "title": "Read a.rs", "kind": "read",
+            "_meta": { "zz": { "parent": "agent-1" } },
+        })));
+        let child = transcript.tool_entry("read-1").expect("child row");
+        assert_eq!(transcript.tool_parent(child), Some("agent-1"));
+        assert_eq!(transcript.tool_entry("agent-1"), None);
+        let before = transcript.revision();
+        transcript.apply_update(update(serde_json::json!({
+            "sessionUpdate": "tool_call", "toolCallId": "agent-1", "title": "Survey", "kind": "think",
+        })));
+        let changed = transcript.changed_entries(before).expect("change log");
+        assert!(
+            changed.contains(&0),
+            "the waiting step is touched: {changed:?}"
+        );
+        assert!(changed.contains(&1));
+        let before = transcript.revision();
+        transcript.apply_update(update(serde_json::json!({
+            "sessionUpdate": "tool_call", "toolCallId": "agent-2", "title": "Survey", "kind": "think",
+        })));
+        assert_eq!(transcript.changed_entries(before), Some(vec![2]));
     }
 
     #[test]

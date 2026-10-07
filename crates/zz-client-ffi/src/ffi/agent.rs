@@ -20,10 +20,10 @@ use zz_client::{
     agent_transcript::AgentTranscript,
 };
 use zz_protocol::{
-    AgentConnectionPhase, AgentPaneWire, AgentProvider, AgentSessionOpKind, ClientInstanceId,
-    GuiResponse, MAX_AGENT_AUTH_METHODS, MAX_AGENT_AVAILABLE_COMMANDS, MAX_AGENT_MODES,
-    MAX_AGENT_PROMPT_BYTES, MAX_AGENT_PROMPT_IMAGES, MAX_AGENT_QUEUED_PROMPTS,
-    MAX_AGENT_SESSION_DIRECTORIES, PaneId, PaneKindSnapshot,
+    AgentConnectionPhase, AgentPaneWire, AgentProvider, AgentQuestionAnswer, AgentSessionOpKind,
+    ClientInstanceId, GuiResponse, MAX_AGENT_AUTH_METHODS, MAX_AGENT_AVAILABLE_COMMANDS,
+    MAX_AGENT_MODES, MAX_AGENT_PROMPT_BYTES, MAX_AGENT_PROMPT_IMAGES, MAX_AGENT_QUEUED_PROMPTS,
+    MAX_AGENT_SESSION_DIRECTORIES, PaneId, PaneKindSnapshot, ProtocolMessage,
     agent_stream::{
         AgentAuthMethod, AgentImage, AgentPrompt, AgentPromptOutcome, AgentSessionCapabilities,
         AgentSessionSummary, AgentStreamItem, AgentStreamPayload,
@@ -245,8 +245,12 @@ impl ZzAgentModel {
                 serde_json::from_value(options.clone()),
             )
         {
+            let questions = payload
+                .get("questions")
+                .and_then(|questions| serde_json::from_value(questions.clone()).ok())
+                .unwrap_or_default();
             self.transcript
-                .request_permission(permission.request_id, tool, options);
+                .request_questions(permission.request_id, tool, options, questions);
         }
         if state.config_options.is_empty() && state.modes.is_empty() {
             self.options.clear();
@@ -576,7 +580,17 @@ impl ZzAgentModel {
         } else {
             changed.unwrap_or_default()
         };
-        let entries = indices.into_iter().map(|index| json!({"index":index,"revision":self.transcript.entry_revisions()[index],"entry":self.transcript.entries()[index]})).collect::<Vec<_>>();
+        let entries = indices
+            .into_iter()
+            .map(|index| {
+                let entry = &self.transcript.entries()[index];
+                let parent = self
+                    .transcript
+                    .tool_parent(entry.id())
+                    .and_then(|parent| self.transcript.tool_entry(parent));
+                json!({"index":index,"revision":self.transcript.entry_revisions()[index],"entry":entry,"parent":parent})
+            })
+            .collect::<Vec<_>>();
         let phase = match self.phase() {
             AgentConnectionPhase::Starting => "starting",
             AgentConnectionPhase::Ready => "ready",
@@ -587,7 +601,7 @@ impl ZzAgentModel {
         json!({"epoch":self.epoch,"revision":self.transcript.revision(),"reset":reset,"entry_count":self.transcript.entries().len(),"entries":entries,
             "provider":self.provider,"cwd":self.cwd,"agent_name":self.agent_name,"agent_key":self.agent_key,"phase":phase,"session_id":self.wire.session_id,"title":self.wire.title,
             "capabilities":self.capabilities,"options":self.options,"modes":self.modes,"mode":self.mode,"commands":self.commands,"auth_methods":self.auth_methods,"usage":self.usage,"git":self.wire.git,
-            "queued_prompts":self.wire.queued_prompts,"permissions":self.transcript.permissions(),"history":self.history,"error":self.error.as_deref().map(rendered_error),"busy":self.pending.is_some(),"cancelling":self.cancelling,"unknown_updates":self.unknown_updates})
+            "queued_prompts":self.wire.queued_prompts,"tasks":self.wire.tasks,"permissions":self.transcript.permissions(),"history":self.history,"error":self.error.as_deref().map(rendered_error),"busy":self.pending.is_some(),"cancelling":self.cancelling,"unknown_updates":self.unknown_updates})
     }
 
     fn prompt(
@@ -800,6 +814,13 @@ enum Action {
         request_id: u64,
         option_id: Option<String>,
     },
+    AnswerQuestion {
+        request_id: u64,
+        answers: Vec<AgentQuestionAnswer>,
+    },
+    StopTask {
+        task_id: String,
+    },
     Configure {
         option: String,
         value: String,
@@ -829,6 +850,33 @@ enum Action {
 }
 
 impl ZzAgentModel {
+    fn question_answer(
+        &self,
+        request_id: u64,
+        answers: Vec<AgentQuestionAnswer>,
+    ) -> Result<ProtocolMessage, String> {
+        if !self.transcript.permissions().iter().any(|permission| {
+            permission.request_id == request_id && !permission.questions.is_empty()
+        }) {
+            return Err("This question is no longer available.".to_owned());
+        }
+        Ok(ProtocolMessage::AgentAnswerQuestion {
+            pane: self.pane,
+            request_id,
+            answers,
+        })
+    }
+
+    fn task_stop(&self, task_id: String) -> Result<ProtocolMessage, String> {
+        if !self.wire.tasks.iter().any(|task| task.id == task_id) {
+            return Err("This task is no longer running.".to_owned());
+        }
+        Ok(ProtocolMessage::AgentStopTask {
+            pane: self.pane,
+            task_id,
+        })
+    }
+
     fn send_setting(&mut self, client: &ZzClient, request: SettingRequest) -> Result<(), String> {
         let result = if request.option == LEGACY_MODE_PREFERENCE_ID {
             client
@@ -955,6 +1003,17 @@ impl ZzAgentModel {
                         .client
                         .agent_respond_permission(pane, request_id, option_id),
                 );
+            }
+            Action::AnswerQuestion {
+                request_id,
+                answers,
+            } => {
+                let message = self.question_answer(request_id, answers)?;
+                return send(client.client.send(&message));
+            }
+            Action::StopTask { task_id } => {
+                let message = self.task_stop(task_id)?;
+                return send(client.client.send(&message));
             }
             Action::ClearError => {
                 self.error = None;
@@ -1299,6 +1358,114 @@ mod tests {
         model.begin_prompt("hang".to_owned(), Vec::new());
         model.update(echo());
         assert_eq!(occurrences(&mut model), 2);
+    }
+
+    #[test]
+    fn question_cards_tasks_and_subagent_steps_reach_the_snapshot_and_the_wire() {
+        let mut model = model();
+        model.sync(&AgentPaneWire {
+            phase: AgentConnectionPhase::AwaitingPermission,
+            pending_permission: Some(zz_protocol::AgentPermissionWire {
+                request_id: 3,
+                payload: json!({
+                    "toolCall": {"toolCallId": "ask", "title": "Which fruit?"},
+                    "options": [],
+                    "questions": [{
+                        "id": "fruit", "question": "Which fruit?",
+                        "options": [{"label": "apple"}], "multiSelect": true, "allowOther": true,
+                    }],
+                })
+                .to_string(),
+            }),
+            tasks: vec![zz_protocol::AgentTaskWire {
+                id: "b1".to_owned(),
+                kind: "agent".to_owned(),
+                description: "Survey".to_owned(),
+                tool_call_id: Some("agent-1".to_owned()),
+            }],
+            ..AgentPaneWire::default()
+        });
+        model.update(
+            json!({"sessionUpdate":"tool_call","toolCallId":"agent-1","title":"Survey","kind":"think"}),
+        );
+        model.update(
+            json!({"sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read a.rs",
+            "kind":"read","_meta":{"zz":{"parent":"agent-1"}}}),
+        );
+
+        let snapshot = model.snapshot(0);
+        let question = &snapshot["permissions"][0]["questions"][0];
+        assert_eq!(question["id"], "fruit");
+        assert_eq!(question["multiSelect"], true);
+        assert_eq!(question["options"][0]["label"], "apple");
+        assert_eq!(snapshot["tasks"][0]["id"], "b1");
+        assert_eq!(snapshot["tasks"][0]["toolCallId"], "agent-1");
+        let entries = snapshot["entries"].as_array().unwrap();
+        let entry = |tool: &str| {
+            entries
+                .iter()
+                .find(|entry| entry["entry"]["protocol_id"] == tool)
+                .unwrap()
+        };
+        assert_eq!(entry("read-1")["parent"], entry("agent-1")["entry"]["id"]);
+        assert!(entry("agent-1")["parent"].is_null());
+
+        let answers = vec![AgentQuestionAnswer {
+            id: "fruit".to_owned(),
+            answers: vec!["apple".to_owned(), "kiwi".to_owned()],
+        }];
+        assert_eq!(
+            model.question_answer(3, answers.clone()),
+            Ok(ProtocolMessage::AgentAnswerQuestion {
+                pane: PaneId(7),
+                request_id: 3,
+                answers: answers.clone(),
+            })
+        );
+        assert!(model.question_answer(4, answers.clone()).is_err());
+        assert_eq!(
+            model.task_stop("b1".to_owned()),
+            Ok(ProtocolMessage::AgentStopTask {
+                pane: PaneId(7),
+                task_id: "b1".to_owned(),
+            })
+        );
+        assert!(model.task_stop("gone".to_owned()).is_err());
+        let action = serde_json::from_str::<Action>(
+            r#"{"action":"answer-question","request_id":3,"answers":[{"id":"fruit","answers":["apple","kiwi"]}]}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            action,
+            Action::AnswerQuestion { request_id: 3, answers: parsed } if parsed == answers
+        ));
+        assert!(matches!(
+            serde_json::from_str::<Action>(r#"{"action":"stop-task","task_id":"b1"}"#).unwrap(),
+            Action::StopTask { task_id } if task_id == "b1"
+        ));
+        assert!(!unsafe {
+            super::super::zz_client_agent_stop_task(std::ptr::null_mut(), 7, c"b1".as_ptr())
+        });
+    }
+
+    #[test]
+    fn a_step_listed_before_its_agent_resends_with_its_parent() {
+        let mut model = model();
+        model.update(
+            json!({"sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read a.rs",
+            "kind":"read","_meta":{"zz":{"parent":"agent-1"}}}),
+        );
+        let first = model.snapshot(0);
+        assert!(first["entries"][0]["parent"].is_null());
+        let since = first["revision"].as_u64().unwrap();
+        model.update(
+            json!({"sessionUpdate":"tool_call","toolCallId":"agent-1","title":"Survey","kind":"think"}),
+        );
+        let next = model.snapshot(since);
+        let entries = next["entries"].as_array().unwrap();
+        let step = entries.iter().find(|entry| entry["index"] == 0).unwrap();
+        let agent = entries.iter().find(|entry| entry["index"] == 1).unwrap();
+        assert_eq!(step["parent"], agent["entry"]["id"]);
     }
 
     #[test]

@@ -1,12 +1,14 @@
 pub mod composer;
 pub mod controls;
 pub mod presentation;
+pub mod question;
 pub mod slash;
+pub mod tasks;
 pub mod title;
 
 use std::{
     cell::Cell,
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     hash::{DefaultHasher, Hash, Hasher},
     path::{Path, PathBuf},
     rc::Rc,
@@ -30,10 +32,10 @@ use crate::{
 };
 use gpui::{
     AnyElement, App, ClipboardItem, Context, DispatchPhase, Div, ElementId, Entity, FollowMode,
-    FontWeight, Global, Hsla, Image, ImageSource, IntoElement, ListSizingBehavior, ListState,
-    ObjectFit, Pixels, RenderImage, Rgba, ScrollStrategy, ScrollWheelEvent, SharedString, Stateful,
-    Task, UniformListScrollHandle, Window, canvas, div, img, list, prelude::*, px, relative,
-    uniform_list,
+    FontWeight, Global, Hsla, Image, ImageSource, IntoElement, ListOffset, ListSizingBehavior,
+    ListState, ObjectFit, Pixels, RenderImage, Rgba, ScrollStrategy, ScrollWheelEvent,
+    SharedString, Stateful, Task, UniformListScrollHandle, Window, canvas, div, img, list,
+    prelude::*, px, relative, uniform_list,
 };
 use parking_lot::RwLock;
 use similar::{ChangeTag, TextDiff};
@@ -266,6 +268,7 @@ pub enum DisclosureKind {
     Reasoning,
     Tool,
     Group,
+    Steps,
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -892,6 +895,7 @@ pub struct AgentToolEntry {
     pub input: Option<AgentToolPayload>,
     pub output: Arc<[AgentToolPayload]>,
     pub default_expanded: bool,
+    pub parent: Option<u64>,
 }
 
 impl AgentEntry {
@@ -982,7 +986,33 @@ pub fn fold_timeline_rows(entries: &[AgentEntry]) -> FoldedTimelineRows {
 }
 
 #[must_use]
+pub const fn timeline_parent(entry: &AgentEntry) -> Option<u64> {
+    match entry {
+        AgentEntry::Tool(tool) => tool.parent,
+        _ => None,
+    }
+}
+
+#[must_use]
 pub fn append_timeline_row(rows: &mut Vec<TimelineRow>, entry: AgentEntry) -> (usize, bool) {
+    if let Some(parent) = timeline_parent(&entry)
+        && let Some(row_index) = rows.iter().rposition(|row| row.entry(parent).is_some())
+    {
+        let row = &mut rows[row_index];
+        match row {
+            TimelineRow::Group { entries, .. } => Arc::make_mut(entries).push(entry),
+            TimelineRow::Single(previous) => {
+                let id = previous.id();
+                let previous = previous.clone();
+                *row = TimelineRow::Group {
+                    kind: TimelineGroupKind::Tool,
+                    id,
+                    entries: Arc::new(vec![previous, entry]),
+                };
+            }
+        }
+        return (row_index, false);
+    }
     if let Some(kind) = timeline_group_kind(&entry)
         && let (Some(row_index), Some(last)) = (rows.len().checked_sub(1), rows.last_mut())
     {
@@ -1265,6 +1295,15 @@ impl TimelineStick {
         self.wake();
     }
 
+    pub fn reveal(&mut self, list: &ListState, row: usize) {
+        self.release(list);
+        self.show_jump = true;
+        list.scroll_to(ListOffset {
+            item_ix: row,
+            offset_in_item: px(0.0),
+        });
+    }
+
     /// Wheel or drag input. This is the *only* path that can break the pin: the
     /// list calls its scroll handler from its input path alone, so content
     /// growth — which moves the distance to the end just as far — never reaches
@@ -1462,6 +1501,18 @@ fn render_group(
     copyable_assistant: Option<u64>,
     cx: &mut App,
 ) -> AnyElement {
+    let nesting = StepNesting::new(members);
+    if let [only] = nesting.top.as_slice() {
+        return render_member(
+            timeline_scroll,
+            store,
+            members,
+            &nesting,
+            *only,
+            copyable_assistant,
+            cx,
+        );
+    }
     let expanded = store.update(cx, |store, _| {
         store.expanded(id, DisclosureKind::Group, false)
     });
@@ -1471,7 +1522,7 @@ fn render_group(
         Some(AgentEntry::Tool(tool)) => tool_icon(tool.kind),
         _ => tool_icon(AgentToolKind::Other),
     };
-    let label = tool_group_label(members);
+    let label = tool_group_label(nesting.top.iter().map(|index| &members[*index]));
 
     v_flex()
         .id(("agent-timeline-group", id))
@@ -1491,11 +1542,159 @@ fn render_group(
             }),
         )
         .when(expanded, |this| {
-            this.child(v_flex().w_full().children(
-                members.iter().cloned().map(|entry| {
-                    render_entry(timeline_scroll, store, entry, copyable_assistant, cx)
-                }),
-            ))
+            this.child(v_flex().w_full().children(nesting.top.iter().map(|index| {
+                render_member(
+                    timeline_scroll,
+                    store,
+                    members,
+                    &nesting,
+                    *index,
+                    copyable_assistant,
+                    cx,
+                )
+            })))
+        })
+        .into_any_element()
+}
+
+struct StepNesting {
+    top: Vec<usize>,
+    steps: HashMap<u64, Vec<usize>>,
+}
+
+impl StepNesting {
+    fn new(members: &[AgentEntry]) -> Self {
+        let positions = members
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| (entry.id(), index))
+            .collect::<HashMap<_, _>>();
+        let parent_of = |index: usize| {
+            timeline_parent(&members[index]).and_then(|parent| positions.get(&parent).copied())
+        };
+        let reaches_top = |index: usize| {
+            let mut visited = HashSet::new();
+            let mut at = index;
+            loop {
+                if !visited.insert(at) {
+                    return false;
+                }
+                match parent_of(at) {
+                    Some(parent) => at = parent,
+                    None => return true,
+                }
+            }
+        };
+        let mut top = Vec::new();
+        let mut steps = HashMap::<u64, Vec<usize>>::new();
+        for index in 0..members.len() {
+            match parent_of(index).filter(|_| reaches_top(index)) {
+                Some(parent) => steps.entry(members[parent].id()).or_default().push(index),
+                None => top.push(index),
+            }
+        }
+        Self { top, steps }
+    }
+}
+
+fn render_member(
+    timeline_scroll: &ListState,
+    store: &Entity<AgentTimelineStore>,
+    members: &[AgentEntry],
+    nesting: &StepNesting,
+    index: usize,
+    copyable_assistant: Option<u64>,
+    cx: &mut App,
+) -> AnyElement {
+    let entry = members[index].clone();
+    let id = entry.id();
+    let row = render_entry(timeline_scroll, store, entry, copyable_assistant, cx);
+    let Some(steps) = nesting.steps.get(&id) else {
+        return row;
+    };
+    v_flex()
+        .w_full()
+        .child(row)
+        .child(render_steps(
+            timeline_scroll,
+            store,
+            members,
+            nesting,
+            id,
+            steps,
+            copyable_assistant,
+            cx,
+        ))
+        .into_any_element()
+}
+
+pub fn subagent_steps_label(count: usize, latest: Option<&str>) -> SharedString {
+    let steps = if count == 1 { "step" } else { "steps" };
+    match latest {
+        Some(latest) => format!("{count} {steps} · {latest}").into(),
+        None => format!("{count} {steps}").into(),
+    }
+}
+
+fn render_steps(
+    timeline_scroll: &ListState,
+    store: &Entity<AgentTimelineStore>,
+    members: &[AgentEntry],
+    nesting: &StepNesting,
+    parent: u64,
+    steps: &[usize],
+    copyable_assistant: Option<u64>,
+    cx: &mut App,
+) -> AnyElement {
+    let expanded = store.update(cx, |store, _| {
+        store.expanded(parent, DisclosureKind::Steps, false)
+    });
+    let toggle = store.clone();
+    let latest = steps.last().map(|index| &members[*index]);
+    let icon = match latest {
+        Some(AgentEntry::Tool(tool)) => tool_icon(tool.kind),
+        _ => IconName::Bot,
+    };
+    let latest_label = latest.and_then(|entry| match entry {
+        AgentEntry::Tool(tool) => Some(tool.label.as_ref()),
+        AgentEntry::Reasoning { label, .. } => Some(label.as_ref()),
+        _ => None,
+    });
+    let label = subagent_steps_label(steps.len(), latest_label);
+    v_flex()
+        .id(("agent-subagent-steps", parent))
+        .debug_selector(|| "agent-subagent-steps".to_owned())
+        .w_full()
+        .ml_1()
+        .pl_4()
+        .border_l_1()
+        .border_color(cx.theme().border())
+        .child(
+            activity_row(
+                ("agent-subagent-steps-toggle", parent),
+                icon,
+                label,
+                Some(expanded),
+                cx,
+            )
+            .on_click(move |_, _, cx| {
+                toggle.update(cx, |store, cx| {
+                    store.toggle_expanded(parent, DisclosureKind::Steps, false, cx);
+                });
+            }),
+        )
+        .when(expanded, |this| {
+            this.children(steps.iter().map(|index| {
+                render_member(
+                    timeline_scroll,
+                    store,
+                    members,
+                    nesting,
+                    *index,
+                    copyable_assistant,
+                    cx,
+                )
+            }))
         })
         .into_any_element()
 }
@@ -1515,9 +1714,9 @@ fn group_action(entry: &AgentEntry) -> Option<(&'static str, &'static str)> {
     }
 }
 
-fn tool_group_label(entries: &[AgentEntry]) -> SharedString {
+fn tool_group_label<'a>(entries: impl IntoIterator<Item = &'a AgentEntry>) -> SharedString {
     let mut actions = Vec::new();
-    for (singular, plural) in entries.iter().filter_map(group_action) {
+    for (singular, plural) in entries.into_iter().filter_map(group_action) {
         if let Some((_, _, count)) = actions
             .iter_mut()
             .find(|(existing, _, _)| *existing == singular)
@@ -1818,6 +2017,7 @@ fn render_tool_entry(
         input,
         output,
         default_expanded,
+        parent: _,
     } = tool;
     let expandable = location.is_some() || input.is_some() || !output.is_empty();
     let expanded = expandable
@@ -3500,6 +3700,7 @@ mod tests {
             input: None,
             output: Arc::from([]),
             default_expanded: false,
+            parent: None,
         }
     }
 
@@ -3555,14 +3756,14 @@ mod tests {
         ));
         assert_eq!(
             tool_group_label(match &folded.rows[0] {
-                TimelineRow::Group { entries, .. } => entries,
+                TimelineRow::Group { entries, .. } => entries.iter(),
                 TimelineRow::Single(_) => unreachable!(),
             }),
             "Edit files, Ran command"
         );
         assert_eq!(
             tool_group_label(match &folded.rows[2] {
-                TimelineRow::Group { entries, .. } => entries,
+                TimelineRow::Group { entries, .. } => entries.iter(),
                 TimelineRow::Single(_) => unreachable!(),
             }),
             "Edit files, Read file"
@@ -3601,11 +3802,160 @@ mod tests {
         ));
         assert_eq!(
             tool_group_label(match &folded.rows[0] {
-                TimelineRow::Group { entries, .. } => entries,
+                TimelineRow::Group { entries, .. } => entries.iter(),
                 TimelineRow::Single(_) => unreachable!(),
             }),
             "Reasoning, Edit files"
         );
+    }
+
+    fn test_step(id: u64, parent: u64) -> AgentEntry {
+        let mut tool = test_tool_entry(
+            id,
+            &format!("Read {id}.rs"),
+            AgentToolKind::Read,
+            AgentToolStatus::Completed,
+        );
+        tool.parent = Some(parent);
+        AgentEntry::Tool(tool)
+    }
+
+    #[test]
+    fn subagent_steps_join_their_agents_row_wherever_it_sits() {
+        let entries = vec![
+            test_tool_kind(1, "Survey", AgentToolKind::Think, AgentToolStatus::Running),
+            test_step(2, 1),
+            AgentEntry::Assistant {
+                id: 3,
+                markdown: "meanwhile".into(),
+            },
+            test_step(4, 1),
+            test_step(5, 99),
+            test_tool_kind(
+                6,
+                "Read a.rs",
+                AgentToolKind::Read,
+                AgentToolStatus::Completed,
+            ),
+            test_tool_kind(7, "Survey", AgentToolKind::Think, AgentToolStatus::Running),
+            test_step(8, 7),
+            test_tool_kind(
+                9,
+                "Edit a.rs",
+                AgentToolKind::Edit,
+                AgentToolStatus::Completed,
+            ),
+        ];
+
+        let folded = fold_timeline_rows(&entries);
+
+        assert_eq!(folded.entry_to_row, [0, 0, 1, 0, 2, 2, 2, 2, 2]);
+        let TimelineRow::Group { id: 1, entries, .. } = &folded.rows[0] else {
+            panic!("the agent row became a group: {:?}", folded.rows[0]);
+        };
+        let ids = entries.iter().map(AgentEntry::id).collect::<Vec<_>>();
+        assert_eq!(ids, [1, 2, 4], "steps keep their order under the agent");
+        let nesting = StepNesting::new(entries);
+        assert_eq!(nesting.top, [0]);
+        assert_eq!(nesting.steps[&1], [1, 2]);
+        let TimelineRow::Group { entries, .. } = &folded.rows[2] else {
+            panic!("tools fold together: {:?}", folded.rows[2]);
+        };
+        let nesting = StepNesting::new(entries);
+        assert_eq!(
+            nesting.top,
+            [0, 1, 2, 4],
+            "a step whose agent is unknown stands alone"
+        );
+        assert_eq!(nesting.steps[&7], [3]);
+        assert_eq!(
+            tool_group_label(nesting.top.iter().map(|index| &entries[*index])),
+            "Read files, Thought, Edit file"
+        );
+        assert_eq!(
+            subagent_steps_label(2, Some("Read 4.rs")),
+            "2 steps · Read 4.rs"
+        );
+        assert_eq!(subagent_steps_label(1, None), "1 step");
+    }
+
+    #[test]
+    fn a_step_listed_before_its_agent_still_nests_but_a_loop_stays_flat() {
+        let members = [
+            test_step(1, 2),
+            test_tool_kind(2, "Survey", AgentToolKind::Think, AgentToolStatus::Running),
+            test_step(3, 1),
+        ];
+        let nesting = StepNesting::new(&members);
+        assert_eq!(nesting.top, [1]);
+        assert_eq!(nesting.steps[&2], [0]);
+        assert_eq!(nesting.steps[&1], [2]);
+
+        let mut agent =
+            test_tool_entry(2, "Survey", AgentToolKind::Think, AgentToolStatus::Running);
+        agent.parent = Some(1);
+        let members = [
+            test_step(1, 2),
+            AgentEntry::Tool(agent),
+            test_step(3, 1),
+            test_step(4, 4),
+        ];
+        let nesting = StepNesting::new(&members);
+        assert_eq!(nesting.top, [0, 1, 2, 3], "a loop renders every row flat");
+        assert!(nesting.steps.is_empty());
+    }
+
+    struct TimelineRowsTest {
+        store: Entity<AgentTimelineStore>,
+        rows: Arc<Vec<TimelineRow>>,
+    }
+
+    impl Render for TimelineRowsTest {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().w(px(520.0)).h(px(600.0)).child(AgentTimeline::new(
+                self.rows.clone(),
+                ListState::new(self.rows.len(), gpui::ListAlignment::Top, px(600.0)),
+                self.store.clone(),
+            ))
+        }
+    }
+
+    #[gpui::test]
+    fn subagent_steps_fold_under_their_agent_until_opened(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let rows = fold_timeline_rows(&[
+            test_tool_kind(1, "Survey", AgentToolKind::Think, AgentToolStatus::Running),
+            test_step(2, 1),
+            test_step(3, 1),
+        ])
+        .rows;
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let view = cx.new(|cx| TimelineRowsTest {
+                store: cx.new(|_| AgentTimelineStore::default()),
+                rows,
+            });
+            crate::Root::new(view, window, cx)
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        let collapsed = cx
+            .debug_bounds("agent-subagent-steps")
+            .expect("the steps fold should be painted");
+        assert!(collapsed.size.height <= px(ACTIVITY_ROW_HEIGHT + 1.0));
+
+        cx.simulate_click(collapsed.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        let expanded = cx
+            .debug_bounds("agent-subagent-steps")
+            .expect("the open steps should be painted");
+        assert!(expanded.size.height >= px(ACTIVITY_ROW_HEIGHT * 3.0));
+        assert_eq!(expanded.top(), collapsed.top());
     }
 
     #[test]

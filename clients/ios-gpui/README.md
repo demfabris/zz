@@ -184,6 +184,18 @@ keyboard hides the on-screen one, and detaching it brings it back for the focuse
 field. Autocorrect, smart punctuation, and capitalization stay off unless a field
 asks for them.
 
+The layout moves with the keyboard frame by frame, as Flutter's keyboard inset does: the
+backend reads the keyboard's own spring from the keyboard layout guide and evaluates it on
+the display link at each frame's display time, so the phone key row, the terminal's bottom
+edge, popovers, and a focused settings field slide with the keys on open and close. In the
+phone shell the key row takes the bar's place where the bar's top edge was and rides on the
+keyboard once the keys pass it. Terminals keep their grid while the keyboard moves (the
+prompt row stays above the key row) and report their new size once it stops.
+
+Number fields in Settings open a decimal pad with a Done button above it; a comma from the
+pad is typed as a point. Done, or Return in any settings field, commits the value and hides
+the keyboard. Return in the Hosts destination field connects and hides it too.
+
 The view implements `UITextInput`, so IME composition (Japanese, Chinese, Korean),
 dead keys, dictation, and Pencil handwriting reach the focused field. While text is
 being composed, hardware keys go to the input method first.
@@ -225,10 +237,10 @@ The display link asks for the screen's top rate with the range Flutter uses (hal
 at least 60, up to the maximum), so ProMotion iPhones and iPads animate at 120 Hz;
 `CADisableMinimumFrameDurationOnPhone` in `Info.plist` lifts the iPhone's 60 Hz cap. The link
 pauses three ticks after the last frame request and restarts when the window is invalidated, a
-touch begins, or a momentum scroll or key repeat is running, so an idle app takes no vsync
-callbacks and the display drops to its idle rate. The window opts out of GPUI presenting the last
-frame again for a second after fast input, and the pager, sheets, and swipe back end the touch
-fling they swallow, so a swipe stops ticking once the page settles.
+touch begins, or a momentum scroll, key repeat, or keyboard animation is running, so an idle
+app takes no vsync callbacks and the display drops to its idle rate. The window opts out of GPUI
+presenting the last frame again for a second after fast input, and the pager, sheets, and swipe
+back end the touch fling they swallow, so a swipe stops ticking once the page settles.
 
 To measure frames on a paired, unlocked device without touching it:
 
@@ -286,8 +298,8 @@ has its own bottom bar), UI zoom, and Match system text size; its Agent panes sw
 System.
 Interface and pane preferences are saved atomically in the app container
 at `Library/Application Support/zz-gpui/preferences.json` and restored on launch.
-Touch controls work without a keyboard; numeric values and hex colors open the
-on-screen keyboard.
+Touch controls work without a keyboard; numeric values open a decimal pad and hex colors
+open the on-screen keyboard.
 
 ## Terminal experiment
 
@@ -375,7 +387,10 @@ itself were not exercised.
 iPhone Simulator checks on 2026-10-06 covered pinching a terminal in the phone shell (one grid
 report per pinch, after release; a two-finger sideways pan neither pages nor scrolls), live
 system text size changes from XS to AX5, and the phone's Settings list. iPad Simulator kept
-Panes, Status bar, UI zoom, and Match system text size.
+Panes, Status bar, UI zoom, and Match system text size. Screen recordings on iPhone 17 Pro
+Simulator then followed the key row, the terminal bottom, an Interface number field, and the
+color picker frame by frame while the keyboard opened and closed (one terminal resize per
+keyboard move), and covered the decimal pad, Done, and Return in the Hosts field.
 
 Copy/paste of text copied within the app was verified. Text injected through
 `simctl pbcopy` was not readable from UIKit in this simulator session; cross-app

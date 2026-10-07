@@ -1273,6 +1273,39 @@ impl PanePump {
             queued.settle(Err(AgentTurnFailure::Reclaimed));
             return;
         }
+        let (verbs, running) = {
+            let state = self.state.lock();
+            (
+                state.capabilities.verbs,
+                state.phase == AgentConnectionPhase::Running,
+            )
+        };
+        if verbs && let Some(line) = queued.prompt.text.trim_start().strip_prefix("//") {
+            let idle_steer = line
+                .strip_prefix("steer")
+                .filter(|rest| !running && rest.starts_with(char::is_whitespace))
+                .map(|rest| rest.trim_start().to_owned());
+            if let Some(text) = idle_steer {
+                queued.prompt.text = text;
+            } else {
+                let prompt = std::mem::take(&mut queued.prompt);
+                if self
+                    .commands
+                    .try_send(RuntimeCommand::Verb { prompt })
+                    .is_err()
+                {
+                    queued.settle(Err(AgentTurnFailure::Failed(
+                        "agent pane is not accepting commands".to_owned(),
+                    )));
+                    return;
+                }
+                queued.settle(Ok(AgentTurnReply {
+                    stop_reason: "zz_command".to_owned(),
+                    ..AgentTurnReply::default()
+                }));
+                return;
+            }
+        }
         if self.state.lock().phase.accepts_prompt() {
             self.dispatch(queued);
             return;
@@ -1984,6 +2017,87 @@ mod tests {
             .get("content")
             .and_then(|content| content.get("text"))
             .and_then(Value::as_str)
+    }
+
+    #[test]
+    fn zz_commands_skip_the_turn_queue_and_idle_steering_becomes_a_prompt() {
+        let fixture = Fixture::open_with_runner(Box::new(|channels| {
+            Box::pin(async move {
+                let send = |text: String| {
+                    channels.events.send(AgentStreamPayload::Update {
+                        update: serde_json::json!({
+                            "sessionUpdate": "agent_message_chunk",
+                            "content": { "type": "text", "text": text },
+                        }),
+                    })
+                };
+                channels
+                    .events
+                    .send(AgentStreamPayload::Ready {
+                        agent_name: "Claude Code".to_owned(),
+                        agent_key: "claude-code".to_owned(),
+                        auth_methods: Vec::new(),
+                        capabilities: AgentSessionCapabilities {
+                            verbs: true,
+                            ..AgentSessionCapabilities::default()
+                        },
+                    })
+                    .await
+                    .map_err(|error| error.to_string())?;
+                channels
+                    .events
+                    .send(AgentStreamPayload::SessionReady {
+                        session_id: "s".to_owned(),
+                        modes: None,
+                        config_options: None,
+                    })
+                    .await
+                    .map_err(|error| error.to_string())?;
+                while let Ok(command) = channels.commands.recv().await {
+                    match command {
+                        RuntimeCommand::Verb { prompt } => {
+                            send(format!("verb {}", prompt.text))
+                                .await
+                                .map_err(|error| error.to_string())?;
+                        }
+                        RuntimeCommand::Prompt { turn_id, prompt } => {
+                            send(format!("prompt {}", prompt.text))
+                                .await
+                                .map_err(|error| error.to_string())?;
+                            channels
+                                .events
+                                .send(AgentStreamPayload::PromptFinished {
+                                    turn_id,
+                                    outcome: AgentPromptOutcome::Finished {
+                                        stop_reason: serde_json::json!("end_turn"),
+                                    },
+                                })
+                                .await
+                                .map_err(|error| error.to_string())?;
+                        }
+                        RuntimeCommand::Shutdown => break,
+                        _ => {}
+                    }
+                }
+                Ok(())
+            })
+        }));
+        fixture.wait_for_session();
+        fixture.prompt("//btw what now");
+        fixture.recorder.wait("the side question", |payload| {
+            chunk_text(payload) == Some("verb //btw what now")
+        });
+        assert_eq!(fixture.state().phase, AgentConnectionPhase::Ready);
+        fixture.prompt("//steer go left");
+        let payloads = fixture.recorder.wait("the steer prompt", |payload| {
+            chunk_text(payload) == Some("prompt go left")
+        });
+        assert!(
+            !chunk_texts(&payloads)
+                .iter()
+                .any(|text| text.starts_with("verb //steer"))
+        );
+        fixture.close();
     }
 
     fn queued_prompt_texts(payloads: &[AgentStreamPayload]) -> Vec<String> {

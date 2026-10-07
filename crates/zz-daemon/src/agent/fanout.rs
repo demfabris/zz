@@ -222,7 +222,12 @@ impl AgentRuntime {
         waiter: Option<AgentTurnWaiter>,
     ) -> bool {
         let _lifecycle = self.lifecycle.lock();
-        let title = self.fanout.propose_title(pane, &prompt.text);
+        let command = self.fanout.is_zz_command(pane, &prompt.text);
+        let title = if command {
+            None
+        } else {
+            self.fanout.propose_title(pane, &prompt.text)
+        };
         let text = prompt.text.clone();
         let queued = QueuedPrompt { prompt, waiter };
         let sent = match self.host.command(pane, HostCommand::Prompt(queued)) {
@@ -236,7 +241,9 @@ impl AgentRuntime {
         if !sent {
             return false;
         }
-        self.fanout.remember_prompt(pane, text);
+        if !command {
+            self.fanout.remember_prompt(pane, text);
+        }
         if let (Some(title), Some(publisher), Some(generation)) = (
             title,
             self.fanout.publisher.upgrade(),
@@ -934,6 +941,16 @@ impl AgentFanout {
         if let Some(lane) = self.lanes.lock().get_mut(&pane) {
             lane.pending_prompts.push_back(text);
         }
+    }
+
+    fn is_zz_command(&self, pane: PaneId, text: &str) -> bool {
+        text.trim_start().starts_with("//")
+            && self.lanes.lock().get(&pane).is_some_and(|lane| {
+                matches!(
+                    lane.ready,
+                    Some(AgentStreamPayload::Ready { capabilities, .. }) if capabilities.verbs
+                )
+            })
     }
 
     /// Name the pane after its opening prompt, once.

@@ -101,6 +101,9 @@ pub(crate) enum RuntimeCommand {
         turn_id: u64,
         prompt: AgentPrompt,
     },
+    Verb {
+        prompt: AgentPrompt,
+    },
     Authenticate {
         method_id: String,
     },
@@ -809,6 +812,7 @@ pub(crate) async fn run_agent_connection(
                     .additional_directories
                     .is_some(),
                 images: response.agent_capabilities.prompt_capabilities.image,
+                verbs: false,
             };
             let (agent_name, agent_key) = response.agent_info.map_or_else(
                 || ("ACP agent".to_owned(), "acp-agent".to_owned()),
@@ -1552,6 +1556,9 @@ pub(crate) async fn run_agent_connection(
                             )
                             .await?,
                         }
+                    }
+                    RuntimeCommand::Verb { .. } => {
+                        log::debug!(target: "zz::agent", "an ACP agent has no zz commands");
                     }
                     RuntimeCommand::Shutdown => {
                         if let Some(session_id) = session.clone() {

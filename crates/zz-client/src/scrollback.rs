@@ -17,13 +17,14 @@ pub const MAX_HISTORY_CHUNK_ROWS: u32 = 512;
 pub const HISTORY_BACKFILL_QUIET: Duration = Duration::from_millis(100);
 pub const HISTORY_REQUEST_RETRY: Duration = Duration::from_secs(3);
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct HistoryRow {
     pub cells: Box<[PackedCell]>,
     pub dictionary: Arc<TerminalDictionary>,
     pub revision: u64,
 }
 
+#[derive(Debug)]
 pub struct HistoryRing {
     pub rows: VecDeque<HistoryRow>,
     limit: usize,
@@ -233,6 +234,7 @@ fn compact_history_plane_start(
     start
 }
 
+#[derive(Debug)]
 pub struct RetainedTerminalViewport {
     pub viewport: TerminalViewport,
     pub history: HistoryRing,

@@ -1314,15 +1314,6 @@ impl MuxClient {
         Some((ssh_destination_label(endpoint), port))
     }
 
-    fn history_trickle_budget(&self) -> usize {
-        self.core
-            .mux_options()
-            .get(MuxOptionKey::HistoryTrickle)
-            .and_then(|option| option.value.parse::<usize>().ok())
-            .unwrap_or_default()
-            .min(MAX_HISTORY_ROWS)
-    }
-
     fn request_history_backfill(&mut self, pane: PaneId) {
         self.request_history(pane, None);
     }
@@ -1426,8 +1417,8 @@ impl MuxClient {
                 .remove(&pane);
         }
 
-        let budget =
-            prefetch_target.map_or_else(|| self.history_trickle_budget(), |_| MAX_HISTORY_ROWS);
+        let budget = prefetch_target
+            .map_or_else(|| self.core.history_trickle_budget(), |_| MAX_HISTORY_ROWS);
         if budget == 0 {
             return;
         }

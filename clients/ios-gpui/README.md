@@ -260,9 +260,10 @@ each display link tick, and an idle `link:` line with few ticks means the displa
 
 `ZZ_GPUI_FRAME_LOG=1` prints, per burst of drawn frames, the interval between new frames (p50,
 p95, max), missed vsyncs, and the CPU time of each display link tick, plus link ticks and draws
-every five seconds. `ZZ_GPUI_BENCH=swipe` or `scroll` (optionally `:count`, default 16) waits eight
-seconds after launch and then plays horizontal pager swipes or vertical terminal flings from the
-display link. `GPUI_FRAME_STATS=frames.jsonl` writes gpui's per-frame JSON stats into the app's
+every five seconds. `ZZ_GPUI_BENCH=swipe`, `scroll`, or `drag` (optionally `:count`, default 16)
+waits eight seconds after launch and then plays horizontal pager swipes, vertical terminal flings,
+or slow 1.5 s terminal drags that hold still before letting go, each followed by a fling back, from
+the display link. `GPUI_FRAME_STATS=frames.jsonl` writes gpui's per-frame JSON stats into the app's
 `tmp` directory. Device and simulator launches forward these variables and `ZZ_GPUI_SESSION`;
 `ZZ_GPUI_CARGO_PROFILE=testflight` builds the device app with line tables for Instruments.
 
@@ -344,6 +345,14 @@ saved by this example.
   rubber-band past their edges and spring back, and a fling that reaches an edge bounces off it.
   Mouse-tracking applications, copy mode, and screens without scrollback keep plain scrolling.
   The bounce lives in the gpui fork (`Overscroll::Bounce` in the backend's gesture tuning).
+- Terminal scrollback moves with the finger by pixels, and a fling coasts the same way. The app
+  keeps up to 2000 rows above the screen (the `history-trickle` option) and draws scrolled rows
+  from them without waiting for the daemon. The daemon's view trails the gesture by up to a
+  screen, more rows are fetched as the view nears the oldest kept row, and once the view stays on
+  one row for 120 ms the daemon's view is moved there. New output does not move a scrolled-back
+  view; scrolling back to the bottom follows output again. This is the desktop's trackpad
+  scrolling (`LocalScrollState` and `HistoryPacer` in `zz-client`). `less`, `vim`, and other
+  mouse-tracking or alternate-screen programs still get wheel events.
 
 The standalone example displays one active terminal pane. The main app supports
 multiple terminal and agent panes; full mux overlays remain a later step.

@@ -121,6 +121,7 @@ impl Element for TerminalElement {
                 images: Some(&*images),
                 local_scroll_target,
                 scroll_pixel_offset,
+                overscroll: Pixels::ZERO,
                 extra_height: Pixels::ZERO,
                 command_output,
                 appearance: &self.appearance,

@@ -360,6 +360,22 @@ struct Entry {
 
 #[must_use]
 pub fn rows(tables: &[KeyTableSnapshot], table: &str, prefix: &str) -> Vec<WhichKeyRow> {
+    build_rows(tables, table, prefix, true)
+}
+
+/// Like [`rows`], but never merges different commands into one row, so each
+/// row can run its own first key.
+#[must_use]
+pub fn action_rows(tables: &[KeyTableSnapshot], table: &str, prefix: &str) -> Vec<WhichKeyRow> {
+    build_rows(tables, table, prefix, false)
+}
+
+fn build_rows(
+    tables: &[KeyTableSnapshot],
+    table: &str,
+    prefix: &str,
+    families: bool,
+) -> Vec<WhichKeyRow> {
     let Some(bindings) = tables.iter().find(|snapshot| snapshot.name == table) else {
         return Vec::new();
     };
@@ -415,7 +431,7 @@ pub fn rows(tables: &[KeyTableSnapshot], table: &str, prefix: &str) -> Vec<Which
                 yours,
                 repeat: binding.repeat,
                 label,
-                family,
+                family: family.filter(|_| families),
             }
         });
     let mut rows = merge(entries);
@@ -602,6 +618,16 @@ mod tests {
         assert_eq!(find(&rows, "'").label, "Go to window by index");
         assert_eq!(find(&rows, "C-b").label, "Send the prefix");
         assert_eq!(rows.len(), 50);
+    }
+
+    #[test]
+    fn action_rows_keep_each_command_on_its_own_row() {
+        let rows = action_rows(&default_tables().snapshot(), "prefix", "C-b");
+        assert_eq!(keys(find(&rows, "n")), [["n"]]);
+        assert_eq!(keys(find(&rows, "p")), [["p"]]);
+        assert_ne!(find(&rows, "n").label, find(&rows, "p").label);
+        assert_eq!(keys(find(&rows, "Up")), [["Up"]]);
+        assert_eq!(keys(find(&rows, "3")), [["3"]]);
     }
 
     #[test]

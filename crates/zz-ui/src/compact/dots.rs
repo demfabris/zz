@@ -5,7 +5,7 @@ use crate::{ActiveTheme as _, rems_from_px};
 const DOT: f32 = 5.0;
 const ACTIVE_DOT: f32 = 12.0;
 const DOT_GAP: f32 = 3.0;
-const GROUP_GAP: f32 = 7.0;
+const GROUP_GAP: f32 = 6.0;
 const DIM: f32 = 0.3;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

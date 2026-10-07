@@ -234,6 +234,13 @@ impl Pager {
         self.count
     }
 
+    pub fn finish(&mut self) {
+        if let Motion::Settle { at, .. } = self.motion {
+            self.shift = 0.0;
+            self.motion = Motion::Settle { velocity: 0.0, at };
+        }
+    }
+
     pub fn is_moving(&self) -> bool {
         !matches!(self.motion, Motion::Idle)
     }

@@ -10,6 +10,7 @@ use gpui::{
 use crate::{
     ActiveTheme as _, Colorize as _, Disableable, Sizable, Size,
     button::{Button, ButtonVariants as _},
+    compact::{bottom_sheet, floating_sheet, sheet_close, sheet_inset},
     h_flex,
     input::{Input, InputEvent, InputState},
     popover::Popover,
@@ -20,6 +21,9 @@ const SWATCH_SIZE: Pixels = px(18.0);
 const TRIGGER_SWATCH_SIZE: Pixels = px(16.0);
 
 const SWATCH_COLUMNS: usize = 10;
+const SHEET_SWATCH_GAP: f32 = 6.0;
+const SHEET_PADDING_X: f32 = 16.0;
+const TOUCH_TRIGGER_SWATCH: Pixels = px(24.0);
 const SWATCHES: [&str; 40] = [
     "#000000", "#0a0a0a", "#141414", "#1e1e1e", "#2d2d2d", "#454545", "#6b6b6b", "#9a9a9a",
     "#cccccc", "#ffffff", "#1a1b26", "#16161e", "#1e1e2e", "#181825", "#282828", "#1d2021",
@@ -36,6 +40,7 @@ pub enum ColorPickerEvent {
 pub struct ColorPickerState {
     hex: Entity<InputState>,
     color: Option<Hsla>,
+    sheet: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -66,6 +71,7 @@ impl ColorPickerState {
         Self {
             hex,
             color,
+            sheet: false,
             _subscriptions: subscriptions,
         }
     }
@@ -99,6 +105,13 @@ impl ColorPickerState {
             }
         };
         self.emit(color, cx);
+    }
+
+    fn set_sheet(&mut self, open: bool, cx: &mut Context<Self>) {
+        if self.sheet != open {
+            self.sheet = open;
+            cx.notify();
+        }
     }
 
     fn emit(&mut self, color: Option<Hsla>, cx: &mut Context<Self>) {
@@ -139,6 +152,139 @@ impl ColorPicker {
         self
     }
 
+    fn pick(
+        state: &Entity<ColorPickerState>,
+        color: Option<Hsla>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        state.update(cx, |picker, cx| {
+            picker.set_color(color, window, cx);
+            picker.emit(color, cx);
+        });
+    }
+
+    fn touch_trigger(&self, shown: Hsla, cx: &App) -> Button {
+        let state = self.state.clone();
+        Button::new(("zz-color-picker", self.state.entity_id()))
+            .ghost()
+            .flat()
+            .with_size(self.size)
+            .disabled(self.disabled)
+            .child(
+                h_flex()
+                    .gap(px(10.0))
+                    .child(
+                        div()
+                            .font_family(cx.theme().mono_font_family.clone())
+                            .text_size(px(13.0))
+                            .text_color(cx.theme().foreground.muted())
+                            .child(crate::to_hex(shown).to_uppercase()),
+                    )
+                    .child(
+                        div()
+                            .size(TOUCH_TRIGGER_SWATCH)
+                            .flex_none()
+                            .rounded(cx.theme().radius)
+                            .bg(shown)
+                            .border_1()
+                            .border_color(cx.theme().border()),
+                    ),
+            )
+            .on_click(move |_, _, cx| state.update(cx, |picker, cx| picker.set_sheet(true, cx)))
+    }
+
+    fn touch_sheet(&self, shown: Hsla, window: &Window, cx: &App) -> gpui::AnyElement {
+        let theme = cx.theme();
+        let state = self.state.clone();
+        let hex = self.state.read(cx).hex.clone();
+        let width = window.visual_viewport_bounds().size.width;
+        let gaps = SHEET_SWATCH_GAP * (SWATCH_COLUMNS - 1) as f32;
+        let cell = ((f32::from(width) - SHEET_PADDING_X * 2.0 - gaps) / SWATCH_COLUMNS as f32)
+            .floor()
+            .max(f32::from(SWATCH_SIZE));
+        let shown_hex = crate::to_hex(shown);
+        let grid = v_flex().gap(px(SHEET_SWATCH_GAP)).children(
+            SWATCHES
+                .chunks(SWATCH_COLUMNS)
+                .enumerate()
+                .map(|(row, colors)| {
+                    h_flex()
+                        .gap(px(SHEET_SWATCH_GAP))
+                        .children(colors.iter().enumerate().map(|(column, hex)| {
+                            let color = crate::parse_hex(hex).unwrap_or_default();
+                            let picked = crate::to_hex(color) == shown_hex;
+                            let state = state.clone();
+                            div()
+                                .id(("zz-sheet-swatch", row * SWATCH_COLUMNS + column))
+                                .size(px(cell))
+                                .flex_none()
+                                .rounded(theme.radius)
+                                .bg(color)
+                                .map(|swatch| {
+                                    if picked {
+                                        swatch.border_2().border_color(theme.foreground)
+                                    } else {
+                                        swatch.border_1().border_color(theme.border())
+                                    }
+                                })
+                                .on_click(move |_, window, cx| {
+                                    Self::pick(&state, Some(color), window, cx);
+                                })
+                        }))
+                }),
+        );
+        let clear = state.clone();
+        let close = state.clone();
+        let dismiss = state.clone();
+        let field = Size::Small.control_h();
+        floating_sheet(
+            bottom_sheet(
+                ("zz-color-picker-sheet", self.state.entity_id()),
+                self.label.clone().unwrap_or_else(|| "Color".into()),
+                [sheet_close("zz-color-picker-sheet-close")
+                    .on_click(move |_, _, cx| {
+                        close.update(cx, |picker, cx| picker.set_sheet(false, cx));
+                    })
+                    .into_any_element()],
+                v_flex()
+                    .gap(px(14.0))
+                    .px(px(SHEET_PADDING_X))
+                    .pb(px(12.0))
+                    .child(
+                        h_flex()
+                            .gap(px(8.0))
+                            .child(
+                                div()
+                                    .w(field)
+                                    .h(field)
+                                    .flex_none()
+                                    .rounded(theme.radius)
+                                    .bg(shown)
+                                    .border_1()
+                                    .border_color(theme.border()),
+                            )
+                            .child(Input::new(&hex).small().flex_1().min_w_0())
+                            .child(
+                                Button::new("zz-color-picker-sheet-clear")
+                                    .ghost()
+                                    .flat()
+                                    .small()
+                                    .compact()
+                                    .icon(crate::IconName::Undo2)
+                                    .on_click(move |_, window, cx| {
+                                        Self::pick(&clear, None, window, cx);
+                                    }),
+                            ),
+                    )
+                    .child(grid),
+                sheet_inset(window),
+                move |_, cx| dismiss.update(cx, |picker, cx| picker.set_sheet(false, cx)),
+            ),
+            window,
+        )
+    }
+
     fn swatch_grid(state: &Entity<ColorPickerState>, cx: &App) -> impl IntoElement {
         let radius = cx.theme().radius;
         v_flex()
@@ -167,10 +313,7 @@ impl ColorPicker {
                                         crate::tooltip::Tooltip::new(*hex).build(window, cx)
                                     })
                                     .on_click(move |_: &ClickEvent, window, cx| {
-                                        state.update(cx, |picker, cx| {
-                                            picker.set_color(Some(color), window, cx);
-                                            picker.emit(Some(color), cx);
-                                        });
+                                        Self::pick(&state, Some(color), window, cx);
                                     })
                             }))
                     }),
@@ -199,9 +342,21 @@ impl gpui::Styled for ColorPicker {
 }
 
 impl RenderOnce for ColorPicker {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let committed = self.state.read(cx).color;
         let shown = committed.unwrap_or(self.inherited);
+        if crate::touch::CoarsePointer::get(cx) {
+            let sheet = self
+                .state
+                .read(cx)
+                .sheet
+                .then(|| self.touch_sheet(shown, window, cx));
+            return div()
+                .flex_none()
+                .child(self.touch_trigger(shown, cx))
+                .children(sheet)
+                .into_any_element();
+        }
         let state = self.state.clone();
         let hex = self.state.read(cx).hex.clone();
         let label = self.label.clone();
@@ -251,12 +406,7 @@ impl RenderOnce for ColorPicker {
                                     .tooltip("Clear the override")
                                     .on_click({
                                         let state = state.clone();
-                                        move |_, window, cx| {
-                                            state.update(cx, |picker, cx| {
-                                                picker.set_color(None, window, cx);
-                                                picker.emit(None, cx);
-                                            });
-                                        }
+                                        move |_, window, cx| Self::pick(&state, None, window, cx)
                                     }),
                             ),
                     )

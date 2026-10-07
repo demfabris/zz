@@ -73,6 +73,7 @@ pub struct TerminalRenderInput<'a> {
     pub images: Option<&'a dyn TerminalImageSource>,
     pub local_scroll_target: Option<u32>,
     pub scroll_pixel_offset: Pixels,
+    pub overscroll: Pixels,
     pub extra_height: Pixels,
     pub command_output: bool,
     pub appearance: &'a TerminalAppearance,
@@ -777,6 +778,11 @@ impl RowRenderCache {
     ) -> PaintState {
         let started = log::log_enabled!(target: DIAGNOSTIC_TARGET, log::Level::Trace)
             .then(web_time::Instant::now);
+        let track = bounds;
+        let bounds = Bounds::new(
+            bounds.origin + point(px(0.0), input.overscroll),
+            bounds.size,
+        );
         let viewport = input.viewport;
         let row_revisions = input.row_revisions;
         let row_revision_epoch = input.revision_epoch;
@@ -1187,7 +1193,7 @@ impl RowRenderCache {
                 offset: target_offset,
                 len: viewport.scrollbar.len,
             });
-        let scrollbar = scrollbar_quad(scrollbar, bounds, cx);
+        let scrollbar = scrollbar_quad(scrollbar, track, input.overscroll, cx);
         let focused = input.focused;
         let cursor_visible =
             cursor_visible_for_paint(cursor, composing, focused, input.cursor_blink_visible);
@@ -1688,6 +1694,7 @@ fn copy_cursor_line_color(appearance: &TerminalAppearance) -> Hsla {
 fn scrollbar_quad(
     scrollbar: ScrollbarState,
     bounds: Bounds<Pixels>,
+    overscroll: Pixels,
     cx: &App,
 ) -> Option<PaintQuad> {
     if scrollbar.total <= scrollbar.len || scrollbar.total == 0 {
@@ -1699,10 +1706,17 @@ fn scrollbar_quad(
     let travel = (track_height - thumb_height).max(px(0.0));
     let denominator = scrollbar.total.saturating_sub(scrollbar.len).max(1);
     let progress = scrollbar.offset as f32 / denominator as f32;
-    let origin = point(
-        bounds.right() - THUMB_WIDTH - THUMB_INSET,
-        bounds.origin.y + THUMB_INSET + travel * progress,
-    );
+    let squeezed = (thumb_height - overscroll.abs()).max(px(MIN_THUMB_SIZE));
+    let top = bounds.origin.y
+        + THUMB_INSET
+        + travel * progress
+        + if overscroll < px(0.0) {
+            thumb_height - squeezed
+        } else {
+            px(0.0)
+        };
+    let thumb_height = squeezed;
+    let origin = point(bounds.right() - THUMB_WIDTH - THUMB_INSET, top);
     Some(
         fill(
             Bounds::new(origin, size(THUMB_WIDTH, thumb_height)),
@@ -4569,6 +4583,7 @@ mod tests {
                             images: None,
                             local_scroll_target: None,
                             scroll_pixel_offset: px(0.0),
+                            overscroll: px(0.0),
                             extra_height,
                             command_output: false,
                             appearance: &appearance,
@@ -4626,6 +4641,7 @@ mod tests {
                         images: None,
                         local_scroll_target: None,
                         scroll_pixel_offset: offset,
+                        overscroll: px(0.0),
                         extra_height: px(0.0),
                         command_output: false,
                         appearance: &appearance,
@@ -4717,6 +4733,7 @@ mod tests {
                         images: None,
                         local_scroll_target: None,
                         scroll_pixel_offset: offset,
+                        overscroll: px(0.0),
                         extra_height: px(0.0),
                         command_output: false,
                         appearance: &appearance,

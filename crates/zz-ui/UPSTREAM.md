@@ -269,8 +269,11 @@ lifecycle; native daemon and operating-system dependencies stay outside `zz-ui`.
 `src/compact/` is **zz-original**: phone-sized widgets for the thin clients, with no upstream
 counterpart. `Pager` is a renderer-free model that pages one pane per screen from touch pans and
 wheel scrolls (rubber-banded edges, a quarter-width or velocity commit, one page per gesture,
-the fling ended after a release, a spring settle). The rest is the chrome around it: `page_dots`,
-`compact_bar` with its 44px buttons and title, `compact_pane_header` and `top_shade`, the
+the fling ended after a release, a spring settle). `Lift` is the same kind of model for a drag up
+the bar: progress follows the finger over 300px with resistance past the top, and a release past
+a third or a flick springs it open, otherwise closed. The rest is the chrome around it: `page_dots`,
+`compact_bar` with its grabber, `compact_bar_pill` (pane icon, title, a meta line and the dots), and
+a 44px keyboard button, the transparent `compact_pane_header`, the
 centered `compact_hud` badge (the terminal text size while pinching),
 `bottom_sheet` (dragged down by its header, or by its content from the top, to close), the
 grouped `WhichKeyList` a sheet shows, `swipe_back` for a back swipe that pops a pushed page over
@@ -280,7 +283,15 @@ swallows and ends the fling momentum of a pan they took after they close. When t
 `touch::CoarsePointer` (narrow thin clients do), `Button::hit_slop`, switches, select triggers,
 and number steppers answer taps in a 44px box around the visual, and workspace tree rows and popup
 menu rows grow to 44px. `touch::touch_scale` renders desktop-sized chrome under a coarse pointer
-with the rem size grown by 17/13 (iOS body text over the desktop's 13px), menus it opens included.
+with the rem size grown by 15/13, menus it opens included. Under a coarse pointer `SettingEntry`
+puts its control on the title line and the description below it, `Switch` grows to 44 by 26,
+`Select` opens a `compact::bottom_sheet` of `sheet_option` rows (search past 12 choices,
+`SelectItem::font_family` previews fonts, `Select::title` names the sheet) instead of the popup
+menu, and `ColorPicker` shows its hex and opens the hex field and swatches in a sheet. Sheets
+opened from inside a page go through `compact::floating_sheet`, which lifts them onto the visible
+part of the window; `bottom_sheet` is sized in pixels so a touch-scaled parent leaves it alone.
+`sheet_action` is the same row with a muted icon in the check slot, for a command such as "New
+session" after a sheet's choices.
 `touch::press_feedback` and `press_highlight` track a press from touch-down (delayed 100ms unless
 a scroll starts, fading in 120ms and out 180ms, shown at least 130ms); buttons skip hover and
 `active` styles under a coarse pointer and draw this instead, as do settings rows that open a

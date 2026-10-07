@@ -51,11 +51,14 @@ impl LocalScroll {
     }
 }
 
-pub fn local_scroll_gate(viewport: &TerminalViewport, history_rows: usize) -> bool {
+fn live_scrollback(viewport: &TerminalViewport) -> bool {
     matches!(viewport.mode, TerminalMode::Live)
         && !viewport.mouse_tracking
         && viewport.scrollbar.total > viewport.scrollbar.len
-        && history_rows != 0
+}
+
+pub fn local_scroll_gate(viewport: &TerminalViewport, history_rows: usize) -> bool {
+    live_scrollback(viewport) && history_rows != 0
 }
 
 pub fn local_scroll_should_retire(
@@ -114,7 +117,11 @@ pub fn daemon_follow_offset(
     toward_newer: bool,
 ) -> Option<u32> {
     let rows = u32::from(rows.max(1));
-    let desired = target.saturating_add((rows / 2).max(1)).min(maximum);
+    let step = (rows / 2).max(1);
+    let desired = target.saturating_add(step).min(maximum).clamp(
+        reference.saturating_sub(step),
+        reference.saturating_add(step),
+    );
     let lead = reference.saturating_sub(target);
     let needed = if toward_newer {
         reference < target || lead < (rows / 4).max(1)
@@ -164,12 +171,19 @@ pub enum LocalScrollSync {
     Requested(u32),
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LocalScrollObservation {
+    pub changed: bool,
+    pub restore: Option<u32>,
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct LocalScrollState {
     local: Option<LocalScroll>,
     generation: u64,
     sub_row: f32,
     observed_invalidations: u64,
+    observed_columns: u16,
 }
 
 impl LocalScrollState {
@@ -307,6 +321,7 @@ impl LocalScrollState {
             return;
         }
         self.observed_invalidations = retained.history_invalidations;
+        self.observed_columns = retained.viewport.columns;
         self.generation = self.generation.wrapping_add(1);
         self.local = Some(next);
         step.redraw = true;
@@ -349,6 +364,7 @@ impl LocalScrollState {
         let server_offset = scrollbar.offset;
         let at_tail = scrollbar.offset.saturating_add(scrollbar.len) >= scrollbar.total;
         self.observed_invalidations = retained.history_invalidations;
+        self.observed_columns = retained.viewport.columns;
         if target < coverage_start {
             push_prefetch(target, retained, &mut step);
             step.redraw = self.clear();
@@ -415,36 +431,42 @@ impl LocalScrollState {
         retained: &RetainedTerminalViewport,
         replaced: bool,
         now: Instant,
-    ) -> bool {
+    ) -> LocalScrollObservation {
         let server_offset = retained.viewport.scrollbar.offset;
         let available = local_scroll_available(retained);
         let invalidations = retained.history_invalidations;
+        let dropped = replaced || invalidations != self.observed_invalidations;
         if let Some(local) = self.local.as_mut() {
             local.observe_server(server_offset);
         }
-        let mut changed = false;
-        if self.local.is_some_and(|local| {
+        let mut observation = LocalScrollObservation::default();
+        if let Some(local) = self.local.filter(|local| {
             replaced
                 || !available
                 || local_scroll_should_retire(
-                    local,
+                    *local,
                     server_offset,
                     self.observed_invalidations,
                     invalidations,
                     now,
                 )
         }) {
+            observation.restore = Some(local.target_offset).filter(|target| {
+                dropped
+                    && *target != server_offset
+                    && retained.viewport.columns == self.observed_columns
+                    && live_scrollback(&retained.viewport)
+            });
             self.clear();
-            changed = true;
+            observation.changed = true;
         }
-        if self.sub_row > 0.0
-            && (replaced || !available || invalidations != self.observed_invalidations)
-        {
+        if self.sub_row > 0.0 && (!available || dropped) {
             self.sub_row = 0.0;
-            changed = true;
+            observation.changed = true;
         }
         self.observed_invalidations = invalidations;
-        changed
+        self.observed_columns = retained.viewport.columns;
+        observation
     }
 
     pub fn overscroll_room(
@@ -593,7 +615,9 @@ mod tests {
         assert_eq!(daemon_follow_offset(507, 512, 24, 1000, true), Some(519));
         assert_eq!(daemon_follow_offset(995, 995, 24, 1000, true), Some(1000));
         assert_eq!(daemon_follow_offset(999, 1000, 24, 1000, true), None);
-        assert_eq!(daemon_follow_offset(10, 9, 1, 1000, true), Some(11));
+        assert_eq!(daemon_follow_offset(10, 9, 1, 1000, true), Some(10));
+        assert_eq!(daemon_follow_offset(970, 1000, 24, 1000, false), Some(988));
+        assert_eq!(daemon_follow_offset(980, 940, 24, 1000, true), Some(952));
     }
 
     #[test]
@@ -666,7 +690,7 @@ mod tests {
         assert!(matches!(
             step.effects[..],
             [
-                LocalScrollEffect::ScrollToOffset(982),
+                LocalScrollEffect::ScrollToOffset(988),
                 LocalScrollEffect::Sync(_)
             ]
         ));
@@ -791,9 +815,15 @@ mod tests {
         retained.viewport.scrollbar.offset = 1000;
         state.scroll_by_pixels(30.0, 20.0, &retained, now);
         assert_eq!((state.target(), state.sub_row()), (Some(999), 10.0));
-        assert!(!state.observe(&retained, false, now));
+        assert!(!state.observe(&retained, false, now).changed);
         retained.history_invalidations += 1;
-        assert!(state.observe(&retained, false, now));
+        assert_eq!(
+            state.observe(&retained, false, now),
+            LocalScrollObservation {
+                changed: true,
+                restore: Some(999),
+            }
+        );
         assert_eq!((state.target(), state.sub_row()), (None, 0.0));
 
         retained.viewport.mouse_tracking = true;

@@ -187,12 +187,17 @@ pub fn settings_navigation_group_label(group: SettingsNavigationGroup, cx: &App)
         .child(group.title())
 }
 
-/// The settings root on a narrow screen: one row per section, grouped like
-/// the sidebar navigation. Tapping a row hands its section to `on_pick`.
+const SECTION_ROW_HEIGHT: f32 = 48.0;
+
+/// The settings root on a narrow screen: the sidebar's labeled groups at
+/// touch size. `meta` puts a short value at the end of a row, and tapping a
+/// row hands its section to `on_pick`.
 pub fn settings_section_index(
     sections: &[SettingsSection],
+    meta: impl Fn(SettingsSection) -> Option<SharedString>,
     on_pick: impl Fn(SettingsSection, &mut Window, &mut App) + 'static,
-    cx: &App,
+    window: &mut Window,
+    cx: &mut App,
 ) -> SettingsScrollColumn {
     let on_pick = Rc::new(on_pick);
     let mut groups: Vec<(SettingsNavigationGroup, Vec<SettingsSection>)> = Vec::new();
@@ -203,23 +208,74 @@ pub fn settings_section_index(
             _ => groups.push((group, vec![section])),
         }
     }
-    let chevron = cx.theme().foreground.muted();
-    settings_scroll_column("settings-index").children(groups.into_iter().map(|(group, members)| {
-        SettingsStack::titled(group.title()).children(members.into_iter().map(|section| {
-            let on_pick = Rc::clone(&on_pick);
-            SettingEntry::new(section.title(), "")
-                .title_icon(section.icon())
-                .control(
-                    Icon::new(crate::IconName::ChevronRight)
-                        .size(crate::rems_from_px(14.0))
-                        .text_color(chevron),
+    let muted = cx.theme().foreground.muted();
+    let dim = cx.theme().foreground.opacity(0.3);
+    let radius = cx.theme().radius;
+    let wash = cx.theme().foreground.opacity(0.08);
+    let mut column = settings_scroll_column("settings-index");
+    for (group, members) in groups {
+        let rows = members
+            .into_iter()
+            .map(|section| {
+                let id = ElementId::Name(format!("settings-index-{}", section.title()).into());
+                let on_pick = Rc::clone(&on_pick);
+                let press = crate::touch::press_feedback(id.clone(), window, cx);
+                let pressed = press.amount;
+                div()
+                    .id(id)
+                    .relative()
+                    .flex()
+                    .items_center()
+                    .gap(px(12.0))
+                    .h(px(SECTION_ROW_HEIGHT))
+                    .px(px(10.0))
+                    .rounded(radius)
+                    .cursor_pointer()
+                    .when(pressed > 0.0, |row| {
+                        row.bg(wash.opacity(wash.a * pressed))
+                            .border(px(0.5))
+                            .border_color(cx.theme().foreground.opacity(0.1 * pressed))
+                    })
+                    .child(Icon::new(section.icon()).small().text_color(muted))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_size(crate::rems_from_px(13.0))
+                            .child(section.title()),
+                    )
+                    .children(meta(section).map(|value| {
+                        div()
+                            .text_size(crate::rems_from_px(11.0))
+                            .text_color(muted)
+                            .child(value)
+                    }))
+                    .child(
+                        Icon::new(crate::IconName::ChevronRight)
+                            .size(px(14.0))
+                            .text_color(dim),
+                    )
+                    .on_click(move |_, window, cx| on_pick(section, window, cx))
+                    .child(press.listener())
+            })
+            .collect::<Vec<_>>();
+        column = column.child(
+            div()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .px(px(6.0))
+                        .pb(px(6.0))
+                        .text_size(crate::rems_from_px(12.0))
+                        .text_color(muted)
+                        .map(crate::StyledExt::font_medium)
+                        .child(group.title()),
                 )
-                .on_click(
-                    ElementId::Name(format!("settings-index-{}", section.title()).into()),
-                    move |_, window, cx| on_pick(section, window, cx),
-                )
-        }))
-    }))
+                .children(rows),
+        );
+    }
+    column
 }
 
 #[cfg(test)]
@@ -892,11 +948,7 @@ fn settings_group_header(
         .gap(px(2.0))
         .px(px(2.0))
         .child(
-            crate::StyledExt::font_medium(div().text_size(crate::rems_from_px(12.0)))
-                .when(crate::touch::CoarsePointer::get(cx), |this| {
-                    this.text_color(cx.theme().foreground.muted())
-                })
-                .child(title),
+            crate::StyledExt::font_medium(div().text_size(crate::rems_from_px(12.0))).child(title),
         )
         .when_some(description, |this, description| {
             this.child(
@@ -1154,6 +1206,53 @@ impl RenderOnce for SettingEntry {
             .as_ref()
             .map(|(id, _)| crate::touch::press_feedback(id.clone(), window, cx));
         let pressed = press.as_ref().map_or(0.0, |press| press.amount);
+        let coarse = crate::touch::CoarsePointer::get(cx);
+        let heading = if coarse {
+            let description = (!self.description.is_empty()).then(|| {
+                div()
+                    .text_size(crate::rems_from_px(11.0))
+                    .text_color(cx.theme().foreground.muted())
+                    .child(self.description.clone())
+            });
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(3.0))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(px(16.0))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_1()
+                                .min_w_0()
+                                .items_center()
+                                .gap(px(4.0))
+                                .when_some(self.title_icon, |this, icon| {
+                                    this.child(icon.with_size(crate::Size::Small))
+                                })
+                                .child(div().text_size(crate::rems_from_px(13.0)).child(self.title))
+                                .when_some(self.title_actions, gpui::ParentElement::child),
+                        )
+                        .when_some(self.control, gpui::ParentElement::child),
+                )
+                .children(description)
+        } else {
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(px(16.0))
+                .child(
+                    SettingCopy::new(self.title, self.description)
+                        .when_some(self.title_icon, SettingCopy::title_icon)
+                        .when_some(self.title_actions, SettingCopy::title_actions),
+                )
+                .when_some(self.control, gpui::ParentElement::child)
+        };
 
         let body = div()
             .relative()
@@ -1181,19 +1280,7 @@ impl RenderOnce for SettingEntry {
                         .bg(cx.theme().foreground.opacity(0.1 * pressed)),
                 )
             })
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap(px(16.0))
-                    .child(
-                        SettingCopy::new(self.title, self.description)
-                            .when_some(self.title_icon, SettingCopy::title_icon)
-                            .when_some(self.title_actions, SettingCopy::title_actions),
-                    )
-                    .when_some(self.control, gpui::ParentElement::child),
-            )
+            .child(heading)
             .children(self.children);
 
         let surface = div()
@@ -1321,11 +1408,7 @@ impl RenderOnce for SettingCopy {
             .flex()
             .flex_col()
             .w_full()
-            .max_w(relative(if crate::touch::CoarsePointer::get(cx) {
-                1.0
-            } else {
-                0.7
-            }))
+            .max_w(relative(0.7))
             .min_w_0()
             .gap(px(3.0))
             .child(
@@ -1383,6 +1466,7 @@ pub fn settings_reset_button(
 pub struct SettingsSelectItem {
     title: SharedString,
     value: String,
+    font: bool,
 }
 
 impl SettingsSelectItem {
@@ -1390,7 +1474,15 @@ impl SettingsSelectItem {
         Self {
             title: title.into(),
             value: value.into(),
+            font: false,
         }
+    }
+
+    /// Draw the row in the font family its value names.
+    #[must_use]
+    pub fn preview_font(mut self) -> Self {
+        self.font = true;
+        self
     }
 }
 
@@ -1403,6 +1495,10 @@ impl SelectItem for SettingsSelectItem {
 
     fn value(&self) -> &Self::Value {
         &self.value
+    }
+
+    fn font_family(&self) -> Option<SharedString> {
+        self.font.then(|| self.value.clone().into())
     }
 }
 

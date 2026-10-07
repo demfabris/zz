@@ -528,6 +528,7 @@ impl TerminalApp {
                     .map(|images| images as &dyn zz_ui::terminal::TerminalImageSource),
                 local_scroll_target: None,
                 scroll_pixel_offset: px(0.0),
+                overscroll: px(0.0),
                 extra_height: px(0.0),
                 command_output: false,
                 appearance: &appearance,

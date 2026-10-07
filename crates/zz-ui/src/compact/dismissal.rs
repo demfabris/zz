@@ -130,6 +130,17 @@ impl Dismissal {
         }
     }
 
+    pub(super) fn finish(&mut self) {
+        if let Motion::Settle { target, at, .. } = self.motion {
+            self.offset = target;
+            self.motion = Motion::Settle {
+                target,
+                velocity: 0.0,
+                at,
+            };
+        }
+    }
+
     pub(super) fn tick(&mut self, now: Instant) -> Tick {
         match self.motion {
             Motion::Idle | Motion::Drag => Tick::Still,
@@ -333,6 +344,16 @@ mod tests {
         assert_eq!(dismissal.offset(), EXTENT);
         assert_eq!(dismissal.tick(clock.at(2000)), Tick::Still);
         assert_eq!(dismissal.offset(), 0.0);
+    }
+
+    #[test]
+    fn finishing_lands_the_release_on_the_next_tick() {
+        let clock = Clock(Instant::now());
+        let mut dismissal = Dismissal::new(Overdrag::Band);
+        drag(&mut dismissal, &clock, &[(0, 110.0), (150, 110.0)]);
+        assert!(dismissal.release(FLING, COMMIT_FRACTION, clock.at(500)));
+        dismissal.finish();
+        assert_eq!(dismissal.tick(clock.at(501)), Tick::Dismissed);
     }
 
     #[test]

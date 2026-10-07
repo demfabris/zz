@@ -42,6 +42,14 @@ impl<D: SelectDelegate> Select<D> {
         self
     }
 
+    /// What the list is choosing, named at the top of the sheet a touch
+    /// screen opens in place of the dropdown.
+    #[must_use]
+    pub fn title(mut self, title: impl Into<SharedString>) -> Self {
+        self.options.title = Some(title.into());
+        self
+    }
+
     /// Cap on the dropdown's height; defaults to the popup menu height limit.
     #[must_use]
     pub fn menu_max_h(mut self, max_h: impl Into<Length>) -> Self {

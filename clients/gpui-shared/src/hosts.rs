@@ -167,7 +167,7 @@ impl AppShell {
     ) -> AnyElement {
         let entries = self.host_entries(narrow, cx);
         let page = settings_scroll_column(id)
-            .child(settings_heading(title, DESCRIPTION, cx))
+            .children(settings_heading(title, DESCRIPTION, cx))
             .when(!entries.is_empty(), |page| {
                 page.child(SettingsStack::titled("Hosts").children(entries))
             });

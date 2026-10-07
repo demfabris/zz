@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use gpui::{
     AnyElement, App, DispatchPhase, ElementId, Entity, EntityId, Global, Hitbox, HitboxBehavior,
-    Hsla, IntoElement, LongPressEvent, MouseButton, MouseDownEvent, MouseUpEvent, Pixels, Point,
-    ScrollWheelEvent, Styled, TouchDragEvent, TouchPhase, Window, canvas, fill,
+    Hsla, IntoElement, LongPressEvent, MouseButton, MouseDownEvent, MouseExitEvent, MouseUpEvent,
+    Pixels, Point, ScrollWheelEvent, Styled, TouchDragEvent, TouchPhase, Window, canvas, fill,
 };
 use web_time::{Duration, Instant};
 
@@ -274,6 +274,16 @@ fn listen(state: &Entity<Press>, hitbox: Hitbox, delay: Duration, window: &mut W
             cx.global_mut::<Contact>().live = false;
         }
     });
+    window.on_mouse_event({
+        let update = update.clone();
+        move |_: &MouseExitEvent, phase, _, cx| {
+            let contact = *cx.default_global::<Contact>();
+            if phase == DispatchPhase::Capture && contact.live && contact.owner == Some(me) {
+                update(cx, &|press, now| press.cancel(now));
+                cx.global_mut::<Contact>().live = false;
+            }
+        }
+    });
     window.on_mouse_event(move |event: &LongPressEvent, phase, _, cx| {
         if phase != DispatchPhase::Capture
             || !matches!(event.phase, TouchPhase::Ended | TouchPhase::Cancelled)
@@ -367,6 +377,22 @@ mod tests {
         frame(cx, 90);
         assert!(inner.get() > 0.0 && inner.get() < 1.0);
         frame(cx, 200);
+        assert_eq!(inner.get(), 0.0);
+    }
+
+    #[gpui::test]
+    fn a_touch_that_ends_without_a_tap_lets_go(cx: &mut TestAppContext) {
+        let (_, inner, cx) = host(cx);
+        let at = point(px(30.0), px(30.0));
+        touch(cx, at);
+        frame(cx, 250);
+        assert_eq!(inner.get(), 1.0);
+        cx.simulate_event(MouseExitEvent {
+            position: point(px(-1.0), px(-1.0)),
+            pressed_button: None,
+            modifiers: Modifiers::none(),
+        });
+        frame(cx, 400);
         assert_eq!(inner.get(), 0.0);
     }
 

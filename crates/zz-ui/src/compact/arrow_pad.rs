@@ -5,7 +5,7 @@ use gpui::{
 use web_time::Duration;
 
 use super::{
-    key_row::{KEY_HEIGHT, KeyLook, key_surface},
+    key_row::{KEY_HEIGHT, KEY_WIDTH, KeyLook, key_surface},
     popover_key::popover_above,
     press::{Grip, Press, press_listeners},
 };
@@ -14,7 +14,6 @@ use crate::{ActiveTheme as _, Colorize as _, Icon, IconName, StyledExt as _, rem
 const THRESHOLD: f32 = 10.0;
 const REPEAT_DELAY: Duration = Duration::from_millis(300);
 const REPEAT_INTERVAL: Duration = Duration::from_millis(80);
-const PAD_WIDTH: f32 = 52.0;
 const BUBBLE: f32 = 132.0;
 const BUBBLE_PADDING: f32 = 6.0;
 const CELL_GAP: f32 = 4.0;
@@ -236,7 +235,7 @@ impl Render for ArrowPad {
             .flex_none()
             .items_center()
             .justify_center()
-            .w(rems_from_px(PAD_WIDTH))
+            .w(rems_from_px(KEY_WIDTH))
             .h(rems_from_px(KEY_HEIGHT))
             .child(Icon::new(IconName::ArrowsMove).size(rems_from_px(18.0)))
             .child(press_listeners(cx.entity().downgrade()))

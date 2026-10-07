@@ -1,17 +1,20 @@
 //! The select's entity: what is picked, and whether the menu is open.
 
 use gpui::{
-    Anchor, AnyElement, App, Bounds, Context, DismissEvent, Entity, EventEmitter, FocusHandle,
-    Focusable, InteractiveElement as _, IntoElement, Length, MouseButton, ParentElement as _,
-    Pixels, Render, SharedString, StyleRefinement, Styled as _, Subscription, Window, anchored,
-    canvas, deferred, div, prelude::FluentBuilder as _, px,
+    Anchor, AnyElement, App, AppContext as _, Bounds, Context, DismissEvent, Entity, EventEmitter,
+    FocusHandle, Focusable, InteractiveElement as _, IntoElement, Length, MouseButton,
+    ParentElement as _, Pixels, Render, SharedString, StatefulInteractiveElement as _,
+    StyleRefinement, Styled as _, Subscription, Window, anchored, canvas, deferred, div,
+    prelude::FluentBuilder as _, px,
 };
 
 use crate::{
     ActiveTheme as _, Colorize as _, Disableable as _, Icon, IconName, IndexPath, Selectable as _,
     Sizable as _, Size, StyledExt as _,
     button::Button,
+    compact::{bottom_sheet, floating_sheet, sheet_close, sheet_inset, sheet_option},
     h_flex,
+    input::{Input, InputEvent, InputState},
     menu::{PopupMenu, PopupMenuItem},
 };
 
@@ -21,6 +24,7 @@ use super::{
 };
 
 const WINDOW_MARGIN: Pixels = px(8.);
+const SEARCH_FROM: usize = 12;
 
 pub(super) type EmptyBuilder = Box<dyn Fn(&mut Window, &App) -> AnyElement + 'static>;
 
@@ -29,6 +33,7 @@ pub(super) struct SelectOptions {
     pub(super) style: StyleRefinement,
     pub(super) size: Size,
     pub(super) placeholder: Option<SharedString>,
+    pub(super) title: Option<SharedString>,
     pub(super) menu_max_h: Option<Length>,
     pub(super) disabled: bool,
 }
@@ -46,6 +51,8 @@ pub struct SelectState<D: SelectDelegate> {
     delegate: D,
     selected: Option<D::Item>,
     menu: Option<Entity<PopupMenu>>,
+    sheet: bool,
+    search: Option<(Entity<InputState>, Subscription)>,
     trigger_bounds: Bounds<Pixels>,
     options: SelectOptions,
     empty: Option<EmptyBuilder>,
@@ -70,6 +77,8 @@ impl<D: SelectDelegate> SelectState<D> {
             delegate,
             selected,
             menu: None,
+            sheet: false,
+            search: None,
             trigger_bounds: Bounds::default(),
             options: SelectOptions::default(),
             empty: None,
@@ -132,7 +141,11 @@ impl<D: SelectDelegate> SelectState<D> {
     }
 
     fn open_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.menu.is_some() || self.options.disabled {
+        if self.menu.is_some() || self.sheet || self.options.disabled {
+            return;
+        }
+        if crate::touch::CoarsePointer::get(cx) {
+            self.open_sheet(window, cx);
             return;
         }
 
@@ -190,9 +203,30 @@ impl<D: SelectDelegate> SelectState<D> {
         cx.notify();
     }
 
+    fn open_sheet(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.delegate.items_count() > SEARCH_FROM {
+            if let Some((search, _)) = &self.search {
+                search.update(cx, |search, cx| search.set_value("", window, cx));
+            } else {
+                let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search"));
+                let subscription = cx.subscribe(&search, |_, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        cx.notify();
+                    }
+                });
+                self.search = Some((search, subscription));
+            }
+        }
+        self.sheet = true;
+        cx.notify();
+    }
+
     fn close_menu(&mut self, cx: &mut Context<Self>) {
         if self.menu.take().is_some() {
             self._subscriptions.clear();
+            cx.notify();
+        }
+        if std::mem::take(&mut self.sheet) {
             cx.notify();
         }
     }
@@ -240,7 +274,7 @@ impl<D: SelectDelegate> SelectState<D> {
     }
 
     pub(super) fn on_cancel(&mut self, _: &Cancel, window: &mut Window, cx: &mut Context<Self>) {
-        if self.menu.is_none() {
+        if self.menu.is_none() && !self.sheet {
             cx.propagate();
             return;
         }
@@ -260,7 +294,7 @@ impl<D: SelectDelegate> SelectState<D> {
             .map(SelectItem::title)
             .or_else(|| self.options.placeholder.clone())
             .unwrap_or_else(|| SharedString::new_static("Select"));
-        let open = self.menu.is_some();
+        let open = self.menu.is_some() || self.sheet;
         let slop = crate::touch::control_slop(self.options.size);
         let toggle = move |this: &mut Self,
                            _: &gpui::MouseDownEvent,
@@ -279,7 +313,7 @@ impl<D: SelectDelegate> SelectState<D> {
             .label(title)
             .dropdown_caret(true)
             .disabled(self.options.disabled)
-            .selected(self.menu.is_some())
+            .selected(open)
             .refine_style(&self.options.style)
             .on_mouse_down(MouseButton::Left, cx.listener(toggle));
         div()
@@ -309,7 +343,69 @@ impl<D: SelectDelegate> SelectState<D> {
             .into_any_element()
     }
 
-    fn render_menu(&self) -> Option<AnyElement> {
+    fn render_sheet(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let query = self
+            .search
+            .as_ref()
+            .map(|(search, _)| search.read(cx).value().to_lowercase())
+            .unwrap_or_default();
+        let selected = self.selected.as_ref().map(|item| item.value().clone());
+        let rows = (0..self.delegate.items_count())
+            .filter_map(|ix| {
+                let item = self.delegate.item(ix)?;
+                let title = item.title();
+                if !query.is_empty() && !title.to_lowercase().contains(&query) {
+                    return None;
+                }
+                Some(
+                    sheet_option(
+                        ("select-option", ix),
+                        title,
+                        selected.as_ref() == Some(item.value()),
+                        cx,
+                    )
+                    .debug_selector(move || format!("select-option-{ix}"))
+                    .when_some(item.font_family(), gpui::Styled::font_family)
+                    .on_click(cx.listener(move |this, _, window, cx| this.commit(ix, window, cx))),
+                )
+            })
+            .collect::<Vec<_>>();
+        let title = self
+            .options
+            .title
+            .clone()
+            .or_else(|| self.options.placeholder.clone())
+            .unwrap_or_else(|| SharedString::new_static("Select"));
+        let dismiss = cx.entity().downgrade();
+        let sheet = bottom_sheet(
+            ("select-sheet", cx.entity_id()),
+            title,
+            [sheet_close("select-sheet-close")
+                .on_click(cx.listener(|this, _, _, cx| this.close_menu(cx)))
+                .into_any_element()],
+            div()
+                .flex()
+                .flex_col()
+                .pb(px(8.0))
+                .children(self.search.as_ref().map(|(search, _)| {
+                    div()
+                        .px(px(16.0))
+                        .pb(px(8.0))
+                        .child(Input::new(search).small().cleanable(true))
+                }))
+                .child(div().flex().flex_col().px(px(8.0)).children(rows)),
+            sheet_inset(window),
+            move |_, cx| {
+                _ = dismiss.update(cx, Self::close_menu);
+            },
+        );
+        floating_sheet(sheet, window)
+    }
+
+    fn render_menu(&self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.sheet {
+            return Some(self.render_sheet(window, cx));
+        }
         let menu = self.menu.clone()?;
         Some(
             deferred(
@@ -339,9 +435,9 @@ impl<D: SelectDelegate> SelectState<D> {
 }
 
 impl<D: SelectDelegate> Render for SelectState<D> {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let trigger = self.render_trigger(cx);
-        let menu = self.render_menu();
+        let menu = self.render_menu(window, cx);
 
         div().relative().child(trigger).children(menu)
     }
@@ -536,6 +632,48 @@ mod tests {
             state.read_with(cx, |state, _| state.selected_value().cloned()),
             Some("Font 0".into())
         );
+    }
+
+    #[gpui::test]
+    fn a_touch_screen_picks_from_a_sheet(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::init(cx);
+            cx.set_reduce_motion(true);
+            crate::touch::CoarsePointer::set(true, cx);
+        });
+        let (preview, cx) = cx.add_window_view(|window, cx| Preview {
+            state: cx.new(|cx| {
+                SelectState::new(
+                    vec!["vi".into(), "emacs".into()],
+                    Some(IndexPath::new(1)),
+                    window,
+                    cx,
+                )
+            }),
+            disabled: false,
+        });
+        let state = preview.read_with(cx, |preview, _| preview.state.clone());
+        let draw = |cx: &mut gpui::VisualTestContext| {
+            cx.run_until_parked();
+            cx.update(|window, cx| {
+                _ = window.draw(cx);
+            });
+        };
+        draw(cx);
+        let bounds = state.read_with(cx, |state, _| state.trigger_bounds);
+        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        draw(cx);
+        assert!(state.read_with(cx, |state, _| state.sheet && state.menu.is_none()));
+        let row = cx
+            .debug_bounds("select-option-0")
+            .expect("the sheet lists the options");
+        cx.simulate_click(row.center(), gpui::Modifiers::default());
+        draw(cx);
+        assert_eq!(
+            state.read_with(cx, |state, _| state.selected_value().cloned()),
+            Some("vi".into())
+        );
+        assert!(state.read_with(cx, |state, _| !state.sheet));
     }
 
     #[gpui::test]

@@ -33,6 +33,7 @@ use std::{
 const STATE_IVAR: &str = "zzWindowState";
 static REGISTER_VIEW: Once = Once::new();
 static mut VIEW_CLASS: *const Class = ptr::null();
+static mut CONTROLLER_CLASS: *const Class = ptr::null();
 
 pub(crate) struct IosWindowState {
     _handle: AnyWindowHandle,
@@ -128,7 +129,7 @@ impl IosWindow {
             };
             apply_window_appearance(native_window, appearance);
 
-            let controller: id = msg_send![class!(UIViewController), new];
+            let controller: id = msg_send![CONTROLLER_CLASS, new];
             let native_view: id = msg_send![VIEW_CLASS, alloc];
             let native_view: id = msg_send![native_view, initWithFrame: screen_bounds];
             let _: () = msg_send![native_view, setContentScaleFactor: scale];
@@ -776,6 +777,18 @@ fn register_view_class() {
         );
         VIEW_CLASS = decl.register();
     }
+    let mut decl = ClassDecl::new("ZZGPUIViewController", class!(UIViewController)).unwrap();
+    unsafe {
+        decl.add_method(
+            sel!(preferredStatusBarStyle),
+            preferred_status_bar_style as extern "C" fn(&Object, Sel) -> isize,
+        );
+        CONTROLLER_CLASS = decl.register();
+    }
+}
+
+extern "C" fn preferred_status_bar_style(_: &Object, _: Sel) -> isize {
+    STATUS_BAR_STYLE.get()
 }
 
 extern "C" fn step(this: &Object, _: Sel, link: id) {
@@ -1751,6 +1764,31 @@ pub fn set_compact_keyboard(enabled: bool) {
     schedule_keyboard_sync(view);
 }
 
+pub fn set_status_bar_on_dark(dark: Option<bool>) {
+    let style = match dark {
+        None => 0,
+        Some(true) => 1,
+        Some(false) => 3,
+    };
+    if STATUS_BAR_STYLE.replace(style) == style {
+        return;
+    }
+    let view = ACTIVE_VIEW.get();
+    if view.is_null() {
+        return;
+    }
+    unsafe {
+        let window: id = msg_send![view, window];
+        if window.is_null() {
+            return;
+        }
+        let controller: id = msg_send![window, rootViewController];
+        if !controller.is_null() {
+            let _: () = msg_send![controller, setNeedsStatusBarAppearanceUpdate];
+        }
+    }
+}
+
 pub fn request_paste() {
     unsafe {
         dispatch2::DispatchQueue::main().exec_async_f(ptr::null_mut(), deferred_paste);
@@ -1902,6 +1940,7 @@ pub fn accessibility() -> Accessibility {
 thread_local! {
     static VIEWS: RefCell<Vec<id>> = const { RefCell::new(Vec::new()) };
     static ACTIVE_VIEW: std::cell::Cell<id> = const { std::cell::Cell::new(ptr::null_mut()) };
+    static STATUS_BAR_STYLE: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
 }
 
 pub(crate) fn is_live_view(view: id) -> bool {

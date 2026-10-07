@@ -85,6 +85,7 @@ struct SwipeState {
     left: f32,
     width: f32,
     gesture: Option<Point<Pixels>>,
+    pending: Option<Point<Pixels>>,
 }
 
 impl SwipeState {
@@ -92,31 +93,39 @@ impl SwipeState {
         f32::from(start.x) - self.left <= EDGE
     }
 
+    fn grab(&mut self, start: Point<Pixels>, delta: f32, now: Instant) -> bool {
+        self.dismissal.grab(self.width);
+        self.dismissal.drag(delta, now);
+        self.gesture = Some(start);
+        true
+    }
+
     fn pan(
         &mut self,
         event: &ScrollWheelEvent,
-        delta: f32,
-        claimable: bool,
+        delta: Point<Pixels>,
+        eligible: bool,
         now: Instant,
         cx: &mut Context<Self>,
     ) -> bool {
         let start = event.position;
         let ours = self.gesture == Some(start);
+        let rightward = delta.x > delta.y.abs();
+        let still = delta == Point::default();
+        let delta = f32::from(delta.x);
         let claimed = match event.touch_phase {
             TouchPhase::Started => {
                 self.gesture = None;
-                if claimable && delta > 0.0 {
-                    self.dismissal.grab(self.width);
-                    self.dismissal.drag(delta, now);
-                    self.gesture = Some(start);
-                    true
-                } else {
-                    false
-                }
+                self.pending = (eligible && still).then_some(start);
+                eligible && rightward && self.grab(start, delta, now)
             }
             TouchPhase::Moved if ours => {
                 self.dismissal.drag(delta, now);
                 true
+            }
+            TouchPhase::Moved if self.pending == Some(start) && !still => {
+                self.pending = None;
+                rightward && self.grab(start, delta, now)
             }
             TouchPhase::Ended if ours => {
                 self.gesture = None;
@@ -131,7 +140,11 @@ impl SwipeState {
                 self.dismissal.cancel(now);
                 true
             }
-            _ => false,
+            TouchPhase::Ended | TouchPhase::Cancelled => {
+                self.pending = None;
+                false
+            }
+            TouchPhase::Moved => false,
         };
         if claimed {
             cx.notify();
@@ -147,9 +160,17 @@ impl RenderOnce for SwipeBack {
             left: 0.0,
             width: 0.0,
             gesture: None,
+            pending: None,
         });
         let now = cx.background_executor().now();
-        match state.update(cx, |state, _| state.dismissal.tick(now)) {
+        let reduce_motion = cx.reduce_motion();
+        let tick = state.update(cx, |state, _| {
+            if reduce_motion {
+                state.dismissal.finish();
+            }
+            state.dismissal.tick(now)
+        });
+        match tick {
             Tick::Moving => window.request_animation_frame(),
             Tick::Dismissed => {
                 let on_back = Rc::clone(&self.on_back);
@@ -188,14 +209,12 @@ impl RenderOnce for SwipeBack {
                         return;
                     }
                     let delta = event.delta.pixel_delta(window.line_height());
-                    let claimable = event.touch_phase == TouchPhase::Started
-                        && delta.x.abs() > delta.y.abs()
+                    let eligible = event.touch_phase == TouchPhase::Started
                         && hitbox.should_handle_scroll(window)
                         && (state.read(cx).on_edge(event.position)
                             || !scroller_takes(event.position, window, cx));
-                    let delta = f32::from(delta.x);
                     let now = cx.background_executor().now();
-                    if state.update(cx, |state, cx| state.pan(event, delta, claimable, now, cx)) {
+                    if state.update(cx, |state, cx| state.pan(event, delta, eligible, now, cx)) {
                         cx.stop_propagation();
                     }
                 });
@@ -383,6 +402,22 @@ mod tests {
         settle(cx);
         assert_eq!(backs.get(), 1);
         assert_eq!(page(cx).left(), px(0.0));
+    }
+
+    #[gpui::test]
+    fn a_drag_that_catches_a_fling_can_still_go_back(cx: &mut TestAppContext) {
+        let (_, _, cx) = host(cx);
+        let edge = point(px(8.0), page(cx).center().y);
+        pan(
+            cx,
+            edge,
+            &[
+                (0, TouchPhase::Started, 0.0),
+                (16, TouchPhase::Moved, 40.0),
+                (16, TouchPhase::Moved, 60.0),
+            ],
+        );
+        assert_eq!(page(cx).left(), px(100.0));
     }
 
     #[gpui::test]

@@ -104,7 +104,10 @@ row order (`TerminalPatchRows`: `TerminalPatchSpan { row, start, len, clear }` o
 cell plane; `clear` empties the row past the span), an append-only dictionary delta
 (`TerminalDictionaryPatch`), and `TerminalPatchFields`, the metadata the patch carries. Metadata a
 patch does not carry keeps the retained frame's value. Row-shift
-detection uses per-row fingerprints (`best_row_shift`). Diff returns `None`, forcing a full reset, when
+detection uses per-row fingerprints (`best_row_shift`): a shift needs at least half the rows to match,
+except the shift implied by a scrollbar offset change at the same total, which wins whenever every
+overlapping row matches, so a view moved past half its rows still patches as a shift and the client
+keeps its history ring. Diff returns `None`, forcing a full reset, when
 dimensions or the dictionary generation change, or when the new dictionary does not extend the old one.
 `apply_patch` validates the entire patch **atomically** against `base_generation` / dictionary /
 dimensions / row bounds / cell references / metadata before mutating retained state, returning a typed

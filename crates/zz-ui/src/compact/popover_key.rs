@@ -5,13 +5,13 @@ use std::{
 
 use gpui::{
     Anchor, AnyElement, Bounds, Context, ElementId, EventEmitter, IntoElement, MouseButton,
-    MouseDownEvent, ParentElement as _, Pixels, Point, Render, SharedString, Styled as _, Task,
-    Window, anchored, canvas, deferred, div, point, prelude::*, px, relative,
+    MouseDownEvent, ParentElement as _, Pixels, Point, Render, ScrollHandle, SharedString,
+    Styled as _, Task, Window, anchored, canvas, deferred, div, point, prelude::*, px, relative,
 };
 use web_time::Duration;
 
 use super::{
-    key_row::{KEY_HEIGHT, KEY_MIN_WIDTH, KEY_PADDING_X, KeyLook, key_surface},
+    key_row::{KEY_HEIGHT, KEY_WIDTH, KeyLook, key_surface},
     press::{Grip, Press, key_slop, press_listeners},
     sticky::{StickyModifier, StickyModifiers},
 };
@@ -135,6 +135,7 @@ struct Touch {
     origin: Point<Pixels>,
     grip: Grip,
     slid: bool,
+    pan: Option<(Pixels, Pixels)>,
 }
 
 pub struct PopoverKey {
@@ -150,6 +151,7 @@ pub struct PopoverKey {
     slots: Rc<RefCell<Vec<Bounds<Pixels>>>>,
     key: Rc<Cell<Bounds<Pixels>>>,
     hold: Option<Task<()>>,
+    scroll: Option<ScrollHandle>,
 }
 
 impl EventEmitter<PopoverKeyEvent> for PopoverKey {}
@@ -169,7 +171,14 @@ impl PopoverKey {
             slots: Rc::default(),
             key: Rc::default(),
             hold: None,
+            scroll: None,
         }
+    }
+
+    #[must_use]
+    pub fn scrolls(mut self, scroll: ScrollHandle) -> Self {
+        self.scroll = Some(scroll);
+        self
     }
 
     #[must_use]
@@ -379,6 +388,7 @@ impl Press for PopoverKey {
             origin: at,
             grip,
             slid: false,
+            pan: None,
         });
         self.hover = None;
         self.hold = self.open.is_none().then(|| {
@@ -399,13 +409,24 @@ impl Press for PopoverKey {
         let Some(touch) = self.touch.as_mut() else {
             return;
         };
-        if !touch.slid && (at - touch.origin).magnitude() > f64::from(SLIDE) {
+        let moved = at - touch.origin;
+        if !touch.slid && moved.magnitude() > f64::from(SLIDE) {
             touch.slid = true;
             if self.open.is_none() {
-                self.open = Some(Open::Held);
                 self.hold = None;
+                match &self.scroll {
+                    Some(scroll) if moved.x.abs() > moved.y.abs() => {
+                        touch.pan = Some((at.x, scroll.offset().x));
+                    }
+                    _ => self.open = Some(Open::Held),
+                }
                 cx.notify();
             }
+        }
+        if let (Some((from, offset)), Some(scroll)) = (touch.pan, &self.scroll) {
+            let x = (offset + at.x - from).clamp(-scroll.max_offset().x, px(0.0));
+            scroll.set_offset(point(x, scroll.offset().y));
+            return;
         }
         let hover = if self.open.is_some() {
             self.slots
@@ -434,6 +455,7 @@ impl Press for PopoverKey {
                 (Some(_), Some(index)) => self.pick(index, cx),
                 (Some(Open::Held), None) if !touch.slid => self.open = Some(Open::Pinned),
                 (Some(_), None) => self.open = None,
+                (None, _) if touch.pan.is_some() => {}
                 (None, _) => match self.tap {
                     PopoverKeyTap::Latch(modifier) => StickyModifiers::toggle(modifier, cx),
                     PopoverKeyTap::Open => self.open = Some(Open::Pinned),
@@ -450,7 +472,8 @@ impl Render for PopoverKey {
             PopoverKeyTap::Latch(modifier) => StickyModifiers::get(cx).is_latched(modifier),
             PopoverKeyTap::Open => false,
         };
-        let look = if self.touch.is_some() || self.open.is_some() || self.armed {
+        let pressed = self.touch.is_some_and(|touch| touch.pan.is_none());
+        let look = if pressed || self.open.is_some() || self.armed {
             KeyLook::Inverted
         } else if latched {
             KeyLook::Latched
@@ -473,9 +496,8 @@ impl Render for PopoverKey {
             .flex_none()
             .items_center()
             .justify_center()
-            .min_w(rems_from_px(KEY_MIN_WIDTH))
+            .w(rems_from_px(KEY_WIDTH))
             .h(rems_from_px(KEY_HEIGHT))
-            .px(rems_from_px(KEY_PADDING_X + 2.0))
             .whitespace_nowrap()
             .child(self.label.clone())
             .child(

@@ -1029,18 +1029,23 @@ impl TerminalView {
             }
             if let Some(retained) = retained {
                 let retained_changed = !Arc::ptr_eq(&retained, &view.retained);
-                let (generation, view_generation, row_revision_epoch, copy_generation) = {
+                let (generation, view_generation, row_revision_epoch, copy_generation, restore) = {
                     let state = retained.read();
-                    changed |= view
+                    let observation = view
                         .scroll
                         .observe(&state, retained_changed, Instant::now());
+                    changed |= observation.changed;
                     (
                         state.viewport.generation,
                         state.viewport.view_generation,
                         state.row_revision_epoch,
                         state.copy_generation,
+                        observation.restore,
                     )
                 };
+                if let Some(target) = restore {
+                    view.send_view_action(cx, TerminalViewAction::ScrollToOffset(target));
+                }
                 if generation != view.observed_generation
                     || view_generation != view.observed_view_generation
                     || row_revision_epoch != view.observed_row_revision_epoch
@@ -3661,7 +3666,7 @@ mod tests {
                 view.on_scroll(&pixels(605.0), window, cx);
                 assert_eq!(view.local_scroll_target(), Some(970));
                 assert_eq!(view.scroll_pixel_offset(), px(5.0));
-                assert_eq!(scroll_actions(&sent), [Some(982)]);
+                assert_eq!(scroll_actions(&sent), [Some(988)]);
 
                 geometry(view, px(5.0), cx);
                 view.on_mouse_down(
@@ -3674,7 +3679,7 @@ mod tests {
                     window,
                     cx,
                 );
-                assert_eq!(scroll_actions(&sent), [Some(982), Some(970)]);
+                assert_eq!(scroll_actions(&sent), [Some(988), Some(970)]);
                 let Some(InputMessage::TerminalView {
                     action: TerminalViewAction::Mouse(press),
                     ..

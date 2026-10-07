@@ -8,15 +8,25 @@ from `clients/gpui-shared/src`.
 The sidebar is 256 points wide and respects the iOS safe area.
 
 On iPhone, and in any window narrower than 640 points, the attached session uses the
-phone shell instead: one pane fills the screen and a sideways swipe pages through every
-pane in window order. Landing on a pane zooms it (`resize-pane -Z`), so the daemon sizes
+phone shell instead: one pane fills the screen and a sideways drag on the bar's pill pages
+through every pane in window order. A sideways swipe on the pane itself stays with the pane. Each page paints its pane's color, opaque, from the top of the screen
+down: the status bar and the pane header are transparent over it, and the status bar text
+turns light or dark to match. Landing on a pane zooms it (`resize-pane -Z`), so the daemon sizes
 the window to that pane; terminal previews keep the neighbouring pane live while it
-slides in. The bottom bar has a tree button (the sidebar tree as a bottom sheet), the
-pane name with page dots grouped by window (tap it for the window chooser), and a
-keyboard button. The keyboard opens only from that button or a tap on the terminal.
-While it is up, a key row replaces the bar: hide, esc, tab, ctrl, alt, `|`, `~`, `/`,
-prefix, and an arrow pad. Keys with a dot share one gesture: tap for the key's own job,
-hold or slide up for a card, and release on an item to pick it. A tap latches ctrl or
+slides in. The bottom bar is a grabber, a pill, and a keyboard button. The pill shows the pane's
+icon, its name, and under it the window and page dots grouped by window; an agent waiting on a
+permission turns the icon and that line yellow. Drag the bar up and the pane shrinks into its card
+in the overview; past a third of the way or with a flick it opens, otherwise it springs back. A tap
+on the pill opens it too. The overview shows every
+pane of the session as a card with a live preview, one row per window, the current pane ringed
+in the accent. Tap a card and it grows back into the pane, or a row's New pane card to split that window. The
+top bar switches sessions (or starts one) from a sheet and opens Settings; New window sits
+under the last row. Close it with the X (the current card grows back) or a swipe right. The phone has no session tree:
+the sidebar toggle and `focus-sidebar` open the overview instead. The keyboard opens only from that button or a tap on the terminal.
+While it is up, a key row replaces the bar: prefix, ctrl, alt, tab, esc, `/`, `@`, an arrow
+pad, and hide, each 52 points wide. When they do not fit, the row scrolls sideways from any
+key but the arrow pad. Keys with a dot share one gesture: tap for the key's own job, hold or
+slide up for a card, slide sideways to scroll the row, and release on an item to pick it. A tap latches ctrl or
 alt for the next key; holding them offers common chords (^C, ^D, ^Z, ^R, M-b, M-f).
 Prefix opens a short menu (new pane, new window, rename pane, last pane, kill pane) and
 an All bindings sheet that sends any prefix binding through the daemon's key table. The
@@ -30,12 +40,17 @@ settings back, tree actions, reset and stepper buttons, switches, select menus),
 rows are 44 points tall, and each key in the key row answers across the whole row height and
 up to the middle of the gap to its neighbours.
 
-The phone sizes chrome like iOS: settings, the workspace tree, menus, dialogs, and daemon
-overlays render their text at 17 points instead of the desktop's 13 (everything sized in rems
-grows by 17/13), and settings get a 44-point navigation bar with a "‹ Settings" back button and a
-centred title. Switches and color wells sit at the right of their row; wider controls stay below
-the description. A rightward drag anywhere on a settings page goes back, as the iOS 26 content
-back gesture does, except on a horizontal strip (the palette tiles) that can still scroll back.
+The phone keeps the desktop's look and grows it for touch: settings, the workspace tree, menus,
+dialogs, and daemon overlays render their text at 15 points instead of the desktop's 13
+(everything sized in rems grows by 15/13). Settings keep the desktop cards, copy, and controls.
+Each row puts its control beside the title and the description underneath at full width; theme
+and palette tiles sit below. Switches grow to 44 by 26. A dropdown opens a bottom sheet of the
+desktop's menu rows at 44 points, check in front, with a search field once the list passes 12
+choices; fonts preview in their own face. A color well shows its hex and opens a sheet with the
+hex field and the desktop's ten-column swatches at touch size. The navigation bar is a back arrow
+and the page title, and the section list follows the desktop settings sidebar's groups. A
+rightward drag anywhere on a settings page goes back, except on a horizontal strip (the palette
+tiles) that can still scroll back.
 
 Buttons, rows, menu items, and keys show presses the way Flutter's CupertinoButton and React
 Native's Pressability do: a touch lights the control 100 ms after it lands unless it turns into a
@@ -166,7 +181,7 @@ its pane's content, and display-panes labels keep their tmux styles and alignmen
 Notices preserve severity, duration, and explicit clearing; a failed command reports
 as `command: error`.
 
-The tree button opens navigation on iPhone.
+The bar's pill opens navigation on iPhone.
 
 ## Keyboard
 

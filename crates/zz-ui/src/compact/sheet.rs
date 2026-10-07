@@ -1,15 +1,18 @@
 use std::rc::Rc;
 
 use gpui::{
-    Animation, AnimationExt as _, AnyElement, App, Context, DispatchPhase, ElementId,
+    Animation, AnimationExt as _, AnyElement, App, Context, DispatchPhase, Div, ElementId,
     HitboxBehavior, IntoElement, MouseButton, ParentElement as _, Pixels, Point, RenderOnce,
-    ScrollHandle, ScrollWheelEvent, SharedString, Styled, TouchPhase, Window, canvas, div,
-    ease_out_quint, prelude::*, px, relative,
+    ScrollHandle, ScrollWheelEvent, SharedString, Stateful, Styled, TouchPhase, Window, anchored,
+    canvas, deferred, div, ease_out_quint, prelude::*, px, relative,
 };
 use web_time::{Duration, Instant};
 
 use super::dismissal::{Dismissal, Overdrag, Tick, coast, coasting};
-use crate::{ActiveTheme as _, Colorize as _, StyledExt as _, rems_from_px};
+use crate::{
+    ActiveTheme as _, Colorize as _, Icon, IconName, StyledExt as _,
+    button::{Button, ButtonVariants as _},
+};
 
 const ENTER: Duration = Duration::from_millis(240);
 const CORNER: f32 = 28.0;
@@ -17,6 +20,8 @@ const GRABBER_WIDTH: f32 = 36.0;
 const GRABBER_HEIGHT: f32 = 5.0;
 const HEADER_HEIGHT: f32 = 44.0;
 const PADDING_X: f32 = 16.0;
+const CLOSE: f32 = 40.0;
+const OPTION_HEIGHT: f32 = 44.0;
 const MAX_HEIGHT: f32 = 0.85;
 const RISE: f32 = 0.3;
 const FLING_HEIGHTS: f32 = 2.0;
@@ -62,9 +67,109 @@ impl BottomSheet {
     }
 }
 
+/// Room a sheet keeps clear under its last row: the home indicator's safe
+/// area, or none while a soft keyboard already lifts the visible area.
+#[must_use]
+pub fn sheet_inset(window: &Window) -> Pixels {
+    (window.visual_viewport_bounds().bottom() - window.fully_visible_bounds().bottom()).max(px(0.0))
+}
+
+/// Lifts a [`bottom_sheet`] out of its parent onto the visible part of the
+/// window, for a sheet opened from inside a page.
+pub fn floating_sheet(sheet: impl IntoElement, window: &Window) -> AnyElement {
+    let area = window.visual_viewport_bounds();
+    deferred(
+        anchored().position(area.origin).child(
+            div()
+                .relative()
+                .w(area.size.width)
+                .h(area.size.height)
+                .child(sheet),
+        ),
+    )
+    .with_priority(2)
+    .into_any_element()
+}
+
+/// The close button at the right of a sheet's header.
+pub fn sheet_close(id: impl Into<ElementId>) -> Button {
+    Button::new(id)
+        .ghost()
+        .compact()
+        .tab_stop(false)
+        .size(px(CLOSE))
+        .child(Icon::new(IconName::Xmark).size(px(18.0)))
+}
+
+/// One choice in a picker sheet: the desktop menu row at touch height, with
+/// the check in front and the accent under a press.
+pub fn sheet_option(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    checked: bool,
+    cx: &App,
+) -> Stateful<Div> {
+    sheet_row(id, checked.then(|| Icon::new(IconName::Check)), label, cx)
+}
+
+/// A command at the end of a picker sheet, like "New session": an option row
+/// with a muted icon where the check would be.
+pub fn sheet_action(
+    id: impl Into<ElementId>,
+    icon: IconName,
+    label: impl Into<SharedString>,
+    cx: &App,
+) -> Stateful<Div> {
+    let muted = cx.theme().foreground.muted();
+    sheet_row(id, Some(Icon::new(icon).text_color(muted)), label, cx)
+}
+
+fn sheet_row(
+    id: impl Into<ElementId>,
+    slot: Option<Icon>,
+    label: impl Into<SharedString>,
+    cx: &App,
+) -> Stateful<Div> {
+    let id = id.into();
+    let theme = cx.theme();
+    div()
+        .id(id.clone())
+        .relative()
+        .flex()
+        .items_center()
+        .gap(px(10.0))
+        .h(px(OPTION_HEIGHT))
+        .px(px(12.0))
+        .flex_none()
+        .cursor_pointer()
+        .child(crate::touch::instant_press_highlight(
+            id,
+            theme.accent,
+            theme.radius,
+        ))
+        .child(
+            div()
+                .flex()
+                .flex_none()
+                .w(px(16.0))
+                .children(slot.map(|icon| icon.size(px(16.0)))),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .text_size(px(15.0))
+                .child(label.into()),
+        )
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Gesture {
     Idle,
+    Pending(Point<Pixels>),
     Content(Point<Pixels>),
     Sheet(Point<Pixels>),
 }
@@ -92,6 +197,16 @@ impl SheetState {
         self.gesture = Gesture::Sheet(start);
     }
 
+    fn begin(&mut self, start: Point<Pixels>, delta: f32, now: Instant) -> bool {
+        if start.y < self.content().bounds().top() || delta > 0.0 && self.at_top() {
+            self.claim(start, delta, now);
+            true
+        } else {
+            self.gesture = Gesture::Content(start);
+            false
+        }
+    }
+
     fn pan(
         &mut self,
         event: &ScrollWheelEvent,
@@ -104,15 +219,17 @@ impl SheetState {
         let claimed = match (event.touch_phase, self.gesture) {
             (TouchPhase::Started, _) => {
                 self.gesture = Gesture::Idle;
-                if !hovered || delta == 0.0 {
+                if !hovered {
                     false
-                } else if start.y < self.content().bounds().top() || delta > 0.0 && self.at_top() {
-                    self.claim(start, delta, now);
-                    true
+                } else if delta == 0.0 {
+                    self.gesture = Gesture::Pending(start);
+                    false
                 } else {
-                    self.gesture = Gesture::Content(start);
-                    false
+                    self.begin(start, delta, now)
                 }
+            }
+            (TouchPhase::Moved, Gesture::Pending(origin)) if origin == start && delta != 0.0 => {
+                self.begin(start, delta, now)
             }
             (TouchPhase::Moved, Gesture::Sheet(origin)) if origin == start => {
                 self.dismissal.drag(delta, now);
@@ -161,8 +278,12 @@ impl RenderOnce for BottomSheet {
         });
         let now = cx.background_executor().now();
         let content_scroll = self.content_scroll;
+        let reduce_motion = cx.reduce_motion();
         let tick = state.update(cx, |state, _| {
             state.content_scroll = content_scroll;
+            if reduce_motion {
+                state.dismissal.finish();
+            }
             state.dismissal.tick(now)
         });
         match tick {
@@ -182,7 +303,7 @@ impl RenderOnce for BottomSheet {
             )
         };
         let theme = cx.theme();
-        let corner = rems_from_px(CORNER);
+        let corner = px(CORNER);
         let on_dismiss = self.on_dismiss;
         let scrim = div()
             .id("bottom-sheet-scrim")
@@ -247,27 +368,23 @@ impl RenderOnce for BottomSheet {
             .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
             .child(listener)
             .child(
-                div()
-                    .flex()
-                    .flex_none()
-                    .justify_center()
-                    .pt(rems_from_px(6.0))
-                    .child(
-                        div()
-                            .w(rems_from_px(GRABBER_WIDTH))
-                            .h(rems_from_px(GRABBER_HEIGHT))
-                            .rounded_full()
-                            .bg(theme.foreground.opacity(0.25)),
-                    ),
+                div().flex().flex_none().justify_center().pt(px(6.0)).child(
+                    div()
+                        .w(px(GRABBER_WIDTH))
+                        .h(px(GRABBER_HEIGHT))
+                        .rounded_full()
+                        .bg(theme.foreground.opacity(0.25)),
+                ),
             )
             .child(
                 div()
                     .flex()
                     .flex_none()
                     .items_center()
-                    .gap(rems_from_px(8.0))
-                    .h(rems_from_px(HEADER_HEIGHT))
-                    .px(rems_from_px(PADDING_X))
+                    .gap(px(8.0))
+                    .h(px(HEADER_HEIGHT))
+                    .pl(px(PADDING_X))
+                    .pr(px(8.0))
                     .child(
                         div()
                             .flex_1()
@@ -275,8 +392,8 @@ impl RenderOnce for BottomSheet {
                             .overflow_hidden()
                             .whitespace_nowrap()
                             .text_ellipsis()
-                            .text_size(rems_from_px(17.0))
-                            .line_height(rems_from_px(22.0))
+                            .text_size(px(17.0))
+                            .line_height(px(22.0))
                             .font_semibold()
                             .child(self.title),
                     )
@@ -450,6 +567,23 @@ mod tests {
         settle(cx);
         assert_eq!(panel(cx).top(), rest.top());
         assert_eq!(dismissed.get(), 0);
+    }
+
+    #[gpui::test]
+    fn a_drag_that_catches_a_fling_still_moves_the_sheet(cx: &mut TestAppContext) {
+        let (_, cx) = host(300.0, cx);
+        let rest = panel(cx);
+        let grip = point(rest.center().x, rest.top() + px(20.0));
+        pan(
+            cx,
+            grip,
+            &[
+                (0, TouchPhase::Started, 0.0),
+                (16, TouchPhase::Moved, 30.0),
+                (16, TouchPhase::Moved, 30.0),
+            ],
+        );
+        assert_eq!(panel(cx).top(), rest.top() + px(60.0));
     }
 
     #[gpui::test]

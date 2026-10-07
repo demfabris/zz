@@ -127,6 +127,7 @@ pub struct TerminalPane {
     text_opacity: f32,
     pane_status: (Option<String>, bool, bool),
     corner_radii: Corners<Pixels>,
+    rows_above: bool,
     resize_suppressed: Rc<Cell<bool>>,
     content_offset: Pixels,
     scroll_rows: f32,
@@ -257,6 +258,7 @@ impl TerminalPane {
             text_opacity: 1.0,
             pane_status: (None, false, false),
             corner_radii: Corners::default(),
+            rows_above: false,
             resize_suppressed: Rc::default(),
             content_offset: Pixels::ZERO,
             scroll_rows: 0.,
@@ -345,6 +347,29 @@ impl TerminalPane {
             self.corner_radii = radii;
             cx.notify();
         }
+    }
+
+    pub(crate) fn set_rows_above(&mut self, rows_above: bool, cx: &mut Context<Self>) {
+        if self.rows_above != rows_above {
+            self.rows_above = rows_above;
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn rows_above_shown(&self, cx: &App) -> bool {
+        self.rows_above
+            && (self.overscroll.is_stretched()
+                || self.scroll.target().is_some()
+                || self.scroll.sub_row() > 0.0
+                || self
+                    .viewport(&self.connection.read(cx).core)
+                    .is_some_and(|viewport| {
+                        viewport
+                            .scrollbar
+                            .offset
+                            .saturating_add(viewport.scrollbar.len)
+                            < viewport.scrollbar.total
+                    }))
     }
 
     pub(crate) fn pane_background(&self, cx: &App) -> Hsla {
@@ -1383,6 +1408,9 @@ impl TerminalPane {
             bounds.origin + point(Pixels::ZERO, displacement),
             bounds.size,
         );
+        let rows_above = self
+            .rows_above_shown(cx)
+            .then(|| window.content_mask().bounds.origin.y);
         let connection = self.connection.clone();
         let (paint, attached, layout_generation) = connection.update(cx, |connection, cx| {
             for image in connection.take_retired_terminal_images() {
@@ -1427,6 +1455,7 @@ impl TerminalPane {
                         .is_none()
                         .then_some(self.marked_text.as_deref())
                         .flatten(),
+                    rows_above,
                 },
                 shifted,
                 window,
@@ -1837,7 +1866,7 @@ impl Render for TerminalPane {
             .id(("terminal", self.pane.0))
             .relative()
             .size_full()
-            .overflow_hidden()
+            .when(!self.rows_above, Styled::overflow_hidden)
             .bg(self.pane_background(cx))
             .rounded_bl(self.corner_radii.bottom_left)
             .rounded_br(self.corner_radii.bottom_right)

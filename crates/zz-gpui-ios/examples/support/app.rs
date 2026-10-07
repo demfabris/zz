@@ -535,6 +535,7 @@ impl TerminalApp {
                 focused: self.focused,
                 cursor_blink_visible: true,
                 marked_text: None,
+                rows_above: None,
             },
             bounds,
             window,

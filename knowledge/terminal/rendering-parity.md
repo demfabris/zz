@@ -4,7 +4,7 @@ title: Zed GPUI terminal rendering parity
 description: The effort to bring zz's terminal painting up to Zed's GPUI standard by mapping immutable renderer-neutral frames and dirty-row patches onto GPUI text, cursor, and overlay painting.
 resource: crates/zz-ui/src/terminal.rs
 tags: [rendering, gpui, zed, parity, cursor, ime, contrast, box-drawing, block-elements, local-scroll]
-timestamp: 2026-09-27T00:00:00Z
+timestamp: 2026-10-07T00:00:00Z
 ---
 
 # Overview
@@ -72,6 +72,13 @@ shows exactly the offset and the bottom row loses the same amount; the scrollbar
 bounds. A peek row the ring does not hold is skipped instead of shimmered, and its revision joins the
 cache retention set. Whole device-pixel moves keep both shaped rows and glyph rasters cached.
 `TerminalGeometry::content_offset` reports the applied shift for hit testing.
+
+`TerminalRenderInput::rows_above` lets a caller extend that peek upward: given a window y above a
+bottom-anchored grid, the painter adds as many ring or live rows above the grid as reach it and
+raises the row clip to it. Only the GPUI thin client's phone shell passes it, as the top of the
+pager's clip, while a pane is scrolled back or its rubber band is stretched, and it drops the pane
+root's `overflow_hidden` so those rows run under the floating pane header and the status bar. The
+desktop and the other thin-client layouts pass `None` and paint exactly as before.
 
 # Typography and grid geometry
 

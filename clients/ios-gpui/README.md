@@ -349,11 +349,18 @@ saved by this example.
 - Terminal scrollback moves with the finger by pixels, and a fling coasts the same way. The app
   keeps up to 2000 rows above the screen (the `history-trickle` option) and draws scrolled rows
   from them without waiting for the daemon. The daemon's view trails the gesture by up to a
-  screen, more rows are fetched as the view nears the oldest kept row, and once the view stays on
-  one row for 120 ms the daemon's view is moved there. New output does not move a scrolled-back
+  screen, more rows are fetched as the view nears the oldest kept row, and once the view holds
+  still for 120 ms the daemon's view is moved there. New output does not move a scrolled-back
   view; scrolling back to the bottom follows output again. This is the desktop's trackpad
   scrolling (`LocalScrollState` and `HistoryPacer` in `zz-client`). `less`, `vim`, and other
   mouse-tracking or alternate-screen programs still get wheel events.
+- In the phone shell, rows of a scrolled-back terminal, or one bouncing at the bottom, keep
+  drawing above the top row, under the pane header and the status bar up to the top of the
+  screen, the way content runs under a translucent iOS navigation bar. A tint of the pane color
+  behind the header and status bar, fading out over the header's last 12 points, fades those rows
+  so the title and the close button stay readable. At the live bottom nothing draws above the top
+  row, so the resting layout is unchanged. The header floats over the terminal instead of sitting
+  above it in the layout, which keeps its button on top for taps.
 
 The standalone example displays one active terminal pane. The main app supports
 multiple terminal and agent panes; full mux overlays remain a later step.

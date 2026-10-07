@@ -8,8 +8,9 @@ use gpui::{
     MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, PinchEvent, Pixels,
     PlatformAtlas, PlatformDisplay, PlatformInput, PlatformInputHandler, PlatformWindow, Point,
     PromptButton, PromptLevel, RequestFrameOptions, ScrollDelta, ScrollWheelEvent, Size,
-    TextInputAction, TextInputConfiguration, TextInputStateChange, TouchEvent, TouchId, TouchPhase,
-    WindowAppearance, WindowBackgroundAppearance, WindowBounds, WindowParams, point, px, size,
+    TextInputAction, TextInputConfiguration, TextInputMode, TextInputStateChange, TouchEvent,
+    TouchId, TouchPhase, WindowAppearance, WindowBackgroundAppearance, WindowBounds, WindowParams,
+    point, px, size,
 };
 use objc::{
     class,
@@ -54,12 +55,12 @@ pub(crate) struct IosWindowState {
     done_bar: id,
     keyboard_probe: id,
     keyboard_overlap: f64,
+    keyboard_rest: f64,
     keyboard_motion: Option<KeyboardMotion>,
     keyboard_requested: bool,
     soft_keyboard: bool,
     compact_keyboard: bool,
-    number_pad: bool,
-    number_pad_shown: bool,
+    shown_input_mode: TextInputMode,
     keyboard_sync_pending: bool,
     reload_input_views: bool,
     text_input: TextInputConfiguration,
@@ -192,12 +193,12 @@ impl IosWindow {
                 done_bar: done_bar(native_view),
                 keyboard_probe: install_keyboard_probe(native_view),
                 keyboard_overlap: 0.0,
+                keyboard_rest: 0.0,
                 keyboard_motion: None,
                 keyboard_requested: false,
                 soft_keyboard: false,
                 compact_keyboard: false,
-                number_pad: false,
-                number_pad_shown: false,
+                shown_input_mode: TextInputMode::Text,
                 keyboard_sync_pending: false,
                 reload_input_views: false,
                 text_input: TextInputConfiguration::default(),
@@ -280,6 +281,13 @@ impl IosWindow {
             size: size(px(rect.size.width as f32), px(rect.size.height as f32)),
         }
     }
+
+    fn viewport_above(&self, keyboard: f64) -> Bounds<Pixels> {
+        let mut bounds = self.bounds_impl();
+        bounds.origin = Point::default();
+        bounds.size.height = (bounds.size.height - px(keyboard as f32)).max(Pixels::ZERO);
+        bounds
+    }
 }
 
 impl Drop for IosWindow {
@@ -338,11 +346,13 @@ impl PlatformWindow for IosWindow {
     }
 
     fn visual_viewport_bounds(&self) -> Bounds<Pixels> {
-        let mut bounds = self.bounds_impl();
-        bounds.origin = Point::default();
-        bounds.size.height =
-            (bounds.size.height - px(self.0.borrow().keyboard_overlap as f32)).max(Pixels::ZERO);
-        bounds
+        let overlap = self.0.borrow().keyboard_overlap;
+        self.viewport_above(overlap)
+    }
+
+    fn target_visual_viewport_bounds(&self) -> Bounds<Pixels> {
+        let rest = self.0.borrow().keyboard_rest;
+        self.viewport_above(rest)
     }
 
     fn on_visual_viewport_changed(&self, callback: Box<dyn FnMut()>) {
@@ -923,8 +933,9 @@ extern "C" fn layout_subviews(this: &Object, _: Sel) {
             false
         } else {
             state.keyboard_motion = None;
-            let changed = target != state.keyboard_overlap;
+            let changed = target != state.keyboard_overlap || target != state.keyboard_rest;
             state.keyboard_overlap = target;
+            state.keyboard_rest = target;
             changed
         }
     };
@@ -963,22 +974,23 @@ fn advance_keyboard(this: &Object, time: f64) {
         if let Some(begin) = begin {
             motion.began(begin);
         }
+        let rest = motion.target();
         let overlap = if motion.finished(time) {
-            let target = motion.target();
             state.keyboard_motion = None;
-            target
+            rest
         } else {
             let overlap = if motion.sampled() {
                 unsafe { presented_overlap(state.native_view, state.keyboard_probe) }
-                    .unwrap_or_else(|| motion.target())
+                    .unwrap_or(rest)
             } else {
                 motion.value(time)
             };
             let scale = display_scale(state.native_view);
             (overlap * scale).round() / scale
         };
-        let changed = overlap != state.keyboard_overlap;
+        let changed = overlap != state.keyboard_overlap || rest != state.keyboard_rest;
         state.keyboard_overlap = overlap;
+        state.keyboard_rest = rest;
         changed
     };
     if changed {
@@ -1360,7 +1372,12 @@ extern "C" fn input_accessory_view(this: &Object, _: Sel) -> id {
         &state.text_input,
     ) {
         state.accessory_view
-    } else if state.soft_keyboard && state.number_pad_shown {
+    } else if state.soft_keyboard
+        && matches!(
+            state.shown_input_mode,
+            TextInputMode::Decimal | TextInputMode::Numeric | TextInputMode::Tel
+        )
+    {
         state.done_bar
     } else {
         nil
@@ -1417,9 +1434,17 @@ extern "C" fn inline_prediction_type(this: &Object, _: Sel) -> isize {
 }
 
 extern "C" fn keyboard_type(this: &Object, _: Sel) -> isize {
-    let number_pad =
-        unsafe { try_window_state(this) }.is_some_and(|state| state.borrow().number_pad_shown);
-    if number_pad { 8 } else { 0 }
+    let mode = unsafe { try_window_state(this) }
+        .map_or(TextInputMode::Text, |state| state.borrow().shown_input_mode);
+    match mode {
+        TextInputMode::Text | TextInputMode::None => 0,
+        TextInputMode::Url => 3,
+        TextInputMode::Numeric => 4,
+        TextInputMode::Tel => 5,
+        TextInputMode::Email => 7,
+        TextInputMode::Decimal => 8,
+        TextInputMode::Search => 10,
+    }
 }
 
 extern "C" fn return_key_type(this: &Object, _: Sel) -> isize {
@@ -1579,8 +1604,12 @@ extern "C" fn insert_text(this: &Object, _: Sel, text: id) {
         }
         return;
     }
-    let number_pad = unsafe { get_window_state(this) }.borrow().number_pad;
-    let text = if number_pad {
+    let decimal = unsafe { get_window_state(this) }
+        .borrow()
+        .text_input
+        .input_mode
+        == TextInputMode::Decimal;
+    let text = if decimal {
         text.replace(',', ".")
     } else {
         text
@@ -1717,25 +1746,6 @@ pub fn set_compact_keyboard(enabled: bool) {
         }
         state.compact_keyboard = enabled;
         state.latched = Modifiers::default();
-        state.reload_input_views = true;
-    }
-    schedule_keyboard_sync(view);
-}
-
-pub fn set_number_pad(enabled: bool) {
-    let view = ACTIVE_VIEW.get();
-    let Some(state) = (!view.is_null())
-        .then(|| unsafe { try_window_state(&*view) })
-        .flatten()
-    else {
-        return;
-    };
-    {
-        let mut state = state.borrow_mut();
-        if state.number_pad == enabled {
-            return;
-        }
-        state.number_pad = enabled;
         state.reload_input_views = true;
     }
     schedule_keyboard_sync(view);
@@ -2447,13 +2457,15 @@ extern "C" fn sync_keyboard(context: *mut c_void) {
             let (visible, reload) = {
                 let mut state = state.borrow_mut();
                 state.keyboard_sync_pending = false;
-                let visible = state.keyboard_requested && !hardware_keyboard();
+                let visible = state.keyboard_requested
+                    && state.text_input.input_mode != TextInputMode::None
+                    && !hardware_keyboard();
                 let reload = state.soft_keyboard != visible
                     || std::mem::take(&mut state.reload_input_views)
                     || (visible && state.keyboard_target() == 0.0);
                 state.soft_keyboard = visible;
                 if visible {
-                    state.number_pad_shown = state.number_pad;
+                    state.shown_input_mode = state.text_input.input_mode;
                 }
                 (visible, reload)
             };

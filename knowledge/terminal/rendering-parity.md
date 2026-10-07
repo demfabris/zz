@@ -132,6 +132,11 @@ desktop and the other thin-client layouts pass `None` and paint exactly as befor
   the spare strip. Copy mode, search, command-output views, and a live bottom whose last row is empty
   stay top-anchored. During a live resize at the live bottom, retained rows are projected from the
   bottom so the prompt does not flash stale content.
+- `TerminalRenderInput::extra_height` measures the grid for its bounds plus that much height. The
+  extra rows hang past the edge the grid is not anchored to (above a bottom-anchored grid, below a
+  top-anchored one) and paint is clipped to the bounds. The iPhone phone shell sets it while the
+  soft keyboard closes, so the terminal reports its final size on the first frame and the rows the
+  keyboard uncovers are already filled when they slide into view.
 
 # Cursor, IME, and paint order
 

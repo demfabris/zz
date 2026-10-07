@@ -73,6 +73,7 @@ pub struct TerminalRenderInput<'a> {
     pub images: Option<&'a dyn TerminalImageSource>,
     pub local_scroll_target: Option<u32>,
     pub scroll_pixel_offset: Pixels,
+    pub extra_height: Pixels,
     pub command_output: bool,
     pub appearance: &'a TerminalAppearance,
     pub appearance_hash: u64,
@@ -810,10 +811,18 @@ impl RowRenderCache {
             .apply(f32::from(natural_line_height))
             .max(1.0));
         let line_height = snap_length(raw_line_height, scale);
-        let measured = terminal_grid_size(bounds.size, cell_width, line_height, scale);
+        let extra_height = input.extra_height.max(px(0.0));
+        let measured = terminal_grid_size(
+            size(bounds.size.width, bounds.size.height + extra_height),
+            cell_width,
+            line_height,
+            scale,
+        );
         let columns = measured.columns;
         let rows = measured.rows;
-        let spare_height = (bounds.size.height - line_height * usize::from(rows)).max(px(0.0));
+        let spare_height = (bounds.size.height + extra_height - line_height * usize::from(rows))
+            .max(px(0.0))
+            - extra_height;
         let scroll_shift = if input.scroll_pixel_offset > px(0.0) {
             snap(input.scroll_pixel_offset.min(line_height), scale)
         } else {
@@ -4535,6 +4544,61 @@ mod tests {
     }
 
     #[gpui::test]
+    fn extra_height_adds_rows_past_the_edge_the_grid_is_not_anchored_to(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        cx.update(crate::init);
+        let cx = cx.add_empty_window();
+        let filled = filled_viewport(8, 4, 'x');
+        let blank = TerminalViewport::blank(8, 4, zz_terminal::SessionStatus::Running);
+        let revisions = [1, 2, 3, 4];
+        let appearance = TerminalAppearance::default();
+        cx.update(|window, cx| {
+            let mut cache = RowRenderCache::default();
+            let mut prepaint = |viewport: &TerminalViewport,
+                                height: Pixels,
+                                extra_height: Pixels,
+                                window: &mut Window| {
+                cache
+                    .prepaint(
+                        TerminalRenderInput {
+                            viewport,
+                            row_revisions: &revisions,
+                            revision_epoch: 1,
+                            history: None,
+                            images: None,
+                            local_scroll_target: None,
+                            scroll_pixel_offset: px(0.0),
+                            extra_height,
+                            command_output: false,
+                            appearance: &appearance,
+                            appearance_hash: 0,
+                            text_opacity: 1.0,
+                            focused: false,
+                            cursor_blink_visible: true,
+                            marked_text: None,
+                            rows_above: None,
+                        },
+                        Bounds::new(point(px(0.0), px(10.0)), size(px(400.0), height)),
+                        window,
+                        cx,
+                    )
+                    .geometry
+            };
+            let line_height = prepaint(&filled, px(400.0), px(0.0), window).line_height;
+            let height = line_height * 4.0 + px(3.0);
+            let anchored = prepaint(&filled, height, line_height * 2.0, window);
+            let top = prepaint(&blank, height, line_height * 2.0, window);
+
+            assert_eq!(anchored.grid.rows, 6);
+            assert_eq!(anchored.grid_bounds.bottom(), px(10.0) + height);
+            assert_eq!(anchored.surface_bounds.size.height, height);
+            assert_eq!(top.grid.rows, 6);
+            assert_eq!(top.grid_bounds.origin.y, px(10.0));
+        });
+    }
+
+    #[gpui::test]
     fn a_pixel_offset_shifts_rows_down_and_peeks_the_ring_row_above(cx: &mut gpui::TestAppContext) {
         cx.update(crate::init);
         let cx = cx.add_empty_window();
@@ -4562,6 +4626,7 @@ mod tests {
                         images: None,
                         local_scroll_target: None,
                         scroll_pixel_offset: offset,
+                        extra_height: px(0.0),
                         command_output: false,
                         appearance: &appearance,
                         appearance_hash: 0,
@@ -4652,6 +4717,7 @@ mod tests {
                         images: None,
                         local_scroll_target: None,
                         scroll_pixel_offset: offset,
+                        extra_height: px(0.0),
                         command_output: false,
                         appearance: &appearance,
                         appearance_hash: 0,

@@ -186,8 +186,8 @@ file changes applied, `restart-agent-pane` resuming the thread with its memory, 
 
 | Agent | Version | Since |
 | --- | --- | --- |
-| Claude Code | 2.1.292 (Agent SDK types 0.3.293) | 2026-10-07 |
-| Codex | 0.159.0 (`multi_agent` on by default) | 2026-10-07 |
+| Claude Code | 2.1.293 (Agent SDK types 0.3.293), live tests on Haiku 5.5 | 2026-10-07 |
+| Codex | 0.159.0 (`multi_agent` on by default), live tests on GPT-6-Luna | 2026-10-07 |
 
 Older CLIs may lack frames or methods the drivers use: `side_question`, `stop_task`,
 `--resume-session-at`, `session_state_changed`, and `background_tasks_changed` on Claude Code;

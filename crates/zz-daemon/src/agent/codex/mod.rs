@@ -1092,7 +1092,9 @@ impl Runtime {
                 }
                 Ok(())
             }
-            (Outgoing::Models, Err(_)) | (Outgoing::Quiet, _) | (Outgoing::Steer, Ok(_)) => Ok(()),
+            (Outgoing::Models, Err(_))
+            | (Outgoing::Quiet, _)
+            | (Outgoing::Steer | Outgoing::SideTurn { .. }, Ok(_)) => Ok(()),
             (Outgoing::Thread { start, cwd }, Ok(response)) => {
                 self.threaded(start, cwd, response).await
             }
@@ -1185,7 +1187,6 @@ impl Runtime {
                 self.notice(&format!("The side question failed: {error}"))
                     .await
             }
-            (Outgoing::SideTurn { .. }, Ok(_)) => Ok(()),
             (Outgoing::SideTurn { thread }, Err(error)) => {
                 self.sides.remove(&thread);
                 self.notice(&format!("The side question failed: {error}"))

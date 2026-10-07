@@ -1847,6 +1847,7 @@ mod tests {
         assert!(receiver.close_reason().contains("Too much pending output"));
     }
 
+    #[cfg(not(target_family = "wasm"))]
     #[gpui::test]
     fn viewport_frames_leave_the_connection_unnotified(cx: &mut gpui::TestAppContext) {
         use gpui::AppContext as _;

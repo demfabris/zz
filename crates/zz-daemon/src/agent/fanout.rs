@@ -361,6 +361,10 @@ struct PaneLane {
     reclaimed_bytes: usize,
     next_reclaim_id: u64,
     pending_prompts: VecDeque<String>,
+    restoring: bool,
+    replayed_turn: bool,
+    prompt_message: Option<String>,
+    reply_message: Option<String>,
     tool_calls: BTreeMap<String, AgentToolCall>,
     /// Bumped whenever a blob the pane state carries is replaced, so the
     /// per-item comparison never copies a quarter-megabyte of JSON.
@@ -375,6 +379,12 @@ struct ReclaimedPrompt {
     reclaim_id: u64,
     last_seq: u64,
     prompt: AgentPrompt,
+}
+
+fn push_projected_prompt(bytes: &mut Vec<u8>, prompt: &str) {
+    bytes.extend_from_slice(b"\x1b]133;A\x07> \x1b]133;B\x07");
+    push_projected_text(bytes, prompt);
+    bytes.extend_from_slice(b"\x1b]133;C\x07\r\n");
 }
 
 fn push_projected_text(bytes: &mut Vec<u8>, text: &str) {
@@ -399,22 +409,61 @@ impl PaneLane {
         match payload {
             AgentStreamPayload::TurnStarted { .. } => {
                 let prompt = self.pending_prompts.pop_front().unwrap_or_default();
-                bytes.extend_from_slice(b"\x1b]133;A\x07> \x1b]133;B\x07");
-                push_projected_text(&mut bytes, &prompt);
-                bytes.extend_from_slice(b"\x1b]133;C\x07\r\n");
+                push_projected_prompt(&mut bytes, &prompt);
+                self.reply_message = None;
+            }
+            AgentStreamPayload::SessionReset { restoring } => {
+                bytes.extend_from_slice(b"\x1b[H\x1b[2J\x1b[3J");
+                self.restoring = *restoring;
+                self.replayed_turn = false;
+                self.prompt_message = None;
+                self.reply_message = None;
+            }
+            AgentStreamPayload::SessionReady { .. }
+            | AgentStreamPayload::SessionSwitched { .. } => {
+                if std::mem::take(&mut self.replayed_turn) {
+                    bytes.extend_from_slice(b"\r\n\x1b]133;D;0\x07");
+                }
+                self.restoring = false;
+                self.prompt_message = None;
+                self.reply_message = None;
             }
             AgentStreamPayload::Update { update } => {
-                if update.get("sessionUpdate").and_then(Value::as_str)
-                    == Some("agent_message_chunk")
-                    && let Some(text) = update
-                        .get("content")
-                        .filter(|content| {
-                            content.get("type").and_then(Value::as_str) == Some("text")
-                        })
-                        .and_then(|content| content.get("text"))
-                        .and_then(Value::as_str)
-                {
-                    push_projected_text(&mut bytes, text);
+                let kind = update.get("sessionUpdate").and_then(Value::as_str);
+                let message = update
+                    .get("messageId")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                let text = update
+                    .get("content")
+                    .filter(|content| content.get("type").and_then(Value::as_str) == Some("text"))
+                    .and_then(|content| content.get("text"))
+                    .and_then(Value::as_str);
+                match (kind, text) {
+                    (Some("user_message_chunk"), Some(text)) if self.restoring => {
+                        if message.is_none() || message != self.prompt_message {
+                            if std::mem::take(&mut self.replayed_turn) {
+                                bytes.extend_from_slice(b"\r\n\x1b]133;D;0\x07");
+                            }
+                            push_projected_prompt(&mut bytes, text);
+                            self.replayed_turn = true;
+                            self.reply_message = None;
+                        }
+                        self.prompt_message = message;
+                    }
+                    (Some("agent_message_chunk"), Some(text)) => {
+                        if self.reply_message.is_some()
+                            && message.is_some()
+                            && message != self.reply_message
+                        {
+                            bytes.extend_from_slice(b"\r\n\r\n");
+                        }
+                        push_projected_text(&mut bytes, text);
+                        if message.is_some() {
+                            self.reply_message = message;
+                        }
+                    }
+                    _ => {}
                 }
             }
             AgentStreamPayload::PromptFinished { outcome, .. } => {
@@ -514,6 +563,10 @@ impl PaneLane {
             reclaimed_bytes: 0,
             next_reclaim_id: 1,
             pending_prompts: VecDeque::new(),
+            restoring: false,
+            replayed_turn: false,
+            prompt_message: None,
+            reply_message: None,
             tool_calls: BTreeMap::new(),
             blobs: 0,
             fingerprint: None,
@@ -563,6 +616,10 @@ impl PaneLane {
         }
         self.generation = generation;
         self.pending_prompts.clear();
+        self.restoring = false;
+        self.replayed_turn = false;
+        self.prompt_message = None;
+        self.reply_message = None;
         self.provider = provider;
         self.session_id = session_id;
         self.modes.clear();

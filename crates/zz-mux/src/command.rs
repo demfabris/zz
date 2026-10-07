@@ -5499,7 +5499,7 @@ impl MuxEngine {
             "clock-mode" => self.clock_mode(context, &command.args)?,
             "switch-mode" => self.switch_mode(context, command)?,
             "copy-mode-search-prompt" => self.copy_mode_search_prompt(context, &command.args)?,
-            "command-prompt" => self.command_prompt(context, command)?,
+            "command-prompt" => self.command_prompt(context, command, hooks)?,
             "focus-sidebar" => self.focus_sidebar(context, &command.args)?,
             "choose-path" => self.choose_path(context, &command.args, hooks)?,
             "choose-tree" => self.choose_tree(context, command)?,
@@ -9142,6 +9142,7 @@ impl MuxEngine {
         &self,
         context: &ExecutionContext,
         invocation: &CommandInvocation,
+        hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let args = &invocation.args;
         let spec = command_spec("command-prompt").expect("executable command has catalog metadata");
@@ -9189,7 +9190,7 @@ impl MuxEngine {
         let steps = if options.has("-l") {
             vec![CommandPromptStep {
                 label: labels,
-                input: self.expand_prompt_input(context, inputs.unwrap_or_default())?,
+                input: self.expand_prompt_input(context, inputs.unwrap_or_default(), hooks),
             }]
         } else {
             let mut inputs = inputs.map(|inputs| inputs.split(','));
@@ -9205,7 +9206,8 @@ impl MuxEngine {
                         input: self.expand_prompt_input(
                             context,
                             inputs.as_mut().and_then(Iterator::next).unwrap_or_default(),
-                        )?,
+                            hooks,
+                        ),
                     })
                 })
                 .collect::<Result<Vec<_>, ServerError>>()?
@@ -9262,34 +9264,21 @@ impl MuxEngine {
         &self,
         context: &ExecutionContext,
         input: &str,
-    ) -> Result<String, ServerError> {
-        let session_name = if input.contains("#S") {
-            let session = self.resolve_session(None, context.session)?;
-            Some(
-                self.state
-                    .sessions
-                    .get(&session)
-                    .ok_or_else(|| ServerError::MissingTarget(session.to_string()))?
-                    .name
-                    .as_str(),
-            )
-        } else {
-            None
-        };
-        let window_name = if input.contains("#W") {
-            let window = self.resolve_window(None, context.session, context.window)?;
-            Some(
-                self.state
-                    .windows
-                    .get(&window)
-                    .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?
-                    .name
-                    .as_str(),
-            )
-        } else {
-            None
-        };
-        Ok(expand_short_formats(input, session_name, window_name))
+        hooks: &mut impl StatusHooks,
+    ) -> String {
+        let format_context = self
+            .resolve_pane(None, context.window, context.pane)
+            .ok()
+            .and_then(|pane| ExecutionContext::for_pane(&self.state, pane))
+            .map_or_else(FormatContext::default, |target| FormatContext {
+                session: target.session,
+                window: target.window,
+                pane: target.pane,
+                active_session: None,
+                format_client: FormatClient::NoClient,
+                format_type: FormatType::Pane,
+            });
+        expand_format_time_with_hooks(input, self, format_context, hooks).into()
     }
 
     fn clear_history(
@@ -17447,29 +17436,6 @@ fn next_session_name(state: &MuxState) -> String {
         .position(|used| !used)
         .expect("one of n + 1 numeric names is unused")
         .to_string()
-}
-
-fn expand_short_formats(
-    input: &str,
-    session_name: Option<&str>,
-    window_name: Option<&str>,
-) -> String {
-    let mut expanded = String::with_capacity(input.len());
-    let mut characters = input.chars().peekable();
-    while let Some(character) = characters.next() {
-        if character != '#' {
-            expanded.push(character);
-            continue;
-        }
-        match (characters.peek().copied(), session_name, window_name) {
-            (Some('S'), Some(name), _) | (Some('W'), _, Some(name)) => {
-                characters.next();
-                expanded.push_str(name);
-            }
-            _ => expanded.push(character),
-        }
-    }
-    expanded
 }
 
 fn key_token(value: &str) -> KeyToken {
@@ -41808,6 +41774,80 @@ mod tests {
                 ..
             }] if commands.len() == 1 && commands[0].name == "display-message"
         ));
+    }
+
+    #[test]
+    fn command_prompt_input_expands_formats_in_the_target_context() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        let steps = |engine: &mut MuxEngine, context: &mut ExecutionContext, flags: &[&str]| {
+            let execution = engine
+                .execute(context, &command("command-prompt", flags))
+                .expect("prompt effect");
+            match execution.effects.into_iter().next().expect("one effect") {
+                MuxEffect::CommandPrompt { steps, .. } => steps
+                    .into_iter()
+                    .map(|step| (step.label, step.input))
+                    .collect::<Vec<_>>(),
+                other => panic!("unexpected effect {other:?}"),
+            }
+        };
+        let owned = |pairs: &[(&str, &str)]| {
+            pairs
+                .iter()
+                .map(|(label, input)| ((*label).to_owned(), (*input).to_owned()))
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            steps(&mut engine, &mut context, &["-I", "#S:#{pane_title}"]),
+            owned(&[(":", ":")])
+        );
+
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work tree"]))
+            .expect("prompt context session");
+        engine
+            .execute(&mut context, &command("rename-window", &["editor pane"]))
+            .expect("prompt context window");
+        engine
+            .execute(&mut context, &command("select-pane", &["-T", "build log"]))
+            .expect("prompt context pane title");
+
+        assert_eq!(
+            steps(
+                &mut engine,
+                &mut context,
+                &["-I", "#{pane_title}", "-p", "x:", "display-message %%"],
+            ),
+            owned(&[("x: ", "build log")])
+        );
+        assert_eq!(
+            steps(
+                &mut engine,
+                &mut context,
+                &[
+                    "-p",
+                    "a,b,c",
+                    "-I",
+                    "#S,#{window_name}",
+                    "display-message %1/%2/%3"
+                ],
+            ),
+            owned(&[("a ", "work tree"), ("b ", "editor pane"), ("c ", "")])
+        );
+        assert_eq!(
+            steps(
+                &mut engine,
+                &mut context,
+                &["-l", "-p", "a,b", "-I", "#{?pane_active,on,off} ## #W"],
+            ),
+            owned(&[("a,b", "on # editor pane")])
+        );
+        assert_eq!(
+            steps(&mut engine, &mut context, &["-P", "-I", "#{pane_title}"]),
+            owned(&[(":", "build log")])
+        );
     }
 
     #[test]

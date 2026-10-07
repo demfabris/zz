@@ -5,7 +5,7 @@ description: "Dated rationale and source evidence for measured tmux divergences,
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, divergences, gaps, reference]
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-09-18
+last_updated: 2026-10-06
 last_updated_by: Claude
 ---
 
@@ -730,16 +730,14 @@ The catalog count does not include syntax zz accepts or parses before diverging:
   `key_string_lookup_string` packs a `0x41` through `utf8_from_data` into a key no keystroke
   equals. Measured key by key against the pin in
   `compat/scenarios/smoke/display-menu-shortcut-grammar.txt`.
-- `command-prompt` never comma-splits `-p` or `-I`, so `-p 'a,b'` raises ONE prompt labelled
-  `a,b` where the pin chains two and feeds their answers to `%1` and `%2`. zz's behaviour is
-  exactly the pin's `-l`, which is why `-l` stays REJECTED rather than accepted as a no-op:
-  accepting it would advertise an opt-out from a chain zz cannot run. `cmd_command_prompt_exec`
-  builds `cdata->prompts[]` by `strsep(&next_prompt, ",")` and
-  `cmd_command_prompt_callback` walks `cdata->current` toward `cdata->count`; zz has neither.
-  `-F` stays rejected for the same honesty reason: the pin expands the template through
-  `format_single_from_target`, and zz's only prompt-side expander (`expand_prompt_input`)
-  understands `#S` and `#W` and nothing else, so accepting `-F` would silently drop every
-  other format. `-t` stays rejected with the rest of the client-fanout contract.
+- `command-prompt -I` splits on commas first and then expands each piece as a full format.
+  `prompt_create` and `prompt_update` run the input through `format_expand_time` in a tree built
+  by `format_create_from_state(NULL, NULL, fs)`: the target client's session, window and active
+  pane, with no client of its own, so `client_*` formats are empty. A conditional such as
+  `#{?pane_active,a,b}` is cut by the split exactly as in the pin, and `-l` keeps it whole. One
+  timing difference remains: the pin expands each chained input when its step opens, zz expands
+  every step when the command runs, so a later step sees state (and `%` time) as of the command.
+  Differential coverage is `smoke/command-prompt-chain`.
 - `command-prompt` preserves the alias and source boundary of its template shape. A typed template
   keeps its structured constructed command list through submission. A string template substitutes
   raw source, then parses and constructs the complete result against the current alias table before
@@ -750,15 +748,6 @@ The catalog count does not include syntax zz accepts or parses before diverging:
 - A selected typed `display-menu` action drops its structural block wrapper before the fresh parse.
   A quoted brace string remains literal. The argument-rule closure above leaves selected-action
   execution and error delivery with the menu runtime owner.
-- `command-prompt` draws a different LABEL from the pin in two of three cases, found while
-  measuring the mode flags and left alone because D1's brief required zero visible change for
-  prompts using none of the new flags. `cmd_command_prompt_exec` appends a trailing space to
-  every label it builds (`xasprintf(&tmp, "%s ", prompt)`) EXCEPT the bare `:` default, and
-  when there is no `-p` but there IS a template it labels the prompt `(<first command name>) `
-  rather than `:`. Measured: `-p lbl` then `q` drew `lbl q`, a bare `command-prompt
-  'display-message ...'` drew `(display-message) q`, and a bare `command-prompt` drew `:q`. zz
-  draws `lblq`, `:q` and `:q`. Cosmetic, three lines to fix in `MuxEngine::command_prompt`, and
-  a natural pickup for the F error/label tranche.
 - `command-prompt -N`'s pass-through runs in the opposite order to the pin. Both sides submit
   the collected digits AND process the non-digit key normally; the pin's cmdq runs the passed
   key's binding first (measured: a `-N` prompt fed `1`, `2`, `z` with `z` bound logged

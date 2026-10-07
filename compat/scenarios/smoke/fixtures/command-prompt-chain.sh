@@ -31,6 +31,7 @@ run() {
     rm -f "$inner_socket"
     INNER new-session -d -s s -x 80 -y 24 >/dev/null 2>&1 || true
     INNER set -g status-keys emacs >/dev/null 2>&1 || true
+    INNER select-pane -t s -T chain-title >/dev/null 2>&1 || true
     eval "INNER bind-key -n F1 $binding" >/dev/null 2>&1 || true
     OUTER new-session -d -s o -x 80 -y 24 "$attach" >/dev/null 2>&1 || true
     sleep 2
@@ -81,5 +82,11 @@ run repeated-percent \
 run short-inputs \
     "command-prompt -p 'a,b,c' -I 'only' 'set-environment -g PROMPT_RESULT \"<%1|%2|%3>\"'" \
     "-,-,-"
+run format-inputs \
+    "command-prompt -p 'a,b' -I '#S:#{pane_title},#{window_index}##' 'set-environment -g PROMPT_RESULT \"<%1|%2>\"'" \
+    "-,-"
+run format-single-line \
+    "command-prompt -l -I '#{?pane_active,on,off},#{session_name}' 'set-environment -g PROMPT_RESULT \"<%1>\"'" \
+    "-"
 
 main_client set-environment -g PROMPT_CHAIN "$report"

@@ -15,7 +15,7 @@ fn payload(frame: &[u8]) -> &[u8] {
 
 #[test]
 fn protocol_version_on_this_commit_is_one_hundred_and_seven() {
-    assert_eq!(PROTOCOL_VERSION, 107);
+    assert_eq!(PROTOCOL_VERSION, 108);
 }
 
 #[test]

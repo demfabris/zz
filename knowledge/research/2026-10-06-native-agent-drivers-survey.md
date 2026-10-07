@@ -340,11 +340,9 @@ branch actions) ~2.5k, against ~7k ACP lines and ~5k ACP tests removed. Estimate
 - **09-10** withdrew `split-codex` because it put vendor behavior into zz mux verbs. Here vendor
   behavior stays inside drivers and the pane's command menu; mux verbs stay vendor-neutral.
 
-# Open decisions
+# Decisions
 
-1. Keep an ACP driver for the long tail, or Claude and Codex only? Keeping it costs a few hundred
-   lines of mapping into the new events.
-2. Is `//` meant as the zz-level verb prefix (fork, branch, side, btw) next to vendor `/`?
-3. Codex transport: per-pane stdio (simplest), or a private unix socket so the same pane can flip to
-   the real TUI with `codex --remote`.
-4. Order: Claude driver first, then Codex, then MCP injection and PiP.
+Taken on 2026-10-07 and recorded in the [native agent drivers design](/designs/native-agent-drivers.md):
+ACP stays as a fallback driver; `//` is zz's own verbs next to the vendor's `/`; Codex runs one
+private `codex app-server` stdio child per pane, as t3code, superset, happy, vibe-kanban,
+CodexMonitor, and Codex Desktop do; the Claude driver comes first, then Codex, then orchestration.

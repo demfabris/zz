@@ -33140,6 +33140,15 @@ impl Shared {
             let PaneKind::Agent(agent) = &model.kind else {
                 return;
             };
+            if agent.provider == zz_protocol::AgentProvider::ClaudeCode
+                && crate::agent::claude::ClaudeCommand::parse(
+                    &inner.engine.agent_options().claude_code_command,
+                )
+                .is_some()
+            {
+                peers.remove(&pane);
+                return;
+            }
             let Some(window) = inner.engine.state.window_for_pane(pane) else {
                 return;
             };
@@ -50909,7 +50918,7 @@ Commands that set an explicit exit code keep that code.
 Split a pane to start an agent; `-t %N` chooses the pane to split and `-c DIR` sets the new pane's cwd.
 Print nothing unless `-P` requests the new pane ID; `-F` changes its format.
 
-The providers are `codex` and `claude-code` (`claude` accepted). Choose one with `zz split-window --kind agent --provider <provider>`. Each provider is an ACP adapter the daemon spawns through the `agent-command` or `agent-claude-code-command` option. The bundled adapters pin `claude-agent-acp@0.76.0` and `codex-acp@1.11.0`. The model, reasoning effort, and approval policy come from the adapter's own configuration: `~/.codex/config.toml` for Codex or Claude Code's own settings. `zz` does not set them.
+The providers are `codex` and `claude-code` (`claude` accepted). Choose one with `zz split-window --kind agent --provider <provider>`. The daemon spawns each provider through the `agent-command` or `agent-claude-code-command` option. Claude Code runs the user's own `claude` over its stream-json protocol; Codex runs the pinned `codex-acp@1.11.0` adapter, and any command whose program is not `claude` runs as an ACP adapter. The model, reasoning effort, and approval policy come from the adapter's own configuration: `~/.codex/config.toml` for Codex or Claude Code's own settings. `zz` does not set them.
 
 ### `zz agent-send [-t %N] [--submit | --wait [--progress] [--timeout SECS] [--on-block wait|fail|allow|deny] [--json | --final]] [--context PATH[:START[-END]]] [TEXT]`
 

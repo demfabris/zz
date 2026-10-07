@@ -25,7 +25,7 @@ use crate::{
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 107;
+pub const PROTOCOL_VERSION: u16 = 108;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const PANE_FRAME_CAPABILITY: &str = "pane-frame-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
@@ -142,12 +142,13 @@ pub(crate) const MAX_CONFIG_OVERRIDE_KEY_BYTES: usize = 128;
 pub(crate) const MAX_CONFIG_OVERRIDE_VALUE_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_MUX_OPTION_VALUE_BYTES: usize = 64 * 1024;
 
-/// The adapter commands an agent pane spawns, version-pinned on purpose:
-/// `@latest` costs a registry round trip on every pane spawn, so bumps are
-/// deliberate edits.
+/// The commands an agent pane spawns. The ACP adapter is version-pinned on
+/// purpose: `@latest` costs a registry round trip on every pane spawn, so bumps
+/// are deliberate edits. Claude Code runs the user's own `claude`, driven over
+/// its stream-json protocol; any command whose program is not `claude` is an
+/// ACP adapter.
 pub const DEFAULT_AGENT_COMMAND: &str = "npx -y @agentclientprotocol/codex-acp@1.11.0";
-pub const DEFAULT_AGENT_CLAUDE_CODE_COMMAND: &str =
-    "npx -y @agentclientprotocol/claude-agent-acp@0.76.0";
+pub const DEFAULT_AGENT_CLAUDE_CODE_COMMAND: &str = "claude";
 pub const DEFAULT_AGENT_AUTO_APPROVE: AgentAutoApprove = AgentAutoApprove::Reads;
 /// Longest adapter command line an agent mux option may carry.
 pub const MAX_AGENT_COMMAND_BYTES: usize = 4 * 1024;
@@ -5516,7 +5517,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 107);
+        assert_eq!(super::PROTOCOL_VERSION, 108);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

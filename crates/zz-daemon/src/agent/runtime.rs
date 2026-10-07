@@ -317,13 +317,13 @@ pub(crate) async fn run_agent_runtime(
 /// Rolling tail of the adapter's stderr, kept so an unexpected exit can say
 /// what the child complained about instead of shrugging.
 #[derive(Clone, Default)]
-struct StderrTail(Arc<Mutex<std::collections::VecDeque<String>>>);
+pub(crate) struct StderrTail(Arc<Mutex<std::collections::VecDeque<String>>>);
 
 impl StderrTail {
     const KEEP_LINES: usize = 6;
     const KEEP_BYTES: usize = 700;
 
-    fn push(&self, line: &str) {
+    pub(crate) fn push(&self, line: &str) {
         let line = line.trim();
         if line.is_empty() {
             return;
@@ -335,7 +335,7 @@ impl StderrTail {
         }
     }
 
-    fn snapshot(&self) -> Option<String> {
+    pub(crate) fn snapshot(&self) -> Option<String> {
         let tail = self.0.lock();
         (!tail.is_empty()).then(|| {
             capped(
@@ -413,7 +413,7 @@ pub(crate) fn load_persistent_journal() -> Option<Arc<AgentJournal>> {
 
 /// A journal failure never interrupts a turn: the transcript keeps streaming,
 /// it just stops being replayable. The first one is loud, the rest are not.
-fn report_journal_error(session_id: &str, error: &str) {
+pub(crate) fn report_journal_error(session_id: &str, error: &str) {
     static REPORTED: AtomicBool = AtomicBool::new(false);
 
     if REPORTED.swap(true, Ordering::Relaxed) {
@@ -1648,7 +1648,9 @@ async fn send_payload(
     })
 }
 
-fn validate_payload(payload: &AgentStreamPayload) -> Result<usize, agent_client_protocol::Error> {
+pub(crate) fn validate_payload(
+    payload: &AgentStreamPayload,
+) -> Result<usize, agent_client_protocol::Error> {
     let bytes = serde_json::to_vec(payload).map_err(|error| {
         agent_client_protocol::Error::internal_error()
             .data(format!("could not encode agent stream item: {error}"))
@@ -1748,7 +1750,7 @@ fn auth_method_model(method: &AuthMethod) -> AgentAuthMethod {
 /// fetching, and thinking are answered daemon-side, and anything that can
 /// change the machine — plus an absent kind, plus the catch-all `Other` an
 /// unknown kind deserializes into — waits for the wizard.
-fn tier_approves(tier: AgentAutoApprove, kind: Option<ToolKind>) -> bool {
+pub(crate) fn tier_approves(tier: AgentAutoApprove, kind: Option<ToolKind>) -> bool {
     match tier {
         AgentAutoApprove::Off => false,
         AgentAutoApprove::All => true,
@@ -1790,7 +1792,7 @@ fn preferred_allow_option(options: &[PermissionOption]) -> Option<String> {
         .filter(|option_id| !option_id.is_empty())
 }
 
-fn prompt_blocks(prompt: AgentPrompt) -> Vec<ContentBlock> {
+pub(crate) fn prompt_blocks(prompt: AgentPrompt) -> Vec<ContentBlock> {
     let AgentPrompt { text, images, .. } = prompt;
     let mut blocks = Vec::with_capacity(usize::from(!text.is_empty()) + images.len());
     if !text.is_empty() {
@@ -1802,7 +1804,10 @@ fn prompt_blocks(prompt: AgentPrompt) -> Vec<ContentBlock> {
     blocks
 }
 
-fn prompt_updates(blocks: &[ContentBlock], message_id: &MessageId) -> Vec<SessionUpdate> {
+pub(crate) fn prompt_updates(
+    blocks: &[ContentBlock],
+    message_id: &MessageId,
+) -> Vec<SessionUpdate> {
     let mut updates = Vec::new();
     for block in blocks {
         let chunks = match block {

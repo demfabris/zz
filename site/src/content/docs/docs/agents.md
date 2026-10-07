@@ -21,11 +21,11 @@ The agent process belongs to the zz daemon, not to the window you opened it in.
 That is the whole design: the daemon spawns the adapter the same way it spawns
 a shell, so a turn keeps running whether or not anything is looking at it.
 
-Claude Code panes run your own installed `claude`, driven over the same
-stream-json protocol Claude Code's own desktop and editor apps use, so they stay
-as current as your CLI and use the login you already have. Codex panes run a
-pinned Agent Client Protocol adapter whose cache is warmed when the first pane
-opens, so a pane should open without waiting on the network. The daemon never runs your
+Agent panes run your own installed CLIs over the protocols their vendors' own
+apps use: `claude` over its stream-json protocol, and `codex` through `codex
+app-server`. They stay as current as your CLIs and use the logins you already
+have. Any other agent that speaks the Agent Client Protocol runs as an ACP
+adapter. The daemon never runs your
 shell init either, so zz repairs the agent's `PATH` from your login shell plus
 any fnm, nvm, volta, bun, pnpm, or mise bin directory on disk — the agent CLIs
 usually live exactly there, and a Dock launch would otherwise miss them.
@@ -124,7 +124,7 @@ daemon for you, and they also work from `zz/mux.conf` or `zz set-option -g`:
 | Key | Set on | Default | Effect |
 | --- | --- | --- | --- |
 | `agent-auto-approve` | daemon | `true` | Answer permission requests with the agent's preferred allow option. Off means you answer them |
-| `agent-command` | daemon | pinned `codex-acp` | Command line, or a launch-config JSON object `{"command", "args", "env"}`, for Codex panes |
+| `agent-command` | daemon | `codex` | The Codex binary, plus any flags to pass it. A command whose program is not `codex` runs as an ACP adapter: a command line, or a launch-config JSON object `{"command", "args", "env"}` |
 | `agent-claude-code-command` | daemon | `claude` | The Claude Code binary, plus any flags to pass it. A command whose program is not `claude` runs as an ACP adapter instead |
 | `agent-working-directory` | app | the donor pane's cwd | Absolute path for brand-new sessions |
 

@@ -3,50 +3,45 @@ pub(crate) mod translate;
 
 use std::{
     collections::{HashMap, HashSet},
-    io::{BufRead as _, BufReader, Write as _},
     path::{Path, PathBuf},
-    process::{Child, Command, Stdio},
+    process::Command,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
-    thread,
     time::{Duration, Instant},
 };
 
 use agent_client_protocol::schema::v1::{MessageId, ToolKind};
-use async_channel::{Receiver, Sender};
+use async_channel::Sender;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use parking_lot::Mutex;
 use serde_json::{Map, Value, json};
 use zz_protocol::{
-    AgentAutoApprove, AgentProvider, AgentQuestionAnswer, AgentTaskWire, MAX_AGENT_RESULT_BYTES,
-    MAX_AGENT_TASKS,
+    AgentAutoApprove, AgentProvider, AgentQuestionAnswer, AgentTaskWire, MAX_AGENT_TASKS,
 };
 
-use crate::{
-    agent::{
-        environment::{AgentWorkspaceEnvironment, agent_path, find_executable},
-        host::RuntimeChannels,
-        journal::{AgentJournal, JournalEntry},
-        runtime::{
-            RuntimeCommand, RuntimeControl, StderrTail, prompt_blocks, prompt_updates,
-            report_journal_error, tier_approves, validate_payload,
-        },
-        stream::{
-            AgentPromptOutcome, AgentQuestion, AgentQuestionOption, AgentSessionCapabilities,
-            AgentStreamPayload,
-        },
+use crate::agent::{
+    child::{
+        ChildEvent, Input, Process, cancelled, fit_update, new_uuid, next_input, option, random_u64,
     },
-    unmasked::SpawnUnmasked as _,
+    environment::{AgentWorkspaceEnvironment, agent_path, find_executable},
+    host::RuntimeChannels,
+    journal::{AgentJournal, JournalEntry},
+    runtime::{
+        RuntimeCommand, RuntimeControl, StderrTail, prompt_blocks, prompt_updates,
+        report_journal_error, tier_approves, validate_payload,
+    },
+    stream::{
+        AgentPromptOutcome, AgentQuestion, AgentQuestionOption, AgentSessionCapabilities,
+        AgentStreamPayload,
+    },
 };
 
 use translate::{Translator, available_commands, tool_info};
 
 const INITIALIZE_TIMEOUT: Duration = Duration::from_mins(1);
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(30);
-const REAP_GRACE: Duration = Duration::from_secs(2);
-const MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
 const MAX_REPLAY_UPDATES: usize = 4096;
 const SESSION_PAGE: usize = 50;
 const SIDE_TIMEOUT: Duration = Duration::from_mins(2);
@@ -191,135 +186,6 @@ pub(crate) async fn run_claude_runtime(
             Input::Deadline => runtime.expire().await?,
         }
     }
-}
-
-enum Input {
-    Command(Result<RuntimeCommand, async_channel::RecvError>),
-    Control(Result<RuntimeControl, async_channel::RecvError>),
-    Child(Result<ChildEvent, async_channel::RecvError>),
-    Deadline,
-}
-
-async fn next_input(
-    commands: &Receiver<RuntimeCommand>,
-    controls: &Receiver<RuntimeControl>,
-    child: &Receiver<ChildEvent>,
-    deadline: Option<Instant>,
-) -> Input {
-    let timer = async {
-        match deadline {
-            Some(deadline) => {
-                smol::Timer::at(deadline).await;
-            }
-            None => futures_lite::future::pending::<()>().await,
-        }
-        Input::Deadline
-    };
-    let controls = async {
-        if controls.is_closed() && controls.is_empty() {
-            futures_lite::future::pending::<()>().await;
-        }
-        Input::Control(controls.recv().await)
-    };
-    futures_lite::future::or(
-        futures_lite::future::or(controls, async { Input::Child(child.recv().await) }),
-        futures_lite::future::or(async { Input::Command(commands.recv().await) }, timer),
-    )
-    .await
-}
-
-enum ChildEvent {
-    Line(u64, Vec<u8>),
-    Closed(u64),
-}
-
-struct Process {
-    child: Option<Child>,
-    stdin: Sender<String>,
-}
-
-impl Process {
-    fn send(&self, frame: &Value) {
-        let _ = self.stdin.try_send(frame.to_string());
-    }
-
-    fn exit_detail(&mut self) -> Option<String> {
-        let child = self.child.as_mut()?;
-        let deadline = Instant::now() + Duration::from_secs(1);
-        loop {
-            match child.try_wait() {
-                Ok(Some(status)) => return Some(status.to_string()),
-                Ok(None) if Instant::now() < deadline => {
-                    thread::sleep(Duration::from_millis(20));
-                }
-                _ => return None,
-            }
-        }
-    }
-}
-
-impl Drop for Process {
-    fn drop(&mut self) {
-        self.stdin.close();
-        let Some(mut child) = self.child.take() else {
-            return;
-        };
-        let spawned = thread::Builder::new()
-            .name("zz-claude-reap".to_owned())
-            .spawn(move || reap(&mut child));
-        if let Err(error) = spawned {
-            log::warn!(target: "zz::agent", "could not reap Claude Code: {error}");
-        }
-    }
-}
-
-fn reap(child: &mut Child) {
-    let deadline = Instant::now() + REAP_GRACE;
-    while Instant::now() < deadline {
-        if !matches!(child.try_wait(), Ok(None)) {
-            return;
-        }
-        thread::sleep(Duration::from_millis(25));
-    }
-    signal_group(child, Signal::Terminate);
-    let deadline = Instant::now() + REAP_GRACE;
-    while Instant::now() < deadline {
-        if !matches!(child.try_wait(), Ok(None)) {
-            return;
-        }
-        thread::sleep(Duration::from_millis(25));
-    }
-    signal_group(child, Signal::Kill);
-    let _ = child.wait();
-}
-
-#[derive(Clone, Copy)]
-enum Signal {
-    Terminate,
-    Kill,
-}
-
-#[cfg(unix)]
-#[allow(
-    unsafe_code,
-    reason = "signal the process group zz created for this Claude Code child"
-)]
-fn signal_group(child: &mut Child, signal: Signal) {
-    let Ok(pid) = libc::pid_t::try_from(child.id()) else {
-        return;
-    };
-    let signal = match signal {
-        Signal::Terminate => libc::SIGTERM,
-        Signal::Kill => libc::SIGKILL,
-    };
-    unsafe {
-        libc::killpg(pid, signal);
-    }
-}
-
-#[cfg(not(unix))]
-fn signal_group(child: &mut Child, _signal: Signal) {
-    let _ = child.kill();
 }
 
 struct Session {
@@ -890,12 +756,7 @@ impl Runtime {
                 command.args(["--resume", source, "--fork-session", "--session-id", id])
             }
         };
-        command
-            .args(&self.command.args)
-            .current_dir(cwd)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        command.args(&self.command.args).current_dir(cwd);
         for name in crate::PARENT_CLAUDE_SESSION_ENVIRONMENT {
             command.env_remove(name);
         }
@@ -914,70 +775,14 @@ impl Runtime {
             use std::os::unix::process::CommandExt as _;
             command.process_group(0);
         }
-        let mut child = command
-            .spawn_unmasked()
-            .map_err(|error| format!("could not start Claude Code: {error}"))?;
         self.generation += 1;
-        let generation = self.generation;
-        let (stdin_tx, stdin_rx) = async_channel::unbounded::<String>();
-        let stdin = child.stdin.take();
-        let stdout = child.stdout.take();
-        let stderr = child.stderr.take();
-        let process = Process {
-            child: Some(child),
-            stdin: stdin_tx,
-        };
-        if let Some(mut stdin) = stdin {
-            spawn_thread("zz-claude-in", move || {
-                while let Ok(line) = stdin_rx.recv_blocking() {
-                    if stdin
-                        .write_all(line.as_bytes())
-                        .and_then(|()| stdin.write_all(b"\n"))
-                        .and_then(|()| stdin.flush())
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
-            })?;
-        }
-        if let Some(stdout) = stdout {
-            let events = self.child_tx.clone();
-            spawn_thread("zz-claude-out", move || {
-                let mut reader = BufReader::with_capacity(1 << 16, stdout);
-                let mut line = Vec::new();
-                loop {
-                    line.clear();
-                    match reader.read_until(b'\n', &mut line) {
-                        Ok(0) | Err(_) => break,
-                        Ok(_) if line.len() > MAX_FRAME_BYTES => {
-                            log::warn!(target: "zz::agent", "dropping a {} byte Claude Code frame", line.len());
-                        }
-                        Ok(_) => {
-                            if events
-                                .send_blocking(ChildEvent::Line(
-                                    generation,
-                                    std::mem::take(&mut line),
-                                ))
-                                .is_err()
-                            {
-                                return;
-                            }
-                        }
-                    }
-                }
-                let _ = events.send_blocking(ChildEvent::Closed(generation));
-            })?;
-        }
-        if let Some(stderr) = stderr {
-            let tail = self.stderr.clone();
-            spawn_thread("zz-claude-err", move || {
-                for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                    log::warn!(target: "zz::agent::stderr", "{line}");
-                    tail.push(&line);
-                }
-            })?;
-        }
+        let process = Process::launch(
+            &mut command,
+            "Claude Code",
+            self.generation,
+            &self.child_tx,
+            &self.stderr,
+        )?;
         self.process = Some(process);
         Ok(())
     }
@@ -1924,24 +1729,6 @@ fn task_kind(task_type: &str) -> String {
     .to_owned()
 }
 
-fn spawn_thread(name: &str, body: impl FnOnce() + Send + 'static) -> Result<(), String> {
-    thread::Builder::new()
-        .name(name.to_owned())
-        .spawn(body)
-        .map(|_| ())
-        .map_err(|error| format!("could not start {name}: {error}"))
-}
-
-fn cancelled() -> AgentPromptOutcome {
-    AgentPromptOutcome::Finished {
-        stop_reason: Value::from("cancelled"),
-    }
-}
-
-fn option(id: &str, name: &str, kind: &str) -> Value {
-    json!({ "optionId": id, "name": name, "kind": kind })
-}
-
 fn allow(input: &Value, permissions: Option<Value>) -> Value {
     let mut response = json!({ "behavior": "allow", "updatedInput": input });
     if let Some(permissions) = permissions {
@@ -2000,63 +1787,6 @@ fn prompt_content(prompt: &crate::agent::stream::AgentPrompt) -> Value {
         }));
     }
     Value::Array(content)
-}
-
-fn fit_update(mut update: Value) -> Value {
-    let fits = |update: &Value| {
-        validate_payload(&AgentStreamPayload::Update {
-            update: update.clone(),
-        })
-        .is_ok()
-    };
-    if fits(&update) {
-        return update;
-    }
-    if let Some(fields) = update.as_object_mut() {
-        fields.remove("rawInput");
-        fields.remove("rawOutput");
-    }
-    if fits(&update) {
-        return update;
-    }
-    if update.get("content").is_some_and(Value::is_array) {
-        update["content"] = json!([{
-            "type": "content",
-            "content": { "type": "text", "text": format!("[output larger than {} KiB not shown]", MAX_AGENT_RESULT_BYTES / 1024) },
-        }]);
-    } else if update["content"]["type"] == "text"
-        && let Some(text) = update["content"]["text"].as_str()
-    {
-        let mut end = MAX_AGENT_RESULT_BYTES / 2;
-        while !text.is_char_boundary(end) {
-            end -= 1;
-        }
-        update["content"]["text"] = Value::from(format!("{}…", &text[..end]));
-    }
-    update
-}
-
-fn random_u64() -> u64 {
-    getrandom::u64().unwrap_or_else(|_| {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |duration| duration.as_nanos() as u64)
-    })
-}
-
-fn new_uuid() -> String {
-    let high = random_u64();
-    let low = random_u64();
-    let high = (high & 0xffff_ffff_ffff_0fff) | 0x0000_0000_0000_4000;
-    let low = (low & 0x3fff_ffff_ffff_ffff) | 0x8000_0000_0000_0000;
-    format!(
-        "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
-        high >> 32,
-        (high >> 16) & 0xffff,
-        high & 0xffff,
-        low >> 48,
-        low & 0xffff_ffff_ffff
-    )
 }
 
 #[cfg(test)]
@@ -2129,7 +1859,7 @@ mod tests {
 
     #[test]
     fn oversized_updates_shed_raw_input_before_content() {
-        let big = "x".repeat(MAX_AGENT_RESULT_BYTES);
+        let big = "x".repeat(zz_protocol::MAX_AGENT_RESULT_BYTES);
         let update = fit_update(json!({
             "sessionUpdate": "tool_call",
             "toolCallId": "t",

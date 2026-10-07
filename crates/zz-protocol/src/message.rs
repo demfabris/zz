@@ -148,12 +148,10 @@ pub(crate) const MAX_CONFIG_OVERRIDE_KEY_BYTES: usize = 128;
 pub(crate) const MAX_CONFIG_OVERRIDE_VALUE_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_MUX_OPTION_VALUE_BYTES: usize = 64 * 1024;
 
-/// The commands an agent pane spawns. The ACP adapter is version-pinned on
-/// purpose: `@latest` costs a registry round trip on every pane spawn, so bumps
-/// are deliberate edits. Claude Code runs the user's own `claude`, driven over
-/// its stream-json protocol; any command whose program is not `claude` is an
-/// ACP adapter.
-pub const DEFAULT_AGENT_COMMAND: &str = "npx -y @agentclientprotocol/codex-acp@1.11.0";
+/// The commands an agent pane spawns: the user's own `codex` (driven over
+/// `codex app-server`) and `claude` (driven over its stream-json protocol). A
+/// command whose program is neither runs as an ACP adapter.
+pub const DEFAULT_AGENT_COMMAND: &str = "codex";
 pub const DEFAULT_AGENT_CLAUDE_CODE_COMMAND: &str = "claude";
 pub const DEFAULT_AGENT_AUTO_APPROVE: AgentAutoApprove = AgentAutoApprove::Reads;
 /// Longest adapter command line an agent mux option may carry.

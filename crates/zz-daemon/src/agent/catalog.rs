@@ -10,7 +10,8 @@ use zz_protocol::{AgentAutoApprove, AgentProvider};
 
 use super::{
     claude::run_claude_runtime,
-    host::{PaneRunner, RuntimeChannels, native_claude},
+    codex::run_codex_runtime,
+    host::{PaneRunner, RuntimeChannels, native_claude, native_codex},
     runtime::{AgentSpawnConfig, RuntimeCommand, RuntimeControl, run_agent_runtime},
     stream::AgentStreamPayload,
 };
@@ -25,6 +26,13 @@ pub(crate) async fn load(
         let workspace = config.workspace;
         let runner: PaneRunner = Box::new(move |channels| {
             Box::pin(run_claude_runtime(command, workspace, provider, channels))
+        });
+        return load_with_runner(cwd, runner).await;
+    }
+    if let Some(command) = native_codex(&config, provider) {
+        let workspace = config.workspace;
+        let runner: PaneRunner = Box::new(move |channels| {
+            Box::pin(run_codex_runtime(command, workspace, provider, channels))
         });
         return load_with_runner(cwd, runner).await;
     }

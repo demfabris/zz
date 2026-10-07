@@ -1,8 +1,8 @@
 ---
 type: Design Plan
 title: Native agent drivers
-description: Agent panes drive each vendor's own protocol from the daemon. Claude Code runs over stream-json and its control protocol (on main 2026-10-07), Codex will run a private `codex app-server` per pane, and ACP stays for the agents that speak it natively, all emitting the stream the shared reducer already renders.
-status: In progress (Claude Code driver on main 2026-10-07; question cards, subagent rows, task tray, zz verbs, the Codex driver, and orchestration remain)
+description: Agent panes drive each vendor's own protocol from the daemon. Claude Code runs over stream-json and its control protocol, Codex over a private `codex app-server` per pane, and ACP stays for the agents that speak it natively, all emitting the stream the shared reducer already renders.
+status: In progress (Claude Code and Codex drivers, zz commands, and the v108 wire for question cards, tasks, and subagent links on main 2026-10-07; the card, tray, and nested-row UI is in a lane; orchestration remains)
 resource: crates/zz-daemon/src/agent/claude/mod.rs
 tags:
 - agent
@@ -93,16 +93,70 @@ Verified live on 2026-10-07 through a private daemon and `zz_cli`: a plain reply
 edited files, an `AskUserQuestion` answered with `agent-respond`, and `restart-agent-pane` resuming
 the session with its memory.
 
+# zz commands
+
+A prompt that starts with `//` is a zz command when the driver's `Ready` capabilities set `verbs`.
+The host hands it to the runner outside the turn queue, so it works while a turn runs; `//steer` on
+an idle pane becomes a plain prompt. The fanout keeps commands out of projected turn headers.
+
+| Command | Claude Code | Codex |
+| --- | --- | --- |
+| `//btw`, `//side` | `side_question`; the answer never enters the conversation | not yet |
+| `//steer <text>` | `user` frame with `priority: "now"` | `turn/steer` |
+| `//fork` | respawn with `--resume X --fork-session --session-id NEW` | `thread/fork` |
+| anything else | lists the commands | lists the commands |
+
+# Background work, questions, subagents (v108)
+
+Background agents and commands stay `in_progress` in their own rows after launch and finish with
+their result when `task_notification` arrives (the agent's summary, or the tail of the command's
+output file); `task_progress` summaries update an agent row while it runs. `background_tasks_changed`
+becomes the pane state's `tasks` list (ambient watchers left out), and `AgentStopTask` sends
+`stop_task`; the driver declares `perTaskStopAffordance`, so stopping a turn spares background
+agents. `AskUserQuestion` (and Codex `item/tool/requestUserInput`) is one permission request with
+a `questions` list, answered by `AgentAnswerQuestion`. Subagent tool calls carry
+`_meta.zz.parent`, and the shared reducer exposes it as `tool_parent`. The wire details are in the
+v108 entry of the [wire protocol](/protocol/wire-protocol.md).
+
+# Codex driver
+
+`crates/zz-daemon/src/agent/codex/`, sharing the process plumbing in `agent/child.rs` with the
+Claude driver. One `codex app-server` child per pane over stdio, as the other apps do, with
+`experimentalApi: true`. `agent-command` defaults to `codex`; extra arguments go after
+`app-server`.
+
+- **Threads.** A new pane runs `thread/start {cwd}`; resume and switch run `thread/resume` and
+  replay `thread/read {includeTurns}` items; a failed resume starts a new thread. The approval
+  policy and sandbox come from the user's `~/.codex/config.toml` until the user picks a mode.
+- **Turns.** `turn/start` with text and data-URL images; `turn/completed` settles the host turn
+  (`interrupted` reads as cancelled); Cancel sends `turn/interrupt`. `/compact` runs
+  `thread/compact/start` and `/review` runs `review/start` inline.
+- **Requests.** Command, file-change, and permission approvals become permission requests (Allow,
+  Always allow this session, Reject); the legacy `execCommandApproval` and `applyPatchApproval`
+  answer in their own decision shape. `serverRequest/resolved` withdraws a request another client
+  answered. Elicitations are declined and unknown requests get a method-not-found error.
+- **Items.** Agent messages and reasoning stream from their deltas; command executions become
+  execute rows (read and search actions get read and search rows) with streamed output and a
+  failed status on a non-zero exit; file changes render their unified diffs as old and new text;
+  MCP and dynamic tool calls, web searches, and collab agent calls get rows; `turn/plan/updated`
+  is the plan; `thread/tokenUsage/updated` is the usage meter.
+- **Settings.** Model and effort from `model/list`; the mode presets read-only, auto, and full
+  access map to `approvalPolicy` and `sandboxPolicy` on the next `turn/start`.
+- **Sessions.** `thread/list` filtered by cwd.
+
+Verified live on 2026-10-07 with Codex 0.159.0: a plain reply, a turn with two approvals and both
+file changes applied, `restart-agent-pane` resuming the thread with its memory, and `//fork`.
+
 # Next
 
-1. Stream vocabulary in v108: a question card (multi-select, free text), subagent child rows, a
-   background task tray (`background_tasks_changed`, `stop_task`), a raw row for unknown frames, and
-   side answers, rendered on desktop, gpui-shared, and FFI.
-2. `//` verbs: side and btw (`side_question`), fork (`--resume X --fork-session`), branch
-   (`--resume-session-at`), rewind, steer (`priority: "now"`).
+1. The question card, task tray, and nested subagent rows on desktop, gpui-shared, and FFI (the
+   wire and reducer are done).
+2. More commands: `//btw` for Codex (an ephemeral `thread/fork` plus a hidden turn), branch from a
+   message (`--resume-session-at`, `thread/fork beforeTurnId`), rewind.
 3. Turns the CLI starts on its own (a background task finishing, a peer message) do not reach the
    host's phase yet, so badges miss that work.
-4. Codex driver: a `codex app-server` stdio child per pane, starting from `archive/codex-host`.
+4. Codex subagent threads (`collabAgentToolCall` receivers) and background terminals.
 5. Orchestration: a zz MCP server passed through `mcpServers` and the Codex thread config; PiP
    panes.
-6. Keep-up: a weekly diff of `sdk.d.ts` and the Codex schema, and a minimum-version table.
+6. Keep-up: a weekly diff of `sdk.d.ts` and the Codex schema, and a minimum-version table. The
+   survey's `archive/codex-host` tag is not in this clone; the Codex driver was written fresh.

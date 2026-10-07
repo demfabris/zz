@@ -20,6 +20,7 @@ use zz_protocol::{
 
 use crate::agent::{
     claude::{ClaudeCommand, run_claude_runtime},
+    codex::{CodexCommand, run_codex_runtime},
     environment::{AgentWorkspaceEnvironment, warm_adapter_cache},
     git_summary,
     journal::AgentJournal,
@@ -377,6 +378,15 @@ pub(crate) fn native_claude(
         .flatten()
 }
 
+pub(crate) fn native_codex(
+    config: &AgentSpawnConfig,
+    provider: AgentProvider,
+) -> Option<CodexCommand> {
+    (provider == AgentProvider::Codex)
+        .then(|| CodexCommand::parse(config.command_for(provider)))
+        .flatten()
+}
+
 pub(crate) type PaneRunner = Box<
     dyn FnOnce(RuntimeChannels) -> Pin<Box<dyn Future<Output = Result<(), String>>>>
         + Send
@@ -457,6 +467,13 @@ impl AgentHost {
             let workspace = config.workspace;
             let runner: PaneRunner = Box::new(move |channels: RuntimeChannels| {
                 Box::pin(run_claude_runtime(command, workspace, provider, channels))
+            });
+            return self.open_with(pane, generation, spec, runner);
+        }
+        if let Some(command) = native_codex(&config, provider) {
+            let workspace = config.workspace;
+            let runner: PaneRunner = Box::new(move |channels: RuntimeChannels| {
+                Box::pin(run_codex_runtime(command, workspace, provider, channels))
             });
             return self.open_with(pane, generation, spec, runner);
         }

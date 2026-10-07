@@ -251,7 +251,7 @@ fn summary(
     let cwd = first_field(&lite.head, "cwd")
         .map(PathBuf::from)
         .or_else(|| project.map(Path::to_path_buf))?;
-    let updated_at = humantime_rfc3339(lite.modified_ms);
+    let updated_at = rfc3339(lite.modified_ms);
     Some((
         lite.modified_ms,
         AgentSessionSummary {
@@ -264,7 +264,7 @@ fn summary(
     ))
 }
 
-fn humantime_rfc3339(ms: u128) -> Option<String> {
+pub(crate) fn rfc3339(ms: u128) -> Option<String> {
     let secs = i64::try_from(ms / 1000).ok()?;
     let days = secs.div_euclid(86_400);
     let rem = secs.rem_euclid(86_400);
@@ -515,7 +515,7 @@ mod tests {
     #[test]
     fn timestamps_render_as_utc() {
         assert_eq!(
-            humantime_rfc3339(1_791_399_341_959).as_deref(),
+            rfc3339(1_791_399_341_959).as_deref(),
             Some("2026-10-07T18:55:41Z")
         );
     }

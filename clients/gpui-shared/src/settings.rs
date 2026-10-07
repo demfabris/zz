@@ -35,6 +35,8 @@ use crate::{
 
 pub(super) use crate::preferences::Preferences;
 
+const NAV_BAR_HEIGHT: f32 = 44.0;
+
 pub(super) const SECTIONS: [SettingsSection; 7] = [
     SettingsSection::Appearance,
     SettingsSection::StatusBar,
@@ -544,7 +546,11 @@ impl AppShell {
             )
             .into_any_element()
         };
-        let title = if picked { section.title() } else { "Settings" };
+        let (title, back) = if picked {
+            (section.title(), "Settings")
+        } else {
+            ("Settings", "Back")
+        };
         div()
             .flex()
             .flex_col()
@@ -553,37 +559,60 @@ impl AppShell {
             .min_h_0()
             .child(
                 div()
+                    .relative()
                     .flex()
                     .items_center()
-                    .h(zz_ui::TITLE_BAR_HEIGHT)
+                    .h(px(NAV_BAR_HEIGHT))
                     .flex_none()
-                    .px(px(8.0))
-                    .gap(px(4.0))
                     .child(
-                        Button::compact_icon("settings-back", IconName::ArrowLeft)
-                            .hit_slop(10.0, 10.0)
-                            .tooltip(if picked {
-                                "Settings"
-                            } else {
-                                "Back to workspace"
-                            })
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.settings_back(window, cx);
-                            })),
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_size(px(17.0))
+                            .font_semibold()
+                            .child(title),
                     )
                     .child(
                         div()
-                            .text_size(zz_ui::rems_from_px(15.0))
-                            .font_medium()
-                            .child(title),
+                            .id("settings-back")
+                            .relative()
+                            .flex()
+                            .items_center()
+                            .h_full()
+                            .pl(px(6.0))
+                            .pr(px(12.0))
+                            .text_color(cx.theme().accent)
+                            .child(
+                                zz_ui::touch::press_highlight(
+                                    "settings-back-press",
+                                    cx.theme().foreground.opacity(0.1),
+                                    px(NAV_BAR_HEIGHT / 2.0),
+                                )
+                                .top(px(4.0))
+                                .bottom(px(4.0)),
+                            )
+                            .child(
+                                zz_ui::Icon::new(IconName::ChevronLeft)
+                                    .size(px(30.0))
+                                    .text_color(cx.theme().accent),
+                            )
+                            .child(div().text_size(px(17.0)).child(back))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.settings_back(window, cx);
+                            })),
                     ),
             )
             .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .relative()
-                    .child(div().absolute().inset_0().flex().child(content)),
+                div().flex_1().min_h_0().relative().child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .child(zz_ui::touch::touch_scale(content, cx)),
+                ),
             )
             .into_any_element()
     }
@@ -635,24 +664,24 @@ impl AppShell {
             SettingsSection::Panes => {
                 let [background, inactive, glow, margin, radius, border] =
                     PaneControl::ALL.map(|control| self.pane_setting(control, narrow, cx));
-                let gaps = with_control(
+                let gaps =
                     SettingEntry::new("Pane gaps", "Separate panes with spacing and borders.")
                         .title_actions(reset_button(
                             "settings-pane-gaps-reset",
                             self.preferences.gaps != Preferences::default().gaps,
                             |this, _, _| this.preferences.gaps = Preferences::default().gaps,
                             cx,
-                        )),
-                    Switch::new("settings-pane-gaps")
-                        .checked(self.preferences.gaps)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.preferences.gaps = !this.preferences.gaps;
-                            this.preferences.save();
-                            cx.notify();
-                        })),
-                    narrow,
-                );
-                let agent = self.agent_panes_setting(narrow, cx);
+                        ))
+                        .control(
+                            Switch::new("settings-pane-gaps")
+                                .checked(self.preferences.gaps)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.preferences.gaps = !this.preferences.gaps;
+                                    this.preferences.save();
+                                    cx.notify();
+                                })),
+                        );
+                let agent = self.agent_panes_setting(cx);
                 return zz_ui::settings::panes_page(
                     zz_ui::settings::panes_preview::PanesPreview {
                         gaps: self.preferences.gaps,
@@ -670,21 +699,22 @@ impl AppShell {
                 .into_any_element();
             }
             SettingsSection::StatusBar => {
-                let mut rows = vec![with_control(
+                let mut rows = vec![
                     SettingEntry::new(
                         "Sidebar",
                         "Show sessions, windows, and panes beside the workspace.",
+                    )
+                    .control(
+                        Switch::new("settings-sidebar")
+                            .checked(self.sidebar)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.sidebar = !this.sidebar;
+                                this.preferences.sidebar = this.sidebar;
+                                this.preferences.save();
+                                cx.notify();
+                            })),
                     ),
-                    Switch::new("settings-sidebar")
-                        .checked(self.sidebar)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.sidebar = !this.sidebar;
-                            this.preferences.sidebar = this.sidebar;
-                            this.preferences.save();
-                            cx.notify();
-                        })),
-                    narrow,
-                )];
+                ];
                 for (id, title, description, checked) in [
                     (
                         "session",
@@ -706,23 +736,27 @@ impl AppShell {
                     ),
                 ] {
                     let default = *status_field(&mut Preferences::default(), id);
-                    rows.push(with_control(
-                        SettingEntry::new(title, description).title_actions(reset_button(
-                            format!("settings-status-{id}-reset"),
-                            checked != default,
-                            move |this, _, _| *status_field(&mut this.preferences, id) = default,
-                            cx,
-                        )),
-                        Switch::new(format!("settings-status-{id}"))
-                            .checked(checked)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                let value = status_field(&mut this.preferences, id);
-                                *value = !*value;
-                                this.preferences.save();
-                                cx.notify();
-                            })),
-                        narrow,
-                    ));
+                    rows.push(
+                        SettingEntry::new(title, description)
+                            .title_actions(reset_button(
+                                format!("settings-status-{id}-reset"),
+                                checked != default,
+                                move |this, _, _| {
+                                    *status_field(&mut this.preferences, id) = default;
+                                },
+                                cx,
+                            ))
+                            .control(
+                                Switch::new(format!("settings-status-{id}"))
+                                    .checked(checked)
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        let value = status_field(&mut this.preferences, id);
+                                        *value = !*value;
+                                        this.preferences.save();
+                                        cx.notify();
+                                    })),
+                            ),
+                    );
                 }
                 return zz_ui::settings::status_bar_preview::status_bar_page(
                     self.preferences.status_bar_settings(),
@@ -735,21 +769,21 @@ impl AppShell {
             SettingsSection::Terminal => return self.terminal_settings(narrow, cx),
             SettingsSection::Advanced => {
                 let text_size = shown(Setting::SystemTextSize, phone).then(|| {
-                    with_control(
-                        SettingEntry::new(
-                            "Match system text size",
-                            "Scale the interface with the iPadOS text size setting.",
-                        )
-                        .title_actions(reset_button(
-                            "settings-system-text-size-reset",
-                            self.preferences.system_text_size
-                                != Preferences::default().system_text_size,
-                            |this, _, _| {
-                                this.preferences.system_text_size =
-                                    Preferences::default().system_text_size;
-                            },
-                            cx,
-                        )),
+                    SettingEntry::new(
+                        "Match system text size",
+                        "Scale the interface with the iPadOS text size setting.",
+                    )
+                    .title_actions(reset_button(
+                        "settings-system-text-size-reset",
+                        self.preferences.system_text_size
+                            != Preferences::default().system_text_size,
+                        |this, _, _| {
+                            this.preferences.system_text_size =
+                                Preferences::default().system_text_size;
+                        },
+                        cx,
+                    ))
+                    .control(
                         Switch::new("settings-system-text-size")
                             .checked(self.preferences.system_text_size)
                             .on_click(cx.listener(|this, _, window, cx| {
@@ -759,12 +793,11 @@ impl AppShell {
                                 this.preferences.apply(&this.connection, window, cx);
                                 cx.notify();
                             })),
-                        narrow,
                     )
                 });
                 return settings_scroll_column("settings-page")
                     .child(settings_heading(
-                        section.title(),
+                        (!narrow).then_some(section.title()),
                         "Tune the command palette and display on this client.",
                         cx,
                     ))
@@ -776,15 +809,13 @@ impl AppShell {
                         !shown(Setting::Section(SettingsSection::Panes), phone),
                         |page| {
                             page.child(
-                                SettingsStack::titled("Panes")
-                                    .child(self.agent_panes_setting(narrow, cx)),
+                                SettingsStack::titled("Panes").child(self.agent_panes_setting(cx)),
                             )
                         },
                     )
                     .when(cfg!(target_os = "ios"), |page| {
                         page.child(
-                            SettingsStack::titled("Display").child(with_control(
-                                SettingEntry::new(
+                            SettingsStack::titled("Display").child(SettingEntry::new(
                                     "Draw under the home indicator",
                                     "Extend the workspace and settings into the bottom safe area.",
                                 )
@@ -797,20 +828,16 @@ impl AppShell {
                                             Preferences::default().extend_bottom_safe_area;
                                     },
                                     cx,
-                                )),
-                                Switch::new("settings-bottom-safe-area")
+                                )).control(Switch::new("settings-bottom-safe-area")
                                     .checked(self.preferences.extend_bottom_safe_area)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.preferences.extend_bottom_safe_area =
                                             !this.preferences.extend_bottom_safe_area;
                                         this.preferences.save();
                                         cx.notify();
-                                    })),
-                                narrow,
-                            ))
+                                    }))))
                             .children(text_size)
-                            .child(with_control(
-                                SettingEntry::new(
+                            .child(SettingEntry::new(
                                     "Keep the screen awake",
                                     "Stop the display from sleeping while connected to a host.",
                                 )
@@ -824,8 +851,7 @@ impl AppShell {
                                         this.sync_idle_guard(cx);
                                     },
                                     cx,
-                                )),
-                                Switch::new("settings-keep-awake")
+                                )).control(Switch::new("settings-keep-awake")
                                     .checked(self.preferences.keep_screen_awake)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.preferences.keep_screen_awake =
@@ -833,9 +859,7 @@ impl AppShell {
                                         this.preferences.save();
                                         this.sync_idle_guard(cx);
                                         cx.notify();
-                                    })),
-                                narrow,
-                            )),
+                                    })))),
                         )
                     })
                     .into_any_element();
@@ -843,7 +867,12 @@ impl AppShell {
             SettingsSection::About => return about_page(cx),
             _ => {}
         }
-        self.hosts_page("settings-page", section.title(), narrow, cx)
+        self.hosts_page(
+            "settings-page",
+            (!narrow).then_some(section.title()),
+            narrow,
+            cx,
+        )
     }
 
     fn appearance_focus(
@@ -1020,28 +1049,26 @@ impl AppShell {
                     .unwrap();
                 let mode = cx.theme().mode;
                 let inherited = inherited_chrome_colors(self.preferences.preset(mode), mode);
-                with_control(
-                    SettingEntry::new(color.title(), color.description()).title_actions(
-                        reset_button(
-                            format!("settings-{}-reset", color.as_str()),
-                            self.preferences.colors[index].is_some(),
-                            move |this, window, cx| {
-                                this.preferences.colors[index] = None;
-                                this.settings_controls.colors[index].update(cx, |picker, cx| {
-                                    picker.set_color(None, window, cx);
-                                });
-                            },
-                            cx,
-                        ),
-                    ),
-                    ColorPicker::new(
-                        &self.settings_controls.colors[index],
-                        zz_ui::chrome_palette::read_chrome_color(color, &inherited),
+                SettingEntry::new(color.title(), color.description())
+                    .title_actions(reset_button(
+                        format!("settings-{}-reset", color.as_str()),
+                        self.preferences.colors[index].is_some(),
+                        move |this, window, cx| {
+                            this.preferences.colors[index] = None;
+                            this.settings_controls.colors[index].update(cx, |picker, cx| {
+                                picker.set_color(None, window, cx);
+                            });
+                        },
+                        cx,
+                    ))
+                    .control(
+                        ColorPicker::new(
+                            &self.settings_controls.colors[index],
+                            zz_ui::chrome_palette::read_chrome_color(color, &inherited),
+                        )
+                        .label(color.title())
+                        .small(),
                     )
-                    .label(color.title())
-                    .small(),
-                    narrow,
-                )
             }
             AppearancePageItem::ChromeContrast => with_control(
                 SettingEntry::new(
@@ -1066,17 +1093,17 @@ impl AppShell {
                 number_control(&self.settings_controls.contrast, cx),
                 narrow,
             ),
-            AppearancePageItem::Animations => with_control(
-                SettingEntry::new(
-                    "Animations",
-                    "Animate interface transitions, loading indicators, and image frames.",
-                )
-                .title_actions(reset_button(
-                    "settings-animations-reset",
-                    self.preferences.animations != Preferences::default().animations,
-                    |this, _, _| this.preferences.animations = Preferences::default().animations,
-                    cx,
-                )),
+            AppearancePageItem::Animations => SettingEntry::new(
+                "Animations",
+                "Animate interface transitions, loading indicators, and image frames.",
+            )
+            .title_actions(reset_button(
+                "settings-animations-reset",
+                self.preferences.animations != Preferences::default().animations,
+                |this, _, _| this.preferences.animations = Preferences::default().animations,
+                cx,
+            ))
+            .control(
                 Switch::new("settings-animations")
                     .checked(self.preferences.animations)
                     .on_click(cx.listener(|this, _, window, cx| {
@@ -1084,7 +1111,6 @@ impl AppShell {
                         this.preferences.save();
                         this.preferences.apply(&this.connection, window, cx);
                     })),
-                narrow,
             ),
             AppearancePageItem::WidgetCornerRadius => with_control(
                 SettingEntry::new(
@@ -1138,9 +1164,8 @@ impl AppShell {
         entry.position(position).into_any_element()
     }
 
-    fn agent_panes_setting(&self, narrow: bool, cx: &mut Context<Self>) -> SettingEntry {
-        with_control(
-            SettingEntry::new("Agent panes", "Allow creating agent panes on this client."),
+    fn agent_panes_setting(&self, cx: &mut Context<Self>) -> SettingEntry {
+        SettingEntry::new("Agent panes", "Allow creating agent panes on this client.").control(
             Switch::new("settings-agent-enabled")
                 .checked(self.preferences.agent_enabled)
                 .on_click(cx.listener(|this, _, _, cx| {
@@ -1148,7 +1173,6 @@ impl AppShell {
                     this.preferences.save();
                     cx.notify();
                 })),
-            narrow,
         )
     }
 
@@ -1236,7 +1260,7 @@ impl AppShell {
             narrow,
         );
         settings_scroll_column("settings-terminal")
-            .child(settings_heading("Terminal", "Adjust terminal text on this client. Colors, cursor, and spacing follow the host configuration.", cx))
+            .child(settings_heading((!narrow).then_some("Terminal"), "Adjust terminal text on this client. Colors, cursor, and spacing follow the host configuration.", cx))
             .child(zz_ui::settings::settings_list_group_header("Preview", None, cx))
             .child(terminal_preview(appearance, cx))
             .child(SettingsStack::titled("Display").child(font).child(scale))
@@ -1333,20 +1357,19 @@ impl AppShell {
                 ),
                 narrow,
             ),
-            with_control(
-                SettingEntry::new(
-                    "Command shortcuts",
-                    "Show keyboard shortcuts beside commands.",
-                )
-                .title_actions(reset_button(
-                    "settings-palette-show-keys-reset",
-                    self.preferences.palette_show_keys != defaults.palette_show_keys,
-                    |this, _, _| {
-                        this.preferences.palette_show_keys =
-                            Preferences::default().palette_show_keys;
-                    },
-                    cx,
-                )),
+            SettingEntry::new(
+                "Command shortcuts",
+                "Show keyboard shortcuts beside commands.",
+            )
+            .title_actions(reset_button(
+                "settings-palette-show-keys-reset",
+                self.preferences.palette_show_keys != defaults.palette_show_keys,
+                |this, _, _| {
+                    this.preferences.palette_show_keys = Preferences::default().palette_show_keys;
+                },
+                cx,
+            ))
+            .control(
                 Switch::new("settings-palette-show-keys")
                     .checked(self.preferences.palette_show_keys)
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -1354,7 +1377,6 @@ impl AppShell {
                         this.preferences.save();
                         cx.notify();
                     })),
-                narrow,
             ),
         ]
     }
@@ -1456,15 +1478,19 @@ fn number_text(value: f32) -> String {
 }
 
 fn number_control(input: &Entity<InputState>, cx: &App) -> gpui::Div {
-    div().w(px(120.0)).max_w_full().flex_none().child(
-        NumberInput::new(input)
-            .small()
-            .bg(settings_control_fill(cx)),
-    )
+    div()
+        .w(zz_ui::rems_from_px(120.0))
+        .max_w_full()
+        .flex_none()
+        .child(
+            NumberInput::new(input)
+                .small()
+                .bg(settings_control_fill(cx)),
+        )
 }
 
 pub(super) fn settings_heading(
-    title: &'static str,
+    title: Option<&'static str>,
     description: &'static str,
     cx: &App,
 ) -> gpui::Div {
@@ -1472,12 +1498,14 @@ pub(super) fn settings_heading(
         .flex()
         .flex_col()
         .gap(px(4.0))
-        .child(
-            div()
-                .font_medium()
-                .text_size(zz_ui::rems_from_px(20.0))
-                .child(title),
-        )
+        .when_some(title, |this, title| {
+            this.child(
+                div()
+                    .font_medium()
+                    .text_size(zz_ui::rems_from_px(20.0))
+                    .child(title),
+            )
+        })
         .child(
             div()
                 .text_size(zz_ui::rems_from_px(11.0))

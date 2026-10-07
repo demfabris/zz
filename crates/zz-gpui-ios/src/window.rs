@@ -1107,6 +1107,7 @@ extern "C" fn touches_ended(this: &Object, _: Sel, touches: id, event: id) {
         return;
     }
     if dispatch_touches(this, touches, TouchPhase::Ended) {
+        lift_finger(this);
         return;
     }
     let position = touch_position(this, touches);
@@ -1123,6 +1124,7 @@ extern "C" fn touches_ended(this: &Object, _: Sel, touches: id, event: id) {
             click_count: touch_count(touches),
         }),
     );
+    lift_finger(this);
 }
 
 extern "C" fn touches_cancelled(this: &Object, sel: Sel, touches: id, event: id) {
@@ -1130,9 +1132,26 @@ extern "C" fn touches_cancelled(this: &Object, sel: Sel, touches: id, event: id)
         pointer_input(this, touches, event, TouchPhase::Cancelled);
         return;
     }
-    if !dispatch_touches(this, touches, TouchPhase::Cancelled) {
+    if dispatch_touches(this, touches, TouchPhase::Cancelled) {
+        lift_finger(this);
+    } else {
         touches_ended(this, sel, touches, event);
     }
+}
+
+fn lift_finger(this: &Object) {
+    let modifiers = unsafe { get_window_state(this) }
+        .borrow()
+        .keyboard
+        .modifiers;
+    dispatch_event(
+        this,
+        PlatformInput::MouseExited(MouseExitEvent {
+            position: point(px(-1.0), px(-1.0)),
+            pressed_button: None,
+            modifiers,
+        }),
+    );
 }
 
 fn dispatch_touches(this: &Object, touches: id, phase: TouchPhase) -> bool {

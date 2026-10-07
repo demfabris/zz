@@ -24,9 +24,9 @@ const WINDOW_MARGIN: f32 = 8.0;
 const CARD_PADDING: f32 = 6.0;
 const ITEM_HEIGHT: f32 = 44.0;
 const ITEM_GAP: f32 = 2.0;
-const LIST_WIDTH: f32 = 216.0;
-const CELL_WIDTH: f32 = 124.0;
-const CAP_WIDTH: f32 = 26.0;
+const LIST_WIDTH: f32 = 240.0;
+const CELL_WIDTH: f32 = 140.0;
+const CAP_WIDTH: f32 = 32.0;
 const HINT: f32 = 3.0;
 
 pub(super) fn popover_above(card: impl IntoElement, window: &Window) -> impl IntoElement {
@@ -244,14 +244,14 @@ impl PopoverKey {
                 .min_w(rems_from_px(CAP_WIDTH))
                 .whitespace_nowrap()
                 .font_family(theme.mono_font_family.clone())
-                .text_size(rems_from_px(12.0))
+                .text_size(rems_from_px(15.0))
                 .text_color(muted)
                 .child(cap)
         };
         let leading = match (&item.icon, &item.cap) {
             (Some(icon), _) => Some(
                 Icon::new(icon.clone())
-                    .size(rems_from_px(16.0))
+                    .size(rems_from_px(20.0))
                     .into_any_element(),
             ),
             (None, Some(text)) => Some(cap(text.clone()).into_any_element()),
@@ -340,8 +340,8 @@ impl PopoverKey {
             .gap(rems_from_px(ITEM_GAP))
             .popover_style(cx)
             .font_family(theme.font_family.clone())
-            .text_size(rems_from_px(14.0))
-            .line_height(rems_from_px(18.0))
+            .text_size(rems_from_px(17.0))
+            .line_height(rems_from_px(22.0))
             .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
             .on_mouse_down_out(cx.listener(|this, event: &MouseDownEvent, _, cx| {
                 if this.open == Some(Open::Pinned) && !this.key.get().contains(&event.position) {

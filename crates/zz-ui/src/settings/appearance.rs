@@ -225,6 +225,12 @@ fn tile(
         )
         .child(
             div()
+                .w_0()
+                .min_w_full()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .text_center()
                 .text_size(crate::rems_from_px(11.0))
                 .text_color(if selected {
                     cx.theme().foreground
@@ -348,7 +354,12 @@ impl RenderOnce for PickerStrip {
             .flex_col()
             .mx(px(-STRIP_INSET))
             .mb(px(-8.0))
-            .child(tiles)
+            .child(
+                div()
+                    .relative()
+                    .child(tiles)
+                    .child(crate::compact::yield_back_swipe((id, 3usize), &scroll)),
+            )
             .child(
                 div()
                     .relative()

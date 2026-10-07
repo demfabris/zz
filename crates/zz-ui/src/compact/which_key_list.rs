@@ -13,7 +13,7 @@ use crate::{
 const INSET: f32 = 8.0;
 const ROW_HEIGHT: f32 = 44.0;
 const HEADER_HEIGHT: f32 = 28.0;
-const CAP_MIN_WIDTH: f32 = 44.0;
+const CAP_MIN_WIDTH: f32 = 52.0;
 
 type PickHandler = Rc<dyn Fn(&SharedString, &mut Window, &mut App)>;
 
@@ -42,7 +42,7 @@ impl WhichKeyList {
             .flex_none()
             .whitespace_nowrap()
             .font_family(cx.theme().mono_font_family.clone())
-            .text_size(rems_from_px(12.0))
+            .text_size(rems_from_px(15.0))
             .text_color(if cap.yours {
                 cx.theme().accent
             } else {
@@ -51,13 +51,22 @@ impl WhichKeyList {
             .child(cap_text(cap))
     }
 
-    fn row(&self, index: usize, row: &WhichKeyRow, cx: &App) -> AnyElement {
+    fn row(
+        &self,
+        index: usize,
+        row: &WhichKeyRow,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> AnyElement {
         let selector = format!("which-key-list-row-{}", row.id);
         let id = row.id.clone();
         let on_pick = self.on_pick.clone();
-        let pressed = cx.theme().background.washed(2);
+        let element_id = ElementId::named_usize("which-key-list-row", index);
+        let press = crate::touch::press_feedback(element_id.clone(), window, cx);
+        let pressed = press.amount;
         div()
-            .id(ElementId::named_usize("which-key-list-row", index))
+            .id(element_id)
+            .relative()
             .debug_selector(move || selector)
             .flex()
             .flex_none()
@@ -68,7 +77,10 @@ impl WhichKeyList {
             .px(rems_from_px(INSET))
             .rounded(cx.theme().menu_radius())
             .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
-            .active(move |style| style.bg(pressed))
+            .when(pressed > 0.0, |this| {
+                this.bg(cx.theme().foreground.opacity(0.1 * pressed))
+            })
+            .child(press.listener())
             .child(
                 div()
                     .flex()
@@ -96,7 +108,7 @@ impl WhichKeyList {
 }
 
 impl RenderOnce for WhichKeyList {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let mut children = Vec::new();
         let mut index = 0;
         for group in groups(&self.rows) {
@@ -109,7 +121,7 @@ impl RenderOnce for WhichKeyList {
                         .h(rems_from_px(HEADER_HEIGHT))
                         .px(rems_from_px(INSET))
                         .pb(rems_from_px(4.0))
-                        .text_size(rems_from_px(12.0))
+                        .text_size(rems_from_px(13.0))
                         .text_color(cx.theme().foreground.muted())
                         .font_medium()
                         .child(title)
@@ -117,7 +129,7 @@ impl RenderOnce for WhichKeyList {
                 );
             }
             for row in group.rows {
-                children.push(self.row(index, row, cx));
+                children.push(self.row(index, row, window, cx));
                 index += 1;
             }
         }
@@ -130,8 +142,8 @@ impl RenderOnce for WhichKeyList {
             .px(rems_from_px(INSET))
             .pb(rems_from_px(INSET))
             .font_family(cx.theme().font_family.clone())
-            .text_size(rems_from_px(14.0))
-            .line_height(rems_from_px(18.0))
+            .text_size(rems_from_px(17.0))
+            .line_height(rems_from_px(22.0))
             .children(children)
     }
 }

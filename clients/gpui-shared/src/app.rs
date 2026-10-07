@@ -1484,7 +1484,7 @@ impl AppShell {
             if !self.connection.read(cx).connected {
                 return self.hosts_page(
                     "web-connect-page",
-                    "Connect to zz",
+                    Some("Connect to zz"),
                     Self::narrow(window),
                     cx,
                 );

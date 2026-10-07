@@ -1,8 +1,18 @@
-use gpui::{App, Div, ElementId, Global, InteractiveElement as _, Stateful, Styled as _, div};
+use gpui::{
+    AnyElement, App, Bounds, Div, Element, ElementId, Global, GlobalElementId, InspectorElementId,
+    InteractiveElement as _, IntoElement, LayoutId, Pixels, Stateful, Styled as _, Window, div,
+};
 
 use crate::{Size, rems_from_px};
 
+mod press;
+
+pub use press::{PressFeedback, instant_press_highlight, press_feedback, press_highlight};
+
 pub const TOUCH_TARGET: f32 = 44.0;
+
+/// iOS body text is 17 points where the desktop chrome sets 13 pixels.
+pub const TOUCH_TYPE_SCALE: f32 = 17.0 / 13.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CoarsePointer(pub bool);
@@ -19,6 +29,90 @@ impl CoarsePointer {
         if Self::get(cx) != coarse {
             cx.set_global(Self(coarse));
         }
+    }
+}
+
+/// Renders desktop-sized chrome at phone reading size under a coarse pointer:
+/// everything sized in rems, including text, icons, controls, and the menus
+/// they open, grows by [`TOUCH_TYPE_SCALE`]. Pixel paddings stay put.
+pub fn touch_scale(child: impl IntoElement, cx: &App) -> AnyElement {
+    if CoarsePointer::get(cx) {
+        TouchScale {
+            child: child.into_any_element(),
+            rem_size: None,
+        }
+        .into_any_element()
+    } else {
+        child.into_any_element()
+    }
+}
+
+struct TouchScale {
+    child: AnyElement,
+    rem_size: Option<Pixels>,
+}
+
+impl IntoElement for TouchScale {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for TouchScale {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, ()) {
+        let rem_size = *self
+            .rem_size
+            .get_or_insert(window.rem_size() * TOUCH_TYPE_SCALE);
+        let child = &mut self.child;
+        let layout_id =
+            window.with_rem_size(Some(rem_size), |window| child.request_layout(window, cx));
+        (layout_id, ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        (): &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let child = &mut self.child;
+        window.with_rem_size(self.rem_size, |window| child.prepaint(window, cx));
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        (): &mut (),
+        (): &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let child = &mut self.child;
+        window.with_rem_size(self.rem_size, |window| child.paint(window, cx));
     }
 }
 

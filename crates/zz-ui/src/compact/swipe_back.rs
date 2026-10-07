@@ -1,9 +1,9 @@
-use std::rc::Rc;
+use std::{collections::HashMap, rc::Rc};
 
 use gpui::{
-    AnyElement, App, BoxShadow, Context, DispatchPhase, ElementId, HitboxBehavior, IntoElement,
-    ParentElement as _, Pixels, Point, RenderOnce, ScrollWheelEvent, Styled as _, TouchPhase,
-    Window, canvas, div, point, prelude::*, px,
+    AnyElement, App, BoxShadow, Context, DispatchPhase, ElementId, Global, Hitbox, HitboxBehavior,
+    IntoElement, ParentElement as _, Pixels, Point, RenderOnce, ScrollHandle, ScrollWheelEvent,
+    Styled as _, TouchPhase, Window, canvas, div, point, prelude::*, px,
 };
 use web_time::Instant;
 
@@ -18,6 +18,38 @@ const DIM: f32 = 0.094;
 const SHADOW: f32 = 0.3;
 
 type Back = Rc<dyn Fn(&mut Window, &mut App)>;
+
+#[derive(Default)]
+struct HorizontalScrollers(HashMap<ElementId, (Hitbox, ScrollHandle)>);
+
+impl Global for HorizontalScrollers {}
+
+/// Lets a horizontal scroller keep a rightward pan that starts on it while it
+/// can still scroll back, instead of the page's back swipe taking it. Place it
+/// over the scroller (absolute, `inset_0`, in a relative parent).
+pub fn yield_back_swipe(id: impl Into<ElementId>, scroll: &ScrollHandle) -> impl IntoElement {
+    let id = id.into();
+    let scroll = scroll.clone();
+    canvas(
+        |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
+        move |_, hitbox, _, cx| {
+            cx.default_global::<HorizontalScrollers>()
+                .0
+                .insert(id, (hitbox, scroll));
+        },
+    )
+    .absolute()
+    .inset_0()
+}
+
+fn scroller_takes(start: Point<Pixels>, window: &Window, cx: &App) -> bool {
+    cx.try_global::<HorizontalScrollers>()
+        .is_some_and(|scrollers| {
+            scrollers.0.values().any(|(hitbox, scroll)| {
+                scroll.offset().x < px(0.0) && hitbox.is_hovered_at(start, window)
+            })
+        })
+}
 
 #[derive(IntoElement)]
 pub struct SwipeBack {
@@ -56,11 +88,15 @@ struct SwipeState {
 }
 
 impl SwipeState {
+    fn on_edge(&self, start: Point<Pixels>) -> bool {
+        f32::from(start.x) - self.left <= EDGE
+    }
+
     fn pan(
         &mut self,
         event: &ScrollWheelEvent,
         delta: f32,
-        hovered: bool,
+        claimable: bool,
         now: Instant,
         cx: &mut Context<Self>,
     ) -> bool {
@@ -69,7 +105,7 @@ impl SwipeState {
         let claimed = match event.touch_phase {
             TouchPhase::Started => {
                 self.gesture = None;
-                if hovered && delta > 0.0 && f32::from(start.x) - self.left <= EDGE {
+                if claimable && delta > 0.0 {
                     self.dismissal.grab(self.width);
                     self.dismissal.drag(delta, now);
                     self.gesture = Some(start);
@@ -151,10 +187,15 @@ impl RenderOnce for SwipeBack {
                         cx.stop_propagation();
                         return;
                     }
-                    let hovered = hitbox.should_handle_scroll(window);
-                    let delta = f32::from(event.delta.pixel_delta(window.line_height()).x);
+                    let delta = event.delta.pixel_delta(window.line_height());
+                    let claimable = event.touch_phase == TouchPhase::Started
+                        && delta.x.abs() > delta.y.abs()
+                        && hitbox.should_handle_scroll(window)
+                        && (state.read(cx).on_edge(event.position)
+                            || !scroller_takes(event.position, window, cx));
+                    let delta = f32::from(delta.x);
                     let now = cx.background_executor().now();
-                    if state.update(cx, |state, cx| state.pan(event, delta, hovered, now, cx)) {
+                    if state.update(cx, |state, cx| state.pan(event, delta, claimable, now, cx)) {
                         cx.stop_propagation();
                     }
                 });
@@ -225,6 +266,7 @@ mod tests {
 
     struct Host {
         backs: Rc<Cell<usize>>,
+        strip: ScrollHandle,
     }
 
     impl Render for Host {
@@ -237,6 +279,21 @@ mod tests {
                         .id("page-body")
                         .size_full()
                         .overflow_y_scroll()
+                        .child(
+                            div()
+                                .relative()
+                                .h(px(100.0))
+                                .child(
+                                    div()
+                                        .id("strip")
+                                        .debug_selector(|| "strip".to_owned())
+                                        .size_full()
+                                        .overflow_x_scroll()
+                                        .track_scroll(&self.strip)
+                                        .child(div().flex_none().w(px(3000.0)).h_full()),
+                                )
+                                .child(yield_back_swipe("strip", &self.strip)),
+                        )
                         .child(div().h(px(4000.0))),
                     move |_, _| backs.set(backs.get() + 1),
                 )
@@ -245,13 +302,18 @@ mod tests {
         }
     }
 
-    fn host(cx: &mut TestAppContext) -> (Rc<Cell<usize>>, &mut VisualTestContext) {
+    fn host(cx: &mut TestAppContext) -> (Rc<Cell<usize>>, ScrollHandle, &mut VisualTestContext) {
         cx.update(crate::init);
         let backs = Rc::new(Cell::new(0));
         let count = Rc::clone(&backs);
-        let (_, cx) = cx.add_window_view(move |_, _| Host { backs: count });
+        let strip = ScrollHandle::new();
+        let handle = strip.clone();
+        let (_, cx) = cx.add_window_view(move |_, _| Host {
+            backs: count,
+            strip: handle,
+        });
         redraw(cx);
-        (backs, cx)
+        (backs, strip, cx)
     }
 
     fn redraw(cx: &mut VisualTestContext) {
@@ -287,7 +349,7 @@ mod tests {
 
     #[gpui::test]
     fn an_edge_drag_past_half_pops_and_a_short_one_returns(cx: &mut TestAppContext) {
-        let (backs, cx) = host(cx);
+        let (backs, _, cx) = host(cx);
         let rest = page(cx);
         let edge = point(px(8.0), rest.center().y);
         let half = f32::from(rest.size.width) / 2.0;
@@ -325,7 +387,7 @@ mod tests {
 
     #[gpui::test]
     fn a_flick_from_the_edge_pops(cx: &mut TestAppContext) {
-        let (backs, cx) = host(cx);
+        let (backs, _, cx) = host(cx);
         let edge = point(px(8.0), page(cx).center().y);
         pan(
             cx,
@@ -341,19 +403,84 @@ mod tests {
     }
 
     #[gpui::test]
-    fn drags_away_from_the_edge_or_leftward_are_ignored(cx: &mut TestAppContext) {
-        let (backs, cx) = host(cx);
+    fn a_drag_from_the_middle_of_the_page_pops(cx: &mut TestAppContext) {
+        let (backs, _, cx) = host(cx);
         let rest = page(cx);
-        let inside = point(px(40.0), rest.center().y);
+        let middle = rest.center();
         pan(
             cx,
-            inside,
+            middle,
             &[
-                (0, TouchPhase::Started, 200.0),
+                (0, TouchPhase::Started, 40.0),
+                (150, TouchPhase::Moved, 60.0),
+            ],
+        );
+        assert_eq!(page(cx).left(), px(100.0));
+        pan(
+            cx,
+            middle,
+            &[
+                (150, TouchPhase::Moved, f32::from(rest.size.width) / 2.0),
+                (300, TouchPhase::Ended, 0.0),
+            ],
+        );
+        settle(cx);
+        assert_eq!(backs.get(), 1);
+    }
+
+    #[gpui::test]
+    fn a_horizontal_scroller_keeps_the_drag_while_it_can_scroll_back(cx: &mut TestAppContext) {
+        let (backs, strip, cx) = host(cx);
+        let bounds = cx.debug_bounds("strip").expect("strip");
+        let on_strip = point(bounds.center().x, bounds.center().y);
+        strip.set_offset(point(px(-200.0), px(0.0)));
+        redraw(cx);
+        pan(
+            cx,
+            on_strip,
+            &[
+                (0, TouchPhase::Started, 40.0),
                 (150, TouchPhase::Ended, 0.0),
             ],
         );
         assert_eq!(page(cx).left(), px(0.0));
+        assert!(strip.offset().x > px(-200.0));
+
+        strip.set_offset(point(px(0.0), px(0.0)));
+        redraw(cx);
+        pan(
+            cx,
+            on_strip,
+            &[
+                (500, TouchPhase::Started, 40.0),
+                (150, TouchPhase::Moved, 60.0),
+            ],
+        );
+        assert_eq!(page(cx).left(), px(100.0));
+        pan(cx, on_strip, &[(300, TouchPhase::Ended, 0.0)]);
+        settle(cx);
+
+        strip.set_offset(point(px(-200.0), px(0.0)));
+        redraw(cx);
+        let edge = point(px(8.0), bounds.center().y);
+        pan(
+            cx,
+            edge,
+            &[
+                (500, TouchPhase::Started, 40.0),
+                (150, TouchPhase::Moved, 60.0),
+            ],
+        );
+        assert_eq!(page(cx).left(), px(100.0));
+        pan(cx, edge, &[(300, TouchPhase::Ended, 0.0)]);
+        settle(cx);
+        assert_eq!(backs.get(), 0);
+    }
+
+    #[gpui::test]
+    fn leftward_drags_are_ignored(cx: &mut TestAppContext) {
+        let (backs, _, cx) = host(cx);
+        let rest = page(cx);
         let edge = point(px(8.0), rest.center().y);
         pan(
             cx,

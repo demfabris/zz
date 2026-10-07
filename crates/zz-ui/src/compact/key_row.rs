@@ -199,10 +199,12 @@ impl KeyRow {
                     .min_w(rems_from_px(KEY_MIN_WIDTH))
                     .px(rems_from_px(KEY_PADDING_X))
                     .whitespace_nowrap()
-                    .when(look == KeyLook::Rest, |cap| {
-                        let pressed = cx.theme().background.washed(PRESSED_WASH);
-                        cap.group_active(KEY_GROUP, move |style| style.bg(pressed))
-                    })
+                    .relative()
+                    .child(crate::touch::instant_press_highlight(
+                        ElementId::named_usize("key-row-press", index),
+                        cx.theme().background.washed(PRESSED_WASH),
+                        cx.theme().control_radius(),
+                    ))
                     .child(content),
             )
     }
@@ -286,8 +288,8 @@ impl RenderOnce for KeyRow {
             .overflow_x_scroll()
             .restrict_scroll_to_axis()
             .font_family(cx.theme().font_family.clone())
-            .text_size(rems_from_px(13.0))
-            .line_height(rems_from_px(16.0))
+            .text_size(rems_from_px(15.0))
+            .line_height(rems_from_px(20.0))
             .children(keys)
     }
 }

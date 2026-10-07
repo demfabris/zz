@@ -30,6 +30,19 @@ settings back, tree actions, reset and stepper buttons, switches, select menus),
 rows are 44 points tall, and each key in the key row answers across the whole row height and
 up to the middle of the gap to its neighbours.
 
+The phone sizes chrome like iOS: settings, the workspace tree, menus, dialogs, and daemon
+overlays render their text at 17 points instead of the desktop's 13 (everything sized in rems
+grows by 17/13), and settings get a 44-point navigation bar with a "‹ Settings" back button and a
+centred title. Switches and color wells sit at the right of their row; wider controls stay below
+the description. A rightward drag anywhere on a settings page goes back, as the iOS 26 content
+back gesture does, except on a horizontal strip (the palette tiles) that can still scroll back.
+
+Buttons, rows, menu items, and keys show presses the way Flutter's CupertinoButton and React
+Native's Pressability do: a touch lights the control 100 ms after it lands unless it turns into a
+scroll first, the highlight fades in over 120 ms and out over 180 ms, and a quick tap still shows
+it for 130 ms. Keys in the key row light at once. Lifting a finger clears hover, so a tapped row
+does not stay lit.
+
 Pinch a terminal to change its text size, as in Blink Shell: the pinch starts once the
 fingers' spread changes by 6% and by at least 8 points (gpui's touch slop), then follows the
 fingers from that spread. The size moves in 5% steps between 50% and 300% (the Terminal

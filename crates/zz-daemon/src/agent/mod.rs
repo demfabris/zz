@@ -7,6 +7,7 @@
 //! implements.
 
 pub(crate) mod catalog;
+pub(crate) mod claude;
 #[cfg(unix)]
 pub(crate) mod claude_peers;
 #[cfg(unix)]

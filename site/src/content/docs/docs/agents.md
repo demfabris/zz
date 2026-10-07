@@ -1,6 +1,6 @@
 ---
 title: Agent panes
-description: Claude Code and Codex as panes, over ACP. Experimental.
+description: Claude Code and Codex as panes. Experimental.
 ---
 
 :::caution[Experimental]
@@ -11,8 +11,8 @@ it back off blocks new agent panes everywhere; panes that are already open
 keep running.
 :::
 
-An agent pane runs Claude Code or Codex over the Agent Client Protocol, with
-the conversation drawn natively rather than as terminal output: streaming
+An agent pane runs Claude Code or Codex with the conversation drawn natively
+rather than as terminal output: streaming
 Markdown, Mermaid diagrams, reasoning, plans, tool calls with typed payloads
 (a diff renders as a diff, not as JSON), live command output with exit codes,
 subagent timelines, and permission approvals.
@@ -21,8 +21,11 @@ The agent process belongs to the zz daemon, not to the window you opened it in.
 That is the whole design: the daemon spawns the adapter the same way it spawns
 a shell, so a turn keeps running whether or not anything is looking at it.
 
-Adapter versions are pinned and their cache is warmed when the first pane opens,
-so a pane should open without waiting on the network. The daemon never runs your
+Claude Code panes run your own installed `claude`, driven over the same
+stream-json protocol Claude Code's own desktop and editor apps use, so they stay
+as current as your CLI and use the login you already have. Codex panes run a
+pinned Agent Client Protocol adapter whose cache is warmed when the first pane
+opens, so a pane should open without waiting on the network. The daemon never runs your
 shell init either, so zz repairs the agent's `PATH` from your login shell plus
 any fnm, nvm, volta, bun, pnpm, or mise bin directory on disk — the agent CLIs
 usually live exactly there, and a Dock launch would otherwise miss them.
@@ -122,7 +125,7 @@ daemon for you, and they also work from `zz/mux.conf` or `zz set-option -g`:
 | --- | --- | --- | --- |
 | `agent-auto-approve` | daemon | `true` | Answer permission requests with the agent's preferred allow option. Off means you answer them |
 | `agent-command` | daemon | pinned `codex-acp` | Command line, or a launch-config JSON object `{"command", "args", "env"}`, for Codex panes |
-| `agent-claude-code-command` | daemon | pinned `claude-agent-acp` | Same, for Claude Code panes |
+| `agent-claude-code-command` | daemon | `claude` | The Claude Code binary, plus any flags to pass it. A command whose program is not `claude` runs as an ACP adapter instead |
 | `agent-working-directory` | app | the donor pane's cwd | Absolute path for brand-new sessions |
 
 Changing an adapter command does not restart the agents already running; the

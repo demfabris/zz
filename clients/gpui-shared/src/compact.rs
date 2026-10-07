@@ -420,30 +420,17 @@ impl AppShell {
                 self.command("split-window", args, cx);
             }
             NEW_WINDOW => self.command("new-window", here(), cx),
-            RENAME_PANE => {
-                let title = self
-                    .connection
-                    .read(cx)
-                    .core
-                    .snapshot()
-                    .sessions
-                    .iter()
-                    .flat_map(|session| &session.windows)
-                    .find_map(|window| window.panes.get(&pane))
-                    .map(|pane| pane.title.clone())
-                    .unwrap_or_default();
-                self.command(
-                    "command-prompt",
-                    vec![
-                        "-I".into(),
-                        title,
-                        "-p".into(),
-                        "rename pane:".into(),
-                        format!("select-pane -t {target} -T '%%'"),
-                    ],
-                    cx,
-                );
-            }
+            RENAME_PANE => self.command(
+                "command-prompt",
+                vec![
+                    "-I".into(),
+                    "#{pane_title}".into(),
+                    "-p".into(),
+                    "rename pane:".into(),
+                    format!("select-pane -t {target} -T '%%'"),
+                ],
+                cx,
+            ),
             LAST_PANE => {
                 let model = self.status_model(cx);
                 let (pages, _) = pages(&model, &self.unseen_agents);

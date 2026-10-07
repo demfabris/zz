@@ -4,7 +4,10 @@ use std::{collections::HashMap, sync::Arc};
 
 use gpui::{Context, EventEmitter};
 use zz_client::agent_completion::AgentCommand;
-use zz_client::{ClientCore, CoreEvent, Outbound};
+use zz_client::{
+    ClientCore, CoreEvent, Outbound,
+    scrollback::{DeferredBackfill, HISTORY_BACKFILL_QUIET, HistoryFollowUp, HistoryPacer},
+};
 use zz_protocol::{
     CommandInvocation, CommandRequest, CommandResponse, InputMessage, PaneId, ProtocolMessage,
     ServerError, SessionId,
@@ -17,6 +20,12 @@ fn launch_endpoint() -> Option<String> {
         .ok()
         .map(|endpoint| endpoint.trim().to_owned())
         .filter(|endpoint| !endpoint.is_empty())
+}
+
+fn history_core() -> ClientCore {
+    let mut core = ClientCore::new();
+    core.retain_history();
+    core
 }
 
 const MAX_AGENT_HISTORY_BYTES: usize = 32 * 1024 * 1024;
@@ -202,6 +211,7 @@ pub struct Connection {
     #[cfg(target_os = "ios")]
     retry: Option<gpui::Task<()>>,
     pub core: ClientCore,
+    history: HistoryPacer,
     #[cfg(test)]
     input_sink: Option<std::rc::Rc<std::cell::RefCell<Vec<ProtocolMessage>>>>,
     pub status: String,
@@ -249,7 +259,8 @@ impl Connection {
             pending_session: None,
             #[cfg(target_os = "ios")]
             retry: None,
-            core: ClientCore::new(),
+            core: history_core(),
+            history: HistoryPacer::default(),
             #[cfg(test)]
             input_sink: None,
             status: "Connecting…".into(),
@@ -532,7 +543,8 @@ impl Connection {
             self.native = None;
             self.client = None;
             self.auth_prompt = None;
-            self.core = ClientCore::new();
+            self.core = history_core();
+            self.history.clear();
             if let Some(endpoint) = self.endpoint.clone() {
                 let target = self.pending_session.take().unwrap_or_else(|| {
                     self.remembered_session.map_or_else(
@@ -732,10 +744,22 @@ impl Connection {
         }
         let mut changed = false;
         while let Some(event) = self.core.poll_event() {
+            let event = match event {
+                chunk @ CoreEvent::HistoryChunk { .. } => {
+                    self.receive_history_chunk(chunk, cx);
+                    continue;
+                }
+                CoreEvent::ViewportChanged { pane, damage } => {
+                    self.request_history(pane, None, cx);
+                    CoreEvent::ViewportChanged { pane, damage }
+                }
+                event => event,
+            };
             self.terminal_images.apply(&event);
             changed |= !matches!(event, CoreEvent::ViewportChanged { .. });
             match &event {
                 CoreEvent::HelloReceived => {
+                    self.history.clear();
                     self.connected = true;
                     self.commands.clear();
                     #[cfg(target_family = "wasm")]
@@ -765,6 +789,7 @@ impl Connection {
                     }
                 }
                 CoreEvent::Attached { session } => {
+                    self.history.clear();
                     self.attaching = false;
                     self.retry_default = false;
                     self.remembered_session = Some(*session);
@@ -894,6 +919,7 @@ impl Connection {
                     self.request_agent_replay(*pane, cx);
                 }
                 CoreEvent::PaneRemoved { pane } => {
+                    self.history.forget(*pane);
                     self.pasted_images.remove_pane(*pane);
                     self.agent_events.remove(pane);
                     self.agent_cursors.remove(pane);
@@ -906,6 +932,7 @@ impl Connection {
                     cx,
                 ),
                 CoreEvent::Detached { .. } => {
+                    self.history.clear();
                     self.status = "Detached".into();
                     if self.core.last_detach_was_session_destroyed() {
                         self.remembered_session = None;
@@ -1016,6 +1043,89 @@ impl Connection {
             }));
         }
         cx.notify();
+    }
+
+    pub(crate) fn request_history_prefetch(
+        &mut self,
+        pane: PaneId,
+        target: u32,
+        cx: &mut Context<Self>,
+    ) {
+        self.request_history(pane, Some(target), cx);
+    }
+
+    fn request_history(&mut self, pane: PaneId, prefetch: Option<u32>, cx: &mut Context<Self>) {
+        if self.core.popup().is_some_and(|popup| popup.pane == pane) {
+            return;
+        }
+        if let Some((start, count)) = self.history.request(
+            pane,
+            prefetch,
+            self.core.history_trickle_budget(),
+            self.core.retained_viewport(pane),
+            zz_ui::compact::Instant::now(),
+        ) {
+            self.send(ProtocolMessage::HistoryRequest { pane, start, count }, cx);
+        }
+    }
+
+    fn receive_history_chunk(&mut self, chunk: CoreEvent, cx: &mut Context<Self>) {
+        let CoreEvent::HistoryChunk {
+            pane,
+            start,
+            total,
+            offset,
+            columns,
+            rows,
+            dictionary,
+        } = chunk
+        else {
+            return;
+        };
+        let mutations = self
+            .core
+            .retained_viewport(pane)
+            .map(|retained| retained.history_mutations);
+        let (apply, follow_up) = self.history.chunk_arrived(pane, mutations);
+        if apply {
+            self.core
+                .apply_history_chunk(pane, start, total, offset, columns, rows, dictionary);
+        }
+        match follow_up {
+            HistoryFollowUp::Prefetch(target) => self.request_history(pane, Some(target), cx),
+            HistoryFollowUp::Defer(mutations) => {
+                if self.history.defer(pane, mutations) {
+                    self.resume_history_backfill(pane, cx);
+                }
+            }
+            HistoryFollowUp::Backfill => self.request_history(pane, None, cx),
+        }
+    }
+
+    fn resume_history_backfill(&self, pane: PaneId, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(HISTORY_BACKFILL_QUIET).await;
+                let resume = this.update(cx, |connection, cx| {
+                    let mutations = connection
+                        .core
+                        .retained_viewport(pane)
+                        .map(|retained| retained.history_mutations);
+                    match connection.history.resume_deferred(pane, mutations) {
+                        DeferredBackfill::Request => {
+                            connection.request_history(pane, None, cx);
+                            false
+                        }
+                        DeferredBackfill::Wait => true,
+                        DeferredBackfill::Done => false,
+                    }
+                });
+                if !matches!(resume, Ok(true)) {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     fn request_agent_replay(&mut self, pane: PaneId, cx: &mut Context<Self>) {

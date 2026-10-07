@@ -4,7 +4,7 @@ title: Terminal interaction (input, selection, paste, words)
 description: The renderer-neutral pointer, keyboard, word-boundary, and paste layer that turns client gestures into libghostty encoding, native selection, and copy-mode actions, plus the client-side local scroll overlay.
 resource: crates/zz-terminal/src/interaction.rs
 tags: [interaction, input, mouse, selection, paste, copy-mode, keyboard]
-timestamp: 2026-09-25T00:00:00Z
+timestamp: 2026-10-07T00:00:00Z
 ---
 
 # Overview
@@ -102,8 +102,7 @@ opener for unsupported schemes or when that window has no browser pane.
 Scrollbar drags and trackpad scrolling do not always have to cost a round trip. When the pane is in
 `Live` mode, mouse tracking is off, the scrollbar has room to move, and the pane's client-side `HistoryRing`
 holds rows,
-`TerminalView` (`crates/zz/src/terminal/view.rs`) records a `LocalScroll { target_offset, .. }`
-and the next frame paints from the
+the view records a `LocalScroll { target_offset, .. }` and the next frame paints from the
 ring: rows above the live viewport come out of the ring, rows still inside it come from the server
 frame, rows the ring cannot cover yet paint as a dim shimmer, and the scrollbar thumb is drawn from
 the local target. Cursor, selection, and overlay spans are projected onto whatever slice of the live
@@ -111,8 +110,16 @@ viewport remains visible. A scrollbar target older than the ring's coverage or n
 offset skips the overlay and takes the round trip instead, and a target near the cold edge of the ring
 triggers a `HistoryRequest` prefetch.
 
+The state machine is `LocalScrollState` in [`zz-client`](/crates/zz-client.md)
+(`crates/zz-client/src/local_scroll.rs`); the desktop `TerminalView`
+(`crates/zz/src/terminal/view.rs`) and the GPUI thin client's `TerminalPane`
+(`clients/gpui-shared/src/terminal.rs`, iOS and web) both drive it and send the effects it returns.
+The thin client keeps its rings in `ClientCore` (`retain_history`) and paces history requests with
+the shared `HistoryPacer`.
+
 **Trackpad pixels.** A `ScrollDelta::Pixels` event (trackpad, Magic Mouse, macOS momentum, Wayland
-touchpad) on a terminal pane moves by pixels instead of whole rows. `TerminalView::sub_row` holds how far
+touchpad, and on iOS a one-finger pan and its momentum) on a terminal pane moves by pixels instead of
+whole rows. The state's `sub_row` holds how far
 the content sits below the whole-row target, in `[0, line_height)`, and `pixel_scroll_position` carries
 each whole row into the local target in both directions. The position is clamped to what the client
 can paint: no newer than the server's offset (the live bottom when the server is there), and no older
@@ -191,4 +198,4 @@ a resurrection of the old one. See
 - Overlays produced here (selection, hover, copy cursor) are painted per [rendering-parity](/terminal/rendering-parity.md).
 - Copy/view-mode semantics build on [copy-mode](/tmux/copy-mode.md); key routing layers over [key-tables](/tmux/key-tables.md).
 - Actions travel the [terminal lanes](/protocol/terminal-lanes.md) of the [wire protocol](/protocol/wire-protocol.md).
-- The client halves of local scroll (`HistoryRing`, `LocalScroll`) live in the [zz app](/crates/zz.md).
+- The client halves of local scroll (`HistoryRing`, `LocalScrollState`) live in [`zz-client`](/crates/zz-client.md), driven by the [zz app](/crates/zz.md) and the GPUI thin client.

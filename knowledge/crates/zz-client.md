@@ -4,7 +4,7 @@ title: zz-client crate
 description: Renderer-free client state, effects, chrome keymaps, and normalized pane geometry shared by native and terminal skins.
 resource: crates/zz-client/src/lib.rs
 tags: [client, core, sans-io, keybindings, crate]
-timestamp: 2026-08-30T00:00:00-03:00
+timestamp: 2026-10-07T00:00:00-03:00
 ---
 
 # Overview
@@ -60,6 +60,25 @@ requests and events into GPUI state. It intercepts `TerminalViewport`, `Terminal
 diff scratch. Passing those frames through both stores would duplicate the highest-rate work. The
 TUI and C ABI use the core's viewport retention directly.
 
+# Scrollback retention and pixel scrolling
+
+`scrollback.rs` holds the retained viewport both kinds of shell paint from: the live grid, its row
+revisions, and a `HistoryRing` of rows above the server's viewport, filled from rows that scroll off
+the top and from `HistoryChunk` replies. `apply_retained_patch` keeps the ring aligned with the
+server's offset and drops it when a patch cannot be reconciled; a scroll back that arrives together
+with output appended below keeps it. The desktop `MuxClient` stores one per pane itself; `ClientCore`
+stores one per pane too, with an empty ring unless the shell calls `retain_history`, so the TUI and
+the C ABI pay nothing for rows they never paint. `history_request_range` sizes a backfill or
+prefetch request, and `HistoryPacer` is the request policy as a sans-IO value: one request in flight
+per pane, prefetch targets merged into it, a retry after 3 s, and backfill deferred until 100 ms
+pass without ring changes. The caller passes the clock.
+
+`local_scroll.rs` holds the pixel scroll state machine. `LocalScrollState` turns pixel deltas into a
+local target row plus a sub-row offset, decides when the daemon should follow (`ScrollToOffset`),
+when to prefetch history, and when to sync and retire, and returns those as `LocalScrollEffect`s for
+the shell to send. The desktop `TerminalView` and the GPUI thin client's `TerminalPane` both drive
+it; see [interaction](/terminal/interaction.md#local-scroll-client-side).
+
 # Command-output actor state
 
 Protocol v79 gives each real command-output actor a nonzero daemon-lifetime ID. `ClientCore` retains
@@ -96,6 +115,8 @@ are not errors because the daemon may supersede an unread terminal frame under b
 | --- | --- |
 | `crates/zz-client/src/lib.rs` | Crate facade and public contract. |
 | `crates/zz-client/src/core.rs` | `ClientCore`, retained state, protocol reduction, `CoreEvent`, and `Outbound`. |
+| `crates/zz-client/src/scrollback.rs` | `RetainedTerminalViewport`, `HistoryRing`, patch and chunk application, and `HistoryPacer`. |
+| `crates/zz-client/src/local_scroll.rs` | `LocalScrollState` and the pixel scroll, follow, and prefetch math. |
 | `crates/zz-client/src/chrome.rs` | `ChromeKeymap`, profiles, action names, chord grammar, defaults, and override API. |
 | `crates/zz-client/src/layout.rs` | Recursive split ratios projected into normalized pane rectangles. |
 | `crates/zz-client/src/status_bar.rs` | Pure native status projection from `MuxSnapshot`, an attachment, an optional host, and typed settings. |

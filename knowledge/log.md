@@ -1,5 +1,8 @@
 # Update Log
 
+## 2026-10-07
+* **Update**: The GPUI thin client (iOS and web) scrolls terminal scrollback by pixels with the finger and with fling momentum, drawing rows it already holds instead of waiting for the daemon after every line. The desktop's history ring, retained viewport bookkeeping, and pixel scroll state machine moved into `zz-client` (`scrollback` and `local_scroll`); the desktop `TerminalView` and the thin client's `TerminalPane` drive the same `LocalScrollState`, and the thin client keeps rings in `ClientCore` (`retain_history`) and paces history requests with the shared sans-IO `HistoryPacer`. A scroll back that arrives together with output appended below no longer drops the ring, so stopping a drag during live output keeps its sub-row position. `ZZ_GPUI_BENCH=drag` plays slow drags on iOS. Client only: no protocol or daemon change. See [interaction](/terminal/interaction.md#local-scroll-client-side).
+
 ## 2026-10-06
 * **Update**: The gpui pin moved to `01d7c9a` with five fixes from the iPhone client. A list's autoscroll no longer pushes duplicate accessibility nodes, so the settings column dropped its workaround. `ListState::bounds_for_item` counts top padding. The wgpu renderer uploads instance data through a reused staging belt and binds the instance buffer once, which took a page swipe frame from about 105 to 38 us of CPU in an offscreen benchmark. iOS skips GPUI's re-presenting after fast input, and the pager and sheets end the touch fling they swallow, so the display link can pause once a swipe settles. See [the pin](/references/gpui-revision.md).
 

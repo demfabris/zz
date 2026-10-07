@@ -48,7 +48,7 @@ as one operation.
 # Row sources under local scroll
 
 A live pane paints every row from the server frame. While [local scroll](/terminal/interaction.md) is
-active, `TerminalView::local_scroll_target` names an absolute offset the server has not reached yet,
+active, the view's local scroll target names an absolute offset the server has not reached yet,
 and `local_row_source` resolves each grid row to one of three sources:
 
 | `LocalRowSource` | Painted from |
@@ -191,7 +191,7 @@ blink is preserved in the model but not painted this milestone.
 - Consumes the immutable [terminal frame](/concepts/terminal-frame.md) and its retained-grid patches.
 - Colors, fonts, padding, and contrast come from the [appearance](/terminal/appearance.md) subsystem.
 - Overlays and pointer feedback are produced by the [interaction](/terminal/interaction.md) subsystem,
-  which also drives local scroll; its client state (`HistoryRing`, `LocalScroll`) lives in the
-  [zz app](/crates/zz.md).
+  which also drives local scroll; its client state (`HistoryRing`, `LocalScrollState`) lives in
+  [`zz-client`](/crates/zz-client.md).
 - Frames arrive over the [terminal lanes](/protocol/terminal-lanes.md); painting lives in [`/crates/zz.md`](/crates/zz.md).
 - GPUI pin and carried patches: [gpui-revision](/references/gpui-revision.md).

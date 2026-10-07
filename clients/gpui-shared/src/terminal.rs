@@ -4,13 +4,17 @@ use gpui::{
     Anchor, AnyElement, App, Bounds, ClipboardEntry, ClipboardItem, Context, Corners,
     ElementInputHandler, Entity, EntityInputHandler, FocusHandle, Focusable, Hsla, ImageSource,
     KeyDownEvent, KeyUpEvent, Keystroke, ModifiersChangedEvent, MouseButton, MouseDownEvent,
-    MouseExitEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, Pixels, Point, Render,
+    MouseExitEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, Pixels, Point, Render, ScrollDelta,
     ScrollWheelEvent, Subscription, Task, TextInputAction, TextInputConfiguration, UTF16Selection,
     Window, anchored, canvas, deferred, div, img, point, prelude::*, px,
 };
 use zz_client::{
     ChromeAction, ChromeKeymap, ChromeProfile, ClientCore, CoreEvent, TERMINAL_TABLE,
-    ViewportDamage,
+    local_scroll::{
+        LOCAL_SCROLL_DEBOUNCE, LOCAL_SCROLL_TIMEOUT, LocalScrollEffect, LocalScrollState,
+        LocalScrollStep, LocalScrollSync, local_scroll_available, scroll_fraction_offset,
+    },
+    scrollback::RetainedTerminalViewport,
 };
 use zz_protocol::{InputMessage, PaneId, PopupAction, TerminalUiCommand};
 use zz_terminal::{
@@ -124,13 +128,12 @@ pub struct TerminalPane {
     pane_status: (Option<String>, bool, bool),
     corner_radii: Corners<Pixels>,
     resize_suppressed: Rc<Cell<bool>>,
+    content_offset: Pixels,
     scroll_rows: f32,
+    scroll: LocalScrollState,
     overscroll: gpui::RubberBand,
     geometry: Option<(GridSize, u64)>,
     cache: RowRenderCache,
-    row_revisions: Vec<u64>,
-    next_revision: u64,
-    revision_epoch: u64,
     focused: bool,
     cursor_blink_visible: bool,
     cursor_blink_task: Option<Task<()>>,
@@ -146,8 +149,6 @@ pub struct TerminalPane {
     selection_autoscroll_lines: i32,
     selection_autoscroll_task: Option<Task<()>>,
     focus_subscriptions: Vec<Subscription>,
-    all_dirty: bool,
-    dirty_rows: HashSet<u16>,
     forwarded: HashSet<String>,
     marked_text: Option<String>,
     surface: TerminalSurface,
@@ -173,13 +174,10 @@ impl TerminalPane {
         let subscription = cx.subscribe(
             &connection,
             move |this, connection, event: &CoreEvent, cx| match event {
-                CoreEvent::ViewportChanged {
-                    pane: changed,
-                    damage,
-                } if *changed == pane => {
-                    match damage {
-                        ViewportDamage::All => this.all_dirty = true,
-                        ViewportDamage::Rows(rows) => this.dirty_rows.extend(rows),
+                CoreEvent::ViewportChanged { pane: changed, .. } if *changed == pane => {
+                    if let Some(retained) = connection.read(cx).core.retained_viewport(pane) {
+                        this.scroll
+                            .observe(retained, false, zz_ui::compact::Instant::now());
                     }
                     cx.notify();
                 }
@@ -199,7 +197,9 @@ impl TerminalPane {
                 }
                 CoreEvent::Attached { .. } | CoreEvent::AppearanceChanged => {
                     this.observe_image_hover(None, cx);
-                    this.all_dirty = true;
+                    if matches!(event, CoreEvent::Attached { .. }) {
+                        this.scroll.cancel();
+                    }
                     this.geometry = None;
                     this.cursor_blink_visible = true;
                     this.cursor_blink_task = None;
@@ -216,7 +216,6 @@ impl TerminalPane {
                 CoreEvent::CommandOutputChanged
                     if this.surface == TerminalSurface::CommandOutput =>
                 {
-                    this.all_dirty = true;
                     cx.notify();
                 }
                 CoreEvent::TerminalUiCommand {
@@ -259,13 +258,12 @@ impl TerminalPane {
             pane_status: (None, false, false),
             corner_radii: Corners::default(),
             resize_suppressed: Rc::default(),
+            content_offset: Pixels::ZERO,
             scroll_rows: 0.,
+            scroll: LocalScrollState::default(),
             overscroll: gpui::RubberBand::default(),
             geometry: None,
             cache: RowRenderCache::default(),
-            row_revisions: Vec::new(),
-            next_revision: 1,
-            revision_epoch: 0,
             focused: false,
             cursor_blink_visible: true,
             cursor_blink_task: None,
@@ -281,8 +279,6 @@ impl TerminalPane {
             selection_autoscroll_lines: 0,
             selection_autoscroll_task: None,
             focus_subscriptions: Vec::new(),
-            all_dirty: true,
-            dirty_rows: HashSet::new(),
             forwarded: HashSet::new(),
             marked_text: None,
             surface: TerminalSurface::Pane,
@@ -545,7 +541,6 @@ impl TerminalPane {
                     let increment = action == ChromeAction::TerminalFontIncrease;
                     self.font_delta =
                         (self.font_delta + if increment { 1. } else { -1. }).clamp(-6., 24.);
-                    self.all_dirty = true;
                     cx.notify();
                     cx.stop_propagation();
                     return;
@@ -596,6 +591,7 @@ impl TerminalPane {
             || input.modifiers.alt()
             || input.modifiers.platform();
         if raw {
+            self.cancel_local_scroll(cx);
             self.forwarded.insert(event.keystroke.key.clone());
             self.send(
                 InputMessage::Key {
@@ -615,6 +611,7 @@ impl TerminalPane {
     }
 
     fn begin_search(&mut self, query: SearchQuery, accept_on_enter: bool, cx: &mut Context<Self>) {
+        self.cancel_local_scroll(cx);
         self.search = Some(query.clone());
         self.search_focus_pending = true;
         self.search_accept_on_enter = accept_on_enter;
@@ -650,6 +647,7 @@ impl TerminalPane {
                         if let Some(query) = view.search.as_mut() {
                             query.text = input.read(cx).value().to_string();
                             let query = query.clone();
+                            view.cancel_local_scroll(cx);
                             view.view(TerminalViewAction::SearchUpdate(query), cx);
                             cx.notify();
                         }
@@ -696,7 +694,8 @@ impl TerminalPane {
         }
     }
 
-    fn step_search(&self, backward: bool, cx: &mut Context<Self>) {
+    fn step_search(&mut self, backward: bool, cx: &mut Context<Self>) {
+        self.cancel_local_scroll(cx);
         self.view(
             if backward {
                 TerminalViewAction::SearchPrevious
@@ -893,7 +892,8 @@ impl TerminalPane {
         let y = f32::from(position.y - self.bounds.origin.y)
             .clamp(0., f32::from(self.bounds.size.height));
         let column = (x / f32::from(self.cell_width)) as u16;
-        let row = (y / f32::from(self.line_height)) as u16;
+        let row =
+            ((y - f32::from(self.content_offset)).max(0.) / f32::from(self.line_height)) as u16;
         TerminalMouseInput::new(
             phase,
             button,
@@ -969,6 +969,7 @@ impl TerminalPane {
             event.click_count,
         );
         self.selection_pointer = self.selection_dragging.then_some(input.cell);
+        self.flush_local_scroll(cx);
         self.view(TerminalViewAction::Mouse(input), cx);
         cx.stop_propagation();
     }
@@ -1070,13 +1071,15 @@ impl TerminalPane {
         &mut self,
         delta: Pixels,
         phase: gpui::TouchPhase,
+        local: bool,
         window: &Window,
         cx: &App,
     ) -> Pixels {
         if window.gesture_tuning().overscroll != gpui::Overscroll::Bounce {
             return delta;
         }
-        let Some(viewport) = self.viewport(&self.connection.read(cx).core) else {
+        let core = &self.connection.read(cx).core;
+        let Some(viewport) = self.viewport(core) else {
             return delta;
         };
         let bar = viewport.scrollbar;
@@ -1086,15 +1089,25 @@ impl TerminalPane {
         {
             return delta;
         }
-        let forward = if bar.offset + bar.len < bar.total {
-            px(f32::MIN)
-        } else {
-            Pixels::ZERO
-        };
-        let back = if bar.offset > 0 {
-            px(f32::MAX)
-        } else {
-            Pixels::ZERO
+        let (forward, back) = match core.retained_viewport(self.pane).filter(|_| local) {
+            Some(retained) => {
+                let (newer, older) = self
+                    .scroll
+                    .overscroll_room(retained, f32::from(self.line_height));
+                (px(-newer), px(older))
+            }
+            None => (
+                if bar.offset + bar.len < bar.total {
+                    px(f32::MIN)
+                } else {
+                    Pixels::ZERO
+                },
+                if bar.offset > 0 {
+                    px(f32::MAX)
+                } else {
+                    Pixels::ZERO
+                },
+            ),
         };
         self.overscroll.scroll(
             Pixels::ZERO,
@@ -1117,14 +1130,19 @@ impl TerminalPane {
             })
     }
 
-    fn scroll_to_pointer(&self, position: Point<Pixels>, cx: &mut Context<Self>) {
-        self.view(
-            TerminalViewAction::ScrollToFraction(zz_ui::terminal::scroll_fraction(
-                self.surface_bounds,
-                position,
-            )),
-            cx,
-        );
+    fn scroll_to_pointer(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        let fraction = zz_ui::terminal::scroll_fraction(self.surface_bounds, position);
+        if self.scroll.clear_sub_row() {
+            cx.notify();
+        }
+        let maximum = self
+            .local_retained(cx)
+            .map(|retained| retained.viewport.scrollbar)
+            .map(|bar| bar.total.saturating_sub(bar.len));
+        match maximum {
+            Some(maximum) => self.scroll_locally_to(scroll_fraction_offset(fraction, maximum), cx),
+            None => self.view(TerminalViewAction::ScrollToFraction(fraction), cx),
+        }
     }
 
     fn end_drag(&mut self) {
@@ -1174,19 +1192,162 @@ impl TerminalPane {
         }));
     }
 
+    fn local_retained<'a>(&self, cx: &'a App) -> Option<&'a RetainedTerminalViewport> {
+        if self.surface != TerminalSurface::Pane {
+            return None;
+        }
+        self.connection
+            .read(cx)
+            .core
+            .retained_viewport(self.pane)
+            .filter(|retained| local_scroll_available(retained))
+    }
+
+    fn cancel_local_scroll(&mut self, cx: &mut Context<Self>) {
+        if self.scroll.cancel() {
+            cx.notify();
+        }
+    }
+
+    fn flush_local_scroll(&mut self, cx: &mut Context<Self>) {
+        if let Some(target) = self.scroll.flush() {
+            self.view(TerminalViewAction::ScrollToOffset(target), cx);
+        }
+    }
+
+    fn scroll_by_pixels(&mut self, delta: Pixels, cx: &mut Context<Self>) -> bool {
+        let Some(retained) = self.local_retained(cx) else {
+            return false;
+        };
+        let Some(step) = self.scroll.scroll_by_pixels(
+            f32::from(delta),
+            f32::from(self.line_height),
+            retained,
+            zz_ui::compact::Instant::now(),
+        ) else {
+            return false;
+        };
+        self.apply_local_scroll(step, cx);
+        true
+    }
+
+    fn scroll_locally_by(&mut self, delta: i64, cx: &mut Context<Self>) {
+        let Some(retained) = self.local_retained(cx) else {
+            return;
+        };
+        let step = self
+            .scroll
+            .scroll_by_rows(delta, retained, zz_ui::compact::Instant::now());
+        self.apply_local_scroll(step, cx);
+    }
+
+    fn scroll_locally_to(&mut self, target: u32, cx: &mut Context<Self>) {
+        let Some(retained) = self.local_retained(cx) else {
+            return;
+        };
+        let step = self
+            .scroll
+            .scroll_to(target, retained, zz_ui::compact::Instant::now());
+        self.apply_local_scroll(step, cx);
+    }
+
+    fn apply_local_scroll(&mut self, step: LocalScrollStep, cx: &mut Context<Self>) {
+        for effect in step.effects {
+            match effect {
+                LocalScrollEffect::ScrollToOffset(offset) => {
+                    self.view(TerminalViewAction::ScrollToOffset(offset), cx);
+                }
+                LocalScrollEffect::Prefetch(target) => {
+                    let pane = self.pane;
+                    self.connection.update(cx, |connection, cx| {
+                        connection.request_history_prefetch(pane, target, cx);
+                    });
+                }
+                LocalScrollEffect::Sync(generation) => {
+                    self.schedule_local_scroll_sync(generation, cx);
+                }
+            }
+        }
+        if step.redraw {
+            cx.notify();
+        }
+    }
+
+    fn schedule_local_scroll_sync(&self, generation: u64, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(LOCAL_SCROLL_DEBOUNCE).await;
+            let Ok(active) = this.update(cx, |view, cx| {
+                let sync = match view.connection.read(cx).core.retained_viewport(view.pane) {
+                    Some(retained) => view.scroll.sync(generation, retained),
+                    None => view.scroll.clear().then_some(LocalScrollSync::Retired),
+                };
+                match sync {
+                    None => false,
+                    Some(LocalScrollSync::Retired) => {
+                        cx.notify();
+                        false
+                    }
+                    Some(LocalScrollSync::Requested(target)) => {
+                        view.view(TerminalViewAction::ScrollToOffset(target), cx);
+                        true
+                    }
+                }
+            }) else {
+                return;
+            };
+            if !active {
+                return;
+            }
+            cx.background_executor()
+                .timer(LOCAL_SCROLL_TIMEOUT.saturating_sub(LOCAL_SCROLL_DEBOUNCE))
+                .await;
+            let _ = this.update(cx, |view, cx| {
+                if view
+                    .scroll
+                    .expire(generation, zz_ui::compact::Instant::now())
+                {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
     fn on_scroll(&mut self, event: &ScrollWheelEvent, window: &mut Window, cx: &mut Context<Self>) {
         let delta = event.delta.pixel_delta(self.line_height);
+        let local = matches!(event.delta, ScrollDelta::Pixels(_))
+            && delta.y != Pixels::ZERO
+            && self.local_retained(cx).is_some();
         let stretched = self.overscroll.is_stretched();
-        let delta = self.overscroll(delta.y, event.touch_phase, window, cx);
+        let delta = self.overscroll(delta.y, event.touch_phase, local, window, cx);
         if stretched || self.overscroll.is_stretched() {
             cx.notify();
             cx.stop_propagation();
+        }
+        if local && self.scroll_by_pixels(delta, cx) {
+            self.scroll_rows = 0.;
+            cx.stop_propagation();
+            return;
+        }
+        if self.scroll.clear_sub_row() {
+            cx.notify();
         }
         let lines = accumulate_scroll(
             &mut self.scroll_rows,
             -f32::from(delta) / f32::from(self.line_height),
         );
-        if lines != 0 {
+        if lines == 0 {
+            return;
+        }
+        if lines > 0 && self.local_retained(cx).is_some() {
+            self.scroll_locally_by(i64::from(lines), cx);
+        } else {
+            if lines < 0
+                && let Some(target) = self.scroll.release()
+            {
+                self.view(TerminalViewAction::ScrollToOffset(target), cx);
+                cx.notify();
+            }
             self.view(
                 TerminalViewAction::ScrollWheel {
                     lines,
@@ -1204,8 +1365,8 @@ impl TerminalPane {
                 },
                 cx,
             );
-            cx.stop_propagation();
         }
+        cx.stop_propagation();
     }
 
     fn prepare(
@@ -1227,34 +1388,25 @@ impl TerminalPane {
             for image in connection.take_retired_terminal_images() {
                 let _ = window.drop_image(image);
             }
-            let viewport = self.viewport(&connection.core)?;
+            let retained = match self.surface {
+                TerminalSurface::CommandOutput => connection
+                    .core
+                    .retained_command_output()
+                    .map(|(_, retained)| retained),
+                _ => connection.core.retained_viewport(self.pane),
+            }?;
             let appearance = localized_font_appearance(
                 &connection.core,
                 &self.available_fonts,
                 &cx.theme().mono_font_family,
                 cx,
             );
-            if self.row_revisions.len() != usize::from(viewport.rows) {
-                self.row_revisions.resize(usize::from(viewport.rows), 0);
-                self.all_dirty = true;
-            }
-            if self.all_dirty {
-                self.revision_epoch = self.revision_epoch.wrapping_add(1);
-            }
-            for (row, revision) in self.row_revisions.iter_mut().enumerate() {
-                if self.all_dirty || self.dirty_rows.contains(&(row as u16)) {
-                    *revision = self.next_revision;
-                    self.next_revision = self.next_revision.wrapping_add(1);
-                }
-            }
-            self.all_dirty = false;
-            self.dirty_rows.clear();
             let paint = self.cache.prepaint(
                 TerminalRenderInput {
-                    viewport,
-                    row_revisions: &self.row_revisions,
-                    revision_epoch: self.revision_epoch,
-                    history: None,
+                    viewport: &retained.viewport,
+                    row_revisions: &retained.row_revisions,
+                    revision_epoch: retained.row_revision_epoch,
+                    history: Some(&retained.history),
                     images: if self.surface == TerminalSurface::Pane {
                         connection
                             .terminal_images(self.pane)
@@ -1262,8 +1414,8 @@ impl TerminalPane {
                     } else {
                         None
                     },
-                    local_scroll_target: None,
-                    scroll_pixel_offset: px(0.0),
+                    local_scroll_target: self.scroll.target(),
+                    scroll_pixel_offset: px(self.scroll.sub_row()),
                     command_output: self.surface == TerminalSurface::CommandOutput,
                     appearance: &appearance,
                     appearance_hash: appearance.stable_hash(),
@@ -1292,6 +1444,7 @@ impl TerminalPane {
         self.surface_bounds = geometry.surface_bounds;
         self.cell_width = geometry.cell_width;
         self.line_height = geometry.line_height;
+        self.content_offset = geometry.content_offset;
         self.scale = window.scale_factor();
         let input_bounds = paint.geometry.input_bounds.unwrap_or(geometry.grid_bounds);
         if self.search.is_none() && self.cursor_bounds != input_bounds {
@@ -1857,6 +2010,7 @@ impl EntityInputHandler for TerminalPane {
         self.reset_cursor_blink(cx);
         let composed = self.marked_text.take().is_some();
         if !text.is_empty() {
+            self.cancel_local_scroll(cx);
             if let Some(query) = self.search.as_mut() {
                 query.text.push_str(text);
                 let query = query.clone();

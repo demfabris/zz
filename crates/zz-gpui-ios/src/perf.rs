@@ -216,6 +216,7 @@ fn percentile(values: &mut [f64], fraction: f64) -> f64 {
 enum BenchKind {
     Swipe,
     Scroll,
+    Drag,
 }
 
 struct Bench {
@@ -232,6 +233,7 @@ impl Bench {
         let kind = match kind {
             "swipe" => BenchKind::Swipe,
             "scroll" => BenchKind::Scroll,
+            "drag" => BenchKind::Drag,
             _ => return None,
         };
         Some(Self {
@@ -243,10 +245,28 @@ impl Bench {
         })
     }
 
-    fn timing(&self) -> (Duration, Duration) {
+    fn timing(&self, cycle: u32) -> (Duration, Duration, Duration) {
         match self.kind {
-            BenchKind::Swipe => (Duration::from_millis(1400), Duration::from_millis(160)),
-            BenchKind::Scroll => (Duration::from_millis(3000), Duration::from_millis(120)),
+            BenchKind::Swipe => (
+                Duration::from_millis(1400),
+                Duration::from_millis(160),
+                Duration::ZERO,
+            ),
+            BenchKind::Scroll => (
+                Duration::from_millis(3000),
+                Duration::from_millis(120),
+                Duration::ZERO,
+            ),
+            BenchKind::Drag if cycle % 2 == 1 => (
+                Duration::from_millis(3000),
+                Duration::from_millis(120),
+                Duration::ZERO,
+            ),
+            BenchKind::Drag => (
+                Duration::from_millis(3000),
+                Duration::from_millis(1500),
+                Duration::from_millis(150),
+            ),
         }
     }
 
@@ -259,7 +279,9 @@ impl Bench {
         };
         match self.kind {
             BenchKind::Swipe => point(px(width * (0.8 - 0.6 * progress)), px(height * 0.4)),
-            BenchKind::Scroll => point(px(width * 0.5), px(height * (0.35 + 0.3 * progress))),
+            BenchKind::Scroll | BenchKind::Drag => {
+                point(px(width * 0.5), px(height * (0.35 + 0.3 * progress)))
+            }
         }
     }
 
@@ -269,8 +291,9 @@ impl Bench {
         }
         let started = *self.started.get_or_insert(now + BENCH_DELAY);
         let elapsed = now.checked_duration_since(started)?;
-        let (period, stroke) = self.timing();
+        let period = self.timing(0).0;
         let cycle = (elapsed.as_millis() / period.as_millis()) as u32;
+        let (_, stroke, hold) = self.timing(cycle);
         if cycle >= self.cycles {
             self.finished = !self.touching;
             return self.touching.then(|| {
@@ -288,7 +311,7 @@ impl Bench {
             };
             self.touching = true;
             Some((phase, self.position(cycle, progress, size)))
-        } else if self.touching {
+        } else if self.touching && into > stroke + hold {
             self.touching = false;
             Some((TouchPhase::Ended, self.position(cycle, 1.0, size)))
         } else {

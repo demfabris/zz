@@ -16,6 +16,11 @@ use zz_terminal::{
     TerminalPatchFields, TerminalViewport, TerminalViewportPatch,
 };
 
+use crate::scrollback::{
+    HistoryRing, MAX_HISTORY_ROWS, RetainedTerminalViewport, apply_history_chunk,
+    apply_retained_patch, new_retained_viewport, replace_retained_viewport,
+};
+
 /// Which viewport rows a terminal frame or patch touched, so a skin repaints
 /// only damaged panes and rows instead of the world.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -306,14 +311,16 @@ pub struct ClientCore {
     attached_read_only: bool,
     attached_client_flags: String,
     last_detach_reason: Option<CoreDetachReason>,
-    viewports: PaneMap<TerminalViewport>,
+    viewports: PaneMap<RetainedTerminalViewport>,
     spare_cells: PaneMap<SpareCells>,
+    next_row_revision: u64,
+    history_limit: usize,
     agent_states: HashMap<PaneId, AgentPaneWire>,
     full_pending: HashSet<PaneId>,
     prefix_armed: bool,
     key_table: Option<(String, bool)>,
     command_prompt: Option<CommandPromptState>,
-    command_output: Option<(u64, PaneId, TerminalViewport)>,
+    command_output: Option<(u64, PaneId, RetainedTerminalViewport)>,
     command_output_watermark: u64,
     choose_tree: Option<ChooseTreeState>,
     choose_buffer: Option<ChooseBufferState>,
@@ -584,7 +591,62 @@ impl ClientCore {
 
     #[must_use]
     pub fn viewport(&self, pane: PaneId) -> Option<&TerminalViewport> {
+        self.viewports.get(&pane).map(|retained| &retained.viewport)
+    }
+
+    #[must_use]
+    pub fn retained_viewport(&self, pane: PaneId) -> Option<&RetainedTerminalViewport> {
         self.viewports.get(&pane)
+    }
+
+    pub fn retain_history(&mut self) {
+        self.history_limit = MAX_HISTORY_ROWS;
+        for retained in self.viewports.values_mut() {
+            if retained.history.limit() != MAX_HISTORY_ROWS {
+                retained.history = HistoryRing::with_limit(MAX_HISTORY_ROWS);
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn history_trickle_budget(&self) -> usize {
+        self.mux_options
+            .get(zz_protocol::MuxOptionKey::HistoryTrickle)
+            .and_then(|option| option.value.parse::<usize>().ok())
+            .unwrap_or_default()
+            .min(MAX_HISTORY_ROWS)
+    }
+
+    pub fn apply_history_chunk(
+        &mut self,
+        pane: PaneId,
+        start: u32,
+        total: u32,
+        offset: u32,
+        columns: u16,
+        rows: Vec<Vec<PackedCell>>,
+        dictionary: TerminalDictionary,
+    ) -> bool {
+        let Some(retained) = self.viewports.get_mut(&pane) else {
+            return false;
+        };
+        let applied = apply_history_chunk(
+            retained,
+            start,
+            total,
+            offset,
+            columns,
+            rows,
+            dictionary,
+            &mut self.next_row_revision,
+        );
+        if applied {
+            self.events.push_back(CoreEvent::ViewportChanged {
+                pane,
+                damage: ViewportDamage::Rows(Vec::new()),
+            });
+        }
+        applied
     }
 
     /// The daemon-published state of an agent pane, or `None` before its first
@@ -630,7 +692,14 @@ impl ClientCore {
     pub fn command_output(&self) -> Option<(PaneId, &TerminalViewport)> {
         self.command_output
             .as_ref()
-            .map(|(_, pane, viewport)| (*pane, viewport))
+            .map(|(_, pane, retained)| (*pane, &retained.viewport))
+    }
+
+    #[must_use]
+    pub fn retained_command_output(&self) -> Option<(PaneId, &RetainedTerminalViewport)> {
+        self.command_output
+            .as_ref()
+            .map(|(_, pane, retained)| (*pane, retained))
     }
 
     #[must_use]
@@ -855,7 +924,13 @@ impl ClientCore {
             EventPayload::TerminalViewport { pane, viewport } => {
                 self.full_pending.remove(&pane);
                 self.spare_cells.remove(&pane);
-                self.viewports.insert(pane, viewport);
+                if let Some(retained) = self.viewports.get_mut(&pane) {
+                    replace_retained_viewport(retained, viewport, &mut self.next_row_revision);
+                } else {
+                    let mut retained = new_retained_viewport(viewport, &mut self.next_row_revision);
+                    retained.history = HistoryRing::with_limit(self.history_limit);
+                    self.viewports.insert(pane, retained);
+                }
                 self.events.push_back(CoreEvent::ViewportChanged {
                     pane,
                     damage: ViewportDamage::All,
@@ -1206,18 +1281,19 @@ impl ClientCore {
     }
 
     fn apply_patch(&mut self, pane: PaneId, patch: TerminalViewportPatch) {
-        let Some(viewport) = self.viewports.get_mut(&pane) else {
+        let Some(retained) = self.viewports.get_mut(&pane) else {
             self.request_full(pane);
             return;
         };
-        let damage = patch_damage(viewport, &patch);
-        let retired = adopt_spare_cells(viewport, self.spare_cells.remove(&pane))
+        let damage = patch_damage(&retained.viewport, &patch);
+        let retired = adopt_spare_cells(&mut retained.viewport, self.spare_cells.remove(&pane))
             .filter(|_| patch.scroll == 0)
             .map(|(cells, mut stale)| {
                 stale.extend(patch.changed_rows.row_indices());
                 (cells, stale)
             });
-        if viewport.apply_patch(patch).is_ok() {
+        if apply_retained_patch(retained, patch, &mut self.next_row_revision).is_ok() {
+            let viewport = &retained.viewport;
             if let Some((cells, stale)) = retired
                 && !Arc::ptr_eq(&cells, &viewport.cells)
             {
@@ -1258,11 +1334,19 @@ impl ClientCore {
         match viewport {
             Some(viewport) if output_id > self.command_output_watermark => {
                 self.command_output_watermark = output_id;
-                self.command_output = Some((output_id, pane, viewport));
+                self.command_output = Some((
+                    output_id,
+                    pane,
+                    new_retained_viewport(viewport, &mut self.next_row_revision),
+                ));
                 self.events.push_back(CoreEvent::CommandOutputChanged);
             }
             Some(viewport) if self.command_output_id() == Some(output_id) => {
-                self.command_output = Some((output_id, pane, viewport));
+                self.command_output = Some((
+                    output_id,
+                    pane,
+                    new_retained_viewport(viewport, &mut self.next_row_revision),
+                ));
                 self.events.push_back(CoreEvent::CommandOutputChanged);
             }
             None if output_id > self.command_output_watermark => {
@@ -2143,7 +2227,10 @@ mod tests {
         core.command_output = Some((
             3,
             pane,
-            TerminalViewport::blank(8, 4, zz_terminal::SessionStatus::Running),
+            new_retained_viewport(
+                TerminalViewport::blank(8, 4, zz_terminal::SessionStatus::Running),
+                &mut 1,
+            ),
         ));
         core.choose_tree = Some(ChooseTreeState {
             items: Vec::new(),
@@ -2626,6 +2713,69 @@ mod tests {
             }
         }
         assert!(adoptable > 0);
+    }
+
+    #[test]
+    fn retained_history_is_opt_in_and_a_chunk_reports_a_viewport_change() {
+        let pane = PaneId(3);
+        let frame = |rows: [u32; 3], offset: u32, generation: u64| {
+            let mut viewport = TerminalViewport::blank(1, 3, zz_terminal::SessionStatus::Running);
+            viewport.generation = generation;
+            viewport.view_generation = generation;
+            viewport.scrollbar = zz_terminal::ScrollbarState {
+                total: offset + 3,
+                offset,
+                len: 3,
+            };
+            for (cell, row) in Arc::make_mut(&mut viewport.cells).iter_mut().zip(rows) {
+                *cell = PackedCell::new(0xe000 + row, 0, zz_terminal::CellWidth::Narrow);
+            }
+            viewport
+        };
+        let scrolled = |core: &mut ClientCore| {
+            let first = frame([5, 6, 7], 5, 1);
+            let patch = TerminalViewport::diff(&first, &frame([6, 7, 8], 6, 2)).unwrap();
+            assert_eq!(patch.scroll, -1);
+            core.handle_message(event(EventPayload::TerminalViewport {
+                pane,
+                viewport: first,
+            }));
+            core.handle_message(event(EventPayload::TerminalPatch { pane, patch }));
+            drain(core);
+        };
+
+        let mut plain = ClientCore::new();
+        scrolled(&mut plain);
+        assert!(plain.retained_viewport(pane).unwrap().history.is_empty());
+
+        let mut retaining = ClientCore::new();
+        retaining.retain_history();
+        scrolled(&mut retaining);
+        assert_eq!(retaining.retained_viewport(pane).unwrap().history.len(), 1);
+        let rows = [3, 4]
+            .map(|row| {
+                vec![PackedCell::new(
+                    0xe000 + row,
+                    0,
+                    zz_terminal::CellWidth::Narrow,
+                )]
+            })
+            .to_vec();
+        let dictionary = retaining
+            .viewport(pane)
+            .unwrap()
+            .dictionary
+            .as_ref()
+            .clone();
+        assert!(retaining.apply_history_chunk(pane, 3, 9, 6, 1, rows, dictionary));
+        assert_eq!(retaining.retained_viewport(pane).unwrap().history.len(), 3);
+        assert_eq!(
+            drain(&mut retaining),
+            [CoreEvent::ViewportChanged {
+                pane,
+                damage: ViewportDamage::Rows(Vec::new()),
+            }]
+        );
     }
 
     #[test]

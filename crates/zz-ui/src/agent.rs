@@ -895,7 +895,6 @@ pub struct AgentToolEntry {
     pub input: Option<AgentToolPayload>,
     pub output: Arc<[AgentToolPayload]>,
     pub default_expanded: bool,
-    /// The entry ID of the agent tool row this one ran under.
     pub parent: Option<u64>,
 }
 
@@ -994,8 +993,6 @@ pub const fn timeline_parent(entry: &AgentEntry) -> Option<u64> {
     }
 }
 
-/// A subagent's step joins the row that holds its agent, wherever that row
-/// sits, so the step can render nested under it.
 #[must_use]
 pub fn append_timeline_row(rows: &mut Vec<TimelineRow>, entry: AgentEntry) -> (usize, bool) {
     if let Some(parent) = timeline_parent(&entry)
@@ -1298,8 +1295,6 @@ impl TimelineStick {
         self.wake();
     }
 
-    /// Drop the pin and bring one row to the top, leaving the jump button to
-    /// come back.
     pub fn reveal(&mut self, list: &ListState, row: usize) {
         self.release(list);
         self.show_jump = true;
@@ -1562,9 +1557,6 @@ fn render_group(
         .into_any_element()
 }
 
-/// Which members of a group are subagent steps, and under which agent row.
-/// A step only nests under an agent listed before it, so the nesting can
-/// never loop.
 struct StepNesting {
     top: Vec<usize>,
     steps: HashMap<u64, Vec<usize>>,
@@ -1625,8 +1617,6 @@ pub fn subagent_steps_label(count: usize, latest: Option<&str>) -> SharedString 
     }
 }
 
-/// A subagent's steps, indented under its agent row and folded to a count
-/// and the latest step until opened.
 fn render_steps(
     timeline_scroll: &ListState,
     store: &Entity<AgentTimelineStore>,
@@ -3931,7 +3921,7 @@ mod tests {
             .debug_bounds("agent-subagent-steps")
             .expect("the open steps should be painted");
         assert!(expanded.size.height >= px(ACTIVITY_ROW_HEIGHT * 3.0));
-        assert!(expanded.top() == collapsed.top());
+        assert_eq!(expanded.top(), collapsed.top());
     }
 
     #[test]

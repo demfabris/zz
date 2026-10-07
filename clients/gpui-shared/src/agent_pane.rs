@@ -2019,7 +2019,6 @@ impl AgentPane {
         true
     }
 
-    /// One question card for the head request while it asks questions.
     fn synchronize_question_card(
         &mut self,
         head: Option<&PendingPermission>,
@@ -2429,13 +2428,11 @@ impl Render for AgentPane {
                         (permissions.len() > 1)
                             .then(|| format!("{}/{}", index + 1, permissions.len()).into()),
                         writable,
-                        Rc::new(
-                            move |action: QuestionCardAction, window: &mut Window, cx: &mut App| {
-                                entity.update(cx, |this, cx| {
-                                    this.question_action(action, window, cx);
-                                });
-                            },
-                        ),
+                        move |action, window, cx| {
+                            entity.update(cx, |this, cx| {
+                                this.question_action(action, window, cx);
+                            });
+                        },
                         cx,
                     )
                     .into_any_element(),
@@ -2483,11 +2480,9 @@ impl Render for AgentPane {
                 &state.tasks,
                 self.tasks_expanded,
                 writable,
-                Rc::new(
-                    move |action: TaskTrayAction, _: &mut Window, cx: &mut App| {
-                        entity.update(cx, |this, cx| this.task_action(action, cx));
-                    },
-                ),
+                move |action, _, cx| {
+                    entity.update(cx, |this, cx| this.task_action(action, cx));
+                },
                 cx,
             )
             .map(IntoElement::into_any_element),

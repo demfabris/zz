@@ -2189,10 +2189,6 @@ pub unsafe extern "C" fn zz_client_agent_cancel(client: *mut ZzClient, pane: u64
     client.client.agent_cancel(PaneId(pane)).is_ok()
 }
 
-/// Answer a question card. `answers_json` is a JSON array with one
-/// `{"id": <question id>, "answers": [<chosen labels or typed text>]}` per
-/// question. Cancel a card with [`zz_client_agent_respond_permission`] and a
-/// null option.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn zz_client_agent_answer_question(
     client: *mut ZzClient,
@@ -2223,7 +2219,6 @@ pub unsafe extern "C" fn zz_client_agent_answer_question(
         .is_ok()
 }
 
-/// Stop one background task the pane state lists, by its id.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn zz_client_agent_stop_task(
     client: *mut ZzClient,

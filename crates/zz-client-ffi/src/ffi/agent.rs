@@ -849,7 +849,6 @@ enum Action {
 }
 
 impl ZzAgentModel {
-    /// The answer to a question card the model still holds.
     fn question_answer(
         &self,
         request_id: u64,

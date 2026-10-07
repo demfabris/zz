@@ -21,7 +21,6 @@ const TASK_ICON_OPTICAL_DROP: f32 = 0.5;
 pub enum TaskTrayAction {
     Toggle,
     Stop(String),
-    /// Show the tool row that started the task, by its tool call ID.
     Reveal(String),
 }
 
@@ -38,19 +37,18 @@ pub fn task_tray_label(count: usize) -> String {
     format!("{count} running")
 }
 
-/// The agent's background work: a chip that counts it and, opened, one row
-/// per task with its Stop button.
 pub fn task_tray(
     id: &str,
     tasks: &[AgentTaskWire],
     expanded: bool,
     enabled: bool,
-    on_action: Rc<dyn Fn(TaskTrayAction, &mut Window, &mut App)>,
+    on_action: impl Fn(TaskTrayAction, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> Option<Div> {
     if tasks.is_empty() {
         return None;
     }
+    let on_action: Rc<dyn Fn(TaskTrayAction, &mut Window, &mut App)> = Rc::new(on_action);
     let toggle = Rc::clone(&on_action);
     let foreground = cx.theme().foreground;
     let rows = tasks.iter().enumerate().map(|(index, task)| {

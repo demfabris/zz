@@ -18,14 +18,10 @@ const CHOICE_LINE_HEIGHT: f32 = 18.0;
 const CHOICE_MARKER: f32 = 14.0;
 const CHOICE_OPTICAL_DROP: f32 = 0.5;
 
-/// What a card interaction asks its host to do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum QuestionCardStep {
-    /// Not the card's key: let it reach the composer.
     Stay,
-    /// The card took the input; redraw it.
     Handled,
-    /// Edit the free-text answer of this question.
     Other(usize),
     Submit(Vec<AgentQuestionAnswer>),
     Dismiss,
@@ -39,7 +35,6 @@ pub enum QuestionCardAction {
     Dismiss,
 }
 
-/// The answers being built for one question card, one entry per question.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct QuestionCard {
     request_id: u64,
@@ -90,8 +85,6 @@ impl QuestionCard {
         self.other.get(question).copied().unwrap_or(false)
     }
 
-    /// One plain question answers the moment a choice is picked, the way the
-    /// permission wizard does.
     fn submits_on_pick(&self) -> bool {
         matches!(&*self.questions, [only] if !only.multi_select)
     }
@@ -133,8 +126,6 @@ impl QuestionCard {
         QuestionCardStep::Handled
     }
 
-    /// Choose the free-text answer. A multi-select question toggles it like
-    /// any other choice.
     pub fn select_other(&mut self, question: usize) -> QuestionCardStep {
         let Some(asked) = self.questions.get(question).filter(|q| q.allow_other) else {
             return QuestionCardStep::Stay;
@@ -153,7 +144,6 @@ impl QuestionCard {
         }
     }
 
-    /// Typing an answer chooses it.
     pub fn set_other_text(&mut self, question: usize, text: &str) -> bool {
         let Some(multi_select) = self
             .questions
@@ -190,8 +180,6 @@ impl QuestionCard {
         !self.questions.is_empty() && (0..self.questions.len()).all(|index| self.is_answered(index))
     }
 
-    /// Per question the chosen labels in their listed order, then the typed
-    /// answer. `None` until every question has one.
     pub fn answers(&self) -> Option<Vec<AgentQuestionAnswer>> {
         self.is_complete().then(|| {
             self.questions
@@ -233,9 +221,6 @@ impl QuestionCard {
         QuestionCardStep::Handled
     }
 
-    /// Digits pick a choice of the focused question, the digit after the last
-    /// choice edits the typed answer, Up/Down and Tab move between questions,
-    /// Enter submits a complete card and Escape dismisses it.
     pub fn key(&mut self, key: &str, shift: bool) -> QuestionCardStep {
         match key {
             "escape" => QuestionCardStep::Dismiss,
@@ -262,7 +247,6 @@ impl QuestionCard {
     }
 }
 
-/// A question card plus the text fields its free-text answers type into.
 pub struct QuestionCardState {
     pub card: QuestionCard,
     others: Vec<Option<Entity<InputState>>>,
@@ -318,7 +302,6 @@ impl QuestionCardState {
         self.others.get(question).and_then(Option::as_ref)
     }
 
-    /// Whether one of the card's text fields holds the keyboard.
     pub fn editing(&self, window: &Window, cx: &App) -> bool {
         self.others
             .iter()
@@ -326,7 +309,6 @@ impl QuestionCardState {
             .any(|input| input.read(cx).focus_handle(cx).is_focused(window))
     }
 
-    /// Mirror a text field into the card; reports whether anything changed.
     pub fn input_changed(&mut self, question: usize, cx: &App) -> bool {
         let Some(input) = self.other_input(question) else {
             return false;
@@ -385,9 +367,10 @@ impl QuestionCardState {
         id: &str,
         counter: Option<SharedString>,
         enabled: bool,
-        on_action: Rc<dyn Fn(QuestionCardAction, &mut Window, &mut App)>,
+        on_action: impl Fn(QuestionCardAction, &mut Window, &mut App) + 'static,
         cx: &App,
     ) -> Div {
+        let on_action: Rc<dyn Fn(QuestionCardAction, &mut Window, &mut App)> = Rc::new(on_action);
         let card = &self.card;
         let several = card.questions().len() > 1;
         let hint = if several {

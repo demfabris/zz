@@ -156,7 +156,6 @@ pub(crate) struct AgentPaneState {
     pub(crate) available_commands: Arc<[AgentCommand]>,
     pub(crate) usage: Option<(u64, u64)>,
     pub(crate) git: Option<AgentGitSummary>,
-    /// The agent's background work, as the daemon last published it.
     pub(crate) tasks: Arc<[AgentTaskWire]>,
     /// Text `agent-send` routed here, waiting for the pane's view to fold it
     /// into the composer draft.
@@ -1246,8 +1245,6 @@ impl AgentController {
         false
     }
 
-    /// Answer a question card. Like a permission, the first answer wins, so
-    /// the card leaves this client at once.
     pub(crate) fn answer_question(
         &mut self,
         pane: PaneId,
@@ -1285,7 +1282,6 @@ impl AgentController {
         known && self.send(pane, AgentRequest::StopTask { task_id }, cx)
     }
 
-    /// The entry a subagent's tool row nests under: its agent's tool row.
     pub(crate) fn tool_parent_entry(&self, pane: PaneId, entry_id: u64) -> Option<u64> {
         let transcript = &self.panes.get(&pane)?.transcript;
         transcript

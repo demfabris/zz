@@ -1,7 +1,6 @@
 use std::{
     collections::{BTreeSet, HashMap},
     path::{Path, PathBuf},
-    rc::Rc,
     sync::Arc,
 };
 use zz_ui::agent::composer::COMPOSER_OUTER_PADDING;
@@ -290,7 +289,6 @@ fn replacement_preserves_folding(previous: &AgentEntry, next: &AgentEntry) -> bo
         && timeline_parent(previous) == timeline_parent(next)
 }
 
-/// The entry a tool row nests under, from the controller's reducer.
 type ToolParents<'a> = &'a dyn Fn(u64) -> Option<u64>;
 
 fn parented(mut entry: AgentEntry, parents: ToolParents<'_>) -> AgentEntry {
@@ -421,8 +419,6 @@ impl PermissionWizard {
         self.answer(requests, Some(option))
     }
 
-    /// Take the focused page off the wizard once its question card is
-    /// answered, the way [`Self::answer`] does for an option.
     fn answer_card(&mut self, requests: &[AgentPermissionRequest], request_id: u64) -> bool {
         if self.current(requests).map(|request| request.request_id) != Some(request_id) {
             return false;
@@ -1512,13 +1508,9 @@ impl AgentView {
                     &format!("agent-question-{}-{}", self.pane.0, permission.request_id),
                     counter.map(Into::into),
                     true,
-                    Rc::new(
-                        move |action: QuestionCardAction,
-                              window: &mut Window,
-                              cx: &mut gpui::App| {
-                            view.update(cx, |view, cx| view.question_action(action, window, cx));
-                        },
-                    ),
+                    move |action, window, cx| {
+                        view.update(cx, |view, cx| view.question_action(action, window, cx));
+                    },
                     cx,
                 )
                 .into_any_element(),
@@ -1642,8 +1634,6 @@ impl AgentView {
         self.apply_permission_step(step, cx);
     }
 
-    /// Keep one question card for the wizard's focused page while that page
-    /// asks questions; its text fields live as long as the card does.
     fn synchronize_question_card(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let head = self
             .permission_wizard
@@ -1797,7 +1787,6 @@ impl AgentView {
         cx.notify();
     }
 
-    /// Scroll the timeline to the row that holds a tool call.
     fn reveal_tool(&mut self, tool_call_id: &str, cx: &gpui::App) {
         let Some(entry) = self.controller.read(cx).tool_entry(self.pane, tool_call_id) else {
             return;
@@ -1826,11 +1815,9 @@ impl AgentView {
             &state.tasks,
             self.tasks_expanded,
             true,
-            Rc::new(
-                move |action: TaskTrayAction, _: &mut Window, cx: &mut gpui::App| {
-                    view.update(cx, |view, cx| view.task_action(action, cx));
-                },
-            ),
+            move |action, _, cx| {
+                view.update(cx, |view, cx| view.task_action(action, cx));
+            },
             cx,
         )
     }
@@ -4150,8 +4137,6 @@ mod completion_tests {
     #[cfg(not(target_os = "macos"))]
     type RecordedRequests = Rc<RefCell<Vec<(PaneId, crate::mux::client::AgentRequest)>>>;
 
-    /// A visible agent view over a controller whose daemon requests are
-    /// recorded instead of sent.
     #[cfg(not(target_os = "macos"))]
     fn wired_view(
         cx: &mut TestAppContext,

@@ -189,6 +189,10 @@ PY
     [[ "${3:-}" == --build-only ]] && exit 0
     [[ "$mode" == bench ]] && exec "$repo_root/scripts/ios-bench.sh" "$udid" "$app" "$endpoint"
     xcrun devicectl device install app --device "$udid" "$app"
+    if ! xcrun devicectl device info lockState --device "$udid" 2>/dev/null | grep -q "passcodeRequired: false"; then
+        echo "installed; the phone is locked, so open zz GPUI from the home screen"
+        exit 0
+    fi
     launch_env="$(ZZ_GPUI_ENDPOINT="$endpoint" python3 -c 'import json, os; print(json.dumps({key: os.environ[key] for key in ("ZZ_GPUI_ENDPOINT", "ZZ_GPUI_SESSION", "ZZ_GPUI_FRAME_LOG", "ZZ_GPUI_BENCH", "GPUI_FRAME_STATS") if os.environ.get(key)}))')"
     echo "launching on $udid with endpoint $endpoint"
     exec xcrun devicectl device process launch --device "$udid" --terminate-existing --console \

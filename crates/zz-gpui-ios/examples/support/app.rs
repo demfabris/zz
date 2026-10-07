@@ -5,7 +5,8 @@ use crate::{
 use gpui::{
     Bounds, ClipboardItem, Context, ElementInputHandler, Entity, EntityInputHandler, FocusHandle,
     Focusable, IntoElement, KeyDownEvent, KeyUpEvent, MouseButton, Pixels, Point, Render,
-    Subscription, Task, UTF16Selection, Window, canvas, div, prelude::*, px,
+    Subscription, Task, TextInputAction, TextInputConfiguration, UTF16Selection, Window, canvas,
+    div, prelude::*, px,
 };
 use std::{collections::HashSet, ops::Range, path::PathBuf, sync::Arc, time::Duration};
 use zz_client::{
@@ -892,6 +893,16 @@ impl EntityInputHandler for TerminalApp {
     fn paste(&mut self, item: ClipboardItem, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(text) = item.text() {
             self.view(TerminalViewAction::Paste(text), cx);
+        }
+    }
+    fn text_input_configuration(
+        &mut self,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> TextInputConfiguration {
+        TextInputConfiguration {
+            input_action: TextInputAction::Enter,
+            ..TextInputConfiguration::default()
         }
     }
 }

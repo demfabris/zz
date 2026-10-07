@@ -886,6 +886,7 @@ impl PopupMenu {
         let group_name = format!("{}:item-{}", cx.entity().entity_id(), ix);
 
         let item_height = match self.size {
+            _ if crate::touch::CoarsePointer::get(cx) => px(crate::touch::TOUCH_TARGET),
             Size::Small => px(20.),
             _ => px(26.),
         };

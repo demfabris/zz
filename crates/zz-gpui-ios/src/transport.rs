@@ -29,6 +29,7 @@ pub enum Event {
 
 pub struct Connection {
     pub events: Receiver<Event>,
+    pub ready: Option<futures::channel::mpsc::UnboundedReceiver<()>>,
     client: Arc<Mutex<Option<Arc<InteractiveClient>>>>,
     cancelled: Arc<AtomicBool>,
 }
@@ -36,6 +37,11 @@ pub struct Connection {
 impl Connection {
     pub fn connect(endpoint: String, session: Option<String>, native_ui: bool) -> Self {
         let (tx, events) = mpsc::sync_channel(64);
+        let (ready_tx, ready) = futures::channel::mpsc::unbounded();
+        let tx = Notifying {
+            events: tx,
+            ready: ready_tx,
+        };
         let client = Arc::new(Mutex::new(None));
         let cancelled = Arc::new(AtomicBool::new(false));
         let shared_client = client.clone();
@@ -117,9 +123,24 @@ impl Connection {
         });
         Self {
             events,
+            ready: Some(ready),
             client,
             cancelled,
         }
+    }
+}
+
+#[derive(Clone)]
+struct Notifying {
+    events: mpsc::SyncSender<Event>,
+    ready: futures::channel::mpsc::UnboundedSender<()>,
+}
+
+impl Notifying {
+    fn send(&self, event: Event) -> Result<(), mpsc::SendError<Event>> {
+        self.events.send(event)?;
+        let _ = self.ready.unbounded_send(());
+        Ok(())
     }
 }
 

@@ -4,7 +4,7 @@ use gpui::{
     Anchor, AnyElement, App, Bounds, Context, DismissEvent, Entity, EventEmitter, FocusHandle,
     Focusable, InteractiveElement as _, IntoElement, Length, MouseButton, ParentElement as _,
     Pixels, Render, SharedString, StyleRefinement, Styled as _, Subscription, Window, anchored,
-    canvas, deferred, div, px,
+    canvas, deferred, div, prelude::FluentBuilder as _, px,
 };
 
 use crate::{
@@ -261,6 +261,18 @@ impl<D: SelectDelegate> SelectState<D> {
             .or_else(|| self.options.placeholder.clone())
             .unwrap_or_else(|| SharedString::new_static("Select"));
         let open = self.menu.is_some();
+        let slop = crate::touch::control_slop(self.options.size);
+        let toggle = move |this: &mut Self,
+                           _: &gpui::MouseDownEvent,
+                           window: &mut Window,
+                           cx: &mut Context<Self>| {
+            cx.stop_propagation();
+            if open {
+                this.close_menu(cx);
+            } else {
+                this.open_menu(window, cx);
+            }
+        };
         let button = Button::new("select-trigger")
             .tab_stop(false)
             .with_size(self.options.size)
@@ -269,17 +281,7 @@ impl<D: SelectDelegate> SelectState<D> {
             .disabled(self.options.disabled)
             .selected(self.menu.is_some())
             .refine_style(&self.options.style)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _, window, cx| {
-                    cx.stop_propagation();
-                    if open {
-                        this.close_menu(cx);
-                    } else {
-                        this.open_menu(window, cx);
-                    }
-                }),
-            );
+            .on_mouse_down(MouseButton::Left, cx.listener(toggle));
         div()
             .relative()
             .child(button)
@@ -294,6 +296,15 @@ impl<D: SelectDelegate> SelectState<D> {
                 .top_0()
                 .left_0()
                 .size_full(),
+            )
+            .when(
+                !self.options.disabled && slop > 0.0 && crate::touch::CoarsePointer::get(cx),
+                |this| {
+                    this.child(
+                        crate::touch::hit_area("select-trigger-touch", 0.0, slop)
+                            .on_mouse_down(MouseButton::Left, cx.listener(toggle)),
+                    )
+                },
             )
             .into_any_element()
     }

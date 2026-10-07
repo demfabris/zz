@@ -34,7 +34,6 @@ pub enum ColorPickerEvent {
 }
 
 pub struct ColorPickerState {
-    focus_handle: FocusHandle,
     hex: Entity<InputState>,
     color: Option<Hsla>,
     _subscriptions: Vec<Subscription>,
@@ -43,8 +42,8 @@ pub struct ColorPickerState {
 impl EventEmitter<ColorPickerEvent> for ColorPickerState {}
 
 impl Focusable for ColorPickerState {
-    fn focus_handle(&self, _: &App) -> FocusHandle {
-        self.focus_handle.clone()
+    fn focus_handle(&self, cx: &App) -> FocusHandle {
+        self.hex.focus_handle(cx)
     }
 }
 
@@ -65,7 +64,6 @@ impl ColorPickerState {
                 }),
             ];
         Self {
-            focus_handle: cx.focus_handle(),
             hex,
             color,
             _subscriptions: subscriptions,

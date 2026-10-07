@@ -14,6 +14,7 @@ use crate::{
     notification::Notification,
     spinner::Spinner,
     tooltip::Tooltip,
+    touch::{CoarsePointer, TOUCH_TARGET},
 };
 
 use super::{workspace_tree_action_button, workspace_tree_marker};
@@ -143,7 +144,11 @@ pub fn tree_row_menu(row: Stateful<gpui::Div>, items: Vec<TreeRowMenuItem>) -> A
     .into_any_element()
 }
 
-pub fn tree_action_strip(id: impl Into<ElementId>, actions: Vec<AnyElement>) -> AnyElement {
+pub fn tree_action_strip(
+    id: impl Into<ElementId>,
+    actions: Vec<AnyElement>,
+    cx: &App,
+) -> AnyElement {
     div()
         .id(id)
         .h_full()
@@ -151,6 +156,11 @@ pub fn tree_action_strip(id: impl Into<ElementId>, actions: Vec<AnyElement>) -> 
         .flex_none()
         .items_center()
         .justify_center()
+        .when(CoarsePointer::get(cx), |this| {
+            this.gap(crate::rems_from_px(
+                TOUCH_TARGET - crate::button::COMPACT_ICON_BUTTON_SIZE,
+            ))
+        })
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .on_click(|_, _, cx| cx.stop_propagation())
         .children(actions)
@@ -244,6 +254,65 @@ pub fn tree_navigation(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct Row;
+
+    impl gpui::Render for Row {
+        fn render(&mut self, _: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+            let actions = tree_action_strip(
+                "actions",
+                vec![
+                    workspace_tree_action_button("add", IconName::Plus, "Add", false, cx)
+                        .debug_selector(|| "add".to_owned())
+                        .into_any_element(),
+                    workspace_tree_action_button("close", IconName::Xmark, "Close", false, cx)
+                        .debug_selector(|| "close".to_owned())
+                        .into_any_element(),
+                ],
+                cx,
+            );
+            div().w(px(300.0)).child(
+                super::super::workspace_tree_row(
+                    "row",
+                    0,
+                    false,
+                    false,
+                    false,
+                    true,
+                    true,
+                    false,
+                    "row-group".into(),
+                    div(),
+                    div().child("label"),
+                    actions,
+                    cx,
+                )
+                .debug_selector(|| "row".to_owned()),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn coarse_rows_grow_to_a_touch_target_and_keep_actions_inside(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+        let (_, cx) = cx.add_window_view(|_, _| Row);
+        for coarse in [false, true] {
+            cx.update(|window, cx| {
+                crate::touch::CoarsePointer::set(coarse, cx);
+                window.refresh();
+                _ = window.draw(cx);
+            });
+            let row = cx.debug_bounds("row").expect("row");
+            let add = cx.debug_bounds("add").expect("add");
+            let close = cx.debug_bounds("close").expect("close");
+            let height = if coarse { 44.0 } else { 32.0 };
+            assert_eq!(row.size.height, px(height));
+            assert_eq!(close.right(), row.right() - px(4.0));
+            assert_eq!(add.center().y, row.center().y);
+            let pitch = if coarse { 44.0 } else { 24.0 };
+            assert_eq!(close.left() - add.left(), px(pitch));
+        }
+    }
 
     #[test]
     fn tree_navigation_expands_then_enters_and_collapses_then_leaves() {

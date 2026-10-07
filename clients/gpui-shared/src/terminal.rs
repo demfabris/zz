@@ -5,8 +5,8 @@ use gpui::{
     ElementInputHandler, Entity, EntityInputHandler, FocusHandle, Focusable, Hsla, ImageSource,
     KeyDownEvent, KeyUpEvent, Keystroke, ModifiersChangedEvent, MouseButton, MouseDownEvent,
     MouseExitEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, Pixels, Point, Render,
-    ScrollWheelEvent, Subscription, Task, UTF16Selection, Window, anchored, canvas, deferred, div,
-    img, point, prelude::*, px,
+    ScrollWheelEvent, Subscription, Task, TextInputAction, TextInputConfiguration, UTF16Selection,
+    Window, anchored, canvas, deferred, div, img, point, prelude::*, px,
 };
 use zz_client::{
     ChromeAction, ChromeKeymap, ChromeProfile, ClientCore, CoreEvent, TERMINAL_TABLE,
@@ -494,6 +494,22 @@ impl TerminalPane {
             return;
         }
         self.reset_cursor_blink(cx);
+        let sticky;
+        let event = if !zz_ui::compact::StickyModifiers::get(cx).is_empty()
+            && !matches!(
+                event.keystroke.key.as_str(),
+                "shift" | "control" | "alt" | "platform" | "function"
+            ) {
+            sticky = KeyDownEvent {
+                keystroke: zz_ui::compact::StickyModifiers::apply(&event.keystroke, cx),
+                is_held: event.is_held,
+                prefer_character_input: event.prefer_character_input,
+            };
+            window.refresh();
+            &sticky
+        } else {
+            event
+        };
         let input = key_input(event);
         if input.key == KeyCode::Unidentified {
             return;
@@ -1847,6 +1863,20 @@ impl EntityInputHandler for TerminalPane {
                 self.view(TerminalViewAction::SearchUpdate(query), cx);
             } else if !composed && (text.contains(['\n', '\r']) || text.chars().count() > 1) {
                 self.view(TerminalViewAction::Paste(text.into()), cx);
+            } else if let Some(keystroke) = sticky_keystroke(text, cx) {
+                window.refresh();
+                self.send(
+                    InputMessage::Key {
+                        pane: self.pane,
+                        input: key_input(&KeyDownEvent {
+                            keystroke,
+                            is_held: false,
+                            prefer_character_input: false,
+                        }),
+                        text_follows: false,
+                    },
+                    cx,
+                );
             } else {
                 self.send(
                     InputMessage::Text {
@@ -1889,6 +1919,16 @@ impl EntityInputHandler for TerminalPane {
         _: &mut Context<Self>,
     ) -> Option<usize> {
         Some(0)
+    }
+    fn text_input_configuration(
+        &mut self,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> TextInputConfiguration {
+        TextInputConfiguration {
+            input_action: TextInputAction::Enter,
+            ..TextInputConfiguration::default()
+        }
     }
 }
 
@@ -1975,6 +2015,29 @@ fn terminal_status_text(status: &SessionStatus) -> Option<String> {
     }
 }
 
+fn sticky_keystroke(text: &str, cx: &mut App) -> Option<gpui::Keystroke> {
+    let mut characters = text.chars();
+    let (Some(character), None) = (characters.next(), characters.next()) else {
+        return None;
+    };
+    if zz_ui::compact::StickyModifiers::get(cx).is_empty() {
+        return None;
+    }
+    let keystroke = gpui::Keystroke {
+        modifiers: gpui::Modifiers {
+            shift: character.is_uppercase(),
+            ..gpui::Modifiers::default()
+        },
+        key: if character == ' ' {
+            "space".to_owned()
+        } else {
+            character.to_lowercase().collect()
+        },
+        key_char: Some(text.to_owned()),
+    };
+    Some(zz_ui::compact::StickyModifiers::apply(&keystroke, cx))
+}
+
 pub fn key_input(event: &KeyDownEvent) -> KeyInput {
     keystroke_input(
         &event.keystroke,
@@ -1986,7 +2049,7 @@ pub fn key_input(event: &KeyDownEvent) -> KeyInput {
     )
 }
 
-fn keystroke_input(keystroke: &Keystroke, action: KeyAction) -> KeyInput {
+pub(crate) fn keystroke_input(keystroke: &Keystroke, action: KeyAction) -> KeyInput {
     #[cfg(target_os = "ios")]
     {
         crate::input::key_input(keystroke, action)

@@ -1,13 +1,13 @@
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use gpui::{
-    AnyElement, App, Context, Entity, IntoElement, Subscription, Window, canvas, div, prelude::*,
-    px,
+    AnyElement, App, Context, Entity, FocusHandle, Focusable as _, IntoElement, Subscription,
+    Window, canvas, div, prelude::*, px,
 };
 use zz_ui::{
     ActiveTheme as _, Colorize as _, IconName, Sizable as _, StyledExt as _, Theme, ThemeMode,
     UiZoom,
-    button::{Button, ButtonVariants as _},
+    button::Button,
     chrome_palette::{
         ChromeColor, ChromePresetId, ThemeModeSetting, chrome_presets, inherited_chrome_colors,
         resolved_chrome_colors,
@@ -45,6 +45,50 @@ pub(super) const SECTIONS: [SettingsSection; 7] = [
     SettingsSection::About,
 ];
 
+const PHONE_MAX_ZOOM: f32 = 1.35;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Setting {
+    Section(SettingsSection),
+    UiZoom,
+    SystemTextSize,
+}
+
+pub(super) fn shown(setting: Setting, phone: bool) -> bool {
+    !phone
+        || !matches!(
+            setting,
+            Setting::Section(SettingsSection::StatusBar | SettingsSection::Panes)
+                | Setting::UiZoom
+                | Setting::SystemTextSize
+        )
+}
+
+pub(super) fn phone() -> bool {
+    #[cfg(target_os = "ios")]
+    return zz_gpui_ios::phone();
+    #[cfg(not(target_os = "ios"))]
+    false
+}
+
+pub(super) fn sections() -> Vec<SettingsSection> {
+    let phone = phone();
+    SECTIONS
+        .into_iter()
+        .filter(|section| shown(Setting::Section(*section), phone))
+        .collect()
+}
+
+fn interface_zoom(preferences: &Preferences, system_scale: f32, phone: bool) -> f32 {
+    if phone {
+        system_scale.min(PHONE_MAX_ZOOM)
+    } else if preferences.system_text_size {
+        preferences.zoom * system_scale
+    } else {
+        preferences.zoom
+    }
+}
+
 struct PlatformReduceMotion(bool);
 
 impl gpui::Global for PlatformReduceMotion {}
@@ -60,17 +104,13 @@ impl Preferences {
         }
         cx.set_reduce_motion(cx.global::<PlatformReduceMotion>().0 || !self.animations);
         #[cfg(target_os = "ios")]
-        let (contrast, zoom) = (
+        let (contrast, text_scale) = (
             self.contrast * if system.increase_contrast { 1.25 } else { 1.0 },
-            self.zoom
-                * if self.system_text_size {
-                    system.text_scale
-                } else {
-                    1.0
-                },
+            system.text_scale,
         );
         #[cfg(not(target_os = "ios"))]
-        let (contrast, zoom) = (self.contrast, self.zoom);
+        let (contrast, text_scale) = (self.contrast, 1.0);
+        let zoom = interface_zoom(self, text_scale, phone());
         let pinned = zz_ui::chrome_palette::pinned_theme_mode(self.theme_mode());
         #[cfg(target_os = "ios")]
         {
@@ -192,21 +232,21 @@ impl Controls {
         });
         let contrast = cx.new(|cx| {
             InputState::new(window, cx)
-                .default_value((preferences.contrast * 100.0).to_string())
+                .default_value(number_text(preferences.contrast * 100.0))
                 .step(5.0)
                 .min(50.0)
                 .max(200.0)
         });
         let shadow_strength = cx.new(|cx| {
             InputState::new(window, cx)
-                .default_value((preferences.shadow_strength * 100.0).to_string())
+                .default_value(number_text(preferences.shadow_strength * 100.0))
                 .step(5.0)
                 .min(0.0)
                 .max(100.0)
         });
         let terminal_scale = cx.new(|cx| {
             InputState::new(window, cx)
-                .default_value((preferences.terminal_font_scale * 100.0).to_string())
+                .default_value(number_text(preferences.terminal_font_scale * 100.0))
                 .step(10.0)
                 .min(50.0)
                 .max(300.0)
@@ -284,7 +324,7 @@ impl Controls {
             let value = pane_values[control as usize] * scale;
             let input = cx.new(|cx| {
                 InputState::new(window, cx)
-                    .default_value(value.to_string())
+                    .default_value(number_text(value))
                     .min(f64::from(min))
                     .max(f64::from(max))
                     .step(step)
@@ -313,7 +353,7 @@ impl Controls {
                     *control.value(&mut this.preferences) = value / scale;
                     if commit {
                         input.update(cx, |input, cx| {
-                            input.set_value(value.to_string(), window, cx);
+                            input.set_value(number_text(value), window, cx);
                         });
                     }
                     this.preferences.save();
@@ -408,6 +448,14 @@ impl AppShell {
             input.set_value(format!("{:.0}", self.preferences.zoom * 100.0), window, cx);
         });
     }
+
+    pub(super) fn sync_terminal_scale_input(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let value = number_text(self.preferences.terminal_font_scale * 100.0);
+        self.settings_controls
+            .terminal_scale
+            .update(cx, |input, cx| input.set_value(value, window, cx));
+    }
+
     fn select_preset(
         &mut self,
         mode: ThemeMode,
@@ -436,64 +484,107 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let narrow = AppShell::narrow(window);
-        let section = if SECTIONS.contains(&section) {
+        let sections = sections();
+        let section = if sections.contains(&section) {
             section
         } else {
             SettingsSection::Appearance
         };
-        let content = self.settings_page(section, narrow, cx);
+        if !narrow {
+            return self.settings_page(section, narrow, cx);
+        }
         let view = cx.entity().downgrade();
+        let picked = self.settings_picked;
+        zz_ui::compact::swipe_back(
+            "settings-swipe-back",
+            self.settings_route(section, picked, cx),
+            move |window, cx| {
+                let _ = view.update(cx, |this, cx| this.settings_back(window, cx));
+            },
+        )
+        .when(picked, |swipe| {
+            swipe.under(self.settings_route(section, false, cx))
+        })
+        .into_any_element()
+    }
+
+    fn settings_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.settings_picked {
+            self.settings_picked = false;
+        } else {
+            self.settings = None;
+            self.focused_pane = None;
+        }
+        self.focus.focus(window, cx);
+        cx.notify();
+    }
+
+    fn settings_route(
+        &self,
+        section: SettingsSection,
+        picked: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let content = if picked {
+            self.settings_page(section, true, cx)
+        } else {
+            zz_ui::settings::settings_section_index(
+                &sections(),
+                {
+                    let view = cx.entity().downgrade();
+                    move |choice, _, cx| {
+                        let _ = view.update(cx, |this, cx| {
+                            this.settings = Some(choice);
+                            this.settings_picked = true;
+                            cx.notify();
+                        });
+                    }
+                },
+                cx,
+            )
+            .into_any_element()
+        };
+        let title = if picked { section.title() } else { "Settings" };
         div()
             .flex()
             .flex_col()
             .size_full()
             .min_w_0()
             .min_h_0()
-            .when(narrow, |page| {
-                page.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .h(zz_ui::TITLE_BAR_HEIGHT)
-                        .flex_none()
-                        .px(px(8.0))
-                        .gap(px(4.0))
-                        .child(
-                            Button::compact_icon("settings-close", IconName::ArrowLeft)
-                                .tooltip("Back to workspace")
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.settings = None;
-                                    this.focused_pane = None;
-                                    this.focus.focus(window, cx);
-                                    cx.notify();
-                                })),
-                        )
-                        .child(
-                            Button::new("settings-section")
-                                .ghost()
-                                .small()
-                                .label(section.title())
-                                .icon(IconName::ChevronDown)
-                                .dropdown_menu(move |menu, _, _| {
-                                    SECTIONS.into_iter().fold(menu, |menu, choice| {
-                                        let view = view.clone();
-                                        menu.item(
-                                            PopupMenuItem::new(choice.title())
-                                                .icon(choice.icon())
-                                                .on_click(move |_, window, cx| {
-                                                    let _ = view.update(cx, |this, cx| {
-                                                        this.settings = Some(choice);
-                                                        this.focus.focus(window, cx);
-                                                        cx.notify();
-                                                    });
-                                                }),
-                                        )
-                                    })
-                                }),
-                        ),
-                )
-            })
-            .child(content)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .h(zz_ui::TITLE_BAR_HEIGHT)
+                    .flex_none()
+                    .px(px(8.0))
+                    .gap(px(4.0))
+                    .child(
+                        Button::compact_icon("settings-back", IconName::ArrowLeft)
+                            .hit_slop(10.0, 10.0)
+                            .tooltip(if picked {
+                                "Settings"
+                            } else {
+                                "Back to workspace"
+                            })
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.settings_back(window, cx);
+                            })),
+                    )
+                    .child(
+                        div()
+                            .text_size(zz_ui::rems_from_px(15.0))
+                            .font_medium()
+                            .child(title),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .relative()
+                    .child(div().absolute().inset_0().flex().child(content)),
+            )
             .into_any_element()
     }
 
@@ -503,6 +594,7 @@ impl AppShell {
         narrow: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let phone = phone();
         match section {
             SettingsSection::Appearance => {
                 let items = appearance_page_items(ChromeColor::ALL, false, false)
@@ -523,13 +615,21 @@ impl AppShell {
                                 | AppearancePageItem::ShadowStrength
                         )
                     })
-                    .collect();
+                    .filter(|item| {
+                        shown(Setting::UiZoom, phone) || !matches!(item, AppearancePageItem::UiZoom)
+                    })
+                    .collect::<Vec<_>>();
+                let focus = items
+                    .iter()
+                    .map(|item| self.appearance_focus(*item, cx))
+                    .collect::<Vec<_>>();
                 let view = cx.entity();
                 return appearance_page(items, move |item, position, _, cx| {
                     view.update(cx, |this, cx| {
                         this.appearance_item(item, position, narrow, cx)
                     })
                 })
+                .row_focus(focus)
                 .into_any_element();
             }
             SettingsSection::Panes => {
@@ -552,17 +652,7 @@ impl AppShell {
                         })),
                     narrow,
                 );
-                let agent = with_control(
-                    SettingEntry::new("Agent panes", "Allow creating agent panes on this client."),
-                    Switch::new("settings-agent-enabled")
-                        .checked(self.preferences.agent_enabled)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.preferences.agent_enabled = !this.preferences.agent_enabled;
-                            this.preferences.save();
-                            cx.notify();
-                        })),
-                    narrow,
-                );
+                let agent = self.agent_panes_setting(narrow, cx);
                 return zz_ui::settings::panes_page(
                     zz_ui::settings::panes_preview::PanesPreview {
                         gaps: self.preferences.gaps,
@@ -644,6 +734,34 @@ impl AppShell {
             }
             SettingsSection::Terminal => return self.terminal_settings(narrow, cx),
             SettingsSection::Advanced => {
+                let text_size = shown(Setting::SystemTextSize, phone).then(|| {
+                    with_control(
+                        SettingEntry::new(
+                            "Match system text size",
+                            "Scale the interface with the iPadOS text size setting.",
+                        )
+                        .title_actions(reset_button(
+                            "settings-system-text-size-reset",
+                            self.preferences.system_text_size
+                                != Preferences::default().system_text_size,
+                            |this, _, _| {
+                                this.preferences.system_text_size =
+                                    Preferences::default().system_text_size;
+                            },
+                            cx,
+                        )),
+                        Switch::new("settings-system-text-size")
+                            .checked(self.preferences.system_text_size)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.preferences.system_text_size =
+                                    !this.preferences.system_text_size;
+                                this.preferences.save();
+                                this.preferences.apply(&this.connection, window, cx);
+                                cx.notify();
+                            })),
+                        narrow,
+                    )
+                });
                 return settings_scroll_column("settings-page")
                     .child(settings_heading(
                         section.title(),
@@ -653,6 +771,15 @@ impl AppShell {
                     .child(
                         SettingsStack::titled("Command palette")
                             .children(self.palette_settings(narrow, cx)),
+                    )
+                    .when(
+                        !shown(Setting::Section(SettingsSection::Panes), phone),
+                        |page| {
+                            page.child(
+                                SettingsStack::titled("Panes")
+                                    .child(self.agent_panes_setting(narrow, cx)),
+                            )
+                        },
                     )
                     .when(cfg!(target_os = "ios"), |page| {
                         page.child(
@@ -681,32 +808,7 @@ impl AppShell {
                                     })),
                                 narrow,
                             ))
-                            .child(with_control(
-                                SettingEntry::new(
-                                    "Match system text size",
-                                    "Scale the interface with the iPadOS text size setting.",
-                                )
-                                .title_actions(reset_button(
-                                    "settings-system-text-size-reset",
-                                    self.preferences.system_text_size
-                                        != Preferences::default().system_text_size,
-                                    |this, _, _| {
-                                        this.preferences.system_text_size =
-                                            Preferences::default().system_text_size;
-                                    },
-                                    cx,
-                                )),
-                                Switch::new("settings-system-text-size")
-                                    .checked(self.preferences.system_text_size)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.preferences.system_text_size =
-                                            !this.preferences.system_text_size;
-                                        this.preferences.save();
-                                        this.preferences.apply(&this.connection, window, cx);
-                                        cx.notify();
-                                    })),
-                                narrow,
-                            ))
+                            .children(text_size)
                             .child(with_control(
                                 SettingEntry::new(
                                     "Keep the screen awake",
@@ -744,6 +846,28 @@ impl AppShell {
         self.hosts_page("settings-page", section.title(), narrow, cx)
     }
 
+    fn appearance_focus(
+        &self,
+        item: AppearancePageItem<ChromeColor>,
+        cx: &App,
+    ) -> Option<FocusHandle> {
+        let controls = &self.settings_controls;
+        let input = match item {
+            AppearancePageItem::UiZoom => &controls.zoom,
+            AppearancePageItem::ChromeContrast => &controls.contrast,
+            AppearancePageItem::WidgetCornerRadius => &controls.radius,
+            AppearancePageItem::ShadowStrength => &controls.shadow_strength,
+            AppearancePageItem::ChromeColor(color) => {
+                let index = ChromeColor::ALL
+                    .iter()
+                    .position(|candidate| *candidate == color)?;
+                return Some(controls.colors.get(index)?.focus_handle(cx));
+            }
+            _ => return None,
+        };
+        Some(input.focus_handle(cx))
+    }
+
     fn appearance_item(
         &self,
         item: AppearancePageItem<ChromeColor>,
@@ -761,32 +885,29 @@ impl AppShell {
                     self.preferences.preset(ThemeMode::Dark),
                     ThemeMode::Dark,
                 );
-                let tiles =
-                    div()
-                        .flex()
-                        .flex_none()
-                        .gap(px(8.0))
-                        .children(ThemeModeSetting::ALL.map(|mode| {
-                            picker_tile(
-                                format!("settings-theme-{}", mode.as_str()).into(),
-                                mode.title(),
-                                theme_preview(
-                                    zz_ui::chrome_palette::pinned_theme_mode(mode),
-                                    &light,
-                                    &dark,
-                                    cx,
-                                ),
-                                self.preferences.theme_mode() == mode,
+                let tiles = div().flex().flex_none().flex_wrap().gap(px(8.0)).children(
+                    ThemeModeSetting::ALL.map(|mode| {
+                        picker_tile(
+                            format!("settings-theme-{}", mode.as_str()).into(),
+                            mode.title(),
+                            theme_preview(
+                                zz_ui::chrome_palette::pinned_theme_mode(mode),
+                                &light,
+                                &dark,
                                 cx,
-                            )
-                            .on_click(cx.listener(
-                                move |this, _, window, cx| {
-                                    this.preferences.mode = Some(mode.as_str().into());
-                                    this.preferences.save();
-                                    this.preferences.apply(&this.connection, window, cx);
-                                },
-                            ))
-                        }));
+                            ),
+                            self.preferences.theme_mode() == mode,
+                            cx,
+                        )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.preferences.mode = Some(mode.as_str().into());
+                                this.preferences.save();
+                                this.preferences.apply(&this.connection, window, cx);
+                            },
+                        ))
+                    }),
+                );
                 with_control(
                     SettingEntry::new("Theme", "Follow the system light/dark setting, or pin one.")
                         .title_actions(reset_button(
@@ -1017,6 +1138,20 @@ impl AppShell {
         entry.position(position).into_any_element()
     }
 
+    fn agent_panes_setting(&self, narrow: bool, cx: &mut Context<Self>) -> SettingEntry {
+        with_control(
+            SettingEntry::new("Agent panes", "Allow creating agent panes on this client."),
+            Switch::new("settings-agent-enabled")
+                .checked(self.preferences.agent_enabled)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.preferences.agent_enabled = !this.preferences.agent_enabled;
+                    this.preferences.save();
+                    cx.notify();
+                })),
+            narrow,
+        )
+    }
+
     fn pane_setting(
         &self,
         control: PaneControl,
@@ -1047,7 +1182,7 @@ impl AppShell {
                             1.0
                         };
                     this.settings_controls.panes[control as usize].update(cx, |input, cx| {
-                        input.set_value((default * scale).to_string(), window, cx);
+                        input.set_value(number_text(default * scale), window, cx);
                     });
                     this.preferences.save();
                     this.preferences.apply(&this.connection, window, cx);
@@ -1312,6 +1447,12 @@ fn status_field<'a>(preferences: &'a mut Preferences, id: &str) -> &'a mut bool 
         "badges" => &mut preferences.status_badges,
         _ => &mut preferences.status_agents,
     }
+}
+
+fn number_text(value: f32) -> String {
+    let text = format!("{value:.2}");
+    let text = text.trim_end_matches('0').trim_end_matches('.');
+    if text == "-0" { "0" } else { text }.to_owned()
 }
 
 fn number_control(input: &Entity<InputState>, cx: &App) -> gpui::Div {
@@ -1605,8 +1746,66 @@ impl PaneControl {
 
 #[cfg(test)]
 mod tests {
-    use super::sample_terminal_viewport;
+    use super::{
+        Preferences, SECTIONS, Setting, interface_zoom, number_text, sample_terminal_viewport,
+        shown,
+    };
     use zz_terminal::{ATTR_BOLD, ATTR_ITALIC, CursorStyle, TerminalAppearance};
+    use zz_ui::settings::SettingsSection;
+
+    #[test]
+    fn phone_hides_pane_status_bar_and_zoom_settings_only() {
+        let visible = |phone| {
+            SECTIONS
+                .into_iter()
+                .filter(|section| shown(Setting::Section(*section), phone))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(visible(false), SECTIONS);
+        assert_eq!(
+            visible(true),
+            [
+                SettingsSection::Appearance,
+                SettingsSection::Terminal,
+                SettingsSection::Hosts,
+                SettingsSection::Advanced,
+                SettingsSection::About,
+            ]
+        );
+        for setting in [Setting::UiZoom, Setting::SystemTextSize] {
+            assert!(shown(setting, false));
+            assert!(!shown(setting, true));
+        }
+    }
+
+    #[test]
+    fn phone_scale_follows_system_text_size_and_ignores_stored_zoom() {
+        let zoomed = Preferences {
+            zoom: 1.5,
+            system_text_size: false,
+            ..Preferences::default()
+        };
+        assert_eq!(interface_zoom(&zoomed, 1.12, false), 1.5);
+        assert_eq!(interface_zoom(&zoomed, 1.12, true), 1.12);
+        assert_eq!(interface_zoom(&zoomed, 0.82, true), 0.82);
+        assert_eq!(interface_zoom(&zoomed, 1.9, true), 1.35);
+        let following = Preferences {
+            zoom: 1.5,
+            ..Preferences::default()
+        };
+        assert!((interface_zoom(&following, 1.2, false) - 1.8).abs() < 1e-6);
+    }
+
+    #[test]
+    fn number_fields_hide_float_noise() {
+        assert_eq!(number_text(1.05_f32 * 100.0), "105");
+        assert_eq!(number_text(0.85_f32 * 100.0), "85");
+        assert_eq!(number_text(13.5), "13.5");
+        assert_eq!(number_text(0.7), "0.7");
+        assert_eq!(number_text(0.05), "0.05");
+        assert_eq!(number_text(0.0), "0");
+        assert_eq!(number_text(-0.001), "0");
+    }
 
     #[test]
     fn terminal_preview_uses_host_palette_styles_and_cursor() {

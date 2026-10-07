@@ -3,6 +3,8 @@ pub mod appearance;
 pub mod panes_preview;
 pub mod status_bar_preview;
 
+use std::rc::Rc;
+
 use crate::Colorize as _;
 use crate::{
     ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _,
@@ -14,9 +16,9 @@ use crate::{
     widget::icon::Icon,
 };
 use gpui::{
-    AnyElement, App, ElementId, IntoElement, ListAlignment, ListSizingBehavior, ListState,
-    ParentElement, RenderOnce, SharedString, Styled as _, Window, div, list, prelude::*, px,
-    relative,
+    AnyElement, App, Bounds, ElementId, FocusHandle, IntoElement, ListAlignment,
+    ListSizingBehavior, ListState, ParentElement, Pixels, RenderOnce, ScrollHandle, SharedString,
+    Styled as _, Window, div, list, prelude::*, px, relative,
 };
 
 /// A page in the settings sidebar, ordered by the labeled groups the sidebar
@@ -185,6 +187,41 @@ pub fn settings_navigation_group_label(group: SettingsNavigationGroup, cx: &App)
         .child(group.title())
 }
 
+/// The settings root on a narrow screen: one row per section, grouped like
+/// the sidebar navigation. Tapping a row hands its section to `on_pick`.
+pub fn settings_section_index(
+    sections: &[SettingsSection],
+    on_pick: impl Fn(SettingsSection, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> SettingsScrollColumn {
+    let on_pick = Rc::new(on_pick);
+    let mut groups: Vec<(SettingsNavigationGroup, Vec<SettingsSection>)> = Vec::new();
+    for &section in sections {
+        let group = section.navigation_group();
+        match groups.last_mut() {
+            Some((last, members)) if *last == group => members.push(section),
+            _ => groups.push((group, vec![section])),
+        }
+    }
+    let chevron = cx.theme().foreground.muted();
+    settings_scroll_column("settings-index").children(groups.into_iter().map(|(group, members)| {
+        SettingsStack::titled(group.title()).children(members.into_iter().map(|section| {
+            let on_pick = Rc::clone(&on_pick);
+            SettingEntry::new(section.title(), "")
+                .title_icon(section.icon())
+                .control(
+                    Icon::new(crate::IconName::ChevronRight)
+                        .size(crate::rems_from_px(14.0))
+                        .text_color(chevron),
+                )
+                .on_click(
+                    ElementId::Name(format!("settings-index-{}", section.title()).into()),
+                    move |_, window, cx| on_pick(section, window, cx),
+                )
+        }))
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,13 +248,107 @@ mod tests {
                     move |index, _, _| {
                         rendered.fetch_add(1, Ordering::Relaxed);
                         div()
-                            .h(px(50.0))
+                            .h(px(120.0))
                             .flex_none()
                             .debug_selector(move || format!("virtual-settings-row-{index}"))
                             .into_any_element()
                     },
                 ))
         }
+    }
+
+    struct FocusedRowTest {
+        focus: FocusHandle,
+    }
+
+    impl Render for FocusedRowTest {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let focus = self.focus.clone();
+            div().flex().w(px(400.0)).h(px(220.0)).child(
+                settings_virtual_column("focused-row-test", 100, move |index, _, _| {
+                    div()
+                        .h(px(120.0))
+                        .flex_none()
+                        .when(index == 99, |row| row.track_focus(&focus))
+                        .debug_selector(move || format!("focused-row-{index}"))
+                        .into_any_element()
+                })
+                .row_focus((0..100).map(|index| (index == 99).then(|| self.focus.clone()))),
+            )
+        }
+    }
+
+    struct RevealTest {
+        input: gpui::Entity<crate::input::InputState>,
+        virtual_rows: bool,
+    }
+
+    impl Render for RevealTest {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let input = self.input.clone();
+            let focus = gpui::Focusable::focus_handle(self.input.read(cx), cx);
+            let row = move |index: usize| {
+                if index == 8 {
+                    div()
+                        .flex_none()
+                        .debug_selector(|| "reveal-field".to_owned())
+                        .child(crate::input::Input::new(&input))
+                } else {
+                    div().h(px(50.0)).flex_none()
+                }
+            };
+            let page = if self.virtual_rows {
+                settings_virtual_column("reveal-virtual", 10, move |index, _, _| {
+                    row(index).into_any_element()
+                })
+                .row_focus((0..10).map(|index| (index == 8).then(|| focus.clone())))
+                .into_any_element()
+            } else {
+                settings_scroll_column("reveal-scroll")
+                    .children((0..10).map(row))
+                    .into_any_element()
+            };
+            div().flex().w(px(400.0)).h(px(220.0)).child(page)
+        }
+    }
+
+    fn reveal_field(cx: &mut TestAppContext, virtual_rows: bool) -> Bounds<Pixels> {
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|window, cx| RevealTest {
+            input: cx.new(|cx| crate::input::InputState::new(window, cx)),
+            virtual_rows,
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.update(|window, cx| {
+            window.set_a11y_forced(true);
+            _ = window.draw(cx);
+        });
+        let hidden = cx.debug_bounds("reveal-field");
+        assert!(hidden.is_none_or(|field| field.top() >= px(220.0)));
+        cx.update(|window, cx| {
+            let focus = gpui::Focusable::focus_handle(view.read(cx).input.read(cx), cx);
+            focus.focus(window, cx);
+        });
+        for _ in 0..3 {
+            cx.run_until_parked();
+            cx.update(|window, cx| {
+                _ = window.draw(cx);
+            });
+        }
+        cx.debug_bounds("reveal-field")
+            .expect("the focused field paints")
+    }
+
+    #[gpui::test]
+    fn a_focused_field_scrolls_into_a_list_page(cx: &mut TestAppContext) {
+        let field = reveal_field(cx, true);
+        assert!(field.top() >= px(0.0) && field.bottom() <= px(220.0));
+    }
+
+    #[gpui::test]
+    fn a_focused_field_scrolls_into_a_scroll_page(cx: &mut TestAppContext) {
+        let field = reveal_field(cx, false);
+        assert!(field.top() >= px(0.0) && field.bottom() <= px(220.0));
     }
 
     struct SettingsColumnGutterTest;
@@ -405,7 +536,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn virtual_column_only_constructs_rows_near_the_viewport(cx: &mut TestAppContext) {
+    fn one_long_scroll_reaches_the_last_row(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let rendered = Arc::new(AtomicUsize::new(0));
         let rendered_for_view = Arc::clone(&rendered);
@@ -420,10 +551,79 @@ mod tests {
 
         assert!(cx.debug_bounds("virtual-settings-row-0").is_some());
         assert!(cx.debug_bounds("virtual-settings-row-99").is_none());
-        assert!(
-            rendered.load(Ordering::Relaxed) < 20,
-            "a short viewport must not construct the full settings page"
-        );
+
+        cx.simulate_event(gpui::ScrollWheelEvent {
+            position: gpui::point(px(100.0), px(100.0)),
+            delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.0), px(-100_000.0))),
+            ..Default::default()
+        });
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        assert!(cx.debug_bounds("virtual-settings-row-99").is_some());
+        assert!(cx.debug_bounds("virtual-settings-row-0").is_none());
+    }
+
+    #[gpui::test]
+    fn a_focused_row_keeps_painting_out_of_view(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|_, cx| FocusedRowTest {
+            focus: cx.focus_handle(),
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.update(|window, cx| {
+            view.read(cx).focus.clone().focus(window, cx);
+            _ = window.draw(cx);
+        });
+
+        assert!(cx.debug_bounds("focused-row-0").is_some());
+        assert!(cx.debug_bounds("focused-row-99").is_some());
+        assert!(cx.debug_bounds("focused-row-98").is_none());
+
+        cx.update(|window, cx| {
+            window.blur(cx);
+            _ = window.draw(cx);
+        });
+        assert!(cx.debug_bounds("focused-row-99").is_none());
+    }
+
+    struct InsetPageTest;
+
+    impl Render for InsetPageTest {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().flex().w(px(400.0)).h(px(220.0)).child(
+                settings_scroll_column("inset-test").children((0..10).map(|index| {
+                    div()
+                        .h(px(50.0))
+                        .flex_none()
+                        .debug_selector(move || format!("inset-row-{index}"))
+                })),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn the_bottom_inset_keeps_the_last_row_clear(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::init(cx);
+            cx.set_global(SettingsBottomInset(px(40.0)));
+        });
+        let (_, cx) = cx.add_window_view(|_, _| InsetPageTest);
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        cx.simulate_event(gpui::ScrollWheelEvent {
+            position: gpui::point(px(100.0), px(100.0)),
+            delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.0), px(-10_000.0))),
+            ..Default::default()
+        });
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        let last = cx.debug_bounds("inset-row-9").expect("last row");
+        assert!(last.bottom() <= px(220.0 - 40.0));
     }
 
     #[gpui::test]
@@ -479,6 +679,20 @@ pub fn settings_page_description(section: SettingsSection, cx: &App) -> gpui::Di
         )
 }
 
+/// Room a host keeps clear below the last row of every settings page, such as
+/// an iOS home indicator the page draws under. Unset means none.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct SettingsBottomInset(pub Pixels);
+
+impl gpui::Global for SettingsBottomInset {}
+
+impl SettingsBottomInset {
+    #[must_use]
+    pub fn get(cx: &App) -> Pixels {
+        cx.try_global::<Self>().map_or(px(0.0), |inset| inset.0)
+    }
+}
+
 /// A settings page: a scrolling column of [`SettingsStack`]s, with the shared
 /// scrollbar overlaid. `id` keys the scroll handle, so each page keeps its own
 /// position.
@@ -517,6 +731,16 @@ impl RenderOnce for SettingsScrollColumn {
             .relative()
             .child(
                 div()
+                    .on_children_prepainted({
+                        let handle = handle.clone();
+                        move |_, window, _| {
+                            if let Some(target) = window.take_autoscroll()
+                                && reveal_in_scroll(&handle, target)
+                            {
+                                window.request_animation_frame();
+                            }
+                        }
+                    })
                     .id(self.id)
                     .flex()
                     .flex_col()
@@ -529,20 +753,49 @@ impl RenderOnce for SettingsScrollColumn {
                             .flex_none()
                             .gap(px(18.0))
                             .children(self.children),
-                    ),
+                    )
+                    .child(div().flex_none().h(SettingsBottomInset::get(cx))),
             )
             .vertical_scrollbar(&handle)
     }
 }
 
-const SETTINGS_LIST_ITEM_HEIGHT_HINT: f32 = 82.0;
+fn reveal_shift(viewport: Bounds<Pixels>, target: Bounds<Pixels>) -> Option<Pixels> {
+    if target.right() <= viewport.left() || target.left() >= viewport.right() {
+        return None;
+    }
+    if target.bottom() > viewport.bottom() {
+        Some((target.bottom() - viewport.bottom()).min(target.top() - viewport.top()))
+    } else if target.top() < viewport.top() {
+        Some(target.top() - viewport.top())
+    } else {
+        None
+    }
+}
+
+fn reveal_in_scroll(handle: &ScrollHandle, target: Bounds<Pixels>) -> bool {
+    let Some(shift) = reveal_shift(handle.bounds(), target) else {
+        return false;
+    };
+    let mut offset = handle.offset();
+    let floor = -handle.max_offset().y.max(px(0.0));
+    let next = (offset.y - shift).clamp(floor, px(0.0));
+    if next == offset.y {
+        return false;
+    }
+    offset.y = next;
+    handle.set_offset(offset);
+    true
+}
+
 const SETTINGS_LIST_OVERDRAW: f32 = 24.0;
 
 type SettingsItemRenderer = Box<dyn FnMut(usize, &mut Window, &mut App) -> AnyElement + 'static>;
 
-/// A settings page that only constructs rows in or around the viewport. Rows
-/// keep [`settings_scroll_column`]'s bounded content width, but each owns the
-/// space beneath it, so a glued run of entries stays glued.
+/// A settings page that paints only rows in or around the viewport. Every row
+/// is measured once per width, so a fling reaches the real end of the page.
+/// Rows keep [`settings_scroll_column`]'s bounded content width, but each owns
+/// the space beneath it, so a glued run of entries stays glued.
 #[must_use]
 pub fn settings_virtual_column(
     id: &'static str,
@@ -553,6 +806,7 @@ pub fn settings_virtual_column(
         id,
         item_count,
         render_item: Box::new(render_item),
+        row_focus: Vec::new(),
     }
 }
 
@@ -561,26 +815,40 @@ pub struct SettingsVirtualColumn {
     id: &'static str,
     item_count: usize,
     render_item: SettingsItemRenderer,
+    row_focus: Vec<Option<FocusHandle>>,
+}
+
+impl SettingsVirtualColumn {
+    /// The focus handle of each row's text field. A row whose field holds focus
+    /// keeps painting after it leaves the viewport, so scrolling or a soft
+    /// keyboard covering it does not take its input away.
+    #[must_use]
+    pub fn row_focus(mut self, handles: impl IntoIterator<Item = Option<FocusHandle>>) -> Self {
+        self.row_focus = handles.into_iter().collect();
+        self
+    }
 }
 
 impl RenderOnce for SettingsVirtualColumn {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let state_key = ElementId::Name(format!("{}-list-state", self.id).into());
+        let mut focus = self.row_focus;
+        focus.resize(self.item_count, None);
         let list_state = window
             .use_keyed_state(state_key, cx, |_, _| {
-                ListState::new(
-                    self.item_count,
-                    ListAlignment::Top,
-                    px(SETTINGS_LIST_OVERDRAW),
+                (
+                    ListState::new(0, ListAlignment::Top, px(SETTINGS_LIST_OVERDRAW)).measure_all(),
+                    Vec::new(),
                 )
-                .with_uniform_item_height(px(SETTINGS_LIST_ITEM_HEIGHT_HINT))
             })
-            .read(cx)
-            .clone();
-        if list_state.item_count() != self.item_count {
-            list_state
-                .reset_with_uniform_height(self.item_count, px(SETTINGS_LIST_ITEM_HEIGHT_HINT));
-        }
+            .update(cx, |(list_state, applied), _| {
+                if *applied != focus {
+                    list_state.reset(0);
+                    list_state.splice_focusable(0..0, focus.iter().cloned());
+                    *applied = focus;
+                }
+                list_state.clone()
+            });
 
         let mut render_item = self.render_item;
         let rows = list(list_state.clone(), move |index, window, cx| {
@@ -597,7 +865,8 @@ impl RenderOnce for SettingsVirtualColumn {
         })
         .with_sizing_behavior(ListSizingBehavior::Auto)
         .size_full()
-        .py(px(SETTINGS_PAGE_PADDING));
+        .pt(px(SETTINGS_PAGE_PADDING))
+        .pb(px(SETTINGS_PAGE_PADDING) + SettingsBottomInset::get(cx));
 
         div()
             .id(self.id)
@@ -792,7 +1061,10 @@ pub struct SettingEntry {
     disabled: bool,
     position: StackPosition,
     children: Vec<AnyElement>,
+    on_click: Option<(ElementId, EntryClick)>,
 }
+
+type EntryClick = Rc<dyn Fn(&gpui::ClickEvent, &mut gpui::Window, &mut App)>;
 
 impl SettingEntry {
     pub fn new(title: impl Into<SharedString>, description: impl Into<SharedString>) -> Self {
@@ -805,7 +1077,19 @@ impl SettingEntry {
             disabled: false,
             position: StackPosition::Middle,
             children: Vec::new(),
+            on_click: None,
         }
+    }
+
+    /// Make the whole row a button, for a row that opens something.
+    #[must_use]
+    pub fn on_click(
+        mut self,
+        id: impl Into<ElementId>,
+        handler: impl Fn(&gpui::ClickEvent, &mut gpui::Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_click = Some((id.into(), Rc::new(handler)));
+        self
     }
 
     /// A state glyph drawn before the title; see [`SettingCopy::title_icon`].
@@ -912,7 +1196,7 @@ impl RenderOnce for SettingEntry {
             })
             .child(body);
 
-        div()
+        let row = div()
             .relative()
             .flex()
             .flex_col()
@@ -960,7 +1244,15 @@ impl RenderOnce for SettingEntry {
                         ),
                 )
             })
-            .child(surface)
+            .child(surface);
+        match self.on_click {
+            Some((id, handler)) => row
+                .id(id)
+                .cursor_pointer()
+                .on_click(move |event, window, cx| handler(event, window, cx))
+                .into_any_element(),
+            None => row.into_any_element(),
+        }
     }
 }
 
@@ -1017,12 +1309,14 @@ impl RenderOnce for SettingCopy {
                     .child(div().text_size(crate::rems_from_px(13.0)).child(self.title))
                     .when_some(self.title_actions, gpui::ParentElement::child),
             )
-            .child(
-                div()
-                    .text_size(crate::rems_from_px(11.0))
-                    .text_color(cx.theme().foreground.muted())
-                    .child(self.description),
-            )
+            .when(!self.description.is_empty(), |this| {
+                this.child(
+                    div()
+                        .text_size(crate::rems_from_px(11.0))
+                        .text_color(cx.theme().foreground.muted())
+                        .child(self.description),
+                )
+            })
     }
 }
 
@@ -1043,11 +1337,13 @@ pub fn settings_reset_button(
     tooltip: impl Into<SharedString>,
     enabled: bool,
 ) -> Button {
+    let slop = crate::touch::control_slop(crate::Size::XSmall);
     Button::new(id)
         .xsmall()
         .compact()
         .ghost()
         .flat()
+        .hit_slop(slop, slop)
         .icon(crate::IconName::Undo2)
         .tooltip(tooltip)
         .disabled(!enabled)

@@ -219,11 +219,24 @@ impl RenderOnce for Switch {
                     self.on_click.clone().filter(|_| !self.disabled),
                     |this, on_click| {
                         let toggle_state = toggle_state.clone();
-                        this.on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                            cx.stop_propagation();
-                            let () = toggle_state.update(cx, |this, _| *this = checked);
-                            on_click(&!checked, window, cx);
-                        })
+                        let toggle =
+                            move |_: &gpui::MouseDownEvent, window: &mut Window, cx: &mut App| {
+                                cx.stop_propagation();
+                                let () = toggle_state.update(cx, |this, _| *this = checked);
+                                on_click(&!checked, window, cx);
+                            };
+                        let coarse = crate::touch::CoarsePointer::get(cx);
+                        this.on_mouse_down(MouseButton::Left, toggle.clone())
+                            .when(coarse, |this| {
+                                this.child(
+                                    crate::touch::hit_area(
+                                        "touch",
+                                        (crate::touch::TOUCH_TARGET - f32::from(m.track_w)) / 2.0,
+                                        (crate::touch::TOUCH_TARGET - f32::from(m.track_h)) / 2.0,
+                                    )
+                                    .on_mouse_down(MouseButton::Left, toggle),
+                                )
+                            })
                     },
                 ),
         )

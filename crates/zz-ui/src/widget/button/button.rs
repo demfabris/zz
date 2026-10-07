@@ -178,6 +178,7 @@ pub struct Button {
 
     tab_index: isize,
     tab_stop: bool,
+    hit_slop: Option<(f32, f32)>,
 }
 
 impl From<Button> for AnyElement {
@@ -213,6 +214,7 @@ impl Button {
             dropdown_caret: false,
             tab_index: 0,
             tab_stop: true,
+            hit_slop: None,
         }
     }
 
@@ -298,6 +300,12 @@ impl Button {
     /// Defaults to true.
     pub fn tab_stop(mut self, tab_stop: bool) -> Self {
         self.tab_stop = tab_stop;
+        self
+    }
+
+    #[must_use]
+    pub fn hit_slop(mut self, horizontal: f32, vertical: f32) -> Self {
+        self.hit_slop = Some((horizontal, vertical));
         self
     }
 
@@ -489,6 +497,29 @@ impl RenderOnce for Button {
             ButtonRounded::Medium => cx.theme().control_radius(),
             ButtonRounded::Size(px) => px,
         };
+        let slop = self
+            .hit_slop
+            .filter(|_| crate::touch::CoarsePointer::get(cx));
+        let on_mouse_down = move |_: &gpui::MouseDownEvent, window: &mut Window, cx: &mut App| {
+            if is_disabled {
+                cx.stop_propagation();
+                return;
+            }
+
+            window.prevent_default();
+
+            crate::text::suppress_text_selection(cx);
+        };
+        let on_click = self.on_click.map(|on_click| {
+            move |event: &ClickEvent, window: &mut Window, cx: &mut App| {
+                if !clickable {
+                    cx.stop_propagation();
+                    return;
+                }
+
+                on_click(event, window, cx);
+            }
+        });
 
         let element = self
             .base
@@ -600,25 +631,20 @@ impl RenderOnce for Button {
                     .shadow_none()
             })
             .refine_style(&self.style)
-            .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                if is_disabled {
-                    cx.stop_propagation();
-                    return;
-                }
-
-                window.prevent_default();
-
-                crate::text::suppress_text_selection(cx);
-            })
-            .when_some(self.on_click, |this, on_click| {
-                this.on_click(move |event, window, cx| {
-                    if !clickable {
-                        cx.stop_propagation();
-                        return;
-                    }
-
-                    on_click(event, window, cx);
-                })
+            .map(|this| match slop {
+                None => this
+                    .on_mouse_down(MouseButton::Left, on_mouse_down)
+                    .when_some(on_click, |this, on_click| this.on_click(on_click)),
+                Some((x, y)) => this.child(
+                    crate::touch::hit_area("touch", x, y)
+                        .on_mouse_down(MouseButton::Left, on_mouse_down)
+                        .when_some(on_click, |this, on_click| {
+                            this.on_click(move |event, window, cx| {
+                                on_click(event, window, cx);
+                                cx.stop_propagation();
+                            })
+                        }),
+                ),
             })
             .when_some(self.on_hover.filter(|_| hoverable), |this, on_hover| {
                 this.on_hover(move |hovered, window, cx| {

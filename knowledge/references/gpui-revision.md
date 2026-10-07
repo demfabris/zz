@@ -4,7 +4,7 @@ title: GPUI revision pin
 description: Where the demfabris/gpui revision zz builds against is pinned, how to move it, and what zz's GPUI changes do. gpui-component is not a dependency.
 resource: Cargo.toml
 tags: [gpui, pin, reference, git-dependency]
-timestamp: 2026-10-05T00:00:00Z
+timestamp: 2026-10-06T00:00:00Z
 ---
 
 # Overview
@@ -76,6 +76,27 @@ rectangle with two erf pairs instead of the four-sample corner loop. zz's pane f
 such a shadow: zz's GPU fragment time on a 2672x1482pt window fell from 237 to 144 ms/s. The
 ignored test `bench_pane_glow` times the glow offscreen; see
 [the surface cost research](/research/2026-10-06-surface-cost.md).
+
+Five fixes from building the iPhone client (`67e9cbc` to `01d7c9a`):
+
+- `Window::transact` rolls back accessibility nodes, focus, and active descendant along with the
+  rest of prepaint. A list honoring an autoscroll prepaints its rows twice, and iOS always builds
+  the tree, so debug builds panicked with "Duplicate a11y node id". zz's settings column no longer
+  takes the autoscroll request from its rows to dodge it.
+- `ListState::bounds_for_item` counts the list's top padding, as `scroll_to_reveal_item` does.
+- `gpui_wgpu` uploads instance data through a `wgpu::util::StagingBelt` with one write for all six
+  primitive kinds, and binds the whole instance buffer once, indexing kinds by `first_instance`.
+  Before, every primitive kind made its own `queue.write_buffer`, and wgpu made a new staging buffer for each
+  one. The ignored `bench_swipe_frames` (a 1179x2556 page swipe, about 650 KB of instances, Metal
+  on an M4 Max) went from 102-112 to 37-40 us of CPU per frame.
+- `PlatformWindow::keeps_presenting_after_input` (default true) lets a platform skip re-presenting
+  the last frame for a second after fast input, which Zed does to keep ProMotion Macs from
+  lowering their refresh rate. The iOS window returns false: its display link asks for its rate
+  itself, and each present encoded the whole scene again.
+- `Window::end_touch_momentum` ends the touch fling a scroll listener swallowed. The next tick
+  closes the stream with a zero-delta `Ended`. The pager calls it after a release it handled, and
+  `coast_guard` calls it for sheets and the swipe back, so the display link can pause instead of
+  ticking through a 2 to 3 s fling.
 
 # zz changes to GPUI
 

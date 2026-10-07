@@ -3,12 +3,12 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root"
-family="${1:-iPad}"
+family="${1:-iPhone}"
 mode="${2:-run}"
 demo="${ZZ_GPUI_DEMO:-app}"
 [[ "$(uname -s)" == Darwin ]] || { echo "iOS GPUI requires macOS" >&2; exit 2; }
 [[ "$family" == iPhone || "$family" == iPad ]] || { echo "expected iPhone or iPad" >&2; exit 2; }
-[[ "$mode" == run || "$mode" == build || "$mode" == device || "$mode" == testflight ]] || { echo "expected run, build, device, or testflight" >&2; exit 2; }
+[[ "$mode" == run || "$mode" == build || "$mode" == device || "$mode" == bench || "$mode" == testflight ]] || { echo "expected run, build, device, bench, or testflight" >&2; exit 2; }
 [[ "$demo" == app || "$demo" == terminal ]] || { echo "ZZ_GPUI_DEMO must be app or terminal" >&2; exit 2; }
 [[ "$(zig version)" == 0.16.0 ]] || { echo "Zig 0.16.0 is required" >&2; exit 2; }
 
@@ -128,7 +128,7 @@ if [[ "$mode" == testflight ]]; then
     exit 0
 fi
 
-if [[ "$mode" == device ]]; then
+if [[ "$mode" == device || "$mode" == bench ]]; then
     bundle_id=dev.zz.gpui-poc
     devices_json="$(mktemp)"
     trap 'rm -f "$devices_json"' EXIT
@@ -173,11 +173,12 @@ PY
     team="$(security cms -D -i "$profile" | plutil -extract TeamIdentifier.0 raw -)"
     endpoint="${ZZ_GPUI_ENDPOINT:-ssh://${USER}@$(scutil --get LocalHostName).local}"
     dev_build="${ZZ_DEV_BUILD-1}"
-    ZZ_DEV_BUILD="$dev_build" IPHONEOS_DEPLOYMENT_TARGET=26.0 cargo build --locked --release -p zz-gpui-ios "${build_target[@]}" --target aarch64-apple-ios
+    cargo_profile="${ZZ_GPUI_CARGO_PROFILE:-release}"
+    ZZ_DEV_BUILD="$dev_build" IPHONEOS_DEPLOYMENT_TARGET=26.0 cargo build --locked --profile "$cargo_profile" -p zz-gpui-ios "${build_target[@]}" --target aarch64-apple-ios
     app="$repo_root/target/ios-gpui-device/ZZ GPUI.app"
     rm -rf "$app"
     mkdir -p "$app"
-    cp "$repo_root/target/aarch64-apple-ios/release/$binary" "$app/ZZGPUI"
+    cp "$repo_root/target/aarch64-apple-ios/$cargo_profile/$binary" "$app/ZZGPUI"
     cp "$repo_root/clients/ios-gpui/Info.plist" "$app/Info.plist"
     plutil -replace CFBundleSupportedPlatforms -json '["iPhoneOS"]' "$app/Info.plist"
     compile_icon "$app" iphoneos zz-dev
@@ -186,10 +187,12 @@ PY
     write_entitlements "$entitlements" "$team" "$bundle_id" 1
     codesign --force --timestamp=none --sign "$identity" --entitlements "$entitlements" "$app"
     [[ "${3:-}" == --build-only ]] && exit 0
+    [[ "$mode" == bench ]] && exec "$repo_root/scripts/ios-bench.sh" "$udid" "$app" "$endpoint"
     xcrun devicectl device install app --device "$udid" "$app"
+    launch_env="$(ZZ_GPUI_ENDPOINT="$endpoint" python3 -c 'import json, os; print(json.dumps({key: os.environ[key] for key in ("ZZ_GPUI_ENDPOINT", "ZZ_GPUI_SESSION", "ZZ_GPUI_FRAME_LOG", "ZZ_GPUI_BENCH", "GPUI_FRAME_STATS") if os.environ.get(key)}))')"
     echo "launching on $udid with endpoint $endpoint"
     exec xcrun devicectl device process launch --device "$udid" --terminate-existing --console \
-        --environment-variables "{\"ZZ_GPUI_ENDPOINT\": \"$endpoint\"}" "$bundle_id"
+        --environment-variables "$launch_env" "$bundle_id"
 fi
 
 IPHONEOS_DEPLOYMENT_TARGET=26.0 cargo build --locked -p zz-gpui-ios "${build_target[@]}" --target aarch64-apple-ios-sim
@@ -204,7 +207,7 @@ codesign --force --sign - "$app"
 endpoint="${ZZ_GPUI_ENDPOINT:-${ZZ_DEV_SOCKET:-${ZZ_SOCKET:-}}}"
 if [[ -z "$endpoint" ]]; then
     darwin_tmp="$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || true)"
-    for candidate in "${XDG_RUNTIME_DIR:-/tmp}/zz-dev/default.sock" "${TMPDIR:-/tmp}/zz-dev-${USER:-user}/default.sock" "${darwin_tmp%/}/zz-dev-${USER:-user}/default.sock" "/tmp/zz-dev-${USER:-user}/default.sock"; do
+    for candidate in "${ZZ_IOS_RIG_SOCKET:-/tmp/zzios-$(basename "$repo_root").sock}" "${XDG_RUNTIME_DIR:-/tmp}/zz-dev/default.sock" "${TMPDIR:-/tmp}/zz-dev-${USER:-user}/default.sock" "${darwin_tmp%/}/zz-dev-${USER:-user}/default.sock" "/tmp/zz-dev-${USER:-user}/default.sock"; do
         if [[ -S "$candidate" ]] && python3 - "$candidate" <<'PY'
 import socket, sys
 
@@ -218,13 +221,16 @@ PY
         then endpoint="$candidate"; break; fi
     done
 fi
-unset SIMCTL_CHILD_ZZ_GPUI_ENDPOINT SIMCTL_CHILD_ZZ_GPUI_SESSION
+unset SIMCTL_CHILD_ZZ_GPUI_ENDPOINT
 if [[ -n "$endpoint" ]]; then
     export SIMCTL_CHILD_ZZ_GPUI_ENDPOINT="$endpoint"
 fi
-if [[ -n "${ZZ_GPUI_SESSION:-}" ]]; then
-    export SIMCTL_CHILD_ZZ_GPUI_SESSION="$ZZ_GPUI_SESSION"
-fi
+for key in ZZ_GPUI_SESSION ZZ_GPUI_FRAME_LOG ZZ_GPUI_BENCH GPUI_FRAME_STATS; do
+    unset "SIMCTL_CHILD_$key"
+    if [[ -n "${!key:-}" ]]; then
+        export "SIMCTL_CHILD_$key=${!key}"
+    fi
+done
 
 udid="${ZZ_GPUI_SIMULATOR:-}"
 if [[ -z "$udid" ]]; then

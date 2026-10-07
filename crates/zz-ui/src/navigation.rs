@@ -5,9 +5,10 @@ pub mod tree;
 use crate::{
     ActiveTheme as _, Colorize as _, Disableable as _, Icon, IconName, MACOS_TRAFFIC_LIGHT_INSET,
     MACOS_TRAFFIC_LIGHT_SPAN, StyledExt as _, TITLE_BAR_HEIGHT, UiZoom,
-    button::{Button, ButtonVariants as _},
+    button::{Button, ButtonVariants as _, COMPACT_ICON_BUTTON_SIZE},
     rems_from_px,
     tooltip::Tooltip,
+    touch::{CoarsePointer, TOUCH_TARGET},
 };
 use gpui::{
     App, ElementId, Hsla, IntoElement, ParentElement as _, Pixels, SharedString, Stateful,
@@ -22,6 +23,7 @@ pub const WORKSPACE_TREE_MARKER_SLOT_WIDTH: f32 = 18.0;
 pub const WORKSPACE_TREE_NODE_ICON_SIZE: f32 = 14.0;
 pub const WORKSPACE_TREE_MARKER_LABEL_GAP: f32 = 6.0;
 const WORKSPACE_TREE_FILL_INSET: f32 = 4.0;
+const TREE_TOUCH_SLOP: f32 = (TOUCH_TARGET - COMPACT_ICON_BUTTON_SIZE) / 2.0;
 const WORKSPACE_TREE_FILL_VERTICAL_INSET: f32 = 1.0;
 pub const WORKSPACE_SIDEBAR_DEFAULT_WIDTH: f32 = 256.0;
 pub const WORKSPACE_CONTROL_TRAFFIC_LIGHT_INSET: f32 =
@@ -365,7 +367,7 @@ pub fn workspace_tree_row(
                 .group_hover(row_group.clone(), gpui::Styled::visible)
         })
         .child(actions);
-    workspace_tree_row_frame(id, depth)
+    workspace_tree_row_frame(id, depth, cx)
         .pr(fill_inset)
         .group(row_group)
         .child(fill)
@@ -390,7 +392,7 @@ pub fn workspace_tree_action_row(
     cx: &App,
 ) -> Stateful<gpui::Div> {
     let foreground = cx.theme().foreground;
-    workspace_tree_row_frame(id, depth)
+    workspace_tree_row_frame(id, depth, cx)
         .text_color(foreground.muted())
         .cursor_pointer()
         .hover(move |row| row.text_color(foreground))
@@ -413,6 +415,7 @@ pub fn workspace_tree_action_button(
     Button::compact_icon(id, icon)
         .text()
         .flat()
+        .hit_slop(TREE_TOUCH_SLOP, TREE_TOUCH_SLOP)
         .when(!disabled, |button| {
             button.text_color(cx.theme().foreground.muted())
         })
@@ -420,12 +423,20 @@ pub fn workspace_tree_action_button(
         .disabled(disabled)
 }
 
-fn workspace_tree_row_frame(id: impl Into<ElementId>, depth: u8) -> Stateful<gpui::Div> {
+fn workspace_tree_row_height(cx: &App) -> f32 {
+    if CoarsePointer::get(cx) {
+        TOUCH_TARGET
+    } else {
+        WORKSPACE_TREE_ROW_HEIGHT
+    }
+}
+
+fn workspace_tree_row_frame(id: impl Into<ElementId>, depth: u8, cx: &App) -> Stateful<gpui::Div> {
     div()
         .id(id)
         .w_full()
         .min_w_0()
-        .h(px(WORKSPACE_TREE_ROW_HEIGHT))
+        .h(px(workspace_tree_row_height(cx)))
         .flex_none()
         .relative()
         .flex()

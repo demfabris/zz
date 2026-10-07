@@ -4,10 +4,10 @@ use gpui::accesskit;
 use gpui::{
     AnyWindowHandle, Bounds, Capslock, CursorStyle, DevicePixels, DispatchEventResult,
     KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, ModifiersChangedEvent, MouseButton,
-    MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, Pixels, PlatformAtlas,
-    PlatformDisplay, PlatformInput, PlatformInputHandler, PlatformWindow, Point, PromptButton,
-    PromptLevel, RequestFrameOptions, ScrollDelta, ScrollWheelEvent, Size, TextInputAction,
-    TextInputConfiguration, TextInputStateChange, TouchEvent, TouchId, TouchPhase,
+    MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, PinchEvent, Pixels,
+    PlatformAtlas, PlatformDisplay, PlatformInput, PlatformInputHandler, PlatformWindow, Point,
+    PromptButton, PromptLevel, RequestFrameOptions, ScrollDelta, ScrollWheelEvent, Size,
+    TextInputAction, TextInputConfiguration, TextInputStateChange, TouchEvent, TouchId, TouchPhase,
     WindowAppearance, WindowBackgroundAppearance, WindowBounds, WindowParams, point, px, size,
 };
 use objc::{
@@ -36,7 +36,7 @@ pub(crate) struct IosWindowState {
     _handle: AnyWindowHandle,
     native_window: id,
     native_view: id,
-    display_link: id,
+    display_link: Rc<crate::DisplayLink>,
     renderer: gpui_wgpu::WgpuRenderer,
     needs_presentation: bool,
     accesskit_adapter: Option<accesskit_ios::SubclassingAdapter>,
@@ -54,6 +54,7 @@ pub(crate) struct IosWindowState {
     keyboard_overlap: f64,
     keyboard_requested: bool,
     soft_keyboard: bool,
+    compact_keyboard: bool,
     keyboard_sync_pending: bool,
     reload_input_views: bool,
     text_input: TextInputConfiguration,
@@ -64,11 +65,13 @@ pub(crate) struct IosWindowState {
     last_touch: Point<Pixels>,
     touch_gestures: bool,
     touches: HashMap<usize, (TouchId, Point<Pixels>)>,
+    pinch: Option<crate::pinch::Pinch>,
     next_touch: u64,
     pointer_button: Option<MouseButton>,
     momentum: Option<crate::momentum::Momentum>,
     pointer_interaction: id,
     edit_menu: id,
+    perf: crate::perf::Perf,
 }
 
 impl IosWindowState {
@@ -83,7 +86,7 @@ impl IosWindowState {
     }
 }
 
-pub(crate) struct IosWindow(Rc<RefCell<IosWindowState>>);
+pub(crate) struct IosWindow(Rc<RefCell<IosWindowState>>, Rc<crate::DisplayLink>);
 
 impl IosWindow {
     pub(crate) fn open(
@@ -161,7 +164,7 @@ impl IosWindow {
                 _handle: handle,
                 native_window,
                 native_view,
-                display_link: nil,
+                display_link: Rc::new(crate::DisplayLink::new()),
                 renderer,
                 needs_presentation: false,
                 accesskit_adapter: None,
@@ -179,6 +182,7 @@ impl IosWindow {
                 keyboard_overlap: 0.0,
                 keyboard_requested: false,
                 soft_keyboard: false,
+                compact_keyboard: false,
                 keyboard_sync_pending: false,
                 reload_input_views: false,
                 text_input: TextInputConfiguration::default(),
@@ -189,11 +193,13 @@ impl IosWindow {
                 last_touch: Point::default(),
                 touch_gestures,
                 touches: HashMap::new(),
+                pinch: None,
                 next_touch: 0,
                 pointer_button: None,
                 momentum: None,
                 pointer_interaction: nil,
                 edit_menu: nil,
+                perf: crate::perf::Perf::from_env(),
             }));
 
             state.borrow_mut().renderer.update_drawable_size(size(
@@ -235,10 +241,11 @@ impl IosWindow {
                 displayLinkWithTarget: native_view
                 selector: sel!(zzStep:)
             ];
+            let link = state.borrow().display_link.clone();
+            link.attach(display_link);
             let run_loop: id = msg_send![class!(NSRunLoop), mainRunLoop];
             let _: () =
                 msg_send![display_link, addToRunLoop: run_loop forMode: NSRunLoopCommonModes];
-            state.borrow_mut().display_link = display_link;
             eprintln!(
                 "[zz-ios] window open: bounds {}x{} scale {}",
                 screen_bounds.size.width, screen_bounds.size.height, scale
@@ -246,7 +253,7 @@ impl IosWindow {
 
             VIEWS.with_borrow_mut(|views| views.push(native_view));
             ACTIVE_VIEW.set(native_view);
-            Ok(Self(state))
+            Ok(Self(state, link))
         }
     }
 
@@ -265,7 +272,7 @@ impl Drop for IosWindow {
         let (view, window, close) = {
             let mut state = self.0.borrow_mut();
             unsafe {
-                let _: () = msg_send![state.display_link, invalidate];
+                state.display_link.invalidate();
                 let _: () = msg_send![state.input_view, release];
                 let _: () = msg_send![state.accessory_view, release];
                 let _: () = msg_send![state.keyboard_probe, release];
@@ -338,7 +345,11 @@ impl PlatformWindow for IosWindow {
 
     fn text_input_state_changed(&self, change: TextInputStateChange) {
         match change {
-            TextInputStateChange::FocusGained => self.show_soft_keyboard(),
+            TextInputStateChange::FocusGained => {
+                if !self.0.borrow().compact_keyboard {
+                    self.show_soft_keyboard();
+                }
+            }
             TextInputStateChange::FocusLost => self.hide_soft_keyboard(),
             TextInputStateChange::SelectionChanged | TextInputStateChange::ContentChanged => {}
         }
@@ -461,6 +472,19 @@ impl PlatformWindow for IosWindow {
         self.0.borrow_mut().request_frame_callback = Some(callback);
     }
 
+    fn frame_waker(&self) -> Option<Rc<dyn Fn()>> {
+        let link = self.1.clone();
+        Some(Rc::new(move || link.wake()))
+    }
+
+    fn schedule_frame(&self) {
+        self.1.wake();
+    }
+
+    fn keeps_presenting_after_input(&self) -> bool {
+        false
+    }
+
     fn on_input(&self, callback: Box<dyn FnMut(PlatformInput) -> DispatchEventResult>) {
         self.0.borrow_mut().event_callback = Some(callback);
     }
@@ -495,6 +519,7 @@ impl PlatformWindow for IosWindow {
 
     fn draw(&self, scene: &gpui::Scene) {
         let mut state = self.0.borrow_mut();
+        state.perf.drew(scene);
         state.needs_presentation = !state.renderer.draw(scene);
     }
 
@@ -725,9 +750,24 @@ fn register_view_class() {
     }
 }
 
-extern "C" fn step(this: &Object, _: Sel, _link: id) {
-    advance_momentum(this);
+extern "C" fn step(this: &Object, _: Sel, link: id) {
     let state = unsafe { get_window_state(this) };
+    let display_link = state.borrow().display_link.clone();
+    display_link.begin_frame();
+    state.borrow_mut().perf.begin();
+    let bench = {
+        let mut state = state.borrow_mut();
+        state.perf.wants_frames().then(|| {
+            let rect: CGRect = unsafe { msg_send![state.native_view, bounds] };
+            let size = size(px(rect.size.width as f32), px(rect.size.height as f32));
+            state.perf.bench_input(Instant::now(), size)
+        })
+    }
+    .flatten();
+    if let Some(input) = bench {
+        dispatch_event(this, input);
+    }
+    advance_momentum(this);
     let repeat = state.borrow_mut().keyboard.repeat(Instant::now());
     if let Some(event) = repeat {
         dispatch_event(this, PlatformInput::KeyDown(event));
@@ -742,6 +782,17 @@ extern "C" fn step(this: &Object, _: Sel, _link: id) {
         callback(options);
         state.borrow_mut().request_frame_callback = Some(callback);
     }
+    let (timestamp, target): (f64, f64) =
+        unsafe { (msg_send![link, timestamp], msg_send![link, targetTimestamp]) };
+    let busy = {
+        let mut state = state.borrow_mut();
+        state.perf.end(timestamp, target);
+        state.momentum.is_some()
+            || !state.touches.is_empty()
+            || state.keyboard.repeating()
+            || state.perf.wants_frames()
+    };
+    display_link.end_frame(busy);
 }
 
 extern "C" fn appearance_changed(this: &Object, _: Sel) {
@@ -988,6 +1039,7 @@ fn pointer_input(this: &Object, touches: id, event: id, phase: TouchPhase) {
 extern "C" fn touches_began(this: &Object, _: Sel, touches: id, event: id) {
     unsafe {
         let _: BOOL = msg_send![this, becomeFirstResponder];
+        get_window_state(this).borrow().display_link.wake();
     }
     stop_momentum(this);
     if pointer_touch(touches) {
@@ -1019,6 +1071,10 @@ extern "C" fn touches_began(this: &Object, _: Sel, touches: id, event: id) {
 }
 
 extern "C" fn touches_moved(this: &Object, _: Sel, touches: id, event: id) {
+    unsafe { get_window_state(this) }
+        .borrow_mut()
+        .perf
+        .touch_moved();
     if pointer_touch(touches) {
         pointer_input(this, touches, event, TouchPhase::Moved);
         return;
@@ -1088,6 +1144,9 @@ fn dispatch_touches(this: &Object, touches: id, phase: TouchPhase) -> bool {
         let location: CGPoint =
             unsafe { msg_send![touch, locationInView: this as *const Object as id] };
         let position = point(px(location.x as f32), px(location.y as f32));
+        if pinch_touch(this, touch as usize, phase, position) {
+            continue;
+        }
         let id = {
             let mut state = state.borrow_mut();
             state.last_touch = position;
@@ -1123,6 +1182,57 @@ fn dispatch_touches(this: &Object, touches: id, phase: TouchPhase) -> bool {
     true
 }
 
+fn pinch_touch(this: &Object, key: usize, phase: TouchPhase, position: Point<Pixels>) -> bool {
+    let state = unsafe { get_window_state(this) };
+    let (step, cancelled, modifiers) = {
+        let mut state = state.borrow_mut();
+        let modifiers = state.keyboard.modifiers;
+        if let Some(pinch) = state.pinch.as_mut() {
+            if pinch.owns(key) {
+                let step = pinch.touch(key, phase, position);
+                if pinch.finished() {
+                    state.pinch = None;
+                }
+                (step, None, modifiers)
+            } else {
+                return phase == TouchPhase::Started;
+            }
+        } else if phase == TouchPhase::Started && state.touches.len() == 1 {
+            let Some((first, (id, at))) = state.touches.drain().next() else {
+                return false;
+            };
+            state.pinch = Some(crate::pinch::Pinch::new([first, key], [at, position]));
+            (None, Some((id, at)), modifiers)
+        } else {
+            return false;
+        }
+    };
+    if let Some((id, position)) = cancelled {
+        dispatch_event(
+            this,
+            PlatformInput::Touch(TouchEvent {
+                id,
+                phase: TouchPhase::Cancelled,
+                position,
+                predicted_position: None,
+                force: None,
+            }),
+        );
+    }
+    if let Some(step) = step {
+        dispatch_event(
+            this,
+            PlatformInput::Pinch(PinchEvent {
+                position: step.position,
+                delta: step.delta,
+                modifiers,
+                phase: step.phase,
+            }),
+        );
+    }
+    true
+}
+
 extern "C" fn can_become_first_responder(_: &Object, _: Sel) -> BOOL {
     YES
 }
@@ -1140,11 +1250,23 @@ extern "C" fn input_view(this: &Object, _: Sel) -> id {
 extern "C" fn input_accessory_view(this: &Object, _: Sel) -> id {
     let state = unsafe { get_window_state(this) };
     let state = state.borrow();
-    if state.soft_keyboard {
+    if terminal_key_row(
+        state.soft_keyboard,
+        state.compact_keyboard,
+        &state.text_input,
+    ) {
         state.accessory_view
     } else {
         nil
     }
+}
+
+fn terminal_key_row(
+    soft_keyboard: bool,
+    compact_keyboard: bool,
+    text_input: &TextInputConfiguration,
+) -> bool {
+    soft_keyboard && !compact_keyboard && text_input.input_action == TextInputAction::Enter
 }
 
 extern "C" fn resign_first_responder(this: &Object, _: Sel) -> BOOL {
@@ -1460,6 +1582,26 @@ pub fn show_edit_menu(x: f32, y: f32) {
         ];
         let _: () = msg_send![edit_menu, presentEditMenuWithConfiguration: configuration];
     }
+}
+
+pub fn set_compact_keyboard(enabled: bool) {
+    let view = ACTIVE_VIEW.get();
+    let Some(state) = (!view.is_null())
+        .then(|| unsafe { try_window_state(&*view) })
+        .flatten()
+    else {
+        return;
+    };
+    {
+        let mut state = state.borrow_mut();
+        if state.compact_keyboard == enabled {
+            return;
+        }
+        state.compact_keyboard = enabled;
+        state.latched = Modifiers::default();
+        state.reload_input_views = true;
+    }
+    schedule_keyboard_sync(view);
 }
 
 pub fn request_paste() {
@@ -2120,5 +2262,28 @@ extern "C" fn sync_keyboard(context: *mut c_void) {
             }
         }
         let _: () = msg_send![view, release];
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_terminal_gets_the_key_row() {
+        let terminal = TextInputConfiguration {
+            input_action: TextInputAction::Enter,
+            ..TextInputConfiguration::default()
+        };
+        let field = TextInputConfiguration::default();
+        let done = TextInputConfiguration {
+            input_action: TextInputAction::Done,
+            ..TextInputConfiguration::default()
+        };
+        assert!(terminal_key_row(true, false, &terminal));
+        assert!(!terminal_key_row(true, false, &field));
+        assert!(!terminal_key_row(true, false, &done));
+        assert!(!terminal_key_row(true, true, &terminal));
+        assert!(!terminal_key_row(false, false, &terminal));
     }
 }

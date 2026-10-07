@@ -52,9 +52,9 @@ pub struct WhichKeyView {
     available: Option<Size<Pixels>>,
 }
 
-struct Group<'a> {
-    title: Option<SharedString>,
-    rows: Vec<&'a WhichKeyRow>,
+pub(crate) struct Group<'a> {
+    pub(crate) title: Option<SharedString>,
+    pub(crate) rows: Vec<&'a WhichKeyRow>,
 }
 
 struct Block<'a> {
@@ -63,7 +63,7 @@ struct Block<'a> {
     rows: &'a [&'a WhichKeyRow],
 }
 
-fn groups(rows: &[WhichKeyRow]) -> Vec<Group<'_>> {
+pub(crate) fn groups(rows: &[WhichKeyRow]) -> Vec<Group<'_>> {
     let mut groups: Vec<Group<'_>> = Vec::new();
     for row in rows {
         match groups.iter_mut().find(|group| group.title == row.group) {
@@ -188,7 +188,7 @@ fn fit(groups: &[Group<'_>], column_width: f32, available: Option<Size<Pixels>>)
     }
 }
 
-fn cap_text(cap: &WhichKeyCap) -> SharedString {
+pub(crate) fn cap_text(cap: &WhichKeyCap) -> SharedString {
     let [first, rest @ ..] = cap.keys.as_slice() else {
         return cap.raw.clone();
     };

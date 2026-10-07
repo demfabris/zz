@@ -1458,6 +1458,7 @@ fn render_node_actions(
     tree_action_strip(
         format!("workspace-tree-actions-{}", entry.node.tree_id()),
         actions,
+        cx,
     )
 }
 

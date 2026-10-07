@@ -12,7 +12,11 @@ fn terminal_input_preserves_layout_modifiers_and_release() {
     assert_eq!(input.unshifted_codepoint, Some('2'));
     assert_eq!(input.text.as_deref(), Some("\""));
     assert!(input.modifiers.shift());
+    assert!(!keyboard.repeating());
+    keyboard.consumed(31, down.is_held, std::time::Instant::now());
+    assert!(keyboard.repeating());
     let up = keyboard.release(31, 0).unwrap();
+    assert!(!keyboard.repeating());
     let input = input::key_input(&up, zz_terminal::KeyAction::Release);
     assert_eq!(input.action, zz_terminal::KeyAction::Release);
     assert_eq!(input.text, None);

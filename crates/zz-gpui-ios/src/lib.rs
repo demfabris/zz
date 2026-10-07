@@ -11,16 +11,21 @@ mod element_picker;
 mod keyboard;
 mod menu;
 mod momentum;
+mod perf;
+mod pinch;
 mod platform;
 mod text_input;
 mod window;
 
 pub(crate) use dispatcher::*;
+pub use display::phone;
 pub(crate) use display::*;
 pub use menu::MenuCommand;
 pub use platform::IosPlatform;
 pub(crate) use window::*;
-pub use window::{Accessibility, accessibility, request_paste, show_edit_menu};
+pub use window::{
+    Accessibility, accessibility, request_paste, set_compact_keyboard, show_edit_menu,
+};
 
 use objc::runtime::Object;
 

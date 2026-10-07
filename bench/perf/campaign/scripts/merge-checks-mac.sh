@@ -27,7 +27,7 @@ timeout 2400 cargo build --release -p zz-cli > $O/release.log 2>&1; log "release
 if [ "${WIRE:-0}" = 1 ]; then
   timeout 1800 /opt/homebrew/bin/bash compat/attached-client.sh $PWD/target/debug/zz_cli $PWD/compat/.cache/tmux-src/tmux > $O/attached-client.log 2>&1; log "attached-client exit $?"
   timeout 1800 /opt/homebrew/bin/bash compat/tui-screen-diff.sh $PWD/target/debug/zz_cli $PWD/compat/.cache/tmux-src/tmux > $O/tui-screen.log 2>&1; log "tui-screen-diff exit $?"
-  timeout 2400 just ios-gpui iPad build > $O/ios.log 2>&1; log "ios-gpui iPad build exit $?"
+  timeout 2400 just ios build iPad > $O/ios.log 2>&1; log "ios-gpui iPad build exit $?"
 fi
 for i in 1 2 3; do
   python3 bench/perf/run.py --zz $PRE --stage $STAGE --quick --only $GROUPS_AB --w0 none --json $O/ab-pre-$i.json > $O/ab-pre-$i.log 2>&1

@@ -5,23 +5,62 @@ The app opens the session sidebar beside the attached window's panes. It uses
 agent interface. Web and iOS compile the same app shell, sidebar, status bar, settings,
 command palette, overlays, terminal, agent, connection reducer, and image caches
 from `clients/gpui-shared/src`.
-The sidebar is 256 points wide and respects the iOS safe area. On iPhone it
-opens over the workspace and closes when you select a session, window, or pane.
+The sidebar is 256 points wide and respects the iOS safe area.
+
+On iPhone, and in any window narrower than 640 points, the attached session uses the
+phone shell instead: one pane fills the screen and a sideways swipe pages through every
+pane in window order. Landing on a pane zooms it (`resize-pane -Z`), so the daemon sizes
+the window to that pane; terminal previews keep the neighbouring pane live while it
+slides in. The bottom bar has a tree button (the sidebar tree as a bottom sheet), the
+pane name with page dots grouped by window (tap it for the window chooser), and a
+keyboard button. The keyboard opens only from that button or a tap on the terminal.
+While it is up, a key row replaces the bar: hide, esc, tab, ctrl, alt, `|`, `~`, `/`,
+prefix, and an arrow pad. Keys with a dot share one gesture: tap for the key's own job,
+hold or slide up for a card, and release on an item to pick it. A tap latches ctrl or
+alt for the next key; holding them offers common chords (^C, ^D, ^Z, ^R, M-b, M-f).
+Prefix opens a short menu (new pane, new window, rename pane, last pane, kill pane) and
+an All bindings sheet that sends any prefix binding through the daemon's key table. The
+arrow pad repeats while held.
+
+Both sheets follow the finger when dragged down by the grabber or the header, or by their
+content once it is scrolled to the top. Dragged past about half their height, or flicked down,
+they close; a shorter drag springs back, and dragging up resists. A tap on the dimmed area above
+still closes them. Small controls take taps across a 44-point box around the glyph (pane close,
+settings back, tree actions, reset and stepper buttons, switches, select menus), workspace tree
+rows are 44 points tall, and each key in the key row answers across the whole row height and
+up to the middle of the gap to its neighbours.
+
+Pinch a terminal to change its text size, as in Blink Shell: the pinch starts once the
+fingers' spread changes by 6% and by at least 8 points (gpui's touch slop), then follows the
+fingers from that spread. The size moves in 5% steps between 50% and 300% (the Terminal
+font scale setting), and a badge shows the percentage while pinching and for a second after.
+The text resizes live; the pane reports its new grid to the daemon once, after the fingers
+lift, and the size is saved then. A second finger cancels the first finger's scroll, page
+swipe, or tap, so two fingers never page or scroll.
 
 ## Run
 
 Use an Apple Silicon Mac with Xcode, Rust's `aarch64-apple-ios-sim` target, and
-Zig 0.16.0. From the repository root:
+Zig 0.16.0. From the repository root, `just ios` lists the actions. Each takes `iPhone`
+(the default) or `iPad`:
 
 ```sh
-just ios
-just ios run iPhone
-just ios build iPad
+just ios rig
+just ios run
+just ios run iPad
+just ios build
 ```
 
-To run on a paired iPad or iPhone, unlock it and use device mode:
+`just ios rig` builds `zz_cli` and starts a throwaway daemon for simulator runs, with its own
+home under `target/ios-rig` and a socket at `/tmp/zzios-<checkout folder>.sock`, so every
+worktree gets its own. It seeds a session named `phone` with two panes in the first window and
+a second window, and `just ios run` attaches to it while it is up. `just ios rig stop` stops it.
+`ZZ_IOS_RIG_SOCKET` picks another socket.
+
+To run on a paired iPhone or iPad, unlock it and use device mode:
 
 ```sh
+just ios device
 just ios device iPad
 ```
 
@@ -40,7 +79,7 @@ Simulator and device builds use the zz Dev icon (`assets/zz-dev.icon`, compiled 
 ## TestFlight
 
 ```sh
-just ios testflight iPad
+just ios testflight
 ```
 
 TestFlight mode builds a release binary with the production identity (`zz` on the host), packages
@@ -53,11 +92,11 @@ uploads it for internal TestFlight testing. Signing uses the Apple account signe
 `ZZ_IOS_UPLOAD=0` exports the signed `.ipa` without uploading, and `ZZ_IOS_BUILD_NUMBER` overrides
 the build number.
 
-The launcher probes zz Dev socket candidates and skips stale sockets. It does not start a daemon. To
-choose a socket and session:
+Without a rig, the launcher probes zz Dev socket candidates and skips stale sockets. It does not
+start a daemon. To choose a socket and session:
 
 ```sh
-ZZ_GPUI_ENDPOINT=/tmp/my-zz.sock ZZ_GPUI_SESSION=work just ios
+ZZ_GPUI_ENDPOINT=/tmp/my-zz.sock ZZ_GPUI_SESSION=work just ios run
 ```
 
 `ZZ_DEV_SOCKET` also selects a local socket. Set `ZZ_GPUI_SIMULATOR` to a simulator
@@ -114,15 +153,20 @@ its pane's content, and display-panes labels keep their tmux styles and alignmen
 Notices preserve severity, duration, and explicit clearing; a failed command reports
 as `command: error`.
 
-The sidebar button reopens navigation on iPhone.
+The tree button opens navigation on iPhone.
 
 ## Keyboard
 
 Without a hardware keyboard, tapping a terminal, the agent composer, or any text
-field raises the on-screen keyboard. A row above it adds Escape, Tab, Control, Option,
-the arrows, and a hide button. Control and Option latch for the next key, so
-Control then C sends Ctrl-C. The workspace shrinks to the space above the docked
-keyboard; a floating keyboard leaves the layout alone. Attaching a hardware
+field raises the on-screen keyboard. For a terminal, a row above it adds Escape, Tab,
+Control, Option, the arrows, and a hide button; the backend shows it only for an input
+whose Return inserts a line break, so settings fields, prompts, the palette, and host
+forms get the plain keyboard, and the phone shell uses its own key row instead.
+Control and Option latch for the next key, so Control then C sends Ctrl-C. The
+workspace shrinks to the space above the docked keyboard, and a focused settings
+field scrolls back into view above it; a focused row of a long settings page keeps
+painting while it is off screen, so the keyboard stays up. A floating keyboard
+leaves the layout alone. Attaching a hardware
 keyboard hides the on-screen one, and detaching it brings it back for the focused
 field. Autocorrect, smart punctuation, and capitalization stay off unless a field
 asks for them.
@@ -152,19 +196,59 @@ being composed, hardware keys go to the input method first.
 
 The connection reconnects two seconds after it drops, and immediately when the app
 returns to the foreground. Leaving the app keeps the connection open for the short
-background time iPadOS allows. Settings › Advanced › Display can keep the screen
+background time iPadOS allows. Settings › System › Display can keep the screen
 awake while connected. Under thermal pressure or Low Power Mode, frames are capped
-at 60 per second. iPadOS text size scales the interface (turn it off in Advanced ›
-Display); Reduce Motion and Increase Contrast apply live. The text system loads the
-iOS system fonts, so Chinese, Japanese, Korean, Arabic, Hebrew, and other scripts
-render. Emoji still show as blank: GPUI's text system only treats Noto Color Emoji
-as a color font.
+at 60 per second. The system text size (Dynamic Type) scales the interface and applies
+live. On iPad it multiplies UI zoom and can be turned off in System › Display; on iPhone it
+is the only interface scale, capped at the largest non-accessibility size (135%) because it
+scales controls and icons as well as text. Reduce Motion and Increase Contrast apply live.
+The text system loads the iOS system fonts, so Chinese, Japanese, Korean, Arabic, Hebrew,
+and other scripts render. Emoji still show as blank: GPUI's text system only treats Noto
+Color Emoji as a color font.
+
+## Frame rate
+
+The display link asks for the screen's top rate with the range Flutter uses (half the maximum, but
+at least 60, up to the maximum), so ProMotion iPhones and iPads animate at 120 Hz;
+`CADisableMinimumFrameDurationOnPhone` in `Info.plist` lifts the iPhone's 60 Hz cap. The link
+pauses three ticks after the last frame request and restarts when the window is invalidated, a
+touch begins, or a momentum scroll or key repeat is running, so an idle app takes no vsync
+callbacks and the display drops to its idle rate. The window opts out of GPUI presenting the last
+frame again for a second after fast input, and the pager, sheets, and swipe back end the touch
+fling they swallow, so a swipe stops ticking once the page settles.
+
+To measure frames on a paired, unlocked device without touching it:
+
+```sh
+just ios bench
+```
+
+Bench mode builds and installs the device app like `device` mode, creates a session named
+`iphone-bench` on the host's `zz-dev` (two panes with scrollback), launches the app three times
+against it (pager swipes, terminal flings, then 25 idle seconds), kills the session, and prints one
+`frames total` line per bench and the last idle link reports. `ZZ_BENCH_CYCLES` (default 16),
+`ZZ_BENCH_SESSION`, `ZZ_BENCH_CLI`, and `ZZ_BENCH_OUT` (log directory) adjust it. To bench an app
+built elsewhere, such as a baseline, run `scripts/ios-bench.sh <udid> <app> <endpoint>`. In the
+output, `interval` is the time between new frames in milliseconds (8.33 at 120 Hz), `dropped`
+counts vsyncs that passed without a new frame inside a burst, `cpu` is the main-thread time of
+each display link tick, and an idle `link:` line with few ticks means the display link is paused.
+
+`ZZ_GPUI_FRAME_LOG=1` prints, per burst of drawn frames, the interval between new frames (p50,
+p95, max), missed vsyncs, and the CPU time of each display link tick, plus link ticks and draws
+every five seconds. `ZZ_GPUI_BENCH=swipe` or `scroll` (optionally `:count`, default 16) waits eight
+seconds after launch and then plays horizontal pager swipes or vertical terminal flings from the
+display link. `GPUI_FRAME_STATS=frames.jsonl` writes gpui's per-frame JSON stats into the app's
+`tmp` directory. Device and simulator launches forward these variables and `ZZ_GPUI_SESSION`;
+`ZZ_GPUI_CARGO_PROFILE=testflight` builds the device app with line tables for Instruments.
 
 ## Settings
 
 Settings uses the shared `zz-ui` form rows, previews, palettes, color pickers,
 number fields, and switches. iPad keeps the section navigation beside the page;
-iPhone uses a full-width page with a section menu and a back button.
+iPhone opens on a list of sections; tapping one opens its page, and back returns
+to the list. A drag from the left edge also goes back: the page follows the finger with
+the section list sliding in underneath, and releasing past half the width or with a
+rightward flick completes it. On the list, the same swipe returns to the workspace.
 
 - **Appearance:** System/Light/Dark appearance, light and dark palettes,
   background/foreground/accent colors, UI zoom, contrast, animations, widget
@@ -183,7 +267,10 @@ iPhone uses a full-width page with a section menu and a back button.
   the screen awake while connected.
 - **About:** app version and source link.
 
-The page omits desktop-only options and controls for unsupported pane kinds.
+The page omits desktop-only options and controls for unsupported pane kinds. iPhone also
+leaves out Panes and Status bar (the phone shell shows one pane without gaps or frames and
+has its own bottom bar), UI zoom, and Match system text size; its Agent panes switch moves to
+System.
 Interface and pane preferences are saved atomically in the app container
 at `Library/Application Support/zz-gpui/preferences.json` and restored on launch.
 Touch controls work without a keyboard; numeric values and hex colors open the
@@ -195,13 +282,13 @@ The terminal uses `InteractiveClient`, `ClientCore`, and the shared `zz-ui`
 painter and Kitty image cache. The daemon owns the PTY and Ghostty parser/encoder.
 
 ```sh
-ZZ_GPUI_DEMO=terminal just ios
+ZZ_GPUI_DEMO=terminal just ios run
 ```
 
 To attach the terminal example to a specific socket and session:
 
 ```sh
-ZZ_GPUI_DEMO=terminal ZZ_GPUI_ENDPOINT=/tmp/my-zz.sock ZZ_GPUI_SESSION=work just ios
+ZZ_GPUI_DEMO=terminal ZZ_GPUI_ENDPOINT=/tmp/my-zz.sock ZZ_GPUI_SESSION=work just ios run
 ```
 
 Without a saved endpoint, the terminal example opens a connection field. **Host** opens that
@@ -271,6 +358,11 @@ automatic reconnect after a daemon restart, live text size changes, the Command-
 command, a second window scene, `zz://attach/<session>`, and long-press Copy/Paste.
 Drag and drop, dictation, Pencil handwriting, CJK input methods, and the menu bar
 itself were not exercised.
+
+iPhone Simulator checks on 2026-10-06 covered pinching a terminal in the phone shell (one grid
+report per pinch, after release; a two-finger sideways pan neither pages nor scrolls), live
+system text size changes from XS to AX5, and the phone's Settings list. iPad Simulator kept
+Panes, Status bar, UI zoom, and Match system text size.
 
 Copy/paste of text copied within the app was verified. Text injected through
 `simctl pbcopy` was not readable from UIKit in this simulator session; cross-app

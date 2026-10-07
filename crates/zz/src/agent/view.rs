@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeSet, HashMap},
     path::{Path, PathBuf},
+    rc::Rc,
     sync::Arc,
 };
 use zz_ui::agent::composer::COMPOSER_OUTER_PADDING;
@@ -16,6 +17,8 @@ use zz_ui::agent::presentation::MAX_RENDERED_ERROR_BYTES;
 use zz_ui::agent::presentation::{
     empty_state, error_card, permission_card, permission_option, rendered_error, welcome_state,
 };
+use zz_ui::agent::question::{QuestionCardAction, QuestionCardState, QuestionCardStep};
+use zz_ui::agent::tasks::{TaskTrayAction, task_tray};
 use zz_ui::agent::title::{agent_thread_title_editor, agent_title_is_editing};
 
 use chrono::{DateTime, Datelike as _, Local, NaiveDate, Timelike as _};
@@ -36,7 +39,7 @@ use zz_ui::agent::{
     AgentToolEntry, AgentToolKind, AgentToolPayload, AgentToolStatus, AgentToolText,
     COMPOSER_ATTACHMENT, FoldedTimelineRows, MarkdownSlot, TimelineRow, TimelineStick,
     agent_attachment_thumbnail, agent_jump_to_bottom_button, agent_pane_header,
-    append_timeline_row, fold_timeline_rows, timeline_group_kind,
+    append_timeline_row, fold_timeline_rows, timeline_group_kind, timeline_parent,
 };
 use zz_ui::command::palette_shortcut_hint;
 use zz_ui::{
@@ -117,11 +120,19 @@ struct TimelineModel {
 }
 
 impl TimelineModel {
-    fn new(entries: &[AgentThreadEntry], revisions: &[u64]) -> Self {
+    fn new(entries: &[AgentThreadEntry], revisions: &[u64], parents: ToolParents<'_>) -> Self {
         debug_assert_eq!(entries.len(), revisions.len());
         let mut markdown = HashMap::new();
         let mut tool_payloads = HashMap::new();
-        let ui_entries = ui_entries_with_markdown(entries, &mut markdown, &mut tool_payloads);
+        let ui_entries = entries
+            .iter()
+            .map(|entry| {
+                parented(
+                    ui_entry_with_markdown(entry, &mut markdown, &mut tool_payloads),
+                    parents,
+                )
+            })
+            .collect::<Vec<_>>();
         let FoldedTimelineRows { rows, entry_to_row } = fold_timeline_rows(&ui_entries);
         Self {
             rows,
@@ -142,8 +153,13 @@ impl TimelineModel {
         self.tool_payloads.clear();
     }
 
-    fn rebuild(&mut self, entries: &[AgentThreadEntry], revisions: &[u64]) {
-        *self = Self::new(entries, revisions);
+    fn rebuild(
+        &mut self,
+        entries: &[AgentThreadEntry],
+        revisions: &[u64],
+        parents: ToolParents<'_>,
+    ) {
+        *self = Self::new(entries, revisions, parents);
     }
 
     fn synchronize(
@@ -151,6 +167,7 @@ impl TimelineModel {
         entries: &[AgentThreadEntry],
         revisions: &[u64],
         changed_entries: Option<&[usize]>,
+        parents: ToolParents<'_>,
     ) -> TimelineModelUpdate {
         debug_assert_eq!(entries.len(), revisions.len());
         if entries.len() != revisions.len() {
@@ -170,7 +187,7 @@ impl TimelineModel {
                     .all(|(id, entry)| *id == entry.id())
             };
         if !append_only {
-            self.rebuild(entries, revisions);
+            self.rebuild(entries, revisions, parents);
             return TimelineModelUpdate::Rebuild;
         }
 
@@ -199,20 +216,23 @@ impl TimelineModel {
         for &entry_index in &changed_existing {
             let id = self.entry_ids[entry_index];
             let Some(&row_index) = self.entry_to_row.get(entry_index) else {
-                self.rebuild(entries, revisions);
+                self.rebuild(entries, revisions, parents);
                 return TimelineModelUpdate::Rebuild;
             };
-            let next = ui_entry_with_markdown(
-                &entries[entry_index],
-                &mut self.markdown,
-                &mut self.tool_payloads,
+            let next = parented(
+                ui_entry_with_markdown(
+                    &entries[entry_index],
+                    &mut self.markdown,
+                    &mut self.tool_payloads,
+                ),
+                parents,
             );
             let Some(previous) = self.rows.get(row_index).and_then(|row| row.entry(id)) else {
-                self.rebuild(entries, revisions);
+                self.rebuild(entries, revisions, parents);
                 return TimelineModelUpdate::Rebuild;
             };
             if !replacement_preserves_folding(previous, &next) {
-                self.rebuild(entries, revisions);
+                self.rebuild(entries, revisions, parents);
                 return TimelineModelUpdate::Rebuild;
             }
             replacements.push((entry_index, row_index, id, next));
@@ -221,7 +241,12 @@ impl TimelineModel {
         let appended = entries
             .iter()
             .skip(old_entry_count)
-            .map(|entry| ui_entry_with_markdown(entry, &mut self.markdown, &mut self.tool_payloads))
+            .map(|entry| {
+                parented(
+                    ui_entry_with_markdown(entry, &mut self.markdown, &mut self.tool_payloads),
+                    parents,
+                )
+            })
             .collect::<Vec<_>>();
         let old_row_count = self.rows.len();
         let mut store_entries = Vec::with_capacity(replacements.len());
@@ -262,6 +287,17 @@ impl TimelineModel {
 
 fn replacement_preserves_folding(previous: &AgentEntry, next: &AgentEntry) -> bool {
     timeline_group_kind(previous) == timeline_group_kind(next)
+        && timeline_parent(previous) == timeline_parent(next)
+}
+
+/// The entry a tool row nests under, from the controller's reducer.
+type ToolParents<'a> = &'a dyn Fn(u64) -> Option<u64>;
+
+fn parented(mut entry: AgentEntry, parents: ToolParents<'_>) -> AgentEntry {
+    if let AgentEntry::Tool(tool) = &mut entry {
+        tool.parent = parents(tool.id);
+    }
+    entry
 }
 
 /// What a wizard interaction asks the controller to do.
@@ -385,6 +421,17 @@ impl PermissionWizard {
         self.answer(requests, Some(option))
     }
 
+    /// Take the focused page off the wizard once its question card is
+    /// answered, the way [`Self::answer`] does for an option.
+    fn answer_card(&mut self, requests: &[AgentPermissionRequest], request_id: u64) -> bool {
+        if self.current(requests).map(|request| request.request_id) != Some(request_id) {
+            return false;
+        }
+        self.answered.insert(request_id);
+        self.sync(requests);
+        true
+    }
+
     fn confirm(&mut self, requests: &[AgentPermissionRequest]) -> PermissionStep {
         self.answer(requests, Some(self.highlighted))
     }
@@ -415,6 +462,8 @@ pub(crate) struct AgentView {
     completion_scroll: UniformListScrollHandle,
     submission_error: Option<Arc<str>>,
     permission_wizard: PermissionWizard,
+    question: Option<QuestionCardState>,
+    tasks_expanded: bool,
     attachments: Vec<Arc<Image>>,
     completions: Arc<[CommandCompletion]>,
     completion_selected: Option<usize>,
@@ -495,7 +544,9 @@ impl AgentView {
                 controller.pane_entries(pane).unwrap_or((&[], &[], 0));
             (
                 pane_state,
-                TimelineModel::new(entries, revisions),
+                TimelineModel::new(entries, revisions, &|id| {
+                    controller.tool_parent_entry(pane, id)
+                }),
                 next_revision,
                 controller.conversation_epoch(pane),
             )
@@ -535,6 +586,8 @@ impl AgentView {
             completion_scroll: UniformListScrollHandle::new(),
             submission_error: None,
             permission_wizard: PermissionWizard::default(),
+            question: None,
+            tasks_expanded: false,
             attachments: Vec::new(),
             completions: Arc::from([]),
             completion_selected: None,
@@ -710,6 +763,8 @@ impl AgentView {
             self.recompute_completions(&commands);
         }
 
+        let pane = self.pane;
+        let parents = |id| controller.tool_parent_entry(pane, id);
         let Some((entries, revisions, next_revision)) = controller.pane_entries(self.pane) else {
             if !self.timeline.rows.is_empty() {
                 self.timeline.clear();
@@ -721,7 +776,7 @@ impl AgentView {
             return (state_changed, TimelineStoreUpdate::Clear);
         };
         if conversation_changed {
-            self.timeline.rebuild(entries, revisions);
+            self.timeline.rebuild(entries, revisions, &parents);
             self.timeline_next_revision = next_revision;
             self.timeline_scroll.reset(self.timeline.rows.len());
             self.stick.engage_now(&self.timeline_scroll, reduce_motion);
@@ -735,15 +790,20 @@ impl AgentView {
         let Some(changed_entries) =
             controller.pane_entry_changes(self.pane, self.timeline_next_revision)
         else {
-            self.timeline.rebuild(entries, revisions);
+            self.timeline.rebuild(entries, revisions, &parents);
             self.timeline_next_revision = next_revision;
             self.timeline_scroll.reset(self.timeline.rows.len());
             self.stick.engage_now(&self.timeline_scroll, reduce_motion);
             return (true, TimelineStoreUpdate::Clear);
         };
         self.timeline_next_revision = next_revision;
-        let (timeline_changed, store_update) =
-            self.synchronize_timeline(entries, revisions, &changed_entries, reduce_motion);
+        let (timeline_changed, store_update) = self.synchronize_timeline(
+            entries,
+            revisions,
+            &changed_entries,
+            &parents,
+            reduce_motion,
+        );
         (timeline_changed || state_changed, store_update)
     }
 
@@ -817,11 +877,12 @@ impl AgentView {
         entries: &[AgentThreadEntry],
         revisions: &[u64],
         changed_entries: &[usize],
+        parents: ToolParents<'_>,
         reduce_motion: bool,
     ) -> (bool, TimelineStoreUpdate) {
         match self
             .timeline
-            .synchronize(entries, revisions, Some(changed_entries))
+            .synchronize(entries, revisions, Some(changed_entries), parents)
         {
             TimelineModelUpdate::None => (false, TimelineStoreUpdate::None),
             TimelineModelUpdate::Rebuild => {
@@ -904,6 +965,9 @@ impl AgentView {
         if !self.input.read(cx).value().trim().is_empty() {
             return false;
         }
+        if self.question.is_some() {
+            return true;
+        }
         let requests = self.pane_state.pending_permissions.clone();
         let step = self.permission_wizard.confirm(&requests);
         self.apply_permission_step(step, cx)
@@ -947,7 +1011,7 @@ impl AgentView {
     fn handle_permission_key(
         &mut self,
         event: &KeyDownEvent,
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
         if self.pane_state.pending_permissions.is_empty() {
@@ -958,6 +1022,9 @@ impl AgentView {
             return false;
         }
         let engaged = self.composer_engaged(window, cx);
+        if self.question.is_some() {
+            return self.handle_question_key(event, engaged, window, cx);
+        }
         let requests = self.pane_state.pending_permissions.clone();
         let step = match event.keystroke.key.as_str() {
             "escape" if !engaged => self.permission_wizard.cancel(&requests),
@@ -1429,6 +1496,29 @@ impl AgentView {
         let counter = self
             .permission_wizard
             .page_label(&state.pending_permissions);
+        if let Some(card) = self
+            .question
+            .as_ref()
+            .filter(|card| card.request_id() == permission.request_id)
+        {
+            let view = view.clone();
+            return Some(
+                card.render(
+                    &format!("agent-question-{}-{}", self.pane.0, permission.request_id),
+                    counter.map(Into::into),
+                    true,
+                    Rc::new(
+                        move |action: QuestionCardAction,
+                              window: &mut Window,
+                              cx: &mut gpui::App| {
+                            view.update(cx, |view, cx| view.question_action(action, window, cx));
+                        },
+                    ),
+                    cx,
+                )
+                .into_any_element(),
+            );
+        }
         let highlighted = self.permission_wizard.highlighted;
         let request_id = permission.request_id;
         let options = permission
@@ -1545,6 +1635,199 @@ impl AgentView {
         let requests = self.pane_state.pending_permissions.clone();
         let step = self.permission_wizard.cancel(&requests);
         self.apply_permission_step(step, cx);
+    }
+
+    /// Keep one question card for the wizard's focused page while that page
+    /// asks questions; its text fields live as long as the card does.
+    fn synchronize_question_card(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let head = self
+            .permission_wizard
+            .current(&self.pane_state.pending_permissions)
+            .filter(|request| !request.questions.is_empty())
+            .map(|request| (request.request_id, request.questions.clone()));
+        match head {
+            None => self.question = None,
+            Some((request_id, _))
+                if self
+                    .question
+                    .as_ref()
+                    .is_some_and(|card| card.request_id() == request_id) => {}
+            Some((request_id, questions)) => {
+                self.question = Some(QuestionCardState::new(
+                    request_id,
+                    questions,
+                    window,
+                    cx,
+                    Self::on_question_input,
+                ));
+            }
+        }
+    }
+
+    fn on_question_input(
+        &mut self,
+        question: usize,
+        event: &InputEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(card) = self.question.as_mut() else {
+            return;
+        };
+        match event {
+            InputEvent::Change => {
+                if card.input_changed(question, cx) {
+                    cx.notify();
+                }
+            }
+            InputEvent::Focus => {
+                if card.card.focus(question) {
+                    cx.notify();
+                }
+            }
+            InputEvent::PressEnter { .. } => {
+                let step = card.card.submit();
+                self.apply_question_step(step, window, cx);
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_question_key(
+        &mut self,
+        event: &KeyDownEvent,
+        engaged: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(card) = self.question.as_mut() else {
+            return false;
+        };
+        let key = event.keystroke.key.as_str();
+        if card.editing(window, cx) {
+            if key != "escape" {
+                return false;
+            }
+            self.input.read(cx).focus_handle(cx).focus(window, cx);
+            cx.notify();
+            return true;
+        }
+        if engaged {
+            return false;
+        }
+        let step = card.key(key, event.keystroke.modifiers.shift, window, cx);
+        self.apply_question_step(step, window, cx)
+    }
+
+    fn question_action(
+        &mut self,
+        action: QuestionCardAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(card) = self.question.as_mut() else {
+            return;
+        };
+        let step = card.action(action, window, cx);
+        self.apply_question_step(step, window, cx);
+    }
+
+    fn apply_question_step(
+        &mut self,
+        step: QuestionCardStep,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(request_id) = self.question.as_ref().map(QuestionCardState::request_id) else {
+            return false;
+        };
+        let editing = self
+            .question
+            .as_ref()
+            .is_some_and(|card| card.editing(window, cx));
+        let requests = self.pane_state.pending_permissions.clone();
+        let answered = match step {
+            QuestionCardStep::Stay => return false,
+            QuestionCardStep::Handled | QuestionCardStep::Other(_) => {
+                cx.notify();
+                return true;
+            }
+            QuestionCardStep::Submit(answers) => {
+                if !self.permission_wizard.answer_card(&requests, request_id) {
+                    return true;
+                }
+                let pane = self.pane;
+                let sent = self.controller.update(cx, |controller, cx| {
+                    controller.answer_question(pane, request_id, answers, cx)
+                });
+                if !sent {
+                    self.permission_wizard.answered.remove(&request_id);
+                    self.permission_wizard.sync(&requests);
+                }
+                sent
+            }
+            QuestionCardStep::Dismiss => {
+                let step = self.permission_wizard.cancel(&requests);
+                self.apply_permission_step(step, cx)
+            }
+        };
+        if answered && editing {
+            self.input.read(cx).focus_handle(cx).focus(window, cx);
+        }
+        cx.notify();
+        true
+    }
+
+    fn task_action(&mut self, action: TaskTrayAction, cx: &mut Context<Self>) {
+        match action {
+            TaskTrayAction::Toggle => self.tasks_expanded = !self.tasks_expanded,
+            TaskTrayAction::Stop(task_id) => {
+                let pane = self.pane;
+                self.controller.update(cx, |controller, cx| {
+                    controller.stop_task(pane, task_id, cx);
+                });
+            }
+            TaskTrayAction::Reveal(tool_call_id) => self.reveal_tool(&tool_call_id, cx),
+        }
+        cx.notify();
+    }
+
+    /// Scroll the timeline to the row that holds a tool call.
+    fn reveal_tool(&mut self, tool_call_id: &str, cx: &gpui::App) {
+        let Some(entry) = self.controller.read(cx).tool_entry(self.pane, tool_call_id) else {
+            return;
+        };
+        let Some(row) = self
+            .timeline
+            .entry_ids
+            .iter()
+            .position(|id| *id == entry)
+            .and_then(|index| self.timeline.entry_to_row.get(index).copied())
+        else {
+            return;
+        };
+        self.stick.reveal(&self.timeline_scroll, row);
+    }
+
+    fn render_task_tray(
+        &self,
+        state: &AgentPaneState,
+        view: &Entity<Self>,
+        cx: &gpui::App,
+    ) -> Option<impl IntoElement> {
+        let view = view.clone();
+        task_tray(
+            &format!("agent-{}", self.pane.0),
+            &state.tasks,
+            self.tasks_expanded,
+            true,
+            Rc::new(
+                move |action: TaskTrayAction, _: &mut Window, cx: &mut gpui::App| {
+                    view.update(cx, |view, cx| view.task_action(action, cx));
+                },
+            ),
+            cx,
+        )
     }
 
     fn render_error(&self, state: &AgentPaneState, cx: &gpui::App) -> Option<impl IntoElement> {
@@ -2542,6 +2825,10 @@ impl AgentView {
                         .map(IntoElement::into_any_element),
                 )
                 .chain(
+                    self.render_task_tray(state, view, cx)
+                        .map(IntoElement::into_any_element),
+                )
+                .chain(
                     self.render_error(state, cx)
                         .map(IntoElement::into_any_element),
                 )
@@ -2631,6 +2918,10 @@ impl Render for AgentView {
         self.drain_pending_composer(window, cx);
         self.permission_wizard
             .sync(&self.pane_state.pending_permissions);
+        self.synchronize_question_card(window, cx);
+        if self.pane_state.tasks.is_empty() {
+            self.tasks_expanded = false;
+        }
         let state = self.pane_state.clone();
         let rows = self.timeline.rows.clone();
         let has_timeline = !rows.is_empty();
@@ -2842,6 +3133,7 @@ fn disconnected_pane_state() -> AgentPaneState {
         available_commands: Arc::from([]),
         usage: None,
         git: None,
+        tasks: Arc::from([]),
         pending_composer: None,
         queued_prompts: 0,
     }
@@ -2849,24 +3141,18 @@ fn disconnected_pane_state() -> AgentPaneState {
 
 #[cfg(test)]
 fn ui_entries(entries: &[AgentThreadEntry]) -> Arc<[AgentEntry]> {
-    ui_entries_with_markdown(entries, &mut HashMap::new(), &mut HashMap::new())
+    let mut markdown = HashMap::new();
+    let mut tool_payloads = HashMap::new();
+    entries
+        .iter()
+        .map(|entry| ui_entry_with_markdown(entry, &mut markdown, &mut tool_payloads))
+        .collect::<Vec<_>>()
+        .into()
 }
 
 #[cfg(test)]
 fn ui_entry(entry: &AgentThreadEntry) -> AgentEntry {
     ui_entry_with_markdown(entry, &mut HashMap::new(), &mut HashMap::new())
-}
-
-fn ui_entries_with_markdown(
-    entries: &[AgentThreadEntry],
-    markdown: &mut HashMap<u64, AgentMarkdown>,
-    tool_payloads: &mut HashMap<(u64, usize), AgentToolPayload>,
-) -> Arc<[AgentEntry]> {
-    entries
-        .iter()
-        .map(|entry| ui_entry_with_markdown(entry, markdown, tool_payloads))
-        .collect::<Vec<_>>()
-        .into()
 }
 
 fn streaming_markdown(
@@ -2976,6 +3262,7 @@ fn ui_entry_with_markdown(
                     .collect::<Vec<_>>()
                     .into(),
                 default_expanded: *default_expanded,
+                parent: None,
             })
         }
         AgentThreadEntry::Plan { id, markdown } => AgentEntry::Plan {
@@ -3689,7 +3976,7 @@ mod completion_tests {
                 history_input,
                 visible: false,
                 pane_state: disconnected_pane_state(),
-                timeline: TimelineModel::new(&timeline_entries, &[1, 2]),
+                timeline: TimelineModel::new(&timeline_entries, &[1, 2], &|_| None),
                 timeline_store,
                 timeline_next_revision: 2,
                 conversation_epoch: 0,
@@ -3698,6 +3985,8 @@ mod completion_tests {
                 completion_scroll: UniformListScrollHandle::new(),
                 submission_error: None,
                 permission_wizard: PermissionWizard::default(),
+                question: None,
+                tasks_expanded: false,
                 attachments: Vec::new(),
                 completions: Arc::from([]),
                 completion_selected: None,
@@ -3730,7 +4019,7 @@ mod completion_tests {
         let (changed, cleared) = cx.update(|_, cx| {
             view.update(cx, |view, cx| {
                 let (changed, store_update) =
-                    view.synchronize_timeline(&replacement, &[3], &[], false);
+                    view.synchronize_timeline(&replacement, &[3], &[], &|_| None, false);
                 let cleared = view.update_timeline_store(store_update, cx);
                 (changed, cleared)
             })
@@ -3791,6 +4080,8 @@ mod completion_tests {
                 completion_scroll: UniformListScrollHandle::new(),
                 submission_error: None,
                 permission_wizard: PermissionWizard::default(),
+                question: None,
+                tasks_expanded: false,
                 attachments: Vec::new(),
                 completions: vec![
                     CommandCompletion {
@@ -3849,6 +4140,316 @@ mod completion_tests {
             "/first "
         );
         assert!(cx.update(|_, cx| view.read(cx).completions.is_empty()));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    type RecordedRequests = Rc<RefCell<Vec<(PaneId, crate::mux::client::AgentRequest)>>>;
+
+    /// A visible agent view over a controller whose daemon requests are
+    /// recorded instead of sent.
+    #[cfg(not(target_os = "macos"))]
+    fn wired_view(
+        cx: &mut TestAppContext,
+        pane: PaneId,
+    ) -> (
+        Entity<AgentView>,
+        Entity<AgentController>,
+        RecordedRequests,
+        &mut VisualTestContext,
+    ) {
+        cx.update(zz_ui::init);
+        let slot = Rc::new(RefCell::new(None));
+        let captured = Rc::clone(&slot);
+        let (_, cx) = cx.add_window_view(move |window, cx| {
+            crate::config::set_fleet_hosts_for_test(Vec::new(), cx);
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(DaemonError::Thread("test client".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            let sink = mux.update(cx, |mux, _| {
+                mux.set_agent_client_instance_id_for_test(zz_protocol::ClientInstanceId(1));
+                mux.record_agent_requests_for_test()
+            });
+            let controller =
+                cx.new(|_| AgentController::new(crate::config::AgentConfig::default()));
+            controller.update(cx, |controller, _| controller.attach_mux(mux.clone()));
+            let descriptor = AgentDescriptor {
+                provider: AgentProvider::ClaudeCode,
+                cwd: Some(PathBuf::from("/workspace")),
+                session_id: None,
+            };
+            let view = cx.new(|cx| {
+                let mut view =
+                    AgentView::new(pane, &descriptor, controller.clone(), mux, window, cx);
+                view.set_visible(true, cx);
+                view
+            });
+            view.read(cx).focus(cx).focus(window, cx);
+            captured.replace(Some((view.clone(), controller, sink)));
+            Root::new(view, window, cx)
+        });
+        let (view, controller, sink) = slot.borrow_mut().take().expect("captured agent view");
+        (view, controller, sink, cx)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn ask(
+        cx: &mut VisualTestContext,
+        controller: &Entity<AgentController>,
+        pane: PaneId,
+        request_id: u64,
+        questions: Vec<zz_protocol::agent_stream::AgentQuestion>,
+    ) {
+        cx.update(|_, cx| {
+            controller.update(cx, |controller, cx| {
+                controller.apply_stream_items(
+                    pane,
+                    vec![zz_daemon::AgentStreamItem {
+                        seq: request_id,
+                        payload: zz_daemon::AgentStreamPayload::PermissionRequested {
+                            request_id,
+                            tool_call: serde_json::json!({
+                                "toolCallId": format!("ask-{request_id}"),
+                                "title": "Claude has questions",
+                            }),
+                            options: serde_json::json!([]),
+                            questions,
+                        },
+                    }],
+                    cx,
+                );
+            });
+        });
+        cx.run_until_parked();
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn asked(
+        id: &str,
+        labels: &[&str],
+        multi_select: bool,
+    ) -> zz_protocol::agent_stream::AgentQuestion {
+        zz_protocol::agent_stream::AgentQuestion {
+            id: id.to_owned(),
+            question: format!("{id}?"),
+            options: labels
+                .iter()
+                .map(|label| zz_protocol::agent_stream::AgentQuestionOption {
+                    label: (*label).to_owned(),
+                    description: None,
+                })
+                .collect(),
+            multi_select,
+            allow_other: true,
+            ..Default::default()
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn reply(id: &str, answers: &[&str]) -> zz_protocol::AgentQuestionAnswer {
+        zz_protocol::AgentQuestionAnswer {
+            id: id.to_owned(),
+            answers: answers.iter().map(|answer| (*answer).to_owned()).collect(),
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn a_question_card_answers_choices_and_typed_text_from_the_keyboard(cx: &mut TestAppContext) {
+        let pane = PaneId(41);
+        let (view, controller, sink, cx) = wired_view(cx, pane);
+        ask(
+            cx,
+            &controller,
+            pane,
+            1,
+            vec![
+                asked("fruit", &["apple", "pear"], false),
+                asked("tools", &["saw", "drill"], true),
+            ],
+        );
+        assert!(cx.update(|_, cx| view.read(cx).question.is_some()));
+
+        cx.simulate_keystrokes("2 1 3");
+        assert!(
+            cx.update(|_, cx| view.read(cx).input.read(cx).value().is_empty()),
+            "the card keeps its digits out of the composer"
+        );
+        cx.simulate_input("chisel");
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+
+        assert_eq!(
+            sink.borrow().as_slice(),
+            &[(
+                pane,
+                crate::mux::client::AgentRequest::AnswerQuestion {
+                    request_id: 1,
+                    answers: vec![
+                        reply("fruit", &["pear"]),
+                        reply("tools", &["saw", "chisel"])
+                    ],
+                }
+            )]
+        );
+        assert!(cx.update(|_, cx| view.read(cx).question.is_none()));
+        assert!(
+            cx.update(|window, cx| view.read(cx).focus(cx).is_focused(window)),
+            "the composer takes the keyboard back"
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn one_plain_question_answers_on_its_digit_and_escape_dismisses(cx: &mut TestAppContext) {
+        let pane = PaneId(42);
+        let (_view, controller, sink, cx) = wired_view(cx, pane);
+        ask(
+            cx,
+            &controller,
+            pane,
+            1,
+            vec![asked("fruit", &["apple", "pear"], false)],
+        );
+        cx.simulate_keystrokes("1");
+        ask(
+            cx,
+            &controller,
+            pane,
+            2,
+            vec![asked("tools", &["saw"], true)],
+        );
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+
+        assert_eq!(
+            sink.borrow().as_slice(),
+            &[
+                (
+                    pane,
+                    crate::mux::client::AgentRequest::AnswerQuestion {
+                        request_id: 1,
+                        answers: vec![reply("fruit", &["apple"])],
+                    }
+                ),
+                (
+                    pane,
+                    crate::mux::client::AgentRequest::RespondPermission {
+                        request_id: 2,
+                        option_id: None,
+                    }
+                ),
+            ]
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn the_task_tray_opens_and_stops_a_task(cx: &mut TestAppContext) {
+        let pane = PaneId(43);
+        let (view, controller, sink, cx) = wired_view(cx, pane);
+        cx.update(|_, cx| {
+            controller.update(cx, |controller, cx| {
+                controller.apply_pane_state(
+                    pane,
+                    &zz_protocol::AgentPaneWire {
+                        phase: zz_protocol::AgentConnectionPhase::Running,
+                        tasks: vec![zz_protocol::AgentTaskWire {
+                            id: "b1".to_owned(),
+                            kind: "shell".to_owned(),
+                            description: "cargo build".to_owned(),
+                            tool_call_id: None,
+                        }],
+                        ..Default::default()
+                    },
+                    cx,
+                );
+            });
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        assert!(cx.debug_bounds("agent-task-stop-0").is_none());
+        let chip = cx
+            .debug_bounds("agent-task-tray")
+            .expect("the tray chip should be painted");
+        cx.simulate_click(chip.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        assert!(cx.update(|_, cx| view.read(cx).tasks_expanded));
+        let stop = cx
+            .debug_bounds("agent-task-stop-0")
+            .expect("an open tray lists the task");
+        cx.simulate_click(stop.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+
+        assert_eq!(
+            sink.borrow().as_slice(),
+            &[(
+                pane,
+                crate::mux::client::AgentRequest::StopTask {
+                    task_id: "b1".to_owned()
+                }
+            )]
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn subagent_steps_nest_from_the_controllers_parent_links(cx: &mut TestAppContext) {
+        let pane = PaneId(44);
+        let (view, controller, _sink, cx) = wired_view(cx, pane);
+        let tool = |seq: u64, id: &str, meta: serde_json::Value| zz_daemon::AgentStreamItem {
+            seq,
+            payload: zz_daemon::AgentStreamPayload::Update {
+                update: serde_json::json!({
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": id,
+                    "title": id,
+                    "kind": "read",
+                    "_meta": meta,
+                }),
+            },
+        };
+        cx.update(|_, cx| {
+            controller.update(cx, |controller, cx| {
+                controller.apply_stream_items(
+                    pane,
+                    vec![
+                        tool(1, "agent-1", serde_json::json!({})),
+                        tool(
+                            2,
+                            "read-1",
+                            serde_json::json!({"zz": {"parent": "agent-1"}}),
+                        ),
+                        tool(
+                            3,
+                            "read-2",
+                            serde_json::json!({"zz": {"parent": "agent-1"}}),
+                        ),
+                    ],
+                    cx,
+                );
+            });
+        });
+        cx.run_until_parked();
+
+        let rows = cx.update(|_, cx| view.read(cx).timeline.rows.clone());
+        let [TimelineRow::Group { entries, .. }] = rows.as_slice() else {
+            panic!("the steps join their agent's row: {rows:?}");
+        };
+        let parents = entries
+            .iter()
+            .map(zz_ui::agent::timeline_parent)
+            .collect::<Vec<_>>();
+        let agent = entries[0].id();
+        assert_eq!(parents, [None, Some(agent), Some(agent)]);
     }
 }
 
@@ -3926,6 +4527,60 @@ mod tests {
         assert!(!rendered.contains('\0'));
     }
 
+    fn no_parent(_: u64) -> Option<u64> {
+        None
+    }
+
+    #[test]
+    fn subagent_steps_join_their_agents_row_across_appends() {
+        let parents = |id: u64| matches!(id, 2 | 4).then_some(1);
+        let mut entries = vec![
+            thread_tool(1, "Survey", AgentToolStatusModel::Running),
+            thread_tool(2, "Read a.rs", AgentToolStatusModel::Completed),
+            AgentThreadEntry::Assistant {
+                id: 3,
+                markdown: "meanwhile".to_owned(),
+            },
+        ];
+        let mut revisions = vec![1, 1, 1];
+        let mut timeline = TimelineModel::new(&entries, &revisions, &parents);
+        assert_eq!(timeline.entry_to_row, [0, 0, 1]);
+
+        entries.push(thread_tool(4, "Read b.rs", AgentToolStatusModel::Running));
+        revisions.push(1);
+        let TimelineModelUpdate::Incremental {
+            remeasure_rows,
+            added_rows,
+            ..
+        } = timeline.synchronize(&entries, &revisions, None, &parents)
+        else {
+            panic!("a late step should grow its agent's row in place");
+        };
+        assert_eq!(remeasure_rows, [0]);
+        assert_eq!(added_rows, 0);
+        assert_eq!(timeline.entry_to_row, [0, 0, 1, 0]);
+        assert!(matches!(
+            &timeline.rows[0],
+            TimelineRow::Group { entries, .. }
+                if entries.iter().map(AgentEntry::id).eq([1, 2, 4])
+        ));
+        assert!(matches!(
+            timeline.rows[0].entry(4),
+            Some(AgentEntry::Tool(AgentToolEntry {
+                parent: Some(1),
+                ..
+            }))
+        ));
+
+        entries[3] = thread_tool(4, "Read b.rs", AgentToolStatusModel::Completed);
+        revisions[3] = 2;
+        assert!(matches!(
+            timeline.synchronize(&entries, &revisions, None, &no_parent),
+            TimelineModelUpdate::Rebuild
+        ));
+        assert_eq!(timeline.entry_to_row, [0, 0, 1, 2]);
+    }
+
     fn thread_tool(id: u64, label: &str, status: AgentToolStatusModel) -> AgentThreadEntry {
         AgentThreadEntry::Tool {
             id,
@@ -3957,7 +4612,7 @@ mod tests {
             thread_tool(3, "Editing files", AgentToolStatusModel::Completed),
         ];
         let mut revisions = vec![1, 1, 1];
-        let mut timeline = TimelineModel::new(&entries, &revisions);
+        let mut timeline = TimelineModel::new(&entries, &revisions, &no_parent);
         assert_eq!(timeline.entry_to_row, [0, 0, 0]);
         assert!(matches!(
             &timeline.rows[0],
@@ -3972,7 +4627,7 @@ mod tests {
             splice_start,
             added_rows,
             ..
-        } = timeline.synchronize(&entries, &revisions, None)
+        } = timeline.synchronize(&entries, &revisions, None, &no_parent)
         else {
             panic!("appending reasoning after a tool should update the trailing group");
         };
@@ -3987,7 +4642,7 @@ mod tests {
             remeasure_rows,
             added_rows,
             ..
-        } = timeline.synchronize(&entries, &revisions, None)
+        } = timeline.synchronize(&entries, &revisions, None, &no_parent)
         else {
             panic!("a member revision should update its owning group row");
         };
@@ -4003,7 +4658,7 @@ mod tests {
             thread_tool(3, "Editing files", AgentToolStatusModel::Completed),
         ];
         let mut revisions = vec![1, 1, 1];
-        let mut timeline = TimelineModel::new(&entries, &revisions);
+        let mut timeline = TimelineModel::new(&entries, &revisions, &no_parent);
         assert_eq!(timeline.rows.len(), 1);
         assert_eq!(timeline.entry_to_row, [0, 0, 0]);
 
@@ -4018,7 +4673,7 @@ mod tests {
             remeasure_rows,
             splice_start,
             added_rows,
-        } = timeline.synchronize(&entries, &revisions, None)
+        } = timeline.synchronize(&entries, &revisions, None, &no_parent)
         else {
             panic!("tool append should update the trailing group");
         };
@@ -4044,7 +4699,7 @@ mod tests {
             splice_start,
             added_rows,
             ..
-        } = timeline.synchronize(&entries, &revisions, None)
+        } = timeline.synchronize(&entries, &revisions, None, &no_parent)
         else {
             panic!("different-label tool append should update the trailing group");
         };
@@ -4061,7 +4716,7 @@ mod tests {
             remeasure_rows,
             added_rows,
             ..
-        } = timeline.synchronize(&entries, &revisions, None)
+        } = timeline.synchronize(&entries, &revisions, None, &no_parent)
         else {
             panic!("member revision should update its owning row");
         };
@@ -4084,7 +4739,7 @@ mod tests {
             remeasure_rows,
             added_rows,
             ..
-        } = timeline.synchronize(&entries, &revisions, None)
+        } = timeline.synchronize(&entries, &revisions, None, &no_parent)
         else {
             panic!("tool label changes should preserve contiguous grouping");
         };

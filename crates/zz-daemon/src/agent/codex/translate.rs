@@ -125,7 +125,7 @@ impl Translator {
     pub(crate) fn history_item(&mut self, item: &Value) -> Vec<Value> {
         if item["type"] == "userMessage" {
             return user_text(item)
-                .map(|text| vec![chunk("user_message_chunk", &id_of(item), &text)])
+                .map(|text| vec![chunk("user_message_chunk", &prompt_id(item), &text)])
                 .unwrap_or_default();
         }
         let mut updates = self.started(item);
@@ -186,7 +186,7 @@ impl Translator {
                 if self.prompts.remove(text.trim()) {
                     return Vec::new();
                 }
-                vec![chunk("user_message_chunk", &id, &text)]
+                vec![chunk("user_message_chunk", &prompt_id(item), &text)]
             }
             Some("agentMessage" | "plan") => {
                 self.whole(&id, "agent_message_chunk", item["text"].as_str())
@@ -284,6 +284,12 @@ impl Translator {
 
 fn id_of(item: &Value) -> String {
     item["id"].as_str().unwrap_or("item").to_owned()
+}
+
+fn prompt_id(item: &Value) -> String {
+    item["clientId"]
+        .as_str()
+        .map_or_else(|| id_of(item), str::to_owned)
 }
 
 fn user_text(item: &Value) -> Option<String> {

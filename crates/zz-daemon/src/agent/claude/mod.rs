@@ -23,8 +23,8 @@ use zz_protocol::{
 
 use crate::agent::{
     child::{
-        ChildEvent, Input, Process, cancelled, fit_update, new_uuid, next_input, option,
-        random_u64, rewind_count, rewind_shortfall,
+        ChildEvent, Input, Process, Rewind, cancelled, fit_update, new_uuid, next_input, option,
+        random_u64, rewind_shortfall,
     },
     environment::{AgentWorkspaceEnvironment, agent_path, find_executable},
     host::RuntimeChannels,
@@ -556,13 +556,13 @@ impl Runtime {
                         .await;
                 }
                 let content = prompt_content(&prompt);
-                let echo = format!("zz-prompt-{turn_id}-{:016x}", random_u64());
-                for update in prompt_updates(&prompt_blocks(prompt), &MessageId::new(echo)) {
+                let uuid = new_uuid();
+                for update in prompt_updates(&prompt_blocks(prompt), &MessageId::new(uuid.clone()))
+                {
                     let update =
                         serde_json::to_value(&update).map_err(|error| error.to_string())?;
                     self.update(update, true).await?;
                 }
-                let uuid = new_uuid();
                 self.send(&json!({
                     "type": "user",
                     "uuid": uuid,
@@ -1032,15 +1032,15 @@ impl Runtime {
                 let (cwd, source) = (session.cwd.clone(), session.id.clone());
                 self.begin(cwd, Start::Fork, Some(source)).await
             }
-            "rewind" => match rewind_count(rest) {
-                Some(count) => self.rewind(count).await,
+            "rewind" => match Rewind::parse(rest) {
+                Some(target) => self.rewind(target).await,
                 None => self.notice(VERB_HELP).await,
             },
             _ => self.notice(VERB_HELP).await,
         }
     }
 
-    async fn rewind(&mut self, count: usize) -> Result<(), String> {
+    async fn rewind(&mut self, target: Rewind) -> Result<(), String> {
         if self.turn.is_some() {
             return self.notice("Stop the turn before rewinding.").await;
         }
@@ -1053,11 +1053,14 @@ impl Runtime {
         let Some(file) = file else {
             return self.notice(&rewind_shortfall(0)).await;
         };
-        let prompts = smol::unblock(move || sessions::prompt_parents(&file)).await;
-        let Some(index) = prompts.len().checked_sub(count) else {
-            return self.notice(&rewind_shortfall(prompts.len())).await;
+        let prompts = smol::unblock(move || sessions::prompts(&file)).await;
+        let index = match target.pick(prompts.len(), |id| {
+            prompts.iter().position(|(uuid, _)| uuid == id)
+        }) {
+            Ok(index) => index,
+            Err(text) => return self.notice(&text).await,
         };
-        match prompts[index].clone() {
+        match prompts[index].1.clone() {
             Some(at) => {
                 let launch = Launch::Fork {
                     source,

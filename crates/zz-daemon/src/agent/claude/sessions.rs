@@ -332,7 +332,7 @@ pub(crate) fn transcript(path: &Path, cwd: PathBuf, until: Option<&str>) -> Vec<
         .collect()
 }
 
-pub(crate) fn prompt_parents(path: &Path) -> Vec<Option<String>> {
+pub(crate) fn prompts(path: &Path) -> Vec<(String, Option<String>)> {
     let entries = chain_entries(path);
     chain(&entries, None)
         .into_iter()
@@ -341,7 +341,12 @@ pub(crate) fn prompt_parents(path: &Path) -> Vec<Option<String>> {
                 && entry["isCompactSummary"] != true
                 && prompt_text(entry).is_some()
         })
-        .map(|entry| entry["parentUuid"].as_str().map(str::to_owned))
+        .filter_map(|entry| {
+            Some((
+                entry["uuid"].as_str()?.to_owned(),
+                entry["parentUuid"].as_str().map(str::to_owned),
+            ))
+        })
         .collect()
 }
 
@@ -550,7 +555,13 @@ mod tests {
             r#"{"type":"assistant","uuid":"a3","parentUuid":"u4","message":{"id":"m3","content":[{"type":"text","text":"two"}]}}"#,
         ];
         std::fs::write(&path, lines.join("\n")).expect("write");
-        assert_eq!(prompt_parents(&path), [None, Some("x1".to_owned())]);
+        assert_eq!(
+            prompts(&path),
+            [
+                ("u1".to_owned(), None),
+                ("u2".to_owned(), Some("x1".to_owned()))
+            ]
+        );
         let kept = transcript(&path, PathBuf::from("/work"), Some("x1"));
         let texts = kept
             .iter()

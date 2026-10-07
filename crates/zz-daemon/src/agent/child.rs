@@ -308,11 +308,38 @@ pub(crate) fn new_uuid() -> String {
     )
 }
 
-pub(crate) fn rewind_count(text: &str) -> Option<usize> {
-    if text.is_empty() {
-        return Some(1);
+pub(crate) enum Rewind {
+    Back(usize),
+    To(String),
+}
+
+impl Rewind {
+    pub(crate) fn parse(text: &str) -> Option<Self> {
+        if text.is_empty() {
+            return Some(Self::Back(1));
+        }
+        match text.parse::<usize>() {
+            Ok(0) => None,
+            Ok(count) => Some(Self::Back(count)),
+            Err(_) if !text.contains(char::is_whitespace) => Some(Self::To(text.to_owned())),
+            Err(_) => None,
+        }
     }
-    text.parse().ok().filter(|count| *count > 0)
+
+    pub(crate) fn pick(
+        &self,
+        prompts: usize,
+        find: impl Fn(&str) -> Option<usize>,
+    ) -> Result<usize, String> {
+        match self {
+            Self::Back(count) => prompts
+                .checked_sub(*count)
+                .ok_or_else(|| rewind_shortfall(prompts)),
+            Self::To(id) => {
+                find(id).ok_or_else(|| "That prompt is no longer in this conversation.".to_owned())
+            }
+        }
+    }
 }
 
 pub(crate) fn rewind_shortfall(prompts: usize) -> String {

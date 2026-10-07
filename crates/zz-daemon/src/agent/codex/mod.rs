@@ -22,8 +22,7 @@ use zz_protocol::{
 
 use crate::agent::{
     child::{
-        ChildEvent, Input, Process, cancelled, fit_update, next_input, option, random_u64,
-        rewind_count, rewind_shortfall,
+        ChildEvent, Input, Process, Rewind, cancelled, fit_update, next_input, option, random_u64,
     },
     environment::{AgentWorkspaceEnvironment, agent_path, find_executable},
     host::RuntimeChannels,
@@ -200,7 +199,7 @@ enum Outgoing {
         task_id: String,
     },
     Rewind {
-        count: usize,
+        target: Rewind,
     },
     SideFork {
         question: String,
@@ -920,7 +919,7 @@ impl Runtime {
         Ok(())
     }
 
-    async fn rewind(&mut self, count: usize, thread: &Value) -> Result<(), String> {
+    async fn rewind(&mut self, target: &Rewind, thread: &Value) -> Result<(), String> {
         if self.turn.is_some() {
             return self.notice("Stop the turn before rewinding.").await;
         }
@@ -932,20 +931,33 @@ impl Runtime {
             .into_iter()
             .flatten()
             .enumerate()
-            .filter(|(_, turn)| {
-                turn["items"]
-                    .as_array()
-                    .is_some_and(|items| items.iter().any(|item| item["type"] == "userMessage"))
+            .filter_map(|(index, turn)| {
+                let ids = turn["items"]
+                    .as_array()?
+                    .iter()
+                    .filter(|item| item["type"] == "userMessage")
+                    .flat_map(|item| [item["id"].as_str(), item["clientId"].as_str()])
+                    .flatten()
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>();
+                if ids.is_empty() {
+                    return None;
+                }
+                Some((index, turn["id"].as_str()?.to_owned(), ids))
             })
-            .filter_map(|(index, turn)| Some((index, turn["id"].as_str()?.to_owned())))
             .collect::<Vec<_>>();
-        let Some(index) = prompts.len().checked_sub(count) else {
-            return self.notice(&rewind_shortfall(prompts.len())).await;
+        let index = match target.pick(prompts.len(), |id| {
+            prompts
+                .iter()
+                .position(|(_, _, ids)| ids.iter().any(|known| known == id))
+        }) {
+            Ok(index) => index,
+            Err(text) => return self.notice(&text).await,
         };
         let cwd = self.cwd();
         match prompts.swap_remove(index) {
-            (0, _) => self.begin(cwd, Start::New, None).await,
-            (_, before) => {
+            (0, _, _) => self.begin(cwd, Start::New, None).await,
+            (_, before, _) => {
                 self.begin_with(Starting {
                     start: Start::Fork,
                     cwd,
@@ -1047,7 +1059,7 @@ impl Runtime {
         let echo = format!("zz-prompt-{turn_id}-{:016x}", random_u64());
         let text = prompt.text.clone();
         let input = turn_input(&prompt);
-        for update in prompt_updates(&prompt_blocks(prompt), &MessageId::new(echo)) {
+        for update in prompt_updates(&prompt_blocks(prompt), &MessageId::new(echo.clone())) {
             let update = serde_json::to_value(&update).map_err(|error| error.to_string())?;
             self.update(update, true).await?;
         }
@@ -1078,7 +1090,11 @@ impl Runtime {
             }
             _ => {
                 self.translator.expect_prompt(&text);
-                let mut params = json!({ "threadId": thread, "input": input });
+                let mut params = json!({
+                    "threadId": thread,
+                    "input": input,
+                    "clientUserMessageId": echo,
+                });
                 self.settings.turn_overrides(&mut params);
                 self.request("turn/start", &params, Outgoing::Turn { turn_id });
             }
@@ -1128,7 +1144,7 @@ impl Runtime {
                 self.begin(cwd, Start::Fork, Some(thread)).await
             }
             "rewind" => {
-                let Some(count) = rewind_count(rest) else {
+                let Some(target) = Rewind::parse(rest) else {
                     return self.notice(VERB_HELP).await;
                 };
                 if self.turn.is_some() {
@@ -1137,7 +1153,7 @@ impl Runtime {
                 self.request(
                     "thread/read",
                     &json!({ "threadId": thread, "includeTurns": true }),
-                    Outgoing::Rewind { count },
+                    Outgoing::Rewind { target },
                 );
                 Ok(())
             }
@@ -1411,8 +1427,8 @@ impl Runtime {
                 self.notice(&format!("Codex could not stop that process{reason}"))
                     .await
             }
-            (Outgoing::Rewind { count }, Ok(response)) => {
-                self.rewind(count, &response["thread"]).await
+            (Outgoing::Rewind { target }, Ok(response)) => {
+                self.rewind(&target, &response["thread"]).await
             }
             (Outgoing::Rewind { .. }, Err(error)) => {
                 self.notice(&format!("Codex could not read the thread: {error}"))
@@ -2140,6 +2156,12 @@ mod tests {
 while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/^{\("method":"[^"]*",\)\{0,1\}"id":\([0-9][0-9]*\),.*/\2/p')
   case "$line" in
+    *'"method":"thread/resume"'*'"threadId":"t2"'*) printf '{"id":%s,"result":{"thread":{"id":"t2"}}}\n' "$id" ;;
+    *'"method":"thread/read"'*'"threadId":"t2"'*)
+      printf '{"id":%s,"result":{"thread":{"id":"t2","turns":[{"id":"u0","items":[{"type":"userMessage","id":"m0","clientId":null,"content":[{"type":"text","text":"one"}]}]},{"id":"u1","items":[{"type":"userMessage","id":"m1","clientId":"zz-prompt-2-x","content":[{"type":"text","text":"two"}]}]}]}}}\n' "$id" ;;
+    *'"method":"thread/fork"'*'"beforeTurnId":"u1"'*) printf '{"id":%s,"result":{"thread":{"id":"f1"}}}\n' "$id" ;;
+    *'"method":"thread/read"'*'"threadId":"f1"'*)
+      printf '{"id":%s,"result":{"thread":{"id":"f1","turns":[{"id":"u0","items":[{"type":"userMessage","id":"m0","clientId":null,"content":[{"type":"text","text":"one"}]}]}]}}}\n' "$id" ;;
     *'"method":"thread/start"'*|*'"method":"thread/resume"'*) printf '{"id":%s,"result":{"thread":{"id":"t1"}}}\n' "$id" ;;
     *'"method":"thread/read"'*'"threadId":"t1"'*)
       printf '{"id":%s,"result":{"thread":{"id":"t1","turns":[{"id":"u0","items":[{"type":"userMessage","id":"m0","content":[{"type":"text","text":"scan"}]},{"type":"subAgentActivity","id":"a1","kind":"started","agentThreadId":"c1","agentPath":"/root/scan_files"},{"type":"subAgentActivity","id":"a2","kind":"completed","agentThreadId":"c1","agentPath":"/root/scan_files"}]}]}}}\n' "$id" ;;
@@ -2328,6 +2350,72 @@ done
             assert_eq!(updates[1]["title"], "Scan files");
             assert_eq!(updates[4]["content"][0]["content"]["text"], "found x");
             assert_eq!(updates[5]["status"], "completed");
+            commands
+                .send(RuntimeCommand::Shutdown)
+                .await
+                .expect("shutdown");
+        };
+        let (result, ()) = smol::block_on(futures_lite::future::zip(runtime, driver));
+        assert_eq!(result, Ok(()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rewinding_to_a_prompt_row_forks_before_its_turn() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let (commands, events, runtime) = fake_codex(directory.path());
+        let driver = async {
+            commands
+                .send(RuntimeCommand::Open {
+                    cwd: directory.path().to_path_buf(),
+                    resume_session: Some("t2".to_owned()),
+                })
+                .await
+                .expect("open");
+            let mut prompts = Vec::new();
+            loop {
+                match until(&events, |_| true).await {
+                    AgentStreamPayload::Update { update }
+                        if update["sessionUpdate"] == "user_message_chunk" =>
+                    {
+                        prompts.push(update["messageId"].clone());
+                    }
+                    AgentStreamPayload::SessionReady { .. } => break,
+                    _ => {}
+                }
+            }
+            assert_eq!(prompts, ["m0", "zz-prompt-2-x"]);
+            let verb = |text: &str| RuntimeCommand::Verb {
+                prompt: AgentPrompt {
+                    text: text.to_owned(),
+                    ..Default::default()
+                },
+            };
+            commands.send(verb("//rewind gone")).await.expect("verb");
+            let AgentStreamPayload::Update { update } = until(&events, |payload| {
+                matches!(payload, AgentStreamPayload::Update { update } if update["_meta"]["zz"]["notice"] == true)
+            })
+            .await
+            else {
+                unreachable!();
+            };
+            assert_eq!(
+                update["content"]["text"],
+                "That prompt is no longer in this conversation."
+            );
+            commands
+                .send(verb("//rewind zz-prompt-2-x"))
+                .await
+                .expect("verb");
+            let AgentStreamPayload::SessionSwitched { session_id, .. } =
+                until(&events, |payload| {
+                    matches!(payload, AgentStreamPayload::SessionSwitched { .. })
+                })
+                .await
+            else {
+                unreachable!();
+            };
+            assert_eq!(session_id, "f1");
             commands
                 .send(RuntimeCommand::Shutdown)
                 .await

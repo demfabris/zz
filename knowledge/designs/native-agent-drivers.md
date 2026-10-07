@@ -108,7 +108,10 @@ an idle pane becomes a plain prompt. The fanout keeps commands out of projected 
 | anything else | lists the commands | lists the commands |
 
 `//rewind [n]` continues from before the last n prompts (1 by default) in a copy, so the full
-conversation stays resumable; files on disk are not touched. Rewinding every prompt opens a new
+conversation stays resumable; files on disk are not touched. `//rewind <id>` goes back to before
+the prompt row with that message id: a prompt row's id is the id the vendor stores (the `uuid` zz
+puts on Claude's user frame, which lands in the session file, and Codex's `clientUserMessageId`,
+which comes back as the item's `clientId`), so live and replayed rows match. Rewinding every prompt opens a new
 session. A Claude fork has no session file until its first prompt, so the driver records the fork
 (`_meta.zz.fork` on its notice) in the pane's journal, and a restart before that prompt forks again
 under the same id.
@@ -181,7 +184,7 @@ file changes applied, `restart-agent-pane` resuming the thread with its memory, 
 
 # Next
 
-1. A "rewind to here" action on prompt rows that sends `//rewind n`.
+1. A "rewind to here" action on prompt rows that sends `//rewind <id>`.
 2. Orchestration: PiP panes and a decision on in-session tools. The groundwork is in:
    `agent-send --notify` submits to another agent pane and, when that turn ends, posts the reply
    back into the calling agent pane as a prompt queued behind its own turn (t3code's async

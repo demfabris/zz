@@ -405,7 +405,7 @@ struct Wait {
     parsed: ParsedWaitPane,
     started: Instant,
     scan_start: Option<usize>,
-    first: bool,
+    park: Option<Arc<Shared>>,
 }
 
 pub(super) fn wait_pane(
@@ -429,7 +429,7 @@ pub(super) fn wait_pane(
             parsed,
             started: Instant::now(),
             scan_start,
-            first: true,
+            park: Some(Arc::clone(shared)),
         },
     );
     wait.finish(shared, Execution::default())
@@ -446,7 +446,7 @@ fn poll_wait(shared: &Arc<Shared>, target: Arc<Target>, mut wait: Wait) {
             let last_output = pane_last_output(shared, target.pane)
                 .unwrap_or(wait.started)
                 .max(wait.started);
-            if !wait.first && last_output.elapsed() >= dwell {
+            if wait.park.is_none() && last_output.elapsed() >= dwell {
                 target.state.resolve(Ok(Execution::default()));
             } else {
                 finish_wait_poll(shared, target, wait, generation);
@@ -522,10 +522,9 @@ fn finish_wait_poll(shared: &Arc<Shared>, target: Arc<Target>, mut wait: Wait, g
             exit_code: 124,
         }));
     } else {
-        if wait.first {
-            shared.report_command_queue_park();
+        if let Some(item) = wait.park.take() {
+            item.report_command_queue_park();
         }
-        wait.first = false;
         let idle = if let PaneWaitCondition::Idle(dwell) = wait.parsed.condition {
             Some(
                 pane_last_output(shared, target.pane)

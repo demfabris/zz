@@ -12,7 +12,7 @@ use crate::{
 pub const COMPACT_BAR_HEIGHT: f32 = 52.0;
 
 const BUTTON: f32 = 44.0;
-const BUTTON_ICON: f32 = 20.0;
+const BUTTON_ICON: f32 = 24.0;
 const PADDING_X: f32 = 4.0;
 
 pub fn compact_bar(
@@ -73,6 +73,12 @@ pub fn compact_bar_title(
         .h_full()
         .px(rems_from_px(8.0))
         .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
+        .relative()
+        .child(crate::touch::press_highlight(
+            "compact-bar-title-press",
+            cx.theme().foreground.opacity(0.1),
+            cx.theme().control_radius(),
+        ))
         .child(
             div()
                 .flex()
@@ -80,15 +86,15 @@ pub fn compact_bar_title(
                 .gap(rems_from_px(6.0))
                 .min_w_0()
                 .max_w_full()
-                .text_size(rems_from_px(14.0))
-                .line_height(rems_from_px(18.0))
+                .text_size(rems_from_px(15.0))
+                .line_height(rems_from_px(20.0))
                 .font_medium()
                 .text_color(cx.theme().foreground)
                 .child(
                     div()
                         .flex_none()
                         .opacity(0.8)
-                        .child(Icon::new(icon).size(rems_from_px(14.0))),
+                        .child(Icon::new(icon).size(rems_from_px(16.0))),
                 )
                 .child(
                     div()

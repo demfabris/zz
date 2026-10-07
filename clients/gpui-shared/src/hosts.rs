@@ -161,7 +161,7 @@ impl AppShell {
     pub(super) fn hosts_page(
         &self,
         id: &'static str,
-        title: &'static str,
+        title: Option<&'static str>,
         narrow: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {

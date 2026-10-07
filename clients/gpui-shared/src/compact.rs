@@ -869,7 +869,7 @@ impl AppShell {
             .child(pager_area)
             .child(bottom)
             .children(sheets)
-            .child(
+            .child(zz_ui::touch::touch_scale(
                 div()
                     .absolute()
                     .top(top_inset)
@@ -877,7 +877,8 @@ impl AppShell {
                     .right_0()
                     .bottom_0()
                     .children(overlays),
-            )
+                cx,
+            ))
     }
 
     fn compact_key_area(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -976,7 +977,7 @@ impl AppShell {
                 .h(height)
                 .w_full()
                 .track_focus(&self.sidebar_focus)
-                .child(tree),
+                .child(zz_ui::touch::touch_scale(tree, cx)),
             bottom_inset,
             move |window, cx| {
                 let _ = view.update(cx, |this, cx| this.release_sidebar_focus(window, cx));

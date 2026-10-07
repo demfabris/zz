@@ -225,6 +225,12 @@ fn tile(
         )
         .child(
             div()
+                .w_0()
+                .min_w_full()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .text_center()
                 .text_size(crate::rems_from_px(11.0))
                 .text_color(if selected {
                     cx.theme().foreground

@@ -497,9 +497,13 @@ impl RenderOnce for Button {
             ButtonRounded::Medium => cx.theme().control_radius(),
             ButtonRounded::Size(px) => px,
         };
-        let slop = self
-            .hit_slop
-            .filter(|_| crate::touch::CoarsePointer::get(cx));
+        let coarse = crate::touch::CoarsePointer::get(cx);
+        let slop = self.hit_slop.filter(|_| coarse);
+        let press = (coarse && clickable)
+            .then(|| crate::touch::press_feedback(self.id.clone(), window, cx));
+        let pressed = press.as_ref().map_or(0.0, |press| press.amount);
+        let press_listener = press.map(crate::touch::PressFeedback::listener);
+        let press_fill = style.active(self.outline, cx).bg;
         let on_mouse_down = move |_: &gpui::MouseDownEvent, window: &mut Window, cx: &mut App| {
             if is_disabled {
                 cx.stop_propagation();
@@ -593,29 +597,33 @@ impl RenderOnce for Button {
                 })
                 .bg(normal_style.bg)
                 .when(normal_style.underline, |this| this.text_decoration_1())
-                .hover(|this| {
-                    let hover_style = style.hovered(self.outline, cx);
-                    let this = this
-                        .bg(self.hover_bg.unwrap_or(hover_style.bg))
-                        .border_color(hover_style.border)
-                        .text_color(hover_style.fg);
-                    if highlight_ring || resting_surface {
-                        this.control_highlight(cx)
-                    } else {
-                        this
-                    }
+                .when(!coarse, |this| {
+                    this.hover(|this| {
+                        let hover_style = style.hovered(self.outline, cx);
+                        let this = this
+                            .bg(self.hover_bg.unwrap_or(hover_style.bg))
+                            .border_color(hover_style.border)
+                            .text_color(hover_style.fg);
+                        if highlight_ring || resting_surface {
+                            this.control_highlight(cx)
+                        } else {
+                            this
+                        }
+                    })
                 })
-                .active(|this| {
-                    let active_style = style.active(self.outline, cx);
-                    let this = this
-                        .bg(active_style.bg)
-                        .border_color(active_style.border)
-                        .text_color(active_style.fg);
-                    if highlight_ring || resting_surface {
-                        this.control_highlight(cx)
-                    } else {
-                        this
-                    }
+                .when(!coarse, |this| {
+                    this.active(|this| {
+                        let active_style = style.active(self.outline, cx);
+                        let this = this
+                            .bg(active_style.bg)
+                            .border_color(active_style.border)
+                            .text_color(active_style.fg);
+                        if highlight_ring || resting_surface {
+                            this.control_highlight(cx)
+                        } else {
+                            this
+                        }
+                    })
                 })
             })
             .when(resting_surface, |this| this.control_surface(cx))
@@ -631,12 +639,24 @@ impl RenderOnce for Button {
                     .shadow_none()
             })
             .refine_style(&self.style)
+            .when(pressed > 0.0, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .rounded(rounding)
+                        .bg(press_fill)
+                        .opacity(pressed),
+                )
+            })
             .map(|this| match slop {
                 None => this
                     .on_mouse_down(MouseButton::Left, on_mouse_down)
-                    .when_some(on_click, |this, on_click| this.on_click(on_click)),
+                    .when_some(on_click, |this, on_click| this.on_click(on_click))
+                    .children(press_listener),
                 Some((x, y)) => this.child(
                     crate::touch::hit_area("touch", x, y)
+                        .children(press_listener)
                         .on_mouse_down(MouseButton::Left, on_mouse_down)
                         .when_some(on_click, |this, on_click| {
                             this.on_click(move |event, window, cx| {
@@ -659,6 +679,7 @@ impl RenderOnce for Button {
                     .justify_center();
 
                 button_text_size(label, self.size)
+                    .when(pressed > 0.0, |this| this.opacity(1.0 - 0.35 * pressed))
                     .when(self.dropdown_caret, |this| {
                         this.text_size(rems_from_px(13.0))
                     })

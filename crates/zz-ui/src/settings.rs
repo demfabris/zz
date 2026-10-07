@@ -667,10 +667,12 @@ pub fn settings_page_description(section: SettingsSection, cx: &App) -> gpui::Di
         .flex_col()
         .flex_none()
         .gap(px(4.0))
-        .child(
-            crate::StyledExt::font_medium(div().text_size(crate::rems_from_px(20.0)))
-                .child(section.title()),
-        )
+        .when(!crate::touch::CoarsePointer::get(cx), |this| {
+            this.child(
+                crate::StyledExt::font_medium(div().text_size(crate::rems_from_px(20.0)))
+                    .child(section.title()),
+            )
+        })
         .child(
             div()
                 .text_size(crate::rems_from_px(11.0))
@@ -890,7 +892,11 @@ fn settings_group_header(
         .gap(px(2.0))
         .px(px(2.0))
         .child(
-            crate::StyledExt::font_medium(div().text_size(crate::rems_from_px(12.0))).child(title),
+            crate::StyledExt::font_medium(div().text_size(crate::rems_from_px(12.0)))
+                .when(crate::touch::CoarsePointer::get(cx), |this| {
+                    this.text_color(cx.theme().foreground.muted())
+                })
+                .child(title),
         )
         .when_some(description, |this, description| {
             this.child(
@@ -1140,9 +1146,14 @@ impl ParentElement for SettingEntry {
 }
 
 impl RenderOnce for SettingEntry {
-    fn render(self, _: &mut gpui::Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut gpui::Window, cx: &mut App) -> impl IntoElement {
         let disabled = self.disabled;
         let position = self.position;
+        let press = self
+            .on_click
+            .as_ref()
+            .map(|(id, _)| crate::touch::press_feedback(id.clone(), window, cx));
+        let pressed = press.as_ref().map_or(0.0, |press| press.amount);
 
         let body = div()
             .relative()
@@ -1155,6 +1166,20 @@ impl RenderOnce for SettingEntry {
             .when(disabled, |this| {
                 this.opacity(0.5)
                     .child(div().absolute().inset_0().occlude())
+            })
+            .when(pressed > 0.0, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .when(position.rounds_top(), |this| {
+                            this.rounded_t(cx.theme().radius)
+                        })
+                        .when(position.rounds_bottom(), |this| {
+                            this.rounded_b(cx.theme().radius)
+                        })
+                        .bg(cx.theme().foreground.opacity(0.1 * pressed)),
+                )
             })
             .child(
                 div()
@@ -1250,6 +1275,7 @@ impl RenderOnce for SettingEntry {
                 .id(id)
                 .cursor_pointer()
                 .on_click(move |event, window, cx| handler(event, window, cx))
+                .children(press.map(crate::touch::PressFeedback::listener))
                 .into_any_element(),
             None => row.into_any_element(),
         }
@@ -1295,7 +1321,11 @@ impl RenderOnce for SettingCopy {
             .flex()
             .flex_col()
             .w_full()
-            .max_w(relative(0.7))
+            .max_w(relative(if crate::touch::CoarsePointer::get(cx) {
+                1.0
+            } else {
+                0.7
+            }))
             .min_w_0()
             .gap(px(3.0))
             .child(

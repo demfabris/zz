@@ -273,13 +273,20 @@ the fling ended after a release, a spring settle). The rest is the chrome around
 `compact_bar` with its 44px buttons and title, `compact_pane_header` and `top_shade`, the
 centered `compact_hud` badge (the terminal text size while pinching),
 `bottom_sheet` (dragged down by its header, or by its content from the top, to close), the
-grouped `WhichKeyList` a sheet shows, `swipe_back` for an edge swipe that pops a pushed page over
+grouped `WhichKeyList` a sheet shows, `swipe_back` for a back swipe that pops a pushed page over
 the one beneath it, and the soft-keyboard `KeyRow` with app-level `StickyModifiers`. The sheet and
 the swipe share one drag-and-settle model; `coast_guard`, mounted once at the host's root,
 swallows and ends the fling momentum of a pan they took after they close. When the host sets
 `touch::CoarsePointer` (narrow thin clients do), `Button::hit_slop`, switches, select triggers,
 and number steppers answer taps in a 44px box around the visual, and workspace tree rows and popup
-menu rows grow to 44px. Its tool keys share one gesture: a tap does the key's own job, and a
+menu rows grow to 44px. `touch::touch_scale` renders desktop-sized chrome under a coarse pointer
+with the rem size grown by 17/13 (iOS body text over the desktop's 13px), menus it opens included.
+`touch::press_feedback` and `press_highlight` track a press from touch-down (delayed 100ms unless
+a scroll starts, fading in 120ms and out 180ms, shown at least 130ms); buttons skip hover and
+`active` styles under a coarse pointer and draw this instead, as do settings rows that open a
+page, tree rows, menu items, which-key rows, and key row keys. `yield_back_swipe` marks a
+horizontal scroller that keeps a rightward pan while it can still scroll back, since `swipe_back`
+now takes a pan that starts anywhere on the page. Its tool keys share one gesture: a tap does the key's own job, and a
 hold or a slide raises a card above it, where releasing on an item picks it. `ArrowPad` is the
 direction card and repeats while held; `PopoverKey` is a menu or chord grid (`ToolKeys` builds the
 ctrl, alt, and prefix set). A long press released in place leaves the card open for taps. Colors

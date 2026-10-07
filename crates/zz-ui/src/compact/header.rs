@@ -36,8 +36,8 @@ pub fn compact_pane_header(
         .pr(rems_from_px(reserve))
         .gap(rems_from_px(8.0))
         .font_family(cx.theme().font_family.clone())
-        .text_size(rems_from_px(13.0))
-        .line_height(rems_from_px(16.0))
+        .text_size(rems_from_px(15.0))
+        .line_height(rems_from_px(20.0))
         .text_color(cx.theme().foreground.muted())
         .child(
             div()
@@ -45,7 +45,7 @@ pub fn compact_pane_header(
                 .relative()
                 .top(rems_from_px(0.5))
                 .opacity(0.8)
-                .child(Icon::new(icon).size(rems_from_px(14.0))),
+                .child(Icon::new(icon).size(rems_from_px(16.0))),
         )
         .child(
             div()

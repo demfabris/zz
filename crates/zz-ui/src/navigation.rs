@@ -367,10 +367,23 @@ pub fn workspace_tree_row(
                 .group_hover(row_group.clone(), gpui::Styled::visible)
         })
         .child(actions);
+    let id = id.into();
+    let press = CoarsePointer::get(cx).then(|| {
+        crate::touch::press_highlight(
+            id.clone(),
+            cx.theme().foreground.opacity(0.1),
+            cx.theme().control_radius(),
+        )
+        .top(px(WORKSPACE_TREE_FILL_VERTICAL_INSET))
+        .bottom(px(WORKSPACE_TREE_FILL_VERTICAL_INSET))
+        .left(fill_inset)
+        .right(fill_inset)
+    });
     workspace_tree_row_frame(id, depth, cx)
         .pr(fill_inset)
         .group(row_group)
         .child(fill)
+        .children(press)
         .text_color(if connected {
             cx.theme().foreground
         } else {

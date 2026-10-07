@@ -891,9 +891,17 @@ impl PopupMenu {
             _ => px(26.),
         };
 
+        let coarse = crate::touch::CoarsePointer::get(cx);
         let this = MenuItemElement::new(ix, &group_name)
             .relative()
-            .text_size(crate::rems_from_px(12.0))
+            .when(coarse && item.is_clickable(), |this| {
+                this.child(crate::touch::press_highlight(
+                    gpui::ElementId::NamedInteger(group_name.clone().into(), 0),
+                    cx.theme().foreground.opacity(0.1),
+                    cx.theme().menu_radius(),
+                ))
+            })
+            .text_size(crate::rems_from_px(if coarse { 13.0 } else { 12.0 }))
             .line_height(px(16.0))
             .py_0()
             .px(INNER_PADDING)

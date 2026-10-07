@@ -101,7 +101,7 @@ an idle pane becomes a plain prompt. The fanout keeps commands out of projected 
 
 | Command | Claude Code | Codex |
 | --- | --- | --- |
-| `//btw`, `//side` | `side_question`; the answer never enters the conversation | not yet |
+| `//btw`, `//side` | `side_question`; the answer never enters the conversation | an ephemeral `thread/fork` answers read-only, then is dropped |
 | `//steer <text>` | `user` frame with `priority: "now"` | `turn/steer` |
 | `//fork` | respawn with `--resume X --fork-session --session-id NEW` | `thread/fork` |
 | anything else | lists the commands | lists the commands |
@@ -157,8 +157,7 @@ file changes applied, `restart-agent-pane` resuming the thread with its memory, 
 
 1. The question card, task tray, and nested subagent rows on desktop, gpui-shared, and FFI (the
    wire and reducer are done).
-2. More commands: `//btw` for Codex (an ephemeral `thread/fork` plus a hidden turn), branch from a
-   message (`--resume-session-at`, `thread/fork beforeTurnId`), rewind.
+2. More commands: branch from a message (`--resume-session-at`, `thread/fork beforeTurnId`), rewind.
 3. Codex subagent threads (`collabAgentToolCall` receivers) and background terminals.
 4. Orchestration: PiP panes and a decision on in-session tools. The groundwork is in:
    `agent-send --notify` submits to another agent pane and, when that turn ends, posts the reply

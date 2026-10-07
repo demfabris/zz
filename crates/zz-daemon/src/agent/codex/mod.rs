@@ -39,7 +39,8 @@ const REQUEST_TIMEOUT: Duration = Duration::from_mins(1);
 const SESSION_PAGE: u64 = 50;
 const AGENT_NAME: &str = "Codex";
 const AGENT_KEY: &str = "codex";
-const VERB_HELP: &str = "zz commands: `//steer <text>` redirects the running turn and `//fork` continues in a copy of this conversation. `/compact` and `/review` run Codex's own compaction and review.";
+const VERB_HELP: &str = "zz commands: `//btw <question>` (or `//side`) asks Codex in a throwaway copy of the thread, `//steer <text>` redirects the running turn, and `//fork` continues in a copy of this conversation. `/compact` and `/review` run Codex's own compaction and review.";
+const SIDE_PREFIX: &str = "Answer this side question briefly from what you already know. Do not run commands, edit files, or call tools.\n\n";
 const MODES: [(&str, &str, &str); 3] = [
     (
         "read-only",
@@ -124,6 +125,7 @@ pub(crate) async fn run_codex_runtime(
         deferred_cancels: HashSet::new(),
         settings: Settings::default(),
         notices: 0,
+        sides: HashMap::new(),
     };
     let commands = channels.commands;
     let controls = channels.controls;
@@ -179,8 +181,15 @@ enum Outgoing {
     Command {
         turn_id: u64,
     },
-    Interrupt,
+    Quiet,
     Steer,
+    SideFork {
+        question: String,
+        message_id: String,
+    },
+    SideTurn {
+        thread: String,
+    },
     Sessions {
         client: zz_protocol::ClientId,
         cwd: Option<PathBuf>,
@@ -377,6 +386,13 @@ struct Runtime {
     deferred_cancels: HashSet<u64>,
     settings: Settings,
     notices: u64,
+    sides: HashMap<String, Side>,
+}
+
+struct Side {
+    message_id: String,
+    text: String,
+    streamed: bool,
 }
 
 impl Runtime {
@@ -572,7 +588,7 @@ impl Runtime {
                     self.request(
                         "turn/interrupt",
                         &json!({ "threadId": thread, "turnId": codex }),
-                        Outgoing::Interrupt,
+                        Outgoing::Quiet,
                     );
                 }
                 self.cancel_permissions().await
@@ -586,7 +602,7 @@ impl Runtime {
                         self.request(
                             "turn/interrupt",
                             &json!({ "threadId": thread, "turnId": codex }),
-                            Outgoing::Interrupt,
+                            Outgoing::Quiet,
                         );
                     }
                     self.cancel_permissions().await?;
@@ -973,9 +989,22 @@ impl Runtime {
                 let cwd = self.cwd();
                 self.begin(cwd, Start::Fork, Some(thread)).await
             }
-            "btw" | "side" => {
-                self.notice("`//btw` is not available for Codex panes yet.")
-                    .await
+            "btw" | "side" if !rest.is_empty() => {
+                self.notices += 1;
+                let message_id = format!(
+                    "zz-side-{}-{:08x}",
+                    self.notices,
+                    random_u64() & 0xffff_ffff
+                );
+                self.request(
+                    "thread/fork",
+                    &json!({ "threadId": thread, "ephemeral": true, "excludeTurns": true }),
+                    Outgoing::SideFork {
+                        question: rest.to_owned(),
+                        message_id,
+                    },
+                );
+                Ok(())
             }
             _ => self.notice(VERB_HELP).await,
         }
@@ -1063,9 +1092,7 @@ impl Runtime {
                 }
                 Ok(())
             }
-            (Outgoing::Models, Err(_)) | (Outgoing::Interrupt, _) | (Outgoing::Steer, Ok(_)) => {
-                Ok(())
-            }
+            (Outgoing::Models, Err(_)) | (Outgoing::Quiet, _) | (Outgoing::Steer, Ok(_)) => Ok(()),
             (Outgoing::Thread { start, cwd }, Ok(response)) => {
                 self.threaded(start, cwd, response).await
             }
@@ -1123,6 +1150,46 @@ impl Runtime {
                     .await?;
                 }
                 Ok(())
+            }
+            (
+                Outgoing::SideFork {
+                    question,
+                    message_id,
+                },
+                Ok(response),
+            ) => {
+                let Some(side) = response["thread"]["id"].as_str().map(str::to_owned) else {
+                    return self.notice("Codex did not open the side thread.").await;
+                };
+                self.sides.insert(
+                    side.clone(),
+                    Side {
+                        message_id,
+                        text: String::new(),
+                        streamed: false,
+                    },
+                );
+                self.request(
+                    "turn/start",
+                    &json!({
+                        "threadId": side,
+                        "input": [{ "type": "text", "text": format!("{SIDE_PREFIX}{question}"), "text_elements": [] }],
+                        "approvalPolicy": "never",
+                        "sandboxPolicy": { "type": "readOnly", "networkAccess": false },
+                    }),
+                    Outgoing::SideTurn { thread: side },
+                );
+                Ok(())
+            }
+            (Outgoing::SideFork { .. }, Err(error)) => {
+                self.notice(&format!("The side question failed: {error}"))
+                    .await
+            }
+            (Outgoing::SideTurn { .. }, Ok(_)) => Ok(()),
+            (Outgoing::SideTurn { thread }, Err(error)) => {
+                self.sides.remove(&thread);
+                self.notice(&format!("The side question failed: {error}"))
+                    .await
             }
             (Outgoing::Steer, Err(error)) => {
                 self.notice(&format!("Codex did not take the steer: {error}"))
@@ -1249,6 +1316,13 @@ impl Runtime {
     }
 
     async fn notification(&mut self, method: &str, params: &Value) -> Result<(), String> {
+        if let Some(thread) = params["threadId"].as_str()
+            && self.sides.contains_key(thread)
+        {
+            return self
+                .side_notification(thread.to_owned(), method, params)
+                .await;
+        }
         let current = self.thread_id();
         if let Some(thread) = params["threadId"].as_str()
             && Some(thread) != current.as_deref()
@@ -1328,12 +1402,72 @@ impl Runtime {
         Ok(())
     }
 
+    async fn side_notification(
+        &mut self,
+        thread: String,
+        method: &str,
+        params: &Value,
+    ) -> Result<(), String> {
+        let Some(side) = self.sides.get_mut(&thread) else {
+            return Ok(());
+        };
+        match method {
+            "item/agentMessage/delta" => {
+                if let Some(delta) = params["delta"].as_str() {
+                    side.text.push_str(delta);
+                    side.streamed = true;
+                }
+            }
+            "item/completed" if params["item"]["type"] == "agentMessage" && !side.streamed => {
+                if let Some(text) = params["item"]["text"].as_str() {
+                    if !side.text.is_empty() {
+                        side.text.push_str("\n\n");
+                    }
+                    side.text.push_str(text);
+                }
+            }
+            "turn/completed" => {
+                if let Some(side) = self.sides.remove(&thread) {
+                    let answer = if side.text.trim().is_empty() {
+                        "Codex had no answer.".to_owned()
+                    } else {
+                        side.text
+                    };
+                    self.update(
+                        json!({
+                            "sessionUpdate": "agent_message_chunk",
+                            "messageId": side.message_id,
+                            "content": { "type": "text", "text": answer },
+                            "_meta": { "zz": { "side": true } },
+                        }),
+                        true,
+                    )
+                    .await?;
+                    self.request(
+                        "thread/unsubscribe",
+                        &json!({ "threadId": thread }),
+                        Outgoing::Quiet,
+                    );
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     async fn server_request(
         &mut self,
         method: &str,
         rpc_id: Value,
         params: &Value,
     ) -> Result<(), String> {
+        if params["threadId"]
+            .as_str()
+            .is_some_and(|thread| self.sides.contains_key(thread))
+        {
+            self.reply_error(&rpc_id, "a side question does not run tools");
+            return Ok(());
+        }
         let item = params["itemId"].as_str().unwrap_or_default().to_owned();
         let reason = params["reason"]
             .as_str()

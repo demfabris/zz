@@ -50936,7 +50936,7 @@ Use `-c` to choose its absolute working directory; otherwise use the pane's curr
 
 ### `zz restart-agent-pane [-t %N]`
 
-Restart the agent pane's ACP adapter and resume its current session.
+Restart the agent pane's agent process and resume its current session.
 Print nothing on success. Use `zz new-agent-session` for a fresh conversation.
 
 ### `zz agent-respond [-t %N] (--allow | --deny | --option ID) [REQUEST_ID]`

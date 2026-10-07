@@ -307,3 +307,18 @@ pub(crate) fn new_uuid() -> String {
         low & 0xffff_ffff_ffff
     )
 }
+
+pub(crate) fn rewind_count(text: &str) -> Option<usize> {
+    if text.is_empty() {
+        return Some(1);
+    }
+    text.parse().ok().filter(|count| *count > 0)
+}
+
+pub(crate) fn rewind_shortfall(prompts: usize) -> String {
+    match prompts {
+        0 => "Nothing to rewind yet: send a prompt first.".to_owned(),
+        1 => "There is only 1 prompt to go back over.".to_owned(),
+        count => format!("There are only {count} prompts to go back over."),
+    }
+}

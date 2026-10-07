@@ -104,7 +104,14 @@ an idle pane becomes a plain prompt. The fanout keeps commands out of projected 
 | `//btw`, `//side` | `side_question`; the answer never enters the conversation | an ephemeral `thread/fork` answers read-only, then is dropped |
 | `//steer <text>` | `user` frame with `priority: "now"` | `turn/steer` |
 | `//fork` | respawn with `--resume X --fork-session --session-id NEW` | `thread/fork` |
+| `//rewind [n]` | the same fork with `--resume-session-at` set to the entry before the nth-last prompt | `thread/fork` with `beforeTurnId` |
 | anything else | lists the commands | lists the commands |
+
+`//rewind [n]` continues from before the last n prompts (1 by default) in a copy, so the full
+conversation stays resumable; files on disk are not touched. Rewinding every prompt opens a new
+session. A Claude fork has no session file until its first prompt, so the driver records the fork
+(`_meta.zz.fork` on its notice) in the pane's journal, and a restart before that prompt forks again
+under the same id.
 
 # Background work, questions, subagents (v108)
 
@@ -163,7 +170,7 @@ file changes applied, `restart-agent-pane` resuming the thread with its memory, 
 
 # Next
 
-1. More commands: branch from a message (`--resume-session-at`, `thread/fork beforeTurnId`), rewind.
+1. A "rewind to here" action on prompt rows that sends `//rewind n`.
 2. Codex subagent threads (`collabAgentToolCall` receivers) and background terminals.
 3. Orchestration: PiP panes and a decision on in-session tools. The groundwork is in:
    `agent-send --notify` submits to another agent pane and, when that turn ends, posts the reply

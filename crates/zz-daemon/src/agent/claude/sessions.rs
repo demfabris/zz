@@ -8,7 +8,7 @@ use std::{
 
 use serde_json::Value;
 
-use super::translate::Translator;
+use super::translate::{Translator, prompt_text};
 use crate::agent::stream::AgentSessionSummary;
 
 const MAX_SANITIZED_LENGTH: usize = 200;
@@ -323,7 +323,29 @@ pub(crate) fn list(config: &Path, cwd: Option<&Path>) -> Vec<AgentSessionSummary
         .collect()
 }
 
-pub(crate) fn transcript(path: &Path, cwd: PathBuf) -> Vec<Value> {
+pub(crate) fn transcript(path: &Path, cwd: PathBuf, until: Option<&str>) -> Vec<Value> {
+    let entries = chain_entries(path);
+    let mut translator = Translator::new(cwd);
+    chain(&entries, until)
+        .into_iter()
+        .flat_map(|entry| translator.history_entry(entry))
+        .collect()
+}
+
+pub(crate) fn prompt_parents(path: &Path) -> Vec<Option<String>> {
+    let entries = chain_entries(path);
+    chain(&entries, None)
+        .into_iter()
+        .filter(|entry| {
+            entry["type"] == "user"
+                && entry["isCompactSummary"] != true
+                && prompt_text(entry).is_some()
+        })
+        .map(|entry| entry["parentUuid"].as_str().map(str::to_owned))
+        .collect()
+}
+
+fn chain_entries(path: &Path) -> Vec<Value> {
     let Ok(file) = File::open(path) else {
         return Vec::new();
     };
@@ -335,22 +357,17 @@ pub(crate) fn transcript(path: &Path, cwd: PathBuf) -> Vec<Value> {
     {
         return Vec::new();
     }
-    let entries = lines(&text)
+    lines(&text)
         .filter(|entry| {
             matches!(
                 entry["type"].as_str(),
                 Some("user" | "assistant" | "progress" | "system" | "attachment")
             ) && entry["uuid"].is_string()
         })
-        .collect::<Vec<_>>();
-    let mut translator = Translator::new(cwd);
-    chain(&entries)
-        .into_iter()
-        .flat_map(|entry| translator.history_entry(entry))
         .collect()
 }
 
-fn chain(entries: &[Value]) -> Vec<&Value> {
+fn chain<'a>(entries: &'a [Value], until: Option<&str>) -> Vec<&'a Value> {
     let by_uuid = entries
         .iter()
         .enumerate()
@@ -366,6 +383,11 @@ fn chain(entries: &[Value]) -> Vec<&Value> {
             .and_then(|parent| by_uuid.get(parent))
             .map(|(_, entry)| *entry)
     };
+    if let Some(until) = until {
+        return by_uuid
+            .get(until)
+            .map_or_else(Vec::new, |(_, leaf)| walk(leaf, parent_of));
+    }
     let mut leaves = Vec::new();
     for terminal in entries.iter().filter(|entry| {
         entry["uuid"]
@@ -398,10 +420,11 @@ fn chain(entries: &[Value]) -> Vec<&Value> {
             leaf["isSidechain"] != true && leaf["isMeta"] != true && leaf["teamName"].is_null()
         })
         .max_by_key(|leaf| index_of(leaf));
-    let Some(leaf) = main.or_else(|| leaves.iter().copied().max_by_key(|leaf| index_of(leaf)))
-    else {
-        return Vec::new();
-    };
+    main.or_else(|| leaves.iter().copied().max_by_key(|leaf| index_of(leaf)))
+        .map_or_else(Vec::new, |leaf| walk(leaf, parent_of))
+}
+
+fn walk<'a>(leaf: &'a Value, parent_of: impl Fn(&Value) -> Option<&'a Value>) -> Vec<&'a Value> {
     let mut chain = Vec::new();
     let mut seen = HashSet::new();
     let mut current = Some(leaf);
@@ -494,7 +517,7 @@ mod tests {
             r#"{"type":"assistant","uuid":"a4","parentUuid":"u2","message":{"id":"m4","content":[{"type":"text","text":"kept"}]}}"#,
         ];
         std::fs::write(&path, lines.join("\n")).expect("write");
-        let updates = transcript(&path, PathBuf::from("/work"));
+        let updates = transcript(&path, PathBuf::from("/work"), None);
         let kinds = updates
             .iter()
             .map(|update| update["sessionUpdate"].as_str().unwrap_or_default())
@@ -510,6 +533,31 @@ mod tests {
         );
         assert_eq!(updates[2]["content"][0]["content"]["text"], "a.rs");
         assert_eq!(updates[3]["content"]["text"], "kept");
+    }
+
+    #[test]
+    fn prompts_mark_where_each_turn_can_be_cut_and_a_cut_drops_what_follows() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("s.jsonl");
+        let lines = [
+            r#"{"type":"user","uuid":"u1","parentUuid":null,"message":{"role":"user","content":"first"}}"#,
+            r#"{"type":"assistant","uuid":"a1","parentUuid":"u1","message":{"id":"m1","content":[{"type":"text","text":"one"}]}}"#,
+            r#"{"type":"attachment","uuid":"x1","parentUuid":"a1"}"#,
+            r#"{"type":"user","uuid":"u2","parentUuid":"x1","message":{"role":"user","content":[{"type":"text","text":"second"}]}}"#,
+            r#"{"type":"assistant","uuid":"a2","parentUuid":"u2","message":{"id":"m2","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}"#,
+            r#"{"type":"user","uuid":"u3","parentUuid":"a2","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"a.rs"}]}}"#,
+            r#"{"type":"user","uuid":"u4","parentUuid":"u3","message":{"role":"user","content":"<task-notification>done</task-notification>"}}"#,
+            r#"{"type":"assistant","uuid":"a3","parentUuid":"u4","message":{"id":"m3","content":[{"type":"text","text":"two"}]}}"#,
+        ];
+        std::fs::write(&path, lines.join("\n")).expect("write");
+        assert_eq!(prompt_parents(&path), [None, Some("x1".to_owned())]);
+        let kept = transcript(&path, PathBuf::from("/work"), Some("x1"));
+        let texts = kept
+            .iter()
+            .map(|update| update["content"]["text"].as_str().unwrap_or_default())
+            .collect::<Vec<_>>();
+        assert_eq!(texts, ["first", "one"]);
+        assert!(transcript(&path, PathBuf::from("/work"), Some("missing")).is_empty());
     }
 
     #[test]

@@ -19,7 +19,10 @@ use serde_json::{Map, Value, json};
 use zz_protocol::{AgentAutoApprove, AgentProvider, AgentQuestionAnswer};
 
 use crate::agent::{
-    child::{ChildEvent, Input, Process, cancelled, fit_update, next_input, option, random_u64},
+    child::{
+        ChildEvent, Input, Process, cancelled, fit_update, next_input, option, random_u64,
+        rewind_count, rewind_shortfall,
+    },
     environment::{AgentWorkspaceEnvironment, agent_path, find_executable},
     host::RuntimeChannels,
     journal::{AgentJournal, JournalEntry},
@@ -39,7 +42,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_mins(1);
 const SESSION_PAGE: u64 = 50;
 const AGENT_NAME: &str = "Codex";
 const AGENT_KEY: &str = "codex";
-const VERB_HELP: &str = "zz commands: `//btw <question>` (or `//side`) asks Codex in a throwaway copy of the thread, `//steer <text>` redirects the running turn, and `//fork` continues in a copy of this conversation. `/compact` and `/review` run Codex's own compaction and review.";
+const VERB_HELP: &str = "zz commands: `//btw <question>` (or `//side`) asks Codex in a throwaway copy of the thread, `//steer <text>` redirects the running turn, `//fork` continues in a copy of this conversation, and `//rewind [n]` continues from before your last n prompts (1 by default) without changing files. `/compact` and `/review` run Codex's own compaction and review.";
 const SIDE_PREFIX: &str = "Answer this side question briefly from what you already know. Do not run commands, edit files, or call tools.\n\n";
 const MODES: [(&str, &str, &str); 3] = [
     (
@@ -161,6 +164,7 @@ struct Starting {
     start: Start,
     cwd: PathBuf,
     resume: Option<String>,
+    before: Option<String>,
 }
 
 enum Outgoing {
@@ -183,6 +187,9 @@ enum Outgoing {
     },
     Quiet,
     Steer,
+    Rewind {
+        count: usize,
+    },
     SideFork {
         question: String,
         message_id: String,
@@ -635,7 +642,18 @@ impl Runtime {
         start: Start,
         resume: Option<String>,
     ) -> Result<(), String> {
-        if start == Start::Fork && resume.is_none() {
+        self.begin_with(Starting {
+            start,
+            cwd,
+            resume,
+            before: None,
+        })
+        .await
+    }
+
+    async fn begin_with(&mut self, starting: Starting) -> Result<(), String> {
+        let start = starting.start;
+        if start == Start::Fork && starting.resume.is_none() {
             return self
                 .notice("Nothing to fork yet: send a prompt first.")
                 .await;
@@ -653,7 +671,7 @@ impl Runtime {
         {
             return self.fail_start(start, message).await;
         }
-        self.starting = Some(Starting { start, cwd, resume });
+        self.starting = Some(starting);
         if self.initialized {
             self.open_thread();
         }
@@ -706,12 +724,15 @@ impl Runtime {
         let cwd = starting.cwd.clone();
         let start = starting.start;
         let cwd_text = cwd.display().to_string();
+        let before = starting.before.clone();
         match (start, starting.resume.clone()) {
-            (Start::Fork, Some(thread)) => self.request(
-                "thread/fork",
-                &json!({ "threadId": thread, "cwd": cwd_text }),
-                Outgoing::Thread { start, cwd },
-            ),
+            (Start::Fork, Some(thread)) => {
+                let mut params = json!({ "threadId": thread, "cwd": cwd_text });
+                if let Some(before) = before {
+                    params["beforeTurnId"] = Value::from(before);
+                }
+                self.request("thread/fork", &params, Outgoing::Thread { start, cwd });
+            }
             (_, Some(thread)) => self.request(
                 "thread/resume",
                 &json!({ "threadId": thread, "cwd": cwd_text }),
@@ -802,7 +823,10 @@ impl Runtime {
         cwd: PathBuf,
         history: Vec<(Value, bool)>,
     ) -> Result<(), String> {
-        let source = self.starting.take().and_then(|starting| starting.resume);
+        let (source, before) = self
+            .starting
+            .take()
+            .map_or((None, None), |starting| (starting.resume, starting.before));
         self.ready().await?;
         self.translator = Translator::new(cwd.clone());
         self.session = Some(Session {
@@ -852,12 +876,53 @@ impl Runtime {
         )
         .await?;
         if let (Start::Fork, Some(source)) = (start, source) {
-            self.notice(&format!(
-                "Forked from thread `{source}`. The original is unchanged."
-            ))
-            .await?;
+            let text = if before.is_some() {
+                format!(
+                    "Went back to an earlier prompt. The full conversation stays in thread `{source}`, and files on disk are unchanged."
+                )
+            } else {
+                format!("Forked from thread `{source}`. The original is unchanged.")
+            };
+            self.notice(&text).await?;
         }
         Ok(())
+    }
+
+    async fn rewind(&mut self, count: usize, thread: &Value) -> Result<(), String> {
+        if self.turn.is_some() {
+            return self.notice("Stop the turn before rewinding.").await;
+        }
+        let Some(source) = thread["id"].as_str().map(str::to_owned) else {
+            return Ok(());
+        };
+        let mut prompts = thread["turns"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .enumerate()
+            .filter(|(_, turn)| {
+                turn["items"]
+                    .as_array()
+                    .is_some_and(|items| items.iter().any(|item| item["type"] == "userMessage"))
+            })
+            .filter_map(|(index, turn)| Some((index, turn["id"].as_str()?.to_owned())))
+            .collect::<Vec<_>>();
+        let Some(index) = prompts.len().checked_sub(count) else {
+            return self.notice(&rewind_shortfall(prompts.len())).await;
+        };
+        let cwd = self.cwd();
+        match prompts.swap_remove(index) {
+            (0, _) => self.begin(cwd, Start::New, None).await,
+            (_, before) => {
+                self.begin_with(Starting {
+                    start: Start::Fork,
+                    cwd,
+                    resume: Some(source),
+                    before: Some(before),
+                })
+                .await
+            }
+        }
     }
 
     fn history(&mut self, thread: &Value) -> Vec<(Value, bool)> {
@@ -988,6 +1053,20 @@ impl Runtime {
                 }
                 let cwd = self.cwd();
                 self.begin(cwd, Start::Fork, Some(thread)).await
+            }
+            "rewind" => {
+                let Some(count) = rewind_count(rest) else {
+                    return self.notice(VERB_HELP).await;
+                };
+                if self.turn.is_some() {
+                    return self.notice("Stop the turn before rewinding.").await;
+                }
+                self.request(
+                    "thread/read",
+                    &json!({ "threadId": thread, "includeTurns": true }),
+                    Outgoing::Rewind { count },
+                );
+                Ok(())
             }
             "btw" | "side" if !rest.is_empty() => {
                 self.notices += 1;
@@ -1190,6 +1269,13 @@ impl Runtime {
             (Outgoing::SideTurn { thread }, Err(error)) => {
                 self.sides.remove(&thread);
                 self.notice(&format!("The side question failed: {error}"))
+                    .await
+            }
+            (Outgoing::Rewind { count }, Ok(response)) => {
+                self.rewind(count, &response["thread"]).await
+            }
+            (Outgoing::Rewind { .. }, Err(error)) => {
+                self.notice(&format!("Codex could not read the thread: {error}"))
                     .await
             }
             (Outgoing::Steer, Err(error)) => {

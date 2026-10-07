@@ -371,21 +371,10 @@ impl Translator {
             return Vec::new();
         }
         let id = frame["uuid"].as_str().unwrap_or("user");
-        let content = &frame["message"]["content"];
-        let text = match content {
-            Value::String(text) => text.clone(),
-            Value::Array(blocks) => blocks
-                .iter()
-                .filter(|block| block["type"] == "text")
-                .filter_map(|block| block["text"].as_str())
-                .collect::<Vec<_>>()
-                .join("\n"),
-            _ => String::new(),
-        };
-        if text.trim().is_empty() || is_internal_user_text(&text) {
-            return Vec::new();
-        }
-        vec![chunk("user_message_chunk", id, &text)]
+        prompt_text(frame)
+            .map(|text| chunk("user_message_chunk", id, &text))
+            .into_iter()
+            .collect()
     }
 
     fn tool_results(&mut self, frame: &Value) -> Vec<Value> {
@@ -525,6 +514,20 @@ fn created_task_id(text: &str) -> Option<String> {
     let rest = text.trim().strip_prefix("Task #")?;
     let (id, tail) = rest.split_once(' ')?;
     tail.starts_with("created").then(|| id.to_owned())
+}
+
+pub(crate) fn prompt_text(frame: &Value) -> Option<String> {
+    let text = match &frame["message"]["content"] {
+        Value::String(text) => text.clone(),
+        Value::Array(blocks) => blocks
+            .iter()
+            .filter(|block| block["type"] == "text")
+            .filter_map(|block| block["text"].as_str())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    };
+    (!text.trim().is_empty() && !is_internal_user_text(&text)).then_some(text)
 }
 
 fn is_internal_user_text(text: &str) -> bool {

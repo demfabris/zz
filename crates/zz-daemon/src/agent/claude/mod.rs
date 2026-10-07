@@ -23,7 +23,8 @@ use zz_protocol::{
 
 use crate::agent::{
     child::{
-        ChildEvent, Input, Process, cancelled, fit_update, new_uuid, next_input, option, random_u64,
+        ChildEvent, Input, Process, cancelled, fit_update, new_uuid, next_input, option,
+        random_u64, rewind_count, rewind_shortfall,
     },
     environment::{AgentWorkspaceEnvironment, agent_path, find_executable},
     host::RuntimeChannels,
@@ -45,7 +46,7 @@ const CONTROL_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_REPLAY_UPDATES: usize = 4096;
 const SESSION_PAGE: usize = 50;
 const SIDE_TIMEOUT: Duration = Duration::from_mins(2);
-const VERB_HELP: &str = "zz commands: `//btw <question>` (or `//side`) asks Claude without adding to the conversation, `//steer <text>` redirects the running turn, and `//fork` continues in a copy of this conversation. A single `/` sends Claude Code's own commands.";
+const VERB_HELP: &str = "zz commands: `//btw <question>` (or `//side`) asks Claude without adding to the conversation, `//steer <text>` redirects the running turn, `//fork` continues in a copy of this conversation, and `//rewind [n]` continues from before your last n prompts (1 by default) without changing files. A single `/` sends Claude Code's own commands.";
 const AGENT_NAME: &str = "Claude Code";
 const AGENT_KEY: &str = "claude-code";
 const BASE_ARGS: [&str; 11] = [
@@ -204,7 +205,11 @@ enum Start {
 enum Launch {
     New(String),
     Resume(String),
-    Fork { source: String, id: String },
+    Fork {
+        source: String,
+        id: String,
+        at: Option<String>,
+    },
 }
 
 impl Launch {
@@ -221,12 +226,18 @@ impl Launch {
             Self::Fork { source, .. } => Some(source),
         }
     }
+
+    fn at(&self) -> Option<&str> {
+        match self {
+            Self::Fork { at, .. } => at.as_deref(),
+            Self::New(_) | Self::Resume(_) => None,
+        }
+    }
 }
 
 struct Starting {
     start: Start,
-    session_id: String,
-    history: Option<String>,
+    launch: Launch,
     cwd: PathBuf,
 }
 
@@ -690,25 +701,53 @@ impl Runtime {
         resume: Option<String>,
     ) -> Result<(), String> {
         let config = sessions::config_home();
-        let resume = resume.filter(|id| {
+        let exists = |id: &str| {
             config
                 .as_deref()
                 .and_then(|config| sessions::session_file(config, &cwd, id))
                 .is_some()
-        });
+        };
         let launch = match (start, resume) {
-            (Start::Fork, Some(source)) => Launch::Fork {
+            (Start::Fork, Some(source)) if exists(&source) => Launch::Fork {
                 source,
                 id: new_uuid(),
+                at: None,
             },
-            (Start::Fork, None) => {
+            (Start::Fork, _) => {
                 return self
                     .notice("Nothing to fork yet: send a prompt first.")
                     .await;
             }
-            (_, Some(id)) => Launch::Resume(id),
+            (_, Some(id)) if exists(&id) => Launch::Resume(id),
+            (_, Some(id)) => self
+                .unsent_fork(&id)
+                .filter(|launch| launch.history().is_some_and(exists))
+                .unwrap_or_else(|| Launch::New(new_uuid())),
             (_, None) => Launch::New(new_uuid()),
         };
+        self.launch(cwd, start, launch).await
+    }
+
+    fn unsent_fork(&self, id: &str) -> Option<Launch> {
+        let records = self
+            .journal
+            .as_deref()?
+            .replay_for(self.provider, id)
+            .ok()?;
+        records
+            .iter()
+            .rev()
+            .find_map(|(_, JournalEntry::Update(update))| {
+                let fork = &update["_meta"]["zz"]["fork"];
+                Some(Launch::Fork {
+                    source: fork["source"].as_str()?.to_owned(),
+                    id: id.to_owned(),
+                    at: fork["at"].as_str().map(str::to_owned),
+                })
+            })
+    }
+
+    async fn launch(&mut self, cwd: PathBuf, start: Start, launch: Launch) -> Result<(), String> {
         self.cancel_permissions(false).await?;
         if let Some(turn) = self.turn.take() {
             self.emit(AgentStreamPayload::PromptFinished {
@@ -729,12 +768,7 @@ impl Runtime {
             },
             other => other,
         };
-        self.starting = Some(Starting {
-            start,
-            session_id: launch.session_id().to_owned(),
-            history: launch.history().map(str::to_owned),
-            cwd,
-        });
+        self.starting = Some(Starting { start, launch, cwd });
         self.request(
             &json!({
                 "subtype": "initialize",
@@ -760,8 +794,12 @@ impl Runtime {
         match launch {
             Launch::New(id) => command.args(["--session-id", id]),
             Launch::Resume(id) => command.args(["--resume", id]),
-            Launch::Fork { source, id } => {
-                command.args(["--resume", source, "--fork-session", "--session-id", id])
+            Launch::Fork { source, id, at } => {
+                command.args(["--resume", source, "--fork-session", "--session-id", id]);
+                if let Some(at) = at {
+                    command.arg(format!("--resume-session-at={at}"));
+                }
+                &mut command
             }
         };
         command.args(&self.command.args).current_dir(cwd);
@@ -835,15 +873,16 @@ impl Runtime {
             .await?;
         }
         self.translator = Translator::new(starting.cwd.clone());
-        let replay = match &starting.history {
+        let session_id = starting.launch.session_id().to_owned();
+        let replay = match starting.launch.history() {
             Some(source) => {
-                self.history(source, &starting.session_id, &starting.cwd)
+                self.history(source, starting.launch.at(), &session_id, &starting.cwd)
                     .await
             }
             None => Vec::new(),
         };
         self.session = Some(Session {
-            id: starting.session_id.clone(),
+            id: session_id.clone(),
             cwd: starting.cwd.clone(),
         });
         let restoring = match starting.start {
@@ -860,7 +899,7 @@ impl Runtime {
         match starting.start {
             Start::Open { .. } => {
                 self.emit(AgentStreamPayload::SessionReady {
-                    session_id: starting.session_id,
+                    session_id,
                     modes,
                     config_options,
                 })
@@ -868,7 +907,7 @@ impl Runtime {
             }
             Start::New | Start::Switch | Start::Fork => {
                 self.emit(AgentStreamPayload::SessionSwitched {
-                    session_id: starting.session_id,
+                    session_id,
                     cwd: starting.cwd,
                     modes,
                     config_options,
@@ -878,21 +917,37 @@ impl Runtime {
             }
         }
         self.publish_commands().await?;
-        if let (Start::Fork, Some(source)) = (starting.start, &starting.history) {
-            self.notice(&format!(
-                "Forked from session `{source}`. The original is unchanged."
-            ))
+        if let Launch::Fork { source, at, .. } = &starting.launch {
+            let text = if at.is_some() {
+                format!(
+                    "Went back to an earlier prompt. The full conversation stays in session `{source}`, and files on disk are unchanged."
+                )
+            } else {
+                format!("Forked from session `{source}`. The original is unchanged.")
+            };
+            self.say(
+                &text,
+                json!({ "notice": true, "fork": { "source": source, "at": at } }),
+            )
             .await?;
         }
         Ok(())
     }
 
-    async fn history(&self, source: &str, session_id: &str, cwd: &Path) -> Vec<(Value, bool)> {
+    async fn history(
+        &self,
+        source: &str,
+        at: Option<&str>,
+        session_id: &str,
+        cwd: &Path,
+    ) -> Vec<(Value, bool)> {
         let file =
             sessions::config_home().and_then(|config| sessions::session_file(&config, cwd, source));
         if let Some(file) = file {
             let cwd = cwd.to_path_buf();
-            let mut updates = smol::unblock(move || sessions::transcript(&file, cwd)).await;
+            let at = at.map(str::to_owned);
+            let mut updates =
+                smol::unblock(move || sessions::transcript(&file, cwd, at.as_deref())).await;
             if updates.len() > MAX_REPLAY_UPDATES {
                 updates.drain(..updates.len() - MAX_REPLAY_UPDATES);
             }
@@ -977,11 +1032,49 @@ impl Runtime {
                 let (cwd, source) = (session.cwd.clone(), session.id.clone());
                 self.begin(cwd, Start::Fork, Some(source)).await
             }
+            "rewind" => match rewind_count(rest) {
+                Some(count) => self.rewind(count).await,
+                None => self.notice(VERB_HELP).await,
+            },
             _ => self.notice(VERB_HELP).await,
         }
     }
 
+    async fn rewind(&mut self, count: usize) -> Result<(), String> {
+        if self.turn.is_some() {
+            return self.notice("Stop the turn before rewinding.").await;
+        }
+        let Some(session) = &self.session else {
+            return Ok(());
+        };
+        let (cwd, source) = (session.cwd.clone(), session.id.clone());
+        let file = sessions::config_home()
+            .and_then(|config| sessions::session_file(&config, &cwd, &source));
+        let Some(file) = file else {
+            return self.notice(&rewind_shortfall(0)).await;
+        };
+        let prompts = smol::unblock(move || sessions::prompt_parents(&file)).await;
+        let Some(index) = prompts.len().checked_sub(count) else {
+            return self.notice(&rewind_shortfall(prompts.len())).await;
+        };
+        match prompts[index].clone() {
+            Some(at) => {
+                let launch = Launch::Fork {
+                    source,
+                    id: new_uuid(),
+                    at: Some(at),
+                };
+                self.launch(cwd, Start::Fork, launch).await
+            }
+            None => self.begin(cwd, Start::New, None).await,
+        }
+    }
+
     async fn notice(&mut self, text: &str) -> Result<(), String> {
+        self.say(text, json!({ "notice": true })).await
+    }
+
+    async fn say(&mut self, text: &str, zz: Value) -> Result<(), String> {
         self.verbs += 1;
         let id = format!(
             "zz-notice-{}-{:08x}",
@@ -993,7 +1086,7 @@ impl Runtime {
                 "sessionUpdate": "agent_message_chunk",
                 "messageId": id,
                 "content": { "type": "text", "text": text },
-                "_meta": { "zz": { "notice": true } },
+                "_meta": { "zz": zz },
             }),
             true,
         )

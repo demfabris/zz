@@ -647,6 +647,7 @@ impl Shard {
             }
         };
         let mut changes = SmallVec::<[Event; 9]>::new();
+        let mut additions = SmallVec::<[Event; 8]>::new();
         if !self.wake_registered {
             changes.push(Event::new(
                 EventFilter::Read(self.wake_rx.as_raw_fd()),
@@ -679,7 +680,7 @@ impl Shard {
                     ));
                 }
                 if let Some(fd) = source {
-                    changes.push(Event::new(
+                    additions.push(Event::new(
                         filter(index, fd),
                         if index == 0 {
                             EventFlags::ADD
@@ -692,6 +693,7 @@ impl Shard {
                 entry.poll_sources[index] = source;
             }
         }
+        changes.extend(additions);
         self.events.clear();
         #[allow(
             unsafe_code,

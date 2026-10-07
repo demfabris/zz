@@ -2,7 +2,7 @@
 type: Design Plan
 title: Native agent drivers
 description: Agent panes drive each vendor's own protocol from the daemon. Claude Code runs over stream-json and its control protocol (on main 2026-10-07), Codex will run a private `codex app-server` per pane, and ACP stays for the agents that speak it natively, all emitting the stream the shared reducer already renders.
-status: In progress (Claude Code driver on main 2026-10-07; question cards, subagent rows, task tray, zz verbs, the Codex driver, and orchestration remain)
+status: In progress (Claude Code driver, zz verbs, question cards, subagent rows, and the task tray landed 2026-10-07; side answers, the Codex driver, and orchestration remain)
 resource: crates/zz-daemon/src/agent/claude/mod.rs
 tags:
 - agent
@@ -95,9 +95,11 @@ the session with its memory.
 
 # Next
 
-1. Stream vocabulary in v108: a question card (multi-select, free text), subagent child rows, a
-   background task tray (`background_tasks_changed`, `stop_task`), a raw row for unknown frames, and
-   side answers, rendered on desktop, gpui-shared, and FFI.
+1. Stream vocabulary in v108: a raw row for unknown frames and side answers. The question card,
+   subagent child rows, and the background task tray ship on desktop and gpui-shared through the
+   shared zz-ui widgets (`agent/question.rs`, `agent/tasks.rs`, the step fold in `agent.rs`); FFI
+   carries them in the agent snapshot (`permissions[].questions`, `tasks`, each entry's `parent`)
+   and answers them with `zz_client_agent_answer_question` and `zz_client_agent_stop_task`.
 2. `//` verbs: side and btw (`side_question`), fork (`--resume X --fork-session`), branch
    (`--resume-session-at`), rewind, steer (`priority: "now"`).
 3. Turns the CLI starts on its own (a background task finishing, a peer message) do not reach the

@@ -11,13 +11,14 @@ use zz_terminal::KeyAction;
 use zz_ui::{
     ActiveTheme as _, IconName,
     compact::{
-        ArrowPadEvent, Instant, KEY_ROW_HEIGHT, KeyRow, PageDot, Pager, PagerEvent, PopoverKey,
-        PopoverKeyEvent, PopoverKeyItem, ToolKeys, WhichKeyList, bottom_sheet, compact_bar,
-        compact_bar_button, compact_bar_title, compact_hud, compact_pane_header, page_dots,
-        top_shade,
+        ArrowPadEvent, COMPACT_BAR_HEIGHT, Instant, KEY_ROW_HEIGHT, KeyRow, PageDot, Pager,
+        PagerEvent, PopoverKey, PopoverKeyEvent, PopoverKeyItem, ToolKeys, WhichKeyList,
+        bottom_sheet, compact_bar, compact_bar_button, compact_bar_title, compact_hud,
+        compact_pane_header, page_dots, top_shade,
     },
     kbd::Kbd,
     pane::pane_header_icon_button,
+    rems_from_px,
     which_key::{WhichKeyCap, WhichKeyRow},
 };
 
@@ -49,6 +50,9 @@ pub(super) struct CompactState {
     previous: Option<PaneId>,
     pinch: Option<(f32, f32)>,
     scale_hud: Option<Instant>,
+    safe_bottom: Pixels,
+    keyboard_overlap: Pixels,
+    keyboard_moving: bool,
 }
 
 impl CompactState {
@@ -222,7 +226,11 @@ fn send_chord(
     }
 }
 
-fn keyboard_visible(window: &Window) -> bool {
+fn key_row_lift(safe_bottom: Pixels, bar: Pixels, overlap: Pixels) -> Pixels {
+    (safe_bottom + bar - px(KEY_ROW_HEIGHT) - overlap).max(px(0.0))
+}
+
+pub(super) fn keyboard_visible(window: &Window) -> bool {
     window.visual_viewport_bounds().size.height + px(1.0) < window.viewport_size().height
 }
 
@@ -294,6 +302,22 @@ impl AppShell {
                 self.terminal_resize_suppressed.set(false);
                 self.preferences.save();
             }
+        }
+    }
+
+    pub(super) fn sync_keyboard_motion(&mut self, window: &mut Window) {
+        let overlap = window.viewport_size().height - window.visual_viewport_bounds().bottom();
+        if self.compact.keyboard_overlap != overlap {
+            self.compact.keyboard_overlap = overlap;
+            self.compact.keyboard_moving = true;
+            self.terminal_resize_suppressed.set(true);
+            window.request_animation_frame();
+        } else if std::mem::take(&mut self.compact.keyboard_moving)
+            && self.split_drag.is_none()
+            && self.compact.pinch.is_none()
+            && !self.compact.pager.is_moving()
+        {
+            self.terminal_resize_suppressed.set(false);
         }
     }
 
@@ -752,6 +776,7 @@ impl AppShell {
         } else if self.terminal_resize_suppressed.get()
             && self.split_drag.is_none()
             && self.compact.pinch.is_none()
+            && !self.compact.keyboard_moving
         {
             self.terminal_resize_suppressed.set(false);
         }
@@ -761,6 +786,10 @@ impl AppShell {
         let top_inset = visible.top();
         let keyboard = keyboard_visible(window);
         let safe_bottom = (window.viewport_size().height - visible.bottom()).max(px(0.0));
+        let overlap = window.viewport_size().height - window.visual_viewport_bounds().bottom();
+        if safe_bottom > overlap || overlap <= px(0.0) {
+            self.compact.safe_bottom = safe_bottom;
+        }
         let shown = self.compact.pager.index();
         let mut strip = Vec::new();
         for (index, x) in layout.pages {
@@ -819,7 +848,9 @@ impl AppShell {
             keys.clone().close(cx);
         }
         let bottom = if keyboard {
-            self.compact_key_area(window, cx)
+            let bar = rems_from_px(COMPACT_BAR_HEIGHT).to_pixels(window.rem_size()) + px(1.0);
+            let lift = key_row_lift(self.compact.safe_bottom, bar, overlap);
+            self.compact_key_area(lift, window, cx)
         } else {
             let page = pages.get(shown);
             let groups = dot_groups(&pages, shown);
@@ -881,7 +912,12 @@ impl AppShell {
             ))
     }
 
-    fn compact_key_area(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn compact_key_area(
+        &mut self,
+        bottom: Pixels,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let keys = self.tool_keys(window, cx);
         let armed = self.connection.read(cx).core.prefix_armed();
         keys.prefix.update(cx, |key, cx| key.set_armed(armed, cx));
@@ -892,7 +928,8 @@ impl AppShell {
             .relative()
             .flex_none()
             .w_full()
-            .h(px(KEY_ROW_HEIGHT))
+            .h(px(KEY_ROW_HEIGHT) + bottom)
+            .pb(bottom)
             .bg(cx.theme().background)
             .border_t_1()
             .border_color(cx.theme().border())
@@ -1024,6 +1061,16 @@ mod tests {
         assert_eq!(pinch_font_scale(2.5, 2.0), 3.0);
         assert_eq!(pinch_font_scale(0.6, 0.1), 0.5);
         assert_eq!(pinch_font_scale(1.1, f32::NAN), 1.1);
+    }
+
+    #[test]
+    fn the_key_row_rests_on_the_bar_line_until_the_keyboard_passes_it() {
+        let (safe, bar) = (px(34.0), px(53.0));
+        let top =
+            |overlap: f32| px(KEY_ROW_HEIGHT) + key_row_lift(safe, bar, px(overlap)) + px(overlap);
+        assert_eq!(top(0.0), safe + bar);
+        assert_eq!(top(40.0), safe + bar);
+        assert_eq!(top(300.0), px(KEY_ROW_HEIGHT + 300.0));
     }
 
     #[test]

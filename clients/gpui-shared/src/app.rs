@@ -2784,6 +2784,7 @@ impl Render for AppShell {
         }
         let compact = self.compact_active(window, cx);
         self.sync_compact_mode(compact, cx);
+        self.sync_keyboard_motion(window);
         let sidebar = if !compact && self.inline_sidebar(window) {
             self.sidebar(window, cx)
         } else {

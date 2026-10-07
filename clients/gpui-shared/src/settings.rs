@@ -265,6 +265,7 @@ impl Controls {
                 input,
                 window,
                 move |this, input, event, window, cx| {
+                    number_field_event(event, window, cx);
                     let commit = matches!(event, InputEvent::Blur | InputEvent::PressEnter { .. });
                     if !commit && !matches!(event, InputEvent::Change) {
                         return;
@@ -335,6 +336,7 @@ impl Controls {
                 &input,
                 window,
                 move |this, input, event, window, cx| {
+                    number_field_event(event, window, cx);
                     let commit = matches!(event, InputEvent::Blur | InputEvent::PressEnter { .. });
                     if !commit && !matches!(event, InputEvent::Change) {
                         return;
@@ -1265,7 +1267,7 @@ impl AppShell {
             .child(terminal_preview(appearance, cx))
             .child(SettingsStack::titled("Display").child(font).child(scale))
             .child(SettingsStack::titled("Host configuration")
-                .child(SettingEntry::new("Colors, cursor, and spacing", "Edit the Ghostty-compatible configuration on the daemon host to change these values.").control("Shared")))
+                .child(SettingEntry::new("Colors, cursor, and spacing", "Edit the Ghostty-compatible configuration on the daemon host to change these values.").control(div().text_size(zz_ui::rems_from_px(13.0)).text_color(cx.theme().foreground.muted()).child("Shared"))))
             .into_any_element()
     }
 }
@@ -1468,6 +1470,23 @@ fn status_field<'a>(preferences: &'a mut Preferences, id: &str) -> &'a mut bool 
         "session" => &mut preferences.status_show_session,
         "badges" => &mut preferences.status_badges,
         _ => &mut preferences.status_agents,
+    }
+}
+
+fn number_field_event(event: &InputEvent, window: &mut Window, cx: &mut App) {
+    match event {
+        #[cfg(target_os = "ios")]
+        InputEvent::Focus | InputEvent::Blur => {
+            zz_gpui_ios::set_number_pad(matches!(event, InputEvent::Focus));
+        }
+        InputEvent::PressEnter { .. } => finish_field(window, cx),
+        _ => {}
+    }
+}
+
+pub(super) fn finish_field(window: &mut Window, cx: &mut App) {
+    if super::compact::keyboard_visible(window) {
+        window.blur(cx);
     }
 }
 

@@ -1,3 +1,4 @@
+use crate::keyboard_inset::{KeyboardMotion, Spring};
 use crate::{CGPoint, CGRect, IosDisplay, id, nil, ns_array};
 use futures::channel::oneshot;
 use gpui::accesskit;
@@ -50,11 +51,15 @@ pub(crate) struct IosWindowState {
     keyboard: crate::keyboard::Keyboard,
     input_view: id,
     accessory_view: id,
+    done_bar: id,
     keyboard_probe: id,
     keyboard_overlap: f64,
+    keyboard_motion: Option<KeyboardMotion>,
     keyboard_requested: bool,
     soft_keyboard: bool,
     compact_keyboard: bool,
+    number_pad: bool,
+    number_pad_shown: bool,
     keyboard_sync_pending: bool,
     reload_input_views: bool,
     text_input: TextInputConfiguration,
@@ -75,6 +80,12 @@ pub(crate) struct IosWindowState {
 }
 
 impl IosWindowState {
+    fn keyboard_target(&self) -> f64 {
+        self.keyboard_motion
+            .as_ref()
+            .map_or(self.keyboard_overlap, KeyboardMotion::target)
+    }
+
     pub(crate) fn take_input_handler(&mut self) -> Option<PlatformInputHandler> {
         self.input_handler.take()
     }
@@ -178,11 +189,15 @@ impl IosWindow {
                 keyboard: Default::default(),
                 input_view: msg_send![class!(UIView), new],
                 accessory_view: accessory_view(native_view),
+                done_bar: done_bar(native_view),
                 keyboard_probe: install_keyboard_probe(native_view),
                 keyboard_overlap: 0.0,
+                keyboard_motion: None,
                 keyboard_requested: false,
                 soft_keyboard: false,
                 compact_keyboard: false,
+                number_pad: false,
+                number_pad_shown: false,
                 keyboard_sync_pending: false,
                 reload_input_views: false,
                 text_input: TextInputConfiguration::default(),
@@ -275,6 +290,7 @@ impl Drop for IosWindow {
                 state.display_link.invalidate();
                 let _: () = msg_send![state.input_view, release];
                 let _: () = msg_send![state.accessory_view, release];
+                let _: () = msg_send![state.done_bar, release];
                 let _: () = msg_send![state.keyboard_probe, release];
                 let center: id = msg_send![class!(NSNotificationCenter), defaultCenter];
                 let _: () = msg_send![center, removeObserver: state.native_view];
@@ -663,11 +679,12 @@ fn register_view_class() {
             sel!(zzAccessoryKey:),
             accessory_key as extern "C" fn(&Object, Sel, id),
         );
+        decl.add_method(sel!(zzDone:), done as extern "C" fn(&Object, Sel, id));
         decl.add_method(
             sel!(zzHardwareKeyboardChanged:),
             hardware_keyboard_changed as extern "C" fn(&Object, Sel, id),
         );
-        let traits: [(Sel, extern "C" fn(&Object, Sel) -> isize); 8] = [
+        let traits: [(Sel, extern "C" fn(&Object, Sel) -> isize); 9] = [
             (sel!(autocorrectionType), autocorrection_type),
             (sel!(autocapitalizationType), autocapitalization_type),
             (sel!(spellCheckingType), spell_checking_type),
@@ -676,6 +693,7 @@ fn register_view_class() {
             (sel!(smartInsertDeleteType), smart_punctuation_type),
             (sel!(inlinePredictionType), inline_prediction_type),
             (sel!(returnKeyType), return_key_type),
+            (sel!(keyboardType), keyboard_type),
         ];
         for (selector, getter) in traits {
             decl.add_method(selector, getter);
@@ -768,6 +786,9 @@ extern "C" fn step(this: &Object, _: Sel, link: id) {
         dispatch_event(this, input);
     }
     advance_momentum(this);
+    let (timestamp, target): (f64, f64) =
+        unsafe { (msg_send![link, timestamp], msg_send![link, targetTimestamp]) };
+    advance_keyboard(this, target);
     let repeat = state.borrow_mut().keyboard.repeat(Instant::now());
     if let Some(event) = repeat {
         dispatch_event(this, PlatformInput::KeyDown(event));
@@ -782,12 +803,11 @@ extern "C" fn step(this: &Object, _: Sel, link: id) {
         callback(options);
         state.borrow_mut().request_frame_callback = Some(callback);
     }
-    let (timestamp, target): (f64, f64) =
-        unsafe { (msg_send![link, timestamp], msg_send![link, targetTimestamp]) };
     let busy = {
         let mut state = state.borrow_mut();
         state.perf.end(timestamp, target);
         state.momentum.is_some()
+            || state.keyboard_motion.is_some()
             || !state.touches.is_empty()
             || state.keyboard.repeating()
             || state.perf.wants_frames()
@@ -882,19 +902,33 @@ extern "C" fn layout_subviews(this: &Object, _: Sel) {
     let Some(state) = (unsafe { try_window_state(this) }) else {
         return;
     };
-    let viewport_changed = {
+    let moved = {
         let mut state = state.borrow_mut();
-        let overlap = unsafe { keyboard_overlap(state.native_view, state.keyboard_probe) };
-        let changed = overlap != state.keyboard_overlap;
-        state.keyboard_overlap = overlap;
-        changed
+        let target = if state.soft_keyboard || hardware_keyboard() {
+            unsafe { keyboard_overlap(state.native_view, state.keyboard_probe) }
+        } else {
+            0.0
+        };
+        if target == state.keyboard_target() {
+            false
+        } else if let Some((duration, spring)) = unsafe { keyboard_animation(state.keyboard_probe) }
+        {
+            let from = state.keyboard_overlap;
+            let now = unsafe { CACurrentMediaTime() };
+            state
+                .keyboard_motion
+                .get_or_insert_with(|| KeyboardMotion::new(from))
+                .push(target, now, duration, spring);
+            state.display_link.wake();
+            false
+        } else {
+            state.keyboard_motion = None;
+            let changed = target != state.keyboard_overlap;
+            state.keyboard_overlap = target;
+            changed
+        }
     };
-    let callback = state.borrow_mut().insets_callback.take();
-    if let Some(mut callback) = callback {
-        let overlap = state.borrow().keyboard_overlap;
-        callback(view_insets(this as *const Object as id, overlap));
-        state.borrow_mut().insets_callback = Some(callback);
-    }
+    insets_changed(this);
     let mut lock = state.borrow_mut();
     unsafe {
         let bounds: CGRect = msg_send![lock.native_view, bounds];
@@ -912,12 +946,63 @@ extern "C" fn layout_subviews(this: &Object, _: Sel) {
             drop(lock);
         }
     }
-    if viewport_changed {
-        let callback = state.borrow_mut().viewport_callback.take();
-        if let Some(mut callback) = callback {
-            callback();
-            state.borrow_mut().viewport_callback = Some(callback);
+    if moved {
+        viewport_changed(this);
+    }
+}
+
+fn advance_keyboard(this: &Object, time: f64) {
+    let state = unsafe { get_window_state(this) };
+    let changed = {
+        let mut guard = state.borrow_mut();
+        let state = &mut *guard;
+        let begin = unsafe { keyboard_animation_began(state.keyboard_probe) };
+        let Some(motion) = state.keyboard_motion.as_mut() else {
+            return;
+        };
+        if let Some(begin) = begin {
+            motion.began(begin);
         }
+        let overlap = if motion.finished(time) {
+            let target = motion.target();
+            state.keyboard_motion = None;
+            target
+        } else {
+            let overlap = if motion.sampled() {
+                unsafe { presented_overlap(state.native_view, state.keyboard_probe) }
+                    .unwrap_or_else(|| motion.target())
+            } else {
+                motion.value(time)
+            };
+            let scale = display_scale(state.native_view);
+            (overlap * scale).round() / scale
+        };
+        let changed = overlap != state.keyboard_overlap;
+        state.keyboard_overlap = overlap;
+        changed
+    };
+    if changed {
+        insets_changed(this);
+        viewport_changed(this);
+    }
+}
+
+fn insets_changed(this: &Object) {
+    let state = unsafe { get_window_state(this) };
+    let callback = state.borrow_mut().insets_callback.take();
+    if let Some(mut callback) = callback {
+        let overlap = state.borrow().keyboard_overlap;
+        callback(view_insets(this as *const Object as id, overlap));
+        state.borrow_mut().insets_callback = Some(callback);
+    }
+}
+
+fn viewport_changed(this: &Object) {
+    let state = unsafe { get_window_state(this) };
+    let callback = state.borrow_mut().viewport_callback.take();
+    if let Some(mut callback) = callback {
+        callback();
+        state.borrow_mut().viewport_callback = Some(callback);
     }
 }
 
@@ -1275,6 +1360,8 @@ extern "C" fn input_accessory_view(this: &Object, _: Sel) -> id {
         &state.text_input,
     ) {
         state.accessory_view
+    } else if state.soft_keyboard && state.number_pad_shown {
+        state.done_bar
     } else {
         nil
     }
@@ -1327,6 +1414,12 @@ extern "C" fn smart_punctuation_type(this: &Object, _: Sel) -> isize {
 
 extern "C" fn inline_prediction_type(this: &Object, _: Sel) -> isize {
     if text_input(this).suggestions { 0 } else { 1 }
+}
+
+extern "C" fn keyboard_type(this: &Object, _: Sel) -> isize {
+    let number_pad =
+        unsafe { try_window_state(this) }.is_some_and(|state| state.borrow().number_pad_shown);
+    if number_pad { 8 } else { 0 }
 }
 
 extern "C" fn return_key_type(this: &Object, _: Sel) -> isize {
@@ -1486,6 +1579,12 @@ extern "C" fn insert_text(this: &Object, _: Sel, text: id) {
         }
         return;
     }
+    let number_pad = unsafe { get_window_state(this) }.borrow().number_pad;
+    let text = if number_pad {
+        text.replace(',', ".")
+    } else {
+        text
+    };
     match text.as_str() {
         "\n" | "\r" => synthesize_key(this, "enter"),
         "\t" => synthesize_key(this, "tab"),
@@ -1623,6 +1722,25 @@ pub fn set_compact_keyboard(enabled: bool) {
     schedule_keyboard_sync(view);
 }
 
+pub fn set_number_pad(enabled: bool) {
+    let view = ACTIVE_VIEW.get();
+    let Some(state) = (!view.is_null())
+        .then(|| unsafe { try_window_state(&*view) })
+        .flatten()
+    else {
+        return;
+    };
+    {
+        let mut state = state.borrow_mut();
+        if state.number_pad == enabled {
+            return;
+        }
+        state.number_pad = enabled;
+        state.reload_input_views = true;
+    }
+    schedule_keyboard_sync(view);
+}
+
 pub fn request_paste() {
     unsafe {
         dispatch2::DispatchQueue::main().exec_async_f(ptr::null_mut(), deferred_paste);
@@ -1724,6 +1842,11 @@ impl rwh::HasDisplayHandle for IosDisplayHandle {
 #[link(name = "Foundation", kind = "framework")]
 unsafe extern "C" {
     static NSRunLoopCommonModes: id;
+}
+
+#[link(name = "QuartzCore", kind = "framework")]
+unsafe extern "C" {
+    fn CACurrentMediaTime() -> f64;
 }
 
 #[link(name = "UIKit", kind = "framework")]
@@ -2086,6 +2209,46 @@ unsafe fn keyboard_overlap(view: id, probe: id) -> f64 {
     }
 }
 
+unsafe fn probe_animation(probe: id) -> Option<id> {
+    let layer: id = msg_send![probe, layer];
+    let animation: id = msg_send![layer, animationForKey: crate::ns_string("position")];
+    (!animation.is_null()).then_some(animation)
+}
+
+unsafe fn keyboard_animation(probe: id) -> Option<(f64, Option<Spring>)> {
+    let animation = probe_animation(probe)?;
+    let duration: f64 = msg_send![animation, duration];
+    if duration <= 0.0 {
+        return None;
+    }
+    let spring: BOOL = msg_send![animation, isKindOfClass: class!(CASpringAnimation)];
+    Some((
+        duration,
+        (spring == YES).then(|| Spring {
+            stiffness: msg_send![animation, stiffness],
+            damping: msg_send![animation, damping],
+            mass: msg_send![animation, mass],
+            velocity: msg_send![animation, initialVelocity],
+        }),
+    ))
+}
+
+unsafe fn keyboard_animation_began(probe: id) -> Option<f64> {
+    let begin: f64 = msg_send![probe_animation(probe)?, beginTime];
+    (begin > 0.0).then_some(begin)
+}
+
+unsafe fn presented_overlap(view: id, probe: id) -> Option<f64> {
+    let layer: id = msg_send![probe, layer];
+    let presentation: id = msg_send![layer, presentationLayer];
+    if presentation.is_null() {
+        return None;
+    }
+    let bounds: CGRect = msg_send![view, bounds];
+    let frame: CGRect = msg_send![presentation, frame];
+    Some((bounds.size.height - frame.origin.y).clamp(0.0, bounds.size.height))
+}
+
 unsafe fn accessory_view(view: id) -> id {
     let frame = CGRect {
         origin: CGPoint::default(),
@@ -2165,6 +2328,26 @@ unsafe fn accessory_view(view: id) -> id {
     }
     let _: () = msg_send![stack, release];
     container
+}
+
+unsafe fn done_bar(view: id) -> id {
+    let toolbar: id = msg_send![class!(UIToolbar), new];
+    let _: () = msg_send![toolbar, sizeToFit];
+    let _: () = msg_send![toolbar, setAutoresizingMask: 2usize];
+    let space: id = msg_send![class!(UIBarButtonItem), alloc];
+    let space: id = msg_send![space, initWithBarButtonSystemItem: 5isize target: nil action: nil];
+    let done: id = msg_send![class!(UIBarButtonItem), alloc];
+    let done: id =
+        msg_send![done, initWithBarButtonSystemItem: 0isize target: view action: sel!(zzDone:)];
+    let _: () = msg_send![toolbar, setItems: ns_array(&[space, done])];
+    let _: () = msg_send![space, release];
+    let _: () = msg_send![done, release];
+    toolbar
+}
+
+extern "C" fn done(this: &Object, _: Sel, _: id) {
+    synthesize_key(this, "enter");
+    request_keyboard(this as *const Object as id, false);
 }
 
 extern "C" fn accessory_key(this: &Object, _: Sel, sender: id) {
@@ -2267,8 +2450,11 @@ extern "C" fn sync_keyboard(context: *mut c_void) {
                 let visible = state.keyboard_requested && !hardware_keyboard();
                 let reload = state.soft_keyboard != visible
                     || std::mem::take(&mut state.reload_input_views)
-                    || (visible && state.keyboard_overlap == 0.0);
+                    || (visible && state.keyboard_target() == 0.0);
                 state.soft_keyboard = visible;
+                if visible {
+                    state.number_pad_shown = state.number_pad;
+                }
                 (visible, reload)
             };
             if reload {

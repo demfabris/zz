@@ -9,6 +9,7 @@ mod drop;
 #[path = "../../zz-browser/src/element_picker.rs"]
 mod element_picker;
 mod keyboard;
+mod keyboard_inset;
 mod menu;
 mod momentum;
 mod perf;
@@ -24,7 +25,8 @@ pub use menu::MenuCommand;
 pub use platform::IosPlatform;
 pub(crate) use window::*;
 pub use window::{
-    Accessibility, accessibility, request_paste, set_compact_keyboard, show_edit_menu,
+    Accessibility, accessibility, request_paste, set_compact_keyboard, set_number_pad,
+    show_edit_menu,
 };
 
 use objc::runtime::Object;

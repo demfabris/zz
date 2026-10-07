@@ -348,7 +348,12 @@ impl RenderOnce for PickerStrip {
             .flex_col()
             .mx(px(-STRIP_INSET))
             .mb(px(-8.0))
-            .child(tiles)
+            .child(
+                div()
+                    .relative()
+                    .child(tiles)
+                    .child(crate::compact::yield_back_swipe((id, 3usize), &scroll)),
+            )
             .child(
                 div()
                     .relative()

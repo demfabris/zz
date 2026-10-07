@@ -26,6 +26,6 @@ pub use popover_key::{
 };
 pub use sheet::{BottomSheet, bottom_sheet};
 pub use sticky::{StickyModifier, StickyModifiers};
-pub use swipe_back::{SwipeBack, swipe_back};
+pub use swipe_back::{SwipeBack, swipe_back, yield_back_swipe};
 pub use web_time::Instant;
 pub use which_key_list::WhichKeyList;

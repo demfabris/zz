@@ -422,6 +422,13 @@ impl AgentPane {
                 self.apply_question_step(step, window, cx);
                 return;
             }
+            if let Some((request_id, option)) = head.and_then(|permission| {
+                let option = permission.options.get(self.permission_selected)?.id.clone();
+                Some((permission.request_id, option))
+            }) {
+                self.respond_permission(request_id, Some(option), cx);
+                return;
+            }
         }
         self.synchronize_completions(cx);
         if let Some(index) = self.completion_selected {
@@ -2190,7 +2197,8 @@ impl AgentPane {
             return;
         }
         let input = self.input.read(cx);
-        if !input.value().trim().is_empty() && input.focus_handle(cx).is_focused(window) {
+        let composer_focused = input.focus_handle(cx).is_focused(window);
+        if !input.value().trim().is_empty() && composer_focused {
             return;
         }
         let Some(permission) = self.current_permission(cx) else {
@@ -2198,6 +2206,7 @@ impl AgentPane {
         };
         let options = permission.options;
         match event.keystroke.key.as_str() {
+            "enter" if composer_focused => return,
             "escape" => self.respond_permission(permission.request_id, None, cx),
             "up" if !options.is_empty() => {
                 self.permission_selected = self

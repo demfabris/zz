@@ -5,8 +5,8 @@ mod actions;
 use gpui::{
     Anchor, AnyElement, App, Bounds, Context, DismissEvent, ElementId, EventEmitter, FocusHandle,
     Focusable, InteractiveElement as _, IntoElement, KeyBinding, MouseButton, ParentElement as _,
-    Pixels, Point, Render, RenderOnce, StyleRefinement, Styled, Subscription, Window, anchored,
-    canvas, deferred, div, prelude::FluentBuilder as _, px,
+    Pixels, Point, Render, RenderOnce, Size, StyleRefinement, Styled, Subscription, Window,
+    anchored, canvas, deferred, div, prelude::FluentBuilder as _, px,
 };
 
 use crate::{Selectable, StyledExt as _, v_flex};
@@ -156,19 +156,45 @@ fn resolved_corner(anchor: Anchor, trigger: Bounds<Pixels>) -> Point<Pixels> {
     }
 }
 
+fn bottom_anchor(anchor: Anchor) -> bool {
+    matches!(
+        anchor,
+        Anchor::BottomLeft | Anchor::BottomCenter | Anchor::BottomRight
+    )
+}
+
+fn fit_corner(
+    anchor: Anchor,
+    corner: Point<Pixels>,
+    panel: Size<Pixels>,
+    gap: Pixels,
+    visible: Bounds<Pixels>,
+) -> Point<Pixels> {
+    let shift = if bottom_anchor(anchor) { -gap } else { gap };
+    let top = Bounds::from_anchor_and_size(anchor, corner, panel).top() + shift;
+    let fitted = top
+        .min(visible.bottom() - WINDOW_MARGIN - panel.height)
+        .max(visible.top() + WINDOW_MARGIN);
+    Point {
+        x: corner.x,
+        y: corner.y + fitted - top,
+    }
+}
+
 impl RenderOnce for Popover {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let state = window.use_keyed_state(self.id.clone(), cx, |_, cx| PopoverState::new(cx));
 
         state.update(cx, |state, _| state.on_dismiss = self.on_dismiss);
 
-        let (open, focus_handle, trigger_bounds, trigger_bounds_captured) = {
+        let (open, focus_handle, trigger_bounds, trigger_bounds_captured, panel_size) = {
             let state = state.read(cx);
             (
                 state.open,
                 state.focus_handle.clone(),
                 state.trigger_bounds,
                 state.trigger_bounds_captured,
+                state.panel_size,
             )
         };
 
@@ -226,9 +252,12 @@ impl RenderOnce for Popover {
             .occlude()
             .tab_group()
             .when(self.appearance, |this| this.popover_style(cx).p_3())
-            .map(|this| match self.anchor {
-                Anchor::BottomLeft | Anchor::BottomCenter | Anchor::BottomRight => this.bottom_1(),
-                _ => this.top_1(),
+            .map(|this| {
+                if bottom_anchor(self.anchor) {
+                    this.bottom_1()
+                } else {
+                    this.top_1()
+                }
             });
 
         let panel = panel
@@ -249,13 +278,38 @@ impl RenderOnce for Popover {
             })
             .refine_style(&self.style);
 
+        let corner = resolved_corner(self.anchor, trigger_bounds);
+        let corner = panel_size.map_or(corner, |panel| {
+            let gap = window.rem_size() * 0.25;
+            fit_corner(
+                self.anchor,
+                corner,
+                panel,
+                gap,
+                window.fully_visible_bounds(),
+            )
+        });
+        let measure = canvas(
+            move |bounds, window, cx| {
+                let changed = state.update(cx, |state, _| {
+                    state.panel_size.replace(bounds.size) != Some(bounds.size)
+                });
+                if changed {
+                    window.request_animation_frame();
+                }
+            },
+            |_, (), _, _| {},
+        )
+        .absolute()
+        .size_full();
+
         el.child(
             deferred(
                 anchored()
                     .snap_to_window_with_margin(WINDOW_MARGIN)
                     .anchor(self.anchor)
-                    .position(resolved_corner(self.anchor, trigger_bounds))
-                    .child(div().relative().child(panel)),
+                    .position(corner)
+                    .child(div().relative().child(panel).child(measure)),
             )
             .with_priority(1),
         )
@@ -269,6 +323,7 @@ pub struct PopoverState {
     previous_focus_handle: Option<FocusHandle>,
     trigger_bounds: Bounds<Pixels>,
     trigger_bounds_captured: bool,
+    panel_size: Option<Size<Pixels>>,
     open: bool,
     dismiss_subscription: Option<Subscription>,
     on_dismiss: Option<DismissHandler>,
@@ -281,6 +336,7 @@ impl PopoverState {
             previous_focus_handle: None,
             trigger_bounds: Bounds::default(),
             trigger_bounds_captured: false,
+            panel_size: None,
             open: false,
             dismiss_subscription: None,
             on_dismiss: None,
@@ -434,6 +490,36 @@ mod tests {
 
         assert_eq!(resolved_corner(Anchor::LeftCenter, bounds), bounds.origin);
         assert_eq!(resolved_corner(Anchor::RightCenter, bounds), bounds.origin);
+    }
+
+    #[test]
+    fn a_panel_moves_up_out_from_under_the_keyboard() {
+        let visible = Bounds {
+            origin: point(0., 60.),
+            size: size(px(400.), px(440.)),
+        };
+        let panel = size(px(250.), px(200.));
+        let corner = point(300., 420.);
+        let fitted = fit_corner(Anchor::TopRight, corner, panel, px(4.), visible);
+        assert_eq!(fitted.x, corner.x);
+        assert_eq!(fitted.y + px(4.) + panel.height, px(500.) - WINDOW_MARGIN);
+
+        let room = point(300., 100.);
+        assert_eq!(
+            fit_corner(Anchor::TopRight, room, panel, px(4.), visible),
+            room
+        );
+    }
+
+    #[test]
+    fn a_panel_taller_than_the_visible_area_keeps_its_top_in_view() {
+        let visible = Bounds {
+            origin: point(0., 60.),
+            size: size(px(400.), px(100.)),
+        };
+        let panel = size(px(250.), px(200.));
+        let fitted = fit_corner(Anchor::BottomLeft, point(10., 140.), panel, px(4.), visible);
+        assert_eq!(fitted.y - px(4.) - panel.height, px(60.) + WINDOW_MARGIN);
     }
 
     #[test]

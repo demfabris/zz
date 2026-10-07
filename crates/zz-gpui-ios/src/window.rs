@@ -55,6 +55,7 @@ pub(crate) struct IosWindowState {
     done_bar: id,
     keyboard_probe: id,
     keyboard_overlap: f64,
+    keyboard_rest: f64,
     keyboard_motion: Option<KeyboardMotion>,
     keyboard_requested: bool,
     soft_keyboard: bool,
@@ -192,6 +193,7 @@ impl IosWindow {
                 done_bar: done_bar(native_view),
                 keyboard_probe: install_keyboard_probe(native_view),
                 keyboard_overlap: 0.0,
+                keyboard_rest: 0.0,
                 keyboard_motion: None,
                 keyboard_requested: false,
                 soft_keyboard: false,
@@ -279,6 +281,13 @@ impl IosWindow {
             size: size(px(rect.size.width as f32), px(rect.size.height as f32)),
         }
     }
+
+    fn viewport_above(&self, keyboard: f64) -> Bounds<Pixels> {
+        let mut bounds = self.bounds_impl();
+        bounds.origin = Point::default();
+        bounds.size.height = (bounds.size.height - px(keyboard as f32)).max(Pixels::ZERO);
+        bounds
+    }
 }
 
 impl Drop for IosWindow {
@@ -337,11 +346,13 @@ impl PlatformWindow for IosWindow {
     }
 
     fn visual_viewport_bounds(&self) -> Bounds<Pixels> {
-        let mut bounds = self.bounds_impl();
-        bounds.origin = Point::default();
-        bounds.size.height =
-            (bounds.size.height - px(self.0.borrow().keyboard_overlap as f32)).max(Pixels::ZERO);
-        bounds
+        let overlap = self.0.borrow().keyboard_overlap;
+        self.viewport_above(overlap)
+    }
+
+    fn target_visual_viewport_bounds(&self) -> Bounds<Pixels> {
+        let rest = self.0.borrow().keyboard_rest;
+        self.viewport_above(rest)
     }
 
     fn on_visual_viewport_changed(&self, callback: Box<dyn FnMut()>) {
@@ -922,8 +933,9 @@ extern "C" fn layout_subviews(this: &Object, _: Sel) {
             false
         } else {
             state.keyboard_motion = None;
-            let changed = target != state.keyboard_overlap;
+            let changed = target != state.keyboard_overlap || target != state.keyboard_rest;
             state.keyboard_overlap = target;
+            state.keyboard_rest = target;
             changed
         }
     };
@@ -962,22 +974,23 @@ fn advance_keyboard(this: &Object, time: f64) {
         if let Some(begin) = begin {
             motion.began(begin);
         }
+        let rest = motion.target();
         let overlap = if motion.finished(time) {
-            let target = motion.target();
             state.keyboard_motion = None;
-            target
+            rest
         } else {
             let overlap = if motion.sampled() {
                 unsafe { presented_overlap(state.native_view, state.keyboard_probe) }
-                    .unwrap_or_else(|| motion.target())
+                    .unwrap_or(rest)
             } else {
                 motion.value(time)
             };
             let scale = display_scale(state.native_view);
             (overlap * scale).round() / scale
         };
-        let changed = overlap != state.keyboard_overlap;
+        let changed = overlap != state.keyboard_overlap || rest != state.keyboard_rest;
         state.keyboard_overlap = overlap;
+        state.keyboard_rest = rest;
         changed
     };
     if changed {

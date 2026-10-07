@@ -56,6 +56,7 @@ pub(super) struct CompactState {
     safe_bottom: Pixels,
     keyboard_overlap: Pixels,
     keyboard_moving: bool,
+    extra_height: Pixels,
 }
 
 impl CompactState {
@@ -233,6 +234,10 @@ fn key_row_lift(safe_bottom: Pixels, bar: Pixels, overlap: Pixels) -> Pixels {
     (safe_bottom + bar - px(KEY_ROW_HEIGHT) - overlap).max(px(0.0))
 }
 
+fn key_row_top(safe_bottom: Pixels, bar: Pixels, overlap: Pixels) -> Pixels {
+    px(KEY_ROW_HEIGHT) + key_row_lift(safe_bottom, bar, overlap) + overlap
+}
+
 pub(super) fn keyboard_visible(window: &Window) -> bool {
     window.visual_viewport_bounds().size.height + px(1.0) < window.viewport_size().height
 }
@@ -309,19 +314,25 @@ impl AppShell {
     }
 
     pub(super) fn sync_keyboard_motion(&mut self, window: &mut Window) {
-        let overlap = window.viewport_size().height - window.visual_viewport_bounds().bottom();
-        if self.compact.keyboard_overlap != overlap {
+        let height = window.viewport_size().height;
+        let overlap = height - window.visual_viewport_bounds().bottom();
+        let closing = height - window.target_visual_viewport_bounds().bottom() < overlap;
+        let moved = self.compact.keyboard_overlap != overlap;
+        if moved {
             self.compact.keyboard_overlap = overlap;
-            self.compact.keyboard_moving = true;
-            self.terminal_resize_suppressed.set(true);
             window.request_animation_frame();
-        } else if std::mem::take(&mut self.compact.keyboard_moving)
+        }
+        let holding = moved && !closing;
+        if holding {
+            self.terminal_resize_suppressed.set(true);
+        } else if self.compact.keyboard_moving
             && self.split_drag.is_none()
             && self.compact.pinch.is_none()
             && !self.compact.pager.is_moving()
         {
             self.terminal_resize_suppressed.set(false);
         }
+        self.compact.keyboard_moving = holding;
     }
 
     fn compact_select(&mut self, page: &Page, cx: &mut Context<Self>) {
@@ -610,6 +621,7 @@ impl AppShell {
                     self.focused_pane = Some(pane_id);
                 }
                 terminal.update(cx, |terminal, cx| {
+                    terminal.set_extra_height(self.compact.extra_height, cx);
                     terminal.set_text_dimmed(false, 1.0, cx);
                     terminal.set_pane_status(dead.clone(), pane.synchronized_input, false, cx);
                     terminal.set_corner_radii(
@@ -811,6 +823,16 @@ impl AppShell {
         if safe_bottom > overlap || overlap <= px(0.0) {
             self.compact.safe_bottom = safe_bottom;
         }
+        let bar = rems_from_px(COMPACT_BAR_HEIGHT).to_pixels(window.rem_size()) + px(1.0);
+        self.compact.extra_height = if keyboard {
+            let rest =
+                window.viewport_size().height - window.target_visual_viewport_bounds().bottom();
+            (key_row_top(self.compact.safe_bottom, bar, overlap)
+                - key_row_top(self.compact.safe_bottom, bar, rest))
+            .max(px(0.0))
+        } else {
+            px(0.0)
+        };
         let shown = self.compact.pager.index();
         let mut strip = Vec::new();
         for (index, x) in layout.pages {
@@ -869,7 +891,6 @@ impl AppShell {
             keys.clone().close(cx);
         }
         let bottom = if keyboard {
-            let bar = rems_from_px(COMPACT_BAR_HEIGHT).to_pixels(window.rem_size()) + px(1.0);
             let lift = key_row_lift(self.compact.safe_bottom, bar, overlap);
             self.compact_key_area(lift, window, cx)
         } else {
@@ -1087,8 +1108,7 @@ mod tests {
     #[test]
     fn the_key_row_rests_on_the_bar_line_until_the_keyboard_passes_it() {
         let (safe, bar) = (px(34.0), px(53.0));
-        let top =
-            |overlap: f32| px(KEY_ROW_HEIGHT) + key_row_lift(safe, bar, px(overlap)) + px(overlap);
+        let top = |overlap: f32| key_row_top(safe, bar, px(overlap));
         assert_eq!(top(0.0), safe + bar);
         assert_eq!(top(40.0), safe + bar);
         assert_eq!(top(300.0), px(KEY_ROW_HEIGHT + 300.0));

@@ -189,8 +189,13 @@ backend reads the keyboard's own spring from the keyboard layout guide and evalu
 the display link at each frame's display time, so the phone key row, the terminal's bottom
 edge, popovers, and a focused settings field slide with the keys on open and close. In the
 phone shell the key row takes the bar's place where the bar's top edge was and rides on the
-keyboard once the keys pass it. Terminals keep their grid while the keyboard moves (the
-prompt row stays above the key row) and report their new size once it stops.
+keyboard once the keys pass it. While the keyboard opens, terminals keep their grid (the
+prompt row stays above the key row) and report their new size once it stops. While it closes,
+the backend reports where the keyboard will come to rest (`target_visual_viewport_bounds`),
+and the phone shell sizes the terminal for that resting place from the first frame: the shell
+gets its one resize at the start, the grid hangs past the top edge under the pane header, and
+the rows the keyboard uncovers slide into view already filled instead of arriving in one step
+after the keyboard lands.
 
 A field picks its keyboard through gpui's text input mode (the HTML `inputmode` set), which
 the backend maps onto `keyboardType`: decimal and numeric pads, phone, email, URL, and web
@@ -413,6 +418,13 @@ Panes, Status bar, UI zoom, and Match system text size. Screen recordings on iPh
 Simulator then followed the key row, the terminal bottom, an Interface number field, and the
 color picker frame by frame while the keyboard opened and closed (one terminal resize per
 keyboard move), and covered the decimal pad, Done, and Return in the Hosts field.
+
+iPhone 17 Pro Simulator checks on 2026-10-07 covered the decimal pad and Done bar on an Interface
+number field asked for through the text input mode (the pad's comma typed as a point, Done
+committed and hid it), the plain keyboard on the Hosts field, and the terminal keyboard with the
+phone key row. Recordings of a keyboard close over a full scrollback showed the top rows already
+filled as they slid in and no change after the keys landed, and a close over a cleared screen kept
+the prompt at the top; the shell logged one SIGWINCH per open and per close.
 
 Copy/paste of text copied within the app was verified. Text injected through
 `simctl pbcopy` was not readable from UIKit in this simulator session; cross-app

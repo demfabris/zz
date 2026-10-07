@@ -129,6 +129,7 @@ pub struct TerminalPane {
     corner_radii: Corners<Pixels>,
     rows_above: bool,
     resize_suppressed: Rc<Cell<bool>>,
+    extra_height: Pixels,
     content_offset: Pixels,
     scroll_rows: f32,
     scroll: LocalScrollState,
@@ -260,6 +261,7 @@ impl TerminalPane {
             corner_radii: Corners::default(),
             rows_above: false,
             resize_suppressed: Rc::default(),
+            extra_height: Pixels::ZERO,
             content_offset: Pixels::ZERO,
             scroll_rows: 0.,
             scroll: LocalScrollState::default(),
@@ -370,6 +372,13 @@ impl TerminalPane {
                             .saturating_add(viewport.scrollbar.len)
                             < viewport.scrollbar.total
                     }))
+    }
+
+    pub(crate) fn set_extra_height(&mut self, height: Pixels, cx: &mut Context<Self>) {
+        if self.extra_height != height {
+            self.extra_height = height;
+            cx.notify();
+        }
     }
 
     pub(crate) fn pane_background(&self, cx: &App) -> Hsla {
@@ -1444,6 +1453,7 @@ impl TerminalPane {
                     },
                     local_scroll_target: self.scroll.target(),
                     scroll_pixel_offset: px(self.scroll.sub_row()),
+                    extra_height: self.extra_height,
                     command_output: self.surface == TerminalSurface::CommandOutput,
                     appearance: &appearance,
                     appearance_hash: appearance.stable_hash(),

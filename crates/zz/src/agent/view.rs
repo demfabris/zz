@@ -965,10 +965,14 @@ impl AgentView {
         if !self.input.read(cx).value().trim().is_empty() {
             return false;
         }
-        if self.question.is_some() {
+        let requests = self.pane_state.pending_permissions.clone();
+        if self
+            .permission_wizard
+            .current(&requests)
+            .is_some_and(|request| !request.questions.is_empty())
+        {
             return true;
         }
-        let requests = self.pane_state.pending_permissions.clone();
         let step = self.permission_wizard.confirm(&requests);
         self.apply_permission_step(step, cx)
     }
@@ -1022,6 +1026,7 @@ impl AgentView {
             return false;
         }
         let engaged = self.composer_engaged(window, cx);
+        self.synchronize_question_card(window, cx);
         if self.question.is_some() {
             return self.handle_question_key(event, engaged, window, cx);
         }

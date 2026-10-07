@@ -3,7 +3,7 @@ pub mod appearance;
 pub mod panes_preview;
 pub mod status_bar_preview;
 
-use std::{cell::Cell, rc::Rc};
+use std::rc::Rc;
 
 use crate::Colorize as _;
 use crate::{
@@ -320,6 +320,7 @@ mod tests {
         });
         let cx: &mut VisualTestContext = cx;
         cx.update(|window, cx| {
+            window.set_a11y_forced(true);
             _ = window.draw(cx);
         });
         let hidden = cx.debug_bounds("reveal-field");
@@ -850,19 +851,8 @@ impl RenderOnce for SettingsVirtualColumn {
             });
 
         let mut render_item = self.render_item;
-        let reveal = Rc::new(Cell::new(None));
-        let row_reveal = Rc::clone(&reveal);
         let rows = list(list_state.clone(), move |index, window, cx| {
-            let reveal = Rc::clone(&row_reveal);
             div()
-                .on_children_prepainted(move |children, window, _| {
-                    if let Some(mut target) = window.take_autoscroll()
-                        && let Some(row) = children.first()
-                    {
-                        target.origin.y -= row.top();
-                        reveal.set(Some((index, target)));
-                    }
-                })
                 .flex()
                 .w_full()
                 .px(px(SETTINGS_PAGE_PADDING))
@@ -879,24 +869,6 @@ impl RenderOnce for SettingsVirtualColumn {
         .pb(px(SETTINGS_PAGE_PADDING) + SettingsBottomInset::get(cx));
 
         div()
-            .on_children_prepainted({
-                let list_state = list_state.clone();
-                move |_, window, _| {
-                    let Some((index, mut target)) = reveal.take() else {
-                        return;
-                    };
-                    if let Some(row) = list_state.bounds_for_item(index) {
-                        target.origin.y += row.top() + px(SETTINGS_PAGE_PADDING);
-                        let Some(shift) = reveal_shift(list_state.viewport_bounds(), target) else {
-                            return;
-                        };
-                        list_state.scroll_by(shift);
-                    } else {
-                        list_state.scroll_to_reveal_item(index);
-                    }
-                    window.request_animation_frame();
-                }
-            })
             .id(self.id)
             .flex_1()
             .min_w_0()

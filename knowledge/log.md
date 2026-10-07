@@ -1,5 +1,8 @@
 # Update Log
 
+## 2026-10-06
+* **Update**: The gpui pin moved to `01d7c9a` with five fixes from the iPhone client. A list's autoscroll no longer pushes duplicate accessibility nodes, so the settings column dropped its workaround. `ListState::bounds_for_item` counts top padding. The wgpu renderer uploads instance data through a reused staging belt and binds the instance buffer once, which took a page swipe frame from about 105 to 38 us of CPU in an offscreen benchmark. iOS skips GPUI's re-presenting after fast input, and the pager and sheets end the touch fling they swallow, so the display link can pause once a swipe settles. See [the pin](/references/gpui-revision.md).
+
 ## 2026-10-02
 * **Update**: The GPUI lab's fork pin `cc9e4d1804` was measured on Metal and merged. On the MacBook, against the old pin `e01edb6b1a`, main-thread CPU fell 5.5% with one terminal streaming, 8.5% with nine panes and one streaming, 4.9% while scrolling and 12.6% with the sidebar and palette open, with no repeat overlapping; the small stream and scroll regression seen on Linux does not appear on Metal. Retained mode was tried again because macOS keeps accessibility inactive, and views were reused, but the retained bookkeeping made stream, scroll and chrome about 24% more expensive; it stays rejected. A port of gpui-fast's CoreText change cut a further 5 to 10%, almost all of it from keeping one CoreText font per size instead of making one for every shaped line; that commit is now on `zz-patches` (`ff805a96b0`, pinned at `5a00ac89a4`). `bench/gpui/frames.py` is the Mac frame-cost yardstick. See [the lab](/research/2026-09-30-gpui-fork-lab.md#macos-metal).
 

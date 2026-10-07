@@ -469,7 +469,12 @@ impl AppShell {
         }
     }
 
-    fn compact_scroll(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
+    fn compact_scroll(
+        &mut self,
+        event: &ScrollWheelEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let delta_x = match event.delta {
             ScrollDelta::Pixels(delta) => f32::from(delta.x),
             ScrollDelta::Lines(delta) => delta.x * 20.0,
@@ -484,6 +489,9 @@ impl AppShell {
             return;
         }
         cx.stop_propagation();
+        if self.compact.pager.swallows_momentum() {
+            window.end_touch_momentum();
+        }
         self.terminal_resize_suppressed
             .set(self.compact.pager.is_moving());
         let changed = response.changed || response.event.is_some();
@@ -778,8 +786,8 @@ impl AppShell {
             .min_h_0()
             .w_full()
             .overflow_hidden()
-            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _, cx| {
-                this.compact_scroll(event, cx);
+            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, window, cx| {
+                this.compact_scroll(event, window, cx);
             }))
             .on_pinch(cx.listener(|this, event: &PinchEvent, window, cx| {
                 if event.phase == TouchPhase::Started {

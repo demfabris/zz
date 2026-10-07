@@ -238,6 +238,10 @@ impl Pager {
         !matches!(self.motion, Motion::Idle)
     }
 
+    pub fn swallows_momentum(&self) -> bool {
+        self.momentum
+    }
+
     pub fn motion(&self, width: f32) -> f32 {
         if width <= 0.0 {
             return 0.0;
@@ -573,6 +577,7 @@ mod tests {
         let response = pager.scroll(0.0, TouchPhase::Ended, WIDTH, clock.at(24));
         assert_eq!(response.event, Some(PagerEvent::Commit { index: 1 }));
         assert!(response.changed);
+        assert!(pager.swallows_momentum());
         let mut ms = 32;
         for _ in 0..30 {
             let response = pager.scroll(-80.0, TouchPhase::Moved, WIDTH, clock.at(ms));
@@ -584,6 +589,7 @@ mod tests {
         }
         let response = pager.scroll(0.0, TouchPhase::Ended, WIDTH, clock.at(ms));
         assert!(response.consumed);
+        assert!(!pager.swallows_momentum());
         assert_eq!(pager.index(), 1);
         settle(&mut pager, &clock, ms);
         assert_eq!(pager.layout(WIDTH, 0.0).pages, vec![(1, 0.0)]);

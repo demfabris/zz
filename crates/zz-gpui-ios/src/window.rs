@@ -481,6 +481,10 @@ impl PlatformWindow for IosWindow {
         self.1.wake();
     }
 
+    fn keeps_presenting_after_input(&self) -> bool {
+        false
+    }
+
     fn on_input(&self, callback: Box<dyn FnMut(PlatformInput) -> DispatchEventResult>) {
         self.0.borrow_mut().event_callback = Some(callback);
     }

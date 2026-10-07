@@ -261,8 +261,9 @@ pub fn coast_guard() -> impl IntoElement {
     canvas(
         |_, _, _| {},
         |_, (), window, _| {
-            window.on_mouse_event(|event: &ScrollWheelEvent, phase, _, cx| {
+            window.on_mouse_event(|event: &ScrollWheelEvent, phase, window, cx| {
                 if phase == DispatchPhase::Capture && coasting(event, cx) {
+                    window.end_touch_momentum();
                     cx.stop_propagation();
                 }
             });

@@ -213,7 +213,9 @@ at least 60, up to the maximum), so ProMotion iPhones and iPads animate at 120 H
 `CADisableMinimumFrameDurationOnPhone` in `Info.plist` lifts the iPhone's 60 Hz cap. The link
 pauses three ticks after the last frame request and restarts when the window is invalidated, a
 touch begins, or a momentum scroll or key repeat is running, so an idle app takes no vsync
-callbacks and the display drops to its idle rate.
+callbacks and the display drops to its idle rate. The window opts out of GPUI presenting the last
+frame again for a second after fast input, and the pager, sheets, and swipe back end the touch
+fling they swallow, so a swipe stops ticking once the page settles.
 
 To measure frames on a paired, unlocked device without touching it:
 

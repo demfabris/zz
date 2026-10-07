@@ -1714,7 +1714,8 @@ impl AgentController {
             },
             AgentStreamPayload::StateSynced { .. }
             | AgentStreamPayload::PromptAccepted { .. }
-            | AgentStreamPayload::TasksChanged { .. } => {
+            | AgentStreamPayload::TasksChanged { .. }
+            | AgentStreamPayload::Activity { .. } => {
                 return None;
             }
             AgentStreamPayload::SessionsListed {

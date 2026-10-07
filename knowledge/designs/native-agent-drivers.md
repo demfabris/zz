@@ -118,6 +118,12 @@ a `questions` list, answered by `AgentAnswerQuestion`. Subagent tool calls carry
 `_meta.zz.parent`, and the shared reducer exposes it as `tool_parent`. The wire details are in the
 v108 entry of the [wire protocol](/protocol/wire-protocol.md).
 
+Turns the agent starts on its own (a background task reporting back, a peer message) arrive as
+`Activity { busy }` stream items: Claude's `session_state_changed` and Codex's
+`thread/status/changed` while no host turn is open. The host shows the pane as running, holds new
+prompts in its queue until the agent is idle, and Stop sends a `Cancel` with turn 0, which the
+drivers turn into an interrupt.
+
 # Codex driver
 
 `crates/zz-daemon/src/agent/codex/`, sharing the process plumbing in `agent/child.rs` with the
@@ -153,10 +159,8 @@ file changes applied, `restart-agent-pane` resuming the thread with its memory, 
    wire and reducer are done).
 2. More commands: `//btw` for Codex (an ephemeral `thread/fork` plus a hidden turn), branch from a
    message (`--resume-session-at`, `thread/fork beforeTurnId`), rewind.
-3. Turns the CLI starts on its own (a background task finishing, a peer message) do not reach the
-   host's phase yet, so badges miss that work.
-4. Codex subagent threads (`collabAgentToolCall` receivers) and background terminals.
-5. Orchestration: a zz MCP server passed through `mcpServers` and the Codex thread config; PiP
+3. Codex subagent threads (`collabAgentToolCall` receivers) and background terminals.
+4. Orchestration: a zz MCP server passed through `mcpServers` and the Codex thread config; PiP
    panes.
-6. Keep-up: a weekly diff of `sdk.d.ts` and the Codex schema, and a minimum-version table. The
+5. Keep-up: a weekly diff of `sdk.d.ts` and the Codex schema, and a minimum-version table. The
    survey's `archive/codex-host` tag is not in this clone; the Codex driver was written fresh.

@@ -9,6 +9,7 @@ mod drop;
 #[path = "../../zz-browser/src/element_picker.rs"]
 mod element_picker;
 mod keyboard;
+mod keyboard_inset;
 mod menu;
 mod momentum;
 mod perf;

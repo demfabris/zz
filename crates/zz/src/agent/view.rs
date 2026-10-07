@@ -419,13 +419,22 @@ impl PermissionWizard {
         self.answer(requests, Some(option))
     }
 
-    fn answer_card(&mut self, requests: &[AgentPermissionRequest], request_id: u64) -> bool {
-        if self.current(requests).map(|request| request.request_id) != Some(request_id) {
+    fn take(&mut self, requests: &[AgentPermissionRequest], request_id: u64) -> bool {
+        if !self
+            .pages(requests)
+            .iter()
+            .any(|request| request.request_id == request_id)
+        {
             return false;
         }
         self.answered.insert(request_id);
         self.sync(requests);
         true
+    }
+
+    fn release(&mut self, requests: &[AgentPermissionRequest], request_id: u64) {
+        self.answered.remove(&request_id);
+        self.sync(requests);
     }
 
     fn confirm(&mut self, requests: &[AgentPermissionRequest]) -> PermissionStep {
@@ -948,7 +957,7 @@ impl AgentView {
             self.accept_selected_completion(window, cx);
             return;
         }
-        if self.confirm_permission(cx) {
+        if self.confirm_permission(window, cx) {
             return;
         }
         self.submit(window, cx);
@@ -957,18 +966,17 @@ impl AgentView {
     /// Enter over an empty composer confirms the highlighted permission option.
     /// It never reaches [`ComposerAction::Stop`]: a stray Enter right after
     /// sending must not kill the turn it just started.
-    fn confirm_permission(&mut self, cx: &mut Context<Self>) -> bool {
+    fn confirm_permission(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if !self.input.read(cx).value().trim().is_empty() {
             return false;
         }
-        let requests = self.pane_state.pending_permissions.clone();
-        if self
-            .permission_wizard
-            .current(&requests)
-            .is_some_and(|request| !request.questions.is_empty())
-        {
+        self.synchronize_question_card(window, cx);
+        if let Some(card) = &self.question {
+            let step = card.card.submit();
+            self.apply_question_step(step, window, cx);
             return true;
         }
+        let requests = self.pane_state.pending_permissions.clone();
         let step = self.permission_wizard.confirm(&requests);
         self.apply_permission_step(step, cx)
     }
@@ -1640,23 +1648,20 @@ impl AgentView {
             .current(&self.pane_state.pending_permissions)
             .filter(|request| !request.questions.is_empty())
             .map(|request| (request.request_id, request.questions.clone()));
-        match head {
-            None => self.question = None,
-            Some((request_id, _))
-                if self
-                    .question
-                    .as_ref()
-                    .is_some_and(|card| card.request_id() == request_id) => {}
-            Some((request_id, questions)) => {
-                self.question = Some(QuestionCardState::new(
-                    request_id,
-                    questions,
-                    window,
-                    cx,
-                    Self::on_question_input,
-                ));
-            }
+        let current = self.question.as_ref().map(QuestionCardState::request_id);
+        if current == head.as_ref().map(|(request_id, _)| *request_id) {
+            return;
         }
+        if self
+            .question
+            .as_ref()
+            .is_some_and(|card| card.editing(window, cx))
+        {
+            self.input.read(cx).focus_handle(cx).focus(window, cx);
+        }
+        self.question = head.map(|(request_id, questions)| {
+            QuestionCardState::new(request_id, questions, window, cx, Self::on_question_input)
+        });
     }
 
     fn on_question_input(
@@ -1741,31 +1746,26 @@ impl AgentView {
             .as_ref()
             .is_some_and(|card| card.editing(window, cx));
         let requests = self.pane_state.pending_permissions.clone();
-        let answered = match step {
+        let answers = match step {
             QuestionCardStep::Stay => return false,
             QuestionCardStep::Handled | QuestionCardStep::Other(_) => {
                 cx.notify();
                 return true;
             }
-            QuestionCardStep::Submit(answers) => {
-                if !self.permission_wizard.answer_card(&requests, request_id) {
-                    return true;
-                }
-                let pane = self.pane;
-                let sent = self.controller.update(cx, |controller, cx| {
-                    controller.answer_question(pane, request_id, answers, cx)
-                });
-                if !sent {
-                    self.permission_wizard.answered.remove(&request_id);
-                    self.permission_wizard.sync(&requests);
-                }
-                sent
-            }
-            QuestionCardStep::Dismiss => {
-                let step = self.permission_wizard.cancel(&requests);
-                self.apply_permission_step(step, cx)
-            }
+            QuestionCardStep::Submit(answers) => Some(answers),
+            QuestionCardStep::Dismiss => None,
         };
+        if !self.permission_wizard.take(&requests, request_id) {
+            return true;
+        }
+        let pane = self.pane;
+        let answered = self.controller.update(cx, |controller, cx| match answers {
+            Some(answers) => controller.answer_question(pane, request_id, answers, cx),
+            None => controller.respond_permission(pane, request_id, None, cx),
+        });
+        if !answered {
+            self.permission_wizard.release(&requests, request_id);
+        }
         if answered && editing {
             self.input.read(cx).focus_handle(cx).focus(window, cx);
         }
@@ -3524,6 +3524,22 @@ mod completion_tests {
     }
 
     #[test]
+    fn a_card_takes_its_own_request_off_the_wizard_whatever_page_is_focused() {
+        let requests = [permission(1), permission(2)];
+        let mut wizard = PermissionWizard::default();
+        wizard.sync(&requests);
+        assert!(wizard.take(&requests, 2));
+        assert_eq!(wizard.current(&requests).map(|r| r.request_id), Some(1));
+        assert!(
+            !wizard.take(&requests, 2),
+            "an answered request is taken once"
+        );
+        assert!(!wizard.take(&requests, 9));
+        wizard.release(&requests, 2);
+        assert_eq!(wizard.page_label(&requests).as_deref(), Some("1/2"));
+    }
+
+    #[test]
     fn composer_action_follows_the_live_turn_and_the_draft() {
         assert_eq!(composer_action(false, false), ComposerAction::Send);
         assert_eq!(composer_action(false, true), ComposerAction::Send);
@@ -4440,6 +4456,256 @@ mod completion_tests {
             .collect::<Vec<_>>();
         let agent = entries[0].id();
         assert_eq!(parents, [None, Some(agent), Some(agent)]);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn stream(
+        cx: &mut VisualTestContext,
+        controller: &Entity<AgentController>,
+        pane: PaneId,
+        items: Vec<(u64, zz_daemon::AgentStreamPayload)>,
+    ) {
+        cx.update(|_, cx| {
+            controller.update(cx, |controller, cx| {
+                controller.apply_stream_items(
+                    pane,
+                    items
+                        .into_iter()
+                        .map(|(seq, payload)| zz_daemon::AgentStreamItem { seq, payload })
+                        .collect(),
+                    cx,
+                );
+            });
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn sent_answers(sink: &RecordedRequests) -> Vec<crate::mux::client::AgentRequest> {
+        sink.borrow()
+            .iter()
+            .map(|(_, request)| request.clone())
+            .filter(|request| {
+                matches!(
+                    request,
+                    crate::mux::client::AgentRequest::AnswerQuestion { .. }
+                        | crate::mux::client::AgentRequest::RespondPermission { .. }
+                        | crate::mux::client::AgentRequest::Prompt { .. }
+                )
+            })
+            .collect()
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn ready_with_an_image(
+        cx: &mut VisualTestContext,
+        view: &Entity<AgentView>,
+        controller: &Entity<AgentController>,
+        pane: PaneId,
+    ) {
+        stream(
+            cx,
+            &controller,
+            pane,
+            vec![
+                (
+                    1,
+                    zz_daemon::AgentStreamPayload::Ready {
+                        agent_name: "Claude Code".to_owned(),
+                        agent_key: "claude".to_owned(),
+                        auth_methods: Vec::new(),
+                        capabilities: zz_protocol::agent_stream::AgentSessionCapabilities {
+                            images: true,
+                            ..Default::default()
+                        },
+                    },
+                ),
+                (
+                    2,
+                    zz_daemon::AgentStreamPayload::SessionReady {
+                        session_id: "s-1".to_owned(),
+                        modes: None,
+                        config_options: None,
+                    },
+                ),
+            ],
+        );
+        cx.update(|_, cx| {
+            view.update(cx, |view, _| {
+                view.attachments.push(Arc::new(Image::from_bytes(
+                    gpui::ImageFormat::Png,
+                    vec![0x89, b'P', b'N', b'G'],
+                )));
+            });
+        });
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn one_enter_answers_the_card_and_nothing_behind_it(cx: &mut TestAppContext) {
+        let pane = PaneId(45);
+        let (view, controller, sink, cx) = wired_view(cx, pane);
+        ready_with_an_image(cx, &view, &controller, pane);
+        ask(
+            cx,
+            &controller,
+            pane,
+            3,
+            vec![
+                asked("fruit", &["apple", "pear"], false),
+                asked("tools", &["saw", "drill"], true),
+            ],
+        );
+        stream(
+            cx,
+            &controller,
+            pane,
+            vec![(
+                4,
+                zz_daemon::AgentStreamPayload::PermissionRequested {
+                    request_id: 4,
+                    tool_call: serde_json::json!({"toolCallId": "bash-1", "title": "Run ls"}),
+                    options: serde_json::json!([
+                        {"optionId": "allow-once", "name": "Allow once", "kind": "allow_once"},
+                    ]),
+                    questions: Vec::new(),
+                },
+            )],
+        );
+
+        cx.simulate_keystrokes("2 1 enter");
+        cx.run_until_parked();
+
+        assert_eq!(
+            sent_answers(&sink),
+            [crate::mux::client::AgentRequest::AnswerQuestion {
+                request_id: 3,
+                answers: vec![reply("fruit", &["pear"]), reply("tools", &["saw"])],
+            }],
+            "the Enter that answers the card neither approves the next request nor sends the images"
+        );
+        assert_eq!(
+            cx.update(|_, cx| view
+                .read(cx)
+                .pane_state
+                .pending_permissions
+                .iter()
+                .map(|request| request.request_id)
+                .collect::<Vec<_>>()),
+            [4]
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn the_enter_that_answers_a_card_keeps_the_attached_images(cx: &mut TestAppContext) {
+        let pane = PaneId(48);
+        let (view, controller, sink, cx) = wired_view(cx, pane);
+        ready_with_an_image(cx, &view, &controller, pane);
+        ask(
+            cx,
+            &controller,
+            pane,
+            3,
+            vec![asked("fruit", &["apple"], true)],
+        );
+
+        cx.simulate_keystrokes("1 enter");
+        cx.run_until_parked();
+
+        assert_eq!(
+            sent_answers(&sink),
+            [crate::mux::client::AgentRequest::AnswerQuestion {
+                request_id: 3,
+                answers: vec![reply("fruit", &["apple"])],
+            }]
+        );
+        assert_eq!(cx.update(|_, cx| view.read(cx).attachments.len()), 1);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn a_card_resolved_elsewhere_hands_the_keyboard_back(cx: &mut TestAppContext) {
+        let pane = PaneId(46);
+        let (view, controller, _sink, cx) = wired_view(cx, pane);
+        ask(
+            cx,
+            &controller,
+            pane,
+            1,
+            vec![asked("fruit", &["apple", "pear"], false)],
+        );
+        cx.simulate_keystrokes("3");
+        assert!(cx.update(|window, cx| !view.read(cx).focus(cx).is_focused(window)));
+        assert!(cx.update(|window, cx| {
+            view.read(cx)
+                .question
+                .as_ref()
+                .is_some_and(|card| card.editing(window, cx))
+        }));
+
+        stream(
+            cx,
+            &controller,
+            pane,
+            vec![(
+                2,
+                zz_daemon::AgentStreamPayload::PermissionResolved {
+                    request_id: 1,
+                    canceled: true,
+                },
+            )],
+        );
+
+        assert!(cx.update(|_, cx| view.read(cx).question.is_none()));
+        assert!(cx.update(|window, cx| view.read(cx).focus(cx).is_focused(window)));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn a_step_that_arrives_before_its_agent_nests_once_the_agent_shows_up(cx: &mut TestAppContext) {
+        let pane = PaneId(47);
+        let (view, controller, _sink, cx) = wired_view(cx, pane);
+        let tool = |id: &str, meta: serde_json::Value| zz_daemon::AgentStreamPayload::Update {
+            update: serde_json::json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": id,
+                "title": id,
+                "kind": "read",
+                "_meta": meta,
+            }),
+        };
+        stream(
+            cx,
+            &controller,
+            pane,
+            vec![(
+                1,
+                tool("read-1", serde_json::json!({"zz": {"parent": "agent-1"}})),
+            )],
+        );
+        stream(
+            cx,
+            &controller,
+            pane,
+            vec![(2, tool("agent-1", serde_json::json!({})))],
+        );
+
+        let rows = cx.update(|_, cx| view.read(cx).timeline.rows.clone());
+        let [TimelineRow::Group { entries, .. }] = rows.as_slice() else {
+            panic!("the step and its agent share a row: {rows:?}");
+        };
+        let agent = entries[1].id();
+        assert_eq!(
+            entries
+                .iter()
+                .map(zz_ui::agent::timeline_parent)
+                .collect::<Vec<_>>(),
+            [Some(agent), None]
+        );
     }
 }
 

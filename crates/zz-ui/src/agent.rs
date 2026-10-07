@@ -1564,15 +1564,34 @@ struct StepNesting {
 
 impl StepNesting {
     fn new(members: &[AgentEntry]) -> Self {
+        let positions = members
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| (entry.id(), index))
+            .collect::<HashMap<_, _>>();
+        let parent_of = |index: usize| {
+            timeline_parent(&members[index]).and_then(|parent| positions.get(&parent).copied())
+        };
+        let reaches_top = |index: usize| {
+            let mut visited = HashSet::new();
+            let mut at = index;
+            loop {
+                if !visited.insert(at) {
+                    return false;
+                }
+                match parent_of(at) {
+                    Some(parent) => at = parent,
+                    None => return true,
+                }
+            }
+        };
         let mut top = Vec::new();
         let mut steps = HashMap::<u64, Vec<usize>>::new();
-        let mut seen = HashSet::with_capacity(members.len());
-        for (index, entry) in members.iter().enumerate() {
-            match timeline_parent(entry).filter(|parent| seen.contains(parent)) {
-                Some(parent) => steps.entry(parent).or_default().push(index),
+        for index in 0..members.len() {
+            match parent_of(index).filter(|_| reaches_top(index)) {
+                Some(parent) => steps.entry(members[parent].id()).or_default().push(index),
                 None => top.push(index),
             }
-            seen.insert(entry.id());
         }
         Self { top, steps }
     }
@@ -3861,14 +3880,29 @@ mod tests {
     }
 
     #[test]
-    fn parent_links_only_point_back_so_a_loop_cannot_hide_a_row() {
+    fn a_step_listed_before_its_agent_still_nests_but_a_loop_stays_flat() {
+        let members = [
+            test_step(1, 2),
+            test_tool_kind(2, "Survey", AgentToolKind::Think, AgentToolStatus::Running),
+            test_step(3, 1),
+        ];
+        let nesting = StepNesting::new(&members);
+        assert_eq!(nesting.top, [1]);
+        assert_eq!(nesting.steps[&2], [0]);
+        assert_eq!(nesting.steps[&1], [2]);
+
         let mut agent =
             test_tool_entry(2, "Survey", AgentToolKind::Think, AgentToolStatus::Running);
         agent.parent = Some(1);
-        let members = [test_step(1, 2), AgentEntry::Tool(agent)];
+        let members = [
+            test_step(1, 2),
+            AgentEntry::Tool(agent),
+            test_step(3, 1),
+            test_step(4, 4),
+        ];
         let nesting = StepNesting::new(&members);
-        assert_eq!(nesting.top, [0]);
-        assert_eq!(nesting.steps[&1], [1]);
+        assert_eq!(nesting.top, [0, 1, 2, 3], "a loop renders every row flat");
+        assert!(nesting.steps.is_empty());
     }
 
     struct TimelineRowsTest {

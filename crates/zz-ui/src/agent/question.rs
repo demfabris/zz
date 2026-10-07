@@ -4,7 +4,10 @@ use gpui::{
     AnyElement, App, Context, Div, Entity, Focusable as _, FontWeight, IntoElement, SharedString,
     Subscription, Window, div, prelude::*, px,
 };
-use zz_protocol::{AgentQuestionAnswer, MAX_AGENT_ANSWER_BYTES, agent_stream::AgentQuestion};
+use zz_protocol::{
+    AgentQuestionAnswer, MAX_AGENT_ANSWER_BYTES, MAX_AGENT_OPTION_BYTES,
+    MAX_AGENT_QUESTION_ANSWERS, agent_stream::AgentQuestion,
+};
 
 use crate::{
     ActiveTheme as _, Colorize as _, Disableable as _, Icon, IconName, Sizable as _,
@@ -171,9 +174,51 @@ impl QuestionCard {
         self.picks
             .get(question)
             .is_some_and(|picks| picks.iter().any(|picked| *picked))
-            || (self.other_selected(question)
-                && !self.other_text[question].trim().is_empty()
-                && self.other_text[question].trim().len() <= MAX_AGENT_ANSWER_BYTES)
+            || (self.other_selected(question) && !self.other_text[question].trim().is_empty())
+    }
+
+    fn question_answers(&self, index: usize) -> Vec<String> {
+        self.questions[index]
+            .options
+            .iter()
+            .zip(&self.picks[index])
+            .filter(|(_, picked)| **picked)
+            .map(|(option, _)| option.label.clone())
+            .chain(
+                self.other[index]
+                    .then(|| self.other_text[index].trim().to_owned())
+                    .filter(|text| !text.is_empty()),
+            )
+            .collect()
+    }
+
+    pub fn problem(&self) -> Option<String> {
+        if self.questions.len() > MAX_AGENT_QUESTION_ANSWERS
+            || self
+                .questions
+                .iter()
+                .any(|question| question.id.len() > MAX_AGENT_OPTION_BYTES)
+        {
+            return Some("zz cannot send answers to this card. Dismiss it.".to_owned());
+        }
+        (0..self.questions.len()).find_map(|index| {
+            let answers = self.question_answers(index);
+            if answers.len() > MAX_AGENT_QUESTION_ANSWERS {
+                Some(format!(
+                    "Choose at most {MAX_AGENT_QUESTION_ANSWERS} answers to one question."
+                ))
+            } else if answers
+                .iter()
+                .any(|answer| answer.len() > MAX_AGENT_ANSWER_BYTES)
+            {
+                Some(format!(
+                    "An answer is over {} KB. Shorten it.",
+                    MAX_AGENT_ANSWER_BYTES / 1024
+                ))
+            } else {
+                None
+            }
+        })
     }
 
     pub fn is_complete(&self) -> bool {
@@ -181,24 +226,13 @@ impl QuestionCard {
     }
 
     pub fn answers(&self) -> Option<Vec<AgentQuestionAnswer>> {
-        self.is_complete().then(|| {
+        (self.is_complete() && self.problem().is_none()).then(|| {
             self.questions
                 .iter()
                 .enumerate()
                 .map(|(index, question)| AgentQuestionAnswer {
                     id: question.id.clone(),
-                    answers: question
-                        .options
-                        .iter()
-                        .zip(&self.picks[index])
-                        .filter(|(_, picked)| **picked)
-                        .map(|(option, _)| option.label.clone())
-                        .chain(
-                            self.other[index]
-                                .then(|| self.other_text[index].trim().to_owned())
-                                .filter(|text| !text.is_empty()),
-                        )
-                        .collect(),
+                    answers: self.question_answers(index),
                 })
                 .collect()
         })
@@ -224,7 +258,6 @@ impl QuestionCard {
     pub fn key(&mut self, key: &str, shift: bool) -> QuestionCardStep {
         match key {
             "escape" => QuestionCardStep::Dismiss,
-            "enter" => self.submit(),
             "tab" => self.move_focus(!shift),
             "down" => self.move_focus(true),
             "up" => self.move_focus(false),
@@ -378,6 +411,7 @@ impl QuestionCardState {
         } else {
             "1-9 picks · enter submits · esc dismisses"
         };
+        let problem = card.problem();
         let dismiss = Rc::clone(&on_action);
         let submit = Rc::clone(&on_action);
         v_flex()
@@ -408,13 +442,18 @@ impl QuestionCardState {
                             .min_w_0()
                             .gap_2()
                             .when_some(counter, |row, counter| row.child(chip(counter, cx)))
-                            .child(
-                                div()
+                            .child(match problem.clone() {
+                                Some(problem) => div()
+                                    .min_w_0()
+                                    .text_size(crate::rems_from_px(11.0))
+                                    .text_color(cx.theme().danger)
+                                    .child(problem),
+                                None => div()
                                     .min_w_0()
                                     .text_size(crate::rems_from_px(9.0))
                                     .text_color(cx.theme().foreground.muted())
                                     .child(hint),
-                            ),
+                            }),
                     )
                     .child(
                         h_flex()
@@ -436,7 +475,7 @@ impl QuestionCardState {
                                     .primary()
                                     .small()
                                     .label("Submit")
-                                    .disabled(!enabled || !card.is_complete())
+                                    .disabled(!enabled || !card.is_complete() || problem.is_some())
                                     .on_click(move |_, window, cx| {
                                         submit(QuestionCardAction::Submit, window, cx);
                                         cx.stop_propagation();
@@ -720,7 +759,12 @@ mod tests {
                 question("tools", &["saw", "drill", "glue"], true),
             ],
         );
-        assert_eq!(card.key("enter", false), QuestionCardStep::Handled);
+        assert_eq!(card.submit(), QuestionCardStep::Handled);
+        assert_eq!(
+            card.key("enter", false),
+            QuestionCardStep::Stay,
+            "Enter reaches the composer, which submits the card"
+        );
         assert_eq!(card.key("1", false), QuestionCardStep::Handled);
         assert_eq!(card.focused(), 1, "a single-select pick moves on");
         assert_eq!(card.key("3", false), QuestionCardStep::Handled);
@@ -733,7 +777,7 @@ mod tests {
             "a second press clears a multi-select choice"
         );
         assert_eq!(
-            card.key("enter", false),
+            card.submit(),
             QuestionCardStep::Submit(vec![
                 answer("fruit", &["apple"]),
                 answer("tools", &["saw", "drill"])
@@ -781,6 +825,69 @@ mod tests {
             card.answers().expect("complete")[0],
             answer("fruit", &["pear"])
         );
+    }
+
+    #[test]
+    fn answers_never_leave_the_wire_limits() {
+        let labels = (0..=MAX_AGENT_QUESTION_ANSWERS)
+            .map(|index| format!("choice {index}"))
+            .collect::<Vec<_>>();
+        let labels = labels.iter().map(String::as_str).collect::<Vec<_>>();
+        let mut card = QuestionCard::new(4, vec![question("many", &labels, true)]);
+        for option in 0..MAX_AGENT_QUESTION_ANSWERS {
+            card.pick(0, option);
+        }
+        let answers = card.answers().expect("the full limit still sends");
+        assert!(
+            zz_protocol::encode_protocol_message(
+                &zz_protocol::ProtocolMessage::AgentAnswerQuestion {
+                    pane: zz_protocol::PaneId(1),
+                    request_id: 4,
+                    answers,
+                }
+            )
+            .is_ok()
+        );
+        card.select_other(0);
+        card.set_other_text(0, "one more");
+        assert!(card.is_complete());
+        assert!(
+            card.problem().is_some(),
+            "a typed answer past the limit is refused"
+        );
+        assert_eq!(card.answers(), None);
+        assert_eq!(card.submit(), QuestionCardStep::Handled);
+
+        let mut card = QuestionCard::new(4, vec![question("note", &["short"], false)]);
+        card.select_other(0);
+        card.set_other_text(0, &"x".repeat(MAX_AGENT_ANSWER_BYTES + 1));
+        assert!(card.problem().is_some());
+        assert_eq!(card.answers(), None);
+        card.set_other_text(0, &"x".repeat(MAX_AGENT_ANSWER_BYTES));
+        assert!(card.problem().is_none());
+        assert!(card.answers().is_some());
+
+        let mut long_label = question("label", &["fine"], false);
+        long_label.options[0].label = "y".repeat(MAX_AGENT_ANSWER_BYTES + 1);
+        let mut card = QuestionCard::new(4, vec![long_label]);
+        assert_eq!(card.pick(0, 0), QuestionCardStep::Handled);
+        assert!(card.problem().is_some());
+
+        let mut long_id = question("id", &["fine"], false);
+        long_id.id = "z".repeat(MAX_AGENT_OPTION_BYTES + 1);
+        let mut card = QuestionCard::new(4, vec![long_id]);
+        assert_eq!(card.pick(0, 0), QuestionCardStep::Handled);
+        assert!(card.problem().is_some());
+
+        let many = (0..=MAX_AGENT_QUESTION_ANSWERS)
+            .map(|index| question(&format!("q{index}"), &["yes"], false))
+            .collect::<Vec<_>>();
+        let mut card = QuestionCard::new(4, many);
+        for index in 0..=MAX_AGENT_QUESTION_ANSWERS {
+            card.pick(index, 0);
+        }
+        assert!(card.is_complete());
+        assert_eq!(card.answers(), None);
     }
 
     #[test]

@@ -414,6 +414,15 @@ impl AgentPane {
     }
 
     fn enter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.input.read(cx).value().trim().is_empty() {
+            let head = self.current_permission(cx);
+            self.synchronize_question_card(head.as_ref(), window, cx);
+            if let Some(card) = &self.question {
+                let step = card.card.submit();
+                self.apply_question_step(step, window, cx);
+                return;
+            }
+        }
         self.synchronize_completions(cx);
         if let Some(index) = self.completion_selected {
             self.accept_completion(index, window, cx);
@@ -2025,23 +2034,27 @@ impl AgentPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        match head.filter(|request| !request.questions.is_empty()) {
-            None => self.question = None,
-            Some(request)
-                if self
-                    .question
-                    .as_ref()
-                    .is_some_and(|card| card.request_id() == request.request_id) => {}
-            Some(request) => {
-                self.question = Some(QuestionCardState::new(
-                    request.request_id,
-                    request.questions.clone(),
-                    window,
-                    cx,
-                    Self::on_question_input,
-                ));
-            }
+        let head = head.filter(|request| !request.questions.is_empty());
+        let current = self.question.as_ref().map(QuestionCardState::request_id);
+        if current == head.map(|request| request.request_id) {
+            return;
         }
+        if self
+            .question
+            .as_ref()
+            .is_some_and(|card| card.editing(window, cx))
+        {
+            self.input.read(cx).focus_handle(cx).focus(window, cx);
+        }
+        self.question = head.map(|request| {
+            QuestionCardState::new(
+                request.request_id,
+                request.questions.clone(),
+                window,
+                cx,
+                Self::on_question_input,
+            )
+        });
     }
 
     fn on_question_input(
@@ -3492,6 +3505,27 @@ mod tests {
             fold_timeline_rows(&transcript.entries).entry_to_row,
             [0, 1, 0],
             "the step joins its agent's row past the reply"
+        );
+    }
+
+    #[test]
+    fn a_step_that_arrives_before_its_agent_learns_its_parent_later() {
+        let mut transcript = Transcript::default();
+        transcript.apply(
+            1,
+            &json!({"item":"update","update":{
+            "sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read a.rs","kind":"read",
+            "_meta":{"zz":{"parent":"agent-1"}}}}),
+        );
+        assert_eq!(zz_ui::agent::timeline_parent(&transcript.entries[0]), None);
+        transcript.apply(
+            2,
+            &json!({"item":"update","update":{
+            "sessionUpdate":"tool_call","toolCallId":"agent-1","title":"Survey","kind":"think"}}),
+        );
+        assert_eq!(
+            zz_ui::agent::timeline_parent(&transcript.entries[0]),
+            Some(transcript.entries[1].id())
         );
     }
 

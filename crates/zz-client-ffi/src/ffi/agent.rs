@@ -1448,6 +1448,26 @@ mod tests {
     }
 
     #[test]
+    fn a_step_listed_before_its_agent_resends_with_its_parent() {
+        let mut model = model();
+        model.update(
+            json!({"sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read a.rs",
+            "kind":"read","_meta":{"zz":{"parent":"agent-1"}}}),
+        );
+        let first = model.snapshot(0);
+        assert!(first["entries"][0]["parent"].is_null());
+        let since = first["revision"].as_u64().unwrap();
+        model.update(
+            json!({"sessionUpdate":"tool_call","toolCallId":"agent-1","title":"Survey","kind":"think"}),
+        );
+        let next = model.snapshot(since);
+        let entries = next["entries"].as_array().unwrap();
+        let step = entries.iter().find(|entry| entry["index"] == 0).unwrap();
+        let agent = entries.iter().find(|entry| entry["index"] == 1).unwrap();
+        assert_eq!(step["parent"], agent["entry"]["id"]);
+    }
+
+    #[test]
     fn preferences_remember_only_the_acknowledged_user_selection() {
         let mut model = model();
         model.setting_request = Some(SettingRequest {

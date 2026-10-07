@@ -42,6 +42,7 @@ use translate::Translator;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_mins(1);
 const SESSION_PAGE: u64 = 50;
+const MAX_CHILD_THREADS: usize = 16;
 const AGENT_NAME: &str = "Codex";
 const AGENT_KEY: &str = "codex";
 const VERB_HELP: &str = "zz commands: `//btw <question>` (or `//side`) asks Codex in a throwaway copy of the thread, `//steer <text>` redirects the running turn, `//fork` continues in a copy of this conversation, and `//rewind [n]` continues from before your last n prompts (1 by default) without changing files. `/compact` and `/review` run Codex's own compaction and review.";
@@ -132,6 +133,7 @@ pub(crate) async fn run_codex_runtime(
         notices: 0,
         sides: HashMap::new(),
         tasks: Vec::new(),
+        loading: None,
     };
     let commands = channels.commands;
     let controls = channels.controls;
@@ -181,6 +183,9 @@ enum Outgoing {
         start: Start,
         thread: Value,
         cwd: PathBuf,
+    },
+    ChildHistory {
+        thread: String,
     },
     Turn {
         turn_id: u64,
@@ -402,6 +407,14 @@ struct Runtime {
     notices: u64,
     sides: HashMap<String, Side>,
     tasks: Vec<AgentTaskWire>,
+    loading: Option<Loading>,
+}
+
+struct Loading {
+    start: Start,
+    thread: Value,
+    cwd: PathBuf,
+    children: HashMap<String, Option<Vec<Value>>>,
 }
 
 struct Side {
@@ -952,16 +965,49 @@ impl Runtime {
         self.emit(AgentStreamPayload::TasksChanged { tasks }).await
     }
 
-    fn history(&mut self, thread: &Value) -> Vec<(Value, bool)> {
+    async fn load(&mut self) -> Result<(), String> {
+        if self
+            .loading
+            .as_ref()
+            .is_none_or(|loading| loading.children.values().any(Option::is_none))
+        {
+            return Ok(());
+        }
+        let Some(loading) = self.loading.take() else {
+            return Ok(());
+        };
+        let children = loading
+            .children
+            .into_iter()
+            .map(|(thread, items)| (thread, items.unwrap_or_default()))
+            .collect();
+        let id = loading.thread["id"].as_str().unwrap_or_default().to_owned();
+        let previous = self.session.take();
+        self.session = Some(Session {
+            id: id.clone(),
+            cwd: loading.cwd.clone(),
+        });
+        let history = self.history(&loading.thread, &children);
+        self.session = previous;
+        self.settle(loading.start, id, loading.cwd, history).await
+    }
+
+    fn history(
+        &mut self,
+        thread: &Value,
+        children: &HashMap<String, Vec<Value>>,
+    ) -> Vec<(Value, bool)> {
         let id = thread["id"].as_str().unwrap_or_default().to_owned();
         let mut translator = Translator::new(self.cwd());
-        let updates = thread["turns"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .flat_map(|turn| turn["items"].as_array().cloned().unwrap_or_default())
-            .flat_map(|item| translator.history_item(&item))
-            .collect::<Vec<_>>();
+        let mut updates = Vec::new();
+        for item in thread_items(thread) {
+            updates.extend(translator.history_item(&item));
+            for child in spawned(&item) {
+                for step in children.get(&child).into_iter().flatten() {
+                    updates.extend(translator.child_history(&child, step));
+                }
+            }
+        }
         if updates.is_empty()
             && let Some(journal) = self.journal.as_deref()
         {
@@ -1221,16 +1267,45 @@ impl Runtime {
                     .await
             }
             (Outgoing::History { start, thread, cwd }, result) => {
-                let id = thread["id"].as_str().unwrap_or_default().to_owned();
                 let full = result.map_or(thread, |response| response["thread"].clone());
-                let previous = self.session.take();
-                self.session = Some(Session {
-                    id: id.clone(),
-                    cwd: cwd.clone(),
+                let mut children = HashMap::new();
+                for item in thread_items(&full) {
+                    for child in spawned(&item) {
+                        if children.len() < MAX_CHILD_THREADS {
+                            children.insert(child, None);
+                        }
+                    }
+                }
+                for child in children.keys() {
+                    self.request(
+                        "thread/read",
+                        &json!({ "threadId": child, "includeTurns": true }),
+                        Outgoing::ChildHistory {
+                            thread: child.clone(),
+                        },
+                    );
+                }
+                self.loading = Some(Loading {
+                    start,
+                    thread: full,
+                    cwd,
+                    children,
                 });
-                let history = self.history(&full);
-                self.session = previous;
-                self.settle(start, id, cwd, history).await
+                self.load().await
+            }
+            (Outgoing::ChildHistory { thread }, result) => {
+                if let Some(slot) = self
+                    .loading
+                    .as_mut()
+                    .and_then(|loading| loading.children.get_mut(&thread))
+                {
+                    *slot = Some(
+                        result
+                            .map(|response| thread_items(&response["thread"]))
+                            .unwrap_or_default(),
+                    );
+                }
+                self.load().await
             }
             (Outgoing::Turn { turn_id }, Ok(response)) => {
                 if let Some(turn) = self.turn.as_mut().filter(|turn| turn.id == turn_id) {
@@ -1908,6 +1983,31 @@ impl Runtime {
     }
 }
 
+fn thread_items(thread: &Value) -> Vec<Value> {
+    thread["turns"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|turn| turn["items"].as_array().cloned().unwrap_or_default())
+        .collect()
+}
+
+fn spawned(item: &Value) -> Vec<String> {
+    let threads = match item["type"].as_str() {
+        Some("subAgentActivity") if item["kind"] == "started" => vec![&item["agentThreadId"]],
+        Some("collabAgentToolCall") if item["tool"] == "spawnAgent" => item["receiverThreadIds"]
+            .as_array()
+            .map(|threads| threads.iter().collect())
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    threads
+        .into_iter()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect()
+}
+
 fn decision(reply: &Reply, option: &str) -> Value {
     match reply {
         Reply::Command | Reply::FileChange => json!({
@@ -2040,7 +2140,11 @@ mod tests {
 while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/^{\("method":"[^"]*",\)\{0,1\}"id":\([0-9][0-9]*\),.*/\2/p')
   case "$line" in
-    *'"method":"thread/start"'*) printf '{"id":%s,"result":{"thread":{"id":"t1"}}}\n' "$id" ;;
+    *'"method":"thread/start"'*|*'"method":"thread/resume"'*) printf '{"id":%s,"result":{"thread":{"id":"t1"}}}\n' "$id" ;;
+    *'"method":"thread/read"'*'"threadId":"t1"'*)
+      printf '{"id":%s,"result":{"thread":{"id":"t1","turns":[{"id":"u0","items":[{"type":"userMessage","id":"m0","content":[{"type":"text","text":"scan"}]},{"type":"subAgentActivity","id":"a1","kind":"started","agentThreadId":"c1","agentPath":"/root/scan_files"},{"type":"subAgentActivity","id":"a2","kind":"completed","agentThreadId":"c1","agentPath":"/root/scan_files"}]}]}}}\n' "$id" ;;
+    *'"method":"thread/read"'*'"threadId":"c1"'*)
+      printf '{"id":%s,"result":{"thread":{"id":"c1","turns":[{"id":"v0","items":[{"type":"userMessage","id":"n0","content":[{"type":"text","text":"list"}]},{"type":"commandExecution","id":"exec-c","command":"ls","commandActions":[],"status":"completed","exitCode":0,"aggregatedOutput":"x"},{"type":"agentMessage","id":"n1","text":"found x"}]}]}}}\n' "$id" ;;
     *'"method":"turn/start"'*)
       printf '{"id":%s,"result":{"turn":{"id":"u1"}}}\n' "$id"
       printf '%s\n' '{"method":"turn/started","params":{"threadId":"t1","turn":{"id":"u1"}}}'
@@ -2057,12 +2161,16 @@ done
 "#;
 
     #[cfg(unix)]
-    #[test]
-    fn background_terminals_fill_the_tray_and_stop_from_it() {
+    fn fake_codex(
+        directory: &Path,
+    ) -> (
+        async_channel::Sender<RuntimeCommand>,
+        async_channel::Receiver<AgentStreamPayload>,
+        impl std::future::Future<Output = Result<(), String>>,
+    ) {
         use std::os::unix::fs::PermissionsExt as _;
 
-        let directory = tempfile::tempdir().expect("tempdir");
-        let program = directory.path().join("codex");
+        let program = directory.join("codex");
         std::fs::write(&program, FAKE_CODEX).expect("fake codex");
         std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755))
             .expect("executable");
@@ -2083,25 +2191,33 @@ done
                 events,
             },
         );
+        (commands, event_rx, runtime)
+    }
+
+    #[cfg(unix)]
+    async fn until(
+        events: &async_channel::Receiver<AgentStreamPayload>,
+        accept: fn(&AgentStreamPayload) -> bool,
+    ) -> AgentStreamPayload {
+        loop {
+            let payload =
+                futures_lite::future::or(async { events.recv().await.expect("event") }, async {
+                    smol::Timer::after(Duration::from_secs(20)).await;
+                    panic!("timed out waiting for the runtime");
+                })
+                .await;
+            if accept(&payload) {
+                return payload;
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn background_terminals_fill_the_tray_and_stop_from_it() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let (commands, events, runtime) = fake_codex(directory.path());
         let driver = async {
-            let until = |accept: fn(&AgentStreamPayload) -> bool| {
-                let event_rx = event_rx.clone();
-                async move {
-                    loop {
-                        let payload = futures_lite::future::or(
-                            async { event_rx.recv().await.expect("event") },
-                            async {
-                                smol::Timer::after(Duration::from_secs(20)).await;
-                                panic!("timed out waiting for the runtime");
-                            },
-                        )
-                        .await;
-                        if accept(&payload) {
-                            return payload;
-                        }
-                    }
-                }
-            };
             commands
                 .send(RuntimeCommand::Open {
                     cwd: directory.path().to_path_buf(),
@@ -2109,7 +2225,10 @@ done
                 })
                 .await
                 .expect("open");
-            until(|payload| matches!(payload, AgentStreamPayload::SessionReady { .. })).await;
+            until(&events, |payload| {
+                matches!(payload, AgentStreamPayload::SessionReady { .. })
+            })
+            .await;
             commands
                 .send(RuntimeCommand::Prompt {
                     turn_id: 1,
@@ -2120,9 +2239,14 @@ done
                 })
                 .await
                 .expect("prompt");
-            until(|payload| matches!(payload, AgentStreamPayload::PromptFinished { .. })).await;
-            let AgentStreamPayload::TasksChanged { tasks } =
-                until(|payload| matches!(payload, AgentStreamPayload::TasksChanged { .. })).await
+            until(&events, |payload| {
+                matches!(payload, AgentStreamPayload::PromptFinished { .. })
+            })
+            .await;
+            let AgentStreamPayload::TasksChanged { tasks } = until(&events, |payload| {
+                matches!(payload, AgentStreamPayload::TasksChanged { .. })
+            })
+            .await
             else {
                 unreachable!();
             };
@@ -2141,12 +2265,69 @@ done
                 })
                 .await
                 .expect("stop");
-            let AgentStreamPayload::TasksChanged { tasks } =
-                until(|payload| matches!(payload, AgentStreamPayload::TasksChanged { .. })).await
+            let AgentStreamPayload::TasksChanged { tasks } = until(&events, |payload| {
+                matches!(payload, AgentStreamPayload::TasksChanged { .. })
+            })
+            .await
             else {
                 unreachable!();
             };
             assert!(tasks.is_empty());
+            commands
+                .send(RuntimeCommand::Shutdown)
+                .await
+                .expect("shutdown");
+        };
+        let (result, ()) = smol::block_on(futures_lite::future::zip(runtime, driver));
+        assert_eq!(result, Ok(()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_resumed_thread_replays_subagent_steps_under_their_agent() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let (commands, events, runtime) = fake_codex(directory.path());
+        let driver = async {
+            commands
+                .send(RuntimeCommand::Open {
+                    cwd: directory.path().to_path_buf(),
+                    resume_session: Some("t1".to_owned()),
+                })
+                .await
+                .expect("open");
+            let mut updates = Vec::new();
+            loop {
+                match until(&events, |_| true).await {
+                    AgentStreamPayload::Update { update } => updates.push(update),
+                    AgentStreamPayload::SessionReady { .. } => break,
+                    _ => {}
+                }
+            }
+            let rows = updates
+                .iter()
+                .filter(|update| update["sessionUpdate"] != "available_commands_update")
+                .map(|update| {
+                    (
+                        update["sessionUpdate"].as_str().unwrap_or_default(),
+                        update["toolCallId"].as_str().unwrap_or_default(),
+                        update["_meta"]["zz"]["parent"].as_str().unwrap_or_default(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                rows,
+                [
+                    ("user_message_chunk", "", ""),
+                    ("tool_call", "a1", ""),
+                    ("tool_call", "exec-c", "a1"),
+                    ("tool_call_update", "exec-c", ""),
+                    ("tool_call_update", "a1", ""),
+                    ("tool_call_update", "a1", ""),
+                ]
+            );
+            assert_eq!(updates[1]["title"], "Scan files");
+            assert_eq!(updates[4]["content"][0]["content"]["text"], "found x");
+            assert_eq!(updates[5]["status"], "completed");
             commands
                 .send(RuntimeCommand::Shutdown)
                 .await

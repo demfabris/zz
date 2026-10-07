@@ -110,6 +110,18 @@ impl Translator {
         Some(updates)
     }
 
+    pub(crate) fn child_history(&mut self, thread: &str, item: &Value) -> Vec<Value> {
+        let params = json!({ "item": item });
+        let mut updates = self
+            .child(thread, "item/started", &params)
+            .unwrap_or_default();
+        updates.extend(
+            self.child(thread, "item/completed", &params)
+                .unwrap_or_default(),
+        );
+        updates
+    }
+
     pub(crate) fn history_item(&mut self, item: &Value) -> Vec<Value> {
         if item["type"] == "userMessage" {
             return user_text(item)

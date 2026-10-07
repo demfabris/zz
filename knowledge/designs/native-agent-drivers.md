@@ -164,8 +164,9 @@ Claude driver. One `codex app-server` child per pane over stdio, as the other ap
 - **Subagents.** Codex streams a spawned agent's thread on the same connection. A
   `subAgentActivity` item (or a `spawnAgent` collab call's `receiverThreadIds`) opens an agent row
   and maps the child thread to it; the child's tool items become rows with `_meta.zz.parent`, so
-  they nest as steps, and its latest message becomes the agent row's content. Live only: a resumed
-  thread shows the agent rows but not their steps, which live in the child threads.
+  they nest as steps, and its latest message becomes the agent row's content. Resuming a thread
+  reads each child thread (up to 16) before the replay and puts its steps right after their agent
+  row.
 - **Background terminals.** A command Codex leaves running stays an open row after its turn. The
   driver lists `thread/backgroundTerminals/list` when a turn completes and puts each one in the
   task tray (kind `shell`, its process id, its row); the row's `item/completed` takes it out, and
@@ -181,14 +182,13 @@ file changes applied, `restart-agent-pane` resuming the thread with its memory, 
 # Next
 
 1. A "rewind to here" action on prompt rows that sends `//rewind n`.
-2. Codex subagent steps on resume (`thread/read` of each child thread).
-3. Orchestration: PiP panes and a decision on in-session tools. The groundwork is in:
+2. Orchestration: PiP panes and a decision on in-session tools. The groundwork is in:
    `agent-send --notify` submits to another agent pane and, when that turn ends, posts the reply
    back into the calling agent pane as a prompt queued behind its own turn (t3code's async
    completion, over the CLI agents already use). Both vendors can also host tools without a
    process: Claude through `sdkMcpServers` and `mcp_message` control requests, Codex through
    `dynamicTools` on `thread/start` and `item/tool/call`.
-4. Keep-up: a weekly diff of `sdk.d.ts` and the Codex schema, and a minimum-version table. The
+3. Keep-up: a weekly diff of `sdk.d.ts` and the Codex schema, and a minimum-version table. The
    survey's `archive/codex-host` tag is not in this clone; the Codex driver was written fresh.
-5. Small UI edges: a subagent step split from its agent row by assistant text does not nest, and
+4. Small UI edges: a subagent step split from its agent row by assistant text does not nest, and
    gpui-shared's Enter on an ordinary permission can also send attached images.

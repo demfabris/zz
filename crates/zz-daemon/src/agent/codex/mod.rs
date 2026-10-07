@@ -119,6 +119,7 @@ pub(crate) async fn run_codex_runtime(
         next_request: 0,
         permissions: HashMap::new(),
         turn: None,
+        external_turn: None,
         last_turn: 0,
         deferred_cancels: HashSet::new(),
         settings: Settings::default(),
@@ -371,6 +372,7 @@ struct Runtime {
     next_request: u64,
     permissions: HashMap<u64, Pending>,
     turn: Option<Turn>,
+    external_turn: Option<String>,
     last_turn: u64,
     deferred_cancels: HashSet<u64>,
     settings: Settings,
@@ -564,6 +566,17 @@ impl Runtime {
 
     async fn control(&mut self, control: RuntimeControl) -> Result<(), String> {
         match control {
+            RuntimeControl::Cancel { turn_id: 0, .. } if self.turn.is_none() => {
+                if let (Some(thread), Some(codex)) = (self.thread_id(), self.external_turn.clone())
+                {
+                    self.request(
+                        "turn/interrupt",
+                        &json!({ "threadId": thread, "turnId": codex }),
+                        Outgoing::Interrupt,
+                    );
+                }
+                self.cancel_permissions().await
+            }
             RuntimeControl::Cancel { turn_id, .. } => {
                 if self.turn.as_ref().is_some_and(|turn| turn.id == turn_id) {
                     let turn = self.turn.take();
@@ -1243,12 +1256,22 @@ impl Runtime {
             return Ok(());
         }
         match method {
-            "turn/started" => {
-                if let Some(turn) = self.turn.as_mut()
-                    && turn.codex.is_none()
-                {
-                    turn.codex = params["turn"]["id"].as_str().map(str::to_owned);
+            "turn/started" => match self.turn.as_mut() {
+                Some(turn) => {
+                    if turn.codex.is_none() {
+                        turn.codex = params["turn"]["id"].as_str().map(str::to_owned);
+                    }
                 }
+                None => {
+                    self.external_turn = params["turn"]["id"].as_str().map(str::to_owned);
+                }
+            },
+            "thread/status/changed" if self.turn.is_none() => {
+                let busy = params["status"]["type"] == "active";
+                if !busy {
+                    self.external_turn = None;
+                }
+                self.emit(AgentStreamPayload::Activity { busy }).await?;
             }
             "turn/completed" => {
                 let codex = params["turn"]["id"].as_str();

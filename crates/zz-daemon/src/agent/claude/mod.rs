@@ -641,6 +641,14 @@ impl Runtime {
 
     async fn control(&mut self, control: RuntimeControl) -> Result<(), String> {
         match control {
+            RuntimeControl::Cancel { turn_id: 0, .. } if self.turn.is_none() => {
+                self.request(
+                    &json!({ "subtype": "interrupt" }),
+                    Outgoing::Interrupt,
+                    CONTROL_TIMEOUT,
+                );
+                self.cancel_permissions(true).await
+            }
             RuntimeControl::Cancel { turn_id, .. } => {
                 if self.turn.as_ref().is_some_and(|turn| turn.id == turn_id) {
                     if let Some(turn) = self.turn.take() {
@@ -1305,12 +1313,17 @@ impl Runtime {
                 self.settings.commands = frame["commands"].as_array().cloned().unwrap_or_default();
                 self.publish_commands().await?;
             }
-            Some("session_state_changed") if frame["state"] == "idle" => {
-                let settled = self
-                    .turn
-                    .as_ref()
-                    .is_some_and(|turn| turn.started || !self.lifecycle_seen);
-                if settled {
+            Some("session_state_changed") => {
+                let idle = frame["state"] == "idle";
+                if self.turn.is_none() {
+                    self.emit(AgentStreamPayload::Activity { busy: !idle })
+                        .await?;
+                } else if idle
+                    && self
+                        .turn
+                        .as_ref()
+                        .is_some_and(|turn| turn.started || !self.lifecycle_seen)
+                {
                     self.finish_active().await?;
                 }
             }

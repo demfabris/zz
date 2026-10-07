@@ -517,8 +517,9 @@ impl ZzAgentModel {
                 prompts,
             } => self.restore(reclaim_id, prompts),
             AgentStreamPayload::TurnStarted { .. } => self.active_turn = true,
-            AgentStreamPayload::PromptAccepted { .. } | AgentStreamPayload::TasksChanged { .. } => {
-            }
+            AgentStreamPayload::PromptAccepted { .. }
+            | AgentStreamPayload::TasksChanged { .. }
+            | AgentStreamPayload::Activity { .. } => {}
         }
     }
 

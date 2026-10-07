@@ -715,6 +715,7 @@ async fn run_pane(
         git_refresh: GitRefreshGate::default(),
         next_turn_id: 0,
         active_turn: None,
+        external_busy: false,
         dispatched_prompt: None,
         active_waiter: None,
         session_waiter: None,
@@ -749,6 +750,7 @@ struct PanePump {
     git_refresh: GitRefreshGate,
     next_turn_id: u64,
     active_turn: Option<u64>,
+    external_busy: bool,
     dispatched_prompt: Option<(u64, AgentPrompt)>,
     active_waiter: Option<AgentTurnWaiter>,
     session_waiter: Option<crate::daemon::cmdq::Reply<Result<(), String>>>,
@@ -1199,6 +1201,24 @@ impl PanePump {
                 AgentStreamPayload::TasksChanged { tasks } => {
                     state.tasks = tasks.iter().take(MAX_AGENT_TASKS).cloned().collect();
                 }
+                AgentStreamPayload::Activity { busy } => {
+                    if *busy {
+                        if self.active_turn.is_none() && state.phase == AgentConnectionPhase::Ready
+                        {
+                            state.phase = AgentConnectionPhase::Running;
+                            self.external_busy = true;
+                        }
+                    } else if std::mem::take(&mut self.external_busy)
+                        && self.active_turn.is_none()
+                        && matches!(
+                            state.phase,
+                            AgentConnectionPhase::Running | AgentConnectionPhase::Cancelling
+                        )
+                    {
+                        state.phase = AgentConnectionPhase::Ready;
+                        follow = FollowUp::DrainQueue;
+                    }
+                }
                 AgentStreamPayload::PermissionResolved { request_id, .. } => state
                     .pending_permissions
                     .retain(|pending| pending.request_id != *request_id),
@@ -1381,6 +1401,7 @@ impl PanePump {
         self.next_turn_id = self.next_turn_id.saturating_add(1).max(1);
         let turn_id = self.next_turn_id;
         self.active_turn = Some(turn_id);
+        self.external_busy = false;
         self.active_waiter = queued.waiter;
         self.turn_reply = AgentTurnReply::default();
         self.turn_started = Instant::now();
@@ -1543,6 +1564,16 @@ impl PanePump {
 
     fn cancel(&mut self) {
         if !self.state.lock().phase.has_active_turn() {
+            return;
+        }
+        if self.external_busy && self.active_turn.is_none() {
+            let session_id = self.state.lock().session_id.clone();
+            if self.send_control(RuntimeControl::Cancel {
+                turn_id: 0,
+                session_id,
+            }) {
+                self.state.lock().phase = AgentConnectionPhase::Cancelling;
+            }
             return;
         }
         let session_id = self.state.lock().session_id.clone();
@@ -2069,6 +2100,75 @@ mod tests {
             .get("content")
             .and_then(|content| content.get("text"))
             .and_then(Value::as_str)
+    }
+
+    #[test]
+    fn a_turn_the_agent_starts_itself_holds_prompts_and_stops_on_cancel() {
+        let fixture = Fixture::open_with_runner(Box::new(|channels| {
+            Box::pin(async move {
+                let send = |payload| channels.events.send(payload);
+                send(AgentStreamPayload::SessionReady {
+                    session_id: "s".to_owned(),
+                    modes: None,
+                    config_options: None,
+                })
+                .await
+                .map_err(|error| error.to_string())?;
+                send(AgentStreamPayload::Activity { busy: true })
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let Ok(RuntimeControl::Cancel { turn_id: 0, .. }) = channels.controls.recv().await
+                else {
+                    return Err("expected an interrupt for the agent's own turn".to_owned());
+                };
+                send(AgentStreamPayload::Activity { busy: false })
+                    .await
+                    .map_err(|error| error.to_string())?;
+                while let Ok(command) = channels.commands.recv().await {
+                    match command {
+                        RuntimeCommand::Prompt { turn_id, prompt } => {
+                            send(AgentStreamPayload::Update {
+                                update: serde_json::json!({
+                                    "sessionUpdate": "agent_message_chunk",
+                                    "content": { "type": "text", "text": format!("got {}", prompt.text) },
+                                }),
+                            })
+                            .await
+                            .map_err(|error| error.to_string())?;
+                            send(AgentStreamPayload::PromptFinished {
+                                turn_id,
+                                outcome: AgentPromptOutcome::Finished {
+                                    stop_reason: serde_json::json!("end_turn"),
+                                },
+                            })
+                            .await
+                            .map_err(|error| error.to_string())?;
+                        }
+                        RuntimeCommand::Shutdown => break,
+                        _ => {}
+                    }
+                }
+                Ok(())
+            })
+        }));
+        fixture.wait_for_session();
+        let deadline = Instant::now() + DEADLINE;
+        while fixture.state().phase != AgentConnectionPhase::Running {
+            assert!(
+                Instant::now() < deadline,
+                "the pane never showed the agent's own turn"
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        fixture.prompt("after it");
+        std::thread::sleep(Duration::from_millis(50));
+        assert_eq!(fixture.state().queued_prompts, 1);
+        assert!(!chunk_texts(&fixture.recorder.payloads()).contains(&"got after it".to_owned()));
+        fixture.command(HostCommand::Cancel);
+        fixture.recorder.wait("the queued prompt", |payload| {
+            chunk_text(payload) == Some("got after it")
+        });
+        fixture.close();
     }
 
     #[test]
@@ -3109,6 +3209,7 @@ mod tests {
             git_refresh: GitRefreshGate::default(),
             next_turn_id: 0,
             active_turn: None,
+            external_busy: false,
             dispatched_prompt: None,
             active_waiter: None,
             session_waiter: None,

@@ -95,6 +95,11 @@ pub enum AgentStreamPayload {
     TasksChanged {
         tasks: Vec<AgentTaskWire>,
     },
+    /// The agent is working on a turn nobody here started, such as a
+    /// background task reporting back, or has gone idle again.
+    Activity {
+        busy: bool,
+    },
     PermissionResolved {
         request_id: u64,
         canceled: bool,
@@ -357,6 +362,7 @@ mod tests {
                     ..AgentQuestion::default()
                 }],
             },
+            AgentStreamPayload::Activity { busy: true },
             AgentStreamPayload::TasksChanged {
                 tasks: vec![AgentTaskWire {
                     id: "b1".to_owned(),

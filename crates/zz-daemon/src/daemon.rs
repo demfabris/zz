@@ -51084,7 +51084,7 @@ Print nothing on success. Use `zz new-agent-session` for a fresh conversation.
 ### `zz agent-respond [-t %N] (--allow | --deny | --option ID) [REQUEST_ID]`
 
 Answer the named or oldest pending permission. Read the pending request with `zz inspect -t %N --json | jq .permission`.
-Print the chosen option ID. `--allow` prefers allow-once; `--deny` selects a reject option. Use `--option ID` to choose an advertised option by ID, including an answer to a user question.
+Print the chosen option ID. `--allow` prefers allow-once; `--deny` selects a reject option, or dismisses a question card that has none and prints `dismissed`. Use `--option ID` to choose an advertised option by ID, including an answer to a user question.
 
 ### Permissions
 

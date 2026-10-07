@@ -945,14 +945,26 @@ impl PanePump {
                     choice,
                     reply,
                 } => {
-                    let selected = select_permission(
-                        &self.state.lock().pending_permissions,
-                        request_id,
-                        &choice,
-                    );
+                    let selected = {
+                        let state = self.state.lock();
+                        let pending = &state.pending_permissions;
+                        select_permission(pending, request_id, &choice)
+                            .map(|(request_id, option_id)| (request_id, Some(option_id)))
+                            .or_else(|error| match choice {
+                                PermissionChoice::Deny => pending
+                                    .iter()
+                                    .find(|permission| {
+                                        request_id.is_none_or(|id| permission.request_id == id)
+                                    })
+                                    .filter(|permission| !permission.questions.is_empty())
+                                    .map(|permission| (permission.request_id, None))
+                                    .ok_or(error),
+                                _ => Err(error),
+                            })
+                    };
                     let result = selected.and_then(|(request_id, option_id)| {
-                        self.respond_permission(request_id, Some(option_id.clone()))
-                            .then_some(option_id)
+                        self.respond_permission(request_id, option_id.clone())
+                            .then(|| option_id.unwrap_or_else(|| "dismissed".to_owned()))
                             .ok_or_else(|| "agent runtime is busy".to_owned())
                     });
                     reply.try_send(result);
@@ -2618,6 +2630,52 @@ mod tests {
             }
             fixture.close();
         }
+    }
+
+    #[test]
+    fn denying_a_question_card_dismisses_it() {
+        let fixture = scripted_reply_fixture(
+            vec![AgentStreamPayload::PermissionRequested {
+                request_id: 42,
+                tool_call: serde_json::json!({"toolCallId": "question"}),
+                options: serde_json::json!([]),
+                questions: vec![crate::agent::stream::AgentQuestion {
+                    id: "q0".to_owned(),
+                    question: "Which fruit?".to_owned(),
+                    ..Default::default()
+                }],
+            }],
+            "end_turn",
+        );
+        fixture.wait_for_session();
+        fixture.prompt("go");
+        fixture.recorder.wait("question", |payload| {
+            matches!(payload, AgentStreamPayload::PermissionRequested { .. })
+        });
+        let (sender, receiver) = crossbeam_channel::bounded(1);
+        fixture.command(HostCommand::RespondPermission {
+            response: PermissionResponse::Select {
+                request_id: None,
+                choice: PermissionChoice::Deny,
+                reply: crate::daemon::cmdq::Reply::new(move |result| {
+                    let _ = sender.send(result);
+                }),
+            },
+        });
+        assert_eq!(
+            receiver.recv_timeout(DEADLINE).expect("reply"),
+            Some(Ok("dismissed".to_owned()))
+        );
+        fixture.recorder.wait("dismissal", |payload| {
+            matches!(
+                payload,
+                AgentStreamPayload::PermissionResolved {
+                    request_id: 42,
+                    canceled: true
+                }
+            )
+        });
+        fixture.close();
     }
 
     #[test]

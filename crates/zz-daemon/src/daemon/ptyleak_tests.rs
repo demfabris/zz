@@ -51,7 +51,13 @@ fn panes(shared: &Shared) -> BTreeSet<PaneId> {
 fn probe(shared: &Shared, pane: PaneId) -> Probe {
     let terminal = Arc::clone(&shared.inner.lock().terminals[&pane]);
     assert!(terminal.wait_for_identity(Duration::from_secs(5)));
-    let pid = terminal.process_id().expect("pane child pid");
+    let pid = terminal.process_id().unwrap_or_else(|| {
+        panic!(
+            "pane child pid: {pane} status={:?} completion={:?}",
+            terminal.latest_viewport().status,
+            terminal.completion()
+        )
+    });
     Probe {
         terminal: Arc::downgrade(&terminal),
         pid: rustix::process::Pid::from_raw(pid as i32).expect("pid"),

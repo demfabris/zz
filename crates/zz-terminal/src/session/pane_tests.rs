@@ -429,7 +429,9 @@ fn an_unwatched_pane_wakes_its_watcher_a_few_times_a_second_under_steady_output(
                 }
                 assert!(
                     started.elapsed() < Duration::from_secs(30),
-                    "the output never finished"
+                    "the output never finished: {ready} wakes, status {:?}, screen {:?}",
+                    session.latest_viewport().status,
+                    text(&session.latest_viewport()).trim_end()
                 );
                 thread::sleep(Duration::from_millis(1));
             }

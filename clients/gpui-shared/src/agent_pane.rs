@@ -3530,6 +3530,32 @@ mod tests {
     }
 
     #[test]
+    fn a_step_that_arrives_before_its_agent_leaves_its_place_for_the_agents_row() {
+        let mut transcript = Transcript::default();
+        transcript.apply(
+            1,
+            &json!({"item":"update","update":{
+            "sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read a.rs","kind":"read",
+            "_meta":{"zz":{"parent":"agent-1"}}}}),
+        );
+        transcript.apply(
+            2,
+            &json!({"item":"update","update":{
+            "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"meanwhile"}}}),
+        );
+        transcript.apply(
+            3,
+            &json!({"item":"update","update":{
+            "sessionUpdate":"tool_call","toolCallId":"agent-1","title":"Survey","kind":"think"}}),
+        );
+        assert_eq!(
+            fold_timeline_rows(&transcript.entries).entry_to_row,
+            [1, 0, 1],
+            "the step moves past the reply into its agent's row"
+        );
+    }
+
+    #[test]
     fn failed_and_canceled_turns_settle_unfinished_tools() {
         for (outcome, expected) in [
             (

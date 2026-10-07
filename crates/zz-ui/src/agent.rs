@@ -973,15 +973,61 @@ pub struct FoldedTimelineRows {
 
 #[must_use]
 pub fn fold_timeline_rows(entries: &[AgentEntry]) -> FoldedTimelineRows {
+    let positions = entries
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| (entry.id(), index))
+        .collect::<HashMap<_, _>>();
+    let roots = (0..entries.len())
+        .map(|index| step_root(entries, &positions, index))
+        .collect::<Vec<_>>();
     let mut rows = Vec::new();
-    let mut entry_to_row = Vec::with_capacity(entries.len());
-    for entry in entries.iter().cloned() {
-        let (row_index, _) = append_timeline_row(&mut rows, entry);
-        entry_to_row.push(row_index);
+    let mut entry_to_row = vec![0; entries.len()];
+    for (index, entry) in entries.iter().enumerate() {
+        if roots[index].is_none() {
+            entry_to_row[index] = append_timeline_row(&mut rows, entry.clone()).0;
+        }
+    }
+    for (index, entry) in entries.iter().enumerate() {
+        if let Some(root) = roots[index] {
+            let row_index = entry_to_row[root];
+            nest_in_row(&mut rows[row_index], entry.clone());
+            entry_to_row[index] = row_index;
+        }
     }
     FoldedTimelineRows {
         rows: Arc::new(rows),
         entry_to_row,
+    }
+}
+
+fn step_root(
+    entries: &[AgentEntry],
+    positions: &HashMap<u64, usize>,
+    index: usize,
+) -> Option<usize> {
+    let mut at = index;
+    for _ in 0..entries.len() {
+        match timeline_parent(&entries[at]).and_then(|parent| positions.get(&parent).copied()) {
+            Some(parent) => at = parent,
+            None => return (at != index).then_some(at),
+        }
+    }
+    None
+}
+
+fn nest_in_row(row: &mut TimelineRow, entry: AgentEntry) {
+    match row {
+        TimelineRow::Group { entries, .. } => Arc::make_mut(entries).push(entry),
+        TimelineRow::Single(previous) => {
+            let id = previous.id();
+            let previous = previous.clone();
+            *row = TimelineRow::Group {
+                kind: TimelineGroupKind::Tool,
+                id,
+                entries: Arc::new(vec![previous, entry]),
+            };
+        }
     }
 }
 
@@ -998,19 +1044,7 @@ pub fn append_timeline_row(rows: &mut Vec<TimelineRow>, entry: AgentEntry) -> (u
     if let Some(parent) = timeline_parent(&entry)
         && let Some(row_index) = rows.iter().rposition(|row| row.entry(parent).is_some())
     {
-        let row = &mut rows[row_index];
-        match row {
-            TimelineRow::Group { entries, .. } => Arc::make_mut(entries).push(entry),
-            TimelineRow::Single(previous) => {
-                let id = previous.id();
-                let previous = previous.clone();
-                *row = TimelineRow::Group {
-                    kind: TimelineGroupKind::Tool,
-                    id,
-                    entries: Arc::new(vec![previous, entry]),
-                };
-            }
-        }
+        nest_in_row(&mut rows[row_index], entry);
         return (row_index, false);
     }
     if let Some(kind) = timeline_group_kind(&entry)
@@ -3864,10 +3898,10 @@ mod tests {
         let nesting = StepNesting::new(entries);
         assert_eq!(
             nesting.top,
-            [0, 1, 2, 4],
+            [0, 1, 2, 3],
             "a step whose agent is unknown stands alone"
         );
-        assert_eq!(nesting.steps[&7], [3]);
+        assert_eq!(nesting.steps[&7], [4]);
         assert_eq!(
             tool_group_label(nesting.top.iter().map(|index| &entries[*index])),
             "Read files, Thought, Edit file"
@@ -3877,6 +3911,71 @@ mod tests {
             "2 steps · Read 4.rs"
         );
         assert_eq!(subagent_steps_label(1, None), "1 step");
+    }
+
+    #[test]
+    fn steps_leave_their_place_for_their_agents_row_in_arrival_order() {
+        let entries = vec![
+            test_step(1, 4),
+            AgentEntry::Assistant {
+                id: 2,
+                markdown: "working".into(),
+            },
+            test_tool_kind(
+                3,
+                "Read a.rs",
+                AgentToolKind::Read,
+                AgentToolStatus::Completed,
+            ),
+            test_tool_kind(4, "Survey", AgentToolKind::Think, AgentToolStatus::Running),
+            AgentEntry::Assistant {
+                id: 5,
+                markdown: "meanwhile".into(),
+            },
+            test_step(6, 4),
+            test_step(7, 6),
+            test_step(8, 99),
+        ];
+
+        let folded = fold_timeline_rows(&entries);
+
+        assert_eq!(folded.entry_to_row, [1, 0, 1, 1, 2, 1, 1, 3]);
+        let TimelineRow::Group { id: 3, entries, .. } = &folded.rows[1] else {
+            panic!("the agent's row holds its steps: {:?}", folded.rows[1]);
+        };
+        assert_eq!(
+            entries.iter().map(AgentEntry::id).collect::<Vec<_>>(),
+            [3, 4, 1, 6, 7]
+        );
+        let nesting = StepNesting::new(entries);
+        assert_eq!(nesting.top, [0, 1]);
+        assert_eq!(nesting.steps[&4], [2, 3], "steps keep their arrival order");
+        assert_eq!(nesting.steps[&6], [4], "a step's own steps nest under it");
+        assert!(matches!(
+            &folded.rows[3],
+            TimelineRow::Single(AgentEntry::Tool(tool)) if tool.id == 8
+        ));
+
+        let mut agent =
+            test_tool_entry(3, "Survey", AgentToolKind::Think, AgentToolStatus::Running);
+        agent.parent = Some(1);
+        let looped = [
+            test_step(1, 3),
+            AgentEntry::Assistant {
+                id: 2,
+                markdown: "between".into(),
+            },
+            AgentEntry::Tool(agent),
+            test_step(4, 4),
+        ];
+        let folded = fold_timeline_rows(&looped);
+        assert_eq!(folded.entry_to_row, [0, 1, 0, 2]);
+        let TimelineRow::Group { entries, .. } = &folded.rows[0] else {
+            panic!("a loop shares one row: {:?}", folded.rows[0]);
+        };
+        let nesting = StepNesting::new(entries);
+        assert_eq!(nesting.top, [0, 1], "a loop of parents renders flat");
+        assert!(nesting.steps.is_empty());
     }
 
     #[test]

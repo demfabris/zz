@@ -247,6 +247,18 @@ impl TimelineModel {
                 )
             })
             .collect::<Vec<_>>();
+        let parent_arrives_later = appended.iter().enumerate().any(|(index, entry)| {
+            timeline_parent(entry).is_some_and(|parent| {
+                !self.entry_ids.contains(&parent)
+                    && !appended[..index]
+                        .iter()
+                        .any(|earlier| earlier.id() == parent)
+            })
+        });
+        if parent_arrives_later {
+            self.rebuild(entries, revisions, parents);
+            return TimelineModelUpdate::Rebuild;
+        }
         let old_row_count = self.rows.len();
         let mut store_entries = Vec::with_capacity(replacements.len());
         let mut remeasure_rows = replacements
@@ -4691,20 +4703,108 @@ mod completion_tests {
             cx,
             &controller,
             pane,
-            vec![(2, tool("agent-1", serde_json::json!({})))],
+            vec![(
+                2,
+                zz_daemon::AgentStreamPayload::Update {
+                    update: serde_json::json!({
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": {"type": "text", "text": "meanwhile"},
+                    }),
+                },
+            )],
+        );
+        stream(
+            cx,
+            &controller,
+            pane,
+            vec![(3, tool("agent-1", serde_json::json!({})))],
         );
 
         let rows = cx.update(|_, cx| view.read(cx).timeline.rows.clone());
-        let [TimelineRow::Group { entries, .. }] = rows.as_slice() else {
-            panic!("the step and its agent share a row: {rows:?}");
+        let [
+            TimelineRow::Single(AgentEntry::Assistant { .. }),
+            TimelineRow::Group { entries, .. },
+        ] = rows.as_slice()
+        else {
+            panic!("the step leaves its place for its agent's row: {rows:?}");
         };
-        let agent = entries[1].id();
+        let agent = entries[0].id();
         assert_eq!(
             entries
                 .iter()
                 .map(zz_ui::agent::timeline_parent)
                 .collect::<Vec<_>>(),
-            [Some(agent), None]
+            [None, Some(agent)]
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn a_step_that_lands_in_the_same_batch_before_its_agent_still_nests(cx: &mut TestAppContext) {
+        let pane = PaneId(49);
+        let (view, controller, _sink, cx) = wired_view(cx, pane);
+        let tool = |id: &str, meta: serde_json::Value| zz_daemon::AgentStreamPayload::Update {
+            update: serde_json::json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": id,
+                "title": id,
+                "kind": "read",
+                "_meta": meta,
+            }),
+        };
+        stream(
+            cx,
+            &controller,
+            pane,
+            vec![(
+                1,
+                zz_daemon::AgentStreamPayload::Update {
+                    update: serde_json::json!({
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": {"type": "text", "text": "starting"},
+                    }),
+                },
+            )],
+        );
+        stream(
+            cx,
+            &controller,
+            pane,
+            vec![
+                (
+                    2,
+                    tool("read-1", serde_json::json!({"zz": {"parent": "agent-1"}})),
+                ),
+                (
+                    3,
+                    zz_daemon::AgentStreamPayload::Update {
+                        update: serde_json::json!({
+                            "sessionUpdate": "agent_message_chunk",
+                            "messageId": "m-2",
+                            "content": {"type": "text", "text": "meanwhile"},
+                        }),
+                    },
+                ),
+                (4, tool("agent-1", serde_json::json!({}))),
+            ],
+        );
+
+        let rows = cx.update(|_, cx| view.read(cx).timeline.rows.clone());
+        let [
+            TimelineRow::Single(AgentEntry::Assistant { .. }),
+            TimelineRow::Single(AgentEntry::Assistant { .. }),
+            TimelineRow::Group { entries, .. },
+        ] = rows.as_slice()
+        else {
+            panic!("the step joins its agent's row: {rows:?}");
+        };
+        let agent = entries[0].id();
+        assert_eq!(
+            entries
+                .iter()
+                .map(zz_ui::agent::timeline_parent)
+                .collect::<Vec<_>>(),
+            [None, Some(agent)]
         );
     }
 }

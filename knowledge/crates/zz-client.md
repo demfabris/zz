@@ -71,7 +71,9 @@ stores one per pane too, with an empty ring unless the shell calls `retain_histo
 the C ABI pay nothing for rows they never paint. `history_request_range` sizes a backfill or
 prefetch request, and `HistoryPacer` is the request policy as a sans-IO value: one request in flight
 per pane, prefetch targets merged into it, a retry after 3 s, and backfill deferred until 100 ms
-pass without ring changes. The caller passes the clock.
+pass without ring changes. The caller passes the clock. The desktop keeps one pacer per host
+connection and the thin client one per connection; the desktop also drops every deferral on a
+snapshot change (`clear_deferred`) so its backfill goes out at once.
 
 `local_scroll.rs` holds the pixel scroll state machine. `LocalScrollState` turns pixel deltas into a
 local target row plus a sub-row offset, decides when the daemon should follow (`ScrollToOffset`),

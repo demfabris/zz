@@ -265,11 +265,12 @@ impl LocalScrollState {
             maximum_offset,
             delta < 0.0,
         );
-        if self.sub_row != position.sub_row {
+        let crept = self.sub_row != position.sub_row;
+        if crept {
             self.sub_row = position.sub_row;
             step.redraw = true;
         }
-        self.pixel_scroll_to(position.target, follow, retained, now, &mut step);
+        self.pixel_scroll_to(position.target, follow, crept, retained, now, &mut step);
         Some(step)
     }
 
@@ -277,6 +278,7 @@ impl LocalScrollState {
         &mut self,
         target: u32,
         follow: Option<u32>,
+        crept: bool,
         retained: &RetainedTerminalViewport,
         now: Instant,
         step: &mut LocalScrollStep,
@@ -285,7 +287,7 @@ impl LocalScrollState {
         let previous = self.local;
         let moved = previous.is_none_or(|local| local.target_offset != target);
         let mut next = match previous {
-            Some(local) if !moved => local,
+            Some(local) if !moved && !crept => local,
             Some(local) => LocalScroll {
                 target_offset: target,
                 started: now,
@@ -301,7 +303,7 @@ impl LocalScrollState {
             step.redraw |= self.clear();
             return;
         }
-        if !moved && follow.is_none() {
+        if !moved && !crept && follow.is_none() {
             return;
         }
         self.observed_invalidations = retained.history_invalidations;
@@ -688,6 +690,74 @@ mod tests {
             .unwrap();
         assert_eq!(state.target(), Some(990));
         assert!(step.effects.contains(&LocalScrollEffect::Prefetch(990)));
+    }
+
+    fn settle_toward_newer(
+        retained: &mut RetainedTerminalViewport,
+        state: &mut LocalScrollState,
+        delta: f32,
+        steps: u32,
+    ) -> Vec<u32> {
+        let frame = Duration::from_millis(16);
+        let started = Instant::now();
+        let mut timers = Vec::new();
+        let mut sent = Vec::new();
+        for tick in 0..steps + 20 {
+            let now = started + frame * tick;
+            let mut effects = Vec::new();
+            timers.retain(|&(due, generation)| {
+                if due > now {
+                    return true;
+                }
+                if let Some(LocalScrollSync::Requested(target)) = state.sync(generation, retained) {
+                    effects.push(LocalScrollEffect::ScrollToOffset(target));
+                }
+                false
+            });
+            if tick < steps {
+                let step = state.scroll_by_pixels(delta, 20.0, retained, now).unwrap();
+                effects.extend(step.effects);
+            }
+            for effect in effects {
+                match effect {
+                    LocalScrollEffect::ScrollToOffset(offset) => {
+                        sent.push(offset);
+                        retained.viewport.scrollbar.offset = offset;
+                        state.observe(retained, false, now);
+                    }
+                    LocalScrollEffect::Sync(generation) => {
+                        timers.push((now + LOCAL_SCROLL_DEBOUNCE, generation));
+                    }
+                    LocalScrollEffect::Prefetch(_) => {}
+                }
+            }
+        }
+        sent
+    }
+
+    #[test]
+    fn a_fling_tail_creeping_toward_newer_rows_syncs_once_at_rest() {
+        let mut retained = scrolled_back(200);
+        let mut state = LocalScrollState::new(retained.history_invalidations);
+        state.scroll_by_pixels(600.0, 20.0, &retained, Instant::now());
+        assert_eq!(state.target(), Some(970));
+        retained.viewport.scrollbar.offset = 982;
+        state.observe(&retained, false, Instant::now());
+        assert_eq!(
+            settle_toward_newer(&mut retained, &mut state, -2.0, 60),
+            vec![976]
+        );
+        assert_eq!((state.target(), state.sub_row()), (None, 0.0));
+
+        let mut retained = scrolled_back(200);
+        let mut state = LocalScrollState::new(retained.history_invalidations);
+        state.scroll_by_pixels(120.0, 20.0, &retained, Instant::now());
+        assert_eq!(state.target(), Some(994));
+        assert_eq!(
+            settle_toward_newer(&mut retained, &mut state, -2.0, 80),
+            Vec::<u32>::new()
+        );
+        assert_eq!((state.target(), state.sub_row()), (None, 0.0));
     }
 
     #[test]

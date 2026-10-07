@@ -260,10 +260,11 @@ each display link tick, and an idle `link:` line with few ticks means the displa
 
 `ZZ_GPUI_FRAME_LOG=1` prints, per burst of drawn frames, the interval between new frames (p50,
 p95, max), missed vsyncs, and the CPU time of each display link tick, plus link ticks and draws
-every five seconds. `ZZ_GPUI_BENCH=swipe`, `scroll`, or `drag` (optionally `:count`, default 16)
-waits eight seconds after launch and then plays horizontal pager swipes, vertical terminal flings,
-or slow 1.5 s terminal drags that hold still before letting go, each followed by a fling back, from
-the display link. `GPUI_FRAME_STATS=frames.jsonl` writes gpui's per-frame JSON stats into the app's
+every five seconds. `ZZ_GPUI_BENCH=swipe`, `scroll`, `drag`, or `fling` (optionally `:count`,
+default 16) waits eight seconds after launch and then plays horizontal pager swipes, vertical
+terminal flings, slow 1.5 s terminal drags that hold still before letting go, each followed by a
+fling back, or one terminal fling every 4 s, two toward older output and then three toward newer,
+from the display link. `GPUI_FRAME_STATS=frames.jsonl` writes gpui's per-frame JSON stats into the app's
 `tmp` directory. Device and simulator launches forward these variables and `ZZ_GPUI_SESSION`;
 `ZZ_GPUI_CARGO_PROFILE=testflight` builds the device app with line tables for Instruments.
 

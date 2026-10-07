@@ -51622,9 +51622,10 @@ fn handle_connection_message<S: TransportStream>(
         let message_started = diagnostic_timer();
         log::trace!(
             target: "zz_daemon::diagnostics::connection",
-            "message begin client={client} bytes={} frame_capacity={} message={message:#?}",
+            "message begin client={client} bytes={} frame_capacity={} message={:#?}",
             inbound_frame.len(),
             inbound_frame.capacity(),
+            crate::client::TracedMessage(&message),
         );
         if shared.shutdown_pending.load(Ordering::Acquire)
             && !(hello.kind == ClientKind::Command

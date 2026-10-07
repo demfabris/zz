@@ -4508,7 +4508,7 @@ mod completion_tests {
     ) {
         stream(
             cx,
-            &controller,
+            controller,
             pane,
             vec![
                 (

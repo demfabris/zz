@@ -140,7 +140,8 @@ opens the command palette without a hardware keyboard.
 
 The app does not connect on launch. Until it connects, the workspace shows the connection screen:
 saved hosts (most recent first) with Connect and Remove, a destination field (`user@host` or
-`user@host:port`), and the app's SSH key. Settings › Hosts shows the same list, plus Disconnect for
+`user@host:port`), and the app's SSH key. On iPhone it fills the screen under the status bar, with no
+toolbar above it. Settings › Hosts shows the same list, plus Disconnect for
 the current host. Hosts are saved in `Library/Application Support/zz-gpui/hosts.json`; a
 successful connection moves its host to the top. `ZZ_GPUI_ENDPOINT` (or `ZZ_SOCKET`) connects
 for that launch only, and opening a `zz://attach/<session>` link connects to the most recent host.

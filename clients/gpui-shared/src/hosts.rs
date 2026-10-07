@@ -4,13 +4,12 @@ use gpui::{Entity, SharedString, Subscription, Window, px};
 use zz_ui::{
     ActiveTheme as _, Colorize as _, Icon, IconName, Sizable as _,
     button::Button,
-    rems_from_px,
+    h_flex, rems_from_px,
     settings::{SettingEntry, SettingsStack, settings_scroll_column},
 };
 #[cfg(target_os = "ios")]
 use zz_ui::{
     button::ButtonVariants as _,
-    h_flex,
     input::{Input, InputEvent, InputState},
     settings::settings_control_fill,
 };
@@ -336,12 +335,14 @@ impl AppShell {
         ));
         vec![with_control(
             entry,
-            Button::new("hosts-reconnect")
-                .small()
-                .label(if connected { "Reconnect" } else { "Retry" })
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.connection.update(cx, Connection::reconnect);
-                })),
+            h_flex().child(
+                Button::new("hosts-reconnect")
+                    .small()
+                    .label(if connected { "Reconnect" } else { "Retry" })
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.connection.update(cx, Connection::reconnect);
+                    })),
+            ),
             narrow,
         )]
     }
@@ -389,10 +390,8 @@ impl AppShell {
                     "SSH key",
                     "Add this key to ~/.ssh/authorized_keys on the host to sign in without a password.",
                 ),
-                Button::new("hosts-copy-ssh-key")
-                    .small()
-                    .label("Copy")
-                    .on_click(|_, window, cx| {
+                h_flex().child(Button::new("hosts-copy-ssh-key").small().label("Copy").on_click(
+                    |_, window, cx| {
                         use zz_ui::{WindowExt as _, notification::Notification};
                         let notification = match zz_daemon::ios_ssh_public_key() {
                             Ok(key) => {
@@ -402,7 +401,8 @@ impl AppShell {
                             Err(error) => Notification::error(error.to_string()),
                         };
                         window.push_notification(notification, cx);
-                    }),
+                    },
+                )),
                 narrow,
             ))
     }

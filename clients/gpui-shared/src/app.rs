@@ -2812,8 +2812,14 @@ impl Render for AppShell {
         } else {
             div().into_any_element()
         };
-        let titlebar = (!compact && self.settings.is_none() && !self.inline_sidebar(window))
-            .then(|| self.status_bar(window, cx));
+        let connect_screen = Self::narrow(window)
+            && !self.connection.read(cx).connected
+            && self.active_window(cx).is_none();
+        let titlebar = (!compact
+            && !connect_screen
+            && self.settings.is_none()
+            && !self.inline_sidebar(window))
+        .then(|| self.status_bar(window, cx));
         let workspace = (!compact).then(|| self.workspace(window, cx));
         #[cfg(target_os = "ios")]
         {

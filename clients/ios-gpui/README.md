@@ -192,9 +192,14 @@ phone shell the key row takes the bar's place where the bar's top edge was and r
 keyboard once the keys pass it. Terminals keep their grid while the keyboard moves (the
 prompt row stays above the key row) and report their new size once it stops.
 
-Number fields in Settings open a decimal pad with a Done button above it; a comma from the
-pad is typed as a point. Done, or Return in any settings field, commits the value and hides
-the keyboard. Return in the Hosts destination field connects and hides it too.
+A field picks its keyboard through gpui's text input mode (the HTML `inputmode` set), which
+the backend maps onto `keyboardType`: decimal and numeric pads, phone, email, URL, and web
+search keyboards; `None` keeps the field focused with no software keyboard, through an empty
+input view. Number fields in Settings ask for the decimal pad, and the browser client gets
+`inputmode="decimal"` from the same setting. Pads without a Return key (decimal, numeric,
+phone) get a Done button above them; a comma from the decimal pad is typed as a point. Done,
+or Return in any settings field, commits the value and hides the keyboard. Return in the Hosts
+destination field connects and hides it too.
 
 The view implements `UITextInput`, so IME composition (Japanese, Chinese, Korean),
 dead keys, dictation, and Pencil handwriting reach the focused field. While text is

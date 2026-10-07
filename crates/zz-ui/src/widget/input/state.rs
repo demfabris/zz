@@ -10,8 +10,9 @@ use gpui::{
     App, AppContext as _, Bounds, ClipboardEntry, ClipboardItem, Context, DismissEvent, Entity,
     EntityInputHandler, EventEmitter, FocusHandle, Focusable, Image, IntoElement, KeyDownEvent,
     MouseButton, MouseDownEvent, ParentElement as _, Pixels, Point, Render, ScrollWheelEvent,
-    SharedString, Styled as _, Subscription, Task, TextAlign, UTF16Selection, Window, anchored,
-    deferred, div, point, prelude::FluentBuilder as _, px,
+    SharedString, Styled as _, Subscription, Task, TextAlign, TextInputConfiguration,
+    TextInputMode, UTF16Selection, Window, anchored, deferred, div, point,
+    prelude::FluentBuilder as _, px,
 };
 use unicode_segmentation::UnicodeSegmentation as _;
 
@@ -99,6 +100,7 @@ pub struct InputState {
     marked_range: Option<Range<usize>>,
 
     mode: InputMode,
+    input_mode: TextInputMode,
     submit_on_enter: bool,
     enable_context_menu: bool,
 
@@ -170,6 +172,7 @@ impl InputState {
             selection_reversed: false,
             marked_range: None,
             mode: InputMode::default(),
+            input_mode: TextInputMode::default(),
             submit_on_enter: false,
             enable_context_menu: false,
             disabled: false,
@@ -212,6 +215,12 @@ impl InputState {
             max_rows: max_rows.max(min_rows),
         };
         self.measured_rows = min_rows;
+        self
+    }
+
+    #[must_use]
+    pub fn input_mode(mut self, mode: TextInputMode) -> Self {
+        self.input_mode = mode;
         self
     }
 
@@ -1644,6 +1653,17 @@ impl EntityInputHandler for InputState {
 
     fn accepts_text_input(&self, _: &mut Window, _: &mut Context<Self>) -> bool {
         !self.disabled
+    }
+
+    fn text_input_configuration(
+        &mut self,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> TextInputConfiguration {
+        TextInputConfiguration {
+            input_mode: self.input_mode,
+            ..TextInputConfiguration::default()
+        }
     }
 }
 

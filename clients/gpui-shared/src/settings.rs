@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use gpui::{
     AnyElement, App, Context, Entity, FocusHandle, Focusable as _, IntoElement, Subscription,
-    Window, canvas, div, prelude::*, px,
+    TextInputMode, Window, canvas, div, prelude::*, px,
 };
 use zz_ui::{
     ActiveTheme as _, Colorize as _, IconName, Sizable as _, StyledExt as _, Theme, ThemeMode,
@@ -220,6 +220,7 @@ impl Controls {
     ) -> Self {
         let zoom = cx.new(|cx| {
             InputState::new(window, cx)
+                .input_mode(TextInputMode::Decimal)
                 .default_value(format!("{:.0}", preferences.zoom * 100.0))
                 .step(10.0)
                 .min(50.0)
@@ -227,6 +228,7 @@ impl Controls {
         });
         let radius = cx.new(|cx| {
             InputState::new(window, cx)
+                .input_mode(TextInputMode::Decimal)
                 .default_value(format!("{:.0}", preferences.radius))
                 .step(1.0)
                 .min(0.0)
@@ -234,6 +236,7 @@ impl Controls {
         });
         let contrast = cx.new(|cx| {
             InputState::new(window, cx)
+                .input_mode(TextInputMode::Decimal)
                 .default_value(number_text(preferences.contrast * 100.0))
                 .step(5.0)
                 .min(50.0)
@@ -241,6 +244,7 @@ impl Controls {
         });
         let shadow_strength = cx.new(|cx| {
             InputState::new(window, cx)
+                .input_mode(TextInputMode::Decimal)
                 .default_value(number_text(preferences.shadow_strength * 100.0))
                 .step(5.0)
                 .min(0.0)
@@ -248,6 +252,7 @@ impl Controls {
         });
         let terminal_scale = cx.new(|cx| {
             InputState::new(window, cx)
+                .input_mode(TextInputMode::Decimal)
                 .default_value(number_text(preferences.terminal_font_scale * 100.0))
                 .step(10.0)
                 .min(50.0)
@@ -327,6 +332,7 @@ impl Controls {
             let value = pane_values[control as usize] * scale;
             let input = cx.new(|cx| {
                 InputState::new(window, cx)
+                    .input_mode(TextInputMode::Decimal)
                     .default_value(number_text(value))
                     .min(f64::from(min))
                     .max(f64::from(max))
@@ -1474,13 +1480,8 @@ fn status_field<'a>(preferences: &'a mut Preferences, id: &str) -> &'a mut bool 
 }
 
 fn number_field_event(event: &InputEvent, window: &mut Window, cx: &mut App) {
-    match event {
-        #[cfg(target_os = "ios")]
-        InputEvent::Focus | InputEvent::Blur => {
-            zz_gpui_ios::set_number_pad(matches!(event, InputEvent::Focus));
-        }
-        InputEvent::PressEnter { .. } => finish_field(window, cx),
-        _ => {}
+    if matches!(event, InputEvent::PressEnter { .. }) {
+        finish_field(window, cx);
     }
 }
 

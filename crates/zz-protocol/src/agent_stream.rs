@@ -8,7 +8,7 @@
 
 use std::path::PathBuf;
 
-use crate::{AgentPaneWire, ClientId, ClientInstanceId};
+use crate::{AgentPaneWire, AgentTaskWire, ClientId, ClientInstanceId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -88,6 +88,12 @@ pub enum AgentStreamPayload {
         request_id: u64,
         tool_call: Value,
         options: Value,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        questions: Vec<AgentQuestion>,
+    },
+    /// The agent's background tasks, the whole set after a change.
+    TasksChanged {
+        tasks: Vec<AgentTaskWire>,
     },
     PermissionResolved {
         request_id: u64,
@@ -131,6 +137,33 @@ pub enum AgentStreamPayload {
         reclaim_id: u64,
         prompts: Vec<AgentPrompt>,
     },
+}
+
+/// A question the agent asks the user, answered from a card rather than a
+/// permission option list: one or more choices, or typed text.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentQuestion {
+    pub id: String,
+    #[serde(default)]
+    pub header: Option<String>,
+    pub question: String,
+    #[serde(default)]
+    pub options: Vec<AgentQuestionOption>,
+    #[serde(default)]
+    pub multi_select: bool,
+    #[serde(default)]
+    pub allow_other: bool,
+    #[serde(default)]
+    pub secret: bool,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentQuestionOption {
+    pub label: String,
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -314,6 +347,23 @@ mod tests {
                 request_id: 7,
                 tool_call: serde_json::json!({"toolCallId": "call-1"}),
                 options: serde_json::json!([{"optionId": "allow", "kind": "allow_once"}]),
+                questions: vec![AgentQuestion {
+                    id: "q".to_owned(),
+                    question: "Which?".to_owned(),
+                    options: vec![AgentQuestionOption {
+                        label: "this".to_owned(),
+                        description: None,
+                    }],
+                    ..AgentQuestion::default()
+                }],
+            },
+            AgentStreamPayload::TasksChanged {
+                tasks: vec![AgentTaskWire {
+                    id: "b1".to_owned(),
+                    kind: "shell".to_owned(),
+                    description: "sleep".to_owned(),
+                    tool_call_id: None,
+                }],
             },
             AgentStreamPayload::PermissionResolved {
                 request_id: 7,

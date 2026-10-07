@@ -3240,6 +3240,7 @@ mod completion_tests {
                     kind: AgentPermissionKind::RejectOnce,
                 },
             ],
+            questions: Vec::new(),
         }
     }
 

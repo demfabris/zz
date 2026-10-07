@@ -14,8 +14,8 @@ use serde_json::Value;
 #[cfg(test)]
 use zz_protocol::ClientInstanceId;
 use zz_protocol::{
-    AgentAutoApprove, AgentGitSummary, AgentProvider, ClientId, MAX_AGENT_PROMPT_BYTES,
-    MAX_AGENT_QUEUED_PROMPTS, PaneId,
+    AgentAutoApprove, AgentGitSummary, AgentProvider, AgentQuestionAnswer, AgentTaskWire, ClientId,
+    MAX_AGENT_PROMPT_BYTES, MAX_AGENT_QUEUED_PROMPTS, MAX_AGENT_TASKS, PaneId,
 };
 
 use crate::agent::{
@@ -25,7 +25,7 @@ use crate::agent::{
     journal::AgentJournal,
     runtime::{AgentSpawnConfig, RuntimeCommand, RuntimeControl, run_agent_runtime},
     stream::{
-        AgentAuthMethod, AgentPrompt, AgentPromptOutcome, AgentSessionCapabilities,
+        AgentAuthMethod, AgentPrompt, AgentPromptOutcome, AgentQuestion, AgentSessionCapabilities,
         AgentSessionSummary, AgentStreamItem, AgentStreamPayload,
     },
 };
@@ -78,6 +78,13 @@ pub(crate) enum HostCommand {
     DeleteSession {
         client: ClientId,
         session_id: String,
+    },
+    AnswerQuestion {
+        request_id: u64,
+        answers: Vec<AgentQuestionAnswer>,
+    },
+    StopTask {
+        task_id: String,
     },
 }
 
@@ -260,6 +267,7 @@ pub(crate) struct AgentPendingPermission {
     pub(crate) request_id: u64,
     pub(crate) tool_call: Value,
     pub(crate) options: Value,
+    pub(crate) questions: Vec<AgentQuestion>,
 }
 
 /// The pane state a client needs without replaying the stream: enough for a
@@ -278,6 +286,7 @@ pub(crate) struct AgentPaneState {
     pub(crate) error: Option<String>,
     pub(crate) last_seq: u64,
     pub(crate) git: Option<AgentGitSummary>,
+    pub(crate) tasks: Vec<AgentTaskWire>,
 }
 
 impl AgentPaneState {
@@ -295,6 +304,7 @@ impl AgentPaneState {
             error: None,
             last_seq: 0,
             git: None,
+            tasks: Vec::new(),
         }
     }
 
@@ -551,7 +561,9 @@ impl AgentHost {
         }
         if matches!(
             &command,
-            HostCommand::Cancel | HostCommand::RespondPermission { .. }
+            HostCommand::Cancel
+                | HostCommand::RespondPermission { .. }
+                | HostCommand::AnswerQuestion { .. }
         ) {
             return handle
                 .control
@@ -927,6 +939,21 @@ impl PanePump {
                     reply.try_send(result);
                 }
             },
+            HostCommand::AnswerQuestion {
+                request_id,
+                answers,
+            } => {
+                if self.send_control(RuntimeControl::AnswerQuestion {
+                    request_id,
+                    answers,
+                }) && self.active_waiter.is_some()
+                {
+                    self.turn_reply.permissions_allowed += 1;
+                }
+            }
+            HostCommand::StopTask { task_id } => {
+                self.send(RuntimeCommand::StopTask { task_id });
+            }
             HostCommand::Authenticate { method_id } => {
                 if !self.send(RuntimeCommand::Authenticate { method_id }) {
                     self.observe(AgentStreamPayload::AuthenticationFailed {
@@ -1113,6 +1140,7 @@ impl PanePump {
                     };
                     state.error = None;
                     state.git = None;
+                    state.tasks.clear();
                     settle_turn(&mut state);
                 }
                 AgentStreamPayload::SessionReady { session_id, .. } => {
@@ -1144,11 +1172,16 @@ impl PanePump {
                     request_id,
                     tool_call,
                     options,
+                    questions,
                 } => state.pending_permissions.push(AgentPendingPermission {
                     request_id: *request_id,
                     tool_call: tool_call.clone(),
                     options: options.clone(),
+                    questions: questions.clone(),
                 }),
+                AgentStreamPayload::TasksChanged { tasks } => {
+                    state.tasks = tasks.iter().take(MAX_AGENT_TASKS).cloned().collect();
+                }
                 AgentStreamPayload::PermissionResolved { request_id, .. } => state
                     .pending_permissions
                     .retain(|pending| pending.request_id != *request_id),
@@ -1218,12 +1251,14 @@ impl PanePump {
                 request_id,
                 tool_call,
                 options,
+                questions,
             } = &payload
         {
             Some(AgentPendingPermission {
                 request_id: *request_id,
                 tool_call: tool_call.clone(),
                 options: options.clone(),
+                questions: questions.clone(),
             })
         } else {
             None
@@ -2428,6 +2463,7 @@ mod tests {
                     request_id: 42,
                     tool_call: serde_json::json!({"toolCallId": "question"}),
                     options: serde_json::json!([{"optionId": "yes", "name": "Yes", "kind": "answer"}]),
+                    questions: Vec::new(),
                 }],
                 "end_turn",
             );
@@ -2702,11 +2738,13 @@ mod tests {
                     { "optionId": "reject", "kind": "reject_once" },
                     { "optionId": "later", "kind": "allow_once" }
                 ]),
+                questions: Vec::new(),
             },
             AgentPendingPermission {
                 request_id: 8,
                 tool_call: serde_json::json!({}),
                 options: serde_json::json!([{ "optionId": "other", "kind": "allow_always" }]),
+                questions: Vec::new(),
             },
         ];
         assert_eq!(

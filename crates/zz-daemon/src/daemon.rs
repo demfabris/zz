@@ -33335,6 +33335,15 @@ impl Shared {
                     option_id,
                 },
             },
+            ProtocolMessage::AgentAnswerQuestion {
+                request_id,
+                answers,
+                ..
+            } => HostCommand::AnswerQuestion {
+                request_id,
+                answers,
+            },
+            ProtocolMessage::AgentStopTask { task_id, .. } => HostCommand::StopTask { task_id },
             ProtocolMessage::AgentSetConfigOption {
                 option_id, value, ..
             } => HostCommand::SetConfigOption { option_id, value },
@@ -33879,7 +33888,9 @@ fn agent_message_pane(message: &ProtocolMessage) -> Result<PaneId, ServerError> 
         | ProtocolMessage::AgentAuthenticate { pane, .. }
         | ProtocolMessage::AgentSessionOp { pane, .. }
         | ProtocolMessage::AgentReplay { pane, .. }
-        | ProtocolMessage::AgentAcknowledgePromptRestore { pane, .. } => Ok(*pane),
+        | ProtocolMessage::AgentAcknowledgePromptRestore { pane, .. }
+        | ProtocolMessage::AgentAnswerQuestion { pane, .. }
+        | ProtocolMessage::AgentStopTask { pane, .. } => Ok(*pane),
         _ => Err(ServerError::InvalidCommand(
             "not an agent message".to_owned(),
         )),
@@ -51889,7 +51900,9 @@ fn handle_connection_message<S: TransportStream>(
             | ProtocolMessage::AgentAuthenticate { .. }
             | ProtocolMessage::AgentSessionOp { .. }
             | ProtocolMessage::AgentReplay { .. }
-            | ProtocolMessage::AgentAcknowledgePromptRestore { .. }) => {
+            | ProtocolMessage::AgentAcknowledgePromptRestore { .. }
+            | ProtocolMessage::AgentAnswerQuestion { .. }
+            | ProtocolMessage::AgentStopTask { .. }) => {
                 let read_only_blocked = !matches!(
                     message,
                     ProtocolMessage::AgentReplay { .. }

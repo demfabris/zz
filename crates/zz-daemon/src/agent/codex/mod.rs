@@ -16,7 +16,9 @@ use async_channel::Sender;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use parking_lot::Mutex;
 use serde_json::{Map, Value, json};
-use zz_protocol::{AgentAutoApprove, AgentProvider, AgentQuestionAnswer};
+use zz_protocol::{
+    AgentAutoApprove, AgentProvider, AgentQuestionAnswer, AgentTaskWire, MAX_AGENT_TASKS,
+};
 
 use crate::agent::{
     child::{
@@ -129,6 +131,7 @@ pub(crate) async fn run_codex_runtime(
         settings: Settings::default(),
         notices: 0,
         sides: HashMap::new(),
+        tasks: Vec::new(),
     };
     let commands = channels.commands;
     let controls = channels.controls;
@@ -187,6 +190,10 @@ enum Outgoing {
     },
     Quiet,
     Steer,
+    Terminals,
+    Terminate {
+        task_id: String,
+    },
     Rewind {
         count: usize,
     },
@@ -394,6 +401,7 @@ struct Runtime {
     settings: Settings,
     notices: u64,
     sides: HashMap<String, Side>,
+    tasks: Vec<AgentTaskWire>,
 }
 
 struct Side {
@@ -583,7 +591,17 @@ impl Runtime {
                     .await?;
                 self.publish_settings().await
             }
-            RuntimeCommand::StopTask { .. } | RuntimeCommand::Shutdown => Ok(()),
+            RuntimeCommand::StopTask { task_id } => {
+                if let Some(thread) = self.thread_id() {
+                    self.request(
+                        "thread/backgroundTerminals/terminate",
+                        &json!({ "threadId": thread, "processId": task_id }),
+                        Outgoing::Terminate { task_id },
+                    );
+                }
+                Ok(())
+            }
+            RuntimeCommand::Shutdown => Ok(()),
         }
     }
 
@@ -829,6 +847,7 @@ impl Runtime {
             .map_or((None, None), |starting| (starting.resume, starting.before));
         self.ready().await?;
         self.translator = Translator::new(cwd.clone());
+        self.tasks.clear();
         self.session = Some(Session {
             id: thread.clone(),
             cwd: cwd.clone(),
@@ -923,6 +942,14 @@ impl Runtime {
                 .await
             }
         }
+    }
+
+    async fn set_tasks(&mut self, tasks: Vec<AgentTaskWire>) -> Result<(), String> {
+        if tasks == self.tasks {
+            return Ok(());
+        }
+        self.tasks.clone_from(&tasks);
+        self.emit(AgentStreamPayload::TasksChanged { tasks }).await
     }
 
     fn history(&mut self, thread: &Value) -> Vec<(Value, bool)> {
@@ -1171,7 +1198,7 @@ impl Runtime {
                 }
                 Ok(())
             }
-            (Outgoing::Models, Err(_))
+            (Outgoing::Models | Outgoing::Terminals, Err(_))
             | (Outgoing::Quiet, _)
             | (Outgoing::Steer | Outgoing::SideTurn { .. }, Ok(_)) => Ok(()),
             (Outgoing::Thread { start, cwd }, Ok(response)) => {
@@ -1269,6 +1296,44 @@ impl Runtime {
             (Outgoing::SideTurn { thread }, Err(error)) => {
                 self.sides.remove(&thread);
                 self.notice(&format!("The side question failed: {error}"))
+                    .await
+            }
+            (Outgoing::Terminals, Ok(response)) => {
+                let tasks = response["data"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|terminal| {
+                        Some(AgentTaskWire {
+                            id: terminal["processId"].as_str()?.to_owned(),
+                            kind: "shell".to_owned(),
+                            description: terminal["command"]
+                                .as_str()
+                                .unwrap_or_default()
+                                .chars()
+                                .take(1000)
+                                .collect(),
+                            tool_call_id: terminal["itemId"].as_str().map(str::to_owned),
+                        })
+                    })
+                    .take(MAX_AGENT_TASKS)
+                    .collect();
+                self.set_tasks(tasks).await
+            }
+            (Outgoing::Terminate { task_id }, Ok(response)) if response["terminated"] == true => {
+                let tasks = self
+                    .tasks
+                    .iter()
+                    .filter(|task| task.id != task_id)
+                    .cloned()
+                    .collect();
+                self.set_tasks(tasks).await
+            }
+            (Outgoing::Terminate { .. }, result) => {
+                let reason = result
+                    .err()
+                    .map_or_else(String::new, |error| format!(": {error}"));
+                self.notice(&format!("Codex could not stop that process{reason}"))
                     .await
             }
             (Outgoing::Rewind { count }, Ok(response)) => {
@@ -1461,6 +1526,29 @@ impl Runtime {
                         },
                     };
                     self.finish(turn.id, outcome).await?;
+                }
+                if let Some(thread) = current {
+                    self.request(
+                        "thread/backgroundTerminals/list",
+                        &json!({ "threadId": thread }),
+                        Outgoing::Terminals,
+                    );
+                }
+            }
+            "item/completed" if params["item"]["type"] == "commandExecution" => {
+                let item = params["item"]["id"].as_str();
+                if self
+                    .tasks
+                    .iter()
+                    .any(|task| task.tool_call_id.as_deref() == item)
+                {
+                    let tasks = self
+                        .tasks
+                        .iter()
+                        .filter(|task| task.tool_call_id.as_deref() != item)
+                        .cloned()
+                        .collect();
+                    self.set_tasks(tasks).await?;
                 }
             }
             "serverRequest/resolved" => {
@@ -1944,5 +2032,127 @@ mod tests {
         settings.turn_overrides(&mut params);
         assert_eq!(params["approvalPolicy"], "never");
         assert_eq!(params["sandboxPolicy"]["type"], "dangerFullAccess");
+    }
+
+    #[cfg(unix)]
+    const FAKE_CODEX: &str = r#"#!/bin/sh
+[ "$1" = app-server ] || exit 2
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/^{\("method":"[^"]*",\)\{0,1\}"id":\([0-9][0-9]*\),.*/\2/p')
+  case "$line" in
+    *'"method":"thread/start"'*) printf '{"id":%s,"result":{"thread":{"id":"t1"}}}\n' "$id" ;;
+    *'"method":"turn/start"'*)
+      printf '{"id":%s,"result":{"turn":{"id":"u1"}}}\n' "$id"
+      printf '%s\n' '{"method":"turn/started","params":{"threadId":"t1","turn":{"id":"u1"}}}'
+      printf '%s\n' '{"method":"item/started","params":{"threadId":"t1","item":{"type":"commandExecution","id":"exec-1","command":"sleep 300","commandActions":[],"processId":"p1","status":"inProgress"}}}'
+      printf '%s\n' '{"method":"turn/completed","params":{"threadId":"t1","turn":{"id":"u1","status":"completed"}}}' ;;
+    *'"method":"thread/backgroundTerminals/list"'*)
+      printf '{"id":%s,"result":{"data":[{"itemId":"exec-1","processId":"p1","command":"sleep 300","cwd":"/"}],"nextCursor":null}}\n' "$id" ;;
+    *'"method":"thread/backgroundTerminals/terminate"'*'"processId":"p1"'*)
+      printf '{"id":%s,"result":{"terminated":true}}\n' "$id"
+      printf '%s\n' '{"method":"item/completed","params":{"threadId":"t1","item":{"type":"commandExecution","id":"exec-1","command":"sleep 300","commandActions":[],"processId":"p1","status":"failed","exitCode":-1}}}' ;;
+    *) [ -n "$id" ] && printf '{"id":%s,"result":{}}\n' "$id" ;;
+  esac
+done
+"#;
+
+    #[cfg(unix)]
+    #[test]
+    fn background_terminals_fill_the_tray_and_stop_from_it() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory = tempfile::tempdir().expect("tempdir");
+        let program = directory.path().join("codex");
+        std::fs::write(&program, FAKE_CODEX).expect("fake codex");
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755))
+            .expect("executable");
+        let command = CodexCommand::parse(&program.display().to_string()).expect("native");
+        let (commands, command_rx) = async_channel::unbounded();
+        let (_controls, control_rx) = async_channel::unbounded();
+        let (events, event_rx) = async_channel::unbounded();
+        let runtime = run_codex_runtime(
+            command,
+            AgentWorkspaceEnvironment::default(),
+            AgentProvider::Codex,
+            RuntimeChannels {
+                auto_approve: Arc::new(Mutex::new(AgentAutoApprove::Off)),
+                permission_ids: Arc::new(AtomicU64::new(1)),
+                journal: None,
+                commands: command_rx,
+                controls: control_rx,
+                events,
+            },
+        );
+        let driver = async {
+            let until = |accept: fn(&AgentStreamPayload) -> bool| {
+                let event_rx = event_rx.clone();
+                async move {
+                    loop {
+                        let payload = futures_lite::future::or(
+                            async { event_rx.recv().await.expect("event") },
+                            async {
+                                smol::Timer::after(Duration::from_secs(20)).await;
+                                panic!("timed out waiting for the runtime");
+                            },
+                        )
+                        .await;
+                        if accept(&payload) {
+                            return payload;
+                        }
+                    }
+                }
+            };
+            commands
+                .send(RuntimeCommand::Open {
+                    cwd: directory.path().to_path_buf(),
+                    resume_session: None,
+                })
+                .await
+                .expect("open");
+            until(|payload| matches!(payload, AgentStreamPayload::SessionReady { .. })).await;
+            commands
+                .send(RuntimeCommand::Prompt {
+                    turn_id: 1,
+                    prompt: AgentPrompt {
+                        text: "start a server".to_owned(),
+                        ..Default::default()
+                    },
+                })
+                .await
+                .expect("prompt");
+            until(|payload| matches!(payload, AgentStreamPayload::PromptFinished { .. })).await;
+            let AgentStreamPayload::TasksChanged { tasks } =
+                until(|payload| matches!(payload, AgentStreamPayload::TasksChanged { .. })).await
+            else {
+                unreachable!();
+            };
+            assert_eq!(
+                tasks,
+                [AgentTaskWire {
+                    id: "p1".to_owned(),
+                    kind: "shell".to_owned(),
+                    description: "sleep 300".to_owned(),
+                    tool_call_id: Some("exec-1".to_owned()),
+                }]
+            );
+            commands
+                .send(RuntimeCommand::StopTask {
+                    task_id: "p1".to_owned(),
+                })
+                .await
+                .expect("stop");
+            let AgentStreamPayload::TasksChanged { tasks } =
+                until(|payload| matches!(payload, AgentStreamPayload::TasksChanged { .. })).await
+            else {
+                unreachable!();
+            };
+            assert!(tasks.is_empty());
+            commands
+                .send(RuntimeCommand::Shutdown)
+                .await
+                .expect("shutdown");
+        };
+        let (result, ()) = smol::block_on(futures_lite::future::zip(runtime, driver));
+        assert_eq!(result, Ok(()));
     }
 }

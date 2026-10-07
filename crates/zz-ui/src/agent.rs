@@ -867,6 +867,7 @@ pub enum AgentEntry {
         markdown: AgentMarkdown,
         /// Images sent with the message, shown above its text as tiles.
         images: Arc<[Arc<Image>]>,
+        rewind_id: Option<SharedString>,
     },
     Assistant {
         id: u64,
@@ -1419,6 +1420,14 @@ impl TimelineStick {
     }
 }
 
+type RewindHandler = Rc<dyn Fn(&SharedString, &mut Window, &mut App)>;
+
+#[derive(Clone)]
+struct TimelineRewind {
+    enabled: bool,
+    handler: RewindHandler,
+}
+
 #[derive(Clone, IntoElement)]
 pub struct AgentTimeline {
     rows: Arc<Vec<TimelineRow>>,
@@ -1426,6 +1435,7 @@ pub struct AgentTimeline {
     store: Entity<AgentTimelineStore>,
     active_turn: bool,
     bottom_padding: f32,
+    rewind: Option<TimelineRewind>,
 }
 
 impl AgentTimeline {
@@ -1441,6 +1451,7 @@ impl AgentTimeline {
             store,
             active_turn: false,
             bottom_padding: 4.0,
+            rewind: None,
         }
     }
 
@@ -1453,6 +1464,19 @@ impl AgentTimeline {
     #[must_use]
     pub fn bottom_padding(mut self, bottom_padding: f32) -> Self {
         self.bottom_padding = bottom_padding;
+        self
+    }
+
+    #[must_use]
+    pub fn rewind(
+        mut self,
+        enabled: bool,
+        handler: impl Fn(&SharedString, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.rewind = Some(TimelineRewind {
+            enabled,
+            handler: Rc::new(handler),
+        });
         self
     }
 }
@@ -1468,6 +1492,10 @@ impl gpui::RenderOnce for AgentTimeline {
             final_assistant_entry_id(&rows)
         };
         let bottom_padding = self.bottom_padding;
+        let rewind = self.rewind.map(|rewind| TimelineRewind {
+            enabled: rewind.enabled && !self.active_turn,
+            handler: rewind.handler,
+        });
 
         list(self.list_state, move |index, _window, cx| {
             let Some(row) = rows.get(index).cloned() else {
@@ -1487,6 +1515,7 @@ impl gpui::RenderOnce for AgentTimeline {
                             &store,
                             row,
                             copyable_assistant,
+                            rewind.as_ref(),
                             cx,
                         )),
                 )
@@ -1515,9 +1544,16 @@ fn render_timeline_row(
     store: &Entity<AgentTimelineStore>,
     row: TimelineRow,
     copyable_assistant: Option<u64>,
+    rewind: Option<&TimelineRewind>,
     cx: &mut App,
 ) -> AnyElement {
     match row {
+        TimelineRow::Single(AgentEntry::User {
+            id,
+            markdown,
+            images,
+            rewind_id,
+        }) => render_user_entry(store, id, markdown, &images, rewind.zip(rewind_id), cx),
         TimelineRow::Single(entry) => {
             render_entry(timeline_scroll, store, entry, copyable_assistant, cx)
         }
@@ -1867,6 +1903,88 @@ fn activity_row(
         })
 }
 
+const USER_ENTRY_GROUP: &str = "agent-user-entry";
+
+fn render_user_entry(
+    store: &Entity<AgentTimelineStore>,
+    id: u64,
+    markdown: AgentMarkdown,
+    images: &[Arc<Image>],
+    rewind: Option<(&TimelineRewind, SharedString)>,
+    cx: &mut App,
+) -> AnyElement {
+    let bubble = v_flex()
+        .debug_selector(|| "agent-user-bubble".to_owned())
+        .max_w(relative(1.0))
+        .gap_2()
+        .px_3()
+        .py_2()
+        .rounded(cx.theme().radius)
+        .border_1()
+        .border_color(cx.theme().border())
+        .bg(cx.theme().background.raised(1))
+        .text_size(crate::rems_from_px(13.0))
+        .when(!images.is_empty(), |this| {
+            this.child(
+                h_flex()
+                    .flex_wrap()
+                    .gap_1()
+                    .children(images.iter().enumerate().map(|(index, image)| {
+                        agent_attachment_thumbnail(
+                            (
+                                SharedString::from(format!("agent-user-attachment-{id}")),
+                                index,
+                            ),
+                            Arc::clone(image),
+                            TRANSCRIPT_ATTACHMENT,
+                            cx,
+                        )
+                        .debug_selector(|| "agent-user-attachment".to_owned())
+                    })),
+            )
+        })
+        .when(!markdown.is_empty(), |this| {
+            this.child(markdown_view(store, id, MarkdownSlot::Body, markdown, cx))
+        });
+    let entry = v_flex().id(("agent-user-entry", id)).w_full().items_end();
+    let Some((rewind, message_id)) = rewind else {
+        return entry.child(bubble).into_any_element();
+    };
+    entry
+        .group(USER_ENTRY_GROUP)
+        .child(
+            h_flex()
+                .w_full()
+                .justify_end()
+                .items_center()
+                .gap_1()
+                .child(rewind_button(id, rewind, message_id))
+                .child(bubble.min_w_0()),
+        )
+        .into_any_element()
+}
+
+fn rewind_button(id: u64, rewind: &TimelineRewind, message_id: SharedString) -> Div {
+    let handler = Rc::clone(&rewind.handler);
+    div()
+        .flex_none()
+        .invisible()
+        .when(rewind.enabled, |slot| {
+            slot.group_hover(USER_ENTRY_GROUP, gpui::Styled::visible)
+        })
+        .child(
+            div()
+                .debug_selector(|| "agent-user-rewind".to_owned())
+                .child(
+                Button::compact_icon(("agent-rewind", id), IconName::History)
+                    .tooltip(
+                        "Rewind to here: continue from before this prompt. Files stay as they are.",
+                    )
+                    .on_click(move |_, window, cx| handler(&message_id, window, cx)),
+            ),
+        )
+}
+
 fn render_entry(
     timeline_scroll: &ListState,
     store: &Entity<AgentTimelineStore>,
@@ -1879,43 +1997,8 @@ fn render_entry(
             id,
             markdown,
             images,
-        } => v_flex()
-            .id(("agent-user-entry", id))
-            .w_full()
-            .items_end()
-            .child(
-                v_flex()
-                    .debug_selector(|| "agent-user-bubble".to_owned())
-                    .max_w(relative(1.0))
-                    .gap_2()
-                    .px_3()
-                    .py_2()
-                    .rounded(cx.theme().radius)
-                    .border_1()
-                    .border_color(cx.theme().border())
-                    .bg(cx.theme().background.raised(1))
-                    .text_size(crate::rems_from_px(13.0))
-                    .when(!images.is_empty(), |this| {
-                        this.child(h_flex().flex_wrap().gap_1().children(
-                            images.iter().enumerate().map(|(index, image)| {
-                                agent_attachment_thumbnail(
-                                    (
-                                        SharedString::from(format!("agent-user-attachment-{id}")),
-                                        index,
-                                    ),
-                                    Arc::clone(image),
-                                    TRANSCRIPT_ATTACHMENT,
-                                    cx,
-                                )
-                                .debug_selector(|| "agent-user-attachment".to_owned())
-                            }),
-                        ))
-                    })
-                    .when(!markdown.is_empty(), |this| {
-                        this.child(markdown_view(store, id, MarkdownSlot::Body, markdown, cx))
-                    }),
-            )
-            .into_any_element(),
+            ..
+        } => render_user_entry(store, id, markdown, &images, None, cx),
         AgentEntry::Assistant { id, markdown } => {
             let copy = markdown.clone();
             v_flex()
@@ -3640,18 +3723,24 @@ mod tests {
         entry: AgentEntry,
         pane_width: Pixels,
         active_turn: bool,
+        rewinds: Option<Rc<std::cell::RefCell<Vec<SharedString>>>>,
     }
 
     impl Render for UserEntryTest {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            div().w(self.pane_width).h(px(600.0)).child(
-                AgentTimeline::new(
-                    Arc::new(vec![TimelineRow::Single(self.entry.clone())]),
-                    ListState::new(1, gpui::ListAlignment::Top, px(600.0)),
-                    self.store.clone(),
-                )
-                .active_turn(self.active_turn),
+            let timeline = AgentTimeline::new(
+                Arc::new(vec![TimelineRow::Single(self.entry.clone())]),
+                ListState::new(1, gpui::ListAlignment::Top, px(600.0)),
+                self.store.clone(),
             )
+            .active_turn(self.active_turn);
+            let timeline = match self.rewinds.clone() {
+                Some(rewinds) => timeline.rewind(true, move |id, _, _| {
+                    rewinds.borrow_mut().push(id.clone());
+                }),
+                None => timeline,
+            };
+            div().w(self.pane_width).h(px(600.0)).child(timeline)
         }
     }
 
@@ -4117,6 +4206,7 @@ mod tests {
                 entry,
                 pane_width: px(520.0),
                 active_turn: false,
+                rewinds: None,
             });
             crate::Root::new(view, window, cx)
         });
@@ -4162,6 +4252,7 @@ mod tests {
                 entry,
                 pane_width: px(520.0),
                 active_turn: true,
+                rewinds: None,
             });
             crate::Root::new(view, window, cx)
         });
@@ -4187,6 +4278,7 @@ mod tests {
                 entry,
                 pane_width: px(520.0),
                 active_turn: false,
+                rewinds: None,
             });
             crate::Root::new(view, window, cx)
         });
@@ -4215,6 +4307,7 @@ mod tests {
                 entry,
                 pane_width: PANE_WIDTH,
                 active_turn: false,
+                rewinds: None,
             });
             crate::Root::new(view, window, cx)
         });
@@ -4245,6 +4338,7 @@ mod tests {
             id: 1,
             markdown: "hi can you read this image properly?".into(),
             images: Arc::from([Arc::new(Image::from_bytes(gpui::ImageFormat::Png, bytes))]),
+            rewind_id: None,
         };
         let (_, cx) = cx.add_window_view(|window, cx| {
             let view = cx.new(|cx| UserEntryTest {
@@ -4252,6 +4346,7 @@ mod tests {
                 entry,
                 pane_width: PANE_WIDTH,
                 active_turn: false,
+                rewinds: None,
             });
             crate::Root::new(view, window, cx)
         });
@@ -4294,6 +4389,93 @@ mod tests {
             cx.update(crate::WindowExt::has_active_dialog),
             "clicking an attachment should open it"
         );
+    }
+
+    fn rewind_point(
+        cx: &mut TestAppContext,
+        pane_width: Pixels,
+        active_turn: bool,
+    ) -> (
+        Rc<std::cell::RefCell<Vec<SharedString>>>,
+        &mut VisualTestContext,
+    ) {
+        cx.update(crate::init);
+        let rewinds = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let recorded = Rc::clone(&rewinds);
+        let entry = AgentEntry::User {
+            id: 7,
+            markdown: "please rename every helper in this module and keep the tests passing, then explain what changed".into(),
+            images: Arc::from([]),
+            rewind_id: Some("prompt-7".into()),
+        };
+        let (_, cx) = cx.add_window_view(move |window, cx| {
+            let view = cx.new(|cx| UserEntryTest {
+                store: cx.new(|_| AgentTimelineStore::default()),
+                entry,
+                pane_width,
+                active_turn,
+                rewinds: Some(recorded),
+            });
+            crate::Root::new(view, window, cx)
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        (rewinds, cx)
+    }
+
+    #[gpui::test]
+    fn a_prompt_row_offers_rewind_on_hover_and_hands_over_its_id(cx: &mut TestAppContext) {
+        const PANE_WIDTH: Pixels = px(420.0);
+        let (rewinds, cx) = rewind_point(cx, PANE_WIDTH, false);
+        assert!(
+            cx.debug_bounds("agent-user-rewind").is_none(),
+            "the action waits for the pointer"
+        );
+        let bubble = cx
+            .debug_bounds("agent-user-bubble")
+            .expect("the user bubble should be painted");
+        assert!(bubble.origin.x >= px(0.0) && bubble.right() <= PANE_WIDTH);
+
+        cx.simulate_mouse_move(bubble.center(), None, gpui::Modifiers::none());
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        let rewind = cx
+            .debug_bounds("agent-user-rewind")
+            .expect("hovering the prompt reveals the action");
+        assert!(
+            rewind.right() <= bubble.left(),
+            "the action sits beside the bubble"
+        );
+        assert_eq!(
+            cx.debug_bounds("agent-user-bubble"),
+            Some(bubble),
+            "revealing the action does not move the bubble"
+        );
+
+        cx.simulate_click(rewind.center(), gpui::Modifiers::none());
+        assert_eq!(rewinds.borrow().as_slice(), ["prompt-7"]);
+    }
+
+    #[gpui::test]
+    fn rewind_stays_hidden_while_a_turn_runs(cx: &mut TestAppContext) {
+        let (rewinds, cx) = rewind_point(cx, px(420.0), true);
+        let bubble = cx
+            .debug_bounds("agent-user-bubble")
+            .expect("the user bubble should be painted");
+        cx.simulate_mouse_move(bubble.center(), None, gpui::Modifiers::none());
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        assert!(cx.debug_bounds("agent-user-rewind").is_none());
+        cx.simulate_click(
+            point(bubble.left() - px(14.0), bubble.center().y),
+            gpui::Modifiers::none(),
+        );
+        assert!(rewinds.borrow().is_empty());
     }
 
     #[test]

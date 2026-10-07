@@ -30,6 +30,7 @@ use zz_client::agent_completion::{
     CommandCompletion, active_command_hint, bare_command_name, completion_query, completion_score,
     meaningful_command_description, ranked_completions,
 };
+use zz_client::agent_transcript::rewind_command;
 use zz_protocol::{AgentDescriptor, AgentProvider, Axis, CommandInvocation, PaneId};
 #[cfg(all(test, not(target_os = "macos")))]
 use zz_ui::agent::DisclosureKind;
@@ -1441,6 +1442,15 @@ impl AgentView {
             }
             Err(error) => self.submission_error = Some(error),
         }
+        cx.notify();
+    }
+
+    fn rewind_to(&mut self, message_id: &str, cx: &mut Context<Self>) {
+        let pane = self.pane;
+        let result = self.controller.update(cx, |controller, cx| {
+            controller.prompt(pane, &rewind_command(message_id), Vec::new(), cx)
+        });
+        self.submission_error = result.err();
         cx.notify();
     }
 
@@ -3038,6 +3048,24 @@ impl Render for AgentView {
             );
         let view = cx.entity();
         let input_focus = self.focus(cx);
+        let timeline = AgentTimeline::new(
+            rows,
+            self.timeline_scroll.clone(),
+            self.timeline_store.clone(),
+        )
+        .active_turn(state.connection.has_active_turn())
+        .bottom_padding(COMPOSER_OUTER_PADDING);
+        let timeline = if state.session_capabilities.verbs {
+            let rewind_view = view.clone();
+            timeline.rewind(
+                state.connection.accepts_prompt() && state.pending_permissions.is_empty(),
+                move |message_id, _, cx| {
+                    rewind_view.update(cx, |view, cx| view.rewind_to(message_id, cx));
+                },
+            )
+        } else {
+            timeline
+        };
         let root = div()
             .id(("agent-pane", self.pane.0))
             .key_context(AGENT_KEY_CONTEXT)
@@ -3085,16 +3113,7 @@ impl Render for AgentView {
                         )
                     })
                     .when(has_timeline, |this| {
-                        this.child(
-                            AgentTimeline::new(
-                                rows,
-                                self.timeline_scroll.clone(),
-                                self.timeline_store.clone(),
-                            )
-                            .active_turn(state.connection.has_active_turn())
-                            .bottom_padding(COMPOSER_OUTER_PADDING),
-                        )
-                        .child(
+                        this.child(timeline).child(
                             div()
                                 .absolute()
                                 .top_0()
@@ -3193,10 +3212,12 @@ fn ui_entry_with_markdown(
             id,
             markdown,
             images,
+            ..
         } => AgentEntry::User {
             id: *id,
             markdown: streaming_markdown(markdown_sources, *id, markdown),
             images: images.clone().into(),
+            rewind_id: entry.rewind_id().map(SharedString::from),
         },
         AgentThreadEntry::Assistant { id, markdown, .. } => AgentEntry::Assistant {
             id: *id,
@@ -3980,6 +4001,7 @@ mod completion_tests {
                     id: 1,
                     markdown: "old session".to_owned(),
                     images: Vec::new(),
+                    message_id: None,
                 },
                 AgentThreadEntry::Assistant {
                     id: 2,
@@ -4035,6 +4057,7 @@ mod completion_tests {
             id: 1,
             markdown: "new session".to_owned(),
             images: Vec::new(),
+            message_id: None,
         }];
         let (changed, cleared) = cx.update(|_, cx| {
             view.update(cx, |view, cx| {
@@ -4807,6 +4830,136 @@ mod completion_tests {
             [None, Some(agent)]
         );
     }
+
+    #[cfg(not(target_os = "macos"))]
+    fn ready_with_a_prompt(
+        cx: &mut VisualTestContext,
+        controller: &Entity<AgentController>,
+        pane: PaneId,
+        verbs: bool,
+        text: &str,
+    ) {
+        stream(
+            cx,
+            controller,
+            pane,
+            vec![
+                (
+                    1,
+                    zz_daemon::AgentStreamPayload::Ready {
+                        agent_name: "Claude Code".to_owned(),
+                        agent_key: "claude".to_owned(),
+                        auth_methods: Vec::new(),
+                        capabilities: zz_protocol::agent_stream::AgentSessionCapabilities {
+                            verbs,
+                            ..Default::default()
+                        },
+                    },
+                ),
+                (
+                    2,
+                    zz_daemon::AgentStreamPayload::SessionReady {
+                        session_id: "s-1".to_owned(),
+                        modes: None,
+                        config_options: None,
+                    },
+                ),
+                (
+                    3,
+                    zz_daemon::AgentStreamPayload::Update {
+                        update: serde_json::json!({
+                            "sessionUpdate": "user_message_chunk",
+                            "messageId": "u-1",
+                            "content": {"type": "text", "text": text},
+                        }),
+                    },
+                ),
+            ],
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn hover_prompt(cx: &mut VisualTestContext) -> Option<gpui::Bounds<gpui::Pixels>> {
+        let bubble = cx
+            .debug_bounds("agent-user-bubble")
+            .expect("the prompt row is painted");
+        cx.simulate_mouse_move(bubble.center(), None, gpui::Modifiers::none());
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        cx.debug_bounds("agent-user-rewind")
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn rewind_to_here_sends_the_rows_id_the_way_the_composer_sends(cx: &mut TestAppContext) {
+        let pane = PaneId(50);
+        let (view, controller, sink, cx) = wired_view(cx, pane);
+        ready_with_a_prompt(cx, &controller, pane, true, "fix the flaky test");
+
+        let rewind = hover_prompt(cx).expect("an idle pane offers the rewind");
+        cx.simulate_click(rewind.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+
+        assert_eq!(
+            sent_answers(&sink),
+            [crate::mux::client::AgentRequest::Prompt {
+                text: "//rewind u-1".to_owned(),
+                images: Vec::new(),
+            }]
+        );
+        let (rows, connection) = cx.update(|_, cx| {
+            let view = view.read(cx);
+            (view.timeline.rows.len(), view.pane_state.connection)
+        });
+        assert_eq!(rows, 1, "the command adds no prompt row of its own");
+        assert_eq!(connection, AgentConnectionState::Ready, "nor a turn");
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn rewind_to_here_waits_for_the_turn_to_end(cx: &mut TestAppContext) {
+        let pane = PaneId(51);
+        let (_view, controller, sink, cx) = wired_view(cx, pane);
+        ready_with_a_prompt(cx, &controller, pane, true, "fix the flaky test");
+        cx.update(|_, cx| {
+            controller.update(cx, |controller, cx| {
+                controller.apply_pane_state(
+                    pane,
+                    &zz_protocol::AgentPaneWire {
+                        phase: zz_protocol::AgentConnectionPhase::Running,
+                        ..Default::default()
+                    },
+                    cx,
+                );
+            });
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+
+        assert!(hover_prompt(cx).is_none());
+        assert!(sent_answers(&sink).is_empty());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn a_slash_command_row_is_not_a_rewind_point(cx: &mut TestAppContext) {
+        let pane = PaneId(52);
+        let (_view, controller, _sink, cx) = wired_view(cx, pane);
+        ready_with_a_prompt(cx, &controller, pane, true, "/compact");
+        assert!(hover_prompt(cx).is_none());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn an_agent_without_zz_commands_offers_no_rewind(cx: &mut TestAppContext) {
+        let pane = PaneId(53);
+        let (_view, controller, _sink, cx) = wired_view(cx, pane);
+        ready_with_a_prompt(cx, &controller, pane, false, "fix the flaky test");
+        assert!(hover_prompt(cx).is_none());
+    }
 }
 
 #[cfg(test)]
@@ -5194,6 +5347,7 @@ mod tests {
                 id: 1,
                 markdown: "user".to_owned(),
                 images: Vec::new(),
+                message_id: None,
             },
             AgentThreadEntry::Assistant {
                 id: 2,
@@ -5237,6 +5391,7 @@ mod tests {
             id: 1,
             markdown: String::new(),
             images: vec![Arc::clone(&image)],
+            message_id: None,
         }]);
 
         let AgentEntry::User { images, .. } = &entries[0] else {

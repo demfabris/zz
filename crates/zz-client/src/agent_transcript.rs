@@ -63,6 +63,7 @@ pub enum AgentThreadEntry<I> {
         id: u64,
         markdown: String,
         images: Vec<I>,
+        message_id: Option<String>,
     },
     Assistant {
         id: u64,
@@ -101,6 +102,25 @@ impl<I> AgentThreadEntry<I> {
             | Self::Plan { id, .. } => *id,
         }
     }
+
+    pub fn rewind_id(&self) -> Option<&str> {
+        match self {
+            Self::User {
+                markdown,
+                message_id: Some(message_id),
+                ..
+            } if !markdown.trim_start().starts_with('/') => Some(message_id),
+            _ => None,
+        }
+    }
+}
+
+pub fn is_zz_command(text: &str) -> bool {
+    text.trim_start().starts_with("//")
+}
+
+pub fn rewind_command(message_id: &str) -> String {
+    format!("//rewind {message_id}")
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, serde::Serialize)]
@@ -153,6 +173,7 @@ pub struct AgentTranscript<I> {
     structured_tool_outputs: BTreeSet<String>,
     plan_entry: Option<u64>,
     suppress_user_echo: bool,
+    echo_target: Option<u64>,
     decode_image: ImageDecoder<I>,
 }
 
@@ -175,6 +196,7 @@ impl<I> AgentTranscript<I> {
             structured_tool_outputs: BTreeSet::new(),
             plan_entry: None,
             suppress_user_echo: false,
+            echo_target: None,
             decode_image,
         }
     }
@@ -230,8 +252,10 @@ impl<I> AgentTranscript<I> {
             id,
             markdown: prompt,
             images,
+            message_id: None,
         });
         self.suppress_user_echo = true;
+        self.echo_target = Some(id);
     }
     pub fn apply_update(&mut self, update: SessionUpdate) {
         match update {
@@ -303,9 +327,26 @@ impl<I> AgentTranscript<I> {
 
     fn apply_message_chunk(&mut self, role: StreamRole, chunk: ContentChunk) {
         if role == StreamRole::User && self.suppress_user_echo {
+            if let Some(target) = self.echo_target.take()
+                && let Some(message_id) = chunk.message_id
+            {
+                self.set_message_id(target, message_id.0.to_string());
+            }
             return;
         }
         self.append_chunk(role, chunk);
+    }
+
+    fn set_message_id(&mut self, entry_id: u64, next: String) {
+        let Some(index) = self.entry_index(entry_id) else {
+            return;
+        };
+        if let AgentThreadEntry::User { message_id, .. } = &mut self.entries[index]
+            && message_id.is_none()
+        {
+            *message_id = Some(next);
+            self.touch_entry(index);
+        }
     }
 
     fn append_chunk(&mut self, role: StreamRole, chunk: ContentChunk) {
@@ -343,7 +384,7 @@ impl<I> AgentTranscript<I> {
             if let Some(id) = self.message_entries.get(key).copied() {
                 id
             } else {
-                let id = self.push_stream_entry(role);
+                let id = self.push_stream_entry(role, Some(&key.1));
                 self.message_entries.insert(key.clone(), id);
                 id
             }
@@ -351,10 +392,10 @@ impl<I> AgentTranscript<I> {
             if active_role == role {
                 id
             } else {
-                self.push_stream_entry(role)
+                self.push_stream_entry(role, None)
             }
         } else {
-            self.push_stream_entry(role)
+            self.push_stream_entry(role, None)
         };
         self.active_stream = Some((role, entry_id));
         if let Some(index) = self.entry_index(entry_id) {
@@ -381,13 +422,14 @@ impl<I> AgentTranscript<I> {
         }
     }
 
-    fn push_stream_entry(&mut self, role: StreamRole) -> u64 {
+    fn push_stream_entry(&mut self, role: StreamRole, message_id: Option<&str>) -> u64 {
         let id = self.allocate_entry_id();
         let entry = match role {
             StreamRole::User => AgentThreadEntry::User {
                 id,
                 markdown: String::new(),
                 images: Vec::new(),
+                message_id: message_id.map(str::to_owned),
             },
             StreamRole::Assistant => AgentThreadEntry::Assistant {
                 id,
@@ -687,6 +729,7 @@ impl<I> AgentTranscript<I> {
     pub fn finish_turn(&mut self) {
         self.pending_permissions = Arc::from([]);
         self.suppress_user_echo = false;
+        self.echo_target = None;
         self.active_stream = None;
     }
 
@@ -1015,6 +1058,58 @@ mod tests {
             "sessionUpdate": "tool_call", "toolCallId": "agent-2", "title": "Survey", "kind": "think",
         })));
         assert_eq!(transcript.changed_entries(before), Some(vec![2]));
+    }
+
+    #[test]
+    fn prompt_rows_keep_the_message_id_a_rewind_targets() {
+        let mut transcript = AgentTranscript::<()>::new(|_, _| None);
+        let prompt = |id: &str, text: &str| {
+            update(serde_json::json!({
+                "sessionUpdate": "user_message_chunk", "messageId": id,
+                "content": { "type": "text", "text": text },
+            }))
+        };
+        transcript.apply_update(prompt("u-1", "first"));
+        transcript.apply_update(prompt("zz-command-1-in", "//btw what now"));
+        transcript.apply_update(prompt("u-2", "/compact"));
+        transcript.finish_replay();
+        transcript.begin_prompt("second".to_owned(), Vec::new());
+        let before = transcript.revision();
+        transcript.apply_update(prompt("u-3", "second"));
+        assert_eq!(
+            transcript.changed_entries(before),
+            Some(vec![3]),
+            "the echo names the row it echoes"
+        );
+        transcript.apply_update(prompt("zz-command-2-in", "//steer faster"));
+        transcript.apply_update(prompt("u-3", "second"));
+
+        let message_ids = transcript
+            .entries()
+            .iter()
+            .map(|entry| match entry {
+                AgentThreadEntry::User { message_id, .. } => message_id.as_deref(),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            message_ids,
+            [
+                Some("u-1"),
+                Some("zz-command-1-in"),
+                Some("u-2"),
+                Some("u-3")
+            ]
+        );
+        let rewind_ids = transcript
+            .entries()
+            .iter()
+            .map(AgentThreadEntry::rewind_id)
+            .collect::<Vec<_>>();
+        assert_eq!(rewind_ids, [Some("u-1"), None, None, Some("u-3")]);
+        assert_eq!(rewind_command("u-3"), "//rewind u-3");
+        assert!(is_zz_command("  //rewind u-3"));
+        assert!(!is_zz_command("/compact"));
     }
 
     #[test]

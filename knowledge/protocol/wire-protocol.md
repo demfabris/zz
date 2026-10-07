@@ -801,8 +801,8 @@ answers: Vec<String> }> }`, which answers a question card (at most `MAX_AGENT_QU
 `AgentStopTask { pane, task_id }`. `AgentPaneWire` appends `tasks: Vec<AgentTaskWire { id, kind,
 description, tool_call_id }>`, the pane's background work, at most `MAX_AGENT_TASKS` (64).
 `agent_question_and_task_messages_append_at_the_wire_tail_and_round_trip` pins the tags. The JSON
-agent stream adds `questions` to `PermissionRequested` (omitted when empty) and a `tasksChanged`
-item, and the parked permission payload carries `questions` too, so a late client sees the card.
+agent stream adds `questions` to `PermissionRequested` (omitted when empty), a `tasksChanged`
+item, and an `activity` item for turns the agent starts itself; the parked permission payload carries `questions` too, so a late client sees the card.
 A prompt starting with `//` is a zz command when the pane's `Ready` capabilities set `verbs`.
 
 # Versioning & compatibility

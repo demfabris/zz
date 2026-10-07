@@ -1267,7 +1267,7 @@ impl AppShell {
             .child(terminal_preview(appearance, cx))
             .child(SettingsStack::titled("Display").child(font).child(scale))
             .child(SettingsStack::titled("Host configuration")
-                .child(SettingEntry::new("Colors, cursor, and spacing", "Edit the Ghostty-compatible configuration on the daemon host to change these values.").control("Shared")))
+                .child(SettingEntry::new("Colors, cursor, and spacing", "Edit the Ghostty-compatible configuration on the daemon host to change these values.").control(div().text_size(zz_ui::rems_from_px(13.0)).text_color(cx.theme().foreground.muted()).child("Shared"))))
             .into_any_element()
     }
 }

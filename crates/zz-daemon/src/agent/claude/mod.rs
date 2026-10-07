@@ -1516,13 +1516,14 @@ impl Runtime {
             .as_array()
             .into_iter()
             .flatten()
-            .map(|question| {
+            .enumerate()
+            .map(|(index, question)| {
                 let text = question["question"]
                     .as_str()
                     .unwrap_or("Question")
                     .to_owned();
                 AgentQuestion {
-                    id: text.clone(),
+                    id: format!("q{index}"),
                     header: question["header"].as_str().map(str::to_owned),
                     question: text,
                     options: question["options"]
@@ -2253,11 +2254,11 @@ while read -r line; do :; done
                     request_id,
                     answers: vec![
                         AgentQuestionAnswer {
-                            id: "Which fruit?".to_owned(),
+                            id: "q0".to_owned(),
                             answers: vec!["a fig".to_owned()],
                         },
                         AgentQuestionAnswer {
-                            id: "Which colors?".to_owned(),
+                            id: "q1".to_owned(),
                             answers: vec!["red".to_owned(), "green".to_owned()],
                         },
                     ],

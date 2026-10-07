@@ -162,9 +162,9 @@ fn effective_chromium_zoom_level(viewport: Viewport, page_zoom_factor: f64) -> f
 )]
 #[must_use]
 fn scaled_osr_dimension(value: u32, scale_factor: f32) -> i32 {
-    (f64::from(value) * f64::from(scale_factor))
+    (value as f32 * scale_factor)
         .ceil()
-        .clamp(1.0, f64::from(i32::MAX)) as i32
+        .clamp(1.0, i32::MAX as f32) as i32
 }
 
 #[allow(
@@ -5327,6 +5327,8 @@ mod tests {
     fn converts_fractional_wayland_scale_to_physical_osr_values() {
         assert_eq!(scaled_osr_dimension(1080, 1.25), 1350);
         assert_eq!(scaled_osr_dimension(638, 1.25), 798);
+        assert_eq!(scaled_osr_dimension(1120, 2.2), 2464);
+        assert_eq!(scaled_osr_dimension(1325, 2.2), 2915);
         assert_eq!(scaled_osr_coordinate(100, 1.25), 125);
         let zoom_factor = CHROMIUM_ZOOM_STEP.powf(chromium_zoom_level(1.25));
         assert!((zoom_factor - 1.25).abs() < f64::EPSILON);

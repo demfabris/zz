@@ -36,6 +36,10 @@ fn identity_reply_from_a_respawned_pane_is_rejected() {
     let item = queued(&shared);
     let wait = CommandWait::new(&item);
     let state = Arc::clone(&wait.state);
+    shared
+        .terminal_requests
+        .paused
+        .store(true, Ordering::Release);
     {
         let _round_trips = zz_terminal::forbid_actor_round_trips();
         wait.pane_output(
@@ -59,6 +63,10 @@ fn identity_reply_from_a_respawned_pane_is_rejected() {
             &CommandInvocation::new("respawn-pane", ["-k", "-t", &pane.to_string(), ""]),
         )
         .unwrap();
+    shared
+        .terminal_requests
+        .paused
+        .store(false, Ordering::Release);
     wait.finish(&item, Execution::default()).unwrap();
     drain(&shared, &state);
     let mut result = Ok(Execution::default());

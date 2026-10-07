@@ -1028,7 +1028,7 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
         name: "agent-send",
         aliases: &[],
         description: "Send text to an agent pane",
-        usage: "[-t target-pane] [--submit] [--wait] [--progress] [--timeout seconds] [--on-block wait|fail|allow|deny] [--json] [--final] [--context context] [text ...]",
+        usage: "[-t target-pane] [--submit] [--wait] [--notify] [--progress] [--timeout seconds] [--on-block wait|fail|allow|deny] [--json] [--final] [--context context] [text ...]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::flag(
@@ -1036,6 +1036,10 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
                 "submit the text instead of filling the composer",
             ),
             CommandOptionSpec::flag("--wait", "submit, then print the turn's reply"),
+            CommandOptionSpec::flag(
+                "--notify",
+                "submit, then post the turn's reply back to the calling agent pane",
+            ),
             CommandOptionSpec::flag(
                 "--json",
                 "with --wait, print one JSON object with turn facts and reply text",

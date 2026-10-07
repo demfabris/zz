@@ -160,7 +160,11 @@ file changes applied, `restart-agent-pane` resuming the thread with its memory, 
 2. More commands: `//btw` for Codex (an ephemeral `thread/fork` plus a hidden turn), branch from a
    message (`--resume-session-at`, `thread/fork beforeTurnId`), rewind.
 3. Codex subagent threads (`collabAgentToolCall` receivers) and background terminals.
-4. Orchestration: a zz MCP server passed through `mcpServers` and the Codex thread config; PiP
-   panes.
+4. Orchestration: PiP panes and a decision on in-session tools. The groundwork is in:
+   `agent-send --notify` submits to another agent pane and, when that turn ends, posts the reply
+   back into the calling agent pane as a prompt queued behind its own turn (t3code's async
+   completion, over the CLI agents already use). Both vendors can also host tools without a
+   process: Claude through `sdkMcpServers` and `mcp_message` control requests, Codex through
+   `dynamicTools` on `thread/start` and `item/tool/call`.
 5. Keep-up: a weekly diff of `sdk.d.ts` and the Codex schema, and a minimum-version table. The
    survey's `archive/codex-host` tag is not in this clone; the Codex driver was written fresh.

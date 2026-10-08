@@ -2866,6 +2866,7 @@ mod tests {
             active_border_colour: None,
             border_status_text: String::new(),
             mode: None,
+            status: None,
         }
     }
 

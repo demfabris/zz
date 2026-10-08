@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v107)
+title: zz wire protocol (v108)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -15,7 +15,7 @@ daemon through an OpenSSH `ssh -L` Unix-socket forward. iOS instead carries the 
 through `zz proxy` over an in-process `russh` SSH channel.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 107`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 108`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -64,7 +64,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (107) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (108) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -109,9 +109,9 @@ fields in declaration order.
 | `PreparedCommandList { request_id, commands }` | request identity plus one `PreparedCommand` per input | Daemon → client: return the immutable invocation, optional canonical identity, `alias_matched`, and `Ready` or a typed `ServerError`. Multi-command and empty aliases return their opaque invocation with `canonical_name: None`, `alias_matched: true`, and `Ready`. The echoed request ID lets a client ignore stale replies while notifications share the stream |
 | `SetTerminalPreview { enabled }` | `enabled: bool` | An attached Interactive client enables or disables passive terminal delivery for every window in its attached session. Foreground visibility, input, history, and PTY geometry remain unchanged |
 
-## Subscribed control state in v107
+## Subscribed control state in v108
 
-The campaign keeps v107 unreleased. After a wire-changing merge, rebuild clients and restart old
+The campaign keeps v108 unreleased. After a wire-changing merge, rebuild clients and restart old
 dev daemons. `crates/zz-protocol/src/control.rs` defines the compact handshake and state grouping;
 `tree_delta.rs` defines the tree changes.
 
@@ -760,7 +760,7 @@ holes in previews larger than 512 cells. The separate `MAX_KITTY_IMAGE_REMOVALS`
 remains 512 IDs per control message, and the daemon splits larger removal sets into
 ordered batches.
 
-v107 is unreleased as of 2026-09-27. It appends `EventPayload::KeyTableActive { table:
+v107 shipped in zz 0.15.0. It appends `EventPayload::KeyTableActive { table:
 Option<String>, repeat: bool }` after `CommandClientExit`, sent to one client when the key table
 it is inside changes: `prefix` or a `switch-client -T` table, never copy-mode, and never the
 session's own `key-table`. `repeat` is true while a `-r` window holds the table. The daemon also
@@ -791,11 +791,17 @@ string is capped at `MAX_PATH_LIST_TEXT_BYTES` (4096) and a chunk or mark batch 
 `MAX_PATH_LIST_ENTRIES` (50,000) during deserialization. `path_picker_variants_append_at_the_wire_tails_and_round_trip` pins the
 tags.
 
+v108 is unreleased as of 2026-10-08. `PaneSnapshot` appends `status: Option<PaneStatus { state,
+kind, progress, app, title, message }>`, the pane's most urgent
+[OSC 7501 program status](/terminal/program-status.md) record, and `TreeOp` appends
+`PaneStatus { session, window, pane, status }` after `PanePresentation`.
+
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 107`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 108`** is stamped into every frame's envelope and re-checked inside
   `Hello` and `Welcome` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v108 requires updated clients and daemon together, including the daemon on every ssh host.
 - v107 requires updated clients and daemon together, including the daemon on every ssh host.
 - v106 requires updated clients and daemon together. A v105 daemon retains the old
   placement limit even after the GUI is rebuilt; restarting only the GUI cannot fix

@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use gpui::{App, Entity, SharedString};
 use zz_protocol::{
     AgentProvider, Axis, CommandInvocation, MuxSnapshot, PaneId, PaneKindSnapshot, PaneSnapshot,
-    SessionId, WindowId,
+    PaneStatusState, SessionId, WindowId,
 };
 
 use super::{
@@ -499,6 +499,7 @@ pub struct MuxTreePane {
     pub kind: MuxTreePaneKind,
     /// A BEL rang here and nobody has been back since.
     pub bell: bool,
+    pub status: Option<PaneStatusState>,
 }
 
 impl MuxTreePane {
@@ -516,6 +517,7 @@ impl MuxTreePane {
             label: pane_label(pane),
             kind,
             bell: pane.bell,
+            status: pane.status.as_ref().map(|status| status.state),
         }
     }
 

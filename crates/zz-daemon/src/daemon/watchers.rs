@@ -1,5 +1,5 @@
 use super::*;
-use zz_terminal::{ScrollbarState, SearchStatus};
+use zz_terminal::{ProgramStatus, ScrollbarState, SearchStatus};
 
 pub(super) type Effect = Box<dyn FnOnce(&Arc<Shared>) + Send>;
 
@@ -130,6 +130,7 @@ struct TerminalWatcher {
     previous_title_writes: u64,
     projects_agent: bool,
     previous_bar_state: ProgressBarState,
+    previous_program_status: Option<Arc<ProgramStatus>>,
     fanout: PaneFrameFanout,
     mode_memo: BTreeMap<TerminalViewId, (u8, ScrollbarState, Option<SearchStatus>)>,
     completion_handled: bool,
@@ -181,6 +182,7 @@ impl Watcher {
                 previous_title_writes: 0,
                 projects_agent,
                 previous_bar_state: ProgressBarState::Hidden,
+                previous_program_status: None,
                 fanout: PaneFrameFanout::new(),
                 mode_memo: BTreeMap::new(),
                 completion_handled: false,
@@ -520,6 +522,27 @@ impl TerminalWatcher {
                     );
                     self.previous_title = Some(runtime_viewport.title().to_owned());
                     self.previous_title_writes = title_writes;
+                }
+                let program_status = terminal.program_status();
+                if !self.projects_agent
+                    && self
+                        .previous_program_status
+                        .as_ref()
+                        .is_none_or(|previous| !Arc::ptr_eq(previous, &program_status))
+                {
+                    let was_reported = self
+                        .previous_program_status
+                        .replace(Arc::clone(&program_status))
+                        .is_some_and(|previous| previous.reported());
+                    let terminal = Arc::clone(terminal);
+                    shared.defer_watcher_effect(move |shared| {
+                        shared.synchronize_pane_program_status(
+                            pane,
+                            &terminal,
+                            &program_status,
+                            was_reported,
+                        );
+                    });
                 }
                 if terminal.take_preview_ready() {
                     shared.refresh_chooser_previews();

@@ -15,7 +15,7 @@ fn payload(frame: &[u8]) -> &[u8] {
 
 #[test]
 fn protocol_version_on_this_commit_is_one_hundred_and_seven() {
-    assert_eq!(PROTOCOL_VERSION, 107);
+    assert_eq!(PROTOCOL_VERSION, 108);
 }
 
 #[test]
@@ -325,7 +325,7 @@ fn dark_interactive_hello_encodes_version_instance_and_process_id_as_varints() {
     assert_eq!(
         frame,
         [
-            0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x6b, 0x00, 0x00, 0x6b, 0x00, 0x00, 0x00, 0x00,
+            0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x6c, 0x00, 0x00, 0x6c, 0x00, 0x00, 0x00, 0x00,
             0x01, 0x01, 0x00, 0x00, 0x00, 0x07,
         ]
     );
@@ -426,6 +426,7 @@ fn pane_snapshot_carries_bell() {
         active_border_colour: None,
         border_status_text: String::new(),
         mode: None,
+        status: None,
     };
     assert!(snapshot.bell);
 }
@@ -444,6 +445,7 @@ fn pane_snapshot_border_colours_round_trip_and_reject_invalid_rgb() {
         active_border_colour: Some(TmuxColour::Basic(1)),
         border_status_text: String::new(),
         mode: None,
+        status: None,
     };
     let bytes = postcard::to_stdvec(&snapshot).expect("pane snapshot encodes");
     assert_eq!(

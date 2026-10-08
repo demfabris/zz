@@ -58,7 +58,8 @@ for one JSON object per row in the same order as text output. Keys are the forma
 variable names for that entity; values are strings with the same expansion as
 `#{name}`, including empty strings for unavailable values. Pane rows include
 `pane_kind`, `agent_state`, `agent_pending_permission`, `browser_url`,
-`pane_pb_state`, and `pane_pb_progress`. Use `show-options --json` for one object
+`pane_pb_state`, `pane_pb_progress`, and the six `pane_status*` program status
+variables. Use `show-options --json` for one object
 mapping option names to value strings in the selected scope. Combining `-F` and
 `--json` is a usage error.
 
@@ -134,7 +135,7 @@ Read one `key: value` line per field, or use `--json` for one object with string
 zz inspect -a --json | jq -c 'select(.pane_kind=="agent") | {pane_id,agent_state}'
 ```
 
-The keys, in text output order, are `session_id`, `session_name`, `window_id`, `window_index`, `window_name`, `window_width`, `window_height`, `window_size`, `pane_id`, `pane_index`, `pane_active`, `pane_kind`, `pane_pid`, `pane_current_command`, `pane_current_path`, `pane_title`, `pane_width`, `pane_height`, `pane_dead`, `pane_dead_status`, `pane_dead_signal`, `pane_last_command_status`, `pane_pb_state`, `pane_pb_progress`, `agent_state`, `agent_pending_permission`, `permission`, `browser_url`, `verbs`, `events`.
+The keys, in text output order, are `session_id`, `session_name`, `window_id`, `window_index`, `window_name`, `window_width`, `window_height`, `window_size`, `pane_id`, `pane_index`, `pane_active`, `pane_kind`, `pane_pid`, `pane_current_command`, `pane_current_path`, `pane_title`, `pane_width`, `pane_height`, `pane_dead`, `pane_dead_status`, `pane_dead_signal`, `pane_last_command_status`, `pane_pb_state`, `pane_pb_progress`, `pane_status`, `pane_status_kind`, `pane_status_progress`, `pane_status_app`, `pane_status_title`, `pane_status_message`, `agent_state`, `agent_pending_permission`, `permission`, `browser_url`, `verbs`, `events`.
 
 `permission` is a nested `{"request_id":7,"tool_call":{...},"options":[...]}` object or `null` in JSON output; text output prints compact JSON on the `permission:` line, or an empty value.
 

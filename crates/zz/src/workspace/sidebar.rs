@@ -12,7 +12,9 @@ use gpui::{
     prelude::FluentBuilder as _, px, uniform_list,
 };
 use zz_client::{ChromeAction, SIDEBAR_TABLE};
-use zz_protocol::{Axis, CommandInvocation, MuxSnapshot, PaneId, SessionId, WindowId};
+use zz_protocol::{
+    Axis, CommandInvocation, MuxSnapshot, PaneId, PaneStatusState, SessionId, WindowId,
+};
 use zz_ui::navigation::{
     WORKSPACE_SIDEBAR_DEFAULT_WIDTH as SIDEBAR_DEFAULT_WIDTH,
     WORKSPACE_TREE_CONTENT_INSET as TREE_CONTENT_INSET,
@@ -247,8 +249,18 @@ impl WorkspaceSidebar {
             .flat_map(|host| &host.sessions)
             .flat_map(|session| &session.windows)
             .flat_map(|window| &window.panes)
-            .filter(|pane| matches!(pane.kind, MuxTreePaneKind::Agent(_)))
-            .filter_map(|pane| Some(((attached_host, pane.id), controller.pane_status(pane.id)?)))
+            .filter_map(|pane| {
+                let status = match pane.kind {
+                    MuxTreePaneKind::Agent(_) => controller.pane_status(pane.id)?,
+                    _ => match pane.status? {
+                        PaneStatusState::Working => AgentPaneStatus::Working,
+                        PaneStatusState::Blocked => AgentPaneStatus::NeedsInput,
+                        PaneStatusState::Error => AgentPaneStatus::Failed,
+                        PaneStatusState::Idle | PaneStatusState::Done => AgentPaneStatus::Idle,
+                    },
+                };
+                Some(((attached_host, pane.id), status))
+            })
             .collect()
     }
 
@@ -1876,6 +1888,7 @@ mod tests {
             active_border_colour: None,
             border_status_text: String::new(),
             mode: None,
+            status: None,
         }
     }
 
@@ -1895,6 +1908,7 @@ mod tests {
             active_border_colour: None,
             border_status_text: String::new(),
             mode: None,
+            status: None,
         }
     }
 
@@ -2888,6 +2902,7 @@ mod tests {
             active_border_colour: None,
             border_status_text: String::new(),
             mode: None,
+            status: None,
         };
 
         let projected = MuxTreePane::from_snapshot(&pane);
@@ -2909,6 +2924,7 @@ mod tests {
             active_border_colour: None,
             border_status_text: String::new(),
             mode: None,
+            status: None,
         };
 
         let projected = MuxTreePane::from_snapshot(&pane);

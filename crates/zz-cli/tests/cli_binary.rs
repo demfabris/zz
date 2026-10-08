@@ -692,7 +692,7 @@ mod daemon_autostart {
                 .unwrap()
                 .contains(&"pane-exited".into())
         );
-        assert_eq!(row.as_object().unwrap().len(), 30);
+        assert_eq!(row.as_object().unwrap().len(), 36);
         for (key, value) in row.as_object().unwrap() {
             if matches!(key.as_str(), "verbs" | "events") {
                 assert!(

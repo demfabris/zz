@@ -120,7 +120,7 @@ impl ProgramStatus {
             .min_by_key(|record| record.state.urgency())?;
         let mut headline = record.clone();
         if headline.app.is_empty() {
-            headline.app = self.inherited_app(&record.id).to_owned();
+            self.inherited_app(&record.id).clone_into(&mut headline.app);
         }
         Some(headline)
     }

@@ -27,7 +27,8 @@ use zz_protocol::{
     RawText, SessionId, StatusLine, TmuxColour, WindowId,
 };
 use zz_terminal::{
-    CellWidth, CopyModeFacts, ProgressBar, TerminalColorScheme, TerminalSession, TerminalViewport,
+    CellWidth, CopyModeFacts, ProgramBlockKind, ProgramStatusRecord, ProgressBar,
+    TerminalColorScheme, TerminalSession, TerminalViewport,
 };
 
 use crate::{
@@ -657,6 +658,12 @@ pub(crate) fn status_cache_callbacks(request: &StatusRequest) -> Option<Vec<Stri
                     | "agent_pending_permission"
                     | "browser_url"
                     | "pane_last_command_status"
+                    | "pane_status"
+                    | "pane_status_kind"
+                    | "pane_status_progress"
+                    | "pane_status_app"
+                    | "pane_status_title"
+                    | "pane_status_message"
             )
             || COPY_MODE_CONTEXT_FORMATS.contains(&name)
             || LIST_CLIENTS_CONTEXT_FORMATS.contains(&name)
@@ -3015,6 +3022,28 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                     .as_str()
                     .to_owned(),
             ),
+            "pane_status"
+            | "pane_status_kind"
+            | "pane_status_progress"
+            | "pane_status_app"
+            | "pane_status_title"
+            | "pane_status_message" => Some(
+                pane_program_status(self.facts, &context.pane_id)
+                    .map(|record| match name {
+                        "pane_status" => record.state.as_str().to_owned(),
+                        "pane_status_kind" => {
+                            record.kind.map_or("", ProgramBlockKind::as_str).to_owned()
+                        }
+                        "pane_status_progress" => record
+                            .progress
+                            .map(|progress| progress.to_string())
+                            .unwrap_or_default(),
+                        "pane_status_app" => record.app,
+                        "pane_status_title" => record.title,
+                        _ => record.message,
+                    })
+                    .unwrap_or_default(),
+            ),
             "window_active_clients" => Some(
                 self.facts
                     .window_clients(context)
@@ -3095,6 +3124,14 @@ fn pane_progress_bar(facts: &dyn FormatFactSource, pane: &str) -> Option<Progres
             .map(|terminal| terminal.progress_bar())
             .unwrap_or_default(),
     )
+}
+
+fn pane_program_status(facts: &dyn FormatFactSource, pane: &str) -> Option<ProgramStatusRecord> {
+    facts
+        .terminals()
+        .get(&pane.parse().ok()?)?
+        .program_status()
+        .headline()
 }
 
 fn buffer_full(data: &[u8]) -> String {

@@ -3039,8 +3039,8 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                             .map(|progress| progress.to_string())
                             .unwrap_or_default(),
                         "pane_status_app" => record.app,
-                        "pane_status_title" => record.title,
-                        _ => record.message,
+                        "pane_status_title" => record.title.replace('#', "##"),
+                        _ => record.message.replace('#', "##"),
                     })
                     .unwrap_or_default(),
             ),

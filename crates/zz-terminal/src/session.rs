@@ -747,6 +747,10 @@ impl EngineFilter {
             self.program_title_writes += u64::from(!integration_title);
             return;
         }
+        if is_prompt_start(&osc) {
+            self.program_status_changed |= self.program_status.program_left();
+            return;
+        }
         if overflowed {
             return;
         }
@@ -760,10 +764,6 @@ impl EngineFilter {
                 Some(report) => self.program_status_changed |= self.program_status.apply(report),
                 None => {}
             }
-            return;
-        }
-        if is_prompt_start(&osc) {
-            self.program_status_changed |= self.program_status.program_left();
             return;
         }
         if let Some(status) = parse_osc_command_status(&osc) {
@@ -17068,7 +17068,11 @@ mod tests {
 
         write(
             &mut filter,
-            b"\x1b]7501;state=done:msg=RG9uZQ\x07\x1b]133;A;cl=m\x07",
+            format!(
+                "\x1b]7501;state=done:msg=RG9uZQ\x07\x1b]7501;state=working:id=w\x07\x1b]133;A;aid={}\x07",
+                "x".repeat(80)
+            )
+            .as_bytes(),
         );
         let status = filter.take_program_status().expect("prompt");
         assert_eq!(

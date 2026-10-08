@@ -1,6 +1,6 @@
 use base64::{
-    Engine as _, alphabet,
-    engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig},
+    Engine as _,
+    engine::general_purpose::{STANDARD, STANDARD_NO_PAD},
 };
 
 pub(crate) const PROGRAM_STATUS_PREFIX: &[u8] = b"7501;";
@@ -16,11 +16,6 @@ const MAX_ID_BYTES: usize = 128;
 const MAX_ID_SEGMENT_BYTES: usize = 32;
 const MAX_ID_DEPTH: usize = 8;
 pub const MAX_PROGRAM_STATUS_RECORDS: usize = 256;
-
-const TEXT: GeneralPurpose = GeneralPurpose::new(
-    &alphabet::STANDARD,
-    GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent),
-);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProgramState {
@@ -318,7 +313,12 @@ fn decode_text(encoded: &[u8], limit: usize) -> Option<String> {
     if encoded.is_empty() {
         return Some(String::new());
     }
-    let bytes = TEXT.decode(encoded).ok()?;
+    let bytes = if encoded.ends_with(b"=") {
+        STANDARD.decode(encoded)
+    } else {
+        STANDARD_NO_PAD.decode(encoded)
+    }
+    .ok()?;
     if bytes.len() > limit {
         return None;
     }
@@ -475,6 +475,9 @@ mod tests {
     #[test]
     fn text_must_decode_to_safe_utf8() {
         assert!(rejected("state=idle:msg=A"));
+        assert!(rejected("state=clear:msg=QQ="));
+        assert_eq!(update("state=idle:msg=QQ").message, "A");
+        assert_eq!(update("state=idle:msg=QQ==").message, "A");
         assert!(rejected("state=idle:msg=a.b-"));
         assert!(!rejected("state=idle:msg=!!!!"));
         assert!(rejected("state=idle:msg=/w=="));

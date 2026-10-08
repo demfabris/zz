@@ -67,16 +67,19 @@ answer first. Surfaces without a PTY (agent pane projections and output views) l
 - Formats: `#{pane_status}`, `#{pane_status_kind}`, `#{pane_status_progress}`,
   `#{pane_status_app}`, `#{pane_status_title}` and `#{pane_status_message}` read the headline
   straight from the pane's terminal. They are daemon hook variables, so they also appear in
-  `inspect` and `list-panes --json`.
+  `inspect` and `list-panes --json`. Title and message come back with every `#` doubled, so a
+  status line or border format shows them as text instead of reading `#[...]` as style.
 - The tree: the daemon's pane watcher copies the headline into `Pane::status`, which rides
   `PaneSnapshot.status` and `TreeOp::PaneStatus` (wire v108).
 - `@agent_state`: `working`, `blocked`, `error` as `failed`, and `idle` for `idle`, `done` or
   no record, so `agent-send --wait`, `zz events`, `wait-for '@agent_state@%N'` and
   `agent-state-changed` work for any program that reports. After a pane's first report, the
   OSC 9;4 bridge and the Claude peer-registry sampler stop writing `@agent_state` for it until
-  a full reset, as the spec asks of OSC 9;4. A full reset after a report writes `idle`.
-- Desktop sidebar: terminal panes with a headline feed the same `AgentAttentionTracker` as Agent
-  panes, so `blocked` shows the needs-input badge and rings, `error` shows failed, and
+  a full reset, as the spec asks of OSC 9;4. The daemon remembers which panes the protocol
+  owns (`program_status_panes`): a full reset or `respawn-pane` on such a pane writes `idle`,
+  hands it back to the heuristics, and drops the peer sampler's memo so its next sample lands.
+- Desktop sidebar: every terminal pane feeds the same `AgentAttentionTracker` as Agent panes,
+  idle until it reports, so a first `blocked` rings, so `blocked` shows the needs-input badge and rings, `error` shows failed, and
   `working` to `done` or `idle` rings and leaves the finished badge until the pane is watched.
   Chimes closer than two seconds apart are dropped, since any program can flip its state as
   fast as it writes.

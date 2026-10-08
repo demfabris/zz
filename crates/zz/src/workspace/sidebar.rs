@@ -252,12 +252,15 @@ impl WorkspaceSidebar {
             .filter_map(|pane| {
                 let status = match pane.kind {
                     MuxTreePaneKind::Agent(_) => controller.pane_status(pane.id)?,
-                    _ => match pane.status? {
-                        PaneStatusState::Working => AgentPaneStatus::Working,
-                        PaneStatusState::Blocked => AgentPaneStatus::NeedsInput,
-                        PaneStatusState::Error => AgentPaneStatus::Failed,
-                        PaneStatusState::Idle | PaneStatusState::Done => AgentPaneStatus::Idle,
+                    MuxTreePaneKind::Terminal => match pane.status {
+                        Some(PaneStatusState::Working) => AgentPaneStatus::Working,
+                        Some(PaneStatusState::Blocked) => AgentPaneStatus::NeedsInput,
+                        Some(PaneStatusState::Error) => AgentPaneStatus::Failed,
+                        Some(PaneStatusState::Idle | PaneStatusState::Done) | None => {
+                            AgentPaneStatus::Idle
+                        }
                     },
+                    _ => return None,
                 };
                 Some(((attached_host, pane.id), status))
             })

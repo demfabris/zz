@@ -10047,6 +10047,7 @@ impl Shared {
                             inner.name_checks.remove(pane);
                             inner.pane_read_observations.remove(pane);
                             inner.control_activity_pending.remove(pane);
+                            inner.program_status_panes.remove(pane);
                             #[cfg(all(feature = "agent", unix))]
                             inner.claude_peer_states.remove(pane);
                             inner.terminal_spawns.remove(pane);
@@ -27965,7 +27966,6 @@ impl Shared {
         pane: PaneId,
         terminal: &Arc<TerminalSession>,
         status: &ProgramStatus,
-        was_reported: bool,
     ) {
         let headline = status.headline().map(|record| PaneStatus {
             state: match record.state {
@@ -27985,15 +27985,8 @@ impl Shared {
             title: record.title,
             message: record.message,
         });
-        let agent_state = (status.reported() || was_reported).then(|| {
-            match headline.as_ref().map(|headline| headline.state) {
-                Some(PaneStatusState::Working) => "working",
-                Some(PaneStatusState::Blocked) => "blocked",
-                Some(PaneStatusState::Error) => "failed",
-                Some(PaneStatusState::Idle | PaneStatusState::Done) | None => "idle",
-            }
-        });
-        let changed = {
+        let reported = status.reported();
+        let (changed, agent_state) = {
             let mut inner = self.inner.lock();
             if !inner
                 .terminals
@@ -28002,7 +27995,27 @@ impl Shared {
             {
                 return;
             }
-            inner.engine.state.set_pane_status(pane, headline)
+            let owned = if reported {
+                !inner.program_status_panes.insert(pane)
+            } else {
+                inner.program_status_panes.remove(&pane)
+            };
+            #[cfg(all(feature = "agent", unix))]
+            if owned != reported {
+                inner.claude_peer_states.remove(&pane);
+            }
+            let agent_state = (reported || owned).then(|| {
+                match headline.as_ref().map(|headline| headline.state) {
+                    Some(PaneStatusState::Working) => "working",
+                    Some(PaneStatusState::Blocked) => "blocked",
+                    Some(PaneStatusState::Error) => "failed",
+                    Some(PaneStatusState::Idle | PaneStatusState::Done) | None => "idle",
+                }
+            });
+            (
+                inner.engine.state.set_pane_status(pane, headline),
+                agent_state,
+            )
         };
         if changed {
             self.publish_snapshot();
@@ -33023,10 +33036,7 @@ impl Shared {
                         .pane_runtime_facts(pane)
                         .and_then(|runtime| runtime.pid)
                         != pid
-                    || inner
-                        .terminals
-                        .get(&pane)
-                        .is_some_and(|terminal| terminal.program_status().reported())
+                    || inner.program_status_panes.contains(&pane)
                 {
                     continue;
                 }
@@ -35136,6 +35146,7 @@ struct ServerState {
     scheduled_name_check: Option<Instant>,
     pane_read_observations: BTreeMap<PaneId, Weak<terminal_reads::Observation>>,
     control_activity_pending: BTreeSet<PaneId>,
+    program_status_panes: BTreeSet<PaneId>,
     #[cfg(all(feature = "agent", unix))]
     claude_peer_states: BTreeMap<PaneId, String>,
     terminal_spawns: BTreeMap<PaneId, TerminalSpawn>,
@@ -81790,12 +81801,12 @@ set-option -g @alias-mixed-next yes
             "send-keys",
             "-t",
             &target,
-            "printf '\\033]7501;state=working:app=tf\\007\\033]7501;state=blocked:id=plan:kind=permission:progress=40:title=UGxhbg:msg=QXBwbHk/\\007'",
+            "printf '\\033]7501;state=working:app=tf\\007\\033]7501;state=blocked:id=plan:kind=permission:progress=40:title=UGxhbg:msg=QXBwbHkgIzE/\\007'",
             "Enter",
         ]);
         settle(
             "#{pane_status}|#{pane_status_kind}|#{pane_status_progress}|#{pane_status_app}|#{pane_status_title}|#{pane_status_message}|#{agent_state}",
-            "blocked|permission|40|tf|Plan|Apply?|blocked",
+            "blocked|permission|40|tf|Plan|Apply ##1?|blocked",
         );
         assert_eq!(
             tree_status(),
@@ -81805,7 +81816,7 @@ set-option -g @alias-mixed-next yes
                 progress: Some(40),
                 app: "tf".to_owned(),
                 title: "Plan".to_owned(),
-                message: "Apply?".to_owned(),
+                message: "Apply #1?".to_owned(),
             })
         );
 
@@ -81846,6 +81857,18 @@ set-option -g @alias-mixed-next yes
         ]);
         settle("#{pane_status}|#{agent_state}", "working|working");
         run(&["send-keys", "-t", &target, "printf '\\033c'", "Enter"]);
+        settle("#{pane_status}|#{agent_state}", "|idle");
+        assert_eq!(tree_status(), None);
+
+        run(&[
+            "send-keys",
+            "-t",
+            &target,
+            "printf '\\033]7501;state=blocked\\007'",
+            "Enter",
+        ]);
+        settle("#{pane_status}|#{agent_state}", "blocked|blocked");
+        run(&["respawn-pane", "-k", "-t", &target]);
         settle("#{pane_status}|#{agent_state}", "|idle");
         assert_eq!(tree_status(), None);
         shared.request_shutdown();

@@ -337,7 +337,10 @@ impl PaneActor {
         let engine_knobs = spawn.knobs;
         let pending_copy_source: Option<Box<CapturedCopySource>> = None;
         let pane_search: Option<CopyModeSearch> = None;
-        let engine_filter = EngineFilter::default();
+        let engine_filter = EngineFilter {
+            replies: Some(Rc::clone(&effects)),
+            ..EngineFilter::default()
+        };
         let engine_renames = Vec::new();
         let engine_bar: Option<ProgressBar> = None;
         let engine_last_command_status: Option<CommandStatusUpdate> = None;
@@ -530,6 +533,9 @@ impl PaneActor {
             .is_some_and(|deadline| deadline <= now);
         if let Some(bar) = self.engine_bar.take() {
             self.publisher.set_progress_bar(bar);
+        }
+        if let Some(status) = self.engine_filter.take_program_status() {
+            self.publisher.set_program_status(status);
         }
         if let Some(status) = self.engine_last_command_status.take() {
             self.publisher.set_last_command_status(status.code());
@@ -2031,7 +2037,7 @@ impl PaneActor {
             engine_knobs,
             pending_copy_source,
             pane_search,
-            engine_filter,
+            mut engine_filter,
             mut engine_last_command_status,
             mut active_views,
             mut inactive_views,
@@ -2074,6 +2080,10 @@ impl PaneActor {
         publisher.set_facts(engine_filter.facts(&terminal)?);
         if let Some(status) = engine_last_command_status.take() {
             publisher.set_last_command_status(status.code());
+        }
+        engine_filter.program_status_changed |= engine_filter.program_status.program_left();
+        if let Some(status) = engine_filter.take_program_status() {
+            publisher.set_program_status(status);
         }
         let status = exit_status.take().expect("checked above");
         let signal = status.signal().and_then(signal_number);

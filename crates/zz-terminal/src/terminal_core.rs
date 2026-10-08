@@ -14,6 +14,8 @@ mod model;
 mod paste;
 #[cfg(all(feature = "session", target_os = "macos"))]
 pub mod posix_spawn;
+#[cfg(feature = "session")]
+mod program_status;
 #[cfg(all(feature = "session", unix))]
 mod pty_types;
 #[cfg(feature = "session")]
@@ -53,6 +55,10 @@ pub use model::{
     shared_default_presentation, shared_empty_kitty_placements, shared_empty_overlays,
 };
 pub use paste::{PastePreparationError, prepare_paste_buffer};
+#[cfg(feature = "session")]
+pub use program_status::{
+    MAX_PROGRAM_STATUS_RECORDS, ProgramBlockKind, ProgramState, ProgramStatus, ProgramStatusRecord,
+};
 #[cfg(all(feature = "session", target_os = "linux"))]
 pub use session::disable_transparent_huge_pages;
 #[cfg(all(feature = "session", unix))]
